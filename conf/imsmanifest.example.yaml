@@ -1,0 +1,202 @@
+# imsmanifest.yaml -- configuration for convert.sh and build-cartridge.py
+#
+# Copy this to imsmanifest.yaml next to your .docx files and edit it.
+# Every key is shown here; almost all of them are optional. Only
+# manifest.identifier and manifest.title have no sensible default.
+#
+# To get a starting point generated from files you already have:
+#     python3 build-cartridge.py --init
+
+# ---------------------------------------------------------------------------
+# Cartridge metadata
+# ---------------------------------------------------------------------------
+manifest:
+  # REQUIRED. Must be stable across rebuilds: Brightspace matches on this
+  # when you re-import, and changing it duplicates the content rather than
+  # updating it. A reverse-DNS style string is conventional.
+  identifier: org.example.course.your-textbook
+
+  # REQUIRED. Shown as the cartridge title on import.
+  title: Your Textbook
+
+  # Optional. Defaults to "<title> converted for import as a Common Cartridge."
+  description: >-
+    An open textbook about smart things, converted from Word
+    for import into Brightspace.
+
+  # Optional. Defaults to an empty list.
+  keywords:
+    - oer
+    - rocks
+
+  # Optional. Defaults to "1.0". Quote it, or YAML reads 1.0 as a number.
+  version: "1.0"
+
+  # Optional. Defaults to "en". Sets the manifest language; the pages get
+  # their lang attribute from convert.sh separately.
+  language: en
+
+  # Optional. Defaults to "<identifier>.imscc". Used by --zip, and named in
+  # the zip command printed when --zip is not given.
+  cartridge: your-textbook.imscc
+
+  # Optional. Defaults to today's date. Set it to keep rebuilds identical.
+  modified: 1970-01-01
+
+# ---------------------------------------------------------------------------
+# Page header and footer
+#
+# Injected into every page: the header as the first thing in <body>, the
+# footer as the last. Either may be inline Markdown (as below) or the name
+# of a Markdown file in this directory.
+#
+# These are conversion-time settings, so they apply when convert.sh runs.
+# Running build-cartridge.py on its own does not add them.
+#
+# The fragment is inserted after the Lua filter has run, so nothing in it
+# is processed: no alt-text checking, no spacer rule, no caption handling.
+# Write its markup correctly by hand. Images referenced here appear on
+# every page, so list them under common_files below.
+# ---------------------------------------------------------------------------
+header: |
+  ![Your Textbook](shared/banner.png)
+
+footer: |
+  *Your Textbook* is licensed
+  [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
+
+# A file instead of inline text:
+# footer: footer.md
+
+# ---------------------------------------------------------------------------
+# Shared files
+#
+# Files used by more than one page -- a banner, a stylesheet, a licence
+# badge, a PDF linked from several places. They are declared once in a
+# common_files resource that every page depends on, instead of being
+# repeated in each page's file list.
+#
+# Files a page references on its own are found automatically and do not
+# belong here. This list is only for files you want shared, and for files
+# reached from the header or footer, which the page scan cannot attribute
+# to any single page.
+# ---------------------------------------------------------------------------
+common_files:
+  - shared/banner.png
+  - shared/course.css
+
+# ---------------------------------------------------------------------------
+# Caption labels (conversion-time)
+#
+# The words that introduce a caption. Books differ: OpenStax labels tables
+# "Table 2.1", while other sources label everything "Figure 1.1" including
+# tables, and some use "Exhibit". A table whose label is not recognised
+# gets no caption at all, so set this to match your source.
+#
+# Listing "Figure" under table_prefixes is safe: which rule applies is
+# decided by what the table contains, not by the word. A one-cell table
+# holding only an image becomes a <figure>; a table with data gets a
+# <caption>.
+# ---------------------------------------------------------------------------
+captions:
+  table_prefixes: [Table, Figure, Exhibit]
+  figure_prefixes: [Figure]
+
+# ---------------------------------------------------------------------------
+# Image handling (conversion-time)
+# ---------------------------------------------------------------------------
+images:
+  # Word documents often use a tiny transparent GIF as a bullet or spacer.
+  # Any image narrower than this is treated as one. Accepts in, px, pt, pc,
+  # cm, mm. Set to 0 to disable, in which case suspected spacers are still
+  # counted and reported so you know the setting exists.
+  spacer_below: 0.3in
+
+  # true  -- remove spacer images from the page entirely
+  # false -- keep them but mark them decorative (alt="")
+  strip_spacer: true
+
+  # Where the list of handled spacers is written. One row per image with
+  # its width and what happened to it.
+  spacer_log: spacer-images.csv
+
+  # Alt text longer than this is reported for shortening. Long descriptions
+  # belong in the prose, where every reader benefits from them.
+  alt_max_chars: 120
+
+# ---------------------------------------------------------------------------
+# Grouping (used only when the contents tree is guessed)
+#
+# Chapters are detected by shape -- a numeric prefix ("12-3-...",
+# "12-key-terms") or a "chapter-12" opener page -- so the grouping works
+# whatever a book calls its parts. Only the order of back matter within a
+# chapter needs the names, and books differ: Statistics has chapter-review
+# and homework, Economics has key-concepts-and-summary and problems.
+#
+# The default is the union of both. Anything not listed sorts after what is
+# listed, and is reported so you can place it.
+# ---------------------------------------------------------------------------
+grouping:
+  # Where --includeallhtml puts the pages it appends. Name a group from
+  # the contents tree below to nest everything inside it -- useful when the
+  # whole book lives under one module in the LMS (recommended for large books!).
+  #
+  # Left unset, a contents tree that is a single group and nothing else is
+  # treated as that container and appended into. Any other shape appends at
+  # the top level.
+  append_to: Your Textbook
+
+  # Heading for the group holding pages whose filename names no chapter.
+  unsorted_title: Unsorted
+
+  back_matter:
+    - key-terms
+    - key-concepts-and-summary
+    - self-check-questions
+    - review-questions
+    - critical-thinking-questions
+    - problems
+    - references
+
+# ---------------------------------------------------------------------------
+# Contents
+#
+# The order and grouping of pages. Omit it entirely and the order is
+# guessed from the filenames, with a warning and a sample config written
+# for you to correct.
+#
+# Three forms:
+#   - a bare string        a page; title comes from its <title>
+#   - page: / title:       a page with the title overridden
+#   - title: / items:      a group (unit, chapter, part)
+#
+# A group is a container only. In Common Cartridge an item that points at a
+# page should be a leaf, so a unit with its own introduction page lists
+# that page as its first child rather than pointing at it directly.
+#
+# Nesting is supported to three levels. Deeper is accepted with a warning,
+# because LMS support for deep hierarchies is uneven.
+#
+# Names are page stems: "BC-01" means BC-01.html. The .html is accepted too.
+# ---------------------------------------------------------------------------
+contents:
+  # A flat book: one file per chapter, titles from each page.
+  - frontmatter
+  - BC-01
+  - BC-02
+
+  # A grouped book, for files that are sections rather than chapters.
+  - title: Unit 1 — Foundations
+    items:
+      - unit-1-introduction        # the unit's own intro page, as first leaf
+      - title: Chapter 1 Sampling and Data
+        items:
+          - 1-introduction
+          - 1-1-definitions-of-statistics-probability-and-key-terms
+          - page: 1-key-terms
+            title: Key Terms       # override only when <title> is wrong
+          - 1-solutions
+      - title: Chapter 2 Descriptive Statistics
+        items:
+          - 2-introduction
+          - 2-1-display-data

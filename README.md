@@ -4,7 +4,7 @@ Converts a directory of Word documents into more-accessible HTML pages and packa
 
 Licensed GPL 3.0. See `LICENSE` for more info.
 
-The initial versions of these scripts was created by Robert Szarka and supported by a grant from the West Virginia Higher Education Policy Commission.
+The initial release of these scripts was created by Robert Szarka and supported by a grant from the West Virginia Higher Education Policy Commission.
 
 ## The pieces
 
@@ -21,7 +21,7 @@ The initial versions of these scripts was created by Robert Szarka and supported
 
 | Tool | Needed for | Install |
 |---|---|---|
-| `pandoc` | Everything. Version 3 or later. | `sudo apt install pandoc` |
+| `pandoc` | Everything. Version 3.9 or later. | `sudo apt install pandoc` |
 | `file` | Detecting real image types | usually present |
 | `python3` | The manifest and the cartridge | usually present |
 | PyYAML | Reading `imsmanifest.yaml` | `sudo apt install python3-yaml` |

@@ -275,7 +275,7 @@ Beyond the Word-to-HTML translation, each page gets:
   first, because two adjacent tables with one label between them are
   genuinely ambiguous and only the document's own habit resolves it.
   Which words introduce a caption is configurable: some books label their
-  tables `Figure 1.1`, and an unrecognised label means no caption at all.
+  tables `Figure 1.1`, and an unrecognized label means no caption at all.
 - **Media files are renamed to match their real content type.** Word stores
   images with whatever extension the DOCX declares, often `.so` from a
   content type of `application/octet-stream`.
@@ -294,7 +294,7 @@ was detected as. The commonest cause is EMF/WMF: Word's vector formats,
 used for equations, SmartArt and pasted Office charts, which no browser
 renders. Replace them in Word (right-click, Save as Picture, PNG) or
 convert them with `libreoffice --headless --convert-to png`. A dead image link is invisible in the output — Pandoc emits
-`<embed>` rather than `<img>` for an extension it does not recognise — so
+`<embed>` rather than `<img>` for an extension it does not recognize — so
 failing loudly is better than shipping a cartridge that looks fine.
 
 ## Reports
@@ -338,7 +338,7 @@ defaults:
 An absolute path works too. A relative one resolves against the book's
 directory, not against the tools. A path that does not exist stops the
 run rather than converting the book and discarding every correction in
-the file, which is what happened before v0.2.1 when an absolute path was
+the file, which is what happened before v0.2 when an absolute path was
 given.
 
 `image-alt.csv` keys on the image path **ignoring the extension**, because
@@ -582,7 +582,7 @@ silences the report rather than fixing anything.
 
 ## How an LMS treats an imported cartridge
 
-Worth knowing before you import anything twice, because the behaviour is
+Worth knowing before you import anything twice, because the behavior is
 not what most people assume and one option is destructive.
 
 **Structure is never merged; it is appended.** Importing a cartridge a
@@ -614,7 +614,7 @@ retained wherever they sit, directories with them, and nothing afterwards
 removes either.
 
 This is not specific to importing. The same happens to a file inserted
-through Brightspace's own HTML editor, so it is general behaviour rather
+through Brightspace's own HTML editor, so it is general behavior rather
 than a gap in Common Cartridge handling — imports just reach it faster,
 bringing hundreds of files at a time. It also means *Permanently delete*
 does not remove everything its dialog says it does.
@@ -702,7 +702,7 @@ move them if you would rather keep them with their chapters.
 | `-d`, `--dir` | `.` | Directory holding the pages and media |
 | `-c`, `--config` | `<dir>/packaging.yaml` | Packaging configuration |
 | `--target` | the only one | Which package to build, when several are defined |
-| `--allow-unknown-keys` | off | Report unrecognised settings instead of refusing them |
+| `--allow-unknown-keys` | off | Report unrecognized settings instead of refusing them |
 | `-o`, `--output` | `<dir>/imsmanifest.xml` | Manifest to write |
 | `--toc PDF` | — | Order from a PDF's bookmark outline |
 | `--includeallhtml` | off | Place pages the config does not list |
@@ -783,10 +783,10 @@ TABLE_CAPTIONS_MISSING=/tmp/rows.csv SPACER_BELOW=0.3in \
     --lua-filter=figures-and-tables.lua -o page.html
 ```
 
-There are also two toggles near the top of the filter that are not exposed
-through the config, because no book has yet needed them to differ:
-`RESPONSIVE_IMAGES` (strip fixed heights so images reflow) and
-`NORMALISE_MATH_ALT` (rejoin MathSpeak identifiers).
+There is also one toggle near the top of the filter that is not exposed
+through the config, because no book has yet needed it to differ:
+`NORMALISE_MATH_ALT`, which rejoins MathSpeak identifiers. Responsive
+images used to sit beside it and are now the `images.responsive` setting.
 
 ## Migrating a v0.1 configuration
 
@@ -893,8 +893,8 @@ still installed and a corpus is on hand. The fixtures assert the same
 things against six documents of about 37 KB each, so the check outlives
 the version it was written for.
 
-Some cases pin behaviour that is about to change rather than behaviour
-that is right -- a merged title row becoming a spanning header, a table
+Some cases pin behavior that is about to change rather than behavior
+that is right — a merged title row becoming a spanning header, a table
 with no header signal having its first row promoted anyway. Both are
 things roadmap item 1 will alter, and a change is only checkable if the
 starting point was written down.

@@ -1,0 +1,5 @@
+targets:
+  html:
+    format: html
+    output_dir: "."
+    output_dir: "elsewhere"

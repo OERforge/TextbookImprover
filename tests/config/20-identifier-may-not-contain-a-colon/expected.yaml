@@ -1,0 +1,3 @@
+# The other obvious way to write a globally unique identifier, and also
+# not a valid XML name.
+error: may not contain a colon

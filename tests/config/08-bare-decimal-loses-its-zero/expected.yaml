@@ -1,0 +1,3 @@
+# By the time the value reaches us it is the number 1.1 and the trailing
+# zero is already gone, so the only honest response is to say so.
+error: rather than text

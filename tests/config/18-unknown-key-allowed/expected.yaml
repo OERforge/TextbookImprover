@@ -1,0 +1,10 @@
+# With --allow-unknown-keys, a setting this version does not declare is
+# reported and ignored rather than refused. It is kept in the resolved
+# values so that rewriting the config does not delete a setting a newer
+# version of the tools would have understood.
+allow_unknown: true
+expect:
+  promote_h1_to_title: always
+  future_setting: 42
+  images.another_future_one: true
+warns: unknown setting

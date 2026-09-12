@@ -1,0 +1,5 @@
+defaults:
+  images:
+    responsive: false
+  tables:
+    wrap: false

@@ -1,0 +1,8 @@
+defaults:
+  captions:
+    table_prefixes: [Table, Exhibit]
+targets:
+  web:
+    format: html
+    captions:
+      table_prefixes: [Exhibit]

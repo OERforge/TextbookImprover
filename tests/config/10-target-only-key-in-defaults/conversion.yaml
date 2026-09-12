@@ -1,0 +1,5 @@
+defaults:
+  format: epub3
+targets:
+  web:
+    format: html

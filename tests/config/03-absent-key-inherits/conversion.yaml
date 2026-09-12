@@ -1,0 +1,5 @@
+defaults:
+  footer: "Access for free at OpenStax."
+targets:
+  web:
+    format: html

@@ -1,0 +1,7 @@
+# Both of these default to true in the schema, so `false or default` --
+# the shape of the bug that used to live in build-cartridge.py -- would
+# resolve them back to true. A fixture where the override and the default
+# happen to agree cannot catch that, which is why this one exists.
+expect:
+  images.responsive: false
+  tables.wrap: false

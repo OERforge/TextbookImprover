@@ -1,0 +1,5 @@
+# Quoted boolean words still mean what they look like. Only a string
+# setting refuses a boolean, because there the two readings differ.
+expect:
+  images.strip_spacer: true
+  images.responsive: false

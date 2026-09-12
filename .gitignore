@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+
+# leftovers when tests/make-filter-fixtures.py fails part-way
+tests/fixtures/_dot.png
+
+# conversion output
+*.html
+*.json
+*.imscc
+settings.sh
+table-captions.csv
+image-alt.csv
+*-missing.csv
+media-unresolved.csv
+spacer-images.csv
+
+# generated configuration
+/conversion.yaml
+/packaging.yaml
+/project.yaml

@@ -1,0 +1,5 @@
+# `footer:` with nothing after it is a decision to have no footer, and
+# falls back to the schema default rather than inheriting.
+target: print
+expect:
+  footer: ""

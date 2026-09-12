@@ -1,0 +1,8 @@
+defaults:
+  images:
+    strip_spacer: true
+targets:
+  epub:
+    format: epub3
+    images:
+      strip_spacer: false

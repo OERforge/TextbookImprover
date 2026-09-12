@@ -1,0 +1,6 @@
+# PyYAML keeps the last of two identical keys and says nothing. That is a
+# poor bargain here, because a generated configuration already contains
+# every setting: someone adding `footer:` rather than editing the
+# `footer:` already in the file loses the one they wrote, with no
+# indication. This is the shape of that mistake.
+error: set twice

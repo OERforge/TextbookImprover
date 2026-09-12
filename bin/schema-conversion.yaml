@@ -1,0 +1,241 @@
+# Copyright 2026 Robert Szarka
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+#
+# Conversion schema -- settings that describe one rendering of the book.
+#
+# Ships with the conversion tools. The packaging half never reads this
+# file, so a setting added here touches nothing packaging depends on.
+#
+# Everything below was reachable somehow before this schema existed: eight
+# keys through the config file, and the rest only as environment variables
+# documented in a Lua comment. Declaring them together is the point --
+# a setting nobody can find is a setting nobody can use.
+
+description: >
+  How the book is rendered into one output format.
+
+keys:
+
+  format:
+    type: enum
+    values: [html, epub3, pdf, docx, markdown]
+    default: html
+    target_only: true
+    description: >
+      What this target produces.
+
+  output_dir:
+    type: path
+    default: ""
+    target_only: true
+    default_from_target: true
+    description: >
+      Where this target writes. Defaults to the target's own name, so two
+      targets in the same format cannot overwrite each other.
+
+  header:
+    type: text
+    default: ""
+    description: >
+      Markdown placed at the top of every page, or the path to a file
+      holding it. Inserted by the template after the filters have run, so
+      nothing in it is processed: give any image explicit alt text.
+
+  footer:
+    type: text
+    default: ""
+    description: >
+      Markdown placed at the bottom of every page, or the path to a file
+      holding it. The usual use is an attribution line. Same caveat as
+      header: it is not processed by the filters.
+
+  promote_h1_to_title:
+    type: enum
+    values: [always, if-absent, longer, never]
+    default: always
+    description: >
+      Whether a page's leading H1 becomes its title. Reading .docx, the
+      existing title comes from a paragraph styled Title, which Pandoc's
+      reader consumes out of the body as metadata. In the OpenStax books
+      that paragraph says the same thing as the H1 without its section
+      number, so the H1 is the more complete of the two and always is
+      right. Reading Markdown or HTML a title is deliberate, so if-absent
+      is. longer promotes only when the H1 contains the existing title;
+      never leaves both alone.
+
+  author_byline:
+    type: enum
+    values: [meta, visible, drop]
+    default: meta
+    description: >
+      What to do with author metadata from the source. Reading .docx this
+      comes from a paragraph styled Author, which Pandoc consumes out of
+      the body the same way it consumes a Title-styled one. meta keeps it
+      in the page head and suppresses the visible byline Pandoc's template
+      would otherwise print under every title; visible keeps both; drop
+      removes it.
+
+  images:
+    description: >
+      How images extracted from the source are handled.
+    keys:
+
+      spacer_below:
+        type: float
+        default: 0
+        description: >
+          Width in inches below which an image is treated as a layout
+          spacer rather than content. 0 disables the rule and reports
+          candidates instead.
+
+      strip_spacer:
+        type: bool
+        default: false
+        description: >
+          Remove spacer images rather than hiding them from assistive
+          technology.
+
+      alt_max_chars:
+        type: int
+        default: 120
+        description: >
+          Alt text longer than this is reported so it can be shortened,
+          with the detail moved into the surrounding prose where every
+          reader benefits from it.
+
+      responsive:
+        type: bool
+        default: true
+        description: >
+          Let images shrink on narrow viewports rather than reproducing
+          the source's fixed dimensions (WCAG 1.4.10).
+
+  tables:
+    description: >
+      How data tables are rendered.
+    keys:
+
+      wrap:
+        type: bool
+        default: true
+        description: >
+          Put wide tables in a focusable scroll container so a long table
+          does not force the whole page to scroll sideways (WCAG 1.4.10).
+
+  captions:
+    description: >
+      How table and figure labels are recognised in the source.
+    keys:
+
+      table_prefixes:
+        type: list
+        item: string
+        default: [Table]
+        description: >
+          Words that begin a table label. Books that say Exhibit rather
+          than Table need this.
+
+      figure_prefixes:
+        type: list
+        item: string
+        default: [Figure]
+        description: >
+          Words that begin a figure label.
+
+  media:
+    description: >
+      How media extracted from the source is handled.
+    keys:
+
+      strict:
+        type: bool
+        default: false
+        description: >
+          Abort as soon as an image cannot be identified, rather than
+          collecting every such image and stopping once at the gate.
+
+  sidecars:
+    description: >
+      CSV files holding decisions a person made about the source. These
+      describe the book rather than one rendering, so a target should
+      rarely override them.
+
+      These files are read, never written, and hold work no script can
+      reproduce. A bare name resolves against the content directory,
+      which is convenient but leaves them among the generated HTML, the
+      extracted media, and the disposable reports: the directory you
+      would delete to rebuild, and the one replaced wholesale when the
+      publisher reissues the source. An absolute path, or one relative
+      to the content directory such as
+      "../corrections/ibs2e/table-captions.csv", keeps them somewhere
+      you can put under version control. A path set here that does not
+      exist stops the run, because the alternative is converting the
+      whole book while silently discarding every correction in it.
+    keys:
+
+      table_captions:
+        type: path
+        default: table-captions.csv
+        description: >
+          Descriptive captions, keyed on the table's label. A bare label
+          is a valid caption but describes nothing, and no script can
+          invent the description.
+
+      image_alt:
+        type: path
+        default: image-alt.csv
+        description: >
+          Alt text, keyed on the image path with the extension ignored.
+          Use [decorative] for an image that carries no meaning.
+
+  reports:
+    description: >
+      Where the run records what still needs human attention. Removing a
+      report when nothing is outstanding is deliberate: the file existing
+      at all is the signal that there is work to do.
+    keys:
+
+      table_captions_missing:
+        type: path
+        default: table-captions-missing.csv
+        description: >
+          Tables whose caption is a bare label with no description.
+
+      image_alt_missing:
+        type: path
+        default: image-alt-missing.csv
+        description: >
+          Images with no alt text, or with alt text over the length limit.
+
+      table_headers_missing:
+        type: path
+        default: table-headers-missing.csv
+        description: >
+          Data tables with no header row. There is no sidecar for these:
+          header text cannot be inferred from the data, so the fix belongs
+          in the source.
+
+      media_unresolved:
+        type: path
+        default: media-unresolved.csv
+        description: >
+          Media that could not be identified. EMF and WMF are the usual
+          cause and have to go back to the author.
+
+      spacer_images:
+        type: path
+        default: spacer-images.csv
+        description: >
+          Spacer images found, and what was done with each.

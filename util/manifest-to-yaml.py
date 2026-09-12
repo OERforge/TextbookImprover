@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """
 manifest-to-yaml.py -- convert an existing imsmanifest.xml (or the old
-imsmanifest-template.xml) into the imsmanifest.yaml that build-cartridge.py
+imsmanifest-template.xml) into the project.yaml and packaging.yaml that
+build-cartridge.py
 reads.
 
-    python3 manifest-to-yaml.py imsmanifest-template.xml -o imsmanifest.yaml
+    python3 manifest-to-yaml.py imsmanifest-template.xml -d .
 
 Run this once per book. It preserves the part that took work to produce --
 the order and grouping of pages, and the metadata -- and drops the part
@@ -36,6 +37,24 @@ import os
 import re
 import sys
 import xml.etree.ElementTree as ET
+
+# The configuration library lives beside bin/, found by path rather than
+# installed so the project stays clone-and-run.
+BIN_DIR = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "bin")
+LIB_DIR = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "lib")
+sys.path.insert(0, LIB_DIR)
+
+try:
+    import yaml
+except ImportError:
+    sys.exit("This needs PyYAML:\n    sudo apt install python3-yaml")
+
+try:
+    import oerconfig
+except ImportError:
+    sys.exit("Cannot find the configuration library; it belongs in lib/.")
 
 NS = {
     "cp": "http://www.imsglobal.org/xsd/imsccv1p1/imscp_v1p1",
@@ -102,10 +121,9 @@ def quote(value):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("manifest")
-    parser.add_argument("-o", "--output", default="imsmanifest.yaml")
     parser.add_argument("-d", "--dir", default=".",
-                        help="directory holding the pages, used to skip "
-                             "titles that the pages already carry")
+                        help="directory holding the pages; the configs are "
+                             "written here too (default: .)")
     args = parser.parse_args()
 
     tree = ET.parse(args.manifest)
@@ -186,31 +204,64 @@ def main():
     for item in top:
         walk(item, 0)
 
-    out = [
-        "# Converted from " + os.path.basename(args.manifest) + ".",
-        "# The <file> entries were dropped: build-cartridge.py rediscovers",
-        "# them from the pages on every run.",
-        "",
-        "manifest:",
-        f"  identifier: {quote(identifier)}",
-        f"  title: {quote(title or identifier)}",
-        f"  description: {quote(description)}",
-        f"  version: {quote(version or '1.0')}",
-        f"  language: {quote(language or 'en')}",
-        f"  cartridge: {quote(identifier + '.imscc')}",
-    ]
-    if keywords:
-        out.append("  keywords:")
-        out += [f"    - {quote(k)}" for k in keywords]
-    else:
-        out.append("  keywords: []")
-    out += ["", "contents:"] + lines + [""]
+    # Written through the configuration library rather than assembled by
+    # hand, so a key added to a schema appears here without anyone having
+    # to remember this file exists. Hand-built YAML in one place and a
+    # schema in another is how the v0.1 sample writer came to be missing
+    # three settings.
+    contents = yaml.safe_load("\n".join(["contents:"] + lines))["contents"]
 
-    with open(args.output, "w", encoding="utf-8") as handle:
-        handle.write("\n".join(out))
+    project_doc = {"project": {
+        "identifier": identifier,
+        "title": title or identifier,
+        "description": description,
+        "language": language or "en",
+        "contents": contents or [],
+    }}
+    packaging_doc = {
+        "project": dict(project_doc["project"]),
+        "defaults": {"version": version or "1.0",
+                     "keywords": list(keywords)},
+        "targets": {"cartridge": {"format": "common-cartridge",
+                                  "includes": ["html"],
+                                  "filename": identifier + ".imscc"}},
+    }
+
+    project_schema = oerconfig.load_schema(
+        os.path.join(LIB_DIR, "schema-project.yaml"))
+    packaging_schema = oerconfig.load_schema(
+        os.path.join(BIN_DIR, "schema-packaging.yaml"))
+
+    note = "Converted from " + os.path.basename(args.manifest) + ". The " \
+           "<file> entries were dropped: build-cartridge.py rediscovers " \
+           "them from the pages on every run."
+
+    packaging_path = os.path.join(args.dir, "packaging.yaml")
+    project_path = os.path.join(args.dir, "project.yaml")
+    for path in (packaging_path, project_path):
+        if os.path.exists(path):
+            sys.exit(f"{path} already exists. Move it aside first.")
+
+    resolved = oerconfig.resolve(packaging_schema, project_schema,
+                                 [oerconfig.Document(packaging_doc,
+                                                     args.manifest)])
+    oerconfig.write_config(packaging_schema, project_schema, resolved,
+                           packaging_doc["targets"], packaging_path,
+                           notes=[note], include_project=False)
+
+    resolved_project = oerconfig.resolve(
+        project_schema, project_schema,
+        [oerconfig.Document(project_doc, args.manifest)])
+    lines_out = ["# " + note, "", "project:"]
+    oerconfig._write_tree(project_schema.root, resolved_project.project,
+                          lines_out, 1, skip_target_only=True)
+    with open(project_path, "w", encoding="utf-8") as handle:
+        handle.write("\n".join(lines_out).rstrip() + "\n")
+
+    print(f"Wrote {project_path} and {packaging_path}.")
 
     pages = sum(1 for line in lines if "- " in line and "title:" not in line)
-    print(f"Wrote {args.output}: {pages} page entries.")
+    print(f"{pages} page entries.")
     if skipped[0]:
         print(f"{skipped[0]} title(s) omitted because the pages already "
               "carry them.")

@@ -1,0 +1,5 @@
+defaults:
+  promote_h1_to_title: always
+  future_setting: 42
+  images:
+    another_future_one: true

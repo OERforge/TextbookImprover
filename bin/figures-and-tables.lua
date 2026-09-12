@@ -136,7 +136,7 @@ end
 -- rows, columns and header associations stop being exposed to screen
 -- readers. The companion CSS restores `display: table` and moves the
 -- scrolling onto this wrapper instead.
-local WRAP_TABLES = true
+local WRAP_TABLES = (os.getenv('WRAP_TABLES') or 'true'):lower() ~= 'false'
 
 -- Word stores some equations as pictures whose alt text is MathSpeak, the
 -- notation used by maths speech engines. It spells identifiers out letter
@@ -164,7 +164,13 @@ local SPACER_LOG = os.getenv('SPACER_LOG')
 -- and is reported rather than silently kept.
 local function to_inches(length)
   if length == nil then return nil end
-  local number, unit = tostring(length):match('^%s*([%d%.]+)%s*(%a*)%s*$')
+  -- The number pattern allows a sign and an exponent, because Pandoc
+  -- writes small lengths in scientific notation: a 0.05in spacer arrives
+  -- as "5.0e-2in". Matching digits and dots alone rejected exactly the
+  -- images the spacer rule exists to catch, and the only sign of it was
+  -- an advisory line about widths that could not be read.
+  local number, unit = tostring(length)
+    :match('^%s*([%-%+]?%d*%.?%d+[eE]?[%-%+]?%d*)%s*(%a*)%s*$')
   if number == nil then return nil end
   number = tonumber(number)
   if number == nil then return nil end
@@ -188,17 +194,80 @@ local SPACER_ADVISORY = 0.3
 -- Drop the fixed height DOCX bakes into each image so that the companion
 -- CSS (img { max-width: 100%; height: auto }) can scale images down on
 -- narrow viewports without distorting them -- WCAG 1.4.10 (Reflow).
--- Set to false to reproduce the DOCX dimensions exactly.
-local RESPONSIVE_IMAGES = true
+-- Set images.responsive to false in the config to reproduce the DOCX
+-- dimensions exactly.
+local RESPONSIVE_IMAGES =
+  (os.getenv('RESPONSIVE_IMAGES') or 'true'):lower() ~= 'false'
 
 -- Pandoc falls back to the filename for <title> when no title metadata is
 -- set, which gives every page a slug like "1-3-factors-comprising-...".
 -- Promoting the leading H1 gives a meaningful page title -- WCAG 2.4.2
--- (Page Titled) -- and avoids two competing H1s in the body.
-local PROMOTE_H1_TO_TITLE = true
+-- (Page Titled) -- and avoids two competing H1s in the body: the
+-- standalone template emits <h1 class="title"> whenever title metadata
+-- exists, so a body H1 left in place becomes a second one.
+--
+-- Whether the H1 should win depends on where the existing title came
+-- from, and Pandoc does not record that.
+--
+-- In a .docx it comes from the body: Pandoc's reader turns a paragraph
+-- styled Title into title metadata and one styled Author into author
+-- metadata, removing both from the text. Every file in the three OpenStax
+-- books carries a Title paragraph, and in 36% of them it says the same
+-- thing as the H1 with the section number missing -- "Levels of
+-- Measurement" against "1.3 Levels of Measurement" -- so the H1 is the
+-- more complete of the two and should win. (Not docProps/core.xml, which
+-- Pandoc does not read; the two say the same thing in these files, which
+-- makes the mistake an easy one.)
+--
+-- Read Markdown or HTML and a title is something the author wrote
+-- deliberately, which an H1 should not silently override.
+--
+--   always     Promote whenever there is a leading H1. Right for .docx,
+--              where the metadata title is a by-product of Word.
+--   if-absent  Promote only when no title metadata exists. Right for
+--              Markdown and HTML, and what v0.1 did unconditionally.
+--   longer     Promote when the H1 contains the metadata title, so the
+--              more informative of the two wins and a genuinely
+--              different title is left alone. Offered but not a default:
+--              it decides by inspecting the strings rather than by
+--              knowing where the title came from, so it gets the rare
+--              case where the two differ only in punctuation wrong.
+--   never      Leave the metadata title and the body H1 both alone.
+-- Reading a .docx directly surfaces an Author-styled paragraph as author
+-- metadata -- Pandoc's reader consumes it out of the body the same way it
+-- consumes a Title-styled one. v0.1 never saw it, because the Markdown
+-- hop dropped document metadata entirely. Pandoc's standalone template then renders
+-- it in two places: a <meta name="author"> in the head, which is worth
+-- having and which the EPUB and cartridge builders can use, and a visible
+-- <p class="author"> byline under the page title, which is not -- every
+-- page acquires a line reading "OpenStax", and that is the publisher
+-- rather than the author of the page.
+--
+--   meta     keep the head metadata, drop the visible byline (default)
+--   visible  keep both, which is Pandoc's own behaviour
+--   drop     remove both
+local BYLINE_MODES = { meta = true, visible = true, drop = true }
+local AUTHOR_BYLINE = (os.getenv('AUTHOR_BYLINE') or 'meta'):lower()
+
+local PROMOTE_MODES = { always = true, ['if-absent'] = true,
+                        longer = true, never = true }
+local PROMOTE_H1_TO_TITLE =
+  (os.getenv('PROMOTE_H1_TO_TITLE') or 'if-absent'):lower()
 
 local function warn(msg)
   io.stderr:write('[figures-and-tables] ' .. msg .. '\n')
+end
+
+if not BYLINE_MODES[AUTHOR_BYLINE] then
+  warn(('AUTHOR_BYLINE=%q is not one of meta, visible, drop; using meta')
+    :format(AUTHOR_BYLINE))
+  AUTHOR_BYLINE = 'meta'
+end
+
+if not PROMOTE_MODES[PROMOTE_H1_TO_TITLE] then
+  warn(('PROMOTE_H1_TO_TITLE=%q is not one of always, if-absent, longer, '
+    .. 'never; using if-absent'):format(PROMOTE_H1_TO_TITLE))
+  PROMOTE_H1_TO_TITLE = 'if-absent'
 end
 
 local function is_blank(inline)
@@ -271,7 +340,31 @@ local function mk_caption(blocks)
   return { long = pandoc.Blocks(blocks) }
 end
 
+-- Word's "list paragraph" style turns a bare label into a one-item list,
+-- and the docx reader represents that faithfully: a BulletList holding a
+-- single Plain that reads "Table 2.54". Reading Markdown this never
+-- appeared, because the round trip flattened the list back to a
+-- paragraph, so a label formatted that way used to pair with its table by
+-- accident. Unwrapping it here keeps that pairing now that the structure
+-- survives. Only a list of exactly one item, itself exactly one
+-- paragraph, is unwrapped -- anything longer is real content, and the
+-- callers still require the text to read as a label before using it.
+local function unwrap_lone_list_item(block)
+  if block == nil then return nil end
+  if block.t ~= 'BulletList' and block.t ~= 'OrderedList' then
+    return block
+  end
+  local items = block.content
+  if items == nil or #items ~= 1 then return block end
+  local item = items[1]
+  if item == nil or #item ~= 1 then return block end
+  local inner = item[1]
+  if inner.t ~= 'Para' and inner.t ~= 'Plain' then return block end
+  return inner
+end
+
 local function caption_below(block)
+  block = unwrap_lone_list_item(block)
   if block == nil then return nil end
   if block.t ~= 'Para' and block.t ~= 'Plain' then return nil end
   if opens_with(normalise(pandoc.utils.stringify(block.content)),
@@ -458,6 +551,35 @@ local function source_document()
     and PANDOC_STATE.input_files[1]) or ''
 end
 
+-- The bare name of the source document, with any directory and extension
+-- removed. Sidecar keys are built from this rather than from the raw input
+-- path so that they do not change when the input format does: reading
+-- 10-problems.md, /books/econ/10-problems.docx, or 10-problems.html all
+-- give "10-problems", and a sidecar written under one stays valid under
+-- the others. v0.1 achieved the same thing by stripping a trailing ".md",
+-- which only worked because Markdown was the only input.
+local function source_stem()
+  local path = source_document()
+  return (path:gsub('.*[/\\]', ''):gsub('%.[^.]+$', ''))
+end
+
+-- Qualify a media path with the document it belongs to.
+--
+-- Reading Markdown, an image src already carries the per-document
+-- extraction directory, because --extract-media rewrote it during the
+-- earlier pandoc run: "10-problems/media/rId26.png". Reading a .docx
+-- directly there is no earlier run, and the filter sees the mediabag path
+-- "media/rId26.so" -- the directory is added after filters finish. Left
+-- alone, every document in the book would key its images on "media/rId26"
+-- and collide with every other document.
+local function qualify_media(src)
+  if src:match('^media/') then
+    local stem = source_stem()
+    if stem ~= '' then return stem .. '/' .. src end
+  end
+  return src
+end
+
 -- First non-empty cell, so a row in the report identifies its table
 -- without the reader having to count tables on the page.
 local function table_excerpt(tbl)
@@ -484,11 +606,12 @@ local function table_excerpt(tbl)
 end
 
 local function record_missing(label, excerpt)
-  append_row(MISSING_FILE, { label, '', source_document(), excerpt or '' })
+  append_row(MISSING_FILE, { label, '', source_stem(), excerpt or '' })
 end
 
 local function record_alt(src, reason, current)
-  append_row(ALT_MISSING_FILE, { src, '', source_document(), reason, current })
+  append_row(ALT_MISSING_FILE,
+    { qualify_media(src), '', source_stem(), reason, current })
 end
 
 -- A table with no label of any kind still needs a key so a caption can be
@@ -503,18 +626,17 @@ end
 local ORDINAL_ATTR = 'data-cc-ordinal'
 
 local function position_key(ordinal)
-  local source = source_document():gsub('%.md$', '')
-  return source .. '#table-' .. tostring(ordinal)
+  return source_stem() .. '#table-' .. tostring(ordinal)
 end
 
 
 local function record_spacer(src, width, action)
-  append_row(SPACER_LOG, { src, source_document(), width, action })
+  append_row(SPACER_LOG, { qualify_media(src), source_stem(), width, action })
 end
 
 local function record_headerless(label, rows, columns)
   append_row(HEADER_MISSING_FILE,
-    { label, source_document(), tostring(rows), tostring(columns) })
+    { label, source_stem(), tostring(rows), tostring(columns) })
 end
 
 -- Read a sidecar into a key -> value map. A missing file is not an error.
@@ -542,12 +664,24 @@ local function load_sidecar(path)
 end
 
 local table_descriptions = nil
-local function description_for(label)
+
+-- A description is looked up by label, and failing that by the table's
+-- position. The fallback exists because a table's label can start being
+-- found: v0.1 could not see a label that Word had formatted as a one-item
+-- list, so those tables were keyed by position, and a description written
+-- against "2-practice#table-18" would otherwise be stranded the moment
+-- the label resolved to "Table 2.54". Trying both keys costs one table
+-- lookup and means no sidecar has to be rewritten.
+local function description_for(label, fallback_key)
   if table_descriptions == nil then
     table_descriptions = load_sidecar(CAPTION_FILE)
   end
   -- nil means absent from the file; '' means present but deliberately blank.
-  return table_descriptions[label]
+  local found = table_descriptions[label]
+  if found == nil and fallback_key ~= nil then
+    found = table_descriptions[fallback_key]
+  end
+  return found
 end
 
 local image_alts = nil
@@ -629,7 +763,7 @@ function Image(img)
     spacers_seen = spacers_seen + 1
   end
 
-  local replacement = alt_for(img.src)
+  local replacement = alt_for(qualify_media(img.src))
   if replacement ~= nil then
     if DECORATIVE_MARKERS[replacement:lower()] then
       -- Clearing the caption alone makes Pandoc omit the attribute
@@ -655,7 +789,18 @@ function Image(img)
     return img
   end
 
-  local alt = pandoc.utils.stringify(img.caption)
+  -- Trimmed before anything is measured, reported, or written back.
+  -- Word sometimes stores a leading space in a description, which a
+  -- screen reader ignores but which counts against the length limit and
+  -- makes the reported character count disagree with what a person
+  -- counts. The trimmed text replaces the original so that what is
+  -- measured and what is emitted are the same string; trimming only the
+  -- copy used for measuring left the attribute still carrying the space.
+  local raw = pandoc.utils.stringify(img.caption)
+  local alt = (raw:gsub('^%s+', ''):gsub('%s+$', ''))
+  if alt ~= raw then
+    img.caption = pandoc.Inlines({ pandoc.Str(alt) })
+  end
   local is_equation = false
 
   if NORMALISE_MATH_ALT and alt ~= '' and looks_spelled_out(alt) then
@@ -745,6 +890,7 @@ local function looks_like_sentence(text, prefixes)
 end
 
 local function table_label(block)
+  block = unwrap_lone_list_item(block)
   if block == nil then return nil end
   if block.t ~= 'Para' and block.t ~= 'Plain' then return nil end
   local text = normalise(pandoc.utils.stringify(block.content))
@@ -898,7 +1044,7 @@ local function caption_data_table(tbl, next_block, after_next, after_after, out)
     if label then
       consumed = 1
       local inlines = text_to_inlines(label)
-      local description = description_for(label)
+      local description = description_for(label, position_key(ordinal))
       if description and description ~= '' then
         inlines:insert(pandoc.Space())
         inlines:extend(text_to_inlines(description))
@@ -992,6 +1138,82 @@ function Blocks(blocks)
   return out
 end
 
+-- Which top-level block is the document's title heading, if any.
+--
+-- Usually the first one, but not always: a chapter introduction opens with
+-- the chapter's figure, so the H1 sits behind a layout table. Searching
+-- past it is safe only when there is exactly one level-1 heading -- with
+-- two or more, removing one would be choosing between headings that the
+-- author wrote as siblings, and the page would keep a duplicate anyway.
+-- Nested headings are ignored: a heading inside a Div or a list item is
+-- not a page title, and pulling one out would move it across a structure
+-- it was written inside.
+-- Move the author out of the template's title block, keeping the head
+-- metadata by writing it as a header include. The two are the same
+-- template variable, so there is no way to keep one and drop the other
+-- except to take the variable away and put the wanted half back.
+local function settle_author(doc)
+  if AUTHOR_BYLINE == 'visible' or doc.meta.author == nil then return end
+
+  if AUTHOR_BYLINE == 'meta' and FORMAT:match('html') then
+    local names = {}
+    local author = doc.meta.author
+    -- One author arrives as MetaInlines, several as a MetaList.
+    local list = (author.t == 'MetaList') and author or { author }
+    for _, entry in ipairs(list) do
+      local text = pandoc.utils.stringify(entry)
+      if text ~= '' then names[#names + 1] = text end
+    end
+    if #names > 0 then
+      local tags = {}
+      for _, name in ipairs(names) do
+        tags[#tags + 1] = ('<meta name="author" content="%s" />')
+          :format(name:gsub('&', '&amp;'):gsub('"', '&quot;')
+                      :gsub('<', '&lt;'):gsub('>', '&gt;'))
+      end
+      local include = pandoc.MetaList({
+        pandoc.MetaBlocks({ pandoc.RawBlock('html',
+          table.concat(tags, '\n')) })
+      })
+      local existing = doc.meta['header-includes']
+      if existing ~= nil then
+        if existing.t == 'MetaList' then
+          for _, item in ipairs(existing) do include:insert(1, item) end
+        else
+          include:insert(1, existing)
+        end
+      end
+      doc.meta['header-includes'] = include
+    end
+  end
+
+  doc.meta.author = nil
+end
+
+local function title_header_index(doc)
+  local found, count = nil, 0
+  for index, block in ipairs(doc.blocks) do
+    if block.t == 'Header' and block.level == 1 then
+      count = count + 1
+      if found == nil then found = index end
+    end
+  end
+  if count == 1 then return found end
+  return nil
+end
+
+local function should_promote_h1(doc, index)
+  if PROMOTE_H1_TO_TITLE == 'never' or index == nil then return false end
+  if doc.meta.title == nil then return true end
+  if PROMOTE_H1_TO_TITLE == 'always' then return true end
+  if PROMOTE_H1_TO_TITLE == 'longer' then
+    local meta = pandoc.utils.stringify(doc.meta.title)
+    local h1 = pandoc.utils.stringify(doc.blocks[index].content)
+    return meta ~= '' and h1 ~= meta and h1:find(meta, 1, true) ~= nil
+  end
+  return false            -- if-absent, and a title is already set
+end
+
 function Pandoc(doc)
   if SPACER_LIMIT == 0 and spacers_seen > 0 then
     warn(('%d image(s) narrower than %gin look like spacers; set '
@@ -1003,14 +1225,12 @@ function Pandoc(doc)
       .. 'not be applied to them'):format(widthless))
   end
   close_handles()
-  if PROMOTE_H1_TO_TITLE
-    and doc.meta.title == nil
-    and doc.blocks[1] ~= nil
-    and doc.blocks[1].t == 'Header'
-    and doc.blocks[1].level == 1
-  then
-    doc.meta.title = pandoc.MetaInlines(doc.blocks[1].content)
-    doc.blocks:remove(1)
+  settle_author(doc)
+
+  local title_index = title_header_index(doc)
+  if should_promote_h1(doc, title_index) then
+    doc.meta.title = pandoc.MetaInlines(doc.blocks[title_index].content)
+    doc.blocks:remove(title_index)
   end
   return doc
 end

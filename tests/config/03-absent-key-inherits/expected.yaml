@@ -1,0 +1,4 @@
+# The mirror of 02: saying nothing is not the same as saying null.
+target: web
+expect:
+  footer: "Access for free at OpenStax."

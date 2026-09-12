@@ -1,0 +1,4 @@
+# Two targets in the same format must not write over each other.
+target: epub-chapters
+expect:
+  output_dir: epub-chapters

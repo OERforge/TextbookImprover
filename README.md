@@ -8,14 +8,53 @@ The initial release of these scripts was created by Robert Szarka and supported 
 
 ## The pieces
 
+The project has two halves that no longer depend on each other. Conversion
+turns source documents into accessible pages; packaging assembles pages
+into something an LMS can import. Either is useful alone — remediating a
+folder of documents needs nothing from the cartridge side, and building a
+cartridge from pages this project never converted needs nothing from the
+conversion side.
+
+**`bin/` — conversion**
+
 | File | What it does |
 |---|---|
-| `convert.sh` | Runs the whole pipeline: DOCX → Markdown → HTML, then hands off to the cartridge builder. |
+| `convert.sh` | Runs the pipeline: DOCX → JSON → HTML, then optionally hands off to the packaging side. |
 | `figures-and-tables.lua` | Pandoc filter doing the accessibility work on each page. |
-| `build-cartridge.py` | Builds `imsmanifest.xml` and, optionally, the `.imscc` archive. Usable on its own. |
-| `manifest-to-yaml.py` | One-time migration: turns an existing manifest into `imsmanifest.yaml`. |
+| `media-extensions.lua` | Pandoc filter naming extracted images by their real content type. |
+| `read-conversion-config.py` | Resolves `conversion.yaml` into settings `convert.sh` reads. |
+| `schema-conversion.yaml` | Declares every conversion setting, its type, default, and meaning. |
+
+**`bin/` — packaging**
+
+| File | What it does |
+|---|---|
+| `build-cartridge.py` | Builds `imsmanifest.xml` and, optionally, the `.imscc` archive. |
+| `validate-manifest.py` | Checks a manifest against the Common Cartridge 1.1 schemas. Run automatically. |
+| `schema-packaging.yaml` | Declares every packaging setting. |
+
+**`schemas/cc11/`** holds the IMS Common Cartridge 1.1 schemas, unmodified
+and redistributed under their own terms. See the README there.
+
+**`lib/` — shared**
+
+| File | What it does |
+|---|---|
+| `oerconfig.py` | Loads, merges, validates, and writes configuration. Both halves use it; neither uses the other. |
+| `schema-project.yaml` | Declares the settings that describe the book itself, which both halves read. |
+
+**`util/` — tools you run occasionally**
+
+| File | What it does |
+|---|---|
+| `migrate-config.py` | One-time: splits a v0.1 `imsmanifest.yaml` into the three v0.2 files. |
+| `manifest-to-yaml.py` | One-time: turns an existing `imsmanifest.xml` into `project.yaml` and `packaging.yaml`. |
 | `untrack-deletions.py` | One-time source repair: turns Word tracked deletions into ordinary strikethrough. |
-| `imsmanifest.yaml` | Your configuration. See `imsmanifest.example.yaml`. |
+| `compare-output.py` | Compares two runs semantically, so a pipeline change can be checked rather than trusted. |
+| `table-census.py` | Surveys table structure across a corpus of DOCX files. |
+
+**`tests/`** holds the configuration conformance fixtures and the two test
+runners. See [Testing](#testing).
 
 ## Requirements
 
@@ -23,26 +62,111 @@ The initial release of these scripts was created by Robert Szarka and supported 
 |---|---|---|
 | `pandoc` | Everything. Version 3.9 or later. | `sudo apt install pandoc` |
 | `file` | Detecting real image types | usually present |
-| `python3` | The manifest and the cartridge | usually present |
-| PyYAML | Reading `imsmanifest.yaml` | `sudo apt install python3-yaml` |
+| `python3` | Required, 3.9 or later. Reads the configuration and inspects conversion intermediates. | usually present |
+| PyYAML | Reading configuration | `sudo apt install python3-yaml` |
+| `lxml` | Optional. Full schema validation of the manifest; without it a smaller set of checks runs. | `sudo apt install python3-lxml` |
 | `pypdf` | `--toc` only | `pip3 install pypdf` |
 | `zip` | Only if you package with the printed command instead of `--zip` | `sudo apt install zip` |
 
-Pandoc versions differ in ways that show up here: newer releases read Word
-caption paragraphs into table captions, older ones do not, so the same
-document can produce different reports on different machines. Neither is
-wrong; the sidecar files absorb the difference.
+Pandoc 3.9 is a hard requirement, checked before any work starts. Earlier
+versions accept most of the command line and quietly do something else:
+3.6 and older write tables without cell spans, so a table with merged
+cells loses them with no warning at all.
+
+Pandoc versions still differ in ways that show up here — newer releases
+read Word caption paragraphs into table captions, older ones do not — so
+the same document can produce different reports on different machines.
+Neither is wrong; the sidecar files absorb the difference.
 
 ## Quick start
 
-```bash
-cd /path/to/your/docx/files
-cp /path/to/tools/{convert.sh,figures-and-tables.lua,build-cartridge.py} .
+There is no example configuration to copy. The schema is the only
+description of the settings, so the file you start from is generated from
+it and cannot fall out of date.
 
-./convert.sh                    # convert, report, build the manifest
-# edit the imsmanifest-sample.yaml it writes, rename to imsmanifest.yaml
-./convert.sh --zip              # convert and build the cartridge
+```bash
+T=/path/to/tools                       # where you cloned this
+cd /path/to/your/docx/files
 ```
+
+**1. Convert.** No configuration is needed for a first run: every setting
+has a documented default.
+
+```bash
+bash $T/bin/convert.sh
+```
+
+You get one `.html` per `.docx`, their images, and a set of `*-missing.csv`
+reports naming what still needs a person. The run then stops, because
+building a manifest needs a couple of things only you can supply, and
+writes `packaging-sample.yaml`.
+
+**2. Fill in the two required settings and rename.** Open
+`packaging-sample.yaml`, set `identifier` and `title` near the top, then:
+
+```bash
+mv packaging-sample.yaml packaging.yaml
+```
+
+Every setting is in that file at its current value with a sentence
+explaining it, so this is also how you find out what can be configured.
+Edit the line that is already there rather than adding another — the file
+is complete, so a second copy of a key would discard the first. (The tools
+refuse that rather than let it happen.) Delete any line you are happy to
+leave at its default; they fill it back in. Renaming it never loses anything you had already set — that is
+asserted by a test, not by care.
+
+`identifier` is worth a moment's thought. Brightspace matches on it when
+re-importing, so changing it later duplicates a course rather than
+updating it.
+
+**3. Run again.**
+
+```bash
+bash $T/bin/convert.sh            # builds imsmanifest.xml
+bash $T/bin/convert.sh --zip      # ... and the .imscc archive
+```
+
+### Changing how conversion works
+
+Everything above uses the conversion defaults. To change any of them —
+the page language, an attribution footer, caption label words, the alt
+text length limit — generate a conversion config the same way:
+
+```bash
+python3 $T/bin/read-conversion-config.py -d . --init
+```
+
+That writes `conversion.yaml` with every setting at its default and a line
+of documentation above each. Edit it in place; there is nothing to rename.
+
+### Where settings live
+
+| File | Holds | Generate with |
+|---|---|---|
+| `packaging.yaml` | How pages become an archive. | first `convert.sh` run, or `build-cartridge.py --init` |
+| `conversion.yaml` | How documents become pages. | `read-conversion-config.py --init` |
+| `project.yaml` | The book itself: language, identifier, title, structure. | optional — see below |
+
+`project.yaml` is optional. The generated `packaging.yaml` carries the
+book's details in a `project:` block at the top, which is enough for most
+uses. Split them out only if you want conversion and packaging to read the
+same declaration from one place, and if you do, remove the inline block so
+there is only one copy. The tools warn when two disagree.
+
+### Notes
+
+`convert.sh` finds its filters, schemas, and the shared library by path
+relative to itself, so the tools can stay where you cloned them. There is
+no install step.
+
+Run each script with the interpreter that matches it: `bash` for
+`convert.sh`, `python3` for anything ending in `.py`. Running a Python
+script with `bash` produces a confusing pile of `import: command not
+found`. The scripts do carry shebangs, so if the executable bit survived
+however you obtained them, `./bin/convert.sh` works too — but it does not
+survive a commit made through GitHub's web interface, so the explicit form
+is what this document uses throughout.
 
 `convert.sh` passes any arguments straight through to `build-cartridge.py`,
 so `--zip`, `--check`, `--toc` and `--includeallhtml` all work on the front
@@ -54,50 +178,68 @@ Work on the Linux filesystem, not under `/mnt/c` or `/mnt/h`. See
 ## A first conversion, start to finish
 
 ```bash
+T=/path/to/tools
+
 # 1. Check the source before converting anything.
-for f in *.docx; do python3 untrack-deletions.py "$f" --check; done | grep -v ': 0 '
+for f in *.docx; do python3 $T/util/untrack-deletions.py "$f" --check; done \
+  | grep -v ': 0 '
 
 # 2. First run. There is no config yet, so it stops with a sample.
-./convert.sh
+bash $T/bin/convert.sh
 
 # 3. Fill in identifier and title, then rename.
-mv imsmanifest-sample.yaml imsmanifest.yaml
+mv packaging-sample.yaml packaging.yaml
 
 # 4. Order the pages. With the book's PDF:
-./convert.sh --toc book.pdf
+bash $T/bin/convert.sh --toc book.pdf
 #    Without one, let it guess and correct the sample:
-./convert.sh --includeallhtml
+bash $T/bin/convert.sh --includeallhtml
 
 # 5. Adopt the order it worked out.
-mv imsmanifest-sample.yaml imsmanifest.yaml
+mv packaging-sample.yaml packaging.yaml
 
 # 6. Work through the reports, appending rows to the sidecar files.
 #    Re-run after each pass; the reports shrink.
-./convert.sh
+bash $T/bin/convert.sh
 
 # 7. When the reports you care about are gone, build the cartridge.
-./convert.sh --zip
+bash $T/bin/convert.sh --zip
 ```
 
 Steps 6 and 7 are the loop you will spend the most time in. Everything else
 is done once per book.
 
+The sample written in steps 2 and 4 is complete: every setting appears at
+its current value with a comment explaining it, so renaming it over your
+own config never loses anything you had set. That is asserted by a test,
+not by care — see [Testing](#testing).
+
 ## What a run creates
 
 ```
-1-3-levels-of-measurement.md          intermediate Markdown, kept for inspection
+1-3-levels-of-measurement.json        intermediate, kept for inspection
 1-3-levels-of-measurement.html        the page
-1-3-levels-of-measurement/media/      its images, renamed by real content type
+1-3-levels-of-measurement/media/      its images, named by real content type
 imsmanifest.xml                       the manifest
 cartridge-files.txt                   every file the archive must contain
-imsmanifest-sample.yaml               written when the script worked something out
+packaging-sample.yaml                 written when the script worked something out
 *-missing.csv                         what still needs a human
 course.imscc                          only with --zip
 ```
 
-The Markdown is intermediate but not disposable — it is what the reports
-name, and what the media-resolution step repairs. Deleting it just means
-the next run regenerates it.
+The intermediate is Pandoc's own document model as JSON, which is lossless
+where Markdown was not. It is not meant to be read directly, but it is not
+opaque either:
+
+```bash
+pandoc -f json -t markdown 1-3-levels-of-measurement.json | less
+```
+
+Deleting the `.json` files costs nothing; the next run regenerates them.
+
+If a run leaves `.md` files behind from v0.1, they are named on stderr and
+otherwise ignored. Nothing reads them, and this script will not delete
+files you may want.
 
 ## Exit codes
 
@@ -174,6 +316,31 @@ the others. A report existing at all means there is work outstanding.
 plain CSV, read afresh each run, and survive re-conversion from updated
 Word files.
 
+**Where to keep them.** By default they sit in the book's own directory,
+next to the reports that name what still needs filling in. That is the
+convenient default and it keeps two books' decisions apart, but it is not
+where they belong long-term. The book's directory also holds the
+generated HTML, the extracted media, and the intermediates: it is the
+directory you delete to rebuild from scratch, and the one you replace
+wholesale when the publisher reissues the source. These two files are the
+only things in it that no script can reproduce.
+
+So once you have spent real time on them, move them somewhere you can put
+under version control and point the configuration at them:
+
+```yaml
+defaults:
+  sidecars:
+    table_captions: ../corrections/ibs2e/table-captions.csv
+    image_alt: ../corrections/ibs2e/image-alt.csv
+```
+
+An absolute path works too. A relative one resolves against the book's
+directory, not against the tools. A path that does not exist stops the
+run rather than converting the book and discarding every correction in
+the file, which is what happened before v0.2.1 when an absolute path was
+given.
+
 `image-alt.csv` keys on the image path **ignoring the extension**, because
 conversion renames files by content type. Four states for the `Alt` column:
 
@@ -205,32 +372,106 @@ different alt text, you get a warning and the first entry wins.
 
 ## Configuration
 
-Everything variable lives in `imsmanifest.yaml`. `imsmanifest.example.yaml`
-documents every key. The two with no default are `manifest.identifier` and
-`manifest.title`; without them the build writes a sample and stops.
+Three files, split by what a setting describes rather than by which script
+reads it.
 
-| `manifest` key | Default | Notes |
+| File | Holds | Read by |
 |---|---|---|
-| `identifier` | none — **required** | Keep it stable across rebuilds. Brightspace matches on it when re-importing; changing it duplicates content rather than updating it. |
-| `title` | none — **required** | Shown on import. |
-| `description` | derived from the title | Appears in the import dialogue. Worth a real sentence. |
-| `keywords` | empty | List of strings. |
-| `version` | `1.0` | **Quote it.** Unquoted `1.10` parses as the number 1.1. |
-| `language` | `en` | Manifest language. Page `lang` is set separately by `convert.sh`. |
-| `cartridge` | `<identifier>.imscc` | Archive filename used by `--zip`. |
-| `modified` | today | Set it to keep rebuilds byte-identical. |
+| `project.yaml` | Facts about the book: its language, identifier, title, and structure. | both halves |
+| `conversion.yaml` | How the book is rendered into an output format. | conversion |
+| `packaging.yaml` | How rendered files are assembled into an archive. | packaging |
+
+Every setting is declared in a schema — `lib/schema-project.yaml`,
+`bin/schema-conversion.yaml`, `bin/schema-packaging.yaml` — which gives its
+type, its default, and a sentence saying what it means. The schema is the
+only description: the readers, the validator, the generated sample files,
+and this document all derive from it, so there is no second list to drift
+out of step with the first.
+
+To see every setting with its documentation, generate a sample:
+
+```bash
+python3 /path/to/tools/bin/build-cartridge.py -d . --init
+```
+
+`project.yaml` is optional. Both other files may carry a `project:` block
+inline, so a directory holding only a conversion config still stands on
+its own. Declare it in one place or the other; declaring it in both means
+one copy goes stale, and the tools warn when the two disagree.
+
+### Required settings
+
+Two have no useful default: `project.identifier` and `project.title`.
+Without them the build writes a sample and stops.
+
+`identifier` is worth care. Brightspace matches on it when re-importing,
+so changing it duplicates a course rather than updating it. Keep it stable
+across rebuilds, and change it only when the book is genuinely a different
+book.
+
+### Targets
+
+Both `conversion.yaml` and `packaging.yaml` have the same shape: a
+`defaults:` block, then a `targets:` block naming one or more things to
+build. A target inherits the defaults and overrides what it needs.
+
+```yaml
+defaults:
+  promote_h1_to_title: always
+
+targets:
+  html:
+    format: html
+    output_dir: .
+```
+
+Today there is one conversion target and one package. The shape exists
+because there will be more: a full-book EPUB alongside per-chapter ones, a
+print PDF alongside a screen one, each needing its own settings and its
+own output directory.
+
+### How values are settled
+
+Four layers, in this order: the schema's default, the `project:` block,
+the file's `defaults:` block, then the target's own block. Five rules
+govern the rest, kept few on purpose:
+
+- The schema decides what nests. A section merges key by key; anything
+  else is replaced whole.
+- Lists replace. They never append.
+- An explicit `null` clears an inherited value back to the schema default.
+  An absent key inherits.
+- No coercion happens during the merge; each resolved value is checked
+  once at the end against its declared type.
+- An unknown key is an error, with a suggestion if one is close. Pass
+  `--allow-unknown-keys` to report and ignore them instead, which is for
+  reading a config written for a newer version of the tools.
+
+### Two YAML traps
+
+Both bite in this configuration specifically, and both are now caught
+rather than silently accepted.
+
+**`language: no` is the boolean false.** YAML reads unquoted `no`, `yes`,
+`on`, and `off` as booleans, so Norwegian becomes `False`. There is no way
+to recover which word was written, so it is refused. Quote it.
+
+**`version: 1.10` is the number 1.1.** The trailing zero is gone before
+any program sees it. Quote it.
 
 ### Contents
 
 ```yaml
-contents:
-  - BC-01                          # title comes from the page's <title>
-  - page: 1-key-terms
-    title: Key Terms               # override when <title> is wrong
-  - title: Chapter 1 Sampling and Data
-    items:
-      - 1-introduction
-      - 1-1-definitions-of-statistics-probability-and-key-terms
+# in project.yaml
+project:
+  contents:
+    - BC-01                        # title comes from the page's <title>
+    - page: 1-key-terms
+      title: Key Terms             # override when <title> is wrong
+    - title: Chapter 1 Sampling and Data
+      items:
+        - 1-introduction
+        - 1-1-definitions-of-statistics-probability-and-key-terms
 ```
 
 A group is a container only. In Common Cartridge an item pointing at a page
@@ -250,7 +491,7 @@ whose own `<title>` becomes the group heading. Within a chapter the order
 is opener, introduction, numbered sections, then back matter in the order
 set by `grouping.back_matter`. A role name not in that list sorts after the
 ones that are, and is reported rather than silently misplaced. The guess is written to
-`imsmanifest-sample.yaml` for you to correct. It is a starting point, not a
+`packaging-sample.yaml` for you to correct. It is a starting point, not a
 finished book.
 
 ### Header and footer
@@ -259,9 +500,11 @@ Injected into every page, as the first and last thing in `<body>`. Either
 inline Markdown or the name of a Markdown file:
 
 ```yaml
-footer: |
-  *Your Textbook Here* is licensed
-  [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
+# in conversion.yaml
+defaults:
+  footer: |
+    *Your Textbook Here* is licensed
+    [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
 ```
 
 The fragment is inserted after the Pandoc filter has run, so nothing in it
@@ -271,9 +514,11 @@ by hand, and list any images it uses under `common_files`.
 ### Caption labels
 
 ```yaml
-captions:
-  table_prefixes: [Table, Figure, Exhibit]
-  figure_prefixes: [Figure]
+# in conversion.yaml
+defaults:
+  captions:
+    table_prefixes: [Table, Figure, Exhibit]
+    figure_prefixes: [Figure]
 ```
 
 The words that introduce a caption. One book here labels every table
@@ -284,9 +529,11 @@ applies is decided by what the table contains, not by the word.
 ### Shared files
 
 ```yaml
-common_files:
-  - shared/banner.png
-  - shared/course.css
+# in packaging.yaml
+defaults:
+  common_files:
+    - shared/banner.png
+    - shared/course.css
 ```
 
 Files used by more than one page. They are declared once in a
@@ -308,10 +555,13 @@ Word documents often use a tiny transparent GIF as a bullet. One book here
 had 274 of them across 487 images.
 
 ```yaml
-images:
-  spacer_below: 0.3in     # anything narrower is a spacer; 0 disables
-  strip_spacer: true      # true removes them, false marks them decorative
-  spacer_log: spacer-images.csv
+# in conversion.yaml
+defaults:
+  images:
+    spacer_below: 0.3       # inches; anything narrower is a spacer, 0 disables
+    strip_spacer: true      # true removes them, false marks them decorative
+  reports:
+    spacer_images: spacer-images.csv
 ```
 
 With the rule off, suspected spacers are still counted and reported so the
@@ -319,14 +569,101 @@ setting is discoverable. Images with no readable width cannot be judged and
 are reported separately.
 
 ```yaml
-images:
-  alt_max_chars: 120
+# in conversion.yaml
+defaults:
+  images:
+    alt_max_chars: 120
 ```
 
 Alt text longer than this is reported for shortening. It is a length at
 which a short equivalent has become a long description, and long
 descriptions belong in the prose where every reader gets them. Raising it
 silences the report rather than fixing anything.
+
+## How an LMS treats an imported cartridge
+
+Worth knowing before you import anything twice, because the behaviour is
+not what most people assume and one option is destructive.
+
+**Structure is never merged; it is appended.** Importing a cartridge a
+second time does not update the modules already in the course. It adds
+another copy of the whole tree. That is why the pages are wrapped in one
+module by default: a re-import then leaves one module to remove rather
+than one per chapter, and in Brightspace modules are deleted one at a
+time.
+
+**There is one file per path, shared by everything that points at it.**
+Two modules showing the same page are two references to one file, not two
+copies. Brightspace offers two ways to delete a module, and the difference
+matters:
+
+- **Remove from Content** detaches the module and leaves the files.
+- **Permanently delete** removes the files themselves.
+
+So after re-importing a book, removing the older module with *Permanently
+delete* empties the newer one too — its structure stays and its pages go
+blank, with nothing to indicate why. Use *Remove from Content* for cleanup
+after a re-import. *Permanently delete* is right only when removing a book
+from the course, and the content prefix is what stops it reaching another
+book's files.
+
+**Deleting a module does not reclaim its images.** Measured in
+Brightspace: *Permanently delete* removes the file a topic **is** and
+never the files a topic **uses**. Images and other referenced files are
+retained wherever they sit, directories with them, and nothing afterwards
+removes either.
+
+This is not specific to importing. The same happens to a file inserted
+through Brightspace's own HTML editor, so it is general behaviour rather
+than a gap in Common Cartridge handling — imports just reach it faster,
+bringing hundreds of files at a time. It also means *Permanently delete*
+does not remove everything its dialog says it does.
+
+Nothing in a cartridge can make an LMS delete files it does not consider
+owned, so this is something to know rather than something to fix. It is
+also a second argument for the content prefix: the leftovers sit in one
+named directory you can find and clear in Manage Files, rather than
+scattered among everything else at the course root. Expect to do that by
+hand after removing a book, and expect the one-time migration to leave the
+old, unprefixed images behind when the old module goes.
+
+### The content prefix
+
+Every file in a package goes inside one directory named after the book,
+unless you turn `paths.prefix_content` off. Without it, two books that
+each contain `frontmatter.html` contain the same file as far as the LMS is
+concerned: the second import overwrites the first, and permanently
+deleting either empties the other.
+
+The directory name is a readable portion of the title plus a short digest
+of the identifier — the title so the folder means something in a file
+manager, the digest because two books can share a title and the identifier
+is the thing that must be unique. The version is deliberately not part of
+it, so an update overwrites the same paths and pages refresh in place.
+
+Nothing on disk moves. The prefix exists only inside the package.
+
+### Moving an existing course to prefixed paths
+
+Turning this on relocates every file, so an instructor with an earlier
+import gets a second copy rather than an update. One time only, and the
+order matters:
+
+1. **Import the new cartridge.** Both copies now coexist.
+2. **Check the new module renders.**
+3. **Then permanently delete the old module.** Safe because the paths no
+   longer overlap — and here *Permanently delete* is the right choice,
+   since nothing else refers to those files and *Remove from Content*
+   would leave them behind for good.
+
+Deleting first would work too, but leaves a window with no content and
+nothing to fall back on if the import fails.
+
+After this, updates behave as before: same identifier, same prefix, same
+paths, pages update in place, and the stale module goes with *Remove from
+Content*. The instruction changes once and then changes back, which is
+worth telling people or the careful ones will keep permanently deleting
+and empty their own courses.
 
 ## Building the cartridge
 
@@ -353,7 +690,7 @@ not replace a curated tree. Anything you listed stays exactly where you put
 it, the outline orders the rest into the same destination, and only pages
 in neither the config nor the outline reach `Unsorted`. With no `contents`
 at all, the outline orders everything. The result goes to
-`imsmanifest-sample.yaml` for review, and outline entries matching no page
+`packaging-sample.yaml` for review, and outline entries matching no page
 are reported.
 
 Note that it follows the book faithfully. If the PDF puts per-chapter
@@ -363,7 +700,9 @@ move them if you would rather keep them with their chapters.
 | Option | Default | Effect |
 |---|---|---|
 | `-d`, `--dir` | `.` | Directory holding the pages and media |
-| `-c`, `--config` | `<dir>/imsmanifest.yaml` | Configuration file |
+| `-c`, `--config` | `<dir>/packaging.yaml` | Packaging configuration |
+| `--target` | the only one | Which package to build, when several are defined |
+| `--allow-unknown-keys` | off | Report unrecognised settings instead of refusing them |
 | `-o`, `--output` | `<dir>/imsmanifest.xml` | Manifest to write |
 | `--toc PDF` | — | Order from a PDF's bookmark outline |
 | `--includeallhtml` | off | Place pages the config does not list |
@@ -417,7 +756,7 @@ what the LMS expects.
 
 `figures-and-tables.lua` is an ordinary Pandoc filter and works outside
 `convert.sh`. Everything configurable is read from the environment, which
-is how `convert.sh` passes settings from `imsmanifest.yaml`:
+is how `convert.sh` passes settings from `conversion.yaml`:
 
 | Variable | Default | Effect |
 |---|---|---|
@@ -440,7 +779,7 @@ you are running the filter yourself.
 
 ```bash
 TABLE_CAPTIONS_MISSING=/tmp/rows.csv SPACER_BELOW=0.3in \
-  pandoc -f markdown-implicit_figures -t html5 page.md \
+  pandoc -f json -t html5 page.json \
     --lua-filter=figures-and-tables.lua -o page.html
 ```
 
@@ -449,10 +788,175 @@ through the config, because no book has yet needed them to differ:
 `RESPONSIVE_IMAGES` (strip fixed heights so images reflow) and
 `NORMALISE_MATH_ALT` (rejoin MathSpeak identifiers).
 
-## Migrating an existing manifest
+## Migrating a v0.1 configuration
+
+`imsmanifest.yaml` is no longer read. Both halves stop with directions
+rather than ignoring it, because a config that looks live and is not is
+worse than none.
 
 ```bash
-python3 manifest-to-yaml.py imsmanifest.xml -o imsmanifest.yaml
+python3 /path/to/tools/util/migrate-config.py -d . --dry-run   # show the plan
+python3 /path/to/tools/util/migrate-config.py -d .             # do it
+```
+
+It prints where every setting lands, lists anything it has no home for
+rather than dropping it, refuses to overwrite a file you may have edited,
+and never touches the original. Check the three new files, then delete the
+old one.
+
+Two settings change shape rather than moving:
+
+- `images.spacer_log` becomes `reports.spacer_images`, alongside the other
+  report filenames.
+- `manifest.cartridge` becomes a package's `filename`, because a
+  configuration can now describe more than one package.
+
+Sidecar files need no migration. `image-alt.csv` keys are unchanged, and
+`table-captions.csv` entries written against a position key such as
+`2-practice#table-18` still apply even where v0.2 now finds the table's
+real label.
+
+## Validating the manifest
+
+`build-cartridge.py` checks the manifest it writes against the Common
+Cartridge 1.1 schemas before building an archive from it. A manifest that
+does not conform is still written, so you can look at it, but no `.imscc`
+is built:
+
+```
+ERROR: imsmanifest.xml did not validate:
+  line 22: Element 'version': This element is not expected.
+           Expected is ( contribute ).
+
+The manifest was written so you can inspect it, but no archive was built
+from it.
+  Re-run with --no-validate to build one anyway.
+```
+
+This is worth having for a reason with a measured cost: **every cartridge
+this project produced before v0.2 was invalid.** The manifest carried a
+`version` element in a place the CC 1.1 profile does not allow one. Every
+LMS accepted it, so nothing ever surfaced it, and it was found by
+validating against the schema and by nothing else.
+
+Full validation uses `lxml`, which is not otherwise required here. Without
+it, the check falls back to what the standard library can do:
+
+- the document is well formed
+- every identifier is a valid XML name — the rule that catches a pasted
+  UUID
+- every `identifierref` resolves to a resource that exists
+- there is at least one resource
+
+The run says which level it used, so a clean result never leaves you
+wondering whether anything was checked. To get the full version:
+
+```bash
+sudo apt install python3-lxml
+```
+
+You can also run it directly, which is useful for a cartridge this project
+did not write:
+
+```bash
+python3 bin/validate-manifest.py path/to/imsmanifest.xml
+```
+
+## Testing
+
+```bash
+bash tests/run-all.sh
+```
+
+Four suites, each independent, all runnable without network access or a
+corpus of real documents. `run-all.sh` runs every one even if an earlier
+one failed, and exits non-zero if any did.
+
+| Suite | What it pins down |
+|---|---|
+| `run-config-tests.py` | Twenty-two fixtures over the configuration cascade: what a `false` override means, what an explicit `null` means, whether lists append, which identifiers are valid XML names, what happens when a setting is written twice. |
+| `run-roundtrip-test.py` | That writing a configuration and reading it back changes nothing. |
+| `run-unit-tests.py` | The small functions that decide filenames and directory names, and the places where one fact is written down twice and could drift apart. |
+| `run-portability-test.py` | That every Python file parses on Python 3.9, the oldest version supported. Uses an older interpreter if one is installed and scans the source otherwise. |
+| `run-filter-tests.py` | The accessibility work the Lua filters do, against six small `.docx` fixtures. Needs Pandoc 3.9; skipped with a message otherwise. |
+
+### Why these and not others
+
+Every filter bug fixed in v0.2 was silent. Alt text applied to the wrong
+image; two `<h1>` elements on a page; a caption that stopped being found; a
+ten-row table reduced to one empty cell. Nothing raised an error and
+nothing in the reports showed it.
+
+They were found by converting a whole book with two versions of the
+pipeline and comparing — which works only while the previous version is
+still installed and a corpus is on hand. The fixtures assert the same
+things against six documents of about 37 KB each, so the check outlives
+the version it was written for.
+
+Some cases pin behaviour that is about to change rather than behaviour
+that is right -- a merged title row becoming a spanning header, a table
+with no header signal having its first row promoted anyway. Both are
+things roadmap item 1 will alter, and a change is only checkable if the
+starting point was written down.
+
+The configuration fixtures serve a second purpose: they are the
+conformance contract for the merge rules. If those rules are ever
+reimplemented — in JavaScript for a web front end, or in a separate
+repository — the fixtures say whether the new implementation agrees with
+this one.
+
+### Why a portability suite
+
+One line of `lib/oerconfig.py` was valid Python 3.12 and a syntax error on
+everything older, because PEP 701 lifted the rule that an f-string
+replacement field cannot span lines. It compiled on the machine it was
+written on and broke three of the four suites on the machine that ran
+them.
+
+Nothing caught it, and nothing could: a syntax error is invisible to an
+interpreter new enough to accept the syntax. `py_compile` passes, every
+test passes, and the file is unusable elsewhere. So that suite checks the
+source rather than the interpreter, and runs first — a file that does not
+parse makes every other result meaningless on someone else's machine.
+
+It compiles with an older interpreter when one is installed, which is the
+authority, and scans for the known-newer constructs otherwise.
+
+### Extending them
+
+The `.docx` fixtures under `tests/fixtures/` are committed, so the tests
+need only Pandoc. `tests/make-filter-fixtures.py` rebuilds them and is the
+only thing that needs `python-docx`.
+
+Two things about Word are worth knowing before adding a fixture, because
+both cost time to discover:
+
+- Pandoc takes the document title and author from paragraphs styled
+  **Title** and **Author**, consuming them out of the body. Not from
+  `docProps/core.xml`, which it does not read — a natural assumption, and
+  wrong.
+- Word declares most embedded images as `application/octet-stream` rather
+  than by type. `python-docx` sets the content type from the file
+  extension, so producing the real-world case means rewriting
+  `[Content_Types].xml` after saving.
+
+A new assertion should be checked by breaking the thing it protects. Every
+check in both suites was verified that way, and doing so found two
+assertions of mine that passed whether the code was right or not. One was
+simply badly written. The other looked fine and was worse: it claimed to
+check that two documents with identically named images get distinct
+sidecar keys, but in the two-step pipeline Pandoc has already qualified
+those paths, so the keys were distinct for a reason that had nothing to do
+with the code being tested. Only a single-pass conversion reaches the code
+in question, which is why there is now a case for it.
+
+For comparing two whole conversion runs — which is still the right tool
+for a pipeline change — see `util/compare-output.py`.
+
+## Migrating an existing manifest## Migrating an existing manifest
+
+```bash
+python3 util/manifest-to-yaml.py imsmanifest.xml -d .
 ```
 
 Keeps the part that took work — the order, the grouping, the metadata — and
@@ -544,7 +1048,7 @@ genuinely malformed.
 `media-unresolved.csv`. Usually EMF/WMF.
 
 **A page appears in no report but looks wrong** — check
-`imsmanifest-sample.yaml`. If a run worked out an ordering, the sample
+`packaging-sample.yaml`. If a run worked out an ordering, the sample
 holds what it decided.
 
 **Keys like `page#table-3` do not match what you see** — the number counts
@@ -571,3 +1075,17 @@ keys on the media path ignoring its extension.
 - **Strikethrough conveys meaning visually.** `<del>` is not announced by
   most screen readers by default, so a before-and-after table should say so
   in its column heading or caption.
+- **Complex tables are reported, not fixed.** A table with stacked column
+  headers, or with a header row and a header column, needs `headers`/`id`
+  associations that no current setting can express. See the roadmap.
+- **One conversion target, one package.** The configuration is shaped for
+  several of each, and the tools resolve them correctly, but only `html`
+  and `common-cartridge` are implemented.
+- **`cartridge-files.txt` cannot build a prefixed package.** `zip -@`
+  names each member after the path it read, so it cannot place files under
+  a directory. Use `--zip`; the file list says so in its header when a
+  prefix is in effect.
+- **`compare-output.py` matches tables by position**, so inserting one
+  table reports every later table on that page as changed. It also flags a
+  `.docx` and its `.json` intermediate as a duplicated filename, which is
+  noise rather than a finding.

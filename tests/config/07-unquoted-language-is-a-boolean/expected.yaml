@@ -1,0 +1,4 @@
+# YAML 1.1 reads no, yes, on and off as booleans, so `language: no` means
+# Norwegian to the author and False to the parser. There is no way to
+# recover which word was written, so it is refused.
+error: read as the boolean false

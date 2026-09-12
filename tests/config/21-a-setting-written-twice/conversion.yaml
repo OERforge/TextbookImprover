@@ -1,0 +1,5 @@
+defaults:
+  footer: |
+    The footer I meant to set.
+  alt_max_chars: 100
+  footer: ""

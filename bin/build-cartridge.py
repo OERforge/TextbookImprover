@@ -15,7 +15,8 @@ the manifest, the file list, the sample config, and the archive. That is
 what makes it safe to run repeatedly, and what lets it work on any tidy
 directory of HTML rather than only on output from convert.sh.
 
-Configuration lives in imsmanifest.yaml. Everything that can be derived
+Configuration lives in packaging.yaml, with the book's own details in
+project.yaml. Everything that can be derived
 is derived: page titles come from each page's <title>, and the files a
 page needs come from the src and href attributes it actually uses.
 
@@ -36,6 +37,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
 import argparse
+import hashlib
 import html as html_module
 import os
 import re
@@ -50,8 +52,26 @@ except ImportError:  # pragma: no cover
              "    sudo apt install python3-yaml\n"
              "  or: pip3 install pyyaml")
 
-CONFIG_NAME = "imsmanifest.yaml"
-SAMPLE_NAME = "imsmanifest-sample.yaml"
+CONFIG_NAME = "packaging.yaml"
+PROJECT_NAME = "project.yaml"
+SAMPLE_NAME = "packaging-sample.yaml"
+LEGACY_NAME = "imsmanifest.yaml"
+
+# The configuration library lives beside bin/. Found by path rather than
+# installed, so the project stays clone-and-run.
+sys.path.insert(0, os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "lib"))
+try:
+    import oerconfig
+except ImportError:
+    oerconfig = None
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+try:
+    import importlib
+    validate_manifest = importlib.import_module("validate-manifest")
+except ImportError:
+    validate_manifest = None
 FILE_LIST_NAME = "cartridge-files.txt"
 
 CRLF = "\r\n"
@@ -474,74 +494,182 @@ def default_config(stems, identifier="course", title="Course"):
     }
 
 
-def dump_sample(config, path, notes, unknown_roles=None):
-    """Write a commented sample config. Deterministic: no timestamps."""
-    manifest = config.get("manifest", {})
-    lines = [
-        "# Sample configuration written by build-cartridge.py.",
-        "#",
-        "# Rename this file to imsmanifest.yaml and edit it. Every value",
-        "# below is either taken from your existing config or a default,",
-        "# so renaming it unchanged reproduces exactly this build.",
-        "#",
-    ]
-    lines += [f"# {note}" for note in notes]
-    lines += [
-        "",
-        "manifest:",
-        f"  identifier: {yaml_scalar(manifest.get('identifier', 'course'))}",
-        f"  title: {yaml_scalar(manifest.get('title', 'Course'))}",
-        f"  description: {yaml_scalar(manifest.get('description', ''))}",
-        f"  version: {yaml_scalar(str(manifest.get('version', '1.0')))}",
-        f"  language: {yaml_scalar(manifest.get('language', 'en'))}",
-        f"  cartridge: {yaml_scalar(manifest.get('cartridge', 'course.imscc'))}",
-    ]
-    keywords = manifest.get("keywords") or []
-    if keywords:
-        lines.append("  keywords:")
-        lines += [f"    - {yaml_scalar(k)}" for k in keywords]
-    else:
-        lines.append("  keywords: []")
+# --------------------------------------------------------------------------
+# configuration
+#
+# Everything below the adapter still works from a flat dictionary shaped
+# like the v0.1 config, because that is what a thousand lines of manifest
+# building already expects. What changed is where that dictionary comes
+# from: the library resolves the cascade against a schema, and the
+# adapter projects the result back into the old shape. Reading, writing,
+# validating, and documenting the settings now all derive from one
+# declaration, which is what stops the sample writer from quietly
+# dropping keys the reader accepts.
+# --------------------------------------------------------------------------
 
-    for key in ("header", "footer"):
-        if config.get(key):
-            lines.append("")
-            lines.append(f"{key}: {yaml_scalar(config[key])}")
+def _schema_dir():
+    return os.path.dirname(os.path.abspath(__file__))
 
-    if config.get("common_files"):
-        lines.append("")
-        lines.append("common_files:")
-        lines += [f"  - {yaml_scalar(f)}" for f in config["common_files"]]
 
-    if config.get("images"):
-        lines.append("")
-        lines.append("images:")
-        for key, value in config["images"].items():
-            lines.append(f"  {key}: {yaml_scalar(value)}")
+def _lib_dir():
+    return os.path.join(os.path.dirname(_schema_dir()), "lib")
 
+
+def load_schemas():
+    """The packaging schema and the shared project schema."""
+    if oerconfig is None:
+        sys.exit("Cannot find the configuration library. It should be in a "
+                 "lib/ directory beside bin/.")
+    return (oerconfig.load_schema(
+                os.path.join(_schema_dir(), "schema-packaging.yaml")),
+            oerconfig.load_schema(
+                os.path.join(_lib_dir(), "schema-project.yaml")))
+
+
+def config_documents(base, config_path):
+    """The configuration files to read, in increasing precedence.
+
+    A project file is optional: both halves carry a project block inline
+    so that a directory holding only one of them still stands alone.
+    """
+    documents = []
+    packaging_schema, project_schema = load_schemas()
+    try:
+        project_path = os.path.join(base, PROJECT_NAME)
+        if os.path.isfile(project_path):
+            documents.append(
+                oerconfig.load_document(project_path, project_schema))
+        if os.path.isfile(config_path):
+            documents.append(
+                oerconfig.load_document(config_path, packaging_schema))
+    except oerconfig.ConfigError as exc:
+        sys.exit(str(exc))
+    return documents
+
+
+def choose_target(documents, requested):
+    """Which package to build.
+
+    With one package defined there is nothing to choose. With several,
+    naming one is required rather than guessed, because building the
+    wrong archive silently is worse than stopping.
+    """
+    names = oerconfig.target_names(documents)
+    if requested:
+        return requested
+    if len(names) == 1:
+        return names[0]
+    if not names:
+        return None
+    sys.exit("This configuration defines several packages (" +
+             ", ".join(names) + "). Choose one with --target.")
+
+
+# What each package format's archive is called. The configuration library
+# fills an unset filename with the target's own name and stops there,
+# because it has no business knowing that a Common Cartridge is a .imscc.
+# Supplying the extension is this tool's job.
+FORMAT_EXTENSIONS = {
+    "common-cartridge": ".imscc",
+    "zip": ".zip",
+}
+
+
+def archive_name(settings, project, target):
+    """The file to write.
+
+    Derived from the book's identifier rather than from the package's
+    name, which is what v0.1 did and is the more useful of the two: a
+    directory usually holds one book and several ways of packaging it, so
+    the identifier is the part worth seeing in the filename. Two packages
+    of the same format would collide, and that is reported rather than
+    worked around with a naming convention nobody asked for.
+    """
+    extension = FORMAT_EXTENSIONS.get(settings.get("format"), ".zip")
+    name = settings.get("filename") or project.get("identifier") or target
+    # Not os.path.splitext: a reverse-DNS identifier such as
+    # org.example.dept.course-2e has a dot in it, and splitext would read
+    # ".course-2e" as an extension and leave the archive without one.
+    # Only an extension this tool actually writes counts as one.
+    if any(name.lower().endswith(known)
+           for known in FORMAT_EXTENSIONS.values()):
+        return name
+    return name + extension
+
+
+def legacy_view(resolved, target):
+    """Project the resolved configuration into the v0.1 shape.
+
+    A translation layer rather than a rewrite. The manifest building below
+    reads config["manifest"]["language"] in a dozen places, and changing
+    all of them would be a large edit with nothing to show for it.
+    """
+    project, settings = resolved.project, resolved.settings
+    return {
+        "manifest": {
+            "identifier": project["identifier"],
+            "title": project["title"],
+            "description": project["description"],
+            "language": project["language"],
+            "version": settings["version"],
+            "modified": settings["modified"],
+            "keywords": list(settings["keywords"]),
+            "cartridge": archive_name(settings, project, target),
+        },
+        "contents": project["contents"],
+        "common_files": list(settings["common_files"]),
+        "grouping": dict(settings["grouping"]),
+        "organization": dict(settings.get("organization") or {}),
+        "project": dict(project),
+        "content_prefix": content_prefix(project,
+                                         settings.get("paths") or {}),
+    }
+
+
+def sample_inputs(resolved, documents, target, contents):
+    """What dump_sample needs: the resolved config with the contents this
+    run worked out, and the target blocks to write back.
+
+    guess_contents produces an ordering from the filenames when the config
+    has none, and putting it in the sample is the whole point of writing
+    one -- a user who accepts the guess can adopt it by renaming a file
+    rather than by typing out a hundred pages.
+    """
+    settled = oerconfig.Resolved(dict(resolved.project),
+                                 dict(resolved.settings),
+                                 resolved.target, resolved.warnings)
+    settled.project["contents"] = contents
+    targets = {}
+    for doc in documents:
+        for name, block in doc.targets.items():
+            targets[name] = block or {}
+    if not targets:
+        targets[target or "cartridge"] = {"format": "common-cartridge",
+                                          "includes": ["html"]}
+    return settled, targets
+
+
+def dump_sample(config, path, notes, unknown_roles=None,
+                schema=None, project_schema=None, resolved=None,
+                targets=None):
+    """Write a complete sample configuration.
+
+    Complete is the point, and it is why this goes through the schema
+    rather than building YAML by hand. The v0.1 version emitted a list of
+    keys someone had remembered to add, and that list was missing three of
+    them -- captions, grouping, and manifest.modified -- so a run that hit
+    any error wrote a "complete" sample without them and told the user to
+    rename it over their real config. Deriving the file from the same
+    declaration the reader uses removes the possibility rather than
+    patching the instance; tests/run-roundtrip-test.py asserts it.
+    """
+    extra = list(notes)
     if unknown_roles:
-        # Written commented out and in the order they were found, so the
-        # list can be reordered and uncommented rather than typed from
-        # scratch. Different books use different words for these sections,
-        # which is why there is no useful default to fall back on.
-        lines.append("")
-        lines.append("# These page roles are not in the back-matter order,")
-        lines.append("# so they currently sort last within their chapter.")
-        lines.append("# Uncomment and put them in the order they should")
-        lines.append("# appear, then re-run.")
-        lines.append("#")
-        lines.append("# grouping:")
-        lines.append("#   back_matter:")
-        for role in unknown_roles:
-            lines.append(f"#     - {role}")
-
-    lines.append("")
-    lines.append("contents:")
-    lines += render_contents(config.get("contents", []), 0)
-    lines.append("")
-
-    with open(path, "w", encoding="utf-8") as handle:
-        handle.write("\n".join(lines))
+        extra.append("These page roles are not in the back-matter order: "
+                     + ", ".join(sorted(unknown_roles)) + ". They sort last "
+                     "until they are listed under grouping.back_matter.")
+    oerconfig.write_config(schema, project_schema, resolved, targets or {},
+                           path, notes=extra)
 
 
 def yaml_scalar(value):
@@ -695,14 +823,11 @@ MANIFEST_HEAD = """<?xml version="1.0" encoding="UTF-8"?>
           <lomimscc:string>{title}</lomimscc:string>
         </lomimscc:title>
         <lomimscc:description>
-          <lomimscc:string>{description}</lomimscc:string>
+          <lomimscc:string>{description}{version_note}</lomimscc:string>
         </lomimscc:description>
         <lomimscc:language>{language}</lomimscc:language>
 {keywords}      </lomimscc:general>
       <lomimscc:lifeCycle>
-        <lomimscc:version>
-          <lomimscc:string>{version}</lomimscc:string>
-        </lomimscc:version>
         <lomimscc:contribute>
           <lomimscc:date>
             <lomimscc:dateTime>{modified}</lomimscc:dateTime>
@@ -725,10 +850,86 @@ MANIFEST_TAIL = """      </item>
 """
 
 
-def render_items(tree, depth):
+# --------------------------------------------------------------------------
+# content prefix
+# --------------------------------------------------------------------------
+
+# How much of the title to keep in the prefix. Long enough to be
+# recognisable in a file manager, short enough that the longest page name
+# plus its media directory stays well inside any path limit.
+PREFIX_TITLE_CHARS = 32
+
+# Hex characters of the digest. Ten gives roughly one chance in two
+# million of a collision across a thousand books, and one in two hundred
+# across a hundred thousand.
+PREFIX_DIGEST_CHARS = 10
+
+
+def content_prefix(project, settings):
+    """The directory every file in the package sits under, or "".
+
+    Two halves, doing two jobs. The title makes the folder mean something
+    to whoever opens the LMS file manager. The digest makes it unique, and
+    it has to be the digest rather than the title because two books can
+    perfectly well share a title -- and it is taken over the identifier,
+    which IMS asks to be globally unique, because hashing anything less
+    would only redistribute the ambiguity rather than remove it.
+
+    The version is deliberately absent. A prefix that changed between
+    releases would relocate every file, turning each update into a fresh
+    import that the instructor has to reconcile by hand.
+    """
+    if not settings.get("prefix_content"):
+        return ""
+    explicit = (settings.get("prefix") or "").strip().strip("/")
+    if explicit:
+        return explicit
+
+    identifier = str(project.get("identifier") or "")
+    digest = hashlib.sha256(identifier.encode("utf-8")).hexdigest()
+    digest = digest[:PREFIX_DIGEST_CHARS]
+
+    readable = re.sub(r"[^A-Za-z0-9._-]+", "-",
+                      str(project.get("title") or "")).strip("-._").lower()
+    readable = re.sub(r"-{2,}", "-", readable)[:PREFIX_TITLE_CHARS]
+    readable = readable.strip("-._")
+    return f"{readable}-{digest}" if readable else digest
+
+
+def under_prefix(prefix, ref):
+    """A package-relative path, inside the prefix when there is one."""
+    return f"{prefix}/{ref}" if prefix else ref
+
+
+def wrapper_title(project, settings, manifest):
+    """The wrapper module's name, from the template."""
+    template = settings.get("module_title") or "{title}"
+    values = {"title": project.get("title") or manifest.get("title") or "",
+              "version": manifest.get("version") or "",
+              "identifier": project.get("identifier") or ""}
+    try:
+        return template.format(**values).strip()
+    except (KeyError, IndexError, ValueError):
+        # A template naming something that does not exist should not take
+        # the build down; the module still needs a name.
+        return str(values["title"])
+
+
+def render_items(tree, depth, wrapper=None):
+    """The organization tree, optionally inside one wrapper module.
+
+    An LMS does not merge an imported organization with one already in the
+    course; it appends. So a re-import always leaves a second copy, and
+    the only question is how much of one. Wrapped, it is a single module
+    to remove; flat, it is one per chapter.
+    """
     pad = "  " * (depth + 4)
     lines = []
     counter = [0]
+    if wrapper:
+        lines.append(f'{pad}<item identifier="group-book">')
+        lines.append(f"{pad}  <title>{xml_escape(wrapper)}</title>")
+        pad += "  "
 
     def emit(nodes, pad):
         for kind, a, b in nodes:
@@ -746,6 +947,8 @@ def render_items(tree, depth):
                 lines.append(f"{pad}</item>")
 
     emit(tree, pad)
+    if wrapper:
+        lines.append(("  " * (depth + 4)) + "</item>")
     return lines
 
 
@@ -753,6 +956,19 @@ TITLES = {}
 
 
 def build_manifest(config, tree, page_files, common_files):
+    """Assemble imsmanifest.xml.
+
+    A note on where the version goes. Full LOM puts it in lifeCycle, but
+    the CC 1.1 manifest profile restricts LifeCycle.Type to `contribute`
+    alone and declares no `version` element anywhere -- so a manifest with
+    one does not validate. Until v0.2 this emitted one, and every cartridge
+    this project has ever produced was invalid because of it. LMSes accept
+    it, which is why nobody noticed.
+
+    There is nowhere legal to put a version, so it is appended to the
+    description, which General.Type does permit. Lossy, and visible on
+    import, but honest; a silently invalid manifest is neither.
+    """
     manifest = config["manifest"]
     keywords = ""
     for word in manifest.get("keywords") or []:
@@ -764,6 +980,8 @@ def build_manifest(config, tree, page_files, common_files):
     head = MANIFEST_HEAD.format(
         identifier=xml_escape(manifest["identifier"]),
         title=xml_escape(manifest["title"]),
+        version_note=(" (version " + xml_escape(str(manifest.get("version", "")))
+                      + ")") if manifest.get("version") else "",
         description=xml_escape(manifest.get("description", "")),
         language=xml_escape(manifest.get("language", "en")),
         version=xml_escape(str(manifest.get("version", "1.0"))),
@@ -771,22 +989,33 @@ def build_manifest(config, tree, page_files, common_files):
         keywords=keywords,
     )
 
-    items = render_items(tree, 0)
+    organization = config.get("organization") or {}
+    project = config.get("project") or {}
+    wrapper = (wrapper_title(project, organization, manifest)
+               if organization.get("wrap_in_module") else None)
+    items = render_items(tree, 0, wrapper)
+
+    # Every href is package-relative, so prefixing them all moves the whole
+    # tree together and no relative reference inside a page changes.
+    prefix = config.get("content_prefix") or ""
 
     resources = []
     if common_files:
         resources.append('    <resource identifier="common_files" '
                          'type="webcontent">')
         for ref in common_files:
-            resources.append(f'      <file href="{xml_escape(ref)}"/>')
+            resources.append('      <file href="'
+                             + xml_escape(under_prefix(prefix, ref)) + '"/>')
         resources.append("    </resource>")
 
     for stem in flatten_pages(tree):
+        page = xml_escape(under_prefix(prefix, stem + ".html"))
         resources.append(f'    <resource identifier="res-{stem}" '
-                         f'type="webcontent" href="{stem}.html">')
-        resources.append(f'      <file href="{stem}.html"/>')
+                         f'type="webcontent" href="{page}">')
+        resources.append(f'      <file href="{page}"/>')
         for ref in page_files[stem]:
-            resources.append(f'      <file href="{xml_escape(ref)}"/>')
+            resources.append('      <file href="'
+                             + xml_escape(under_prefix(prefix, ref)) + '"/>')
         if common_files:
             resources.append('      <dependency identifierref="common_files"/>')
         resources.append("    </resource>")
@@ -824,11 +1053,24 @@ def main():
                              "own table of contents. Overrides contents in "
                              "the config; the result is written to the "
                              "sample for review.")
+    parser.add_argument("--no-validate", action="store_true",
+                        help="skip checking the manifest against the "
+                             "Common Cartridge schemas")
+    parser.add_argument("--target", default=None, metavar="NAME",
+                        help="which package to build, when the config "
+                             "defines more than one")
+    parser.add_argument("--allow-unknown-keys", action="store_true",
+                        help="report settings this version does not know "
+                             "about instead of refusing them, and keep "
+                             "them if the config is rewritten")
     parser.add_argument("--init", action="store_true",
                         help="write a sample config and stop")
     parser.add_argument("--check", action="store_true",
                         help="validate only; write nothing")
     parser.add_argument("--emit-conversion-config", metavar="DIR",
+                        # Retired in v0.2: conversion reads its own config
+                        # now, so the packaging tool no longer has to be
+                        # present for a folder of documents to convert.
                         help="write the conversion-time settings (header and "
                              "footer sources, spacer rules) into DIR for "
                              "convert.sh to read, then stop. Writes only into "
@@ -841,8 +1083,9 @@ def main():
     output_path = args.output or os.path.join(base, "imsmanifest.xml")
 
     if args.emit_conversion_config:
-        return emit_conversion_config(config_path,
-                                      args.emit_conversion_config)
+        sys.exit("--emit-conversion-config was retired in v0.2. Conversion "
+                 "reads its own configuration:\n"
+                 "    python3 bin/read-conversion-config.py -d . DIR")
 
     stems = sorted((f[:-5] for f in os.listdir(base) if f.endswith(".html")),
                    key=natural_key)
@@ -854,22 +1097,75 @@ def main():
 
     # ---- configuration ---------------------------------------------------
     config, notes, fatal = {}, [], []
+    schema, project_schema = load_schemas()
+    resolved, documents, target = None, [], None
 
-    if os.path.isfile(config_path) and not args.init:
-        with open(config_path, encoding="utf-8") as handle:
-            config = yaml.safe_load(handle) or {}
-        if not isinstance(config, dict):
-            sys.exit(f"{config_path} does not contain a mapping.")
-    else:
-        if args.init:
-            notes.append("Generated by --init.")
+    legacy_path = os.path.join(base, LEGACY_NAME)
+    if os.path.isfile(legacy_path) and not os.path.isfile(config_path):
+        sys.exit(
+            f"{legacy_path} is the v0.1 configuration and is no longer "
+            f"read.\n"
+            f"Split it into {PROJECT_NAME}, conversion.yaml, and "
+            f"{CONFIG_NAME} with:\n"
+            f"    python3 util/migrate-config.py -d {base}\n"
+            "It reports what it will do first with --dry-run, and never "
+            "changes the original.")
+
+    if not args.init:
+        documents = config_documents(base, config_path)
+        if documents:
+            target = choose_target(documents, args.target)
+            try:
+                resolved = oerconfig.resolve(
+                    schema, project_schema, documents, target=target,
+                    allow_unknown=args.allow_unknown_keys)
+            except oerconfig.ConfigError as exc:
+                sys.exit(str(exc))
+            for warning in resolved.warnings:
+                print(f"WARNING: {warning}", file=sys.stderr)
+            config = legacy_view(resolved, target)
+
+            # Two packages of the same format both derive the same
+            # filename from the identifier. Reporting it costs one loop
+            # and saves a build that silently overwrites another.
+            names = oerconfig.target_names(documents)
+            if len(names) > 1:
+                seen = {}
+                for other in names:
+                    try:
+                        settled = oerconfig.resolve(
+                            schema, project_schema, documents, target=other,
+                            allow_unknown=args.allow_unknown_keys)
+                    except oerconfig.ConfigError:
+                        continue
+                    archive = archive_name(settled.settings,
+                                           settled.project, other)
+                    if archive in seen:
+                        fatal.append(
+                            f"packages {seen[archive]} and {other} would "
+                            f"both be written to {archive}. Give at least "
+                            "one of them its own filename.")
+                    seen[archive] = other
         else:
             fatal.append(f"{config_path} not found.")
+    else:
+        notes.append("Generated by --init.")
 
+    if resolved is None:
+        # Nothing to resolve, but the code below still needs the schema's
+        # own defaults so that a sample can be written from them.
+        resolved = oerconfig.resolve(schema, project_schema, [])
+        if not config:
+            config = legacy_view(resolved, None)
+
+    # No `or` fallbacks here. The configuration library has already
+    # applied the schema's defaults, so an empty value at this point is
+    # one somebody chose, and `x or default` would quietly overrule it --
+    # which is precisely the bug that used to make `unsorted_title: ""`
+    # come out as "Unsorted".
     grouping = config.get("grouping") or {}
-    back_matter = [str(r) for r in (grouping.get("back_matter")
-                                    or BACK_MATTER_ORDER)]
-    unsorted_title = str(grouping.get("unsorted_title") or "Unsorted")
+    back_matter = [str(r) for r in grouping.get("back_matter", [])]
+    unsorted_title = str(grouping.get("unsorted_title", ""))
 
     # Computed from every page, not only appended ones, so the block lands
     # in the sample whenever the ordering was worked out by the script --
@@ -1076,16 +1372,22 @@ def main():
                               or guess_contents(stems, back_matter, TITLES))
         if args.includeallhtml or not config.get("contents"):
             sample["contents"] = guess_contents(stems, back_matter, TITLES)
-        dump_sample(sample, sample_path, notes, unknown_roles)
+        settled, sample_targets = sample_inputs(
+            resolved, documents, target, sample["contents"])
+        dump_sample(sample, sample_path, notes, unknown_roles,
+                    schema, project_schema, settled, sample_targets)
         for problem in fatal:
             print(f"ERROR: {problem}", file=sys.stderr)
         print(f"\nWrote {sample_path}.", file=sys.stderr)
         print(f"Edit it, rename it to {CONFIG_NAME}, and run again.",
               file=sys.stderr)
+        print("Every setting is in there with its description, so nothing "
+              "you had set is lost by renaming it.", file=sys.stderr)
         return 0 if args.init else 1
 
     xml = build_manifest(config, tree, page_files, common_files)
 
+    prefix = config.get("content_prefix") or ""
     file_list = ["imsmanifest.xml"]
     for ref in common_files:
         file_list.append(ref)
@@ -1104,86 +1406,68 @@ def main():
         handle.write(xml)
     list_path = os.path.join(base, FILE_LIST_NAME)
     with open(list_path, "w", encoding="utf-8") as handle:
+        if prefix:
+            # zip -@ names each member after the path it reads, so this
+            # list cannot build a prefixed package. Saying so is better
+            # than letting someone build a flat one that looks right and
+            # collides with every other book on import.
+            handle.write(
+                "# Every file this package contains, as it sits on disk.\n"
+                f"# Inside the package they all go under {prefix}/ "
+                "(imsmanifest.xml excepted),\n"
+                "# which `zip -@` cannot do: it names each member after "
+                "the path it read.\n"
+                "# Build the archive with --zip instead.\n")
         handle.write("\n".join(file_list) + "\n")
 
     print(f"Wrote {output_path}: {pages} page(s), {assets} asset(s).")
     print(f"Wrote {list_path}.")
 
+    # Validate before building anything from it. A manifest that does not
+    # conform still gets written, so it can be looked at, but the archive
+    # is not built from it: shipping an invalid cartridge is the failure
+    # this is here to prevent, and every cartridge produced before v0.2
+    # was invalid without anyone noticing.
+    if not args.no_validate and validate_manifest is not None:
+        if not validate_manifest.validate(output_path, quiet=True):
+            print("", file=sys.stderr)
+            print("The manifest was written so you can inspect it, but no "
+                  "archive was built from it.", file=sys.stderr)
+            print("  Re-run with --no-validate to build one anyway.",
+                  file=sys.stderr)
+            return 1
+
     if (extra and args.includeallhtml) or args.toc or guessed_contents:
-        dump_sample({**config, "contents": contents_from_tree(tree)},
-                    sample_path, notes, unknown_roles)
+        settled, sample_targets = sample_inputs(
+            resolved, documents, target, contents_from_tree(tree))
+        dump_sample(config, sample_path, notes, unknown_roles,
+                    schema, project_schema, settled, sample_targets)
         print(f"Wrote {sample_path} for review.")
 
     cartridge = os.path.join(base, config["manifest"]["cartridge"])
     if args.zip:
         with zipfile.ZipFile(cartridge, "w", zipfile.ZIP_DEFLATED) as archive:
+            # imsmanifest.xml sits at the package root whatever else
+            # does; Common Cartridge requires it there.
             archive.write(output_path, "imsmanifest.xml")
             for ref in file_list[1:]:
-                archive.write(os.path.join(base, ref), ref)
+                archive.write(os.path.join(base, ref),
+                              under_prefix(prefix, ref))
         size = os.path.getsize(cartridge) / 1048576
         print(f"Wrote {cartridge} ({size:.1f} MB, {len(file_list)} entries).")
     else:
         print("\nTo build the cartridge:")
-        print(f"  cd {base} && zip -q -X "
-              f"{config['manifest']['cartridge']} -@ < {FILE_LIST_NAME}")
-        print("  (or re-run this script with --zip)")
+        if prefix:
+            # The manual route cannot produce a prefixed layout, so it is
+            # not offered as though it could.
+            print("  re-run this script with --zip")
+            print(f"  ({FILE_LIST_NAME} lists the files, but zip -@ cannot "
+                  f"place them under {prefix}/)")
+        else:
+            print(f"  cd {base} && zip -q -X "
+                  f"{config['manifest']['cartridge']} -@ < {FILE_LIST_NAME}")
+            print("  (or re-run this script with --zip)")
 
-    return 0
-
-
-def emit_conversion_config(config_path, out_dir):
-    """Hand convert.sh the settings that affect conversion.
-
-    Kept here so there is one config file and one parser, but written into
-    a directory convert.sh owns -- the content directory is never touched.
-    A block scalar in the YAML is written out as a Markdown file; a plain
-    string is treated as a path and copied through as-is.
-    """
-    config = {}
-    if os.path.isfile(config_path):
-        with open(config_path, encoding="utf-8") as handle:
-            config = yaml.safe_load(handle) or {}
-
-    os.makedirs(out_dir, exist_ok=True)
-    images = config.get("images") or {}
-    captions = config.get("captions") or {}
-
-    def prefixes(key, fallback):
-        value = captions.get(key, fallback)
-        if isinstance(value, (list, tuple)):
-            return ",".join(str(v) for v in value)
-        return str(value)
-
-    def resolve(key):
-        """Return a path to Markdown for header/footer, or ''."""
-        value = config.get(key)
-        if not value:
-            return ""
-        text = str(value)
-        # A single line with no newline that names an existing file is a
-        # path; anything else is inline Markdown.
-        candidate = os.path.join(os.path.dirname(config_path) or ".", text.strip())
-        if "\n" not in text.strip() and os.path.isfile(candidate):
-            return os.path.abspath(candidate)
-        path = os.path.join(out_dir, key + ".md")
-        with open(path, "w", encoding="utf-8") as handle:
-            handle.write(text.rstrip() + "\n")
-        return os.path.abspath(path)
-
-    settings = {
-        "HEADER_MD": resolve("header"),
-        "FOOTER_MD": resolve("footer"),
-        "SPACER_BELOW": str(images.get("spacer_below", "0")),
-        "STRIP_SPACER": "true" if images.get("strip_spacer") else "false",
-        "SPACER_LOG_NAME": str(images.get("spacer_log", "spacer-images.csv")),
-        "ALT_MAX_CHARS": str(images.get("alt_max_chars", "120")),
-        "TABLE_LABEL_PREFIXES": prefixes("table_prefixes", "Table"),
-        "FIGURE_LABEL_PREFIXES": prefixes("figure_prefixes", "Figure"),
-    }
-    with open(os.path.join(out_dir, "settings.sh"), "w",
-              encoding="utf-8") as handle:
-        for key, value in settings.items():
-            handle.write(f"{key}={shell_quote(value)}\n")
     return 0
 
 

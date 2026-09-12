@@ -1,0 +1,4 @@
+# Writing one value where a list is expected is always meant, and
+# refusing it would be pedantry.
+expect:
+  captions.figure_prefixes: [Illustration]

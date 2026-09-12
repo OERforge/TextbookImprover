@@ -1,0 +1,4 @@
+# Appending would make it impossible for a target to remove a prefix.
+target: web
+expect:
+  captions.table_prefixes: [Exhibit]

@@ -1,0 +1,6 @@
+# A tool's own file may override the project file, but a book with two
+# languages is nearly always a mistake, so it is said out loud.
+expect_project:
+  language: es
+  identifier: ibs2
+warns: language is set to

@@ -1,0 +1,5 @@
+# IMS types the manifest identifier as xs:ID, which derives from NCName,
+# so an identifier starting with a digit produces a manifest no validator
+# accepts. A bare UUID usually starts with one, and it is the first thing
+# people reach for after reading "make it globally unique".
+error: starts with a digit

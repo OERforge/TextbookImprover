@@ -1,0 +1,2 @@
+# The same, inside a target block rather than in defaults.
+error: set twice

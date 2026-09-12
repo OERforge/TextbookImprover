@@ -1,0 +1,102 @@
+# Copyright 2026 Robert Szarka
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+#
+# Project schema -- settings that describe the book rather than any one
+# rendering of it.
+#
+# This schema lives with the configuration library rather than with either
+# tool, because it is the vocabulary the conversion and packaging halves
+# have to agree on. Everything here has one right answer per book: the
+# language is the language whether the output is HTML, EPUB, or a print
+# PDF, and the identifier has to be the same in a cartridge manifest and
+# an EPUB package document or a consumer will treat a re-import as new
+# content rather than an update.
+#
+# Both halves may declare these inline, so a directory holding only a
+# conversion config or only a packaging config still stands on its own.
+#
+# Field meanings:
+#   keys         this node is a section; merge descends into it
+#   type         this node is a setting; merge replaces it wholesale
+#   default      used when no layer supplies a value
+#   description  one line, written into generated sample files
+#   values       permitted values, for type: enum
+#   item         element type, for type: list
+
+description: >
+  Facts about the book itself, true of every rendering of it.
+
+keys:
+
+  identifier:
+    type: ncname
+    default: book
+    description: >
+      A name for this book that no other book anywhere will use. It is
+      what an LMS matches on to recognise a re-import as the same course,
+      it is what the content folder inside a package is named after, and
+      two books sharing one are two books the LMS will treat as one. The
+      IMS schema only requires it to be unique within the package;
+      uniqueness beyond that is your responsibility and nothing will warn
+      you.
+      It also has to be a valid XML name, because IMS types it as xs:ID:
+      start with a letter, then letters, digits, and . - _ only. No
+      colons, and it may not start with a digit -- which rules out both
+      obvious ways of generating a unique one, since a bare UUID usually
+      starts with a digit and urn:uuid: has colons.
+      Reverse-DNS is the least error-prone form and reads well as a folder
+      name: org.example.dept.course-code. A UUID works with a letter in
+      front, which you can generate with
+      python3 -c "import uuid; print('i' + uuid.uuid4().hex)".
+      Whichever you choose, keep it for the life of the book. Changing it
+      makes every future import a new course rather than an update.
+
+  title:
+    type: string
+    default: Untitled
+    description: >
+      The book's title, as it should appear to a reader.
+
+  language:
+    type: language
+    default: en
+    description: >
+      BCP 47 language tag for the book's text. Sets the lang attribute on
+      every page (WCAG 3.1.1) and the language declared in any package
+      built from those pages. Quote it: unquoted no, yes, and on are read
+      as booleans by YAML.
+
+  description:
+    type: text
+    default: ""
+    description: >
+      A sentence or two about the book, used wherever a package format
+      asks for one.
+
+  publisher:
+    type: string
+    default: ""
+    description: >
+      Who published the book. Written as document metadata, and available
+      to package formats that record it.
+
+  contents:
+    type: opaque
+    default: []
+    description: >
+      The book's structure as a nested list of pages and groups. This
+      describes the book, not any one package, so a cartridge
+      organisation and an EPUB table of contents are both built from it.
+      Left empty, tools that need an order guess one and say so.

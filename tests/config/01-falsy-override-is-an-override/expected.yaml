@@ -1,0 +1,6 @@
+# A target setting something to false is overriding it, not omitting it.
+# `target.get(k) or defaults.get(k)` gets this wrong and is the single
+# most common way a cascade goes bad.
+target: epub
+expect:
+  images.strip_spacer: false

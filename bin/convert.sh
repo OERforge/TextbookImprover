@@ -28,26 +28,45 @@ set -x
 # Directory this script lives in, so its companions are found regardless of cwd.
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 figure_filter="$script_dir/figures-and-tables.lua"
+media_filter="$script_dir/media-extensions.lua"
+config_reader="$script_dir/read-conversion-config.py"
 cartridge_tool="$script_dir/build-cartridge.py"
 
-if [ ! -f "$figure_filter" ]; then
-  echo "Missing $figure_filter -- save it alongside this script." >&2
+for required in "$figure_filter" "$media_filter"; do
+  if [ ! -f "$required" ]; then
+    echo "Missing $required -- save it alongside this script." >&2
+    exit 1
+  fi
+done
+
+# Pandoc 3.9 introduced the options this script relies on. Earlier
+# versions accept most of the command line and quietly do something else:
+# 3.6 and older write grid tables without cell spans, so a table with
+# merged cells loses them without any warning.
+# Python 3 is required, not optional. It reads the configuration, and
+# step 2 reads image references out of the JSON with it. In v0.1 it was
+# needed only for the manifest and the cartridge, and both of those steps
+# checked for it; step 2 arrived in v0.2 without a check, so a machine
+# without Python failed part-way through a run having already written the
+# intermediates. Saying so before any work starts is cheaper.
+if ! command -v python3 >/dev/null 2>&1; then
+  echo "python3 not found. It reads the configuration and inspects the" >&2
+  echo "  conversion intermediates, so it is required:" >&2
+  echo "    sudo apt install python3 python3-yaml" >&2
   exit 1
 fi
 
-export TABLE_CAPTIONS="$script_dir/table-captions.csv"
-export IMAGE_ALT="$script_dir/image-alt.csv"
+pandoc_version="$(pandoc --version | head -1 | awk '{print $2}')"
+if [ "$(printf '%s\n3.9\n' "$pandoc_version" | sort -V | head -1)" != "3.9" ]; then
+  echo "Pandoc $pandoc_version is too old; 3.9 or later is required." >&2
+  exit 1
+fi
 
-missing_report="$script_dir/table-captions-missing.csv"
-alt_report="$script_dir/image-alt-missing.csv"
-header_report="$script_dir/table-headers-missing.csv"
-unresolved_report="$script_dir/media-unresolved.csv"
-
-# Every later step works from this list rather than from *.md. A directory
-# that has been converted before also contains Markdown left over from
-# earlier runs, and possibly Markdown whose .docx has since been moved
-# away; globbing *.md sweeps those in and makes one document's stale state
-# look like a failure of this run.
+# Every later step works from this list rather than from *.json. A
+# directory that has been converted before also contains intermediates
+# left over from earlier runs, and possibly intermediates whose .docx has
+# since been moved away; globbing sweeps those in and makes one document's
+# stale state look like a failure of this run.
 run_docs="$(mktemp)"
 refs_file="$(mktemp)"
 missing_rows="$(mktemp)"
@@ -56,17 +75,20 @@ header_rows="$(mktemp)"
 spacer_rows="$(mktemp)"
 unresolved_rows="$(mktemp)"
 unresolved_log="$(mktemp)"
+media_rows="$(mktemp)"
 css_header="$(mktemp)"
 work_dir="$(mktemp -d)"
 trap 'rm -f "$run_docs" "$refs_file" "$missing_rows" "$alt_rows" \
         "$header_rows" "$spacer_rows" "$unresolved_log" "$unresolved_rows" \
-        "$css_header"; \
+        "$media_rows" "$css_header"; \
       rm -rf "$work_dir"' EXIT
 
 export TABLE_CAPTIONS_MISSING="$missing_rows"
 export IMAGE_ALT_MISSING="$alt_rows"
 export TABLE_HEADERS_MISSING="$header_rows"
 export SPACER_LOG="$spacer_rows"
+export MEDIA_UNRESOLVED="$media_rows"
+
 
 unresolved=0
 
@@ -87,25 +109,68 @@ note_unresolved_row() {
 }
 
 ############################################
-# 0. Read conversion settings from imsmanifest.yaml
+# 0. Read conversion settings from conversion.yaml
 #
-#    build-cartridge.py owns the config file and its parser; this step
-#    asks it for the handful of settings that affect conversion rather
-#    than parsing YAML in shell. Everything is written into a temporary
-#    directory, so the content directory is untouched.
+#    read-conversion-config.py resolves the config against a schema and
+#    writes shell assignments here, so this script never parses YAML.
+#    Everything goes into a temporary directory; the content directory is
+#    untouched.
+#
+#    In v0.1 this asked build-cartridge.py, which meant a folder of
+#    documents could not be converted without the packaging tool present.
+#    Both halves now use the same configuration library and neither needs
+#    the other.
 ############################################
 
+# The schema's own defaults, repeated here so that a bare folder of
+# documents converts with no configuration at all. Anything the config
+# says overrides these; anything it does not mention keeps them.
+LANGUAGE="en"
 HEADER_MD=""
 FOOTER_MD=""
+PROMOTE_H1_TO_TITLE="always"
+AUTHOR_BYLINE="meta"
 SPACER_BELOW="0"
 STRIP_SPACER="false"
-SPACER_LOG_NAME="spacer-images.csv"
 ALT_MAX_CHARS="120"
+RESPONSIVE_IMAGES="true"
+WRAP_TABLES="true"
+MEDIA_STRICT=""
 TABLE_LABEL_PREFIXES="Table"
 FIGURE_LABEL_PREFIXES="Figure"
+TABLE_CAPTIONS_NAME="table-captions.csv"
+IMAGE_ALT_NAME="image-alt.csv"
+TABLE_CAPTIONS_MISSING_NAME="table-captions-missing.csv"
+IMAGE_ALT_MISSING_NAME="image-alt-missing.csv"
+TABLE_HEADERS_MISSING_NAME="table-headers-missing.csv"
+MEDIA_UNRESOLVED_NAME="media-unresolved.csv"
+SPACER_LOG_NAME="spacer-images.csv"
 
-if [ -f "$cartridge_tool" ] && command -v python3 >/dev/null 2>&1; then
-  python3 "$cartridge_tool" -d . --emit-conversion-config "$work_dir" || true
+if [ -f "imsmanifest.yaml" ] && [ ! -f "conversion.yaml" ]; then
+  echo "imsmanifest.yaml is the v0.1 configuration and is no longer read." >&2
+  echo "  Split it into project.yaml, conversion.yaml and packaging.yaml:" >&2
+  echo "    python3 $script_dir/../util/migrate-config.py -d ." >&2
+  echo "  It reports what it will do first with --dry-run, and never" >&2
+  echo "  changes the original." >&2
+  exit 1
+fi
+
+if [ -f "$config_reader" ]; then
+  # A directory with no configuration converts with the defaults above.
+  # A configuration that exists and cannot be read is a different matter,
+  # and stops the run: the alternative is converting a whole book with
+  # settings the user thought they had changed, which looks like success
+  # and is not. v0.2.0 tolerated both cases alike, so a footer written at
+  # the top level -- where v0.1 put it -- was reported and then ignored.
+  if ! python3 "$config_reader" -d . "$work_dir"; then
+    if [ -f "conversion.yaml" ] || [ -f "project.yaml" ]; then
+      echo "" >&2
+      echo "Stopping: the configuration could not be read." >&2
+      echo "  Nothing was converted. Fix the problem above and re-run," >&2
+      echo "  or move the file aside to convert with the defaults." >&2
+      exit 1
+    fi
+  fi
   if [ -f "$work_dir/settings.sh" ]; then
     # shellcheck disable=SC1091
     . "$work_dir/settings.sh"
@@ -113,25 +178,88 @@ if [ -f "$cartridge_tool" ] && command -v python3 >/dev/null 2>&1; then
 fi
 
 export SPACER_BELOW STRIP_SPACER ALT_MAX_CHARS
+export RESPONSIVE_IMAGES WRAP_TABLES MEDIA_STRICT
 export TABLE_LABEL_PREFIXES FIGURE_LABEL_PREFIXES
-spacer_report="$script_dir/$SPACER_LOG_NAME"
+export AUTHOR_BYLINE PROMOTE_H1_TO_TITLE
+# Reports are written by the run and regenerated every time, so they
+# belong beside the book they describe. In v0.1 that was also where the
+# scripts were, because the scripts were copied into the content
+# directory; from v0.2 the tools stay where they were cloned, and leaving
+# the reports there would mean two books overwriting each other's.
+#
+# Sidecars are different, and the difference matters: they are read, never
+# written, and they hold work no script can reproduce. A relative name
+# resolves against the content directory, which is the convenient default.
+# An absolute path is used as given, so corrections can live somewhere
+# version-controlled instead of among the generated files. Resolving
+# "$PWD/$name" unconditionally turned an absolute setting into
+# "/book//home/you/sidecars/table-captions.csv", which no filter could
+# read and nothing reported except an instruction to append your work to
+# a path that did not exist.
+#
+# Their names come from the config, so these cannot be resolved until
+# step 0 has run.
+resolve_path() {
+  case "$1" in
+    /*) printf '%s' "$1" ;;
+     *) printf '%s' "$PWD/$1" ;;
+  esac
+}
+
+export TABLE_CAPTIONS="$(resolve_path "$TABLE_CAPTIONS_NAME")"
+export IMAGE_ALT="$(resolve_path "$IMAGE_ALT_NAME")"
+
+# A sidecar the config names but the filter cannot read is almost always a
+# wrong path rather than a deliberately empty one, and the run would
+# otherwise succeed while silently discarding every correction in it. The
+# default names are exempt: not having written one yet is the normal
+# starting state.
+check_sidecar() {
+  local path="$1" setting="$2" default="$3"
+  [ -e "$path" ] && return 0
+  [ "$(basename "$path")" = "$default" ] && [ "${path%/*}" = "$PWD" ] && return 0
+  printf 'ERROR: %s is set to %s, which does not exist.\n' "$setting" "$path" >&2
+  printf '       A relative name resolves against %s.\n' "$PWD" >&2
+  printf '       Create the file, or remove the setting to use ./%s.\n' \
+    "$default" >&2
+  exit 1
+}
+
+check_sidecar "$TABLE_CAPTIONS" 'sidecars.table_captions' 'table-captions.csv'
+check_sidecar "$IMAGE_ALT" 'sidecars.image_alt' 'image-alt.csv'
+
+missing_report="$(resolve_path "$TABLE_CAPTIONS_MISSING_NAME")"
+alt_report="$(resolve_path "$IMAGE_ALT_MISSING_NAME")"
+header_report="$(resolve_path "$TABLE_HEADERS_MISSING_NAME")"
+unresolved_report="$(resolve_path "$MEDIA_UNRESOLVED_NAME")"
+spacer_report="$(resolve_path "$SPACER_LOG_NAME")"
 
 ############################################
-# 1. Convert DOCX → Markdown, extract media
-#    into per-document subdirectories
+# 1. Convert DOCX -> a filtered JSON intermediate, extract media
 #
-#    Grid tables are left enabled. With -grid_tables, any table Pandoc
-#    cannot express in simple Markdown -- one with multi-block cells, say
-#    -- falls back to a raw HTML block, which then passes through the Lua
-#    filter untouched: no caption, no scope attributes, no scroll wrapper.
+#    JSON rather than Markdown. Markdown is a format with opinions, and
+#    everything has to survive its grammar: it has no syntax for a cell
+#    attribute or for a header column, which are precisely what the
+#    remediation produces. It also picks the simplest table layout that
+#    fits, which silently destroys a table whose cells are all empty --
+#    three of them in these books, where a blank worksheet table came back
+#    as a paragraph break. The JSON is Pandoc's own AST, so nothing is
+#    lost, and `pandoc -f json -t markdown` renders it back to something
+#    readable whenever a human wants to look.
 #
-#    --wrap=none is not cosmetic. Pandoc's default wrapping can break a
-#    line in the middle of an image path, and every later grep and sed
-#    here assumes one reference per line. A wrapped path turned
-#    "media/image1.gif" into "media/image1.g" + "if" and produced a dead
-#    link that only the media gate caught.
+#    The media filter runs here rather than afterwards. Word stores images
+#    with whatever content type the DOCX declares, which is routinely
+#    application/octet-stream; Pandoc turns that into a ".so" extension
+#    and then writes <embed> instead of <img> -- a page that validates and
+#    shows nothing. Renaming inside the mediabag, before --extract-media
+#    writes anything, means the file and the reference cannot disagree.
+#    v0.1 did this afterwards by walking the Markdown with grep and sed,
+#    because by then it was the only option left.
+#
+#    --extract-media has to be on this run for the same reason: it is what
+#    rewrites each src to "<base>/media/...", and that path is the key the
+#    alt-text sidecar is stored under.
 ############################################
-
 for f in *.docx; do
   [ -e "$f" ] || continue
 
@@ -166,13 +294,13 @@ for f in *.docx; do
 
   pandoc \
     -f docx \
-    -t markdown \
-    --wrap=none \
+    -t json \
     "$f" \
-    -o "$base.md" \
+    -o "$base.json" \
+    --lua-filter="$media_filter" \
     --extract-media="$base"
 
-  printf '%s\n' "$base.md" >> "$run_docs"
+  printf '%s\n' "$base.json" >> "$run_docs"
 done
 
 if [ ! -s "$run_docs" ]; then
@@ -180,217 +308,93 @@ if [ ! -s "$run_docs" ]; then
   exit 1
 fi
 
-# Markdown with no matching .docx is not this run's output. Say so and
-# leave it alone rather than treating its stale state as an error.
-for md in *.md; do
-  [ -e "$md" ] || continue
-  grep -Fqx "$md" "$run_docs" && continue
-  echo "Skipping $md: no matching .docx in this directory." >&2
+# An intermediate with no matching .docx is not this run's output. Say so
+# and leave it alone rather than treating its stale state as an error.
+for stale in *.json; do
+  [ -e "$stale" ] || continue
+  grep -Fqx "$stale" "$run_docs" && continue
+  echo "Skipping $stale: no matching .docx in this directory." >&2
   echo "  It is left over from an earlier run, or its .docx has moved." >&2
 done
 
-############################################
-# 2. Resolve extracted media
-#
-#    Word stores images with whatever extension the DOCX declares, which
-#    is often meaningless (.so, from a ContentType of
-#    application/octet-stream). This step is driven by the Markdown: for
-#    every media reference it locates the file actually on disk, renames
-#    it to match its real content type, and rewrites the reference to
-#    agree -- as one operation per reference.
-#
-#    Matching on the stem rather than the extension makes this idempotent
-#    and self-healing: whatever state a document was left in by an earlier
-#    run, re-running reconciles the file and the reference.
-############################################
-
-# Real extension for a file, from its content. Empty means "not an image
-# format a browser can display".
-media_extension() {
-  case "$(file -b --mime-type "$1")" in
-    image/png)                 echo png ;;
-    image/jpeg)                echo jpg ;;
-    image/gif)                 echo gif ;;
-    image/svg+xml)             echo svg ;;
-    image/webp)                echo webp ;;
-    image/avif)                echo avif ;;
-    image/bmp|image/x-ms-bmp)  echo bmp ;;
-    image/tiff)                echo tiff ;;
-    image/x-icon|image/vnd.microsoft.icon) echo ico ;;
-    *)                         echo "" ;;
+# Markdown from a v0.1 run is no longer read by anything. Leaving it in
+# place is quietly misleading -- it looks like current output and is not --
+# so it is named rather than removed, since deleting a user's files is not
+# this script's decision to make.
+for old in *.md; do
+  [ -e "$old" ] || continue
+  case "$old" in
+    "$HEADER_MD"|"$FOOTER_MD") continue ;;
   esac
-}
-
-# `file --mime-type` calls a Word metafile application/octet-stream, which
-# says nothing useful. The human-readable description names it, so use that
-# in the message and to spot the formats worth naming specifically.
-media_description() {
-  file -b -- "$1" 2>/dev/null | head -c 60
-}
-
-media_advice() {
-  case "$(media_description "$1")" in
-    *Metafile*|*EMF*|*WMF*)
-      echo "Word metafile (EMF/WMF): vector art no browser displays." ;;
-    *)
-      echo "Not an image format browsers display." ;;
-  esac
-}
-
-# How many writes had to be retried before they were visible. A non-zero
-# count here is the signature of a filesystem that does not present a
-# consistent view -- typically a cloud-synced folder mounted into WSL.
-retries=0
-
-# Rename, then confirm the result is actually visible. One retry, because
-# on a synced mount the first read after a write can still show the old
-# state; a second failure is treated as real.
-rename_media() {
-  mv -f -- "$1" "$2" 2>/dev/null || true
-  [ -f "$2" ] && return 0
-  sleep 1
-  retries=$((retries + 1))
-  mv -f -- "$1" "$2" 2>/dev/null || true
-  [ -f "$2" ]
-}
-
-# Rewrite one reference, then confirm the old one is gone. The pattern is
-# escaped so a dot in a filename cannot match some other character.
-rewrite_reference() {
-  rewrite_md="$1"
-  rewrite_from="$2"
-  rewrite_to="$3"
-  rewrite_re="$(printf '%s' "$rewrite_from" | sed 's/[^[:alnum:]_/-]/\\&/g')"
-
-  sed -i "s|${rewrite_re}|${rewrite_to}|g" "$rewrite_md"
-  grep -qF -- "$rewrite_from" "$rewrite_md" || return 0
-  sleep 1
-  retries=$((retries + 1))
-  sed -i "s|${rewrite_re}|${rewrite_to}|g" "$rewrite_md"
-  ! grep -qF -- "$rewrite_from" "$rewrite_md"
-}
-
-# Media references for one document, anchored to that document's own
-# extraction directory. A blanket '/media/' pattern also matches ordinary
-# URLs in the prose -- reference chapters cite pages such as
-# https://www1.nyc.gov/site/dca/media/Face-Masks-... -- and those are not
-# files this script has any business resolving. Everything outside
-# [alnum]_/- is escaped so the base name cannot act as a regex.
-document_media_refs() {
-  md_file="$1"
-  base_re="$(printf '%s' "${md_file%.md}" | sed 's/[^[:alnum:]_/-]/\\&/g')"
-  grep -oE "${base_re}/media/[^ )<>\"]+" "$md_file" 2>/dev/null | sort -u || true
-}
-
-while IFS= read -r md; do
-  [ -e "$md" ] || continue
-
-  document_media_refs "$md" > "$refs_file"
-
-  # Redirected from a file, not a pipe, so the loop runs in this shell and
-  # can increment the unresolved counter.
-  while IFS= read -r ref; do
-    [ -n "$ref" ] || continue
-
-    stem="${ref%.*}"
-
-    # Prefer the file the Markdown already points at. Otherwise take the
-    # most recently written candidate: a directory converted before can
-    # hold both this run's extraction and an earlier run's renamed copy,
-    # and picking alphabetically would sometimes choose the stale one.
-    if [ -f "$ref" ]; then
-      actual="$ref"
-    else
-      actual="$(ls -t -- "$stem".* 2>/dev/null | head -n 1 || true)"
-    fi
-
-    if [ -z "$actual" ] || [ ! -f "$actual" ]; then
-      note_unresolved "UNRESOLVED: $md references $ref" \
-                      "            nothing on disk matches $stem.*"
-      note_unresolved_row "$ref" "$md" "" "no file matches $stem.*"
-      continue
-    fi
-
-    ext="$(media_extension "$actual")"
-    if [ -z "$ext" ]; then
-      described="$(media_description "$actual")"
-      note_unresolved \
-        "UNRESOLVED: $actual" \
-        "            detected as: $described" \
-        "            $(media_advice "$actual")"
-      note_unresolved_row "$actual" "$md" "$described" "$(media_advice "$actual")"
-      continue
-    fi
-
-    target="${stem}.${ext}"
-
-    # Both the rename and the rewrite are checked afterwards rather than
-    # trusted. mv and sed report success as soon as the kernel accepts the
-    # write, which on a network or cloud-synced mount is not the same as
-    # the change being visible to the next command. Without these checks a
-    # lost write surfaces much later -- as a gate failure, or as HTML
-    # pointing at a file that no longer exists -- with nothing to say where
-    # it went wrong.
-    if [ "$actual" != "$target" ]; then
-      if ! rename_media "$actual" "$target"; then
-        note_unresolved \
-          "UNRESOLVED: renamed $actual to $target, but $target is not there" \
-          "            (the filesystem did not keep the rename)"
-        note_unresolved_row "$actual" "$md" "" "rename did not take effect"
-        continue
-      fi
-    fi
-
-    if [ "$ref" != "$target" ]; then
-      if ! rewrite_reference "$md" "$ref" "$target"; then
-        note_unresolved \
-          "UNRESOLVED: rewrote $ref to $target in $md, but $md still" \
-          "            references $ref (the filesystem did not keep the edit)"
-        note_unresolved_row "$ref" "$md" "" "rewrite did not take effect"
-        continue
-      fi
-    fi
-
-    # Drop any other copy of the same image left by an earlier run, so the
-    # ambiguity above cannot build up over time.
-    for sibling in "$stem".*; do
-      [ -f "$sibling" ] || continue
-      [ "$sibling" = "$target" ] || rm -f -- "$sibling"
-    done
-  done < "$refs_file"
-done < "$run_docs"
+  echo "Note: $old is left over from a v0.1 run and is no longer read." >&2
+done
 
 ############################################
-# 3. Verify every media reference resolves
+# 2. Verify every media reference resolves
 #
 #    A dead image link is invisible in the generated HTML -- Pandoc emits
 #    an <embed> rather than an <img> for an extension it does not
-#    recognise. Stopping here is deliberate: broken output that looks
-#    fine is worse than no output.
+#    recognise. Stopping here is deliberate: broken output that looks fine
+#    is worse than no output.
+#
+#    v0.1 spent this step repairing as well as checking, because the
+#    renaming happened after extraction and the two could drift apart.
+#    They cannot now, so what is left is a check. It is kept as a check
+#    rather than dropped because the failure it guards against is silent,
+#    and because the media filter still cannot identify every format Word
+#    stores: EMF and WMF have no browser-renderable equivalent and have to
+#    go back to the author.
 ############################################
+# Every media path the intermediate refers to, one per line. Read out of
+# the JSON with python3 rather than grep, because the AST is structured
+# and an image path that happens to appear in prose is not a reference.
+document_media_refs() {
+  python3 - "$1" <<'PYEOF'
+import json
+import sys
 
-while IFS= read -r md; do
-  [ -e "$md" ] || continue
-  document_media_refs "$md" > "$refs_file"
+def walk(node, out):
+    if isinstance(node, dict):
+        if node.get("t") == "Image":
+            try:
+                out.append(node["c"][2][0])
+            except (KeyError, IndexError, TypeError):
+                pass
+        for value in node.values():
+            walk(value, out)
+    elif isinstance(node, list):
+        for value in node:
+            walk(value, out)
+
+refs = []
+with open(sys.argv[1], encoding="utf-8") as handle:
+    walk(json.load(handle), refs)
+for ref in sorted(set(refs)):
+    # An absolute URL is not this script's to resolve.
+    if not ref.startswith(("http://", "https://", "//", "data:")):
+        print(ref)
+PYEOF
+}
+
+while IFS= read -r doc; do
+  [ -e "$doc" ] || continue
+  document_media_refs "$doc" > "$refs_file"
   while IFS= read -r ref; do
     [ -n "$ref" ] || continue
     [ -f "$ref" ] && continue
-    note_unresolved \
-      "UNRESOLVED: $md still references missing $ref after resolution."
-    note_unresolved_row "$ref" "$md" "" "still missing after resolution"
+    note_unresolved "UNRESOLVED: $doc references missing $ref."
+    note_unresolved_row "$ref" "$doc" "" "referenced but not on disk"
   done < "$refs_file"
 done < "$run_docs"
 
-# A retry only ever succeeds when the first attempt was lost, so any count
-# above zero says the working directory is not giving a consistent view of
-# its own writes.
-if [ "$retries" -gt 0 ]; then
-  echo "" >&2
-  echo "Note: $retries media write(s) had to be retried before the change" >&2
-  echo "  was visible. That is a filesystem symptom, not a conversion one." >&2
-  echo "  A cloud-synced folder (Google Drive, OneDrive, Dropbox) mounted" >&2
-  echo "  into WSL is the usual cause. Converting on the Linux filesystem" >&2
-  echo "  and copying the finished cartridge back avoids it." >&2
+# Anything the media filter could not identify. Its rows are already in the
+# right shape, so they are folded in here and one gate covers both.
+if [ -s "$media_rows" ]; then
+  while IFS= read -r row; do
+    [ -n "$row" ] || continue
+    printf '%s\n' "$row" >> "$unresolved_rows"
+    note_unresolved "UNRESOLVED: ${row%%,*} could not be identified."
+  done < "$media_rows"
 fi
 
 if [ "$unresolved" -gt 0 ]; then
@@ -414,22 +418,23 @@ if [ "$unresolved" -gt 0 ]; then
     echo "to be replaced. In Word: right-click the image, Save as Picture," >&2
     echo "choose PNG, then re-insert. Or convert in place:" >&2
     echo "  libreoffice --headless --convert-to png --outdir DIR FILE" >&2
-    echo "and rename the result to the name the Markdown expects." >&2
+    echo "and rename the result to the name the document expects." >&2
   fi
 
   echo "No HTML was generated." >&2
   exit 1
 fi
 
-# Past the gate, this run will finish and step 6 will write whatever is
-# outstanding. Clear the reports now so that one left behind by an earlier
-# run cannot survive into a run that has nothing to report. Doing it here
-# rather than at the top means a run that stops at the gate leaves the
-# previous reports intact, since they are still the best list available.
+# Past the gate, this run will finish and the reports at the end will be
+# written with whatever is outstanding. Clear them now so one left behind
+# by an earlier run cannot survive into a run that has nothing to report.
+# Doing it here rather than at the top means a run that stops at the gate
+# leaves the previous reports intact, since they are still the best list
+# available.
 rm -f "$missing_report" "$alt_report" "$header_report" "$spacer_report"
 
 ############################################
-# 4. Render the header and footer fragments
+# 3. Render the header and footer fragments
 #
 #    Pandoc's --include-before-body and --include-after-body take HTML, so
 #    Markdown from the config is rendered once here and reused for every
@@ -463,21 +468,31 @@ if [ -n "$FOOTER_MD" ]; then
 fi
 
 ############################################
-# 5. Convert Markdown → HTML5
+# 4. Convert the JSON intermediate → HTML5
 #
 #    --lua-filter  rewrites DOCX layout tables into <figure>/<figcaption>,
 #                  gives data tables a real <caption> plus scope="col"
 #                  headers and a scroll wrapper, replaces image alt text
 #                  from the sidecar, applies the spacer rule, and promotes
 #                  the leading H1 to the page title
-#    -M lang=en    sets the html lang attribute (WCAG 3.1.1)
+#    -M lang       sets the html lang attribute (WCAG 3.1.1), from the
+#                  project's declared language. v0.1 hardcoded "en" while
+#                  the manifest read its own separate setting, so a book
+#                  in any other language shipped pages that disagreed with
+#                  the package describing them, and nothing checked.
 #
-#    -implicit_figures stops Pandoc wrapping every standalone image in a
-#    <figure> captioned with a copy of its own alt text. Word stores some
-#    equations as pictures with MathSpeak alt text, so that caption printed
-#    strings like "StartLayout 1st Row 1st Column upper C u s t o m e r ..."
-#    as visible body copy. Figures built by the Lua filter are unaffected --
-#    it constructs them directly and does not rely on this extension.
+#    -implicit_figures is gone with the Markdown. It existed because the
+#    Markdown reader wrapped every standalone image in a <figure>
+#    captioned with a copy of its own alt text, and Word stores some
+#    equations as pictures with MathSpeak alt text, so that caption
+#    printed strings like "StartLayout 1st Row 1st Column upper C u s t o
+#    m e r ..." as visible body copy. Reading JSON there is no such
+#    reader extension to disable. Figures built by the Lua filter are
+#    unaffected either way -- it constructs them directly.
+#
+#    --math-method=mathml rather than --mathml, which Pandoc 3.11
+#    deprecated. MathML is now the default, so the option is stated only
+#    to keep the intent visible.
 #
 #    --embed-resources is deliberately NOT used. Base64 data URIs inflate
 #    every page and Brightspace does not render them reliably from an
@@ -546,19 +561,19 @@ CSS
 
 while IFS= read -r f; do
   [ -e "$f" ] || continue
-  base="${f%.md}"
+  base="${f%.json}"
 
   pandoc_args=(
-    -f markdown-implicit_figures
+    -f json
     -t html5
     "$f"
     -o "$base.html"
     --standalone
     --ascii
-    --mathml
+    --math-method=mathml
     --lua-filter="$figure_filter"
     --include-in-header="$css_header"
-    -M lang=en
+    -M "lang=$LANGUAGE"
   )
   [ -n "$header_html" ] && pandoc_args+=(--include-before-body="$header_html")
   [ -n "$footer_html" ] && pandoc_args+=(--include-after-body="$footer_html")
@@ -567,7 +582,7 @@ while IFS= read -r f; do
 done < "$run_docs"
 
 ############################################
-# 6. Report items still needing human input
+# 5. Report items still needing human input
 ############################################
 
 # Sort and deduplicate the collected rows into a report, or remove a stale
@@ -630,7 +645,7 @@ if [ -s "$missing_rows" ]; then
 fi
 
 ############################################
-# 7. Build the Common Cartridge manifest
+# 6. Build the Common Cartridge manifest
 #
 #    Handed off to build-cartridge.py, which is read-only with respect to
 #    page content and can be run on its own against any directory of HTML.

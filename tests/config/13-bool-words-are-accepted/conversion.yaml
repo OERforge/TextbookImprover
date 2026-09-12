@@ -1,0 +1,4 @@
+defaults:
+  images:
+    strip_spacer: "yes"
+    responsive: "off"

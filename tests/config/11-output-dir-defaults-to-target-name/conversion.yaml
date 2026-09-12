@@ -1,0 +1,5 @@
+targets:
+  epub-full:
+    format: epub3
+  epub-chapters:
+    format: epub3

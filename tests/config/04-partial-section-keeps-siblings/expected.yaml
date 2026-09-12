@@ -1,0 +1,7 @@
+# A section merges key by key. Overriding one image setting must not
+# revert the others, which is what replacing the whole map would do.
+target: epub
+expect:
+  images.spacer_below: 0.25
+  images.strip_spacer: true
+  images.alt_max_chars: 150

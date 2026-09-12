@@ -1,0 +1,3 @@
+# A format in the defaults block would apply to every target at once,
+# which cannot be what it means.
+error: belongs to a target

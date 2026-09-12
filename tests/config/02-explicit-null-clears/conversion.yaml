@@ -1,0 +1,6 @@
+defaults:
+  footer: "Access for free at OpenStax."
+targets:
+  print:
+    format: pdf
+    footer: null

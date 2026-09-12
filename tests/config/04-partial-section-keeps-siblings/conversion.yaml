@@ -1,0 +1,10 @@
+defaults:
+  images:
+    spacer_below: 0.5
+    strip_spacer: true
+    alt_max_chars: 150
+targets:
+  epub:
+    format: epub3
+    images:
+      spacer_below: 0.25

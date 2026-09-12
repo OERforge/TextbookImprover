@@ -1,0 +1,9 @@
+# The floor of the cascade. Every declared setting has a value even when
+# the config is almost empty.
+target: web
+expect:
+  promote_h1_to_title: always
+  author_byline: meta
+  images.alt_max_chars: 120
+  captions.table_prefixes: [Table]
+  sidecars.image_alt: image-alt.csv

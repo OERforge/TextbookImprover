@@ -4,6 +4,20 @@ All notable changes to this project are documented in this file. The format is b
 
 Versions are two-part and pre-1.0: breaking changes may land in any of them until 1.0, and each is marked **Breaking** below. But we intend to keep the configuration schema, the command-line interface of each script, and the format of the sidecar CSV files stable in each version.
 
+## [Unreleased]
+
+Groundwork for the table-headers sidecar (roadmap item 1). Nothing in the conversion pipeline changes yet.
+
+### Added
+
+- `util/table-census.py` reports a `Guess` column beside `Kind`: the value a table-headers sidecar would be prefilled with, for every data table. `Kind` is what the file says, `Guess` is what to declare, and a row where they differ is a row worth looking at. Across four OpenStax books (1,011 documents, 1,716 tables, 687 of them data tables) the guess gives 332 `both`, 289 `first-row`, 60 `none`, and 6 `first-column`. The header mechanism it feeds behaves identically on Pandoc 3.1.3, 3.9, and 3.11, so this needs no version bump.
+- `util/contrib/fix-empty-paragraphs.py`, contributed from another project and not wired in. It removes content-free paragraph structure elements from a tagged PDF, two sources of which are the longtable caption wrapper and Pandoc's minipage header cells. Needs `pikepdf`. See roadmap item 7.
+- `tests/run-census-tests.py` checks that guess against thirteen table shapes built as OOXML directly, so each one carries exactly the formatting signals it means to and no table style decides the answer first. Registered in `tests/run-all.sh`.
+
+### Changed
+
+- The vocabulary for header shapes is `first-row`, `first-column`, `both`, and `none`, naming the line that holds the headers. It previously used `col` for a header *row* and `row` for a header *column*, which is the opposite of how LaTeX's `table/header-rows` and `table/header-columns` read. No sidecar format has shipped with the old names, so there is nothing to migrate.
+
 ## [0.2] - 2026-09-12
 
 Two major structural changes to prepare for future work: the conversion pipeline is now routed through JSON instead of Markdown, and the configuration is no longer described in three hand-maintained places. Both were prompted by the same discovery: settings and structure were being lost silently, in ways no report caught and no error announced. Converting *Introductory Business Statistics 2e* with v0.2 produces 169 of 169 pages semantically identical to v0.1, apart from the fixes below, and every one recovers something v0.1 dropped.

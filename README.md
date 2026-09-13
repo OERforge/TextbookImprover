@@ -51,7 +51,7 @@ and redistributed under their own terms. See the README there.
 | `manifest-to-yaml.py` | One-time: turns an existing `imsmanifest.xml` into `project.yaml` and `packaging.yaml`. |
 | `untrack-deletions.py` | One-time source repair: turns Word tracked deletions into ordinary strikethrough. |
 | `compare-output.py` | Compares two runs semantically, so a pipeline change can be checked rather than trusted. |
-| `table-census.py` | Surveys table structure across a corpus of DOCX files. |
+| `table-census.py` | Surveys table structure across a corpus of DOCX files and guesses where each table's headers are. Reads the OOXML directly, so it needs no Pandoc. |
 
 **`tests/`** holds the configuration conformance fixtures and the two test
 runners. See [Testing](#testing).
@@ -953,7 +953,7 @@ in question, which is why there is now a case for it.
 For comparing two whole conversion runs — which is still the right tool
 for a pipeline change — see `util/compare-output.py`.
 
-## Migrating an existing manifest## Migrating an existing manifest
+## Migrating an existing manifest
 
 ```bash
 python3 util/manifest-to-yaml.py imsmanifest.xml -d .
@@ -1078,6 +1078,23 @@ keys on the media path ignoring its extension.
 - **Complex tables are reported, not fixed.** A table with stacked column
   headers, or with a header row and a header column, needs `headers`/`id`
   associations that no current setting can express. See the roadmap.
+- **Two PAC errors on a tagged PDF are the validator's, not the file's.**
+  This matters only once PDF is an output (roadmap item 7), but it is
+  worth recognizing rather than chasing. *Table header cell has no
+  associated subcells* is raised because `latex-lab` sets `Scope` through
+  an attribute class and PAC does not resolve `/ClassMap` references:
+  rewriting the same value as an inline `/A` dictionary makes PAC pass
+  with no change to the content, veraPDF never raises it, and
+  [tagging-project discussion #930](https://github.com/latex3/tagging-project/discussions/930)
+  has the maintainers declining to change the implementation, since the
+  class is what makes `TH-both` expressible for a cell that heads both a
+  row and a column. *Invalid use of a TR structure element* is raised
+  because PAC rejects `Artifact` as a child of `Table`, which is how a
+  repeated `longtable` header row is represented; ISO 32000-2 Annex L,
+  Table L.2 permits it, so the file conforms, and
+  [tagging-project issue #1583](https://github.com/latex3/tagging-project/issues/1583)
+  says the same. It has been reported to PAC; there is no public ticket to
+  watch.
 - **One conversion target, one package.** The configuration is shaped for
   several of each, and the tools resolve them correctly, but only `html`
   and `common-cartridge` are implemented.

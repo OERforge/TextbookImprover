@@ -6,13 +6,71 @@ We are attempting to follow two principles: build the tool that can check a chan
 
 ## 1. Table headers sidecar
 
-A CSV declaring, per table, where its headers are: first row, first column, both, or neither. The conversion applies it, so the same declaration drives every output format.
+A CSV declaring, per table, which lines hold its headers: `first-row`, `first-column`, `both`, or `none`. The conversion applies it, so the same declaration drives every output format.
 
-A census of three OpenStax books found 592 data tables among 1,412. Formatting alone classifies most of them, but the interesting distinction can't be read from the file at all: a contingency table's category column and a frequency table's interval column are byte-for-byte identical in the DOCX, and only one of them wants `scope="row"`. That's what the sidecar is for.
+The values are named for the line that holds the headers, which is how [`latex-lab-table`](https://ctan.org/pkg/latex-lab) names `table/header-rows` and `table/header-columns` and how Pandoc names `row_head_columns`. Earlier drafts of this file used `col`, `row`, `matrix`, and `grid`, where `col` meant a header *row*: that reads as the opposite of the LaTeX keys and is gone. `matrix` and `grid` stay acceptable as aliases for `both` and `none`, because `matrix` is what my textbook's fenced divs already say.
 
-The generated report will carry a best guess. A first column whose values uniquely key their rows, over a body of values, is treated as headers; that gives roughly 53% `matrix`, 37% `col`, 9% `grid`, and 1% `row` across the three books. The guess is a starting point to correct, not an answer.
+A census of four OpenStax books found 687 data tables among 1,716. Formatting alone classifies most of them, but the interesting distinction can't be read from the file at all: a contingency table's category column and a frequency table's interval column are byte-for-byte identical in the DOCX, and only one of them wants `scope="row"`. That's what the sidecar is for.
 
-Also here: promote a merged full-width first row to `<caption>` rather than treating it as a header row, which folds five tables in the statistics book into the existing caption machinery.
+### The guess
+
+The generated report carries a best guess, produced by `util/table-census.py` and checked by `tests/run-census-tests.py`. Across the four books it gives 332 `both` (48%), 289 `first-row` (42%), 60 `none` (9%), and 6 `first-column` (1%). The proportions differ by book rather than being a property of OpenStax: *Introductory Business Statistics 2e* is 61% `both`, *Principles of Data Science* is 60% `first-row`, and *Principles of Marketing* has 22 data tables in 250.
+
+The rule that produces it: a first column that keys its rows, over a body of values, is headers. Keying means every cell filled and no value repeated. Two conditions stop that from over-firing. The body has to be mostly numeric, so a table of descriptions stays `first-row`: a prose body reads as a list rather than a matrix. And a *numeric* first column only counts if it is ordered. 110 tables turn on that last one and they split 78/32. The ordered side is lookup axes (Year, Price Level, `z`, a frequency table's Data column), the unordered side is homogeneous measurements where row 1 names three groups and there is no label column at all. Formatting that already proves a header column wins over the rule where they disagree, which is 8 tables.
+
+Residual error is small but real. Of the tables guessed `both`, five have parallel column headers (`Team 1 | Team 2 | Team 3`), and two of those five are genuinely a first data column that happens to ascend. The guess is a starting point to correct, not an answer.
+
+Two shapes to read past before any of this applies: a merged full-width first row, which becomes a `<caption>`, and a wholly empty first row, which three tables in the data science book use above their real header row. Reading either as the header row calls an ordinary table headerless. In a one-column table every row spans the width trivially, so the first test has to be off there or it consumes the table.
+
+Also here: promote a merged full-width first row to `<caption>` rather than treating it as a header row, which folds five tables in the statistics book into the existing caption machinery. The guess already reads past such a row, so the value describes the table as it will be after the promotion.
+
+### Splitting grouping-band tables
+
+Nine tables have a merged full-width row partway down, labelling the rows beneath it. At least one more writes the band as the same text repeated across every cell rather than as a merged cell (`d-appendix-d-review-of-python-functions.docx`, 85 rows), which the census does not currently detect. Worth catching before the split machinery is built, since it is the same shape wearing a different hat. `<th colspan="N" scope="rowgroup">` is the canonical HTML answer, but `scope="rowgroup"` has thin screen reader support, PDF's `Scope` has no rowgroup value, and a cell `Headers` array is an open item in `latex-lab-table`. So the sidecar takes `split-at=1,6,11` instead and each band starts a new table with the band text as its caption. That works identically in HTML and LaTeX, and for `7-5-costs-in-the-long-run.docx` it is a truer reading of the source, which really is two tables Word glued together.
+
+### Keys
+
+A key has to survive the source being reissued, and it has to survive us splitting a table. Position survives neither. Content hashing survives both, and the collision worry turns out to be backwards: if two tables have identical content they want identical headers, so a collision is a feature.
+
+Measured on the three books, a hash over the whole normalized cell text plus the table's shape gives 15 duplicate groups covering 31 tables, and **no group whose members the guess treats differently**. A narrower hash over just the header row, first column, and shape gives 36 groups covering 76 tables, of which 4 disagree. So the narrow hash buys robustness against an edit in a data cell at the cost of merging tables that want different declarations, and the full hash is the better trade on this corpus.
+
+The split case falls out of this: we are the ones splitting, so we can compute each sub-table's hash before writing anything and record it against the parent's row. Nothing has to be rediscovered on a later pass.
+
+A DOCX-to-DOCX round trip is the one case this does not reach, since the output's tables are new tables. That is also the one case where we are already rewriting the publisher's file, so a bookmark per table written at that point is affordable there and nowhere else.
+
+### Where the declaration comes from
+
+The CSV is one supplier and not the only one, but it is always available and it wins.
+
+- **DOCX** has nowhere to put a declaration, so the CSV is all there is.
+- **Markdown** can carry it in a fenced div, which is what my textbook does with `::: matrix :::`. The marker names have to be configurable, since another author will have chosen differently, and an unmarked table has to stay distinguishable from one marked and declared, so that a fresh batch from that author is still reportable.
+- **HTML** may carry `scope` and `headers` already, which we preserve, and may carry nothing, which is the unmarked case again.
+
+The default for an unmarked table is a declared setting rather than a constant. `first-row` is right for a book whose tables all have header rows and wrong for a corpus with 60 genuine data grids in it.
+
+### Which Pandoc this needs
+
+Not a newer one. Setting `row_head_columns` from a Lua filter, and setting `scope` on a cell's attributes, produce identical HTML on 3.1.3, 3.9, and 3.11, and survive to EPUB3 unchanged on 3.9 and 3.11. So item 1 adds no version pressure and the project's existing floor of 3.9 stands.
+
+Two version facts that bear on it anyway. Pandoc's DOCX reader treated `<w:tblHeader w:val="0"/>` as marking a header row until 3.10, so on an earlier version a deliberately disabled header row reads as a header. None of the 1,011 files in the four books carries one (590 `tblHeader` elements, none disabled), so the census figures are unaffected, but the next corpus may differ. And spanning cells only round-trip through the Markdown writer from 3.7, which matters for the complex tables item 1 does not cover.
+
+### What the PDF half can and cannot do
+
+`table/header-columns={1}` is the mechanism, and it is what my `matrix-headers.lua` already emits. Three things about it are worth writing down before anyone builds on it.
+
+The setting is ambient, not per-table. [The documentation](https://ctan.org/pkg/latex-lab) says it applies to all tables until changed or emptied, so the pattern is set-before and reset-after around each table, which is self-contained and works for a filter that knows nothing about the surrounding document. There is no per-table argument to pass.
+
+`table/header-rows` is ignored whenever `\endhead` or `\endfirsthead` is present, which for Pandoc is always, because Pandoc emits `longtable` for everything. The documentation is explicit: in a longtable the code uses the `\endhead` or `\endfirsthead` rows as the header and in that case ignores `table/header-rows`. So the header row is tagged `TH` either way, and setting the key changes nothing; the column key is the only one whose value alters the output. If we ever emitted `tabular` inside a float instead, that would reverse: there is no `\endhead` to read, and `table/header-rows={1}` would become the only thing marking the header row. A cell falling under both settings gets `TH-both`, so a matrix table's blank corner gets `Scope=Both` for free.
+
+A longtable `\caption` is typeset as a multicolumn inside `\endfirsthead` and is tagged `TH` rather than `Caption`. So the caption promotion above produces correct markup in HTML and EPUB and an incorrectly tagged header row in PDF, through no fault of ours. Either post-process the PDF to retag it (see item 7) or accept it until `latex-lab` handles longtable captions.
+
+### Two PAC errors that are not ours
+
+Both were reproduced by building the diagnostic and watching the error disappear, so they are worth recognizing rather than chasing.
+
+**"Table header cell has no associated subcells."** `latex-lab` sets `Scope` through an attribute class, and PAC does not resolve `/ClassMap` references, so the attribute is present and invisible to the validator. Rewriting the `/C` reference as an inline `/A` dictionary makes PAC pass with no change to the content. The [latex-lab-table documentation](https://ctan.org/pkg/latex-lab) says so in a footnote, and [tagging-project discussion #930](https://github.com/latex3/tagging-project/discussions/930) has the maintainers declining to change the implementation for it, since the class is what makes `TH-both` expressible. veraPDF does not raise it.
+
+**"Invalid use of a TR structure element."** PAC rejects `Artifact` as a child of `Table`, which is how the repeated longtable header row is represented. ISO 32000-2 Annex L, Table L.2 permits `Artifact` 0..n as a child of `Table`, and `TD`/`TR` as children of `Artifact`, so the output conforms and the rejection is a PAC defect. Ulrike Fischer says the same in [tagging-project issue #1583](https://github.com/latex3/tagging-project/issues/1583), notes that even UA-1 allows a private element there, and says she has reported it to PAC without knowing when it will be fixed. Where that report lives is not stated, so there is no upstream ticket to watch.
 
 **Why now.** It is the largest accessibility gap remaining, it is independent of everything else, and the schema is in place so it arrives as a declared setting rather than another environment variable.
 
@@ -28,7 +86,7 @@ A sidecar maps each URL to a short description, which the filter attaches to the
 
 - **HTML and EPUB3** need nothing further. Pandoc's writer emits the attribute as it stands, verified in both.
 - **PDF** needs the attribute turned into the `/Contents` entry of the link annotation, which is what PDF/UA requires as a link's alternate description and what Acrobat announces. A filter for this already exists from another project and reads exactly the attribute above, so the two halves meet without either knowing about the other. What this gets us: in testing, Acrobat announces `/Contents`, browser PDF viewers ignore it. Every other mechanism — `/Alt` or `/ActualText` on a marked-content span, `/Alt` on the `Link` structure element — was tested against Acrobat and NVDA and announced nothing, and Edge announced nothing for any of them including `/Contents`. So the PDF half reaches Acrobat users and no one else, which is an argument for sequencing it after the HTML and EPUB halves rather than alongside them.
-- **Markdown**, once it is an output format (item 5), carries the annotation as the `{aria-label="..."}` attribute syntax it was authored in. This is the same markup my textbook project writes by hand, so a sidecar-generated description and an author-written one are indistinguishable downstream. The flavor matters: `markdown` and `commonmark_x` round-trip the attribute, while `gfm`, `commonmark`, and `markdown_strict` rewrite the whole link as a raw `<a>` element. That is not a silent loss (it survives in the HTML) but reading such a file back gives a `RawInline` holding the opening tag, a bare `Link` stripped of its attributes, and a `RawInline` holding the closing tag. So a filter reading `Link.attributes` finds nothing, and the PDF half of this breaks. Any Markdown target needs `link_attributes` asserted rather than assumed. Item 5 has the detail.
+- **Markdown**, once it is an output format (item 5), carries the annotation as the `{aria-label="..."}` attribute syntax it was authored in. This is the same markup my textbook project writes by hand, so a sidecar-generated description and an author-written one are indistinguishable downstream. The flavor matters: `markdown` and `commonmark_x` round-trip the attribute, while `gfm`, `commonmark`, and `markdown_strict` rewrite the whole link as a raw `<a>` element. The extension is spelled `link_attributes` for `markdown` and `attributes` for `commonmark_x`, verified on 3.11. That is not a silent loss (it survives in the HTML) but reading such a file back gives a `RawInline` holding the opening tag, a bare `Link` stripped of its attributes, and a `RawInline` holding the closing tag. So a filter reading `Link.attributes` finds nothing, and the PDF half of this breaks. Any Markdown target needs the extension asserted rather than assumed. Item 5 has the detail.
 
 ### What has to be worked out
 
@@ -42,7 +100,7 @@ Note that 144 of the 176 are in `-references.html` files and 32 are elsewhere, s
 
 **`aria-label` replaces the accessible name.** The URL stays visible while a screen reader hears the description instead, and WCAG 2.5.3 (Label in Name) asks that a control's accessible name contain its visible label. Strictly, this fails it. Practically, the risk is close to nil, since 2.5.3 exists so speech-input users can say what they see, and nobody dictates a 135-character URL.
 
-Still worth deciding deliberately rather than by default. The alternative is to shorten the visible text to something readable, keep the full address in the `href`, and restore it for print with `@media print { a[href]::after { content: " (" attr(href) ")" } }`. That satisfies both criteria and changes what a reader sees on the page, which is a bigger decision than adding an attribute.
+Still worth deciding deliberately rather than by default, and the PDF testing argues for the alternative more strongly than it first appeared. Of seven mechanisms tested against NVDA, only the annotation `/Contents` announced anything, and only in Acrobat; `/ActualText` works but replaces what a reader copies, which for a DOI is a real loss. Descriptive visible text was the only option that worked in every viewer and needed nothing from the reader's stack. So: shorten the visible text to something readable, keep the full address in the `href`, and restore it for print with `@media print { a[href]::after { content: " (" attr(href) ")" } }`. That satisfies both WCAG criteria and asks nothing of tagged-PDF support. It changes what a reader sees on the page, which is a bigger decision than adding an attribute, but it is the one that reaches everybody.
 
 **The LaTeX side needs a preamble.** The existing filter emits `\LinkAlt{...}` and `\LinkAltReset{}` around each link, and those macros live in a `link-alt-preamble.tex` that has to come along with it. It is also a no-op without `\DocumentMetadata` tagging enabled, so the PDF half of this arrives with item 7 rather than before it. The HTML and EPUB halves have no such dependency.
 
@@ -72,7 +130,7 @@ The accumulated knowledge in the comments — the Word lock-file check, the zip-
 
 Pandoc writes Markdown already, so the work is small: a target with a format, and two decisions.
 
-**The flavor is not free.** It has to be `markdown` or `commonmark_x`. Those round-trip a link's `{aria-label="..."}` attribute; `gfm`, `commonmark`, and `markdown_strict` rewrite the whole link as a raw `<a>` element instead, and reading such a file back gives a `RawInline` holding the tag, a `Link` stripped of its attributes, and another `RawInline`. So the description survives visually and stops being reachable by any filter that looks at `Link.attributes`. `link_attributes` has to be asserted on the target rather than assumed.
+**The flavor is not free.** It has to be `markdown` or `commonmark_x`. Those round-trip a link's `{aria-label="..."}` attribute; `gfm`, `commonmark`, and `markdown_strict` rewrite the whole link as a raw `<a>` element instead, and reading such a file back gives a `RawInline` holding the tag, a `Link` stripped of its attributes, and another `RawInline`. So the description survives visually and stops being reachable by any filter that looks at `Link.attributes`. The extension has to be asserted on the target rather than assumed, and it is not spelled the same way in both: `link_attributes` for `markdown`, `attributes` for `commonmark_x`.
 
 **Tables do not survive.** Markdown has no syntax for a header column, a cell attribute, or a `scope`, which is most of what item 1 produces. A Markdown target therefore can't be an accessible deliverable: it is a source format. That is a reasonable thing to want: converting an OER `.docx` into editable Pandoc Markdown is how a book gets maintained rather than merely republished, and it's the form my textbook project authors in. But the report files remain the record of the accessibility work, and regenerating HTML from the Markdown would need the sidecars applied again.
 
@@ -91,6 +149,8 @@ Markdown is the weakest input for tables: it can't express a header column or a 
 ## 7. PDF, and DOCX output
 
 **PDF** is gated on something outside this project. Pandoc 3.9 can drive LaTeX's tagging via `-V pdfstandard=ua-2`, but `latex-lab-table` states plainly that only simple header rows and columns are supported; that complex headers with subheaders need syntax changes not yet made; and that a cell `Headers` array (the mechanism the hard cases need) is an open item. Until that lands, a tagged PDF from this pipeline can carry simple tables correctly and can't carry the complex ones. Worth revisiting each LaTeX release rather than working around.
+
+Three defects in the meantime are candidates for a post-processing pass with `pikepdf`, which is how they were diagnosed in the first place. [`util/contrib/fix-empty-paragraphs.py`](util/contrib/fix-empty-paragraphs.py) already handles one of them: LaTeX's tagging code opens paragraph structure elements that never receive content, around the longtable caption wrapper and around Pandoc's minipage header cells among others, and a checker reports each as an empty paragraph. It is not wired in and has not been run against anything this pipeline produced. A longtable caption arrives tagged `TH` inside the repeated-header structure rather than as a `Caption` element, and retagging it means changing the element type, moving it out of the `TR`, and reparenting it under the `Table`: mechanical, and the structure tree is explicit enough to do it reliably. The `/ClassMap` case is easier still, since flattening a `/C` reference into an inline `/A` dictionary is a local rewrite. All three work around other people's open items, so each wants a check against the current `latex-lab` before being carried forward.
 
 **DOCX output** is the riskier one, and deserves scoping care. The writer does preserve `w:tblHeader`, so in principle `table-headers-missing.csv` could stop being a report and start being an input that produces a corrected source document. But a Pandoc round trip discards everything Pandoc does not model: converting a file and back turned a layout table's `FigureTable` style into plain `Table`, and that style is the cleanest signal available for identifying layout tables. Section properties, content controls, comments, field codes, and tracked changes have the same exposure. If this is built, it should annotate the OOXML directly rather than rebuild the document. It's more code, but the difference between annotating and rebuilding.
 
@@ -118,6 +178,7 @@ Not a goal in itself. Worth doing when one half has users the other does not.
 
 ## Smaller things
 
+- **Watch [pandoc#3034](https://github.com/jgm/pandoc/issues/3034).** The DOCX and ODT readers ignore `docProps/core.xml`, so a Word file whose title is set through File → Info → Properties converts with no metadata at all: the standalone HTML `<title>` falls back to the filename and the EPUB OPF gets no `dc:title`. If the reader ever picks those up, `promote_h1_to_title` and the duplicate-H1 guard both need rechecking, since the condition they turn on is `doc.meta.title == nil`.
 - **Retired key names.** Writing `manifest.cartridge` into a v0.2 config fails with "unknown setting" and no suggestion, because nothing is similarly named. A small table of retired names would let the error say where it went instead.
 - **`compare-output.py` matches tables by position**, so one inserted table reports every later one on that page as changed. Matching on caption could help, but not every table has one.
 - **A media inventory for the comparator.** It reports files and references; comparing image dimensions or bytes-per-page would catch a class of regression it currently can't see.

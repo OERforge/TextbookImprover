@@ -4,11 +4,22 @@
 Reads word/document.xml directly, so it needs nothing but the standard
 library and can run anywhere Python 3 does.
 
-For every table it reports a guess drawn from the shapes a three-way sidecar
-would cover -- col (headers in the first row), row (headers in the first
-column), matrix (both) -- plus the shapes it would not cover: layout tables,
-tables whose header band is not the first row, and tables with no header
-signal at all.
+Two columns describe each table, and they answer different questions.
+
+`Kind` is what the file says: first-row, first-column, both, or none, plus
+the shapes no sidecar value covers -- layout tables, tables whose header
+band is not the first row, and tables with no header signal at all.
+
+`Guess` is the value a table-headers sidecar would be prefilled with, and
+is one of first-row, first-column, both, or none. It reads content as well
+as formatting, because these books rarely mark a row-header column in any
+way a file can be asked about. See guess() for the rule.
+
+The value names say which line of the table holds headers, which is how
+LaTeX's table/header-rows and table/header-columns are named and how
+Pandoc's row_head_columns is named. Earlier drafts called these col, row,
+matrix, and grid, where col meant a header *row*; that reads as the
+opposite of the LaTeX keys and is gone.
 
 Usage:
     python3 table-census.py *.docx > table-census.csv
@@ -317,11 +328,11 @@ def classify(tbl):
     if title_row and (1 in header_rows or 1 in marked):
         kind = "title-row-then-headers"
     elif has_row1 and header_col:
-        kind = "matrix"
+        kind = "both"
     elif has_row1:
-        kind = "col"
+        kind = "first-row"
     elif header_col:
-        kind = "row"
+        kind = "first-column"
     elif header_rows:
         kind = f"headers-not-in-row-1(row {header_rows[0] + 1})"
     else:
@@ -338,7 +349,7 @@ def classify(tbl):
     # settle it -- a frequency table's interval column and a contingency
     # table's category column look identical in the DOCX -- so this is
     # reported for review rather than acted on.
-    if kind == "col":
+    if kind == "first-row":
         body_rows = [r for r in grid[1:] if r and not is_full_width_band(r)]
         if len(body_rows) >= 2:
             c0 = [r[0] for r in body_rows]
@@ -348,6 +359,136 @@ def classify(tbl):
                 ev.append("REVIEW: first column is a non-numeric label column")
 
     return kind, ev, nrows, ncols
+
+
+def parse_number(text):
+    m = NUMERIC.match(text)
+    if not m:
+        return None
+    try:
+        return float(re.sub(r"[^\d.-]", "", text) or "x")
+    except ValueError:
+        return None
+
+
+def keys_rows(cells):
+    """True when this column reads as a label for its rows rather than as
+    data.
+
+    Three conditions, and the third is the one that took measuring. Every
+    cell filled, no value repeated -- a column that repeats a value is not
+    keying anything. Then: a column of text labels is a key, but a column
+    of numbers is only a key if it is ordered.
+
+    Without that last test, `Group A | Group B | Group C` over three
+    columns of measurements is read as having a header column, because the first column
+    of data is as unique as any label column. 110 tables in the three
+    OpenStax books turn on this and they split 78/32. The ordered side is
+    lookup axes -- Year, Price Level, Quantity, z, a frequency table's
+    Data column. The unordered side is homogeneous data columns, where
+    row 1 names three groups and there is no label column at all.
+
+    A column that is mostly unparseable (`1`, `2`, `3-4`, `5+`) is treated
+    as labels, not numbers: those are bins, and bins label their rows.
+    """
+    texts = [c.text for c in cells]
+    if not texts or not all(texts) or len(set(texts)) != len(texts):
+        return False
+    values = [parse_number(t) for t in texts]
+    parsed = [v for v in values if v is not None]
+    if len(parsed) < 0.8 * len(values):
+        return True
+    if len(parsed) < 3:
+        return False
+    return (all(b > a for a, b in zip(parsed, parsed[1:]))
+            or all(b < a for a, b in zip(parsed, parsed[1:])))
+
+
+# --------------------------------------------------------------------------
+# The sidecar guess
+# --------------------------------------------------------------------------
+
+def guess(tbl, kind=None, ev=None):
+    """The value a table-headers sidecar would be prefilled with.
+
+    Four values, which are the ones the sidecar accepts: first-row,
+    first-column, both, and none (no headers, deliberately). Returns None
+    for a table the sidecar does not cover, which today means layout
+    tables -- distinct from "none", which is a declaration that this is a
+    data table with nothing to declare.
+
+    This is deliberately not the same question classify() answers.
+    classify() reports what the file says; these books hardly ever bold or
+    shade a row-header column, so formatting alone finds 16 matrix tables
+    where a reading of the content finds several hundred. The rule here is
+    that a first column which keys its rows, over a body of values, is
+    headers -- a contingency table's category column, a
+    frequency table's interval column, a table of countries and their
+    union density. The numeric-body condition is what keeps it from firing
+    on a table of descriptions, where the first column is a key but the
+    rest is prose and the whole thing reads as a list.
+
+    It is still a guess, and the ambiguous population is real: a frequency
+    table's interval column and a contingency table's category column are
+    byte-for-byte identical in the DOCX. The value exists to be corrected.
+    """
+    if kind is None:
+        kind, ev, _, _ = classify(tbl)
+    if kind == "empty" or kind.startswith("layout"):
+        return None
+
+    grid = build_grid(tbl)
+    if not grid:
+        return None
+
+    # Read past what the table opens with but does not mean. A merged
+    # full-width first row becomes a <caption>, so the value describes the
+    # table as it will be once that has happened; and a wholly empty first
+    # row is a spacer, which three tables in the data science book use
+    # above their real header row.
+    # In a one-column table every row spans the width trivially, so the
+    # title-row test has to be off for those or it consumes the table.
+    wide = max(len(r) for r in grid) > 1
+    start = 0
+    while start < len(grid):
+        first = grid[start]
+        if wide and is_full_width_band(first) and first[0].text:
+            start += 1
+        elif not any(c.text or c.image for c in first):
+            start += 1
+        else:
+            break
+    rows = grid[start:]
+    if not rows:
+        return None
+
+    marked = [i for i, tr in enumerate(tbl.findall(q("tr"))) if repeats_as_header(tr)]
+    has_head = (start in marked
+                or (not is_full_width_band(rows[0])
+                    and looks_like_header_band(rows[0], allow_blank_corner=True)))
+
+    # Formatting that already proves a header column wins over the key
+    # rule below, which would otherwise demote those tables to col.
+    if kind == "both":
+        return "both"
+    if kind == "first-column":
+        return "first-column"
+
+    if not has_head and kind == "no-header-signal":
+        return "none"
+
+    ncols = max(len(r) for r in rows)
+    body = [r for r in rows[1 if has_head else 0:]
+            if r and not is_full_width_band(r)]
+    if ncols < 2 or len(body) < 2:
+        return "first-row" if has_head else "none"
+
+    rest = [c for r in body for c in r[1:]]
+    if has_head and keys_rows([r[0] for r in body]) and mostly_numeric(rest):
+        return "both"
+    if has_head:
+        return "first-row"
+    return "none"
 
 
 LABEL = re.compile(r"\b(Table|Exhibit)\s+([A-Z]?[\d.]+[a-z]?)", re.I)
@@ -383,8 +524,10 @@ def census(paths, verbose=False):
     import xml.etree.ElementTree as ET
 
     out = csv.writer(sys.stdout)
-    out.writerow(["Source", "Label", "Kind", "Rows", "Columns", "Depth", "Evidence"])
+    out.writerow(["Source", "Label", "Kind", "Guess", "Rows", "Columns",
+                  "Depth", "Evidence"])
     tally = Counter()
+    guesses = Counter()
 
     for path in paths:
         try:
@@ -401,24 +544,34 @@ def census(paths, verbose=False):
 
         for tbl, depth in all_tables(body):
             kind, ev, nrows, ncols = classify(tbl)
+            g = guess(tbl, kind, ev)
             label = nearby_label(body, tbl) if depth == 0 else ""
             tally[kind] += 1
-            out.writerow([path, label, kind, nrows, ncols, depth, "; ".join(ev)])
+            if g:
+                guesses[g] += 1
+            out.writerow([path, label, kind, g or "", nrows, ncols, depth,
+                          "; ".join(ev)])
             if verbose:
-                print(f"  {path} {label or '(unlabeled)'}: {kind} "
+                print(f"  {path} {label or '(unlabeled)'}: {kind} -> {g or '-'} "
                       f"{nrows}x{ncols} [{'; '.join(ev)}]", file=sys.stderr)
 
     print("", file=sys.stderr)
     print("Totals:", file=sys.stderr)
     for kind, n in tally.most_common():
         print(f"  {n:5d}  {kind}", file=sys.stderr)
-    covered = sum(n for k, n in tally.items() if k in ("col", "row", "matrix"))
+    covered = sum(n for k, n in tally.items() if k in ("first-row", "first-column", "both"))
     total = sum(tally.values())
     layout = sum(n for k, n in tally.items() if k.startswith("layout"))
     data = total - layout
     if data:
         print(f"\n  {covered}/{data} data tables ({100 * covered / data:.0f}%) "
-              f"fit col / row / matrix.", file=sys.stderr)
+              f"have a header row or column by formatting alone.", file=sys.stderr)
+    total_guessed = sum(guesses.values())
+    if total_guessed:
+        print("\nSidecar guess:", file=sys.stderr)
+        for value, n in guesses.most_common():
+            print(f"  {n:5d}  ({100 * n / total_guessed:4.1f}%)  {value}",
+                  file=sys.stderr)
 
 
 if __name__ == "__main__":

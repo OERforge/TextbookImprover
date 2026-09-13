@@ -27,6 +27,10 @@
 #                          and directory names, and the places where one
 #                          fact is written down twice and could drift.
 #
+#   run-census-tests.py    the sidecar guess in util/table-census.py,
+#                          against tables built as OOXML so each carries
+#                          exactly the formatting signals it means to.
+#
 #   run-portability-test.py
 #                          that every Python file parses on the oldest
 #                          interpreter the project supports. A syntax
@@ -75,6 +79,7 @@ run run-portability-test.py
 run run-config-tests.py
 run run-roundtrip-test.py
 run run-unit-tests.py
+run run-census-tests.py
 
 # The filter tests convert real documents, so they need Pandoc. Skipping
 # is reported rather than silent: a suite that quietly does not run is

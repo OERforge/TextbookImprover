@@ -2,11 +2,11 @@
 
 What's planned, in the order that seems most productive.
 
-We are attempting to follow two principles: build the tool that can check a change before making the change and, where a decision can't be made by a script, make it declarable by a person once.
+We're attempting to follow two principles: build the tool that can check a change before making the change and, where a decision can't be made by a script, make it declarable by a person once.
 
 ## 1. Table headers sidecar
 
-**Why now.** It is the largest accessibility gap remaining, it is independent of everything else, and the schema is in place so it arrives as a declared setting rather than another environment variable.
+**Why now.** It's the largest accessibility gap remaining, it's independent of everything else, and the schema is in place so it arrives as a declared setting rather than another environment variable.
 
 A CSV declaring, per table, which lines hold its headers: `first-row`, `first-column`, `both`, or `none`. The conversion applies it, so the same declaration drives every output format.
 
@@ -32,7 +32,7 @@ Two shapes to read past before any of this applies: a merged full-width first ro
 
 Also here: promote a merged full-width first row to `<caption>` rather than treating it as a header row, which folds five tables in the statistics book into the existing caption machinery. The guess already reads past such a row, so the value describes the table as it will be after the promotion.
 
-### Shapes a header declaration cannot describe
+### Shapes a header declaration can't describe
 
 Two kinds of table have nothing wrong with their headers and something wrong with being tables at all. Both convert as tables for now; both are worth revisiting once the sidecar is in place, and they are not equally urgent.
 
@@ -62,7 +62,7 @@ Twelve tables across the five books have a merged full-width row partway down, l
 
 Two things the build settled that the plan had wrong. First, that table's bands each sit over their own header row -- "Example A", then `| Labor Cost | Machine Cost | Total Cost`, then the data, then "Example B" and another header row -- so "every part gets a copy of the original header row" is right only where the table had one marked in Word; otherwise each part's own first row is promoted by the header declaration, applied per part. Second, row 1 there is a band, not a title, and the pre-pass tells the two apart by whether there are bands below: a merged row 1 alone is `caption-rows=1`, a merged row 1 with bands beneath joins `split-at`. The guess for a banded table is taken part by part with any shared header rows in place, and the parts vote; read whole, the bands break every rule and such a table guessed `none`.
 
-Third, a band need not be a merged row. Table 7.2 of the sociology book repeats its bold header row three times with a different group name in the corner -- Functionalism, Conflict Theory, Symbolic Interactionism -- over `| Associated Theorist | Deviance arises from:`. Of the eighteen tables in seven books with header-looking rows below row 1, three have exactly this shape and nothing else does, so it is inferred. The filter tells the two kinds of split row apart from the row itself: one merged cell across the table is a caption, several cells cannot be, so the row heads its part and only its corner cell goes into the caption.
+Third, a band need not be a merged row. Table 7.2 of the sociology book repeats its bold header row three times with a different group name in the corner -- Functionalism, Conflict Theory, Symbolic Interactionism -- over `| Associated Theorist | Deviance arises from:`. Of the eighteen tables in seven books with header-looking rows below row 1, three have exactly this shape and nothing else does, so it is inferred. The filter tells the two kinds of split row apart from the row itself: one merged cell across the table is a caption, several cells can't be, so the row heads its part and only its corner cell goes into the caption.
 
 ### Keys
 
@@ -126,7 +126,7 @@ The accumulated knowledge in the comments — the Word lock-file check, the zip-
 
 Markdown is the one format this project should be able to go both ways in, and the two halves are one piece of work because they define the same vocabulary. Reading has to accept the markers writing emits; writing has to emit markers reading accepts. Ship either half alone and the other is where you find out the first chose badly.
 
-**Tables survive better than this item used to claim.** What Markdown cannot carry is the rendered markup: there is no syntax for `scope` on a cell or for a header column. What it can carry is the *declaration*, in a fenced div, and the declaration is what the sidecar holds anyway. Verified on 3.11: `::: matrix` around a table round-trips through the `markdown` and `commonmark_x` writers and readers as `Div ("", ["matrix"], [])`, and a filter reading that class regenerates the whole thing -- `<caption>`, `scope="col"` across the head, `scope="row"` down the first column. So a Markdown source is not a lesser input carrying more sidecar load; it is a source where the sidecar's content lives in the document. That is how my own textbook is written, with `::: matrix` and `matrix-headers.lua`.
+**Tables survive better than this item used to claim.** What Markdown can't carry is the rendered markup: there is no syntax for `scope` on a cell or for a header column. What it can carry is the *declaration*, in a fenced div, and the declaration is what the sidecar holds anyway. Verified on 3.11: `::: matrix` around a table round-trips through the `markdown` and `commonmark_x` writers and readers as `Div ("", ["matrix"], [])`, and a filter reading that class regenerates the whole thing -- `<caption>`, `scope="col"` across the head, `scope="row"` down the first column. So a Markdown source is not a lesser input carrying more sidecar load; it is a source where the sidecar's content lives in the document. That is how my own textbook is written, with `::: matrix` and `matrix-headers.lua`.
 
 **Captions round-trip in `markdown` and not in `commonmark_x`.** The `markdown` writer emits `: Table 7.1 Costs by technology` beneath the table and reads it back as the table's `Caption`; `commonmark_x` writes it as a following paragraph and reads it back as a paragraph, association gone. That is a second reason for the flavor constraint the link attributes already impose.
 
@@ -157,7 +157,7 @@ The cartridge is the one output the pipeline checks after building it: `validate
 - **HTML**: the Nu HTML checker (`vnu.jar`, needs Java) for conformance; `pa11y` or `axe-core` for the accessibility rules that markup alone can be checked against, which is most of what the tables and links work produces.
 - **EPUB**: `epubcheck` (Java) for the container and content, and DAISY's `Ace` for accessibility, which reports on exactly the table and image markup this project cares about.
 - **PDF**: `veraPDF` for PDF/UA conformance, scriptable and cross-platform. PAC is Windows-only and interactive, and its two known defects (item 9) mean its output needs reading with that in mind.
-- **DOCX**: Word's Accessibility Checker cannot be driven from a script. `util/docx-compat.py`'s checks are what can be automated, and they are about the package, not the content.
+- **DOCX**: Word's Accessibility Checker can't be driven from a script. `util/docx-compat.py`'s checks are what can be automated, and they are about the package, not the content.
 
 The shape would be a `--check` per target, as the packager has today, run by `convert.sh` after the build and reported alongside the other reports rather than failing the run: a validator's findings are things to work through, and the run producing them is the point. Each tool wants installing separately, which is the argument for making every one optional and saying which ran.
 

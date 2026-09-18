@@ -38,7 +38,7 @@ and redistributed under their own terms. See the README there.
 | File | What it does |
 |---|---|
 | `oerconfig.py` | Loads, merges, validates, and writes configuration. Both halves use it; neither uses the other. |
-| `tablecensus.py` | Reads the tables in a Word document and says what shape they are: the classification, the guess, and the sidecar key. Used by the pre-pass and by `table-census.py`. |
+| `tablecensus.py` | Reads the tables in a Word document and says what shape they're: the classification, the guess, and the sidecar key. Used by the pre-pass and by `table-census.py`. |
 | `schema-project.yaml` | Declares the settings that describe the book itself, which both halves read. |
 
 **`util/` — tools you run occasionally**
@@ -75,7 +75,7 @@ Beyond the Word-to-HTML translation, each page gets:
   makes it a header cell spanning the table. The run recognizes the shape,
   writes `caption-rows=1` into the table's prefilled sidecar row so the
   decision is visible and reversible, and folds the row into the caption:
-  after the label if there is one, so "Table 2.14" becomes "Table 2.14
+  after the label if there's one, so "Table 2.14" becomes "Table 2.14
   Number of hours my classmates spent playing video games on weekends".
   Equations in the row stay equations. `caption-rows=N,M` in the sidecar
   does the same for any rows a person names.
@@ -92,7 +92,7 @@ Beyond the Word-to-HTML translation, each page gets:
 - **Tables get the headers they were declared to have.** `table-headers.csv`
   says, per table, whether the headers are in the first row, the first
   column, both, or nowhere (see [Sidecar files](sidecars.md#sidecar-files)), and for a
-  table it does not cover the run guesses from the file. A header row is
+  table it doesn't cover the run guesses from the file. A header row is
   marked up as `<th scope="col">` whether or not Word marked it to repeat;
   a header column becomes `<th scope="row">` on the first cell of every
   body row, which is what lets a screen reader say which country a figure
@@ -101,7 +101,7 @@ Beyond the Word-to-HTML translation, each page gets:
 - **Captions are found above or below the table.** Either `**Table 2.1:
   Message Transmission Mediums**` on one line, or a bare `**Table 7.1**`
   followed by `*Sample Code of Conduct*`. Prose that merely mentions a
-  table is not consumed, nor is a sentence that merely *begins* with the
+  table isn't consumed, nor is a sentence that merely *begins* with the
   label word: "Table 48.1 provides an example of..." continues with a
   lowercase verb, where a caption continues with a capital or a colon.
   Which side a book captions on is measured across the whole document
@@ -117,17 +117,17 @@ Beyond the Word-to-HTML translation, each page gets:
   rather than "upper C u s t o m e r".
 - **Caption contrast** is set to `#555`, which measures 7.33:1 against
   Pandoc's `#fdfdfd` background. The widely quoted `#767676` is only
-  4.47:1 there, because it is computed against pure white.
+  4.47:1 there, because it's computed against pure white.
 - **The leading H1 becomes the page title**, giving a meaningful `<title>`
   instead of a filename slug, and one H1 rather than two.
 
-Conversion stops before writing any HTML if an image reference cannot be
+Conversion stops before writing any HTML if an image reference can't be
 resolved, and writes `media-unresolved.csv` naming each one with what it
 was detected as. The commonest cause is EMF/WMF: Word's vector formats,
 used for equations, SmartArt and pasted Office charts, which no browser
 renders. Replace them in Word (right-click, Save as Picture, PNG) or
 convert them with `libreoffice --headless --convert-to png`. A dead image link is invisible in the output — Pandoc emits
-`<embed>` rather than `<img>` for an extension it does not recognize — so
+`<embed>` rather than `<img>` for an extension it doesn't recognize — so
 failing loudly is better than shipping a cartridge that looks fine.
 
 ## Running the Pandoc filter on its own
@@ -153,7 +153,7 @@ is how `convert.sh` passes settings from `conversion.yaml`:
 The `*_MISSING` and `SPACER_LOG` files are appended to, not truncated, and
 carry no header row — `convert.sh` collects them across a whole run, sorts
 and deduplicates, then writes the header. Point them at a temporary file if
-you are running the filter yourself.
+you're running the filter yourself.
 
 ```bash
 TABLE_CAPTIONS_MISSING=/tmp/rows.csv SPACER_BELOW=0.3in \
@@ -161,7 +161,7 @@ TABLE_CAPTIONS_MISSING=/tmp/rows.csv SPACER_BELOW=0.3in \
     --lua-filter=figures-and-tables.lua -o page.html
 ```
 
-There is also one toggle near the top of the filter that is not exposed
+There's also one toggle near the top of the filter that isn't exposed
 through the config, because no book has yet needed it to differ:
 `NORMALISE_MATH_ALT`, which rejoins MathSpeak identifiers. Responsive
 images used to sit beside it and are now the `images.responsive` setting.

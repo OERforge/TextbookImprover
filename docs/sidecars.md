@@ -5,7 +5,7 @@ A run writes reports naming what still needs a person, and reads sidecar files h
 ## Reports
 
 Each run writes only the reports that have something in them, and deletes
-the others. A report existing at all means there is work outstanding.
+the others. A report existing at all means there's work outstanding.
 
 | Report | Fix it by |
 |---|---|
@@ -24,9 +24,9 @@ re-conversion from updated Word files.
 
 **Where to keep them.** By default they sit in the book's own directory,
 next to the reports that name what still needs filling in. That is the
-convenient default and it keeps two books' decisions apart, but it is not
+convenient default and it keeps two books' decisions apart, but it isn't
 where they belong long-term. The book's directory also holds the
-generated HTML, the extracted media, and the intermediates: it is the
+generated HTML, the extracted media, and the intermediates: it's the
 directory you delete to rebuild from scratch, and the one you replace
 wholesale when the publisher reissues the source. These files are the
 only things in it that no script can reproduce.
@@ -43,7 +43,7 @@ defaults:
 ```
 
 An absolute path works too. A relative one resolves against the book's
-directory, not against the tools. A path that does not exist stops the
+directory, not against the tools. A path that doesn't exist stops the
 run rather than converting the book and discarding every correction in
 the file, which is what happened before v0.2 when an absolute path was
 given.
@@ -64,8 +64,8 @@ not act on yet (`manual`, `list`) are accepted and kept, so a book can
 start carrying them. The value in effect -- the sidecar's where one was declared, the guess
 otherwise -- is applied when the page is built. A status of `needs-word` in
 the report means no cell of the table could serve as a header, so no value
-can help and headers have to be written in Word; that is the one thing the
-old `table-headers-missing.csv` reported, and it is now a row in the report
+can help and headers have to be written in Word; that's the one thing the
+old `table-headers-missing.csv` reported, and it's now a row in the report
 rather than a file.
 
 `image-alt.csv` keys on the image path **ignoring the extension**, because
@@ -78,18 +78,18 @@ conversion renames files by content type. Four states for the `Alt` column:
 | `[decorative]` | Emit `alt=""` so assistive technology skips it |
 | *(no row)* | Unreviewed; reported if absent or over the length limit |
 
-A blank cell deliberately does not mean decorative. "I checked this and it
+A blank cell deliberately doesn't mean decorative. "I checked this and it
 is fine" and "this image carries no meaning" are different decisions.
 
 `table-captions.csv` keys on the table's label, such as `Table 2.1`. A
-table the source never labeled has no such key, so it is reported under a
+table the source never labeled has no such key, so it's reported under a
 positional one instead:
 
 ```
 BC-08#table-1,Comparison of chart types and when to use each
 ```
 
-That is page stem, then which table it is on the page. The key is stable
+That is page stem, then which table it's on the page. The key is stable
 as long as no table is inserted or removed above it on that page — the
 trade for being able to caption a table the source never named. Labelled
 tables are unaffected and keep their label as the key.

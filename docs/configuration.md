@@ -17,7 +17,7 @@ Every setting is declared in a schema — `lib/schema-project.yaml`,
 `bin/schema-conversion.yaml`, `bin/schema-packaging.yaml` — which gives its
 type, its default, and a sentence saying what it means. The schema is the
 only description: the readers, the validator, the generated sample files,
-and this document all derive from it, so there is no second list to drift
+and this document all derive from it, so there's no second list to drift
 out of step with the first.
 
 To see every setting with its documentation, generate a sample:
@@ -57,7 +57,7 @@ targets:
     output_dir: .
 ```
 
-Today there is one conversion target and one package. The shape exists
+Today there's one conversion target and one package. The shape exists
 because there will be more: a full-book EPUB alongside per-chapter ones, a
 print PDF alongside a screen one, each needing its own settings and its
 own output directory.
@@ -85,8 +85,8 @@ Both bite in this configuration specifically, and both are now caught
 rather than silently accepted.
 
 **`language: no` is the boolean false.** YAML reads unquoted `no`, `yes`,
-`on`, and `off` as booleans, so Norwegian becomes `False`. There is no way
-to recover which word was written, so it is refused. Quote it.
+`on`, and `off` as booleans, so Norwegian becomes `False`. There's no way
+to recover which word was written, so it's refused. Quote it.
 
 **`version: 1.10` is the number 1.1.** The trailing zero is gone before
 any program sees it. Quote it.
@@ -113,7 +113,7 @@ nesting are supported; deeper is accepted with a warning, since LMS support
 for deep hierarchies is uneven.
 
 Omit `contents` and the order is guessed from the filenames — natural sort,
-so chapter 10 does not land between chapters 1 and 2, plus chapter grouping
+so chapter 10 doesn't land between chapters 1 and 2, plus chapter grouping
 when the filenames encode it. `--includeallhtml` groups the pages it
 appends the same way.
 
@@ -123,7 +123,7 @@ whose own `<title>` becomes the group heading. Within a chapter the order
 is opener, introduction, numbered sections, then back matter in the order
 set by `grouping.back_matter`. A role name not in that list sorts after the
 ones that are, and is reported rather than silently misplaced. The guess is written to
-`packaging-sample.yaml` for you to correct. It is a starting point, not a
+`packaging-sample.yaml` for you to correct. It's a starting point, not a
 finished book.
 
 ### Header and footer
@@ -172,10 +172,10 @@ Files used by more than one page. They are declared once in a
 `common_files` resource that every page depends on, instead of being
 repeated in each page's file list.
 
-Files a page references on its own are found automatically and do not
+Files a page references on its own are found automatically and don't
 belong here. This list is for files you want shared, and for anything
 reached from the header or footer — the page scan sees those on every page
-and cannot attribute them to one.
+and can't attribute them to one.
 
 Common Cartridge `<dependency>` support varies between systems. Test a
 small cartridge before relying on it; removing `common_files` falls back to
@@ -197,7 +197,7 @@ defaults:
 ```
 
 With the rule off, suspected spacers are still counted and reported so the
-setting is discoverable. Images with no readable width cannot be judged and
+setting is discoverable. Images with no readable width can't be judged and
 are reported separately.
 
 ```yaml
@@ -207,7 +207,7 @@ defaults:
     alt_max_chars: 120
 ```
 
-Alt text longer than this is reported for shortening. It is a length at
+Alt text longer than this is reported for shortening. It's a length at
 which a short equivalent has become a long description, and long
 descriptions belong in the prose where every reader gets them. Raising it
 silences the report rather than fixing anything.
@@ -215,7 +215,7 @@ silences the report rather than fixing anything.
 ## Migrating a v0.1 configuration
 
 `imsmanifest.yaml` is no longer read. Both halves stop with directions
-rather than ignoring it, because a config that looks live and is not is
+rather than ignoring it, because a config that looks live and isn't is
 worse than none.
 
 ```bash

@@ -10,7 +10,7 @@ The initial release of these scripts was created by Robert Szarka and supported 
 
 Two halves, which share a configuration and nothing else.
 
-**Conversion** turns each `.docx` into an HTML page through Pandoc and a Lua filter, and makes the page more accessible on the way: figures get real captions tied to their images, data tables get captions, header cells, and a focusable scroll region, images get their alt text checked and their layout spacers marked, and equations stay equations. Where the source does not say something a screen reader needs -- which column heads a table, what a picture shows -- the run guesses from the file, writes its guess into a sidecar CSV you can correct, and reports what still needs a person.
+**Conversion** turns each `.docx` into an HTML page through Pandoc and a Lua filter, and makes the page more accessible on the way: figures get real captions tied to their images, data tables get captions, header cells, and a focusable scroll region, images get their alt text checked and their layout spacers marked, and equations stay equations. Where the source doesn't say something a screen reader needs -- which column heads a table, what a picture shows -- the run guesses from the file, writes its guess into a sidecar CSV you can correct, and reports what still needs a person.
 
 **Packaging** turns a directory of pages into a Common Cartridge, with the book's table of contents as the module tree, and validates the manifest against the IMS schemas.
 
@@ -53,6 +53,6 @@ If you have the book's PDF, run `bash $T/bin/convert.sh --toc book.pdf` *before*
 | [Brightspace](docs/brightspace.md) | What importing and deleting actually do there, confirmed by D2L |
 | [Testing](docs/testing.md) | The test suites and what each is load-bearing for |
 | [Utilities](docs/utilities.md) | The tools in `util/`: surveying a corpus, checking a source, comparing runs |
-| [Troubleshooting and known limits](docs/troubleshooting.md) | Cloud drives, common failures, validator defects, what is not fixed |
+| [Troubleshooting and known limits](docs/troubleshooting.md) | Cloud drives, common failures, validator defects, what isn't fixed |
 
 [CHANGELOG.md](CHANGELOG.md) records what changed in each version; [ROADMAP.md](ROADMAP.md) records what is planned and why.

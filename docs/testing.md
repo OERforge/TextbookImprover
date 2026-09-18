@@ -29,13 +29,13 @@ still installed and a corpus is on hand. The fixtures assert the same
 things against six documents of about 37 KB each, so the check outlives
 the version it was written for.
 
-Some cases pin behavior that is about to change rather than behavior
-that is right — a merged title row becoming a spanning header, a table
+Some cases pin behavior that's about to change rather than behavior
+that's right — a merged title row becoming a spanning header, a table
 with no header signal having its first row promoted anyway. Both are
 things roadmap item 1 will alter, and a change is only checkable if the
 starting point was written down.
 
-The configuration fixtures serve a second purpose: they are the
+The configuration fixtures serve a second purpose: they're the
 conformance contract for the merge rules. If those rules are ever
 reimplemented — in JavaScript for a web front end, or in a separate
 repository — the fixtures say whether the new implementation agrees with
@@ -45,14 +45,14 @@ this one.
 
 One line of `lib/oerconfig.py` was valid Python 3.12 and a syntax error on
 everything older, because PEP 701 lifted the rule that an f-string
-replacement field cannot span lines. It compiled on the machine it was
+replacement field can't span lines. It compiled on the machine it was
 written on and broke three of the four suites on the machine that ran
 them.
 
 Nothing caught it, and nothing could: a syntax error is invisible to an
 interpreter new enough to accept the syntax. `py_compile` passes, every
 test passes, and the file is unusable elsewhere. So that suite checks the
-source rather than the interpreter, and runs first — a file that does not
+source rather than the interpreter, and runs first — a file that doesn't
 parse makes every other result meaningless on someone else's machine.
 
 It compiles with an older interpreter when one is installed, which is the
@@ -69,7 +69,7 @@ both cost time to discover:
 
 - Pandoc takes the document title and author from paragraphs styled
   **Title** and **Author**, consuming them out of the body. Not from
-  `docProps/core.xml`, which it does not read — a natural assumption, and
+  `docProps/core.xml`, which it doesn't read — a natural assumption, and
   wrong.
 - Word declares most embedded images as `application/octet-stream` rather
   than by type. `python-docx` sets the content type from the file
@@ -84,7 +84,15 @@ check that two documents with identically named images get distinct
 sidecar keys, but in the two-step pipeline Pandoc has already qualified
 those paths, so the keys were distinct for a reason that had nothing to do
 with the code being tested. Only a single-pass conversion reaches the code
-in question, which is why there is now a case for it.
+in question, which is why there's now a case for it.
 
 For comparing two whole conversion runs — which is still the right tool
 for a pipeline change — see `util/compare-output.py`.
+
+## House style
+
+Prose in this repository -- these pages, the README, the changelog, the roadmap, code comments, docstrings, and the descriptions in the schemas -- is US English and uses contractions: *can't*, *doesn't*, *isn't*, *it's*. The expanded forms are for the rare place where the emphasis is the point, as in the roadmap's heading "What the PDF half can and cannot do".
+
+Two things are not prose and are left alone: anything inside a code span or a fenced block, and any string the programs print. A message a user reads on their terminal is part of the interface, and restyling one is a change to the interface rather than to the documentation.
+
+The three settings pages under `docs/` are generated from the schemas by `util/settings-reference.py`, so their wording is fixed in the schema's `description:` and regenerated, never edited in place. `tests/run-all.sh` fails when they drift.

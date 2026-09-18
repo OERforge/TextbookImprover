@@ -43,7 +43,7 @@ keys:
       major LMS reads, and the floor sets the target. Brightspace and
       Canvas handle up to 1.3 and Blackboard up to 1.2, but Moodle stops at
       1.1, and a 1.1 cartridge imports into all of them while a later one
-      does not. Nothing in 1.2 or 1.3 is needed here: quizzes, question
+      doesn't. Nothing in 1.2 or 1.3 is needed here: quizzes, question
       banks, discussion topics, web links and LTI links are all in 1.1
       already. Assignments arrive in 1.3 and are the one reason to revisit
       this.
@@ -53,7 +53,7 @@ keys:
     default: ""
     target_only: true
     description: >
-      The archive to write. Left empty it is worked out afresh on every
+      The archive to write. Left empty it's worked out afresh on every
       run from the book's identifier and this package's format, so
       renaming the book renames the archive. Given without an extension,
       the one matching the format is added. Set it when a configuration
@@ -67,7 +67,7 @@ keys:
     target_only: true
     description: >
       Conversion targets whose output goes into this package, named as
-      they are named in the conversion config. Order does not matter:
+      they are named in the conversion config. Order doesn't matter:
       anything listed is built first. A package of HTML pages that also
       ships an EPUB and a print PDF lists all three.
 
@@ -83,8 +83,8 @@ keys:
           Put every chapter inside one module named after the book, rather
           than leaving each at the top level. An LMS never merges an
           imported structure with one already there -- it appends -- so a
-          re-import always adds a second copy. Wrapped, that is one module
-          to remove afterwards; flat, it is one per chapter, and in
+          re-import always adds a second copy. Wrapped, that's one module
+          to remove afterwards; flat, it's one per chapter, and in
           Brightspace they must be deleted one at a time.
 
       module_title:
@@ -95,7 +95,7 @@ keys:
           title and {version} this package's version. The version is there
           because after a re-import there are two modules with the same
           name and nothing else to tell them apart. Write "{title}" alone
-          if you do not bump the version between releases, since a
+          if you don't bump the version between releases, since a
           permanent "(1.0)" distinguishes nothing and every student sees
           it.
 
@@ -110,7 +110,7 @@ keys:
         default: true
         description: >
           Put every file in the package inside one directory, so two books
-          cannot share a path. Without this, two cartridges that each
+          can't share a path. Without this, two cartridges that each
           contain frontmatter.html contain the same file as far as the LMS
           is concerned: importing the second overwrites the first, and
           permanently deleting either one empties the other, leaving its
@@ -124,7 +124,7 @@ keys:
         type: path
         default: ""
         description: >
-          The directory name to use. Left empty it is derived from the
+          The directory name to use. Left empty it's derived from the
           book's title and identifier: a readable portion from the title
           so the folder means something in a file manager, and a short
           digest of the identifier for uniqueness, which is where the

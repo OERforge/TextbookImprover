@@ -9,14 +9,14 @@ Brightspace-only feature — but none of it has been tested anywhere else,
 so treat it as a reason for care rather than as a description of your
 own LMS.
 
-**Structure is never merged; it is appended.** Importing a cartridge a
-second time does not update the modules already in the course. It adds
+**Structure is never merged; it's appended.** Importing a cartridge a
+second time doesn't update the modules already in the course. It adds
 another copy of the whole tree. That is why the pages are wrapped in one
 module by default: a re-import then leaves one module to remove rather
 than one per chapter, and in Brightspace modules are deleted one at a
 time.
 
-**There is one file per path, shared by everything that points at it.**
+**There's one file per path, shared by everything that points at it.**
 Two modules showing the same page are two references to one file, not two
 copies. Brightspace offers two ways to delete a module, and the difference
 matters:
@@ -31,29 +31,29 @@ after a re-import. *Permanently delete* is right only when removing a book
 from the course, and the content prefix is what stops it reaching another
 book's files.
 
-**Deleting a module does not reclaim its images.** Measured in
+**Deleting a module doesn't reclaim its images.** Measured in
 Brightspace: *Permanently delete* removes the file a topic **is** and
 never the files a topic **uses**. Images and other referenced files are
 retained wherever they sit, directories with them, and nothing afterwards
 removes either.
 
-This is not specific to importing. The same happens to a file inserted
-through Brightspace's own HTML editor, so it is general behavior rather
+This isn't specific to importing. The same happens to a file inserted
+through Brightspace's own HTML editor, so it's general behavior rather
 than a gap in Common Cartridge handling — imports just reach it faster,
 bringing hundreds of files at a time. It also means *Permanently delete*
-does not remove everything its dialog says it does.
+doesn't remove everything its dialog says it does.
 
 **D2L has confirmed all of this as intended behavior.** Reported to the
 D2L Helpdesk with a test package, and reviewed by their Product Support
 team, who answered that the option worded *Permanently delete both the
 topic from Content and the associated file or activity from the course*
 means the file the topic **is**, and that images, CSS, and other
-resources referenced inside that file are not considered associated files
-of the topic because the topic does not track what its file pulls in.
+resources referenced inside that file aren't considered associated files
+of the topic because the topic doesn't track what its file pulls in.
 They also confirmed the sharper case: where two topics point at the same
 file, deleting either one with that option deletes the file, the other
 topic is left with a broken link, Brightspace gives no warning, and it
-does not keep the file on account of the other reference. The wording and
+doesn't keep the file on account of the other reference. The wording and
 the missing warning were passed to their product team for consideration,
 with no ticket and no commitment, so plan on the behavior staying as it
 is.
@@ -64,8 +64,8 @@ and *Permanently delete* on either takes it. Prefer *Remove from Content*
 whenever a page might be shared, and treat *Permanently delete* as
 something to use only when a whole book is going.
 
-Nothing in a cartridge can make an LMS delete files it does not consider
-owned, so this is something to know rather than something to fix. It is
+Nothing in a cartridge can make an LMS delete files it doesn't consider
+owned, so this is something to know rather than something to fix. It's
 also a second argument for the content prefix: the leftovers sit in one
 named directory you can find and clear in Manage Files, rather than
 scattered among everything else at the course root. Expect to do that by

@@ -6,7 +6,7 @@ From a directory of Word files to a cartridge, in the order the steps have to ha
 
 A cartridge needs the pages in the book's order, grouped into modules. Three sources, in order of how much you should trust them:
 
-1. **The book's PDF**, with `--toc book.pdf`: the PDF's bookmark outline is the table of contents in the order the book uses, with its real chapter titles. Needs `pypdf`. Run it *before* adopting the sample, since the sample already places every page and `--toc` orders only pages the config does not.
+1. **The book's PDF**, with `--toc book.pdf`: the PDF's bookmark outline is the table of contents in the order the book uses, with its real chapter titles. Needs `pypdf`. Run it *before* adopting the sample, since the sample already places every page and `--toc` orders only pages the config doesn't.
 2. **The filenames**, with `--includeallhtml`: a page named `3-2-something` is placed under chapter 3 without guessing. Pages with no chapter in their name are left for you to sort.
 3. **A guess**, which is what a bare first run does and says so in the sample.
 
@@ -14,9 +14,9 @@ Whichever you use, the result goes to `packaging-sample.yaml` for review, and an
 
 ## Quick start
 
-There is no example configuration to copy. The schema is the only
+There's no example configuration to copy. The schema is the only
 description of the settings, so the file you start from is generated from
-it and cannot fall out of date.
+it and can't fall out of date.
 
 ```bash
 T=/path/to/tools                       # where you cloned this
@@ -44,10 +44,10 @@ mv packaging-sample.yaml packaging.yaml
 
 Every setting is in that file at its current value with a sentence
 explaining it, so this is also how you find out what can be configured.
-Edit the line that is already there rather than adding another — the file
+Edit the line that's already there rather than adding another — the file
 is complete, so a second copy of a key would discard the first. (The tools
-refuse that rather than let it happen.) Delete any line you are happy to
-leave at its default; they fill it back in. Renaming it never loses anything you had already set — that is
+refuse that rather than let it happen.) Delete any line you're happy to
+leave at its default; they fill it back in. Renaming it never loses anything you had already set — that's
 asserted by a test, not by care.
 
 `identifier` is worth a moment's thought. Brightspace matches on it when
@@ -72,7 +72,7 @@ python3 $T/bin/read-conversion-config.py -d . --init
 ```
 
 That writes `conversion.yaml` with every setting at its default and a line
-of documentation above each. Edit it in place; there is nothing to rename.
+of documentation above each. Edit it in place; there's nothing to rename.
 
 ### Where settings live
 
@@ -86,19 +86,19 @@ of documentation above each. Edit it in place; there is nothing to rename.
 book's details in a `project:` block at the top, which is enough for most
 uses. Split them out only if you want conversion and packaging to read the
 same declaration from one place, and if you do, remove the inline block so
-there is only one copy. The tools warn when two disagree.
+there's only one copy. The tools warn when two disagree.
 
 ### Notes
 
 `convert.sh` finds its filters, schemas, and the shared library by path
-relative to itself, so the tools can stay where you cloned them. There is
+relative to itself, so the tools can stay where you cloned them. There's
 no install step.
 
 Run each script with the interpreter that matches it: `bash` for
 `convert.sh`, `python3` for anything ending in `.py`. Running a Python
 script with `bash` produces a confusing pile of `import: command not
 found`. The scripts do carry shebangs, so if the executable bit survived
-however you obtained them, `./bin/convert.sh` works too — but it does not
+however you obtained them, `./bin/convert.sh` works too — but it doesn't
 survive a commit made through GitHub's web interface, so the explicit form
 is what this document uses throughout.
 
@@ -166,7 +166,7 @@ course.imscc                          only with --zip
 ```
 
 The intermediate is Pandoc's own document model as JSON, which is lossless
-where Markdown was not. It is not meant to be read directly, but it is not
+where Markdown wasn't. It isn't meant to be read directly, but it isn't
 opaque either:
 
 ```bash
@@ -175,8 +175,8 @@ pandoc -f json -t markdown 1-3-levels-of-measurement.json | less
 
 Deleting the `.json` files costs nothing; the next run regenerates them.
 
-If a run leaves `.md` files behind from v0.1, they are named on stderr and
-otherwise ignored. Nothing reads them, and this script will not delete
+If a run leaves `.md` files behind from v0.1, they're named on stderr and
+otherwise ignored. Nothing reads them, and this script won't delete
 files you may want.
 
 ## Exit codes
@@ -186,6 +186,6 @@ files you may want.
 | 0 | Everything ran. Reports may still list outstanding work. |
 | 1 | The run stopped: no `.docx` present, unresolved media, a missing required config value, or a referenced file not on disk. |
 
-A non-zero exit on a first run is normal — there is no config yet, so the
+A non-zero exit on a first run is normal — there's no config yet, so the
 manifest step writes a sample and stops. The HTML is already written by
 that point.

@@ -1,6 +1,6 @@
 # Installation
 
-What the tools need, and how to check it. There is no install step for the tools themselves: `convert.sh` finds its filters, schemas, and the shared library by path relative to itself, so they stay where you cloned them.
+What the tools need, and how to check it. There's no install step for the tools themselves: `convert.sh` finds its filters, schemas, and the shared library by path relative to itself, so they stay where you cloned them.
 
 ## Requirements
 
@@ -20,6 +20,6 @@ versions accept most of the command line and quietly do something else:
 cells loses them with no warning at all.
 
 Pandoc versions still differ in ways that show up here — newer releases
-read Word caption paragraphs into table captions, older ones do not — so
+read Word caption paragraphs into table captions, older ones don't — so
 the same document can produce different reports on different machines.
 Neither is wrong; the sidecar files absorb the difference.

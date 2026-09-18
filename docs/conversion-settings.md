@@ -10,15 +10,15 @@ What this target produces.
 
 **`output_dir`** -- `path`; default `""` (empty); *target only*
 
-Where this target writes. Defaults to the target's own name, so two targets in the same format cannot overwrite each other.
+Where this target writes. Defaults to the target's own name, so two targets in the same format can't overwrite each other.
 
 **`header`** -- `text`; default `""` (empty)
 
-Markdown placed at the top of every page, or the path to a file holding it. Inserted by the template after the filters have run, so nothing in it is processed: give any image explicit alt text.
+Markdown placed at the top of every page, or the path to a file holding it. Inserted by the template after the filters have run, so nothing in it's processed: give any image explicit alt text.
 
 **`footer`** -- `text`; default `""` (empty)
 
-Markdown placed at the bottom of every page, or the path to a file holding it. The usual use is an attribution line. Same caveat as header: it is not processed by the filters.
+Markdown placed at the bottom of every page, or the path to a file holding it. The usual use is an attribution line. Same caveat as header: it isn't processed by the filters.
 
 **`promote_h1_to_title`** -- one of `always`, `if-absent`, `longer`, `never`; default `always`
 
@@ -54,7 +54,7 @@ How data tables are rendered.
 
 **`tables.wrap`** -- `bool`; default `true`
 
-Put wide tables in a focusable scroll container so a long table does not force the whole page to scroll sideways (WCAG 1.4.10).
+Put wide tables in a focusable scroll container so a long table doesn't force the whole page to scroll sideways (WCAG 1.4.10).
 
 ## captions
 
@@ -74,11 +74,11 @@ How media extracted from the source is handled.
 
 **`media.strict`** -- `bool`; default `false`
 
-Abort as soon as an image cannot be identified, rather than collecting every such image and stopping once at the gate.
+Abort as soon as an image can't be identified, rather than collecting every such image and stopping once at the gate.
 
 ## sidecars
 
-CSV files holding decisions a person made about the source. These describe the book rather than one rendering, so a target should rarely override them. These files are read, never written, and hold work no script can reproduce. A bare name resolves against the content directory, which is convenient but leaves them among the generated HTML, the extracted media, and the disposable reports: the directory you would delete to rebuild, and the one replaced wholesale when the publisher reissues the source. An absolute path, or one relative to the content directory such as "../corrections/ibs2e/table-captions.csv", keeps them somewhere you can put under version control. A path set here that does not exist stops the run, because the alternative is converting the whole book while silently discarding every correction in it.
+CSV files holding decisions a person made about the source. These describe the book rather than one rendering, so a target should rarely override them. These files are read, never written, and hold work no script can reproduce. A bare name resolves against the content directory, which is convenient but leaves them among the generated HTML, the extracted media, and the disposable reports: the directory you would delete to rebuild, and the one replaced wholesale when the publisher reissues the source. An absolute path, or one relative to the content directory such as "../corrections/ibs2e/table-captions.csv", keeps them somewhere you can put under version control. A path set here that doesn't exist stops the run, because the alternative is converting the whole book while silently discarding every correction in it.
 
 **`sidecars.table_captions`** -- `path`; default `table-captions.csv`
 
@@ -90,11 +90,11 @@ Alt text, keyed on the image path with the extension ignored. Use [decorative] f
 
 **`sidecars.table_headers`** -- `path`; default `table-headers.csv`
 
-Where each table's headers are, keyed on a hash of the table's content: first-row, first-column, both, or none. A first run writes prefilled rows to the table_headers_new report; rename or paste them here. Values this version does not act on yet (manual, list) are accepted and kept. A row whose key matches no table stops the run, because a correction that silently fails to apply destroys work invisibly.
+Where each table's headers are, keyed on a hash of the table's content: first-row, first-column, both, or none. A first run writes prefilled rows to the table_headers_new report; rename or paste them here. Values this version doesn't act on yet (manual, list) are accepted and kept. A row whose key matches no table stops the run, because a correction that silently fails to apply destroys work invisibly.
 
 ## reports
 
-Where the run records what still needs human attention. Removing a report when nothing is outstanding is deliberate: the file existing at all is the signal that there is work to do.
+Where the run records what still needs human attention. Removing a report when nothing is outstanding is deliberate: the file existing at all is the signal that there's work to do.
 
 **`reports.table_captions_missing`** -- `path`; default `table-captions-missing.csv`
 

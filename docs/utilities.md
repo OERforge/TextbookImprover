@@ -1,6 +1,6 @@
 # Utilities
 
-Tools in `util/` that are not part of a conversion but help before or around one: surveying a corpus, checking a source, comparing two runs.
+Tools in `util/` that aren't part of a conversion but help before or around one: surveying a corpus, checking a source, comparing two runs.
 
 | Tool | Purpose |
 | --- | --- |
@@ -11,11 +11,11 @@ Tools in `util/` that are not part of a conversion but help before or around one
 | `table-census.py` | Surveys table structure across a corpus of DOCX files: the command line over `lib/tablecensus.py`. |
 | `table-samples.py` | Collects one real example of each table shape into a single Word document, copied from the sources rather than rebuilt. |
 | `docx-compat.py` | Reads, and optionally sets, the Word compatibility mode of a DOCX. |
-| `settings-reference.py` | Writes the three settings reference pages under `docs/` from the schemas; `--check` says whether they are current. |
+| `settings-reference.py` | Writes the three settings reference pages under `docs/` from the schemas; `--check` says whether they're current. |
 
 Each takes `--help`. The census and sample tools read Word files directly and need no Pandoc; `compare-output.py` reads HTML; `docx-compat.py` touches nothing but `word/settings.xml`.
 
-`table-census.py`, `table-samples.py`, and `docx-compat.py` are the ones to reach for before converting a book you have not seen: the census says what shapes its tables take and what the run will guess about each, the sample document shows one real example of every shape so you can see what would be lost, and the compatibility check says whether Word will open the sources in Compatibility Mode.
+`table-census.py`, `table-samples.py`, and `docx-compat.py` are the ones to reach for before converting a book you haven't seen: the census says what shapes its tables take and what the run will guess about each, the sample document shows one real example of every shape so you can see what would be lost, and the compatibility check says whether Word will open the sources in Compatibility Mode.
 
 ## Repairing tracked deletions in the source
 
@@ -44,9 +44,9 @@ as `<del>`.
 alternative, but it only fixes this pipeline, leaves the document fragile
 for every other consumer, and emits `<span class="deletion">` needing CSS.
 
-## Files that are not documents
+## Files that aren't documents
 
-A glob of `*.docx` picks up things that are not documents, and both
+A glob of `*.docx` picks up things that aren't documents, and both
 `convert.sh` and `untrack-deletions.py` skip them by name with a message
 rather than failing:
 

@@ -902,16 +902,22 @@ end
 -- A scroll container keeps long tables from forcing the whole page to
 -- scroll sideways (WCAG 1.4.10). It is focusable so it can be scrolled by
 -- keyboard, and named so the resulting region is not announced anonymously.
+--
+-- The attributes are given as a list of pairs, not a table keyed by name.
+-- A keyed table is iterated in whatever order Lua's hash puts it in, and
+-- that order changes from one process to the next, so the same document
+-- converted twice produced <div tabindex role aria-label> one time and
+-- <div aria-label role tabindex> the next. Nothing was wrong with either,
+-- but a byte-level comparison of two runs was noise, and that comparison
+-- is the regression gate for everything the table work will change.
 local function wrap_table(tbl, label)
   if not WRAP_TABLES then return tbl end
-  local attr
+  local attributes = { { 'tabindex', '0' } }
   if label then
-    attr = pandoc.Attr('', { 'table-wrapper' },
-      { tabindex = '0', role = 'region', ['aria-label'] = label })
-  else
-    attr = pandoc.Attr('', { 'table-wrapper' }, { tabindex = '0' })
+    attributes[#attributes + 1] = { 'role', 'region' }
+    attributes[#attributes + 1] = { 'aria-label', label }
   end
-  return pandoc.Div({ tbl }, attr)
+  return pandoc.Div({ tbl }, pandoc.Attr('', { 'table-wrapper' }, attributes))
 end
 
 -- A paragraph that is nothing but emphasised text -- Word's usual way of

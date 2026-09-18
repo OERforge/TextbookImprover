@@ -6,9 +6,14 @@ Versions are two-part and pre-1.0: breaking changes may land in any of them unti
 
 ## [Unreleased]
 
-Groundwork for the table-headers sidecar (roadmap item 1). Nothing in the conversion pipeline changes yet.
+Groundwork for the table-headers sidecar (roadmap item 1), through step 1 of its build: the sidecar, the key, and the report exist and a book can start carrying declarations. Nothing in the converted output changes yet.
 
 ### Added
+
+- `bin/table-headers.py`, a pre-pass `convert.sh` runs on the DOCX files before Pandoc. For every data table it computes a sidecar key, reads what `table-headers.csv` declares, asks the guess for the rest, and writes `table-headers-report.csv`. Tables with no sidecar row get a prefilled row in `table-headers-new.csv`, in the sidecar's own format, ready to paste in; that file is removed when there are none. A sidecar row whose key matches no table stops the run after writing the report, on the reasoning that a correction that silently fails to apply destroys work invisibly. Values this version does not act on (`manual`, `list`, `split-at`, `caption-rows`) are accepted and kept; a value it does not recognize is warned about once and read as blank.
+- `lib/tablecensus.py`: the classification, the guess, and the key, moved out of `util/table-census.py` so the pre-pass and the census tool share one implementation. The key is a SHA-256 over every cell's text in row order, with edge whitespace stripped and nothing else normalized, plus the table's row count, column count, and per-row cell counts; a cell holding a nested table contributes that table's key. Computed on the source before any transformation, so it survives everything the pipeline does and changes only when the source table changes. Measured on a chapter Word had rewritten on save: all six tables kept their keys while every media part was renamed.
+- Settings `sidecars.table_headers`, `reports.table_headers_new`, and `reports.table_headers_report`.
+- `tests/run-headers-tests.py`, 23 checks over the pre-pass end to end, and 9 key checks in `tests/run-census-tests.py`.
 
 - `util/table-census.py` reports a `Guess` column beside `Kind`: the value a table-headers sidecar would be prefilled with, for every data table. `Kind` is what the file says, `Guess` is what to declare, and a row where they differ is a row worth looking at. Across seven books (1,271 documents, 2,068 tables, 792 of them data tables) the guess gives 462 `both`, 264 `first-row`, 37 `none`, 28 `first-column`, and 1 `unknown`. The header mechanism it feeds behaves identically on Pandoc 3.1.3, 3.9, and 3.11, so this needs no version bump.
 - `util/contrib/fix-empty-paragraphs.py`, contributed from another project and not wired in. It removes content-free paragraph structure elements from a tagged PDF, two sources of which are the longtable caption wrapper and Pandoc's minipage header cells. Needs `pikepdf`. See roadmap item 7.

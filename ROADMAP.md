@@ -96,7 +96,7 @@ The setting is ambient, not per-table. [The documentation](https://ctan.org/pkg/
 
 `table/header-rows` is ignored whenever `\endhead` or `\endfirsthead` is present, which for Pandoc is always, because Pandoc emits `longtable` for everything. The documentation is explicit: in a longtable the code uses the `\endhead` or `\endfirsthead` rows as the header and in that case ignores `table/header-rows`. So the header row is tagged `TH` either way, and setting the key changes nothing; the column key is the only one whose value alters the output. If we ever emitted `tabular` inside a float instead, that would reverse: there is no `\endhead` to read, and `table/header-rows={1}` would become the only thing marking the header row. A cell falling under both settings gets `TH-both`, so a matrix table's blank corner gets `Scope=Both` for free.
 
-A longtable `\caption` is typeset as a multicolumn inside `\endfirsthead` and is tagged `TH` rather than `Caption`. So the caption promotion above produces correct markup in HTML and EPUB and an incorrectly tagged header row in PDF, through no fault of ours. Either post-process the PDF to retag it (see item 7) or accept it until `latex-lab` handles longtable captions.
+A longtable `\caption` is typeset as a multicolumn inside `\endfirsthead` and is tagged `TH` rather than `Caption`. So the caption promotion above produces correct markup in HTML and EPUB and an incorrectly tagged header row in PDF, through no fault of ours. Either post-process the PDF to retag it (see item 9) or accept it until `latex-lab` handles longtable captions.
 
 ### Two PAC errors that are not ours
 
@@ -180,7 +180,24 @@ HTML in particular opens same-format remediation, reading an HTML file and writi
 
 Markdown is the weakest input for tables: it can't express a header column or a cell attribute, so the sidecar carries proportionally more of the load. Links are the exception. Markdown can carry an `aria-label` on a link directly, in the same `{aria-label="..."}` syntax the writer emits, so for item 2 a Markdown source needs no sidecar at all: the annotation is authorable in the file. Subject to the flavor caveat noted there: `link_attributes` has to be on, or the reader sees a raw `<a>` element rather than a `Link`.
 
-## 7. PDF, and DOCX output
+## 7. Rewriting links that point back at the publisher
+
+**Held until the consequences for license compliance are understood.** Rewriting a link changes what a page says about where its content came from, and OpenStax's license terms are worth reading against that before anything is built. The measurements are done, so the work waits on that reading rather than on more investigation.
+
+OpenStax's DOCX exports link within the book by absolute URL: a section quiz's answer link is `https://openstax.org/books/introduction-sociology-3e/pages/chapter-8#fs-id2627631-solution`, so a reader of the converted book is sent to the publisher's site instead of the page a few clicks away. Measured across five books, 11,306 such links, 9,911 of them with an anchor; in *Introduction to Sociology 3e* alone, 1,001 survive into the HTML and every one names a page that exists locally. The page half is a rewrite: `pages/<slug>` to `<slug>.html`, or whatever the target's page naming is. The anchor half is harder, and measured: none of the 927 anchors resolves, because the DOCX export carries no bookmarks (zero `w:bookmarkStart` in 243 files), so the `fs-id…` targets exist nowhere in the source. Two ways forward, not exclusive: rewrite to the page and drop the anchor, which is still a local link; or take anchors from the EPUB, which is built from the same source and should carry the ids -- one more argument for EPUB as an input. The `-solution` suffix is worth checking against the EPUB first, since it may be the web site's own convention rather than an id in the content. Belongs with the link work in item 2, which is already reading every link.
+
+## 8. Validating each output the way the manifest is validated
+
+The cartridge is the one output the pipeline checks after building it: `validate-manifest.py` runs the manifest against the IMS schemas and reports what does not conform. Every other output is trusted. That is worth changing as outputs multiply, because each format has a validator that finds the same class of mistake -- structure that is well-formed and wrong -- and none of them is the kind of thing a person notices by looking at a page.
+
+- **HTML**: the Nu HTML checker (`vnu.jar`, needs Java) for conformance; `pa11y` or `axe-core` for the accessibility rules that markup alone can be checked against, which is most of what the tables and links work produces.
+- **EPUB**: `epubcheck` (Java) for the container and content, and DAISY's `Ace` for accessibility, which reports on exactly the table and image markup this project cares about.
+- **PDF**: `veraPDF` for PDF/UA conformance, scriptable and cross-platform. PAC is Windows-only and interactive, and its two known defects (item 9) mean its output needs reading with that in mind.
+- **DOCX**: Word's Accessibility Checker cannot be driven from a script. `util/docx-compat.py`'s checks are what can be automated, and they are about the package, not the content.
+
+The shape would be a `--check` per target, as the packager has today, run by `convert.sh` after the build and reported alongside the other reports rather than failing the run: a validator's findings are things to work through, and the run producing them is the point. Each tool wants installing separately, which is the argument for making every one optional and saying which ran.
+
+## 9. PDF, and DOCX output
 
 **PDF** is gated on something outside this project. Pandoc 3.9 can drive LaTeX's tagging via `-V pdfstandard=ua-2`, but `latex-lab-table` states plainly that only simple header rows and columns are supported; that complex headers with subheaders need syntax changes not yet made; and that a cell `Headers` array (the mechanism the hard cases need) is an open item. Until that lands, a tagged PDF from this pipeline can carry simple tables correctly and can't carry the complex ones. Worth revisiting each LaTeX release rather than working around.
 
@@ -190,7 +207,7 @@ Three defects in the meantime are candidates for a post-processing pass with `pi
 
 **DOCX output** is the riskier one, and deserves scoping care. The writer does preserve `w:tblHeader`, so in principle `table-headers-missing.csv` could stop being a report and start being an input that produces a corrected source document. But a Pandoc round trip discards everything Pandoc does not model: converting a file and back turned a layout table's `FigureTable` style into plain `Table`, and that style is the cleanest signal available for identifying layout tables. Section properties, content controls, comments, field codes, and tracked changes have the same exposure. If this is built, it should annotate the OOXML directly rather than rebuild the document. It's more code, but the difference between annotating and rebuilding.
 
-## 8. Common Cartridge 1.3, for assignments
+## 10. Common Cartridge 1.3, for assignments
 
 The 1.1 profile already carries everything this project emits today. Quizzes and question banks (`imsqti_xmlv1p2`), discussion topics, web links, LTI links, and the authorization attributes are all in 1.1. The only thing worth moving for is **assignments**, which arrive in 1.3.
 
@@ -198,13 +215,13 @@ The cost is reach. Brightspace and Canvas read up to 1.3, Blackboard up to 1.2, 
 
 Worth doing when there is an assignment to ship, not before.
 
-## 9. A web front end
+## 11. A web front end
 
 Here's why the configuration is schema-driven and why conversion becomes a library: a front end needs to render a form from the settings that exist, write a complete config back without losing anything, and report progress and failures structurally.
 
 Two pieces are already in place for it: the schema carries a description per setting, which is what a form's help text should say, and the writer is proven lossless by test. The third piece (resolving a config in JavaScript) is what the conformance fixtures in `tests/config/` exist to make safe.
 
-## 10. Splitting into separate repositories
+## 12. Splitting into separate repositories
 
 Eventually the two halves may be separate projects with a small shared library between them. Both standalone cases are already close: packaging is read-only with respect to page content and runs against any directory of HTML, and conversion has no packaging logic. v0.2 removed the last coupling, which was the config.
 
@@ -214,7 +231,6 @@ Not a goal in itself. Worth doing when one half has users the other does not.
 
 ## Smaller things
 
-- **Rewrite links that point back at openstax.org to the local page.** OpenStax's DOCX exports link within the book by absolute URL: a section quiz's answer link is `https://openstax.org/books/introduction-sociology-3e/pages/chapter-8#fs-id2627631-solution`, so a reader of the converted book is sent to the publisher's site instead of the page a few clicks away. Measured across five books, 11,306 such links, 9,911 of them with an anchor; in *Introduction to Sociology 3e* alone, 1,001 survive into the HTML and every one names a page that exists locally. The page half is a rewrite: `pages/<slug>` to `<slug>.html`, or whatever the target's page naming is. The anchor half is harder, and measured: none of the 927 anchors resolves, because the DOCX export carries no bookmarks (zero `w:bookmarkStart` in 243 files), so the `fs-id…` targets exist nowhere in the source. Two ways forward, not exclusive: rewrite to the page and drop the anchor, which is still a local link; or take anchors from the EPUB, which is built from the same source and should carry the ids -- one more argument for EPUB as an input. The `-solution` suffix is worth checking against the EPUB first, since it may be the web site's own convention rather than an id in the content. Belongs with the link work in item 2, which is already reading every link.
 - **Read the contents tree from an EPUB as well as a PDF.** `build-cartridge.py` builds the module tree from a PDF's bookmark outline, which is the book's table of contents in the order the book actually uses. An EPUB carries the same thing in machine-readable form -- `nav.xhtml` with `epub:type="toc"` in EPUB 3, `toc.ncx` in EPUB 2 -- so the same walk produces the same `(depth, title)` list without needing `pypdf`, and OpenStax publishes EPUBs. The matching of titles to page filenames is unchanged; only the source of the entries differs.
 - **Watch [pandoc#3034](https://github.com/jgm/pandoc/issues/3034).** The DOCX and ODT readers ignore `docProps/core.xml`, so a Word file whose title is set through File → Info → Properties converts with no metadata at all: the standalone HTML `<title>` falls back to the filename and the EPUB OPF gets no `dc:title`. If the reader ever picks those up, `promote_h1_to_title` and the duplicate-H1 guard both need rechecking, since the condition they turn on is `doc.meta.title == nil`.
 - **Retired key names.** Writing `manifest.cartridge` into a v0.2 config fails with "unknown setting" and no suggestion, because nothing is similarly named. A small table of retired names would let the error say where it went instead.

@@ -99,7 +99,7 @@ python3 util/migrate-config.py -d . --dry-run   # see where everything goes
 python3 util/migrate-config.py -d .
 ```
 
-Sidecar files need no migration, and can now be moved out of the book's directory: see [Sidecar files](README.md#sidecar-files). If you tried an absolute path before and found it had no effect, that was the bug above rather than your CSV. For the cartridge, see [How an LMS treats an imported cartridge](README.md#how-an-lms-treats-an-imported-cartridge), in particular the order in which instructors should import the new package and remove the old module, and which of Brightspace's two delete options is safe when. (We haven't tested on other LMS software.)
+Sidecar files need no migration, and can now be moved out of the book's directory: see [Sidecar files](README.md#sidecar-files). If you tried an absolute path before and found it had no effect, that was the bug above rather than your CSV. For the cartridge, see [How Brightspace treats an imported cartridge](README.md#how-brightspace-treats-an-imported-cartridge), in particular the order in which instructors should import the new package and remove the old module, and which of Brightspace's two delete options is safe when. (We haven't tested on other LMS software.)
 
 ## [0.1] - 2026-08-30
 

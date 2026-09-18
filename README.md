@@ -582,10 +582,16 @@ which a short equivalent has become a long description, and long
 descriptions belong in the prose where every reader gets them. Raising it
 silences the report rather than fixing anything.
 
-## How an LMS treats an imported cartridge
+## How Brightspace treats an imported cartridge
 
 Worth knowing before you import anything twice, because the behavior is
 not what most people assume and one option is destructive.
+
+Everything below was measured in Brightspace, and where noted confirmed
+by D2L. Another LMS may do the same things — nothing here depends on a
+Brightspace-only feature — but none of it has been tested anywhere else,
+so treat it as a reason for care rather than as a description of your
+own LMS.
 
 **Structure is never merged; it is appended.** Importing a cartridge a
 second time does not update the modules already in the course. It adds
@@ -620,6 +626,27 @@ through Brightspace's own HTML editor, so it is general behavior rather
 than a gap in Common Cartridge handling — imports just reach it faster,
 bringing hundreds of files at a time. It also means *Permanently delete*
 does not remove everything its dialog says it does.
+
+**D2L has confirmed all of this as intended behavior.** Reported to the
+D2L Helpdesk with a test package, and reviewed by their Product Support
+team, who answered that the option worded *Permanently delete both the
+topic from Content and the associated file or activity from the course*
+means the file the topic **is**, and that images, CSS, and other
+resources referenced inside that file are not considered associated files
+of the topic because the topic does not track what its file pulls in.
+They also confirmed the sharper case: where two topics point at the same
+file, deleting either one with that option deletes the file, the other
+topic is left with a broken link, Brightspace gives no warning, and it
+does not keep the file on account of the other reference. The wording and
+the missing warning were passed to their product team for consideration,
+with no ticket and no commitment, so plan on the behavior staying as it
+is.
+
+That last part is worth reading twice, because a course can be broken by
+one careless deletion: two modules showing the same page share one file,
+and *Permanently delete* on either takes it. Prefer *Remove from Content*
+whenever a page might be shared, and treat *Permanently delete* as
+something to use only when a whole book is going.
 
 Nothing in a cartridge can make an LMS delete files it does not consider
 owned, so this is something to know rather than something to fix. It is

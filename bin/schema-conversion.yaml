@@ -231,14 +231,6 @@ keys:
         description: >
           Images with no alt text, or with alt text over the length limit.
 
-      table_headers_missing:
-        type: path
-        default: table-headers-missing.csv
-        description: >
-          Data tables with no header row. There is no sidecar for these:
-          header text cannot be inferred from the data, so the fix belongs
-          in the source.
-
       table_headers_new:
         type: path
         default: table-headers-new.csv

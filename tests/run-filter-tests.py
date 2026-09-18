@@ -80,7 +80,6 @@ class Converted:
             "IMAGE_ALT": os.path.join(work, "image-alt.csv"),
             "TABLE_CAPTIONS_MISSING": os.path.join(work, "caps-missing.csv"),
             "IMAGE_ALT_MISSING": os.path.join(work, "alt-missing.csv"),
-            "TABLE_HEADERS_MISSING": os.path.join(work, "heads-missing.csv"),
             "MEDIA_UNRESOLVED": os.path.join(work, "media-unresolved.csv"),
             "SPACER_LOG": os.path.join(work, "spacers.csv"),
             "PROMOTE_H1_TO_TITLE": "always",
@@ -141,7 +140,6 @@ class Converted:
             "IMAGE_ALT": os.path.join(work, "image-alt.csv"),
             "IMAGE_ALT_MISSING": os.path.join(work, "alt-missing.csv"),
             "TABLE_CAPTIONS_MISSING": os.path.join(work, "caps-missing.csv"),
-            "TABLE_HEADERS_MISSING": os.path.join(work, "heads-missing.csv"),
             "PROMOTE_H1_TO_TITLE": "always",
         })
         environment.update(settings or {})
@@ -314,10 +312,94 @@ def case_tables_b(work):
         ("its label is reported, keyed by position because it is merged",
          lambda: any("table-1" in key for key in
                      out.report_column("caps-missing.csv", 0))),
-        # Today: Pandoc's reader promotes the first row regardless. Item 1
-        # should let a person declare that this table has no headers.
+        # With no pre-pass in reach, as here, the filter leaves the table
+        # as Pandoc's reader gave it. Declaring none is covered by
+        # case_headers; this pins the no-declaration behavior.
         ("a table with no header signal still gets its first row promoted",
          lambda: Converted.cells(plain, "th") == 2),
+    ]
+
+
+def case_headers(work):
+    """The filter applies what the table-headers pre-pass resolved.
+
+    Runs the pre-pass the way convert.sh does -- once with no sidecar to
+    get the prefilled rows, then with a sidecar a remediator edited --
+    and converts with the resolved values in reach of the filter. Each
+    value is declared on a table whose reader-built shape would have
+    given something else, so the assertion is on the declaration and not
+    on what Pandoc did anyway.
+    """
+    import csv
+    os.makedirs(work, exist_ok=True)
+    for name in ("tables", "tables-b"):
+        shutil.copy(os.path.join(FIXTURES, name + ".docx"), work)
+    tool = os.path.join(BIN, "table-headers.py")
+    sidecar = os.path.join(work, "table-headers.csv")
+    resolved = os.path.join(work, "table-headers.json")
+
+    def prepass():
+        subprocess.run([sys.executable, tool, "tables.docx", "tables-b.docx",
+                        "--sidecar", sidecar,
+                        "--new", os.path.join(work, "table-headers-new.csv"),
+                        "--report", os.path.join(work, "table-headers-report.csv"),
+                        "--resolved", resolved],
+                       cwd=work, capture_output=True, text=True,
+                       stdin=subprocess.DEVNULL)
+
+    prepass()
+    with open(os.path.join(work, "table-headers-new.csv"), newline="",
+              encoding="utf-8") as fh:
+        rows = list(csv.DictReader(fh))
+    # Table 1.1: the guess says both; keep it. Table 1.2 has a repeat-header
+    # row and is declared first-column, so its head must come down and its
+    # first column go up. tables-b's second table is declared none.
+    by_label = {r["label"]: r for r in rows}
+    by_label["Table 1.2"]["headers"] = "first-column"
+    plain = [r for r in rows if r["source"] == "tables-b.docx"][-1]
+    plain["headers"] = "none"
+    with open(sidecar, "w", newline="", encoding="utf-8") as fh:
+        writer = csv.DictWriter(fh, fieldnames=list(rows[0].keys()))
+        writer.writeheader()
+        writer.writerows(rows)
+    prepass()
+
+    out = Converted(work, ["tables", "tables-b"],
+                    {"TABLE_HEADERS_RESOLVED": resolved})
+    t11, t12 = out.tables("tables")[:2]
+    plain_html = out.tables("tables-b")[1]
+    body_rows = t11.count("<tr>") - 1
+
+    # A resolved entry whose shape does not match the table it points at
+    # must not be applied: the filter's count of tables and the pre-pass's
+    # could disagree, and a declaration on the wrong table is worse than
+    # none. Doctor the entry for Table 1.2 and convert again.
+    import json
+    with open(resolved, encoding="utf-8") as fh:
+        doctored = json.load(fh)
+    doctored["tables"][1]["cols"] = 9
+    wrong = os.path.join(work, "wrong.json")
+    with open(wrong, "w", encoding="utf-8") as fh:
+        json.dump(doctored, fh)
+    again = Converted(os.path.join(work, "again"), ["tables"],
+                      {"TABLE_HEADERS_RESOLVED": wrong})
+    t12_again = again.tables("tables")[1]
+    return [
+        ("a table declared both keeps its header row",
+         lambda: "<thead>" in t11 and 'scope="col"' in t11),
+        ("and gets scope=\"row\" on the first cell of every body row",
+         lambda: t11.count('<th scope="row">') == body_rows and body_rows > 0),
+        ("a table declared first-column loses its reader-built header row",
+         lambda: "<thead>" not in t12),
+        ("and gains row headers instead",
+         lambda: t12.count('<th scope="row">') == t12.count("<tr>")),
+        ("a table declared none has no header cells at all",
+         lambda: Converted.cells(plain_html, "th") == 0),
+        ("the pre-pass report records the declarations",
+         lambda: out.reports.get("table-headers-report.csv", "").count("declared") >= 2),
+        ("a resolved entry whose shape does not match is not applied",
+         lambda: "<thead>" in t12_again
+                 and t12_again.count('<th scope="row">') == 0),
     ]
 
 
@@ -383,6 +465,7 @@ CASES = [
     ("promotion and byline modes", case_metadata_modes),
     ("table labels and empty tables", case_tables),
     ("merged title rows and unclassifiable tables", case_tables_b),
+    ("declared table headers", case_headers),
     ("equations, MathSpeak, and spacers", case_math),
     ("media naming, alt text, and keys", case_media),
     ("media keys when converting in one pass", case_media_keys_single_pass),

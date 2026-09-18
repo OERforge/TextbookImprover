@@ -24,6 +24,12 @@ Three files share the name and do different jobs:
   table-headers-report.csv  what happened to every table this run. Written
                             every run, never edited.
 
+With --resolved, also writes a JSON file for the filter: for each source
+document, the value in effect for each data table -- the sidecar's where
+one was declared, the guess otherwise -- with the table's position among
+all the document's tables, its shape, and its first cell, so the filter
+can confirm it is applying the value to the table it was computed for.
+
 A sidecar row whose key matches no table is an error, and the run stops
 after writing the report: a correction that silently does not apply is
 worse than a failed run, because it destroys work invisibly. The report
@@ -55,6 +61,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import argparse
 import csv
+import json
 import os
 import sys
 import zipfile
@@ -172,8 +179,12 @@ def tables_in(path):
         if value is None:
             continue
         grid = tc.build_grid(tbl)
+        first = grid[0][0].text if grid and grid[0] else ""
         found.append({
             "key": tc.table_key(tbl, keys),
+            "rows": nrows,
+            "cols": ncols,
+            "first": " ".join(first.split())[:40],
             "source": os.path.basename(path),
             "index": index,
             "label": label_for(body, tbl, depth, parents),
@@ -190,6 +201,17 @@ def tables_in(path):
 # ---------------------------------------------------------------------------
 # Deciding
 # ---------------------------------------------------------------------------
+
+def in_effect(info, row):
+    """The value the filter should apply: the sidecar's if it declared
+    one of the acting values, else the guess. manual, list, and a blank
+    all mean "as Pandoc gives it", which is the empty string here."""
+    if row is not None and row["headers"] in ACTING:
+        return row["headers"]
+    if row is not None and row["headers"] in RESERVED:
+        return ""
+    return info["guess"]
+
 
 def decide(info, row):
     """(declared, supplier, status, note) for one table."""
@@ -244,6 +266,8 @@ def main():
                     help="where prefilled rows for unclaimed tables go")
     ap.add_argument("--report", default="table-headers-report.csv",
                     help="where the per-table report goes")
+    ap.add_argument("--resolved", default=None,
+                    help="JSON of the value in effect per table, for the filter")
     ap.add_argument("--verbose", action="store_true")
     args = ap.parse_args()
 
@@ -259,12 +283,19 @@ def main():
             warn(str(exc))
 
     report, new_rows = [], []
+    resolved = {}
     claimed = set()
     for info in tables:
         row = sidecar.get(info["key"])
         if row is not None:
             claimed.add(info["key"])
         declared, supplier, status, note = decide(info, row)
+        # Keyed by stem, not filename: the filter runs on the JSON
+        # intermediate named after the .docx, and knows only the stem.
+        resolved.setdefault(os.path.splitext(info["source"])[0], []).append({
+            "index": info["index"], "headers": in_effect(info, row),
+            "rows": info["rows"], "cols": info["cols"], "first": info["first"],
+        })
         report.append({
             "key": info["key"], "source": info["source"],
             "label": info["label"], "preview": info["preview"],
@@ -292,6 +323,9 @@ def main():
                     % os.path.basename(args.new_path),
         })
 
+    if args.resolved:
+        with open(args.resolved, "w", encoding="utf-8") as handle:
+            json.dump(resolved, handle, indent=1, sort_keys=True)
     if report:
         write_csv(args.report, REPORT_COLUMNS, report)
     else:

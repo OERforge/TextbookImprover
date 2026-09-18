@@ -72,7 +72,6 @@ run_docs="$(mktemp)"
 refs_file="$(mktemp)"
 missing_rows="$(mktemp)"
 alt_rows="$(mktemp)"
-header_rows="$(mktemp)"
 spacer_rows="$(mktemp)"
 unresolved_rows="$(mktemp)"
 unresolved_log="$(mktemp)"
@@ -80,13 +79,12 @@ media_rows="$(mktemp)"
 css_header="$(mktemp)"
 work_dir="$(mktemp -d)"
 trap 'rm -f "$run_docs" "$refs_file" "$missing_rows" "$alt_rows" \
-        "$header_rows" "$spacer_rows" "$unresolved_log" "$unresolved_rows" \
+        "$spacer_rows" "$unresolved_log" "$unresolved_rows" \
         "$media_rows" "$css_header"; \
       rm -rf "$work_dir"' EXIT
 
 export TABLE_CAPTIONS_MISSING="$missing_rows"
 export IMAGE_ALT_MISSING="$alt_rows"
-export TABLE_HEADERS_MISSING="$header_rows"
 export SPACER_LOG="$spacer_rows"
 export MEDIA_UNRESOLVED="$media_rows"
 
@@ -144,7 +142,6 @@ IMAGE_ALT_NAME="image-alt.csv"
 TABLE_CAPTIONS_MISSING_NAME="table-captions-missing.csv"
 IMAGE_ALT_MISSING_NAME="image-alt-missing.csv"
 TABLE_HEADERS_NAME="table-headers.csv"
-TABLE_HEADERS_MISSING_NAME="table-headers-missing.csv"
 TABLE_HEADERS_NEW_NAME="table-headers-new.csv"
 TABLE_HEADERS_REPORT_NAME="table-headers-report.csv"
 MEDIA_UNRESOLVED_NAME="media-unresolved.csv"
@@ -236,7 +233,6 @@ check_sidecar "$TABLE_HEADERS" 'sidecars.table_headers' 'table-headers.csv'
 
 missing_report="$(resolve_path "$TABLE_CAPTIONS_MISSING_NAME")"
 alt_report="$(resolve_path "$IMAGE_ALT_MISSING_NAME")"
-header_report="$(resolve_path "$TABLE_HEADERS_MISSING_NAME")"
 headers_new="$(resolve_path "$TABLE_HEADERS_NEW_NAME")"
 headers_report="$(resolve_path "$TABLE_HEADERS_REPORT_NAME")"
 unresolved_report="$(resolve_path "$MEDIA_UNRESOLVED_NAME")"
@@ -268,8 +264,10 @@ for f in *.docx; do
   docx_files+=("$f")
 done
 if [ "${#docx_files[@]}" -gt 0 ]; then
+  export TABLE_HEADERS_RESOLVED="$work_dir/table-headers.json"
   if ! python3 "$headers_tool" "${docx_files[@]}" --sidecar "$TABLE_HEADERS" \
-       --new "$headers_new" --report "$headers_report"; then
+       --new "$headers_new" --report "$headers_report" \
+       --resolved "$TABLE_HEADERS_RESOLVED"; then
     exit 1
   fi
 fi
@@ -471,7 +469,7 @@ fi
 # Doing it here rather than at the top means a run that stops at the gate
 # leaves the previous reports intact, since they are still the best list
 # available.
-rm -f "$missing_report" "$alt_report" "$header_report" "$spacer_report"
+rm -f "$missing_report" "$alt_report" "$spacer_report"
 
 ############################################
 # 3. Render the header and footer fragments
@@ -659,19 +657,6 @@ write_report "$alt_rows" "$alt_report" \
 
 write_report "$spacer_rows" "$spacer_report" \
   'Image,Source,Width,Action' 'spacer image(s) handled'
-
-# No sidecar for this one: header text has to come from the DOCX, so the
-# report names the tables and the fix is made in Word.
-if [ -s "$header_rows" ]; then
-  { printf 'Table,Source,Rows,Columns\n'; sort -u "$header_rows"; } > "$header_report"
-  count=$(sort -u "$header_rows" | wc -l)
-  echo "Wrote $header_report ($count data table(s) with no header row)." >&2
-  echo "Fix in Word: select the header row, Table Properties > Row >" >&2
-  echo "  'Repeat as header row at the top of each page'. Where a table has" >&2
-  echo "  no header row at all, one has to be written." >&2
-else
-  rm -f "$header_report"
-fi
 
 if [ -s "$missing_rows" ]; then
   rows=$(sort -u "$missing_rows" | wc -l)

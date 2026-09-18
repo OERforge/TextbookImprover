@@ -106,12 +106,35 @@ local MISSING_FILE = os.getenv('TABLE_CAPTIONS_MISSING')
 local ALT_FILE = os.getenv('IMAGE_ALT') or 'image-alt.csv'
 local ALT_MISSING_FILE = os.getenv('IMAGE_ALT_MISSING')
 
--- Data tables with no header row are reported here. Unlike the other two
--- reports there is no sidecar to fill in: header text cannot be inferred
--- from the data, and inventing it would be worse than leaving it out. The
--- fix belongs in the DOCX -- mark the header row in Word, or add one where
--- the table genuinely lacks it.
-local HEADER_MISSING_FILE = os.getenv('TABLE_HEADERS_MISSING')
+-- What the table-headers pre-pass decided for each data table: the
+-- sidecar's value where one was declared, the guess otherwise. Keyed by
+-- source stem, then by the table's position among all the document's
+-- tables. Each entry carries the table's shape and first cell so the
+-- value is applied only to the table it was computed for; a document
+-- whose tables the reader counted differently gets a warning and no
+-- change rather than a declaration landing on the wrong table.
+local RESOLVED_FILE = os.getenv('TABLE_HEADERS_RESOLVED')
+local resolved_headers = nil
+
+local function load_resolved()
+  if resolved_headers ~= nil then return resolved_headers end
+  resolved_headers = {}
+  if not RESOLVED_FILE or RESOLVED_FILE == '' then return resolved_headers end
+  local handle = io.open(RESOLVED_FILE, 'r')
+  if not handle then return resolved_headers end
+  local text = handle:read('a')
+  handle:close()
+  local ok, data = pcall(pandoc.json.decode, text)
+  if not ok or type(data) ~= 'table' then return resolved_headers end
+  for stem, entries in pairs(data) do
+    local by_index = {}
+    for _, entry in ipairs(entries) do
+      by_index[tonumber(entry.index)] = entry
+    end
+    resolved_headers[stem] = by_index
+  end
+  return resolved_headers
+end
 
 -- Accepted spellings of the decorative marker, matched case-insensitively.
 local DECORATIVE_MARKERS = {
@@ -624,6 +647,10 @@ end
 -- in the document. A separate pass runs first and stamps each table with
 -- its true position; see the filter list at the end of this file.
 local ORDINAL_ATTR = 'data-cc-ordinal'
+-- Position among *all* the document's tables, image-only ones included,
+-- in document order with a container before the tables inside it. This
+-- is the index the table-headers pre-pass uses, which counts every w:tbl.
+local TH_INDEX_ATTR = 'data-th-index'
 
 local function position_key(ordinal)
   return source_stem() .. '#table-' .. tostring(ordinal)
@@ -632,11 +659,6 @@ end
 
 local function record_spacer(src, width, action)
   append_row(SPACER_LOG, { qualify_media(src), source_stem(), width, action })
-end
-
-local function record_headerless(label, rows, columns)
-  append_row(HEADER_MISSING_FILE,
-    { label, source_stem(), tostring(rows), tostring(columns) })
 end
 
 -- Read a sidecar into a key -> value map. A missing file is not an error.
@@ -1008,6 +1030,129 @@ local function belongs_to_next_table(after_next, after_after)
   return false
 end
 
+-- ---------------------------------------------------------------------------
+-- Applying the table-headers declaration
+--
+-- The value comes from the pre-pass (see load_resolved), and says which
+-- lines of the table hold its headers: first-row, first-column, both, or
+-- none. A blank means "as Pandoc gives it" -- nothing declared and no
+-- guess, or a value like manual that this version accepts and does not
+-- act on -- and leaves the table alone apart from scope="col" on any
+-- header row the reader already built.
+--
+-- Two jobs, and only the first is Pandoc's. Setting row_head_columns on
+-- a body makes the writer emit <th> for the leading cell of each row;
+-- the writer emits a bare <th>, so scope="row" is set here as well. The
+-- header row is Pandoc's TableHead: a declared first-row promotes the
+-- first body row into it when the reader left it empty, and a declared
+-- none moves whatever the reader put there back into the body.
+-- ---------------------------------------------------------------------------
+
+local function first_body(tbl)
+  for _, body in ipairs(tbl.bodies) do
+    if #body.body > 0 then return body end
+  end
+  return nil
+end
+
+local function promote_first_row(tbl)
+  if #tbl.head.rows > 0 then return end
+  local body = first_body(tbl)
+  if body == nil then return end
+  local row = table.remove(body.body, 1)
+  tbl.head = pandoc.TableHead({ row }, tbl.head.attr)
+end
+
+local function demote_head(tbl)
+  if #tbl.head.rows == 0 then return end
+  local rows = tbl.head.rows
+  tbl.head = pandoc.TableHead({}, tbl.head.attr)
+  local body = tbl.bodies[1]
+  if body == nil then
+    tbl.bodies = { pandoc.TableBody(rows, {}, 0, pandoc.Attr()) }
+    return
+  end
+  local merged = {}
+  for _, r in ipairs(rows) do merged[#merged + 1] = r end
+  for _, r in ipairs(body.body) do merged[#merged + 1] = r end
+  body.body = merged
+end
+
+local function set_row_headers(tbl, on)
+  for _, body in ipairs(tbl.bodies) do
+    body.row_head_columns = on and 1 or 0
+    for _, row in ipairs(body.body) do
+      local cell = row.cells[1]
+      if cell then
+        if on then
+          cell.attr.attributes['scope'] = 'row'
+        else
+          cell.attr.attributes['scope'] = nil
+        end
+      end
+    end
+  end
+end
+
+-- The pre-pass counted rows and columns from the file; the AST may have
+-- had a title row absorbed or a spacer dropped, so this compares shape
+-- and first cell loosely and refuses on a clear mismatch rather than
+-- putting a declaration on the wrong table.
+local function matches_entry(tbl, entry)
+  local rows, columns = table_shape(tbl)
+  rows = rows + #tbl.head.rows
+  if columns ~= tonumber(entry.cols) then return false end
+  if math.abs(rows - tonumber(entry.rows)) > 1 then return false end
+  local first = ''
+  local row = tbl.head.rows[1] or (first_body(tbl) and first_body(tbl).body[1])
+  if row and row.cells[1] then
+    first = pandoc.utils.stringify(row.cells[1].contents)
+    first = first:gsub('%s+', ' '):gsub('^ ', ''):gsub(' $', ''):sub(1, 40)
+  end
+  local expected = tostring(entry.first or '')
+  if expected == '' or first == '' then return true end
+  return first:sub(1, 20) == expected:sub(1, 20)
+end
+
+local function resolved_for(tbl)
+  local index = tonumber(tbl.attr.attributes[TH_INDEX_ATTR])
+  local by_doc = load_resolved()[source_stem()]
+  if index == nil or by_doc == nil then return nil end
+  local entry = by_doc[index]
+  if entry == nil then return nil end
+  if not matches_entry(tbl, entry) then
+    warn(('table-headers: table %d of %s does not match the pre-pass '
+      .. '(shape or first cell differ); declaration %q not applied')
+      :format(index, source_stem(), tostring(entry.headers)))
+    return nil
+  end
+  return entry
+end
+
+local function apply_headers(tbl, label)
+  local entry = resolved_for(tbl)
+  tbl.attr.attributes[TH_INDEX_ATTR] = nil
+  local value = entry and tostring(entry.headers or '') or ''
+
+  if value == 'first-row' or value == 'both' then
+    promote_first_row(tbl)
+  elseif value == 'none' or value == 'first-column' then
+    -- Declared headers in the first column only, or none: a header row
+    -- the reader built from a repeat-header setting is not what the
+    -- person said this table has.
+    demote_head(tbl)
+  end
+  set_row_headers(tbl, value == 'first-column' or value == 'both')
+
+  if has_header_row(tbl) then
+    mark_column_headers(tbl)
+  elseif value == '' then
+    local rows, columns = table_shape(tbl)
+    warn(('data table has no header row and no declaration: %s (%d rows x %d columns)')
+      :format(label or '(unlabelled)', rows, columns))
+  end
+end
+
 local function caption_data_table(tbl, next_block, after_next, after_after, out)
   local consumed = 0
   local label = nil
@@ -1075,14 +1220,7 @@ local function caption_data_table(tbl, next_block, after_next, after_after, out)
     end
   end
 
-  if has_header_row(tbl) then
-    mark_column_headers(tbl)
-  else
-    local rows, columns = table_shape(tbl)
-    record_headerless(label or '(unlabelled)', rows, columns)
-    warn(('data table has no header row: %s (%d rows x %d columns)')
-      :format(label or '(unlabelled)', rows, columns))
-  end
+  apply_headers(tbl, label)
 
   return wrap_table(tbl, label), consumed
 end
@@ -1261,6 +1399,8 @@ local function number_tables(blocks, state)
     local kind = block.t
 
     if kind == 'Table' then
+      block.attr.attributes[TH_INDEX_ATTR] = tostring(state.all)
+      state.all = state.all + 1
       -- Only data tables are numbered. A table holding nothing but an
       -- image becomes a <figure> later, so counting it here would leave
       -- gaps -- a page with four tables reporting "#table-1, #table-3,
@@ -1316,7 +1456,7 @@ end
 return {
   {
     Pandoc = function(doc)
-      local state = { n = 0, above = 0, below = 0 }
+      local state = { n = 0, all = 0, above = 0, below = 0 }
       number_tables(doc.blocks, state)
       if state.above > state.below then
         caption_side = 'above'

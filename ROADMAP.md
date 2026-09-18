@@ -124,7 +124,7 @@ A sidecar maps each URL to a short description, which the filter attaches to the
 
 ### What has to be worked out
 
-**Why a sidecar and not the source.** A Word hyperlink can hold a ScreenTip in `w:tooltip`, which would be the obvious place for a description and would let a remediated `.docx` carry its own. Pandoc's DOCX reader discards it: a tooltip injected by hand into `word/document.xml` comes back as `['', [], []]` on the `Link`, with the title slot empty too. So for DOCX input there is nowhere in the file for this to live, and a sidecar is not a convenience but the only option short of pre-processing the OOXML. Relevant to the DOCX-output question in item 7, which would otherwise be the natural home for writing descriptions back into a corrected source.
+**Why a sidecar and not the source.** A Word hyperlink can hold a ScreenTip in `w:tooltip`, which would be the obvious place for a description and would let a remediated `.docx` carry its own. Pandoc's DOCX reader discards it: a tooltip injected by hand into `word/document.xml` comes back as `['', [], []]` on the `Link`, with the title slot empty too. So for DOCX input there is nowhere in the file for this to live, and a sidecar is not a convenience but the only option short of pre-processing the OOXML. Relevant to the DOCX-output question in item 9, which would otherwise be the natural home for writing descriptions back into a corrected source.
 
 **Detection.** Pandoc marks a bare URL with `class="uri"` when it comes from Markdown autolink syntax, but not when it comes from a `.docx`, so that signal is not free. The rule that works: the link's text, normalized, equals its href. That found all 176 without hand-tuning.
 
@@ -136,7 +136,7 @@ Note that 144 of the 176 are in `-references.html` files and 32 are elsewhere, s
 
 Still worth deciding deliberately rather than by default, and the PDF testing argues for the alternative more strongly than it first appeared. Of seven mechanisms tested against NVDA, only the annotation `/Contents` announced anything, and only in Acrobat; `/ActualText` works but replaces what a reader copies, which for a DOI is a real loss. Descriptive visible text was the only option that worked in every viewer and needed nothing from the reader's stack. So: shorten the visible text to something readable, keep the full address in the `href`, and restore it for print with `@media print { a[href]::after { content: " (" attr(href) ")" } }`. That satisfies both WCAG criteria and asks nothing of tagged-PDF support. It changes what a reader sees on the page, which is a bigger decision than adding an attribute, but it is the one that reaches everybody.
 
-**The LaTeX side needs a preamble.** The existing filter emits `\LinkAlt{...}` and `\LinkAltReset{}` around each link, and those macros live in a `link-alt-preamble.tex` that has to come along with it. It is also a no-op without `\DocumentMetadata` tagging enabled, so the PDF half of this arrives with item 7 rather than before it. The HTML and EPUB halves have no such dependency.
+**The LaTeX side needs a preamble.** The existing filter emits `\LinkAlt{...}` and `\LinkAltReset{}` around each link, and those macros live in a `link-alt-preamble.tex` that has to come along with it. It is also a no-op without `\DocumentMetadata` tagging enabled, so the PDF half of this arrives with item 9 rather than before it. The HTML and EPUB halves have no such dependency.
 
 ### Why second
 
@@ -154,7 +154,7 @@ Nearly free on the table side: EPUB3 uses Pandoc's HTML writer, so `id`, `colspa
 
 The configuration already describes several conversion targets and several packages, each overriding the defaults. Making them real means: building each target into its own output directory, reusing one parsed intermediate across targets that do not override media, and ordering builds from what a package declares it `includes` rather than from the order blocks appear in a file.
 
-`convert.sh` becomes Python at the same time. Adding N targets restructures most of it anyway, and rewriting a script you are about to gut is much cheaper than rewriting one you mean to keep. The argument for Python is mostly the front end in item 9: a web interface shelling out to bash and scraping stderr can't ask what targets exist, can't report progress per document, and can't tell a media failure from a Pandoc failure without parsing prose. Conversion needs to be callable, not just runnable.
+`convert.sh` becomes Python at the same time. Adding N targets restructures most of it anyway, and rewriting a script you are about to gut is much cheaper than rewriting one you mean to keep. The argument for Python is mostly the front end in item 11: a web interface shelling out to bash and scraping stderr can't ask what targets exist, can't report progress per document, and can't tell a media failure from a Pandoc failure without parsing prose. Conversion needs to be callable, not just runnable.
 
 The accumulated knowledge in the comments — the Word lock-file check, the zip-signature test for a renamed `.doc`, the cloud-drive write retry, the EMF/WMF guidance — has to carry across verbatim. A rewrite is exactly where that gets dropped. `set -x` tracing needs a deliberate equivalent, too: seeing every Pandoc invocation as it happens has been useful more than once.
 

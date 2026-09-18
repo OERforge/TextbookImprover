@@ -1114,6 +1114,149 @@ local function matches_entry(tbl, entry)
   return first:sub(1, 20) == expected:sub(1, 20)
 end
 
+-- Every row of the table in source order: the head's rows, then each
+-- body's. The pre-pass numbers rows the way the file does, and a merged
+-- title row the reader put in the head is still row 1.
+local function all_rows(tbl)
+  local rows = {}
+  for _, row in ipairs(tbl.head.rows) do
+    rows[#rows + 1] = { row = row, holder = tbl.head.rows, }
+  end
+  for _, body in ipairs(tbl.bodies) do
+    for _, row in ipairs(body.body) do
+      rows[#rows + 1] = { row = row, holder = body.body }
+    end
+  end
+  return rows
+end
+
+local function remove_row(tbl, target)
+  for _, body in ipairs(tbl.bodies) do
+    for i, row in ipairs(body.body) do
+      if row == target then table.remove(body.body, i); return true end
+    end
+  end
+  local kept = {}
+  local found = false
+  for _, row in ipairs(tbl.head.rows) do
+    if row == target then found = true else kept[#kept + 1] = row end
+  end
+  if found then tbl.head = pandoc.TableHead(kept, tbl.head.attr) end
+  return found
+end
+
+-- A cell's inlines, joined across its blocks with spaces, so that a title
+-- row holding an equation keeps the equation rather than its LaTeX
+-- source. Two title rows in the statistics book's formula appendix hold
+-- five equations between them.
+local function cell_inlines(cell)
+  local out = pandoc.Inlines({})
+  for _, block in ipairs(cell.contents) do
+    local inlines = nil
+    if block.t == 'Plain' or block.t == 'Para' then
+      inlines = block.content
+    else
+      inlines = text_to_inlines(pandoc.utils.stringify(block))
+    end
+    if #inlines > 0 then
+      if #out > 0 then out:insert(pandoc.Space()) end
+      out:extend(inlines)
+    end
+  end
+  return out
+end
+
+local function trim_inlines(inlines)
+  while #inlines > 0 and inlines[1].t == 'Space' do inlines:remove(1) end
+  while #inlines > 0 and inlines[#inlines].t == 'Space' do inlines:remove(#inlines) end
+  return inlines
+end
+
+-- A removed row as caption content: the first cell, a colon, the rest
+-- joined with commas. A merged title row is one cell and reads as itself;
+-- "Population estimates, July 1, 2019 | 328,239,523" reads as
+-- "Population estimates, July 1, 2019: 328,239,523". Returns the inlines
+-- and their text, since the caption search compares text.
+local function row_as_caption(row)
+  local parts, seen = {}, {}
+  for _, cell in ipairs(row.cells) do
+    local inlines = trim_inlines(cell_inlines(cell))
+    local text = normalise(pandoc.utils.stringify(inlines))
+    if text ~= '' and not seen[text] then
+      seen[text] = true
+      parts[#parts + 1] = { inlines = inlines, text = text }
+    end
+  end
+  if #parts == 0 then return pandoc.Inlines({}), '' end
+  local out = pandoc.Inlines({})
+  out:extend(parts[1].inlines)
+  local text = parts[1].text
+  for i = 2, #parts do
+    out:insert(pandoc.Str(i == 2 and ':' or ','))
+    out:insert(pandoc.Space())
+    out:extend(parts[i].inlines)
+    text = text .. (i == 2 and ': ' or ', ') .. parts[i].text
+  end
+  return out, text
+end
+
+-- caption-rows=N,M from the sidecar, or caption-rows=1 inferred by the
+-- pre-pass for a merged full-width first row. Two halves, because the
+-- caption search has to see the table intact: pending_caption_rows works
+-- out which rows are meant and what they say, without touching the
+-- table, so the search can treat that text as the description a bare
+-- label lacks; fold_caption_rows then removes the rows and puts the text
+-- into the caption, after whatever the search found, so a title row is
+-- the caption and row 1 is the real header row by the time first-row
+-- promotes it.
+local function pending_caption_rows(tbl, entry)
+  local pending = { targets = {}, text = '', inlines = pandoc.Inlines({}) }
+  local wanted = entry and entry.caption_rows
+  if type(wanted) ~= 'table' or #wanted == 0 then return pending end
+  local rows = all_rows(tbl)
+  local texts = {}
+  for _, n in ipairs(wanted) do
+    local at = rows[tonumber(n)]
+    if at == nil then
+      warn(('table-headers: caption-rows names row %s of a %d-row table in %s; ignored')
+        :format(tostring(n), #rows, source_stem()))
+    else
+      pending.targets[#pending.targets + 1] = at.row
+      local inlines, text = row_as_caption(at.row)
+      if text ~= '' then
+        if #texts > 0 then
+          pending.inlines:insert(pandoc.Str('.'))
+          pending.inlines:insert(pandoc.Space())
+        end
+        pending.inlines:extend(inlines)
+        texts[#texts + 1] = text
+      end
+    end
+  end
+  pending.text = table.concat(texts, '. ')
+  return pending
+end
+
+local function fold_caption_rows(tbl, pending)
+  for _, row in ipairs(pending.targets) do remove_row(tbl, row) end
+  if pending.text == '' then return nil end
+  local existing, existing_inlines = '', nil
+  if #tbl.caption.long > 0 then
+    existing = normalise(pandoc.utils.stringify(tbl.caption.long))
+    existing_inlines = pandoc.utils.blocks_to_inlines(tbl.caption.long)
+  end
+  if existing:find(pending.text, 1, true) then return existing end
+  local out = pandoc.Inlines({})
+  if existing ~= '' then
+    out:extend(existing_inlines)
+    if not existing:match('[.!?]$') then out:insert(pandoc.Str('.')) end
+    out:insert(pandoc.Space())
+  end
+  out:extend(pending.inlines)
+  tbl.caption = mk_caption({ pandoc.Plain(out) })
+  return normalise(pandoc.utils.stringify(out))
+end
+
 local function resolved_for(tbl)
   local index = tonumber(tbl.attr.attributes[TH_INDEX_ATTR])
   local by_doc = load_resolved()[source_stem()]
@@ -1129,9 +1272,7 @@ local function resolved_for(tbl)
   return entry
 end
 
-local function apply_headers(tbl, label)
-  local entry = resolved_for(tbl)
-  tbl.attr.attributes[TH_INDEX_ATTR] = nil
+local function apply_headers(tbl, label, entry)
   local value = entry and tostring(entry.headers or '') or ''
 
   if value == 'first-row' or value == 'both' then
@@ -1161,6 +1302,12 @@ local function caption_data_table(tbl, next_block, after_next, after_after, out)
   -- does not reach the HTML.
   local ordinal = tbl.attr.attributes[ORDINAL_ATTR] or '?'
   tbl.attr.attributes[ORDINAL_ATTR] = nil
+
+  -- What the pre-pass resolved for this table, checked against the table
+  -- as the reader gave it, before any row is moved.
+  local entry = resolved_for(tbl)
+  tbl.attr.attributes[TH_INDEX_ATTR] = nil
+  local pending = pending_caption_rows(tbl, entry)
 
   if #tbl.caption.long > 0 then
     -- Already captioned: reuse that text to name the scroll region. A
@@ -1200,9 +1347,16 @@ local function caption_data_table(tbl, next_block, after_next, after_after, out)
         inlines:insert(pandoc.Space())
         inlines:extend(text_to_inlines(description))
       elseif description == nil and is_bare_label(label) then
-        -- Absent from the sidecar and the label says nothing but a number.
-        record_missing(label, table_excerpt(tbl))
-        warn('no description for "' .. label .. '"')
+        if pending.text ~= '' then
+          -- A title row is about to become the description this bare
+          -- label lacks; nothing to report.
+          inlines:insert(pandoc.Space())
+          inlines:extend(pending.inlines)
+        else
+          -- Absent from the sidecar and the label says nothing but a number.
+          record_missing(label, table_excerpt(tbl))
+          warn('no description for "' .. label .. '"')
+        end
       end
       tbl.caption = mk_caption({ pandoc.Plain(inlines) })
     else
@@ -1210,7 +1364,10 @@ local function caption_data_table(tbl, next_block, after_next, after_after, out)
       -- can still be reported and still be given a caption.
       local key = position_key(ordinal)
       local description = description_for(key)
-      if description == nil then
+      if description == nil and pending.text ~= '' then
+        -- The title row is the caption.
+        label = pending.text
+      elseif description == nil then
         record_missing(key, table_excerpt(tbl))
         warn('data table has no caption or label: ' .. key)
       elseif description ~= '' then
@@ -1220,7 +1377,9 @@ local function caption_data_table(tbl, next_block, after_next, after_after, out)
     end
   end
 
-  apply_headers(tbl, label)
+  local folded = fold_caption_rows(tbl, pending)
+  if folded then label = folded end
+  apply_headers(tbl, label, entry)
 
   return wrap_table(tbl, label), consumed
 end

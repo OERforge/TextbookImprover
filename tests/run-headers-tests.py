@@ -125,7 +125,8 @@ def run(workdir, *extra):
     proc = subprocess.run(
         [sys.executable, TOOL] + files + ["--sidecar", "table-headers.csv",
                                           "--new", "table-headers-new.csv",
-                                          "--report", "table-headers-report.csv"]
+                                          "--report", "table-headers-report.csv",
+                                          "--resolved", "resolved.json"]
         + list(extra),
         cwd=workdir, capture_output=True, text=True)
     return proc.returncode, proc.stderr
@@ -187,6 +188,8 @@ def checks(workdir):
     k["1.5 | 2.4 | 3.6"]["headers"] = "grid"                          # alias
     k["Key | Value"]["headers"] = "bogus"                             # unknown
     k["Code"]["headers"] = ""                                         # cleared
+    k["The Message Triangle | The Message Triangle | The Message Triangle"]["caption-rows"] = ""  # inferred, removed
+    k[" | Speeding | No speeding"]["caption-rows"] = "1"              # declared by hand
     cols = list(new[0].keys())
     with open(os.path.join(workdir, "table-headers.csv"), "w", newline="", encoding="utf-8") as h:
         w = csv.writer(h)
@@ -217,6 +220,17 @@ def checks(workdir):
         status["Code"]["status"] == "blank" and status["Code"]["guess"] == "first-row", \
         status["Code"]
     yield "a header row pasted mid-file is skipped", len(report) == 5, len(report)
+    import json
+    with open(os.path.join(workdir, "resolved.json"), encoding="utf-8") as h:
+        resolved = json.load(h)
+    entries = {e["first"]: e for doc in resolved.values() for e in doc}
+    yield "an inferred caption-rows the remediator removed is not applied", \
+        entries["The Message Triangle"]["caption_rows"] == [], entries["The Message Triangle"]
+    yield "a caption-rows declared by hand reaches the resolved file", \
+        entries[""]["caption_rows"] == [1] if "" in entries else False, \
+        {k: v["caption_rows"] for k, v in entries.items()}
+    yield "the resolved file carries the value in effect", \
+        entries[""]["headers"] == "first-row" if "" in entries else False, ""
 
     # A stale key stops the run, after writing the report.
     with open(os.path.join(workdir, "table-headers.csv"), "a", newline="", encoding="utf-8") as h:

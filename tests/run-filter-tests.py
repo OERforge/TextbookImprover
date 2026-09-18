@@ -302,7 +302,9 @@ def case_tables_b(work):
     return [
         ("both tables are present",
          lambda: len(tables) == 2),
-        # Today: a spanning header cell. Item 1 should make this a caption.
+        # With no pre-pass in reach, as here, the reader's spanning header
+        # cell stands. With one, caption-rows=1 is inferred and the row
+        # becomes the caption; case_headers covers that.
         ("a merged full-width first row becomes a header spanning the table",
          lambda: 'colspan="3"' in head
                  and "Table 2.1 Sample results" in head),
@@ -367,8 +369,10 @@ def case_headers(work):
     out = Converted(work, ["tables", "tables-b"],
                     {"TABLE_HEADERS_RESOLVED": resolved})
     t11, t12 = out.tables("tables")[:2]
-    plain_html = out.tables("tables-b")[1]
+    titled_html, plain_html = out.tables("tables-b")[:2]
     body_rows = t11.count("<tr>") - 1
+    titled_head = re.search(r"<thead>.*?</thead>", titled_html, re.S)
+    titled_head = titled_head.group(0) if titled_head else ""
 
     # A resolved entry whose shape does not match the table it points at
     # must not be applied: the filter's count of tables and the pre-pass's
@@ -397,6 +401,18 @@ def case_headers(work):
          lambda: Converted.cells(plain_html, "th") == 0),
         ("the pre-pass report records the declarations",
          lambda: out.reports.get("table-headers-report.csv", "").count("declared") >= 2),
+        # The merged title row: caption-rows=1 is inferred by the pre-pass
+        # and written into the prefilled row, which the remediator kept.
+        ("a merged title row becomes the caption",
+         lambda: "<caption>" in titled_html
+                 and "Table 2.1 Sample results" in
+                 re.search(r"<caption>.*?</caption>", titled_html, re.S).group(0)),
+        ("and is no longer a header cell spanning the table",
+         lambda: 'colspan="3"' not in titled_head
+                 and "Sample results" not in titled_head),
+        ("the real header row beneath it is the head",
+         lambda: Converted.cells(titled_head, "th") == 3
+                 and titled_head.count('scope="col"') == 3),
         ("a resolved entry whose shape does not match is not applied",
          lambda: "<thead>" in t12_again
                  and t12_again.count('<th scope="row">') == 0),

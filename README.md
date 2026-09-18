@@ -269,6 +269,15 @@ Beyond the Word-to-HTML translation, each page gets:
   a focusable scroll wrapper. Pandoc's own stylesheet sets `display: block`
   on tables, which strips the table role from the accessibility tree; the
   wrapper restores it.
+- **A merged title row becomes the caption.** Word has no caption feature
+  for tables, so authors put the title in a merged first row, and Pandoc
+  makes it a header cell spanning the table. The run recognizes the shape,
+  writes `caption-rows=1` into the table's prefilled sidecar row so the
+  decision is visible and reversible, and folds the row into the caption:
+  after the label if there is one, so "Table 2.14" becomes "Table 2.14
+  Number of hours my classmates spent playing video games on weekends".
+  Equations in the row stay equations. `caption-rows=N,M` in the sidecar
+  does the same for any rows a person names.
 - **Tables get the headers they were declared to have.** `table-headers.csv`
   says, per table, whether the headers are in the first row, the first
   column, both, or nowhere (see [Sidecar files](#sidecar-files)), and for a
@@ -368,8 +377,8 @@ it so you can find the table -- and you rename that file, or paste its rows
 in on later runs when tables have been added. A row whose key matches no
 table stops the run, since a correction that silently fails to apply
 destroys work invisibly; the report names the row. Values this version does
-not act on yet (`manual`, `list`, `split-at`, `caption-rows`) are accepted
-and kept, so a book can start carrying them. The value in effect -- the sidecar's where one was declared, the guess
+not act on yet (`manual`, `list`, `split-at`) are accepted and kept, so a
+book can start carrying them. The value in effect -- the sidecar's where one was declared, the guess
 otherwise -- is applied when the page is built. A status of `needs-word` in
 the report means no cell of the table could serve as a header, so no value
 can help and headers have to be written in Word; that is the one thing the

@@ -202,6 +202,19 @@ def tables_in(path):
 # Deciding
 # ---------------------------------------------------------------------------
 
+def caption_rows_in_effect(info, row):
+    """The rows to fold into the caption: the sidecar's list where a row
+    exists (a blank there means none, so a person can remove the inferred
+    one), else the pre-pass's inference for a table with no row yet."""
+    text = row["caption-rows"] if row is not None else info["caption-rows"]
+    rows = []
+    for part in (text or "").split(","):
+        part = part.strip()
+        if part.isdigit() and int(part) > 0:
+            rows.append(int(part))
+    return rows
+
+
 def in_effect(info, row):
     """The value the filter should apply: the sidecar's if it declared
     one of the acting values, else the guess. manual, list, and a blank
@@ -292,10 +305,19 @@ def main():
         declared, supplier, status, note = decide(info, row)
         # Keyed by stem, not filename: the filter runs on the JSON
         # intermediate named after the .docx, and knows only the stem.
+        caption_rows = caption_rows_in_effect(info, row)
         resolved.setdefault(os.path.splitext(info["source"])[0], []).append({
             "index": info["index"], "headers": in_effect(info, row),
+            "caption_rows": caption_rows,
             "rows": info["rows"], "cols": info["cols"], "first": info["first"],
         })
+        if caption_rows:
+            note = (note + "; " if note else "") + (
+                "caption-rows=%s: row%s folded into the caption"
+                % (",".join(str(n) for n in caption_rows),
+                   "s" if len(caption_rows) > 1 else ""))
+            if row is None:
+                note += " (inferred: a merged full-width first row is a title)"
         report.append({
             "key": info["key"], "source": info["source"],
             "label": info["label"], "preview": info["preview"],

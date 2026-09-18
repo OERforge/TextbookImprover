@@ -31,6 +31,7 @@ figure_filter="$script_dir/figures-and-tables.lua"
 media_filter="$script_dir/media-extensions.lua"
 config_reader="$script_dir/read-conversion-config.py"
 cartridge_tool="$script_dir/build-cartridge.py"
+headers_tool="$script_dir/table-headers.py"
 
 for required in "$figure_filter" "$media_filter"; do
   if [ ! -f "$required" ]; then
@@ -142,7 +143,10 @@ TABLE_CAPTIONS_NAME="table-captions.csv"
 IMAGE_ALT_NAME="image-alt.csv"
 TABLE_CAPTIONS_MISSING_NAME="table-captions-missing.csv"
 IMAGE_ALT_MISSING_NAME="image-alt-missing.csv"
+TABLE_HEADERS_NAME="table-headers.csv"
 TABLE_HEADERS_MISSING_NAME="table-headers-missing.csv"
+TABLE_HEADERS_NEW_NAME="table-headers-new.csv"
+TABLE_HEADERS_REPORT_NAME="table-headers-report.csv"
 MEDIA_UNRESOLVED_NAME="media-unresolved.csv"
 SPACER_LOG_NAME="spacer-images.csv"
 
@@ -208,6 +212,7 @@ resolve_path() {
 
 export TABLE_CAPTIONS="$(resolve_path "$TABLE_CAPTIONS_NAME")"
 export IMAGE_ALT="$(resolve_path "$IMAGE_ALT_NAME")"
+export TABLE_HEADERS="$(resolve_path "$TABLE_HEADERS_NAME")"
 
 # A sidecar the config names but the filter cannot read is almost always a
 # wrong path rather than a deliberately empty one, and the run would
@@ -227,12 +232,47 @@ check_sidecar() {
 
 check_sidecar "$TABLE_CAPTIONS" 'sidecars.table_captions' 'table-captions.csv'
 check_sidecar "$IMAGE_ALT" 'sidecars.image_alt' 'image-alt.csv'
+check_sidecar "$TABLE_HEADERS" 'sidecars.table_headers' 'table-headers.csv'
 
 missing_report="$(resolve_path "$TABLE_CAPTIONS_MISSING_NAME")"
 alt_report="$(resolve_path "$IMAGE_ALT_MISSING_NAME")"
 header_report="$(resolve_path "$TABLE_HEADERS_MISSING_NAME")"
+headers_new="$(resolve_path "$TABLE_HEADERS_NEW_NAME")"
+headers_report="$(resolve_path "$TABLE_HEADERS_REPORT_NAME")"
 unresolved_report="$(resolve_path "$MEDIA_UNRESOLVED_NAME")"
 spacer_report="$(resolve_path "$SPACER_LOG_NAME")"
+
+############################################
+# 0.5. The table-headers pre-pass
+#
+#    Runs on the .docx files, before Pandoc sees them, because the
+#    evidence the guess reads -- repeat-header rows, bold, shading -- does
+#    not survive Pandoc's reader. For every data table it computes the
+#    sidecar key, reads what the sidecar declares, guesses the rest, and
+#    writes table-headers-report.csv. Tables with no sidecar row get a
+#    prefilled row in table-headers-new.csv, in the sidecar's own format,
+#    ready to paste in.
+#
+#    Nothing downstream consumes the result yet; that is the next step
+#    of roadmap item 1. What this step establishes is the sidecar, the
+#    key, and the report, so a book can start carrying declarations now.
+#
+#    A sidecar row whose key matches no table stops the run. A correction
+#    that silently does not apply destroys work invisibly, and the report
+#    lists the unmatched rows beside the tables no row claimed.
+############################################
+docx_files=()
+for f in *.docx; do
+  [ -e "$f" ] || continue
+  case "$f" in '~$'*) continue ;; esac   # Word's owner file, not a document
+  docx_files+=("$f")
+done
+if [ "${#docx_files[@]}" -gt 0 ]; then
+  if ! python3 "$headers_tool" "${docx_files[@]}" --sidecar "$TABLE_HEADERS" \
+       --new "$headers_new" --report "$headers_report"; then
+    exit 1
+  fi
+fi
 
 ############################################
 # 1. Convert DOCX -> a filtered JSON intermediate, extract media

@@ -27,7 +27,11 @@
 #                          and directory names, and the places where one
 #                          fact is written down twice and could drift.
 #
-#   run-census-tests.py    the sidecar guess in util/table-census.py,
+#   run-headers-tests.py   the table-headers pre-pass end to end: keys,
+#                          the sidecar's values and aliases, the new-rows
+#                          file, the report, and the unmatched-key stop.
+#
+#   run-census-tests.py    the sidecar guess in lib/tablecensus.py,
 #                          against tables built as OOXML so each carries
 #                          exactly the formatting signals it means to.
 #
@@ -80,6 +84,7 @@ run run-config-tests.py
 run run-roundtrip-test.py
 run run-unit-tests.py
 run run-census-tests.py
+run run-headers-tests.py
 
 # The filter tests convert real documents, so they need Pandoc. Skipping
 # is reported rather than silent: a suite that quietly does not run is

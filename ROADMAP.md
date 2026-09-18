@@ -6,6 +6,8 @@ We are attempting to follow two principles: build the tool that can check a chan
 
 ## 1. Table headers sidecar
 
+**Why now.** It is the largest accessibility gap remaining, it is independent of everything else, and the schema is in place so it arrives as a declared setting rather than another environment variable.
+
 A CSV declaring, per table, which lines hold its headers: `first-row`, `first-column`, `both`, or `none`. The conversion applies it, so the same declaration drives every output format.
 
 **Status: built, on the `table-headers` branch.** The sidecar, the key, the pre-pass, and the report exist; the filter applies the value in effect (`first-row`, `first-column`, `both`, `none`; a blank, `manual`, and `list` leave the table as Pandoc gave it); `caption-rows` folds named rows into the caption, with `caption-rows=1` inferred for a merged title row; and `split-at` makes one table per band, inferred for merged rows below row 1. What remains is the merge to `main` and a release.
@@ -22,7 +24,7 @@ The rule that produces it: a first column that keys its rows, over a body of val
 
 Where the guess is soft rather than wrong: 89 of the tables it calls `both` have two columns, and there `both` and `first-row` are both defensible. A screen reader on the value cell of `Labor | Wage` announces the row label as well, which helps someone who arrowed into the middle of the table and is verbose for someone reading it top to bottom. W3C's [one-header page](https://www.w3.org/WAI/tutorials/tables/one-header/) makes the case for the lighter markup on small tables where the data is unambiguous on its own. It stays `both` because the errors are not symmetric -- a spurious `scope="row"` costs verbosity, a missing one loses the association -- and because carving out two-column tables would reverse the decision that `Data | Frequency` and `x | P(x)` are matrix tables. Worth sampling there first.
 
-Residual error is small but real. Of the tables guessed `both`, five have parallel column headers (`Team 1 | Team 2 | Team 3`), and two of those five are genuinely a first data column that happens to ascend. The guess is a starting point to correct, not an answer.
+Residual error is small but real. Of the tables guessed `both`, five have parallel column headers (`Team 1 | Team 2 | Team 3`), and two of those five are genuinely a first data column that gets promoted inappropriately. The guess is a starting point to correct, not an answer.
 
 Two shapes to read past before any of this applies: a merged full-width first row, which becomes a `<caption>`, and a wholly empty first row, which three tables in the data science book use above their real header row. Reading either as the header row calls an ordinary table headerless. In a one-column table every row spans the width trivially, so the first test has to be off there or it consumes the table.
 
@@ -40,7 +42,7 @@ Two kinds of table have nothing wrong with their headers and something wrong wit
 
 `caption-rows=N,M` declares that those rows are not part of the table and their content belongs in the caption, in the same syntax as `split-at`. A merged full-width first row is the inferred case, `caption-rows=1`. It is not `split-at` under another name: that divides a table into parts, this removes a row and moves what it held. `11-5-race-and-ethnicity-in-the-united-states.docx` is the case -- it opens with `Population estimates, July 1, 2019 | 328,239,523`, a fact about the whole table sitting above the real header row, which is why that table is the corpus's only `unknown`. Folded into the caption it reads as one sentence and leaves an ordinary `both` table underneath. Two things to settle when it is built: how the cells of the removed row are joined into caption text (a colon between the two here, but that is one example), and what happens when the table already has a caption, since a book that labels its tables will have one.
 
-**A list snaked into columns.** Four tables in the programming book are glossaries laid out three columns wide, running alphabetically down column one and then down column two. Read across the rows, which is what HTML and a screen reader do, the order becomes `Class, JavaDoc, private` and the alphabetical sequence is gone. `none` is the right value and says nothing about the problem. This one is a real defect: the content reaches the reader in an order the author did not write. `util/table-samples.py` recognizes the shape well enough to show examples (two or more columns individually sorted, short text cells, no numbers, row-major order not sorted), but two genuine data tables elsewhere have sorted columns by coincidence, so it is a prompt to look rather than something to act on. That is also why it has to be a declared value rather than something the conversion decides: turning a real data table into a list would destroy structure that is doing work.
+**A list snaked into columns.** Four tables in the programming book in our test corpus are glossaries laid out three columns wide, running alphabetically down column one and then down column two. Read across the rows, which is what HTML and a screen reader do, the order becomes `Class, JavaDoc, private` and the alphabetical sequence is gone. `none` is the right value and says nothing about the problem. This one is a real defect: the content reaches the reader in an order the author did not write. `util/table-samples.py` recognizes the shape well enough to show examples (two or more columns individually sorted, short text cells, no numbers, row-major order not sorted), but two genuine data tables elsewhere have sorted columns by coincidence, so it is a prompt to look rather than something to act on. That is also why it has to be a declared value rather than something the conversion decides: turning a real data table into a list would destroy structure that is doing work.
 
 Rebuilding the cells in column order as a `BulletList` is a few lines in a Lua filter and produces the right order, verified on 3.11. The caption is what makes it more than that, and all three routes were tested:
 
@@ -56,7 +58,7 @@ The distinction between the two matters more than either case. A table whose rea
 
 ### Splitting grouping-band tables
 
-Twelve tables across the five books have a merged full-width row partway down, labeling the rows beneath it, 34 such rows in total. They are all genuine merges and the census sees all of them; an earlier draft of this section claimed one book wrote its bands as repeated text instead, which was wrong. The largest is `d-appendix-d-review-of-python-functions.docx`, 85 rows with seven bands. `<th colspan="N" scope="rowgroup">` is the canonical HTML answer, but `scope="rowgroup"` has thin screen reader support, PDF's `Scope` has no rowgroup value, and a cell `Headers` array is an open item in `latex-lab-table`. So the sidecar takes `split-at=1,6,11` instead and each band starts a new table with the band text as its caption. That works identically in HTML and LaTeX, and for `7-5-costs-in-the-long-run.docx` it is a truer reading of the source, which really is three tables Word glued together.
+Twelve tables across the five books have a merged full-width row partway down, labeling the rows beneath it, 34 such rows in total. They are all genuine merges and the census sees all of them; an earlier draft of this section claimed one book wrote its bands as repeated text instead, which was wrong. The largest is `d-appendix-d-review-of-python-functions.docx`, 85 rows with seven bands. `<th colspan="N" scope="rowgroup">` is the canonical HTML answer, but `scope="rowgroup"` has thin screen reader support; PDF's `Scope` has no rowgroup value; and a cell `Headers` array is an open item in `latex-lab-table`. So the sidecar takes `split-at=1,6,11` instead and each band starts a new table with the band text as its caption. That works identically in HTML and LaTeX, and for `7-5-costs-in-the-long-run.docx` it is a truer reading of the source, which really is three tables Word glued together.
 
 Two things the build settled that the plan had wrong. First, that table's bands each sit over their own header row -- "Example A", then `| Labor Cost | Machine Cost | Total Cost`, then the data, then "Example B" and another header row -- so "every part gets a copy of the original header row" is right only where the table had one marked in Word; otherwise each part's own first row is promoted by the header declaration, applied per part. Second, row 1 there is a band, not a title, and the pre-pass tells the two apart by whether there are bands below: a merged row 1 alone is `caption-rows=1`, a merged row 1 with bands beneath joins `split-at`. The guess for a banded table is taken part by part with any shared header rows in place, and the parts vote; read whole, the bands break every rule and such a table guessed `none`.
 
@@ -64,7 +66,7 @@ Third, a band need not be a merged row. Table 7.2 of the sociology book repeats 
 
 ### Keys
 
-A key has to survive the source being reissued, and it has to survive us splitting a table. Position survives neither. Content hashing survives both, and the collision worry turns out to be backwards: if two tables have identical content they want identical headers, so a collision is a feature.
+A key has to survive the source being reissued, and it has to survive splitting a table. Position survives neither. Content hashing survives both, and the collision worry turns out to be backwards: if two tables have identical content they want identical headers, so a collision is a feature.
 
 Measured on the three books, a hash over the whole normalized cell text plus the table's shape gives 15 duplicate groups covering 31 tables, and **no group whose members the guess treats differently**. A narrower hash over just the header row, first column, and shape gives 36 groups covering 76 tables, of which 4 disagree. So the narrow hash buys robustness against an edit in a data cell at the cost of merging tables that want different declarations, and the full hash is the better trade on this corpus.
 
@@ -84,15 +86,15 @@ The default for an unmarked table is a declared setting rather than a constant. 
 
 ### Which Pandoc this needs
 
-Not a newer one. Setting `row_head_columns` from a Lua filter, and setting `scope` on a cell's attributes, produce identical HTML on 3.1.3, 3.9, and 3.11, and survive to EPUB3 unchanged on 3.9 and 3.11. So item 1 adds no version pressure and the project's existing floor of 3.9 stands.
+Setting `row_head_columns` from a Lua filter, and setting `scope` on a cell's attributes, produce identical HTML on 3.1.3, 3.9, and 3.11, and survive to EPUB3 unchanged on 3.9 and 3.11. So item 1 adds no version pressure and the project's existing floor of 3.9 stands.
 
-Two version facts that bear on it anyway. Pandoc's DOCX reader treated `<w:tblHeader w:val="0"/>` as marking a header row until 3.10, so on an earlier version a deliberately disabled header row reads as a header. None of the 1,011 files in the four books carries one (590 `tblHeader` elements, none disabled), so the census figures are unaffected, but the next corpus may differ. And spanning cells only round-trip through the Markdown writer from 3.7, which matters for the complex tables item 1 does not cover.
+But 3.11 is a good idea anyway. Pandoc's DOCX reader treated `<w:tblHeader w:val="0"/>` as marking a header row until 3.10, so on an earlier version a deliberately disabled header row reads as a header. None of the 1,011 files in the four books carries one (590 `tblHeader` elements, none disabled), so the census figures are unaffected, but the next corpus may differ. Also, spanning cells only round-trip through the Markdown writer from 3.7, which matters for the complex tables item 1 does not cover.
 
 ### What the PDF half can and cannot do
 
 `table/header-columns={1}` is the mechanism, and it is what my `matrix-headers.lua` already emits. Three things about it are worth writing down before anyone builds on it.
 
-The setting is ambient, not per-table. [The documentation](https://ctan.org/pkg/latex-lab) says it applies to all tables until changed or emptied, so the pattern is set-before and reset-after around each table, which is self-contained and works for a filter that knows nothing about the surrounding document. There is no per-table argument to pass.
+The setting is sticky, not per-table. [The documentation](https://ctan.org/pkg/latex-lab) says it applies to all tables until changed or emptied, so the pattern is set-before and reset-after around each table, which is self-contained and works for a filter that knows nothing about the surrounding document. There is no per-table argument to pass.
 
 `table/header-rows` is ignored whenever `\endhead` or `\endfirsthead` is present, which for Pandoc is always, because Pandoc emits `longtable` for everything. The documentation is explicit: in a longtable the code uses the `\endhead` or `\endfirsthead` rows as the header and in that case ignores `table/header-rows`. So the header row is tagged `TH` either way, and setting the key changes nothing; the column key is the only one whose value alters the output. If we ever emitted `tabular` inside a float instead, that would reverse: there is no `\endhead` to read, and `table/header-rows={1}` would become the only thing marking the header row. A cell falling under both settings gets `TH-both`, so a matrix table's blank corner gets `Scope=Both` for free.
 
@@ -102,9 +104,66 @@ A longtable `\caption` is typeset as a multicolumn inside `\endfirsthead` and is
 
 Both are described, with citations, in [Troubleshooting and known limits](docs/troubleshooting.md#known-limits): the `/ClassMap` attribute class PAC does not resolve, and the `Artifact` under `Table` it rejects though ISO 32000-2 permits it. Item 1's output will trip both, and neither is a defect to chase.
 
-**Why now.** It is the largest accessibility gap remaining, it is independent of everything else, and the schema is in place so it arrives as a declared setting rather than another environment variable.
+## 2. EPUB3 output
 
-## 2. Link text sidecar, for bare URLs
+One EPUB per book, its table of contents built from the same `contents` the cartridge organization uses. A per-chapter variant follows from the targets mechanism once the first one works.
+
+Nearly free on the table side: EPUB3 uses Pandoc's HTML writer, so `id`, `colspan`, `rowspan`, `scope`, `headers`, and `role` all survive unchanged. The real work is the package document. Pandoc emits accessibility metadata unconditionally and asserts things it can't know: `accessMode: textual` for books that are 820 figures, and `accessibilityFeature: alternativeText` whether or not the images have any. `--epub-metadata` silently drops `schema:` properties, so correcting this means post-processing the OPF inside the archive. An EPUB claiming alt text it does not have is worse than one claiming nothing, because catalogs and assistive technology act on that claim.
+
+**Why here.** A second consumer of the table sidecar is the only real test that it describes semantics rather than HTML markup. Defer every output format to the end and HTML assumptions get baked in while nothing pushes back.
+
+## 3. Multiple targets, and `convert.sh` rewritten in Python
+
+The configuration already describes several conversion targets and several packages, each overriding the defaults. Making them real means: building each target into its own output directory, reusing one parsed intermediate across targets that do not override media, and ordering builds from what a package declares it `includes` rather than from the order blocks appear in a file.
+
+`convert.sh` becomes Python at the same time. Adding N targets restructures most of it anyway, and rewriting a script you are about to gut is much cheaper than rewriting one you mean to keep. The argument for Python is mostly the front end in item 11: a web interface shelling out to bash and scraping stderr can't ask what targets exist, can't report progress per document, and can't tell a media failure from a Pandoc failure without parsing prose. Conversion needs to be callable, not just runnable.
+
+The accumulated knowledge in the comments — the Word lock-file check, the zip-signature test for a renamed `.doc`, the cloud-drive write retry, the EMF/WMF guidance — has to carry across verbatim. A rewrite is exactly where that gets dropped. `set -x` tracing needs a deliberate equivalent, too: seeing every Pandoc invocation as it happens has been useful more than once.
+
+`compare-output.py` makes this checkable. The rewrite is done when it says `Runs agree`.
+
+## 4. Markdown as a source format, read and written
+
+Markdown is the one format this project should be able to go both ways in, and the two halves are one piece of work because they define the same vocabulary. Reading has to accept the markers writing emits; writing has to emit markers reading accepts. Ship either half alone and the other is where you find out the first chose badly.
+
+**Tables survive better than this item used to claim.** What Markdown cannot carry is the rendered markup: there is no syntax for `scope` on a cell or for a header column. What it can carry is the *declaration*, in a fenced div, and the declaration is what the sidecar holds anyway. Verified on 3.11: `::: matrix` around a table round-trips through the `markdown` and `commonmark_x` writers and readers as `Div ("", ["matrix"], [])`, and a filter reading that class regenerates the whole thing -- `<caption>`, `scope="col"` across the head, `scope="row"` down the first column. So a Markdown source is not a lesser input carrying more sidecar load; it is a source where the sidecar's content lives in the document. That is how my own textbook is written, with `::: matrix` and `matrix-headers.lua`.
+
+**Captions round-trip in `markdown` and not in `commonmark_x`.** The `markdown` writer emits `: Table 7.1 Costs by technology` beneath the table and reads it back as the table's `Caption`; `commonmark_x` writes it as a following paragraph and reads it back as a paragraph, association gone. That is a second reason for the flavor constraint the link attributes already impose.
+
+**The flavor is not free.** It has to be `markdown` or `commonmark_x`. Those round-trip a link's `{aria-label="..."}` attribute; `gfm`, `commonmark`, and `markdown_strict` rewrite the whole link as a raw `<a>` element instead, and reading such a file back gives a `RawInline` holding the tag, a `Link` stripped of its attributes, and another `RawInline`. So the description survives visually and stops being reachable by any filter that looks at `Link.attributes`. `gfm` does the same to a fenced div. The extension has to be asserted on the target rather than assumed, and it is not spelled the same way in both: `link_attributes` for `markdown`, `attributes` for `commonmark_x`.
+
+**Marker names are configurable.** `::: matrix` is what one author chose; another will have chosen otherwise, and a book may mark nothing at all. So `tables.markers` maps each declaration to the div classes that mean it, defaulting to what my textbook uses, and an unmarked table is the unmarked case: guessed, reported, and distinguishable in the report from one that was marked. The same applies to links, where a Markdown source can carry its own `aria-label` and needs no sidecar at all.
+
+**The acceptance test exists only when both halves do.** Convert a `.docx` to Markdown, convert that Markdown to HTML, and compare against converting the `.docx` straight to HTML. If the pages differ, a declaration did not survive. `util/compare-output.py` already performs that comparison, so the gate is free once the second half lands.
+
+**Read first, write second.** There are Markdown books to test the reading half against today, and no Markdown output yet to produce any. Reading also settles the marker vocabulary against a real document rather than against a guess.
+
+**Why here.** Its only dependency is the targets mechanism above. It is the cheapest format on this list, it is not blocked on anything external the way PDF is, and it is the one that turns this project from a one-way converter into something a book can be maintained in.
+
+## 5. HTML and EPUB as input formats
+
+With Markdown handled above, what remains is HTML and EPUB, and they are close relatives: an EPUB is zipped XHTML, and Pandoc reads it with the same reader.
+
+**HTML opens same-format remediation** -- reading an HTML file and writing it back improved. Pandoc's HTML reader preserves `scope`, `headers`, `id`, and `role`, so this round-trips, which gives a testable invariant worth having: **running the pipeline on its own output should change nothing.** That is a stronger regression test than golden files, because it catches any filter that applies twice or acts non-deterministically. Note the fixed point is reached after one pass, not zero: the reader normalizes irregular tables on the way in.
+
+One thing to know before relying on it: the reader keeps the attribute but not the element. `<th scope="row">` comes back as a `Cell` carrying `("scope","row")` and is written as `<td scope="row">`, because a `Cell` has no is-a-header flag and only `row_head_columns` makes a body cell a `th`. So `scope="row"` on the first column is a source marker meaning `first-column` or `both`, and the filter sets `row_head_columns` to make it true again. Verified on 3.11 for both readers.
+
+**EPUB earns its place twice over.** Its `nav.xhtml` is the book's table of contents in machine-readable form, which is the packager's module tree without needing the PDF's bookmark outline (see Smaller things). And it is built from the same source as the DOCX but keeps the ids the DOCX export drops, which is where the anchors for item 8 would have to come from.
+
+## 6. Validating each output the way the manifest is validated
+
+The cartridge is the one output the pipeline checks after building it: `validate-manifest.py` runs the manifest against the IMS schemas and reports what does not conform. Every other output is trusted. That is worth changing as outputs multiply, because each format has a validator that finds the same class of mistake -- structure that is well-formed and wrong -- and none of them is the kind of thing a person notices by looking at a page.
+
+- **HTML**: the Nu HTML checker (`vnu.jar`, needs Java) for conformance; `pa11y` or `axe-core` for the accessibility rules that markup alone can be checked against, which is most of what the tables and links work produces.
+- **EPUB**: `epubcheck` (Java) for the container and content, and DAISY's `Ace` for accessibility, which reports on exactly the table and image markup this project cares about.
+- **PDF**: `veraPDF` for PDF/UA conformance, scriptable and cross-platform. PAC is Windows-only and interactive, and its two known defects (item 9) mean its output needs reading with that in mind.
+- **DOCX**: Word's Accessibility Checker cannot be driven from a script. `util/docx-compat.py`'s checks are what can be automated, and they are about the package, not the content.
+
+The shape would be a `--check` per target, as the packager has today, run by `convert.sh` after the build and reported alongside the other reports rather than failing the run: a validator's findings are things to work through, and the run producing them is the point. Each tool wants installing separately, which is the argument for making every one optional and saying which ran.
+
+## 7. Link text sidecar, for bare URLs
+
+**Held, with item 8, until the WCAG question is settled.** Both items change what a link says or where it goes, and the question is the same for each: whether the result still meets the letter and the spirit of the guidelines. Here it is whether supplying an accessible name the visible text does not show -- so that a sighted reader and a screen reader user are given different link text -- is the right reading of 2.4.4, or whether the honest fix is to change the visible text so everyone sees it. The research below stands; what waits is the decision it feeds.
 
 A reference list reads like this:
 
@@ -116,7 +175,7 @@ A sidecar maps each URL to a short description, which the filter attaches to the
 
 - **HTML and EPUB3** need nothing further. Pandoc's writer emits the attribute as it stands, verified in both.
 - **PDF** needs the attribute turned into the `/Contents` entry of the link annotation, which is what PDF/UA requires as a link's alternate description and what Acrobat announces. A filter for this already exists from another project and reads exactly the attribute above, so the two halves meet without either knowing about the other. What this gets us: in testing, Acrobat announces `/Contents`, browser PDF viewers ignore it. Every other mechanism — `/Alt` or `/ActualText` on a marked-content span, `/Alt` on the `Link` structure element — was tested against Acrobat and NVDA and announced nothing, and Edge announced nothing for any of them including `/Contents`. So the PDF half reaches Acrobat users and no one else, which is an argument for sequencing it after the HTML and EPUB halves rather than alongside them.
-- **Markdown**, once it is an output format (item 5), carries the annotation as the `{aria-label="..."}` attribute syntax it was authored in. This is the same markup my textbook project writes by hand, so a sidecar-generated description and an author-written one are indistinguishable downstream. The flavor matters: `markdown` and `commonmark_x` round-trip the attribute, while `gfm`, `commonmark`, and `markdown_strict` rewrite the whole link as a raw `<a>` element. The extension is spelled `link_attributes` for `markdown` and `attributes` for `commonmark_x`, verified on 3.11. That is not a silent loss (it survives in the HTML) but reading such a file back gives a `RawInline` holding the opening tag, a bare `Link` stripped of its attributes, and a `RawInline` holding the closing tag. So a filter reading `Link.attributes` finds nothing, and the PDF half of this breaks. Any Markdown target needs the extension asserted rather than assumed. Item 5 has the detail.
+- **Markdown**, once item 4 lands, carries the annotation as the `{aria-label="..."}` attribute syntax it was authored in. This is the same markup my textbook project writes by hand, so a sidecar-generated description and an author-written one are indistinguishable downstream. The flavor matters: `markdown` and `commonmark_x` round-trip the attribute, while `gfm`, `commonmark`, and `markdown_strict` rewrite the whole link as a raw `<a>` element. The extension is spelled `link_attributes` for `markdown` and `attributes` for `commonmark_x`, verified on 3.11. That is not a silent loss (it survives in the HTML) but reading such a file back gives a `RawInline` holding the opening tag, a bare `Link` stripped of its attributes, and a `RawInline` holding the closing tag. So a filter reading `Link.attributes` finds nothing, and the PDF half of this breaks. Any Markdown target needs the extension asserted rather than assumed. Item 5 has the detail.
 
 ### What has to be worked out
 
@@ -134,64 +193,15 @@ Still worth deciding deliberately rather than by default, and the PDF testing ar
 
 **The LaTeX side needs a preamble.** The existing filter emits `\LinkAlt{...}` and `\LinkAltReset{}` around each link, and those macros live in a `link-alt-preamble.tex` that has to come along with it. It is also a no-op without `\DocumentMetadata` tagging enabled, so the PDF half of this arrives with item 9 rather than before it. The HTML and EPUB halves have no such dependency.
 
-### Why second
+### Why it is not harder than it looks
 
-It is smaller than anything else on this list and shares all its plumbing with item 1: report what needs a human, read a CSV, apply it, report what is still outstanding. Building that machinery once with two users tests whether it is actually general, which is cheaper to find out now than after a third sidecar is bolted onto it.
+It is smaller than most of what is on this list and shares all its plumbing with item 1: report what needs a human, read a CSV, apply it, report what is still outstanding. That machinery is built and has one user, so this is the second, which is what tests whether it is actually general -- cheaper to find out with two than after a third sidecar is bolted on. What holds the item is the question above, not the work.
 
-## 3. EPUB3 output
+## 8. Rewriting links that point back at the publisher
 
-One EPUB per book, its table of contents built from the same `contents` the cartridge organization uses. A per-chapter variant follows from the targets mechanism once the first one works.
+**Held, with item 7, until the WCAG question is settled.** Rewriting a link changes where it goes, and the question is whether the result still meets the letter and the spirit of the guidelines: a link whose text and surrounding prose describe one destination (the publisher's page, with its anchor) would then lead somewhere else (a local page, possibly without the anchor), and that bears on how link purpose is judged. The measurements are done, so the work waits on that reading rather than on more investigation.
 
-Nearly free on the table side: EPUB3 uses Pandoc's HTML writer, so `id`, `colspan`, `rowspan`, `scope`, `headers`, and `role` all survive unchanged. The real work is the package document. Pandoc emits accessibility metadata unconditionally and asserts things it can't know: `accessMode: textual` for books that are 820 figures, and `accessibilityFeature: alternativeText` whether or not the images have any. `--epub-metadata` silently drops `schema:` properties, so correcting this means post-processing the OPF inside the archive. An EPUB claiming alt text it does not have is worse than one claiming nothing, because catalogs and assistive technology act on that claim.
-
-**Why second.** A second consumer of the table sidecar is the only real test that it describes semantics rather than HTML markup. Defer every output format to the end and HTML assumptions get baked in while nothing pushes back.
-
-## 4. Multiple targets, and `convert.sh` rewritten in Python
-
-The configuration already describes several conversion targets and several packages, each overriding the defaults. Making them real means: building each target into its own output directory, reusing one parsed intermediate across targets that do not override media, and ordering builds from what a package declares it `includes` rather than from the order blocks appear in a file.
-
-`convert.sh` becomes Python at the same time. Adding N targets restructures most of it anyway, and rewriting a script you are about to gut is much cheaper than rewriting one you mean to keep. The argument for Python is mostly the front end in item 11: a web interface shelling out to bash and scraping stderr can't ask what targets exist, can't report progress per document, and can't tell a media failure from a Pandoc failure without parsing prose. Conversion needs to be callable, not just runnable.
-
-The accumulated knowledge in the comments — the Word lock-file check, the zip-signature test for a renamed `.doc`, the cloud-drive write retry, the EMF/WMF guidance — has to carry across verbatim. A rewrite is exactly where that gets dropped. `set -x` tracing needs a deliberate equivalent, too: seeing every Pandoc invocation as it happens has been useful more than once.
-
-`compare-output.py` makes this checkable. The rewrite is done when it says `Runs agree`.
-
-## 5. Markdown output
-
-Pandoc writes Markdown already, so the work is small: a target with a format, and two decisions.
-
-**The flavor is not free.** It has to be `markdown` or `commonmark_x`. Those round-trip a link's `{aria-label="..."}` attribute; `gfm`, `commonmark`, and `markdown_strict` rewrite the whole link as a raw `<a>` element instead, and reading such a file back gives a `RawInline` holding the tag, a `Link` stripped of its attributes, and another `RawInline`. So the description survives visually and stops being reachable by any filter that looks at `Link.attributes`. The extension has to be asserted on the target rather than assumed, and it is not spelled the same way in both: `link_attributes` for `markdown`, `attributes` for `commonmark_x`.
-
-**Tables do not survive.** Markdown has no syntax for a header column, a cell attribute, or a `scope`, which is most of what item 1 produces. A Markdown target therefore can't be an accessible deliverable: it is a source format. That is a reasonable thing to want: converting an OER `.docx` into editable Pandoc Markdown is how a book gets maintained rather than merely republished, and it's the form my textbook project authors in. But the report files remain the record of the accessibility work, and regenerating HTML from the Markdown would need the sidecars applied again.
-
-Links are the exception: a Markdown source can carry its own `aria-label`, so a book maintained as Markdown needs no link sidecar. See items 2 and 6, which is the reading half of the same point.
-
-**Why here.** Its only dependency is the targets mechanism above. It's the cheapest output on this list, it's not blocked on anything external the way PDF is, and it's the one that turns this project from a one-way converter into something a book can be maintained in.
-
-## 6. More input formats
-
-Markdown and HTML alongside DOCX. This mostly follows from the JSON architecture: a reader is a reader.
-
-HTML in particular opens same-format remediation, reading an HTML file and writing it back improved. Pandoc's HTML reader preserves `scope`, `headers`, `id`, and `role`, so this round-trips, which gives a testable invariant worth having: **running the pipeline on its own output should change nothing.** That is a stronger regression test than golden files, because it catches any filter that applies twice or acts non-deterministically. Note the fixed point is reached after one pass, not zero: the reader normalizes irregular tables on the way in.
-
-Markdown is the weakest input for tables: it can't express a header column or a cell attribute, so the sidecar carries proportionally more of the load. Links are the exception. Markdown can carry an `aria-label` on a link directly, in the same `{aria-label="..."}` syntax the writer emits, so for item 2 a Markdown source needs no sidecar at all: the annotation is authorable in the file. Subject to the flavor caveat noted there: `link_attributes` has to be on, or the reader sees a raw `<a>` element rather than a `Link`.
-
-## 7. Rewriting links that point back at the publisher
-
-**Held until the WCAG consequences are understood.** Rewriting a link changes where it goes, and the question is whether the result still meets the letter and the spirit of the guidelines: a link whose text and surrounding prose describe one destination (the publisher's page, with its anchor) would then lead somewhere else (a local page, possibly without the anchor), and that bears on how link purpose is judged. The measurements are done, so the work waits on that reading rather than on more investigation.
-
-OpenStax's DOCX exports link within the book by absolute URL: a section quiz's answer link is `https://openstax.org/books/introduction-sociology-3e/pages/chapter-8#fs-id2627631-solution`, so a reader of the converted book is sent to the publisher's site instead of the page a few clicks away. Measured across five books, 11,306 such links, 9,911 of them with an anchor; in *Introduction to Sociology 3e* alone, 1,001 survive into the HTML and every one names a page that exists locally. The page half is a rewrite: `pages/<slug>` to `<slug>.html`, or whatever the target's page naming is. The anchor half is harder, and measured: none of the 927 anchors resolves, because the DOCX export carries no bookmarks (zero `w:bookmarkStart` in 243 files), so the `fs-id…` targets exist nowhere in the source. Two ways forward, not exclusive: rewrite to the page and drop the anchor, which is still a local link; or take anchors from the EPUB, which is built from the same source and should carry the ids -- one more argument for EPUB as an input. The `-solution` suffix is worth checking against the EPUB first, since it may be the web site's own convention rather than an id in the content. Belongs with the link work in item 2, which is already reading every link.
-
-## 8. Validating each output the way the manifest is validated
-
-The cartridge is the one output the pipeline checks after building it: `validate-manifest.py` runs the manifest against the IMS schemas and reports what does not conform. Every other output is trusted. That is worth changing as outputs multiply, because each format has a validator that finds the same class of mistake -- structure that is well-formed and wrong -- and none of them is the kind of thing a person notices by looking at a page.
-
-- **HTML**: the Nu HTML checker (`vnu.jar`, needs Java) for conformance; `pa11y` or `axe-core` for the accessibility rules that markup alone can be checked against, which is most of what the tables and links work produces.
-- **EPUB**: `epubcheck` (Java) for the container and content, and DAISY's `Ace` for accessibility, which reports on exactly the table and image markup this project cares about.
-- **PDF**: `veraPDF` for PDF/UA conformance, scriptable and cross-platform. PAC is Windows-only and interactive, and its two known defects (item 9) mean its output needs reading with that in mind.
-- **DOCX**: Word's Accessibility Checker cannot be driven from a script. `util/docx-compat.py`'s checks are what can be automated, and they are about the package, not the content.
-
-The shape would be a `--check` per target, as the packager has today, run by `convert.sh` after the build and reported alongside the other reports rather than failing the run: a validator's findings are things to work through, and the run producing them is the point. Each tool wants installing separately, which is the argument for making every one optional and saying which ran.
+OpenStax's DOCX exports link within the book by absolute URL: a section quiz's answer link is `https://openstax.org/books/introduction-sociology-3e/pages/chapter-8#fs-id2627631-solution`, so a reader of the converted book is sent to the publisher's site instead of the page a few clicks away. Measured across five books, 11,306 such links, 9,911 of them with an anchor; in *Introduction to Sociology 3e* alone, 1,001 survive into the HTML and every one names a page that exists locally. The page half is a rewrite: `pages/<slug>` to `<slug>.html`, or whatever the target's page naming is. The anchor half is harder, and measured: none of the 927 anchors resolves, because the DOCX export carries no bookmarks (zero `w:bookmarkStart` in 243 files), so the `fs-id…` targets exist nowhere in the source. Two ways forward, not exclusive: rewrite to the page and drop the anchor, which is still a local link; or take anchors from the EPUB, which is built from the same source and should carry the ids -- one more argument for EPUB as an input. The `-solution` suffix is worth checking against the EPUB first, since it may be the web site's own convention rather than an id in the content. Belongs with the link work in item 7, which is already reading every link.
 
 ## 9. PDF, and DOCX output
 

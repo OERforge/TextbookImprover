@@ -4,6 +4,16 @@ All notable changes to this project are documented in this file. The format is b
 
 Versions are two-part and pre-1.0: breaking changes may land in any of them until 1.0, and each is marked **Breaking** below. But we intend to keep the configuration schema, the command-line interface of each script, and the format of the sidecar CSV files stable in each version.
 
+## [Unreleased]
+
+### Added
+
+- `util/contrib/matrix-headers.lua`, the filter the textbook this project was built alongside is written with, kept as the reference for the marker vocabulary Markdown input has to accept: `::: matrix` around a table becomes row headers with `scope`, plus the `\tagpdfsetup{table/header-columns={1}}` bracket for the PDF. Not wired in.
+
+### Documentation
+
+- `docs/utilities.md` describes `util/contrib/`: what it is for, and what each of the three files in it does.
+
 ## [0.3] - 2026-09-18
 
 The table-headers sidecar, complete: the sidecar, the key, and the report exist; the conversion applies the value in effect for every data table; a merged title row becomes the caption; and a table with grouping bands becomes one table per band. Output changes for tables declared or guessed to have a header column, an unmarked header row, no headers, a title row, or bands.

@@ -138,16 +138,83 @@ def label_for(body, tbl, depth, parents):
     return ("inside %s" % label) if label else ""
 
 
-def inferred_caption_rows(grid):
-    """A merged full-width first row with text is a title, not a header
-    row: caption-rows=1, inferred, so the remediator can see and remove
-    it."""
+def guess_by_parts(tbl, split_at, whole_value, whole_reason):
+    """The guess for a table that will be split, taken part by part.
+
+    The bands break every rule when the table is read whole -- a blank
+    corner matrix's first column has band text in it, a key column has
+    gaps -- so the whole-table guess for a banded table is usually none.
+    Each part between the bands is an ordinary table, so guess each and
+    let them vote; the parts nearly always agree, and one value covers
+    them all in the sidecar."""
+    trs = tbl.findall(tc.q("tr"))
+    cuts = sorted(set(i - 1 for i in split_at if 0 < i <= len(trs)))
+    if not cuts:
+        return whole_value, whole_reason
+    # Rows above the first band that Word marks to repeat are the table's
+    # header rows, shared by every part -- the filter copies them into
+    # each -- so the parts are guessed with them in place. Anything else
+    # above the first band is a leading part of its own.
+    shared = []
+    while (len(shared) < cuts[0]
+           and tc.repeats_as_header(trs[len(shared)])):
+        shared.append(trs[len(shared)])
+    bounds = []
+    start = len(shared)
+    for c in cuts:
+        if c > start:
+            bounds.append((start, c))
+        start = c + 1
+    if start < len(trs):
+        bounds.append((start, len(trs)))
+    votes = []
+    for lo, hi in bounds:
+        part = ET.Element(tc.q("tbl"))
+        pr = tbl.find(tc.q("tblPr"))
+        if pr is not None:
+            part.append(pr)
+        for tr in shared:
+            part.append(tr)
+        for tr in trs[lo:hi]:
+            part.append(tr)
+        kind, ev, _, _ = tc.classify(part)
+        v, _ = tc.explain(part, kind, ev)
+        if v and v != "unknown":
+            votes.append(v)
+    if not votes:
+        return whole_value, whole_reason
+    winner = max(set(votes), key=votes.count)
+    return winner, ("guessed part by part between the bands: %s"
+                    % ", ".join(votes))
+
+
+def band_rows(grid):
+    """0-based indices of merged full-width rows with text."""
     if not grid or max(len(r) for r in grid) < 2:
-        return ""
-    first = grid[0]
-    if tc.is_full_width_band(first) and first[0].text:
-        return "1"
-    return ""
+        return []
+    return [i for i, r in enumerate(grid) if tc.is_full_width_band(r) and r[0].text]
+
+
+def inferred_structure(grid):
+    """(caption-rows, split-at) as the sidecar strings.
+
+    A merged full-width row with text is one of two things. Alone at the
+    top it is a title, and becomes the caption. Partway down it is a
+    grouping band, a label for the rows beneath it, which no header
+    markup can express in every output format; the table is split there.
+    And when row 1 is merged *and* there are bands below it, row 1 is the
+    first band, not a title -- 7-5-costs-in-the-long-run.docx opens with
+    "Example A", then "Example B" at row 6, each with its own header row
+    beneath. Written into the prefilled row so the plan is visible."""
+    bands = band_rows(grid)
+    if not bands:
+        return "", ""
+    below = [i for i in bands if i > 0]
+    if not below:
+        return "1", ""
+    if 0 in bands:
+        return "", ",".join(str(i + 1) for i in bands)
+    return "", ",".join(str(i + 1) for i in below)
 
 
 def no_header_text(grid):
@@ -180,6 +247,9 @@ def tables_in(path):
             continue
         grid = tc.build_grid(tbl)
         first = grid[0][0].text if grid and grid[0] else ""
+        inferred = inferred_structure(grid)
+        if inferred[1]:
+            value, reason = guess_by_parts(tbl, rows_list(inferred[1]), value, reason)
         found.append({
             "key": tc.table_key(tbl, keys),
             "rows": nrows,
@@ -191,7 +261,8 @@ def tables_in(path):
             "preview": preview_of(grid),
             "guess": "" if value == "unknown" else value,
             "reason": reason,
-            "caption-rows": inferred_caption_rows(grid),
+            "caption-rows": inferred[0],
+            "split-at": inferred[1],
             "needs-word": value == "none" and no_header_text(grid),
             "summary-row": "trailing row with no label" in reason,
         })
@@ -213,6 +284,25 @@ def caption_rows_in_effect(info, row):
         if part.isdigit() and int(part) > 0:
             rows.append(int(part))
     return rows
+
+
+def rows_list(text):
+    rows = []
+    for part in (text or "").split(","):
+        part = part.strip()
+        if part.isdigit() and int(part) > 0:
+            rows.append(int(part))
+    return rows
+
+
+def split_in_effect(info, row):
+    """The band rows to split at: the sidecar's where a row exists, else
+    the inference. And the part captions, if a person wrote any."""
+    if row is not None:
+        parts = [c.strip() for c in row["part-captions"].split("|")] \
+            if row["part-captions"].strip() else []
+        return rows_list(row["split-at"]), parts
+    return rows_list(info["split-at"]), []
 
 
 def in_effect(info, row):
@@ -306,11 +396,20 @@ def main():
         # Keyed by stem, not filename: the filter runs on the JSON
         # intermediate named after the .docx, and knows only the stem.
         caption_rows = caption_rows_in_effect(info, row)
+        split_at, part_captions = split_in_effect(info, row)
         resolved.setdefault(os.path.splitext(info["source"])[0], []).append({
             "index": info["index"], "headers": in_effect(info, row),
             "caption_rows": caption_rows,
+            "split_at": split_at, "part_captions": part_captions,
             "rows": info["rows"], "cols": info["cols"], "first": info["first"],
         })
+        if split_at:
+            note = (note + "; " if note else "") + (
+                "split-at=%s: one table per band, each with the header row "
+                "and the band as its caption"
+                % ",".join(str(n) for n in split_at))
+            if row is None:
+                note += " (inferred: merged full-width rows below row 1 are bands)"
         if caption_rows:
             note = (note + "; " if note else "") + (
                 "caption-rows=%s: row%s folded into the caption"
@@ -328,7 +427,8 @@ def main():
         if row is None:
             new_rows.append({
                 "key": info["key"], "headers": info["guess"],
-                "split-at": "", "caption-rows": info["caption-rows"],
+                "split-at": info["split-at"],
+                "caption-rows": info["caption-rows"],
                 "part-captions": "", "source": info["source"],
                 "label": info["label"], "preview": info["preview"],
             })

@@ -92,7 +92,8 @@ class Converted:
                 fh.write(content)
 
         for name in names:
-            shutil.copy(os.path.join(FIXTURES, name + ".docx"), work)
+            if not os.path.exists(os.path.join(work, name + ".docx")):
+                shutil.copy(os.path.join(FIXTURES, name + ".docx"), work)
             # Run from the working directory with relative paths, because
             # that is what convert.sh does and it shows up in the output:
             # --extract-media given an absolute path puts absolute paths
@@ -322,6 +323,101 @@ def case_tables_b(work):
     ]
 
 
+def case_split(work):
+    """split-at: one table per band, each with the header row and the
+    band as its caption, and the header declaration applied per part.
+
+    The fixture is built here as OOXML, through the pre-pass suite's
+    builder, because the shape -- a band, its own header row beneath it,
+    three data rows, again twice -- is the one 7-5-costs-in-the-long-run
+    has and nothing in tests/fixtures does.
+    """
+    import csv
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "headers_tests", os.path.join(HERE, "run-headers-tests.py"))
+    hb = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(hb)
+
+    def block(letter, wage):
+        return [hb.row([hb.cell("Example %s: workers cost $%d" % (letter, wage),
+                                bold=True, span=4)]),
+                hb.row([hb.cell(""), hb.cell("Labor Cost"), hb.cell("Machine Cost"),
+                        hb.cell("Total Cost")]),
+                hb.row([hb.cell("Technology 1"), hb.cell("$%d" % (10 * wage)),
+                        hb.cell("$160"), hb.cell("$%d" % (10 * wage + 160))]),
+                hb.row([hb.cell("Technology 2"), hb.cell("$%d" % (7 * wage)),
+                        hb.cell("$320"), hb.cell("$%d" % (7 * wage + 320))])]
+    banded = hb.table(block("A", 40) + block("B", 55) + block("C", 90))
+    # The other shape: one header row marked in Word, then bands partway
+    # down with plain rows beneath. BC-12's "Front Matter / Body / Back
+    # Matter" table. Each part must carry the original head.
+    headed = hb.table([
+        hb.row([hb.cell("Part"), hb.cell("Purpose"), hb.cell("Length")], header=True),
+        hb.row([hb.cell("Front matter", bold=True, span=3)]),
+        hb.row([hb.cell("Title page"), hb.cell("Identifies the report"), hb.cell("1")]),
+        hb.row([hb.cell("Abstract"), hb.cell("Summarizes it"), hb.cell("1")]),
+        hb.row([hb.cell("Body", bold=True, span=3)]),
+        hb.row([hb.cell("Introduction"), hb.cell("States the problem"), hb.cell("2")]),
+        hb.row([hb.cell("Methods"), hb.cell("Says what was done"), hb.cell("3")]),
+    ])
+    os.makedirs(work, exist_ok=True)
+    hb.docx(os.path.join(work, "banded.docx"),
+            [hb.para("Table 7.14 Total cost with rising labor costs"), banded,
+             hb.para("Prose between the tables, as there always is."),
+             hb.para("Table 1.1 Report parts"), headed])
+
+    tool = os.path.join(BIN, "table-headers.py")
+    resolved = os.path.join(work, "table-headers.json")
+    subprocess.run([sys.executable, tool, "banded.docx",
+                    "--sidecar", os.path.join(work, "table-headers.csv"),
+                    "--new", os.path.join(work, "table-headers-new.csv"),
+                    "--report", os.path.join(work, "table-headers-report.csv"),
+                    "--resolved", resolved],
+                   cwd=work, capture_output=True, text=True, stdin=subprocess.DEVNULL)
+    with open(os.path.join(work, "table-headers-new.csv"), newline="", encoding="utf-8") as fh:
+        new = list(csv.DictReader(fh))
+    out = Converted(work, ["banded"], {"TABLE_HEADERS_RESOLVED": resolved})
+    everything = out.tables("banded")
+    tables, headed_parts = everything[:3], everything[3:]
+    headed_heads = [re.search(r"<thead>.*?</thead>", t, re.S) for t in headed_parts]
+    caps = [" ".join(re.sub(r"<[^>]+>", "",
+                            re.search(r"<caption>(.*?)</caption>", t, re.S).group(1)).split())
+            if "<caption>" in t else "" for t in tables]
+    heads = [re.search(r"<thead>.*?</thead>", t, re.S) for t in tables]
+    return [
+        ("the pre-pass infers split-at for the bands, row 1 included",
+         lambda: new and new[0]["split-at"] == "1,5,9"),
+        ("and does not mistake the first band for a title",
+         lambda: new and new[0]["caption-rows"] == ""),
+        ("and guesses the value part by part",
+         lambda: new and new[0]["headers"] == "both"),
+        ("the table becomes one table per band",
+         lambda: len(tables) == 3),
+        ("each part's caption is the table's caption and its band",
+         lambda: all(c.startswith("Table 7.14 Total cost with rising labor costs: Example")
+                     for c in caps) and "Example C" in caps[2]),
+        ("each part has its own header row, promoted",
+         lambda: all(h and Converted.cells(h.group(0), "th") == 4 for h in heads)),
+        ("and row headers on every body row",
+         lambda: all(t.count('<th scope="row">') == 2 for t in tables)),
+        ("no band survives as a cell",
+         lambda: all('colspan="4"' not in t for t in tables)),
+        # The headed shape.
+        ("a table with a marked header row and bands below splits into its parts",
+         lambda: len(headed_parts) == 2),
+        ("and each part carries a copy of the original header row",
+         lambda: all(h and "Purpose" in h.group(0) and Converted.cells(h.group(0), "th") == 3
+                     for h in headed_heads)),
+        ("with the table's caption and the band as each part's caption",
+         lambda: len(headed_parts) == 2
+                 and all("Table 1.1 Report parts:" in " ".join(
+                     re.sub(r"<[^>]+>", "", t).split()) for t in headed_parts)
+                 and "Front matter" in headed_parts[0] and "Body" in headed_parts[1]
+                 and 'colspan="3"' not in headed_parts[0]),
+    ]
+
+
 def case_headers(work):
     """The filter applies what the table-headers pre-pass resolved.
 
@@ -482,6 +578,7 @@ CASES = [
     ("table labels and empty tables", case_tables),
     ("merged title rows and unclassifiable tables", case_tables_b),
     ("declared table headers", case_headers),
+    ("split at grouping bands", case_split),
     ("equations, MathSpeak, and spacers", case_math),
     ("media naming, alt text, and keys", case_media),
     ("media keys when converting in one pass", case_media_keys_single_pass),

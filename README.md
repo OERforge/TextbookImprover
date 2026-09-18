@@ -278,6 +278,16 @@ Beyond the Word-to-HTML translation, each page gets:
   Number of hours my classmates spent playing video games on weekends".
   Equations in the row stay equations. `caption-rows=N,M` in the sidecar
   does the same for any rows a person names.
+- **A table with grouping bands becomes one table per band.** A merged row
+  partway down a table -- "Example B", "Higher Income Countries", "Year 2"
+  -- labels the rows beneath it, and no header markup expresses that in
+  every format. The run infers `split-at` for those rows, writes it into
+  the prefilled sidecar row, and splits there: each part gets the band as
+  its caption, composed onto the table's own ("Table 17.4: Year 2"), a
+  copy of the header row where the table had one marked, and the header
+  declaration applied on its own. Where the bands each sit over their own
+  header row, as in the cost tables of Economics 3e, each part keeps its
+  own. `part-captions` in the sidecar overrides the composed captions.
 - **Tables get the headers they were declared to have.** `table-headers.csv`
   says, per table, whether the headers are in the first row, the first
   column, both, or nowhere (see [Sidecar files](#sidecar-files)), and for a
@@ -377,8 +387,8 @@ it so you can find the table -- and you rename that file, or paste its rows
 in on later runs when tables have been added. A row whose key matches no
 table stops the run, since a correction that silently fails to apply
 destroys work invisibly; the report names the row. Values this version does
-not act on yet (`manual`, `list`, `split-at`) are accepted and kept, so a
-book can start carrying them. The value in effect -- the sidecar's where one was declared, the guess
+not act on yet (`manual`, `list`) are accepted and kept, so a book can
+start carrying them. The value in effect -- the sidecar's where one was declared, the guess
 otherwise -- is applied when the page is built. A status of `needs-word` in
 the report means no cell of the table could serve as a header, so no value
 can help and headers have to be written in Word; that is the one thing the

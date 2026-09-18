@@ -1257,6 +1257,137 @@ local function fold_caption_rows(tbl, pending)
   return normalise(pandoc.utils.stringify(out))
 end
 
+-- ---------------------------------------------------------------------------
+-- split-at: one table per band
+--
+-- A merged full-width row partway down a table labels the rows beneath
+-- it. <th scope="rowgroup"> is the HTML for that and nothing reads it
+-- reliably, PDF has no rowgroup scope at all, so instead the table is
+-- split at each band: the band row becomes the caption of the part below
+-- it, composed onto the table's own caption -- "Table 7.12: Example B" --
+-- unless part-captions supplies the text. Every part gets the original
+-- header rows where the table had a head; where it did not, the part's
+-- own first row is promoted by the header declaration, which is applied
+-- to each part in turn. One declaration covers every part.
+--
+-- Band rows are found by object before anything else moves them, so
+-- caption-rows and split-at both refer to the source's row numbers and
+-- neither renumbers the other.
+-- ---------------------------------------------------------------------------
+
+local function band_targets(tbl, entry)
+  local out = {}
+  local wanted = entry and entry.split_at
+  if type(wanted) ~= 'table' or #wanted == 0 then return out end
+  local rows = all_rows(tbl)
+  for _, n in ipairs(wanted) do
+    local at = rows[tonumber(n)]
+    if at == nil then
+      warn(('table-headers: split-at names row %s of a %d-row table in %s; ignored')
+        :format(tostring(n), #rows, source_stem()))
+    else
+      out[#out + 1] = at.row
+    end
+  end
+  return out
+end
+
+local function clone_rows(rows)
+  local out = {}
+  for _, row in ipairs(rows) do out[#out + 1] = row:clone() end
+  return out
+end
+
+local function compose_part_caption(base, band_inlines, band_text, given, part_no)
+  if given and given ~= '' then
+    return text_to_inlines(given), given
+  end
+  local out = pandoc.Inlines({})
+  local text = ''
+  if base and #base > 0 then
+    out:extend(base)
+    text = normalise(pandoc.utils.stringify(base))
+  end
+  if band_text ~= '' then
+    if #out > 0 then
+      out:insert(pandoc.Str(':'))
+      out:insert(pandoc.Space())
+      text = text .. ': ' .. band_text
+    else
+      text = band_text
+    end
+    out:extend(band_inlines)
+  elseif #out > 0 and part_no then
+    local suffix = 'Part ' .. tostring(part_no)
+    out:insert(pandoc.Str(':'))
+    out:insert(pandoc.Space())
+    out:insert(pandoc.Str(suffix))
+    text = text .. ': ' .. suffix
+  end
+  return out, text
+end
+
+-- Returns a list of tables, or nil when there is nothing to split.
+local function split_table(tbl, bands, part_captions, apply)
+  if #bands == 0 then return nil end
+  local is_band = {}
+  for _, row in ipairs(bands) do is_band[row] = true end
+
+  -- Flatten every body's rows in order, keeping the first body's
+  -- settings for the parts.
+  local model = tbl.bodies[1]
+  local rows = {}
+  for _, body in ipairs(tbl.bodies) do
+    for _, row in ipairs(body.body) do rows[#rows + 1] = row end
+  end
+
+  local segments, current, band_for = {}, {}, {}
+  local pending_band = nil
+  for _, row in ipairs(rows) do
+    if is_band[row] then
+      if #current > 0 then
+        segments[#segments + 1] = current
+        band_for[#segments] = pending_band
+      end
+      current, pending_band = {}, row
+    else
+      current[#current + 1] = row
+    end
+  end
+  if #current > 0 then
+    segments[#segments + 1] = current
+    band_for[#segments] = pending_band
+  end
+  if #segments < 2 and pending_band == nil then return nil end
+
+  local base = nil
+  if #tbl.caption.long > 0 then
+    base = pandoc.utils.blocks_to_inlines(tbl.caption.long)
+  end
+  local parts = {}
+  for i, segment in ipairs(segments) do
+    local band = band_for[i]
+    local band_inlines, band_text = pandoc.Inlines({}), ''
+    if band then band_inlines, band_text = row_as_caption(band) end
+    local caption_inlines, caption_text = compose_part_caption(
+      base, band_inlines, band_text, part_captions and part_captions[i], i)
+
+    local attr = pandoc.Attr(
+      tbl.attr.identifier ~= '' and (tbl.attr.identifier .. '-' .. i) or '',
+      tbl.attr.classes, {})
+    local head = pandoc.TableHead(clone_rows(tbl.head.rows), tbl.head.attr)
+    local body = pandoc.TableBody(segment, {},
+      model and model.row_head_columns or 0, pandoc.Attr())
+    local part = pandoc.Table(
+      #caption_inlines > 0 and mk_caption({ pandoc.Plain(caption_inlines) })
+        or pandoc.Caption(),
+      tbl.colspecs, head, { body }, pandoc.TableFoot({}), attr)
+    apply(part)
+    parts[#parts + 1] = { table = part, label = caption_text ~= '' and caption_text or nil }
+  end
+  return parts
+end
+
 local function resolved_for(tbl)
   local index = tonumber(tbl.attr.attributes[TH_INDEX_ATTR])
   local by_doc = load_resolved()[source_stem()]
@@ -1308,6 +1439,7 @@ local function caption_data_table(tbl, next_block, after_next, after_after, out)
   local entry = resolved_for(tbl)
   tbl.attr.attributes[TH_INDEX_ATTR] = nil
   local pending = pending_caption_rows(tbl, entry)
+  local bands = band_targets(tbl, entry)
 
   if #tbl.caption.long > 0 then
     -- Already captioned: reuse that text to name the scroll region. A
@@ -1379,9 +1511,19 @@ local function caption_data_table(tbl, next_block, after_next, after_after, out)
 
   local folded = fold_caption_rows(tbl, pending)
   if folded then label = folded end
-  apply_headers(tbl, label, entry)
 
-  return wrap_table(tbl, label), consumed
+  local parts = split_table(tbl, bands, entry and entry.part_captions,
+    function(part) apply_headers(part, label, entry) end)
+  if parts then
+    local blocks = {}
+    for _, part in ipairs(parts) do
+      blocks[#blocks + 1] = wrap_table(part.table, part.label or label)
+    end
+    return blocks, consumed
+  end
+
+  apply_headers(tbl, label, entry)
+  return { wrap_table(tbl, label) }, consumed
 end
 
 function Blocks(blocks)
@@ -1402,7 +1544,7 @@ function Blocks(blocks)
         -- <caption>, mark its column headers, wrap it for scrolling.
         local wrapped, consumed = caption_data_table(
           block, blocks[i + 1], blocks[i + 2], blocks[i + 3], out)
-        out:insert(wrapped)
+        for _, piece in ipairs(wrapped) do out:insert(piece) end
         i = i + 1 + consumed
       else
         out:insert(block)

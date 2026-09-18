@@ -68,7 +68,18 @@ def row(cells, header=False):
 
 
 def table(rows):
-    return "<w:tbl><w:tblPr/>%s</w:tbl>" % "".join(rows)
+    """A w:tbl with a w:tblGrid, which Word always writes and Pandoc's
+    reader relies on for the column count: without it a table whose
+    first row is one spanning cell reads as one column wide."""
+    import re
+    width = 0
+    for row in rows:
+        cells = re.findall(r"<w:tc>(.*?)</w:tc>", row, re.S)
+        spans = sum(int(m) for m in re.findall(r'w:gridSpan w:val="(\d+)"', row))
+        plain = sum(1 for c in cells if "gridSpan" not in c)
+        width = max(width, spans + plain)
+    grid = "<w:tblGrid>%s</w:tblGrid>" % ('<w:gridCol w:w="2400"/>' * width)
+    return "<w:tbl><w:tblPr/>%s%s</w:tbl>" % (grid, "".join(rows))
 
 
 def para(text):
@@ -114,6 +125,15 @@ GRID = table([
 # Two rows, so it is a data table and not a single-cell code box, which
 # the census rightly leaves out.
 INNER = table([row([cell("Code", bold=True)]), row([cell("print(x)")])])
+BANDED = table([
+    row([cell("Part"), cell("Purpose"), cell("Length")], header=True),
+    row([cell("Front matter", bold=True, span=3)]),
+    row([cell("Title page"), cell("Identifies the report"), cell("1")]),
+    row([cell("Abstract"), cell("Summarizes it"), cell("1")]),
+    row([cell("Body", bold=True, span=3)]),
+    row([cell("Introduction"), cell("States the problem"), cell("2")]),
+    row([cell("Methods"), cell("Says what was done"), cell("3")]),
+])
 NESTED = table([
     row([cell("Key", bold=True), cell("Value", bold=True)]),
     row([cell("133"), cell("", inner=INNER)]),
@@ -148,18 +168,19 @@ def checks(workdir):
     docx(os.path.join(workdir, "a.docx"), [para("Table 3.1"), CONTINGENCY,
                                            para("Some prose."), TITLED,
                                            para("Table 3.3"), GRID])
-    docx(os.path.join(workdir, "b.docx"), [para("Table 7.3"), NESTED])
+    docx(os.path.join(workdir, "b.docx"), [para("Table 7.3"), NESTED,
+                                           para("Table 8.1"), BANDED])
 
     # First run: nothing declared, everything new.
     code, err = run(workdir)
     report = read(workdir, "table-headers-report.csv")
     new = read(workdir, "table-headers-new.csv")
     yield "a first run exits 0", code == 0, err
-    yield "the report has one row per data table", report is not None and len(report) == 5, \
+    yield "the report has one row per data table", report is not None and len(report) == 6, \
         report and len(report)
     yield "every table is new on a first run", all(r["status"] in ("new", "needs-word") for r in report), \
         [r["status"] for r in report]
-    yield "the new file has the same rows in sidecar form", new is not None and len(new) == 5, ""
+    yield "the new file has the same rows in sidecar form", new is not None and len(new) == 6, ""
     yield "the new file's columns are the sidecar's", new and list(new[0].keys()) == [
         "key", "headers", "split-at", "caption-rows", "part-captions", "source", "label", "preview"], \
         new and list(new[0].keys())
@@ -177,6 +198,14 @@ def checks(workdir):
     yield "a nested table borrows its container's label", inner and inner[0]["label"] == "inside Table 7.3", \
         [r["label"] for r in report]
     yield "keys are full digests", all(len(r["key"]) == 64 for r in report), ""
+    banded = [r for r in new if r["label"] == "Table 8.1"]
+    yield "bands below a marked header row are written as split-at", \
+        banded and banded[0]["split-at"] == "2,5", banded and banded[0]["split-at"]
+    yield "and the guess is taken part by part with the header row in place", \
+        banded and banded[0]["headers"] == "both", banded and banded[0]["headers"]
+    yield "a banded table's report row says so", \
+        any("split-at=2,5" in r["note"] and "inferred" in r["note"]
+            for r in report if r["label"] == "Table 8.1"), ""
 
     # Adopt the new rows as the sidecar, then edit like a remediator.
     shutil.move(os.path.join(workdir, "table-headers-new.csv"),
@@ -219,7 +248,7 @@ def checks(workdir):
     yield "a cleared cell is blank and the guess is still reported", \
         status["Code"]["status"] == "blank" and status["Code"]["guess"] == "first-row", \
         status["Code"]
-    yield "a header row pasted mid-file is skipped", len(report) == 5, len(report)
+    yield "a header row pasted mid-file is skipped", len(report) == 6, len(report)
     import json
     with open(os.path.join(workdir, "resolved.json"), encoding="utf-8") as h:
         resolved = json.load(h)

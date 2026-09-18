@@ -100,11 +100,7 @@ A longtable `\caption` is typeset as a multicolumn inside `\endfirsthead` and is
 
 ### Two PAC errors that are not ours
 
-Both were reproduced by building the diagnostic and watching the error disappear, so they are worth recognizing rather than chasing.
-
-**"Table header cell has no associated subcells."** `latex-lab` sets `Scope` through an attribute class, and PAC does not resolve `/ClassMap` references, so the attribute is present and invisible to the validator. Rewriting the `/C` reference as an inline `/A` dictionary makes PAC pass with no change to the content. The [latex-lab-table documentation](https://ctan.org/pkg/latex-lab) says so in a footnote, and [tagging-project discussion #930](https://github.com/latex3/tagging-project/discussions/930) has the maintainers declining to change the implementation for it, since the class is what makes `TH-both` expressible. veraPDF does not raise it.
-
-**"Invalid use of a TR structure element."** PAC rejects `Artifact` as a child of `Table`, which is how the repeated longtable header row is represented. ISO 32000-2 Annex L, Table L.2 permits `Artifact` 0..n as a child of `Table`, and `TD`/`TR` as children of `Artifact`, so the output conforms and the rejection is a PAC defect. Ulrike Fischer says the same in [tagging-project issue #1583](https://github.com/latex3/tagging-project/issues/1583), notes that even UA-1 allows a private element there, and says she has reported it to PAC without knowing when it will be fixed. Where that report lives is not stated, so there is no upstream ticket to watch.
+Both are described, with citations, in [Troubleshooting and known limits](docs/troubleshooting.md#known-limits): the `/ClassMap` attribute class PAC does not resolve, and the `Artifact` under `Table` it rejects though ISO 32000-2 permits it. Item 1's output will trip both, and neither is a defect to chase.
 
 **Why now.** It is the largest accessibility gap remaining, it is independent of everything else, and the schema is in place so it arrives as a declared setting rather than another environment variable.
 

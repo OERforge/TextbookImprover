@@ -22,6 +22,10 @@ The table-headers sidecar, roadmap item 1, complete: the sidecar, the key, and t
 - `util/table-samples.py` collects one real example of each table shape into a single Word document, copied out of the sources rather than rebuilt, so the style, table-look flags, merges, repeat-header rows, direct formatting, images, and links all come across. Each example is annotated with its census kind, its guessed value, the evidence read from the file, and which rule produced that value. Deterministic by default; `--random` or `--seed N` samples other examples of the same shapes.
 - `util/docx-compat.py` reads, and optionally sets, the `compatibilityMode` compat setting that decides whether Word treats a document as current or opens it in Compatibility Mode, where it refuses to run its Accessibility Checker. Every other part of the package is copied through untouched, and legacy compat option elements are reported rather than cleared.
 
+### Documentation
+
+- The README is an overview and a quick start; everything else moved under `docs/`, one page per subject: installation, a first run, how it works, configuration, sidecars and reports, building the cartridge, Brightspace, testing, utilities, and troubleshooting with the known limits. The three settings references are generated from the schemas by `util/settings-reference.py`, so they cannot describe a setting the tools do not have, and `run-all.sh` fails when a schema changes without them.
+
 ### Fixed
 
 - `--toc` said nothing when it did nothing. It orders only pages the config does not place, so a `packaging.yaml` adopted from the first run's sample -- which already places every page in a guessed order -- left the outline with nothing to do, and the run gave no sign. It now warns, says what to do (remove the `contents` block and run again), and writes the same note into the sample. The README's walkthrough says to run `--toc` before adopting the sample and why.
@@ -68,7 +72,7 @@ Three of the breaking changes need action before a first run with v0.2: split yo
 - **Breaking:** Python 3 is required rather than optional. It reads the configuration and inspects the conversion intermediates.
 - **Breaking:** `build-cartridge.py --emit-conversion-config` is retired. `convert.sh` used to ask the packaging tool to parse its configuration, so a folder of documents could not be converted without it present. Both halves now use the shared library in `lib/` and neither uses the other.
 - Reports are written to the book's directory rather than beside the scripts. In v0.1 those were the same place, because the scripts were copied into the content directory. From v0.2 the tools stay where they were cloned, so leaving the reports there would mean two books overwriting each other's.
-- Sidecars default to the book's directory too, but that is only a default. They are read rather than written, and they hold the one thing in the pipeline no script can reproduce, so the directory you delete to rebuild is the wrong permanent home for them. `sidecars.table_captions` and `sidecars.image_alt` take a path: absolute, or relative to the book's directory, so corrections can live somewhere version-controlled. See [Sidecar files](README.md#sidecar-files).
+- Sidecars default to the book's directory too, but that is only a default. They are read rather than written, and they hold the one thing in the pipeline no script can reproduce, so the directory you delete to rebuild is the wrong permanent home for them. `sidecars.table_captions` and `sidecars.image_alt` take a path: absolute, or relative to the book's directory, so corrections can live somewhere version-controlled. See [Sidecar files](docs/sidecars.md#sidecar-files).
 - A configuration that can't be read stops the run. It was reported and then ignored, so a book would convert with the defaults while the user believed their settings had applied. A directory with no configuration still converts with the defaults, as before.
 - A setting written twice in the same block is refused. PyYAML keeps the last and says nothing, which is a poor bargain when generated configuration files already contain every setting.
 - A misplaced setting says where it belongs. `footer` at the top level (where v0.1 put it) now reports that it is a setting and belongs under `defaults:`, rather than reporting only that it was unexpected.
@@ -112,7 +116,7 @@ python3 util/migrate-config.py -d . --dry-run   # see where everything goes
 python3 util/migrate-config.py -d .
 ```
 
-Sidecar files need no migration, and can now be moved out of the book's directory: see [Sidecar files](README.md#sidecar-files). If you tried an absolute path before and found it had no effect, that was the bug above rather than your CSV. For the cartridge, see [How Brightspace treats an imported cartridge](README.md#how-brightspace-treats-an-imported-cartridge), in particular the order in which instructors should import the new package and remove the old module, and which of Brightspace's two delete options is safe when. (We haven't tested on other LMS software.)
+Sidecar files need no migration, and can now be moved out of the book's directory: see [Sidecar files](docs/sidecars.md#sidecar-files). If you tried an absolute path before and found it had no effect, that was the bug above rather than your CSV. For the cartridge, see [How Brightspace treats an imported cartridge](docs/brightspace.md), in particular the order in which instructors should import the new package and remove the old module, and which of Brightspace's two delete options is safe when. (We haven't tested on other LMS software.)
 
 ## [0.1] - 2026-08-30
 

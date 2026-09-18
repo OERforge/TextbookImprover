@@ -199,7 +199,11 @@ bash $T/bin/convert.sh --toc book.pdf
 #    Without one, let it guess and correct the sample:
 bash $T/bin/convert.sh --includeallhtml
 
-# 5. Adopt the order it worked out.
+# 5. Adopt the order it worked out. Do this AFTER step 4: the sample
+#    already carries a guessed order for every page, and --toc orders
+#    only pages the config does not place, so a config adopted first
+#    leaves the outline nothing to do. (If that happens, delete the
+#    contents block from packaging.yaml and run step 4 again.)
 mv packaging-sample.yaml packaging.yaml
 
 # 6. Work through the reports, appending rows to the sidecar files.
@@ -770,7 +774,14 @@ It supplies the order for pages `contents` does not already place; it does
 not replace a curated tree. Anything you listed stays exactly where you put
 it, the outline orders the rest into the same destination, and only pages
 in neither the config nor the outline reach `Unsorted`. With no `contents`
-at all, the outline orders everything. The result goes to
+at all, the outline orders everything.
+
+That last case is the one you want on a first pass, and it is easy to miss
+by doing things in the wrong order: the sample a first run writes already
+places every page in a guessed order, so a `packaging.yaml` adopted from it
+leaves the outline nothing to do, and `--toc` says so and changes nothing.
+Run `--toc` before adopting the sample, or delete the `contents` block and
+run it again. The result goes to
 `packaging-sample.yaml` for review, and outline entries matching no page
 are reported.
 

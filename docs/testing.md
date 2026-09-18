@@ -31,9 +31,10 @@ the version it was written for.
 
 Some cases pin behavior that's about to change rather than behavior
 that's right — a merged title row becoming a spanning header, a table
-with no header signal having its first row promoted anyway. Both are
-things roadmap item 1 will alter, and a change is only checkable if the
-starting point was written down.
+with no header signal having its first row promoted anyway. Those are
+what the filter does with no declaration in reach, which is how those
+cases run; what a declaration does instead is pinned separately, in the
+cases that run the pre-pass the way `convert.sh` does.
 
 The configuration fixtures serve a second purpose: they're the
 conformance contract for the merge rules. If those rules are ever

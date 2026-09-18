@@ -6,7 +6,7 @@ Versions are two-part and pre-1.0: breaking changes may land in any of them unti
 
 ## [0.3] - 2026-09-18
 
-To be released as 0.3. The table-headers sidecar, roadmap item 1, complete: the sidecar, the key, and the report exist; the conversion applies the value in effect for every data table; a merged title row becomes the caption; and a table with grouping bands becomes one table per band. Output changes for tables declared or guessed to have a header column, an unmarked header row, no headers, a title row, or bands.
+The table-headers sidecar, complete: the sidecar, the key, and the report exist; the conversion applies the value in effect for every data table; a merged title row becomes the caption; and a table with grouping bands becomes one table per band. Output changes for tables declared or guessed to have a header column, an unmarked header row, no headers, a title row, or bands.
 
 ### Added
 
@@ -16,7 +16,7 @@ To be released as 0.3. The table-headers sidecar, roadmap item 1, complete: the 
 - `tests/run-headers-tests.py`, 23 checks over the pre-pass end to end, and 9 key checks in `tests/run-census-tests.py`.
 
 - `util/table-census.py` reports a `Guess` column beside `Kind`: the value a table-headers sidecar would be prefilled with, for every data table. `Kind` is what the file says, `Guess` is what to declare, and a row where they differ is a row worth looking at. Across seven books (1,271 documents, 2,068 tables, 792 of them data tables) the guess gives 462 `both`, 264 `first-row`, 37 `none`, 28 `first-column`, and 1 `unknown`. The header mechanism it feeds behaves identically on Pandoc 3.1.3, 3.9, and 3.11, so this needs no version bump.
-- `util/contrib/fix-empty-paragraphs.py`, contributed from another project and not wired in. It removes content-free paragraph structure elements from a tagged PDF, two sources of which are the longtable caption wrapper and Pandoc's minipage header cells. Needs `pikepdf`. See roadmap item 9.
+- `util/contrib/fix-empty-paragraphs.py`, contributed from another project and not wired in. It removes content-free paragraph structure elements from a tagged PDF, two sources of which are the longtable caption wrapper and Pandoc's minipage header cells. Needs `pikepdf`. See roadmap item 8.
 - `tests/run-census-tests.py` checks that guess against thirteen table shapes built as OOXML directly, so each one carries exactly the formatting signals it means to and no table style decides the answer first. Registered in `tests/run-all.sh`.
 
 - `util/table-samples.py` collects one real example of each table shape into a single Word document, copied out of the sources rather than rebuilt, so the style, table-look flags, merges, repeat-header rows, direct formatting, images, and links all come across. Each example is annotated with its census kind, its guessed value, the evidence read from the file, and which rule produced that value. Deterministic by default; `--random` or `--seed N` samples other examples of the same shapes.

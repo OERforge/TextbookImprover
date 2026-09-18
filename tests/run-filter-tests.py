@@ -288,10 +288,12 @@ def case_tables(work):
 def case_tables_b(work):
     """A merged title row, and a table with nothing to classify it by.
 
-    These pin what the filter does today rather than what it should do.
-    Roadmap item 1 changes both -- a merged full-width row ought to become
-    the caption, and a table with no header signal ought to be declarable
-    rather than guessed at -- and a change is only checkable if the
+    These pin what the filter does with no declaration in reach, which
+    is how these cases run: no resolved file, so a merged full-width row
+    stays a spanning header and a table with no header signal keeps the
+    first row Pandoc's reader promoted. What a declaration does instead
+    is pinned in case_headers and case_split, which run the pre-pass the
+    way convert.sh does. A change is only checkable if the
     starting point is written down.
     """
     out = Converted(work, ["tables-b"])

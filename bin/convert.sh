@@ -249,9 +249,9 @@ spacer_report="$(resolve_path "$SPACER_LOG_NAME")"
 #    prefilled row in table-headers-new.csv, in the sidecar's own format,
 #    ready to paste in.
 #
-#    Nothing downstream consumes the result yet; that is the next step
-#    of roadmap item 1. What this step establishes is the sidecar, the
-#    key, and the report, so a book can start carrying declarations now.
+#    The filter consumes the result through TABLE_HEADERS_RESOLVED,
+#    below: the value in effect per table, the rows to fold into the
+#    caption, and the rows to split at.
 #
 #    A sidecar row whose key matches no table stops the run. A correction
 #    that silently does not apply destroys work invisibly, and the report

@@ -159,14 +159,22 @@ def guess_by_parts(tbl, split_at, whole_value, whole_reason):
     while (len(shared) < cuts[0]
            and tc.repeats_as_header(trs[len(shared)])):
         shared.append(trs[len(shared)])
+    # A split row that is a merged band leaves the part; one with several
+    # cells is the part's own header row and stays at its top.
+    grid = tc.build_grid(tbl)
+    is_band = {c: (c < len(grid) and tc.is_full_width_band(grid[c])
+                   and len(grid[c]) > 1) for c in cuts}
+    # Segments run between cut points. A band cut is left out of the
+    # segment it opens; a header-row cut is its first row.
     bounds = []
-    start = len(shared)
-    for c in cuts:
-        if c > start:
-            bounds.append((start, c))
-        start = c + 1
-    if start < len(trs):
-        bounds.append((start, len(trs)))
+    edges = [len(shared)] + cuts + [len(trs)]
+    for k in range(len(cuts) + 1):
+        lo = edges[k]
+        hi = edges[k + 1]
+        if k > 0 and is_band[cuts[k - 1]]:
+            lo = cuts[k - 1] + 1
+        if hi > lo:
+            bounds.append((lo, hi))
     votes = []
     for lo, hi in bounds:
         part = ET.Element(tc.q("tbl"))
@@ -195,6 +203,27 @@ def band_rows(grid):
     return [i for i, r in enumerate(grid) if tc.is_full_width_band(r) and r[0].text]
 
 
+def repeated_header_rows(grid):
+    """0-based indices of rows that repeat row 1's header cells with a
+    different first cell: the corner names a group, and the rest of the
+    row is the same header again. Table 7.2 of the sociology book --
+    Functionalism, Conflict Theory, Symbolic Interactionism, each over
+    `| Associated Theorist | Deviance arises from:` -- and two tables in
+    Economics 3e. Three of the eighteen tables with header-looking rows
+    below row 1 have this shape, and nothing else does."""
+    if len(grid) < 4 or max(len(r) for r in grid) < 2:
+        return []
+    first = grid[0]
+    if len({id(c) for c in first}) < 2 or not tc.looks_like_header_band(first):
+        return []
+    tail = lambda r: tuple(c.text for c in r[1:])
+    later = [i for i, r in enumerate(grid) if i > 0
+             and len({id(c) for c in r}) > 1
+             and tc.looks_like_header_band(r)
+             and tail(r) == tail(first) and r[0].text != first[0].text]
+    return [0] + later if later else []
+
+
 def inferred_structure(grid):
     """(caption-rows, split-at) as the sidecar strings.
 
@@ -208,6 +237,9 @@ def inferred_structure(grid):
     beneath. Written into the prefilled row so the plan is visible."""
     bands = band_rows(grid)
     if not bands:
+        repeated = repeated_header_rows(grid)
+        if repeated:
+            return "", ",".join(str(i + 1) for i in repeated)
         return "", ""
     below = [i for i in bands if i > 0]
     if not below:

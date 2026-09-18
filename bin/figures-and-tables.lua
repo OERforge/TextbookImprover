@@ -1327,6 +1327,15 @@ local function compose_part_caption(base, band_inlines, band_text, given, part_n
   return out, text
 end
 
+-- A split row that is one merged cell across the table is a band: it
+-- leaves the table and its text becomes the caption. A split row with
+-- several cells cannot be a caption, so it is the part's own header row
+-- -- Functionalism | Associated Theorist | Deviance arises from: -- and
+-- only its first cell, the group's name, goes into the caption.
+local function is_band_row(row, width)
+  return #row.cells == 1 and (row.cells[1].col_span or 1) >= width
+end
+
 -- Returns a list of tables, or nil when there is nothing to split.
 local function split_table(tbl, bands, part_captions, apply)
   if #bands == 0 then return nil end
@@ -1364,18 +1373,32 @@ local function split_table(tbl, bands, part_captions, apply)
   if #tbl.caption.long > 0 then
     base = pandoc.utils.blocks_to_inlines(tbl.caption.long)
   end
+  local width = #tbl.colspecs
   local parts = {}
   for i, segment in ipairs(segments) do
     local band = band_for[i]
     local band_inlines, band_text = pandoc.Inlines({}), ''
-    if band then band_inlines, band_text = row_as_caption(band) end
+    local own_head = nil
+    if band and is_band_row(band, width) then
+      band_inlines, band_text = row_as_caption(band)
+    elseif band then
+      -- A header row: it heads this part, and its corner cell names it.
+      own_head = band
+      local corner = band.cells[1]
+      if corner then
+        band_inlines = trim_inlines(cell_inlines(corner))
+        band_text = normalise(pandoc.utils.stringify(band_inlines))
+      end
+    end
     local caption_inlines, caption_text = compose_part_caption(
       base, band_inlines, band_text, part_captions and part_captions[i], i)
 
     local attr = pandoc.Attr(
       tbl.attr.identifier ~= '' and (tbl.attr.identifier .. '-' .. i) or '',
       tbl.attr.classes, {})
-    local head = pandoc.TableHead(clone_rows(tbl.head.rows), tbl.head.attr)
+    local head_rows = clone_rows(tbl.head.rows)
+    if own_head then head_rows[#head_rows + 1] = own_head end
+    local head = pandoc.TableHead(head_rows, tbl.head.attr)
     local body = pandoc.TableBody(segment, {},
       model and model.row_head_columns or 0, pandoc.Attr())
     local part = pandoc.Table(

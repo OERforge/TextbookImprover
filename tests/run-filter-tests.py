@@ -361,11 +361,26 @@ def case_split(work):
         hb.row([hb.cell("Introduction"), hb.cell("States the problem"), hb.cell("2")]),
         hb.row([hb.cell("Methods"), hb.cell("Says what was done"), hb.cell("3")]),
     ])
+    # The third shape: a bold header row that repeats, with a group name
+    # in its corner. Table 7.2 of the sociology book. The repeated row is
+    # each part's header, and only the corner goes into the caption.
+    grouped = hb.table([
+        hb.row([hb.cell("Functionalism", bold=True), hb.cell("Theorist", bold=True),
+                hb.cell("Deviance arises from", bold=True)]),
+        hb.row([hb.cell("Strain theory"), hb.cell("Merton"), hb.cell("Blocked goals")]),
+        hb.row([hb.cell("Disorganization"), hb.cell("Chicago school"), hb.cell("Weak ties")]),
+        hb.row([hb.cell("Conflict theory", bold=True), hb.cell("Theorist", bold=True),
+                hb.cell("Deviance arises from", bold=True)]),
+        hb.row([hb.cell("Unequal system"), hb.cell("Marx"), hb.cell("Inequality")]),
+        hb.row([hb.cell("Power elite"), hb.cell("Mills"), hb.cell("Power")]),
+    ])
     os.makedirs(work, exist_ok=True)
     hb.docx(os.path.join(work, "banded.docx"),
             [hb.para("Table 7.14 Total cost with rising labor costs"), banded,
              hb.para("Prose between the tables, as there always is."),
-             hb.para("Table 1.1 Report parts"), headed])
+             hb.para("Table 1.1 Report parts"), headed,
+             hb.para("More prose."),
+             hb.para("Table 7.2 Theoretical perspectives"), grouped])
 
     tool = os.path.join(BIN, "table-headers.py")
     resolved = os.path.join(work, "table-headers.json")
@@ -379,8 +394,11 @@ def case_split(work):
         new = list(csv.DictReader(fh))
     out = Converted(work, ["banded"], {"TABLE_HEADERS_RESOLVED": resolved})
     everything = out.tables("banded")
-    tables, headed_parts = everything[:3], everything[3:]
+    tables, headed_parts, grouped_parts = everything[:3], everything[3:5], everything[5:]
     headed_heads = [re.search(r"<thead>.*?</thead>", t, re.S) for t in headed_parts]
+    grouped_heads = [re.search(r"<thead>.*?</thead>", t, re.S) for t in grouped_parts]
+    grouped_new = [r for r in new if r["label"] == "Table 7.2"]
+    flat = lambda t: " ".join(re.sub(r"<[^>]+>", " ", t).split())
     caps = [" ".join(re.sub(r"<[^>]+>", "",
                             re.search(r"<caption>(.*?)</caption>", t, re.S).group(1)).split())
             if "<caption>" in t else "" for t in tables]
@@ -409,6 +427,19 @@ def case_split(work):
         ("and each part carries a copy of the original header row",
          lambda: all(h and "Purpose" in h.group(0) and Converted.cells(h.group(0), "th") == 3
                      for h in headed_heads)),
+        # The repeated-header shape.
+        ("a repeating bold header row with a group name in its corner is inferred as a split",
+         lambda: grouped_new and grouped_new[0]["split-at"] == "1,4"),
+        ("and splits into a table per group",
+         lambda: len(grouped_parts) == 2),
+        ("each headed by its own repeated row, not captioned by it",
+         lambda: all(h and "Theorist" in h.group(0) and Converted.cells(h.group(0), "th") == 3
+                     for h in grouped_heads)),
+        ("with only the corner cell composed into the caption",
+         lambda: len(grouped_parts) == 2
+                 and "Table 7.2 Theoretical perspectives: Functionalism" in flat(grouped_parts[0])
+                 and "Table 7.2 Theoretical perspectives: Conflict theory" in flat(grouped_parts[1])
+                 and "Theorist" not in re.search(r"<caption>.*?</caption>", grouped_parts[0], re.S).group(0)),
         ("with the table's caption and the band as each part's caption",
          lambda: len(headed_parts) == 2
                  and all("Table 1.1 Report parts:" in " ".join(

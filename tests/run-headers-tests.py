@@ -134,6 +134,14 @@ BANDED = table([
     row([cell("Introduction"), cell("States the problem"), cell("2")]),
     row([cell("Methods"), cell("Says what was done"), cell("3")]),
 ])
+GROUPED = table([
+    row([cell("Australia", bold=True), cell("2011", bold=True), cell("2012", bold=True)]),
+    row([cell("Real GDP per capita"), cell("2.3%"), cell("1.5%")]),
+    row([cell("Real GDP per hour"), cell("1.7%"), cell("-0.1%")]),
+    row([cell("Belgium", bold=True), cell("2011", bold=True), cell("2012", bold=True)]),
+    row([cell("Real GDP per capita"), cell("0.9"), cell("-0.6")]),
+    row([cell("Real GDP per hour"), cell("-0.5"), cell("-0.3")]),
+])
 NESTED = table([
     row([cell("Key", bold=True), cell("Value", bold=True)]),
     row([cell("133"), cell("", inner=INNER)]),
@@ -169,18 +177,19 @@ def checks(workdir):
                                            para("Some prose."), TITLED,
                                            para("Table 3.3"), GRID])
     docx(os.path.join(workdir, "b.docx"), [para("Table 7.3"), NESTED,
-                                           para("Table 8.1"), BANDED])
+                                           para("Table 8.1"), BANDED,
+                                           para("Table 9.1"), GROUPED])
 
     # First run: nothing declared, everything new.
     code, err = run(workdir)
     report = read(workdir, "table-headers-report.csv")
     new = read(workdir, "table-headers-new.csv")
     yield "a first run exits 0", code == 0, err
-    yield "the report has one row per data table", report is not None and len(report) == 6, \
+    yield "the report has one row per data table", report is not None and len(report) == 7, \
         report and len(report)
     yield "every table is new on a first run", all(r["status"] in ("new", "needs-word") for r in report), \
         [r["status"] for r in report]
-    yield "the new file has the same rows in sidecar form", new is not None and len(new) == 6, ""
+    yield "the new file has the same rows in sidecar form", new is not None and len(new) == 7, ""
     yield "the new file's columns are the sidecar's", new and list(new[0].keys()) == [
         "key", "headers", "split-at", "caption-rows", "part-captions", "source", "label", "preview"], \
         new and list(new[0].keys())
@@ -203,6 +212,11 @@ def checks(workdir):
         banded and banded[0]["split-at"] == "2,5", banded and banded[0]["split-at"]
     yield "and the guess is taken part by part with the header row in place", \
         banded and banded[0]["headers"] == "both", banded and banded[0]["headers"]
+    grouped = [r for r in new if r["label"] == "Table 9.1"]
+    yield "a repeated header row with a group name in its corner is inferred as a split", \
+        grouped and grouped[0]["split-at"] == "1,4", grouped and grouped[0]["split-at"]
+    yield "and its parts are guessed with their own header rows in place", \
+        grouped and grouped[0]["headers"] == "both", grouped and grouped[0]["headers"]
     yield "a banded table's report row says so", \
         any("split-at=2,5" in r["note"] and "inferred" in r["note"]
             for r in report if r["label"] == "Table 8.1"), ""
@@ -248,7 +262,7 @@ def checks(workdir):
     yield "a cleared cell is blank and the guess is still reported", \
         status["Code"]["status"] == "blank" and status["Code"]["guess"] == "first-row", \
         status["Code"]
-    yield "a header row pasted mid-file is skipped", len(report) == 6, len(report)
+    yield "a header row pasted mid-file is skipped", len(report) == 7, len(report)
     import json
     with open(os.path.join(workdir, "resolved.json"), encoding="utf-8") as h:
         resolved = json.load(h)

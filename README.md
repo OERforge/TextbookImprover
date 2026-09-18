@@ -52,6 +52,8 @@ and redistributed under their own terms. See the README there.
 | `untrack-deletions.py` | One-time source repair: turns Word tracked deletions into ordinary strikethrough. |
 | `compare-output.py` | Compares two runs semantically, so a pipeline change can be checked rather than trusted. |
 | `table-census.py` | Surveys table structure across a corpus of DOCX files and guesses where each table's headers are. Reads the OOXML directly, so it needs no Pandoc. |
+| `table-samples.py` | Collects one real example of each table shape into a single Word document, copied from the sources rather than rebuilt. |
+| `docx-compat.py` | Reads, and optionally sets, the Word compatibility mode of a DOCX. |
 
 **`tests/`** holds the configuration conformance fixtures and the two test
 runners. See [Testing](#testing).
@@ -355,7 +357,7 @@ A blank cell deliberately does not mean decorative. "I checked this and it
 is fine" and "this image carries no meaning" are different decisions.
 
 `table-captions.csv` keys on the table's label, such as `Table 2.1`. A
-table the source never labelled has no such key, so it is reported under a
+table the source never labeled has no such key, so it is reported under a
 positional one instead:
 
 ```
@@ -1078,6 +1080,20 @@ keys on the media path ignoring its extension.
 - **Complex tables are reported, not fixed.** A table with stacked column
   headers, or with a header row and a header column, needs `headers`/`id`
   associations that no current setting can express. See the roadmap.
+- **Word's "Mark as layout table" does not mark anything.** Word's
+  Accessibility Checker flags a table with no header row and offers
+  "Mark as layout table" as the fix. Taking that offer removes the
+  table's `w:tblStyle` reference and resets `w:tblLook`, and writes no
+  record of the claim: no `w:tblCaption`, no `w:tblDescription`, no
+  element in any namespace, nothing in `settings.xml`. So the conversion
+  cannot see the declaration, cannot honor it, and cannot warn about it.
+  What it can do is lose the evidence: a header row whose shading came
+  from the table style rather than from direct formatting stops looking
+  like a header row, and the table converts as though it never had one.
+  If a table genuinely presents data with nothing to relate -- a grid of
+  measurements laid out to fit the page -- it needs no header cells to
+  conform, and the useful thing to add is a caption, not a layout
+  marking.
 - **Two PAC errors on a tagged PDF are the validator's, not the file's.**
   This matters only once PDF is an output (roadmap item 7), but it is
   worth recognizing rather than chasing. *Table header cell has no

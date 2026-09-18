@@ -75,8 +75,36 @@ def all_tables(body, depth=0):
                     yield from all_tables(cell, depth + 1)
 
 
+MATH = "http://schemas.openxmlformats.org/officeDocument/2006/math"
+
+
 def cell_text(tc):
-    return "".join(t.text or "" for t in tc.iter(q("t")))
+    """Everything readable in a cell, including equations.
+
+    A cell's visible content can be an OMML equation rather than runs of
+    text, and then w:t finds nothing: 336 cells across the five books look
+    empty to a w:t-only reader and are not. That misleads the guess -- an
+    equation body is not a prose body and not an empty one -- and it is
+    worse for a key computed from cell text, since two tables differing
+    only in their equations hash the same. Three tables in the statistics
+    book do exactly that.
+
+    Paragraphs and line breaks are separated rather than run together, so
+    a cell holding two paragraphs does not read as one word and does not
+    hash the same as the cell that genuinely holds the concatenation.
+    """
+    parts = []
+    for node in tc.iter():
+        tag = node.tag
+        if tag == q("t") or tag == "{%s}t" % MATH:
+            parts.append(node.text or "")
+        elif tag in (q("br"), q("cr")):
+            parts.append("\n")
+        elif tag == q("tab"):
+            parts.append("\t")
+        elif tag == q("p") and parts and parts[-1] != "\n":
+            parts.append("\n")
+    return "".join(parts).strip("\n")
 
 
 def cell_has_image(tc):
@@ -371,6 +399,132 @@ def parse_number(text):
         return None
 
 
+def text_row_over_numbers(rows):
+    """A row of words with nothing but numbers underneath it.
+
+    The change of type is the signal. Nothing in the file marks these rows
+    -- no bold, no shading, no repeat-header setting -- but a row reading
+    Labor | Wage above six rows of figures is a header row by any reading,
+    and 275 tables across five books have this shape. 271 of them the rest
+    of the rule already treats as having a header row, which is what makes
+    the other four safe to treat the same way.
+
+    Strict on the top row: every cell filled, and not one of them parsing
+    as a number. A transposed table opening `# Lumberjacks | 1 | 2 | 3`
+    has numbers in row 1 and must not reach here, because its headers run
+    down the side.
+
+    One column counts. `Weight in ounces` over eleven measurements is a
+    header row, and a one-column table has no other way to show one:
+    every row of it spans the full width, so the merged-row tests cannot
+    help and formatting is otherwise the only signal.
+    """
+    if len(rows) < 3:
+        return False
+    top = rows[0]
+    if any(not c.text for c in top):
+        return False
+    if any(NUMERIC.match(c.text) for c in top):
+        return False
+    body = [c for r in rows[1:] for c in r]
+    return bool(body) and mostly_numeric(body)
+
+
+def blank_corner_matrix(rows):
+    """A blank top-left cell with labels along both edges: a matrix table.
+
+    An author who leaves the corner empty has said something: the first
+    column does not belong under the first row's heading, because the two
+    label different axes. Nothing else in the file has to agree -- this
+    fires with no bold, no shading, and no repeat-header row, which is the
+    state most of these tables are in.
+
+    The corner is the guard that makes the rest safe to relax. A table of
+    descriptions has a heading over its first column, so it never reaches
+    here, and the body does not have to be numeric: a normal-form game
+    whose cells read "A gets $1,000, B gets $800" is as much a matrix as a
+    contingency table, and a confusion matrix labeled Predicted Positive
+    over Actual Positive is the same shape again.
+
+    Across five books this matches 62 tables. 45 of them the rest of the
+    rule already calls both, which is the evidence that it picks out the
+    shape it means to.
+    """
+    if len(rows) < 3 or max(len(r) for r in rows) < 3:
+        return False
+    corner = rows[0][0]
+    if corner.text or corner.image:
+        return False
+    top = rows[0][1:]
+    side = [r[0] for r in rows[1:]]
+    if not top or not side:
+        return False
+    if any(not c.text for c in top) or any(not c.text for c in side):
+        return False
+    if mostly_numeric(top) or mostly_numeric(side):
+        return False
+    inner = [c for r in rows[1:] for c in r[1:]]
+    return bool(inner) and all(c.text or c.image for c in inner)
+
+
+QUANTITY = re.compile(r"""^[(\[]?[-+\u2212]?[$\u00a3\u20ac\u00a5]?\s*
+                          [\d][\d,. ]*
+                          \s*(?:%|[a-zA-Z][a-zA-Z./\u00b2\u00b3]{0,11}
+                                 (?:\s+[a-zA-Z]{1,10})?)?
+                          [)\]]?$""", re.X)
+
+
+def mostly_values(cells, ratio=0.8):
+    """A body of measurements rather than prose.
+
+    Wider than mostly_numeric, which wants a bare number: this also takes
+    a currency symbol, a unit, or both -- `$120 billion`, `3.0 million`,
+    `$1 per hour`, `18,100 clicks`, `21.4%`. Those are values with their
+    units written out, and a table of them is as much a matrix as a table
+    of bare figures. 24 tables in five books turn on the difference, all
+    of them shapes like `Government purchases | $120 billion`.
+
+    Deliberately strict about what follows the number: one word, or two
+    short ones. `Reducing pollution by the first 25%` starts with no digit
+    and never reaches here, but the ratio is what stops a column of
+    sentences that happen to open with a figure.
+    """
+    values = [c.text.strip() for c in cells if c.text.strip()]
+    if not values:
+        return False
+    hits = sum(1 for v in values if QUANTITY.match(v))
+    return hits >= ratio * len(values)
+
+
+def holds_values(rows):
+    """Is there something being measured to the right of the first column?
+
+    Asked per column, not over the whole body. `Neighborhood | Income
+    Level | Number of Participants` is half categories and half counts,
+    so over the whole body fewer than 80% of the cells parse as values
+    and the table read as prose -- but Number of Participants is a column
+    of measurements and Neighborhood heads its rows. 45 tables in seven
+    books turn on the difference.
+
+    The original whole-body test is kept as an alternative, since a body
+    can be mostly values without any single column reaching the
+    threshold.
+
+    What this still excludes is the case the test exists for: `Retail
+    Type | Product Focus | Example` has no column of values anywhere, so
+    it stays a list of descriptions rather than becoming a matrix.
+    """
+    if not rows:
+        return False
+    if mostly_values([c for r in rows for c in r[1:]]):
+        return True
+    for j in range(1, max(len(r) for r in rows)):
+        column = [r[j] for r in rows if j < len(r)]
+        if column and mostly_values(column):
+            return True
+    return False
+
+
 def keys_rows(cells):
     """True when this column reads as a label for its rows rather than as
     data.
@@ -409,6 +563,11 @@ def keys_rows(cells):
 # --------------------------------------------------------------------------
 
 def guess(tbl, kind=None, ev=None):
+    """The sidecar value alone. See explain() for the value and the reason."""
+    return explain(tbl, kind, ev)[0]
+
+
+def explain(tbl, kind=None, ev=None):
     """The value a table-headers sidecar would be prefilled with.
 
     Four values, which are the ones the sidecar accepts: first-row,
@@ -416,6 +575,14 @@ def guess(tbl, kind=None, ev=None):
     for a table the sidecar does not cover, which today means layout
     tables -- distinct from "none", which is a declaration that this is a
     data table with nothing to declare.
+
+    Returns "unknown" where the file shows a header band the four values
+    cannot place. That is a third state on purpose: "none" is a claim
+    about the table and "unknown" is a claim about the guess, and a report
+    that conflates them tells a person nothing about where to look.
+
+    The key-column rule fires with or without a header row above it, but
+    not on the same terms: see the comment where it does.
 
     This is deliberately not the same question classify() answers.
     classify() reports what the file says; these books hardly ever bold or
@@ -435,11 +602,11 @@ def guess(tbl, kind=None, ev=None):
     if kind is None:
         kind, ev, _, _ = classify(tbl)
     if kind == "empty" or kind.startswith("layout"):
-        return None
+        return None, "not a data table"
 
     grid = build_grid(tbl)
     if not grid:
-        return None
+        return None, "no cells"
 
     # Read past what the table opens with but does not mean. A merged
     # full-width first row becomes a <caption>, so the value describes the
@@ -460,35 +627,113 @@ def guess(tbl, kind=None, ev=None):
             break
     rows = grid[start:]
     if not rows:
-        return None
+        return None, "nothing left after the opening rows"
+    skipped = ("read past %d opening row(s); " % start) if start else ""
 
     marked = [i for i, tr in enumerate(tbl.findall(q("tr"))) if repeats_as_header(tr)]
-    has_head = (start in marked
-                or (not is_full_width_band(rows[0])
-                    and looks_like_header_band(rows[0], allow_blank_corner=True)))
+    # Ignoring full-width rows would empty a one-column table, where every
+    # row spans the width by definition.
+    plain = [r for r in rows if not wide or not is_full_width_band(r)]
+    if start in marked:
+        head_why = "row 1 is set to repeat as a header (w:tblHeader)"
+    elif ((not wide or not is_full_width_band(rows[0]))
+          and looks_like_header_band(rows[0], allow_blank_corner=True)):
+        head_why = "every cell in row 1 has text and they are uniformly bold or shaded"
+    elif text_row_over_numbers(plain):
+        head_why = "row 1 is words and everything under it is numbers"
+    else:
+        head_why = ""
+    has_head = bool(head_why)
 
     # Formatting that already proves a header column wins over the key
     # rule below, which would otherwise demote those tables to col.
-    if kind == "both":
-        return "both"
-    if kind == "first-column":
-        return "first-column"
+    # classify() found a header band, and not where we could use it: not
+    # row 1, not a title row, not a blank spacer. `11-5-race-and-ethnicity`
+    # opens with a stray data row above its real header row. There is no
+    # value for that, and asserting one would be worse than saying so --
+    # the guess reported first-column here, which is a claim that this
+    # table has no header row when the file plainly shows one.
+    if not has_head and kind.startswith("headers-not-in-row-1"):
+        return "unknown", (skipped + "there is a header band, but below row 1 "
+                           "and with content above it, which no value describes")
 
-    if not has_head and kind == "no-header-signal":
-        return "none"
+    # Whether the first column is formatted as headers, asked directly
+    # rather than read off `kind`. classify() computes this and then, on
+    # the title-row branch, reports the title row instead: BC-07's Message
+    # Triangle has a merged title, a bold header row, and a bold first
+    # column, and the column finding was in the evidence string and
+    # nowhere else. A bold first column is the strongest signal there is
+    # for both, and there are only 19 of them in seven books.
+    col_cells = [r[0] for r in rows[1 if has_head else 0:]
+                 if r and not is_full_width_band(r)]
+    header_col = bool(col_cells) and (
+        looks_like_header_band(col_cells, allow_blank_corner=not has_head)
+        and not mostly_numeric(col_cells))
+
+    if kind == "both" or (has_head and header_col):
+        return "both", (skipped + "formatting marks both a header row and a "
+                        "header column")
+    if kind == "first-column" or header_col:
+        return "first-column", (skipped + "formatting marks a header column "
+                                "and no header row")
+
+    if blank_corner_matrix(plain):
+        return "both", (skipped + "the corner cell is blank with labels along the top "
+                        "row and down the first column, so the two axes label each other")
 
     ncols = max(len(r) for r in rows)
     body = [r for r in rows[1 if has_head else 0:]
             if r and not is_full_width_band(r)]
     if ncols < 2 or len(body) < 2:
-        return "first-row" if has_head else "none"
+        if has_head:
+            return "first-row", skipped + head_why
+        return "none", skipped + "too small to read, and nothing marks a header"
 
-    rest = [c for r in body for c in r[1:]]
-    if has_head and keys_rows([r[0] for r in body]) and mostly_numeric(rest):
-        return "both"
+    # A trailing summary row ("Total = 600") often has nothing in its
+    # label cell, and one blank is enough to make the whole first column
+    # fail the every-cell-filled test. Set it aside for the key rule; it
+    # is a footer for the table, not one of the rows being keyed. Five
+    # tables in five books turn on this, all frequency or contingency
+    # tables that want both.
+    keyed_rows = body
+    summary = ""
+    if (len(body) > 2 and not body[-1][0].text
+            and any(c.text for c in body[-1][1:])):
+        keyed_rows = body[:-1]
+        summary = ", setting aside a trailing row with no label"
+    col0 = [r[0] for r in keyed_rows]
+    rest = [c for r in keyed_rows for c in r[1:]]
+    keyed = keys_rows(col0)
+    valued = holds_values(keyed_rows)
+    sample = next((c.text for c in rest if c.text and QUANTITY.match(c.text.strip())),
+                  next((c.text for c in rest if c.text), ""))
+    over = ("over a body holding values" + (' such as "%s"' % sample[:24] if sample else ""))
+    key_why = "the first column fills every cell without repeating a value, " + over
+    if keyed and valued:
+        if has_head:
+            return "both", skipped + head_why + ", and " + key_why + summary
+        # No header row at all. A column of labels over a body of values
+        # still heads its rows -- a transposed table whose first column
+        # holds the field names, or a list of makes against their market
+        # share. But a *numeric* first column is not enough on its own
+        # here: with no header row to fix the orientation, an ordered
+        # numeric column is as likely to be the first data series as a
+        # lookup axis. 17 tables reach this point and the split is 13/4,
+        # with the 4 numeric ones including a bare grid whose first column
+        # happens to descend.
+        # mostly_values rather than mostly_numeric: a first column of
+        # dollar amounts is a data series with its units written out, and
+        # two tables in the corpus are bare grids of money that the
+        # narrower test would have read as labels.
+        if not mostly_values(col0):
+            return "first-column", (
+                skipped + "nothing marks a header row, but the first column reads as "
+                "labels rather than values and fills every cell without repeating, "
+                + over)
     if has_head:
-        return "first-row"
-    return "none"
+        return "first-row", skipped + head_why + (
+            ", and the first column does not key its rows over a body of values")
+    return "none", skipped + "no header row, no header column, and no keying first column"
 
 
 LABEL = re.compile(r"\b(Table|Exhibit)\s+([A-Z]?[\d.]+[a-z]?)", re.I)

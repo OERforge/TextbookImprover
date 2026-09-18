@@ -20,7 +20,7 @@ rather than the file, so a corpus is the only other way to check it, and a
 corpus is not something a test can carry.
 
 Each case names a table shape rather than a rule, and two of them exist to
-pin behaviour the rule must NOT have: a table of descriptions and a table
+pin behavior the rule must NOT have: a table of descriptions and a table
 with a repeating first column both stay col, because a first column that
 keys its rows only means something when the rest of the table is values.
 
@@ -162,6 +162,145 @@ case("a one-column table is not all title rows", "first-row", [
     row([cell("Hours studied", bold=True)], header=True),
     row([cell("2")]),
     row([cell("5")]),
+])
+
+# A column of labels over a body of values heads its rows even with no
+# header row above it: a list of makes against their market share.
+case("labels over values with no header row", "first-column", [
+    row([cell("Honda"), cell("10%")]),
+    row([cell("Nissan"), cell("7%")]),
+    row([cell("Hyundai"), cell("5%")]),
+    row([cell("Kia"), cell("4%")]),
+])
+
+# The same shape with a numeric first column is not enough. With no header
+# row to fix the orientation, an ordered numeric column is as likely to be
+# the first data series as a lookup axis, and this one is a bare grid.
+case("numbers over values with no header row stays none", "none", [
+    row([cell("94.2"), cell("75.2"), cell("69.6")]),
+    row([cell("77.3"), cell("74.1"), cell("70.2")]),
+    row([cell("76.3"), cell("73.8"), cell("71.1")]),
+])
+
+# A blank corner with labels along both edges is a matrix, whatever the
+# body holds. A normal-form game written without spanning player names is
+# this shape, and so is a confusion matrix.
+case("a blank corner with labels on both edges", "both", [
+    row([cell(""), cell("Firm B colludes"), cell("Firm B cheats")]),
+    row([cell("Firm A colludes"), cell("A gets $1,000"), cell("A gets $200")]),
+    row([cell("Firm A cheats"), cell("A gets $1,500"), cell("A gets $400")]),
+])
+
+# The guard: a table of descriptions has a heading over its first column,
+# so the corner is not blank and the rule never fires.
+case("a heading over the first column is not a matrix", "first-row", [
+    row([cell("Retail type", bold=True), cell("Product focus", bold=True),
+         cell("Example", bold=True)]),
+    row([cell("Department store"), cell("Wide assortment"), cell("Macy's")]),
+    row([cell("Specialty store"), cell("One category"), cell("Foot Locker")]),
+])
+
+# A row of words over rows of numbers is a header row even though nothing
+# in the file says so. Here the first column is unordered, so it stops at
+# first-row.
+case("words over numbers is a header row", "first-row", [
+    row([cell("Group A"), cell("Group B"), cell("Group C")]),
+    row([cell("101"), cell("108"), cell("98")]),
+    row([cell("98"), cell("112"), cell("104")]),
+    row([cell("107"), cell("99"), cell("110")]),
+])
+
+# Same signal, but the first column is an ordered key, so the row-header
+# rule fires on top of it and the table lands on both.
+case("words over numbers with a key column is both", "both", [
+    row([cell("Labor"), cell("Wage")]),
+    row([cell("1"), cell("1")]),
+    row([cell("2"), cell("3")]),
+    row([cell("3"), cell("5")]),
+    row([cell("4"), cell("7")]),
+])
+
+# Values with their units written out are still values, so a label column
+# over a column of dollar amounts heads its rows.
+case("labels over amounts with units", "first-column", [
+    row([cell("Government purchases"), cell("$120 billion")]),
+    row([cell("Depreciation"), cell("$40 billion")]),
+    row([cell("Consumption"), cell("$400 billion")]),
+    row([cell("Business investment"), cell("$60 billion")]),
+])
+
+# The guard: a first column of dollar amounts is a data series, not
+# labels, so a bare grid of money stays none.
+case("a grid of money is not a label column", "none", [
+    row([cell("$46,500.00"), cell("$0"), cell("$40,966.50")]),
+    row([cell("$19,500.00"), cell("$181,557.20"), cell("$2,900")]),
+    row([cell("$3,600"), cell("$1,243,900"), cell("$10,900")]),
+])
+
+# A trailing total row usually has nothing in its label cell, and one
+# blank cell would otherwise disqualify the whole first column.
+case("a trailing total row does not break the key column", "both", [
+    row([cell("Streaming services", bold=True), cell("Frequency", bold=True)],
+        header=True),
+    row([cell("0"), cell("66")]),
+    row([cell("1"), cell("119")]),
+    row([cell("2"), cell("340")]),
+    row([cell("4+"), cell("15")]),
+    row([cell(""), cell("Total = 540")]),
+])
+
+# A data row above the real header row. Nothing can be declared about
+# this, and "none" would be a false claim that the table has no headers.
+case("a header band below a data row is unknown", "unknown", [
+    row([cell("Population estimates, July 1, 2019"), cell("328,239,523")]),
+    row([cell("Race and Hispanic Origin", bold=True),
+         cell("Percentage (%)", bold=True)]),
+    row([cell("White alone"), cell("76.3")]),
+    row([cell("Black or African American alone"), cell("13.4")]),
+    row([cell("Asian alone"), cell("5.9")]),
+])
+
+# A merged title, a bold header row, and a bold first column all at once.
+# The title-row branch of classify() reports the title and not the
+# column, so the guess has to ask about the column itself.
+case("a title row does not hide a formatted header column", "both", [
+    row([cell("The Message Triangle", span=3)]),
+    row([cell("Element", bold=True), cell("Focus", bold=True),
+         cell("Example", bold=True)]),
+    row([cell("Purpose", bold=True), cell("What is the core idea?"),
+         cell("We are requesting approval")]),
+    row([cell("Clarity", bold=True), cell("How simply can it be stated?"),
+         cell("The change will reduce time")]),
+    row([cell("Tone", bold=True), cell("How will it sound?"),
+         cell("We appreciate your support")]),
+])
+
+# Half categories, half counts. The counts are a column of measurements
+# and the neighborhood heads its row, so the mix does not make it prose.
+case("a mixed body with one column of values", "both", [
+    row([cell("Neighborhood", bold=True), cell("Income Level", bold=True),
+         cell("Number of Participants", bold=True)]),
+    row([cell("Northside"), cell("Low Income"), cell("35")]),
+    row([cell("Southside"), cell("Middle Income"), cell("50")]),
+    row([cell("Eastside"), cell("High Income"), cell("45")]),
+])
+
+# Every row of a one-column table spans the full width, so the tests that
+# look for a merged header row have to stand aside for them. Here the only
+# signal is that row 1 is bold.
+case("a bold header row in a one-column table", "first-row", [
+    row([cell("Compound Operator", bold=True)]),
+    row([cell("+=")]),
+    row([cell("-=")]),
+    row([cell("*=")]),
+])
+
+# And with no formatting at all, a word over a column of measurements.
+case("words over numbers in a one-column table", "first-row", [
+    row([cell("Weight in ounces")]),
+    row([cell("15.65")]),
+    row([cell("16.09")]),
+    row([cell("15.98")]),
 ])
 
 case("a bare data array is none", "none", [

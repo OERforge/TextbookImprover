@@ -6,7 +6,7 @@ Versions are two-part and pre-1.0: breaking changes may land in any of them unti
 
 ## [Unreleased]
 
-Groundwork for the table-headers sidecar (roadmap item 1), through step 1 of its build: the sidecar, the key, and the report exist and a book can start carrying declarations. Nothing in the converted output changes yet.
+The table-headers sidecar (roadmap item 1), through step 2 of its build: the sidecar, the key, and the report exist, and the conversion applies the value in effect for every data table. Output changes for tables declared or guessed to have a header column, an unmarked header row, or no headers.
 
 ### Added
 
@@ -24,6 +24,8 @@ Groundwork for the table-headers sidecar (roadmap item 1), through step 1 of its
 
 ### Changed
 
+- **The conversion applies each table's header declaration.** The filter reads what the pre-pass resolved -- the sidecar's value where one was declared, the guess otherwise -- and sets `row_head_columns` and `scope="row"` for a header column, promotes an unmarked first row into the table head for `first-row` and `both`, and moves a reader-built head back into the body for `none` and `first-column`. A blank, `manual`, or `list` leaves the table as Pandoc gave it. Each resolved value is checked against the table's shape and first cell before it is applied, and refused with a warning on a mismatch, so a disagreement between the pre-pass's count of tables and the filter's cannot put a declaration on the wrong table. Measured on *Introductory Business Statistics 2e* against the previous pipeline: 124 of 169 pages identical; on the 45 that differ, 228 tables gained row headers, 31 unmarked header rows were promoted, and one merged title row that had been a spanning header cell is no longer one (the caption it should be is step 3).
+- **`table-headers-missing.csv` is retired.** What it reported -- tables with no header row -- is answerable by a sidecar value wherever the header text exists, and where it does not, the report's `needs-word` status says so. The `reports.table_headers_missing` setting is removed; a configuration that still names it is an unknown key.
 - Cell text now includes equations and respects line structure. A cell's content can be an OMML equation rather than runs of text, and 336 cells across the corpus looked empty to a `w:t`-only reader; paragraphs and line breaks inside a cell are separated rather than run together. Both matter for the guess and more for a key computed from cell text, where three tables in the statistics book hashed identically.
 - The guess reads more shapes, each measured against the corpus: a numeric first column must be ordered to count as a key column, a blank corner with labels along both edges is a matrix whatever the body holds, a row of words over rows of numbers is a header row, values with their units written out (`$120 billion`) count as values, the values test is asked per column rather than over the whole body, an unlabeled trailing summary row is set aside, and one-column tables are no longer disqualified by tests written for merged rows.
 - `guess()` is now a thin wrapper over `explain()`, which returns the value and the reason together, so the reason cannot drift from the decision.

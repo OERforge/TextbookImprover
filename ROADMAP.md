@@ -8,7 +8,7 @@ We are attempting to follow two principles: build the tool that can check a chan
 
 A CSV declaring, per table, which lines hold its headers: `first-row`, `first-column`, `both`, or `none`. The conversion applies it, so the same declaration drives every output format.
 
-**Status: step 1 of 4 landed.** The sidecar, the key, the pre-pass, and the report exist (`bin/table-headers.py`, `lib/tablecensus.py`); a book can carry declarations now and the run checks them. Nothing in the output changes yet. Next: the filter consuming the value.
+**Status: step 2 of 4 landed.** The sidecar, the key, the pre-pass, and the report exist, and the filter applies the value in effect: `first-row`, `first-column`, `both`, and `none` change the output; a blank, `manual`, and `list` leave the table as Pandoc gave it. Next: `caption-rows`, with `caption-rows=1` inferred for a merged title row; then `split-at`.
 
 The values are named for the line that holds the headers, which is how [`latex-lab-table`](https://ctan.org/pkg/latex-lab) names `table/header-rows` and `table/header-columns` and how Pandoc names `row_head_columns`. Earlier drafts of this file used `col`, `row`, `matrix`, and `grid`, where `col` meant a header *row*: that reads as the opposite of the LaTeX keys and is gone. `matrix` and `grid` stay acceptable as aliases for `both` and `none`, because `matrix` is what my textbook's fenced divs already say.
 

@@ -269,6 +269,15 @@ Beyond the Word-to-HTML translation, each page gets:
   a focusable scroll wrapper. Pandoc's own stylesheet sets `display: block`
   on tables, which strips the table role from the accessibility tree; the
   wrapper restores it.
+- **Tables get the headers they were declared to have.** `table-headers.csv`
+  says, per table, whether the headers are in the first row, the first
+  column, both, or nowhere (see [Sidecar files](#sidecar-files)), and for a
+  table it does not cover the run guesses from the file. A header row is
+  marked up as `<th scope="col">` whether or not Word marked it to repeat;
+  a header column becomes `<th scope="row">` on the first cell of every
+  body row, which is what lets a screen reader say which country a figure
+  belongs to; a table declared to have no headers gets none, however Word
+  formatted it.
 - **Captions are found above or below the table.** Either `**Table 2.1:
   Message Transmission Mediums**` on one line, or a bare `**Table 7.1**`
   followed by `*Sample Code of Conduct*`. Prose that merely mentions a
@@ -310,7 +319,6 @@ the others. A report existing at all means there is work outstanding.
 |---|---|
 | `image-alt-missing.csv` | Filling in the `Alt` column and appending the rows to `image-alt.csv`. |
 | `table-captions-missing.csv` | Filling in the `Description` column and appending to `table-captions.csv`. |
-| `table-headers-missing.csv` | Marking the header row in Word. No sidecar: header text cannot be invented. |
 | `table-headers-new.csv` | Pasting its rows into `table-headers.csv`. It holds a prefilled sidecar row for every data table the sidecar has none for, and exists only while there are any. |
 | `table-headers-report.csv` | Nothing directly: it records, for every data table, what the sidecar declared, what the guess said and why, and a status. Written every run. |
 | `spacer-images.csv` | Nothing — it records what the spacer rule did. |
@@ -361,10 +369,12 @@ in on later runs when tables have been added. A row whose key matches no
 table stops the run, since a correction that silently fails to apply
 destroys work invisibly; the report names the row. Values this version does
 not act on yet (`manual`, `list`, `split-at`, `caption-rows`) are accepted
-and kept, so a book can start carrying them. The pipeline does not yet
-change output on the strength of this file; that is the next step of
-roadmap item 1, and everything here is so the sidecar and its report exist
-first.
+and kept, so a book can start carrying them. The value in effect -- the sidecar's where one was declared, the guess
+otherwise -- is applied when the page is built. A status of `needs-word` in
+the report means no cell of the table could serve as a header, so no value
+can help and headers have to be written in Word; that is the one thing the
+old `table-headers-missing.csv` reported, and it is now a row in the report
+rather than a file.
 
 `image-alt.csv` keys on the image path **ignoring the extension**, because
 conversion renames files by content type. Four states for the `Alt` column:
@@ -816,7 +826,7 @@ is how `convert.sh` passes settings from `conversion.yaml`:
 | `IMAGE_ALT` | `image-alt.csv` | Sidecar of replacement alt text to read |
 | `TABLE_CAPTIONS_MISSING` | unset | Where to append rows for tables needing a description |
 | `IMAGE_ALT_MISSING` | unset | Where to append rows for images needing alt text |
-| `TABLE_HEADERS_MISSING` | unset | Where to append rows for tables with no header row |
+| `TABLE_HEADERS_RESOLVED` | unset | JSON from `table-headers.py --resolved`: the header value to apply per table |
 | `SPACER_LOG` | unset | Where to append rows for spacer images handled |
 | `SPACER_BELOW` | `0` (off) | Width under which an image is a spacer |
 | `STRIP_SPACER` | `false` | Remove spacers rather than marking them decorative |
@@ -1113,9 +1123,11 @@ keys on the media path ignoring its extension.
 
 ## Known limits
 
-- **Header row text cannot be invented.** A table with no header row is
-  reported, not fixed. Add the header in Word, where it benefits every
-  downstream format.
+- **Header row text cannot be invented.** A table whose cells hold nothing
+  that could be a header -- a grid of measurements -- is reported as
+  `needs-word` in `table-headers-report.csv`, not fixed. Add the header in
+  Word, where it benefits every downstream format. Where the header text is
+  there and only unmarked, a value in `table-headers.csv` is enough.
 - **Equation images stay images.** Rejoining MathSpeak identifiers is a
   mitigation. The real fix is authoring them as Word equations, which
   convert to MathML.

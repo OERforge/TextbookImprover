@@ -46,10 +46,10 @@ keys:
     description: >
       A name for this book that no other book anywhere will use. It is
       what an LMS matches on to recognise a re-import as the same course,
-      it is what the content folder inside a package is named after, and
+      it's what the content folder inside a package is named after, and
       two books sharing one are two books the LMS will treat as one. The
       IMS schema only requires it to be unique within the package;
-      uniqueness beyond that is your responsibility and nothing will warn
+      uniqueness beyond that's your responsibility and nothing will warn
       you.
       It also has to be a valid XML name, because IMS types it as xs:ID:
       start with a letter, then letters, digits, and . - _ only. No

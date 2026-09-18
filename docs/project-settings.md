@@ -1,0 +1,29 @@
+# Project settings
+
+Settings that describe the book rather than any one rendering or package of it, at the top level of `packaging.yaml`. Both halves of the pipeline read them. Generated from `lib/schema-project.yaml` by `util/settings-reference.py`; edit the schema, not this page.
+
+Facts about the book itself, true of every rendering of it.
+
+**`identifier`** -- `ncname`; default `book`
+
+A name for this book that no other book anywhere will use. It is what an LMS matches on to recognise a re-import as the same course, it's what the content folder inside a package is named after, and two books sharing one are two books the LMS will treat as one. The IMS schema only requires it to be unique within the package; uniqueness beyond that's your responsibility and nothing will warn you. It also has to be a valid XML name, because IMS types it as xs:ID: start with a letter, then letters, digits, and . - _ only. No colons, and it may not start with a digit -- which rules out both obvious ways of generating a unique one, since a bare UUID usually starts with a digit and urn:uuid: has colons. Reverse-DNS is the least error-prone form and reads well as a folder name: org.example.dept.course-code. A UUID works with a letter in front, which you can generate with python3 -c "import uuid; print('i' + uuid.uuid4().hex)". Whichever you choose, keep it for the life of the book. Changing it makes every future import a new course rather than an update.
+
+**`title`** -- `string`; default `Untitled`
+
+The book's title, as it should appear to a reader.
+
+**`language`** -- `language`; default `en`
+
+BCP 47 language tag for the book's text. Sets the lang attribute on every page (WCAG 3.1.1) and the language declared in any package built from those pages. Quote it: unquoted no, yes, and on are read as booleans by YAML.
+
+**`description`** -- `text`; default `""` (empty)
+
+A sentence or two about the book, used wherever a package format asks for one.
+
+**`publisher`** -- `string`; default `""` (empty)
+
+Who published the book. Written as document metadata, and available to package formats that record it.
+
+**`contents`** -- `opaque`; default `[]`
+
+The book's structure as a nested list of pages and groups. This describes the book, not any one package, so a cartridge organisation and an EPUB table of contents are both built from it. Left empty, tools that need an order guess one and say so.

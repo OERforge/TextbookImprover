@@ -1210,6 +1210,22 @@ def main():
                              available, used, problems)
 
     extra = [s for s in stems if s not in used]
+    if args.toc and not extra:
+        # The outline orders only pages the config does not place, and the
+        # config placed all of them -- usually because the first run's
+        # guessed sample was adopted as packaging.yaml before --toc was
+        # tried. Saying nothing here left the outline silently unused and
+        # the sample looking exactly like the config.
+        print(f"WARNING: {os.path.basename(args.toc)} was not used. contents "
+              "already places every page, and the outline orders only pages "
+              "it does not.", file=sys.stderr)
+        print("  To order the whole book from the outline, remove the "
+              "contents block from packaging.yaml and run --toc again; the "
+              "sample it writes is the outline's order, with the book's own "
+              "chapter titles.", file=sys.stderr)
+        notes.append(f"{os.path.basename(args.toc)} was not used: contents "
+                     "already placed every page. Remove contents and run "
+                     "--toc again to order from the outline.")
     if extra:
         if args.toc:
             # The outline supplies the order for pages the config did not

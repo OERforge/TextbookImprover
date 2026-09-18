@@ -1,5 +1,5 @@
 -- NOT YET WIRED IN. Kept here because it is the working half of roadmap
--- item 2, the bare-URL sidecar: it turns an aria-label attribute on a Link
+-- item 7, the bare-URL sidecar: it turns an aria-label attribute on a Link
 -- into the /Contents entry of the PDF link annotation. The HTML and EPUB
 -- writers already emit that attribute unchanged, so one annotation covers
 -- all three outputs.

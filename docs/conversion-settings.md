@@ -1,0 +1,121 @@
+# Conversion settings
+
+Settings that describe one rendering of the book, under `conversion:` in `packaging.yaml` and per target under `targets:`. Generated from `bin/schema-conversion.yaml` by `util/settings-reference.py`; edit the schema, not this page. A setting marked *target only* can appear only inside a target.
+
+How the book is rendered into one output format.
+
+**`format`** -- one of `html`, `epub3`, `pdf`, `docx`, `markdown`; default `html`; *target only*
+
+What this target produces.
+
+**`output_dir`** -- `path`; default `""` (empty); *target only*
+
+Where this target writes. Defaults to the target's own name, so two targets in the same format can't overwrite each other.
+
+**`header`** -- `text`; default `""` (empty)
+
+Markdown placed at the top of every page, or the path to a file holding it. Inserted by the template after the filters have run, so nothing in it's processed: give any image explicit alt text.
+
+**`footer`** -- `text`; default `""` (empty)
+
+Markdown placed at the bottom of every page, or the path to a file holding it. The usual use is an attribution line. Same caveat as header: it isn't processed by the filters.
+
+**`promote_h1_to_title`** -- one of `always`, `if-absent`, `longer`, `never`; default `always`
+
+Whether a page's leading H1 becomes its title. Reading .docx, the existing title comes from a paragraph styled Title, which Pandoc's reader consumes out of the body as metadata. In the OpenStax books that paragraph says the same thing as the H1 without its section number, so the H1 is the more complete of the two and always is right. Reading Markdown or HTML a title is deliberate, so if-absent is. longer promotes only when the H1 contains the existing title; never leaves both alone.
+
+**`author_byline`** -- one of `meta`, `visible`, `drop`; default `meta`
+
+What to do with author metadata from the source. Reading .docx this comes from a paragraph styled Author, which Pandoc consumes out of the body the same way it consumes a Title-styled one. meta keeps it in the page head and suppresses the visible byline Pandoc's template would otherwise print under every title; visible keeps both; drop removes it.
+
+## images
+
+How images extracted from the source are handled.
+
+**`images.spacer_below`** -- `float`; default `0`
+
+Width in inches below which an image is treated as a layout spacer rather than content. 0 disables the rule and reports candidates instead.
+
+**`images.strip_spacer`** -- `bool`; default `false`
+
+Remove spacer images rather than hiding them from assistive technology.
+
+**`images.alt_max_chars`** -- `int`; default `120`
+
+Alt text longer than this is reported so it can be shortened, with the detail moved into the surrounding prose where every reader benefits from it.
+
+**`images.responsive`** -- `bool`; default `true`
+
+Let images shrink on narrow viewports rather than reproducing the source's fixed dimensions (WCAG 1.4.10).
+
+## tables
+
+How data tables are rendered.
+
+**`tables.wrap`** -- `bool`; default `true`
+
+Put wide tables in a focusable scroll container so a long table doesn't force the whole page to scroll sideways (WCAG 1.4.10).
+
+## captions
+
+How table and figure labels are recognised in the source.
+
+**`captions.table_prefixes`** -- `list`; default `[Table]`
+
+Words that begin a table label. Books that say Exhibit rather than Table need this.
+
+**`captions.figure_prefixes`** -- `list`; default `[Figure]`
+
+Words that begin a figure label.
+
+## media
+
+How media extracted from the source is handled.
+
+**`media.strict`** -- `bool`; default `false`
+
+Abort as soon as an image can't be identified, rather than collecting every such image and stopping once at the gate.
+
+## sidecars
+
+CSV files holding decisions a person made about the source. These describe the book rather than one rendering, so a target should rarely override them. These files are read, never written, and hold work no script can reproduce. A bare name resolves against the content directory, which is convenient but leaves them among the generated HTML, the extracted media, and the disposable reports: the directory you would delete to rebuild, and the one replaced wholesale when the publisher reissues the source. An absolute path, or one relative to the content directory such as "../corrections/ibs2e/table-captions.csv", keeps them somewhere you can put under version control. A path set here that doesn't exist stops the run, because the alternative is converting the whole book while silently discarding every correction in it.
+
+**`sidecars.table_captions`** -- `path`; default `table-captions.csv`
+
+Descriptive captions, keyed on the table's label. A bare label is a valid caption but describes nothing, and no script can invent the description.
+
+**`sidecars.image_alt`** -- `path`; default `image-alt.csv`
+
+Alt text, keyed on the image path with the extension ignored. Use [decorative] for an image that carries no meaning.
+
+**`sidecars.table_headers`** -- `path`; default `table-headers.csv`
+
+Where each table's headers are, keyed on a hash of the table's content: first-row, first-column, both, or none. A first run writes prefilled rows to the table_headers_new report; rename or paste them here. Values this version doesn't act on yet (manual, list) are accepted and kept. A row whose key matches no table stops the run, because a correction that silently fails to apply destroys work invisibly.
+
+## reports
+
+Where the run records what still needs human attention. Removing a report when nothing is outstanding is deliberate: the file existing at all is the signal that there's work to do.
+
+**`reports.table_captions_missing`** -- `path`; default `table-captions-missing.csv`
+
+Tables whose caption is a bare label with no description.
+
+**`reports.image_alt_missing`** -- `path`; default `image-alt-missing.csv`
+
+Images with no alt text, or with alt text over the length limit.
+
+**`reports.table_headers_new`** -- `path`; default `table-headers-new.csv`
+
+Prefilled sidecar rows for every data table the table_headers sidecar has no row for, in the sidecar's own format. Written when there are any and removed when there are none, so the file existing is the signal that there are rows to paste in.
+
+**`reports.table_headers_report`** -- `path`; default `table-headers-report.csv`
+
+What happened to every data table this run: what the sidecar declared, what the guess said and why, and a status of declared, new, blank, manual, needs-word, or unmatched.
+
+**`reports.media_unresolved`** -- `path`; default `media-unresolved.csv`
+
+Media that could not be identified. EMF and WMF are the usual cause and have to go back to the author.
+
+**`reports.spacer_images`** -- `path`; default `spacer-images.csv`
+
+Spacer images found, and what was done with each.

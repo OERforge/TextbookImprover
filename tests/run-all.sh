@@ -27,9 +27,16 @@
 #                          and directory names, and the places where one
 #                          fact is written down twice and could drift.
 #
-#   run-census-tests.py    the sidecar guess in util/table-census.py,
+#   run-headers-tests.py   the table-headers pre-pass end to end: keys,
+#                          the sidecar's values and aliases, the new-rows
+#                          file, the report, and the unmatched-key stop.
+#
+#   run-census-tests.py    the sidecar guess in lib/tablecensus.py,
 #                          against tables built as OOXML so each carries
 #                          exactly the formatting signals it means to.
+#
+#   settings-reference.py  the docs/*-settings.md pages are current with
+#                          the schemas they are written from.
 #
 #   run-portability-test.py
 #                          that every Python file parses on the oldest
@@ -76,10 +83,18 @@ run () {
 # meaningless on someone else's machine.
 run run-portability-test.py
 
+# The three settings reference pages under docs/ are written from the
+# schemas; this fails when a schema changed and nobody regenerated them.
+printf '\n=== settings-reference.py --check\n'
+if ! python3 "$here/../util/settings-reference.py" --check; then
+  failures=$((failures + 1))
+fi
+
 run run-config-tests.py
 run run-roundtrip-test.py
 run run-unit-tests.py
 run run-census-tests.py
+run run-headers-tests.py
 
 # The filter tests convert real documents, so they need Pandoc. Skipping
 # is reported rather than silent: a suite that quietly does not run is

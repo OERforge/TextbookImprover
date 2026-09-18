@@ -201,8 +201,10 @@ def main():
         "TABLE_CAPTIONS_MISSING_NAME":
             resolved["reports.table_captions_missing"],
         "IMAGE_ALT_MISSING_NAME": resolved["reports.image_alt_missing"],
-        "TABLE_HEADERS_MISSING_NAME":
-            resolved["reports.table_headers_missing"],
+        "TABLE_HEADERS_NAME": resolved["sidecars.table_headers"],
+        "TABLE_HEADERS_NEW_NAME": resolved["reports.table_headers_new"],
+        "TABLE_HEADERS_REPORT_NAME":
+            resolved["reports.table_headers_report"],
         "MEDIA_UNRESOLVED_NAME": resolved["reports.media_unresolved"],
         "SPACER_LOG_NAME": resolved["reports.spacer_images"],
 

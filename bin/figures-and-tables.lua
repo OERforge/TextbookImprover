@@ -106,12 +106,35 @@ local MISSING_FILE = os.getenv('TABLE_CAPTIONS_MISSING')
 local ALT_FILE = os.getenv('IMAGE_ALT') or 'image-alt.csv'
 local ALT_MISSING_FILE = os.getenv('IMAGE_ALT_MISSING')
 
--- Data tables with no header row are reported here. Unlike the other two
--- reports there is no sidecar to fill in: header text cannot be inferred
--- from the data, and inventing it would be worse than leaving it out. The
--- fix belongs in the DOCX -- mark the header row in Word, or add one where
--- the table genuinely lacks it.
-local HEADER_MISSING_FILE = os.getenv('TABLE_HEADERS_MISSING')
+-- What the table-headers pre-pass decided for each data table: the
+-- sidecar's value where one was declared, the guess otherwise. Keyed by
+-- source stem, then by the table's position among all the document's
+-- tables. Each entry carries the table's shape and first cell so the
+-- value is applied only to the table it was computed for; a document
+-- whose tables the reader counted differently gets a warning and no
+-- change rather than a declaration landing on the wrong table.
+local RESOLVED_FILE = os.getenv('TABLE_HEADERS_RESOLVED')
+local resolved_headers = nil
+
+local function load_resolved()
+  if resolved_headers ~= nil then return resolved_headers end
+  resolved_headers = {}
+  if not RESOLVED_FILE or RESOLVED_FILE == '' then return resolved_headers end
+  local handle = io.open(RESOLVED_FILE, 'r')
+  if not handle then return resolved_headers end
+  local text = handle:read('a')
+  handle:close()
+  local ok, data = pcall(pandoc.json.decode, text)
+  if not ok or type(data) ~= 'table' then return resolved_headers end
+  for stem, entries in pairs(data) do
+    local by_index = {}
+    for _, entry in ipairs(entries) do
+      by_index[tonumber(entry.index)] = entry
+    end
+    resolved_headers[stem] = by_index
+  end
+  return resolved_headers
+end
 
 -- Accepted spellings of the decorative marker, matched case-insensitively.
 local DECORATIVE_MARKERS = {
@@ -624,6 +647,10 @@ end
 -- in the document. A separate pass runs first and stamps each table with
 -- its true position; see the filter list at the end of this file.
 local ORDINAL_ATTR = 'data-cc-ordinal'
+-- Position among *all* the document's tables, image-only ones included,
+-- in document order with a container before the tables inside it. This
+-- is the index the table-headers pre-pass uses, which counts every w:tbl.
+local TH_INDEX_ATTR = 'data-th-index'
 
 local function position_key(ordinal)
   return source_stem() .. '#table-' .. tostring(ordinal)
@@ -632,11 +659,6 @@ end
 
 local function record_spacer(src, width, action)
   append_row(SPACER_LOG, { qualify_media(src), source_stem(), width, action })
-end
-
-local function record_headerless(label, rows, columns)
-  append_row(HEADER_MISSING_FILE,
-    { label, source_stem(), tostring(rows), tostring(columns) })
 end
 
 -- Read a sidecar into a key -> value map. A missing file is not an error.
@@ -902,16 +924,22 @@ end
 -- A scroll container keeps long tables from forcing the whole page to
 -- scroll sideways (WCAG 1.4.10). It is focusable so it can be scrolled by
 -- keyboard, and named so the resulting region is not announced anonymously.
+--
+-- The attributes are given as a list of pairs, not a table keyed by name.
+-- A keyed table is iterated in whatever order Lua's hash puts it in, and
+-- that order changes from one process to the next, so the same document
+-- converted twice produced <div tabindex role aria-label> one time and
+-- <div aria-label role tabindex> the next. Nothing was wrong with either,
+-- but a byte-level comparison of two runs was noise, and that comparison
+-- is the regression gate for everything the table work will change.
 local function wrap_table(tbl, label)
   if not WRAP_TABLES then return tbl end
-  local attr
+  local attributes = { { 'tabindex', '0' } }
   if label then
-    attr = pandoc.Attr('', { 'table-wrapper' },
-      { tabindex = '0', role = 'region', ['aria-label'] = label })
-  else
-    attr = pandoc.Attr('', { 'table-wrapper' }, { tabindex = '0' })
+    attributes[#attributes + 1] = { 'role', 'region' }
+    attributes[#attributes + 1] = { 'aria-label', label }
   end
-  return pandoc.Div({ tbl }, attr)
+  return pandoc.Div({ tbl }, pandoc.Attr('', { 'table-wrapper' }, attributes))
 end
 
 -- A paragraph that is nothing but emphasised text -- Word's usual way of
@@ -1002,6 +1030,424 @@ local function belongs_to_next_table(after_next, after_after)
   return false
 end
 
+-- ---------------------------------------------------------------------------
+-- Applying the table-headers declaration
+--
+-- The value comes from the pre-pass (see load_resolved), and says which
+-- lines of the table hold its headers: first-row, first-column, both, or
+-- none. A blank means "as Pandoc gives it" -- nothing declared and no
+-- guess, or a value like manual that this version accepts and does not
+-- act on -- and leaves the table alone apart from scope="col" on any
+-- header row the reader already built.
+--
+-- Two jobs, and only the first is Pandoc's. Setting row_head_columns on
+-- a body makes the writer emit <th> for the leading cell of each row;
+-- the writer emits a bare <th>, so scope="row" is set here as well. The
+-- header row is Pandoc's TableHead: a declared first-row promotes the
+-- first body row into it when the reader left it empty, and a declared
+-- none moves whatever the reader put there back into the body.
+-- ---------------------------------------------------------------------------
+
+local function first_body(tbl)
+  for _, body in ipairs(tbl.bodies) do
+    if #body.body > 0 then return body end
+  end
+  return nil
+end
+
+local function promote_first_row(tbl)
+  if #tbl.head.rows > 0 then return end
+  local body = first_body(tbl)
+  if body == nil then return end
+  local row = table.remove(body.body, 1)
+  tbl.head = pandoc.TableHead({ row }, tbl.head.attr)
+end
+
+local function demote_head(tbl)
+  if #tbl.head.rows == 0 then return end
+  local rows = tbl.head.rows
+  tbl.head = pandoc.TableHead({}, tbl.head.attr)
+  local body = tbl.bodies[1]
+  if body == nil then
+    tbl.bodies = { pandoc.TableBody(rows, {}, 0, pandoc.Attr()) }
+    return
+  end
+  local merged = {}
+  for _, r in ipairs(rows) do merged[#merged + 1] = r end
+  for _, r in ipairs(body.body) do merged[#merged + 1] = r end
+  body.body = merged
+end
+
+local function set_row_headers(tbl, on)
+  for _, body in ipairs(tbl.bodies) do
+    body.row_head_columns = on and 1 or 0
+    for _, row in ipairs(body.body) do
+      local cell = row.cells[1]
+      if cell then
+        if on then
+          cell.attr.attributes['scope'] = 'row'
+        else
+          cell.attr.attributes['scope'] = nil
+        end
+      end
+    end
+  end
+end
+
+-- The pre-pass counted rows and columns from the file; the AST may have
+-- had a title row absorbed or a spacer dropped, so this compares shape
+-- and first cell loosely and refuses on a clear mismatch rather than
+-- putting a declaration on the wrong table.
+local function matches_entry(tbl, entry)
+  local rows, columns = table_shape(tbl)
+  rows = rows + #tbl.head.rows
+  if columns ~= tonumber(entry.cols) then return false end
+  if math.abs(rows - tonumber(entry.rows)) > 1 then return false end
+  local first = ''
+  local row = tbl.head.rows[1] or (first_body(tbl) and first_body(tbl).body[1])
+  if row and row.cells[1] then
+    first = pandoc.utils.stringify(row.cells[1].contents)
+    first = first:gsub('%s+', ' '):gsub('^ ', ''):gsub(' $', ''):sub(1, 40)
+  end
+  local expected = tostring(entry.first or '')
+  if expected == '' or first == '' then return true end
+  return first:sub(1, 20) == expected:sub(1, 20)
+end
+
+-- Every row of the table in source order: the head's rows, then each
+-- body's. The pre-pass numbers rows the way the file does, and a merged
+-- title row the reader put in the head is still row 1.
+local function all_rows(tbl)
+  local rows = {}
+  for _, row in ipairs(tbl.head.rows) do
+    rows[#rows + 1] = { row = row, holder = tbl.head.rows, }
+  end
+  for _, body in ipairs(tbl.bodies) do
+    for _, row in ipairs(body.body) do
+      rows[#rows + 1] = { row = row, holder = body.body }
+    end
+  end
+  return rows
+end
+
+local function remove_row(tbl, target)
+  for _, body in ipairs(tbl.bodies) do
+    for i, row in ipairs(body.body) do
+      if row == target then table.remove(body.body, i); return true end
+    end
+  end
+  local kept = {}
+  local found = false
+  for _, row in ipairs(tbl.head.rows) do
+    if row == target then found = true else kept[#kept + 1] = row end
+  end
+  if found then tbl.head = pandoc.TableHead(kept, tbl.head.attr) end
+  return found
+end
+
+-- A cell's inlines, joined across its blocks with spaces, so that a title
+-- row holding an equation keeps the equation rather than its LaTeX
+-- source. Two title rows in the statistics book's formula appendix hold
+-- five equations between them.
+local function cell_inlines(cell)
+  local out = pandoc.Inlines({})
+  for _, block in ipairs(cell.contents) do
+    local inlines = nil
+    if block.t == 'Plain' or block.t == 'Para' then
+      inlines = block.content
+    else
+      inlines = text_to_inlines(pandoc.utils.stringify(block))
+    end
+    if #inlines > 0 then
+      if #out > 0 then out:insert(pandoc.Space()) end
+      out:extend(inlines)
+    end
+  end
+  return out
+end
+
+local function trim_inlines(inlines)
+  while #inlines > 0 and inlines[1].t == 'Space' do inlines:remove(1) end
+  while #inlines > 0 and inlines[#inlines].t == 'Space' do inlines:remove(#inlines) end
+  return inlines
+end
+
+-- A removed row as caption content: the first cell, a colon, the rest
+-- joined with commas. A merged title row is one cell and reads as itself;
+-- "Population estimates, July 1, 2019 | 328,239,523" reads as
+-- "Population estimates, July 1, 2019: 328,239,523". Returns the inlines
+-- and their text, since the caption search compares text.
+local function row_as_caption(row)
+  local parts, seen = {}, {}
+  for _, cell in ipairs(row.cells) do
+    local inlines = trim_inlines(cell_inlines(cell))
+    local text = normalise(pandoc.utils.stringify(inlines))
+    if text ~= '' and not seen[text] then
+      seen[text] = true
+      parts[#parts + 1] = { inlines = inlines, text = text }
+    end
+  end
+  if #parts == 0 then return pandoc.Inlines({}), '' end
+  local out = pandoc.Inlines({})
+  out:extend(parts[1].inlines)
+  local text = parts[1].text
+  for i = 2, #parts do
+    out:insert(pandoc.Str(i == 2 and ':' or ','))
+    out:insert(pandoc.Space())
+    out:extend(parts[i].inlines)
+    text = text .. (i == 2 and ': ' or ', ') .. parts[i].text
+  end
+  return out, text
+end
+
+-- caption-rows=N,M from the sidecar, or caption-rows=1 inferred by the
+-- pre-pass for a merged full-width first row. Two halves, because the
+-- caption search has to see the table intact: pending_caption_rows works
+-- out which rows are meant and what they say, without touching the
+-- table, so the search can treat that text as the description a bare
+-- label lacks; fold_caption_rows then removes the rows and puts the text
+-- into the caption, after whatever the search found, so a title row is
+-- the caption and row 1 is the real header row by the time first-row
+-- promotes it.
+local function pending_caption_rows(tbl, entry)
+  local pending = { targets = {}, text = '', inlines = pandoc.Inlines({}) }
+  local wanted = entry and entry.caption_rows
+  if type(wanted) ~= 'table' or #wanted == 0 then return pending end
+  local rows = all_rows(tbl)
+  local texts = {}
+  for _, n in ipairs(wanted) do
+    local at = rows[tonumber(n)]
+    if at == nil then
+      warn(('table-headers: caption-rows names row %s of a %d-row table in %s; ignored')
+        :format(tostring(n), #rows, source_stem()))
+    else
+      pending.targets[#pending.targets + 1] = at.row
+      local inlines, text = row_as_caption(at.row)
+      if text ~= '' then
+        if #texts > 0 then
+          pending.inlines:insert(pandoc.Str('.'))
+          pending.inlines:insert(pandoc.Space())
+        end
+        pending.inlines:extend(inlines)
+        texts[#texts + 1] = text
+      end
+    end
+  end
+  pending.text = table.concat(texts, '. ')
+  return pending
+end
+
+local function fold_caption_rows(tbl, pending)
+  for _, row in ipairs(pending.targets) do remove_row(tbl, row) end
+  if pending.text == '' then return nil end
+  local existing, existing_inlines = '', nil
+  if #tbl.caption.long > 0 then
+    existing = normalise(pandoc.utils.stringify(tbl.caption.long))
+    existing_inlines = pandoc.utils.blocks_to_inlines(tbl.caption.long)
+  end
+  if existing:find(pending.text, 1, true) then return existing end
+  local out = pandoc.Inlines({})
+  if existing ~= '' then
+    out:extend(existing_inlines)
+    if not existing:match('[.!?]$') then out:insert(pandoc.Str('.')) end
+    out:insert(pandoc.Space())
+  end
+  out:extend(pending.inlines)
+  tbl.caption = mk_caption({ pandoc.Plain(out) })
+  return normalise(pandoc.utils.stringify(out))
+end
+
+-- ---------------------------------------------------------------------------
+-- split-at: one table per band
+--
+-- A merged full-width row partway down a table labels the rows beneath
+-- it. <th scope="rowgroup"> is the HTML for that and nothing reads it
+-- reliably, PDF has no rowgroup scope at all, so instead the table is
+-- split at each band: the band row becomes the caption of the part below
+-- it, composed onto the table's own caption -- "Table 7.12: Example B" --
+-- unless part-captions supplies the text. Every part gets the original
+-- header rows where the table had a head; where it did not, the part's
+-- own first row is promoted by the header declaration, which is applied
+-- to each part in turn. One declaration covers every part.
+--
+-- Band rows are found by object before anything else moves them, so
+-- caption-rows and split-at both refer to the source's row numbers and
+-- neither renumbers the other.
+-- ---------------------------------------------------------------------------
+
+local function band_targets(tbl, entry)
+  local out = {}
+  local wanted = entry and entry.split_at
+  if type(wanted) ~= 'table' or #wanted == 0 then return out end
+  local rows = all_rows(tbl)
+  for _, n in ipairs(wanted) do
+    local at = rows[tonumber(n)]
+    if at == nil then
+      warn(('table-headers: split-at names row %s of a %d-row table in %s; ignored')
+        :format(tostring(n), #rows, source_stem()))
+    else
+      out[#out + 1] = at.row
+    end
+  end
+  return out
+end
+
+local function clone_rows(rows)
+  local out = {}
+  for _, row in ipairs(rows) do out[#out + 1] = row:clone() end
+  return out
+end
+
+local function compose_part_caption(base, band_inlines, band_text, given, part_no)
+  if given and given ~= '' then
+    return text_to_inlines(given), given
+  end
+  local out = pandoc.Inlines({})
+  local text = ''
+  if base and #base > 0 then
+    out:extend(base)
+    text = normalise(pandoc.utils.stringify(base))
+  end
+  if band_text ~= '' then
+    if #out > 0 then
+      out:insert(pandoc.Str(':'))
+      out:insert(pandoc.Space())
+      text = text .. ': ' .. band_text
+    else
+      text = band_text
+    end
+    out:extend(band_inlines)
+  elseif #out > 0 and part_no then
+    local suffix = 'Part ' .. tostring(part_no)
+    out:insert(pandoc.Str(':'))
+    out:insert(pandoc.Space())
+    out:insert(pandoc.Str(suffix))
+    text = text .. ': ' .. suffix
+  end
+  return out, text
+end
+
+-- A split row that is one merged cell across the table is a band: it
+-- leaves the table and its text becomes the caption. A split row with
+-- several cells cannot be a caption, so it is the part's own header row
+-- -- Functionalism | Associated Theorist | Deviance arises from: -- and
+-- only its first cell, the group's name, goes into the caption.
+local function is_band_row(row, width)
+  return #row.cells == 1 and (row.cells[1].col_span or 1) >= width
+end
+
+-- Returns a list of tables, or nil when there is nothing to split.
+local function split_table(tbl, bands, part_captions, apply)
+  if #bands == 0 then return nil end
+  local is_band = {}
+  for _, row in ipairs(bands) do is_band[row] = true end
+
+  -- Flatten every body's rows in order, keeping the first body's
+  -- settings for the parts.
+  local model = tbl.bodies[1]
+  local rows = {}
+  for _, body in ipairs(tbl.bodies) do
+    for _, row in ipairs(body.body) do rows[#rows + 1] = row end
+  end
+
+  local segments, current, band_for = {}, {}, {}
+  local pending_band = nil
+  for _, row in ipairs(rows) do
+    if is_band[row] then
+      if #current > 0 then
+        segments[#segments + 1] = current
+        band_for[#segments] = pending_band
+      end
+      current, pending_band = {}, row
+    else
+      current[#current + 1] = row
+    end
+  end
+  if #current > 0 then
+    segments[#segments + 1] = current
+    band_for[#segments] = pending_band
+  end
+  if #segments < 2 and pending_band == nil then return nil end
+
+  local base = nil
+  if #tbl.caption.long > 0 then
+    base = pandoc.utils.blocks_to_inlines(tbl.caption.long)
+  end
+  local width = #tbl.colspecs
+  local parts = {}
+  for i, segment in ipairs(segments) do
+    local band = band_for[i]
+    local band_inlines, band_text = pandoc.Inlines({}), ''
+    local own_head = nil
+    if band and is_band_row(band, width) then
+      band_inlines, band_text = row_as_caption(band)
+    elseif band then
+      -- A header row: it heads this part, and its corner cell names it.
+      own_head = band
+      local corner = band.cells[1]
+      if corner then
+        band_inlines = trim_inlines(cell_inlines(corner))
+        band_text = normalise(pandoc.utils.stringify(band_inlines))
+      end
+    end
+    local caption_inlines, caption_text = compose_part_caption(
+      base, band_inlines, band_text, part_captions and part_captions[i], i)
+
+    local attr = pandoc.Attr(
+      tbl.attr.identifier ~= '' and (tbl.attr.identifier .. '-' .. i) or '',
+      tbl.attr.classes, {})
+    local head_rows = clone_rows(tbl.head.rows)
+    if own_head then head_rows[#head_rows + 1] = own_head end
+    local head = pandoc.TableHead(head_rows, tbl.head.attr)
+    local body = pandoc.TableBody(segment, {},
+      model and model.row_head_columns or 0, pandoc.Attr())
+    local part = pandoc.Table(
+      #caption_inlines > 0 and mk_caption({ pandoc.Plain(caption_inlines) })
+        or pandoc.Caption(),
+      tbl.colspecs, head, { body }, pandoc.TableFoot({}), attr)
+    apply(part)
+    parts[#parts + 1] = { table = part, label = caption_text ~= '' and caption_text or nil }
+  end
+  return parts
+end
+
+local function resolved_for(tbl)
+  local index = tonumber(tbl.attr.attributes[TH_INDEX_ATTR])
+  local by_doc = load_resolved()[source_stem()]
+  if index == nil or by_doc == nil then return nil end
+  local entry = by_doc[index]
+  if entry == nil then return nil end
+  if not matches_entry(tbl, entry) then
+    warn(('table-headers: table %d of %s does not match the pre-pass '
+      .. '(shape or first cell differ); declaration %q not applied')
+      :format(index, source_stem(), tostring(entry.headers)))
+    return nil
+  end
+  return entry
+end
+
+local function apply_headers(tbl, label, entry)
+  local value = entry and tostring(entry.headers or '') or ''
+
+  if value == 'first-row' or value == 'both' then
+    promote_first_row(tbl)
+  elseif value == 'none' or value == 'first-column' then
+    -- Declared headers in the first column only, or none: a header row
+    -- the reader built from a repeat-header setting is not what the
+    -- person said this table has.
+    demote_head(tbl)
+  end
+  set_row_headers(tbl, value == 'first-column' or value == 'both')
+
+  if has_header_row(tbl) then
+    mark_column_headers(tbl)
+  elseif value == '' then
+    local rows, columns = table_shape(tbl)
+    warn(('data table has no header row and no declaration: %s (%d rows x %d columns)')
+      :format(label or '(unlabelled)', rows, columns))
+  end
+end
+
 local function caption_data_table(tbl, next_block, after_next, after_after, out)
   local consumed = 0
   local label = nil
@@ -1010,6 +1456,13 @@ local function caption_data_table(tbl, next_block, after_next, after_after, out)
   -- does not reach the HTML.
   local ordinal = tbl.attr.attributes[ORDINAL_ATTR] or '?'
   tbl.attr.attributes[ORDINAL_ATTR] = nil
+
+  -- What the pre-pass resolved for this table, checked against the table
+  -- as the reader gave it, before any row is moved.
+  local entry = resolved_for(tbl)
+  tbl.attr.attributes[TH_INDEX_ATTR] = nil
+  local pending = pending_caption_rows(tbl, entry)
+  local bands = band_targets(tbl, entry)
 
   if #tbl.caption.long > 0 then
     -- Already captioned: reuse that text to name the scroll region. A
@@ -1049,9 +1502,16 @@ local function caption_data_table(tbl, next_block, after_next, after_after, out)
         inlines:insert(pandoc.Space())
         inlines:extend(text_to_inlines(description))
       elseif description == nil and is_bare_label(label) then
-        -- Absent from the sidecar and the label says nothing but a number.
-        record_missing(label, table_excerpt(tbl))
-        warn('no description for "' .. label .. '"')
+        if pending.text ~= '' then
+          -- A title row is about to become the description this bare
+          -- label lacks; nothing to report.
+          inlines:insert(pandoc.Space())
+          inlines:extend(pending.inlines)
+        else
+          -- Absent from the sidecar and the label says nothing but a number.
+          record_missing(label, table_excerpt(tbl))
+          warn('no description for "' .. label .. '"')
+        end
       end
       tbl.caption = mk_caption({ pandoc.Plain(inlines) })
     else
@@ -1059,7 +1519,10 @@ local function caption_data_table(tbl, next_block, after_next, after_after, out)
       -- can still be reported and still be given a caption.
       local key = position_key(ordinal)
       local description = description_for(key)
-      if description == nil then
+      if description == nil and pending.text ~= '' then
+        -- The title row is the caption.
+        label = pending.text
+      elseif description == nil then
         record_missing(key, table_excerpt(tbl))
         warn('data table has no caption or label: ' .. key)
       elseif description ~= '' then
@@ -1069,16 +1532,21 @@ local function caption_data_table(tbl, next_block, after_next, after_after, out)
     end
   end
 
-  if has_header_row(tbl) then
-    mark_column_headers(tbl)
-  else
-    local rows, columns = table_shape(tbl)
-    record_headerless(label or '(unlabelled)', rows, columns)
-    warn(('data table has no header row: %s (%d rows x %d columns)')
-      :format(label or '(unlabelled)', rows, columns))
+  local folded = fold_caption_rows(tbl, pending)
+  if folded then label = folded end
+
+  local parts = split_table(tbl, bands, entry and entry.part_captions,
+    function(part) apply_headers(part, label, entry) end)
+  if parts then
+    local blocks = {}
+    for _, part in ipairs(parts) do
+      blocks[#blocks + 1] = wrap_table(part.table, part.label or label)
+    end
+    return blocks, consumed
   end
 
-  return wrap_table(tbl, label), consumed
+  apply_headers(tbl, label, entry)
+  return { wrap_table(tbl, label) }, consumed
 end
 
 function Blocks(blocks)
@@ -1099,7 +1567,7 @@ function Blocks(blocks)
         -- <caption>, mark its column headers, wrap it for scrolling.
         local wrapped, consumed = caption_data_table(
           block, blocks[i + 1], blocks[i + 2], blocks[i + 3], out)
-        out:insert(wrapped)
+        for _, piece in ipairs(wrapped) do out:insert(piece) end
         i = i + 1 + consumed
       else
         out:insert(block)
@@ -1255,6 +1723,8 @@ local function number_tables(blocks, state)
     local kind = block.t
 
     if kind == 'Table' then
+      block.attr.attributes[TH_INDEX_ATTR] = tostring(state.all)
+      state.all = state.all + 1
       -- Only data tables are numbered. A table holding nothing but an
       -- image becomes a <figure> later, so counting it here would leave
       -- gaps -- a page with four tables reporting "#table-1, #table-3,
@@ -1310,7 +1780,7 @@ end
 return {
   {
     Pandoc = function(doc)
-      local state = { n = 0, above = 0, below = 0 }
+      local state = { n = 0, all = 0, above = 0, below = 0 }
       number_tables(doc.blocks, state)
       if state.above > state.below then
         caption_side = 'above'

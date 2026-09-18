@@ -80,7 +80,6 @@ class Converted:
             "IMAGE_ALT": os.path.join(work, "image-alt.csv"),
             "TABLE_CAPTIONS_MISSING": os.path.join(work, "caps-missing.csv"),
             "IMAGE_ALT_MISSING": os.path.join(work, "alt-missing.csv"),
-            "TABLE_HEADERS_MISSING": os.path.join(work, "heads-missing.csv"),
             "MEDIA_UNRESOLVED": os.path.join(work, "media-unresolved.csv"),
             "SPACER_LOG": os.path.join(work, "spacers.csv"),
             "PROMOTE_H1_TO_TITLE": "always",
@@ -93,7 +92,8 @@ class Converted:
                 fh.write(content)
 
         for name in names:
-            shutil.copy(os.path.join(FIXTURES, name + ".docx"), work)
+            if not os.path.exists(os.path.join(work, name + ".docx")):
+                shutil.copy(os.path.join(FIXTURES, name + ".docx"), work)
             # Run from the working directory with relative paths, because
             # that is what convert.sh does and it shows up in the output:
             # --extract-media given an absolute path puts absolute paths
@@ -141,7 +141,6 @@ class Converted:
             "IMAGE_ALT": os.path.join(work, "image-alt.csv"),
             "IMAGE_ALT_MISSING": os.path.join(work, "alt-missing.csv"),
             "TABLE_CAPTIONS_MISSING": os.path.join(work, "caps-missing.csv"),
-            "TABLE_HEADERS_MISSING": os.path.join(work, "heads-missing.csv"),
             "PROMOTE_H1_TO_TITLE": "always",
         })
         environment.update(settings or {})
@@ -304,7 +303,9 @@ def case_tables_b(work):
     return [
         ("both tables are present",
          lambda: len(tables) == 2),
-        # Today: a spanning header cell. Item 1 should make this a caption.
+        # With no pre-pass in reach, as here, the reader's spanning header
+        # cell stands. With one, caption-rows=1 is inferred and the row
+        # becomes the caption; case_headers covers that.
         ("a merged full-width first row becomes a header spanning the table",
          lambda: 'colspan="3"' in head
                  and "Table 2.1 Sample results" in head),
@@ -314,10 +315,234 @@ def case_tables_b(work):
         ("its label is reported, keyed by position because it is merged",
          lambda: any("table-1" in key for key in
                      out.report_column("caps-missing.csv", 0))),
-        # Today: Pandoc's reader promotes the first row regardless. Item 1
-        # should let a person declare that this table has no headers.
+        # With no pre-pass in reach, as here, the filter leaves the table
+        # as Pandoc's reader gave it. Declaring none is covered by
+        # case_headers; this pins the no-declaration behavior.
         ("a table with no header signal still gets its first row promoted",
          lambda: Converted.cells(plain, "th") == 2),
+    ]
+
+
+def case_split(work):
+    """split-at: one table per band, each with the header row and the
+    band as its caption, and the header declaration applied per part.
+
+    The fixture is built here as OOXML, through the pre-pass suite's
+    builder, because the shape -- a band, its own header row beneath it,
+    three data rows, again twice -- is the one 7-5-costs-in-the-long-run
+    has and nothing in tests/fixtures does.
+    """
+    import csv
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "headers_tests", os.path.join(HERE, "run-headers-tests.py"))
+    hb = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(hb)
+
+    def block(letter, wage):
+        return [hb.row([hb.cell("Example %s: workers cost $%d" % (letter, wage),
+                                bold=True, span=4)]),
+                hb.row([hb.cell(""), hb.cell("Labor Cost"), hb.cell("Machine Cost"),
+                        hb.cell("Total Cost")]),
+                hb.row([hb.cell("Technology 1"), hb.cell("$%d" % (10 * wage)),
+                        hb.cell("$160"), hb.cell("$%d" % (10 * wage + 160))]),
+                hb.row([hb.cell("Technology 2"), hb.cell("$%d" % (7 * wage)),
+                        hb.cell("$320"), hb.cell("$%d" % (7 * wage + 320))])]
+    banded = hb.table(block("A", 40) + block("B", 55) + block("C", 90))
+    # The other shape: one header row marked in Word, then bands partway
+    # down with plain rows beneath. BC-12's "Front Matter / Body / Back
+    # Matter" table. Each part must carry the original head.
+    headed = hb.table([
+        hb.row([hb.cell("Part"), hb.cell("Purpose"), hb.cell("Length")], header=True),
+        hb.row([hb.cell("Front matter", bold=True, span=3)]),
+        hb.row([hb.cell("Title page"), hb.cell("Identifies the report"), hb.cell("1")]),
+        hb.row([hb.cell("Abstract"), hb.cell("Summarizes it"), hb.cell("1")]),
+        hb.row([hb.cell("Body", bold=True, span=3)]),
+        hb.row([hb.cell("Introduction"), hb.cell("States the problem"), hb.cell("2")]),
+        hb.row([hb.cell("Methods"), hb.cell("Says what was done"), hb.cell("3")]),
+    ])
+    # The third shape: a bold header row that repeats, with a group name
+    # in its corner. Table 7.2 of the sociology book. The repeated row is
+    # each part's header, and only the corner goes into the caption.
+    grouped = hb.table([
+        hb.row([hb.cell("Functionalism", bold=True), hb.cell("Theorist", bold=True),
+                hb.cell("Deviance arises from", bold=True)]),
+        hb.row([hb.cell("Strain theory"), hb.cell("Merton"), hb.cell("Blocked goals")]),
+        hb.row([hb.cell("Disorganization"), hb.cell("Chicago school"), hb.cell("Weak ties")]),
+        hb.row([hb.cell("Conflict theory", bold=True), hb.cell("Theorist", bold=True),
+                hb.cell("Deviance arises from", bold=True)]),
+        hb.row([hb.cell("Unequal system"), hb.cell("Marx"), hb.cell("Inequality")]),
+        hb.row([hb.cell("Power elite"), hb.cell("Mills"), hb.cell("Power")]),
+    ])
+    os.makedirs(work, exist_ok=True)
+    hb.docx(os.path.join(work, "banded.docx"),
+            [hb.para("Table 7.14 Total cost with rising labor costs"), banded,
+             hb.para("Prose between the tables, as there always is."),
+             hb.para("Table 1.1 Report parts"), headed,
+             hb.para("More prose."),
+             hb.para("Table 7.2 Theoretical perspectives"), grouped])
+
+    tool = os.path.join(BIN, "table-headers.py")
+    resolved = os.path.join(work, "table-headers.json")
+    subprocess.run([sys.executable, tool, "banded.docx",
+                    "--sidecar", os.path.join(work, "table-headers.csv"),
+                    "--new", os.path.join(work, "table-headers-new.csv"),
+                    "--report", os.path.join(work, "table-headers-report.csv"),
+                    "--resolved", resolved],
+                   cwd=work, capture_output=True, text=True, stdin=subprocess.DEVNULL)
+    with open(os.path.join(work, "table-headers-new.csv"), newline="", encoding="utf-8") as fh:
+        new = list(csv.DictReader(fh))
+    out = Converted(work, ["banded"], {"TABLE_HEADERS_RESOLVED": resolved})
+    everything = out.tables("banded")
+    tables, headed_parts, grouped_parts = everything[:3], everything[3:5], everything[5:]
+    headed_heads = [re.search(r"<thead>.*?</thead>", t, re.S) for t in headed_parts]
+    grouped_heads = [re.search(r"<thead>.*?</thead>", t, re.S) for t in grouped_parts]
+    grouped_new = [r for r in new if r["label"] == "Table 7.2"]
+    flat = lambda t: " ".join(re.sub(r"<[^>]+>", " ", t).split())
+    caps = [" ".join(re.sub(r"<[^>]+>", "",
+                            re.search(r"<caption>(.*?)</caption>", t, re.S).group(1)).split())
+            if "<caption>" in t else "" for t in tables]
+    heads = [re.search(r"<thead>.*?</thead>", t, re.S) for t in tables]
+    return [
+        ("the pre-pass infers split-at for the bands, row 1 included",
+         lambda: new and new[0]["split-at"] == "1,5,9"),
+        ("and does not mistake the first band for a title",
+         lambda: new and new[0]["caption-rows"] == ""),
+        ("and guesses the value part by part",
+         lambda: new and new[0]["headers"] == "both"),
+        ("the table becomes one table per band",
+         lambda: len(tables) == 3),
+        ("each part's caption is the table's caption and its band",
+         lambda: all(c.startswith("Table 7.14 Total cost with rising labor costs: Example")
+                     for c in caps) and "Example C" in caps[2]),
+        ("each part has its own header row, promoted",
+         lambda: all(h and Converted.cells(h.group(0), "th") == 4 for h in heads)),
+        ("and row headers on every body row",
+         lambda: all(t.count('<th scope="row">') == 2 for t in tables)),
+        ("no band survives as a cell",
+         lambda: all('colspan="4"' not in t for t in tables)),
+        # The headed shape.
+        ("a table with a marked header row and bands below splits into its parts",
+         lambda: len(headed_parts) == 2),
+        ("and each part carries a copy of the original header row",
+         lambda: all(h and "Purpose" in h.group(0) and Converted.cells(h.group(0), "th") == 3
+                     for h in headed_heads)),
+        # The repeated-header shape.
+        ("a repeating bold header row with a group name in its corner is inferred as a split",
+         lambda: grouped_new and grouped_new[0]["split-at"] == "1,4"),
+        ("and splits into a table per group",
+         lambda: len(grouped_parts) == 2),
+        ("each headed by its own repeated row, not captioned by it",
+         lambda: all(h and "Theorist" in h.group(0) and Converted.cells(h.group(0), "th") == 3
+                     for h in grouped_heads)),
+        ("with only the corner cell composed into the caption",
+         lambda: len(grouped_parts) == 2
+                 and "Table 7.2 Theoretical perspectives: Functionalism" in flat(grouped_parts[0])
+                 and "Table 7.2 Theoretical perspectives: Conflict theory" in flat(grouped_parts[1])
+                 and "Theorist" not in re.search(r"<caption>.*?</caption>", grouped_parts[0], re.S).group(0)),
+        ("with the table's caption and the band as each part's caption",
+         lambda: len(headed_parts) == 2
+                 and all("Table 1.1 Report parts:" in " ".join(
+                     re.sub(r"<[^>]+>", "", t).split()) for t in headed_parts)
+                 and "Front matter" in headed_parts[0] and "Body" in headed_parts[1]
+                 and 'colspan="3"' not in headed_parts[0]),
+    ]
+
+
+def case_headers(work):
+    """The filter applies what the table-headers pre-pass resolved.
+
+    Runs the pre-pass the way convert.sh does -- once with no sidecar to
+    get the prefilled rows, then with a sidecar a remediator edited --
+    and converts with the resolved values in reach of the filter. Each
+    value is declared on a table whose reader-built shape would have
+    given something else, so the assertion is on the declaration and not
+    on what Pandoc did anyway.
+    """
+    import csv
+    os.makedirs(work, exist_ok=True)
+    for name in ("tables", "tables-b"):
+        shutil.copy(os.path.join(FIXTURES, name + ".docx"), work)
+    tool = os.path.join(BIN, "table-headers.py")
+    sidecar = os.path.join(work, "table-headers.csv")
+    resolved = os.path.join(work, "table-headers.json")
+
+    def prepass():
+        subprocess.run([sys.executable, tool, "tables.docx", "tables-b.docx",
+                        "--sidecar", sidecar,
+                        "--new", os.path.join(work, "table-headers-new.csv"),
+                        "--report", os.path.join(work, "table-headers-report.csv"),
+                        "--resolved", resolved],
+                       cwd=work, capture_output=True, text=True,
+                       stdin=subprocess.DEVNULL)
+
+    prepass()
+    with open(os.path.join(work, "table-headers-new.csv"), newline="",
+              encoding="utf-8") as fh:
+        rows = list(csv.DictReader(fh))
+    # Table 1.1: the guess says both; keep it. Table 1.2 has a repeat-header
+    # row and is declared first-column, so its head must come down and its
+    # first column go up. tables-b's second table is declared none.
+    by_label = {r["label"]: r for r in rows}
+    by_label["Table 1.2"]["headers"] = "first-column"
+    plain = [r for r in rows if r["source"] == "tables-b.docx"][-1]
+    plain["headers"] = "none"
+    with open(sidecar, "w", newline="", encoding="utf-8") as fh:
+        writer = csv.DictWriter(fh, fieldnames=list(rows[0].keys()))
+        writer.writeheader()
+        writer.writerows(rows)
+    prepass()
+
+    out = Converted(work, ["tables", "tables-b"],
+                    {"TABLE_HEADERS_RESOLVED": resolved})
+    t11, t12 = out.tables("tables")[:2]
+    titled_html, plain_html = out.tables("tables-b")[:2]
+    body_rows = t11.count("<tr>") - 1
+    titled_head = re.search(r"<thead>.*?</thead>", titled_html, re.S)
+    titled_head = titled_head.group(0) if titled_head else ""
+
+    # A resolved entry whose shape does not match the table it points at
+    # must not be applied: the filter's count of tables and the pre-pass's
+    # could disagree, and a declaration on the wrong table is worse than
+    # none. Doctor the entry for Table 1.2 and convert again.
+    import json
+    with open(resolved, encoding="utf-8") as fh:
+        doctored = json.load(fh)
+    doctored["tables"][1]["cols"] = 9
+    wrong = os.path.join(work, "wrong.json")
+    with open(wrong, "w", encoding="utf-8") as fh:
+        json.dump(doctored, fh)
+    again = Converted(os.path.join(work, "again"), ["tables"],
+                      {"TABLE_HEADERS_RESOLVED": wrong})
+    t12_again = again.tables("tables")[1]
+    return [
+        ("a table declared both keeps its header row",
+         lambda: "<thead>" in t11 and 'scope="col"' in t11),
+        ("and gets scope=\"row\" on the first cell of every body row",
+         lambda: t11.count('<th scope="row">') == body_rows and body_rows > 0),
+        ("a table declared first-column loses its reader-built header row",
+         lambda: "<thead>" not in t12),
+        ("and gains row headers instead",
+         lambda: t12.count('<th scope="row">') == t12.count("<tr>")),
+        ("a table declared none has no header cells at all",
+         lambda: Converted.cells(plain_html, "th") == 0),
+        ("the pre-pass report records the declarations",
+         lambda: out.reports.get("table-headers-report.csv", "").count("declared") >= 2),
+        # The merged title row: caption-rows=1 is inferred by the pre-pass
+        # and written into the prefilled row, which the remediator kept.
+        ("a merged title row becomes the caption",
+         lambda: "<caption>" in titled_html
+                 and "Table 2.1 Sample results" in
+                 re.search(r"<caption>.*?</caption>", titled_html, re.S).group(0)),
+        ("and is no longer a header cell spanning the table",
+         lambda: 'colspan="3"' not in titled_head
+                 and "Sample results" not in titled_head),
+        ("the real header row beneath it is the head",
+         lambda: Converted.cells(titled_head, "th") == 3
+                 and titled_head.count('scope="col"') == 3),
+        ("a resolved entry whose shape does not match is not applied",
+         lambda: "<thead>" in t12_again
+                 and t12_again.count('<th scope="row">') == 0),
     ]
 
 
@@ -383,6 +608,8 @@ CASES = [
     ("promotion and byline modes", case_metadata_modes),
     ("table labels and empty tables", case_tables),
     ("merged title rows and unclassifiable tables", case_tables_b),
+    ("declared table headers", case_headers),
+    ("split at grouping bands", case_split),
     ("equations, MathSpeak, and spacers", case_math),
     ("media naming, alt text, and keys", case_media),
     ("media keys when converting in one pass", case_media_keys_single_pass),

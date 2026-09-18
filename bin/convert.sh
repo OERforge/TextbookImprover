@@ -31,6 +31,7 @@ figure_filter="$script_dir/figures-and-tables.lua"
 media_filter="$script_dir/media-extensions.lua"
 config_reader="$script_dir/read-conversion-config.py"
 cartridge_tool="$script_dir/build-cartridge.py"
+headers_tool="$script_dir/table-headers.py"
 
 for required in "$figure_filter" "$media_filter"; do
   if [ ! -f "$required" ]; then
@@ -71,7 +72,6 @@ run_docs="$(mktemp)"
 refs_file="$(mktemp)"
 missing_rows="$(mktemp)"
 alt_rows="$(mktemp)"
-header_rows="$(mktemp)"
 spacer_rows="$(mktemp)"
 unresolved_rows="$(mktemp)"
 unresolved_log="$(mktemp)"
@@ -79,13 +79,12 @@ media_rows="$(mktemp)"
 css_header="$(mktemp)"
 work_dir="$(mktemp -d)"
 trap 'rm -f "$run_docs" "$refs_file" "$missing_rows" "$alt_rows" \
-        "$header_rows" "$spacer_rows" "$unresolved_log" "$unresolved_rows" \
+        "$spacer_rows" "$unresolved_log" "$unresolved_rows" \
         "$media_rows" "$css_header"; \
       rm -rf "$work_dir"' EXIT
 
 export TABLE_CAPTIONS_MISSING="$missing_rows"
 export IMAGE_ALT_MISSING="$alt_rows"
-export TABLE_HEADERS_MISSING="$header_rows"
 export SPACER_LOG="$spacer_rows"
 export MEDIA_UNRESOLVED="$media_rows"
 
@@ -142,7 +141,9 @@ TABLE_CAPTIONS_NAME="table-captions.csv"
 IMAGE_ALT_NAME="image-alt.csv"
 TABLE_CAPTIONS_MISSING_NAME="table-captions-missing.csv"
 IMAGE_ALT_MISSING_NAME="image-alt-missing.csv"
-TABLE_HEADERS_MISSING_NAME="table-headers-missing.csv"
+TABLE_HEADERS_NAME="table-headers.csv"
+TABLE_HEADERS_NEW_NAME="table-headers-new.csv"
+TABLE_HEADERS_REPORT_NAME="table-headers-report.csv"
 MEDIA_UNRESOLVED_NAME="media-unresolved.csv"
 SPACER_LOG_NAME="spacer-images.csv"
 
@@ -208,6 +209,7 @@ resolve_path() {
 
 export TABLE_CAPTIONS="$(resolve_path "$TABLE_CAPTIONS_NAME")"
 export IMAGE_ALT="$(resolve_path "$IMAGE_ALT_NAME")"
+export TABLE_HEADERS="$(resolve_path "$TABLE_HEADERS_NAME")"
 
 # A sidecar the config names but the filter cannot read is almost always a
 # wrong path rather than a deliberately empty one, and the run would
@@ -227,12 +229,48 @@ check_sidecar() {
 
 check_sidecar "$TABLE_CAPTIONS" 'sidecars.table_captions' 'table-captions.csv'
 check_sidecar "$IMAGE_ALT" 'sidecars.image_alt' 'image-alt.csv'
+check_sidecar "$TABLE_HEADERS" 'sidecars.table_headers' 'table-headers.csv'
 
 missing_report="$(resolve_path "$TABLE_CAPTIONS_MISSING_NAME")"
 alt_report="$(resolve_path "$IMAGE_ALT_MISSING_NAME")"
-header_report="$(resolve_path "$TABLE_HEADERS_MISSING_NAME")"
+headers_new="$(resolve_path "$TABLE_HEADERS_NEW_NAME")"
+headers_report="$(resolve_path "$TABLE_HEADERS_REPORT_NAME")"
 unresolved_report="$(resolve_path "$MEDIA_UNRESOLVED_NAME")"
 spacer_report="$(resolve_path "$SPACER_LOG_NAME")"
+
+############################################
+# 0.5. The table-headers pre-pass
+#
+#    Runs on the .docx files, before Pandoc sees them, because the
+#    evidence the guess reads -- repeat-header rows, bold, shading -- does
+#    not survive Pandoc's reader. For every data table it computes the
+#    sidecar key, reads what the sidecar declares, guesses the rest, and
+#    writes table-headers-report.csv. Tables with no sidecar row get a
+#    prefilled row in table-headers-new.csv, in the sidecar's own format,
+#    ready to paste in.
+#
+#    Nothing downstream consumes the result yet; that is the next step
+#    of roadmap item 1. What this step establishes is the sidecar, the
+#    key, and the report, so a book can start carrying declarations now.
+#
+#    A sidecar row whose key matches no table stops the run. A correction
+#    that silently does not apply destroys work invisibly, and the report
+#    lists the unmatched rows beside the tables no row claimed.
+############################################
+docx_files=()
+for f in *.docx; do
+  [ -e "$f" ] || continue
+  case "$f" in '~$'*) continue ;; esac   # Word's owner file, not a document
+  docx_files+=("$f")
+done
+if [ "${#docx_files[@]}" -gt 0 ]; then
+  export TABLE_HEADERS_RESOLVED="$work_dir/table-headers.json"
+  if ! python3 "$headers_tool" "${docx_files[@]}" --sidecar "$TABLE_HEADERS" \
+       --new "$headers_new" --report "$headers_report" \
+       --resolved "$TABLE_HEADERS_RESOLVED"; then
+    exit 1
+  fi
+fi
 
 ############################################
 # 1. Convert DOCX -> a filtered JSON intermediate, extract media
@@ -431,7 +469,7 @@ fi
 # Doing it here rather than at the top means a run that stops at the gate
 # leaves the previous reports intact, since they are still the best list
 # available.
-rm -f "$missing_report" "$alt_report" "$header_report" "$spacer_report"
+rm -f "$missing_report" "$alt_report" "$spacer_report"
 
 ############################################
 # 3. Render the header and footer fragments
@@ -619,19 +657,6 @@ write_report "$alt_rows" "$alt_report" \
 
 write_report "$spacer_rows" "$spacer_report" \
   'Image,Source,Width,Action' 'spacer image(s) handled'
-
-# No sidecar for this one: header text has to come from the DOCX, so the
-# report names the tables and the fix is made in Word.
-if [ -s "$header_rows" ]; then
-  { printf 'Table,Source,Rows,Columns\n'; sort -u "$header_rows"; } > "$header_report"
-  count=$(sort -u "$header_rows" | wc -l)
-  echo "Wrote $header_report ($count data table(s) with no header row)." >&2
-  echo "Fix in Word: select the header row, Table Properties > Row >" >&2
-  echo "  'Repeat as header row at the top of each page'. Where a table has" >&2
-  echo "  no header row at all, one has to be written." >&2
-else
-  rm -f "$header_report"
-fi
 
 if [ -s "$missing_rows" ]; then
   rows=$(sort -u "$missing_rows" | wc -l)

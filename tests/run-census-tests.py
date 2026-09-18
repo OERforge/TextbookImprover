@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-run-census-tests.py -- check the sidecar guess in util/table-census.py.
+run-census-tests.py -- check the sidecar guess in lib/tablecensus.py.
 
     python3 tests/run-census-tests.py
 
@@ -40,17 +40,13 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
-import importlib.util
 import os
 import sys
 import xml.etree.ElementTree as ET
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-CENSUS = os.path.join(HERE, os.pardir, "util", "table-census.py")
-
-spec = importlib.util.spec_from_file_location("table_census", CENSUS)
-tc = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(tc)
+sys.path.insert(0, os.path.join(HERE, os.pardir, "lib"))
+import tablecensus as tc  # noqa: E402
 
 W = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"'
 
@@ -338,8 +334,76 @@ case("an image-only table gets no value", None, [
 ])
 
 
+# ---------------------------------------------------------------------------
+# The key: what must and must not change it
+# ---------------------------------------------------------------------------
+
+def key_checks():
+    """Each returns (name, ok, detail)."""
+    base = [row([cell("Year"), cell("GDP")]),
+            row([cell("1960"), cell("543")]),
+            row([cell("1965"), cell("743")])]
+    k = tc.table_key(table(base))
+    yield "key is a full SHA-256 hex digest", len(k) == 64, k
+    yield ("identical tables share a key",
+           tc.table_key(table(base)) == k, "")
+    padded = [row([cell(" Year "), cell("GDP\t")]),
+              row([cell("1960"), cell(" 543")]),
+              row([cell("1965"), cell("743 ")])]
+    yield ("leading and trailing whitespace does not change the key",
+           tc.table_key(table(padded)) == k, "")
+    cased = [row([cell("year"), cell("GDP")]),
+             row([cell("1960"), cell("543")]),
+             row([cell("1965"), cell("743")])]
+    yield ("case changes the key",
+           tc.table_key(table(cased)) != k, "")
+    inner = [row([cell("Year"), cell("GDP")]),
+             row([cell("1960"), cell("543")]),
+             row([cell("1965"), cell("7 43")])]
+    yield ("internal spacing changes the key",
+           tc.table_key(table(inner)) != k, "")
+    merged = [row([cell("Year and GDP", span=2)]),
+              row([cell("1960"), cell("543")]),
+              row([cell("1965"), cell("743")])]
+    yield ("a merge changes the key even where text does not",
+           tc.table_key(table(merged)) != k, "")
+    empty = [row([cell("Year"), cell("GDP")]),
+             row([cell("1960"), cell("")]),
+             row([cell("1965"), cell("743")])]
+    moved = [row([cell("Year"), cell("GDP")]),
+             row([cell(""), cell("1960")]),
+             row([cell("1965"), cell("743")])]
+    yield ("an empty cell counts by position",
+           tc.table_key(table(empty)) != tc.table_key(table(moved)), "")
+
+    # Nested: the container's key depends on the inner table's key, not on
+    # its text, and two containers with different inner tables differ.
+    def box(text):
+        return ("<w:tc><w:tcPr/><w:tbl><w:tblPr/><w:tr><w:tc><w:tcPr/>"
+                "<w:p><w:r><w:t>%s</w:t></w:r></w:p></w:tc></w:tr></w:tbl>"
+                "<w:p/></w:tc>" % text)
+    outer_a = table([row([cell("Key"), cell("Value")]),
+                     row([cell("133"), box("print(x)")])])
+    outer_b = table([row([cell("Key"), cell("Value")]),
+                     row([cell("133"), box("print(y)")])])
+    ka, kb = tc.table_key(outer_a), tc.table_key(outer_b)
+    yield ("containers with different inner tables have different keys",
+           ka != kb, "")
+    inner_key = tc.table_key(outer_a.find(".//" + tc.q("tbl")))
+    yield ("the inner table has its own key, distinct from the container",
+           inner_key != ka and len(inner_key) == 64, "")
+
+
 def main():
     failures = 0
+    for name, ok, detail in key_checks():
+        if ok:
+            print("  ok    %s" % name)
+        else:
+            failures += 1
+            print("  FAIL  %s" % name)
+            if detail:
+                print("          %s" % detail)
     for name, expect, rows in CASES:
         tbl = table(rows)
         kind, ev, _, _ = tc.classify(tbl)
@@ -351,12 +415,13 @@ def main():
             print("  FAIL  %s" % name)
             print("          kind=%s guess=%s, expected %s" % (kind, got, expect))
             print("          evidence: %s" % "; ".join(ev))
+    total = len(CASES) + sum(1 for _ in key_checks())
     print("")
     if failures:
-        print("%d of %d census checks failed." % (failures, len(CASES)),
+        print("%d of %d census checks failed." % (failures, total),
               file=sys.stderr)
         return 1
-    print("all %d census checks passed" % len(CASES))
+    print("all %d census checks passed" % total)
     return 0
 
 

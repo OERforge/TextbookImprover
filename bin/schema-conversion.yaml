@@ -43,7 +43,7 @@ keys:
     default_from_target: true
     description: >
       Where this target writes. Defaults to the target's own name, so two
-      targets in the same format cannot overwrite each other.
+      targets in the same format can't overwrite each other.
 
   header:
     type: text
@@ -51,7 +51,7 @@ keys:
     description: >
       Markdown placed at the top of every page, or the path to a file
       holding it. Inserted by the template after the filters have run, so
-      nothing in it is processed: give any image explicit alt text.
+      nothing in it's processed: give any image explicit alt text.
 
   footer:
     type: text
@@ -59,7 +59,7 @@ keys:
     description: >
       Markdown placed at the bottom of every page, or the path to a file
       holding it. The usual use is an attribution line. Same caveat as
-      header: it is not processed by the filters.
+      header: it isn't processed by the filters.
 
   promote_h1_to_title:
     type: enum
@@ -132,7 +132,7 @@ keys:
         default: true
         description: >
           Put wide tables in a focusable scroll container so a long table
-          does not force the whole page to scroll sideways (WCAG 1.4.10).
+          doesn't force the whole page to scroll sideways (WCAG 1.4.10).
 
   captions:
     description: >
@@ -163,7 +163,7 @@ keys:
         type: bool
         default: false
         description: >
-          Abort as soon as an image cannot be identified, rather than
+          Abort as soon as an image can't be identified, rather than
           collecting every such image and stopping once at the gate.
 
   sidecars:
@@ -180,7 +180,7 @@ keys:
       publisher reissues the source. An absolute path, or one relative
       to the content directory such as
       "../corrections/ibs2e/table-captions.csv", keeps them somewhere
-      you can put under version control. A path set here that does not
+      you can put under version control. A path set here that doesn't
       exist stops the run, because the alternative is converting the
       whole book while silently discarding every correction in it.
     keys:
@@ -200,11 +200,23 @@ keys:
           Alt text, keyed on the image path with the extension ignored.
           Use [decorative] for an image that carries no meaning.
 
+      table_headers:
+        type: path
+        default: table-headers.csv
+        description: >
+          Where each table's headers are, keyed on a hash of the table's
+          content: first-row, first-column, both, or none. A first run
+          writes prefilled rows to the table_headers_new report; rename
+          or paste them here. Values this version doesn't act on yet
+          (manual, list) are accepted and kept. A row whose key matches
+          no table stops the run, because a correction that silently
+          fails to apply destroys work invisibly.
+
   reports:
     description: >
       Where the run records what still needs human attention. Removing a
       report when nothing is outstanding is deliberate: the file existing
-      at all is the signal that there is work to do.
+      at all is the signal that there's work to do.
     keys:
 
       table_captions_missing:
@@ -219,13 +231,22 @@ keys:
         description: >
           Images with no alt text, or with alt text over the length limit.
 
-      table_headers_missing:
+      table_headers_new:
         type: path
-        default: table-headers-missing.csv
+        default: table-headers-new.csv
         description: >
-          Data tables with no header row. There is no sidecar for these:
-          header text cannot be inferred from the data, so the fix belongs
-          in the source.
+          Prefilled sidecar rows for every data table the table_headers
+          sidecar has no row for, in the sidecar's own format. Written
+          when there are any and removed when there are none, so the file
+          existing is the signal that there are rows to paste in.
+
+      table_headers_report:
+        type: path
+        default: table-headers-report.csv
+        description: >
+          What happened to every data table this run: what the sidecar
+          declared, what the guess said and why, and a status of
+          declared, new, blank, manual, needs-word, or unmatched.
 
       media_unresolved:
         type: path

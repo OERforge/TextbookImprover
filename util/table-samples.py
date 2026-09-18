@@ -41,7 +41,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
 import argparse
-import importlib.util
 import os
 import random
 import re
@@ -52,10 +51,8 @@ import xml.etree.ElementTree as ET
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
-spec = importlib.util.spec_from_file_location(
-    "table_census", os.path.join(HERE, "table-census.py"))
-tc = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(tc)
+sys.path.insert(0, os.path.join(os.path.dirname(HERE), "lib"))
+import tablecensus as tc  # noqa: E402
 
 W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 R = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"

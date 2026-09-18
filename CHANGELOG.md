@@ -4,7 +4,7 @@ All notable changes to this project are documented in this file. The format is b
 
 Versions are two-part and pre-1.0: breaking changes may land in any of them until 1.0, and each is marked **Breaking** below. But we intend to keep the configuration schema, the command-line interface of each script, and the format of the sidecar CSV files stable in each version.
 
-## [Unreleased]
+## [0.3] - 2026-09-18
 
 To be released as 0.3. The table-headers sidecar, roadmap item 1, complete: the sidecar, the key, and the report exist; the conversion applies the value in effect for every data table; a merged title row becomes the caption; and a table with grouping bands becomes one table per band. Output changes for tables declared or guessed to have a header column, an unmarked header row, no headers, a title row, or bands.
 

@@ -6,7 +6,7 @@ From a directory of Word files to a cartridge, in the order the steps have to ha
 
 A cartridge needs the pages in the book's order, grouped into modules. Three sources, in order of how much you should trust them:
 
-1. **The book's PDF**, with `--toc book.pdf`: the PDF's bookmark outline is the table of contents in the order the book uses, with its real chapter titles. Needs `pypdf`. Run it *before* adopting the sample, since the sample already places every page and `--toc` orders only pages the config doesn't.
+1. **The book's PDF or EPUB**, with `--toc book.pdf` or `--toc book.epub`: the PDF's bookmark outline or the EPUB's navigation document is the table of contents in the order the book uses, with its real chapter titles. The PDF needs `pypdf`; the EPUB needs nothing. Run it *before* adopting the sample, since the sample already places every page and `--toc` orders only pages the config doesn't.
 2. **The filenames**, with `--includeallhtml`: a page named `3-2-something` is placed under chapter 3 without guessing. Pages with no chapter in their name are left for you to sort.
 3. **A guess**, which is what a bare first run does and says so in the sample.
 

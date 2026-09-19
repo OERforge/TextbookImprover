@@ -9,12 +9,13 @@ python3 build-cartridge.py                 # write imsmanifest.xml
 python3 build-cartridge.py --check         # validate, write nothing
 python3 build-cartridge.py --zip           # also build the .imscc
 python3 build-cartridge.py --init          # write a sample config and stop
-python3 build-cartridge.py --toc book.pdf  # order from the PDF's outline
+python3 build-cartridge.py --toc book.pdf  # order from the PDF's outline, or book.epub
 ```
 
 ### Ordering from the book's own table of contents
 
-`--toc book.pdf` reads the PDF's bookmark outline, which is the table of
+`--toc book.pdf` reads the PDF's bookmark outline, and `--toc book.epub`
+the EPUB's navigation document (or `toc.ncx` in an EPUB 2), which is the table of
 contents in the order the book actually uses — better than any filename
 heuristic can manage, and it supplies the real chapter titles. Pages are
 matched by deriving a filename from each heading ("Key Concepts and
@@ -48,7 +49,7 @@ move them if you would rather keep them with their chapters.
 | `--target` | the only one | Which package to build, when several are defined |
 | `--allow-unknown-keys` | off | Report unrecognized settings instead of refusing them |
 | `-o`, `--output` | `<dir>/imsmanifest.xml` | Manifest to write |
-| `--toc PDF` | — | Order from a PDF's bookmark outline |
+| `--toc PDF-OR-EPUB` | — | Order from a PDF's bookmark outline or an EPUB's table of contents |
 | `--includeallhtml` | off | Place pages the config doesn't list |
 | `--zip` | off | Also build the `.imscc` |
 | `--check` | off | Validate; write nothing |

@@ -11,7 +11,7 @@ What the tools need, and how to check it. There's no install step for the tools 
 | `python3` | Required, 3.9 or later. Reads the configuration and inspects conversion intermediates. | usually present |
 | PyYAML | Reading configuration | `sudo apt install python3-yaml` |
 | `lxml` | Optional. Full schema validation of the manifest; without it a smaller set of checks runs. | `sudo apt install python3-lxml` |
-| `pypdf` | `--toc` only | `pip3 install pypdf` |
+| `pypdf` | `--toc` with a PDF only; an EPUB needs nothing | `pip3 install pypdf` |
 | `zip` | Only if you package with the printed command instead of `--zip` | `sudo apt install zip` |
 
 ## Optional: the full validators

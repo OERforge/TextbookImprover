@@ -169,18 +169,8 @@ def page_references(path, base_dir):
 # configuration
 # --------------------------------------------------------------------------
 
-def contents_from_pdf(path, stems, titles):
-    """Build a contents tree from a PDF's bookmark outline.
-
-    The outline of a textbook PDF is its table of contents, in the order
-    the book actually uses -- which no filename heuristic can match. Pages
-    are found by deriving a filename from each heading, so this works for
-    any book whose files are named after its headings rather than only for
-    ones whose section names are known in advance.
-
-    Returns (tree, placed, unmapped). Anything the outline does not cover
-    is left for the caller to append as usual.
-    """
+def pdf_outline(path):
+    """(depth, title) for each bookmark of a PDF, in order."""
     try:
         from pypdf import PdfReader
     except ImportError:
@@ -201,6 +191,112 @@ def contents_from_pdf(path, stems, titles):
                 entries.append((depth, clean_title(str(item.title))))
 
     walk(reader.outline, 0)
+    return entries
+
+
+def epub_outline(path):
+    """(depth, title) for each entry of an EPUB's table of contents.
+
+    EPUB 3 keeps it in the navigation document, a nested <ol> inside
+    <nav epub:type="toc">; EPUB 2 in toc.ncx, as nested navPoint
+    elements. The container says where the package document is, and
+    the package document says which item is which. Nothing but the
+    standard library, so this needs no pypdf.
+    """
+    import xml.etree.ElementTree as ET
+    import zipfile
+    import posixpath
+
+    NS = {"c": "urn:oasis:names:tc:opendocument:xmlns:container",
+          "opf": "http://www.idpf.org/2007/opf",
+          "x": "http://www.w3.org/1999/xhtml",
+          "epub": "http://www.idpf.org/2007/ops",
+          "ncx": "http://www.daisy.org/z3986/2005/ncx/"}
+    try:
+        archive = zipfile.ZipFile(path)
+    except zipfile.BadZipFile:
+        sys.exit(f"{path} is not an EPUB (not a zip archive).")
+    with archive:
+        try:
+            container = ET.fromstring(archive.read("META-INF/container.xml"))
+            opf_name = container.find(".//c:rootfile", NS).get("full-path")
+            opf = ET.fromstring(archive.read(opf_name))
+        except (KeyError, ET.ParseError, AttributeError) as exc:
+            sys.exit(f"{path} has no readable package document: {exc}")
+        opf_dir = posixpath.dirname(opf_name)
+        nav_item = ncx_item = None
+        spine = opf.find("opf:spine", NS)
+        toc_id = spine.get("toc") if spine is not None else None
+        for item in opf.iter("{%s}item" % NS["opf"]):
+            if "nav" in (item.get("properties") or "").split():
+                nav_item = item.get("href")
+            if item.get("media-type") == "application/x-dtbncx+xml" \
+                    or item.get("id") == toc_id:
+                ncx_item = item.get("href")
+
+        def read(href):
+            return ET.fromstring(archive.read(
+                posixpath.normpath(posixpath.join(opf_dir, href))))
+
+        entries = []
+        if nav_item:
+            nav = read(nav_item)
+            toc = None
+            for candidate in nav.iter("{%s}nav" % NS["x"]):
+                if candidate.get("{%s}type" % NS["epub"]) == "toc":
+                    toc = candidate
+                    break
+            if toc is not None:
+                def walk_ol(ol, depth):
+                    for li in ol.findall("x:li", NS):
+                        label = li.find("x:a", NS)
+                        if label is None:
+                            label = li.find("x:span", NS)
+                        if label is not None:
+                            entries.append((depth, clean_title(
+                                "".join(label.itertext()))))
+                        for child in li.findall("x:ol", NS):
+                            walk_ol(child, depth + 1)
+                first = toc.find("x:ol", NS)
+                if first is not None:
+                    walk_ol(first, 0)
+        if not entries and ncx_item:
+            ncx = read(ncx_item)
+
+            def walk_nav(node, depth):
+                for point in node.findall("ncx:navPoint", NS):
+                    text = point.find("ncx:navLabel/ncx:text", NS)
+                    entries.append((depth, clean_title(
+                        "".join(text.itertext()) if text is not None
+                        else "")))
+                    walk_nav(point, depth + 1)
+            nav_map = ncx.find("ncx:navMap", NS)
+            if nav_map is not None:
+                walk_nav(nav_map, 0)
+    if not entries:
+        sys.exit(f"{path} has no table of contents to read: no toc nav in "
+                 "its navigation document, and no toc.ncx.")
+    return entries
+
+
+def contents_from_outline(path, stems, titles):
+    """Build a contents tree from a book's own table of contents.
+
+    The outline of a textbook PDF, or the navigation document of its
+    EPUB, is its table of contents in the order the book actually uses
+    -- which no filename heuristic can match. Pages are found by deriving
+    a filename from each heading, so this works for any book whose files
+    are named after its headings rather than only for ones whose section
+    names are known in advance. OpenStax publishes both, and the EPUB
+    needs nothing installed.
+
+    Returns (tree, placed, unmapped). Anything the outline does not cover
+    is left for the caller to append as usual.
+    """
+    if path.lower().endswith(".epub"):
+        entries = epub_outline(path)
+    else:
+        entries = pdf_outline(path)
 
     available = set(stems)
     placed, unmapped = set(), []
@@ -815,10 +911,11 @@ def main():
     parser.add_argument("--includeallhtml", action="store_true",
                         help="append pages that the config does not list, "
                              "and write an updated sample config")
-    parser.add_argument("--toc", metavar="PDF",
+    parser.add_argument("--toc", metavar="PDF-OR-EPUB",
                         help="take the order and the headings from this "
-                             "PDF's bookmark outline, which is the book's "
-                             "own table of contents. Overrides contents in "
+                             "PDF's bookmark outline or EPUB's navigation "
+                             "document, which is the book's own table of "
+                             "contents. Overrides contents in "
                              "the config; the result is written to the "
                              "sample for review.")
     parser.add_argument("--no-validate", action="store_true",
@@ -1007,7 +1104,7 @@ def main():
             destination, dest_depth, dest_title = append_destination(
                 tree, grouping.get("append_to"))
 
-            from_pdf, placed, unmapped = contents_from_pdf(
+            from_pdf, placed, unmapped = contents_from_outline(
                 args.toc, extra, TITLES)
             destination.extend(
                 walk_contents(from_pdf, available, used, problems))

@@ -521,8 +521,70 @@ def case_editions(work):
     ]
 
 
+def case_markdown_target(work):
+    """Markdown written back as source: read again, it gives the same
+    HTML; written again, it is the same file."""
+    import filecmp
+    first = os.path.join(work, "first")
+    result = convert(first, "targets:\n  html:\n    format: html\n"
+                            "  src:\n    format: markdown\n")
+    second = os.path.join(work, "second")
+    os.makedirs(second, exist_ok=True)
+    for name in os.listdir(os.path.join(first, "src")):
+        src = os.path.join(first, "src", name)
+        if os.path.isdir(src):
+            shutil.copytree(src, os.path.join(second, name), dirs_exist_ok=True)
+        else:
+            shutil.copy(src, os.path.join(second, name))
+    for name in ("project.yaml", "conversion.yaml"):
+        shutil.copy(os.path.join(first, name), os.path.join(second, name))
+    again = subprocess.run(
+        ["python3", os.path.join(BIN, "convert.py"), "--quiet"], cwd=second,
+        capture_output=True, text=True, stdin=subprocess.DEVNULL)
+    compare = subprocess.run(
+        ["python3", os.path.join(ROOT, "util", "compare-output.py"),
+         os.path.join(first, "html"), os.path.join(second, "html")],
+        capture_output=True, text=True)
+    # A source from Word settles after one write (Word's whitespace,
+    # grid-table widths rounded to characters); the second write is the
+    # fixed point, so the third must equal it.
+    third = os.path.join(work, "third")
+    os.makedirs(third, exist_ok=True)
+    for name in os.listdir(os.path.join(second, "src")):
+        src = os.path.join(second, "src", name)
+        if os.path.isdir(src):
+            shutil.copytree(src, os.path.join(third, name), dirs_exist_ok=True)
+        else:
+            shutil.copy(src, os.path.join(third, name))
+    for name in ("project.yaml", "conversion.yaml"):
+        shutil.copy(os.path.join(first, name), os.path.join(third, name))
+    subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quiet"],
+                   cwd=third, capture_output=True, text=True,
+                   stdin=subprocess.DEVNULL)
+    mds = [n for n in os.listdir(os.path.join(first, "src"))
+           if n.endswith(".md")]
+    same = [n for n in mds if filecmp.cmp(os.path.join(second, "src", n),
+                                          os.path.join(third, "src", n),
+                                          shallow=False)]
+    md = read(first, "src", "tables.md")
+    return [
+        ("a markdown target writes one file per source",
+         lambda: result.returncode == 0 and len(mds) == len(NEEDED)),
+        ("the row-header table carries its marker, the caption stays",
+         lambda: "::: matrix" in md and ": Table 1.1" in md),
+        ("no scope, wrapper, or bookkeeping reaches the Markdown",
+         lambda: "scope=" not in md and "table-wrapper" not in md
+         and "data-th" not in md),
+        ("read back as a book, the Markdown gives the same HTML",
+         lambda: again.returncode == 0 and "Runs agree" in compare.stdout),
+        ("the second write is the fixed point: the third equals it",
+         lambda: len(same) == len(mds)),
+    ]
+
+
 CASES = [
     ("a bare directory", case_bare),
+    ("a Markdown target, round trip", case_markdown_target),
     ("two editions from one directory", case_editions),
     ("roles, numbering, and a contents page", case_structure),
     ("footnote numbering and placement", case_notes),

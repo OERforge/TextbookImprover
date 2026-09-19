@@ -652,7 +652,8 @@ local ORDINAL_ATTR = 'data-cc-ordinal'
 -- "class=value,class=value". Removed before the writer sees it.
 local MARKER_ATTR = 'data-th-marker'
 local MARKERS = {}
-for pair in (os.getenv('TABLE_MARKERS') or 'matrix=both'):gmatch('[^,]+') do
+for pair in (os.getenv('TABLE_MARKERS') or 'matrix=both,row-headers=first-column')
+    :gmatch('[^,]+') do
   local class, value = pair:match('^%s*([^=%s]+)%s*=%s*(%S+)%s*$')
   if class then MARKERS[class] = value end
 end
@@ -763,6 +764,40 @@ end
 local spacers_seen = 0
 local widthless = 0
 
+-- A lone image a Markdown target wrote with the mark for "not a
+-- figure": an empty span of class inline after it (or Pandoc's own
+-- non-breaking space). The mark has done its job by the time the reader
+-- is through, and would otherwise reach the page.
+local function drop_figure_mark(block)
+  local c = block.content
+  if #c == 2 and c[1].t == 'Image' and (
+      (c[2].t == 'Str' and c[2].text == '\194\160')
+      or (c[2].t == 'Span' and #c[2].content == 0
+          and c[2].classes:includes('inline'))) then
+    block.content = { c[1] }
+    return block
+  end
+  return nil
+end
+
+function Para(para) return drop_figure_mark(para) end
+function Plain(plain) return drop_figure_mark(plain) end
+
+-- A table a Markdown target wrote as HTML because it has merged cells,
+-- or a figure it wrote that way because it carries an id: read back
+-- into the block it was, so the rest of the filter can work on it.
+function RawBlock(raw)
+  if (raw.format == 'html' or raw.format == 'html5')
+      and raw.text:match('^%s*<[tf][ai][bg]') then
+    local doc = pandoc.read(raw.text, 'html')
+    if #doc.blocks == 1 and (doc.blocks[1].t == 'Table'
+        or doc.blocks[1].t == 'Figure') then
+      return doc.blocks[1]
+    end
+  end
+  return nil
+end
+
 function Image(img)
   -- Applies to every image, not just the ones that end up in figures, so
   -- equation images scale on narrow viewports too.
@@ -807,6 +842,14 @@ function Image(img)
   end
 
   local replacement = alt_for(qualify_media(img.src))
+  -- A Markdown source says an image is decorative with the class
+  -- {.decorative}: the author's decision, in the file, the same as a
+  -- [decorative] sidecar entry. (Pandoc has no marker of its own, and an
+  -- empty alt cannot be one: in a Word file it is what an omission looks
+  -- like.) A Markdown target writes the class back.
+  if replacement == nil and img.classes:includes('decorative') then
+    replacement = '[decorative]'
+  end
   if replacement ~= nil then
     if DECORATIVE_MARKERS[replacement:lower()] then
       -- Clearing the caption alone makes Pandoc omit the attribute
@@ -1883,7 +1926,32 @@ local function number_tables(blocks, state)
   end
 end
 
+-- Pandoc's Markdown writes a figure that carries an id as a div of class
+-- "figure" holding the image and a div of class "caption", and reads
+-- that back as a div around a figure rather than as the figure. Folded
+-- back into one Figure with the id, which is what was written.
+local function figure_div(div)
+  if not div.classes:includes('figure') then return nil end
+  local image, caption = nil, nil
+  for _, block in ipairs(div.content) do
+    if block.t == 'Figure' and image == nil then
+      image = block.content
+    elseif (block.t == 'Para' or block.t == 'Plain') and image == nil then
+      image = { block }
+    elseif block.t == 'Div' and block.classes:includes('caption') then
+      caption = block.content
+    end
+  end
+  if image == nil then return nil end
+  local attr = pandoc.Attr(div.identifier, {}, div.attributes)
+  return pandoc.Figure(image, caption and { long = caption } or {}, attr)
+end
+
 return {
+  -- A table or figure written as HTML, or a figure written as a div, by
+  -- a Markdown target: the block it was, before anything counts or
+  -- numbers tables and figures.
+  { RawBlock = RawBlock, Div = figure_div },
   {
     Pandoc = function(doc)
       local state = { n = 0, all = 0, above = 0, below = 0 }
@@ -1898,6 +1966,8 @@ return {
   },
   {
     Image = Image,
+    Para = Para,
+    Plain = Plain,
     Blocks = Blocks,
     Pandoc = Pandoc,
   },

@@ -31,6 +31,26 @@ A Markdown book is often set up for `pandoc *.md -o book.pdf`: a `_preamble.md` 
 
 Two things about such a book are worth knowing. A chapter file with one `# Heading` gets it promoted to the page title, as a Word page's H1 is, and its `##` sections become the pages under it. And a file name with a space (`01 BigPicture.md`) gives a page named `01-BigPicture`, with its pieces `01-BigPicture--learning-objectives` and so on: spaces and other characters an href would have to encode are replaced, because an LMS may take an href literally. The same rule renames media a page refers to, in the copy beside the page; the source files keep their names.
 
+## Markdown as a target
+
+A target with `format: markdown` writes the book back as source, in Pandoc's own flavor: one `.md` per source document, or one per page when the target has a split level, with the images beside them.
+
+```yaml
+targets:
+  src:
+    format: markdown
+    pages:
+      split_level: 0      # one file per source, even if defaults split
+```
+
+The rule for what goes in the file: Markdown holds what the author decided; the filter holds what follows from it. So a decision the pipeline made from a sidecar, a pre-pass, or a marker is written as markup that reads back to the same decision, and after one round trip every correction that lived in a sidecar is in the source: which cells head a table, as the `tables.markers` class (`::: matrix` for a header row and column, `::: row-headers` for a header column alone; a header row alone and no headers need none); a table's caption, as its caption; alt text on the image, and `{.decorative}` on a decorative one; an anchor restored from a Word bookmark, as an empty span; the author in the YAML. What the filter derived is left out and rebuilt on the next read: the scroll wrapper, `scope` on header cells, `aria-hidden`, the split's provenance.
+
+Two things Pandoc's Markdown can't say are written as fenced HTML blocks and read back into what they were: a table with merged cells (Pandoc's Markdown writer drops the spans silently otherwise) and a figure that carries an id. A lone image is marked `![alt](x.png)[]{.inline}` so it doesn't read back as a figure; the reading filter removes the mark.
+
+The checks, which the driver's test suite runs on the fixtures: read the Markdown back as a book and the HTML is the same (`compare-output.py` says `Runs agree`; on *Introductory Business Statistics 2e*, 169 pages, every page identical); write it again and nothing changes. A source that came from Word settles after one write, from Word's stray spaces and from grid-table widths rounded to characters, so the second write is the fixed point and the third equals it. A Markdown source is normalized the same way on its first pass: a promoted heading becomes the YAML `title:`, `_italics_` becomes `*italics*`, hard-wrapped lines are joined, and a pipe table wide enough to have been read with column widths comes back as a grid table. Content is unchanged; form is Pandoc's.
+
+What is lossy, and known: grid-table widths are Pandoc's approximation to the character; a merged-cell table round-trips in structure but is the manual case it always was.
+
 ## What isn't here yet
 
-Markdown as an *output*, so a book converted from Word can be maintained in Markdown, is the other half of roadmap item 1. And a Markdown table with no marker gets no guess and no report; the census that makes the guess reads Word files.
+A Markdown table with no marker gets no guess and no report; the census that makes the guess reads Word files. And merging sections into their chapter (one file per `contents` group from sources cut at the section level, as OpenStax ships them) is the next thing a Markdown target should do.

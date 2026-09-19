@@ -83,6 +83,7 @@ MEDIA_FILTER = os.path.join(HERE, "media-extensions.lua")
 HEADER_FILTER = os.path.join(HERE, "header-includes.lua")
 SAFE_MEDIA_FILTER = os.path.join(HERE, "safe-media.lua")
 TARGET_FILTER = os.path.join(HERE, "target-blocks.lua")
+MARKDOWN_FILTER = os.path.join(HERE, "markdown-source.lua")
 SOURCE_EXTENSIONS = (".docx", ".md", ".html")
 PAGE_CSS = os.path.join(HERE, "page.css")
 HEADERS_TOOL = os.path.join(HERE, "table-headers.py")
@@ -741,6 +742,34 @@ def split_pages(target, pages, paths, reports):
     return [line for line in result.stdout.split("\n") if line.strip()]
 
 
+def render_markdown(target, pages, base, env):
+    """One Markdown file per intermediate, as source: what the author
+    decided, in Pandoc's own flavor, and nothing the filter derived. A
+    target with no split writes one file per source document; one with
+    a split writes the pages."""
+    env = dict(env, TARGET_NAME=target.name)
+    os.makedirs(target.output_dir, exist_ok=True)
+    written = []
+    for page in pages:
+        stem = os.path.basename(page)[:-len(INTERMEDIATE)]
+        out = os.path.join(target.output_dir, stem + ".md")
+        # Pipe or grid tables, which keep an empty cell and a
+        # multi-paragraph one. What Markdown cannot say (a merged-cell
+        # table, a figure with an id) is written as a fenced HTML block,
+        # which the reader keeps whole and the filter reads back into
+        # the table or figure it was; plain raw HTML would come back one
+        # tag at a time.
+        run(["pandoc", "-f", "json",
+             "-t", "markdown-simple_tables-multiline_tables-raw_html",
+             page, "-o", out,
+             "--standalone", "--wrap=none", "--markdown-headings=atx",
+             "--lua-filter=" + TARGET_FILTER,
+             "--lua-filter=" + MARKDOWN_FILTER], env=env, cwd=base)
+        written.append(out)
+    copy_media(base, target.output_dir, pages)
+    return written
+
+
 def render_html(target, pages, base, fragments, language, env):
     env = dict(env, TARGET_NAME=target.name,
                TITLE_BLOCK=str(target["title_block"]))
@@ -1165,6 +1194,11 @@ def main():
         written = {}
         renv = dict(env, HEADER_INCLUDES_FILE=css_header)
         for target in targets:
+            if target.format == "markdown":
+                written[target.name] = render_markdown(
+                    target, [p for p in pages_by_dir[target.pages_dir]
+                             if os.path.basename(p)[:-len(INTERMEDIATE)]
+                             not in hand_stems], base, renv)
             if target.format == "html":
                 rendered = [p for p in pages_by_dir[target.pages_dir]
                             if os.path.basename(p)[:-len(INTERMEDIATE)]
@@ -1225,7 +1259,7 @@ def main():
         # run: the output exists, and the list is what to work through.
         command = ["python3", CHECK_TOOL, "--report", reports["output_check"]]
         for pages in written.values():
-            command += pages
+            command += [p for p in pages if p.endswith(".html")]
         for epub in epubs:
             command += ["--epub", epub]
         if os.path.isfile(CHECK_TOOL):

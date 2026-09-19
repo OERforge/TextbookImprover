@@ -68,9 +68,9 @@ How data tables are rendered.
 
 Put wide tables in a focusable scroll container so a long table doesn't force the whole page to scroll sideways (WCAG 1.4.10).
 
-**`tables.markers`**—`opaque`; default `{matrix: both}`
+**`tables.markers`**—`opaque`; default `{matrix: both, row-headers: first-column}`
 
-What a fenced div around a table in a Markdown source declares about its headers, class by class: "::: matrix" means both a header row and a header column unless this says otherwise. The values are the ones table-headers.csv takes (first-row, first-column, both, none). A Markdown table with no marker is left as Pandoc read it, header row and all; the guess and the report run only on Word sources.
+What a fenced div around a table in a Markdown source declares about its headers, class by class: "::: matrix" means both a header row and a header column, "::: row-headers" a header column and no header row, unless this says otherwise. The values are the ones table-headers.csv takes (first-row, first-column, both, none); a header row alone and no headers need no marker, since a pipe or grid table says those itself. A Markdown target writes these markers back. A Markdown table with no marker is left as Pandoc read it; the guess and the report run only on Word sources.
 
 ## pages
 

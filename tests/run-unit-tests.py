@@ -303,7 +303,35 @@ def check_docx_repair():
     fixed, moved = docxrepair.move_bookmarks_into_paragraphs(xml)
     body = ET.fromstring(fixed).find("{%s}body" % W)
     tbl = body.find("{%s}tbl" % W)
+    heading = ('<w:document xmlns:w="%s"><w:body>'
+               '<w:bookmarkStart w:id="1" w:name="note-1"/>'
+               '<w:p><w:pPr><w:pStyle w:val="Heading2Grey"/></w:pPr>'
+               '<w:r><w:t>Case Study</w:t></w:r></w:p>'
+               '<w:hyperlink w:anchor="note-1"><w:r><w:t>x</w:t></w:r>'
+               '</w:hyperlink></w:body></w:document>' % W)
+    fixed_heading, _ = docxrepair.move_bookmarks_into_paragraphs(heading)
+    kept, count = docxrepair.keep_unlinked_bookmarks(xml)
     return [
+        ("a bookmark before a heading gets a paragraph of its own",
+         lambda: '<w:p><w:r><w:t>&#8203;</w:t></w:r>'
+         '<w:bookmarkStart w:id="1" w:name="note-1"/></w:p>'
+         '<w:p><w:pPr><w:pStyle w:val="Heading2Grey"/>' in fixed_heading),
+        ("a bookmark the source put inside a heading is moved out before it",
+         lambda: (lambda f: '<w:p><w:r><w:t>&#8203;</w:t></w:r>'
+                  '<w:bookmarkStart w:id="9" w:name="term-9"/>'
+                  '</w:p><w:p><w:pPr><w:pStyle w:val="Heading3Grey"/></w:pPr>'
+                  '<w:r>' in f)(docxrepair.move_bookmarks_into_paragraphs(
+                      '<w:document xmlns:w="%s"><w:body><w:p><w:pPr>'
+                      '<w:pStyle w:val="Heading3Grey"/></w:pPr>'
+                      '<w:bookmarkStart w:id="9" w:name="term-9"/>'
+                      '<w:r><w:t>Term</w:t></w:r></w:p></w:body></w:document>'
+                      % W)[0])),
+        ("bookmarks no link in the document points at get a keeper link",
+         lambda: count == 2 and 'w:anchor="fs-one"' in kept
+         and 'w:anchor="fs-tbl"' in kept),
+        ("a bookmark already linked, or Word's own, gets none",
+         lambda: 'w:anchor="_GoBack"' not in kept
+         and docxrepair.keep_unlinked_bookmarks(heading)[1] == 0),
         ("one bookmark moved, the one before a paragraph",
          lambda: moved == 1),
         ("it sits after the paragraph's properties",

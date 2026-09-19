@@ -780,7 +780,25 @@ local function drop_figure_mark(block)
   return nil
 end
 
-function Para(para) return drop_figure_mark(para) end
+-- A link with nothing in it says nothing to a reader and fails WCAG
+-- 2.4.4; the repair step adds such links to keep Pandoc's reader from
+-- deleting bookmarks that only other files point at, and they go here.
+-- The zero-width space the repair puts between adjacent bookmarks.
+function Str(s)
+  if s.text == '\226\128\139' then return {} end
+  return nil
+end
+
+function Link(link)
+  local text = pandoc.utils.stringify(link.content)
+  if text == '' or text == '\226\128\139' then return {} end
+  return nil
+end
+
+function Para(para)
+  if #para.content == 0 then return {} end    -- the keeper links' paragraph
+  return drop_figure_mark(para)
+end
 function Plain(plain) return drop_figure_mark(plain) end
 
 -- A table a Markdown target wrote as HTML because it has merged cells,
@@ -1636,18 +1654,21 @@ function Blocks(blocks)
       images, anchor = image_only_table(block)
     end
 
+    -- Bookmarks that stood before a table in the source, which Pandoc's
+    -- reader drops: every "Table 1.11" link in an OpenStax book points
+    -- at one, and so does every link to a boxed note, which is a
+    -- one-cell table. Restored as empty anchors ahead of whatever the
+    -- table becomes, so the links land and a split table keeps them.
+    if block.t == 'Table' then
+      local entry = resolved_for(block)
+      for _, name in ipairs(entry and entry.anchors or {}) do
+        out:insert(pandoc.Div({}, pandoc.Attr(name, { 'table-anchor' })))
+      end
+    end
     if images == nil then
       if block.t == 'Table' then
         -- Not a layout table, so it is a real data table: give it a
         -- <caption>, mark its column headers, wrap it for scrolling.
-        -- Bookmarks that stood before the table in the source, which
-        -- Pandoc's reader drops: every "Table 1.11" link in an OpenStax
-        -- book points at one. Restored as empty anchors ahead of the
-        -- table, so the links land and a split table keeps them.
-        local entry = resolved_for(block)
-        for _, name in ipairs(entry and entry.anchors or {}) do
-          out:insert(pandoc.Div({}, pandoc.Attr(name, { 'table-anchor' })))
-        end
         local wrapped, consumed = caption_data_table(
           block, blocks[i + 1], blocks[i + 2], blocks[i + 3], out)
         for _, piece in ipairs(wrapped) do out:insert(piece) end
@@ -1984,6 +2005,8 @@ return {
   },
   {
     Image = Image,
+    Str = Str,
+    Link = Link,
     Para = Para,
     Plain = Plain,
     Blocks = Blocks,

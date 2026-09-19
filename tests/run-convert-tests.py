@@ -469,7 +469,9 @@ def case_structure(work):
 EDITIONS = {
     "about.md": "# About This Book\n\nFor every edition.\n",
     "about.print.md": "# About This Book\n\nFor the print edition only.\n",
-    "access.md": ("# Accessibility\n\nChecked.\n\n"
+    "access.md": ("# Accessibility\n\nChecked. See [about](https://openstax.org"
+                  "/books/x/pages/about#here) and [not ours](https://openstax.org"
+                  "/books/x/pages/elsewhere).\n\n"
                   "::: {targets=\"web\"}\nUse the web edition with a screen "
                   "reader.\n:::\n\n::: {targets=\"!web\"}\nThis edition was "
                   "validated.\n:::\n"),
@@ -499,6 +501,9 @@ def case_editions(work):
             work, target, stem + ".html") else ""
     return [
         ("the run succeeds", lambda: result.returncode == 0),
+        ("a publisher link to a page of the book points at the page here",
+         lambda: 'href="about.html#here"' in page("web", "access")
+         and "openstax.org/books/x/pages/elsewhere" in page("web", "access")),
         ("a variant file replaces the page for its target only",
          lambda: "For the print edition only." in page("print", "about")
          and "For every edition." in page("web", "about")),

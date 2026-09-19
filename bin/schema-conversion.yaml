@@ -207,6 +207,24 @@ keys:
           page_names sidecar says otherwise, its heading becomes its
           title, and links between pieces are rewritten to follow.
 
+  links:
+    stage: filter
+    description: >
+      What happens to links on the way through.
+    keys:
+
+      rewrite_publisher:
+        type: bool
+        default: true
+        stage: filter
+        description: >
+          A link to a page of this book on the publisher's site --
+          https://openstax.org/books/<book>/pages/<page>#anchor, the shape
+          OpenStax's export uses for its index and its cross-references --
+          becomes a link to the page here, anchor and all, when the book
+          has that page. A link to a page the book doesn't have is left
+          as it is.
+
   notes:
     stage: render
     description: >

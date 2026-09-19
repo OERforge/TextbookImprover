@@ -722,6 +722,45 @@ def filter_pages(base, stems, target, env, raw=None):
     return written
 
 
+PUBLISHER_PAGE = re.compile(r"^https?://[^/]+/books/[^/]+/pages/([^#?/]+)([#?].*)?$")
+
+
+def rewrite_publisher_links(pages):
+    """A link to one of this book's pages on the publisher's site becomes
+    a link to the page here. Runs on the filtered intermediates before
+    the split, so the split and the assembler treat it as any other link
+    between pages."""
+    stems = {os.path.basename(p)[:-len(INTERMEDIATE)] for p in pages}
+    total = 0
+    for path in pages:
+        with open(path, encoding="utf-8") as fh:
+            doc = json.load(fh)
+        count = 0
+
+        def walk(node):
+            nonlocal count
+            if isinstance(node, dict):
+                if node.get("t") == "Link":
+                    target = node["c"][2][0]
+                    m = PUBLISHER_PAGE.match(target)
+                    if m and safe_stem(m.group(1)) in stems:
+                        node["c"][2][0] = safe_stem(m.group(1)) + ".html" \
+                            + (m.group(2) or "")
+                        count += 1
+                for value in node.values():
+                    walk(value)
+            elif isinstance(node, list):
+                for item in node:
+                    walk(item)
+        walk(doc["blocks"])
+        if count:
+            with open(path, "w", encoding="utf-8") as fh:
+                json.dump(doc, fh)
+            total += count
+    if total:
+        say(f"{total} publisher link(s) now point at pages of this book.")
+
+
 def split_pages(target, pages, paths, reports):
     """split-pages.py runs on the filtered intermediates, after the
     filter and before the render, so the pieces carry everything the
@@ -1175,6 +1214,8 @@ def main():
             variant_stems = [s for s in raw if s not in stems]
             pages = filter_pages(base, stems + variant_stems, target, fenv,
                                  raw)
+            if target["links.rewrite_publisher"]:
+                rewrite_publisher_links(pages)
             pages_by_dir[target.pages_dir] = split_pages(target, pages,
                                                          paths, reports)
 

@@ -80,6 +80,14 @@ What a page is, when the source's files are not already the pages you want.
 
 Cut every source into one page per heading of this level or shallower, after the filter has run and before anything is rendered. 0 leaves each file as one page. A book that arrived as one file per chapter gets one page per section with 2, and the packager groups the pieces under their source without being told. Each piece is named after its heading unless the page_names sidecar says otherwise, its heading becomes its title, and links between pieces are rewritten to follow.
 
+## links
+
+What happens to links on the way through.
+
+**`links.rewrite_publisher`**—`bool`; default `true`
+
+A link to a page of this book on the publisher's site -- https://openstax.org/books/<book>/pages/<page>#anchor, the shape OpenStax's export uses for its index and its cross-references -- becomes a link to the page here, anchor and all, when the book has that page. A link to a page the book doesn't have is left as it is.
+
 ## notes
 
 Where footnotes go and how they count, once a source has been cut into pages. Pandoc numbers them per page and keeps each page's at its end; these settings rearrange that in the rendered pages and in the EPUB alike.

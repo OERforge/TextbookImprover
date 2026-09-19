@@ -43,7 +43,7 @@ java -jar "$EPUBCHECK_JAR" --version
 java -jar "$VNU_JAR" --version
 ```
 
-The next `convert.sh` reports `epubcheck ran on 1 EPUB(s)` and `The Nu HTML checker ran on N page(s)`. Ubuntu also packages `epubcheck` (`sudo apt install epubcheck`), which the run finds on the path without any variable; it's older than the release above, and either works. The `latest` link for `vnu.jar` moves with each release, which is what you want for a validator; the version it prints is the one to note if a finding needs discussing.
+The next `convert.sh` reports `epubcheck ran on 1 EPUB(s)` and `The Nu HTML checker ran on N page(s)`. Both need Java 11 or later; `java -version` says what you have, and if a check reports `vnu:failed` the line after it is the checker's own exception, which names the cause. Ubuntu also packages `epubcheck` (`sudo apt install epubcheck`), which the run finds on the path without any variable; it's older than the release above, and either works. The `latest` link for `vnu.jar` moves with each release, which is what you want for a validator; the version it prints is the one to note if a finding needs discussing.
 
 Pandoc 3.9 is a hard requirement, checked before any work starts. Earlier
 versions accept most of the command line and quietly do something else:

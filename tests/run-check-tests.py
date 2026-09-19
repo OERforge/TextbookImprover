@@ -65,7 +65,7 @@ def expect(condition, findings):
     """A failed expectation shows what the checker actually returned."""
     if not condition:
         raise AssertionError("got: " + "; ".join(
-            f"{f.where} {f.check} {f.detail[:80]}" for f in findings)
+            f"{f.where} {f.check} {f.detail[:300]}" for f in findings)
             if findings else "got no findings")
     return True
 

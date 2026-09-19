@@ -487,8 +487,14 @@ def run_vnu(command, paths):
     except (OSError, subprocess.SubprocessError, ValueError) as exc:
         detail = str(exc)
         if isinstance(exc, ValueError):
-            detail = ("no JSON report in the checker's output; it began: "
-                      + repr((result.stdout or result.stderr)[:200]))
+            # The tool crashed before reporting. Its exception line says
+            # why -- a Java too old for it, a jar that is not a jar -- so
+            # that is what to show, in full.
+            output = result.stdout + result.stderr
+            crash = next((line for line in output.splitlines()
+                          if "Exception" in line or "Error" in line), "")
+            detail = ("the checker produced no report; it said: "
+                      + (crash.strip() or repr(output[:200])))
         return [Finding("", "vnu:failed", detail)], 0
     findings, infos = [], 0
     for message in parsed.get("messages", []):

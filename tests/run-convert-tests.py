@@ -570,8 +570,16 @@ def case_markdown_target(work):
     return [
         ("a markdown target writes one file per source",
          lambda: result.returncode == 0 and len(mds) == len(NEEDED)),
-        ("the row-header table carries its marker, the caption stays",
-         lambda: "::: matrix" in md and ": Table 1.1" in md),
+        ("the row-header table carries its marker and Word's exact widths, "
+         "the caption stays",
+         lambda: re.search(r"::: \{\.matrix widths=\"[0-9. ]+\"\}", md)
+         and ": Table 1.1" in md),
+        ("tables are pipe tables, so no width is rounded to a character",
+         lambda: "|---" in md or "|:--" in md or "|--" in md),
+        ("the first write is already the fixed point for a widths table",
+         lambda: filecmp.cmp(os.path.join(first, "src", "tables-b.md"),
+                             os.path.join(second, "src", "tables-b.md"),
+                             shallow=False)),
         ("no scope, wrapper, or bookkeeping reaches the Markdown",
          lambda: "scope=" not in md and "table-wrapper" not in md
          and "data-th" not in md),

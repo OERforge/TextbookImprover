@@ -47,9 +47,11 @@ The rule for what goes in the file: Markdown holds what the author decided; the 
 
 Two things Pandoc's Markdown can't say are written as fenced HTML blocks and read back into what they were: a table with merged cells (Pandoc's Markdown writer drops the spans silently otherwise) and a figure that carries an id. A lone image is marked `![alt](x.png)[]{.inline}` so it doesn't read back as a figure; the reading filter removes the mark.
 
-The checks, which the driver's test suite runs on the fixtures: read the Markdown back as a book and the HTML is the same (`compare-output.py` says `Runs agree`; on *Introductory Business Statistics 2e*, 169 pages, every page identical); write it again and nothing changes. A source that came from Word settles after one write, from Word's stray spaces and from grid-table widths rounded to characters, so the second write is the fixed point and the third equals it. A Markdown source is normalized the same way on its first pass: a promoted heading becomes the YAML `title:`, `_italics_` becomes `*italics*`, hard-wrapped lines are joined, and a pipe table wide enough to have been read with column widths comes back as a grid table. Content is unchanged; form is Pandoc's.
+Tables are pipe tables, and a table's column widths (Word's, or a wide pipe table's) travel as an attribute on the wrapping div, `::: {.matrix widths="0.28 0.36 0.36"}`, exact to four places and applied on the next read; a grid table appears only where a cell holds a block. That is also the route a DOCX target will take the same widths back by.
 
-What is lossy, and known: grid-table widths are Pandoc's approximation to the character; a merged-cell table round-trips in structure but is the manual case it always was.
+The checks, which the driver's test suite runs on the fixtures: read the Markdown back as a book and the HTML is the same (`compare-output.py` says `Runs agree`; on *Introductory Business Statistics 2e*, 169 pages, every page identical); write it again and nothing changes. A source that came from Word settles after one write, from Word's own residue (paragraphs holding only a non-breaking space, leading and trailing spaces, an escaped `a\.`), so the second write is the fixed point and the third equals it. A Markdown source is normalized the same way on its first pass: a promoted heading becomes the YAML `title:`, `_italics_` becomes `*italics*`, hard-wrapped lines are joined. Content is unchanged; form is Pandoc's.
+
+What is lossy, and known: a merged-cell table round-trips in structure but is the manual case it always was.
 
 ## What isn't here yet
 

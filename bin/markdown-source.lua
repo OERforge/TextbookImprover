@@ -58,6 +58,28 @@ local function headers_of(tbl)
   return 'none'
 end
 
+-- The column widths Word gave a table, as text for a widths attribute,
+-- and the table with its widths cleared so Pandoc writes a pipe table.
+-- Grid-table dashes round a width to a character and drift by one on
+-- every write; an attribute keeps the number.
+local function take_widths(tbl)
+  local out, any = {}, false
+  for i, spec in ipairs(tbl.colspecs) do
+    local width = spec[2]
+    if type(width) == 'number' and width > 0 then
+      any = true
+      out[i] = string.format('%.4f', width):gsub('0+$', ''):gsub('%.$', '')
+    else
+      out[i] = '0'
+    end
+  end
+  if not any then return nil end
+  local specs = {}
+  for i, spec in ipairs(tbl.colspecs) do specs[i] = { spec[1], 'ColWidthDefault' } end
+  tbl.colspecs = specs
+  return table.concat(out, ' ')
+end
+
 local function clean_table(tbl)
   strip_bookkeeping(tbl.attr)
   local function clean_cells(rows)
@@ -101,8 +123,12 @@ function Div(div)
             .. 'the table is written without its header column\n')
             :format(headers))
         end
-        if class then
-          out:insert(pandoc.Div({ block }, pandoc.Attr('', { class })))
+        -- The widths go on the same div, so a pipe table can carry them.
+        local widths = block.t == 'Table' and take_widths(block) or nil
+        if class or widths then
+          local attr = pandoc.Attr('', class and { class } or {},
+                                   widths and { widths = widths } or {})
+          out:insert(pandoc.Div({ block }, attr))
         else
           out:insert(block)
         end
@@ -111,6 +137,13 @@ function Div(div)
       end
     end
     return out
+  end
+  -- A div with nothing left on it -- the reader took its widths and
+  -- kept the box -- is unwrapped rather than written as "::: {}".
+  local empty = div.identifier == '' and #div.classes == 0
+  for _ in pairs(div.attributes) do empty = false end
+  if empty then
+    return div.content
   end
   -- A marker div the source already had, now holding the one this pass
   -- made: one is enough.

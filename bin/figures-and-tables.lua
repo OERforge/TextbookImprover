@@ -1910,6 +1910,24 @@ local function number_tables(blocks, state)
             end
           end
         end
+        -- Column widths a Markdown target carried on the div, exact:
+        -- back onto the table, so the pipe table has Word's widths.
+        local widths = block.attributes['widths']
+        if widths then
+          local values = {}
+          for w in widths:gmatch('%S+') do values[#values + 1] = tonumber(w) end
+          for _, inner in ipairs(block.content) do
+            if inner.t == 'Table' and #values == #inner.colspecs then
+              local specs = {}
+              for i, spec in ipairs(inner.colspecs) do
+                specs[i] = { spec[1], values[i] > 0 and values[i]
+                                        or 'ColWidthDefault' }
+              end
+              inner.colspecs = specs
+            end
+          end
+          block.attributes['widths'] = nil
+        end
       end
       number_tables(block.content, state)
     elseif kind == 'BulletList' or kind == 'OrderedList' then

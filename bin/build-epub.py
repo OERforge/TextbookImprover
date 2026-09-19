@@ -47,6 +47,7 @@ import json
 import os
 import re
 import shutil
+import zipfile
 import subprocess
 import sys
 import tempfile
@@ -418,11 +419,11 @@ def chapter_template(work):
     Ace reports. The chapter's own title variable holds its heading.
     """
     template = pandoc_default("-Depub3")
-    needle = "<title>$pagetitle$</title>"
-    if needle not in template:
-        print("WARNING: Pandoc's epub3 template no longer titles chapters "
-              "by file name; using it unchanged.", file=sys.stderr)
-    template = template.replace(needle, "<title>$title$</title>")
+    # The chapter <title> is left as the writer fills it -- the file name
+    # -- and rewritten from the chapter's heading once the archive
+    # exists (retitle_chapters). $title$ here would render a heading's
+    # <em> or <sup> inside <title>, which XHTML forbids, and the writer
+    # offers no plain-text form of a chapter's heading.
     # The cover is an SVG holding the image, with no text alternative at
     # all: a screen reader meets the book with a silent page. Give the
     # SVG a name, and a title element for readers that look there.
@@ -442,6 +443,41 @@ def chapter_template(work):
     with open(path, "w", encoding="utf-8") as fh:
         fh.write(template)
     return path
+
+
+def retitle_chapters(path):
+    """Give each chapter file a <title> that is its heading's text.
+
+    Pandoc titles every chapter file by its file name ("ch002.xhtml"), a
+    WCAG 2.4.2 failure on every page and what Ace reports first. The
+    archive is rewritten in place, mimetype first and stored as the
+    container rules require, and only the <title> elements change.
+    """
+    heading = re.compile(r"<h[1-6]\b[^>]*>(.*?)</h[1-6]>", re.S)
+    title = re.compile(r"<title>.*?</title>", re.S)
+    tmp = path + ".tmp"
+    retitled = 0
+    with zipfile.ZipFile(path) as zin, \
+            zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as zout:
+        for info in zin.infolist():
+            data = zin.read(info.filename)
+            if info.filename == "mimetype":
+                zout.writestr(info, data, compress_type=zipfile.ZIP_STORED)
+                continue
+            if info.filename.endswith(".xhtml") and "/text/" in info.filename:
+                text = data.decode("utf-8")
+                found = heading.search(text)
+                if found:
+                    plain = " ".join(re.sub(r"<[^>]+>", "", found.group(1))
+                                     .split())
+                    if plain:
+                        text = title.sub("<title>" + plain + "</title>",
+                                         text, count=1)
+                        retitled += 1
+                data = text.encode("utf-8")
+            zout.writestr(info, data)
+    os.replace(tmp, path)
+    return retitled
 
 
 def stylesheet(work):
@@ -589,6 +625,7 @@ def build(base, name, resolved, keep, intermediates=None):
             print(result.stderr.rstrip(), file=sys.stderr)
         if result.returncode != 0:
             sys.exit(f"pandoc failed building {out_path}.")
+        retitle_chapters(out_path)
         if keep:
             shutil.copy(book_json, os.path.join(out_dir, "book.json"))
     finally:

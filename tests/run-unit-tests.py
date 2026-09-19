@@ -282,7 +282,45 @@ def check_sidecar_paths():
     ]
 
 
+def check_docx_repair():
+    """Bookmarks between blocks move into the block that follows."""
+    import xml.etree.ElementTree as ET
+    import docxrepair
+    import tablecensus
+    W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+    xml = ('<w:document xmlns:w="%s"><w:body>'
+           '<w:p><w:r><w:t>before</w:t></w:r></w:p>'
+           '<w:bookmarkStart w:id="1" w:name="fs-one"/>'
+           '<w:bookmarkEnd w:id="1"/>'
+           '<w:p><w:pPr><w:pStyle w:val="BodyText"/></w:pPr>'
+           '<w:r><w:t>target</w:t></w:r></w:p>'
+           '<w:bookmarkStart w:id="2" w:name="fs-tbl"/>'
+           '<w:bookmarkStart w:id="3" w:name="_GoBack"/>'
+           '<w:tbl><w:tblGrid><w:gridCol/></w:tblGrid><w:tr><w:tc>'
+           '<w:p><w:r><w:t>cell</w:t></w:r></w:p></w:tc></w:tr></w:tbl>'
+           '</w:body></w:document>' % W)
+    fixed, moved = docxrepair.move_bookmarks_into_paragraphs(xml)
+    body = ET.fromstring(fixed).find("{%s}body" % W)
+    tbl = body.find("{%s}tbl" % W)
+    return [
+        ("one bookmark moved, the one before a paragraph",
+         lambda: moved == 1),
+        ("it sits after the paragraph's properties",
+         lambda: '</w:pPr><w:bookmarkStart w:id="1" w:name="fs-one"/>'
+         in fixed),
+        ("it is no longer at body level",
+         lambda: '<w:bookmarkEnd w:id="1"/><w:p>' in fixed
+         and '<w:bookmarkStart w:id="1" w:name="fs-one"/><w:bookmarkEnd'
+         not in fixed),
+        ("a bookmark before a table stays, for the pre-pass to read",
+         lambda: tablecensus.anchors_before(body, tbl) == ["fs-tbl"]),
+        ("Word's own _-prefixed bookmarks are not anchors",
+         lambda: "_GoBack" not in tablecensus.anchors_before(body, tbl)),
+    ]
+
+
 GROUPS = [
+    ("repairing a .docx on the way in", check_docx_repair),
     ("the archive's name", check_archive_name),
     ("the content prefix", check_content_prefix),
     ("the wrapper module's name", check_wrapper_title),

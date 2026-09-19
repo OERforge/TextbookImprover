@@ -295,6 +295,7 @@ def tables_in(path):
             "reason": reason,
             "caption-rows": inferred[0],
             "split-at": inferred[1],
+            "anchors": tc.anchors_before(body, tbl) if depth == 0 else [],
             "needs-word": value == "none" and no_header_text(grid),
             "summary-row": "trailing row with no label" in reason,
         })
@@ -434,6 +435,7 @@ def main():
             "caption_rows": caption_rows,
             "split_at": split_at, "part_captions": part_captions,
             "rows": info["rows"], "cols": info["cols"], "first": info["first"],
+            "anchors": info.get("anchors", []),
         })
         if split_at:
             note = (note + "; " if note else "") + (

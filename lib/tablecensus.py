@@ -63,6 +63,33 @@ def top_level_tables(body):
             yield child
 
 
+def anchors_before(body, tbl):
+    """Bookmark names standing between the previous block and this table.
+
+    OpenStax's DOCX export bookmarks a table by placing w:bookmarkStart as
+    a child of the body, right before the w:tbl, and every "Table 1.11"
+    link in the book points at that name. Pandoc's reader keeps a
+    bookmark only inside a paragraph, so these are lost and the links
+    die. The pre-pass hands them to the filter, which puts the id back.
+    """
+    names = []
+    children = list(body)
+    try:
+        at = children.index(tbl)
+    except ValueError:
+        return names
+    for child in reversed(children[:at]):
+        if child.tag == q("bookmarkStart"):
+            name = child.get(q("name"))
+            if name and not name.startswith("_"):
+                names.insert(0, name)
+        elif child.tag == q("bookmarkEnd"):
+            continue
+        else:
+            break
+    return names
+
+
 def all_tables(body, depth=0):
     """Every table, with its nesting depth."""
     for child in body:

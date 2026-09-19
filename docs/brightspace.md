@@ -72,6 +72,27 @@ scattered among everything else at the course root. Expect to do that by
 hand after removing a book, and expect the one-time migration to leave the
 old, unprefixed images behind when the old module goes.
 
+**An href is taken literally.** A cartridge's manifest names its files
+by `href`, and IMS Content Packaging says an `href` is a URI, so a file
+called `01 BigPicture.html` is referred to as `01%20BigPicture.html`. A
+manifest written that way validates, and Brightspace imports its
+structure and then reports every such page as missing when a student
+opens it: it looks for a file literally named `01%20BigPicture.html`,
+and the archive holds `01 BigPicture.html`. Pages whose names needed no
+encoding open normally, which is what makes the failure look partial
+and random. Measured with a cartridge where 320 of 361 hrefs carried a
+`%20`; the 41 without one worked.
+
+The pipeline no longer produces such a manifest: a page is named after
+its source with spaces and other URI-special characters replaced
+(`01 BigPicture.md` is the page `01-BigPicture`), and media a page
+refers to is copied under such a name with the reference rewritten to
+match, so nothing in the archive needs encoding. If you build a
+cartridge by hand or from pages the pipeline did not name, keep every
+file name to letters, digits, `.`, `_`, and `-`. There is no way to
+make Brightspace decode an href, and it is not obvious that it should
+have to; a report has been drafted for D2L.
+
 ### The content prefix
 
 Every file in a package goes inside one directory named after the book,

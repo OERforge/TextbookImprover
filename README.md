@@ -1,6 +1,6 @@
 # TextbookImprover
 
-Converts a directory of Word documents into more-accessible HTML pages and packages them as an IMS Common Cartridge for import into Brightspace or another LMS.
+Converts a directory of Word documents into more-accessible HTML pages, packages them as an IMS Common Cartridge for import into Brightspace or another LMS, and can assemble them into an EPUB.
 
 Licensed GPL 3.0. See `LICENSE` for more info.
 
@@ -8,7 +8,7 @@ The initial release of these scripts was created by Robert Szarka and supported 
 
 ## What it does
 
-Two halves, which share a configuration and nothing else.
+Two halves, which share a configuration and the book's table of contents, and nothing else.
 
 **Conversion** turns each `.docx` into an HTML page through Pandoc and a Lua filter, and makes the page more accessible on the way: figures get real captions tied to their images, data tables get captions, header cells, and a focusable scroll region, images get their alt text checked and their layout spacers marked, and equations stay equations. Where the source doesn't say something a screen reader needs -- which column heads a table, what a picture shows -- the run guesses from the file, writes its guess into a sidecar CSV you can correct, and reports what still needs a person.
 
@@ -50,6 +50,7 @@ If you have the book's PDF, run `bash $T/bin/convert.sh --toc book.pdf` *before*
 | [Packaging settings](docs/packaging-settings.md) | Reference, generated from the schema |
 | [Sidecars and reports](docs/sidecars.md) | Each report, each sidecar, and what goes in them |
 | [Building the cartridge](docs/packaging.md) | The packager, ordering from a PDF, validating the manifest |
+| [Building an EPUB](docs/epub.md) | One EPUB per book from the same pages and the same contents, and what it claims about itself |
 | [Brightspace](docs/brightspace.md) | What importing and deleting actually do there, confirmed by D2L |
 | [Testing](docs/testing.md) | The test suites and what each is load-bearing for |
 | [Utilities](docs/utilities.md) | The tools in `util/`: surveying a corpus, checking a source, comparing runs |

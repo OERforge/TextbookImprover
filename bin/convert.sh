@@ -29,11 +29,13 @@ set -x
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 figure_filter="$script_dir/figures-and-tables.lua"
 media_filter="$script_dir/media-extensions.lua"
+page_css="$script_dir/page.css"
 config_reader="$script_dir/read-conversion-config.py"
 cartridge_tool="$script_dir/build-cartridge.py"
 headers_tool="$script_dir/table-headers.py"
+epub_tool="$script_dir/build-epub.py"
 
-for required in "$figure_filter" "$media_filter"; do
+for required in "$figure_filter" "$media_filter" "$page_css"; do
   if [ ! -f "$required" ]; then
     echo "Missing $required -- save it alongside this script." >&2
     exit 1
@@ -163,7 +165,9 @@ if [ -f "$config_reader" ]; then
   # settings the user thought they had changed, which looks like success
   # and is not. v0.2.0 tolerated both cases alike, so a footer written at
   # the top level -- where v0.1 put it -- was reported and then ignored.
-  if ! python3 "$config_reader" -d . "$work_dir"; then
+  # --format html: this script renders the pages, and a configuration
+  # that also declares an epub3 target hands that one to build-epub.py.
+  if ! python3 "$config_reader" -d . "$work_dir" --format html; then
     if [ -f "conversion.yaml" ] || [ -f "project.yaml" ]; then
       echo "" >&2
       echo "Stopping: the configuration could not be read." >&2
@@ -348,8 +352,11 @@ fi
 
 # An intermediate with no matching .docx is not this run's output. Say so
 # and leave it alone rather than treating its stale state as an error.
+# The filtered intermediates step 4 writes are named after the raw ones,
+# so one is stale exactly when the other is.
 for stale in *.json; do
   [ -e "$stale" ] || continue
+  case "$stale" in *.filtered.json) continue ;; esac
   grep -Fqx "$stale" "$run_docs" && continue
   echo "Skipping $stale: no matching .docx in this directory." >&2
   echo "  It is left over from an earlier run, or its .docx has moved." >&2
@@ -506,7 +513,19 @@ if [ -n "$FOOTER_MD" ]; then
 fi
 
 ############################################
-# 4. Convert the JSON intermediate → HTML5
+# 4. Filter the JSON intermediate, then render it as HTML5
+#
+#    Two Pandoc runs per page rather than one. The filter writes its
+#    result back out as JSON -- <page>.filtered.json -- and the HTML
+#    writer reads that. The extra run costs a fraction of a second per
+#    page and buys the thing every other output format needs: a page
+#    that has already been remediated, on disk, in a form any writer can
+#    consume. The EPUB assembler in step 5.5 reads these rather than the
+#    HTML, because Pandoc's HTML reader keeps a cell's scope attribute
+#    but not the element, so a row header read back from HTML arrives as
+#    a <td scope="row">. The filter is per-page by design -- its sidecar
+#    keys, its table numbering, and its title promotion all assume one
+#    document -- so it cannot simply be run over the assembled book.
 #
 #    --lua-filter  rewrites DOCX layout tables into <figure>/<figcaption>,
 #                  gives data tables a real <caption> plus scope="col"
@@ -538,78 +557,30 @@ fi
 #    at <page>/media/... instead.
 ############################################
 
-cat > "$css_header" <<'CSS'
-<style>
-/* Caption contrast -- WCAG 1.4.3 / 1.4.6.
-   Pandoc's stylesheet sets no colour on captions, so they fall back to
-   inheritance or the browser default and can land well under 4.5:1.
-   #555 on Pandoc's #fdfdfd background measures 7.33:1, which clears AAA
-   while staying visibly lighter than the #1a1a1a body text. Note that the
-   familiar "accessible grey" #767676 is only 4.47:1 here -- it is computed
-   against pure white, and Pandoc's background is not pure white. */
-figcaption,
-table caption {
-  color: #555;
-}
-
-/* Pandoc's stylesheet sets `display: block` on tables so they can scroll
-   sideways. That silently strips the table role from the browser
-   accessibility tree, so screen readers stop exposing rows, columns and
-   header associations -- WCAG 1.3.1. Restore real table display and move
-   the scrolling onto the wrapper the Lua filter adds. */
-table {
-  display: table;
-  width: 100%;
-}
-.table-wrapper {
-  overflow-x: auto;
-  margin: 1em 0;
-}
-.table-wrapper:focus-visible {
-  outline: 2px solid #1a1a1a;
-  outline-offset: 2px;
-}
-
-/* Word puts the "Table 2.1" label below the table; keep it there. */
-table caption {
-  caption-side: bottom;
-  margin-top: 0.75em;
-  margin-bottom: 0;
-  text-align: left;
-}
-
-figure { margin: 1.5em 0; }
-figure img { height: auto; }
-figcaption {
-  font-size: 0.9em;
-  line-height: 1.4;
-  margin-top: 0.5em;
-}
-
-/* Pandoc's print block forces the body to black; keep captions in step so
-   they do not print lighter than the surrounding text. */
-@media print {
-  figcaption,
-  table caption {
-    color: black;
-  }
-}
-</style>
-CSS
+# The stylesheet is a file rather than a heredoc so that the EPUB
+# assembler can carry the same rules: a table needs the same caption
+# contrast and the same scroll wrapper whichever writer renders it.
+{ printf '<style>\n'; cat "$page_css"; printf '</style>\n'; } > "$css_header"
 
 while IFS= read -r f; do
   [ -e "$f" ] || continue
   base="${f%.json}"
 
+  pandoc \
+    -f json \
+    -t json \
+    "$f" \
+    -o "$base.filtered.json" \
+    --lua-filter="$figure_filter"
+
   pandoc_args=(
     -f json
     -t html5
-    "$f"
+    "$base.filtered.json"
     -o "$base.html"
     --standalone
     --ascii
     --math-method=mathml
-    --lua-filter="$figure_filter"
     --include-in-header="$css_header"
     -M "lang=$LANGUAGE"
   )
@@ -666,6 +637,22 @@ if [ -s "$missing_rows" ]; then
     # applied to every table sharing that label -- worth knowing about.
     echo "Note: the same label appears in more than one document." >&2
     echo "Only one description can apply per label; check the Source column." >&2
+  fi
+fi
+
+############################################
+# 5.5. Assemble the EPUB, when a target asks for one
+#
+#    build-epub.py reads the filtered intermediates step 4 wrote and the
+#    contents tree the packager also uses, and writes one EPUB per
+#    epub3 target. With no such target it says nothing and does nothing,
+#    which is why it runs unconditionally: a folder of documents with no
+#    configuration is still the common case.
+############################################
+
+if [ -f "$epub_tool" ] && [ -f "conversion.yaml" ]; then
+  if ! python3 "$epub_tool" -d . --if-declared; then
+    exit 1
   fi
 fi
 

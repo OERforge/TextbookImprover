@@ -1623,7 +1623,11 @@ end
 local function settle_author(doc)
   if AUTHOR_BYLINE == 'visible' or doc.meta.author == nil then return end
 
-  if AUTHOR_BYLINE == 'meta' and FORMAT:match('html') then
+  -- convert.sh runs this filter with the JSON writer, and everything that
+  -- reads the result -- the html5 writer for the pages, the epub3 writer
+  -- for the book -- is an HTML writer with the same title block. So the
+  -- intermediate is treated as HTML-bound here.
+  if AUTHOR_BYLINE == 'meta' and (FORMAT:match('html') or FORMAT == 'json') then
     local names = {}
     local author = doc.meta.author
     -- One author arrives as MetaInlines, several as a MetaList.

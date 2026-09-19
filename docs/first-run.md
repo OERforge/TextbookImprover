@@ -155,7 +155,8 @@ not by care — see [Testing](testing.md).
 ## What a run creates
 
 ```
-1-3-levels-of-measurement.json        intermediate, kept for inspection
+1-3-levels-of-measurement.json        intermediate, as Pandoc read the source
+1-3-levels-of-measurement.filtered.json   the same page after the filter has run
 1-3-levels-of-measurement.html        the page
 1-3-levels-of-measurement/media/      its images, named by real content type
 imsmanifest.xml                       the manifest
@@ -163,14 +164,18 @@ cartridge-files.txt                   every file the archive must contain
 packaging-sample.yaml                 written when the script worked something out
 *-missing.csv                         what still needs a human
 course.imscc                          only with --zip
+epub/course.epub                      only with an epub3 target declared
 ```
 
-The intermediate is Pandoc's own document model as JSON, which is lossless
-where Markdown wasn't. It isn't meant to be read directly, but it isn't
-opaque either:
+The intermediates are Pandoc's own document model as JSON, which is
+lossless where Markdown wasn't. The first is the source as Pandoc read it;
+the second is what the filter made of it, and it's what every output
+format is rendered from, so a table that looks wrong on the page can be
+checked there before suspecting the writer. Neither is meant to be read
+directly, but neither is opaque:
 
 ```bash
-pandoc -f json -t markdown 1-3-levels-of-measurement.json | less
+pandoc -f json -t markdown 1-3-levels-of-measurement.filtered.json | less
 ```
 
 Deleting the `.json` files costs nothing; the next run regenerates them.

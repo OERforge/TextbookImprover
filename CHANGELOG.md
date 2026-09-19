@@ -8,6 +8,16 @@ Versions are two-part and pre-1.0: breaking changes may land in any of them unti
 
 ### Added
 
+- **EPUB3 output.** A conversion target with `format: epub3` assembles every page in `project.contents` into one EPUB, built by the new `bin/build-epub.py` after the pages are rendered. The table of contents is the same tree the cartridge organization uses: a group is a heading over its pages, a page a heading at its depth, and a page's own headings continue below it, so the depth at which something appears is its rank in the book and not a fact about the file it came from. Each page is its own file, titled by its heading; ids are prefixed per page so two pages sharing one keep their links straight. The package document's accessibility claims (`accessMode`, `accessModeSufficient`, `accessibilityFeature`, `accessibilitySummary`) are computed from the build rather than asserted: `alternativeText` only when every image has it, `MathML` only when there are equations. See [Building an EPUB](docs/epub.md).
+- Settings: `filename` on a target, an `epub:` section (`toc_depth`, `accessibility_summary`), and `project.authors`, recorded as the EPUB's creators.
+- `read-conversion-config.py --format`, which is how `convert.sh` keeps the `html` target when an `epub3` one is declared beside it.
+- `tests/run-epub-tests.py`.
+
+### Changed
+
+- `convert.sh` writes the filtered intermediate to disk, `<page>.filtered.json`, and renders the HTML from it rather than filtering inside the HTML run. The pages are byte-identical; the point is that every output format now reads one remediated intermediate. The EPUB needs it because Pandoc's HTML reader keeps a cell's `scope` but not the element.
+- The contents tree and the filename guess moved from `build-cartridge.py` into `lib/bookcontents.py`, unchanged, so both halves read one copy. The page stylesheet moved from a heredoc in `convert.sh` into `bin/page.css` for the same reason: `--css` replaces Pandoc's EPUB stylesheet rather than adding to it, so the assembler appends ours to Pandoc's.
+
 - `util/contrib/matrix-headers.lua`, the filter the textbook this project was built alongside is written with, kept as the reference for the marker vocabulary Markdown input has to accept: `::: matrix` around a table becomes row headers with `scope`, plus the `\tagpdfsetup{table/header-columns={1}}` bracket for the PDF. Not wired in.
 
 ### Documentation

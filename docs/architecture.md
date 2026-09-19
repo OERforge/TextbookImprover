@@ -15,10 +15,12 @@ conversion side.
 
 | File | What it does |
 |---|---|
-| `convert.sh` | Runs the pipeline: DOCX → JSON → HTML, then optionally hands off to the packaging side. |
+| `convert.sh` | Runs the pipeline: DOCX → JSON → filtered JSON → HTML, then optionally hands off to the packaging side. |
 | `figures-and-tables.lua` | Pandoc filter doing the accessibility work on each page. |
 | `media-extensions.lua` | Pandoc filter naming extracted images by their real content type. |
+| `page.css` | The rules every page carries beyond Pandoc's own stylesheet: caption contrast, real table display, the scroll wrapper. |
 | `read-conversion-config.py` | Resolves `conversion.yaml` into settings `convert.sh` reads. |
+| `build-epub.py` | Assembles the filtered intermediates into one EPUB3, ordered by `project.contents`, with accessibility claims computed from the build. |
 | `schema-conversion.yaml` | Declares every conversion setting, its type, default, and meaning. |
 
 **`bin/` — packaging**
@@ -39,6 +41,7 @@ and redistributed under their own terms. See the README there.
 |---|---|
 | `oerconfig.py` | Loads, merges, validates, and writes configuration. Both halves use it; neither uses the other. |
 | `tablecensus.py` | Reads the tables in a Word document and says what shape they're: the classification, the guess, and the sidecar key. Used by the pre-pass and by `table-census.py`. |
+| `bookcontents.py` | Reads `project.contents` into a tree, and guesses one from the filenames when it's absent. The packager builds the cartridge organization from it; `build-epub.py` builds the table of contents from the same tree. |
 | `schema-project.yaml` | Declares the settings that describe the book itself, which both halves read. |
 
 **`util/` — tools you run occasionally**

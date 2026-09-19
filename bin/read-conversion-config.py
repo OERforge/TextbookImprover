@@ -96,6 +96,9 @@ def main():
                         help="directory holding the config (default: .)")
     parser.add_argument("--target", default=None,
                         help="which conversion target to resolve")
+    parser.add_argument("--format", default=None,
+                        help="with several targets, resolve the one of "
+                             "this format (html, epub3, ...)")
     parser.add_argument("--allow-unknown-keys", action="store_true",
                         help="report settings this version does not know "
                              "about instead of refusing them")
@@ -134,6 +137,28 @@ def main():
         names = oerconfig.target_names(documents)
         if len(names) == 1:
             target = names[0]
+        elif names and args.format:
+            # convert.sh renders the pages, so it asks for the html
+            # target; build-epub.py finds the epub3 ones for itself. A
+            # second target of the same format is item 2 on the roadmap.
+            try:
+                matching = [
+                    name for name in names
+                    if oerconfig.resolve(schema, project_schema, documents,
+                                         target=name,
+                                         allow_unknown=True)["format"]
+                    == args.format]
+            except oerconfig.ConfigError as exc:
+                sys.exit(str(exc))
+            if len(matching) == 1:
+                target = matching[0]
+            elif not matching:
+                sys.exit(f"None of the targets ({', '.join(names)}) has "
+                         f"format: {args.format}.")
+            else:
+                sys.exit(f"Several targets have format: {args.format} ("
+                         + ", ".join(matching) + "). Choose one with "
+                         "--target.")
         elif names:
             sys.exit("This configuration defines several targets (" +
                      ", ".join(names) + "). Choose one with --target.")

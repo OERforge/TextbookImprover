@@ -24,6 +24,10 @@ A sentence or two about the book, used wherever a package format asks for one.
 
 Who published the book. Written as document metadata, and available to package formats that record it.
 
+**`authors`** -- `list`; default `[]`
+
+Who wrote the book, one entry each, as a reader should see them. An EPUB records each as a creator; the cartridge has nowhere to put one. For an OpenStax book the publisher is usually the right entry.
+
 **`contents`** -- `opaque`; default `[]`
 
 The book's structure as a nested list of pages and groups. This describes the book, not any one package, so a cartridge organisation and an EPUB table of contents are both built from it. Left empty, tools that need an order guess one and say so.

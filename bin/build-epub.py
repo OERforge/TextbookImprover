@@ -1,0 +1,582 @@
+#!/usr/bin/env python3
+"""
+build-epub.py -- assemble a book's pages into one EPUB3.
+
+    build-epub.py                  # build every epub3 target in conversion.yaml
+    build-epub.py --target epub    # build one of them
+    build-epub.py --if-declared    # build them, and be silent if there are none
+
+Reads the filtered intermediates convert.sh writes (<page>.filtered.json)
+rather than the HTML pages. Pandoc's HTML reader keeps a cell's scope
+attribute but not the element, so a row header read back from a page
+would arrive as <td scope="row">; the intermediate still has everything
+the filter did. It never runs the filter itself: the filter is per-page
+by design, and running it over the assembled book would match no sidecar
+declaration.
+
+The book's structure comes from project.contents, the same tree the
+cartridge organization is built from, or from the packager's filename
+guess when there is none. A group -- a chapter, a unit, whatever the
+author calls it -- becomes a heading, a page a heading at its depth, and the page's own headings continue below it, so
+the table of contents shows ranks -- chapter, section -- at the same
+depth whatever file each came from.
+
+The package document's accessibility claims are computed from what this
+run found rather than declared once and left to go stale: the EPUB says
+its images have alternative text only when they all do.
+
+Copyright 2026 Robert Szarka
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
+"""
+
+import argparse
+import copy
+import json
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(os.path.dirname(HERE), "lib"))
+
+try:
+    import oerconfig
+except ImportError:
+    sys.exit("Cannot find the configuration library. It should be in a "
+             "lib/ directory beside bin/.")
+from bookcontents import (  # noqa: E402
+    guess_contents, walk_contents, flatten_pages, natural_key, stem_title,
+)
+
+CONFIG_NAME = "conversion.yaml"
+PROJECT_NAME = "project.yaml"
+INTERMEDIATE = ".filtered.json"
+PAGE_CSS = os.path.join(HERE, "page.css")
+
+# Attributes whose value is a list of ids, kept in step when ids are
+# prefixed. headers is what a cell uses to name its header cells when
+# scope cannot express the relationship.
+ID_LIST_ATTRIBUTES = {"headers", "aria-labelledby", "aria-describedby"}
+
+
+# --------------------------------------------------------------------------
+# reading the intermediates
+# --------------------------------------------------------------------------
+
+def page_stems(base):
+    return sorted((f[:-len(INTERMEDIATE)] for f in os.listdir(base)
+                   if f.endswith(INTERMEDIATE)), key=natural_key)
+
+
+def load_page(base, stem):
+    with open(os.path.join(base, stem + INTERMEDIATE), encoding="utf-8") as fh:
+        return json.load(fh)
+
+
+def stringify(node):
+    """The text of an inline tree, as Pandoc's stringify would give it."""
+    if isinstance(node, dict):
+        kind = node.get("t")
+        if kind == "Str":
+            return node["c"]
+        if kind in ("Space", "SoftBreak", "LineBreak"):
+            return " "
+        if kind in ("Code", "Math"):
+            return node["c"][1]
+        if kind in ("RawInline", "Note"):
+            return ""
+        return stringify(node.get("c", []))
+    if isinstance(node, list):
+        return "".join(stringify(child) for child in node)
+    return ""
+
+
+def meta_text(meta, key):
+    value = meta.get(key)
+    if not value:
+        return ""
+    if value.get("t") == "MetaString":
+        return value["c"]
+    return " ".join(stringify(value.get("c", [])).split())
+
+
+def page_title(doc, stem):
+    """The page's title from its metadata, falling back to the filename.
+
+    With promote_h1_to_title in effect the filter has moved the page's
+    heading here, which is why the intermediate usually opens without one.
+    """
+    return meta_text(doc.get("meta", {}), "title") or stem_title(stem)
+
+
+def inlines(text):
+    """Str and Space inlines for a plain string."""
+    out = []
+    for index, word in enumerate(text.split()):
+        if index:
+            out.append({"t": "Space"})
+        out.append({"t": "Str", "c": word})
+    return out
+
+
+def header(level, content, identifier):
+    return {"t": "Header", "c": [level, [identifier, [], []], content]}
+
+
+# --------------------------------------------------------------------------
+# rewriting a page for its place in the book
+# --------------------------------------------------------------------------
+
+def is_attr(value):
+    """Pandoc's Attr is the only three-element list that starts with a
+    string and continues with a list of strings and a list of pairs."""
+    return (isinstance(value, list) and len(value) == 3
+            and isinstance(value[0], str)
+            and isinstance(value[1], list)
+            and all(isinstance(c, str) for c in value[1])
+            and isinstance(value[2], list)
+            and all(isinstance(kv, list) and len(kv) == 2
+                    and isinstance(kv[0], str) and isinstance(kv[1], str)
+                    for kv in value[2]))
+
+
+def prefix_ids(node, prefix):
+    """Give every id in a page the page's prefix, and every link to one
+    the same, so that two pages with a "Key Terms" heading do not collide
+    once they share a book. Pandoc rewrites #id links to the chapter file
+    holding the id by its first occurrence, so a collision would send a
+    link to the wrong page without a word."""
+    if isinstance(node, dict):
+        if node.get("t") == "Link":
+            target = node["c"][2]
+            if target[0].startswith("#") and len(target[0]) > 1:
+                target[0] = "#" + prefix + target[0][1:]
+        for value in node.values():
+            prefix_ids(value, prefix)
+    elif is_attr(node):
+        if node[0]:
+            node[0] = prefix + node[0]
+        for pair in node[2]:
+            if pair[0] in ID_LIST_ATTRIBUTES and pair[1].strip():
+                pair[1] = " ".join(prefix + token
+                                   for token in pair[1].split())
+    elif isinstance(node, list):
+        for value in node:
+            prefix_ids(value, prefix)
+
+
+def shift_headers(node, by):
+    if isinstance(node, dict):
+        if node.get("t") == "Header":
+            node["c"][0] = min(6, node["c"][0] + by)
+        for value in node.values():
+            shift_headers(value, by)
+    elif isinstance(node, list):
+        for value in node:
+            shift_headers(value, by)
+
+
+def opens_with_h1(blocks):
+    return bool(blocks) and blocks[0].get("t") == "Header" \
+        and blocks[0]["c"][0] == 1
+
+
+def count_images(node, found):
+    """Tally images and the ones with no alternative text.
+
+    An image the filter marked decorative -- alt="" with
+    role="presentation" -- has been described, as having nothing to say.
+    An image with an empty alt and no such marker has not.
+    """
+    if isinstance(node, dict):
+        if node.get("t") == "Image":
+            attr, alt, _ = node["c"]
+            found["images"] += 1
+            decorative = ["role", "presentation"] in attr[2]
+            if not decorative and not stringify(alt).strip():
+                found["without_alt"] += 1
+        elif node.get("t") == "Math":
+            found["math"] += 1
+        for value in node.values():
+            count_images(value, found)
+    elif isinstance(node, list):
+        for value in node:
+            count_images(value, found)
+
+
+class Assembly:
+    """The book being built: blocks, and what was learned building them."""
+
+    def __init__(self, base):
+        self.base = base
+        self.blocks = []
+        self.depth = 1              # deepest heading level a page sits at
+        self.pages = []
+        self.found = {"images": 0, "without_alt": 0, "math": 0}
+
+    def add_tree(self, tree, depth=1):
+        for kind, a, b in tree:
+            if kind == "group":
+                self.blocks.append(header(depth, inlines(a), group_id(a, depth,
+                                                                     self)))
+                self.add_tree(b, depth + 1)
+            else:
+                self.add_page(a, b, depth)
+
+    def add_page(self, stem, title_override, depth):
+        doc = load_page(self.base, stem)
+        blocks = copy.deepcopy(doc["blocks"])
+        title = title_override or page_title(doc, stem)
+        prefix = "page-" + stem + "--"
+        prefix_ids(blocks, prefix)
+        # A page's own headings continue below its entry. The page's title
+        # heading is usually in its metadata, moved there by the filter;
+        # when the body still opens with one, that is the page's heading
+        # and it is used rather than doubled.
+        shift_headers(blocks, depth - 1)
+        if opens_with_h1(doc["blocks"]):
+            blocks[0]["c"][1][0] = "page-" + stem
+            blocks[0]["c"][2] = inlines(title) if title_override \
+                else blocks[0]["c"][2]
+        else:
+            blocks.insert(0, header(depth, inlines(title), "page-" + stem))
+        count_images(blocks, self.found)
+        self.depth = max(self.depth, depth)
+        self.pages.append((stem, title, depth))
+        self.blocks.extend(blocks)
+
+    def add_single_page(self, stem, title_override):
+        """A contents tree that is one page is the book itself: its title
+        is the book's, its headings are the book's, and nothing sits
+        above them."""
+        doc = load_page(self.base, stem)
+        blocks = copy.deepcopy(doc["blocks"])
+        prefix_ids(blocks, "page-" + stem + "--")
+        count_images(blocks, self.found)
+        self.pages.append((stem, title_override or page_title(doc, stem), 1))
+        self.blocks.extend(blocks)
+
+
+def group_id(title, depth, assembly):
+    """An id for a group heading that no page can produce and no two
+    groups share: page ids start with page-, this with group-."""
+    slug = "".join(c if c.isalnum() else "-" for c in title.lower())
+    slug = "-".join(part for part in slug.split("-") if part) or "untitled"
+    ordinal = sum(1 for b in assembly.blocks
+                  if b.get("t") == "Header" and b["c"][1][0].startswith("group-"))
+    return f"group-{ordinal + 1}-{slug}"
+
+
+# --------------------------------------------------------------------------
+# metadata
+# --------------------------------------------------------------------------
+
+def meta_string(text):
+    return {"t": "MetaString", "c": str(text)}
+
+
+def meta_list(items):
+    return {"t": "MetaList", "c": [meta_string(i) for i in items]}
+
+
+def accessibility_claims(found):
+    """What the package document may say about this build.
+
+    Pandoc's own defaults assert textual access, sufficient on its own,
+    with alternative text present -- for every EPUB it writes. A catalog
+    acts on those words, so each is made only when this run can stand
+    behind it.
+    """
+    modes = ["textual"]
+    if found["images"]:
+        modes.append("visual")
+    alt_complete = found["without_alt"] == 0
+    # accessModeSufficient lists sets, one entry each. "textual" alone says
+    # a reader who cannot see the page misses nothing, which is true only
+    # when every image has been described (or marked decorative).
+    sufficient = ["textual"] if alt_complete else ["textual,visual"]
+    features = ["structuralNavigation", "tableOfContents", "readingOrder"]
+    if found["images"] and alt_complete:
+        features.append("alternativeText")
+    if found["math"]:
+        features.append("MathML")
+    return {
+        "accessModes": modes,
+        "accessModeSufficient": sufficient,
+        "accessibilityFeatures": features,
+        # No video, audio, animation, or script comes out of a Word file.
+        "accessibilityHazards": ["none"],
+    }
+
+
+def derived_summary(found):
+    parts = ["Headings and a table of contents for navigation; data tables "
+             "carry captions and header cells."]
+    if found["images"]:
+        if found["without_alt"] == 0:
+            parts.append(f"All {found['images']} images have alternative "
+                         "text or are marked decorative.")
+        else:
+            parts.append(f"{found['without_alt']} of {found['images']} "
+                         "images have no alternative text yet.")
+    if found["math"]:
+        parts.append("Equations are MathML.")
+    return " ".join(parts)
+
+
+def book_metadata(project, resolved, found):
+    meta = {
+        "title": meta_string(project["title"]),
+        "lang": meta_string(project["language"]),
+        # The book's own identifier rather than a fresh UUID per build, so
+        # a reading system recognises a rebuilt edition as the same book.
+        "identifier": meta_string(project["identifier"]),
+    }
+    if project.get("publisher"):
+        meta["publisher"] = meta_string(project["publisher"])
+    if project.get("description"):
+        meta["description"] = meta_string(project["description"])
+    authors = [str(a) for a in (project.get("authors") or []) if str(a)]
+    if authors:
+        meta["creator"] = meta_list(authors)
+    for key, value in accessibility_claims(found).items():
+        meta[key] = meta_list(value)
+    summary = str(resolved["epub.accessibility_summary"] or "").strip()
+    meta["accessibilitySummary"] = meta_string(summary or
+                                               derived_summary(found))
+    return meta
+
+
+# --------------------------------------------------------------------------
+# running Pandoc
+# --------------------------------------------------------------------------
+
+def pandoc_default(argument):
+    return subprocess.run(["pandoc", argument], capture_output=True,
+                          text=True, check=True).stdout
+
+
+def chapter_template(work):
+    """Pandoc's epub3 template with each chapter titled by its heading.
+
+    The writer fills $pagetitle$ with the chapter file's name, so every
+    chapter's <title> reads "ch002.xhtml" -- a WCAG 2.4.2 failure that
+    Ace reports. The chapter's own title variable holds its heading.
+    """
+    template = pandoc_default("-Depub3")
+    needle = "<title>$pagetitle$</title>"
+    if needle not in template:
+        print("WARNING: Pandoc's epub3 template no longer titles chapters "
+              "by file name; using it unchanged.", file=sys.stderr)
+    template = template.replace(needle, "<title>$title$</title>")
+    path = os.path.join(work, "epub3.template")
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write(template)
+    return path
+
+
+def stylesheet(work):
+    """Pandoc's EPUB stylesheet followed by ours. --css replaces the
+    default rather than adding to it."""
+    path = os.path.join(work, "book.css")
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write(pandoc_default("--print-default-data-file=epub.css"))
+        fh.write("\n\n/* From TextbookImprover's page.css */\n")
+        with open(PAGE_CSS, encoding="utf-8") as page_css:
+            fh.write(page_css.read())
+    return path
+
+
+def output_name(resolved, project, target):
+    """<identifier>.epub unless the target names a file."""
+    name = str(resolved["filename"] or "").strip() \
+        or project["identifier"] or target
+    if not name.lower().endswith(".epub"):
+        name += ".epub"
+    return name
+
+
+# --------------------------------------------------------------------------
+# configuration
+# --------------------------------------------------------------------------
+
+def load_documents(base, allow_unknown):
+    schema = oerconfig.load_schema(os.path.join(HERE, "schema-conversion.yaml"))
+    project_schema = oerconfig.load_schema(
+        os.path.join(os.path.dirname(HERE), "lib", "schema-project.yaml"))
+    documents = []
+    project_path = os.path.join(base, PROJECT_NAME)
+    if os.path.isfile(project_path):
+        documents.append(oerconfig.load_document(project_path, project_schema))
+    config_path = os.path.join(base, CONFIG_NAME)
+    if os.path.isfile(config_path):
+        documents.append(oerconfig.load_document(config_path, schema))
+    return schema, project_schema, documents
+
+
+def epub_targets(schema, project_schema, documents, requested, allow_unknown):
+    names = [requested] if requested else oerconfig.target_names(documents)
+    targets = []
+    for name in names:
+        resolved = oerconfig.resolve(schema, project_schema, documents,
+                                     target=name, allow_unknown=allow_unknown)
+        if resolved["format"] == "epub3":
+            targets.append((name, resolved))
+        elif requested:
+            sys.exit(f"Target {name} has format: {resolved['format']}, "
+                     "not epub3.")
+    return targets
+
+
+# --------------------------------------------------------------------------
+
+def build(base, name, resolved, keep):
+    project = resolved.project
+    for warning in resolved.warnings:
+        print(f"WARNING: {warning}", file=sys.stderr)
+
+    stems = page_stems(base)
+    if not stems:
+        sys.exit(f"No {INTERMEDIATE} files in {base}: run convert.sh first.")
+    titles = {}
+    for stem in stems:
+        titles[stem] = page_title(load_page(base, stem), stem)
+
+    available, used, problems = set(stems), set(), []
+    contents = project.get("contents") or []
+    if contents:
+        tree = walk_contents(contents, available, used, problems,
+                             suffix=INTERMEDIATE)
+    else:
+        problems.append("contents not specified; using guessed order. The "
+                        "packager's sample config is the place to fix it.")
+        tree = walk_contents(guess_contents(stems, None, titles), available,
+                             used, problems, suffix=INTERMEDIATE)
+    for problem in problems:
+        print(f"WARNING: {problem}", file=sys.stderr)
+    unplaced = [s for s in stems if s not in used]
+    if unplaced:
+        print(f"{len(unplaced)} page(s) are not in project.contents, so "
+              "they are not in the EPUB (nor in the cartridge):",
+              file=sys.stderr)
+        for stem in unplaced:
+            print(f"  {stem}", file=sys.stderr)
+    placed = list(flatten_pages(tree))
+    if not placed:
+        sys.exit("No page in project.contents exists on disk; nothing to "
+                 "build.")
+
+    assembly = Assembly(base)
+    if len(tree) == 1 and tree[0][0] == "page":
+        assembly.add_single_page(tree[0][1], tree[0][2])
+    else:
+        assembly.add_tree(tree)
+
+    document = {
+        "pandoc-api-version": load_page(base, placed[0])["pandoc-api-version"],
+        "meta": book_metadata(project, resolved, assembly.found),
+        "blocks": assembly.blocks,
+    }
+
+    out_dir = os.path.join(base, str(resolved["output_dir"] or name))
+    os.makedirs(out_dir, exist_ok=True)
+    out_path = os.path.join(out_dir, output_name(resolved, project, name))
+    toc_depth = int(resolved["epub.toc_depth"])
+
+    work = tempfile.mkdtemp(prefix="build-epub-")
+    try:
+        book_json = os.path.join(work, "book.json")
+        with open(book_json, "w", encoding="utf-8") as fh:
+            json.dump(document, fh)
+        command = [
+            "pandoc", "-f", "json", "-t", "epub3", book_json,
+            "-o", os.path.abspath(out_path),
+            "--template", chapter_template(work),
+            "--css", stylesheet(work),
+            # One file per page: split at every level a page heading uses.
+            f"--split-level={assembly.depth}",
+            f"--toc-depth={toc_depth}",
+            "--math-method=mathml",
+        ]
+        # Run in the content directory: image paths in the intermediates
+        # are relative to it.
+        result = subprocess.run(command, cwd=base, capture_output=True,
+                                text=True)
+        if result.stderr.strip():
+            print(result.stderr.rstrip(), file=sys.stderr)
+        if result.returncode != 0:
+            sys.exit(f"pandoc failed building {out_path}.")
+        if keep:
+            shutil.copy(book_json, os.path.join(out_dir, "book.json"))
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+    found = assembly.found
+    claims = accessibility_claims(found)
+    print(f"Wrote {out_path}: {len(assembly.pages)} page(s), "
+          f"{found['images']} image(s), {found['without_alt']} without "
+          "alternative text.", file=sys.stderr)
+    print("  Claims: accessMode " + ", ".join(claims["accessModes"])
+          + "; sufficient " + "; ".join(claims["accessModeSufficient"])
+          + "; features " + ", ".join(claims["accessibilityFeatures"]) + ".",
+          file=sys.stderr)
+    return 0
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Assemble the filtered intermediates into an EPUB3.")
+    parser.add_argument("-d", "--dir", default=".",
+                        help="the content directory (default: .)")
+    parser.add_argument("--target", default=None,
+                        help="build this epub3 target only")
+    parser.add_argument("--if-declared", action="store_true",
+                        help="exit quietly when no epub3 target is declared")
+    parser.add_argument("--keep", action="store_true",
+                        help="leave the assembled book.json beside the EPUB")
+    parser.add_argument("--allow-unknown-keys", action="store_true",
+                        help="report settings this version does not know "
+                             "about instead of refusing them")
+    args = parser.parse_args()
+
+    if shutil.which("pandoc") is None:
+        sys.exit("pandoc is not on the path.")
+
+    try:
+        schema, project_schema, documents = load_documents(
+            args.dir, args.allow_unknown_keys)
+        targets = epub_targets(schema, project_schema, documents,
+                               args.target, args.allow_unknown_keys)
+    except oerconfig.ConfigError as exc:
+        sys.exit(str(exc))
+
+    if not targets:
+        if args.if_declared:
+            return 0
+        print("No target with format: epub3 in conversion.yaml. Declare "
+              "one to build an EPUB:", file=sys.stderr)
+        print("  targets:\n    epub:\n      format: epub3", file=sys.stderr)
+        return 1
+
+    status = 0
+    for name, resolved in targets:
+        status = build(args.dir, name, resolved, args.keep) or status
+    return status
+
+
+if __name__ == "__main__":
+    sys.exit(main())

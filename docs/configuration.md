@@ -57,10 +57,11 @@ targets:
     output_dir: .
 ```
 
-Today there's one conversion target and one package. The shape exists
-because there will be more: a full-book EPUB alongside per-chapter ones, a
-print PDF alongside a screen one, each needing its own settings and its
-own output directory.
+`convert.sh` renders the pages from the one `html` target, and an
+`epub3` target beside it is built by `build-epub.py` (see [Building an
+EPUB](epub.md)); the two are told apart by `format`. The shape allows
+more than that because there will be more: a print PDF alongside a
+screen one, each needing its own settings and its own output directory.
 
 ### How values are settled
 

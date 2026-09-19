@@ -16,12 +16,12 @@ What the tools need, and how to check it. There's no install step for the tools 
 
 ## Optional: the full validators
 
-Every run [checks its output](checking.md) with nothing but Python. Two validators know the specifications in full and are used as well when they're present; both are Java. Nothing else in the project needs Java, and a run without them loses only their findings.
+Every run [checks its output](checking.md) with nothing but Python. Two validators know the specifications in full and are used as well when they're present; both are Java, and the Nu checker needs **Java 17 or later** (its own classes are built for 11, but it bundles a Jetty library built for 17, and Java 11 fails on that with `UnsupportedClassVersionError`). Nothing else in the project needs Java, and a run without them loses only their findings.
 
 On Ubuntu, including WSL:
 
 ```bash
-sudo apt install default-jre-headless          # Java, about 50 MB
+sudo apt install openjdk-17-jre-headless       # Java 17, about 50 MB
 
 mkdir -p ~/tools
 curl -L -o /tmp/epubcheck.zip https://github.com/w3c/epubcheck/releases/download/v5.2.1/epubcheck-5.2.1.zip
@@ -43,7 +43,7 @@ java -jar "$EPUBCHECK_JAR" --version
 java -jar "$VNU_JAR" --version
 ```
 
-The next `convert.sh` reports `epubcheck ran on 1 EPUB(s)` and `The Nu HTML checker ran on N page(s)`. Ubuntu also packages `epubcheck` (`sudo apt install epubcheck`), which the run finds on the path without any variable; it's older than the release above, and either works. The `latest` link for `vnu.jar` moves with each release, which is what you want for a validator; the version it prints is the one to note if a finding needs discussing.
+The next `convert.sh` reports `epubcheck ran on 1 EPUB(s)` and `The Nu HTML checker ran on N page(s)`. If `java -version` still reports 11 after installing 17 (Ubuntu keeps both), `sudo update-alternatives --config java` picks the one the run sees. A `vnu:failed` finding carries the checker's own exception, which names the cause. Ubuntu also packages `epubcheck` (`sudo apt install epubcheck`), which the run finds on the path without any variable; it's older than the release above, and either works. The `latest` link for `vnu.jar` moves with each release, which is what you want for a validator; the version it prints is the one to note if a finding needs discussing.
 
 Pandoc 3.9 is a hard requirement, checked before any work starts. Earlier
 versions accept most of the command line and quietly do something else:

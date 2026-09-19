@@ -19,6 +19,8 @@ one failed, and exits non-zero if any did.
 | `run-split-tests.py` | `split-pages.py` on a chapter-shaped document Pandoc builds from Markdown: what a piece is, the names sidecar, links between pieces, and that the packager and the EPUB assembler group the pieces under their source from the provenance each carries. Same Pandoc requirement. |
 | `run-epub-tests.py` | `build-epub.py` against the same fixtures: the nav mirrors `contents`, each page is its own file titled by its heading, a declared row header survives assembly, ids stay distinct across pages, and the package document claims `alternativeText` only once every image has it. Same Pandoc requirement. |
 
+`run-all.sh` ends with `All suites passed.` or with the names of the suites that failed and their `FAIL` and `ERROR` lines repeated, so the reason is at the bottom rather than somewhere in ten suites of output. A check that runs one of the full validators says what the validator returned when it fails, since the usual cause is the tool, not the page.
+
 ### Why these and not others
 
 Every filter bug fixed in v0.2 was silent. Alt text applied to the wrong

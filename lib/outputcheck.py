@@ -476,12 +476,26 @@ def run_vnu(command, paths):
     if not paths:
         return [], 0
     try:
+        # --stdout: the checker writes its report to stderr otherwise,
+        # where Java's own notices ("Picked up JAVA_TOOL_OPTIONS") land
+        # too. The report is the first { onward, whatever precedes it.
         result = subprocess.run(
-            command + ["--format", "json", "--exit-zero-always"] + paths,
-            capture_output=True, text=True, timeout=600)
-        parsed = json.loads(result.stdout or result.stderr)
+            command + ["--format", "json", "--stdout", "--exit-zero-always"]
+            + paths, capture_output=True, text=True, timeout=600)
+        text = result.stdout if "{" in result.stdout else result.stderr
+        parsed = json.loads(text[text.index("{"):])
     except (OSError, subprocess.SubprocessError, ValueError) as exc:
-        return [Finding("", "vnu:failed", str(exc))], 0
+        detail = str(exc)
+        if isinstance(exc, ValueError):
+            # The tool crashed before reporting. Its exception line says
+            # why -- a Java too old for it, a jar that is not a jar -- so
+            # that is what to show, in full.
+            output = result.stdout + result.stderr
+            crash = next((line for line in output.splitlines()
+                          if "Exception" in line or "Error" in line), "")
+            detail = ("the checker produced no report; it said: "
+                      + (crash.strip() or repr(output[:200])))
+        return [Finding("", "vnu:failed", detail)], 0
     findings, infos = [], 0
     for message in parsed.get("messages", []):
         kind = message.get("type")
@@ -519,9 +533,15 @@ def run_validators(pages, epubs):
         if command:
             found, infos = run_vnu(command, pages)
             findings += found
-            notes.append(f"The Nu HTML checker ran on {len(pages)} page(s)"
-                         + (f"; {infos} informational message(s) not listed."
-                            if infos else "."))
+            if any(f.check == "vnu:failed" for f in found):
+                notes.append("The Nu HTML checker was found but failed to "
+                             "run; see vnu:failed in the report (it needs "
+                             "Java 17 or later).")
+            else:
+                notes.append(f"The Nu HTML checker ran on {len(pages)} "
+                             "page(s)"
+                             + (f"; {infos} informational message(s) not "
+                                "listed." if infos else "."))
         else:
             notes.append("The Nu HTML checker not found (set VNU_JAR); "
                          "skipped.")

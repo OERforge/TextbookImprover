@@ -61,6 +61,15 @@ def checks(findings):
     return sorted(f.check for f in findings)
 
 
+def expect(condition, findings):
+    """A failed expectation shows what the checker actually returned."""
+    if not condition:
+        raise AssertionError("got: " + "; ".join(
+            f"{f.where} {f.check} {f.detail[:300]}" for f in findings)
+            if findings else "got no findings")
+    return True
+
+
 def main():
     work = tempfile.mkdtemp(prefix="check-tests-")
     failed = 0
@@ -125,11 +134,11 @@ def main():
             ec_broken = outputcheck.run_epubcheck(have["epubcheck"], broken)
             cases += [
                 ("epubcheck passes Pandoc's own EPUB",
-                 lambda: ec_clean == []),
+                 lambda: expect(ec_clean == [], ec_clean)),
                 ("and reports the broken fragment as RSC-012, with the file",
-                 lambda: any(f.check == "epubcheck:RSC-012"
-                             and f.where.endswith("ch001.xhtml")
-                             for f in ec_broken)),
+                 lambda: expect(any(f.check == "epubcheck:RSC-012"
+                                    and f.where.endswith("ch001.xhtml")
+                                    for f in ec_broken), ec_broken)),
             ]
         else:
             print("  skip  epubcheck not installed (EPUBCHECK_JAR)")
@@ -140,10 +149,13 @@ def main():
                                            [os.path.join(work, "bad.html")])
             cases += [
                 ("the Nu checker passes the correct page",
-                 lambda: not [f for f in v_good if f.check == "vnu:error"]),
+                 lambda: expect(not [f for f in v_good
+                                     if f.check != "vnu:warning"], v_good)),
                 ("and reports the image without alt, naming the page",
-                 lambda: any(f.check == "vnu:error" and "alt" in f.detail
-                             and f.where == "bad.html" for f in v_bad)),
+                 lambda: expect(any(f.check == "vnu:error"
+                                    and "alt" in f.detail
+                                    and f.where == "bad.html"
+                                    for f in v_bad), v_bad)),
             ]
         else:
             print("  skip  the Nu HTML checker not installed (VNU_JAR)")

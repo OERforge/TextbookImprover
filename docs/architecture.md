@@ -39,6 +39,7 @@ and redistributed under their own terms. See the README there.
 |---|---|
 | `oerconfig.py` | Loads, merges, validates, and writes configuration. Both halves use it; neither uses the other. |
 | `tablecensus.py` | Reads the tables in a Word document and says what shape they're: the classification, the guess, and the sidecar key. Used by the pre-pass and by `table-census.py`. |
+| `bookcontents.py` | Reads `project.contents` into a tree, and guesses one from the filenames when it's absent. The packager builds the cartridge organization from it; the EPUB assembler builds the table of contents from the same tree. |
 | `schema-project.yaml` | Declares the settings that describe the book itself, which both halves read. |
 
 **`util/` — tools you run occasionally**

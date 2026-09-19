@@ -17,7 +17,7 @@ filename whose extension was ".book-2e", so the archive came out with no
 extension at all. That is a three-line assertion here.
 
 The second kind checks that a fact stated in two places still agrees.
-build-cartridge.py has a built-in back-matter order, and the packaging
+lib/bookcontents.py has a built-in back-matter order, and the packaging
 schema documents a default for it; they drifted, and the schema's copy was
 missing seven entries. A schema exists to be the single description of a
 setting, so anywhere a default is also hardcoded is worth asserting about
@@ -199,7 +199,7 @@ def check_consistency():
         open(os.path.join(ROOT, "bin", "schema-packaging.yaml"),
              encoding="utf-8"))
     declared = (schema["keys"]["grouping"]["keys"]["back_matter"]["default"])
-    source = open(os.path.join(ROOT, "bin", "build-cartridge.py"),
+    source = open(os.path.join(ROOT, "lib", "bookcontents.py"),
                   encoding="utf-8").read()
     builtin = re.findall(
         r'"([^"]+)"',

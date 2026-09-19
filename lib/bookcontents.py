@@ -101,9 +101,41 @@ def piece_source(stem):
     return stem.split(PIECE_SEPARATOR, 1)[0]
 
 
+def nest_pieces(members, titles):
+    """Arrange a source's pieces by the headings above them.
+
+    members are (stem, parents, position) in reading order: parents the
+    titles of the cut headings enclosing each, position its place among
+    them ("3.2"), which is what keeps two chapters' "Introduction"
+    groups apart. A heading that is itself a page --
+    the H1 with an introduction under it -- is the first item of the
+    group that holds its sections; a heading that is not a page is a
+    group all the same, since its sections carry its title.
+    """
+    root = []
+    groups = {}                     # position prefix -> item list
+    for stem, parents, position in members:
+        container = root
+        steps = position.split(".") if position else []
+        for depth, title in enumerate(parents):
+            path = tuple(steps[:depth + 1])
+            if path not in groups:
+                group = {"title": title, "items": []}
+                # The heading's own page, placed just before, opens it.
+                if container and isinstance(container[-1], str) \
+                        and titles.get(container[-1]) == title:
+                    group["items"].append(container.pop())
+                container.append(group)
+                groups[path] = group["items"]
+            container = groups[path]
+        container.append(stem)
+    return root
+
+
 def group_pieces(tree, pieces, titles):
     """Replace each source stem in a guessed tree with a group holding the
-    source's own page (when it has one) and its pieces in order."""
+    source's own page (when it has one) and its pieces, nested by the
+    headings above them."""
     out = []
     for node in tree:
         if isinstance(node, dict):
@@ -123,7 +155,8 @@ def group_pieces(tree, pieces, titles):
             out.append(node)
         elif node in pieces:
             source_page, ordered = pieces[node]
-            items = ([node] if source_page else []) + ordered
+            items = ([node] if source_page else []) + \
+                nest_pieces(ordered, titles)
             out.append({"title": titles.get(node) or stem_title(node),
                         "items": items, "source": node})
         else:
@@ -273,10 +306,10 @@ def chapter_heading(number, pages, titles):
 def guess_contents(stems, back_matter=None, titles=None, parts=None):
     """Best-effort contents tree from filenames alone.
 
-    parts maps a piece's stem to (source stem, part number) when the
-    caller has read that from the page; otherwise pieces are recognised
-    by the separator in their names and ordered by name, which is right
-    only by luck. Either way the pieces of a source are grouped under
+    parts maps a piece's stem to (source stem, part number, parent
+    titles, position) when the caller has read that from the page; otherwise
+    pieces are recognised by the separator in their names and ordered by
+    name, which is right only by luck. Either way the pieces of a source are grouped under
     it, with the source's own page first when it has one, and the group
     then takes the source's place in whatever chapter grouping applies.
 
@@ -298,22 +331,33 @@ def guess_contents(stems, back_matter=None, titles=None, parts=None):
     plain = []
     for stem in stems:
         if stem in parts:
-            source, number = parts[stem]
+            source, number, parents, position = \
+                (tuple(parts[stem]) + (None, ""))[:4]
         elif piece_source(stem):
-            source, number = piece_source(stem), None
+            source, number, parents, position = (piece_source(stem), None,
+                                                 None, "")
         else:
             plain.append(stem)
             continue
-        pieces.setdefault(source, []).append((number, stem))
+        pieces.setdefault(source, []).append(
+            (number, stem, parents or [], position or ""))
     if pieces:
         ordered = {}
         for source, members in pieces.items():
             members.sort(key=lambda m: (m[0] is None, m[0] or 0,
                                         natural_key(m[1])))
-            ordered[source] = (source in plain, [m[1] for m in members])
+            ordered[source] = (source in plain,
+                               [(m[1], m[2], m[3]) for m in members])
         stems = plain + [s for s in ordered if s not in plain]
-        return strip_source(group_pieces(
+        tree = strip_source(group_pieces(
             guess_contents(stems, back_matter, titles), ordered, titles))
+        # A book that is one source is the source: a group for it would
+        # only push every page one level down.
+        if len(tree) == 1 and isinstance(tree[0], dict) \
+                and len(ordered) == 1 and not [s for s in plain
+                                               if s not in ordered]:
+            return tree[0]["items"]
+        return tree
 
     chapters = {}
     loose = []

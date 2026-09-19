@@ -89,6 +89,14 @@ Costs fall as output rises.
 ## Economies of Scale
 
 A second section with the same heading, on purpose.
+
+#
+
+# Diseconomies
+
+## Economies of Scale
+
+The same heading under a different section.
 """
 
 
@@ -203,14 +211,27 @@ def case_pieces(work):
               encoding="utf-8") as fh:
         report = fh.read()
     return [
-        ("four pieces, in reading order, named by their headings",
+        ("pieces in reading order, named by their headings",
          lambda: out.stems == [
-             "chapter-7", "chapter-7--choice-of-production-technology",
+             "chapter-7--7-5-costs-in-the-long-run",
+             "chapter-7--choice-of-production-technology",
              "chapter-7--economies-of-scale",
-             "chapter-7--economies-of-scale-2"]),
-        ("the content before the first cut is a piece named for the source",
-         lambda: out.title("chapter-7") == "7.5 Costs in the Long Run"
-         and '"vary."' in out.text("chapter-7")),
+             "chapter-7--economies-of-scale-2",
+             "chapter-7--diseconomies--economies-of-scale"]),
+        ("a repeated heading under another section takes its parent's name",
+         lambda: "chapter-7--diseconomies--economies-of-scale" in out.stems),
+        ("an empty heading cuts nothing",
+         lambda: not any("part" in s for s in out.stems)),
+        ("a heading with nothing of its own is a group, not a page",
+         lambda: "chapter-7--diseconomies" not in out.stems
+         and out.docs["chapter-7--diseconomies--economies-of-scale"]["meta"][
+             "page-parents"]["c"] == [{"t": "MetaString", "c": "Diseconomies"}]),
+        ("with two H1s the title stays a heading, so nothing precedes the "
+         "first cut and there is no page named for the source",
+         lambda: "chapter-7" not in out.stems
+         and out.title("chapter-7--7-5-costs-in-the-long-run")
+         == "7.5 Costs in the Long Run"
+         and '"vary."' in out.text("chapter-7--7-5-costs-in-the-long-run")),
         ("a cut heading becomes its piece's title and leaves the body",
          lambda: out.title("chapter-7--economies-of-scale")
          == "Economies of Scale"
@@ -224,50 +245,71 @@ def case_pieces(work):
          == [2]),
         ("a link to a heading in another piece follows it there",
          lambda: "chapter-7--economies-of-scale.html#economies-of-scale"
-         in out.links("chapter-7")),
+         in out.links("chapter-7--7-5-costs-in-the-long-run")),
         ("a link within a piece is left alone",
          lambda: "#choice-of-production-technology"
          in out.links("chapter-7--choice-of-production-technology")),
-        ("a repeated heading gets a number and a warning",
-         lambda: "appears more than once" in out.stderr),
-        ("each piece records its source and part",
+        ("a repeated heading under the same parent gets a number and a "
+         "warning",
+         lambda: "repeats an earlier name" in out.stderr),
+        ("each piece records its source, part, and position",
          lambda: out.docs["chapter-7--economies-of-scale"]["meta"][
-             "page-part"]["c"] == "3/4"
-         and out.docs["chapter-7"]["meta"]["source-page"]["c"]
-         == "chapter-7"),
-        ("the prefilled rows name the part after the separator",
-         lambda: "chapter-7,Choice of Production Technology,"
-         "choice-of-production-technology" in new
-         and "chapter-7,Economies of Scale,economies-of-scale-2" in new),
-        ("the report lists every piece with its part",
-         lambda: "chapter-7,,chapter-7,1,4" in report
-         and "economies-of-scale-2,4,4" in report),
+             "page-part"]["c"] == "3/5"
+         and out.docs["chapter-7--economies-of-scale"]["meta"][
+             "page-position"]["c"] == "1.2"
+         and out.docs["chapter-7--7-5-costs-in-the-long-run"]["meta"][
+             "source-page"]["c"] == "chapter-7"),
+        ("the prefilled rows give the whole name, and a position only "
+         "where the heading path repeats",
+         lambda: "chapter-7,7.5 Costs in the Long Run,Choice of Production "
+         "Technology,,chapter-7--choice-of-production-technology" in new
+         and "chapter-7,7.5 Costs in the Long Run,Economies of Scale,1.3,"
+         "chapter-7--economies-of-scale-2" in new
+         and "chapter-7,Diseconomies,Economies of Scale,,chapter-7--"
+         "diseconomies--economies-of-scale" in new),
+        ("the report lists every piece with its position and part",
+         lambda: "chapter-7,,7.5 Costs in the Long Run,chapter-7--7-5-costs-"
+         "in-the-long-run,1,1,5" in report
+         and "economies-of-scale-2,1.3,4,5" in report),
     ]
 
 
 def case_names(work):
     """The sidecar, and what it does with a row that matches nothing."""
     source = prepare(work)
+    first = split(work, [source])
+    prepare(work)                   # the split consumed the intermediate
     out = Pieces(work, split(work, [source], sidecar=(
-        "source,heading,name\n"
-        "chapter-7,Choice of Production Technology,technology\n"
-        "chapter-7,Economies of Scale,chapter-7--scale\n"
-        "chapter-7,Gone Heading,x\n")))
+        "source,parents,heading,position,name\n"
+        "chapter-7,7.5 Costs in the Long Run,Choice of Production "
+        "Technology,,7-1-technology\n"
+        "chapter-7,7.5 Costs in the Long Run,Economies of Scale,1.3,"
+        "7-3-scale-again\n"
+        "chapter-7,Diseconomies,Economies of Scale,,7-4-scale\n"
+        "chapter-7,,Gone Heading,,x\n")))
     bad = Pieces(os.path.join(work, "bad"), split(
         os.path.join(work, "bad"), [prepare(os.path.join(work, "bad"))],
-        sidecar="source,heading,name\n"
-                "chapter-7,Economies of Scale,no spaces allowed\n"))
+        sidecar="source,parents,heading,position,name\n"
+                "chapter-7,7.5 Costs in the Long Run,Economies of Scale,,"
+                "no spaces allowed\n"))
     new_path = os.path.join(work, "page-names-new.csv")
+    with open(new_path, encoding="utf-8") as fh:
+        new = fh.read()
     return [
-        ("a sidecar name replaces the heading's",
-         lambda: "chapter-7--technology" in out.stems),
-        ("a name written with the source's prefix is accepted as the same",
-         lambda: "chapter-7--scale" in out.stems),
+        ("a sidecar name is the whole page name",
+         lambda: "7-1-technology" in out.stems),
+        ("a row with a position names only the piece at that position",
+         lambda: "7-3-scale-again" in out.stems
+         and "chapter-7--economies-of-scale" in out.stems),
+        ("a row is keyed on the headings above as well",
+         lambda: "7-4-scale" in out.stems),
+        ("a page the previous run wrote under another name is replaced",
+         lambda: first.returncode == 0 and not os.path.exists(os.path.join(
+             work, "chapter-7--choice-of-production-technology.filtered.json"))),
         ("a row for a heading the source does not have is reported",
          lambda: "no heading 'Gone Heading'" in out.stderr),
-        ("a row names every occurrence of its heading, so nothing is new",
-         lambda: "chapter-7--scale-2" in out.stems
-         and not os.path.exists(new_path)),
+        ("only the unnamed pieces get prefilled rows",
+         lambda: new.count("\n") == 3 and "Scale,1.2," in new),
         ("an unusable name is refused, said so, and the heading's used",
          lambda: bad.status == 0 and "not a usable name" in bad.stderr
          and "chapter-7--economies-of-scale" in bad.stems),
@@ -329,15 +371,19 @@ def case_readers(work):
     body = "\n".join(chapters.values())
     return [
         ("the page head carries the provenance, and the packager reads it",
-         lambda: parts["chapter-7--economies-of-scale"] == ("chapter-7", 3)),
-        ("the packager groups the pieces under the source, in reading order",
-         lambda: guessed == [{"title": "7.5 Costs in the Long Run",
-                              "items": out.stems}]),
+         lambda: parts["chapter-7--diseconomies--economies-of-scale"]
+         == ("chapter-7", 5, ["Diseconomies"], "2.1")),
+        ("the packager groups the pieces under the source and their "
+         "headings, a heading's own page opening its group",
+         lambda: guessed == [
+             {"title": "7.5 Costs in the Long Run", "items": out.stems[:4]},
+             {"title": "Diseconomies", "items": [out.stems[4]]}]),
         ("without provenance the pieces still group, by name",
-         lambda: len(by_name) == 1 and by_name[0]["title"]
-         == "7.5 Costs in the Long Run"),
-        ("the EPUB builds from the pieces",
-         lambda: built.returncode == 0 and len(chapters) == 5),
+         lambda: by_name and all(isinstance(n, str) for n in by_name)
+         and set(by_name) == set(out.stems)),
+        ("the EPUB builds from the pieces, and not from the source too",
+         lambda: built.returncode == 0 and len(chapters) == 7
+         and not os.path.exists(os.path.join(work, "chapter-7.filtered.json"))),
         ("and its nav shows the source over its pieces",
          lambda: nav.index("7.5 Costs in the Long Run")
          < nav.index("Choice of Production Technology")),

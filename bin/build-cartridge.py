@@ -90,8 +90,8 @@ EXTERNAL = ("http://", "https://", "//", "data:", "mailto:", "tel:", "#",
 SRC_RE = re.compile(r'\b(?:src|href)\s*=\s*"([^"]+)"', re.I)
 TITLE_RE = re.compile(r"<title[^>]*>(.*?)</title>", re.I | re.S)
 # What a page split by split-pages.py says about where it came from.
-META_RE = re.compile(r'<meta\s+name="(source-page|page-part)"\s+'
-                     r'content="([^"]*)"', re.I)
+META_RE = re.compile(r'<meta\s+name="(source-page|page-part|page-parent|'
+                     r'page-position)"\s+content="([^"]*)"', re.I)
 
 REQUIRED = ["identifier", "title"]
 
@@ -125,19 +125,26 @@ def page_title(path, stem):
 
 
 def page_provenance(path):
-    """(source stem, part number) for a page split-pages.py wrote, from
-    the <meta> elements it put in the head, or None."""
+    """(source stem, part number, parent titles) for a page
+    split-pages.py wrote, from the <meta> elements it put in the head,
+    or None."""
     try:
         with open(path, encoding="utf-8", errors="replace") as handle:
             markup = handle.read(20000)
     except OSError:
         return None
-    found = dict(META_RE.findall(markup.split("</head>", 1)[0]))
+    found, parents = {}, []
+    for name, value in META_RE.findall(markup.split("</head>", 1)[0]):
+        value = html_module.unescape(value)
+        if name == "page-parent":
+            parents.append(value)
+        else:
+            found[name] = value
     if not found.get("source-page"):
         return None
     m = re.match(r"(\d+)/", found.get("page-part", ""))
-    return (html_module.unescape(found["source-page"]),
-            int(m.group(1)) if m else None)
+    return (found["source-page"], int(m.group(1)) if m else None, parents,
+            found.get("page-position", ""))
 
 
 def page_references(path, base_dir):
@@ -713,7 +720,7 @@ def render_items(tree, depth, wrapper=None):
 
 
 TITLES = {}
-PARTS = {}      # piece stem -> (source stem, part number)
+PARTS = {}      # piece stem -> (source stem, part number, parent titles)
 
 
 def build_manifest(config, tree, page_files, common_files):

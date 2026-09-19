@@ -244,13 +244,27 @@ class Assembly:
     def add_tree(self, tree, depth=1):
         for kind, a, b in tree:
             if kind == "group":
-                self.blocks.append(header(depth, inlines(a), group_id(a, depth,
-                                                                     self)))
-                self.add_tree(b, depth + 1)
+                # A group whose first page bears its own title -- a
+                # heading's introduction, placed under it by the split --
+                # opens with that page's content rather than repeating the
+                # heading. The group takes the page's id so links to the
+                # page still land.
+                opener = None
+                if b and b[0][0] == "page":
+                    stem, override = b[0][1], b[0][2]
+                    doc = load_page(self.base, stem)
+                    if (override or page_title(doc, stem)) == a:
+                        opener = stem
+                self.blocks.append(header(
+                    depth, inlines(a),
+                    "page-" + opener if opener else group_id(a, depth, self)))
+                if opener:
+                    self.add_page(opener, None, depth, heading=False)
+                self.add_tree(b[1:] if opener else b, depth + 1)
             else:
                 self.add_page(a, b, depth)
 
-    def add_page(self, stem, title_override, depth):
+    def add_page(self, stem, title_override, depth, heading=True):
         doc = load_page(self.base, stem)
         blocks = copy.deepcopy(doc["blocks"])
         title = title_override or page_title(doc, stem)
@@ -261,7 +275,9 @@ class Assembly:
         # when the body still opens with one, that is the page's heading
         # and it is used rather than doubled.
         shift_headers(blocks, depth - 1)
-        if opens_with_h1(doc["blocks"]):
+        if not heading:
+            pass                    # the group's heading stands for it
+        elif opens_with_h1(doc["blocks"]):
             blocks[0]["c"][1][0] = "page-" + stem
             blocks[0]["c"][2] = inlines(title) if title_override \
                 else blocks[0]["c"][2]
@@ -472,7 +488,10 @@ def build(base, name, resolved, keep):
         source = meta_text(doc.get("meta", {}), "source-page")
         if source:
             m = re.match(r"(\d+)/", meta_text(doc["meta"], "page-part"))
-            parts[stem] = (source, int(m.group(1)) if m else None)
+            parents = [p.get("c", "") for p in
+                       doc["meta"].get("page-parents", {}).get("c", [])]
+            parts[stem] = (source, int(m.group(1)) if m else None, parents,
+                           meta_text(doc["meta"], "page-position"))
 
     available, used, problems = set(stems), set(), []
     contents = project.get("contents") or []

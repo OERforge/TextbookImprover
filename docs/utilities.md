@@ -11,11 +11,33 @@ Tools in `util/` that aren't part of a conversion but help before or around one:
 | `table-census.py` | Surveys table structure across a corpus of DOCX files: the command line over `lib/tablecensus.py`. |
 | `table-samples.py` | Collects one real example of each table shape into a single Word document, copied from the sources rather than rebuilt. |
 | `docx-compat.py` | Reads, and optionally sets, the Word compatibility mode of a DOCX. |
+| `restyle-headings.py` | Reports the paragraph styles a DOCX uses, and rewrites its heading styles from a map: the repair a book whose top level is styled `Title` needs before its structure can be seen. |
 | `settings-reference.py` | Writes the three settings reference pages under `docs/` from the schemas; `--check` says whether they're current. |
 
-Each takes `--help`. The census and sample tools read Word files directly and need no Pandoc; `compare-output.py` reads HTML; `docx-compat.py` touches nothing but `word/settings.xml`.
+Each takes `--help`. The census and sample tools read Word files directly and need no Pandoc; `compare-output.py` reads HTML; `docx-compat.py` touches nothing but `word/settings.xml`; `restyle-headings.py` nothing but the paragraph styles.
 
 `table-census.py`, `table-samples.py`, and `docx-compat.py` are the ones to reach for before converting a book you haven't seen: the census says what shapes its tables take and what the run will guess about each, the sample document shows one real example of every shape so you can see what would be lost, and the compatibility check says whether Word will open the sources in Compatibility Mode.
+
+## Repairing heading styles in the source
+
+Pandoc's DOCX reader reads `Heading 1` through `Heading 9` as headings and nothing else. A book whose top level is styled `Title` loses it on the way in: the first `Title` paragraph becomes the document's metadata title and every later one becomes a plain paragraph, so the page split, the contents guess, and the EPUB's table of contents all see sections with no chapters over them. The all-in-one programming text in the corpus is exactly that, and its own table-of-contents field says so: `TOC \h \z \t "Heading 1,2,Heading 2,3,...,Title,1"`.
+
+```bash
+python3 util/restyle-headings.py book.docx              # report the styles in use
+python3 util/restyle-headings.py book.docx --from-toc   # what the TOC field declares, and what would change
+python3 util/restyle-headings.py book.docx --from-toc -o book-restyled.docx
+```
+
+Three ways to say what to do, and they don't chain: the map is applied to every paragraph at once, so `Heading1=Heading2,Heading2=Heading3` does what it says.
+
+- `--from-toc` reads the levels from the document's own TOC field and builds the map from them.
+- `--promote STYLE` makes `STYLE` the level-1 heading and moves every heading in use down one.
+- `--demote` moves every heading in use down one, for a book with several `Heading 1` sections and nothing over them; `--title "Text"` then inserts a `Heading 1` holding that text at the top of the body and records it as the document's `dc:title` property. One paragraph serves as both title and heading here: `promote_h1_to_title` makes a lone H1 the page's metadata title, and after a split it titles the preamble page and the group.
+- `--map FROM=TO,...` is explicit, in style ids (`Title`, `Heading1`).
+
+Empty paragraphs of a remapped style are dropped, since an empty `Title` paragraph would become an empty heading and Word leaves plenty of those (46 in that book); `--keep-empty` keeps them. Every target style has to exist in `word/styles.xml`, which Word writes only once a style has been used, so a shift that needs a `Heading 5` the document has never used is refused with a note saying what to do in Word. Everything else is copied byte for byte.
+
+Restyling removes the `Title` paragraphs, so the converted pages take their titles from their headings and the EPUB takes the book's from `project.title`, which is where it should come from anyway. After restyling, `pages.split_level: 2` gives one page per section with the modules as groups; see [Splitting pages](splitting.md).
 
 ## Repairing tracked deletions in the source
 

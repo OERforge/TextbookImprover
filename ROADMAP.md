@@ -20,6 +20,8 @@ Markdown is the one format this project should be able to go both ways in, and t
 
 **The acceptance test exists only when both halves do.** Convert a `.docx` to Markdown, convert that Markdown to HTML, and compare against converting the `.docx` straight to HTML. If the pages differ, a declaration didn't survive. `util/compare-output.py` already performs that comparison, so the gate is free once the second half lands.
 
+**A hand-written page is one of two things, and the run already tells them apart.** An `.html` beside the sources with no `.docx` behind it is finished: it is copied into every HTML target as it stands and read into an intermediate only so the EPUB can carry it. An `.md` beside the sources is a source, not a finished page: Pandoc reads it into the same intermediate a `.docx` gets, every target renders it (HTML included), and the filter can act on its markers. The two DOCX-only steps, the table-headers pre-pass and the bookmark repair, don't run on it. So Markdown input is a second reader in the driver's first step, not a new path; the one visible change is that an `.md` on its own stops being reported as a v0.1 leftover (one with a same-named `.docx` still is).
+
 **Read first, write second.** There are Markdown books to test the reading half against today, and no Markdown output yet to produce any. Reading also settles the marker vocabulary against a real document rather than against a guess.
 
 **Why here.** Its only dependency is the targets mechanism above. It's the cheapest format on this list, it isn't blocked on anything external the way PDF is, and it's the one that turns this project from a one-way converter into something a book can be maintained in.

@@ -15,7 +15,7 @@ conversion side.
 
 | File | What it does |
 |---|---|
-| `convert.sh` | Runs the pipeline: DOCX → JSON → HTML, then optionally hands off to the packaging side. |
+| `convert.sh` | Runs the pipeline: DOCX → JSON → filtered JSON → HTML, then optionally hands off to the packaging side. |
 | `figures-and-tables.lua` | Pandoc filter doing the accessibility work on each page. |
 | `media-extensions.lua` | Pandoc filter naming extracted images by their real content type. |
 | `read-conversion-config.py` | Resolves `conversion.yaml` into settings `convert.sh` reads. |

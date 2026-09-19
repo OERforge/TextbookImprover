@@ -348,8 +348,11 @@ fi
 
 # An intermediate with no matching .docx is not this run's output. Say so
 # and leave it alone rather than treating its stale state as an error.
+# The filtered intermediates step 4 writes are named after the raw ones,
+# so one is stale exactly when the other is.
 for stale in *.json; do
   [ -e "$stale" ] || continue
+  case "$stale" in *.filtered.json) continue ;; esac
   grep -Fqx "$stale" "$run_docs" && continue
   echo "Skipping $stale: no matching .docx in this directory." >&2
   echo "  It is left over from an earlier run, or its .docx has moved." >&2
@@ -506,7 +509,19 @@ if [ -n "$FOOTER_MD" ]; then
 fi
 
 ############################################
-# 4. Convert the JSON intermediate → HTML5
+# 4. Filter the JSON intermediate, then render it as HTML5
+#
+#    Two Pandoc runs per page rather than one. The filter writes its
+#    result back out as JSON -- <page>.filtered.json -- and the HTML
+#    writer reads that. The extra run costs a fraction of a second per
+#    page and buys the thing every other output format needs: a page
+#    that has already been remediated, on disk, in a form any writer can
+#    consume. The EPUB assembler in step 5.5 reads these rather than the
+#    HTML, because Pandoc's HTML reader keeps a cell's scope attribute
+#    but not the element, so a row header read back from HTML arrives as
+#    a <td scope="row">. The filter is per-page by design -- its sidecar
+#    keys, its table numbering, and its title promotion all assume one
+#    document -- so it cannot simply be run over the assembled book.
 #
 #    --lua-filter  rewrites DOCX layout tables into <figure>/<figcaption>,
 #                  gives data tables a real <caption> plus scope="col"
@@ -601,15 +616,21 @@ while IFS= read -r f; do
   [ -e "$f" ] || continue
   base="${f%.json}"
 
+  pandoc \
+    -f json \
+    -t json \
+    "$f" \
+    -o "$base.filtered.json" \
+    --lua-filter="$figure_filter"
+
   pandoc_args=(
     -f json
     -t html5
-    "$f"
+    "$base.filtered.json"
     -o "$base.html"
     --standalone
     --ascii
     --math-method=mathml
-    --lua-filter="$figure_filter"
     --include-in-header="$css_header"
     -M "lang=$LANGUAGE"
   )

@@ -104,12 +104,19 @@ class Converted:
                 "--lua-filter", os.path.join(BIN, "media-extensions.lua"),
                 "--extract-media", name,
             ], environment, work)
+            # The filter writes JSON and the writer reads it, as in
+            # convert.sh, so the filtered intermediate is what the EPUB
+            # assembler will see and what case_intermediate checks.
             self._pandoc([
-                "-f", "json", "-t", "html5", name + ".json",
+                "-f", "json", "-t", "json", name + ".json",
+                "-o", name + ".filtered.json",
+                "--lua-filter", os.path.join(BIN, "figures-and-tables.lua"),
+            ], environment, work)
+            self._pandoc([
+                "-f", "json", "-t", "html5", name + ".filtered.json",
                 "-o", name + ".html",
                 "--standalone", "--ascii", "--math-method=mathml",
                 "-M", "lang=en",
-                "--lua-filter", os.path.join(BIN, "figures-and-tables.lua"),
             ], environment, work)
             with open(os.path.join(work, name + ".html"),
                       encoding="utf-8") as fh:
@@ -605,8 +612,53 @@ def case_media_keys_single_pass(work):
     ]
 
 
+def case_intermediate(work):
+    """Filtering to JSON and rendering that must give the same page as
+    filtering while rendering.
+
+    convert.sh does the former so that every output format reads one
+    remediated intermediate. The filter has one branch that looks at the
+    output format -- the byline goes into the head only for HTML writers
+    -- and this is where a second such branch would show up as a page
+    that differs by which route produced it. Byte equality is the test,
+    since the comparator's tolerance would hide exactly that."""
+    out = Converted(work, ["metadata", "tables"])
+    direct = {}
+    for name in ("metadata", "tables"):
+        environment = dict(os.environ)
+        environment.update({
+            "TABLE_CAPTIONS": os.path.join(work, "table-captions.csv"),
+            "IMAGE_ALT": os.path.join(work, "image-alt.csv"),
+            "IMAGE_ALT_MISSING": os.path.join(work, "alt-direct.csv"),
+            "TABLE_CAPTIONS_MISSING": os.path.join(work, "caps-direct.csv"),
+            "PROMOTE_H1_TO_TITLE": "always",
+            "AUTHOR_BYLINE": "meta",
+        })
+        Converted._pandoc([
+            "-f", "json", "-t", "html5", name + ".json",
+            "-o", name + ".direct.html",
+            "--standalone", "--ascii", "--math-method=mathml",
+            "-M", "lang=en",
+            "--lua-filter", os.path.join(BIN, "figures-and-tables.lua"),
+        ], environment, work)
+        with open(os.path.join(work, name + ".direct.html"),
+                  encoding="utf-8") as fh:
+            direct[name] = fh.read()
+    return [
+        ("a page with author metadata renders the same either way",
+         lambda: out.pages["metadata"] == direct["metadata"]),
+        ("a page with declared-header tables renders the same either way",
+         lambda: out.pages["tables"] == direct["tables"]),
+        ("the intermediate carries the byline as a head include",
+         lambda: 'name=\\"author\\"' in open(
+             os.path.join(work, "metadata.filtered.json"),
+             encoding="utf-8").read()),
+    ]
+
+
 CASES = [
     ("document metadata", case_metadata),
+    ("the filtered intermediate", case_intermediate),
     ("promotion and byline modes", case_metadata_modes),
     ("table labels and empty tables", case_tables),
     ("merged title rows and unclassifiable tables", case_tables_b),

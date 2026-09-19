@@ -375,10 +375,10 @@ def check_matter_by_name():
     order = bookcontents.guess_contents(
         ["03 Third", "Z1 Glossary", "01 First", "_preamble", "A1 Intro"])
     return [
-        ("a leading underscore or a front-matter word goes first",
-         lambda: order[0] == "_preamble"),
-        ("a back-matter word goes last, whatever precedes it",
-         lambda: order[-1] == "Z1 Glossary"),
+        ("a leading underscore or a front-matter word goes first, as front",
+         lambda: order[0] == {"page": "_preamble", "role": "front"}),
+        ("a back-matter word goes last, as back matter",
+         lambda: order[-1] == {"page": "Z1 Glossary", "role": "back"}),
         ("everything else keeps its natural order",
          lambda: order[1:-1] == ["01 First", "03 Third", "A1 Intro"]),
     ]

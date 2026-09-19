@@ -114,7 +114,7 @@ def nest_pieces(members, titles):
     """
     root = []
     groups = {}                     # position prefix -> item list
-    for stem, parents, position in members:
+    for stem, parents, position, _ in members:
         container = root
         steps = position.split(".") if position else []
         for depth, title in enumerate(parents):
@@ -132,15 +132,24 @@ def nest_pieces(members, titles):
     return root
 
 
-def group_pieces(tree, pieces, titles):
+def group_pieces(tree, pieces, titles, roles=None):
     """Replace each source stem in a guessed tree with a group holding the
     source's own page (when it has one) and its pieces, nested by the
     headings above them."""
     out = []
     for node in tree:
+        explicit = None
+        if isinstance(node, dict) and "items" not in node:
+            # A page entry with a role. If it is a split source, its
+            # pieces still belong under it.
+            if node.get("page") in pieces:
+                explicit, node = node.get("role"), node["page"]
+            else:
+                out.append(node)
+                continue
         if isinstance(node, dict):
             node = dict(node)
-            node["items"] = group_pieces(node["items"], pieces, titles)
+            node["items"] = group_pieces(node["items"], pieces, titles, roles)
             # A chapter whose only page is a split source would nest one
             # group inside another with nothing else in either. Keep the
             # chapter's heading unless it is the bare fallback and the
@@ -157,8 +166,15 @@ def group_pieces(tree, pieces, titles):
             source_page, ordered = pieces[node]
             items = ([node] if source_page else []) + \
                 nest_pieces(ordered, titles)
-            out.append({"title": titles.get(node) or stem_title(node),
-                        "items": items, "source": node})
+            group = {"title": titles.get(node) or stem_title(node),
+                     "items": items, "source": node}
+            # The source's markers say what part of the book it is; a
+            # name that says so is the fallback.
+            role = explicit or next((m[3] for m in ordered if m[3]), "") \
+                or (roles or {}).get(node, "") or matter_role(node)
+            if role in ("front", "appendix", "back"):
+                group["role"] = role
+            out.append(group)
         else:
             out.append(node)
     return out
@@ -167,7 +183,7 @@ def group_pieces(tree, pieces, titles):
 def strip_source(tree):
     """Drop the bookkeeping key group_pieces leaves on a group."""
     for node in tree:
-        if isinstance(node, dict):
+        if isinstance(node, dict) and "items" in node:
             node.pop("source", None)
             strip_source(node["items"])
     return tree
@@ -322,7 +338,8 @@ def chapter_heading(number, pages, titles):
     return f"Chapter {number}"
 
 
-def guess_contents(stems, back_matter=None, titles=None, parts=None):
+def guess_contents(stems, back_matter=None, titles=None, parts=None,
+                   roles=None):
     """Best-effort contents tree from filenames alone.
 
     parts maps a piece's stem to (source stem, part number, parent
@@ -345,31 +362,34 @@ def guess_contents(stems, back_matter=None, titles=None, parts=None):
     back_matter = back_matter or BACK_MATTER_ORDER
     titles = titles or {}
     parts = parts or {}
+    roles = roles or {}          # stem -> role, for a page that was not split
 
     pieces = {}
     plain = []
     for stem in stems:
         if stem in parts:
-            source, number, parents, position = \
-                (tuple(parts[stem]) + (None, ""))[:4]
+            padded = tuple(parts[stem]) + (None, "", "", "")
+            source, number, parents, position = padded[:4]
+            role = padded[5] if len(padded) > 5 else ""
         elif piece_source(stem):
-            source, number, parents, position = (piece_source(stem), None,
-                                                 None, "")
+            source, number, parents, position, role = (piece_source(stem),
+                                                       None, None, "", "")
         else:
             plain.append(stem)
             continue
         pieces.setdefault(source, []).append(
-            (number, stem, parents or [], position or ""))
+            (number, stem, parents or [], position or "", role or ""))
     if pieces:
         ordered = {}
         for source, members in pieces.items():
             members.sort(key=lambda m: (m[0] is None, m[0] or 0,
                                         natural_key(m[1])))
             ordered[source] = (source in plain,
-                               [(m[1], m[2], m[3]) for m in members])
+                               [(m[1], m[2], m[3], m[4]) for m in members])
         stems = plain + [s for s in ordered if s not in plain]
         tree = strip_source(group_pieces(
-            guess_contents(stems, back_matter, titles), ordered, titles))
+            guess_contents(stems, back_matter, titles, None, roles), ordered,
+            titles, roles))
         # A book that is one source is the source: a group for it would
         # only push every page one level down.
         if len(tree) == 1 and isinstance(tree[0], dict) \
@@ -391,10 +411,13 @@ def guess_contents(stems, back_matter=None, titles=None, parts=None):
     # the names say is front or back matter first and last.
     grouped_pages = sum(len(v) for v in chapters.values())
     if len(chapters) < 2 or grouped_pages < max(3, len(stems) // 4):
-        by_role = {"front": [], "middle": [], "back": []}
+        by_role = {"front": [], "middle": [], "back": [], "appendix": []}
         for stem in sorted(stems, key=natural_key):
-            by_role[matter_role(stem)].append(stem)
-        return by_role["front"] + by_role["middle"] + by_role["back"]
+            by_role[roles.get(stem) or matter_role(stem)].append(stem)
+        return ([{"page": s, "role": "front"} for s in by_role["front"]]
+                + by_role["middle"]
+                + [{"page": s, "role": "appendix"} for s in by_role["appendix"]]
+                + [{"page": s, "role": "back"} for s in by_role["back"]])
 
     front = [s for s in loose if s.lower().startswith(FRONT_MATTER)
              or matter_role(s) == "front"]
@@ -418,8 +441,26 @@ def guess_contents(stems, back_matter=None, titles=None, parts=None):
 
 
 
+ROLES = ("front", "main", "appendix", "back")
+GENERATED = {"toc": ("toc", "Contents")}       # kind -> (default name, title)
+
+
+class Entry(tuple):
+    """A tree record, ("group", title, children) or ("page", stem, title),
+    that also carries what a plain tuple could not: its role, its
+    number once numbering has run, and what generates it. Unpacking as
+    kind, a, b still works everywhere."""
+
+    def __new__(cls, record, role=None, generate=None):
+        self = tuple.__new__(cls, record)
+        self.role = role
+        self.generate = generate
+        self.number = None
+        return self
+
+
 def walk_contents(nodes, available, used, problems, depth=0,
-                  suffix=".html"):
+                  suffix=".html", inherited=None):
     """Normalise the configured tree into (kind, ...) records.
 
     available is the set of page stems that exist; suffix is only used to
@@ -435,14 +476,36 @@ def walk_contents(nodes, available, used, problems, depth=0,
             problems.append(f"contents entry is not a page or a group: {node!r}")
             continue
 
+        role = node.get("role")
+        if role is not None and role not in ROLES:
+            problems.append(f"role {role!r} is not one of "
+                            + ", ".join(ROLES))
+            role = None
+        role = role or inherited          # a page under a front group is front
+        if "generate" in node:
+            kind = str(node["generate"])
+            if kind not in GENERATED:
+                problems.append(f"cannot generate {kind!r}; known: "
+                                + ", ".join(GENERATED))
+                continue
+            name = str(node.get("name") or GENERATED[kind][0])
+            if name in used:
+                problems.append(f"page listed more than once: {name}")
+                continue
+            used.add(name)
+            out.append(Entry(("page", name,
+                              node.get("title") or GENERATED[kind][1]),
+                             role=role, generate=kind))
+            continue
         if "items" in node:
             children = walk_contents(node["items"], available, used,
-                                     problems, depth + 1, suffix)
+                                     problems, depth + 1, suffix, role)
             if depth >= 2:
                 problems.append(
                     f"group '{node.get('title', '')}' nests more than three "
                     "levels deep; some LMSs flatten this")
-            out.append(("group", node.get("title", ""), children))
+            out.append(Entry(("group", node.get("title", ""), children),
+                             role=role))
             continue
 
         stem = str(node.get("page", "")).strip()
@@ -459,10 +522,117 @@ def walk_contents(nodes, available, used, problems, depth=0,
             problems.append(f"page listed more than once: {stem}{suffix}")
             continue
         used.add(stem)
-        out.append(("page", stem, node.get("title")))
+        out.append(Entry(("page", stem, node.get("title")), role=role))
     return out
 
 
+
+
+def role_of(entry):
+    return getattr(entry, "role", None) or "main"
+
+
+def is_generated(entry):
+    return getattr(entry, "generate", None)
+
+
+def letter(n):
+    """1 -> A, 26 -> Z, 27 -> AA."""
+    out = ""
+    while n:
+        n, r = divmod(n - 1, 26)
+        out = chr(65 + r) + out
+    return out
+
+
+def number_tree(tree, titles=None):
+    """Give each entry its number, the way a printed book counts.
+
+    Top-level groups and pages with the main role count 1, 2, 3 and
+    appendices A, B; front and back matter and generated pages get none.
+    Inside a numbered group its pages count N.1, N.2, except the group's
+    own opening page (titled as the group is), which takes the group's
+    number. Numbers are set on the entries; nothing else changes."""
+    titles = titles or {}
+    main = appendix = 0
+    for entry in tree:
+        entry.number = None
+        if is_generated(entry) or role_of(entry) in ("front", "back"):
+            continue
+        if role_of(entry) == "appendix":
+            appendix += 1
+            entry.number = letter(appendix)
+        else:
+            main += 1
+            entry.number = str(main)
+        if entry[0] == "group":
+            count = 0
+            for child in entry[2]:
+                child.number = None
+                if child[0] != "page" or is_generated(child):
+                    continue
+                own = (child[2] or titles.get(child[1]))
+                if count == 0 and own and own == entry[1]:
+                    child.number = entry.number      # the opening page
+                    continue
+                count += 1
+                child.number = f"{entry.number}.{count}"
+    return tree
+
+
+def numbered_title(entry, title):
+    """The title with its number in front, when it has one."""
+    number = getattr(entry, "number", None)
+    return f"{number} {title}" if number and title else title
+
+
+def toc_blocks(tree, titles, link_for):
+    """The tree as Pandoc blocks: a nested bullet list of links, one
+    entry per page or group, numbered when numbering has run. link_for
+    maps a page stem to the target a link should carry for the output
+    being written (page.html, #page-stem, page.md); a group with no page
+    of its own links to its first page."""
+    def inlines(text):
+        out = []
+        for index, word in enumerate(text.split()):
+            if index:
+                out.append({"t": "Space"})
+            out.append({"t": "Str", "c": word})
+        return out
+
+    def link(text, target):
+        return {"t": "Link", "c": [["", [], []], inlines(text), [target, ""]]}
+
+    def items(nodes):
+        out = []
+        for entry in nodes:
+            kind, a, b = entry
+            if kind == "page":
+                if is_generated(entry) and is_generated(entry) == "toc":
+                    continue                 # the contents page itself
+                text = numbered_title(entry, b or titles.get(a) or a)
+                out.append([{"t": "Plain", "c": [link(text, link_for(a))]}])
+            else:
+                first = next((s for s in flatten_pages(b)
+                              if not any(is_generated(e) and e[1] == s
+                                         for e in b)), None)
+                text = numbered_title(entry, a)
+                head = [link(text, link_for(first))] if first else inlines(text)
+                item = [{"t": "Plain", "c": head}]
+                # A group's own opening page is the group line; listing it
+                # again below would repeat the chapter.
+                rest = b
+                if b and b[0][0] == "page" and not is_generated(b[0]) \
+                        and (b[0].number == entry.number
+                             or (b[0][2] or titles.get(b[0][1])) == a):
+                    rest = b[1:]
+                children = items(rest)
+                if children:
+                    item.append({"t": "BulletList", "c": children})
+                out.append(item)
+        return out
+
+    return [{"t": "BulletList", "c": items(tree)}]
 
 
 def flatten_pages(tree):
@@ -476,11 +646,27 @@ def flatten_pages(tree):
 
 
 def contents_from_tree(tree):
-    """Turn the resolved tree back into plain YAML-shaped data."""
+    """The YAML shape of a tree, roles and generated pages included."""
     out = []
-    for kind, a, b in tree:
-        if kind == "page":
-            out.append(a if not b else {"page": a, "title": b})
+    for entry in tree:
+        kind, a, b = entry
+        role = getattr(entry, "role", None)
+        generate = getattr(entry, "generate", None)
+        if generate:
+            node = {"generate": generate}
+            if a != GENERATED[generate][0]:
+                node["name"] = a
+            if b and b != GENERATED[generate][1]:
+                node["title"] = b
+        elif kind == "group":
+            node = {"title": a, "items": contents_from_tree(b)}
+        elif b:
+            node = {"page": a, "title": b}
         else:
-            out.append({"title": a, "items": contents_from_tree(b)})
+            node = a
+        if role and role != "main":
+            if not isinstance(node, dict):
+                node = {"page": node}
+            node["role"] = role
+        out.append(node)
     return out

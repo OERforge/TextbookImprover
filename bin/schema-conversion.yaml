@@ -59,6 +59,18 @@ keys:
       so renaming the book renames the file. Given without an extension,
       the one matching the format is added.
 
+  numbering:
+    type: enum
+    values: [project, "on", "off"]
+    default: project
+    stage: render
+    description: >
+      Whether this target shows the book's structure numbered (see
+      project.numbering). project follows the book; on and off decide
+      for this target alone, so an EPUB can carry chapter numbers while
+      a web edition doesn't, or the reverse. The cartridge follows the
+      book's setting.
+
   header:
     type: text
     default: ""

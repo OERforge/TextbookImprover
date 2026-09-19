@@ -71,6 +71,8 @@ try:
     import docxrepair
     import notes as notes_lib
     import oerconfig
+    from bookcontents import (guess_contents, walk_contents, number_tree,
+                              is_generated, toc_blocks)
 except ImportError:
     sys.exit("Cannot find the configuration library. It should be in a "
              "lib/ directory beside bin/.")
@@ -732,6 +734,109 @@ def page_group(intermediate):
     return source, text("source-title") or source
 
 
+def meta_text(meta, key):
+    value = meta.get(key)
+    if not value:
+        return ""
+    if value.get("t") == "MetaString":
+        return value["c"]
+    return " ".join("".join(i.get("c", " ") if i["t"] == "Str" else " "
+                            for i in value.get("c", [])).split())
+
+
+def numbering_for(target, project):
+    """The target's say, else the book's."""
+    choice = str(target["numbering"])
+    if choice in ("on", "off", "True", "False"):
+        return choice in ("on", "True")
+    return bool(project.get("numbering"))
+
+
+def book_tree(project, pages, numbered=None):
+    """The book's structure over this run's pages: project.contents when
+    declared, else the guess from names and provenance; numbered when
+    the project says so. Returns (tree, titles, api), api being the
+    Pandoc API version the intermediates carry, for a document the run
+    writes itself."""
+    titles, parts, roles = {}, {}, {}
+    stems = []
+    api = None
+    for intermediate in pages:
+        stem = os.path.basename(intermediate)[:-len(INTERMEDIATE)]
+        stems.append(stem)
+        with open(intermediate, encoding="utf-8") as fh:
+            doc = json.load(fh)
+        api = api or doc.get("pandoc-api-version")
+        meta = doc.get("meta", {})
+        titles[stem] = meta_text(meta, "title") or stem
+        if meta_text(meta, "page-role"):
+            roles[stem] = meta_text(meta, "page-role")
+        source = meta_text(meta, "source-page")
+        if source:
+            m = re.match(r"(\d+)/", meta_text(meta, "page-part"))
+            parents = [p.get("c", "") for p in
+                       meta.get("page-parents", {}).get("c", [])]
+            parts[stem] = (source, int(m.group(1)) if m else None, parents,
+                           meta_text(meta, "page-position"),
+                           meta_text(meta, "source-title"),
+                           meta_text(meta, "page-role"))
+            if meta_text(meta, "source-title") and source not in titles:
+                titles[source] = meta_text(meta, "source-title")
+    available, used, problems = set(stems), set(), []
+    available.add("notes")          # a page the run may write itself
+    contents = project.get("contents") or []
+    if contents:
+        tree = walk_contents(contents, available, used, problems,
+                             suffix=INTERMEDIATE)
+    else:
+        tree = walk_contents(guess_contents(stems, None, titles, parts, roles),
+                             available, used, problems, suffix=INTERMEDIATE)
+    for problem in problems:
+        say(f"WARNING: {problem}")
+    if project.get("numbering") if numbered is None else numbered:
+        number_tree(tree, titles)
+    return tree, titles, api
+
+
+def generated_pages(tree):
+    out = []
+    for entry in tree:
+        if is_generated(entry):
+            out.append(entry)
+        elif entry[0] == "group":
+            out += generated_pages(entry[2])
+    return out
+
+
+def write_generated(target, tree, titles, api, base, work, fragments,
+                    language, env):
+    """The pages contents asks the run to write: a contents page, as a
+    nested list of links, numbered when the book is."""
+    written = []
+    for entry in generated_pages(tree):
+        kind, name, title = entry
+        if entry.generate != "toc":
+            continue
+        doc = {"pandoc-api-version": api,
+               "meta": {"title": {"t": "MetaString", "c": title}},
+               "blocks": toc_blocks(tree, titles, lambda s: s + ".html")}
+        source = os.path.join(work, f"{target.name}-{name}.json")
+        with open(source, "w", encoding="utf-8") as fh:
+            json.dump(doc, fh)
+        out = os.path.join(target.output_dir, name + ".html")
+        command = ["pandoc", "-f", "json", "-t", "html5", source, "-o", out,
+                   "--standalone", "--ascii",
+                   "--lua-filter=" + HEADER_FILTER, "-M", f"lang={language}"]
+        header, footer = fragments
+        if header:
+            command.append("--include-before-body=" + header)
+        if footer:
+            command.append("--include-after-body=" + footer)
+        run(command, env=env, cwd=base)
+        written.append(out)
+    return written
+
+
 def arrange_notes(target, pages, base, work, fragments, language, env):
     """Apply notes.numbering and notes.placement to a target's rendered
     pages, and write the Notes page when placement is book."""
@@ -981,6 +1086,12 @@ def main():
                     renv)
                 written[target.name] += copy_hand_pages(base, hand,
                                                         target.output_dir)
+                tree, titles, api = book_tree(
+                    project, pages_by_dir[target.pages_dir],
+                    numbering_for(target, project))
+                written[target.name] += write_generated(
+                    target, tree, titles, api, base, work,
+                    fragments[target.name], language, renv)
                 for path in arrange_notes(target, rendered, base, work,
                                           fragments[target.name], language,
                                           renv):

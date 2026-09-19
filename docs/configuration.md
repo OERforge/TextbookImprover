@@ -136,6 +136,43 @@ its first child rather than pointing at it directly. Three levels of
 nesting are supported; deeper is accepted with a warning, since LMS support
 for deep hierarchies is uneven.
 
+A group or page can carry a `role`: `front`, `main` (the default),
+`appendix`, or `back`. It says what part of the book the entry is, which
+a group's pages inherit. With `numbering: true` on the project, the
+book counts the way a printed one does: main groups and top-level pages
+1, 2, 3 and their pages 1.1, 1.2; appendices A, B and A.1; front and
+back matter unnumbered, a chapter's own opening page taking the
+chapter's number. The numbers show in the EPUB's table of contents and
+headings, the cartridge organization, and the generated contents page;
+a target can say `numbering: on` or `off` for itself. A Markdown book
+written for a Pandoc PDF build declares its parts already, with
+`\frontmatter`, `\mainmatter`, `\appendix`, `\backmatter`, and
+`{.appendix}` on a heading, and the guess reads those, so the sample
+comes out with the roles in place.
+
+An entry `generate: toc` is a page the run writes: the full table of
+contents as a nested list of links, numbered when the book is, placed
+wherever it sits in `contents`. It's named `toc` and titled `Contents`
+unless `name` and `title` say otherwise.
+
+```yaml
+contents:
+  - role: front
+    title: Front Matter
+    items:
+      - _preamble
+      - generate: toc
+      - _preamble--to-the-instructor
+  - 01 BigPicture
+  - …
+  - role: appendix
+    title: Math Review
+    items: [A2 Math--fractions, …]
+  - page: Z1 Glossary
+    role: back
+numbering: true
+```
+
 A page cut by `pages.split_level` is listed by its piece name,
 `chapter-7--economies-of-scale`; see [Splitting pages](splitting.md).
 

@@ -1729,7 +1729,33 @@ function Pandoc(doc)
 
   local title_index = title_header_index(doc)
   if should_promote_h1(doc, title_index) then
-    doc.meta.title = pandoc.MetaInlines(doc.blocks[title_index].content)
+    local heading = doc.blocks[title_index]
+    doc.meta.title = pandoc.MetaInlines(heading.content)
+    -- A class on the heading that says what part of the book this is
+    -- ({.appendix}, as a Pandoc LaTeX build reads it) would go with the
+    -- heading; it stays as the page's role, in the metadata and in the
+    -- head, where the split and the packager read it.
+    for _, class in ipairs(heading.classes) do
+      if class == 'appendix' or class == 'frontmatter'
+          or class == 'backmatter' then
+        local role = ({ appendix = 'appendix', frontmatter = 'front',
+                        backmatter = 'back' })[class]
+        doc.meta['page-role'] = pandoc.MetaString(role)
+        local include = pandoc.MetaBlocks({ pandoc.RawBlock('html',
+          '<meta name="page-role" content="' .. role .. '" />') })
+        local existing = doc.meta['header-includes']
+        local list = pandoc.MetaList({})
+        if existing ~= nil then
+          if existing.t == 'MetaList' then
+            for _, item in ipairs(existing) do list:insert(item) end
+          else
+            list:insert(existing)
+          end
+        end
+        list:insert(include)
+        doc.meta['header-includes'] = list
+      end
+    end
     doc.blocks:remove(title_index)
   end
   return doc

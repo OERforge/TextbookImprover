@@ -63,6 +63,7 @@ except ImportError:
              "lib/ directory beside bin/.")
 from bookcontents import (  # noqa: E402
     guess_contents, walk_contents, flatten_pages, natural_key, stem_title,
+    number_tree, numbered_title, is_generated, toc_blocks,
 )
 
 CONFIG_NAME = "conversion.yaml"
@@ -272,17 +273,32 @@ def count_images(node, found):
 class Assembly:
     """The book being built: blocks, and what was learned building them."""
 
-    def __init__(self, base, pages):
+    def __init__(self, base, pages, tree=(), titles=None):
         self.base = base
+        self.tree = tree
+        self.titles = titles or {}
         self.book_pages = frozenset(pages)   # stems a link may point at
         self.blocks = []
         self.depth = 1              # deepest heading level a page sits at
         self.pages = []
         self.found = {"images": 0, "without_alt": 0, "math": 0, "notes": 0}
         self.groups = {}             # page stem -> (group key, group title)
+        self.notes_placed = False    # the Notes chapter, where contents put it
 
     def add_tree(self, tree, depth=1):
-        for index, (kind, a, b) in enumerate(tree):
+        for index, entry in enumerate(tree):
+            kind, a, b = entry
+            if is_generated(entry):
+                self.add_generated(entry, depth)
+                continue
+            if kind == "page" and a == "notes" and not os.path.exists(
+                    os.path.join(self.base, "notes" + INTERMEDIATE)):
+                # The Notes chapter, placed where contents lists it and
+                # filled after the writer runs.
+                self.blocks.append(header(depth, inlines(b or "Notes"),
+                                          page_id("notes")))
+                self.notes_placed = True
+                continue
             if depth == 1:
                 # A top-level group is a notes group; so is a top-level
                 # page, on its own.
@@ -300,24 +316,37 @@ class Assembly:
                 # heading. The group takes the page's id so links to the
                 # page still land.
                 opener = None
-                if b and b[0][0] == "page":
+                if b and b[0][0] == "page" and not is_generated(b[0]) \
+                        and b[0][1] != "notes":
                     stem, override = b[0][1], b[0][2]
                     doc = load_page(self.base, stem)
                     if (override or page_title(doc, stem)) == a:
                         opener = stem
                 self.blocks.append(header(
-                    depth, inlines(a),
+                    depth, inlines(numbered_title(entry, a)),
                     page_id(opener) if opener else group_id(a, depth, self)))
                 if opener:
                     self.add_page(opener, None, depth, heading=False)
                 self.add_tree(b[1:] if opener else b, depth + 1)
             else:
-                self.add_page(a, b, depth)
+                self.add_page(a, b, depth, number=entry.number)
 
-    def add_page(self, stem, title_override, depth, heading=True):
+    def add_generated(self, entry, depth):
+        """A page the run writes: the contents page, as blocks."""
+        kind, name, title = entry
+        if entry.generate == "toc":
+            self.blocks.append(header(depth, inlines(title), page_id(name)))
+            self.blocks.extend(toc_blocks(
+                self.tree, self.titles, lambda stem: "#" + page_id(stem)))
+            self.pages.append((name, title, depth))
+
+    def add_page(self, stem, title_override, depth, heading=True,
+                 number=None):
         doc = load_page(self.base, stem)
         blocks = copy.deepcopy(doc["blocks"])
         title = title_override or page_title(doc, stem)
+        if number:
+            title = f"{number} {title}"
         prefix = page_id(stem) + "--"
         strip_comments(blocks)
         prefix_ids(blocks, prefix, self.book_pages)
@@ -330,7 +359,7 @@ class Assembly:
             pass                    # the group's heading stands for it
         elif opens_with_h1(doc["blocks"]):
             blocks[0]["c"][1][0] = page_id(stem)
-            blocks[0]["c"][2] = inlines(title) if title_override \
+            blocks[0]["c"][2] = inlines(title) if (title_override or number) \
                 else blocks[0]["c"][2]
         else:
             blocks.insert(0, header(depth, inlines(title), page_id(stem)))
@@ -583,7 +612,7 @@ def arrange_epub_notes(path, assembly, numbering, placement):
         first = re.search(r'<section id="([^"]+)"', text)
         ident = first.group(1) if first else ""
         short = name.rsplit("/", 1)[1]
-        if ident == "book-notes":
+        if ident == page_id("notes"):
             notes_page = notes_lib.Page(short, text, "notes", "Notes", "xhtml")
             continue
         stem = None
@@ -710,10 +739,12 @@ def build(base, name, resolved, keep, intermediates=None):
     if not stems:
         sys.exit(f"No {INTERMEDIATE} files in {pages_dir}: run the "
                  "conversion first.")
-    titles, parts = {}, {}
+    titles, parts, roles = {}, {}, {}
     for stem in stems:
         doc = load_page(pages_dir, stem)
         titles[stem] = page_title(doc, stem)
+        if meta_text(doc.get("meta", {}), "page-role"):
+            roles[stem] = meta_text(doc["meta"], "page-role")
         source = meta_text(doc.get("meta", {}), "source-page")
         if source:
             # A source with no page of its own -- a chapter whose sections
@@ -725,9 +756,13 @@ def build(base, name, resolved, keep, intermediates=None):
             parents = [p.get("c", "") for p in
                        doc["meta"].get("page-parents", {}).get("c", [])]
             parts[stem] = (source, int(m.group(1)) if m else None, parents,
-                           meta_text(doc["meta"], "page-position"))
+                           meta_text(doc["meta"], "page-position"),
+                           meta_text(doc["meta"], "source-title"),
+                           meta_text(doc["meta"], "page-role"))
 
     available, used, problems = set(stems), set(), []
+    if str(resolved["notes.placement"]) == "book":
+        available.add("notes")      # the Notes chapter, written after
     contents = project.get("contents") or []
     if contents:
         tree = walk_contents(contents, available, used, problems,
@@ -735,7 +770,7 @@ def build(base, name, resolved, keep, intermediates=None):
     else:
         problems.append("contents not specified; using guessed order. The "
                         "packager's sample config is the place to fix it.")
-        tree = walk_contents(guess_contents(stems, None, titles, parts),
+        tree = walk_contents(guess_contents(stems, None, titles, parts, roles),
                              available, used, problems, suffix=INTERMEDIATE)
     for problem in problems:
         print(f"WARNING: {problem}", file=sys.stderr)
@@ -747,24 +782,32 @@ def build(base, name, resolved, keep, intermediates=None):
         for stem in unplaced:
             print(f"  {stem}", file=sys.stderr)
     placed = list(flatten_pages(tree))
-    if not placed:
+    real = [s for s in placed if s in available]
+    if not real:
         sys.exit("No page in project.contents exists on disk; nothing to "
                  "build.")
+    choice = str(resolved["numbering"])
+    numbered = choice in ("on", "True") if choice in ("on", "off", "True",
+                                                        "False") \
+        else bool(project["numbering"])
+    if numbered:
+        number_tree(tree, titles)
 
-    assembly = Assembly(pages_dir, placed)
+    assembly = Assembly(pages_dir, placed, tree, titles)
     if len(tree) == 1 and tree[0][0] == "page":
         assembly.add_single_page(tree[0][1], tree[0][2])
     else:
         assembly.add_tree(tree)
     numbering = str(resolved["notes.numbering"])
     placement = str(resolved["notes.placement"])
-    if placement == "book" and assembly.found["notes"]:
+    if placement == "book" and assembly.found["notes"] \
+            and not assembly.notes_placed:
         # A chapter of its own for the notes, filled after the writer runs.
-        assembly.blocks.append(header(1, inlines("Notes"), "book-notes"))
+        assembly.blocks.append(header(1, inlines("Notes"), page_id("notes")))
 
     document = {
         "pandoc-api-version": load_page(pages_dir,
-                                        placed[0])["pandoc-api-version"],
+                                        real[0])["pandoc-api-version"],
         "meta": book_metadata(project, resolved, assembly.found, base),
         "blocks": assembly.blocks,
     }

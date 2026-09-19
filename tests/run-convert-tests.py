@@ -380,8 +380,86 @@ def case_notes(work):
     ]
 
 
+BOOK = {
+    "_preamble.md": "---\ntitle: The Book\n---\n\nAn epigraph.\n\n\\frontmatter\n\n"
+                    "# To the Reader\n\nHello.\n\n# Thanks\n\nTo all.\n\n"
+                    "\\mainmatter\n",
+    "01 One.md": "# Chapter One\n\nIntro.\n\n## First\n\nA.\n\n## Second\n\nB.\n",
+    "02 Two.md": "# Chapter Two\n\n## Only\n\nC.\n",
+    "A1 Extra.md": "# Extra Material {.appendix}\n\n## Details\n\nD.\n",
+    "Z1 Glossary.md": "\\backmatter\n\n# Glossary {-}\n\nTerms.\n",
+}
+
+
+def case_structure(work):
+    """Roles from the source's markers, numbering, and a generated
+    contents page."""
+    import yaml
+    os.makedirs(work, exist_ok=True)
+    for name, text in BOOK.items():
+        with open(os.path.join(work, name), "w", encoding="utf-8") as fh:
+            fh.write(text)
+    # First run: no contents, so the guess reads the markers.
+    first = convert(work, "defaults:\n  pages:\n    split_level: 2\n"
+                          "targets:\n  html:\n    format: html\n"
+                          "  epub:\n    format: epub3\n")
+    sample = yaml.safe_load(open(os.path.join(work, "packaging-sample.yaml"),
+                                 encoding="utf-8"))["project"]["contents"]
+    roles = {str(n.get("title", n.get("page"))): n.get("role")
+             for n in sample if isinstance(n, dict)}
+    # Second run: adopt it, number the book, and ask for a contents page.
+    for n in sample:
+        if isinstance(n, dict) and n.get("role") == "front":
+            n["items"].insert(0, {"generate": "toc"})
+    with open(os.path.join(work, "project.yaml"), "w", encoding="utf-8") as fh:
+        yaml.safe_dump({"project": {"identifier": "org.example.fixtures",
+                                    "title": "The Book", "numbering": True,
+                                    "contents": sample}}, fh, sort_keys=False)
+    second = subprocess.run(
+        ["python3", os.path.join(BIN, "convert.py"), "--quiet"], cwd=work,
+        capture_output=True, text=True, stdin=subprocess.DEVNULL)
+    toc = read(work, "html", "toc.html") if exists(work, "html", "toc.html") \
+        else ""
+    entries = re.findall(r'<li><a href="([^"]*)">([^<]*)</a>', toc)
+    import zipfile
+    nav = ""
+    e = os.path.join(work, "epub", "org.example.fixtures.epub")
+    if os.path.exists(e):
+        with zipfile.ZipFile(e) as z:
+            nav = z.read("EPUB/nav.xhtml").decode("utf-8")
+    manifest = read(work, "imsmanifest.xml") if exists(work,
+                                                       "imsmanifest.xml") else ""
+    return [
+        ("the runs succeed", lambda: first.returncode == 0
+         and second.returncode == 0),
+        ("the guess reads \\frontmatter, {.appendix}, and \\backmatter",
+         lambda: roles.get("The Book") == "front"
+         and roles.get("Extra Material") == "appendix"
+         and roles.get("Z1 Glossary") == "back"),
+        ("the contents page numbers chapters, sections, and appendices",
+         lambda: ("01 One.html", "1 Chapter One") in entries
+         and ("01 One--first.html", "1.1 First") in entries
+         and ("A1 Extra--details.html", "A.1 Details") in entries),
+        ("and leaves front and back matter unnumbered",
+         lambda: any(t == "To the Reader" for _, t in entries)
+         and any(t == "Glossary" for _, t in entries)),
+        ("a chapter's opening page is its group line, not a second entry",
+         lambda: [t for _, t in entries if t == "1 Chapter One"] ==
+         ["1 Chapter One"]),
+        ("the EPUB's nav carries the numbers",
+         lambda: ">1 Chapter One<" in nav and ">A Extra Material<" in nav
+         and ">Contents<" in nav),
+        ("and so does the cartridge organization",
+         lambda: "<title>1 Chapter One</title>" in manifest
+         and "<title>A.1 Details</title>" in manifest),
+        ("the output check finds no dead link in the contents page",
+         lambda: "link-to-missing" not in second.stderr),
+    ]
+
+
 CASES = [
     ("a bare directory", case_bare),
+    ("roles, numbering, and a contents page", case_structure),
     ("footnote numbering and placement", case_notes),
     ("a Markdown source", case_markdown),
     ("a hand-written page", case_hand_written),

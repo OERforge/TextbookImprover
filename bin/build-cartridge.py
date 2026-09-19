@@ -71,7 +71,7 @@ except ImportError:
 from bookcontents import (  # noqa: E402
     natural_key, chapter_of, within_chapter_key, unrecognised_roles,
     guess_contents, walk_contents, flatten_pages, contents_from_tree,
-    stem_title, slugify, clean_title,
+    stem_title, slugify, clean_title, number_tree, numbered_title,
 )
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -92,7 +92,8 @@ SRC_RE = re.compile(r'\b(?:src|href)\s*=\s*"([^"]+)"', re.I)
 TITLE_RE = re.compile(r"<title[^>]*>(.*?)</title>", re.I | re.S)
 # What a page split by split-pages.py says about where it came from.
 META_RE = re.compile(r'<meta\s+name="(source-page|source-title|page-part|'
-                     r'page-parent|page-position)"\s+content="([^"]*)"', re.I)
+                     r'page-parent|page-position|page-role)"\s+content="([^"]*)"',
+                     re.I)
 
 REQUIRED = ["identifier", "title"]
 
@@ -158,7 +159,20 @@ def page_provenance(path):
         return None
     m = re.match(r"(\d+)/", found.get("page-part", ""))
     return (found["source-page"], int(m.group(1)) if m else None, parents,
-            found.get("page-position", ""), found.get("source-title", ""))
+            found.get("page-position", ""), found.get("source-title", ""),
+            found.get("page-role", ""))
+
+
+def page_role(path):
+    """A page's own role, from the <meta> the filter wrote when it
+    promoted a heading carrying one ({.appendix})."""
+    try:
+        with open(path, encoding="utf-8", errors="replace") as handle:
+            markup = handle.read(20000)
+    except OSError:
+        return ""
+    found = dict(META_RE.findall(markup.split("</head>", 1)[0]))
+    return found.get("page-role", "")
 
 
 def page_references(path, base_dir):
@@ -590,6 +604,7 @@ def legacy_view(resolved, target):
     """
     project, settings = resolved.project, resolved.settings
     return {
+        "numbering": bool(project["numbering"]),
         "manifest": {
             "identifier": project["identifier"],
             "title": project["title"],
@@ -870,9 +885,10 @@ def render_items(tree, depth, wrapper=None):
         pad += "  "
 
     def emit(nodes, pad):
-        for kind, a, b in nodes:
+        for entry in nodes:
+            kind, a, b = entry
             if kind == "page":
-                title = b or TITLES[a]
+                title = numbered_title(entry, b or TITLES[a])
                 lines.append(f'{pad}<item identifier="item-{ncname(a)}" '
                              f'identifierref="res-{ncname(a)}">')
                 lines.append(f"{pad}  <title>{xml_escape(title)}</title>")
@@ -880,7 +896,8 @@ def render_items(tree, depth, wrapper=None):
             else:
                 counter[0] += 1
                 lines.append(f'{pad}<item identifier="group-{counter[0]}">')
-                lines.append(f"{pad}  <title>{xml_escape(a)}</title>")
+                lines.append(f"{pad}  <title>"
+                             f"{xml_escape(numbered_title(entry, a))}</title>")
                 emit(b, pad + "  ")
                 lines.append(f"{pad}</item>")
 
@@ -892,6 +909,7 @@ def render_items(tree, depth, wrapper=None):
 
 TITLES = {}
 PARTS = {}      # piece stem -> (source stem, part number, parent titles)
+ROLES = {}      # page stem -> role, for a page that was not split
 
 
 def build_manifest(config, tree, page_files, common_files):
@@ -1042,6 +1060,9 @@ def main():
         path = os.path.join(pages_dir, stem + ".html")
         TITLES[stem] = page_title(path, stem)
         origin = page_provenance(path)
+        role = page_role(path)
+        if role:
+            ROLES[stem] = role
         if origin:
             PARTS[stem] = origin
             # A source with no page of its own still has a title, and its
@@ -1160,7 +1181,7 @@ def main():
                      "from the filenames. Check it.")
         problems.append("contents not specified; using guessed order.")
         guessed_contents = True
-        tree = walk_contents(guess_contents(stems, back_matter, TITLES, PARTS),
+        tree = walk_contents(guess_contents(stems, back_matter, TITLES, PARTS, ROLES),
                              available, used, problems)
 
     extra = [s for s in stems if s not in used]
@@ -1199,7 +1220,7 @@ def main():
                 destination.extend(walk_contents(
                     [{"title": unsorted_title,
                       "items": guess_contents(leftover, back_matter,
-                                              TITLES, PARTS)}],
+                                              TITLES, PARTS, ROLES)}],
                     available, used, problems))
 
             print(f"Read {os.path.basename(args.toc)}: {len(placed)} of "
@@ -1266,7 +1287,7 @@ def main():
             # themselves land in number order after what is already there.
             if created:
                 new_tree = walk_contents(
-                    guess_contents(created, back_matter, TITLES, PARTS),
+                    guess_contents(created, back_matter, TITLES, PARTS, ROLES),
                     available, used, problems)
                 destination.extend(new_tree)
 
@@ -1345,7 +1366,7 @@ def main():
         # sample says what a run would do. Building the guess afresh here
         # threw the outline away on exactly the first run --toc is for.
         sample["contents"] = contents_from_tree(tree) if tree else \
-            guess_contents(stems, back_matter, TITLES, PARTS)
+            guess_contents(stems, back_matter, TITLES, PARTS, ROLES)
         settled, sample_targets = sample_inputs(
             resolved, documents, target, sample["contents"])
         dump_sample(sample, sample_path, notes, unknown_roles,
@@ -1359,6 +1380,8 @@ def main():
               "you had set is lost by renaming it.", file=sys.stderr)
         return 0 if args.init else 1
 
+    if config.get("numbering"):
+        number_tree(tree, TITLES)
     xml = build_manifest(config, tree, page_files, common_files)
 
     prefix = config.get("content_prefix") or ""

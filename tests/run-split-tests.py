@@ -376,7 +376,7 @@ def case_readers(work):
         ("the page head carries the provenance, and the packager reads it",
          lambda: parts["chapter-7--diseconomies--economies-of-scale"]
          == ("chapter-7", 5, ["Diseconomies"], "2.1",
-             "Costs in the Long Run")),
+             "Costs in the Long Run", "")),
         ("the packager groups the pieces under the source and their "
          "headings, a heading's own page opening its group",
          lambda: guessed == [

@@ -16,6 +16,10 @@ Where this target writes. Defaults to the target's own name, so two targets in t
 
 For a format that produces one file for the whole book, such as epub3, the file to write inside output_dir. Left empty it's worked out afresh on every run from the book's identifier and the format, so renaming the book renames the file. Given without an extension, the one matching the format is added.
 
+**`numbering`**—one of `project`, `on`, `off`; default `project`
+
+Whether this target shows the book's structure numbered (see project.numbering). project follows the book; on and off decide for this target alone, so an EPUB can carry chapter numbers while a web edition doesn't, or the reverse. The cartridge follows the book's setting.
+
 **`header`**—`text`; default `""` (empty)
 
 Markdown placed at the top of every page, or the path to a file holding it. Inserted by the template after the filters have run, so nothing in it's processed: give any image explicit alt text.

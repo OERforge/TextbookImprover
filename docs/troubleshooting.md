@@ -60,7 +60,7 @@ keys on the media path ignoring its extension.
 ## Known limits
 
 - **Header row text can't be invented.** A table whose cells hold nothing
-  that could be a header -- a grid of measurements -- is reported as
+  that could be a header—a grid of measurements—is reported as
   `needs-word` in `table-headers-report.csv`, not fixed. Add the header in
   Word, where it benefits every downstream format. Where the header text is
   there and only unmarked, a value in `table-headers.csv` is enough.
@@ -88,8 +88,8 @@ keys on the media path ignoring its extension.
   What it can do is lose the evidence: a header row whose shading came
   from the table style rather than from direct formatting stops looking
   like a header row, and the table converts as though it never had one.
-  If a table genuinely presents data with nothing to relate -- a grid of
-  measurements laid out to fit the page -- it needs no header cells to
+  If a table genuinely presents data with nothing to relate—a grid of
+  measurements laid out to fit the page—it needs no header cells to
   conform, and the useful thing to add is a caption, not a layout
   marking.
 - **Two PAC errors on a tagged PDF are the validator's, not the file's.**

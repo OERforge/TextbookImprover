@@ -8,11 +8,13 @@ and books, one output per target, and hand off to the packager.
     python3 convert.py --toc book.pdf   # passed through to the packager
     python3 convert.py --quiet          # without the command trace
 
-Run in the directory holding the .docx files. With no configuration at
-all a bare folder of documents converts to one HTML page per document
-beside them, as it always has. With targets declared, each is built into
-its own output directory: several HTML renderings with different headers
-or options, an EPUB, whatever else the schema lists.
+Run in the directory holding the .docx files. That directory keeps the
+sources, the intermediates, the sidecars, and the reports; every target
+writes into a directory of its own, html/ for the one implied when no
+configuration says otherwise. A page the author wrote by hand -- an
+.html here with no .docx behind it -- is copied into every HTML
+target's directory as it stands, with the local files it refers to, and
+read into an intermediate so the EPUB has it too.
 
 THE RUN
 
@@ -185,9 +187,8 @@ def load_targets(base, allow_unknown):
                                          target=name,
                                          allow_unknown=allow_unknown)
             if name is None:
-                # No targets declared: the one implied target writes its
-                # pages beside the sources, as every version has.
-                resolved.settings["output_dir"] = "."
+                # No targets declared: one implied html target, which
+                # writes into html/ like any other target would.
                 name = "html"
             targets.append(Target(name, resolved, base))
     except oerconfig.ConfigError as exc:
@@ -334,6 +335,75 @@ def read_to_json(base, docs, env, work):
     return stems
 
 
+LOCAL_REF = re.compile(r'\b(?:src|href)\s*=\s*"([^"]+)"', re.I)
+EXTERNAL_REF = ("http://", "https://", "//", "data:", "mailto:", "tel:", "#",
+                "javascript:")
+
+
+def hand_pages(base, stems):
+    """Pages the author wrote: .html files beside the sources with no
+    .docx behind them and not a piece an earlier split left behind. They
+    are final, so they are copied rather than rendered."""
+    found = []
+    for path in sorted(glob.glob(os.path.join(base, "*.html"))):
+        stem = os.path.basename(path)[:-5]
+        if stem in stems or stem.split("--", 1)[0] in stems:
+            continue
+        found.append(stem)
+    return found
+
+
+def local_references(path):
+    """Local files a hand-written page refers to, for copying with it."""
+    with open(path, encoding="utf-8", errors="replace") as fh:
+        markup = fh.read()
+    refs = []
+    for raw in LOCAL_REF.findall(markup):
+        ref = raw.strip().split("#", 1)[0].split("?", 1)[0]
+        if ref and not ref.startswith(EXTERNAL_REF) and ref not in refs:
+            refs.append(ref)
+    return refs
+
+
+def copy_hand_pages(base, hand, target_dir):
+    """A hand-written page and what it refers to, byte for byte, into a
+    target's directory. A page linking another page of the book is left
+    to that page; a file that isn't there is reported and skipped."""
+    if os.path.abspath(target_dir) == os.path.abspath(base):
+        return [os.path.join(base, stem + ".html") for stem in hand]
+    os.makedirs(target_dir, exist_ok=True)
+    copied = []
+    for stem in hand:
+        source = os.path.join(base, stem + ".html")
+        shutil.copy2(source, os.path.join(target_dir, stem + ".html"))
+        copied.append(os.path.join(target_dir, stem + ".html"))
+        for ref in local_references(source):
+            if ref.endswith(".html"):
+                continue
+            src = os.path.normpath(os.path.join(base, ref))
+            if not os.path.isfile(src) or not src.startswith(
+                    os.path.abspath(base)):
+                say(f"WARNING: {stem}.html refers to {ref}, which is not "
+                    "here; not copied.")
+                continue
+            dest = os.path.join(target_dir, ref)
+            os.makedirs(os.path.dirname(dest), exist_ok=True)
+            shutil.copy2(src, dest)
+    return copied
+
+
+def read_hand_pages(base, hand, pages_dir, env):
+    """An intermediate for each hand-written page, read from its HTML, so
+    the EPUB can hold it. No filter runs: a person finished this page."""
+    out = []
+    for stem in hand:
+        target = os.path.join(pages_dir, stem + INTERMEDIATE)
+        run(["pandoc", "-f", "html", "-t", "json", stem + ".html",
+             "-o", target], env=env, cwd=base)
+        out.append(target)
+    return out
+
+
 def warn_about_leftovers(base, stems, fragments):
     """An intermediate with no matching .docx is not this run's output.
     Say so and leave it alone rather than treating its stale state as an
@@ -351,6 +421,16 @@ def warn_about_leftovers(base, stems, fragments):
             continue
         say(f"Note: {os.path.basename(path)} is left over from a v0.1 run "
             "and is no longer read.")
+    # Pages an earlier version wrote beside the sources. They are named
+    # rather than removed, since deleting a user's files is not this
+    # script's decision; but they are not this run's pages, which go to
+    # each target's directory.
+    old = [os.path.basename(p) for p in glob.glob(os.path.join(base, "*.html"))
+           if os.path.basename(p)[:-5] in stems
+           or os.path.basename(p)[:-5].split("--", 1)[0] in stems]
+    if old:
+        say(f"Note: {len(old)} page(s) beside the sources ({old[0]}, ...) are "
+            "from an earlier run; pages now go to each target's directory.")
 
 
 # --------------------------------------------------------------------------
@@ -757,14 +837,28 @@ def main():
             pages_by_dir[target.pages_dir] = split_pages(target, pages,
                                                          paths, reports)
 
+        # ---- 4.6 hand-written pages ------------------------------------------
+        hand = hand_pages(base, stems)
+        if hand:
+            say(f"{len(hand)} hand-written page(s): " + ", ".join(hand))
+        for pages_dir in pages_by_dir:
+            pages_by_dir[pages_dir] += read_hand_pages(base, hand, pages_dir,
+                                                       env)
+        hand_stems = set(hand)
+
         # ---- 4.7 render, per html target --------------------------------------
         written = {}
         renv = dict(env, HEADER_INCLUDES_FILE=css_header)
         for target in targets:
             if target.format == "html":
+                rendered = [p for p in pages_by_dir[target.pages_dir]
+                            if os.path.basename(p)[:-len(INTERMEDIATE)]
+                            not in hand_stems]
                 written[target.name] = render_html(
-                    target, pages_by_dir[target.pages_dir], base,
-                    fragments[target.name], language, renv)
+                    target, rendered, base, fragments[target.name], language,
+                    renv)
+                written[target.name] += copy_hand_pages(base, hand,
+                                                        target.output_dir)
 
         # ---- 5. reports, once per book ----------------------------------------
         missing = write_report(
@@ -817,20 +911,21 @@ def main():
     # Handed off to build-cartridge.py, which is read-only with respect to
     # page content and can be run on its own against any directory of
     # HTML. Arguments not recognised here are passed straight through, so
-    # `--zip` builds the archive too. It packages the html target that
-    # writes beside the sources; a package that includes another target
-    # is not built yet, and says so.
+    # `--zip` builds the archive too. It reads its configuration here and
+    # its pages from the first html target's directory; a package whose
+    # includes name another html target is a roadmap item.
     if not os.path.isfile(CARTRIDGE_TOOL):
         say(f"No {CARTRIDGE_TOOL}, so skipping the manifest.")
         return 0
-    beside = [t for t in targets if t.format == "html"
-              and os.path.abspath(t.output_dir) == os.path.abspath(base)]
-    if not beside:
-        say("No html target writes beside the sources, so there is nothing "
-            "for the packager to read; skipping the manifest.")
+    html_targets = [t for t in targets if t.format == "html"]
+    if not html_targets:
+        say("No html target, so there is nothing for the packager to read; "
+            "skipping the manifest.")
         return 0
-    result = run(["python3", CARTRIDGE_TOOL, "-d", base] + passthrough,
-                 check=False)
+    command = ["python3", CARTRIDGE_TOOL, "-d", base]
+    if os.path.abspath(html_targets[0].output_dir) != os.path.abspath(base):
+        command += ["--pages", html_targets[0].output_dir]
+    result = run(command + passthrough, check=False)
     return result.returncode
 
 

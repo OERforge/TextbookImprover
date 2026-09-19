@@ -88,8 +88,8 @@ Beyond the Word-to-HTML translation, each page gets:
   Equations in the row stay equations. `caption-rows=N,M` in the sidecar
   does the same for any rows a person names.
 - **A table with grouping bands becomes one table per band.** A merged row
-  partway down a table -- "Example B", "Higher Income Countries", "Year 2"
-  -- labels the rows beneath it, and no header markup expresses that in
+  partway down a table—"Example B", "Higher Income Countries", "Year 2"
+ —labels the rows beneath it, and no header markup expresses that in
   every format. The run infers `split-at` for those rows, writes it into
   the prefilled sidecar row, and splits there: each part gets the band as
   its caption, composed onto the table's own ("Table 17.4: Year 2"), a

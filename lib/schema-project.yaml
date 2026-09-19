@@ -13,7 +13,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #
-# Project schema -- settings that describe the book rather than any one
+# Project schema—settings that describe the book rather than any one
 # rendering of it.
 #
 # This schema lives with the configuration library rather than with either
@@ -53,7 +53,7 @@ keys:
       you.
       It also has to be a valid XML name, because IMS types it as xs:ID:
       start with a letter, then letters, digits, and . - _ only. No
-      colons, and it may not start with a digit -- which rules out both
+      colons, and it may not start with a digit—which rules out both
       obvious ways of generating a unique one, since a bare UUID usually
       starts with a digit and urn:uuid: has colons.
       Reverse-DNS is the least error-prone form and reads well as a folder

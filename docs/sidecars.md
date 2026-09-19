@@ -60,14 +60,14 @@ accepted for `both` and `none`. The key is a hash of the table's content
 and shape, so a row survives anything the pipeline does to the table and
 detaches only when the source table itself changes. You never type a key:
 the first run writes `table-headers-new.csv` with a prefilled row for every
-data table -- the guess in `headers`, the source file and first cells beside
-it so you can find the table -- and you rename that file, or paste its rows
+data table—the guess in `headers`, the source file and first cells beside
+it so you can find the table—and you rename that file, or paste its rows
 in on later runs when tables have been added. A row whose key matches no
 table stops the run, since a correction that silently fails to apply
 destroys work invisibly; the report names the row. Values this version does
 not act on yet (`manual`, `list`) are accepted and kept, so a book can
-start carrying them. The value in effect -- the sidecar's where one was declared, the guess
-otherwise -- is applied when the page is built. A status of `needs-word` in
+start carrying them. The value in effect—the sidecar's where one was declared, the guess
+otherwise—is applied when the page is built. A status of `needs-word` in
 the report means no cell of the table could serve as a header, so no value
 can help and headers have to be written in Word; that's the one thing the
 old `table-headers-missing.csv` reported, and it's now a row in the report

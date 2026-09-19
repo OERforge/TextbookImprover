@@ -419,14 +419,16 @@ def guess_contents(stems, back_matter=None, titles=None, parts=None,
                 + [{"page": s, "role": "appendix"} for s in by_role["appendix"]]
                 + [{"page": s, "role": "back"} for s in by_role["back"]])
 
+    def role_for(s):
+        return roles.get(s) or matter_role(s)
     front = [s for s in loose if s.lower().startswith(FRONT_MATTER)
-             or matter_role(s) == "front"]
+             or role_for(s) == "front"]
     tail = [s for s in loose
             if (s.lower().startswith(BACK_MATTER_PAGES)
-                or matter_role(s) == "back") and s not in front]
+                or role_for(s) == "back") and s not in front]
     middle = [s for s in loose if s not in front and s not in tail]
 
-    tree = sorted(front, key=natural_key)
+    tree = [{"page": s, "role": "front"} for s in sorted(front, key=natural_key)]
 
     for number in sorted(chapters):
         pages = sorted(chapters[number],
@@ -435,7 +437,7 @@ def guess_contents(stems, back_matter=None, titles=None, parts=None,
                      "items": pages})
 
     tree.extend(sorted(middle, key=natural_key))
-    tree.extend(sorted(tail, key=natural_key))
+    tree.extend({"page": s, "role": "back"} for s in sorted(tail, key=natural_key))
     return tree
 
 

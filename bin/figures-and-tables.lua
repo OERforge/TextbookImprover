@@ -1690,6 +1690,25 @@ local function settle_author(doc)
   doc.meta.author = nil
 end
 
+-- The page's role, in the metadata and in the head, where the split and
+-- the packager read it.
+local function set_page_role(doc, role)
+  doc.meta['page-role'] = pandoc.MetaString(role)
+  local include = pandoc.MetaBlocks({ pandoc.RawBlock('html',
+    '<meta name="page-role" content="' .. role .. '" />') })
+  local existing = doc.meta['header-includes']
+  local list = pandoc.MetaList({})
+  if existing ~= nil then
+    if existing.t == 'MetaList' then
+      for _, item in ipairs(existing) do list:insert(item) end
+    else
+      list:insert(existing)
+    end
+  end
+  list:insert(include)
+  doc.meta['header-includes'] = list
+end
+
 local function title_header_index(doc)
   local found, count = nil, 0
   for index, block in ipairs(doc.blocks) do
@@ -1727,6 +1746,26 @@ function Pandoc(doc)
   close_handles()
   settle_author(doc)
 
+  -- A raw \frontmatter, \mainmatter, \appendix, or \backmatter in the
+  -- page -- a Pandoc PDF book's own declaration of its parts -- gives
+  -- the page its role. The first one counts; the split reads the rest.
+  local MATTER = { frontmatter = 'front', mainmatter = 'main',
+                   appendix = 'appendix', backmatter = 'back' }
+  local role_from_raw = nil
+  for _, block in ipairs(doc.blocks) do
+    if block.t == 'RawBlock' and (block.format == 'latex'
+        or block.format == 'tex') then
+      local command = block.text:match('\\(%a+)')
+      if command and MATTER[command] then
+        role_from_raw = MATTER[command]
+        break
+      end
+    end
+  end
+  if role_from_raw and role_from_raw ~= 'main' then
+    set_page_role(doc, role_from_raw)
+  end
+
   local title_index = title_header_index(doc)
   if should_promote_h1(doc, title_index) then
     local heading = doc.blocks[title_index]
@@ -1738,22 +1777,8 @@ function Pandoc(doc)
     for _, class in ipairs(heading.classes) do
       if class == 'appendix' or class == 'frontmatter'
           or class == 'backmatter' then
-        local role = ({ appendix = 'appendix', frontmatter = 'front',
-                        backmatter = 'back' })[class]
-        doc.meta['page-role'] = pandoc.MetaString(role)
-        local include = pandoc.MetaBlocks({ pandoc.RawBlock('html',
-          '<meta name="page-role" content="' .. role .. '" />') })
-        local existing = doc.meta['header-includes']
-        local list = pandoc.MetaList({})
-        if existing ~= nil then
-          if existing.t == 'MetaList' then
-            for _, item in ipairs(existing) do list:insert(item) end
-          else
-            list:insert(existing)
-          end
-        end
-        list:insert(include)
-        doc.meta['header-includes'] = list
+        set_page_role(doc, ({ appendix = 'appendix', frontmatter = 'front',
+                              backmatter = 'back' })[class])
       end
     end
     doc.blocks:remove(title_index)

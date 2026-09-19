@@ -452,6 +452,10 @@ def case_structure(work):
         ("the EPUB's nav carries the numbers",
          lambda: ">1 Chapter One<" in nav and ">A Extra Material<" in nav
          and ">Contents<" in nav),
+        ("and back matter declared by \\backmatter in an unsplit page is "
+         "not numbered",
+         lambda: ">Glossary<" in nav
+         and not re.search(r">\d+ Glossary<", nav)),
         ("and so does the cartridge organization",
          lambda: "<title>1 Chapter One</title>" in manifest
          and "<title>A.1 Details</title>" in manifest),

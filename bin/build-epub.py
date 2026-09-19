@@ -480,13 +480,49 @@ def chapter_template(work):
     return path
 
 
+NOTE = re.compile(r'(<aside epub:type="footnote"[^>]*\bid="fn(\d+)"[^>]*>)'
+                  r'(.*?)(</aside>)', re.S)
+
+
+def number_notes(text):
+    """A number at the start of each footnote and a return link at its
+    end, as Pandoc's HTML writer gives them.
+
+    The EPUB writer writes each note as an aside with epub:type
+    "footnote" and nothing else: a reading system that pops notes up on
+    tap needs no number, and one that lists them at the end of the
+    section leaves the reader with anonymous paragraphs. Numbers restart
+    per chapter file, as the references do.
+    """
+    count = 0
+
+    def fix(match):
+        nonlocal count
+        opening, number, body, closing = match.groups()
+        if 'class="footnote-number"' in body:
+            return match.group(0)
+        count += 1
+        body = re.sub(r"<p\b([^>]*)>",
+                      r'<p\1><span class="footnote-number">%s.</span> ' % number,
+                      body, count=1)
+        back = (' <a href="#fnref%s" class="footnote-back" '
+                'role="doc-backlink" aria-label="Back to reference %s">'
+                '\u21a9\ufe0e</a>' % (number, number))
+        last = body.rfind("</p>")
+        body = body[:last] + back + body[last:] if last >= 0 else body + back
+        return opening + body + closing
+
+    return NOTE.sub(fix, text), count
+
+
 def retitle_chapters(path):
-    """Give each chapter file a <title> that is its heading's text.
+    """Give each chapter file a <title> that is its heading's text, and
+    its footnotes their numbers.
 
     Pandoc titles every chapter file by its file name ("ch002.xhtml"), a
     WCAG 2.4.2 failure on every page and what Ace reports first. The
     archive is rewritten in place, mimetype first and stored as the
-    container rules require, and only the <title> elements change.
+    container rules require.
     """
     heading = re.compile(r"<h[1-6]\b[^>]*>(.*?)</h[1-6]>", re.S)
     title = re.compile(r"<title>.*?</title>", re.S)
@@ -509,6 +545,7 @@ def retitle_chapters(path):
                         text = title.sub("<title>" + plain + "</title>",
                                          text, count=1)
                         retitled += 1
+                text, _ = number_notes(text)
                 data = text.encode("utf-8")
             zout.writestr(info, data)
     os.replace(tmp, path)

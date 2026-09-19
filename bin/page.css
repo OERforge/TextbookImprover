@@ -10,6 +10,12 @@ table caption {
   color: #555;
 }
 
+/* Footnote numbers the EPUB assembler adds; Pandoc's HTML writer numbers
+   its own list. */
+.footnote-number {
+  font-weight: bold;
+}
+
 /* Pandoc's stylesheet sets `display: block` on tables so they can scroll
    sideways. That silently strips the table role from the browser
    accessibility tree, so screen readers stop exposing rows, columns and

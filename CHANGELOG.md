@@ -15,6 +15,7 @@ Versions are two-part and pre-1.0: breaking changes may land in any of them unti
 
 ### Fixed
 
+- Footnotes in the EPUB had no number where they appeared: the writer's `aside` carries none, on the assumption of a reading system that pops notes up. Each note now opens with its number and ends with a return link, as Pandoc's HTML writer does.
 - An EPUB page whose stem had a space got ids with a space in them, and a raw HTML comment holding `--` (a citation, say) was fatal in XHTML. The assembler makes ids from a sanitized stem and drops raw HTML comments; the output check flags an id with whitespace.
 - A page or file name with a space produced a manifest with a raw space in its `href` and an `identifier` that was not an XML name, which the validator refused. Hrefs are percent-encoded and identifiers reduced to names; references are decoded on the way to disk, so the archive holds the real file names.
 - An EPUB chapter whose heading held `<em>` or `<sup>` had them inside its `<title>`, which XHTML forbids (four chapters of the statistics book; epubcheck `RSC-005`). The chapter `<title>` is now set from the heading's text after the archive is written, since the writer offers no plain-text form of a chapter's heading.

@@ -229,6 +229,10 @@ def case_structure(work):
         doc = json.load(fh)
     doc["blocks"].append({"t": "Header", "c": [
         2, ["sub", [], []], [{"t": "Str", "c": "Subsection"}]]})
+    # And a footnote, which the writer leaves unnumbered.
+    doc["blocks"].append({"t": "Para", "c": [
+        {"t": "Str", "c": "Noted."},
+        {"t": "Note", "c": [{"t": "Para", "c": [{"t": "Str", "c": "The note."}]}]}]})
     # And a body that opens with its own H1, emphasis and all, as a page
     # does when the filter's promotion did not fire: the heading keeps
     # the emphasis, and the chapter <title> must not.
@@ -256,6 +260,11 @@ def case_structure(work):
          lambda: len(out.chapters()) == 7),
         ("each file is titled by its heading, not its file name",
          lambda: out.titles() == [e[1] for e in entries]),
+        ("a footnote is numbered where it appears, with a return link",
+         lambda: '<span class="footnote-number">1.</span> The note.'
+         in out.files[out.chapters()[2]]
+         and 'href="#fnref1" class="footnote-back" role="doc-backlink"'
+         in out.files[out.chapters()[2]]),
         ("a heading with emphasis gives a plain-text title",
          lambda: "<title>Practice</title>" in out.files[out.chapters()[2]]
          and "<h2>Prac<em>tice</em></h2>" in out.files[out.chapters()[2]]),

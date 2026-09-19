@@ -222,6 +222,9 @@ def case_pieces(work):
          lambda: "chapter-7--diseconomies--economies-of-scale" in out.stems),
         ("an empty heading cuts nothing",
          lambda: not any("part" in s for s in out.stems)),
+        ("a link to a heading that became a group lands on its first page",
+         lambda: out.docs["chapter-7--diseconomies--economies-of-scale"][
+             "blocks"][0]["c"][0][0] == "diseconomies"),
         ("a heading with nothing of its own is a group, not a page",
          lambda: "chapter-7--diseconomies" not in out.stems
          and out.docs["chapter-7--diseconomies--economies-of-scale"]["meta"][
@@ -396,19 +399,26 @@ def case_readers(work):
 def case_restyle(work):
     """util/restyle-headings.py: the source repair a Title-styled book
     needs before any of the above can see its top level."""
-    import docx
     os.makedirs(work, exist_ok=True)
-    d = docx.Document()
-    d.add_paragraph("", style="Title")               # Word's cruft
-    d.add_paragraph("Module 1: Basics", style="Title")
-    d.add_paragraph("Intro text")
-    d.add_paragraph("What is Java?", style="Heading 1")
-    d.add_paragraph("Java Goals", style="Heading 2")
-    d.add_paragraph("", style="Heading 2")             # empty, and remapped
-    d.add_paragraph("Module 2: More", style="Title")
-    d.add_paragraph("Body text", style="Body Text")
+    # Built by Pandoc rather than python-docx, which is not a dependency
+    # of this project: a custom-style div writes a Title-styled paragraph
+    # and a raw OpenXML block writes an empty one, which is what Word
+    # leaves behind and what the tool has to drop.
+    empty_title = ('```{=openxml}\n<w:p><w:pPr><w:pStyle w:val="Title"/>'
+                   '</w:pPr></w:p>\n```\n\n')
+    empty_h2 = ('```{=openxml}\n<w:p><w:pPr><w:pStyle w:val="Heading2"/>'
+                '</w:pPr></w:p>\n```\n\n')
+    titled = (empty_title
+              + '::: {custom-style="Title"}\nModule 1: Basics\n:::\n\n'
+              'Intro text\n\n## What is Java?\n\n### Java Goals\n\n'
+              + empty_h2
+              + '::: {custom-style="Title"}\nModule 2: More\n:::\n\n'
+              'Body text\n')
     path = os.path.join(work, "book.docx")
-    d.save(path)
+    with open(os.path.join(work, "book.md"), "w", encoding="utf-8") as fh:
+        fh.write(titled)
+    # Pandoc's H2 is Word's Heading 2, so shift the source one up.
+    run(["pandoc", "book.md", "--shift-heading-level-by=-1", "-o", path], work)
     tool = os.path.join(ROOT, "util", "restyle-headings.py")
     report = run(["python3", tool, path], work)
     no_toc = run(["python3", tool, path, "--from-toc"], work, check=False)
@@ -432,12 +442,10 @@ def case_restyle(work):
         restyled = archive.namelist()
 
     # A book with several H1 sections and no heading over them.
-    flat = docx.Document()
-    flat.add_paragraph("What is Java?", style="Heading 1")
-    flat.add_paragraph("Java Goals", style="Heading 2")
-    flat.add_paragraph("Comments", style="Heading 1")
     flat_path = os.path.join(work, "flat.docx")
-    flat.save(flat_path)
+    with open(os.path.join(work, "flat.md"), "w", encoding="utf-8") as fh:
+        fh.write("# What is Java?\n\n## Java Goals\n\n# Comments\n")
+    run(["pandoc", "flat.md", "-o", flat_path], work)
     titled = os.path.join(work, "titled.docx")
     run(["python3", tool, flat_path, "--demote", "--title", "Intro & Java",
          "-o", titled], work)

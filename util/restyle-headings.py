@@ -74,8 +74,11 @@ PSTYLE = re.compile(r'(<w:pStyle\s+w:val=")([^"]*)(")')
 TEXT = re.compile(r"<w:t(?:\s[^>]*)?>([^<]*)</w:t>")
 TOC_SWITCH = re.compile(r'<w:instrText[^>]*>\s*TOC\b[^<]*?\\t\s*"([^"]*)"',
                         re.I)
-STYLE = re.compile(r'<w:style\b[^>]*w:type="paragraph"[^>]*w:styleId="([^"]*)"'
-                   r'[^>]*>.*?<w:name\s+w:val="([^"]*)"', re.S)
+# Attributes come in any order: Word writes w:type before w:styleId,
+# Pandoc the reverse.
+STYLE_OPEN = re.compile(r"<w:style\b([^>]*)>(.*?)</w:style>", re.S)
+STYLE_ATTR = re.compile(r'\bw:(styleId|type)="([^"]*)"')
+STYLE_NAME = re.compile(r'<w:name\s+w:val="([^"]*)"')
 HEADING_ID = re.compile(r"^Heading(\d)$")
 
 
@@ -90,10 +93,15 @@ def paragraph_styles(document):
     """Style ids of paragraphs in w:styleId form; empty for none."""
     names = {}
     styles = {}
-    for match in STYLE.finditer(document.get("word/styles.xml", b"").decode(
-            "utf-8", "replace")):
-        styles[match.group(1)] = match.group(2)
-        names[match.group(2).lower()] = match.group(1)
+    for match in STYLE_OPEN.finditer(document.get("word/styles.xml", b"")
+                                     .decode("utf-8", "replace")):
+        attrs = dict(STYLE_ATTR.findall(match.group(1)))
+        if attrs.get("type") != "paragraph" or "styleId" not in attrs:
+            continue
+        name = STYLE_NAME.search(match.group(2))
+        styles[attrs["styleId"]] = name.group(1) if name else ""
+        if name:
+            names[name.group(1).lower()] = attrs["styleId"]
     return styles, names
 
 

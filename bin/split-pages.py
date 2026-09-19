@@ -304,6 +304,7 @@ def split_document(doc, stem, level, names, taken, problems):
         or stem_title(stem)
     out = []
     paths = {}                      # default name -> parents it was given
+    pending = []                    # ids of group headings, for the next page
     for n, (head, parents, position, blocks) in enumerate(parts):
         if head is None:
             if not blocks:
@@ -316,6 +317,10 @@ def split_document(doc, stem, level, names, taken, problems):
             following = parts[n + 1] if n + 1 < len(parts) else None
             if not blocks and following and following[0] is not None \
                     and following[1][:len(parents) + 1] == parents + [title]:
+                # A link to the heading -- a Word TOC's, say -- should
+                # land on the first page under it, so its id goes there.
+                if head["c"][1][0]:
+                    pending.append(head["c"][1][0])
                 continue
             key = (stem, PARENT_JOIN.join(parents), title)
             declared = names.get(key + (position,)) or names.get(key + ("",),
@@ -350,15 +355,17 @@ def split_document(doc, stem, level, names, taken, problems):
             anchor = head["c"][1][0]
         taken.add(piece)
         paths[piece] = parents
-        out.append((piece, title, key, parents, position, blocks, anchor))
+        out.append((piece, title, key, parents, position, blocks,
+                    [a for a in pending + [anchor] if a]))
+        pending = []
 
     total = len(out)
     pieces = []
-    for index, (piece, title, key, parents, position, blocks, anchor) \
+    for index, (piece, title, key, parents, position, blocks, anchors) \
             in enumerate(out, 1):
         body = copy.deepcopy(blocks)
         shift_headers(body, level - 1)
-        if anchor:
+        for anchor in reversed(anchors):
             body.insert(0, {"t": "Div", "c": [[anchor, [ANCHOR_CLASS], []],
                                               []]})
         meta = copy.deepcopy(doc.get("meta", {}))

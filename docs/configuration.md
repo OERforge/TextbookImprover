@@ -113,6 +113,9 @@ its first child rather than pointing at it directly. Three levels of
 nesting are supported; deeper is accepted with a warning, since LMS support
 for deep hierarchies is uneven.
 
+A page cut by `pages.split_level` is listed by its piece name,
+`chapter-7--economies-of-scale`; see [Splitting pages](splitting.md).
+
 Omit `contents` and the order is guessed from the filenames — natural sort,
 so chapter 10 doesn't land between chapters 1 and 2, plus chapter grouping
 when the filenames encode it. `--includeallhtml` groups the pages it

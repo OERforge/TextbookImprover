@@ -158,6 +158,7 @@ not by care — see [Testing](testing.md).
 1-3-levels-of-measurement.json        intermediate, as Pandoc read the source
 1-3-levels-of-measurement.filtered.json   the same page after the filter has run
 1-3-levels-of-measurement.html        the page
+chapter-7--economies-of-scale.html    a page cut from chapter-7, with pages.split_level on
 1-3-levels-of-measurement/media/      its images, named by real content type
 imsmanifest.xml                       the manifest
 cartridge-files.txt                   every file the archive must contain

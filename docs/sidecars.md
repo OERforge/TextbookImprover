@@ -13,14 +13,18 @@ the others. A report existing at all means there's work outstanding.
 | `table-captions-missing.csv` | Filling in the `Description` column and appending to `table-captions.csv`. |
 | `table-headers-new.csv` | Pasting its rows into `table-headers.csv`. It holds a prefilled sidecar row for every data table the sidecar has none for, and exists only while there are any. |
 | `table-headers-report.csv` | Nothing directly: it records, for every data table, what the sidecar declared, what the guess said and why, and a status. Written every run. |
+| `page-names-new.csv` | Pasting its rows into `page-names.csv` after editing the `name` column, if the names derived from headings aren't the ones you want. Written only when `pages.split_level` is on. |
+| `page-names-report.csv` | Nothing: it records every page the split wrote, its source, and which part of how many it is. |
 | `spacer-images.csv` | Nothing — it records what the spacer rule did. |
 | `media-unresolved.csv` | Replacing the images named in it. Written only when the run stops. |
 
 ### Sidecar files
 
-`image-alt.csv`, `table-captions.csv`, and `table-headers.csv` hold your
-corrections. All three are plain CSV, read afresh each run, and survive
-re-conversion from updated Word files.
+`image-alt.csv`, `table-captions.csv`, `table-headers.csv`, and
+`page-names.csv` hold your corrections. All four are plain CSV, read
+afresh each run, and survive re-conversion from updated Word files.
+`page-names.csv` is read only when `pages.split_level` is on; see
+[Splitting pages](splitting.md).
 
 **Where to keep them.** By default they sit in the book's own directory,
 next to the reports that name what still needs filling in. That is the

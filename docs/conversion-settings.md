@@ -60,6 +60,14 @@ How data tables are rendered.
 
 Put wide tables in a focusable scroll container so a long table doesn't force the whole page to scroll sideways (WCAG 1.4.10).
 
+## pages
+
+What a page is, when the source's files are not already the pages you want.
+
+**`pages.split_level`** -- `int`; default `0`
+
+Cut every source into one page per heading of this level or shallower, after the filter has run and before anything is rendered. 0 leaves each file as one page. A book that arrived as one file per chapter gets one page per section with 2, and the packager groups the pieces under their source without being told. Each piece is named after its heading unless the page_names sidecar says otherwise, its heading becomes its title, and links between pieces are rewritten to follow.
+
 ## epub
 
 Settings read only by an epub3 target. One EPUB holds the whole book: every page in project.contents, in that order, with each group a heading over its pages and the table of contents built from the same tree the cartridge organization uses.
@@ -108,6 +116,10 @@ Alt text, keyed on the image path with the extension ignored. Use [decorative] f
 
 Where each table's headers are, keyed on a hash of the table's content: first-row, first-column, both, or none. A first run writes prefilled rows to the table_headers_new report; rename or paste them here. Values this version doesn't act on yet (manual, list) are accepted and kept. A row whose key matches no table stops the run, because a correction that silently fails to apply destroys work invisibly.
 
+**`sidecars.page_names`** -- `path`; default `page-names.csv`
+
+Names for the pages split_level cuts, keyed on the source and the heading text: source, heading, name. Only needed when the name derived from the heading is not the one you want. A row whose source and heading match nothing is reported, since it means a heading was edited or the row was mistyped.
+
 ## reports
 
 Where the run records what still needs human attention. Removing a report when nothing is outstanding is deliberate: the file existing at all is the signal that there's work to do.
@@ -127,6 +139,14 @@ Prefilled sidecar rows for every data table the table_headers sidecar has no row
 **`reports.table_headers_report`** -- `path`; default `table-headers-report.csv`
 
 What happened to every data table this run: what the sidecar declared, what the guess said and why, and a status of declared, new, blank, manual, needs-word, or unmatched.
+
+**`reports.page_names_new`** -- `path`; default `page-names-new.csv`
+
+Prefilled page_names rows for every page split_level cut that the sidecar has no row for, with the derived name filled in. Written when there are any and removed when there are none.
+
+**`reports.page_names_report`** -- `path`; default `page-names-report.csv`
+
+Every page split_level wrote this run: its source, the heading it was cut at, its name, and which part of how many it is.
 
 **`reports.media_unresolved`** -- `path`; default `media-unresolved.csv`
 

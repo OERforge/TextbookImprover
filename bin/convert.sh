@@ -33,6 +33,7 @@ page_css="$script_dir/page.css"
 config_reader="$script_dir/read-conversion-config.py"
 cartridge_tool="$script_dir/build-cartridge.py"
 headers_tool="$script_dir/table-headers.py"
+epub_tool="$script_dir/build-epub.py"
 
 for required in "$figure_filter" "$media_filter" "$page_css"; do
   if [ ! -f "$required" ]; then
@@ -164,7 +165,9 @@ if [ -f "$config_reader" ]; then
   # settings the user thought they had changed, which looks like success
   # and is not. v0.2.0 tolerated both cases alike, so a footer written at
   # the top level -- where v0.1 put it -- was reported and then ignored.
-  if ! python3 "$config_reader" -d . "$work_dir"; then
+  # --format html: this script renders the pages, and a configuration
+  # that also declares an epub3 target hands that one to build-epub.py.
+  if ! python3 "$config_reader" -d . "$work_dir" --format html; then
     if [ -f "conversion.yaml" ] || [ -f "project.yaml" ]; then
       echo "" >&2
       echo "Stopping: the configuration could not be read." >&2
@@ -634,6 +637,22 @@ if [ -s "$missing_rows" ]; then
     # applied to every table sharing that label -- worth knowing about.
     echo "Note: the same label appears in more than one document." >&2
     echo "Only one description can apply per label; check the Source column." >&2
+  fi
+fi
+
+############################################
+# 5.5. Assemble the EPUB, when a target asks for one
+#
+#    build-epub.py reads the filtered intermediates step 4 wrote and the
+#    contents tree the packager also uses, and writes one EPUB per
+#    epub3 target. With no such target it says nothing and does nothing,
+#    which is why it runs unconditionally: a folder of documents with no
+#    configuration is still the common case.
+############################################
+
+if [ -f "$epub_tool" ] && [ -f "conversion.yaml" ]; then
+  if ! python3 "$epub_tool" -d . --if-declared; then
+    exit 1
   fi
 fi
 

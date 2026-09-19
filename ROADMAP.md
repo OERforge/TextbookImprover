@@ -1,18 +1,28 @@
 # Roadmap
 
-What's planned, in the order that seems most productive. What has shipped is in [the changelog](CHANGELOG.md); what the tools do now is in [the docs](docs/).
+What's planned, in the order that seems most productive. What has shipped is in [the changelog](CHANGELOG.md); what the tools do now is in [the docs](docs/). EPUB3 output shipped after v0.3 and is no longer a numbered item; see [Building an EPUB](docs/epub.md).
 
 We're attempting to follow two principles: build the tool that can check a change before making the change and, where a decision can't be made by a script, make it declarable by a person once.
 
 Two sections sit after the numbered items. **Refinements to the table headers work** is what v0.3 left undone in the feature it shipped, kept separate because none of it is large enough to be an item and all of it is worth doing before that work is called finished. **Smaller things** is everything that has no dependency on anything else.
 
-## 1. EPUB3 output
+## 1. Splitting and combining pages
 
-One EPUB per book, its table of contents built from the same `contents` the cartridge organization uses. A per-chapter variant follows from the targets mechanism once the first one works.
+A page is the unit `project.contents` arranges, and a page is a file. That's right for OpenStax, which exports one file per section, and wrong for a book that arrives as one file per chapter or one file for the whole thing: the cartridge, the HTML, and the EPUB all get one page per file, and a chapter's sections are visible only as that page's internal headings. Several of the books in reach are like this, and an OER remix may mix files split at different depths.
 
-Nearly free on the table side: EPUB3 uses Pandoc's HTML writer, so `id`, `colspan`, `rowspan`, `scope`, `headers`, and `role` all survive unchanged. The real work is the package document. Pandoc emits accessibility metadata unconditionally and asserts things it can't know: `accessMode: textual` for books that are 820 figures, and `accessibilityFeature: alternativeText` whether or not the images have any. `--epub-metadata` silently drops `schema:` properties, so correcting this means post-processing the OPF inside the archive. An EPUB claiming alt text it doesn't have is worse than one claiming nothing, because catalogs and assistive technology act on that claim.
+So: a step between the filter and the render that cuts a filtered intermediate at every top-level heading of a chosen level or shallower and writes one `.filtered.json` per piece. Everything downstream sees ordinary pages and needs no change. Working on the intermediate is what makes it cheap and format-agnostic: it serves a single-file `.docx` today and a Markdown chapter the day item 3 lands, and once a format round-trips, an author who wants their *source* split can get that from the same step. (DOCX may stay the exception, since a Pandoc round trip discards what Pandoc doesn't model.)
 
-**Why here.** A second consumer of the table sidecar is the only real test that it describes semantics rather than HTML markup. Defer every output format to the end and HTML assumptions get baked in while nothing pushes back.
+After the filter and not before it, because the filter is per-document: the table-headers pre-pass hands it declarations keyed by source file and table index, the alt-text keys carry the source stem, and the reports name the source. Split first and all of that misses; split after and the pieces carry remediated tables while the reports still describe the file the author has to fix.
+
+Three things to settle:
+
+- **Piece names have to be stable across rebuilds**, because the content prefix is stable so an update overwrites in place. A name from the heading's text, the way OpenStax names its files after headings, survives reordering and breaks on a heading edit; a name from position is the reverse. The lean is toward the heading's text, since editing a heading is deliberate and a moved section shouldn't change its address.
+- **Provenance.** A piece should record where it came from -- the source file, and part *n* of *m* -- so that a report can say it and so that a rename sidecar can be generated for the author to adopt once the pieces have settled names.
+- **Links between pieces.** A `#id` link from one piece to a heading now in another has to become `<piece>.html#id`. The splitter knows where every id landed and can rewrite these itself, which solves the cross-page link item under Smaller things for the case it creates. The heading a piece was cut at becomes its page title, the way `promote_h1_to_title` promotes a source's H1.
+
+Combining is the other direction and needs no new machinery: the EPUB is the combination, and a single-page HTML target would be a later variant of the same assembler. The filename guess in `lib/bookcontents.py` can recognize a piece's parent and group pieces under the source's title, which gives the `contents` tree an author would write without their writing it.
+
+**Why here.** The EPUB is what made it visible, but it's a defect in every output for these books, and it's the smallest thing on this list that changes what a reader gets.
 
 ## 2. Multiple targets, and `convert.sh` rewritten in Python
 
@@ -184,7 +194,7 @@ The distinction between the two matters more than either case. A table whose rea
 ## Smaller things
 
 - **Read the contents tree from an EPUB as well as a PDF.** `build-cartridge.py` builds the module tree from a PDF's bookmark outline, which is the book's table of contents in the order the book actually uses. An EPUB carries the same thing in machine-readable form -- `nav.xhtml` with `epub:type="toc"` in EPUB 3, `toc.ncx` in EPUB 2 -- so the same walk produces the same `(depth, title)` list without needing `pypdf`, and OpenStax publishes EPUBs. The matching of titles to page filenames is unchanged; only the source of the entries differs.
-- **Watch [pandoc#3034](https://github.com/jgm/pandoc/issues/3034).** The DOCX and ODT readers ignore `docProps/core.xml`, so a Word file whose title is set through File → Info → Properties converts with no metadata at all: the standalone HTML `<title>` falls back to the filename and the EPUB OPF gets no `dc:title`. If the reader ever picks those up, `promote_h1_to_title` and the duplicate-H1 guard both need rechecking, since the condition they turn on is `doc.meta.title == nil`.
+- **Watch [pandoc#3034](https://github.com/jgm/pandoc/issues/3034).** The DOCX and ODT readers ignore `docProps/core.xml`, so a Word file whose title is set through File → Info → Properties converts with no metadata at all: the standalone HTML `<title>` falls back to the filename and an EPUB Pandoc builds straight from it gets no `dc:title` (ours takes the title from `project.yaml`). If the reader ever picks those up, `promote_h1_to_title` and the duplicate-H1 guard both need rechecking, since the condition they turn on is `doc.meta.title == nil`.
 - **Retired key names.** Writing `manifest.cartridge` into a v0.2 config fails with "unknown setting" and no suggestion, because nothing is similarly named. A small table of retired names would let the error say where it went instead.
 - **`compare-output.py` matches tables by position**, so one inserted table reports every later one on that page as changed. Matching on caption could help, but not every table has one.
 - **A media inventory for the comparator.** It reports files and references; comparing image dimensions or bytes-per-page would catch a class of regression it currently can't see.

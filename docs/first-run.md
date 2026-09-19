@@ -164,6 +164,7 @@ cartridge-files.txt                   every file the archive must contain
 packaging-sample.yaml                 written when the script worked something out
 *-missing.csv                         what still needs a human
 course.imscc                          only with --zip
+epub/course.epub                      only with an epub3 target declared
 ```
 
 The intermediates are Pandoc's own document model as JSON, which is

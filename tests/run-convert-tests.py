@@ -233,7 +233,7 @@ title: Costs in the Long Run
 Text with a [reference](https://doi.org/10.1017/x){aria-label="DOI for Seidel 2014"}.
 <!-- a citation, 28--29, which XHTML forbids in a comment -->
 
-![A pipe](assets/Pipe Sizes.png)
+![A pipe vs. a tube](assets/Pipe Sizes.png)
 
 ::: matrix
 |      | Left | Right |
@@ -299,6 +299,8 @@ def case_markdown(work):
          and not exists(work, "html", "assets", "Pipe Sizes.png")),
         ("raw LaTeX is dropped, not shown",
          lambda: "frontmatter" not in page),
+        ("no non-breaking space after \"vs.\" in alt text",
+         lambda: 'alt="A pipe vs. a tube"' in page),
         ("an .md with a same-named .docx is a leftover, not a source",
          lambda: not exists(work, "html", "tables.md")
          and "tables.md is left over" in result.stderr),

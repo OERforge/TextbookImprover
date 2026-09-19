@@ -768,6 +768,18 @@ function Image(img)
   -- equation images scale on narrow viewports too.
   if RESPONSIVE_IMAGES then img.attributes.height = nil end
 
+  -- Alt text is a string, not a line of type: a non-breaking space the
+  -- markdown reader put after "vs." or "e.g." (its smart extension
+  -- keeps such a pair on one line) has nothing to hold together here
+  -- and comes out as &nbsp;. Plain spaces in the alt.
+  img.caption = img.caption:walk({
+    Str = function(s)
+      if s.text:find('\194\160') then
+        return pandoc.Str((s.text:gsub('\194\160', ' ')))
+      end
+    end,
+  })
+
   -- Spacer handling runs before anything else: a stripped image should
   -- not also be reported as missing alt text.
   local width = img.attributes.width

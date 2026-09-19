@@ -64,6 +64,14 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+# This script needs bash: it reads PIPESTATUS to gate on a suite's exit
+# code rather than tee's. If it was started as `sh tests/run-all.sh`,
+# Ubuntu and WSL run it under dash -- re-exec under bash so it works
+# either way. Must stay POSIX-parseable and above anything bash-specific.
+if [ -z "${BASH_VERSION:-}" ]; then
+  exec bash "$0" "$@"
+fi
+
 set -u
 
 here="$(cd "$(dirname "$0")" && pwd)"

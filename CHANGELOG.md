@@ -4,7 +4,9 @@ All notable changes to this project are documented in this file. The format is b
 
 Versions are two-part and pre-1.0: breaking changes may land in any of them until 1.0, and each is marked **Breaking** below. But we intend to keep the configuration schema, the command-line interface of each script, and the format of the sidecar CSV files stable in each version.
 
-## [Unreleased]
+## [0.4] - 2026-09-19
+
+EPUB output, and pages that need not be files. A conversion target with `format: epub3` assembles the book into one EPUB whose table of contents is the same tree the cartridge organization uses and whose accessibility claims are computed from the build; `pages.split_level` cuts a source that arrived as one file into one page per heading, in every output; and every run now ends by checking what it wrote, with epubcheck and the Nu HTML checker joining in when they're installed. Output changes for decorative images, which carry `aria-hidden="true"` instead of `role="presentation"`, and for every page's `<head>`, which now carries the author `<meta>` the filter has written since v0.2.
 
 ### Added
 

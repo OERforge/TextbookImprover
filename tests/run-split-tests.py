@@ -393,7 +393,66 @@ def case_readers(work):
     ]
 
 
+def case_restyle(work):
+    """util/restyle-headings.py: the source repair a Title-styled book
+    needs before any of the above can see its top level."""
+    import docx
+    os.makedirs(work, exist_ok=True)
+    d = docx.Document()
+    d.add_paragraph("", style="Title")               # Word's cruft
+    d.add_paragraph("Module 1: Basics", style="Title")
+    d.add_paragraph("Intro text")
+    d.add_paragraph("What is Java?", style="Heading 1")
+    d.add_paragraph("Java Goals", style="Heading 2")
+    d.add_paragraph("", style="Heading 2")             # empty, and remapped
+    d.add_paragraph("Module 2: More", style="Title")
+    d.add_paragraph("Body text", style="Body Text")
+    path = os.path.join(work, "book.docx")
+    d.save(path)
+    tool = os.path.join(ROOT, "util", "restyle-headings.py")
+    report = run(["python3", tool, path], work)
+    no_toc = run(["python3", tool, path, "--from-toc"], work, check=False)
+    out = os.path.join(work, "restyled.docx")
+    done = run(["python3", tool, path, "--promote", "Title", "-o", out], work)
+    kept = os.path.join(work, "kept.docx")
+    run(["python3", tool, path, "--promote", "Title", "--keep-empty",
+         "-o", kept], work)
+    run(["pandoc", "-f", "docx", "-t", "json", out, "-o", "restyled.json"],
+        work)
+    with open(os.path.join(work, "restyled.json"), encoding="utf-8") as fh:
+        doc = json.load(fh)
+    headers = [(b["c"][0], "".join(i.get("c", " ") if i["t"] == "Str"
+                                   else " " for i in b["c"][2]))
+               for b in doc["blocks"] if b["t"] == "Header"]
+    with zipfile.ZipFile(kept) as archive:
+        kept_xml = archive.read("word/document.xml").decode("utf-8")
+    with zipfile.ZipFile(path) as archive:
+        original = archive.namelist()
+    with zipfile.ZipFile(out) as archive:
+        restyled = archive.namelist()
+    return [
+        ("with no option the tool reports and writes nothing",
+         lambda: "Title" in report.stdout and "Nothing changed" in report.stdout
+         and not os.path.exists(os.path.join(work, "book.docx.tmp"))),
+        ("--from-toc refuses a document with no TOC field",
+         lambda: no_toc.returncode != 0 and "no TOC field" in no_toc.stderr),
+        ("--promote moves every heading down one, all at once",
+         lambda: headers == [(1, "Module 1: Basics"), (2, "What is Java?"),
+                             (3, "Java Goals"), (1, "Module 2: More")]),
+        ("an empty paragraph of a remapped style is dropped, and said so",
+         lambda: "empty Title paragraph(s) dropped" in done.stdout
+         and "empty Heading2 paragraph(s) dropped" in done.stdout),
+        ("--keep-empty keeps it",
+         lambda: kept_xml.count('w:val="Heading1"') == 3),
+        ("the metadata title is gone with the Title style, as it should be",
+         lambda: "title" not in doc["meta"]),
+        ("every other part is carried over",
+         lambda: original == restyled),
+    ]
+
+
 CASES = [
+    ("restyling a Title-styled source", case_restyle),
     ("what a piece is", case_pieces),
     ("the page-names sidecar", case_names),
     ("levels and refusals", case_levels),

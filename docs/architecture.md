@@ -57,6 +57,7 @@ and redistributed under their own terms. See the README there.
 | `table-census.py` | Surveys table structure across a corpus of DOCX files: the command line over `lib/tablecensus.py`. |
 | `table-samples.py` | Collects one real example of each table shape into a single Word document, copied from the sources rather than rebuilt. |
 | `docx-compat.py` | Reads, and optionally sets, the Word compatibility mode of a DOCX. |
+| `restyle-headings.py` | Rewrites a DOCX's heading styles from a map or from its TOC field, for a book whose top level is styled `Title`. |
 | `settings-reference.py` | Writes the settings reference pages under `docs/` from the schemas. |
 
 **`tests/`** holds the configuration conformance fixtures and the two test

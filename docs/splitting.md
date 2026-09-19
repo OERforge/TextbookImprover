@@ -15,35 +15,49 @@ The cut happens on the filtered intermediate, after the filter has done its work
 
 Everything from a top-level heading of the chosen level or shallower up to the next one. The heading becomes the piece's title, the way `promote_h1_to_title` makes a source's H1 its page title, and its id is kept as an empty anchor at the top of the piece so links to the section still land. The piece's own headings move up so that each page starts its own structure at H2. Whatever precedes the first cut (a chapter's introduction, say) is a piece of its own, named after the source and titled by it, unless there's nothing there. A source with no heading at that level is left as it was.
 
-Only top-level headings cut. A heading inside a Div, a list item, or a table cell is part of whatever contains it.
+Cut headings nest. With level 2, an H1 and the H2s under it are all pages, and the H2 pages belong under the H1. An H1 with nothing of its own before its first H2 isn't a page at all: it survives as a group, because the pages under it record it as their parent. Only top-level headings cut; a heading inside a Div, a list item, or a table cell is part of whatever contains it, and an empty heading (Word leaves these behind) cuts nothing.
 
 Links between pieces are rewritten: a link to `#economies-of-scale` from a piece that no longer holds that section becomes `chapter-7--economies-of-scale.html#economies-of-scale`, and the EPUB assembler turns that into a link within the book. Links within a piece are left alone.
 
-## Names
-
-A piece is named after the source and its heading, the way OpenStax names files after headings: *Economies of Scale* under `chapter-7.docx` becomes `chapter-7--economies-of-scale.html`. That name survives moving the section and changes when the heading does. The source's name stays in front because it's what lets a later run find the pieces of a source it's cutting again and replace them, whatever the level was last time.
-
-To change the part after the separator, write `page-names.csv`:
-
-```
-source,heading,name
-chapter-7,Choice of Production Technology,technology
-```
-
-It's keyed on the source and the heading text as written. A first run writes `page-names-new.csv` with a prefilled row for every piece the sidecar doesn't name; edit the `name` column and append the rows. A row whose heading the source doesn't have is reported, since it means the heading was edited or the row mistyped. Two sections with the same heading both match a row for it, and the later one gets a number.
-
-`page-names-report.csv` lists every piece the run wrote, with its source, its heading, and which part of how many it is. Two dashes in a row (`--`) are reserved for the separator: a source whose own name contains them is refused.
-
 ## Where the pieces came from
 
-Each piece records its source and its part number in its metadata and in the page's `<head>`:
+Each piece records its source, its part number, its position among the cut headings, and the headings above it, in its metadata and in the page's `<head>`:
 
 ```html
 <meta name="source-page" content="chapter-7" />
-<meta name="page-part" content="3/4" />
+<meta name="page-part" content="3/12" />
+<meta name="page-position" content="2.1" />
+<meta name="page-parent" content="Economies of Scale" />
 ```
 
-The packager and the EPUB assembler read that, so with no `contents` declared the pieces of a source are grouped under the source's title, in reading order, and the source's own page comes first when it has one. The guess written to `packaging-sample.yaml` shows the result and is the place to adjust it.
+The packager and the EPUB assembler read that, so with no `contents` declared the pieces are grouped under the headings they sat beneath, in reading order, with a heading's own page first in its group. A book that is a single source isn't wrapped in a group for the source, since the book is the source. The guess is written to `packaging-sample.yaml` and is the place to adjust it.
+
+## Naming the pages
+
+A piece starts out named after the source and its heading, the way OpenStax names files after headings: *Economies of Scale* under `chapter-7.docx` is `chapter-7--economies-of-scale.html`. A heading that repeats under a different parent takes the parent's name as well; one that repeats under the same parent gets a number, and the run says so. Those names are stable and usable, and for many books they're enough.
+
+To choose your own, the workflow is:
+
+1. Convert with `split_level` on. The run writes `page-names-new.csv`, one row per piece the sidecar doesn't name, with the derived name filled in:
+
+   ```
+   source,parents,heading,position,name
+   chapter-7,,What is Java?,,chapter-7--what-is-java
+   chapter-7,What is Java?,Java Goals,,chapter-7--java-goals
+   chapter-7,Introduction,Learning Objectives,2.1,chapter-7--learning-objectives
+   ```
+
+2. Edit the `name` column to the names you want (`1-1-what-is-java`, say) and append the rows to `page-names.csv`. Rows you don't want to rename can be left out; the derived name stands.
+
+3. Convert again. The pieces are written under the new names, the pages the previous run wrote under the old ones are removed (the run keeps their list in `page-names-report.csv`), and `packaging-sample.yaml` shows the new names in the guessed order. Copy its `contents` into `project.yaml` when the order is right, or edit it there.
+
+A row is keyed on the source, the headings above (joined with ` > `), and the heading's text, so it survives the section moving and stops matching when the heading is edited, which is reported. The `position` column is filled in only for pieces the other three columns can't tell apart, two sections both called *Introduction* under the same parent, and it's the one thing that does change when a section moves. Names must be usable as file names: letters, digits, `.`, `_`, and `-`.
+
+`page-names-report.csv` lists every piece the run wrote, with its source, parents, heading, position, and part.
+
+## Headings that aren't headings
+
+The splitter cuts at what Pandoc reads as headings, and Pandoc's DOCX reader reads `Heading 1` through `Heading 9`. A book whose top level is styled `Title` (one text in reach uses `Title` for its modules and `Heading 1` for their sections, and its own TOC field says so: `Title,1,Heading 1,2,...`) loses that level on the way in: the first `Title` paragraph becomes the document's metadata title and the rest become plain paragraphs. The result is a flat list of sections with no modules over them, and every module's *Introduction* colliding with every other's. The fix is in the source: restyle `Title` to `Heading 1` and shift the rest down, which Word's Styles pane does in a minute and a small utility could do mechanically. Until then, `pandoc -f docx+styles` shows what was lost, as `Div` blocks with `custom-style="Title"`.
 
 ## Splitting your source files
 

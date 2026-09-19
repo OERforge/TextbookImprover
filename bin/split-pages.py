@@ -31,21 +31,30 @@ structure at H2. Whatever precedes the first cut -- a chapter's own
 introduction -- is a piece of its own, named after the source and titled
 by it, unless it is empty.
 
+STRUCTURE
+
+Cut headings nest: with level 2, an H1 and the H2s under it are all
+pages, and the H2 pages belong under the H1. Each piece records that --
+its source, its part n of m, and the headings above it -- in its
+metadata and in the page's <head> as <meta> elements, so the packager
+and the EPUB assembler group the pieces under their source and under
+their enclosing headings without being told. A heading with nothing of
+its own before the next cut is not a page; it survives as a group,
+through the provenance of the pages under it.
+
 NAMES
 
-A piece is named after its heading, the way OpenStax names files after
-headings: "Economies of Scale" under chapter-7 becomes
-chapter-7--economies-of-scale. That survives reordering and changes when
-the heading does. The page-names sidecar overrides the part after the
-separator, keyed on the source and the heading text, so an author who
-wants shorter or different names writes them once; a report is written
-with a prefilled row for every piece the sidecar has no row for. The
-source's name stays in front because it is what lets a later run find
-and replace the pieces of a source it is splitting again.
-
-Each piece records where it came from -- source, part n of m -- in its
-metadata, and in the page's <head> as <meta> elements, so the packager
-can group pieces under their source without being told.
+A piece is named after its source and its heading, the way OpenStax
+names files after headings: "Economies of Scale" under chapter-7
+becomes chapter-7--economies-of-scale, with the enclosing heading added
+when that alone would repeat. That survives reordering and changes when
+the heading does. The page-names sidecar replaces the whole name, keyed
+on the source, the enclosing headings, and the heading text, so an
+author who wants OpenStax-style names writes them once; a report is
+written with a prefilled row for every piece the sidecar has no row
+for, with the piece's position (1.2.3) beside it to derive them from.
+Pages a previous run wrote are found in its report and replaced, so a
+renamed page does not leave its old self behind.
 
 Copyright 2026 Robert Szarka
 
@@ -73,11 +82,13 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(HERE), "lib"))
-from bookcontents import slugify, PIECE_SEPARATOR  # noqa: E402
+from bookcontents import slugify, stem_title, PIECE_SEPARATOR  # noqa: E402
 
 INTERMEDIATE = ".filtered.json"
-SIDECAR_COLUMNS = ["source", "heading", "name"]
-REPORT_COLUMNS = ["source", "heading", "name", "part", "parts"]
+SIDECAR_COLUMNS = ["source", "parents", "heading", "position", "name"]
+REPORT_COLUMNS = ["source", "parents", "heading", "name", "position",
+                  "part", "parts"]
+PARENT_JOIN = " > "
 ANCHOR_CLASS = "page-title-anchor"
 SAFE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 
@@ -204,9 +215,9 @@ def shift_headers(node, by):
 # --------------------------------------------------------------------------
 
 def read_sidecar(path):
-    """(source, heading) -> name. Columns are matched by header name, so
-    a column this version does not know is ignored and a missing one
-    reads as empty."""
+    """(source, parents, heading) -> name. Columns are matched by header
+    name, so a column this version does not know is ignored and a
+    missing one reads as empty."""
     names = {}
     if not path or not os.path.exists(path):
         return names
@@ -216,8 +227,23 @@ def read_sidecar(path):
             row = {k.strip().lower(): (v or "").strip()
                    for k, v in row.items() if k}
             if row.get("source") and row.get("heading"):
-                names[(row["source"], row["heading"])] = row.get("name", "")
+                # position is part of the key only when the row gives
+                # one: the prefilled rows carry it for headings the path
+                # cannot tell apart, and nowhere else, so that moving a
+                # section does not orphan its name.
+                key = (row["source"], row.get("parents", ""), row["heading"],
+                       row.get("position", ""))
+                names[key] = row.get("name", "")
     return names
+
+
+def previous_pages(report):
+    """Names a previous run's report lists, so they can be replaced."""
+    if not report or not os.path.exists(report):
+        return []
+    with open(report, encoding="utf-8", newline="") as fh:
+        return [row.get("name", "") for row in csv.DictReader(fh)
+                if row.get("name")]
 
 
 # --------------------------------------------------------------------------
@@ -225,67 +251,111 @@ def read_sidecar(path):
 # --------------------------------------------------------------------------
 
 def cut(blocks, level):
-    """[(heading block or None, blocks)] in reading order. Only top-level
-    headings cut: a heading inside a Div or a list item is part of what
-    contains it, as it is for the filter's title promotion."""
+    """[(heading block or None, parents, position, blocks)] in reading
+    order, where parents are the titles of the cut headings enclosing
+    this one and position is its place among them, "1.2.3". Only
+    top-level headings cut: a heading inside a Div or a list item is
+    part of what contains it, as it is for the filter's title
+    promotion."""
     pieces, current, head = [], [], None
+    stack = []                      # [(level, title, index)] enclosing
+    parents, position = [], ""
+
+    def close():
+        if head is not None or current:
+            pieces.append((head, list(parents), position, current))
+
     for block in blocks:
-        if block.get("t") == "Header" and block["c"][0] <= level:
-            if head is not None or current:
-                pieces.append((head, current))
+        # An empty heading is Word cruft, not a section: it cuts nothing
+        # and is nobody's parent.
+        if block.get("t") == "Header" and block["c"][0] <= level \
+                and heading_text(block["c"][2]):
+            close()
             head, current = block, []
+            own = block["c"][0]
+            while stack and stack[-1][0] >= own:
+                stack.pop()
+            index = 1
+            if pieces:
+                # Count earlier siblings: cut headings at this level under
+                # the same parents.
+                index = 1 + sum(1 for h, p, _, _ in pieces
+                                if h is not None and h["c"][0] == own
+                                and p == [t for _, t, _ in stack])
+            parents = [t for _, t, _ in stack]
+            position = ".".join(str(i) for _, _, i in stack) + \
+                ("." if stack else "") + str(index)
+            stack.append((own, heading_text(block["c"][2]), index))
         else:
             current.append(block)
-    if head is not None or current:
-        pieces.append((head, current))
+    close()
     return pieces
 
 
-def split_document(doc, stem, level, names, problems):
-    """The pieces of one source: [(piece_stem, title, heading_key, doc)]."""
+def split_document(doc, stem, level, names, taken, problems):
+    """The pieces of one source: [(piece_stem, title, key, position, doc)].
+
+    taken holds every page name in use across the run, so a sidecar
+    cannot give two pieces of different sources one name."""
     parts = cut(doc["blocks"], level)
     if len(parts) <= 1 and (not parts or parts[0][0] is None):
         return []                       # nothing at that level to cut at
-    source_title = meta_text(doc.get("meta", {}), "title")
-    taken = set()
+    source_title = meta_text(doc.get("meta", {}), "title") \
+        or stem_title(stem)
     out = []
-    for head, blocks in parts:
+    paths = {}                      # default name -> parents it was given
+    for n, (head, parents, position, blocks) in enumerate(parts):
         if head is None:
             if not blocks:
                 continue
-            piece, title, key = stem, source_title, None
-            anchor = None
+            piece, title, key, anchor = stem, source_title, None, None
         else:
             title = heading_text(head["c"][2])
-            key = (stem, title)
-            declared = names.get(key, "")
-            if declared:
-                if declared.startswith(stem + PIECE_SEPARATOR):
-                    declared = declared[len(stem) + len(PIECE_SEPARATOR):]
-                if not SAFE_NAME.match(declared) or PIECE_SEPARATOR in declared:
-                    problems.append(
-                        f"page-names: {stem} / {title!r}: {declared!r} is "
-                        "not a usable name (letters, digits, . _ - only, "
-                        f"and no {PIECE_SEPARATOR!r}); the heading's is used")
-                    declared = ""
-            name = declared or slugify(title) or "part"
-            piece = stem + PIECE_SEPARATOR + name
-            if piece in taken:
-                # Two sections with one heading: a sidecar row for the
-                # heading names both, and the later one gets a number.
-                n = 2
-                while f"{piece}-{n}" in taken:
-                    n += 1
-                piece = f"{piece}-{n}"
-                problems.append(f"{stem}: the heading {title!r} appears "
-                                f"more than once; the later one is {piece}")
+            # A heading with nothing of its own before the next cut is a
+            # group, not a page; the pages under it carry it as a parent.
+            following = parts[n + 1] if n + 1 < len(parts) else None
+            if not blocks and following and following[0] is not None \
+                    and following[1][:len(parents) + 1] == parents + [title]:
+                continue
+            key = (stem, PARENT_JOIN.join(parents), title)
+            declared = names.get(key + (position,)) or names.get(key + ("",),
+                                                                 "")
+            if declared and not SAFE_NAME.match(declared):
+                problems.append(
+                    f"page-names: {stem} / {title!r}: {declared!r} is not "
+                    "a usable name (letters, digits, . _ - only); the "
+                    "heading's is used")
+                declared = ""
+            if declared and declared in taken:
+                problems.append(
+                    f"page-names: {stem} / {title!r}: {declared!r} is "
+                    "already a page; the heading's name is used")
+                declared = ""
+            piece = declared
+            if not piece:
+                piece = stem + PIECE_SEPARATOR + (slugify(title) or "part")
+                # The same heading under a different parent takes the
+                # parent's name; under the same parent, a number.
+                if piece in taken and parents and paths.get(piece) != parents:
+                    piece = (stem + PIECE_SEPARATOR + slugify(parents[-1])
+                             + PIECE_SEPARATOR + (slugify(title) or "part"))
+                if piece in taken:
+                    base, k = piece, 2
+                    while f"{base}-{k}" in taken:
+                        k += 1
+                    piece = f"{base}-{k}"
+                    problems.append(f"{stem}: {title!r} under "
+                                    f"{PARENT_JOIN.join(parents) or 'the top'}"
+                                    f" repeats an earlier name; it is {piece}")
             anchor = head["c"][1][0]
         taken.add(piece)
-        out.append((piece, title, key, blocks, anchor))
+        paths[piece] = parents
+        out.append((piece, title, key, parents, position, blocks, anchor))
 
     total = len(out)
     pieces = []
-    for index, (piece, title, key, blocks, anchor) in enumerate(out, 1):
+    for index, (piece, title, key, parents, position, blocks, anchor) \
+            in enumerate(out, 1):
         body = copy.deepcopy(blocks)
         shift_headers(body, level - 1)
         if anchor:
@@ -300,9 +370,14 @@ def split_document(doc, stem, level, names, problems):
         meta["source-page"] = meta_string(stem)
         meta["source-title"] = meta_string(source_title)
         meta["page-part"] = meta_string(f"{index}/{total}")
+        meta["page-parents"] = {"t": "MetaList",
+                                "c": [meta_string(t) for t in parents]}
+        meta["page-position"] = meta_string(position)
         add_head_meta(meta, [("source-page", stem),
-                             ("page-part", f"{index}/{total}")])
-        pieces.append((piece, title, key, {
+                             ("page-part", f"{index}/{total}"),
+                             ("page-position", position)]
+                      + [("page-parent", t) for t in parents])
+        pieces.append((piece, title, key, parents, position, {
             "pandoc-api-version": doc["pandoc-api-version"],
             "meta": meta, "blocks": body}))
     return pieces
@@ -335,6 +410,23 @@ def main():
     names = read_sidecar(args.sidecar)
     problems, new_rows, report_rows, written = [], [], [], []
     seen_keys = set()
+    sources = {os.path.basename(p)[:-len(INTERMEDIATE)] for p in args.files
+               if p.endswith(INTERMEDIATE)}
+    taken = set(sources)
+
+    # Pages the previous run cut are this run's to replace, whatever they
+    # were named: a renamed or re-levelled page would otherwise survive.
+    if args.level > 0:
+        for old in previous_pages(args.report):
+            if old in sources:
+                continue
+            for suffix in (INTERMEDIATE, ".html"):
+                for path in args.files:
+                    candidate = os.path.join(os.path.dirname(path) or ".",
+                                             old + suffix)
+                    if os.path.exists(candidate):
+                        os.remove(candidate)
+                    break
 
     for path in args.files:
         if not path.endswith(INTERMEDIATE):
@@ -346,8 +438,8 @@ def main():
                      "reserved for the pieces this tool writes.")
         with open(path, encoding="utf-8") as fh:
             doc = json.load(fh)
-        pieces = split_document(doc, stem, args.level, names, problems) \
-            if args.level > 0 else []
+        pieces = split_document(doc, stem, args.level, names, taken,
+                                problems) if args.level > 0 else []
         if not pieces:
             written.append(path)
             continue
@@ -355,32 +447,42 @@ def main():
         # Links between pieces. An id that occurs twice in the source
         # keeps its first home, as the browser would have resolved it.
         home = {}
-        for piece, _, _, pdoc in pieces:
+        for piece, _, _, _, _, pdoc in pieces:
             ids = []
             collect_ids(pdoc["blocks"], ids)
             for identifier in ids:
                 home.setdefault(identifier, piece)
         total = len(pieces)
-        for index, (piece, title, key, pdoc) in enumerate(pieces, 1):
+        for index, (piece, title, key, parents, position, pdoc) \
+                in enumerate(pieces, 1):
             rewrite_links(pdoc["blocks"], piece, home)
             out = os.path.join(directory, piece + INTERMEDIATE)
             with open(out, "w", encoding="utf-8") as fh:
                 json.dump(pdoc, fh)
             written.append(out)
-            report_rows.append([stem, title if key else "", piece,
-                                str(index), str(total)])
+            joined = PARENT_JOIN.join(parents)
+            report_rows.append([stem, joined, title if key else "", piece,
+                                position, str(index), str(total)])
             if key:
                 seen_keys.add(key)
-                if key not in names:
-                    new_rows.append([stem, title, piece.split(
-                        PIECE_SEPARATOR, 1)[1]])
+                shared = sum(1 for _, _, k, _, _, _ in pieces if k == key) > 1
+                if key + (position,) not in names and key + ("",) not in names:
+                    new_rows.append([stem, joined, title,
+                                     position if shared else "", piece])
+        # The source's own intermediate is superseded by its pieces. Left
+        # behind, anything that reads every intermediate -- the EPUB
+        # assembler -- would take it for a page holding the whole source.
+        # (When the content before the first cut is a page, it took the
+        # source's name and overwrote it.)
+        if stem not in {piece for piece, _, _, _, _, _ in pieces}:
+            os.remove(path)
         print(f"split-pages: {stem}: {total} page(s)", file=sys.stderr)
 
     for key in names:
-        if key not in seen_keys and any(key[0] == os.path.basename(p)[
-                :-len(INTERMEDIATE)] for p in args.files):
+        if key[:3] not in seen_keys and key[0] in sources:
+            where = f" under {key[1]!r}" if key[1] else ""
             problems.append(f"page-names: {key[0]} has no heading "
-                            f"{key[1]!r}; the row did not apply")
+                            f"{key[2]!r}{where}; the row did not apply")
 
     for problem in problems:
         print(f"WARNING: {problem}", file=sys.stderr)

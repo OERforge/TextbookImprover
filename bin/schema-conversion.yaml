@@ -150,6 +150,18 @@ keys:
           Put wide tables in a focusable scroll container so a long table
           doesn't force the whole page to scroll sideways (WCAG 1.4.10).
 
+      markers:
+        type: opaque
+        default: {matrix: both}
+        description: >
+          What a fenced div around a table in a Markdown source declares
+          about its headers, class by class: "::: matrix" means both a
+          header row and a header column unless this says otherwise. The
+          values are the ones table-headers.csv takes (first-row,
+          first-column, both, none). A Markdown table with no marker is
+          left as Pandoc read it, header row and all; the guess and the
+          report run only on Word sources.
+
   pages:
     description: >
       What a page is, when the source's files are not already the pages

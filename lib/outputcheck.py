@@ -200,6 +200,8 @@ def check_page(page, findings):
         if identifier in seen:
             findings.append(Finding(where, "duplicate-id", identifier))
         seen.add(identifier)
+        if any(c.isspace() for c in identifier):
+            findings.append(Finding(where, "invalid-id", identifier))
     for has_alt, alt, decorative, src in page.images:
         if not has_alt:
             findings.append(Finding(where, "image-without-alt", src))
@@ -402,6 +404,7 @@ DESCRIPTIONS = {
     "heading-skips-level": "a heading is more than one level below the last",
     "empty-heading": "a heading with no text",
     "duplicate-id": "an id used more than once in one document",
+    "invalid-id": "an id containing whitespace, which no id may",
     "table-without-headers-or-caption":
         "a data table with no th and no caption",
     "no-lang": "the html element declares no language",

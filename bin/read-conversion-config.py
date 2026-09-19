@@ -213,6 +213,8 @@ def main():
         "RESPONSIVE_IMAGES":
             "true" if resolved["images.responsive"] else "false",
         "WRAP_TABLES": "true" if resolved["tables.wrap"] else "false",
+        "TABLE_MARKERS": ",".join(f"{k}={v}" for k, v in
+                                  (resolved["tables.markers"] or {}).items()),
         "MEDIA_STRICT": "1" if resolved["media.strict"] else "",
 
         "TABLE_LABEL_PREFIXES": as_list(resolved["captions.table_prefixes"]),

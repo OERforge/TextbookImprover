@@ -307,7 +307,9 @@ def split_document(doc, stem, level, names, taken, problems):
     pending = []                    # ids of group headings, for the next page
     for n, (head, parents, position, blocks) in enumerate(parts):
         if head is None:
-            if not blocks:
+            # Raw LaTeX alone -- \\frontmatter before the first heading --
+            # is not a page.
+            if not [b for b in blocks if b.get("t") != "RawBlock"]:
                 continue
             piece, title, key, anchor = stem, source_title, None, None
         else:

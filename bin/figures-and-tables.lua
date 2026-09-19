@@ -647,6 +647,15 @@ end
 -- in the document. A separate pass runs first and stamps each table with
 -- its true position; see the filter list at the end of this file.
 local ORDINAL_ATTR = 'data-cc-ordinal'
+-- Stamped on a table inside a marked div (::: matrix) in a Markdown
+-- source: the declaration the marker means, read from TABLE_MARKERS as
+-- "class=value,class=value". Removed before the writer sees it.
+local MARKER_ATTR = 'data-th-marker'
+local MARKERS = {}
+for pair in (os.getenv('TABLE_MARKERS') or 'matrix=both'):gmatch('[^,]+') do
+  local class, value = pair:match('^%s*([^=%s]+)%s*=%s*(%S+)%s*$')
+  if class then MARKERS[class] = value end
+end
 -- Position among *all* the document's tables, image-only ones included,
 -- in document order with a container before the tables inside it. This
 -- is the index the table-headers pre-pass uses, which counts every w:tbl.
@@ -1415,6 +1424,13 @@ local function split_table(tbl, bands, part_captions, apply)
 end
 
 local function resolved_for(tbl)
+  -- A marker in the source outranks nothing: it is the author's own
+  -- declaration, and a Markdown source has no pre-pass to disagree.
+  local marked = tbl.attr.attributes[MARKER_ATTR]
+  if marked then
+    return { headers = marked, caption_rows = {}, split_at = {},
+             part_captions = {}, anchors = {} }
+  end
   local index = tonumber(tbl.attr.attributes[TH_INDEX_ATTR])
   local by_doc = load_resolved()[source_stem()]
   if index == nil or by_doc == nil then return nil end
@@ -1464,6 +1480,7 @@ local function caption_data_table(tbl, next_block, after_next, after_after, out)
   -- as the reader gave it, before any row is moved.
   local entry = resolved_for(tbl)
   tbl.attr.attributes[TH_INDEX_ATTR] = nil
+  tbl.attr.attributes[MARKER_ATTR] = nil
   local pending = pending_caption_rows(tbl, entry)
   local bands = band_targets(tbl, entry)
 
@@ -1777,6 +1794,17 @@ local function number_tables(blocks, state)
         end
       end
     elseif kind == 'Div' or kind == 'BlockQuote' or kind == 'Figure' then
+      if kind == 'Div' then
+        for _, class in ipairs(block.classes) do
+          if MARKERS[class] then
+            for _, inner in ipairs(block.content) do
+              if inner.t == 'Table' then
+                inner.attr.attributes[MARKER_ATTR] = MARKERS[class]
+              end
+            end
+          end
+        end
+      end
       number_tables(block.content, state)
     elseif kind == 'BulletList' or kind == 'OrderedList' then
       for _, item in ipairs(block.content) do

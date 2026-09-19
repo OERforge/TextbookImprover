@@ -6,9 +6,9 @@ We're attempting to follow two principles: build the tool that can check a chang
 
 Two sections sit after the numbered items. **Refinements to the table headers work** is what v0.3 left undone in the feature it shipped, kept separate because none of it is large enough to be an item and all of it is worth doing before that work is called finished. **Smaller things** is everything that has no dependency on anything else.
 
-## 1. Markdown as a source format, read and written
+## 1. Markdown as a target format
 
-Markdown is the one format this project should be able to go both ways in, and the two halves are one piece of work because they define the same vocabulary. Reading has to accept the markers writing emits; writing has to emit markers reading accepts. Ship either half alone and the other is where you find out the first chose badly.
+Reading Markdown shipped (see [Markdown sources](docs/markdown.md)): a `.md` beside the sources is a page, `::: matrix` declares a table's headers through `tables.markers`, a link's `aria-label` carries through, and images named by path travel with the page. What remains is writing it, so a book converted from Word can be maintained in Markdown, and the two halves define one vocabulary: writing has to emit the markers reading accepts.
 
 **Tables survive better than this item used to claim.** What Markdown can't carry is the rendered markup: there's no syntax for `scope` on a cell or for a header column. What it can carry is the *declaration*, in a fenced div, and the declaration is what the sidecar holds anyway. Verified on 3.11: `::: matrix` around a table round-trips through the `markdown` and `commonmark_x` writers and readers as `Div ("", ["matrix"], [])`, and a filter reading that class regenerates the whole thing—`<caption>`, `scope="col"` across the head, `scope="row"` down the first column. So a Markdown source isn't a lesser input carrying more sidecar load; it's a source where the sidecar's content lives in the document. That is how my own textbook is written, with `::: matrix` and `matrix-headers.lua`.
 
@@ -21,8 +21,6 @@ Markdown is the one format this project should be able to go both ways in, and t
 **The acceptance test exists only when both halves do.** Convert a `.docx` to Markdown, convert that Markdown to HTML, and compare against converting the `.docx` straight to HTML. If the pages differ, a declaration didn't survive. `util/compare-output.py` already performs that comparison, so the gate is free once the second half lands.
 
 **A hand-written page is one of two things, and the run already tells them apart.** An `.html` beside the sources with no `.docx` behind it is finished: it is copied into every HTML target as it stands and read into an intermediate only so the EPUB can carry it. An `.md` beside the sources is a source, not a finished page: Pandoc reads it into the same intermediate a `.docx` gets, every target renders it (HTML included), and the filter can act on its markers. The two DOCX-only steps, the table-headers pre-pass and the bookmark repair, don't run on it. So Markdown input is a second reader in the driver's first step, not a new path; the one visible change is that an `.md` on its own stops being reported as a v0.1 leftover (one with a same-named `.docx` still is).
-
-**Read first, write second.** There are Markdown books to test the reading half against today, and no Markdown output yet to produce any. Reading also settles the marker vocabulary against a real document rather than against a guess.
 
 **Why here.** Its only dependency is the targets mechanism above. It's the cheapest format on this list, it isn't blocked on anything external the way PDF is, and it's the one that turns this project from a one-way converter into something a book can be maintained in.
 

@@ -75,6 +75,12 @@ PAGE_CSS = os.path.join(HERE, "page.css")
 ID_LIST_ATTRIBUTES = {"headers", "aria-labelledby", "aria-describedby"}
 
 
+def page_id(stem):
+    """The id a page's heading gets, and the prefix its ids take. A stem
+    is a file name and may hold a space; an id may not."""
+    return "page-" + re.sub(r"[^\w.-]+", "-", stem)
+
+
 # --------------------------------------------------------------------------
 # reading the intermediates
 # --------------------------------------------------------------------------
@@ -174,10 +180,10 @@ def prefix_ids(node, prefix, pages=()):
             if url.startswith("#") and len(url) > 1:
                 target[0] = "#" + prefix + url[1:]
             elif url.endswith(".html") and url[:-5] in pages:
-                target[0] = "#page-" + url[:-5]
+                target[0] = "#" + page_id(url[:-5])
             elif ".html#" in url and url.split(".html#", 1)[0] in pages:
                 stem, fragment = url.split(".html#", 1)
-                target[0] = "#page-" + stem + "--" + fragment
+                target[0] = "#" + page_id(stem) + "--" + fragment
         for value in node.values():
             prefix_ids(value, prefix, pages)
     elif is_attr(node):
@@ -190,6 +196,33 @@ def prefix_ids(node, prefix, pages=()):
     elif isinstance(node, list):
         for value in node:
             prefix_ids(value, prefix, pages)
+
+
+def strip_comments(node):
+    """Raw HTML comments, dropped. A Markdown source may carry one -- a
+    citation beside an epigraph -- and a comment holding "--" is fatal in
+    XHTML, which is what an EPUB is made of. A comment says nothing to a
+    reader either way."""
+    if isinstance(node, dict):
+        for key, value in list(node.items()):
+            if isinstance(value, list):
+                node[key] = [v for v in value if not is_comment(v)]
+                for v in node[key]:
+                    strip_comments(v)
+            elif isinstance(value, dict):
+                strip_comments(value)
+    elif isinstance(node, list):
+        node[:] = [v for v in node if not is_comment(v)]
+        for v in node:
+            strip_comments(v)
+
+
+def is_comment(node):
+    return (isinstance(node, dict) and node.get("t") in ("RawInline",
+                                                          "RawBlock")
+            and isinstance(node.get("c"), list) and len(node["c"]) == 2
+            and node["c"][0] in ("html", "html5", "html4")
+            and node["c"][1].lstrip().startswith("<!--"))
 
 
 def shift_headers(node, by):
@@ -260,7 +293,7 @@ class Assembly:
                         opener = stem
                 self.blocks.append(header(
                     depth, inlines(a),
-                    "page-" + opener if opener else group_id(a, depth, self)))
+                    page_id(opener) if opener else group_id(a, depth, self)))
                 if opener:
                     self.add_page(opener, None, depth, heading=False)
                 self.add_tree(b[1:] if opener else b, depth + 1)
@@ -271,7 +304,8 @@ class Assembly:
         doc = load_page(self.base, stem)
         blocks = copy.deepcopy(doc["blocks"])
         title = title_override or page_title(doc, stem)
-        prefix = "page-" + stem + "--"
+        prefix = page_id(stem) + "--"
+        strip_comments(blocks)
         prefix_ids(blocks, prefix, self.book_pages)
         # A page's own headings continue below its entry. The page's title
         # heading is usually in its metadata, moved there by the filter;
@@ -281,11 +315,11 @@ class Assembly:
         if not heading:
             pass                    # the group's heading stands for it
         elif opens_with_h1(doc["blocks"]):
-            blocks[0]["c"][1][0] = "page-" + stem
+            blocks[0]["c"][1][0] = page_id(stem)
             blocks[0]["c"][2] = inlines(title) if title_override \
                 else blocks[0]["c"][2]
         else:
-            blocks.insert(0, header(depth, inlines(title), "page-" + stem))
+            blocks.insert(0, header(depth, inlines(title), page_id(stem)))
         count_images(blocks, self.found)
         self.depth = max(self.depth, depth)
         self.pages.append((stem, title, depth))
@@ -297,7 +331,8 @@ class Assembly:
         above them."""
         doc = load_page(self.base, stem)
         blocks = copy.deepcopy(doc["blocks"])
-        prefix_ids(blocks, "page-" + stem + "--", self.book_pages)
+        strip_comments(blocks)
+        prefix_ids(blocks, page_id(stem) + "--", self.book_pages)
         count_images(blocks, self.found)
         self.pages.append((stem, title_override or page_title(doc, stem), 1))
         self.blocks.extend(blocks)

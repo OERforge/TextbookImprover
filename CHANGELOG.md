@@ -8,12 +8,15 @@ Versions are two-part and pre-1.0: breaking changes may land in any of them unti
 
 ### Added
 
+- **Markdown sources.** A `.md` beside the sources is a page, read into the same intermediate a `.docx` gets, filtered, split, and rendered by every target. `::: matrix` around a table (configurable through `tables.markers`) declares its headers; a link's `aria-label` carries through; images named by path are checked, copied beside the page in every HTML target, and packed into the EPUB, with a `%20` in a name decoded on the way to disk. Raw LaTeX passes through and is dropped by the HTML and EPUB writers. An `.md` with a same-named `.docx` is still the v0.1 leftover it always was. Tested on a 33-chapter Markdown textbook. See [Markdown sources](docs/markdown.md).
 - **Multiple targets.** Every target in `conversion.yaml` is built, each into its own `output_dir`: several HTML renderings with different headers, footers, or options, and an EPUB, in one run. Targets whose filter-stage settings agree (the schema now marks each setting's `stage`) share one filtered intermediate; a target that differs gets its own under its output directory. A target away from the sources gets its media copied beside its pages. Reports and sidecars stay one per book. `tests/run-convert-tests.py`.
 
 - **Cross-references land.** A `.docx` is read through a repaired copy with each bookmark that stood between blocks moved into the block that follows, since Pandoc's reader drops the ones OpenStax places that way; a bookmark before a table is handed to the filter by the pre-pass and restored as an anchor ahead of the table, which a split table keeps. On *Introductory Business Statistics 2e* the 104 dead `#fs-id…` links become none. `lib/docxrepair.py`.
 
 ### Fixed
 
+- An EPUB page whose stem had a space got ids with a space in them, and a raw HTML comment holding `--` (a citation, say) was fatal in XHTML. The assembler makes ids from a sanitized stem and drops raw HTML comments; the output check flags an id with whitespace.
+- A page or file name with a space produced a manifest with a raw space in its `href` and an `identifier` that was not an XML name, which the validator refused. Hrefs are percent-encoded and identifiers reduced to names; references are decoded on the way to disk, so the archive holds the real file names.
 - An EPUB chapter whose heading held `<em>` or `<sup>` had them inside its `<title>`, which XHTML forbids (four chapters of the statistics book; epubcheck `RSC-005`). The chapter `<title>` is now set from the heading's text after the archive is written, since the writer offers no plain-text form of a chapter's heading.
 
 ### Changed

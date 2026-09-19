@@ -122,8 +122,8 @@ def case_hand_written(work):
         fh.write(HAND)
     with open(os.path.join(work, "front", "style.css"), "w") as fh:
         fh.write("body {}\n")
-    shutil.copy(os.path.join(FIXTURES, "media-a.docx"),
-                os.path.join(work, "front", "logo.png"))   # any bytes
+    with open(os.path.join(work, "front", "logo.png"), "wb") as fh:
+        fh.write(ONE_PIXEL)
     result = convert(work, "targets:\n  html:\n    format: html\n"
                            "  epub:\n    format: epub3\n",
                      arguments=["--zip"])
@@ -218,8 +218,95 @@ def case_wrapper(work):
     ]
 
 
+# A real one-pixel PNG: epubcheck reads the images.
+import base64
+ONE_PIXEL = base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNgYGAAAAAEAAH2FzhVAAAAAElFTkSuQmCC")
+
+MARKDOWN = """---
+title: Costs in the Long Run
+---
+
+# Costs in the Long Run
+
+\\frontmatter
+
+Text with a [reference](https://doi.org/10.1017/x){aria-label="DOI for Seidel 2014"}.
+<!-- a citation, 28--29, which XHTML forbids in a comment -->
+
+![A pipe](assets/Pipe Sizes.png)
+
+::: matrix
+|      | Left | Right |
+|------|------|-------|
+| Up   | 1    | 2     |
+| Down | 3    | 4     |
+:::
+
+| Plain | Table |
+|-------|-------|
+| a     | b     |
+
+## Economies of Scale
+
+More text.
+"""
+
+
+def case_markdown(work):
+    """A Markdown source is a page like a .docx is."""
+    os.makedirs(os.path.join(work, "assets"), exist_ok=True)
+    with open(os.path.join(work, "long run.md"), "w", encoding="utf-8") as fh:
+        fh.write(MARKDOWN)            # a space in the name, on purpose
+    with open(os.path.join(work, "assets", "Pipe Sizes.png"), "wb") as fh:
+        fh.write(ONE_PIXEL)
+    # A leftover from v0.1: an .md with the same name as a .docx.
+    with open(os.path.join(work, "tables.md"), "w", encoding="utf-8") as fh:
+        fh.write("# old\n")
+    result = convert(work, "defaults:\n  pages:\n    split_level: 2\n"
+                           "targets:\n  html:\n    format: html\n"
+                           "  epub:\n    format: epub3\n")
+    page = read(work, "html", "long run.html") if exists(
+        work, "html", "long run.html") else ""
+    section = read(work, "html", "long run--economies-of-scale.html") \
+        if exists(work, "html", "long run--economies-of-scale.html") else ""
+    epub_path = os.path.join(work, "epub", "org.example.fixtures.epub")
+    sys.path.insert(0, os.path.join(ROOT, "lib"))
+    import outputcheck
+    epubcheck = outputcheck.find_validator("epubcheck")
+    validated = None
+    if epubcheck and os.path.exists(epub_path):
+        validated = outputcheck.run_epubcheck(epubcheck, epub_path)
+    else:
+        print("  skip  epubcheck not installed (EPUBCHECK_JAR)")
+    return [
+        ("a stem with a space gives ids without one, and epubcheck agrees",
+         lambda: validated == [] if validated is not None else True),
+        ("the run succeeds", lambda: result.returncode == 0),
+        ("the Markdown source becomes a page, split like any other",
+         lambda: page and section),
+        ("its title is the promoted heading",
+         lambda: "<title>Costs in the Long Run</title>" in page),
+        ("a ::: matrix table gets row headers, a plain one does not",
+         lambda: page.count('<th scope="row">') == 2
+         and '<th scope="col">Plain</th>' in page),
+        ("a link's aria-label survives",
+         lambda: 'aria-label="DOI for Seidel 2014"' in page),
+        ("an image named by path is copied beside the page, space and all",
+         lambda: exists(work, "html", "assets", "Pipe Sizes.png")
+         and 'src="assets/Pipe%20Sizes.png"' in page),
+        ("raw LaTeX is dropped, not shown",
+         lambda: "frontmatter" not in page),
+        ("an .md with a same-named .docx is a leftover, not a source",
+         lambda: not exists(work, "html", "tables.md")
+         and "tables.md is left over" in result.stderr),
+        ("the EPUB has the page",
+         lambda: exists(work, "epub", "org.example.fixtures.epub")),
+    ]
+
+
 CASES = [
     ("a bare directory", case_bare),
+    ("a Markdown source", case_markdown),
     ("a hand-written page", case_hand_written),
     ("several targets", case_targets),
     ("arguments passed to the packager", case_passthrough),

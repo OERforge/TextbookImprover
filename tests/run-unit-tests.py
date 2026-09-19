@@ -319,7 +319,22 @@ def check_docx_repair():
     ]
 
 
+def check_manifest_names():
+    """What a file name with a space does to a manifest."""
+    return [
+        ("an href percent-encodes a space and escapes the rest",
+         lambda: cartridge.href_of("assets/Pipe Sizes & more.png")
+         == "assets/Pipe%20Sizes%20%26%20more.png"),
+        ("an identifier becomes an XML name",
+         lambda: cartridge.ncname("01 BigPicture--a b") == "01-BigPicture--a-b"
+         or cartridge.ncname("01 BigPicture--a b") == "p-01-BigPicture--a-b"),
+        ("and always starts with a letter",
+         lambda: cartridge.ncname("01 Big")[0].isalpha()),
+    ]
+
+
 GROUPS = [
+    ("manifest names", check_manifest_names),
     ("repairing a .docx on the way in", check_docx_repair),
     ("the archive's name", check_archive_name),
     ("the content prefix", check_content_prefix),

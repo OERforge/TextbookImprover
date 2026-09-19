@@ -50,7 +50,7 @@ OTHER = """<!DOCTYPE html><html lang="en"><head><title>Other</title></head>
 <body><h1 id="there">There</h1></body></html>"""
 
 BAD = """<!DOCTYPE html><html><head><title></title></head>
-<body><h1 id="a">A</h1><h3 id="a">Skipped</h3><h2></h2>
+<body><h1 id="a">A</h1><h3 id="a">Skipped</h3><h2 id="two words"></h2>
 <img src="p.png"><img src="q.png" alt="">
 <table><tr><td>1</td></tr></table>
 <a href="#nowhere">x</a><a href="gone.html">y</a><a href="other.html#no">z</a>
@@ -87,7 +87,8 @@ def main():
              lambda: checks(good) == []),
             ("every check fires on the page that breaks it",
              lambda: checks(bad) == sorted([
-                 "no-lang", "no-title", "duplicate-id", "heading-skips-level",
+                 "no-lang", "no-title", "duplicate-id", "invalid-id",
+                 "heading-skips-level",
                  "empty-heading", "image-without-alt",
                  "image-empty-alt-not-decorative",
                  "table-without-headers-or-caption",

@@ -63,6 +63,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from urllib.parse import unquote
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(HERE), "lib"))
@@ -257,6 +258,23 @@ def check_sidecar(path, setting, default, base):
 # 1. .docx -> .json
 # --------------------------------------------------------------------------
 
+def markdown_sources(base, fragments):
+    """The .md files this run converts: a page each, the way a .docx is.
+
+    One with a same-named .docx beside it is what a v0.1 run left behind
+    and is not a source; neither is a file the header or footer setting
+    names. Everything else written in Markdown is a page of the book."""
+    found = []
+    for path in sorted(glob.glob(os.path.join(base, "*.md"))):
+        name = os.path.basename(path)
+        if os.path.abspath(path) in fragments:
+            continue
+        if os.path.exists(os.path.join(base, name[:-3] + ".docx")):
+            continue
+        found.append(name)
+    return found
+
+
 def source_documents(base):
     """The .docx files this run converts, with the ones to skip named.
 
@@ -289,6 +307,22 @@ def source_documents(base):
                 continue
         found.append(name)
     return found
+
+
+def read_markdown_to_json(base, docs, env):
+    """A Markdown source is read as Pandoc's markdown, into the same
+    intermediate a .docx gets. Its images are files it names by path,
+    so there is nothing to extract; they are copied to each target with
+    the page. Raw LaTeX in it -- \\frontmatter, \\chaptermark -- rides
+    along and is dropped by the HTML and EPUB writers."""
+    stems = []
+    for name in docs:
+        stem = name[:-3]
+        run(["pandoc", "-f", "markdown", "-t", "json", name,
+             "-o", stem + ".json", "--lua-filter=" + MEDIA_FILTER],
+            env=env, cwd=base)
+        stems.append(stem)
+    return stems
 
 
 def read_to_json(base, docs, env, work):
@@ -419,6 +453,8 @@ def warn_about_leftovers(base, stems, fragments):
     for path in sorted(glob.glob(os.path.join(base, "*.md"))):
         if os.path.abspath(path) in fragments:
             continue
+        if not os.path.exists(path[:-3] + ".docx"):
+            continue                      # a Markdown source, read above
         say(f"Note: {os.path.basename(path)} is left over from a v0.1 run "
             "and is no longer read.")
     # Pages an earlier version wrote beside the sources. They are named
@@ -477,7 +513,9 @@ def media_gate(base, stems, media_rows, report_path):
     problems, rows = [], []
     for stem in stems:
         for ref in media_references(os.path.join(base, stem + ".json")):
-            if not os.path.isfile(os.path.join(base, ref)):
+            # A Markdown source writes a space in a file name as %20, as a
+            # link must; the file on disk has the space.
+            if not os.path.isfile(os.path.join(base, unquote(ref))):
                 problems.append(f"UNRESOLVED: {stem}.json references "
                                 f"missing {ref}.")
                 rows.append(f"{ref},{stem}.json,,referenced but not on disk")
@@ -563,6 +601,8 @@ def filter_env(target, base, paths, env):
         "ALT_MAX_CHARS": str(r["images.alt_max_chars"]),
         "RESPONSIVE_IMAGES": "true" if r["images.responsive"] else "false",
         "WRAP_TABLES": "true" if r["tables.wrap"] else "false",
+        "TABLE_MARKERS": ",".join(f"{k}={v}" for k, v in
+                                  (r["tables.markers"] or {}).items()),
         "MEDIA_STRICT": "1" if r["media.strict"] else "",
         "TABLE_LABEL_PREFIXES": ",".join(map(str, r["captions.table_prefixes"])),
         "FIGURE_LABEL_PREFIXES": ",".join(map(str,
@@ -660,26 +700,28 @@ def render_html(target, pages, base, fragments, language, env):
         run(command, env=env, cwd=base)
         written.append(out)
     if os.path.abspath(target.output_dir) != os.path.abspath(base):
-        copy_media(base, target.output_dir, [os.path.basename(p)
-                                             [:-len(INTERMEDIATE)]
-                                             .split("--", 1)[0]
-                                             for p in pages])
+        copy_media(base, target.output_dir, pages)
     return written
 
 
-def copy_media(base, output_dir, sources):
-    """A page links its images at <source>/media/..., relative to
-    itself. A target writing somewhere other than the content directory
-    needs the media there too; a copy keeps the pages self-contained,
-    which is what the packager assumes."""
-    for source in sorted(set(sources)):
-        media = os.path.join(base, source, "media")
-        if not os.path.isdir(media):
-            continue
-        dest = os.path.join(output_dir, source, "media")
-        os.makedirs(dest, exist_ok=True)
-        for name in os.listdir(media):
-            shutil.copy2(os.path.join(media, name), os.path.join(dest, name))
+def copy_media(base, output_dir, pages):
+    """Every local image a page refers to, copied beside the page at the
+    same relative path: <source>/media/... for what was extracted from a
+    .docx, assets/... or wherever for what a Markdown source names. A
+    copy keeps the target's pages self-contained, which is what the
+    packager assumes."""
+    copied = set()
+    for page in pages:
+        for ref in media_references(page):
+            if ref in copied:
+                continue
+            src = os.path.normpath(os.path.join(base, unquote(ref)))
+            if not os.path.isfile(src):
+                continue
+            dest = os.path.join(output_dir, unquote(ref))
+            os.makedirs(os.path.dirname(dest), exist_ok=True)
+            shutil.copy2(src, dest)
+            copied.add(ref)
 
 
 # --------------------------------------------------------------------------
@@ -789,11 +831,6 @@ def main():
                    "--report", reports["table_headers_report"],
                    "--resolved", env["TABLE_HEADERS_RESOLVED"]], cwd=base)
 
-        # ---- 1. read ----------------------------------------------------------
-        stems = read_to_json(base, docs, env, work)
-        if not stems:
-            die("No .docx files here, so there is nothing to convert.")
-
         # ---- 3. fragments, per target ----------------------------------------
         fragments = {}
         fragment_files = set()
@@ -807,6 +844,14 @@ def main():
                 pair.append(render_fragment(
                     source, os.path.join(work, f"{target.name}-{key}.html")))
             fragments[target.name] = tuple(pair)
+
+        # ---- 1. read ----------------------------------------------------------
+        stems = read_to_json(base, docs, env, work)
+        stems += read_markdown_to_json(base, markdown_sources(base,
+                                                              fragment_files),
+                                       env)
+        if not stems:
+            die("No .docx or .md files here, so there is nothing to convert.")
         warn_about_leftovers(base, stems, fragment_files)
 
         # ---- 2. the gate ------------------------------------------------------

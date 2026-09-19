@@ -1,6 +1,6 @@
 # TextbookImprover
 
-Converts a directory of Word documents into more-accessible HTML pages, packages them as an IMS Common Cartridge for import into Brightspace or another LMS, and can assemble them into an EPUB.
+Converts a directory of Word or Markdown documents into more-accessible HTML pages, packages them as an IMS Common Cartridge for import into Brightspace or another LMS, and can assemble them into an EPUB.
 
 Licensed GPL 3.0. See `LICENSE` for more info.
 
@@ -52,6 +52,7 @@ python3 $T/bin/convert.py --zip           # 3. ... and the .imscc archive
 | [Building the cartridge](docs/packaging.md) | The packager, ordering from a PDF, validating the manifest |
 | [Building an EPUB](docs/epub.md) | One EPUB per book from the same pages and the same contents, and what it claims about itself |
 | [Checking the output](docs/checking.md) | What every run checks about the pages and EPUBs it wrote, and what it doesn't |
+| [Markdown sources](docs/markdown.md) | A `.md` beside the sources is a page: what it can declare, how its images travel, and a book set up for a Pandoc PDF build |
 | [Splitting pages](docs/splitting.md) | One page per heading from a source that arrived as one file per chapter, or one file |
 | [Brightspace](docs/brightspace.md) | What importing and deleting actually do there, confirmed by D2L |
 | [Testing](docs/testing.md) | The test suites and what each is load-bearing for |

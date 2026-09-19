@@ -44,6 +44,7 @@ import re
 import sys
 import zipfile
 from datetime import date
+from urllib.parse import quote, unquote
 
 try:
     import yaml
@@ -104,6 +105,19 @@ TOC_SKIP = {"contents", "table-of-contents", "chapter-objectives",
 # small helpers
 # --------------------------------------------------------------------------
 
+def href_of(path):
+    """A file path as a manifest href: percent-encoded, then XML-escaped.
+    A raw space in an href is not a valid URI reference."""
+    return xml_escape(quote(path, safe="/"))
+
+
+def ncname(text):
+    """An identifier IMS types as xs:ID: letters, digits, . - _ only, so
+    a page stem with a space or anything else in it is still a name."""
+    out = re.sub(r"[^A-Za-z0-9._-]+", "-", text).strip("-")
+    return out if out and out[0].isalpha() else "p-" + out
+
+
 def xml_escape(text):
     return (text.replace("&", "&amp;").replace("<", "&lt;")
                 .replace(">", "&gt;").replace('"', "&quot;"))
@@ -157,7 +171,10 @@ def page_references(path, base_dir):
         ref = html_module.unescape(raw).strip()
         if not ref or ref.startswith(EXTERNAL):
             continue
-        ref = ref.split("#", 1)[0].split("?", 1)[0]
+        # A file name with a space is written %20 in a page, as a link
+        # must be; what is on disk, and what goes in the archive, has the
+        # space. The manifest encodes it again on the way out (href_of).
+        ref = unquote(ref.split("#", 1)[0].split("?", 1)[0])
         if not ref or ref in seen:
             continue
         seen.add(ref)
@@ -856,8 +873,8 @@ def render_items(tree, depth, wrapper=None):
         for kind, a, b in nodes:
             if kind == "page":
                 title = b or TITLES[a]
-                lines.append(f'{pad}<item identifier="item-{a}" '
-                             f'identifierref="res-{a}">')
+                lines.append(f'{pad}<item identifier="item-{ncname(a)}" '
+                             f'identifierref="res-{ncname(a)}">')
                 lines.append(f"{pad}  <title>{xml_escape(title)}</title>")
                 lines.append(f"{pad}</item>")
             else:
@@ -927,17 +944,17 @@ def build_manifest(config, tree, page_files, common_files):
                          'type="webcontent">')
         for ref in common_files:
             resources.append('      <file href="'
-                             + xml_escape(under_prefix(prefix, ref)) + '"/>')
+                             + href_of(under_prefix(prefix, ref)) + '"/>')
         resources.append("    </resource>")
 
     for stem in flatten_pages(tree):
-        page = xml_escape(under_prefix(prefix, stem + ".html"))
-        resources.append(f'    <resource identifier="res-{stem}" '
+        page = href_of(under_prefix(prefix, stem + ".html"))
+        resources.append(f'    <resource identifier="res-{ncname(stem)}" '
                          f'type="webcontent" href="{page}">')
         resources.append(f'      <file href="{page}"/>')
         for ref in page_files[stem]:
             resources.append('      <file href="'
-                             + xml_escape(under_prefix(prefix, ref)) + '"/>')
+                             + href_of(under_prefix(prefix, ref)) + '"/>')
         if common_files:
             resources.append('      <dependency identifierref="common_files"/>')
         resources.append("    </resource>")

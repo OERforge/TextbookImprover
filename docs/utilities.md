@@ -32,6 +32,7 @@ Three ways to say what to do, and they don't chain: the map is applied to every 
 
 - `--from-toc` reads the levels from the document's own TOC field and builds the map from them.
 - `--promote STYLE` makes `STYLE` the level-1 heading and moves every heading in use down one.
+- `--demote` moves every heading in use down one, for a book with several `Heading 1` sections and nothing over them; `--title "Text"` then inserts a `Heading 1` holding that text at the top of the body and records it as the document's `dc:title` property. One paragraph serves as both title and heading here: `promote_h1_to_title` makes a lone H1 the page's metadata title, and after a split it titles the preamble page and the group.
 - `--map FROM=TO,...` is explicit, in style ids (`Title`, `Heading1`).
 
 Empty paragraphs of a remapped style are dropped, since an empty `Title` paragraph would become an empty heading and Word leaves plenty of those (46 in that book); `--keep-empty` keeps them. Every target style has to exist in `word/styles.xml`, which Word writes only once a style has been used, so a shift that needs a `Heading 5` the document has never used is refused with a note saying what to do in Word. Everything else is copied byte for byte.

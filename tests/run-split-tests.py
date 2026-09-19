@@ -430,7 +430,32 @@ def case_restyle(work):
         original = archive.namelist()
     with zipfile.ZipFile(out) as archive:
         restyled = archive.namelist()
+
+    # A book with several H1 sections and no heading over them.
+    flat = docx.Document()
+    flat.add_paragraph("What is Java?", style="Heading 1")
+    flat.add_paragraph("Java Goals", style="Heading 2")
+    flat.add_paragraph("Comments", style="Heading 1")
+    flat_path = os.path.join(work, "flat.docx")
+    flat.save(flat_path)
+    titled = os.path.join(work, "titled.docx")
+    run(["python3", tool, flat_path, "--demote", "--title", "Intro & Java",
+         "-o", titled], work)
+    run(["pandoc", "-f", "docx", "-t", "json", titled, "-o", "titled.json"],
+        work)
+    with open(os.path.join(work, "titled.json"), encoding="utf-8") as fh:
+        tdoc = json.load(fh)
+    theaders = [(b["c"][0], "".join(i.get("c", " ") if i["t"] == "Str"
+                                    else " " for i in b["c"][2]))
+                for b in tdoc["blocks"] if b["t"] == "Header"]
+    with zipfile.ZipFile(titled) as archive:
+        core = archive.read("docProps/core.xml").decode("utf-8")
     return [
+        ("--demote --title puts one H1 over demoted sections",
+         lambda: theaders == [(1, "Intro & Java"), (2, "What is Java?"),
+                              (3, "Java Goals"), (2, "Comments")]),
+        ("and records it as the document's dc:title, escaped",
+         lambda: "<dc:title>Intro &amp; Java</dc:title>" in core),
         ("with no option the tool reports and writes nothing",
          lambda: "Title" in report.stdout and "Nothing changed" in report.stdout
          and not os.path.exists(os.path.join(work, "book.docx.tmp"))),

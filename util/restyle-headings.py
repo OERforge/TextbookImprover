@@ -7,6 +7,7 @@ restyle-headings.py -- report or rewrite the heading styles of a .docx.
     python3 util/restyle-headings.py book.docx --from-toc -o book-restyled.docx
     python3 util/restyle-headings.py book.docx --promote Title -o out.docx
     python3 util/restyle-headings.py book.docx --map Title=Heading1,Heading1=Heading2 -o out.docx
+    python3 util/restyle-headings.py book.docx --demote --title "Intro to Java" -o out.docx
 
 WHY
 
@@ -29,7 +30,13 @@ WHAT IT DOES
 
 Rewrites the w:pStyle of every paragraph in word/document.xml (and the
 headers, footers, footnotes, and endnotes) according to a map, all at
-once, so Heading1=Heading2,Heading2=Heading3 does not chain. Paragraphs
+once, so Heading1=Heading2,Heading2=Heading3 does not chain. --demote is
+the map that moves every heading in use down one; --promote STYLE is
+that plus STYLE=Heading1. --title TEXT then puts a Heading 1 paragraph
+holding TEXT at the top of the body and records TEXT as the document's
+dc:title property, for a book that has several Heading 1 sections and
+no heading over them: the pipeline's promote_h1_to_title makes a lone
+H1 the page's metadata title as well, so one paragraph serves as both. Paragraphs
 whose style is remapped and whose text is empty are dropped, because an
 empty Title paragraph would become an empty heading -- and Word leaves
 plenty of those. Every target style has to exist in word/styles.xml;
@@ -125,7 +132,7 @@ def map_from_levels(levels):
 
 def promote_map(style, styles):
     """style becomes Heading1 and every heading used moves down one."""
-    out = {style: "Heading1"}
+    out = {style: "Heading1"} if style else {}
     for style_id in styles:
         m = HEADING_ID.match(style_id)
         if m:
@@ -163,6 +170,32 @@ def restyle(xml, mapping, keep_empty):
     return PARA.sub(one, xml), changed, dropped
 
 
+def xml_escape(text):
+    return (text.replace("&", "&amp;").replace("<", "&lt;")
+                .replace(">", "&gt;").replace('"', "&quot;"))
+
+
+def insert_title(xml, text):
+    """A Heading 1 paragraph as the first thing in the body. Inserted
+    after the restyle, so it is not demoted with the rest."""
+    para = ('<w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r>'
+            f'<w:t xml:space="preserve">{xml_escape(text)}</w:t></w:r></w:p>')
+    return re.sub(r"(<w:body\b[^>]*>)", lambda m: m.group(1) + para, xml,
+                  count=1)
+
+
+def set_core_title(xml, text):
+    """dc:title in docProps/core.xml. Pandoc does not read it, but Word
+    shows it and other readers may."""
+    if re.search(r"<dc:title\b", xml):
+        return re.sub(r"<dc:title\b[^>]*>.*?</dc:title>|<dc:title\b[^>]*/>",
+                      f"<dc:title>{xml_escape(text)}</dc:title>", xml,
+                      count=1, flags=re.S)
+    return xml.replace("</cp:coreProperties>",
+                       f"<dc:title>{xml_escape(text)}</dc:title>"
+                       "</cp:coreProperties>", 1)
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Report or rewrite the heading styles of a .docx.")
@@ -178,8 +211,13 @@ def main():
     how.add_argument("--promote", metavar="STYLE",
                      help="make STYLE the level-1 heading and move every "
                           "heading in use down one")
+    how.add_argument("--demote", action="store_true",
+                     help="move every heading in use down one")
     how.add_argument("--map", metavar="FROM=TO,...",
                      help="explicit style-id map, applied all at once")
+    parser.add_argument("--title", metavar="TEXT",
+                        help="insert a Heading 1 paragraph holding TEXT at "
+                             "the top of the body, and set dc:title to it")
     parser.add_argument("--keep-empty", action="store_true",
                         help="keep empty paragraphs of a remapped style "
                              "instead of dropping them")
@@ -204,10 +242,12 @@ def main():
             sys.exit(f"{args.file}: no paragraph style {args.promote!r}. "
                      "Styles here: " + ", ".join(sorted(styles)))
         mapping = promote_map(args.promote, {s for s in found if s})
+    elif args.demote:
+        mapping = promote_map(None, {s for s in found if s})
     elif args.map:
         mapping = parse_map(args.map)
     else:
-        mapping = None
+        mapping = {} if args.title else None
 
     print(f"{args.file}: paragraph styles in use")
     for style_id, count in found.most_common():
@@ -224,18 +264,23 @@ def main():
         print("  No TOC field declares heading levels.")
 
     if mapping is None:
-        print("Nothing changed. Give --from-toc, --promote STYLE, or --map.")
+        print("Nothing changed. Give --from-toc, --promote STYLE, --demote, "
+              "--map, or --title.")
         return 0
 
     mapping = {a: b for a, b in mapping.items() if a in found and a != b}
-    missing = sorted(b for b in set(mapping.values()) if b not in styles)
+    needed = set(mapping.values()) | ({"Heading1"} if args.title else set())
+    missing = sorted(b for b in needed if b not in styles)
     if missing:
         sys.exit("Cannot restyle: the document does not define "
                  + ", ".join(missing) + ". Word defines a heading style "
                  "once it is used, so apply that style to one paragraph "
                  "in Word, save, and run this again.")
-    print("Will apply: " + ", ".join(f"{a} -> {b}"
-                                     for a, b in sorted(mapping.items())))
+    if mapping:
+        print("Will apply: " + ", ".join(f"{a} -> {b}"
+                                         for a, b in sorted(mapping.items())))
+    if args.title:
+        print(f"Will insert a Heading1 paragraph: {args.title!r}")
     if not (args.output or args.in_place):
         print("Give -o FILE or --in-place to write it.")
         return 0
@@ -247,6 +292,8 @@ def main():
             if PARTS.match(info.filename):
                 text, changed, dropped = restyle(data.decode("utf-8"),
                                                  mapping, args.keep_empty)
+                if args.title and info.filename == "word/document.xml":
+                    text = insert_title(text, args.title)
                 data = text.encode("utf-8")
                 for style_id, n in changed.items():
                     print(f"  {info.filename}: {n} {style_id} -> "
@@ -254,6 +301,10 @@ def main():
                 for style_id, n in dropped.items():
                     print(f"  {info.filename}: {n} empty {style_id} "
                           "paragraph(s) dropped")
+            elif args.title and info.filename == "docProps/core.xml":
+                data = set_core_title(data.decode("utf-8"),
+                                      args.title).encode("utf-8")
+                print(f"  {info.filename}: dc:title set")
             archive.writestr(info, data)
     os.replace(out_path + ".tmp", out_path)
     print(f"Wrote {out_path}.")

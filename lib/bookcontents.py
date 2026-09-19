@@ -248,6 +248,25 @@ def unrecognised_roles(stems, back_matter):
 FRONT_MATTER = ("frontmatter", "front-matter", "preface", "about", "titlepage")
 BACK_MATTER_PAGES = ("notes", "index", "references", "bibliography", "glossary",
                      "solutions", "answer-key")
+# A word in a file name that says where the page belongs, whatever the
+# rest of the name is: "_preamble", "Z1 Glossary", "A3 Appendix Tables".
+FRONT_WORDS = {"frontmatter", "preamble", "preface", "foreword", "titlepage",
+               "about"}
+BACK_WORDS = {"notes", "index", "references", "bibliography", "glossary",
+              "solutions", "appendix", "backmatter", "colophon"}
+
+
+def matter_role(stem):
+    """front, back, or middle, from the words of a file name. A leading
+    underscore is the Pandoc-book convention for a preamble."""
+    if stem.startswith("_"):
+        return "front"
+    words = set(re.split(r"[^a-z0-9]+", stem.lower()))
+    if words & FRONT_WORDS:
+        return "front"
+    if words & BACK_WORDS:
+        return "back"
+    return "middle"
 
 
 # Words that stay lowercase inside a derived heading unless they lead it.
@@ -368,14 +387,20 @@ def guess_contents(stems, back_matter=None, titles=None, parts=None):
         else:
             chapters.setdefault(number, []).append(stem)
 
-    # Not enough structure to be worth grouping.
+    # Not enough structure to be worth grouping: a plain order, with what
+    # the names say is front or back matter first and last.
     grouped_pages = sum(len(v) for v in chapters.values())
     if len(chapters) < 2 or grouped_pages < max(3, len(stems) // 4):
-        return sorted(stems, key=natural_key)
+        by_role = {"front": [], "middle": [], "back": []}
+        for stem in sorted(stems, key=natural_key):
+            by_role[matter_role(stem)].append(stem)
+        return by_role["front"] + by_role["middle"] + by_role["back"]
 
-    front = [s for s in loose if s.lower().startswith(FRONT_MATTER)]
+    front = [s for s in loose if s.lower().startswith(FRONT_MATTER)
+             or matter_role(s) == "front"]
     tail = [s for s in loose
-            if s.lower().startswith(BACK_MATTER_PAGES) and s not in front]
+            if (s.lower().startswith(BACK_MATTER_PAGES)
+                or matter_role(s) == "back") and s not in front]
     middle = [s for s in loose if s not in front and s not in tail]
 
     tree = sorted(front, key=natural_key)

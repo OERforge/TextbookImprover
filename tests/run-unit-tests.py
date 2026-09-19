@@ -48,6 +48,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, os.path.join(ROOT, "lib"))
+import bookcontents  # noqa: E402
 
 try:
     import yaml
@@ -369,7 +370,22 @@ def check_contrast():
     ]
 
 
+def check_matter_by_name():
+    """A file name that says where its page belongs."""
+    order = bookcontents.guess_contents(
+        ["03 Third", "Z1 Glossary", "01 First", "_preamble", "A1 Intro"])
+    return [
+        ("a leading underscore or a front-matter word goes first",
+         lambda: order[0] == "_preamble"),
+        ("a back-matter word goes last, whatever precedes it",
+         lambda: order[-1] == "Z1 Glossary"),
+        ("everything else keeps its natural order",
+         lambda: order[1:-1] == ["01 First", "03 Third", "A1 Intro"]),
+    ]
+
+
 GROUPS = [
+    ("front and back matter by name", check_matter_by_name),
     ("caption contrast", check_contrast),
     ("manifest names", check_manifest_names),
     ("repairing a .docx on the way in", check_docx_repair),

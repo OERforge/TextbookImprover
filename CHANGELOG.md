@@ -17,6 +17,7 @@ Versions are two-part and pre-1.0: breaking changes may land in any of them unti
 
 ### Fixed
 
+- The filename guess puts a page whose name holds a front-matter word (or starts with `_`) first and one with a back-matter word (`glossary`, `appendix`, …) last, in every branch, not only once numbered chapters were found. And the EPUB assembler seeds a source's title from its pieces when the source has no page of its own, as the packager already did; a chapter whose sections start right under its heading was named by its file.
 - Footnotes in the EPUB had no number where they appeared: the writer's `aside` carries none, on the assumption of a reading system that pops notes up. Each note now opens with its number and ends with a return link, as Pandoc's HTML writer does.
 - An EPUB page whose stem had a space got ids with a space in them, and a raw HTML comment holding `--` (a citation, say) was fatal in XHTML. The assembler makes ids from a sanitized stem and drops raw HTML comments; the output check flags an id with whitespace.
 - A page or file name with a space produced a manifest with a raw space in its `href` and an `identifier` that was not an XML name, which the validator refused. Hrefs are percent-encoded and identifiers reduced to names; references are decoded on the way to disk, so the archive holds the real file names.

@@ -716,6 +716,11 @@ def build(base, name, resolved, keep, intermediates=None):
         titles[stem] = page_title(doc, stem)
         source = meta_text(doc.get("meta", {}), "source-page")
         if source:
+            # A source with no page of its own -- a chapter whose sections
+            # start right under its heading -- still has a title, and its
+            # pieces carry it; the group over them is called that.
+            if source not in titles and meta_text(doc["meta"], "source-title"):
+                titles[source] = meta_text(doc["meta"], "source-title")
             m = re.match(r"(\d+)/", meta_text(doc["meta"], "page-part"))
             parents = [p.get("c", "") for p in
                        doc["meta"].get("page-parents", {}).get("c", [])]

@@ -59,6 +59,11 @@ BACK_MATTER_ORDER = [
 
 
 
+def stem_title(stem):
+    """A readable title for a page that has none of its own."""
+    return stem.replace("-", " ").replace("_", " ").title()
+
+
 def natural_key(text):
     """Sort key where runs of digits compare numerically.
 

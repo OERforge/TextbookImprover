@@ -12,6 +12,10 @@ What this target produces.
 
 Where this target writes. Defaults to the target's own name, so two targets in the same format can't overwrite each other.
 
+**`filename`** -- `path`; default `""` (empty); *target only*
+
+For a format that produces one file for the whole book, such as epub3, the file to write inside output_dir. Left empty it's worked out afresh on every run from the book's identifier and the format, so renaming the book renames the file. Given without an extension, the one matching the format is added.
+
 **`header`** -- `text`; default `""` (empty)
 
 Markdown placed at the top of every page, or the path to a file holding it. Inserted by the template after the filters have run, so nothing in it's processed: give any image explicit alt text.
@@ -55,6 +59,18 @@ How data tables are rendered.
 **`tables.wrap`** -- `bool`; default `true`
 
 Put wide tables in a focusable scroll container so a long table doesn't force the whole page to scroll sideways (WCAG 1.4.10).
+
+## epub
+
+Settings read only by an epub3 target. One EPUB holds the whole book: every page in project.contents, in that order, with each group a heading over its pages and the table of contents built from the same tree the cartridge organization uses.
+
+**`epub.toc_depth`** -- `int`; default `2`
+
+How many levels the table of contents shows. A group at the top of project.contents is level 1, a page inside it level 2, and a page's own headings continue below its entry, so 2 shows the groups and their pages, whatever a group is called. The depth is a rank in the book, not a fact about the file a heading came from, so a book assembled from files split at different depths still reads evenly.
+
+**`epub.accessibility_summary`** -- `text`; default `""` (empty)
+
+The sentence or two a reading system shows a reader about the book's accessibility, alongside the claims the run computes for itself (see the docs). Left empty it's derived from what this run found: how many images lack alternative text, whether equations are MathML, and so on, so it stays true as the sidecars are filled in.
 
 ## captions
 

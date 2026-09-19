@@ -70,6 +70,7 @@ except ImportError:
 from bookcontents import (  # noqa: E402
     natural_key, chapter_of, within_chapter_key, unrecognised_roles,
     guess_contents, walk_contents, flatten_pages, contents_from_tree,
+    stem_title,
 )
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -140,7 +141,7 @@ def page_title(path, stem):
         title = clean_title(m.group(1))
         if title:
             return title
-    return stem.replace("-", " ").replace("_", " ").title()
+    return stem_title(stem)
 
 
 def page_references(path, base_dir):

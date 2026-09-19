@@ -486,14 +486,18 @@ def case_outline(work):
         ("without a navigation document, toc.ncx gives the same, after "
          "the title page it also lists",
          lambda: fallback[-len(entries):] == entries),
-        # The matcher derives a filename from each heading, which is how
-        # OpenStax names its files; only media-a is named that way here.
-        ("a page named after its heading is placed under its group",
-         lambda: placed == {"media-a"}
-         and tree == [{"title": "Chapter 2 Everything Else",
-                       "items": ["media-a"]}]),
-        ("headings that name no page are reported, not guessed at",
-         lambda: "Practice" in unmapped and "Chapter 1 Tables" in unmapped),
+        # A page is found by the filename its heading derives (how
+        # OpenStax names files) or, failing that, by its own title.
+        # tables-b is titled "More tables" and the contents renamed it
+        # "Tables, Continued" in the nav, so that entry names no page.
+        ("every page whose title the outline uses is placed under its group",
+         lambda: placed == set(stems) - {"tables-b"}
+         and tree == ["metadata",
+                      {"title": "Chapter 1 Tables", "items": ["tables"]},
+                      {"title": "Chapter 2 Everything Else",
+                       "items": ["media-a", "math"]}]),
+        ("an entry that names no page is reported, not guessed at",
+         lambda: unmapped == ["Tables, Continued"]),
     ]
 
 

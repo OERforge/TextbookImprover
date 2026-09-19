@@ -33,6 +33,19 @@ That last case is the one you want on a first pass, and it's easy to miss
 by doing things in the wrong order: the sample a first run writes already
 places every page in a guessed order, so a `packaging.yaml` adopted from it
 leaves the outline nothing to do, and `--toc` says so and changes nothing.
+
+An entry is matched to a page two ways: by the filename its heading
+derives (`Key Concepts and Summary` finds `1-key-concepts-and-summary`,
+which is how OpenStax names files), and failing that by the page's own
+title, so files named `BC-01` or pages cut from a chapter by
+`pages.split_level` are found too. A title two pages share is settled by
+provenance, preferring the page from the source the rest of the group
+came from, then by reading order. Entries the outline has but no page
+carries are reported; pages the outline never names are appended after
+it, grouped under their source's title when they came from a split.
+Publishers' navigation documents are not always clean: blank entries are
+skipped, and an entry holding a page's worth of text (one in the corpus
+does) is skipped with a warning rather than matched.
 Run `--toc` before adopting the sample, or delete the `contents` block and
 run it again. The result goes to
 `packaging-sample.yaml` for review, and outline entries matching no page

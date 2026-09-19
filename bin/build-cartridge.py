@@ -90,8 +90,8 @@ EXTERNAL = ("http://", "https://", "//", "data:", "mailto:", "tel:", "#",
 SRC_RE = re.compile(r'\b(?:src|href)\s*=\s*"([^"]+)"', re.I)
 TITLE_RE = re.compile(r"<title[^>]*>(.*?)</title>", re.I | re.S)
 # What a page split by split-pages.py says about where it came from.
-META_RE = re.compile(r'<meta\s+name="(source-page|page-part|page-parent|'
-                     r'page-position)"\s+content="([^"]*)"', re.I)
+META_RE = re.compile(r'<meta\s+name="(source-page|source-title|page-part|'
+                     r'page-parent|page-position)"\s+content="([^"]*)"', re.I)
 
 REQUIRED = ["identifier", "title"]
 
@@ -125,9 +125,9 @@ def page_title(path, stem):
 
 
 def page_provenance(path):
-    """(source stem, part number, parent titles) for a page
-    split-pages.py wrote, from the <meta> elements it put in the head,
-    or None."""
+    """(source stem, part number, parent titles, position, source title)
+    for a page split-pages.py wrote, from the <meta> elements it put in
+    the head, or None."""
     try:
         with open(path, encoding="utf-8", errors="replace") as handle:
             markup = handle.read(20000)
@@ -144,7 +144,7 @@ def page_provenance(path):
         return None
     m = re.match(r"(\d+)/", found.get("page-part", ""))
     return (found["source-page"], int(m.group(1)) if m else None, parents,
-            found.get("page-position", ""))
+            found.get("page-position", ""), found.get("source-title", ""))
 
 
 def page_references(path, base_dir):
@@ -279,7 +279,7 @@ def epub_outline(path):
     return entries
 
 
-def contents_from_outline(path, stems, titles):
+def contents_from_outline(path, stems, titles, parts=None):
     """Build a contents tree from a book's own table of contents.
 
     The outline of a textbook PDF, or the navigation document of its
@@ -297,9 +297,46 @@ def contents_from_outline(path, stems, titles):
         entries = epub_outline(path)
     else:
         entries = pdf_outline(path)
+    parts = parts or {}
+    # An entry with no text names nothing; one holding a page's worth of
+    # text is a broken navigation document, and is reported rather than
+    # matched against every title in the book.
+    kept = []
+    for depth, title in entries:
+        if not title.strip():
+            continue
+        if len(title) > 200:
+            print(f"WARNING: an outline entry is {len(title)} characters "
+                  f"long, which is not a heading: {title[:60]!r}...; "
+                  "skipped.", file=sys.stderr)
+            continue
+        kept.append((depth, title))
+    entries = kept
 
     available = set(stems)
     placed, unmapped = set(), []
+
+    # A page is also found by its own title, normalised the way a heading
+    # is, so files named BC-01 or cut from a chapter by split_level match
+    # the entries that name them. A title two pages share is settled by
+    # provenance -- the page from the source the rest of this group came
+    # from -- and failing that by reading order, since the outline is in
+    # reading order too.
+    by_title = {}
+    for stem in stems:
+        by_title.setdefault(slugify(titles.get(stem, "")), []).append(stem)
+
+    def source_of(stem):
+        origin = parts.get(stem)
+        return origin[0] if origin else stem
+
+    def order_of(stem):
+        origin = parts.get(stem)
+        return (natural_key(source_of(stem)),
+                origin[1] if origin and origin[1] is not None else 0,
+                natural_key(stem))
+
+    group_source = [None]           # the source this top-level entry uses
 
     def take(*candidates):
         for name in candidates:
@@ -307,6 +344,20 @@ def contents_from_outline(path, stems, titles):
                 placed.add(name)
                 return name
         return None
+
+    def take_title(title):
+        hits = [s for s in by_title.get(slugify(title), [])
+                if s in available and s not in placed]
+        if not hits:
+            return None
+        if len(hits) > 1 and group_source[0]:
+            same = [s for s in hits if source_of(s) == group_source[0]]
+            hits = same or hits
+        hit = min(hits, key=order_of)
+        placed.add(hit)
+        if group_source[0] is None:
+            group_source[0] = source_of(hit)
+        return hit
 
     def by_prefix(prefix):
         hits = sorted(p for p in available
@@ -336,7 +387,7 @@ def contents_from_outline(path, stems, titles):
             if found:
                 return found
 
-        return take(slug)
+        return take(slug) or take_title(title)
 
     tree, i = [], 0
     while i < len(entries):
@@ -360,30 +411,37 @@ def contents_from_outline(path, stems, titles):
         # Index, an appendix -- takes the page and its children are
         # sections within it, not separate pages.
         own = None
+        group_source[0] = None
         if chapter is None:
-            own = take(slugify(title))
+            own = take(slugify(title)) or take_title(title)
+            if own:
+                group_source[0] = source_of(own)
             if own is None and letter:
                 own = by_prefix(letter.group(1).lower() + "-")
 
-        if own:
-            tree.append(own)
-            while i < len(entries) and entries[i][0] > 0:
-                i += 1
-            continue
-
-        items = []
+        # A top-level entry that is itself a page -- Preface, References,
+        # an appendix -- takes the page, and its children are headings
+        # within it unless they are pages too: a chapter cut into pages
+        # by split_level has its own page first and its sections after.
+        items = [own] if own else []
+        children_unmapped = []
         while i < len(entries) and entries[i][0] > 0:
             child = resolve_child(entries[i][1], chapter)
             if child:
                 items.append(child)
             elif slugify(entries[i][1]) not in TOC_SKIP:
-                unmapped.append(entries[i][1])
+                children_unmapped.append(entries[i][1])
             i += 1
 
-        if items:
+        if own and len(items) == 1:
+            tree.append(own)            # its children are headings within it
+        elif items:
             tree.append({"title": title, "items": items})
-        elif chapter is not None:
-            unmapped.append(title)
+            unmapped.extend(children_unmapped)
+        else:
+            unmapped.extend(children_unmapped)
+            if chapter is not None:
+                unmapped.append(title)
 
     return tree, placed, unmapped
 
@@ -963,6 +1021,10 @@ def main():
         origin = page_provenance(path)
         if origin:
             PARTS[stem] = origin
+            # A source with no page of its own still has a title, and its
+            # pieces carry it; that is what a group over them is called.
+            if origin[4] and origin[0] not in TITLES:
+                TITLES[origin[0]] = origin[4]
 
     # ---- configuration ---------------------------------------------------
     config, notes, fatal = {}, [], []
@@ -1105,7 +1167,7 @@ def main():
                 tree, grouping.get("append_to"))
 
             from_pdf, placed, unmapped = contents_from_outline(
-                args.toc, extra, TITLES)
+                args.toc, extra, TITLES, PARTS)
             destination.extend(
                 walk_contents(from_pdf, available, used, problems))
 
@@ -1113,7 +1175,8 @@ def main():
             if leftover:
                 destination.extend(walk_contents(
                     [{"title": unsorted_title,
-                      "items": sorted(leftover, key=natural_key)}],
+                      "items": guess_contents(leftover, back_matter,
+                                              TITLES, PARTS)}],
                     available, used, problems))
 
             print(f"Read {os.path.basename(args.toc)}: {len(placed)} of "
@@ -1253,10 +1316,12 @@ def main():
     # ---- act on what we found -------------------------------------------
     if fatal or args.init:
         sample = dict(config)
-        sample["contents"] = (config.get("contents")
-                              or guess_contents(stems, back_matter, TITLES, PARTS))
-        if args.includeallhtml or not config.get("contents"):
-            sample["contents"] = guess_contents(stems, back_matter, TITLES, PARTS)
+        # The tree already holds the best order available -- the config's,
+        # the outline's with leftovers appended, or the guess -- so the
+        # sample says what a run would do. Building the guess afresh here
+        # threw the outline away on exactly the first run --toc is for.
+        sample["contents"] = contents_from_tree(tree) if tree else \
+            guess_contents(stems, back_matter, TITLES, PARTS)
         settled, sample_targets = sample_inputs(
             resolved, documents, target, sample["contents"])
         dump_sample(sample, sample_path, notes, unknown_roles,

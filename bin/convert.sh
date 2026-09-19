@@ -36,6 +36,7 @@ cartridge_tool="$script_dir/build-cartridge.py"
 headers_tool="$script_dir/table-headers.py"
 split_tool="$script_dir/split-pages.py"
 epub_tool="$script_dir/build-epub.py"
+check_tool="$script_dir/check-output.py"
 
 for required in "$figure_filter" "$media_filter" "$header_filter" "$page_css"; do
   if [ ! -f "$required" ]; then
@@ -152,6 +153,7 @@ SPLIT_LEVEL="0"
 PAGE_NAMES_NAME="page-names.csv"
 PAGE_NAMES_NEW_NAME="page-names-new.csv"
 PAGE_NAMES_REPORT_NAME="page-names-report.csv"
+OUTPUT_CHECK_NAME="output-check.csv"
 MEDIA_UNRESOLVED_NAME="media-unresolved.csv"
 SPACER_LOG_NAME="spacer-images.csv"
 
@@ -249,6 +251,7 @@ headers_new="$(resolve_path "$TABLE_HEADERS_NEW_NAME")"
 headers_report="$(resolve_path "$TABLE_HEADERS_REPORT_NAME")"
 page_names_new="$(resolve_path "$PAGE_NAMES_NEW_NAME")"
 page_names_report="$(resolve_path "$PAGE_NAMES_REPORT_NAME")"
+check_report="$(resolve_path "$OUTPUT_CHECK_NAME")"
 unresolved_report="$(resolve_path "$MEDIA_UNRESOLVED_NAME")"
 spacer_report="$(resolve_path "$SPACER_LOG_NAME")"
 
@@ -640,7 +643,6 @@ while IFS= read -r page; do
 
   pandoc "${pandoc_args[@]}"
 done < "$pages_file"
-rm -f "$pages_file"
 
 ############################################
 # 5. Report items still needing human input
@@ -702,11 +704,36 @@ fi
 #    configuration is still the common case.
 ############################################
 
+epubs_file="$(mktemp)"
 if [ -f "$epub_tool" ] && [ -f "conversion.yaml" ]; then
-  if ! python3 "$epub_tool" -d . --if-declared; then
+  # build-epub.py prints each EPUB it writes on stdout, for the check.
+  if ! python3 "$epub_tool" -d . --if-declared > "$epubs_file"; then
     exit 1
   fi
 fi
+
+############################################
+# 5.7. Check what was written
+#
+#    check-output.py reads every page of this run and every EPUB built
+#    from them and reports what is well-formed and wrong: a link to
+#    nothing, an image with no alt attribute, a heading that skips a
+#    level, a table with neither header cells nor a caption. Findings
+#    go to a report beside the others and never stop the run: the
+#    output exists, and the list is what to work through. It uses
+#    nothing but Python; epubcheck and the Nu HTML checker remain the
+#    authoritative validators for anyone who has them.
+############################################
+
+if [ -f "$check_tool" ]; then
+  epub_args=()
+  while IFS= read -r built; do
+    [ -n "$built" ] && epub_args+=(--epub "$built")
+  done < "$epubs_file"
+  python3 "$check_tool" --pages "$pages_file" --report "$check_report" \
+    "${epub_args[@]}" || true
+fi
+rm -f "$pages_file" "$epubs_file"
 
 ############################################
 # 6. Build the Common Cartridge manifest

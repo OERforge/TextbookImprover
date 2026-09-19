@@ -53,8 +53,20 @@ The assembler computes them from the build instead:
 
 So the claims change as the sidecars are filled in. A book whose `image-alt-missing.csv` still has rows says so in its summary and withholds `alternativeText`; supply the text through `image-alt.csv`, rebuild, and the EPUB starts claiming it. The run prints what it claimed.
 
+## A cover
+
+```yaml
+  epub:
+    format: epub3
+    epub:
+      cover_image: cover.png       # absolute, or relative to the content directory
+      cover_alt: Cover of Principles of Marketing, third edition
+```
+
+Pandoc makes the cover page, puts it first, and marks the image in the manifest. What it doesn't do is give the cover a text alternative: the page is an SVG holding the image and nothing else, so a screen reader meets the book with a silent page. The assembler names it, as `role="img"` with an `aria-label` and a `<title>` inside the SVG. `cover_alt` is that text; left empty it's "Cover of" and the book's title.
+
 ## Checking the result
 
-[epubcheck](https://github.com/w3c/epubcheck) validates the container and content, and DAISY's [Ace](https://daisy.github.io/ace/) reports on the accessibility of the markup, including the table and image structure this project works on. Neither is run by the pipeline yet; both are worth running on a book before distributing it. The fixture book this project's tests build passes epubcheck 5.2 with no errors or warnings.
+Every run ends with the [output check](checking.md) over the pages and the EPUB: dead links and fragments, images without alt text, skipped headings, tables without headers, and the EPUB's own container and metadata. [epubcheck](https://github.com/w3c/epubcheck) validates the container and content in full, and DAISY's [Ace](https://daisy.github.io/ace/) reports on the accessibility of the markup as a reading system would see it; both need Java or Node and are worth running on a book before distributing it. The fixture book this project's tests build passes epubcheck 5.2 with no errors or warnings.
 
 One thing to know when reading Ace's report: Pandoc titles each chapter file by its heading here, because the assembler adjusts Pandoc's EPUB template to do so. Without that every file is titled by its own filename, which is a WCAG 2.4.2 failure that Ace reports on every page.

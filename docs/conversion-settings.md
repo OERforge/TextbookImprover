@@ -76,6 +76,14 @@ Settings read only by an epub3 target. One EPUB holds the whole book: every page
 
 How many levels the table of contents shows. A group at the top of project.contents is level 1, a page inside it level 2, and a page's own headings continue below its entry, so 2 shows the groups and their pages, whatever a group is called. The depth is a rank in the book, not a fact about the file a heading came from, so a book assembled from files split at different depths still reads evenly.
 
+**`epub.cover_image`** -- `path`; default `""` (empty)
+
+An image for the cover page, JPEG or PNG, as an absolute path or one relative to the content directory. Left empty the book has no cover page. A path that doesn't exist stops the build.
+
+**`epub.cover_alt`** -- `string`; default `""` (empty)
+
+What a screen reader says for the cover image. Left empty it is "Cover of" followed by the book's title, which is what a cover usually is; give the text when the picture says more.
+
 **`epub.accessibility_summary`** -- `text`; default `""` (empty)
 
 The sentence or two a reading system shows a reader about the book's accessibility, alongside the claims the run computes for itself (see the docs). Left empty it's derived from what this run found: how many images lack alternative text, whether equations are MathML, and so on, so it stays true as the sidecars are filled in.
@@ -147,6 +155,10 @@ Prefilled page_names rows for every page split_level cut that the sidecar has no
 **`reports.page_names_report`** -- `path`; default `page-names-report.csv`
 
 Every page split_level wrote this run: its source, the heading it was cut at, its name, and which part of how many it is.
+
+**`reports.output_check`** -- `path`; default `output-check.csv`
+
+What the output check found wrong with the pages and any EPUB this run wrote: links and fragments that resolve to nothing, images with no alt attribute, headings that skip a level, duplicate ids, tables with neither header cells nor a caption, pages with no language or title. Written when there are any findings and removed when there are none. The run isn't stopped by them; they're a list to work through.
 
 **`reports.media_unresolved`** -- `path`; default `media-unresolved.csv`
 

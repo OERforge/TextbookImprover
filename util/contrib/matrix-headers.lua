@@ -13,7 +13,7 @@
 --
 -- Two things it does that the pipeline does not yet. It brackets each
 -- table with \tagpdfsetup{table/header-columns={1}} for the PDF, which
--- is the LaTeX half of roadmap item 7. And it defaults every unmarked
+-- is the LaTeX half of roadmap item 6. And it defaults every unmarked
 -- table to a header row, which is right for a book whose tables all have
 -- one and wrong in general; the pipeline guesses instead, and where it
 -- has no answer a declared setting decides.

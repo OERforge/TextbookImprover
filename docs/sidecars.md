@@ -16,6 +16,7 @@ the others. A report existing at all means there's work outstanding.
 | `page-names-new.csv` | Editing the `name` column and appending the rows to `page-names.csv`, if the names derived from headings aren't the ones you want. Written only when `pages.split_level` is on; see [Splitting pages](splitting.md#naming-the-pages). |
 | `page-names-report.csv` | Nothing: it records every page the split wrote, its source, and which part of how many it is. |
 | `spacer-images.csv` | Nothing — it records what the spacer rule did. |
+| `output-check.csv` | Fixing what it names: dead links, images with no alt, headings that skip, tables with no headers. Written when the [output check](checking.md) finds anything. |
 | `media-unresolved.csv` | Replacing the images named in it. Written only when the run stops. |
 
 ### Sidecar files

@@ -234,6 +234,7 @@ def main():
         "PAGE_NAMES_NAME": resolved["sidecars.page_names"],
         "PAGE_NAMES_NEW_NAME": resolved["reports.page_names_new"],
         "PAGE_NAMES_REPORT_NAME": resolved["reports.page_names_report"],
+        "OUTPUT_CHECK_NAME": resolved["reports.output_check"],
         "MEDIA_UNRESOLVED_NAME": resolved["reports.media_unresolved"],
         "SPACER_LOG_NAME": resolved["reports.spacer_images"],
 

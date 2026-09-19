@@ -367,7 +367,7 @@ def derived_summary(found):
     return " ".join(parts)
 
 
-def book_metadata(project, resolved, found):
+def book_metadata(project, resolved, found, base):
     meta = {
         "title": meta_string(project["title"]),
         "lang": meta_string(project["language"]),
@@ -387,6 +387,15 @@ def book_metadata(project, resolved, found):
     summary = str(resolved["epub.accessibility_summary"] or "").strip()
     meta["accessibilitySummary"] = meta_string(summary or
                                                derived_summary(found))
+    cover = str(resolved["epub.cover_image"] or "").strip()
+    if cover:
+        path = cover if os.path.isabs(cover) else os.path.join(base, cover)
+        if not os.path.isfile(path):
+            sys.exit(f"epub.cover_image is set to {cover}, which does not "
+                     f"exist (looked at {os.path.abspath(path)}).")
+        meta["cover-image"] = meta_string(os.path.abspath(path))
+        alt = str(resolved["epub.cover_alt"] or "").strip()
+        meta["cover-alt"] = meta_string(alt or f"Cover of {project['title']}")
     return meta
 
 
@@ -412,6 +421,21 @@ def chapter_template(work):
         print("WARNING: Pandoc's epub3 template no longer titles chapters "
               "by file name; using it unchanged.", file=sys.stderr)
     template = template.replace(needle, "<title>$title$</title>")
+    # The cover is an SVG holding the image, with no text alternative at
+    # all: a screen reader meets the book with a silent page. Give the
+    # SVG a name, and a title element for readers that look there.
+    svg = re.search(r'<svg [^>]*viewBox="0 0 \$cover-image-width\$ '
+                    r'\$cover-image-height\$"[^>]*>', template)
+    if svg:
+        opened = svg.group(0)
+        template = template.replace(
+            opened,
+            opened[:-1] + ' role="img" aria-label="$cover-alt$">'
+            "\n<title>$cover-alt$</title>", 1)
+    else:
+        print("WARNING: Pandoc's epub3 template has changed its cover "
+              "page; the cover will have no accessible name.",
+              file=sys.stderr)
     path = os.path.join(work, "epub3.template")
     with open(path, "w", encoding="utf-8") as fh:
         fh.write(template)
@@ -525,7 +549,7 @@ def build(base, name, resolved, keep):
 
     document = {
         "pandoc-api-version": load_page(base, placed[0])["pandoc-api-version"],
-        "meta": book_metadata(project, resolved, assembly.found),
+        "meta": book_metadata(project, resolved, assembly.found, base),
         "blocks": assembly.blocks,
     }
 
@@ -562,6 +586,7 @@ def build(base, name, resolved, keep):
     finally:
         shutil.rmtree(work, ignore_errors=True)
 
+    print(os.path.abspath(out_path))          # for whatever runs next
     found = assembly.found
     claims = accessibility_claims(found)
     print(f"Wrote {out_path}: {len(assembly.pages)} page(s), "

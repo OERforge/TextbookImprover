@@ -28,6 +28,7 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
+import html as html_module
 import re
 
 
@@ -57,6 +58,86 @@ BACK_MATTER_ORDER = [
     "solutions",
 ]
 
+
+
+def slugify(text):
+    """Filename form of an outline title.
+
+    OpenStax names its files after its headings, so "Key Concepts and
+    Summary" is "key-concepts-and-summary" and "Self-Check Questions" is
+    "self-check-questions". Deriving the name rather than listing known
+    headings is what lets one rule serve books that use different words
+    for the same sections.
+    """
+    text = clean_title(text).lower()
+    text = re.sub(r"['\u2019\u2018`]", "", text)
+    text = re.sub(r"[^a-z0-9]+", "-", text)
+    return text.strip("-")
+
+
+def clean_title(text):
+    """Unescape entities and drop the invisible characters Word leaves."""
+    text = html_module.unescape(text)
+    text = re.sub(r"[\u200b\u200c\u200d\ufeff\u00ad]", "", text)
+    text = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", "", text)
+    return " ".join(text.split())
+
+
+# What separates a source's name from a piece's in a split page:
+# chapter-7--economies-of-scale. Reserved: split-pages.py refuses a source
+# whose own name contains it.
+PIECE_SEPARATOR = "--"
+
+
+def piece_source(stem):
+    """The source a piece was cut from, judged by its name alone, or None.
+
+    A caller that has read the piece's own provenance -- the source-page
+    and page-part metadata every piece carries -- should prefer that; the
+    name is the fallback for pages made somewhere else.
+    """
+    if PIECE_SEPARATOR not in stem:
+        return None
+    return stem.split(PIECE_SEPARATOR, 1)[0]
+
+
+def group_pieces(tree, pieces, titles):
+    """Replace each source stem in a guessed tree with a group holding the
+    source's own page (when it has one) and its pieces in order."""
+    out = []
+    for node in tree:
+        if isinstance(node, dict):
+            node = dict(node)
+            node["items"] = group_pieces(node["items"], pieces, titles)
+            # A chapter whose only page is a split source would nest one
+            # group inside another with nothing else in either. Keep the
+            # chapter's heading unless it is the bare fallback and the
+            # source has a real title.
+            only = node["items"][0] if len(node["items"]) == 1 else None
+            if (isinstance(only, dict) and len(node.get("items", [])) == 1
+                    and only.get("source")):
+                if re.match(r"^Chapter \d+$", node.get("title", "")) \
+                        and only["source"] in titles:
+                    node["title"] = only["title"]
+                node["items"] = only["items"]
+            out.append(node)
+        elif node in pieces:
+            source_page, ordered = pieces[node]
+            items = ([node] if source_page else []) + ordered
+            out.append({"title": titles.get(node) or stem_title(node),
+                        "items": items, "source": node})
+        else:
+            out.append(node)
+    return out
+
+
+def strip_source(tree):
+    """Drop the bookkeeping key group_pieces leaves on a group."""
+    for node in tree:
+        if isinstance(node, dict):
+            node.pop("source", None)
+            strip_source(node["items"])
+    return tree
 
 
 def stem_title(stem):
@@ -189,8 +270,15 @@ def chapter_heading(number, pages, titles):
     return f"Chapter {number}"
 
 
-def guess_contents(stems, back_matter=None, titles=None):
+def guess_contents(stems, back_matter=None, titles=None, parts=None):
     """Best-effort contents tree from filenames alone.
+
+    parts maps a piece's stem to (source stem, part number) when the
+    caller has read that from the page; otherwise pieces are recognised
+    by the separator in their names and ordered by name, which is right
+    only by luck. Either way the pieces of a source are grouped under
+    it, with the source's own page first when it has one, and the group
+    then takes the source's place in whatever chapter grouping applies.
 
     Chapter grouping only fires when the filenames actually encode it.
     "BC-01".."BC-16" have no internal structure and stay flat; OpenStax
@@ -204,6 +292,28 @@ def guess_contents(stems, back_matter=None, titles=None):
     """
     back_matter = back_matter or BACK_MATTER_ORDER
     titles = titles or {}
+    parts = parts or {}
+
+    pieces = {}
+    plain = []
+    for stem in stems:
+        if stem in parts:
+            source, number = parts[stem]
+        elif piece_source(stem):
+            source, number = piece_source(stem), None
+        else:
+            plain.append(stem)
+            continue
+        pieces.setdefault(source, []).append((number, stem))
+    if pieces:
+        ordered = {}
+        for source, members in pieces.items():
+            members.sort(key=lambda m: (m[0] is None, m[0] or 0,
+                                        natural_key(m[1])))
+            ordered[source] = (source in plain, [m[1] for m in members])
+        stems = plain + [s for s in ordered if s not in plain]
+        return strip_source(group_pieces(
+            guess_contents(stems, back_matter, titles), ordered, titles))
 
     chapters = {}
     loose = []

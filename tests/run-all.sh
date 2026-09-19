@@ -68,15 +68,26 @@ set -u
 
 here="$(cd "$(dirname "$0")" && pwd)"
 failures=0
+failed=""
 skipped=""
+summary="$(mktemp)"
+trap 'rm -f "$summary" "$summary.suite"' EXIT
 
 run () {
   local script="$1"
   shift
   printf '\n=== %s\n' "$script"
-  if ! python3 "$here/$script" "$@"; then
+  # Show the suite's output as it runs, and keep its FAIL and ERROR
+  # lines for a summary at the end, where they are findable after ten
+  # suites have scrolled past.
+  python3 "$here/$script" "$@" 2>&1 | tee "$summary.suite"
+  if [ "${PIPESTATUS[0]}" -ne 0 ]; then
     failures=$((failures + 1))
+    failed="$failed $script"
+    grep -E '^ *(FAIL|ERROR)\b' "$summary.suite" \
+      | sed "s|^ *|  $script: |" >> "$summary"
   fi
+  rm -f "$summary.suite"
 }
 
 # First, because a file that does not parse makes every other result
@@ -88,6 +99,7 @@ run run-portability-test.py
 printf '\n=== settings-reference.py --check\n'
 if ! python3 "$here/../util/settings-reference.py" --check; then
   failures=$((failures + 1))
+  failed="$failed settings-reference.py"
 fi
 
 run run-config-tests.py
@@ -118,7 +130,8 @@ if [ -n "$skipped" ]; then
   echo "skipped: $skipped" >&2
 fi
 if [ "$failures" -gt 0 ]; then
-  echo "$failures suite(s) failed." >&2
+  echo "$failures suite(s) failed:$failed" >&2
+  cat "$summary" >&2
   exit 1
 fi
 echo "All suites passed."

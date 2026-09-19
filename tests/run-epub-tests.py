@@ -420,7 +420,7 @@ def case_rewriting(work):
     found = {"images": 0, "without_alt": 0, "math": 0}
     epub.count_images([
         {"t": "Image", "c": [["", [], []], [], ["x.png", ""]]},
-        {"t": "Image", "c": [["", [], [["role", "presentation"]]], [],
+        {"t": "Image", "c": [["", [], [["aria-hidden", "true"]]], [],
                              ["y.png", ""]]},
         {"t": "Image", "c": [["", [], []], [{"t": "Str", "c": "z"}],
                              ["z.png", ""]]},

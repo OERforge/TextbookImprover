@@ -31,8 +31,12 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
+import json
 import os
 import posixpath
+import shutil
+import subprocess
+import tempfile
 import xml.etree.ElementTree as ET
 import zipfile
 from html.parser import HTMLParser
@@ -59,6 +63,14 @@ class Finding:
 # what a page says about itself
 # --------------------------------------------------------------------------
 
+def is_decorative(attributes):
+    """Declared decorative: aria-hidden="true", which is what the filter
+    writes, or role="presentation", which it used to and which some
+    other pipeline may."""
+    return attributes.get("aria-hidden") == "true" \
+        or attributes.get("role") == "presentation"
+
+
 class Page:
     """The facts the checks need from one HTML or XHTML document."""
 
@@ -68,7 +80,7 @@ class Page:
         self.title = None
         self.ids = []               # in document order, duplicates kept
         self.links = []             # href values of <a>
-        self.images = []            # (has_alt, alt, role, src)
+        self.images = []            # (has_alt, alt, decorative, src)
         self.headings = []          # (level, text)
         self.tables = []            # (has_th, has_caption, role)
         self.parse_error = None
@@ -96,7 +108,7 @@ class _Collector(HTMLParser):
             self.page.links.append(a["href"])
         elif tag == "img":
             self.page.images.append(("alt" in a, a.get("alt") or "",
-                                     a.get("role"), a.get("src", "")))
+                                     is_decorative(a), a.get("src", "")))
         elif tag in ("h1", "h2", "h3", "h4", "h5", "h6"):
             self._heading = [int(tag[1]), []]
         elif tag == "table":
@@ -157,7 +169,7 @@ def read_xhtml(name, markup):
             page.links.append(el.get("href"))
         elif tag == "img":
             page.images.append(("alt" in el.attrib, el.get("alt") or "",
-                                el.get("role"), el.get("src", "")))
+                                is_decorative(el.attrib), el.get("src", "")))
         elif tag in ("h1", "h2", "h3", "h4", "h5", "h6"):
             page.headings.append((int(tag[1]),
                                   " ".join("".join(el.itertext()).split())))
@@ -188,10 +200,10 @@ def check_page(page, findings):
         if identifier in seen:
             findings.append(Finding(where, "duplicate-id", identifier))
         seen.add(identifier)
-    for has_alt, alt, role, src in page.images:
+    for has_alt, alt, decorative, src in page.images:
         if not has_alt:
             findings.append(Finding(where, "image-without-alt", src))
-        elif not alt.strip() and role != "presentation":
+        elif not alt.strip() and not decorative:
             findings.append(Finding(where, "image-empty-alt-not-decorative",
                                     src))
     last = 0
@@ -381,7 +393,7 @@ DESCRIPTIONS = {
     "link-to-missing-fragment": "a link's #fragment matches no id",
     "image-without-alt": "an img element has no alt attribute",
     "image-empty-alt-not-decorative":
-        "alt is empty but the image is not marked role=presentation",
+        "alt is empty but the image is not marked aria-hidden=\"true\"",
     "heading-skips-level": "a heading is more than one level below the last",
     "empty-heading": "a heading with no text",
     "duplicate-id": "an id used more than once in one document",
@@ -391,3 +403,126 @@ DESCRIPTIONS = {
     "no-title": "no title element, or an empty one",
     "not-well-formed": "the document could not be parsed",
 }
+
+
+# --------------------------------------------------------------------------
+# the full validators, when they are installed
+# --------------------------------------------------------------------------
+#
+# epubcheck and the Nu HTML checker know their specifications in full and
+# need Java, so they are optional: found through an environment variable
+# naming the jar, or a command on the path, and skipped otherwise. Their
+# findings are folded into the same report in the same shape, with the
+# tool's own message id as the check name, so one file lists everything.
+
+VALIDATORS = {
+    "epubcheck": ("EPUBCHECK_JAR", "epubcheck"),
+    "vnu": ("VNU_JAR", "vnu"),
+}
+
+
+def find_validator(name):
+    """The command to run, as a list, or None.
+
+    An environment variable naming the jar wins (EPUBCHECK_JAR, VNU_JAR);
+    otherwise a command of that name on the path, which is what a
+    package manager's epubcheck provides. Either needs java for a jar.
+    """
+    variable, command = VALIDATORS[name]
+    jar = os.environ.get(variable, "").strip()
+    if jar:
+        if os.path.isfile(jar) and shutil.which("java"):
+            return ["java", "-jar", jar]
+        return None
+    found = shutil.which(command)
+    return [found] if found else None
+
+
+def run_epubcheck(command, path):
+    """epubcheck's messages as findings, or a finding that it failed."""
+    findings = []
+    with tempfile.TemporaryDirectory() as work:
+        report = os.path.join(work, "epubcheck.json")
+        try:
+            subprocess.run(command + ["--json", report, path],
+                           capture_output=True, text=True, timeout=600)
+            with open(report, encoding="utf-8") as fh:
+                result = json.load(fh)
+        except (OSError, subprocess.SubprocessError, ValueError) as exc:
+            return [Finding(os.path.basename(path), "epubcheck:failed",
+                            str(exc))]
+    for message in result.get("messages", []):
+        severity = str(message.get("severity", "")).upper()
+        if severity not in ("FATAL", "ERROR", "WARNING"):
+            continue
+        locations = message.get("locations") or [{}]
+        for location in locations[:5]:
+            where = location.get("path") or os.path.basename(path)
+            line = location.get("line")
+            detail = message.get("message", "")
+            if line and line > 0:
+                detail = f"line {line}: {detail}"
+            findings.append(Finding(where, f"epubcheck:{message.get('ID')}",
+                                    f"{severity.lower()}: {detail}"))
+    return findings
+
+
+def run_vnu(command, paths):
+    """The Nu HTML checker's errors and warnings as findings.
+
+    Its "info" messages -- Pandoc's trailing slashes on void elements,
+    mostly -- are counted, not listed; they change nothing for a reader.
+    """
+    if not paths:
+        return [], 0
+    try:
+        result = subprocess.run(
+            command + ["--format", "json", "--exit-zero-always"] + paths,
+            capture_output=True, text=True, timeout=600)
+        parsed = json.loads(result.stdout or result.stderr)
+    except (OSError, subprocess.SubprocessError, ValueError) as exc:
+        return [Finding("", "vnu:failed", str(exc))], 0
+    findings, infos = [], 0
+    for message in parsed.get("messages", []):
+        kind = message.get("type")
+        if kind == "error":
+            check = "vnu:error"
+        elif message.get("subType") == "warning":
+            check = "vnu:warning"
+        else:
+            infos += 1
+            continue
+        where = os.path.basename(message.get("url", "").replace("file:", ""))
+        line = message.get("lastLine")
+        detail = message.get("message", "")
+        if line:
+            detail = f"line {line}: {detail}"
+        findings.append(Finding(where, check, detail))
+    return findings, infos
+
+
+def run_validators(pages, epubs):
+    """Run whichever of the two is installed. Returns (findings, notes),
+    notes being one line per tool saying whether it ran."""
+    findings, notes = [], []
+    if epubs:
+        command = find_validator("epubcheck")
+        if command:
+            for path in epubs:
+                findings += run_epubcheck(command, path)
+            notes.append(f"epubcheck ran on {len(epubs)} EPUB(s).")
+        else:
+            notes.append("epubcheck not found (set EPUBCHECK_JAR, or put "
+                         "epubcheck on the path); skipped.")
+    if pages:
+        command = find_validator("vnu")
+        if command:
+            found, infos = run_vnu(command, pages)
+            findings += found
+            notes.append(f"The Nu HTML checker ran on {len(pages)} page(s)"
+                         + (f"; {infos} informational message(s) not listed."
+                            if infos else "."))
+        else:
+            notes.append("The Nu HTML checker not found (set VNU_JAR); "
+                         "skipped.")
+    return findings, notes

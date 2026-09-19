@@ -40,7 +40,7 @@ import outputcheck  # noqa: E402
 
 GOOD = """<!DOCTYPE html><html lang="en"><head><title>A page</title></head>
 <body><h1 id="top">Top</h1><h2>Second</h2>
-<img src="x.png" alt="A thing"><img src="y.png" alt="" role="presentation">
+<img src="x.png" alt="A thing"><img src="y.png" alt="" aria-hidden="true">
 <table><caption>Data</caption><tr><th scope="col">H</th></tr></table>
 <table role="presentation"><tr><td>layout</td></tr></table>
 <a href="#top">up</a><a href="other.html#there">over</a>
@@ -117,6 +117,36 @@ def main():
                                                "file-not", "mimetype"))
                                  for c in checks(damaged))),
             ]
+        # The full validators, when they are here. A machine without
+        # them skips these with a note rather than failing.
+        have = {n: outputcheck.find_validator(n) for n in ("epubcheck", "vnu")}
+        if shutil.which("pandoc") and have["epubcheck"]:
+            ec_clean = outputcheck.run_epubcheck(have["epubcheck"], epub)
+            ec_broken = outputcheck.run_epubcheck(have["epubcheck"], broken)
+            cases += [
+                ("epubcheck passes Pandoc's own EPUB",
+                 lambda: ec_clean == []),
+                ("and reports the broken fragment as RSC-012, with the file",
+                 lambda: any(f.check == "epubcheck:RSC-012"
+                             and f.where.endswith("ch001.xhtml")
+                             for f in ec_broken)),
+            ]
+        else:
+            print("  skip  epubcheck not installed (EPUBCHECK_JAR)")
+        if have["vnu"]:
+            v_good, _ = outputcheck.run_vnu(have["vnu"],
+                                            [os.path.join(work, "good.html")])
+            v_bad, _ = outputcheck.run_vnu(have["vnu"],
+                                           [os.path.join(work, "bad.html")])
+            cases += [
+                ("the Nu checker passes the correct page",
+                 lambda: not [f for f in v_good if f.check == "vnu:error"]),
+                ("and reports the image without alt, naming the page",
+                 lambda: any(f.check == "vnu:error" and "alt" in f.detail
+                             and f.where == "bad.html" for f in v_bad)),
+            ]
+        else:
+            print("  skip  the Nu HTML checker not installed (VNU_JAR)")
         for label, predicate in cases:
             try:
                 ok = predicate()

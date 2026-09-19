@@ -777,7 +777,7 @@ function Image(img)
     record_spacer(img.src, tostring(width), 'decorative')
     img.caption = pandoc.Inlines({})
     img.attributes.alt = ''
-    img.attributes.role = 'presentation'
+    img.attributes['aria-hidden'] = 'true'
     return img
   elseif SPACER_LIMIT == 0 and inches < SPACER_ADVISORY then
     -- Rule off: count it so the run can point the setting out, but change
@@ -795,11 +795,14 @@ function Image(img)
       -- --embed-resources re-serialises the HTML and rewrites alt="" to a
       -- bare alt. The two are equivalent to an HTML5 parser, but some
       -- assistive technology treats a valueless alt as absent, so
-      -- role="presentation" is set as well: it survives that pass intact
-      -- and drops the image from the accessibility tree on its own.
+      -- aria-hidden="true" is set as well: it survives that pass intact
+      -- and drops the image from the accessibility tree on its own. It
+      -- used to be role="presentation", which the HTML checker rejects:
+      -- an img with alt="" already has that role and may carry no role
+      -- attribute at all.
       img.caption = pandoc.Inlines({})
       img.attributes.alt = ''
-      img.attributes.role = 'presentation'
+      img.attributes['aria-hidden'] = 'true'
     elseif replacement ~= '' then
       img.caption = pandoc.Inlines({ pandoc.Str(replacement) })
       local length = char_len(replacement)

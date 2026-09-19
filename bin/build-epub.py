@@ -211,14 +211,16 @@ def count_images(node, found):
     """Tally images and the ones with no alternative text.
 
     An image the filter marked decorative -- alt="" with
-    role="presentation" -- has been described, as having nothing to say.
-    An image with an empty alt and no such marker has not.
+    aria-hidden="true" (role="presentation" in older intermediates) --
+    has been described, as having nothing to say. An image with an empty
+    alt and no such marker has not.
     """
     if isinstance(node, dict):
         if node.get("t") == "Image":
             attr, alt, _ = node["c"]
             found["images"] += 1
-            decorative = ["role", "presentation"] in attr[2]
+            decorative = ["aria-hidden", "true"] in attr[2] \
+                or ["role", "presentation"] in attr[2]
             if not decorative and not stringify(alt).strip():
                 found["without_alt"] += 1
         elif node.get("t") == "Math":

@@ -19,7 +19,10 @@ duplicate ids, tables with neither header cells nor a caption, pages
 with no language or title, and an EPUB whose manifest, spine, and
 archive disagree or whose package document lacks the metadata every
 EPUB needs. They are not epubcheck, the Nu HTML checker, or Ace, which
-know their specifications in full; run those where they are installed.
+know their specifications in full. epubcheck and the Nu checker are run
+as well when they are installed -- named by EPUBCHECK_JAR and VNU_JAR,
+or as commands on the path -- and their findings go into the same
+report with the tool's own message id as the check; --quick skips them.
 
 Copyright 2026 Robert Szarka
 
@@ -57,6 +60,9 @@ def main():
     parser.add_argument("--epub", action="append", default=[],
                         help="an EPUB to check (repeatable)")
     parser.add_argument("--report", help="write findings here as CSV")
+    parser.add_argument("--quick", action="store_true",
+                        help="skip epubcheck and the Nu checker even if "
+                             "installed")
     args = parser.parse_args()
 
     pages = list(args.pages)
@@ -73,9 +79,13 @@ def main():
     findings = []
     if pages:
         findings += outputcheck.check_html_files(pages)
-    for path in args.epub:
-        if os.path.exists(path):
-            findings += outputcheck.check_epub(path)
+    epubs = [p for p in args.epub if os.path.exists(p)]
+    for path in epubs:
+        findings += outputcheck.check_epub(path)
+    notes = []
+    if not args.quick:
+        more, notes = outputcheck.run_validators(pages, epubs)
+        findings += more
 
     if args.report:
         if findings:
@@ -87,7 +97,9 @@ def main():
             os.remove(args.report)
 
     checked = f"{len(pages)} page(s)" + (
-        f" and {len(args.epub)} EPUB(s)" if args.epub else "")
+        f" and {len(epubs)} EPUB(s)" if epubs else "")
+    for note in notes:
+        print(f"  {note}", file=sys.stderr)
     if not findings:
         print(f"Output check: {checked}, nothing found.", file=sys.stderr)
         return 0

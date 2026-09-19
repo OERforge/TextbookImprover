@@ -17,10 +17,11 @@ The checks are the class of defect that has reached this project's output before
 | `link-to-missing-file` | A link names a page or file that isn't in the set being checked. |
 | `link-to-missing-fragment` | A link's `#fragment` matches no `id` in the page it points at. |
 | `image-without-alt` | An `img` has no `alt` attribute, so a screen reader announces the file name. |
-| `image-empty-alt-not-decorative` | `alt=""` without `role="presentation"`: the image was neither described nor declared decorative. |
+| `image-empty-alt-not-decorative` | `alt=""` without `aria-hidden="true"`: the image was neither described nor declared decorative. In an EPUB this is the usual form of a missing description, since Pandoc's writer gives every image an `alt`. |
 | `heading-skips-level` | A heading is more than one level below the one before it. |
 | `empty-heading` | A heading with no text. |
 | `duplicate-id` | An `id` used more than once in one document, so links to it are ambiguous. |
+| `vnu:error`, `vnu:warning`, `epubcheck:<ID>` | What the full validators reported, when installed; see below. |
 | `table-without-headers-or-caption` | A table with no `th` and no `caption`, and not marked `role="presentation"`. A data grid with no relationships to encode conforms with a caption alone; without one it's unidentifiable. |
 | `no-lang`, `no-title` | The `html` element declares no language, or the page has no title. |
 | `not-well-formed` | An EPUB content document that isn't XML. |
@@ -29,6 +30,12 @@ For an EPUB it also checks the container: `mimetype` first and uncompressed, a p
 
 Each finding says where (the page or archive member), which check, and what (the link, the image path, the heading text), so `output-check.csv` sorts and filters into work lists: every image without alt text goes to `image-alt.csv`, every table without headers to the table sidecars.
 
-## What it isn't
+## The full validators
 
-It isn't a validator. [epubcheck](https://github.com/w3c/epubcheck) and the [Nu HTML checker](https://validator.github.io/validator/) know their specifications in full, and DAISY's [Ace](https://daisy.github.io/ace/) applies the accessibility rules to an EPUB the way a reading system would. All three are worth running on a book before distributing it, and all three need Java or Node with a bundled browser, which is why they aren't part of the run. The check here is what can be done every run, on every machine that can run the pipeline, with nothing installed. Where it and epubcheck have both been run on the same book they have agreed; a link the check reports as dead is one epubcheck reports as `RSC-012`.
+The checks above are what the standard library can do. [epubcheck](https://github.com/w3c/epubcheck) and the [Nu HTML checker](https://validator.github.io/validator/) know their specifications in full, and when they're installed the run uses them too: epubcheck on each EPUB, the Nu checker on every page. Their findings land in the same report in the same shape, with the tool's own message as the check (`epubcheck:RSC-012`, `vnu:error`, `vnu:warning`), and the run says which ran. The Nu checker's informational messages (Pandoc's trailing slashes on void elements, mostly) are counted and not listed, since they change nothing for a reader.
+
+Both are Java, which is why they're optional. [Installation](installation.md#optional-the-full-validators) says how to set them up; the run finds them through `EPUBCHECK_JAR` and `VNU_JAR`, or as `epubcheck` and `vnu` commands on the path. `check-output.py --quick` skips them when a fast turn is wanted.
+
+The first thing the Nu checker found in this project's own output was a rule the built-in check couldn't know: an `img` with `alt=""` already has the presentation role and may not carry a `role` attribute, which the filter had been adding to every decorative image. It now uses `aria-hidden="true"`, which the checker accepts and which does the same job. That's the argument for running the real thing.
+
+DAISY's [Ace](https://daisy.github.io/ace/) applies the accessibility rules to an EPUB the way a reading system would; it needs Node with a bundled browser and isn't wired in. Worth running on a book before distributing it.

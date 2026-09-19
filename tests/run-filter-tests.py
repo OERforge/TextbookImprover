@@ -112,10 +112,19 @@ class Converted:
                 "-o", name + ".filtered.json",
                 "--lua-filter", os.path.join(BIN, "figures-and-tables.lua"),
             ], environment, work)
+            # The stylesheet goes in the way convert.sh puts it in. It
+            # matters: --include-in-header would silently discard the
+            # author <meta> the case_metadata checks look for.
+            with open(os.path.join(work, "head.html"), "w",
+                      encoding="utf-8") as fh:
+                fh.write("<style>/* test */</style>\n")
+            environment["HEADER_INCLUDES_FILE"] = os.path.join(work,
+                                                               "head.html")
             self._pandoc([
                 "-f", "json", "-t", "html5", name + ".filtered.json",
                 "-o", name + ".html",
                 "--standalone", "--ascii", "--math-method=mathml",
+                "--lua-filter", os.path.join(BIN, "header-includes.lua"),
                 "-M", "lang=en",
             ], environment, work)
             with open(os.path.join(work, name + ".html"),
@@ -234,6 +243,8 @@ def case_metadata(work):
     return [
         ("the page title keeps the section number the heading carries",
          lambda: out.title("metadata") == "1.3 Levels of Measurement"),
+        ("the stylesheet and the author meta both reach the head",
+         lambda: "/* test */" in page and 'name="author"' in page),
         ("the page has exactly one h1",
          lambda: out.count("metadata", "<h1") == 1),
         ("the author is kept as document metadata",
@@ -633,6 +644,7 @@ def case_intermediate(work):
             "TABLE_CAPTIONS_MISSING": os.path.join(work, "caps-direct.csv"),
             "PROMOTE_H1_TO_TITLE": "always",
             "AUTHOR_BYLINE": "meta",
+            "HEADER_INCLUDES_FILE": os.path.join(work, "head.html"),
         })
         Converted._pandoc([
             "-f", "json", "-t", "html5", name + ".json",
@@ -640,6 +652,7 @@ def case_intermediate(work):
             "--standalone", "--ascii", "--math-method=mathml",
             "-M", "lang=en",
             "--lua-filter", os.path.join(BIN, "figures-and-tables.lua"),
+            "--lua-filter", os.path.join(BIN, "header-includes.lua"),
         ], environment, work)
         with open(os.path.join(work, name + ".direct.html"),
                   encoding="utf-8") as fh:

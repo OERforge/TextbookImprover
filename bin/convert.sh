@@ -29,13 +29,14 @@ set -x
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 figure_filter="$script_dir/figures-and-tables.lua"
 media_filter="$script_dir/media-extensions.lua"
+header_filter="$script_dir/header-includes.lua"
 page_css="$script_dir/page.css"
 config_reader="$script_dir/read-conversion-config.py"
 cartridge_tool="$script_dir/build-cartridge.py"
 headers_tool="$script_dir/table-headers.py"
 epub_tool="$script_dir/build-epub.py"
 
-for required in "$figure_filter" "$media_filter" "$page_css"; do
+for required in "$figure_filter" "$media_filter" "$header_filter" "$page_css"; do
   if [ ! -f "$required" ]; then
     echo "Missing $required -- save it alongside this script." >&2
     exit 1
@@ -551,6 +552,12 @@ fi
 #    deprecated. MathML is now the default, so the option is stated only
 #    to keep the intent visible.
 #
+#    The stylesheet goes in through header-includes.lua rather than
+#    --include-in-header, because that option replaces the page's own
+#    header-includes metadata -- the author <meta>, a split page's
+#    provenance -- instead of adding to it. Found when the provenance
+#    failed to appear; the author <meta> had been missing since v0.2.
+#
 #    --embed-resources is deliberately NOT used. Base64 data URIs inflate
 #    every page and Brightspace does not render them reliably from an
 #    imported Common Cartridge, so each page links to its extracted images
@@ -562,6 +569,7 @@ fi
 # contrast and the same scroll wrapper whichever writer renders it.
 { printf '<style>\n'; cat "$page_css"; printf '</style>\n'; } > "$css_header"
 
+export HEADER_INCLUDES_FILE="$css_header"
 while IFS= read -r f; do
   [ -e "$f" ] || continue
   base="${f%.json}"
@@ -581,7 +589,7 @@ while IFS= read -r f; do
     --standalone
     --ascii
     --math-method=mathml
-    --include-in-header="$css_header"
+    --lua-filter="$header_filter"
     -M "lang=$LANGUAGE"
   )
   [ -n "$header_html" ] && pandoc_args+=(--include-before-body="$header_html")

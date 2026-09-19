@@ -222,6 +222,9 @@ def case_pieces(work):
          lambda: "chapter-7--diseconomies--economies-of-scale" in out.stems),
         ("an empty heading cuts nothing",
          lambda: not any("part" in s for s in out.stems)),
+        ("a link to a heading that became a group lands on its first page",
+         lambda: out.docs["chapter-7--diseconomies--economies-of-scale"][
+             "blocks"][0]["c"][0][0] == "diseconomies"),
         ("a heading with nothing of its own is a group, not a page",
          lambda: "chapter-7--diseconomies" not in out.stems
          and out.docs["chapter-7--diseconomies--economies-of-scale"]["meta"][

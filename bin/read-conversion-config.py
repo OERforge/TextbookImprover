@@ -140,7 +140,7 @@ def main():
         elif names and args.format:
             # convert.sh renders the pages, so it asks for the html
             # target; build-epub.py finds the epub3 ones for itself. A
-            # second target of the same format is item 2 on the roadmap.
+            # second target of the same format is item 1 on the roadmap.
             try:
                 matching = [
                     name for name in names
@@ -230,6 +230,10 @@ def main():
         "TABLE_HEADERS_NEW_NAME": resolved["reports.table_headers_new"],
         "TABLE_HEADERS_REPORT_NAME":
             resolved["reports.table_headers_report"],
+        "SPLIT_LEVEL": resolved["pages.split_level"],
+        "PAGE_NAMES_NAME": resolved["sidecars.page_names"],
+        "PAGE_NAMES_NEW_NAME": resolved["reports.page_names_new"],
+        "PAGE_NAMES_REPORT_NAME": resolved["reports.page_names_report"],
         "MEDIA_UNRESOLVED_NAME": resolved["reports.media_unresolved"],
         "SPACER_LOG_NAME": resolved["reports.spacer_images"],
 

@@ -70,7 +70,7 @@ except ImportError:
 from bookcontents import (  # noqa: E402
     natural_key, chapter_of, within_chapter_key, unrecognised_roles,
     guess_contents, walk_contents, flatten_pages, contents_from_tree,
-    stem_title,
+    stem_title, slugify, clean_title,
 )
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -89,6 +89,9 @@ EXTERNAL = ("http://", "https://", "//", "data:", "mailto:", "tel:", "#",
 
 SRC_RE = re.compile(r'\b(?:src|href)\s*=\s*"([^"]+)"', re.I)
 TITLE_RE = re.compile(r"<title[^>]*>(.*?)</title>", re.I | re.S)
+# What a page split by split-pages.py says about where it came from.
+META_RE = re.compile(r'<meta\s+name="(source-page|page-part)"\s+'
+                     r'content="([^"]*)"', re.I)
 
 REQUIRED = ["identifier", "title"]
 
@@ -100,29 +103,6 @@ TOC_SKIP = {"contents", "table-of-contents", "chapter-objectives",
 # --------------------------------------------------------------------------
 # small helpers
 # --------------------------------------------------------------------------
-
-def slugify(text):
-    """Filename form of an outline title.
-
-    OpenStax names its files after its headings, so "Key Concepts and
-    Summary" is "key-concepts-and-summary" and "Self-Check Questions" is
-    "self-check-questions". Deriving the name rather than listing known
-    headings is what lets one rule serve books that use different words
-    for the same sections.
-    """
-    text = clean_title(text).lower()
-    text = re.sub(r"['\u2019\u2018`]", "", text)
-    text = re.sub(r"[^a-z0-9]+", "-", text)
-    return text.strip("-")
-
-
-def clean_title(text):
-    """Unescape entities and drop the invisible characters Word leaves."""
-    text = html_module.unescape(text)
-    text = re.sub(r"[\u200b\u200c\u200d\ufeff\u00ad]", "", text)
-    text = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", "", text)
-    return " ".join(text.split())
-
 
 def xml_escape(text):
     return (text.replace("&", "&amp;").replace("<", "&lt;")
@@ -142,6 +122,22 @@ def page_title(path, stem):
         if title:
             return title
     return stem_title(stem)
+
+
+def page_provenance(path):
+    """(source stem, part number) for a page split-pages.py wrote, from
+    the <meta> elements it put in the head, or None."""
+    try:
+        with open(path, encoding="utf-8", errors="replace") as handle:
+            markup = handle.read(20000)
+    except OSError:
+        return None
+    found = dict(META_RE.findall(markup.split("</head>", 1)[0]))
+    if not found.get("source-page"):
+        return None
+    m = re.match(r"(\d+)/", found.get("page-part", ""))
+    return (html_module.unescape(found["source-page"]),
+            int(m.group(1)) if m else None)
 
 
 def page_references(path, base_dir):
@@ -717,6 +713,7 @@ def render_items(tree, depth, wrapper=None):
 
 
 TITLES = {}
+PARTS = {}      # piece stem -> (source stem, part number)
 
 
 def build_manifest(config, tree, page_files, common_files):
@@ -857,7 +854,11 @@ def main():
         sys.exit(f"No .html files in {base}.")
 
     for stem in stems:
-        TITLES[stem] = page_title(os.path.join(base, stem + ".html"), stem)
+        path = os.path.join(base, stem + ".html")
+        TITLES[stem] = page_title(path, stem)
+        origin = page_provenance(path)
+        if origin:
+            PARTS[stem] = origin
 
     # ---- configuration ---------------------------------------------------
     config, notes, fatal = {}, [], []
@@ -970,7 +971,7 @@ def main():
                      "from the filenames. Check it.")
         problems.append("contents not specified; using guessed order.")
         guessed_contents = True
-        tree = walk_contents(guess_contents(stems, back_matter, TITLES),
+        tree = walk_contents(guess_contents(stems, back_matter, TITLES, PARTS),
                              available, used, problems)
 
     extra = [s for s in stems if s not in used]
@@ -1075,7 +1076,7 @@ def main():
             # themselves land in number order after what is already there.
             if created:
                 new_tree = walk_contents(
-                    guess_contents(created, back_matter, TITLES),
+                    guess_contents(created, back_matter, TITLES, PARTS),
                     available, used, problems)
                 destination.extend(new_tree)
 
@@ -1149,9 +1150,9 @@ def main():
     if fatal or args.init:
         sample = dict(config)
         sample["contents"] = (config.get("contents")
-                              or guess_contents(stems, back_matter, TITLES))
+                              or guess_contents(stems, back_matter, TITLES, PARTS))
         if args.includeallhtml or not config.get("contents"):
-            sample["contents"] = guess_contents(stems, back_matter, TITLES)
+            sample["contents"] = guess_contents(stems, back_matter, TITLES, PARTS)
         settled, sample_targets = sample_inputs(
             resolved, documents, target, sample["contents"])
         dump_sample(sample, sample_path, notes, unknown_roles,

@@ -8,10 +8,15 @@ Versions are two-part and pre-1.0: breaking changes may land in any of them unti
 
 ### Added
 
+- **Page splitting.** `pages.split_level` cuts each source into one page per heading of that level or shallower, on the filtered intermediate, after the filter and before the render, so a book that arrived as one file per chapter gets one page per section in every output. The heading becomes the piece's title and stays as an anchor; body headings move up; links between pieces are rewritten and the EPUB assembler resolves them within the book. Pieces are named `<source>--<heading>` unless `page-names.csv` says otherwise, and each records its source and part in its metadata and `<head>`, which the packager and the assembler read to group the pieces under their source without a `contents` tree. New: `bin/split-pages.py`, the `page_names` sidecar, the `page_names_new` and `page_names_report` reports, `tests/run-split-tests.py`, and [Splitting pages](docs/splitting.md).
 - **EPUB3 output.** A conversion target with `format: epub3` assembles every page in `project.contents` into one EPUB, built by the new `bin/build-epub.py` after the pages are rendered. The table of contents is the same tree the cartridge organization uses: a group is a heading over its pages, a page a heading at its depth, and a page's own headings continue below it, so the depth at which something appears is its rank in the book and not a fact about the file it came from. Each page is its own file, titled by its heading; ids are prefixed per page so two pages sharing one keep their links straight. The package document's accessibility claims (`accessMode`, `accessModeSufficient`, `accessibilityFeature`, `accessibilitySummary`) are computed from the build rather than asserted: `alternativeText` only when every image has it, `MathML` only when there are equations. See [Building an EPUB](docs/epub.md).
 - Settings: `filename` on a target, an `epub:` section (`toc_depth`, `accessibility_summary`), and `project.authors`, recorded as the EPUB's creators.
 - `read-conversion-config.py --format`, which is how `convert.sh` keeps the `html` target when an `epub3` one is declared beside it.
 - `tests/run-epub-tests.py`.
+
+### Fixed
+
+- The author `<meta>` the filter has written since v0.2 never reached a page: `--include-in-header` replaces a document's `header-includes` metadata rather than adding to it, so `convert.sh`'s stylesheet silently displaced it. The stylesheet now goes in through `bin/header-includes.lua`, which appends to what the page carries. Found when a split page's provenance failed to appear; the filter tests now put the stylesheet in the way `convert.sh` does, so the author check is load-bearing.
 
 ### Changed
 
@@ -36,7 +41,7 @@ The table-headers sidecar, complete: the sidecar, the key, and the report exist;
 - `tests/run-headers-tests.py`, 23 checks over the pre-pass end to end, and 9 key checks in `tests/run-census-tests.py`.
 
 - `util/table-census.py` reports a `Guess` column beside `Kind`: the value a table-headers sidecar would be prefilled with, for every data table. `Kind` is what the file says, `Guess` is what to declare, and a row where they differ is a row worth looking at. Across seven books (1,271 documents, 2,068 tables, 792 of them data tables) the guess gives 462 `both`, 264 `first-row`, 37 `none`, 28 `first-column`, and 1 `unknown`. The header mechanism it feeds behaves identically on Pandoc 3.1.3, 3.9, and 3.11, so this needs no version bump.
-- `util/contrib/fix-empty-paragraphs.py`, contributed from another project and not wired in. It removes content-free paragraph structure elements from a tagged PDF, two sources of which are the longtable caption wrapper and Pandoc's minipage header cells. Needs `pikepdf`. See roadmap item 8.
+- `util/contrib/fix-empty-paragraphs.py`, contributed from another project and not wired in. It removes content-free paragraph structure elements from a tagged PDF, two sources of which are the longtable caption wrapper and Pandoc's minipage header cells. Needs `pikepdf`. See roadmap item 7.
 - `tests/run-census-tests.py` checks that guess against thirteen table shapes built as OOXML directly, so each one carries exactly the formatting signals it means to and no table style decides the answer first. Registered in `tests/run-all.sh`.
 
 - `util/table-samples.py` collects one real example of each table shape into a single Word document, copied out of the sources rather than rebuilt, so the style, table-look flags, merges, repeat-header rows, direct formatting, images, and links all come across. Each example is annotated with its census kind, its guessed value, the evidence read from the file, and which rule produced that value. Deterministic by default; `--random` or `--seed N` samples other examples of the same shapes.

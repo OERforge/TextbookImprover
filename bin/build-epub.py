@@ -45,6 +45,7 @@ import argparse
 import copy
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -154,19 +155,30 @@ def is_attr(value):
                     for kv in value[2]))
 
 
-def prefix_ids(node, prefix):
+def prefix_ids(node, prefix, pages=()):
     """Give every id in a page the page's prefix, and every link to one
     the same, so that two pages with a "Key Terms" heading do not collide
     once they share a book. Pandoc rewrites #id links to the chapter file
     holding the id by its first occurrence, so a collision would send a
-    link to the wrong page without a word."""
+    link to the wrong page without a word.
+
+    A link to another page of the book -- <stem>.html or <stem>.html#id,
+    which is how split-pages.py links the pieces of a source -- becomes
+    a link into the book the same way, so it resolves to that page's
+    chapter file instead of to a file the EPUB does not contain."""
     if isinstance(node, dict):
         if node.get("t") == "Link":
             target = node["c"][2]
-            if target[0].startswith("#") and len(target[0]) > 1:
-                target[0] = "#" + prefix + target[0][1:]
+            url = target[0]
+            if url.startswith("#") and len(url) > 1:
+                target[0] = "#" + prefix + url[1:]
+            elif url.endswith(".html") and url[:-5] in pages:
+                target[0] = "#page-" + url[:-5]
+            elif ".html#" in url and url.split(".html#", 1)[0] in pages:
+                stem, fragment = url.split(".html#", 1)
+                target[0] = "#page-" + stem + "--" + fragment
         for value in node.values():
-            prefix_ids(value, prefix)
+            prefix_ids(value, prefix, pages)
     elif is_attr(node):
         if node[0]:
             node[0] = prefix + node[0]
@@ -176,7 +188,7 @@ def prefix_ids(node, prefix):
                                    for token in pair[1].split())
     elif isinstance(node, list):
         for value in node:
-            prefix_ids(value, prefix)
+            prefix_ids(value, prefix, pages)
 
 
 def shift_headers(node, by):
@@ -221,8 +233,9 @@ def count_images(node, found):
 class Assembly:
     """The book being built: blocks, and what was learned building them."""
 
-    def __init__(self, base):
+    def __init__(self, base, pages):
         self.base = base
+        self.book_pages = frozenset(pages)   # stems a link may point at
         self.blocks = []
         self.depth = 1              # deepest heading level a page sits at
         self.pages = []
@@ -242,7 +255,7 @@ class Assembly:
         blocks = copy.deepcopy(doc["blocks"])
         title = title_override or page_title(doc, stem)
         prefix = "page-" + stem + "--"
-        prefix_ids(blocks, prefix)
+        prefix_ids(blocks, prefix, self.book_pages)
         # A page's own headings continue below its entry. The page's title
         # heading is usually in its metadata, moved there by the filter;
         # when the body still opens with one, that is the page's heading
@@ -265,7 +278,7 @@ class Assembly:
         above them."""
         doc = load_page(self.base, stem)
         blocks = copy.deepcopy(doc["blocks"])
-        prefix_ids(blocks, "page-" + stem + "--")
+        prefix_ids(blocks, "page-" + stem + "--", self.book_pages)
         count_images(blocks, self.found)
         self.pages.append((stem, title_override or page_title(doc, stem), 1))
         self.blocks.extend(blocks)
@@ -452,9 +465,14 @@ def build(base, name, resolved, keep):
     stems = page_stems(base)
     if not stems:
         sys.exit(f"No {INTERMEDIATE} files in {base}: run convert.sh first.")
-    titles = {}
+    titles, parts = {}, {}
     for stem in stems:
-        titles[stem] = page_title(load_page(base, stem), stem)
+        doc = load_page(base, stem)
+        titles[stem] = page_title(doc, stem)
+        source = meta_text(doc.get("meta", {}), "source-page")
+        if source:
+            m = re.match(r"(\d+)/", meta_text(doc["meta"], "page-part"))
+            parts[stem] = (source, int(m.group(1)) if m else None)
 
     available, used, problems = set(stems), set(), []
     contents = project.get("contents") or []
@@ -464,8 +482,8 @@ def build(base, name, resolved, keep):
     else:
         problems.append("contents not specified; using guessed order. The "
                         "packager's sample config is the place to fix it.")
-        tree = walk_contents(guess_contents(stems, None, titles), available,
-                             used, problems, suffix=INTERMEDIATE)
+        tree = walk_contents(guess_contents(stems, None, titles, parts),
+                             available, used, problems, suffix=INTERMEDIATE)
     for problem in problems:
         print(f"WARNING: {problem}", file=sys.stderr)
     unplaced = [s for s in stems if s not in used]
@@ -480,7 +498,7 @@ def build(base, name, resolved, keep):
         sys.exit("No page in project.contents exists on disk; nothing to "
                  "build.")
 
-    assembly = Assembly(base)
+    assembly = Assembly(base, placed)
     if len(tree) == 1 and tree[0][0] == "page":
         assembly.add_single_page(tree[0][1], tree[0][2])
     else:

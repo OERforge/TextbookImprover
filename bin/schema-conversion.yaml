@@ -145,6 +145,25 @@ keys:
           Put wide tables in a focusable scroll container so a long table
           doesn't force the whole page to scroll sideways (WCAG 1.4.10).
 
+  pages:
+    description: >
+      What a page is, when the source's files are not already the pages
+      you want.
+    keys:
+
+      split_level:
+        type: int
+        default: 0
+        description: >
+          Cut every source into one page per heading of this level or
+          shallower, after the filter has run and before anything is
+          rendered. 0 leaves each file as one page. A book that arrived
+          as one file per chapter gets one page per section with 2, and
+          the packager groups the pieces under their source without
+          being told. Each piece is named after its heading unless the
+          page_names sidecar says otherwise, its heading becomes its
+          title, and links between pieces are rewritten to follow.
+
   epub:
     description: >
       Settings read only by an epub3 target. One EPUB holds the whole
@@ -253,6 +272,16 @@ keys:
           no table stops the run, because a correction that silently
           fails to apply destroys work invisibly.
 
+      page_names:
+        type: path
+        default: page-names.csv
+        description: >
+          Names for the pages split_level cuts, keyed on the source and
+          the heading text: source, heading, name. Only needed when the
+          name derived from the heading is not the one you want. A row
+          whose source and heading match nothing is reported, since it
+          means a heading was edited or the row was mistyped.
+
   reports:
     description: >
       Where the run records what still needs human attention. Removing a
@@ -288,6 +317,21 @@ keys:
           What happened to every data table this run: what the sidecar
           declared, what the guess said and why, and a status of
           declared, new, blank, manual, needs-word, or unmatched.
+
+      page_names_new:
+        type: path
+        default: page-names-new.csv
+        description: >
+          Prefilled page_names rows for every page split_level cut that
+          the sidecar has no row for, with the derived name filled in.
+          Written when there are any and removed when there are none.
+
+      page_names_report:
+        type: path
+        default: page-names-report.csv
+        description: >
+          Every page split_level wrote this run: its source, the heading
+          it was cut at, its name, and which part of how many it is.
 
       media_unresolved:
         type: path

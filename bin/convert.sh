@@ -29,13 +29,15 @@ set -x
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 figure_filter="$script_dir/figures-and-tables.lua"
 media_filter="$script_dir/media-extensions.lua"
+header_filter="$script_dir/header-includes.lua"
 page_css="$script_dir/page.css"
 config_reader="$script_dir/read-conversion-config.py"
 cartridge_tool="$script_dir/build-cartridge.py"
 headers_tool="$script_dir/table-headers.py"
+split_tool="$script_dir/split-pages.py"
 epub_tool="$script_dir/build-epub.py"
 
-for required in "$figure_filter" "$media_filter" "$page_css"; do
+for required in "$figure_filter" "$media_filter" "$header_filter" "$page_css"; do
   if [ ! -f "$required" ]; then
     echo "Missing $required -- save it alongside this script." >&2
     exit 1
@@ -146,6 +148,10 @@ IMAGE_ALT_MISSING_NAME="image-alt-missing.csv"
 TABLE_HEADERS_NAME="table-headers.csv"
 TABLE_HEADERS_NEW_NAME="table-headers-new.csv"
 TABLE_HEADERS_REPORT_NAME="table-headers-report.csv"
+SPLIT_LEVEL="0"
+PAGE_NAMES_NAME="page-names.csv"
+PAGE_NAMES_NEW_NAME="page-names-new.csv"
+PAGE_NAMES_REPORT_NAME="page-names-report.csv"
 MEDIA_UNRESOLVED_NAME="media-unresolved.csv"
 SPACER_LOG_NAME="spacer-images.csv"
 
@@ -182,7 +188,7 @@ if [ -f "$config_reader" ]; then
   fi
 fi
 
-export SPACER_BELOW STRIP_SPACER ALT_MAX_CHARS
+export SPACER_BELOW STRIP_SPACER ALT_MAX_CHARS SPLIT_LEVEL
 export RESPONSIVE_IMAGES WRAP_TABLES MEDIA_STRICT
 export TABLE_LABEL_PREFIXES FIGURE_LABEL_PREFIXES
 export AUTHOR_BYLINE PROMOTE_H1_TO_TITLE
@@ -214,6 +220,7 @@ resolve_path() {
 export TABLE_CAPTIONS="$(resolve_path "$TABLE_CAPTIONS_NAME")"
 export IMAGE_ALT="$(resolve_path "$IMAGE_ALT_NAME")"
 export TABLE_HEADERS="$(resolve_path "$TABLE_HEADERS_NAME")"
+page_names="$(resolve_path "$PAGE_NAMES_NAME")"
 
 # A sidecar the config names but the filter cannot read is almost always a
 # wrong path rather than a deliberately empty one, and the run would
@@ -234,11 +241,14 @@ check_sidecar() {
 check_sidecar "$TABLE_CAPTIONS" 'sidecars.table_captions' 'table-captions.csv'
 check_sidecar "$IMAGE_ALT" 'sidecars.image_alt' 'image-alt.csv'
 check_sidecar "$TABLE_HEADERS" 'sidecars.table_headers' 'table-headers.csv'
+check_sidecar "$page_names" 'sidecars.page_names' 'page-names.csv'
 
 missing_report="$(resolve_path "$TABLE_CAPTIONS_MISSING_NAME")"
 alt_report="$(resolve_path "$IMAGE_ALT_MISSING_NAME")"
 headers_new="$(resolve_path "$TABLE_HEADERS_NEW_NAME")"
 headers_report="$(resolve_path "$TABLE_HEADERS_REPORT_NAME")"
+page_names_new="$(resolve_path "$PAGE_NAMES_NEW_NAME")"
+page_names_report="$(resolve_path "$PAGE_NAMES_REPORT_NAME")"
 unresolved_report="$(resolve_path "$MEDIA_UNRESOLVED_NAME")"
 spacer_report="$(resolve_path "$SPACER_LOG_NAME")"
 
@@ -551,6 +561,12 @@ fi
 #    deprecated. MathML is now the default, so the option is stated only
 #    to keep the intent visible.
 #
+#    The stylesheet goes in through header-includes.lua rather than
+#    --include-in-header, because that option replaces the page's own
+#    header-includes metadata -- the author <meta>, a split page's
+#    provenance -- instead of adding to it. Found when the provenance
+#    failed to appear; the author <meta> had been missing since v0.2.
+#
 #    --embed-resources is deliberately NOT used. Base64 data URIs inflate
 #    every page and Brightspace does not render them reliably from an
 #    imported Common Cartridge, so each page links to its extracted images
@@ -562,9 +578,15 @@ fi
 # contrast and the same scroll wrapper whichever writer renders it.
 { printf '<style>\n'; cat "$page_css"; printf '</style>\n'; } > "$css_header"
 
+pages_file="$(mktemp)"
 while IFS= read -r f; do
   [ -e "$f" ] || continue
   base="${f%.json}"
+
+  # Pieces this source was cut into by an earlier run are this run's to
+  # replace: the separator marks them as generated from it, and leaving
+  # them would let a page from an old split survive a change of level.
+  rm -f "$base--"*.filtered.json "$base--"*.html
 
   pandoc \
     -f json \
@@ -572,23 +594,53 @@ while IFS= read -r f; do
     "$f" \
     -o "$base.filtered.json" \
     --lua-filter="$figure_filter"
+  printf '%s\n' "$base.filtered.json" >> "$pages_file"
+done < "$run_docs"
+
+############################################
+# 4.5. Cut sources into pages, when asked
+#
+#    split-pages.py runs on the filtered intermediates, after the filter
+#    and before the render, so the pieces carry everything the filter
+#    did while the sidecar keys and the reports still name the source.
+#    It prints the pages to render, in reading order; with the level at
+#    0 the list is the sources themselves.
+############################################
+
+if [ "$SPLIT_LEVEL" -gt 0 ]; then
+  split_out="$(mktemp)"
+  if ! xargs -d '\n' python3 "$split_tool" --level "$SPLIT_LEVEL" \
+         --sidecar "$page_names" --new "$page_names_new" \
+         --report "$page_names_report" < "$pages_file" > "$split_out"; then
+    exit 1
+  fi
+  mv "$split_out" "$pages_file"
+else
+  rm -f "$page_names_new" "$page_names_report"
+fi
+
+export HEADER_INCLUDES_FILE="$css_header"
+while IFS= read -r page; do
+  [ -e "$page" ] || continue
+  base="${page%.filtered.json}"
 
   pandoc_args=(
     -f json
     -t html5
-    "$base.filtered.json"
+    "$page"
     -o "$base.html"
     --standalone
     --ascii
     --math-method=mathml
-    --include-in-header="$css_header"
+    --lua-filter="$header_filter"
     -M "lang=$LANGUAGE"
   )
   [ -n "$header_html" ] && pandoc_args+=(--include-before-body="$header_html")
   [ -n "$footer_html" ] && pandoc_args+=(--include-after-body="$footer_html")
 
   pandoc "${pandoc_args[@]}"
-done < "$run_docs"
+done < "$pages_file"
+rm -f "$pages_file"
 
 ############################################
 # 5. Report items still needing human input

@@ -100,7 +100,7 @@ run run-headers-tests.py
 # is reported rather than silent: a suite that quietly does not run is
 # worse than one that fails.
 if ! command -v pandoc >/dev/null 2>&1; then
-  skipped="run-filter-tests.py and run-epub-tests.py (pandoc not found)"
+  skipped="run-filter-tests.py, run-epub-tests.py and run-split-tests.py (pandoc not found)"
 elif [ "$(printf '%s\n3.9\n' \
           "$(pandoc --version | head -1 | awk '{print $2}')" \
           | sort -V | head -1)" != "3.9" ]; then
@@ -109,6 +109,7 @@ elif [ "$(printf '%s\n3.9\n' \
 else
   run run-filter-tests.py
   run run-epub-tests.py
+  run run-split-tests.py
 fi
 
 printf '\n'

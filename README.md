@@ -51,6 +51,7 @@ If you have the book's PDF, run `bash $T/bin/convert.sh --toc book.pdf` *before*
 | [Sidecars and reports](docs/sidecars.md) | Each report, each sidecar, and what goes in them |
 | [Building the cartridge](docs/packaging.md) | The packager, ordering from a PDF, validating the manifest |
 | [Building an EPUB](docs/epub.md) | One EPUB per book from the same pages and the same contents, and what it claims about itself |
+| [Splitting pages](docs/splitting.md) | One page per heading from a source that arrived as one file per chapter, or one file |
 | [Brightspace](docs/brightspace.md) | What importing and deleting actually do there, confirmed by D2L |
 | [Testing](docs/testing.md) | The test suites and what each is load-bearing for |
 | [Utilities](docs/utilities.md) | The tools in `util/`: surveying a corpus, checking a source, comparing runs |

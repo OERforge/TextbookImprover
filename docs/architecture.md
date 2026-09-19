@@ -15,13 +15,13 @@ conversion side.
 
 | File | What it does |
 |---|---|
-| `convert.sh` | Runs the pipeline: DOCX → JSON → filtered JSON → (split) → HTML, then optionally hands off to the packaging side. |
+| `convert.py` | Runs the pipeline: DOCX → JSON → filtered JSON → (split) → one output per target, then hands off to the packaging side. `convert.sh` is a wrapper that runs it, kept for one release. |
 | `figures-and-tables.lua` | Pandoc filter doing the accessibility work on each page. |
 | `media-extensions.lua` | Pandoc filter naming extracted images by their real content type. |
 | `header-includes.lua` | Adds the stylesheet to a page's `header-includes` at render time, alongside what the page already carries there; `--include-in-header` would replace it. |
 | `split-pages.py` | Cuts filtered intermediates into one page per heading, names the pieces, rewrites links between them, and records where each came from. |
 | `page.css` | The rules every page carries beyond Pandoc's own stylesheet: caption contrast, real table display, the scroll wrapper. |
-| `read-conversion-config.py` | Resolves `conversion.yaml` into settings `convert.sh` reads. |
+| `read-conversion-config.py` | Resolves `conversion.yaml` into settings `convert.py` reads. |
 | `check-output.py` | Checks the pages and EPUBs a run wrote for dead links, missing alt text, skipped headings, and the like; the command line over `lib/outputcheck.py`. |
 | `build-epub.py` | Assembles the filtered intermediates into one EPUB3, ordered by `project.contents`, with accessibility claims computed from the build. |
 | `schema-conversion.yaml` | Declares every conversion setting, its type, default, and meaning. |
@@ -141,8 +141,8 @@ failing loudly is better than shipping a cartridge that looks fine.
 ## Running the Pandoc filter on its own
 
 `figures-and-tables.lua` is an ordinary Pandoc filter and works outside
-`convert.sh`. Everything configurable is read from the environment, which
-is how `convert.sh` passes settings from `conversion.yaml`:
+`convert.py`. Everything configurable is read from the environment, which
+is how `convert.py` passes settings from `conversion.yaml`:
 
 | Variable | Default | Effect |
 |---|---|---|
@@ -159,7 +159,7 @@ is how `convert.sh` passes settings from `conversion.yaml`:
 | `FIGURE_LABEL_PREFIXES` | `Figure` | The same for figures |
 
 The `*_MISSING` and `SPACER_LOG` files are appended to, not truncated, and
-carry no header row — `convert.sh` collects them across a whole run, sorts
+carry no header row — `convert.py` collects them across a whole run, sorts
 and deduplicates, then writes the header. Point them at a temporary file if
 you're running the filter yourself.
 

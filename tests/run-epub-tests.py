@@ -397,7 +397,7 @@ def case_targets(work):
         ("output_dir and filename name the file, with the extension added",
          lambda: named.returncode == 0
          and os.path.exists(os.path.join(work, "books", "fixtures.epub"))),
-        ("convert.sh's reader picks the html target among several",
+        ("the settings reader picks the html target among several",
          lambda: reader.returncode == 0 and "TARGET_NAME='html'" in settings),
     ]
 

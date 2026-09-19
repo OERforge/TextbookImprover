@@ -1,22 +1,12 @@
 # Roadmap
 
-What's planned, in the order that seems most productive. What has shipped is in [the changelog](CHANGELOG.md); what the tools do now is in [the docs](docs/). EPUB3 output, page splitting, and output checking shipped after v0.3 and are no longer numbered items; see [Building an EPUB](docs/epub.md), [Splitting pages](docs/splitting.md), and [Checking the output](docs/checking.md).
+What's planned, in the order that seems most productive. What has shipped is in [the changelog](CHANGELOG.md); what the tools do now is in [the docs](docs/). EPUB3 output, page splitting, output checking, and multiple targets with the Python driver shipped after v0.3 and are no longer numbered items; see [Building an EPUB](docs/epub.md), [Splitting pages](docs/splitting.md), and [Checking the output](docs/checking.md).
 
 We're attempting to follow two principles: build the tool that can check a change before making the change and, where a decision can't be made by a script, make it declarable by a person once.
 
 Two sections sit after the numbered items. **Refinements to the table headers work** is what v0.3 left undone in the feature it shipped, kept separate because none of it is large enough to be an item and all of it is worth doing before that work is called finished. **Smaller things** is everything that has no dependency on anything else.
 
-## 1. Multiple targets, and `convert.sh` rewritten in Python
-
-The configuration already describes several conversion targets and several packages, each overriding the defaults. Making them real means: building each target into its own output directory, reusing one parsed intermediate across targets that don't override media, and ordering builds from what a package declares it `includes` rather than from the order blocks appear in a file.
-
-`convert.sh` becomes Python at the same time. Adding N targets restructures most of it anyway, and rewriting a script you're about to gut is much cheaper than rewriting one you mean to keep. The argument for Python is mostly the front end in item 8: a web interface shelling out to bash and scraping stderr can't ask what targets exist, can't report progress per document, and can't tell a media failure from a Pandoc failure without parsing prose. Conversion needs to be callable, not just runnable.
-
-The accumulated knowledge in the comments — the Word lock-file check, the zip-signature test for a renamed `.doc`, the cloud-drive write retry, the EMF/WMF guidance — has to carry across verbatim. A rewrite is exactly where that gets dropped. `set -x` tracing needs a deliberate equivalent, too: seeing every Pandoc invocation as it happens has been useful more than once.
-
-`compare-output.py` makes this checkable. The rewrite is done when it says `Runs agree`.
-
-## 2. Markdown as a source format, read and written
+## 1. Markdown as a source format, read and written
 
 Markdown is the one format this project should be able to go both ways in, and the two halves are one piece of work because they define the same vocabulary. Reading has to accept the markers writing emits; writing has to emit markers reading accepts. Ship either half alone and the other is where you find out the first chose badly.
 
@@ -34,7 +24,7 @@ Markdown is the one format this project should be able to go both ways in, and t
 
 **Why here.** Its only dependency is the targets mechanism above. It's the cheapest format on this list, it isn't blocked on anything external the way PDF is, and it's the one that turns this project from a one-way converter into something a book can be maintained in.
 
-## 3. HTML and EPUB as input formats
+## 2. HTML and EPUB as input formats
 
 With Markdown handled above, what remains is HTML and EPUB, and they're close relatives: an EPUB is zipped XHTML, and Pandoc reads it with the same reader.
 
@@ -42,11 +32,11 @@ With Markdown handled above, what remains is HTML and EPUB, and they're close re
 
 One thing to know before relying on it: the reader keeps the attribute but not the element. `<th scope="row">` comes back as a `Cell` carrying `("scope","row")` and is written as `<td scope="row">`, because a `Cell` has no is-a-header flag and only `row_head_columns` makes a body cell a `th`. So `scope="row"` on the first column is a source marker meaning `first-column` or `both`, and the filter sets `row_head_columns` to make it true again. Verified on 3.11 for both readers.
 
-**EPUB earns its place twice over.** Its `nav.xhtml` is the book's table of contents in machine-readable form, which is the packager's module tree without needing the PDF's bookmark outline, and `--toc` reads it now. And it's built from the same source as the DOCX but keeps the ids the DOCX export drops, which is where the anchors for item 5 would have to come from.
+**EPUB earns its place twice over.** Its `nav.xhtml` is the book's table of contents in machine-readable form, which is the packager's module tree without needing the PDF's bookmark outline, and `--toc` reads it now. And it's built from the same source as the DOCX but keeps the ids the DOCX export drops, which is where the anchors for item 4 would have to come from.
 
-## 4. Link text sidecar, for bare URLs
+## 3. Link text sidecar, for bare URLs
 
-**Held, with item 5, until the WCAG question is settled.** Both items change what a link says or where it goes, and the question is the same for each: whether the result still meets the letter and the spirit of the guidelines. Here it's whether supplying an accessible name the visible text doesn't show -- so that a sighted reader and a screen reader user are given different link text -- is the right reading of 2.4.4, or whether the honest fix is to change the visible text so everyone sees it. The research below stands; what waits is the decision it feeds.
+**Held, with item 4, until the WCAG question is settled.** Both items change what a link says or where it goes, and the question is the same for each: whether the result still meets the letter and the spirit of the guidelines. Here it's whether supplying an accessible name the visible text doesn't show -- so that a sighted reader and a screen reader user are given different link text -- is the right reading of 2.4.4, or whether the honest fix is to change the visible text so everyone sees it. The research below stands; what waits is the decision it feeds.
 
 A reference list reads like this:
 
@@ -58,11 +48,11 @@ A sidecar maps each URL to a short description, which the filter attaches to the
 
 - **HTML and EPUB3** need nothing further. Pandoc's writer emits the attribute as it stands, verified in both.
 - **PDF** needs the attribute turned into the `/Contents` entry of the link annotation, which is what PDF/UA requires as a link's alternate description and what Acrobat announces. A filter for this already exists from another project and reads exactly the attribute above, so the two halves meet without either knowing about the other. What this gets us: in testing, Acrobat announces `/Contents`, browser PDF viewers ignore it. Every other mechanism — `/Alt` or `/ActualText` on a marked-content span, `/Alt` on the `Link` structure element — was tested against Acrobat and NVDA and announced nothing, and Edge announced nothing for any of them including `/Contents`. So the PDF half reaches Acrobat users and no one else, which is an argument for sequencing it after the HTML and EPUB halves rather than alongside them.
-- **Markdown**, once item 2 lands, carries the annotation as the `{aria-label="..."}` attribute syntax it was authored in. This is the same markup my textbook project writes by hand, so a sidecar-generated description and an author-written one are indistinguishable downstream. The flavor matters: `markdown` and `commonmark_x` round-trip the attribute, while `gfm`, `commonmark`, and `markdown_strict` rewrite the whole link as a raw `<a>` element. The extension is spelled `link_attributes` for `markdown` and `attributes` for `commonmark_x`, verified on 3.11. That isn't a silent loss (it survives in the HTML) but reading such a file back gives a `RawInline` holding the opening tag, a bare `Link` stripped of its attributes, and a `RawInline` holding the closing tag. So a filter reading `Link.attributes` finds nothing, and the PDF half of this breaks. Any Markdown target needs the extension asserted rather than assumed. Item 4 has the detail.
+- **Markdown**, once item 1 lands, carries the annotation as the `{aria-label="..."}` attribute syntax it was authored in. This is the same markup my textbook project writes by hand, so a sidecar-generated description and an author-written one are indistinguishable downstream. The flavor matters: `markdown` and `commonmark_x` round-trip the attribute, while `gfm`, `commonmark`, and `markdown_strict` rewrite the whole link as a raw `<a>` element. The extension is spelled `link_attributes` for `markdown` and `attributes` for `commonmark_x`, verified on 3.11. That isn't a silent loss (it survives in the HTML) but reading such a file back gives a `RawInline` holding the opening tag, a bare `Link` stripped of its attributes, and a `RawInline` holding the closing tag. So a filter reading `Link.attributes` finds nothing, and the PDF half of this breaks. Any Markdown target needs the extension asserted rather than assumed. Item 3 has the detail.
 
 ### What has to be worked out
 
-**Why a sidecar and not the source.** A Word hyperlink can hold a ScreenTip in `w:tooltip`, which would be the obvious place for a description and would let a remediated `.docx` carry its own. Pandoc's DOCX reader discards it: a tooltip injected by hand into `word/document.xml` comes back as `['', [], []]` on the `Link`, with the title slot empty too. So for DOCX input there's nowhere in the file for this to live, and a sidecar isn't a convenience but the only option short of pre-processing the OOXML. Relevant to the DOCX-output question in item 6, which would otherwise be the natural home for writing descriptions back into a corrected source.
+**Why a sidecar and not the source.** A Word hyperlink can hold a ScreenTip in `w:tooltip`, which would be the obvious place for a description and would let a remediated `.docx` carry its own. Pandoc's DOCX reader discards it: a tooltip injected by hand into `word/document.xml` comes back as `['', [], []]` on the `Link`, with the title slot empty too. So for DOCX input there's nowhere in the file for this to live, and a sidecar isn't a convenience but the only option short of pre-processing the OOXML. Relevant to the DOCX-output question in item 5, which would otherwise be the natural home for writing descriptions back into a corrected source.
 
 **Detection.** Pandoc marks a bare URL with `class="uri"` when it comes from Markdown autolink syntax, but not when it comes from a `.docx`, so that signal isn't free. The rule that works: the link's text, normalized, equals its href. That found all 176 without hand-tuning.
 
@@ -74,19 +64,19 @@ Note that 144 of the 176 are in `-references.html` files and 32 are elsewhere, s
 
 Still worth deciding deliberately rather than by default, and the PDF testing argues for the alternative more strongly than it first appeared. Of seven mechanisms tested against NVDA, only the annotation `/Contents` announced anything, and only in Acrobat; `/ActualText` works but replaces what a reader copies, which for a DOI is a real loss. Descriptive visible text was the only option that worked in every viewer and needed nothing from the reader's stack. So: shorten the visible text to something readable, keep the full address in the `href`, and restore it for print with `@media print { a[href]::after { content: " (" attr(href) ")" } }`. That satisfies both WCAG criteria and asks nothing of tagged-PDF support. It changes what a reader sees on the page, which is a bigger decision than adding an attribute, but it's the one that reaches everybody.
 
-**The LaTeX side needs a preamble.** The existing filter emits `\LinkAlt{...}` and `\LinkAltReset{}` around each link, and those macros live in a `link-alt-preamble.tex` that has to come along with it. It's also a no-op without `\DocumentMetadata` tagging enabled, so the PDF half of this arrives with item 6 rather than before it. The HTML and EPUB halves have no such dependency.
+**The LaTeX side needs a preamble.** The existing filter emits `\LinkAlt{...}` and `\LinkAltReset{}` around each link, and those macros live in a `link-alt-preamble.tex` that has to come along with it. It's also a no-op without `\DocumentMetadata` tagging enabled, so the PDF half of this arrives with item 5 rather than before it. The HTML and EPUB halves have no such dependency.
 
 ### Why it isn't harder than it looks
 
 It's smaller than most of what is on this list and shares all its plumbing with the table headers sidecar that shipped in v0.3: report what needs a human, read a CSV, apply it, report what is still outstanding. That machinery is built and has one user, so this is the second, which is what tests whether it's actually general -- cheaper to find out with two than after a third sidecar is bolted on. What holds the item is the question above, not the work.
 
-## 5. Rewriting links that point back at the publisher
+## 4. Rewriting links that point back at the publisher
 
-**Held, with item 4, until the WCAG question is settled.** Rewriting a link changes where it goes, and the question is whether the result still meets the letter and the spirit of the guidelines: a link whose text and surrounding prose describe one destination (the publisher's page, with its anchor) would then lead somewhere else (a local page, possibly without the anchor), and that bears on how link purpose is judged. The measurements are done, so the work waits on that reading rather than on more investigation.
+**Held, with item 3, until the WCAG question is settled.** Rewriting a link changes where it goes, and the question is whether the result still meets the letter and the spirit of the guidelines: a link whose text and surrounding prose describe one destination (the publisher's page, with its anchor) would then lead somewhere else (a local page, possibly without the anchor), and that bears on how link purpose is judged. The measurements are done, so the work waits on that reading rather than on more investigation.
 
-OpenStax's DOCX exports link within the book by absolute URL: a section quiz's answer link is `https://openstax.org/books/introduction-sociology-3e/pages/chapter-8#fs-id2627631-solution`, so a reader of the converted book is sent to the publisher's site instead of the page a few clicks away. Measured across five books, 11,306 such links, 9,911 of them with an anchor; in *Introduction to Sociology 3e* alone, 1,001 survive into the HTML and every one names a page that exists locally. The page half is a rewrite: `pages/<slug>` to `<slug>.html`, or whatever the target's page naming is. The anchor half is harder, and measured: none of the 927 anchors resolves, because the DOCX export carries no bookmarks (zero `w:bookmarkStart` in 243 files), so the `fs-id…` targets exist nowhere in the source. Two ways forward, not exclusive: rewrite to the page and drop the anchor, which is still a local link; or take anchors from the EPUB, which is built from the same source and should carry the ids -- one more argument for EPUB as an input. The `-solution` suffix is worth checking against the EPUB first, since it may be the web site's own convention rather than an id in the content. Belongs with the link work in item 4, which is already reading every link.
+OpenStax's DOCX exports link within the book by absolute URL: a section quiz's answer link is `https://openstax.org/books/introduction-sociology-3e/pages/chapter-8#fs-id2627631-solution`, so a reader of the converted book is sent to the publisher's site instead of the page a few clicks away. Measured across five books, 11,306 such links, 9,911 of them with an anchor; in *Introduction to Sociology 3e* alone, 1,001 survive into the HTML and every one names a page that exists locally. The page half is a rewrite: `pages/<slug>` to `<slug>.html`, or whatever the target's page naming is. The anchor half is harder, and measured: none of the 927 anchors resolves, because the DOCX export carries no bookmarks (zero `w:bookmarkStart` in 243 files), so the `fs-id…` targets exist nowhere in the source. Two ways forward, not exclusive: rewrite to the page and drop the anchor, which is still a local link; or take anchors from the EPUB, which is built from the same source and should carry the ids -- one more argument for EPUB as an input. The `-solution` suffix is worth checking against the EPUB first, since it may be the web site's own convention rather than an id in the content. Belongs with the link work in item 3, which is already reading every link.
 
-## 6. PDF, and DOCX output
+## 5. PDF, and DOCX output
 
 **PDF** is gated on something outside this project. Pandoc 3.9 can drive LaTeX's tagging via `-V pdfstandard=ua-2`, but `latex-lab-table` states plainly that only simple header rows and columns are supported; that complex headers with subheaders need syntax changes not yet made; and that a cell `Headers` array (the mechanism the hard cases need) is an open item. Until that lands, a tagged PDF from this pipeline can carry simple tables correctly and can't carry the complex ones. Worth revisiting each LaTeX release rather than working around.
 
@@ -96,7 +86,7 @@ Three defects in the meantime are candidates for a post-processing pass with `pi
 
 **DOCX output** is the riskier one, and deserves scoping care. The writer does preserve `w:tblHeader`, so in principle `table-headers-missing.csv` could stop being a report and start being an input that produces a corrected source document. But a Pandoc round trip discards everything Pandoc doesn't model: converting a file and back turned a layout table's `FigureTable` style into plain `Table`, and that style is the cleanest signal available for identifying layout tables. Section properties, content controls, comments, field codes, and tracked changes have the same exposure. If this is built, it should annotate the OOXML directly rather than rebuild the document. It's more code, but the difference between annotating and rebuilding.
 
-## 7. Common Cartridge 1.3, for assignments
+## 6. Common Cartridge 1.3, for assignments
 
 The 1.1 profile already carries everything this project emits today. Quizzes and question banks (`imsqti_xmlv1p2`), discussion topics, web links, LTI links, and the authorization attributes are all in 1.1. The only thing worth moving for is **assignments**, which arrive in 1.3.
 
@@ -104,13 +94,13 @@ The cost is reach. Brightspace and Canvas read up to 1.3, Blackboard up to 1.2, 
 
 Worth doing when there's an assignment to ship, not before.
 
-## 8. A web front end
+## 7. A web front end
 
 Here's why the configuration is schema-driven and why conversion becomes a library: a front end needs to render a form from the settings that exist, write a complete config back without losing anything, and report progress and failures structurally.
 
 Two pieces are already in place for it: the schema carries a description per setting, which is what a form's help text should say, and the writer is proven lossless by test. The third piece (resolving a config in JavaScript) is what the conformance fixtures in `tests/config/` exist to make safe.
 
-## 9. Splitting into separate repositories
+## 8. Splitting into separate repositories
 
 Eventually the two halves may be separate projects with a small shared library between them. Both standalone cases are already close: packaging is read-only with respect to page content and runs against any directory of HTML, and conversion has no packaging logic. v0.2 removed the last coupling, which was the config.
 
@@ -168,6 +158,7 @@ The distinction between the two matters more than either case. A table whose rea
 - **veraPDF and Ace.** epubcheck and the Nu HTML checker now run when they're installed. veraPDF (PDF/UA, Java) joins them when PDF is an output, and DAISY's Ace (Node with a bundled browser) applies the accessibility rules to an EPUB as a reading system would; it is the least likely to be present and the most worth running by hand before a book is distributed.
 - **Landmarks and `epub:type`.** Pandoc's landmarks nav lists only the title page. A reading system can offer "go to the start of the body" when front and back matter are marked, but the tools stay agnostic about what a group is called, so this wants a declaration on a `contents` group (`epub_type: frontmatter`) rather than a guess from its title. Worth doing when a book needs it.
 - **One EPUB per group.** A per-chapter EPUB is a target naming a subset of `contents`, which falls out of item 1 once a target can do that. Nice to have, not a need.
+- **Package a target that writes away from the sources.** A package's `includes` names conversion targets, and `build-cartridge.py` reads the HTML in its `-d` directory, so today the packager builds from the target with `output_dir: .` and a package that includes another is not built. The packager would need to read the configuration from the book's directory while taking its pages from the target's; `--config` is half of that.
 - **Retired key names.** Writing `manifest.cartridge` into a v0.2 config fails with "unknown setting" and no suggestion, because nothing is similarly named. A small table of retired names would let the error say where it went instead.
 - **`compare-output.py` matches tables by position**, so one inserted table reports every later one on that page as changed. Matching on caption could help, but not every table has one.
 - **A media inventory for the comparator.** It reports files and references; comparing image dimensions or bytes-per-page would catch a class of regression it currently can't see.

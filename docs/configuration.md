@@ -57,11 +57,30 @@ targets:
     output_dir: .
 ```
 
-`convert.sh` renders the pages from the one `html` target, and an
-`epub3` target beside it is built by `build-epub.py` (see [Building an
-EPUB](epub.md)); the two are told apart by `format`. The shape allows
-more than that because there will be more: a print PDF alongside a
-screen one, each needing its own settings and its own output directory.
+Every target is built, each into its own `output_dir`: several HTML
+renderings with different headers, footers, or options, an EPUB, and
+whatever else the schema's `format` lists. Two targets whose settings
+that change the filtered intermediate agree (the schema marks these
+`stage: filter`; images, tables, captions, the split, the sidecars) share
+one intermediate, written beside the sources; a target that differs gets
+its own under its output directory. Settings that only change how a
+target writes (`header`, `footer`, `output_dir`) or assemble a book
+(`epub.*`) cost nothing to vary. Reports and sidecars are about the
+source and are written once per book. The packager reads the HTML
+target that writes beside the sources (`output_dir: .`); packaging a
+target that writes elsewhere is on the roadmap.
+
+```yaml
+targets:
+  html:
+    format: html
+    output_dir: .
+  print:
+    format: html          # shares the intermediate; only the footer differs
+    footer: "Printed edition."
+  epub:
+    format: epub3
+```
 
 ### How values are settled
 

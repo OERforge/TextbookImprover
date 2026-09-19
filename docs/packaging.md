@@ -1,6 +1,6 @@
 # Building the cartridge
 
-`build-cartridge.py` turns a directory of pages into an IMS Common Cartridge: the manifest, the file list, and optionally the archive. `convert.sh` calls it for you and passes its options through.
+`build-cartridge.py` turns a directory of pages into an IMS Common Cartridge: the manifest, the file list, and optionally the archive. `convert.py` calls it for you and passes its options through.
 
 ## Building the cartridge
 
@@ -68,7 +68,7 @@ move them if you would rather keep them with their chapters.
 | `--check` | off | Validate; write nothing |
 | `--init` | off | Write a sample config and stop |
 
-There's also `--emit-conversion-config DIR`, which `convert.sh` uses to
+There's also `--emit-conversion-config DIR`, which `convert.py` uses to
 read header, footer and image settings out of the config without parsing
 YAML in shell. It writes only into `DIR` and isn't otherwise useful.
 
@@ -76,7 +76,7 @@ YAML in shell. It writes only into `DIR` and isn't otherwise useful.
 never edits an HTML file or anything under a media directory; it writes
 only the manifest, the file list, the sample config, and the archive. That
 is what makes it safe to run repeatedly, and what lets it work on any tidy
-directory of HTML rather than only on output from `convert.sh`.
+directory of HTML rather than only on output from `convert.py`.
 
 Which files each page needs is discovered from the `src` and `href`
 attributes the page actually uses, so a stray file left in a media

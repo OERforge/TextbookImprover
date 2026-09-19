@@ -4,6 +4,17 @@ All notable changes to this project are documented in this file. The format is b
 
 Versions are two-part and pre-1.0: breaking changes may land in any of them until 1.0, and each is marked **Breaking** below. But we intend to keep the configuration schema, the command-line interface of each script, and the format of the sidecar CSV files stable in each version.
 
+## [Unreleased]
+
+### Added
+
+- **Multiple targets.** Every target in `conversion.yaml` is built, each into its own `output_dir`: several HTML renderings with different headers, footers, or options, and an EPUB, in one run. Targets whose filter-stage settings agree (the schema now marks each setting's `stage`) share one filtered intermediate; a target that differs gets its own under its output directory. A target away from the sources gets its media copied beside its pages. Reports and sidecars stay one per book. `tests/run-convert-tests.py`.
+
+### Changed
+
+- **`convert.sh` is `convert.py`.** The driver is Python: the same steps, the same reports, the same output (checked page for page with `compare-output.py` on four books, which say `Runs agree`), with every comment that recorded what the shell script had learned carried over. `--quiet` turns off the command trace `set -x` used to give; unknown arguments still pass to the packager. `convert.sh` remains as a wrapper that runs it, for one release, so documented commands keep working.
+- The unit tests call `convert.py`'s path helpers directly rather than reading the shell script's source; the check that the script's built-in defaults matched the schema is retired, since the Python reads the schema.
+
 ## [0.4] - 2026-09-19
 
 EPUB output, and pages that need not be files. A conversion target with `format: epub3` assembles the book into one EPUB whose table of contents is the same tree the cartridge organization uses and whose accessibility claims are computed from the build; `pages.split_level` cuts a source that arrived as one file into one page per heading, in every output; and every run now ends by checking what it wrote, with epubcheck and the Nu HTML checker joining in when they're installed. Output changes for decorative images, which carry `aria-hidden="true"` instead of `role="presentation"`, and for every page's `<head>`, which now carries the author `<meta>` the filter has written since v0.2.
@@ -51,7 +62,7 @@ The table-headers sidecar, complete: the sidecar, the key, and the report exist;
 - `tests/run-headers-tests.py`, 23 checks over the pre-pass end to end, and 9 key checks in `tests/run-census-tests.py`.
 
 - `util/table-census.py` reports a `Guess` column beside `Kind`: the value a table-headers sidecar would be prefilled with, for every data table. `Kind` is what the file says, `Guess` is what to declare, and a row where they differ is a row worth looking at. Across seven books (1,271 documents, 2,068 tables, 792 of them data tables) the guess gives 462 `both`, 264 `first-row`, 37 `none`, 28 `first-column`, and 1 `unknown`. The header mechanism it feeds behaves identically on Pandoc 3.1.3, 3.9, and 3.11, so this needs no version bump.
-- `util/contrib/fix-empty-paragraphs.py`, contributed from another project and not wired in. It removes content-free paragraph structure elements from a tagged PDF, two sources of which are the longtable caption wrapper and Pandoc's minipage header cells. Needs `pikepdf`. See roadmap item 6.
+- `util/contrib/fix-empty-paragraphs.py`, contributed from another project and not wired in. It removes content-free paragraph structure elements from a tagged PDF, two sources of which are the longtable caption wrapper and Pandoc's minipage header cells. Needs `pikepdf`. See roadmap item 5.
 - `tests/run-census-tests.py` checks that guess against thirteen table shapes built as OOXML directly, so each one carries exactly the formatting signals it means to and no table style decides the answer first. Registered in `tests/run-all.sh`.
 
 - `util/table-samples.py` collects one real example of each table shape into a single Word document, copied out of the sources rather than rebuilt, so the style, table-look flags, merges, repeat-header rows, direct formatting, images, and links all come across. Each example is annotated with its census kind, its guessed value, the evidence read from the file, and which rule produced that value. Deterministic by default; `--random` or `--seed N` samples other examples of the same shapes.

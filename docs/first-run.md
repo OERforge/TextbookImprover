@@ -27,7 +27,7 @@ cd /path/to/your/docx/files
 has a documented default.
 
 ```bash
-bash $T/bin/convert.sh
+python3 $T/bin/convert.py
 ```
 
 You get one `.html` per `.docx`, their images, and a set of `*-missing.csv`
@@ -57,8 +57,8 @@ updating it.
 **3. Run again.**
 
 ```bash
-bash $T/bin/convert.sh            # builds imsmanifest.xml
-bash $T/bin/convert.sh --zip      # ... and the .imscc archive
+python3 $T/bin/convert.py            # builds imsmanifest.xml
+python3 $T/bin/convert.py --zip      # ... and the .imscc archive
 ```
 
 ### Changing how conversion works
@@ -78,7 +78,7 @@ of documentation above each. Edit it in place; there's nothing to rename.
 
 | File | Holds | Generate with |
 |---|---|---|
-| `packaging.yaml` | How pages become an archive. | first `convert.sh` run, or `build-cartridge.py --init` |
+| `packaging.yaml` | How pages become an archive. | first `convert.py` run, or `build-cartridge.py --init` |
 | `conversion.yaml` | How documents become pages. | `read-conversion-config.py --init` |
 | `project.yaml` | The book itself: language, identifier, title, structure. | optional — see below |
 
@@ -90,19 +90,19 @@ there's only one copy. The tools warn when two disagree.
 
 ### Notes
 
-`convert.sh` finds its filters, schemas, and the shared library by path
+`convert.py` finds its filters, schemas, and the shared library by path
 relative to itself, so the tools can stay where you cloned them. There's
 no install step.
 
 Run each script with the interpreter that matches it: `bash` for
-`convert.sh`, `python3` for anything ending in `.py`. Running a Python
+`convert.py`, `python3` for anything ending in `.py`. Running a Python
 script with `bash` produces a confusing pile of `import: command not
 found`. The scripts do carry shebangs, so if the executable bit survived
-however you obtained them, `./bin/convert.sh` works too — but it doesn't
+however you obtained them, `./bin/convert.py` works too — but it doesn't
 survive a commit made through GitHub's web interface, so the explicit form
 is what this document uses throughout.
 
-`convert.sh` passes any arguments straight through to `build-cartridge.py`,
+`convert.py` passes any arguments straight through to `build-cartridge.py`,
 so `--zip`, `--check`, `--toc` and `--includeallhtml` all work on the front
 script.
 
@@ -119,15 +119,15 @@ for f in *.docx; do python3 $T/util/untrack-deletions.py "$f" --check; done \
   | grep -v ': 0 '
 
 # 2. First run. There is no config yet, so it stops with a sample.
-bash $T/bin/convert.sh
+python3 $T/bin/convert.py
 
 # 3. Fill in identifier and title, then rename.
 mv packaging-sample.yaml packaging.yaml
 
 # 4. Order the pages. With the book's PDF:
-bash $T/bin/convert.sh --toc book.pdf
+python3 $T/bin/convert.py --toc book.pdf
 #    Without one, let it guess and correct the sample:
-bash $T/bin/convert.sh --includeallhtml
+python3 $T/bin/convert.py --includeallhtml
 
 # 5. Adopt the order it worked out. Do this AFTER step 4: the sample
 #    already carries a guessed order for every page, and --toc orders
@@ -138,10 +138,10 @@ mv packaging-sample.yaml packaging.yaml
 
 # 6. Work through the reports, appending rows to the sidecar files.
 #    Re-run after each pass; the reports shrink.
-bash $T/bin/convert.sh
+python3 $T/bin/convert.py
 
 # 7. When the reports you care about are gone, build the cartridge.
-bash $T/bin/convert.sh --zip
+python3 $T/bin/convert.py --zip
 ```
 
 Steps 6 and 7 are the loop you will spend the most time in. Everything else

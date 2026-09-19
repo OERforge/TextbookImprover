@@ -148,9 +148,10 @@ class Node:
     """One schema entry: a section holding keys, or a single setting."""
 
     __slots__ = ("name", "path", "description", "type", "default", "values",
-                 "item", "target_only", "default_from_target", "keys")
+                 "item", "target_only", "default_from_target", "keys",
+                 "stage")
 
-    def __init__(self, name, path, raw):
+    def __init__(self, name, path, raw, stage=None):
         self.name = name
         self.path = path
         self.description = " ".join(str(raw.get("description", "")).split())
@@ -161,12 +162,20 @@ class Node:
         self.item = None
         self.target_only = bool(raw.get("target_only", False))
         self.default_from_target = bool(raw.get("default_from_target", False))
+        # Which step of a run a setting changes: filter (the intermediate
+        # the filter writes), render (how a target writes its pages),
+        # package (a whole-book output), or report. A section's stage is
+        # inherited by its keys; unset means filter, the conservative
+        # reading, since sharing an intermediate two targets would have
+        # filtered differently is the silent failure.
+        self.stage = raw.get("stage", stage) or "filter"
 
         if "keys" in raw:
             self.keys = {}
             for child, child_raw in (raw["keys"] or {}).items():
                 child_path = f"{path}.{child}" if path else child
-                self.keys[child] = Node(child, child_path, child_raw or {})
+                self.keys[child] = Node(child, child_path, child_raw or {},
+                                        self.stage)
             return
 
         self.type = raw.get("type")

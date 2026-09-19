@@ -69,7 +69,7 @@ for every other consumer, and emits `<span class="deletion">` needing CSS.
 ## Files that aren't documents
 
 A glob of `*.docx` picks up things that aren't documents, and both
-`convert.sh` and `untrack-deletions.py` skip them by name with a message
+`convert.py` and `untrack-deletions.py` skip them by name with a message
 rather than failing:
 
 | What | Why it appears |

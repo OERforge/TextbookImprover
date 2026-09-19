@@ -499,17 +499,22 @@ def epub_targets(schema, project_schema, documents, requested, allow_unknown):
 
 # --------------------------------------------------------------------------
 
-def build(base, name, resolved, keep):
+def build(base, name, resolved, keep, intermediates=None):
     project = resolved.project
     for warning in resolved.warnings:
         print(f"WARNING: {warning}", file=sys.stderr)
 
-    stems = page_stems(base)
+    # Where the filtered intermediates are: the content directory unless
+    # a run with several targets put this target's elsewhere. Media paths
+    # inside them are relative to the content directory either way.
+    pages_dir = intermediates or base
+    stems = page_stems(pages_dir)
     if not stems:
-        sys.exit(f"No {INTERMEDIATE} files in {base}: run convert.sh first.")
+        sys.exit(f"No {INTERMEDIATE} files in {pages_dir}: run the "
+                 "conversion first.")
     titles, parts = {}, {}
     for stem in stems:
-        doc = load_page(base, stem)
+        doc = load_page(pages_dir, stem)
         titles[stem] = page_title(doc, stem)
         source = meta_text(doc.get("meta", {}), "source-page")
         if source:
@@ -543,14 +548,15 @@ def build(base, name, resolved, keep):
         sys.exit("No page in project.contents exists on disk; nothing to "
                  "build.")
 
-    assembly = Assembly(base, placed)
+    assembly = Assembly(pages_dir, placed)
     if len(tree) == 1 and tree[0][0] == "page":
         assembly.add_single_page(tree[0][1], tree[0][2])
     else:
         assembly.add_tree(tree)
 
     document = {
-        "pandoc-api-version": load_page(base, placed[0])["pandoc-api-version"],
+        "pandoc-api-version": load_page(pages_dir,
+                                        placed[0])["pandoc-api-version"],
         "meta": book_metadata(project, resolved, assembly.found, base),
         "blocks": assembly.blocks,
     }
@@ -608,6 +614,9 @@ def main():
                         help="the content directory (default: .)")
     parser.add_argument("--target", default=None,
                         help="build this epub3 target only")
+    parser.add_argument("--intermediates", default=None,
+                        help="read the filtered intermediates from here "
+                             "rather than from the content directory")
     parser.add_argument("--if-declared", action="store_true",
                         help="exit quietly when no epub3 target is declared")
     parser.add_argument("--keep", action="store_true",
@@ -638,7 +647,8 @@ def main():
 
     status = 0
     for name, resolved in targets:
-        status = build(args.dir, name, resolved, args.keep) or status
+        status = build(args.dir, name, resolved, args.keep,
+                       args.intermediates) or status
     return status
 
 

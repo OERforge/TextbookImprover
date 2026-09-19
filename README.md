@@ -24,18 +24,18 @@ You need Pandoc 3.9 or later, Python 3.9 or later, and PyYAML; see [Installation
 T=/path/to/tools                       # where you cloned this
 cd /path/to/your/docx/files
 
-bash $T/bin/convert.sh                 # 1. convert: one .html per .docx, plus reports
+python3 $T/bin/convert.py                 # 1. convert: one .html per .docx, plus reports
 ```
 
 The first run converts everything, then stops and writes `packaging-sample.yaml`, because a manifest needs two things only you can supply. Set `identifier` and `title` near the top of that file and rename it:
 
 ```bash
 mv packaging-sample.yaml packaging.yaml
-bash $T/bin/convert.sh                 # 2. builds imsmanifest.xml
-bash $T/bin/convert.sh --zip           # 3. ... and the .imscc archive
+python3 $T/bin/convert.py                 # 2. builds imsmanifest.xml
+python3 $T/bin/convert.py --zip           # 3. ... and the .imscc archive
 ```
 
-If you have the book's PDF or EPUB, run `bash $T/bin/convert.sh --toc book.pdf` (or `--toc book.epub`) *before* renaming the sample: it orders the pages from the book's own table of contents, with the real chapter titles. The EPUB needs nothing installed; OpenStax publishes both. [A first run](docs/first-run.md) walks through all of this, including the reports and sidecars you will work through afterwards.
+`bash $T/bin/convert.sh` still works and runs the same thing; it's a wrapper kept for one release. If you have the book's PDF or EPUB, run `python3 $T/bin/convert.py --toc book.pdf` (or `--toc book.epub`) *before* renaming the sample: it orders the pages from the book's own table of contents, with the real chapter titles. The EPUB needs nothing installed; OpenStax publishes both. [A first run](docs/first-run.md) walks through all of this, including the reports and sidecars you will work through afterwards.
 
 ## Documentation
 

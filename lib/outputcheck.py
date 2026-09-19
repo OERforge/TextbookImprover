@@ -253,7 +253,12 @@ def check_html_files(paths):
     findings = []
     pages = {}
     for path in paths:
-        name = os.path.basename(path)
+        # Named by their path below the working directory, so a run with
+        # several targets can tell print/tables.html from tables.html;
+        # a page elsewhere is named by its file name alone.
+        relative = os.path.relpath(path)
+        name = relative.replace(os.sep, "/") if not relative.startswith("..") \
+            else os.path.basename(path)
         with open(path, encoding="utf-8", errors="replace") as fh:
             pages[name] = read_html(name, fh.read())
     for page in pages.values():

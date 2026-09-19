@@ -26,11 +26,11 @@ operation rather than letting it surface later as a missing image.
 ## Troubleshooting
 
 **`set: Illegal option -o pipefail`** — the script is running under dash.
-Use `bash convert.sh` or `./convert.sh`, not `sh convert.sh`. It re-execs
+Use `bash convert.py` or `./convert.py`, not `sh convert.py`. It re-execs
 itself under bash, so this should only appear with a very old copy.
 
 **`\r: not found`, then syntax errors** — CRLF line endings from a Windows
-editor. `sed -i 's/\r$//' convert.sh`, and set
+editor. `sed -i 's/\r$//' convert.py`, and set
 `git config --global core.autocrlf input`.
 
 **`couldn't unpack docx container`** — a file that isn't a DOCX. Word lock
@@ -89,7 +89,7 @@ keys on the media path ignoring its extension.
   conform, and the useful thing to add is a caption, not a layout
   marking.
 - **Two PAC errors on a tagged PDF are the validator's, not the file's.**
-  This matters only once PDF is an output (roadmap item 6), but it's
+  This matters only once PDF is an output (roadmap item 5), but it's
   worth recognizing rather than chasing. *Table header cell has no
   associated subcells* is raised because `latex-lab` sets `Scope` through
   an attribute class and PAC doesn't resolve `/ClassMap` references:

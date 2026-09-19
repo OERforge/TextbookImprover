@@ -14,6 +14,7 @@ one failed, and exits non-zero if any did.
 | `run-roundtrip-test.py` | That writing a configuration and reading it back changes nothing. |
 | `run-unit-tests.py` | The small functions that decide filenames and directory names, and the places where one fact is written down twice and could drift apart. |
 | `run-portability-test.py` | That every Python file parses on Python 3.9, the oldest version supported. Uses an older interpreter if one is installed and scans the source otherwise. |
+| `run-convert-tests.py` | `convert.py` on the fixtures: a bare directory converts beside its sources, several targets each land in their own directory, targets whose filter settings agree share one intermediate and ones that differ don't, a target away from the sources gets its media, arguments reach the packager, and the `convert.sh` wrapper still runs. |
 | `run-filter-tests.py` | The accessibility work the Lua filters do, against six small `.docx` fixtures. Needs Pandoc 3.9; skipped with a message otherwise. |
 | `run-check-tests.py` | The output checker: a page that breaks every check and one that breaks none, and an EPUB with a link broken inside the archive by hand. |
 | `run-split-tests.py` | `split-pages.py` on a chapter-shaped document Pandoc builds from Markdown: what a piece is, the names sidecar, links between pieces, and that the packager and the EPUB assembler group the pieces under their source from the provenance each carries. Same Pandoc requirement. |
@@ -39,7 +40,7 @@ that's right — a merged title row becoming a spanning header, a table
 with no header signal having its first row promoted anyway. Those are
 what the filter does with no declaration in reach, which is how those
 cases run; what a declaration does instead is pinned separately, in the
-cases that run the pre-pass the way `convert.sh` does.
+cases that run the pre-pass the way `convert.py` does.
 
 The configuration fixtures serve a second purpose: they're the
 conformance contract for the merge rules. If those rules are ever

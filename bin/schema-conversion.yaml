@@ -33,6 +33,7 @@ keys:
     values: [html, epub3, pdf, docx, markdown]
     default: html
     target_only: true
+    stage: render
     description: >
       What this target produces.
 
@@ -41,6 +42,7 @@ keys:
     default: ""
     target_only: true
     default_from_target: true
+    stage: render
     description: >
       Where this target writes. Defaults to the target's own name, so two
       targets in the same format can't overwrite each other.
@@ -49,6 +51,7 @@ keys:
     type: path
     default: ""
     target_only: true
+    stage: render
     description: >
       For a format that produces one file for the whole book, such as
       epub3, the file to write inside output_dir. Left empty it's worked
@@ -59,6 +62,7 @@ keys:
   header:
     type: text
     default: ""
+    stage: render
     description: >
       Markdown placed at the top of every page, or the path to a file
       holding it. Inserted by the template after the filters have run, so
@@ -67,6 +71,7 @@ keys:
   footer:
     type: text
     default: ""
+    stage: render
     description: >
       Markdown placed at the bottom of every page, or the path to a file
       holding it. The usual use is an attribution line. Same caveat as
@@ -165,6 +170,7 @@ keys:
           title, and links between pieces are rewritten to follow.
 
   epub:
+    stage: package
     description: >
       Settings read only by an epub3 target. One EPUB holds the whole
       book: every page in project.contents, in that order, with each
@@ -299,6 +305,7 @@ keys:
           means a heading was edited or the row was mistyped.
 
   reports:
+    stage: report
     description: >
       Where the run records what still needs human attention. Removing a
       report when nothing is outstanding is deliberate: the file existing

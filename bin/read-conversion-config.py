@@ -138,9 +138,9 @@ def main():
         if len(names) == 1:
             target = names[0]
         elif names and args.format:
-            # convert.sh renders the pages, so it asks for the html
-            # target; build-epub.py finds the epub3 ones for itself. A
-            # second target of the same format is item 1 on the roadmap.
+            # One target at a time: convert.py builds every target itself
+            # through the library, and this reader serves whoever wants
+            # one target's settings as shell assignments.
             try:
                 matching = [
                     name for name in names

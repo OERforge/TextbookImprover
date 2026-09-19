@@ -1,6 +1,6 @@
 # Building an EPUB
 
-One EPUB for the whole book, assembled from the same pages the cartridge holds and ordered by the same `project.contents`. Declare an `epub3` target and `convert.sh` builds it after the pages, or run `bin/build-epub.py` on its own against a directory that has already been converted.
+One EPUB for the whole book, assembled from the same pages the cartridge holds and ordered by the same `project.contents`. Declare an `epub3` target and `convert.py` builds it after the pages, or run `bin/build-epub.py` on its own against a directory that has already been converted.
 
 ## Declaring the target
 
@@ -20,7 +20,7 @@ The book's own details come from `project.yaml`: `title`, `language`, `identifie
 
 ## What goes in, and in what order
 
-The assembler reads the filtered intermediates `convert.sh` writes (`<page>.filtered.json`), not the HTML pages. The intermediate is the page after the filter has done its work and before any writer has rendered it, so everything the [remediation](architecture.md#what-conversion-does-to-your-pages) produced (captions, `scope` on header cells, the scroll wrapper, replaced alt text, MathML) arrives in the EPUB as it does in the HTML. Reading the HTML back would lose some of it: Pandoc's HTML reader keeps a cell's `scope` attribute but not the element, so a row header would come back as a `<td>`.
+The assembler reads the filtered intermediates `convert.py` writes (`<page>.filtered.json`), not the HTML pages. The intermediate is the page after the filter has done its work and before any writer has rendered it, so everything the [remediation](architecture.md#what-conversion-does-to-your-pages) produced (captions, `scope` on header cells, the scroll wrapper, replaced alt text, MathML) arrives in the EPUB as it does in the HTML. Reading the HTML back would lose some of it: Pandoc's HTML reader keeps a cell's `scope` attribute but not the element, so a row header would come back as a `<td>`.
 
 Order and structure come from `project.contents`, exactly as for the cartridge. A group becomes a heading over its pages; a page becomes a heading at its depth; the page's own headings continue below it. So the table of contents shows ranks, not files: with
 

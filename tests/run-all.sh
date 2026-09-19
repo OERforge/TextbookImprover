@@ -121,6 +121,7 @@ elif [ "$(printf '%s\n3.9\n' \
            | awk '{print $2}') is older than 3.9)"
 else
   run run-filter-tests.py
+  run run-convert-tests.py
   run run-epub-tests.py
   run run-split-tests.py
 fi

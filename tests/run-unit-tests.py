@@ -42,7 +42,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 import importlib.util
 import os
 import re
-import subprocess
 import tempfile
 import sys
 
@@ -205,38 +204,10 @@ def check_consistency():
         r'"([^"]+)"',
         re.search(r"BACK_MATTER_ORDER = \[(.*?)\]", source, re.S).group(1))
 
-    conversion = yaml.safe_load(
-        open(os.path.join(ROOT, "bin", "schema-conversion.yaml"),
-             encoding="utf-8"))
-    convert_sh = open(os.path.join(ROOT, "bin", "convert.sh"),
-                      encoding="utf-8").read()
-
-    def fallbacks_agree():
-        """convert.sh repeats the schema's defaults so a bare directory
-        converts with no configuration. Two copies, so worth asserting."""
-        pairs = {
-            "PROMOTE_H1_TO_TITLE": ("promote_h1_to_title",),
-            "AUTHOR_BYLINE": ("author_byline",),
-            "ALT_MAX_CHARS": ("images", "alt_max_chars"),
-        }
-        for variable, path in pairs.items():
-            node = conversion["keys"]
-            for part in path:
-                node = node["keys"][part] if "keys" in node else node[part]
-                if isinstance(node, dict) and part in node.get("keys", {}):
-                    node = node["keys"][part]
-            found = re.search(r'(?m)^%s="([^"]*)"' % variable, convert_sh)
-            if not found:
-                return False
-            if str(found.group(1)) != str(node["default"]):
-                return False
-        return True
 
     return [
         ("the schema's back-matter default matches the built-in order",
          lambda: list(declared) == builtin),
-        ("convert.sh's built-in fallbacks match the schema's defaults",
-         fallbacks_agree),
         ("every schema loads and declares its keys",
          lambda: all("keys" in yaml.safe_load(open(p, encoding="utf-8"))
                      for p in (
@@ -271,56 +242,43 @@ def undescribed():
 # --------------------------------------------------------------------------
 
 def check_sidecar_paths():
-    """How convert.sh turns a configured sidecar name into a path.
+    """How convert.py turns a configured sidecar name into a path.
 
-    It built "$PWD/$name" unconditionally, so an absolute setting became
-    "/book//srv/corrections/table-captions.csv". The filter read nothing,
-    every correction in the file was discarded, and the only trace was an
-    instruction telling the user to append their work to a path that did
-    not exist. Sidecars are the one thing here that no script can
-    reproduce, so failing to read one silently is the worst failure this
-    pipeline has.
+    convert.sh built "$PWD/$name" unconditionally, so an absolute setting
+    became "/book//srv/corrections/table-captions.csv". The filter read
+    nothing, every correction in the file was discarded, and the only
+    trace was an instruction telling the user to append their work to a
+    path that did not exist. Sidecars are the one thing here that no
+    script can reproduce, so failing to read one silently is the worst
+    failure this pipeline has. The Python has one helper for it, called
+    directly here.
     """
-    script = os.path.join(ROOT, "bin", "convert.sh")
-    with open(script, encoding="utf-8") as handle:
-        source = handle.read()
-
-    # A real directory, because bash sets $PWD from the working directory
-    # and ignores it in the environment.
+    convert = load(os.path.join(ROOT, "bin", "convert.py"), "convert")
     base = tempfile.mkdtemp(prefix="sidecar-paths-")
 
-    def resolve(name):
-        # The same case statement convert.sh uses, exercised through a
-        # shell so this fails if the shell semantics differ from what the
-        # Python here assumes.
-        result = subprocess.run(
-            ["bash", "-c",
-             'resolve_path() { case "$1" in /*) printf %s "$1" ;; '
-             '*) printf %s "$PWD/$1" ;; esac ; } ; resolve_path "$1"',
-             "_", name],
-            capture_output=True, text=True, stdin=subprocess.DEVNULL,
-            cwd=base)
-        return result.stdout
+    def stops(path, setting, default):
+        try:
+            convert.check_sidecar(path, setting, default, base)
+        except SystemExit:
+            return True
+        return False
 
     return [
         ("an absolute sidecar path is used as given",
-         lambda: resolve("/srv/corrections/table-captions.csv")
-                 == "/srv/corrections/table-captions.csv"),
+         lambda: convert.resolve_path(base, "/srv/corrections/t.csv")
+                 == "/srv/corrections/t.csv"),
         ("a bare name resolves against the content directory",
-         lambda: resolve("table-captions.csv")
+         lambda: convert.resolve_path(base, "table-captions.csv")
                  == os.path.join(base, "table-captions.csv")),
         ("a path escaping the content directory stays relative to it",
-         lambda: resolve("../corrections/table-captions.csv")
-                 == os.path.join(base, "../corrections/table-captions.csv")),
-        # Asserted against the script itself, so a later rewrite cannot
-        # quietly reintroduce the shape of the bug.
-        ("convert.sh no longer prefixes $PWD unconditionally",
-         lambda: '"$PWD/$TABLE_CAPTIONS_NAME"' not in source
-                 and '"$PWD/$IMAGE_ALT_NAME"' not in source),
-        ("convert.sh resolves every sidecar and report through one helper",
-         lambda: source.count("resolve_path \"$") >= 7),
+         lambda: convert.resolve_path(base, "../corrections/t.csv")
+                 == os.path.join(base, "../corrections/t.csv")),
         ("a configured sidecar that does not exist stops the run",
-         lambda: "check_sidecar" in source and "exit 1" in source),
+         lambda: stops(os.path.join(base, "corrections", "t.csv"),
+                       "sidecars.table_captions", "table-captions.csv")),
+        ("the default name, not yet written, is the normal starting state",
+         lambda: not stops(os.path.join(base, "table-captions.csv"),
+                           "sidecars.table_captions", "table-captions.csv")),
     ]
 
 

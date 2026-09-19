@@ -200,6 +200,30 @@ class Pieces:
 # the cases
 # --------------------------------------------------------------------------
 
+def case_document_meta(work):
+    """The source's front matter stays on the source's page."""
+    # Straight from Markdown, since a .docx carries no such metadata.
+    os.makedirs(work, exist_ok=True)
+    with open(os.path.join(work, "book.md"), "w", encoding="utf-8") as fh:
+        fh.write("---\ntitle: The Book\nsubtitle: Draft, all rights reserved\n"
+                 "date: 2026-09-19\ninclude-before: An epigraph.\n---\n\n"
+                 "A title page.\n\n# One\n\nText.\n\n# Two\n\nMore.\n")
+    run(["pandoc", "book.md", "-t", "json", "-o", "book.filtered.json"], work)
+    out = Pieces(work, split(work, [os.path.join(work, "book.filtered.json")]))
+    first = out.docs.get("book--one", {})
+    own = out.docs.get("book", {})
+    return [
+        ("a piece carries no subtitle, date, or include-before",
+         lambda: not any(k in first.get("meta", {})
+                         for k in ("subtitle", "date", "include-before"))),
+        ("the source's own page keeps them",
+         lambda: "subtitle" in own.get("meta", {})
+         and "include-before" in own.get("meta", {})),
+        ("a piece keeps the language and its title",
+         lambda: "title" in first["meta"]),
+    ]
+
+
 def case_pieces(work):
     """What a piece is."""
     source = prepare(work)
@@ -488,6 +512,7 @@ def case_restyle(work):
 CASES = [
     ("restyling a Title-styled source", case_restyle),
     ("what a piece is", case_pieces),
+    ("document metadata stays on the document", case_document_meta),
     ("the page-names sidecar", case_names),
     ("levels and refusals", case_levels),
     ("the packager and the assembler read the pieces", case_readers),

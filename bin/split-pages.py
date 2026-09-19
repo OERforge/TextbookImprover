@@ -250,6 +250,11 @@ def previous_pages(report):
 # splitting
 # --------------------------------------------------------------------------
 
+# Metadata that belongs to the document a source is, not to its pieces.
+DOCUMENT_ONLY = ("subtitle", "date", "abstract", "abstract-title",
+                 "include-before", "include-after", "toc", "toc-title",
+                 "toc-depth")
+
 MATTER = {"\\frontmatter": "front", "\\mainmatter": "main",
           "\\appendix": "appendix", "\\backmatter": "back"}
 
@@ -401,6 +406,15 @@ def split_document(doc, stem, level, names, taken, problems):
             body.insert(0, {"t": "Div", "c": [[anchor, [ANCHOR_CLASS], []],
                                               []]})
         meta = copy.deepcopy(doc.get("meta", {}))
+        # A piece inherits what describes a page -- language, author,
+        # what the pipeline recorded -- and not the source document's
+        # front matter: a subtitle, date, abstract, or include-before
+        # is the title page's, and the source's own page (what precedes
+        # the first cut) keeps it. Rendered on every piece, it would
+        # open each section with the book's copyright line.
+        if piece != stem:               # the opening page is the document's
+            for field in DOCUMENT_ONLY:
+                meta.pop(field, None)
         meta["title"] = {"t": "MetaInlines", "c": [{"t": "Str", "c": w}
                                                     if i % 2 == 0 else
                                                     {"t": "Space"}

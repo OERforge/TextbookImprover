@@ -73,6 +73,7 @@ try:
     import oerconfig
     from bookcontents import (guess_contents, walk_contents, number_tree,
                               is_generated, toc_blocks)
+    from names import safe_path, safe_stem, is_safe
 except ImportError:
     sys.exit("Cannot find the configuration library. It should be in a "
              "lib/ directory beside bin/.")
@@ -80,6 +81,7 @@ except ImportError:
 FIGURE_FILTER = os.path.join(HERE, "figures-and-tables.lua")
 MEDIA_FILTER = os.path.join(HERE, "media-extensions.lua")
 HEADER_FILTER = os.path.join(HERE, "header-includes.lua")
+SAFE_MEDIA_FILTER = os.path.join(HERE, "safe-media.lua")
 PAGE_CSS = os.path.join(HERE, "page.css")
 HEADERS_TOOL = os.path.join(HERE, "table-headers.py")
 SPLIT_TOOL = os.path.join(HERE, "split-pages.py")
@@ -320,7 +322,10 @@ def read_markdown_to_json(base, docs, env):
     along and is dropped by the HTML and EPUB writers."""
     stems = []
     for name in docs:
-        stem = name[:-3]
+        # A page is named after its source, made safe for an href: the
+        # cartridge's, the EPUB's, an LMS's. "01 BigPicture.md" is the
+        # page 01-BigPicture.
+        stem = safe_stem(name[:-3])
         run(["pandoc", "-f", "markdown", "-t", "json", name,
              "-o", stem + ".json", "--lua-filter=" + MEDIA_FILTER],
             env=env, cwd=base)
@@ -354,7 +359,7 @@ def read_to_json(base, docs, env, work):
     repaired_dir = os.path.join(work, "repaired")
     os.makedirs(repaired_dir, exist_ok=True)
     for name in docs:
-        stem = name[:-5]
+        stem = safe_stem(name[:-5])
         # Pandoc reads a repaired copy -- bookmarks moved to where its
         # reader keeps them; see lib/docxrepair.py -- and the source is
         # never touched. The copy keeps the name so nothing downstream
@@ -386,6 +391,10 @@ def hand_pages(base, stems):
         stem = os.path.basename(path)[:-5]
         if stem in stems or stem.split("--", 1)[0] in stems:
             continue
+        if not is_safe(stem):
+            say(f"WARNING: {stem}.html has a space or other character in "
+                "its name that an LMS may not resolve in a link; renaming "
+                "the file is the fix, since its own links are yours.")
         found.append(stem)
     return found
 
@@ -695,6 +704,7 @@ def render_html(target, pages, base, fragments, language, env):
         out = os.path.join(target.output_dir, stem + ".html")
         command = ["pandoc", "-f", "json", "-t", "html5", page, "-o", out,
                    "--standalone", "--ascii", "--math-method=mathml",
+                   "--lua-filter=" + SAFE_MEDIA_FILTER,
                    "--lua-filter=" + HEADER_FILTER, "-M", f"lang={language}"]
         if header:
             command.append("--include-before-body=" + header)
@@ -702,8 +712,7 @@ def render_html(target, pages, base, fragments, language, env):
             command.append("--include-after-body=" + footer)
         run(command, env=env, cwd=base)
         written.append(out)
-    if os.path.abspath(target.output_dir) != os.path.abspath(base):
-        copy_media(base, target.output_dir, pages)
+    copy_media(base, target.output_dir, pages)
     return written
 
 
@@ -900,7 +909,10 @@ def copy_media(base, output_dir, pages):
             src = os.path.normpath(os.path.join(base, unquote(ref)))
             if not os.path.isfile(src):
                 continue
-            dest = os.path.join(output_dir, unquote(ref))
+            # Under the safe name safe-media.lua wrote into the page.
+            dest = os.path.join(output_dir, safe_path(unquote(ref)))
+            if os.path.abspath(dest) == os.path.abspath(src):
+                continue
             os.makedirs(os.path.dirname(dest), exist_ok=True)
             shutil.copy2(src, dest)
             copied.add(ref)

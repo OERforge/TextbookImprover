@@ -1391,6 +1391,8 @@ def main():
     for stem in flatten_pages(tree):
         file_list.append(stem + ".html")
         file_list.extend(page_files[stem])
+    # Two pages sharing an image list it twice; the archive holds it once.
+    file_list = list(dict.fromkeys(file_list))
 
     pages = len(list(flatten_pages(tree)))
     assets = len(file_list) - pages - 1

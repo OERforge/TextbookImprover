@@ -265,10 +265,11 @@ def case_markdown(work):
     result = convert(work, "defaults:\n  pages:\n    split_level: 2\n"
                            "targets:\n  html:\n    format: html\n"
                            "  epub:\n    format: epub3\n")
-    page = read(work, "html", "long run.html") if exists(
-        work, "html", "long run.html") else ""
-    section = read(work, "html", "long run--economies-of-scale.html") \
-        if exists(work, "html", "long run--economies-of-scale.html") else ""
+    # "long run.md" is the page long-run: no space reaches an href.
+    page = read(work, "html", "long-run.html") if exists(
+        work, "html", "long-run.html") else ""
+    section = read(work, "html", "long-run--economies-of-scale.html") \
+        if exists(work, "html", "long-run--economies-of-scale.html") else ""
     epub_path = os.path.join(work, "epub", "org.example.fixtures.epub")
     sys.path.insert(0, os.path.join(ROOT, "lib"))
     import outputcheck
@@ -291,9 +292,11 @@ def case_markdown(work):
          and '<th scope="col">Plain</th>' in page),
         ("a link's aria-label survives",
          lambda: 'aria-label="DOI for Seidel 2014"' in page),
-        ("an image named by path is copied beside the page, space and all",
-         lambda: exists(work, "html", "assets", "Pipe Sizes.png")
-         and 'src="assets/Pipe%20Sizes.png"' in page),
+        ("an image named by path is copied beside the page under a safe "
+         "name, and the page refers to that",
+         lambda: exists(work, "html", "assets", "Pipe-Sizes.png")
+         and 'src="assets/Pipe-Sizes.png"' in page
+         and not exists(work, "html", "assets", "Pipe Sizes.png")),
         ("raw LaTeX is dropped, not shown",
          lambda: "frontmatter" not in page),
         ("an .md with a same-named .docx is a leftover, not a source",
@@ -435,11 +438,11 @@ def case_structure(work):
         ("the guess reads \\frontmatter, {.appendix}, and \\backmatter",
          lambda: roles.get("The Book") == "front"
          and roles.get("Extra Material") == "appendix"
-         and roles.get("Z1 Glossary") == "back"),
+         and roles.get("Z1-Glossary") == "back"),
         ("the contents page numbers chapters, sections, and appendices",
-         lambda: ("01 One.html", "1 Chapter One") in entries
-         and ("01 One--first.html", "1.1 First") in entries
-         and ("A1 Extra--details.html", "A.1 Details") in entries),
+         lambda: ("01-One.html", "1 Chapter One") in entries
+         and ("01-One--first.html", "1.1 First") in entries
+         and ("A1-Extra--details.html", "A.1 Details") in entries),
         ("and leaves front and back matter unnumbered",
          lambda: any(t == "To the Reader" for _, t in entries)
          and any(t == "Glossary" for _, t in entries)),

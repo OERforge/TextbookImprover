@@ -22,6 +22,7 @@ conversion side.
 | `split-pages.py` | Cuts filtered intermediates into one page per heading, names the pieces, rewrites links between them, and records where each came from. |
 | `page.css` | The rules every page carries beyond Pandoc's own stylesheet: caption contrast, real table display, the scroll wrapper. |
 | `read-conversion-config.py` | Resolves `conversion.yaml` into settings `convert.sh` reads. |
+| `check-output.py` | Checks the pages and EPUBs a run wrote for dead links, missing alt text, skipped headings, and the like; the command line over `lib/outputcheck.py`. |
 | `build-epub.py` | Assembles the filtered intermediates into one EPUB3, ordered by `project.contents`, with accessibility claims computed from the build. |
 | `schema-conversion.yaml` | Declares every conversion setting, its type, default, and meaning. |
 
@@ -43,6 +44,7 @@ and redistributed under their own terms. See the README there.
 |---|---|
 | `oerconfig.py` | Loads, merges, validates, and writes configuration. Both halves use it; neither uses the other. |
 | `tablecensus.py` | Reads the tables in a Word document and says what shape they're: the classification, the guess, and the sidecar key. Used by the pre-pass and by `table-census.py`. |
+| `outputcheck.py` | The output checks, in nothing but the standard library. |
 | `bookcontents.py` | Reads `project.contents` into a tree, and guesses one from the filenames when it's absent. The packager builds the cartridge organization from it; `build-epub.py` builds the table of contents from the same tree. |
 | `schema-project.yaml` | Declares the settings that describe the book itself, which both halves read. |
 

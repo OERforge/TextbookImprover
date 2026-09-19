@@ -9,7 +9,7 @@
 #
 # Written in another session against a hand-built textbook, so it has not
 # been run against anything this pipeline produced. It needs pikepdf, which
-# nothing else here does. Roadmap item 7 is where it gets picked up, along
+# nothing else here does. Roadmap item 6 is where it gets picked up, along
 # with the two other post-processing candidates named there.
 #
 """

@@ -183,6 +183,22 @@ keys:
           fact about the file a heading came from, so a book assembled
           from files split at different depths still reads evenly.
 
+      cover_image:
+        type: path
+        default: ""
+        description: >
+          An image for the cover page, JPEG or PNG, as an absolute path
+          or one relative to the content directory. Left empty the book
+          has no cover page. A path that doesn't exist stops the build.
+
+      cover_alt:
+        type: string
+        default: ""
+        description: >
+          What a screen reader says for the cover image. Left empty it
+          is "Cover of" followed by the book's title, which is what a
+          cover usually is; give the text when the picture says more.
+
       accessibility_summary:
         type: text
         default: ""
@@ -332,6 +348,18 @@ keys:
         description: >
           Every page split_level wrote this run: its source, the heading
           it was cut at, its name, and which part of how many it is.
+
+      output_check:
+        type: path
+        default: output-check.csv
+        description: >
+          What the output check found wrong with the pages and any EPUB
+          this run wrote: links and fragments that resolve to nothing,
+          images with no alt attribute, headings that skip a level,
+          duplicate ids, tables with neither header cells nor a caption,
+          pages with no language or title. Written when there are any
+          findings and removed when there are none. The run isn't
+          stopped by them; they're a list to work through.
 
       media_unresolved:
         type: path

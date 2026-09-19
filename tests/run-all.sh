@@ -94,6 +94,7 @@ run run-config-tests.py
 run run-roundtrip-test.py
 run run-unit-tests.py
 run run-census-tests.py
+run run-check-tests.py
 run run-headers-tests.py
 
 # The filter tests convert real documents, so they need Pandoc. Skipping

@@ -166,6 +166,7 @@ packaging-sample.yaml                 written when the script worked something o
 *-missing.csv                         what still needs a human
 course.imscc                          only with --zip
 epub/course.epub                      only with an epub3 target declared
+output-check.csv                      what the output check found, if anything
 ```
 
 The intermediates are Pandoc's own document model as JSON, which is

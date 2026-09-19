@@ -16,6 +16,10 @@ Where this target writes. Defaults to the target's own name, so two targets in t
 
 For a format that produces one file for the whole book, such as epub3, the file to write inside output_dir. Left empty it's worked out afresh on every run from the book's identifier and the format, so renaming the book renames the file. Given without an extension, the one matching the format is added.
 
+**`title_block`**—one of `on`, `off`; default `on`
+
+Whether a page's own subtitle, date, abstract, and include-before render on it for this target. A source's opening page carries the document's, which makes it a title page; off leaves the author to lay the front matter out by hand.
+
 **`numbering`**—one of `project`, `on`, `off`; default `project`
 
 Whether this target shows the book's structure numbered (see project.numbering). project follows the book; on and off decide for this target alone, so an EPUB can carry chapter numbers while a web edition doesn't, or the reverse. The cartridge follows the book's setting.

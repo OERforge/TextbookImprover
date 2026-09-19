@@ -831,11 +831,16 @@ def build(base, name, resolved, keep, intermediates=None):
             f"--split-level={assembly.depth}",
             f"--toc-depth={toc_depth}",
             "--math-method=mathml",
+            # A passage for some editions, and the title-block switch,
+            # resolved for this target.
+            "--lua-filter", os.path.join(HERE, "target-blocks.lua"),
         ]
+        environment = dict(os.environ, TARGET_NAME=name,
+                           TITLE_BLOCK=str(resolved["title_block"]))
         # Run in the content directory: image paths in the intermediates
         # are relative to it.
         result = subprocess.run(command, cwd=base, capture_output=True,
-                                text=True)
+                                text=True, env=environment)
         if result.stderr.strip():
             print(result.stderr.rstrip(), file=sys.stderr)
         if result.returncode != 0:

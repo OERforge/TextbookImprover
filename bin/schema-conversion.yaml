@@ -59,6 +59,17 @@ keys:
       so renaming the book renames the file. Given without an extension,
       the one matching the format is added.
 
+  title_block:
+    type: enum
+    values: ["on", "off"]
+    default: "on"
+    stage: render
+    description: >
+      Whether a page's own subtitle, date, abstract, and include-before
+      render on it for this target. A source's opening page carries the
+      document's, which makes it a title page; off leaves the author to
+      lay the front matter out by hand.
+
   numbering:
     type: enum
     values: [project, "on", "off"]

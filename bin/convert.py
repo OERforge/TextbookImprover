@@ -82,6 +82,8 @@ FIGURE_FILTER = os.path.join(HERE, "figures-and-tables.lua")
 MEDIA_FILTER = os.path.join(HERE, "media-extensions.lua")
 HEADER_FILTER = os.path.join(HERE, "header-includes.lua")
 SAFE_MEDIA_FILTER = os.path.join(HERE, "safe-media.lua")
+TARGET_FILTER = os.path.join(HERE, "target-blocks.lua")
+SOURCE_EXTENSIONS = (".docx", ".md", ".html")
 PAGE_CSS = os.path.join(HERE, "page.css")
 HEADERS_TOOL = os.path.join(HERE, "table-headers.py")
 SPLIT_TOOL = os.path.join(HERE, "split-pages.py")
@@ -215,10 +217,21 @@ def load_targets(base, allow_unknown):
         else:
             stages[node.path] = node.stage
     walk(schema.root)
+    names = {t.name for t in targets}
     for target in targets:
         values = {path: target.resolved[path] for path, stage in stages.items()
-                  if stage == "filter"}
+                 if stage == "filter"}
+        # A variant source for this target -- <stem>.<target>.md -- makes
+        # its intermediates its own, so it goes into the fingerprint.
+        target.variants = variant_sources(base, target.name)
+        values["variants"] = sorted(target.variants.values())
         target.fingerprint = json.dumps(values, sort_keys=True, default=str)
+    all_variants = {os.path.basename(p) for t in targets
+                    for p in t.variants.values()}
+    for target in targets:
+        target.variant_files = all_variants
+    globals()["VARIANT_FILES"] = all_variants
+    globals()["TARGET_NAMES"] = names
     owners = {}
     for target in targets:
         if target.fingerprint not in owners:
@@ -263,6 +276,27 @@ def check_sidecar(path, setting, default, base):
 # 1. .docx -> .json
 # --------------------------------------------------------------------------
 
+VARIANT_FILES = set()       # every <stem>.<target>.<ext> in the directory
+TARGET_NAMES = set()
+
+
+def variant_sources(base, target_name):
+    """{stem: path} of the files that replace a source for one target:
+    <stem>.<target>.md, .docx, or .html. The page keeps the stem, so
+    contents, links, and sidecars don't know which file produced it."""
+    found = {}
+    for ext in SOURCE_EXTENSIONS:
+        for path in sorted(glob.glob(os.path.join(base, f"*.{target_name}{ext}"))):
+            stem = os.path.basename(path)[:-len(f".{target_name}{ext}")]
+            found[safe_stem(stem)] = path
+    return found
+
+
+def is_variant(name):
+    """A file whose second-to-last name segment is a target's name."""
+    return name in VARIANT_FILES
+
+
 def markdown_sources(base, fragments):
     """The .md files this run converts: a page each, the way a .docx is.
 
@@ -272,7 +306,7 @@ def markdown_sources(base, fragments):
     found = []
     for path in sorted(glob.glob(os.path.join(base, "*.md"))):
         name = os.path.basename(path)
-        if os.path.abspath(path) in fragments:
+        if os.path.abspath(path) in fragments or is_variant(name):
             continue
         if os.path.exists(os.path.join(base, name[:-3] + ".docx")):
             continue
@@ -293,6 +327,8 @@ def source_documents(base):
     found = []
     for path in sorted(glob.glob(os.path.join(base, "*.docx"))):
         name = os.path.basename(path)
+        if is_variant(name):
+            continue                    # read for its target, below
         if name.startswith("~$"):
             say(f"Skipping {name}: Word lock file, not a document.")
             say("  Close the document in Word, or delete the file.")
@@ -389,7 +425,8 @@ def hand_pages(base, stems):
     found = []
     for path in sorted(glob.glob(os.path.join(base, "*.html"))):
         stem = os.path.basename(path)[:-5]
-        if stem in stems or stem.split("--", 1)[0] in stems:
+        if stem in stems or stem.split("--", 1)[0] in stems \
+                or is_variant(os.path.basename(path)):
             continue
         if not is_safe(stem):
             say(f"WARNING: {stem}.html has a space or other character in "
@@ -411,16 +448,19 @@ def local_references(path):
     return refs
 
 
-def copy_hand_pages(base, hand, target_dir):
+def copy_hand_pages(base, hand, target_dir, variants=None):
     """A hand-written page and what it refers to, byte for byte, into a
-    target's directory. A page linking another page of the book is left
-    to that page; a file that isn't there is reported and skipped."""
+    target's directory; the target's own variant of it when there is
+    one. A page linking another page of the book is left to that page; a
+    file that isn't there is reported and skipped."""
+    variants = variants or {}
     if os.path.abspath(target_dir) == os.path.abspath(base):
         return [os.path.join(base, stem + ".html") for stem in hand]
     os.makedirs(target_dir, exist_ok=True)
     copied = []
     for stem in hand:
-        source = os.path.join(base, stem + ".html")
+        source = variants.get(stem) if str(variants.get(stem, "")).endswith(
+            ".html") else os.path.join(base, stem + ".html")
         shutil.copy2(source, os.path.join(target_dir, stem + ".html"))
         copied.append(os.path.join(target_dir, stem + ".html"))
         for ref in local_references(source):
@@ -438,16 +478,43 @@ def copy_hand_pages(base, hand, target_dir):
     return copied
 
 
-def read_hand_pages(base, hand, pages_dir, env):
+def read_hand_pages(base, hand, pages_dir, env, variants=None):
     """An intermediate for each hand-written page, read from its HTML, so
     the EPUB can hold it. No filter runs: a person finished this page."""
+    variants = variants or {}
     out = []
     for stem in hand:
         target = os.path.join(pages_dir, stem + INTERMEDIATE)
-        run(["pandoc", "-f", "html", "-t", "json", stem + ".html",
+        source = variants.get(stem) if str(variants.get(stem, "")).endswith(
+            ".html") else stem + ".html"
+        run(["pandoc", "-f", "html", "-t", "json", source,
              "-o", target], env=env, cwd=base)
         out.append(target)
     return out
+
+
+def read_variants(base, target, work, env):
+    """This target's variant sources, read to raw JSON of their own, so
+    filter_pages can take them instead of the shared ones."""
+    raw = {}
+    for stem, path in target.variants.items():
+        name = os.path.basename(path)
+        if name.endswith(".html"):
+            continue                    # a hand page: copied, not read
+        out_dir = os.path.join(work, "variants", target.name)
+        os.makedirs(out_dir, exist_ok=True)
+        out = os.path.join(out_dir, stem + ".json")
+        if name.endswith(".docx"):
+            repaired = os.path.join(out_dir, name)
+            docxrepair.repaired_copy(path, repaired)
+            run(["pandoc", "-f", "docx", "-t", "json", repaired, "-o", out,
+                 "--lua-filter=" + MEDIA_FILTER, "--extract-media=" + stem],
+                env=env, cwd=base)
+        else:
+            run(["pandoc", "-f", "markdown", "-t", "json", path, "-o", out,
+                 "--lua-filter=" + MEDIA_FILTER], env=env, cwd=base)
+        raw[stem] = out
+    return raw
 
 
 def warn_about_leftovers(base, stems, fragments):
@@ -628,7 +695,7 @@ def filter_env(target, base, paths, env):
     return out
 
 
-def filter_pages(base, stems, target, env):
+def filter_pages(base, stems, target, env, raw=None):
     """Two Pandoc runs per page rather than one. The filter writes its
     result back out as JSON -- <page>.filtered.json -- and the HTML writer
     reads that. The extra run costs a fraction of a second per page and
@@ -647,8 +714,8 @@ def filter_pages(base, stems, target, env):
             if old.endswith((INTERMEDIATE, ".html")):
                 os.remove(old)
         out = os.path.join(pages_dir, stem + INTERMEDIATE)
-        run(["pandoc", "-f", "json", "-t", "json",
-             os.path.join(base, stem + ".json"), "-o", out,
+        source = (raw or {}).get(stem) or os.path.join(base, stem + ".json")
+        run(["pandoc", "-f", "json", "-t", "json", source, "-o", out,
              "--lua-filter=" + FIGURE_FILTER], env=env, cwd=base)
         written.append(out)
     return written
@@ -675,6 +742,8 @@ def split_pages(target, pages, paths, reports):
 
 
 def render_html(target, pages, base, fragments, language, env):
+    env = dict(env, TARGET_NAME=target.name,
+               TITLE_BLOCK=str(target["title_block"]))
     """--lua-filter figures-and-tables ran already; what remains is the
     writer. -M lang sets the html lang attribute (WCAG 3.1.1), from the
     project's declared language. v0.1 hardcoded "en" while the manifest
@@ -704,6 +773,7 @@ def render_html(target, pages, base, fragments, language, env):
         out = os.path.join(target.output_dir, stem + ".html")
         command = ["pandoc", "-f", "json", "-t", "html5", page, "-o", out,
                    "--standalone", "--ascii", "--math-method=mathml",
+                   "--lua-filter=" + TARGET_FILTER,
                    "--lua-filter=" + SAFE_MEDIA_FILTER,
                    "--lua-filter=" + HEADER_FILTER, "-M", f"lang={language}"]
         if header:
@@ -1072,7 +1142,10 @@ def main():
             if target.pages_dir in pages_by_dir:
                 continue
             fenv = filter_env(target, base, paths, env)
-            pages = filter_pages(base, stems, target, fenv)
+            raw = read_variants(base, target, work, env)
+            variant_stems = [s for s in raw if s not in stems]
+            pages = filter_pages(base, stems + variant_stems, target, fenv,
+                                 raw)
             pages_by_dir[target.pages_dir] = split_pages(target, pages,
                                                          paths, reports)
 
@@ -1080,9 +1153,12 @@ def main():
         hand = hand_pages(base, stems)
         if hand:
             say(f"{len(hand)} hand-written page(s): " + ", ".join(hand))
-        for pages_dir in pages_by_dir:
-            pages_by_dir[pages_dir] += read_hand_pages(base, hand, pages_dir,
-                                                       env)
+        for target in targets:
+            if target.pages_dir in pages_by_dir and not any(
+                    p.endswith(stem + INTERMEDIATE) for stem in hand
+                    for p in pages_by_dir[target.pages_dir]):
+                pages_by_dir[target.pages_dir] += read_hand_pages(
+                    base, hand, target.pages_dir, env, target.variants)
         hand_stems = set(hand)
 
         # ---- 4.7 render, per html target --------------------------------------
@@ -1096,8 +1172,8 @@ def main():
                 written[target.name] = render_html(
                     target, rendered, base, fragments[target.name], language,
                     renv)
-                written[target.name] += copy_hand_pages(base, hand,
-                                                        target.output_dir)
+                written[target.name] += copy_hand_pages(
+                    base, hand, target.output_dir, target.variants)
                 tree, titles, api = book_tree(
                     project, pages_by_dir[target.pages_dir],
                     numbering_for(target, project))

@@ -276,6 +276,44 @@ which a short equivalent has become a long description, and long
 descriptions belong in the prose where every reader gets them. Raising it
 silences the report rather than fixing anything.
 
+## Editions
+
+Two editions of a book usually differ in a page or a passage, not in
+the book, and neither difference needs a second source directory or a
+build system.
+
+**A variant file** replaces a page for one target: `about.print.md`
+stands in for `about.md` when the target named `print` is built, and
+`about.md` serves every other target. The same works for `.docx` and
+for a hand-written `.html`. The page keeps the stem, so `contents`,
+links, and sidecars don't know which file produced it, and a target
+with a variant gets intermediates of its own.
+
+**A passage for some targets**, in Markdown, is a fenced div naming
+them; it is unwrapped where it applies and dropped elsewhere, and the
+attribute never reaches the output:
+
+```markdown
+::: {targets="epub print"}
+This edition was checked with epubcheck.
+:::
+
+::: {targets="!web"}
+Prefer the web edition with a screen reader.
+:::
+```
+
+Names keep; `!name` excludes; a list of only exclusions keeps by
+default. A span takes the same attribute for a phrase. Word sources
+have no such markup, by design; an HTML source, when HTML is an input
+format, will take Jinja's block syntax for the same thing.
+
+**The title block.** A source's opening page carries the document's
+subtitle, date, abstract, and `include-before`, which the page
+template renders: that is its title page. `title_block: off` on a
+target leaves them out, for an author laying the front matter out by
+hand.
+
 ## Migrating a v0.1 configuration
 
 `imsmanifest.yaml` is no longer read. Both halves stop with directions

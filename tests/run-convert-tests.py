@@ -466,8 +466,64 @@ def case_structure(work):
     ]
 
 
+EDITIONS = {
+    "about.md": "# About This Book\n\nFor every edition.\n",
+    "about.print.md": "# About This Book\n\nFor the print edition only.\n",
+    "access.md": ("# Accessibility\n\nChecked.\n\n"
+                  "::: {targets=\"web\"}\nUse the web edition with a screen "
+                  "reader.\n:::\n\n::: {targets=\"!web\"}\nThis edition was "
+                  "validated.\n:::\n"),
+    "front.html": "<!DOCTYPE html><html lang=\"en\"><head><title>Front</title>"
+                  "</head><body><h1>Front</h1><p>Web front.</p></body></html>\n",
+    "front.print.html": "<!DOCTYPE html><html lang=\"en\"><head><title>Front"
+                        "</title></head><body><h1>Front</h1><p>Print front."
+                        "</p></body></html>\n",
+    "titled.md": "---\ntitle: Titled\nsubtitle: A subtitle\n---\n\nBody.\n",
+}
+
+
+def case_editions(work):
+    """Two editions from one directory: a variant file, a passage for
+    some targets, a hand-written variant, and the title-block switch."""
+    os.makedirs(work, exist_ok=True)
+    for name, text in EDITIONS.items():
+        with open(os.path.join(work, name), "w", encoding="utf-8") as fh:
+            fh.write(text)
+    result = convert(work, "targets:\n  web:\n    format: html\n"
+                           "  print:\n    format: html\n"
+                           "    title_block: \"off\"\n"
+                           "  epub:\n    format: epub3\n")
+
+    def page(target, stem):
+        return read(work, target, stem + ".html") if exists(
+            work, target, stem + ".html") else ""
+    return [
+        ("the run succeeds", lambda: result.returncode == 0),
+        ("a variant file replaces the page for its target only",
+         lambda: "For the print edition only." in page("print", "about")
+         and "For every edition." in page("web", "about")),
+        ("the variant is not a page of its own",
+         lambda: not exists(work, "web", "about.print.html")
+         and not exists(work, "print", "about.print.html")),
+        ("a passage for some targets appears there and nowhere else",
+         lambda: "with a screen reader" in page("web", "access")
+         and "with a screen reader" not in page("print", "access")
+         and "was validated" in page("print", "access")
+         and "was validated" not in page("web", "access")),
+        ("the targets attribute never reaches the output",
+         lambda: "targets=" not in page("web", "access")),
+        ("a hand-written variant is copied for its target",
+         lambda: "Print front." in page("print", "front")
+         and "Web front." in page("web", "front")),
+        ("title_block off drops the subtitle for that target",
+         lambda: "A subtitle" in page("web", "titled")
+         and "A subtitle" not in page("print", "titled")),
+    ]
+
+
 CASES = [
     ("a bare directory", case_bare),
+    ("two editions from one directory", case_editions),
     ("roles, numbering, and a contents page", case_structure),
     ("footnote numbering and placement", case_notes),
     ("a Markdown source", case_markdown),

@@ -34,6 +34,8 @@ One thing to know before relying on it: the reader keeps the attribute but not t
 
 **EPUB earns its place twice over.** Its `nav.xhtml` is the book's table of contents in machine-readable form, which is the packager's module tree without needing the PDF's bookmark outline, and `--toc` reads it now. And it's built from the same source as the DOCX but keeps the ids the DOCX export drops, which is where the anchors for item 4 would have to come from.
 
+
+Two notes from the Markdown work. An HTML source's passages for some editions take Jinja's block syntax (`{% if target == "print" %} … {% endif %}`), the syntax and not the engine: a source is a page, not a template. And a title page belongs to `generate:` in `contents`, built from project metadata (title, subtitle, authors, date, license, an accessibility statement) and never from a source's YAML, which is what a web interface would edit; the source's own YAML stays the author's PDF business.
 ## 3. Link text sidecar, for bare URLs
 
 **Held, with item 4, until the WCAG question is settled.** Both items change what a link says or where it goes, and the question is the same for each: whether the result still meets the letter and the spirit of the guidelines. Here it's whether supplying an accessible name the visible text doesn't show—so that a sighted reader and a screen reader user are given different link text—is the right reading of 2.4.4, or whether the honest fix is to change the visible text so everyone sees it. The research below stands; what waits is the decision it feeds.

@@ -100,7 +100,11 @@ Here's why the configuration is schema-driven and why conversion becomes a libra
 
 Two pieces are already in place for it: the schema carries a description per setting, which is what a form's help text should say, and the writer is proven lossless by test. The third piece (resolving a config in JavaScript) is what the conformance fixtures in `tests/config/` exist to make safe.
 
-## 8. Splitting into separate repositories
+## 8. A check-only run, and a source audit
+
+Almost everything an automated accessibility check can say about a book already exists here in pieces: the table census and classifier (what shape every table takes, what the run would guess, and the evidence), the output check with the two validators it folds in, the alt-text, caption, and header reports, the media identification, `docx-compat.py`, and what the filter knows about Word's export. What is missing is a front door: a way to point all of it at a directory or a file and get the report without producing output, and a report on a Word source that says what is wrong with it *as a source*. That is plumbing over existing parts, with Ace and veraPDF staying external, and it would make the project useful to someone who is not converting anything yet.
+
+## 9. Splitting into separate repositories
 
 Eventually the two halves may be separate projects with a small shared library between them. Both standalone cases are already close: packaging is read-only with respect to page content and runs against any directory of HTML, and conversion has no packaging logic. v0.2 removed the last coupling, which was the config.
 

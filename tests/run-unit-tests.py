@@ -333,7 +333,44 @@ def check_manifest_names():
     ]
 
 
+def check_contrast():
+    """Every color page.css sets on text, against the backgrounds it can
+    sit on. WCAG 1.4.3 wants 4.5:1; the caption color is chosen to clear
+    AAA (7:1). No checker we run measures this on the output, so it is
+    measured here, on the stylesheet, where it is decided."""
+    css = open(os.path.join(ROOT, "bin", "page.css"), encoding="utf-8").read()
+    css = re.sub(r"/\*.*?\*/", "", css, flags=re.S)
+    colors = re.findall(r"(?<![-\w])color:\s*(#[0-9a-fA-F]{3,6})", css)
+
+    def channel(v):
+        v /= 255
+        return v / 12.92 if v <= 0.03928 else ((v + 0.055) / 1.055) ** 2.4
+
+    def luminance(hexcolor):
+        h = hexcolor.lstrip("#")
+        if len(h) == 3:
+            h = "".join(c * 2 for c in h)
+        r, g, b = (int(h[i:i + 2], 16) for i in (0, 2, 4))
+        return 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b)
+
+    def ratio(a, b):
+        la, lb = sorted((luminance(a), luminance(b)), reverse=True)
+        return (la + 0.05) / (lb + 0.05)
+
+    backgrounds = ("#fdfdfd", "#ffffff")     # Pandoc's page, and white
+    worst = min((ratio(c, bg) for c in colors for bg in backgrounds),
+                default=21)
+    return [
+        ("page.css sets at least one text color", lambda: bool(colors)),
+        ("every text color clears 4.5:1 on Pandoc's background and on white",
+         lambda: worst >= 4.5),
+        ("the caption color clears 7:1 (AAA)",
+         lambda: all(ratio(c, bg) >= 7 for c in colors for bg in backgrounds)),
+    ]
+
+
 GROUPS = [
+    ("caption contrast", check_contrast),
     ("manifest names", check_manifest_names),
     ("repairing a .docx on the way in", check_docx_repair),
     ("the archive's name", check_archive_name),

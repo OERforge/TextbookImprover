@@ -69,6 +69,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(HERE), "lib"))
 try:
     import docxrepair
+    import notes as notes_lib
     import oerconfig
 except ImportError:
     sys.exit("Cannot find the configuration library. It should be in a "
@@ -704,6 +705,82 @@ def render_html(target, pages, base, fragments, language, env):
     return written
 
 
+def page_group(intermediate):
+    """(group key, group title) for a page, from the provenance a split
+    left in it. A chapter file's sections share the source; a single-file
+    book's sections share the H1 above them; a page that was not split
+    is a group of one."""
+    with open(intermediate, encoding="utf-8") as fh:
+        meta = json.load(fh).get("meta", {})
+
+    def text(key):
+        value = meta.get(key)
+        if not value:
+            return ""
+        if value.get("t") == "MetaString":
+            return value["c"]
+        return " ".join("".join(i.get("c", " ") if i["t"] == "Str" else " "
+                                for i in value.get("c", [])).split())
+    source = text("source-page")
+    parents = [p.get("c", "") for p in
+               meta.get("page-parents", {}).get("c", [])]
+    stem = os.path.basename(intermediate)[:-len(INTERMEDIATE)]
+    if not source:
+        return stem, text("title") or stem
+    if parents:
+        return (source, parents[0]), parents[0]
+    return source, text("source-title") or source
+
+
+def arrange_notes(target, pages, base, work, fragments, language, env):
+    """Apply notes.numbering and notes.placement to a target's rendered
+    pages, and write the Notes page when placement is book."""
+    numbering = str(target["notes.numbering"])
+    placement = str(target["notes.placement"])
+    if numbering == "page" and placement == "page":
+        return []
+    records = []
+    for intermediate in pages:
+        stem = os.path.basename(intermediate)[:-len(INTERMEDIATE)]
+        path = os.path.join(target.output_dir, stem + ".html")
+        if not os.path.exists(path):
+            continue
+        group, title = page_group(intermediate)
+        with open(path, encoding="utf-8") as fh:
+            records.append(notes_lib.Page(stem + ".html", fh.read(), group,
+                                          title, "html"))
+    notes_page = None
+    if placement == "book":
+        source = os.path.join(work, "notes.md")
+        with open(source, "w", encoding="utf-8") as fh:
+            fh.write("# Notes\n")
+        out = os.path.join(target.output_dir, "notes.html")
+        command = ["pandoc", "-f", "markdown", "-t", "html5", source,
+                   "-o", out, "--standalone", "--ascii",
+                   "--lua-filter=" + HEADER_FILTER, "-M", f"lang={language}"]
+        header, footer = fragments
+        if header:
+            command.append("--include-before-body=" + header)
+        if footer:
+            command.append("--include-after-body=" + footer)
+        run(command, env=env, cwd=base)
+        with open(out, encoding="utf-8") as fh:
+            notes_page = notes_lib.Page("notes.html", fh.read(), "notes",
+                                        "Notes", "html")
+    changed = notes_lib.arrange(records, numbering, placement, notes_page)
+    written = []
+    for page in changed:
+        path = os.path.join(target.output_dir, page.name)
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(page.text)
+        written.append(path)
+    if notes_page is not None and notes_page not in changed:
+        os.remove(os.path.join(target.output_dir, "notes.html"))
+    elif notes_page is not None:
+        written.append(os.path.join(target.output_dir, "notes.html"))
+    return written
+
+
 def copy_media(base, output_dir, pages):
     """Every local image a page refers to, copied beside the page at the
     same relative path: <source>/media/... for what was extracted from a
@@ -904,6 +981,11 @@ def main():
                     renv)
                 written[target.name] += copy_hand_pages(base, hand,
                                                         target.output_dir)
+                for path in arrange_notes(target, rendered, base, work,
+                                          fragments[target.name], language,
+                                          renv):
+                    if path not in written[target.name]:
+                        written[target.name].append(path)
 
         # ---- 5. reports, once per book ----------------------------------------
         missing = write_report(

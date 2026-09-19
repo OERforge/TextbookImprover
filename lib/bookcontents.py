@@ -246,7 +246,7 @@ def unrecognised_roles(stems, back_matter):
 
 
 FRONT_MATTER = ("frontmatter", "front-matter", "preface", "about", "titlepage")
-BACK_MATTER_PAGES = ("index", "references", "bibliography", "glossary",
+BACK_MATTER_PAGES = ("notes", "index", "references", "bibliography", "glossary",
                      "solutions", "answer-key")
 
 

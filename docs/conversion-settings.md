@@ -72,6 +72,18 @@ What a page is, when the source's files are not already the pages you want.
 
 Cut every source into one page per heading of this level or shallower, after the filter has run and before anything is rendered. 0 leaves each file as one page. A book that arrived as one file per chapter gets one page per section with 2, and the packager groups the pieces under their source without being told. Each piece is named after its heading unless the page_names sidecar says otherwise, its heading becomes its title, and links between pieces are rewritten to follow.
 
+## notes
+
+Where footnotes go and how they count, once a source has been cut into pages. Pandoc numbers them per page and keeps each page's at its end; these settings rearrange that in the rendered pages and in the EPUB alike.
+
+**`notes.numbering`**—one of `page`, `group`; default `page`
+
+page restarts the numbers on every page. group continues them across the pages of the enclosing group, in reading order, whatever a group is called; a page that was not split is a group of one.
+
+**`notes.placement`**—one of `page`, `group`, `book`; default `page`
+
+page keeps each page's notes at its end. group gathers a group's notes at the end of its last page. book gathers every note on one Notes page at the end, with a heading for each group, numbered per group. A reference always links to its note wherever it went, and the note links back.
+
 ## epub
 
 Settings read only by an epub3 target. One EPUB holds the whole book: every page in project.contents, in that order, with each group a heading over its pages and the table of contents built from the same tree the cartridge organization uses.

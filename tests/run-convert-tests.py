@@ -304,8 +304,85 @@ def case_markdown(work):
     ]
 
 
+NOTED = """# Chapter One
+
+Text.[^a] More.[^b]
+
+## First Section
+
+Section text.[^c]
+
+## Second Section
+
+Another.[^d]
+
+[^a]: Note A.
+[^b]: Note B.
+[^c]: Note C.
+[^d]: Note D.
+"""
+
+
+def case_notes(work):
+    """notes.numbering and notes.placement, on a chapter cut into pages."""
+    import zipfile
+
+    def build(sub, numbering, placement):
+        d = os.path.join(work, sub)
+        os.makedirs(d, exist_ok=True)
+        with open(os.path.join(d, "ch1.md"), "w", encoding="utf-8") as fh:
+            fh.write(NOTED)
+        with open(os.path.join(d, "ch2.md"), "w", encoding="utf-8") as fh:
+            fh.write("# Chapter Two\n\nTwo.[^e]\n\n[^e]: Note E.\n")
+        r = convert(d, "defaults:\n  pages:\n    split_level: 2\n  notes:\n"
+                       f"    numbering: {numbering}\n    placement: "
+                       f"{placement}\ntargets:\n  html:\n    format: html\n"
+                       "  epub:\n    format: epub3\n")
+        nav = ""
+        e = os.path.join(d, "epub", "org.example.fixtures.epub")
+        if os.path.exists(e):
+            with zipfile.ZipFile(e) as z:
+                nav = z.read("EPUB/nav.xhtml").decode("utf-8")
+        return d, r, nav
+
+    gp, r1, _ = build("group-page", "group", "page")
+    gg, r2, _ = build("group-group", "group", "group")
+    gb, r3, nav = build("group-book", "group", "book")
+    return [
+        ("group numbering continues across a chapter's pages",
+         lambda: r1.returncode == 0
+         and 'id="fn3"' in read(gp, "html", "ch1--first-section.html")
+         and 'id="fn4"' in read(gp, "html", "ch1--second-section.html")
+         and 'id="fn1"' in read(gp, "html", "ch2.html")),
+        ("with a value on each item so the browser numbers agree",
+         lambda: 'value="4"' in read(gp, "html", "ch1--second-section.html")),
+        ("group placement gathers the notes on the chapter's last page",
+         lambda: r2.returncode == 0
+         and "footnotes" not in read(gg, "html", "ch1.html")
+         and read(gg, "html", "ch1--second-section.html").count('<li id="fn')
+         == 4),
+        ("and references cross to them, notes link back",
+         lambda: 'href="ch1--second-section.html#fn1"' in read(gg, "html",
+                                                                "ch1.html")
+         and 'href="ch1.html#fnref1"' in read(gg, "html",
+                                              "ch1--second-section.html")),
+        # The fixture .docx pages are in the book too and form groups of
+        # one with no notes, so two groups have headings on the page.
+        ("book placement makes a Notes page with a heading per group",
+         lambda: r3.returncode == 0
+         and read(gb, "html", "notes.html").count("<h2>") == 2
+         and re.search(r'id="g\d+-fn1"', read(gb, "html", "notes.html"))),
+        ("and the EPUB gets a Notes chapter",
+         lambda: ">Notes<" in nav),
+        ("no reference or return link is left dangling in any of them",
+         lambda: not any(re.search(r"link-to-missing|duplicate-id",
+                                   r.stderr) for r in (r1, r2, r3))),
+    ]
+
+
 CASES = [
     ("a bare directory", case_bare),
+    ("footnote numbering and placement", case_notes),
     ("a Markdown source", case_markdown),
     ("a hand-written page", case_hand_written),
     ("several targets", case_targets),

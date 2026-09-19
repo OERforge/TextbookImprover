@@ -41,7 +41,8 @@ import outputcheck  # noqa: E402
 GOOD = """<!DOCTYPE html><html lang="en"><head><title>A page</title></head>
 <body><h1 id="top">Top</h1><h2>Second</h2>
 <img src="x.png" alt="A thing"><img src="y.png" alt="" aria-hidden="true">
-<table><caption>Data</caption><tr><th scope="col">H</th></tr></table>
+<div class="table-wrapper" tabindex="0" role="region" aria-label="Data">
+<table><caption>Data</caption><tr><th scope="col">H</th></tr></table></div>
 <table role="presentation"><tr><td>layout</td></tr></table>
 <a href="#top">up</a><a href="other.html#there">over</a>
 <a href="https://example.org/#x">out</a></body></html>"""
@@ -92,6 +93,7 @@ def main():
                  "empty-heading", "image-without-alt",
                  "image-empty-alt-not-decorative",
                  "table-without-headers-or-caption",
+                 "table-not-in-scroll-region",
                  "link-to-missing-fragment", "link-to-missing-file",
                  "link-to-missing-fragment"])),
             ("a finding says where and what",

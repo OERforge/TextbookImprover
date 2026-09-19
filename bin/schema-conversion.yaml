@@ -181,6 +181,36 @@ keys:
           page_names sidecar says otherwise, its heading becomes its
           title, and links between pieces are rewritten to follow.
 
+  notes:
+    stage: render
+    description: >
+      Where footnotes go and how they count, once a source has been cut
+      into pages. Pandoc numbers them per page and keeps each page's at
+      its end; these settings rearrange that in the rendered pages and in
+      the EPUB alike.
+    keys:
+
+      numbering:
+        type: enum
+        values: [page, group]
+        default: page
+        description: >
+          page restarts the numbers on every page. group continues them
+          across the pages of the enclosing group, in reading order,
+          whatever a group is called; a page that was not split is a
+          group of one.
+
+      placement:
+        type: enum
+        values: [page, group, book]
+        default: page
+        description: >
+          page keeps each page's notes at its end. group gathers a
+          group's notes at the end of its last page. book gathers every
+          note on one Notes page at the end, with a heading for each
+          group, numbered per group. A reference always links to its
+          note wherever it went, and the note links back.
+
   epub:
     stage: package
     description: >

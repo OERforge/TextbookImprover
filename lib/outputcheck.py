@@ -533,9 +533,15 @@ def run_validators(pages, epubs):
         if command:
             found, infos = run_vnu(command, pages)
             findings += found
-            notes.append(f"The Nu HTML checker ran on {len(pages)} page(s)"
-                         + (f"; {infos} informational message(s) not listed."
-                            if infos else "."))
+            if any(f.check == "vnu:failed" for f in found):
+                notes.append("The Nu HTML checker was found but failed to "
+                             "run; see vnu:failed in the report (it needs "
+                             "Java 17 or later).")
+            else:
+                notes.append(f"The Nu HTML checker ran on {len(pages)} "
+                             "page(s)"
+                             + (f"; {infos} informational message(s) not "
+                                "listed." if infos else "."))
         else:
             notes.append("The Nu HTML checker not found (set VNU_JAR); "
                          "skipped.")

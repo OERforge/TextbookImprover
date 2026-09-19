@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
 read-conversion-config.py -- resolve the conversion configuration and hand
-it to convert.sh as shell assignments.
+it to convert.py as shell assignments.
 
     python3 bin/read-conversion-config.py -d . --target html OUT_DIR
     python3 bin/read-conversion-config.py -d . --init
 
-Writes OUT_DIR/settings.sh, which convert.sh sources. With --init, writes
+Writes OUT_DIR/settings.sh, which convert.py sources. With --init, writes
 a conversion.yaml holding every setting at its default with a line of
 documentation above it, and stops. There is no example configuration to
 copy: the schema is the only description, so the file you start from is
@@ -24,7 +24,7 @@ neither depends on the other.
 Header and footer are the one thing that needs doing rather than
 reporting. A block scalar in the YAML is written out as a Markdown file
 here; a single line naming an existing file is taken as a path and passed
-through. Either way convert.sh receives a path, so it does not have to
+through. Either way convert.py receives a path, so it does not have to
 know which form was used.
 
 Copyright 2026 Robert Szarka
@@ -220,7 +220,7 @@ def main():
         "TABLE_LABEL_PREFIXES": as_list(resolved["captions.table_prefixes"]),
         "FIGURE_LABEL_PREFIXES": as_list(resolved["captions.figure_prefixes"]),
 
-        # Names rather than paths: convert.sh keeps its reports and
+        # Names rather than paths: convert.py keeps its reports and
         # sidecars beside the scripts, not in the content directory, and
         # it is the one that knows where that is.
         "TABLE_CAPTIONS_NAME": resolved["sidecars.table_captions"],

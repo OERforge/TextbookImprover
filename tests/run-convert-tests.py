@@ -202,22 +202,6 @@ def case_passthrough(work):
     ]
 
 
-def case_wrapper(work):
-    """convert.sh runs convert.py for one release."""
-    os.makedirs(work, exist_ok=True)
-    for name in NEEDED:
-        shutil.copy(os.path.join(FIXTURES, name + ".docx"), work)
-    result = subprocess.run(["bash", os.path.join(BIN, "convert.sh"),
-                             "--quiet"], cwd=work, capture_output=True,
-                            text=True, stdin=subprocess.DEVNULL)
-    return [
-        ("the wrapper converts the directory",
-         lambda: exists(work, "html", "tables.html")),
-        ("and passes its arguments on",
-         lambda: "+ " not in result.stderr),
-    ]
-
-
 # A real one-pixel PNG: epubcheck reads the images.
 import base64
 ONE_PIXEL = base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNgYGAAAAAEAAH2FzhVAAAAAElFTkSuQmCC")
@@ -605,7 +589,6 @@ CASES = [
     ("a hand-written page", case_hand_written),
     ("several targets", case_targets),
     ("arguments passed to the packager", case_passthrough),
-    ("the convert.sh wrapper", case_wrapper),
 ]
 
 

@@ -54,18 +54,18 @@ defaults:
 targets:
   html:
     format: html
-    output_dir: .
 ```
 
 Every target is built, each into its own `output_dir`, named after the
 target unless it says otherwise: `html/` for the one implied when no
 configuration exists, and several HTML renderings with different
 headers, footers, or options, an EPUB, and whatever else the schema's
-`format` lists when they're declared. The content directory keeps the
-sources, the intermediates, the sidecars, and the reports. A page you
-wrote by hand (an `.html` there with no `.docx` behind it) is copied
-into every HTML target with the local files it refers to, and read into
-an intermediate so the EPUB has it too. Two targets whose settings that
+`format` lists when they're declared: `html`, `epub3`, and `markdown`
+build today. The content directory keeps the sources, the
+intermediates, the sidecars, and the reports. A page you wrote by hand
+(an `.html` there with no source behind it) is copied into every HTML
+target with the local files it refers to, and read into an intermediate
+so the EPUB has it too. Two targets whose settings that
 change the filtered intermediate agree (the schema marks these `stage:
 filter`; images, tables, captions, the split, the sidecars) share one
 intermediate; a target that differs gets its own under its output
@@ -82,9 +82,20 @@ targets:
   print:
     format: html          # shares the intermediate; only the footer differs
     footer: "Printed edition."
+    numbering: "off"      # the book is numbered; this edition isn't
   epub:
     format: epub3
+    notes:
+      placement: book     # every footnote on one Notes chapter
+  src:
+    format: markdown      # the book as source, one file per document
+    pages:
+      split_level: 0
 ```
+
+A target can also decide `title_block`, `numbering`, and the footnote
+settings for itself; the [conversion settings](conversion-settings.md)
+reference says which settings are a target's and which are the book's.
 
 ### How values are settled
 
@@ -313,6 +324,30 @@ subtitle, date, abstract, and `include-before`, which the page
 template renders: that is its title page. `title_block: off` on a
 target leaves them out, for an author laying the front matter out by
 hand.
+
+## Upgrading from v0.4
+
+Two changes alter what a run writes, so a directory converted with v0.4
+looks different after its first v0.5 run.
+
+**Pages go into `html/`.** Nothing writes beside the sources any more.
+The pages v0.4 left there are named once on stderr as being from an
+earlier run and left alone; delete them when you're satisfied, or set
+`output_dir: .` on the HTML target to keep the old layout. The
+packager reads `html/` (`--pages`), and its configuration, manifest,
+and archive stay in the content directory. Sidecars and reports don't
+move.
+
+**A page name with a space changes.** `01 BigPicture.docx` used to be
+the page `01 BigPicture`; it is `01-BigPicture` now, because an LMS
+takes a link literally and a space in it never resolved. `contents`
+entries and `page-names.csv` rows naming such pages need the new
+spelling; nothing else does.
+
+Two things are additive and change nothing unless you ask: `role`,
+`numbering`, and `generate: toc` in `contents`, and the footnote and
+edition settings. The `convert.sh` wrapper is gone; `convert.py` takes
+the same arguments and does the same steps.
 
 ## Migrating a v0.1 configuration
 

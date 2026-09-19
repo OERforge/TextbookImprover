@@ -8,11 +8,13 @@ The initial release of these scripts was created by Robert Szarka and supported 
 
 ## What it does
 
-Two halves, which share a configuration and the book's table of contents, and nothing else.
+Reads a book's sources, one file per page (Word, Markdown, or a page written by hand as HTML), into one intermediate per page, makes each page more accessible on the way, and writes every output the configuration asks for from the same intermediates: HTML pages, an EPUB, Markdown source, and a Common Cartridge for import into an LMS. The book's structure, declared once as `contents` or guessed from the files and the publisher's PDF, is the cartridge's module tree, the EPUB's table of contents, and the generated contents page alike.
 
-**Conversion** turns each `.docx` into an HTML page through Pandoc and a Lua filter, and makes the page more accessible on the way: figures get real captions tied to their images, data tables get captions, header cells, and a focusable scroll region, images get their alt text checked and their layout spacers marked, and equations stay equations. Where the source doesn't say something a screen reader needs—which column heads a table, what a picture shows—the run guesses from the file, writes its guess into a sidecar CSV you can correct, and reports what still needs a person.
+**Conversion** runs each source through Pandoc and a Lua filter that makes the page more accessible: figures get real captions tied to their images, data tables get captions, header cells, and a focusable scroll region, images get their alt text checked and their layout spacers marked, equations stay equations, and cross-references that Word's export left dangling land. Where the source doesn't say something a screen reader needs, the run reports it, and a sidecar file holds what you decide; after a Markdown round trip, the decisions are in the source itself.
 
-**Packaging** turns a directory of pages into a Common Cartridge, with the book's table of contents as the module tree, and validates the manifest against the IMS schemas.
+**Packaging** turns the pages into a Common Cartridge with the book's structure as the module tree, validated against the IMS schemas, and into an EPUB 3 that validates with epubcheck and says what it can claim about itself.
+
+**Every run checks what it wrote**: dead links and fragments, missing alt text, heading order, invalid ids, tables without headers or caption, and, when the validators are installed, epubcheck and the Nu HTML checker.
 
 Everything a run decides is written down: reports name what to fix, sidecar files hold what you decided, and the configuration file lists every setting with a sentence explaining it.
 
@@ -24,7 +26,7 @@ You need Pandoc 3.9 or later, Python 3.9 or later, and PyYAML; see [Installation
 T=/path/to/tools                       # where you cloned this
 cd /path/to/your/docx/files
 
-python3 $T/bin/convert.py                 # 1. convert: html/, one page per .docx, plus reports
+python3 $T/bin/convert.py                 # 1. convert: html/, one page per source, plus reports
 ```
 
 The first run converts everything, then stops and writes `packaging-sample.yaml`, because a manifest needs two things only you can supply. Set `identifier` and `title` near the top of that file and rename it:
@@ -35,7 +37,19 @@ python3 $T/bin/convert.py                 # 2. builds imsmanifest.xml
 python3 $T/bin/convert.py --zip           # 3. ... and the .imscc archive
 ```
 
-`bash $T/bin/convert.sh` still works and runs the same thing; it's a wrapper kept for one release. If you have the book's PDF or EPUB, run `python3 $T/bin/convert.py --toc book.pdf` (or `--toc book.epub`) *before* renaming the sample: it orders the pages from the book's own table of contents, with the real chapter titles. The EPUB needs nothing installed; OpenStax publishes both. [A first run](docs/first-run.md) walks through all of this, including the reports and sidecars you will work through afterwards.
+If you have the book's PDF or EPUB, run `python3 $T/bin/convert.py --toc book.pdf` (or `--toc book.epub`) *before* renaming the sample: it orders the pages from the book's own table of contents, with chapters as modules. To build more than one output, declare targets in `conversion.yaml`:
+
+```yaml
+targets:
+  html:
+    format: html              # writes html/
+  epub:
+    format: epub3             # writes epub/<identifier>.epub
+  src:
+    format: markdown          # writes src/, the book as Markdown source
+```
+
+Each target writes into a directory of its own; the content directory keeps the sources, the intermediates, the sidecars, and the reports. See [Configuration](docs/configuration.md) for targets, editions, and the book's structure, and [Markdown sources](docs/markdown.md) for Markdown in and out.
 
 ## Documentation
 

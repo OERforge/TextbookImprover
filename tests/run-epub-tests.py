@@ -5,8 +5,8 @@ run-epub-tests.py -- check build-epub.py against the fixture documents.
     python3 tests/run-epub-tests.py           # run every case
     python3 tests/run-epub-tests.py --keep    # leave the output in place
 
-Needs Pandoc 3.9 or later, as convert.sh does. The fixtures are converted
-to filtered intermediates the way convert.sh does it, then assembled.
+Needs Pandoc 3.9 or later, as convert.py does. The fixtures are converted
+to filtered intermediates the way convert.py does it, then assembled.
 
 WHAT IS LOAD-BEARING HERE
 
@@ -83,7 +83,7 @@ def run(arguments, cwd, environment=None):
 
 
 def convert(work, names, sidecars=None):
-    """The fixtures as convert.sh leaves them: raw and filtered JSON."""
+    """The fixtures as convert.py leaves them: raw and filtered JSON."""
     os.makedirs(work, exist_ok=True)
     environment = dict(os.environ)
     environment.update({
@@ -383,7 +383,7 @@ def case_contents_edges(work):
 
 
 def case_targets(work):
-    """Which targets get built, and how convert.sh keeps its own."""
+    """Which targets get built, and how convert.py keeps its own."""
     convert(work, ["tables"])
     write_config(work, "    - tables\n")
     with open(os.path.join(work, "conversion.yaml"), "w",
@@ -545,7 +545,7 @@ def main():
                              text=True).stdout.split()[1]
     if tuple(int(p) for p in re.findall(r"\d+", version)[:3]) < (3, 9):
         sys.exit(f"Pandoc {version} is too old; these tests need 3.9 or "
-                 "later, as convert.sh does.")
+                 "later, as convert.py does.")
     missing = [n for n in NEEDED
                if not os.path.isfile(os.path.join(FIXTURES, n + ".docx"))]
     if missing:

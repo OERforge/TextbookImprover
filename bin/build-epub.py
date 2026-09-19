@@ -6,7 +6,7 @@ build-epub.py -- assemble a book's pages into one EPUB3.
     build-epub.py --target epub    # build one of them
     build-epub.py --if-declared    # build them, and be silent if there are none
 
-Reads the filtered intermediates convert.sh writes (<page>.filtered.json)
+Reads the filtered intermediates convert.py writes (<page>.filtered.json)
 rather than the HTML pages. Pandoc's HTML reader keeps a cell's scope
 attribute but not the element, so a row header read back from a page
 would arrive as <td scope="row">; the intermediate still has everything

@@ -6,7 +6,7 @@
 -- same name rather than merging with it. So a page whose metadata carries
 -- header-includes -- the author <meta> figures-and-tables.lua writes, the
 -- provenance <meta> split-pages.py writes -- lost them the moment
--- convert.sh added its stylesheet that way, and nothing said so. Reading
+-- convert.py added its stylesheet that way, and nothing said so. Reading
 -- the file here and appending it to the metadata keeps both.
 --
 --   HEADER_INCLUDES_FILE   path to raw HTML to add (the stylesheet block)

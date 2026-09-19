@@ -245,7 +245,7 @@ def undescribed():
 def check_sidecar_paths():
     """How convert.py turns a configured sidecar name into a path.
 
-    convert.sh built "$PWD/$name" unconditionally, so an absolute setting
+    convert.py built "$PWD/$name" unconditionally, so an absolute setting
     became "/book//srv/corrections/table-captions.csv". The filter read
     nothing, every correction in the file was discarded, and the only
     trace was an instruction telling the user to append their work to a

@@ -13,7 +13,7 @@ This script is read-only with respect to page content: it never edits an
 HTML file, an image, or anything under a media directory. It writes only
 the manifest, the file list, the sample config, and the archive. That is
 what makes it safe to run repeatedly, and what lets it work on any tidy
-directory of HTML rather than only on output from convert.sh.
+directory of HTML rather than only on output from convert.py.
 
 Configuration lives in packaging.yaml, with the book's own details in
 project.yaml. Everything that can be derived
@@ -1036,7 +1036,7 @@ def main():
                         # present for a folder of documents to convert.
                         help="write the conversion-time settings (header and "
                              "footer sources, spacer rules) into DIR for "
-                             "convert.sh to read, then stop. Writes only into "
+                             "convert.py to read, then stop. Writes only into "
                              "DIR, never into the content directory.")
     args = parser.parse_args()
 

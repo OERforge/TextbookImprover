@@ -5,7 +5,7 @@ run-headers-tests.py -- check the table-headers pre-pass end to end.
     python3 tests/run-headers-tests.py
 
 Builds small .docx files as OOXML, runs bin/table-headers.py over them
-the way convert.sh does, and reads back what it wrote. Needs nothing but
+the way convert.py does, and reads back what it wrote. Needs nothing but
 the standard library.
 
 WHY THESE EXIST

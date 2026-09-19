@@ -1727,7 +1727,7 @@ end
 local function settle_author(doc)
   if AUTHOR_BYLINE == 'visible' or doc.meta.author == nil then return end
 
-  -- convert.sh runs this filter with the JSON writer, and everything that
+  -- convert.py runs this filter with the JSON writer, and everything that
   -- reads the result -- the html5 writer for the pages, the epub3 writer
   -- for the book -- is an HTML writer with the same title block. So the
   -- intermediate is treated as HTML-bound here.

@@ -15,10 +15,16 @@ conversion side.
 
 | File | What it does |
 |---|---|
-| `convert.py` | Runs the pipeline: DOCX → JSON → filtered JSON → (split) → one output per target, then hands off to the packaging side. `convert.sh` is a wrapper that runs it, kept for one release. |
+| `convert.py` | Runs the pipeline: each source (`.docx` through a repaired copy, `.md` as it is) → JSON → filtered JSON → (split) → every target's output, then hands off to the packaging side. Every setting comes from `conversion.yaml` through the schema. |
 | `figures-and-tables.lua` | Pandoc filter doing the accessibility work on each page. |
 | `media-extensions.lua` | Pandoc filter naming extracted images by their real content type. |
+| `safe-media.lua` | Rewrites a page's local media references at render time to names that need no encoding in a link, matching what `convert.py` copies beside the page. |
+| `target-blocks.lua` | At render time, keeps a passage marked for some targets and drops it for the rest, and applies `title_block`. |
+| `markdown-source.lua` | For a markdown target: takes out what the filter derived and writes what it decided as source markup. |
 | `header-includes.lua` | Adds the stylesheet to a page's `header-includes` at render time, alongside what the page already carries there; `--include-in-header` would replace it. |
+| `lib/docxrepair.py` | What a `.docx` needs done to it before Pandoc reads it, on a copy: bookmarks moved to where the reader keeps them, invisible links so bookmarks only other files point at survive. |
+| `lib/notes.py` | Footnote numbering and placement across pages, after rendering, for HTML and EPUB alike. |
+| `lib/names.py` | The one rule for a safe file name, shared with `safe-media.lua`. |
 | `split-pages.py` | Cuts filtered intermediates into one page per heading, names the pieces, rewrites links between them, and records where each came from. |
 | `page.css` | The rules every page carries beyond Pandoc's own stylesheet: caption contrast, real table display, the scroll wrapper. |
 | `read-conversion-config.py` | Resolves `conversion.yaml` into settings `convert.py` reads. |
@@ -141,8 +147,12 @@ failing loudly is better than shipping a cartridge that looks fine.
 ## Running the Pandoc filter on its own
 
 `figures-and-tables.lua` is an ordinary Pandoc filter and works outside
-`convert.py`. Everything configurable is read from the environment, which
-is how `convert.py` passes settings from `conversion.yaml`:
+`convert.py`, with two things missing that `convert.py` does before it
+runs: the repair of the `.docx` (so bookmarks between blocks and
+bookmarks only other files link to are lost that way) and the
+table-headers pre-pass. Everything configurable is read from the
+environment, which is how `convert.py` passes settings from
+`conversion.yaml`:
 
 | Variable | Default | Effect |
 |---|---|---|
@@ -157,6 +167,7 @@ is how `convert.py` passes settings from `conversion.yaml`:
 | `ALT_MAX_CHARS` | `120` | Alt text longer than this is reported |
 | `TABLE_LABEL_PREFIXES` | `Table` | Comma-separated words that introduce a table caption |
 | `FIGURE_LABEL_PREFIXES` | `Figure` | The same for figures |
+| `TABLE_MARKERS` | `matrix=both,row-headers=first-column` | What a fenced div's class declares about a Markdown table's headers |
 
 The `*_MISSING` and `SPACER_LOG` files are appended to, not truncated, and
 carry no header row — `convert.py` collects them across a whole run, sorts

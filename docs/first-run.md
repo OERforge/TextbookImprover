@@ -168,11 +168,21 @@ packaging-sample.yaml                 written when the script worked something o
 course.imscc                          only with --zip
 epub/course.epub                      only with an epub3 target declared
 output-check.csv                      what the output check found, if anything
-
-A page you wrote yourself, an `.html` beside the sources with no `.docx`
-of its own, is copied into `html/` as it stands, with the files it links,
-and appears in the EPUB and the cartridge like any other page.
+src/1-3-levels-of-measurement.md      only with a markdown target declared
+html/toc.html                         only with a `generate: toc` entry in contents
+html/notes.html                       only with notes.placement set to book
 ```
+
+The source can be `.docx` or `.md`, one page each, in any mix. A page you
+wrote yourself, an `.html` beside the sources with no source of its own,
+is copied into `html/` as it stands, with the files it links, and appears
+in the EPUB and the cartridge like any other page. A file named
+`<stem>.<target>.md` (or `.docx`, `.html`) replaces `<stem>` for that
+target alone; see [Editions](configuration.md#editions).
+
+A page's name is its source's name made safe for a link: `01 BigPicture.md`
+is the page `01-BigPicture`. The names of pages cut from a source are the
+source's name and the heading's; `page-names.csv` renames them.
 
 The intermediates are Pandoc's own document model as JSON, which is
 lossless where Markdown wasn't. The first is the source as Pandoc read it;
@@ -187,16 +197,17 @@ pandoc -f json -t markdown 1-3-levels-of-measurement.filtered.json | less
 
 Deleting the `.json` files costs nothing; the next run regenerates them.
 
-If a run leaves `.md` files behind from v0.1, they're named on stderr and
-otherwise ignored. Nothing reads them, and this script won't delete
-files you may want.
+An `.md` file with the same name as a `.docx` is what v0.1 left behind;
+it's named on stderr and otherwise ignored. So are pages an earlier
+version wrote beside the sources, which now go to `html/`. This script
+won't delete files you may want.
 
 ## Exit codes
 
 | Code | Meaning |
 |---|---|
 | 0 | Everything ran. Reports may still list outstanding work. |
-| 1 | The run stopped: no `.docx` present, unresolved media, a missing required config value, or a referenced file not on disk. |
+| 1 | The run stopped: no source present, unresolved media, a missing required config value, or a referenced file not on disk. |
 
 A non-zero exit on a first run is normal — there's no config yet, so the
 manifest step writes a sample and stops. The HTML is already written by

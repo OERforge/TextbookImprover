@@ -6,10 +6,10 @@ split-pages.py -- cut filtered intermediates into one page per heading.
     split-pages.py --level 2 --sidecar page-names.csv --new page-names-new.csv ...
 
 Runs between the filter and the render, on the filtered intermediates
-convert.sh writes, and writes one <source>--<name>.filtered.json per
+convert.py writes, and writes one <source>--<name>.filtered.json per
 piece. Everything downstream -- the HTML render, the packager, the EPUB
 assembler -- sees ordinary pages. The paths of the pieces are printed to
-stdout, one per line, in reading order; that is what convert.sh renders.
+stdout, one per line, in reading order; that is what convert.py renders.
 
 WHY AFTER THE FILTER
 

@@ -101,3 +101,7 @@ tables are unaffected and keep their label as the key.
 
 One alt per image file. If the same image appears twice on a page with
 different alt text, you get a warning and the first entry wins.
+
+## After a Markdown round trip
+
+A markdown target writes every decision a sidecar holds into the source: captions as captions, alt text and `{.decorative}` on the images, the header declaration as the marker div. A book maintained from that Markdown needs no sidecar for those decisions, and a report that lists them again is listing what the source already says; the sidecars stay useful for a book whose source stays Word.

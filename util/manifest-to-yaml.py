@@ -259,6 +259,10 @@ def main():
         handle.write("\n".join(lines_out).rstrip() + "\n")
 
     print(f"Wrote {project_path} and {packaging_path}.")
+    print("A manifest says nothing about conversion, so no conversion.yaml "
+          "was written;\n  the defaults apply without one. For a documented "
+          "one to add targets to:\n    python3 bin/read-conversion-config.py "
+          "--init -d .")
 
     pages = sum(1 for line in lines if "- " in line and "title:" not in line)
     print(f"{pages} page entries.")

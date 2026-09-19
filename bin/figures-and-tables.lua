@@ -1568,6 +1568,14 @@ function Blocks(blocks)
       if block.t == 'Table' then
         -- Not a layout table, so it is a real data table: give it a
         -- <caption>, mark its column headers, wrap it for scrolling.
+        -- Bookmarks that stood before the table in the source, which
+        -- Pandoc's reader drops: every "Table 1.11" link in an OpenStax
+        -- book points at one. Restored as empty anchors ahead of the
+        -- table, so the links land and a split table keeps them.
+        local entry = resolved_for(block)
+        for _, name in ipairs(entry and entry.anchors or {}) do
+          out:insert(pandoc.Div({}, pandoc.Attr(name, { 'table-anchor' })))
+        end
         local wrapped, consumed = caption_data_table(
           block, blocks[i + 1], blocks[i + 2], blocks[i + 3], out)
         for _, piece in ipairs(wrapped) do out:insert(piece) end

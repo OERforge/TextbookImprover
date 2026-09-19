@@ -65,6 +65,7 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(HERE), "lib"))
 try:
+    import docxrepair
     import oerconfig
 except ImportError:
     sys.exit("Cannot find the configuration library. It should be in a "
@@ -289,7 +290,7 @@ def source_documents(base):
     return found
 
 
-def read_to_json(base, docs, env):
+def read_to_json(base, docs, env, work):
     """JSON rather than Markdown. Markdown is a format with opinions, and
     everything has to survive its grammar: it has no syntax for a cell
     attribute or for a header column, which are precisely what the
@@ -312,9 +313,21 @@ def read_to_json(base, docs, env):
     alt-text sidecar is stored under.
     """
     stems = []
+    repaired_dir = os.path.join(work, "repaired")
+    os.makedirs(repaired_dir, exist_ok=True)
     for name in docs:
         stem = name[:-5]
-        run(["pandoc", "-f", "docx", "-t", "json", name, "-o", stem + ".json",
+        # Pandoc reads a repaired copy -- bookmarks moved to where its
+        # reader keeps them; see lib/docxrepair.py -- and the source is
+        # never touched. The copy keeps the name so nothing downstream
+        # sees a difference.
+        repaired = os.path.join(repaired_dir, name)
+        moved = docxrepair.repaired_copy(os.path.join(base, name), repaired)
+        if moved and TRACE:
+            say(f"# {name}: {moved} bookmark(s) moved into the paragraphs "
+                "they precede")
+        run(["pandoc", "-f", "docx", "-t", "json", repaired,
+             "-o", stem + ".json",
              "--lua-filter=" + MEDIA_FILTER, "--extract-media=" + stem],
             env=env, cwd=base)
         stems.append(stem)
@@ -697,7 +710,7 @@ def main():
                    "--resolved", env["TABLE_HEADERS_RESOLVED"]], cwd=base)
 
         # ---- 1. read ----------------------------------------------------------
-        stems = read_to_json(base, docs, env)
+        stems = read_to_json(base, docs, env, work)
         if not stems:
             die("No .docx files here, so there is nothing to convert.")
 

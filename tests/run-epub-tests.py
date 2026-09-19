@@ -176,14 +176,14 @@ class Built:
                 continue
             out.append(token)
         entries, depth = [], 0
-        for m in re.finditer(r"(<ol[^>]*>)|(</ol>)|<a [^>]*>([^<]*)</a>",
-                             self.nav):
+        for m in re.finditer(r"(<ol[^>]*>)|(</ol>)|<a [^>]*>(.*?)</a>",
+                             self.nav, re.S):
             if m.group(1):
                 depth += 1
             elif m.group(2):
                 depth -= 1
             else:
-                entries.append((depth, m.group(3)))
+                entries.append((depth, re.sub(r"<[^>]+>", "", m.group(3))))
         return entries
 
     def chapters(self):
@@ -229,6 +229,12 @@ def case_structure(work):
         doc = json.load(fh)
     doc["blocks"].append({"t": "Header", "c": [
         2, ["sub", [], []], [{"t": "Str", "c": "Subsection"}]]})
+    # And a body that opens with its own H1, emphasis and all, as a page
+    # does when the filter's promotion did not fire: the heading keeps
+    # the emphasis, and the chapter <title> must not.
+    doc["blocks"].insert(0, {"t": "Header", "c": [
+        1, ["own", [], []], [{"t": "Str", "c": "Prac"},
+                             {"t": "Emph", "c": [{"t": "Str", "c": "tice"}]}]]})
     with open(path, "w", encoding="utf-8") as fh:
         json.dump(doc, fh)
     write_config(work, TREE, "  authors: [A. Writer, B. Writer]\n"
@@ -250,6 +256,9 @@ def case_structure(work):
          lambda: len(out.chapters()) == 7),
         ("each file is titled by its heading, not its file name",
          lambda: out.titles() == [e[1] for e in entries]),
+        ("a heading with emphasis gives a plain-text title",
+         lambda: "<title>Practice</title>" in out.files[out.chapters()[2]]
+         and "<h2>Prac<em>tice</em></h2>" in out.files[out.chapters()[2]]),
         # The writer puts a heading's id on the <section> it opens.
         ("a page inside a group is an h2 and its own sections h3",
          lambda: re.search(r'<section id="page-tables"[^>]*>\s*<h2>',

@@ -10,6 +10,12 @@ Versions are two-part and pre-1.0: breaking changes may land in any of them unti
 
 - **Multiple targets.** Every target in `conversion.yaml` is built, each into its own `output_dir`: several HTML renderings with different headers, footers, or options, and an EPUB, in one run. Targets whose filter-stage settings agree (the schema now marks each setting's `stage`) share one filtered intermediate; a target that differs gets its own under its output directory. A target away from the sources gets its media copied beside its pages. Reports and sidecars stay one per book. `tests/run-convert-tests.py`.
 
+- **Cross-references land.** A `.docx` is read through a repaired copy with each bookmark that stood between blocks moved into the block that follows, since Pandoc's reader drops the ones OpenStax places that way; a bookmark before a table is handed to the filter by the pre-pass and restored as an anchor ahead of the table, which a split table keeps. On *Introductory Business Statistics 2e* the 104 dead `#fs-id…` links become none. `lib/docxrepair.py`.
+
+### Fixed
+
+- An EPUB chapter whose heading held `<em>` or `<sup>` had them inside its `<title>`, which XHTML forbids (four chapters of the statistics book; epubcheck `RSC-005`). The chapter `<title>` is now set from the heading's text after the archive is written, since the writer offers no plain-text form of a chapter's heading.
+
 ### Changed
 
 - **`convert.sh` is `convert.py`.** The driver is Python: the same steps, the same reports, the same output (checked page for page with `compare-output.py` on four books, which say `Runs agree`), with every comment that recorded what the shell script had learned carried over. `--quiet` turns off the command trace `set -x` used to give; unknown arguments still pass to the packager. `convert.sh` remains as a wrapper that runs it, for one release, so documented commands keep working.

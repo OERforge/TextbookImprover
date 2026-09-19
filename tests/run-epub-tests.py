@@ -447,8 +447,63 @@ def case_rewriting(work):
     ]
 
 
+def case_outline(work):
+    """The packager reads the book's table of contents back out of the
+    EPUB, the way it reads a PDF's bookmarks."""
+    convert(work, NEEDED)
+    write_config(work, TREE)
+    out = Built(work)
+    cartridge = load(os.path.join(ROOT, "bin", "build-cartridge.py"),
+                     "cartridge")
+    path = os.path.join(work, "epub", "org.example.fixtures.epub")
+    entries = cartridge.epub_outline(path)
+    # The same book with no navigation document declared, so toc.ncx is
+    # all there is: what an EPUB 2 offers.
+    ncx_only = os.path.join(work, "ncx-only.epub")
+    with zipfile.ZipFile(path) as src, zipfile.ZipFile(ncx_only, "w") as dst:
+        for info in src.infolist():
+            data = src.read(info.filename)
+            if info.filename.endswith(".opf"):
+                data = data.replace(b' properties="nav"', b"")
+            dst.writestr(info, data)
+    fallback = cartridge.epub_outline(ncx_only)
+    stems = [s for s in NEEDED]
+    titles = {}
+    for stem in stems:
+        with open(os.path.join(work, stem + ".filtered.json"),
+                  encoding="utf-8") as fh:
+            titles[stem] = epub.page_title(json.load(fh), stem)
+    tree, placed, unmapped = cartridge.contents_from_outline(path, stems,
+                                                             titles)
+    return [
+        ("the build succeeds", lambda: out.status == 0),
+        ("the navigation document gives the entries at their depths",
+         lambda: entries == [
+             (0, "1.3 Levels of Measurement"), (0, "Chapter 1 Tables"),
+             (1, "Practice"), (1, "Tables, Continued"),
+             (0, "Chapter 2 Everything Else"), (1, "Media A"),
+             (1, "Conditional probability")]),
+        ("without a navigation document, toc.ncx gives the same, after "
+         "the title page it also lists",
+         lambda: fallback[-len(entries):] == entries),
+        # A page is found by the filename its heading derives (how
+        # OpenStax names files) or, failing that, by its own title.
+        # tables-b is titled "More tables" and the contents renamed it
+        # "Tables, Continued" in the nav, so that entry names no page.
+        ("every page whose title the outline uses is placed under its group",
+         lambda: placed == set(stems) - {"tables-b"}
+         and tree == ["metadata",
+                      {"title": "Chapter 1 Tables", "items": ["tables"]},
+                      {"title": "Chapter 2 Everything Else",
+                       "items": ["media-a", "math"]}]),
+        ("an entry that names no page is reported, not guessed at",
+         lambda: unmapped == ["Tables, Continued"]),
+    ]
+
+
 CASES = [
     ("the shape of the book", case_structure),
+    ("the table of contents read back", case_outline),
     ("tables survive assembly", case_tables_survive),
     ("accessibility claims", case_claims),
     ("contents edge cases", case_contents_edges),

@@ -35,7 +35,7 @@ bash $T/bin/convert.sh                 # 2. builds imsmanifest.xml
 bash $T/bin/convert.sh --zip           # 3. ... and the .imscc archive
 ```
 
-If you have the book's PDF, run `bash $T/bin/convert.sh --toc book.pdf` *before* renaming the sample: it orders the pages from the PDF's own table of contents, with the real chapter titles. [A first run](docs/first-run.md) walks through all of this, including the reports and sidecars you will work through afterwards.
+If you have the book's PDF or EPUB, run `bash $T/bin/convert.sh --toc book.pdf` (or `--toc book.epub`) *before* renaming the sample: it orders the pages from the book's own table of contents, with the real chapter titles. The EPUB needs nothing installed; OpenStax publishes both. [A first run](docs/first-run.md) walks through all of this, including the reports and sidecars you will work through afterwards.
 
 ## Documentation
 

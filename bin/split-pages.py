@@ -381,6 +381,7 @@ def split_document(doc, stem, level, names, taken, problems):
                                 "c": [meta_string(t) for t in parents]}
         meta["page-position"] = meta_string(position)
         add_head_meta(meta, [("source-page", stem),
+                             ("source-title", source_title),
                              ("page-part", f"{index}/{total}"),
                              ("page-position", position)]
                       + [("page-parent", t) for t in parents])

@@ -9,12 +9,13 @@ python3 build-cartridge.py                 # write imsmanifest.xml
 python3 build-cartridge.py --check         # validate, write nothing
 python3 build-cartridge.py --zip           # also build the .imscc
 python3 build-cartridge.py --init          # write a sample config and stop
-python3 build-cartridge.py --toc book.pdf  # order from the PDF's outline
+python3 build-cartridge.py --toc book.pdf  # order from the PDF's outline, or book.epub
 ```
 
 ### Ordering from the book's own table of contents
 
-`--toc book.pdf` reads the PDF's bookmark outline, which is the table of
+`--toc book.pdf` reads the PDF's bookmark outline, and `--toc book.epub`
+the EPUB's navigation document (or `toc.ncx` in an EPUB 2), which is the table of
 contents in the order the book actually uses — better than any filename
 heuristic can manage, and it supplies the real chapter titles. Pages are
 matched by deriving a filename from each heading ("Key Concepts and
@@ -32,6 +33,19 @@ That last case is the one you want on a first pass, and it's easy to miss
 by doing things in the wrong order: the sample a first run writes already
 places every page in a guessed order, so a `packaging.yaml` adopted from it
 leaves the outline nothing to do, and `--toc` says so and changes nothing.
+
+An entry is matched to a page two ways: by the filename its heading
+derives (`Key Concepts and Summary` finds `1-key-concepts-and-summary`,
+which is how OpenStax names files), and failing that by the page's own
+title, so files named `BC-01` or pages cut from a chapter by
+`pages.split_level` are found too. A title two pages share is settled by
+provenance, preferring the page from the source the rest of the group
+came from, then by reading order. Entries the outline has but no page
+carries are reported; pages the outline never names are appended after
+it, grouped under their source's title when they came from a split.
+Publishers' navigation documents are not always clean: blank entries are
+skipped, and an entry holding a page's worth of text (one in the corpus
+does) is skipped with a warning rather than matched.
 Run `--toc` before adopting the sample, or delete the `contents` block and
 run it again. The result goes to
 `packaging-sample.yaml` for review, and outline entries matching no page
@@ -48,7 +62,7 @@ move them if you would rather keep them with their chapters.
 | `--target` | the only one | Which package to build, when several are defined |
 | `--allow-unknown-keys` | off | Report unrecognized settings instead of refusing them |
 | `-o`, `--output` | `<dir>/imsmanifest.xml` | Manifest to write |
-| `--toc PDF` | — | Order from a PDF's bookmark outline |
+| `--toc PDF-OR-EPUB` | — | Order from a PDF's bookmark outline or an EPUB's table of contents |
 | `--includeallhtml` | off | Place pages the config doesn't list |
 | `--zip` | off | Also build the `.imscc` |
 | `--check` | off | Validate; write nothing |

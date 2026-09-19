@@ -42,7 +42,7 @@ With Markdown handled above, what remains is HTML and EPUB, and they're close re
 
 One thing to know before relying on it: the reader keeps the attribute but not the element. `<th scope="row">` comes back as a `Cell` carrying `("scope","row")` and is written as `<td scope="row">`, because a `Cell` has no is-a-header flag and only `row_head_columns` makes a body cell a `th`. So `scope="row"` on the first column is a source marker meaning `first-column` or `both`, and the filter sets `row_head_columns` to make it true again. Verified on 3.11 for both readers.
 
-**EPUB earns its place twice over.** Its `nav.xhtml` is the book's table of contents in machine-readable form, which is the packager's module tree without needing the PDF's bookmark outline (see Smaller things). And it's built from the same source as the DOCX but keeps the ids the DOCX export drops, which is where the anchors for item 5 would have to come from.
+**EPUB earns its place twice over.** Its `nav.xhtml` is the book's table of contents in machine-readable form, which is the packager's module tree without needing the PDF's bookmark outline, and `--toc` reads it now. And it's built from the same source as the DOCX but keeps the ids the DOCX export drops, which is where the anchors for item 5 would have to come from.
 
 ## 4. Link text sidecar, for bare URLs
 
@@ -164,7 +164,6 @@ The distinction between the two matters more than either case. A table whose rea
 
 ## Smaller things
 
-- **Read the contents tree from an EPUB as well as a PDF.** `build-cartridge.py` builds the module tree from a PDF's bookmark outline, which is the book's table of contents in the order the book actually uses. An EPUB carries the same thing in machine-readable form -- `nav.xhtml` with `epub:type="toc"` in EPUB 3, `toc.ncx` in EPUB 2 -- so the same walk produces the same `(depth, title)` list without needing `pypdf`, and OpenStax publishes EPUBs. The matching of titles to page filenames is unchanged; only the source of the entries differs.
 - **Watch [pandoc#3034](https://github.com/jgm/pandoc/issues/3034).** The DOCX and ODT readers ignore `docProps/core.xml`, so a Word file whose title is set through File → Info → Properties converts with no metadata at all: the standalone HTML `<title>` falls back to the filename and an EPUB Pandoc builds straight from it gets no `dc:title` (ours takes the title from `project.yaml`). If the reader ever picks those up, `promote_h1_to_title` and the duplicate-H1 guard both need rechecking, since the condition they turn on is `doc.meta.title == nil`.
 - **veraPDF and Ace.** epubcheck and the Nu HTML checker now run when they're installed. veraPDF (PDF/UA, Java) joins them when PDF is an output, and DAISY's Ace (Node with a bundled browser) applies the accessibility rules to an EPUB as a reading system would; it is the least likely to be present and the most worth running by hand before a book is distributed.
 - **Landmarks and `epub:type`.** Pandoc's landmarks nav lists only the title page. A reading system can offer "go to the start of the body" when front and back matter are marked, but the tools stay agnostic about what a group is called, so this wants a declaration on a `contents` group (`epub_type: frontmatter`) rather than a guess from its title. Worth doing when a book needs it.

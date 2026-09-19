@@ -8,8 +8,7 @@ One EPUB for the whole book, assembled from the same pages the cartridge holds a
 # in conversion.yaml
 targets:
   html:
-    format: html
-    output_dir: .
+    format: html             # writes html/
   epub:
     format: epub3            # writes epub/<identifier>.epub
 ```

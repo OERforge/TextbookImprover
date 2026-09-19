@@ -13,7 +13,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #
-# Packaging schema -- settings that describe one package built from
+# Packaging schema—settings that describe one package built from
 # already-converted files.
 #
 # Ships with the packaging tools. The conversion half never reads this
@@ -36,7 +36,7 @@ keys:
     default: common-cartridge
     target_only: true
     description: >
-      What this package is. Others -- SCORM in particular -- are expected
+      What this package is. Others—SCORM in particular—are expected
       here later.
       A common-cartridge is written to the Common Cartridge 1.1 profile.
       That is deliberate rather than neglect: 1.1 is the only version every
@@ -82,7 +82,7 @@ keys:
         description: >
           Put every chapter inside one module named after the book, rather
           than leaving each at the top level. An LMS never merges an
-          imported structure with one already there -- it appends -- so a
+          imported structure with one already there—it appends—so a
           re-import always adds a second copy. Wrapped, that's one module
           to remove afterwards; flat, it's one per chapter, and in
           Brightspace they must be deleted one at a time.
@@ -129,7 +129,7 @@ keys:
           so the folder means something in a file manager, and a short
           digest of the identifier for uniqueness, which is where the
           uniqueness has to come from since two books can share a title.
-          The version is deliberately not part of it -- a prefix that
+          The version is deliberately not part of it—a prefix that
           changed between releases would make every update a fresh import
           rather than an update.
           Set this explicitly if you expect to edit the title, since the
@@ -170,7 +170,7 @@ keys:
     item: path
     default: []
     description: >
-      Files every page depends on -- a stylesheet, a shared image. Listed
+      Files every page depends on—a stylesheet, a shared image. Listed
       once as their own resource and referenced by each page rather than
       repeated.
 

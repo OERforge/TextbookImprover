@@ -958,6 +958,11 @@ def build_manifest(config, tree, page_files, common_files):
 def main():
     parser = argparse.ArgumentParser(
         description="Build an IMS Common Cartridge manifest from HTML pages.")
+    parser.add_argument("--pages", default=None,
+                        help="read the pages from this directory rather "
+                             "than from --dir, which keeps the configuration, "
+                             "the sample, the manifest, and the archive; "
+                             "convert.py passes an html target's output_dir")
     parser.add_argument("-d", "--dir", default=".",
                         help="directory holding the pages (default: .)")
     parser.add_argument("-c", "--config", default=None,
@@ -1010,13 +1015,14 @@ def main():
                  "reads its own configuration:\n"
                  "    python3 bin/read-conversion-config.py -d . DIR")
 
-    stems = sorted((f[:-5] for f in os.listdir(base) if f.endswith(".html")),
+    pages_dir = args.pages or base
+    stems = sorted((f[:-5] for f in os.listdir(pages_dir) if f.endswith(".html")),
                    key=natural_key)
     if not stems:
-        sys.exit(f"No .html files in {base}.")
+        sys.exit(f"No .html files in {pages_dir}.")
 
     for stem in stems:
-        path = os.path.join(base, stem + ".html")
+        path = os.path.join(pages_dir, stem + ".html")
         TITLES[stem] = page_title(path, stem)
         origin = page_provenance(path)
         if origin:
@@ -1291,19 +1297,20 @@ def main():
 
     for stem in flatten_pages(tree):
         refs = []
-        for ref in page_references(os.path.join(base, stem + ".html"), base):
+        for ref in page_references(os.path.join(pages_dir, stem + ".html"),
+                                   pages_dir):
             if ref[:-5] in available and ref.endswith(".html"):
                 continue        # a link to another page: its own resource
             if ref in common_files:
                 continue        # declared once, in the shared resource
-            if not os.path.isfile(os.path.join(base, ref)):
+            if not os.path.isfile(os.path.join(pages_dir, ref)):
                 missing.append((stem, ref))
                 continue
             refs.append(ref)
         page_files[stem] = refs
 
     for ref in common_files:
-        if not os.path.isfile(os.path.join(base, ref)):
+        if not os.path.isfile(os.path.join(pages_dir, ref)):
             missing.append(("common_files", ref))
 
     if missing:
@@ -1401,7 +1408,7 @@ def main():
             # does; Common Cartridge requires it there.
             archive.write(output_path, "imsmanifest.xml")
             for ref in file_list[1:]:
-                archive.write(os.path.join(base, ref),
+                archive.write(os.path.join(pages_dir, ref),
                               under_prefix(prefix, ref))
         size = os.path.getsize(cartridge) / 1048576
         print(f"Wrote {cartridge} ({size:.1f} MB, {len(file_list)} entries).")
@@ -1414,7 +1421,7 @@ def main():
             print(f"  ({FILE_LIST_NAME} lists the files, but zip -@ cannot "
                   f"place them under {prefix}/)")
         else:
-            print(f"  cd {base} && zip -q -X "
+            print(f"  cd {pages_dir} && zip -q -X "
                   f"{config['manifest']['cartridge']} -@ < {FILE_LIST_NAME}")
             print("  (or re-run this script with --zip)")
 

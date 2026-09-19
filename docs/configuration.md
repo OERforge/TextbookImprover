@@ -57,24 +57,28 @@ targets:
     output_dir: .
 ```
 
-Every target is built, each into its own `output_dir`: several HTML
-renderings with different headers, footers, or options, an EPUB, and
-whatever else the schema's `format` lists. Two targets whose settings
-that change the filtered intermediate agree (the schema marks these
-`stage: filter`; images, tables, captions, the split, the sidecars) share
-one intermediate, written beside the sources; a target that differs gets
-its own under its output directory. Settings that only change how a
-target writes (`header`, `footer`, `output_dir`) or assemble a book
-(`epub.*`) cost nothing to vary. Reports and sidecars are about the
-source and are written once per book. The packager reads the HTML
-target that writes beside the sources (`output_dir: .`); packaging a
-target that writes elsewhere is on the roadmap.
+Every target is built, each into its own `output_dir`, named after the
+target unless it says otherwise: `html/` for the one implied when no
+configuration exists, and several HTML renderings with different
+headers, footers, or options, an EPUB, and whatever else the schema's
+`format` lists when they're declared. The content directory keeps the
+sources, the intermediates, the sidecars, and the reports. A page you
+wrote by hand (an `.html` there with no `.docx` behind it) is copied
+into every HTML target with the local files it refers to, and read into
+an intermediate so the EPUB has it too. Two targets whose settings that
+change the filtered intermediate agree (the schema marks these `stage:
+filter`; images, tables, captions, the split, the sidecars) share one
+intermediate; a target that differs gets its own under its output
+directory. Settings that only change how a target writes (`header`,
+`footer`, `output_dir`) or assemble a book (`epub.*`) cost nothing to
+vary. The packager reads the first HTML target's directory; a package
+whose `includes` name another is on the roadmap. `output_dir: .` keeps
+the layout earlier versions used, pages beside the sources.
 
 ```yaml
 targets:
   html:
     format: html
-    output_dir: .
   print:
     format: html          # shares the intermediate; only the footer differs
     footer: "Printed edition."

@@ -121,7 +121,7 @@ def render_keys(keys, path, depth, out):
             bits.append("*target only*")
         if spec.get("required"):
             bits.append("**required**")
-        out.append("**`%s`** -- %s" % (full, "; ".join(bits)) if bits
+        out.append("**`%s`**—%s" % (full, "; ".join(bits)) if bits
                    else "**`%s`**" % full)
         out.append("")
         if spec.get("description"):

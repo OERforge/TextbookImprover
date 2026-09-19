@@ -14,7 +14,7 @@ python3 build-cartridge.py --toc book.pdf  # order from the PDF's outline, or bo
 
 ### Ordering from the book's own table of contents
 
-`--toc book.pdf` reads the PDF's bookmark outline, and `--toc book.epub`
+`convert.py` runs the packager with `--pages html/` (the first HTML target's directory) so it reads the pages there and keeps its configuration, sample, manifest, and archive in the content directory; run by hand, `--pages` does the same. `--toc book.pdf` reads the PDF's bookmark outline, and `--toc book.epub`
 the EPUB's navigation document (or `toc.ncx` in an EPUB 2), which is the table of
 contents in the order the book actually uses — better than any filename
 heuristic can manage, and it supplies the real chapter titles. Pages are

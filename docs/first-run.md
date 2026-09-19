@@ -157,9 +157,10 @@ not by care — see [Testing](testing.md).
 ```
 1-3-levels-of-measurement.json        intermediate, as Pandoc read the source
 1-3-levels-of-measurement.filtered.json   the same page after the filter has run
-1-3-levels-of-measurement.html        the page
-chapter-7--economies-of-scale.html    a page cut from chapter-7, with pages.split_level on
 1-3-levels-of-measurement/media/      its images, named by real content type
+html/1-3-levels-of-measurement.html   the page, in the html target's directory
+html/chapter-7--economies-of-scale.html   a page cut from chapter-7, with pages.split_level on
+html/1-3-levels-of-measurement/media/ the images again, beside the page that uses them
 imsmanifest.xml                       the manifest
 cartridge-files.txt                   every file the archive must contain
 packaging-sample.yaml                 written when the script worked something out
@@ -167,6 +168,10 @@ packaging-sample.yaml                 written when the script worked something o
 course.imscc                          only with --zip
 epub/course.epub                      only with an epub3 target declared
 output-check.csv                      what the output check found, if anything
+
+A page you wrote yourself, an `.html` beside the sources with no `.docx`
+of its own, is copied into `html/` as it stands, with the files it links,
+and appears in the EPUB and the cartridge like any other page.
 ```
 
 The intermediates are Pandoc's own document model as JSON, which is

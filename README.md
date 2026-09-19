@@ -10,7 +10,7 @@ The initial release of these scripts was created by Robert Szarka and supported 
 
 Two halves, which share a configuration and the book's table of contents, and nothing else.
 
-**Conversion** turns each `.docx` into an HTML page through Pandoc and a Lua filter, and makes the page more accessible on the way: figures get real captions tied to their images, data tables get captions, header cells, and a focusable scroll region, images get their alt text checked and their layout spacers marked, and equations stay equations. Where the source doesn't say something a screen reader needs -- which column heads a table, what a picture shows -- the run guesses from the file, writes its guess into a sidecar CSV you can correct, and reports what still needs a person.
+**Conversion** turns each `.docx` into an HTML page through Pandoc and a Lua filter, and makes the page more accessible on the way: figures get real captions tied to their images, data tables get captions, header cells, and a focusable scroll region, images get their alt text checked and their layout spacers marked, and equations stay equations. Where the source doesn't say something a screen reader needs—which column heads a table, what a picture shows—the run guesses from the file, writes its guess into a sidecar CSV you can correct, and reports what still needs a person.
 
 **Packaging** turns a directory of pages into a Common Cartridge, with the book's table of contents as the module tree, and validates the manifest against the IMS schemas.
 
@@ -24,7 +24,7 @@ You need Pandoc 3.9 or later, Python 3.9 or later, and PyYAML; see [Installation
 T=/path/to/tools                       # where you cloned this
 cd /path/to/your/docx/files
 
-python3 $T/bin/convert.py                 # 1. convert: one .html per .docx, plus reports
+python3 $T/bin/convert.py                 # 1. convert: html/, one page per .docx, plus reports
 ```
 
 The first run converts everything, then stops and writes `packaging-sample.yaml`, because a manifest needs two things only you can supply. Set `identifier` and `title` near the top of that file and rename it:

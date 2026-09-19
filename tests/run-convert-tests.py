@@ -87,20 +87,70 @@ def read(*parts):
 
 
 def case_bare(work):
-    """No configuration at all: one page per document, beside it."""
+    """No configuration at all: one page per document, in html/."""
     result = convert(work, config=None, project=False)
     return [
-        ("a bare directory converts",
-         lambda: all(exists(work, n + ".html") for n in NEEDED)),
+        ("a bare directory converts into html/",
+         lambda: all(exists(work, "html", n + ".html") for n in NEEDED)
+         and not exists(work, "tables.html")),
         ("and stops at the packager's sample, as a first run does",
          lambda: result.returncode != 0
          and exists(work, "packaging-sample.yaml")),
-        ("the intermediates sit beside the sources",
+        ("the intermediates and the reports sit beside the sources",
          lambda: exists(work, "tables.filtered.json")
-         and not exists(work, "html")),
-        ("the reports are written",
-         lambda: exists(work, "image-alt-missing.csv")
-         and exists(work, "table-headers-new.csv")),
+         and exists(work, "image-alt-missing.csv")
+         and exists(work, "table-headers-new.csv")
+         and not exists(work, "html", "image-alt-missing.csv")),
+        ("the media go with the pages",
+         lambda: exists(work, "html", "media-a", "media", "image1.png")),
+    ]
+
+
+HAND = """<!DOCTYPE html><html lang="en"><head><title>Front Matter</title>
+<link rel="stylesheet" href="front/style.css"></head>
+<body><h1>Front Matter</h1><p>By hand. <img src="front/logo.png" alt="Logo"></p>
+</body></html>
+"""
+
+
+def case_hand_written(work):
+    """A page the author wrote is copied, not rendered, and is in every
+    output."""
+    os.makedirs(os.path.join(work, "front"), exist_ok=True)
+    with open(os.path.join(work, "frontmatter.html"), "w",
+              encoding="utf-8") as fh:
+        fh.write(HAND)
+    with open(os.path.join(work, "front", "style.css"), "w") as fh:
+        fh.write("body {}\n")
+    shutil.copy(os.path.join(FIXTURES, "media-a.docx"),
+                os.path.join(work, "front", "logo.png"))   # any bytes
+    result = convert(work, "targets:\n  html:\n    format: html\n"
+                           "  epub:\n    format: epub3\n",
+                     arguments=["--zip"])
+    import zipfile
+    names = []
+    if exists(work, "org.example.fixtures.imscc"):
+        with zipfile.ZipFile(os.path.join(work, "org.example.fixtures.imscc")) as z:
+            names = z.namelist()
+    nav = ""
+    if exists(work, "epub", "org.example.fixtures.epub"):
+        with zipfile.ZipFile(os.path.join(work, "epub",
+                                          "org.example.fixtures.epub")) as z:
+            nav = z.read("EPUB/nav.xhtml").decode("utf-8")
+    return [
+        ("the run succeeds", lambda: result.returncode == 0),
+        ("the page is copied into the html target byte for byte",
+         lambda: read(work, "html", "frontmatter.html") == HAND),
+        ("with the files it refers to",
+         lambda: exists(work, "html", "front", "style.css")
+         and exists(work, "html", "front", "logo.png")),
+        ("it is in the EPUB",
+         lambda: "Front Matter" in nav),
+        ("and in the cartridge, with its files",
+         lambda: any(n.endswith("/frontmatter.html") for n in names)
+         and any(n.endswith("/front/style.css") for n in names)),
+        ("and the output check looked at it",
+         lambda: "Output check: 6 page(s)" in result.stderr),
     ]
 
 
@@ -109,7 +159,7 @@ def case_targets(work):
     result = convert(work, MULTI)
     return [
         ("the run succeeds", lambda: result.returncode == 0),
-        ("the html target writes beside the sources",
+        ("the html target writes beside the sources when told to",
          lambda: exists(work, "tables.html")),
         ("a second html target writes into its own directory",
          lambda: exists(work, "print", "tables.html")),
@@ -162,7 +212,7 @@ def case_wrapper(work):
                             text=True, stdin=subprocess.DEVNULL)
     return [
         ("the wrapper converts the directory",
-         lambda: exists(work, "tables.html")),
+         lambda: exists(work, "html", "tables.html")),
         ("and passes its arguments on",
          lambda: "+ " not in result.stderr),
     ]
@@ -170,6 +220,7 @@ def case_wrapper(work):
 
 CASES = [
     ("a bare directory", case_bare),
+    ("a hand-written page", case_hand_written),
     ("several targets", case_targets),
     ("arguments passed to the packager", case_passthrough),
     ("the convert.sh wrapper", case_wrapper),

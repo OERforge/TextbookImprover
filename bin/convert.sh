@@ -29,11 +29,12 @@ set -x
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 figure_filter="$script_dir/figures-and-tables.lua"
 media_filter="$script_dir/media-extensions.lua"
+page_css="$script_dir/page.css"
 config_reader="$script_dir/read-conversion-config.py"
 cartridge_tool="$script_dir/build-cartridge.py"
 headers_tool="$script_dir/table-headers.py"
 
-for required in "$figure_filter" "$media_filter"; do
+for required in "$figure_filter" "$media_filter" "$page_css"; do
   if [ ! -f "$required" ]; then
     echo "Missing $required -- save it alongside this script." >&2
     exit 1
@@ -553,64 +554,10 @@ fi
 #    at <page>/media/... instead.
 ############################################
 
-cat > "$css_header" <<'CSS'
-<style>
-/* Caption contrast -- WCAG 1.4.3 / 1.4.6.
-   Pandoc's stylesheet sets no colour on captions, so they fall back to
-   inheritance or the browser default and can land well under 4.5:1.
-   #555 on Pandoc's #fdfdfd background measures 7.33:1, which clears AAA
-   while staying visibly lighter than the #1a1a1a body text. Note that the
-   familiar "accessible grey" #767676 is only 4.47:1 here -- it is computed
-   against pure white, and Pandoc's background is not pure white. */
-figcaption,
-table caption {
-  color: #555;
-}
-
-/* Pandoc's stylesheet sets `display: block` on tables so they can scroll
-   sideways. That silently strips the table role from the browser
-   accessibility tree, so screen readers stop exposing rows, columns and
-   header associations -- WCAG 1.3.1. Restore real table display and move
-   the scrolling onto the wrapper the Lua filter adds. */
-table {
-  display: table;
-  width: 100%;
-}
-.table-wrapper {
-  overflow-x: auto;
-  margin: 1em 0;
-}
-.table-wrapper:focus-visible {
-  outline: 2px solid #1a1a1a;
-  outline-offset: 2px;
-}
-
-/* Word puts the "Table 2.1" label below the table; keep it there. */
-table caption {
-  caption-side: bottom;
-  margin-top: 0.75em;
-  margin-bottom: 0;
-  text-align: left;
-}
-
-figure { margin: 1.5em 0; }
-figure img { height: auto; }
-figcaption {
-  font-size: 0.9em;
-  line-height: 1.4;
-  margin-top: 0.5em;
-}
-
-/* Pandoc's print block forces the body to black; keep captions in step so
-   they do not print lighter than the surrounding text. */
-@media print {
-  figcaption,
-  table caption {
-    color: black;
-  }
-}
-</style>
-CSS
+# The stylesheet is a file rather than a heredoc so that the EPUB
+# assembler can carry the same rules: a table needs the same caption
+# contrast and the same scroll wrapper whichever writer renders it.
+{ printf '<style>\n'; cat "$page_css"; printf '</style>\n'; } > "$css_header"
 
 while IFS= read -r f; do
   [ -e "$f" ] || continue

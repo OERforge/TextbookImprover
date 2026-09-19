@@ -16,6 +16,14 @@ Where this target writes. Defaults to the target's own name, so two targets in t
 
 For a format that produces one file for the whole book, such as epub3, the file to write inside output_dir. Left empty it's worked out afresh on every run from the book's identifier and the format, so renaming the book renames the file. Given without an extension, the one matching the format is added.
 
+**`title_block`**—one of `on`, `off`; default `on`
+
+Whether a page's own subtitle, date, abstract, and include-before render on it for this target. A source's opening page carries the document's, which makes it a title page; off leaves the author to lay the front matter out by hand.
+
+**`numbering`**—one of `project`, `on`, `off`; default `project`
+
+Whether this target shows the book's structure numbered (see project.numbering). project follows the book; on and off decide for this target alone, so an EPUB can carry chapter numbers while a web edition doesn't, or the reverse. The cartridge follows the book's setting.
+
 **`header`**—`text`; default `""` (empty)
 
 Markdown placed at the top of every page, or the path to a file holding it. Inserted by the template after the filters have run, so nothing in it's processed: give any image explicit alt text.
@@ -60,6 +68,10 @@ How data tables are rendered.
 
 Put wide tables in a focusable scroll container so a long table doesn't force the whole page to scroll sideways (WCAG 1.4.10).
 
+**`tables.markers`**—`opaque`; default `{matrix: both, row-headers: first-column}`
+
+What a fenced div around a table in a Markdown source declares about its headers, class by class: "::: matrix" means both a header row and a header column, "::: row-headers" a header column and no header row, unless this says otherwise. The values are the ones table-headers.csv takes (first-row, first-column, both, none); a header row alone and no headers need no marker, since a pipe or grid table says those itself. A Markdown target writes these markers back. A Markdown table with no marker is left as Pandoc read it; the guess and the report run only on Word sources.
+
 ## pages
 
 What a page is, when the source's files are not already the pages you want.
@@ -67,6 +79,26 @@ What a page is, when the source's files are not already the pages you want.
 **`pages.split_level`**—`int`; default `0`
 
 Cut every source into one page per heading of this level or shallower, after the filter has run and before anything is rendered. 0 leaves each file as one page. A book that arrived as one file per chapter gets one page per section with 2, and the packager groups the pieces under their source without being told. Each piece is named after its heading unless the page_names sidecar says otherwise, its heading becomes its title, and links between pieces are rewritten to follow.
+
+## links
+
+What happens to links on the way through.
+
+**`links.rewrite_publisher`**—`bool`; default `true`
+
+A link to a page of this book on the publisher's site -- https://openstax.org/books/<book>/pages/<page>#anchor, the shape OpenStax's export uses for its index and its cross-references -- becomes a link to the page here, anchor and all, when the book has that page. A link to a page the book doesn't have is left as it is.
+
+## notes
+
+Where footnotes go and how they count, once a source has been cut into pages. Pandoc numbers them per page and keeps each page's at its end; these settings rearrange that in the rendered pages and in the EPUB alike.
+
+**`notes.numbering`**—one of `page`, `group`; default `page`
+
+page restarts the numbers on every page. group continues them across the pages of the enclosing group, in reading order, whatever a group is called; a page that was not split is a group of one.
+
+**`notes.placement`**—one of `page`, `group`, `book`; default `page`
+
+page keeps each page's notes at its end. group gathers a group's notes at the end of its last page. book gathers every note on one Notes page at the end, with a heading for each group, numbered per group. A reference always links to its note wherever it went, and the note links back.
 
 ## epub
 

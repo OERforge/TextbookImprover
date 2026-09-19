@@ -7,7 +7,7 @@ wrote, using nothing but Python.
     check-output.py page1.html page2.html ...
     check-output.py --epub book.epub
 
-Runs at the end of convert.sh over the pages of this run and any EPUB
+Runs at the end of convert.py over the pages of this run and any EPUB
 built from them, and writes the findings to a report beside the other
 reports. The run is not stopped by a finding: the output exists, and
 the report is the list to work through. With no findings the report is

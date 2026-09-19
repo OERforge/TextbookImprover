@@ -54,18 +54,18 @@ defaults:
 targets:
   html:
     format: html
-    output_dir: .
 ```
 
 Every target is built, each into its own `output_dir`, named after the
 target unless it says otherwise: `html/` for the one implied when no
 configuration exists, and several HTML renderings with different
 headers, footers, or options, an EPUB, and whatever else the schema's
-`format` lists when they're declared. The content directory keeps the
-sources, the intermediates, the sidecars, and the reports. A page you
-wrote by hand (an `.html` there with no `.docx` behind it) is copied
-into every HTML target with the local files it refers to, and read into
-an intermediate so the EPUB has it too. Two targets whose settings that
+`format` lists when they're declared: `html`, `epub3`, and `markdown`
+build today. The content directory keeps the sources, the
+intermediates, the sidecars, and the reports. A page you wrote by hand
+(an `.html` there with no source behind it) is copied into every HTML
+target with the local files it refers to, and read into an intermediate
+so the EPUB has it too. Two targets whose settings that
 change the filtered intermediate agree (the schema marks these `stage:
 filter`; images, tables, captions, the split, the sidecars) share one
 intermediate; a target that differs gets its own under its output
@@ -82,9 +82,20 @@ targets:
   print:
     format: html          # shares the intermediate; only the footer differs
     footer: "Printed edition."
+    numbering: "off"      # the book is numbered; this edition isn't
   epub:
     format: epub3
+    notes:
+      placement: book     # every footnote on one Notes chapter
+  src:
+    format: markdown      # the book as source, one file per document
+    pages:
+      split_level: 0
 ```
+
+A target can also decide `title_block`, `numbering`, and the footnote
+settings for itself; the [conversion settings](conversion-settings.md)
+reference says which settings are a target's and which are the book's.
 
 ### How values are settled
 
@@ -135,6 +146,43 @@ should be a leaf, so a unit with its own introduction lists that page as
 its first child rather than pointing at it directly. Three levels of
 nesting are supported; deeper is accepted with a warning, since LMS support
 for deep hierarchies is uneven.
+
+A group or page can carry a `role`: `front`, `main` (the default),
+`appendix`, or `back`. It says what part of the book the entry is, which
+a group's pages inherit. With `numbering: true` on the project, the
+book counts the way a printed one does: main groups and top-level pages
+1, 2, 3 and their pages 1.1, 1.2; appendices A, B and A.1; front and
+back matter unnumbered, a chapter's own opening page taking the
+chapter's number. The numbers show in the EPUB's table of contents and
+headings, the cartridge organization, and the generated contents page;
+a target can say `numbering: on` or `off` for itself. A Markdown book
+written for a Pandoc PDF build declares its parts already, with
+`\frontmatter`, `\mainmatter`, `\appendix`, `\backmatter`, and
+`{.appendix}` on a heading, and the guess reads those, so the sample
+comes out with the roles in place.
+
+An entry `generate: toc` is a page the run writes: the full table of
+contents as a nested list of links, numbered when the book is, placed
+wherever it sits in `contents`. It's named `toc` and titled `Contents`
+unless `name` and `title` say otherwise.
+
+```yaml
+contents:
+  - role: front
+    title: Front Matter
+    items:
+      - _preamble
+      - generate: toc
+      - _preamble--to-the-instructor
+  - 01 BigPicture
+  - …
+  - role: appendix
+    title: Math Review
+    items: [A2 Math--fractions, …]
+  - page: Z1 Glossary
+    role: back
+numbering: true
+```
 
 A page cut by `pages.split_level` is listed by its piece name,
 `chapter-7--economies-of-scale`; see [Splitting pages](splitting.md).
@@ -238,6 +286,68 @@ Alt text longer than this is reported for shortening. It's a length at
 which a short equivalent has become a long description, and long
 descriptions belong in the prose where every reader gets them. Raising it
 silences the report rather than fixing anything.
+
+## Editions
+
+Two editions of a book usually differ in a page or a passage, not in
+the book, and neither difference needs a second source directory or a
+build system.
+
+**A variant file** replaces a page for one target: `about.print.md`
+stands in for `about.md` when the target named `print` is built, and
+`about.md` serves every other target. The same works for `.docx` and
+for a hand-written `.html`. The page keeps the stem, so `contents`,
+links, and sidecars don't know which file produced it, and a target
+with a variant gets intermediates of its own.
+
+**A passage for some targets**, in Markdown, is a fenced div naming
+them; it is unwrapped where it applies and dropped elsewhere, and the
+attribute never reaches the output:
+
+```markdown
+::: {targets="epub print"}
+This edition was checked with epubcheck.
+:::
+
+::: {targets="!web"}
+Prefer the web edition with a screen reader.
+:::
+```
+
+Names keep; `!name` excludes; a list of only exclusions keeps by
+default. A span takes the same attribute for a phrase. Word sources
+have no such markup, by design; an HTML source, when HTML is an input
+format, will take Jinja's block syntax for the same thing.
+
+**The title block.** A source's opening page carries the document's
+subtitle, date, abstract, and `include-before`, which the page
+template renders: that is its title page. `title_block: off` on a
+target leaves them out, for an author laying the front matter out by
+hand.
+
+## Upgrading from v0.4
+
+Two changes alter what a run writes, so a directory converted with v0.4
+looks different after its first v0.5 run.
+
+**Pages go into `html/`.** Nothing writes beside the sources any more.
+The pages v0.4 left there are named once on stderr as being from an
+earlier run and left alone; delete them when you're satisfied, or set
+`output_dir: .` on the HTML target to keep the old layout. The
+packager reads `html/` (`--pages`), and its configuration, manifest,
+and archive stay in the content directory. Sidecars and reports don't
+move.
+
+**A page name with a space changes.** `01 BigPicture.docx` used to be
+the page `01 BigPicture`; it is `01-BigPicture` now, because an LMS
+takes a link literally and a space in it never resolved. `contents`
+entries and `page-names.csv` rows naming such pages need the new
+spelling; nothing else does.
+
+Two things are additive and change nothing unless you ask: `role`,
+`numbering`, and `generate: toc` in `contents`, and the footnote and
+edition settings. The `convert.sh` wrapper is gone; `convert.py` takes
+the same arguments and does the same steps.
 
 ## Migrating a v0.1 configuration
 

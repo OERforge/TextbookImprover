@@ -6,10 +6,10 @@ split-pages.py -- cut filtered intermediates into one page per heading.
     split-pages.py --level 2 --sidecar page-names.csv --new page-names-new.csv ...
 
 Runs between the filter and the render, on the filtered intermediates
-convert.sh writes, and writes one <source>--<name>.filtered.json per
+convert.py writes, and writes one <source>--<name>.filtered.json per
 piece. Everything downstream -- the HTML render, the packager, the EPUB
 assembler -- sees ordinary pages. The paths of the pieces are printed to
-stdout, one per line, in reading order; that is what convert.sh renders.
+stdout, one per line, in reading order; that is what convert.py renders.
 
 WHY AFTER THE FILTER
 
@@ -250,22 +250,56 @@ def previous_pages(report):
 # splitting
 # --------------------------------------------------------------------------
 
-def cut(blocks, level):
-    """[(heading block or None, parents, position, blocks)] in reading
-    order, where parents are the titles of the cut headings enclosing
-    this one and position is its place among them, "1.2.3". Only
-    top-level headings cut: a heading inside a Div or a list item is
-    part of what contains it, as it is for the filter's title
-    promotion."""
+# Metadata that belongs to the document a source is, not to its pieces.
+DOCUMENT_ONLY = ("subtitle", "date", "abstract", "abstract-title",
+                 "include-before", "include-after", "toc", "toc-title",
+                 "toc-depth")
+
+MATTER = {"\\frontmatter": "front", "\\mainmatter": "main",
+          "\\appendix": "appendix", "\\backmatter": "back"}
+
+
+def matter_marker(block):
+    """The role a raw LaTeX block declares for what follows, or None.
+
+    A book written for a Pandoc PDF build says \\frontmatter,
+    \\mainmatter, \\appendix, and \\backmatter between its chapters;
+    those are the author's own declaration of the book's parts, and
+    the guess reads them. They are dropped by the HTML and EPUB writers
+    either way."""
+    if block.get("t") != "RawBlock":
+        return None
+    fmt, text = block["c"]
+    if fmt not in ("latex", "tex"):
+        return None
+    for command, role in MATTER.items():
+        if re.search(re.escape(command) + r"\b", text):
+            return role
+    return None
+
+
+def cut(blocks, level, initial=None):
+    """[(heading block or None, parents, position, blocks, role)] in
+    reading order, where parents are the titles of the cut headings
+    enclosing this one, position is its place among them, "1.2.3", and
+    role is what the source's markers say about it. Only top-level
+    headings cut: a heading inside a Div or a list item is part of what
+    contains it, as it is for the filter's title promotion."""
     pieces, current, head = [], [], None
     stack = []                      # [(level, title, index)] enclosing
     parents, position = [], ""
+    role = [initial]                # sticky, like the LaTeX commands
 
     def close():
         if head is not None or current:
-            pieces.append((head, list(parents), position, current))
+            pieces.append((head, list(parents), position, current, role[0]))
 
     for block in blocks:
+        marker = matter_marker(block)
+        if marker:
+            role[0] = marker
+        if block.get("t") == "Header" and "appendix" in block["c"][1][1]:
+            role[0] = "appendix"      # {.appendix} on a heading
         # An empty heading is Word cruft, not a section: it cuts nothing
         # and is nobody's parent.
         if block.get("t") == "Header" and block["c"][0] <= level \
@@ -279,7 +313,7 @@ def cut(blocks, level):
             if pieces:
                 # Count earlier siblings: cut headings at this level under
                 # the same parents.
-                index = 1 + sum(1 for h, p, _, _ in pieces
+                index = 1 + sum(1 for h, p, _, _, _ in pieces
                                 if h is not None and h["c"][0] == own
                                 and p == [t for _, t, _ in stack])
             parents = [t for _, t, _ in stack]
@@ -297,7 +331,8 @@ def split_document(doc, stem, level, names, taken, problems):
 
     taken holds every page name in use across the run, so a sidecar
     cannot give two pieces of different sources one name."""
-    parts = cut(doc["blocks"], level)
+    parts = cut(doc["blocks"], level,
+                meta_text(doc.get("meta", {}), "page-role") or None)
     if len(parts) <= 1 and (not parts or parts[0][0] is None):
         return []                       # nothing at that level to cut at
     source_title = meta_text(doc.get("meta", {}), "title") \
@@ -305,9 +340,11 @@ def split_document(doc, stem, level, names, taken, problems):
     out = []
     paths = {}                      # default name -> parents it was given
     pending = []                    # ids of group headings, for the next page
-    for n, (head, parents, position, blocks) in enumerate(parts):
+    for n, (head, parents, position, blocks, role) in enumerate(parts):
         if head is None:
-            if not blocks:
+            # Raw LaTeX alone -- \\frontmatter before the first heading --
+            # is not a page.
+            if not [b for b in blocks if b.get("t") != "RawBlock"]:
                 continue
             piece, title, key, anchor = stem, source_title, None, None
         else:
@@ -356,19 +393,28 @@ def split_document(doc, stem, level, names, taken, problems):
         taken.add(piece)
         paths[piece] = parents
         out.append((piece, title, key, parents, position, blocks,
-                    [a for a in pending + [anchor] if a]))
+                    [a for a in pending + [anchor] if a], role))
         pending = []
 
     total = len(out)
     pieces = []
-    for index, (piece, title, key, parents, position, blocks, anchors) \
-            in enumerate(out, 1):
+    for index, (piece, title, key, parents, position, blocks, anchors,
+                role) in enumerate(out, 1):
         body = copy.deepcopy(blocks)
         shift_headers(body, level - 1)
         for anchor in reversed(anchors):
             body.insert(0, {"t": "Div", "c": [[anchor, [ANCHOR_CLASS], []],
                                               []]})
         meta = copy.deepcopy(doc.get("meta", {}))
+        # A piece inherits what describes a page -- language, author,
+        # what the pipeline recorded -- and not the source document's
+        # front matter: a subtitle, date, abstract, or include-before
+        # is the title page's, and the source's own page (what precedes
+        # the first cut) keeps it. Rendered on every piece, it would
+        # open each section with the book's copyright line.
+        if piece != stem:               # the opening page is the document's
+            for field in DOCUMENT_ONLY:
+                meta.pop(field, None)
         meta["title"] = {"t": "MetaInlines", "c": [{"t": "Str", "c": w}
                                                     if i % 2 == 0 else
                                                     {"t": "Space"}
@@ -380,10 +426,13 @@ def split_document(doc, stem, level, names, taken, problems):
         meta["page-parents"] = {"t": "MetaList",
                                 "c": [meta_string(t) for t in parents]}
         meta["page-position"] = meta_string(position)
+        if role:
+            meta["page-role"] = meta_string(role)
         add_head_meta(meta, [("source-page", stem),
                              ("source-title", source_title),
                              ("page-part", f"{index}/{total}"),
                              ("page-position", position)]
+                      + ([("page-role", role)] if role else [])
                       + [("page-parent", t) for t in parents])
         pieces.append((piece, title, key, parents, position, {
             "pandoc-api-version": doc["pandoc-api-version"],

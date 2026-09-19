@@ -5,11 +5,11 @@ run-split-tests.py -- check split-pages.py, and what reads its pieces.
     python3 tests/run-split-tests.py           # run every case
     python3 tests/run-split-tests.py --keep    # leave the output in place
 
-Needs Pandoc 3.9 or later, as convert.sh does. The source is written as
+Needs Pandoc 3.9 or later, as convert.py does. The source is written as
 Markdown here and turned into a .docx by Pandoc, because no fixture has
 headings below its title and a chapter-shaped document is the whole
 point. It then goes through the pre-pass and the filter the way
-convert.sh sends it, and is cut from the filtered intermediate.
+convert.py sends it, and is cut from the filtered intermediate.
 
 WHAT IS LOAD-BEARING HERE
 
@@ -111,7 +111,7 @@ def run(arguments, cwd, environment=None, check=True):
 
 
 def prepare(work, stem="chapter-7", source=SOURCE):
-    """A filtered intermediate, as convert.sh leaves one."""
+    """A filtered intermediate, as convert.py leaves one."""
     os.makedirs(work, exist_ok=True)
     with open(os.path.join(work, "src.md"), "w", encoding="utf-8") as fh:
         fh.write(source)
@@ -182,7 +182,7 @@ class Pieces:
                           self.text(stem))
 
     def render(self, stem):
-        """The page as convert.sh would write it."""
+        """The page as convert.py would write it."""
         head = os.path.join(self.work, "head.html")
         with open(head, "w", encoding="utf-8") as fh:
             fh.write("<style>/* test */</style>\n")
@@ -199,6 +199,30 @@ class Pieces:
 # --------------------------------------------------------------------------
 # the cases
 # --------------------------------------------------------------------------
+
+def case_document_meta(work):
+    """The source's front matter stays on the source's page."""
+    # Straight from Markdown, since a .docx carries no such metadata.
+    os.makedirs(work, exist_ok=True)
+    with open(os.path.join(work, "book.md"), "w", encoding="utf-8") as fh:
+        fh.write("---\ntitle: The Book\nsubtitle: Draft, all rights reserved\n"
+                 "date: 2026-09-19\ninclude-before: An epigraph.\n---\n\n"
+                 "A title page.\n\n# One\n\nText.\n\n# Two\n\nMore.\n")
+    run(["pandoc", "book.md", "-t", "json", "-o", "book.filtered.json"], work)
+    out = Pieces(work, split(work, [os.path.join(work, "book.filtered.json")]))
+    first = out.docs.get("book--one", {})
+    own = out.docs.get("book", {})
+    return [
+        ("a piece carries no subtitle, date, or include-before",
+         lambda: not any(k in first.get("meta", {})
+                         for k in ("subtitle", "date", "include-before"))),
+        ("the source's own page keeps them",
+         lambda: "subtitle" in own.get("meta", {})
+         and "include-before" in own.get("meta", {})),
+        ("a piece keeps the language and its title",
+         lambda: "title" in first["meta"]),
+    ]
+
 
 def case_pieces(work):
     """What a piece is."""
@@ -376,7 +400,7 @@ def case_readers(work):
         ("the page head carries the provenance, and the packager reads it",
          lambda: parts["chapter-7--diseconomies--economies-of-scale"]
          == ("chapter-7", 5, ["Diseconomies"], "2.1",
-             "Costs in the Long Run")),
+             "Costs in the Long Run", "")),
         ("the packager groups the pieces under the source and their "
          "headings, a heading's own page opening its group",
          lambda: guessed == [
@@ -488,6 +512,7 @@ def case_restyle(work):
 CASES = [
     ("restyling a Title-styled source", case_restyle),
     ("what a piece is", case_pieces),
+    ("document metadata stays on the document", case_document_meta),
     ("the page-names sidecar", case_names),
     ("levels and refusals", case_levels),
     ("the packager and the assembler read the pieces", case_readers),
@@ -509,7 +534,7 @@ def main():
                              text=True).stdout.split()[1]
     if tuple(int(p) for p in re.findall(r"\d+", version)[:3]) < (3, 9):
         sys.exit(f"Pandoc {version} is too old; these tests need 3.9 or "
-                 "later, as convert.sh does.")
+                 "later, as convert.py does.")
 
     work = tempfile.mkdtemp(prefix="split-tests-")
     failed = 0

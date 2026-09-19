@@ -95,7 +95,7 @@ class Converted:
             if not os.path.exists(os.path.join(work, name + ".docx")):
                 shutil.copy(os.path.join(FIXTURES, name + ".docx"), work)
             # Run from the working directory with relative paths, because
-            # that is what convert.sh does and it shows up in the output:
+            # that is what convert.py does and it shows up in the output:
             # --extract-media given an absolute path puts absolute paths
             # into the sidecar keys, which would differ between machines.
             self._pandoc([
@@ -105,14 +105,14 @@ class Converted:
                 "--extract-media", name,
             ], environment, work)
             # The filter writes JSON and the writer reads it, as in
-            # convert.sh, so the filtered intermediate is what the EPUB
+            # convert.py, so the filtered intermediate is what the EPUB
             # assembler will see and what case_intermediate checks.
             self._pandoc([
                 "-f", "json", "-t", "json", name + ".json",
                 "-o", name + ".filtered.json",
                 "--lua-filter", os.path.join(BIN, "figures-and-tables.lua"),
             ], environment, work)
-            # The stylesheet goes in the way convert.sh puts it in. It
+            # The stylesheet goes in the way convert.py puts it in. It
             # matters: --include-in-header would silently discard the
             # author <meta> the case_metadata checks look for.
             with open(os.path.join(work, "head.html"), "w",
@@ -145,7 +145,7 @@ class Converted:
         because --extract-media rewrites them after filters run. Two
         documents then present identically named media, which is the
         collision that applied one document's alt text to another's
-        image. The two-step pipeline convert.sh uses does not reach this,
+        image. The two-step pipeline convert.py uses does not reach this,
         so nothing else here covers it.
         """
         out = Converted.__new__(Converted)
@@ -217,7 +217,7 @@ class Converted:
     def report_column(self, report, column):
         """One column of a report the filter appended to.
 
-        These files carry no header row -- convert.sh adds one when it
+        These files carry no header row -- convert.py adds one when it
         consolidates them -- so every line is data. Skipping the first,
         as for a normal CSV, silently halved what the assertions saw.
         """
@@ -311,7 +311,7 @@ def case_tables_b(work):
     stays a spanning header and a table with no header signal keeps the
     first row Pandoc's reader promoted. What a declaration does instead
     is pinned in case_headers and case_split, which run the pre-pass the
-    way convert.sh does. A change is only checkable if the
+    way convert.py does. A change is only checkable if the
     starting point is written down.
     """
     out = Converted(work, ["tables-b"])
@@ -472,7 +472,7 @@ def case_split(work):
 def case_headers(work):
     """The filter applies what the table-headers pre-pass resolved.
 
-    Runs the pre-pass the way convert.sh does -- once with no sidecar to
+    Runs the pre-pass the way convert.py does -- once with no sidecar to
     get the prefilled rows, then with a sidecar a remediator edited --
     and converts with the resolved values in reach of the filter. Each
     value is declared on a table whose reader-built shape would have
@@ -627,7 +627,7 @@ def case_intermediate(work):
     """Filtering to JSON and rendering that must give the same page as
     filtering while rendering.
 
-    convert.sh does the former so that every output format reads one
+    convert.py does the former so that every output format reads one
     remediated intermediate. The filter has one branch that looks at the
     output format -- the byline goes into the head only for HTML writers
     -- and this is where a second such branch would show up as a page
@@ -695,14 +695,14 @@ def main():
     if shutil.which("pandoc") is None:
         sys.exit("pandoc is not on the path.")
 
-    # The same requirement convert.sh enforces. Without this check an
+    # The same requirement convert.py enforces. Without this check an
     # older Pandoc fails with "Unknown option --math-method", which says
     # nothing about the actual problem.
     version = subprocess.run(["pandoc", "--version"], capture_output=True,
                              text=True).stdout.split()[1]
     if tuple(int(p) for p in re.findall(r"\d+", version)[:3]) < (3, 9):
         sys.exit(f"Pandoc {version} is too old; these tests need 3.9 or "
-                 "later, as convert.sh does.")
+                 "later, as convert.py does.")
 
     missing = [n for n in NEEDED
                if not os.path.isfile(os.path.join(FIXTURES, n + ".docx"))]

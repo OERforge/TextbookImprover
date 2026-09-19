@@ -647,6 +647,16 @@ end
 -- in the document. A separate pass runs first and stamps each table with
 -- its true position; see the filter list at the end of this file.
 local ORDINAL_ATTR = 'data-cc-ordinal'
+-- Stamped on a table inside a marked div (::: matrix) in a Markdown
+-- source: the declaration the marker means, read from TABLE_MARKERS as
+-- "class=value,class=value". Removed before the writer sees it.
+local MARKER_ATTR = 'data-th-marker'
+local MARKERS = {}
+for pair in (os.getenv('TABLE_MARKERS') or 'matrix=both,row-headers=first-column')
+    :gmatch('[^,]+') do
+  local class, value = pair:match('^%s*([^=%s]+)%s*=%s*(%S+)%s*$')
+  if class then MARKERS[class] = value end
+end
 -- Position among *all* the document's tables, image-only ones included,
 -- in document order with a container before the tables inside it. This
 -- is the index the table-headers pre-pass uses, which counts every w:tbl.
@@ -754,10 +764,74 @@ end
 local spacers_seen = 0
 local widthless = 0
 
+-- A lone image a Markdown target wrote with the mark for "not a
+-- figure": an empty span of class inline after it (or Pandoc's own
+-- non-breaking space). The mark has done its job by the time the reader
+-- is through, and would otherwise reach the page.
+local function drop_figure_mark(block)
+  local c = block.content
+  if #c == 2 and c[1].t == 'Image' and (
+      (c[2].t == 'Str' and c[2].text == '\194\160')
+      or (c[2].t == 'Span' and #c[2].content == 0
+          and c[2].classes:includes('inline'))) then
+    block.content = { c[1] }
+    return block
+  end
+  return nil
+end
+
+-- A link with nothing in it says nothing to a reader and fails WCAG
+-- 2.4.4; the repair step adds such links to keep Pandoc's reader from
+-- deleting bookmarks that only other files point at, and they go here.
+-- The zero-width space the repair puts between adjacent bookmarks.
+function Str(s)
+  if s.text == '\226\128\139' then return {} end
+  return nil
+end
+
+function Link(link)
+  local text = pandoc.utils.stringify(link.content)
+  if text == '' or text == '\226\128\139' then return {} end
+  return nil
+end
+
+function Para(para)
+  if #para.content == 0 then return {} end    -- the keeper links' paragraph
+  return drop_figure_mark(para)
+end
+function Plain(plain) return drop_figure_mark(plain) end
+
+-- A table a Markdown target wrote as HTML because it has merged cells,
+-- or a figure it wrote that way because it carries an id: read back
+-- into the block it was, so the rest of the filter can work on it.
+function RawBlock(raw)
+  if (raw.format == 'html' or raw.format == 'html5')
+      and raw.text:match('^%s*<[tf][ai][bg]') then
+    local doc = pandoc.read(raw.text, 'html')
+    if #doc.blocks == 1 and (doc.blocks[1].t == 'Table'
+        or doc.blocks[1].t == 'Figure') then
+      return doc.blocks[1]
+    end
+  end
+  return nil
+end
+
 function Image(img)
   -- Applies to every image, not just the ones that end up in figures, so
   -- equation images scale on narrow viewports too.
   if RESPONSIVE_IMAGES then img.attributes.height = nil end
+
+  -- Alt text is a string, not a line of type: a non-breaking space the
+  -- markdown reader put after "vs." or "e.g." (its smart extension
+  -- keeps such a pair on one line) has nothing to hold together here
+  -- and comes out as &nbsp;. Plain spaces in the alt.
+  img.caption = img.caption:walk({
+    Str = function(s)
+      if s.text:find('\194\160') then
+        return pandoc.Str((s.text:gsub('\194\160', ' ')))
+      end
+    end,
+  })
 
   -- Spacer handling runs before anything else: a stripped image should
   -- not also be reported as missing alt text.
@@ -786,6 +860,14 @@ function Image(img)
   end
 
   local replacement = alt_for(qualify_media(img.src))
+  -- A Markdown source says an image is decorative with the class
+  -- {.decorative}: the author's decision, in the file, the same as a
+  -- [decorative] sidecar entry. (Pandoc has no marker of its own, and an
+  -- empty alt cannot be one: in a Word file it is what an omission looks
+  -- like.) A Markdown target writes the class back.
+  if replacement == nil and img.classes:includes('decorative') then
+    replacement = '[decorative]'
+  end
   if replacement ~= nil then
     if DECORATIVE_MARKERS[replacement:lower()] then
       -- Clearing the caption alone makes Pandoc omit the attribute
@@ -1415,6 +1497,13 @@ local function split_table(tbl, bands, part_captions, apply)
 end
 
 local function resolved_for(tbl)
+  -- A marker in the source outranks nothing: it is the author's own
+  -- declaration, and a Markdown source has no pre-pass to disagree.
+  local marked = tbl.attr.attributes[MARKER_ATTR]
+  if marked then
+    return { headers = marked, caption_rows = {}, split_at = {},
+             part_captions = {}, anchors = {} }
+  end
   local index = tonumber(tbl.attr.attributes[TH_INDEX_ATTR])
   local by_doc = load_resolved()[source_stem()]
   if index == nil or by_doc == nil then return nil end
@@ -1464,6 +1553,7 @@ local function caption_data_table(tbl, next_block, after_next, after_after, out)
   -- as the reader gave it, before any row is moved.
   local entry = resolved_for(tbl)
   tbl.attr.attributes[TH_INDEX_ATTR] = nil
+  tbl.attr.attributes[MARKER_ATTR] = nil
   local pending = pending_caption_rows(tbl, entry)
   local bands = band_targets(tbl, entry)
 
@@ -1564,18 +1654,21 @@ function Blocks(blocks)
       images, anchor = image_only_table(block)
     end
 
+    -- Bookmarks that stood before a table in the source, which Pandoc's
+    -- reader drops: every "Table 1.11" link in an OpenStax book points
+    -- at one, and so does every link to a boxed note, which is a
+    -- one-cell table. Restored as empty anchors ahead of whatever the
+    -- table becomes, so the links land and a split table keeps them.
+    if block.t == 'Table' then
+      local entry = resolved_for(block)
+      for _, name in ipairs(entry and entry.anchors or {}) do
+        out:insert(pandoc.Div({}, pandoc.Attr(name, { 'table-anchor' })))
+      end
+    end
     if images == nil then
       if block.t == 'Table' then
         -- Not a layout table, so it is a real data table: give it a
         -- <caption>, mark its column headers, wrap it for scrolling.
-        -- Bookmarks that stood before the table in the source, which
-        -- Pandoc's reader drops: every "Table 1.11" link in an OpenStax
-        -- book points at one. Restored as empty anchors ahead of the
-        -- table, so the links land and a split table keeps them.
-        local entry = resolved_for(block)
-        for _, name in ipairs(entry and entry.anchors or {}) do
-          out:insert(pandoc.Div({}, pandoc.Attr(name, { 'table-anchor' })))
-        end
         local wrapped, consumed = caption_data_table(
           block, blocks[i + 1], blocks[i + 2], blocks[i + 3], out)
         for _, piece in ipairs(wrapped) do out:insert(piece) end
@@ -1634,7 +1727,7 @@ end
 local function settle_author(doc)
   if AUTHOR_BYLINE == 'visible' or doc.meta.author == nil then return end
 
-  -- convert.sh runs this filter with the JSON writer, and everything that
+  -- convert.py runs this filter with the JSON writer, and everything that
   -- reads the result -- the html5 writer for the pages, the epub3 writer
   -- for the book -- is an HTML writer with the same title block. So the
   -- intermediate is treated as HTML-bound here.
@@ -1671,6 +1764,25 @@ local function settle_author(doc)
   end
 
   doc.meta.author = nil
+end
+
+-- The page's role, in the metadata and in the head, where the split and
+-- the packager read it.
+local function set_page_role(doc, role)
+  doc.meta['page-role'] = pandoc.MetaString(role)
+  local include = pandoc.MetaBlocks({ pandoc.RawBlock('html',
+    '<meta name="page-role" content="' .. role .. '" />') })
+  local existing = doc.meta['header-includes']
+  local list = pandoc.MetaList({})
+  if existing ~= nil then
+    if existing.t == 'MetaList' then
+      for _, item in ipairs(existing) do list:insert(item) end
+    else
+      list:insert(existing)
+    end
+  end
+  list:insert(include)
+  doc.meta['header-includes'] = list
 end
 
 local function title_header_index(doc)
@@ -1710,9 +1822,41 @@ function Pandoc(doc)
   close_handles()
   settle_author(doc)
 
+  -- A raw \frontmatter, \mainmatter, \appendix, or \backmatter in the
+  -- page -- a Pandoc PDF book's own declaration of its parts -- gives
+  -- the page its role. The first one counts; the split reads the rest.
+  local MATTER = { frontmatter = 'front', mainmatter = 'main',
+                   appendix = 'appendix', backmatter = 'back' }
+  local role_from_raw = nil
+  for _, block in ipairs(doc.blocks) do
+    if block.t == 'RawBlock' and (block.format == 'latex'
+        or block.format == 'tex') then
+      local command = block.text:match('\\(%a+)')
+      if command and MATTER[command] then
+        role_from_raw = MATTER[command]
+        break
+      end
+    end
+  end
+  if role_from_raw and role_from_raw ~= 'main' then
+    set_page_role(doc, role_from_raw)
+  end
+
   local title_index = title_header_index(doc)
   if should_promote_h1(doc, title_index) then
-    doc.meta.title = pandoc.MetaInlines(doc.blocks[title_index].content)
+    local heading = doc.blocks[title_index]
+    doc.meta.title = pandoc.MetaInlines(heading.content)
+    -- A class on the heading that says what part of the book this is
+    -- ({.appendix}, as a Pandoc LaTeX build reads it) would go with the
+    -- heading; it stays as the page's role, in the metadata and in the
+    -- head, where the split and the packager read it.
+    for _, class in ipairs(heading.classes) do
+      if class == 'appendix' or class == 'frontmatter'
+          or class == 'backmatter' then
+        set_page_role(doc, ({ appendix = 'appendix', frontmatter = 'front',
+                              backmatter = 'back' })[class])
+      end
+    end
     doc.blocks:remove(title_index)
   end
   return doc
@@ -1777,6 +1921,35 @@ local function number_tables(blocks, state)
         end
       end
     elseif kind == 'Div' or kind == 'BlockQuote' or kind == 'Figure' then
+      if kind == 'Div' then
+        for _, class in ipairs(block.classes) do
+          if MARKERS[class] then
+            for _, inner in ipairs(block.content) do
+              if inner.t == 'Table' then
+                inner.attr.attributes[MARKER_ATTR] = MARKERS[class]
+              end
+            end
+          end
+        end
+        -- Column widths a Markdown target carried on the div, exact:
+        -- back onto the table, so the pipe table has Word's widths.
+        local widths = block.attributes['widths']
+        if widths then
+          local values = {}
+          for w in widths:gmatch('%S+') do values[#values + 1] = tonumber(w) end
+          for _, inner in ipairs(block.content) do
+            if inner.t == 'Table' and #values == #inner.colspecs then
+              local specs = {}
+              for i, spec in ipairs(inner.colspecs) do
+                specs[i] = { spec[1], values[i] > 0 and values[i]
+                                        or 'ColWidthDefault' }
+              end
+              inner.colspecs = specs
+            end
+          end
+          block.attributes['widths'] = nil
+        end
+      end
       number_tables(block.content, state)
     elseif kind == 'BulletList' or kind == 'OrderedList' then
       for _, item in ipairs(block.content) do
@@ -1792,7 +1965,32 @@ local function number_tables(blocks, state)
   end
 end
 
+-- Pandoc's Markdown writes a figure that carries an id as a div of class
+-- "figure" holding the image and a div of class "caption", and reads
+-- that back as a div around a figure rather than as the figure. Folded
+-- back into one Figure with the id, which is what was written.
+local function figure_div(div)
+  if not div.classes:includes('figure') then return nil end
+  local image, caption = nil, nil
+  for _, block in ipairs(div.content) do
+    if block.t == 'Figure' and image == nil then
+      image = block.content
+    elseif (block.t == 'Para' or block.t == 'Plain') and image == nil then
+      image = { block }
+    elseif block.t == 'Div' and block.classes:includes('caption') then
+      caption = block.content
+    end
+  end
+  if image == nil then return nil end
+  local attr = pandoc.Attr(div.identifier, {}, div.attributes)
+  return pandoc.Figure(image, caption and { long = caption } or {}, attr)
+end
+
 return {
+  -- A table or figure written as HTML, or a figure written as a div, by
+  -- a Markdown target: the block it was, before anything counts or
+  -- numbers tables and figures.
+  { RawBlock = RawBlock, Div = figure_div },
   {
     Pandoc = function(doc)
       local state = { n = 0, all = 0, above = 0, below = 0 }
@@ -1807,6 +2005,10 @@ return {
   },
   {
     Image = Image,
+    Str = Str,
+    Link = Link,
+    Para = Para,
+    Plain = Plain,
     Blocks = Blocks,
     Pandoc = Pandoc,
   },

@@ -82,7 +82,7 @@ class Page:
         self.links = []             # href values of <a>
         self.images = []            # (has_alt, alt, decorative, src)
         self.headings = []          # (level, text)
-        self.tables = []            # (has_th, has_caption, role)
+        self.tables = []            # (has_th, has_caption, role, wrapped)
         self.parse_error = None
 
 
@@ -111,8 +111,11 @@ class _Collector(HTMLParser):
                                      is_decorative(a), a.get("src", "")))
         elif tag in ("h1", "h2", "h3", "h4", "h5", "h6"):
             self._heading = [int(tag[1]), []]
+        elif tag == "div" and "table-wrapper" in (a.get("class") or ""):
+            self._in_wrapper = True
         elif tag == "table":
-            self._table = [False, False, a.get("role")]
+            self._table = [False, False, a.get("role"),
+                           getattr(self, "_in_wrapper", False)]
         elif tag == "th" and self._table:
             self._table[0] = True
         elif tag == "caption" and self._table:
@@ -130,6 +133,7 @@ class _Collector(HTMLParser):
         elif tag == "table" and self._table:
             self.page.tables.append(tuple(self._table))
             self._table = None
+            self._in_wrapper = False
 
     def handle_data(self, data):
         if self._title is not None:
@@ -177,7 +181,7 @@ def read_xhtml(name, markup):
             has_th = any(c.tag.replace(XHTML, "") == "th" for c in el.iter())
             has_caption = any(c.tag.replace(XHTML, "") == "caption"
                               for c in el.iter())
-            page.tables.append((has_th, has_caption, el.get("role")))
+            page.tables.append((has_th, has_caption, el.get("role"), None))
     return page
 
 
@@ -200,6 +204,8 @@ def check_page(page, findings):
         if identifier in seen:
             findings.append(Finding(where, "duplicate-id", identifier))
         seen.add(identifier)
+        if any(c.isspace() for c in identifier):
+            findings.append(Finding(where, "invalid-id", identifier))
     for has_alt, alt, decorative, src in page.images:
         if not has_alt:
             findings.append(Finding(where, "image-without-alt", src))
@@ -214,11 +220,17 @@ def check_page(page, findings):
             findings.append(Finding(where, "heading-skips-level",
                                     f"h{last} to h{level}: {text}"))
         last = level
-    for index, (has_th, has_caption, role) in enumerate(page.tables, 1):
+    for index, (has_th, has_caption, role, wrapped) in enumerate(page.tables,
+                                                                 1):
         if role == "presentation":
             continue
         if not has_th and not has_caption:
             findings.append(Finding(where, "table-without-headers-or-caption",
+                                    f"table {index}"))
+        if wrapped is False:
+            # The filter's own invariant, checked on the output: a data
+            # table sits in the focusable scroll region (WCAG 1.4.10).
+            findings.append(Finding(where, "table-not-in-scroll-region",
                                     f"table {index}"))
 
 
@@ -402,8 +414,11 @@ DESCRIPTIONS = {
     "heading-skips-level": "a heading is more than one level below the last",
     "empty-heading": "a heading with no text",
     "duplicate-id": "an id used more than once in one document",
+    "invalid-id": "an id containing whitespace, which no id may",
     "table-without-headers-or-caption":
         "a data table with no th and no caption",
+    "table-not-in-scroll-region":
+        "a data table outside the focusable scroll wrapper (HTML pages)",
     "no-lang": "the html element declares no language",
     "no-title": "no title element, or an empty one",
     "not-well-formed": "the document could not be parsed",

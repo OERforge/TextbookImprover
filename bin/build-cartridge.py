@@ -13,7 +13,7 @@ This script is read-only with respect to page content: it never edits an
 HTML file, an image, or anything under a media directory. It writes only
 the manifest, the file list, the sample config, and the archive. That is
 what makes it safe to run repeatedly, and what lets it work on any tidy
-directory of HTML rather than only on output from convert.sh.
+directory of HTML rather than only on output from convert.py.
 
 Configuration lives in packaging.yaml, with the book's own details in
 project.yaml. Everything that can be derived
@@ -44,6 +44,7 @@ import re
 import sys
 import zipfile
 from datetime import date
+from urllib.parse import quote, unquote
 
 try:
     import yaml
@@ -70,7 +71,7 @@ except ImportError:
 from bookcontents import (  # noqa: E402
     natural_key, chapter_of, within_chapter_key, unrecognised_roles,
     guess_contents, walk_contents, flatten_pages, contents_from_tree,
-    stem_title, slugify, clean_title,
+    stem_title, slugify, clean_title, number_tree, numbered_title,
 )
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -91,7 +92,8 @@ SRC_RE = re.compile(r'\b(?:src|href)\s*=\s*"([^"]+)"', re.I)
 TITLE_RE = re.compile(r"<title[^>]*>(.*?)</title>", re.I | re.S)
 # What a page split by split-pages.py says about where it came from.
 META_RE = re.compile(r'<meta\s+name="(source-page|source-title|page-part|'
-                     r'page-parent|page-position)"\s+content="([^"]*)"', re.I)
+                     r'page-parent|page-position|page-role)"\s+content="([^"]*)"',
+                     re.I)
 
 REQUIRED = ["identifier", "title"]
 
@@ -103,6 +105,19 @@ TOC_SKIP = {"contents", "table-of-contents", "chapter-objectives",
 # --------------------------------------------------------------------------
 # small helpers
 # --------------------------------------------------------------------------
+
+def href_of(path):
+    """A file path as a manifest href: percent-encoded, then XML-escaped.
+    A raw space in an href is not a valid URI reference."""
+    return xml_escape(quote(path, safe="/"))
+
+
+def ncname(text):
+    """An identifier IMS types as xs:ID: letters, digits, . - _ only, so
+    a page stem with a space or anything else in it is still a name."""
+    out = re.sub(r"[^A-Za-z0-9._-]+", "-", text).strip("-")
+    return out if out and out[0].isalpha() else "p-" + out
+
 
 def xml_escape(text):
     return (text.replace("&", "&amp;").replace("<", "&lt;")
@@ -144,7 +159,20 @@ def page_provenance(path):
         return None
     m = re.match(r"(\d+)/", found.get("page-part", ""))
     return (found["source-page"], int(m.group(1)) if m else None, parents,
-            found.get("page-position", ""), found.get("source-title", ""))
+            found.get("page-position", ""), found.get("source-title", ""),
+            found.get("page-role", ""))
+
+
+def page_role(path):
+    """A page's own role, from the <meta> the filter wrote when it
+    promoted a heading carrying one ({.appendix})."""
+    try:
+        with open(path, encoding="utf-8", errors="replace") as handle:
+            markup = handle.read(20000)
+    except OSError:
+        return ""
+    found = dict(META_RE.findall(markup.split("</head>", 1)[0]))
+    return found.get("page-role", "")
 
 
 def page_references(path, base_dir):
@@ -157,7 +185,10 @@ def page_references(path, base_dir):
         ref = html_module.unescape(raw).strip()
         if not ref or ref.startswith(EXTERNAL):
             continue
-        ref = ref.split("#", 1)[0].split("?", 1)[0]
+        # A file name with a space is written %20 in a page, as a link
+        # must be; what is on disk, and what goes in the archive, has the
+        # space. The manifest encodes it again on the way out (href_of).
+        ref = unquote(ref.split("#", 1)[0].split("?", 1)[0])
         if not ref or ref in seen:
             continue
         seen.add(ref)
@@ -573,6 +604,7 @@ def legacy_view(resolved, target):
     """
     project, settings = resolved.project, resolved.settings
     return {
+        "numbering": bool(project["numbering"]),
         "manifest": {
             "identifier": project["identifier"],
             "title": project["title"],
@@ -853,17 +885,19 @@ def render_items(tree, depth, wrapper=None):
         pad += "  "
 
     def emit(nodes, pad):
-        for kind, a, b in nodes:
+        for entry in nodes:
+            kind, a, b = entry
             if kind == "page":
-                title = b or TITLES[a]
-                lines.append(f'{pad}<item identifier="item-{a}" '
-                             f'identifierref="res-{a}">')
+                title = numbered_title(entry, b or TITLES[a])
+                lines.append(f'{pad}<item identifier="item-{ncname(a)}" '
+                             f'identifierref="res-{ncname(a)}">')
                 lines.append(f"{pad}  <title>{xml_escape(title)}</title>")
                 lines.append(f"{pad}</item>")
             else:
                 counter[0] += 1
                 lines.append(f'{pad}<item identifier="group-{counter[0]}">')
-                lines.append(f"{pad}  <title>{xml_escape(a)}</title>")
+                lines.append(f"{pad}  <title>"
+                             f"{xml_escape(numbered_title(entry, a))}</title>")
                 emit(b, pad + "  ")
                 lines.append(f"{pad}</item>")
 
@@ -875,6 +909,7 @@ def render_items(tree, depth, wrapper=None):
 
 TITLES = {}
 PARTS = {}      # piece stem -> (source stem, part number, parent titles)
+ROLES = {}      # page stem -> role, for a page that was not split
 
 
 def build_manifest(config, tree, page_files, common_files):
@@ -927,17 +962,17 @@ def build_manifest(config, tree, page_files, common_files):
                          'type="webcontent">')
         for ref in common_files:
             resources.append('      <file href="'
-                             + xml_escape(under_prefix(prefix, ref)) + '"/>')
+                             + href_of(under_prefix(prefix, ref)) + '"/>')
         resources.append("    </resource>")
 
     for stem in flatten_pages(tree):
-        page = xml_escape(under_prefix(prefix, stem + ".html"))
-        resources.append(f'    <resource identifier="res-{stem}" '
+        page = href_of(under_prefix(prefix, stem + ".html"))
+        resources.append(f'    <resource identifier="res-{ncname(stem)}" '
                          f'type="webcontent" href="{page}">')
         resources.append(f'      <file href="{page}"/>')
         for ref in page_files[stem]:
             resources.append('      <file href="'
-                             + xml_escape(under_prefix(prefix, ref)) + '"/>')
+                             + href_of(under_prefix(prefix, ref)) + '"/>')
         if common_files:
             resources.append('      <dependency identifierref="common_files"/>')
         resources.append("    </resource>")
@@ -1001,7 +1036,7 @@ def main():
                         # present for a folder of documents to convert.
                         help="write the conversion-time settings (header and "
                              "footer sources, spacer rules) into DIR for "
-                             "convert.sh to read, then stop. Writes only into "
+                             "convert.py to read, then stop. Writes only into "
                              "DIR, never into the content directory.")
     args = parser.parse_args()
 
@@ -1025,6 +1060,9 @@ def main():
         path = os.path.join(pages_dir, stem + ".html")
         TITLES[stem] = page_title(path, stem)
         origin = page_provenance(path)
+        role = page_role(path)
+        if role:
+            ROLES[stem] = role
         if origin:
             PARTS[stem] = origin
             # A source with no page of its own still has a title, and its
@@ -1143,7 +1181,7 @@ def main():
                      "from the filenames. Check it.")
         problems.append("contents not specified; using guessed order.")
         guessed_contents = True
-        tree = walk_contents(guess_contents(stems, back_matter, TITLES, PARTS),
+        tree = walk_contents(guess_contents(stems, back_matter, TITLES, PARTS, ROLES),
                              available, used, problems)
 
     extra = [s for s in stems if s not in used]
@@ -1182,7 +1220,7 @@ def main():
                 destination.extend(walk_contents(
                     [{"title": unsorted_title,
                       "items": guess_contents(leftover, back_matter,
-                                              TITLES, PARTS)}],
+                                              TITLES, PARTS, ROLES)}],
                     available, used, problems))
 
             print(f"Read {os.path.basename(args.toc)}: {len(placed)} of "
@@ -1249,7 +1287,7 @@ def main():
             # themselves land in number order after what is already there.
             if created:
                 new_tree = walk_contents(
-                    guess_contents(created, back_matter, TITLES, PARTS),
+                    guess_contents(created, back_matter, TITLES, PARTS, ROLES),
                     available, used, problems)
                 destination.extend(new_tree)
 
@@ -1328,7 +1366,7 @@ def main():
         # sample says what a run would do. Building the guess afresh here
         # threw the outline away on exactly the first run --toc is for.
         sample["contents"] = contents_from_tree(tree) if tree else \
-            guess_contents(stems, back_matter, TITLES, PARTS)
+            guess_contents(stems, back_matter, TITLES, PARTS, ROLES)
         settled, sample_targets = sample_inputs(
             resolved, documents, target, sample["contents"])
         dump_sample(sample, sample_path, notes, unknown_roles,
@@ -1342,6 +1380,8 @@ def main():
               "you had set is lost by renaming it.", file=sys.stderr)
         return 0 if args.init else 1
 
+    if config.get("numbering"):
+        number_tree(tree, TITLES)
     xml = build_manifest(config, tree, page_files, common_files)
 
     prefix = config.get("content_prefix") or ""
@@ -1351,6 +1391,8 @@ def main():
     for stem in flatten_pages(tree):
         file_list.append(stem + ".html")
         file_list.extend(page_files[stem])
+    # Two pages sharing an image list it twice; the archive holds it once.
+    file_list = list(dict.fromkeys(file_list))
 
     pages = len(list(flatten_pages(tree)))
     assets = len(file_list) - pages - 1

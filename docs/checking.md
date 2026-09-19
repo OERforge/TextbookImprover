@@ -22,6 +22,7 @@ The checks are the class of defect that has reached this project's output before
 | `empty-heading` | A heading with no text. |
 | `duplicate-id` | An `id` used more than once in one document, so links to it are ambiguous. |
 | `vnu:error`, `vnu:warning`, `epubcheck:<ID>` | What the full validators reported, when installed; see below. |
+| `table-not-in-scroll-region` | A data table on an HTML page outside the focusable wrapper the filter puts around every data table (WCAG 1.4.10). The filter's own invariant, checked on the output. |
 | `table-without-headers-or-caption` | A table with no `th` and no `caption`, and not marked `role="presentation"`. A data grid with no relationships to encode conforms with a caption alone; without one it's unidentifiable. |
 | `no-lang`, `no-title` | The `html` element declares no language, or the page has no title. |
 | `not-well-formed` | An EPUB content document that isn't XML. |
@@ -29,6 +30,10 @@ The checks are the class of defect that has reached this project's output before
 For an EPUB it also checks the container: `mimetype` first and uncompressed, a package document the container points at, every manifest item present in the archive and every file in the archive present in the manifest, spine entries that exist, a navigation document, the `dc:title`, `dc:identifier`, and `dc:language` every EPUB needs, and the accessibility metadata this project writes.
 
 Each finding says where (the page or archive member), which check, and what (the link, the image path, the heading text), so `output-check.csv` sorts and filters into work lists: every image without alt text goes to `image-alt.csv`, every table without headers to the table sidecars.
+
+## Contrast
+
+No checker here measures color contrast on the rendered page; Ace, axe, and Panorama do. What the pipeline controls is its own stylesheet, and that is checked where it's decided: a unit test computes the ratio of every text color `page.css` sets against Pandoc's page background and against white, and fails below 4.5:1 (the caption color is held to 7:1).
 
 ## The full validators
 

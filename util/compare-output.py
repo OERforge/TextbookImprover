@@ -37,7 +37,7 @@ that merely moved.
 Every reference in every page is then resolved against that inventory, in
 three separate buckets. Media -- the src of an img, embed, or object --
 fails when a file is missing or misnamed, which is what the media handling
-in convert.sh exists to prevent. Page links -- an href to another page of
+in convert.py exists to prevent. Page links -- an href to another page of
 the same book -- fail when the book does not hold together, usually a
 naming or outline problem rather than a conversion one. Asset links -- an
 href or src pointing at a stylesheet, a script, a PDF -- fail on their
@@ -453,7 +453,7 @@ def resolve_reference(src, page_path, root):
 
     Returns None for anything that is not a local file: an absolute URL, a
     data URI, a bare fragment. Those are not this script's business, the
-    same distinction convert.sh draws when it anchors its media search to
+    same distinction convert.py draws when it anchors its media search to
     the document's own extraction directory.
     """
     src = src.strip()
@@ -772,7 +772,7 @@ def _report_references(run, label, args):
 
     Reported in three buckets because they fail for different reasons and
     are fixed in different places. A broken media reference is the failure
-    the media gate in convert.sh exists to prevent: pandoc writes an
+    the media gate in convert.py exists to prevent: pandoc writes an
     <embed> rather than an <img> for a file it cannot type, and the page
     looks fine in the source and blank in a browser. A broken page link
     means the book does not hold together, which is usually a naming or

@@ -48,6 +48,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, os.path.join(ROOT, "lib"))
+import bookcontents  # noqa: E402
 
 try:
     import yaml
@@ -244,7 +245,7 @@ def undescribed():
 def check_sidecar_paths():
     """How convert.py turns a configured sidecar name into a path.
 
-    convert.sh built "$PWD/$name" unconditionally, so an absolute setting
+    convert.py built "$PWD/$name" unconditionally, so an absolute setting
     became "/book//srv/corrections/table-captions.csv". The filter read
     nothing, every correction in the file was discarded, and the only
     trace was an instruction telling the user to append their work to a
@@ -302,7 +303,35 @@ def check_docx_repair():
     fixed, moved = docxrepair.move_bookmarks_into_paragraphs(xml)
     body = ET.fromstring(fixed).find("{%s}body" % W)
     tbl = body.find("{%s}tbl" % W)
+    heading = ('<w:document xmlns:w="%s"><w:body>'
+               '<w:bookmarkStart w:id="1" w:name="note-1"/>'
+               '<w:p><w:pPr><w:pStyle w:val="Heading2Grey"/></w:pPr>'
+               '<w:r><w:t>Case Study</w:t></w:r></w:p>'
+               '<w:hyperlink w:anchor="note-1"><w:r><w:t>x</w:t></w:r>'
+               '</w:hyperlink></w:body></w:document>' % W)
+    fixed_heading, _ = docxrepair.move_bookmarks_into_paragraphs(heading)
+    kept, count = docxrepair.keep_unlinked_bookmarks(xml)
     return [
+        ("a bookmark before a heading gets a paragraph of its own",
+         lambda: '<w:p><w:r><w:t>&#8203;</w:t></w:r>'
+         '<w:bookmarkStart w:id="1" w:name="note-1"/></w:p>'
+         '<w:p><w:pPr><w:pStyle w:val="Heading2Grey"/>' in fixed_heading),
+        ("a bookmark the source put inside a heading is moved out before it",
+         lambda: (lambda f: '<w:p><w:r><w:t>&#8203;</w:t></w:r>'
+                  '<w:bookmarkStart w:id="9" w:name="term-9"/>'
+                  '</w:p><w:p><w:pPr><w:pStyle w:val="Heading3Grey"/></w:pPr>'
+                  '<w:r>' in f)(docxrepair.move_bookmarks_into_paragraphs(
+                      '<w:document xmlns:w="%s"><w:body><w:p><w:pPr>'
+                      '<w:pStyle w:val="Heading3Grey"/></w:pPr>'
+                      '<w:bookmarkStart w:id="9" w:name="term-9"/>'
+                      '<w:r><w:t>Term</w:t></w:r></w:p></w:body></w:document>'
+                      % W)[0])),
+        ("bookmarks no link in the document points at get a keeper link",
+         lambda: count == 2 and 'w:anchor="fs-one"' in kept
+         and 'w:anchor="fs-tbl"' in kept),
+        ("a bookmark already linked, or Word's own, gets none",
+         lambda: 'w:anchor="_GoBack"' not in kept
+         and docxrepair.keep_unlinked_bookmarks(heading)[1] == 0),
         ("one bookmark moved, the one before a paragraph",
          lambda: moved == 1),
         ("it sits after the paragraph's properties",
@@ -319,7 +348,74 @@ def check_docx_repair():
     ]
 
 
+def check_manifest_names():
+    """What a file name with a space does to a manifest."""
+    return [
+        ("an href percent-encodes a space and escapes the rest",
+         lambda: cartridge.href_of("assets/Pipe Sizes & more.png")
+         == "assets/Pipe%20Sizes%20%26%20more.png"),
+        ("an identifier becomes an XML name",
+         lambda: cartridge.ncname("01 BigPicture--a b") == "01-BigPicture--a-b"
+         or cartridge.ncname("01 BigPicture--a b") == "p-01-BigPicture--a-b"),
+        ("and always starts with a letter",
+         lambda: cartridge.ncname("01 Big")[0].isalpha()),
+    ]
+
+
+def check_contrast():
+    """Every color page.css sets on text, against the backgrounds it can
+    sit on. WCAG 1.4.3 wants 4.5:1; the caption color is chosen to clear
+    AAA (7:1). No checker we run measures this on the output, so it is
+    measured here, on the stylesheet, where it is decided."""
+    css = open(os.path.join(ROOT, "bin", "page.css"), encoding="utf-8").read()
+    css = re.sub(r"/\*.*?\*/", "", css, flags=re.S)
+    colors = re.findall(r"(?<![-\w])color:\s*(#[0-9a-fA-F]{3,6})", css)
+
+    def channel(v):
+        v /= 255
+        return v / 12.92 if v <= 0.03928 else ((v + 0.055) / 1.055) ** 2.4
+
+    def luminance(hexcolor):
+        h = hexcolor.lstrip("#")
+        if len(h) == 3:
+            h = "".join(c * 2 for c in h)
+        r, g, b = (int(h[i:i + 2], 16) for i in (0, 2, 4))
+        return 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b)
+
+    def ratio(a, b):
+        la, lb = sorted((luminance(a), luminance(b)), reverse=True)
+        return (la + 0.05) / (lb + 0.05)
+
+    backgrounds = ("#fdfdfd", "#ffffff")     # Pandoc's page, and white
+    worst = min((ratio(c, bg) for c in colors for bg in backgrounds),
+                default=21)
+    return [
+        ("page.css sets at least one text color", lambda: bool(colors)),
+        ("every text color clears 4.5:1 on Pandoc's background and on white",
+         lambda: worst >= 4.5),
+        ("the caption color clears 7:1 (AAA)",
+         lambda: all(ratio(c, bg) >= 7 for c in colors for bg in backgrounds)),
+    ]
+
+
+def check_matter_by_name():
+    """A file name that says where its page belongs."""
+    order = bookcontents.guess_contents(
+        ["03 Third", "Z1 Glossary", "01 First", "_preamble", "A1 Intro"])
+    return [
+        ("a leading underscore or a front-matter word goes first, as front",
+         lambda: order[0] == {"page": "_preamble", "role": "front"}),
+        ("a back-matter word goes last, as back matter",
+         lambda: order[-1] == {"page": "Z1 Glossary", "role": "back"}),
+        ("everything else keeps its natural order",
+         lambda: order[1:-1] == ["01 First", "03 Third", "A1 Intro"]),
+    ]
+
+
 GROUPS = [
+    ("front and back matter by name", check_matter_by_name),
+    ("caption contrast", check_contrast),
+    ("manifest names", check_manifest_names),
     ("repairing a .docx on the way in", check_docx_repair),
     ("the archive's name", check_archive_name),
     ("the content prefix", check_content_prefix),

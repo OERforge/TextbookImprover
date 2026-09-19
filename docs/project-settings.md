@@ -24,10 +24,14 @@ A sentence or two about the book, used wherever a package format asks for one.
 
 Who published the book. Written as document metadata, and available to package formats that record it.
 
+**`numbering`**—`bool`; default `false`
+
+Number the book's structure the way a printed book does: groups and top-level pages with the main role 1, 2, 3 and their pages 1.1, 1.2; appendices A, B and A.1, A.2; front and back matter unnumbered. The numbers appear in the EPUB's table of contents and headings, the cartridge organization, the generated contents page, and the pages' titles.
+
 **`authors`**—`list`; default `[]`
 
 Who wrote the book, one entry each, as a reader should see them. An EPUB records each as a creator; the cartridge has nowhere to put one. For an OpenStax book the publisher is usually the right entry.
 
 **`contents`**—`opaque`; default `[]`
 
-The book's structure as a nested list of pages and groups. This describes the book, not any one package, so a cartridge organisation and an EPUB table of contents are both built from it. Left empty, tools that need an order guess one and say so.
+The book's structure as a nested list of pages and groups. This describes the book, not any one package, so a cartridge organisation and an EPUB table of contents are both built from it. A group or page may carry a role, front, main, appendix, or back, which says how it counts when numbering is on and where it belongs in the book; the default is main. An entry "generate: toc" is a page the run writes, a full table of contents with links, named toc unless "name" says otherwise and titled Contents unless "title" does. Left empty, tools that need an order guess one and say so.

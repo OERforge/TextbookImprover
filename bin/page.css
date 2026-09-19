@@ -10,14 +10,24 @@ table caption {
   color: #555;
 }
 
+/* Footnote numbers the EPUB assembler adds; Pandoc's HTML writer numbers
+   its own list. */
+.footnote-number {
+  font-weight: bold;
+}
+
 /* Pandoc's stylesheet sets `display: block` on tables so they can scroll
    sideways. That silently strips the table role from the browser
    accessibility tree, so screen readers stop exposing rows, columns and
-   header associations -- WCAG 1.3.1. Restore real table display and move
-   the scrolling onto the wrapper the Lua filter adds. */
+   header associations—WCAG 1.3.1. Restore real table display and move
+   the scrolling onto the wrapper the Lua filter adds. A table is as wide
+   as its content and no wider than the page; the wrapper scrolls the ones
+   that overflow. (Pandoc's width: 100% had come along with the display
+   rule, and stretched a two-column payoff matrix to the margins.) */
 table {
   display: table;
-  width: 100%;
+  width: auto;
+  max-width: 100%;
 }
 .table-wrapper {
   overflow-x: auto;

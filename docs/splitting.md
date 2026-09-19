@@ -55,6 +55,21 @@ A row is keyed on the source, the headings above (joined with ` > `), and the he
 
 `page-names-report.csv` lists every piece the run wrote, with its source, parents, heading, position, and part.
 
+## Footnotes across pages
+
+Pandoc numbers footnotes per document, and every page it renders is a document to it, so a source cut into pages restarts at 1 on each page and keeps each page's notes at its end. Two settings change that in the rendered pages and in the EPUB alike:
+
+```yaml
+defaults:
+  notes:
+    numbering: group     # page (restart on every page) or group
+    placement: book      # page, group, or book
+```
+
+`numbering: group` continues the numbers across the pages of the enclosing group in reading order, whatever a group is called; a page that wasn't split is a group of one. `placement: group` gathers a group's notes at the end of its last page; `placement: book` gathers every note on a `notes` page at the end, with a heading for each group and the numbers per group. A reference always links to its note wherever it went, and every note ends with a link back to its reference, labelled for a screen reader ("Back to reference 3"). Pandoc can't be asked to start counting at 7, so the numbers are rewritten in the output, ids and all, which is why the EPUB's per-file MathML bookkeeping is redone when a note with an equation moves.
+
+The `notes` page is back matter to the packager's guess and to the EPUB; list it in `contents` where you want it if that isn't the end.
+
 ## Headings that aren't headings
 
 The splitter cuts at what Pandoc reads as headings, and Pandoc's DOCX reader reads `Heading 1` through `Heading 9`. A book whose top level is styled `Title` (one text in reach uses `Title` for its modules and `Heading 1` for their sections, and its own TOC field says so: `Title,1,Heading 1,2,...`) loses that level on the way in: the first `Title` paragraph becomes the document's metadata title and the rest become plain paragraphs. The result is a flat list of sections with no modules over them, and every module's *Introduction* colliding with every other's. The fix is in the source: restyle `Title` to `Heading 1` and shift the rest down. [`util/restyle-headings.py`](utilities.md#repairing-heading-styles-in-the-source) does that from a map, or from what the TOC field declares, and drops the empty `Title` paragraphs Word leaves behind. `pandoc -f docx+styles` shows what was being lost, as `Div` blocks with `custom-style="Title"`.

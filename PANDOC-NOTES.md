@@ -30,6 +30,8 @@ What Pandoc does, as read from its source or established by test, for the questi
 
 **`w:tblHeader w:val="0"` read as a header row until 3.10.** Measured across versions.
 
+**Heading ids are made unique against the anchor map's values, and a bookmark can hold the next candidate.** `makeHeaderAnchor'` computes a heading's id with `uniqueIdent`, checking each candidate (`base`, `base-1`, `base-2`, …) against `M.elems docxAnchorMap` (`Readers/Docx.hs` 589; `Shared.hs` 616). OpenStax names the bookmark for a repeated heading `site-selection-1`, which is exactly the candidate the second "Site Selection" heading is offered, so two headings got one id. Read from the source; measured on *Clinical Nursing Skills* (16 pages). Our filter renumbers duplicates as its last pass.
+
 **A style based on `Heading N` is a heading.** `Heading2Grey` (OpenStax) becomes a level-2 `Header` with the style as a class. Measured.
 
 ## The DOCX writer
@@ -38,11 +40,16 @@ What Pandoc does, as read from its source or established by test, for the questi
 
 ## The Markdown reader and writer
 
+**The reader keeps duplicate ids and warns.** `[WARNING] Duplicate identifier 'x' at file.md line N` on stderr; both elements keep the id. Measured on a merged file with 733 of them. Relevant because Pandoc's HTML writer then emits invalid HTML without complaint.
+
+
 **A plain raw HTML block is read one tag at a time.** `<table>…</table>` written as bare HTML comes back as dozens of `RawBlock`s (125 on one page). A fenced raw block (` ```{=html} `) is one `RawBlock`. Measured. Our Markdown target writes with `-raw_html` so every raw block is fenced.
 
 **The writer drops cell spans silently.** A table with `colspan`/`rowspan` is written as a grid table with the spans removed and no warning (48 on one page, to none). Measured on 3.11; `Writers/Markdown/Table.hs` has no span handling. Our target writes such a table as HTML.
 
 **A figure with attributes is written as a div.** `Writers/Markdown.hs` writes a `Figure` whose `Attr` is non-null as `::: {#id .figure}` holding the image and a `::: caption` div; the reader returns that as a `Div` around a `Figure`, not as the figure. Read from the source and measured. Our reading filter folds it back.
+
+**A tight list item holds a `Plain`, and reads back loose.** A one-item list in a grid cell written as `- ![…]` comes back as a `Para` in the item, and a lone image in a `Para` is a figure. Measured. Our not-a-figure mark goes on `Plain` as well as `Para`.
 
 **A lone image is a figure on read (`implicit_figures`).** The documented way to say "not a figure" is a non-breaking space after it (`\ `), which becomes a hard line break when a grid cell wraps at it. Measured. Our target writes an empty `[]{.inline}` span instead; an empty span with no attributes is not written at all.
 
@@ -69,6 +76,9 @@ What Pandoc does, as read from its source or established by test, for the questi
 **Emits a bare `<th>` for a row-header column** (`row_head_columns`), never `<th scope="row">`; scope is the filter's to add. **`--include-in-header` replaces the `header-includes` metadata field** rather than merging. **`$title$` in a template renders inlines**, so a heading's `<em>` lands inside `<title>`. **Small lengths are written in scientific notation** (`5.0e-2in`). All measured.
 
 ## The Lua filter environment
+
+**Within one filter table, every inline is walked before any block.** So a `Div`/`Span` handler pair that renames ids sees every span before every heading; a handler that must see elements in document order has to walk the blocks itself. Measured (`figures-and-tables.lua`, `make_ids_unique`).
+
 
 **`AttributeList` is not a plain table**: `next()` on it errors; iterate with `pairs`. Measured. **A filter's table of attributes is iterated in hash order**, so build an `Attr` from a list of pairs for stable output. Measured. **Filters in a returned list run in order**, each over the whole document; a handler returning `{}` removes the element, `nil` leaves it. **`pandoc.read(text, 'html')`** reads MathML into `Math` and `<thead>` into head rows; **`pandoc.write(doc, 'html', {html_math_method = 'mathml'})`** writes math as MathML. Measured.
 

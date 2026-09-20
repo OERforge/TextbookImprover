@@ -1390,6 +1390,10 @@ def main():
                "--toc FILE, --check, --includeallhtml.")
     parser.add_argument("--quiet", action="store_true",
                         help="don't trace each command as it runs")
+    parser.add_argument("--check-only", action="store_true",
+                        help="read, gate, pre-pass, filter, and write the "
+                             "reports, then stop: no output directory is "
+                             "written and nothing is packaged")
     parser.add_argument("--allow-unknown-keys", action="store_true",
                         help="report settings this version does not know "
                              "about instead of refusing them")
@@ -1515,6 +1519,11 @@ def main():
                 rewrite_publisher_links(pages)
             pages_by_dir[target.pages_dir] = split_pages(target, pages,
                                                          paths, reports)
+
+        if args.check_only:
+            say("Check only: the reports are written; nothing was rendered "
+                "or packaged.")
+            return 0
 
         # ---- 4.6 hand-written pages ------------------------------------------
         hand = hand_pages(base, stems)

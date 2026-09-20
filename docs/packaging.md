@@ -21,7 +21,7 @@ heuristic can manage, and it supplies the real chapter titles. Pages are
 matched by deriving a filename from each heading ("Key Concepts and
 Summary" to `key-concepts-and-summary`), so it works for any book whose
 files are named after its headings rather than only for known section
-names. Needs `pypdf` (`pip3 install pypdf`).
+names. Needs `pypdf` (`sudo apt install python3-pypdf`).
 
 It supplies the order for pages `contents` doesn't already place; it does
 not replace a curated tree. Anything you listed stays exactly where you put

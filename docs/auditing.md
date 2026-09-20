@@ -17,6 +17,10 @@ It depends on `lib/` and on Pandoc, to read a source. `pypdf` (for PDFs), epubch
 
 **A PDF** gets the simple report: what the file states about itself, read with `pypdf`, and what that implies. Title, author, language, dates, producer, PDF version, size and SHA-256; XMP metadata and its fields; what the file *claims* (PDF/UA-1 or -2, PDF/A) as distinct from what it is; whether it's tagged and has a structure tree, with a count of tags by type; the bookmark outline; pages with no extractable text, which are scans; fonts and whether they're embedded; encryption. A claim is reported as a claim: "claims PDF/UA-2" is a fact about the file, and whether it *is* PDF/UA-2 is veraPDF's to say, which the audit runs when it finds it. Ace stays by hand.
 
+## What a Markdown file's YAML means to the audit
+
+Each file is read as its own document, so a YAML block applies to the file it heads: its `title`, its `lang`, and nothing else's. A book whose files were written to be concatenated by a Pandoc command line, with one `_preamble.md` carrying the YAML for all of them, is read one file at a time here, and the other files have no YAML as far as the audit can see. The book's facts live in `project.yaml`, which the audit reads when it sits beside the files: `language` there answers the language question for every file. That is the only configuration the audit uses, and it's optional; `conversion.yaml` and `packaging.yaml` are the conversion's business. The audit could instead take the first file's YAML as the book's when `contents` gives an order, but that would make a report depend on a guess the reader can't see; `project.yaml` says the same thing in the open.
+
 ## The findings format
 
 `audit.csv` has these columns, in this order:

@@ -14,6 +14,7 @@ Versions are two-part and pre-1.0: breaking changes may land in any of them unti
 
 ### Fixed
 
+- A raw HTML comment in a source reached the HTML pages, where `--` inside one draws a warning from the Nu checker ("not mappable to XML 1.0") and would break an EPUB. The filter drops raw HTML comments for every target; the EPUB assembler's own removal stays for hand-written pages, which the filter doesn't see.
 - Merging a book whose pages all come from one source wrote every file to the same name, so one survived. A file is named for its source only when it holds all of that source's pages; otherwise it takes its own entry's title, made unique.
 - A markdown target copied media under the safe names the HTML targets use, so the Markdown it wrote (which keeps the author's paths, being source) referred to files that weren't there. Its copies keep the author's names.
 - A link from one Markdown source to another by file name (`other.md#x`) now points at the page in whatever the target writes, instead of being left as a link to a file the output doesn't contain.

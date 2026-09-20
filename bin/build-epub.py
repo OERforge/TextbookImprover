@@ -201,10 +201,10 @@ def prefix_ids(node, prefix, pages=()):
 
 
 def strip_comments(node):
-    """Raw HTML comments, dropped. A Markdown source may carry one -- a
-    citation beside an epigraph -- and a comment holding "--" is fatal in
-    XHTML, which is what an EPUB is made of. A comment says nothing to a
-    reader either way."""
+    """Raw HTML comments, dropped. The filter drops them for every
+    target now; this still matters for a hand-written page, which is
+    read into an intermediate without the filter, and a comment
+    holding "--" is fatal in XHTML, which is what an EPUB is made of."""
     if isinstance(node, dict):
         for key, value in list(node.items()):
             if isinstance(value, list):

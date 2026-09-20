@@ -8,10 +8,13 @@ Versions are two-part and pre-1.0: breaking changes may land in any of them unti
 
 ### Added
 
+- **`audit.py`: what is wrong with a file, without converting it.** Word and Markdown sources (read by Pandoc with no filter: alt text, table headers, bare-URL links, heading levels, raw HTML, and for Word what the census would guess), HTML pages and EPUBs (the output check and the validators), and PDFs (metadata, claims, tagging, structure tree, outline, scanned pages, fonts, with veraPDF when installed). One findings format for every check, `Where, Check, Detail, File, Kind, Severity, Standard, Tool, Fix`, whose first three columns are `output-check.csv`'s and which `output-check.csv` now uses too; a Markdown report with every input's SHA-256, so a stale report says so; a cache that skips an unchanged input. `convert.py --check-only` writes the conversion's reports and stops. Roadmap item 1. See [Auditing](docs/auditing.md).
+
 - **A markdown target can merge.** `merge: groups` writes one file per top-level entry of the book's contents instead of one per page, so a book whose sources are one file per section comes back as one file per chapter (853 pages into 17 on the statistics book). Pages nest the way the book does, links between merged pages become links inside the file, and an id two pages shared is renamed with its page's links following it. Roadmap item 1. See [Merging sections into chapters](docs/markdown.md#merging-sections-into-chapters).
 
 ### Fixed
 
+- A raw HTML comment in a source reached the HTML pages, where `--` inside one draws a warning from the Nu checker ("not mappable to XML 1.0") and would break an EPUB. The filter drops raw HTML comments for every target; the EPUB assembler's own removal stays for hand-written pages, which the filter doesn't see.
 - Merging a book whose pages all come from one source wrote every file to the same name, so one survived. A file is named for its source only when it holds all of that source's pages; otherwise it takes its own entry's title, made unique.
 - A markdown target copied media under the safe names the HTML targets use, so the Markdown it wrote (which keeps the author's paths, being source) referred to files that weren't there. Its copies keep the author's names.
 - A link from one Markdown source to another by file name (`other.md#x`) now points at the page in whatever the target writes, instead of being left as a link to a file the output doesn't contain.

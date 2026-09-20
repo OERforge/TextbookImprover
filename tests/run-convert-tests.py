@@ -283,6 +283,9 @@ def case_markdown(work):
          and not exists(work, "html", "assets", "Pipe Sizes.png")),
         ("raw LaTeX is dropped, not shown",
          lambda: "frontmatter" not in page),
+        ("a raw HTML comment is dropped, so a -- inside one reaches no "
+         "output",
+         lambda: "<!--" not in page and "28--29" not in page),
         ("no non-breaking space after \"vs.\" in alt text",
          lambda: 'alt="A pipe vs. a tube"' in page),
         ("an .md with a same-named .docx is a leftover, not a source",

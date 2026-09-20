@@ -794,6 +794,20 @@ end
 -- A link with nothing in it says nothing to a reader and fails WCAG
 -- 2.4.4; the repair step adds such links to keep Pandoc's reader from
 -- deleting bookmarks that only other files point at, and they go here.
+-- A raw HTML comment says nothing to a reader and is dropped for every
+-- target: an EPUB is XML, where "--" inside a comment is fatal, and the
+-- Nu checker warns about the same thing on a page. A Markdown source
+-- often carries one (a citation beside an epigraph, say).
+local function is_comment(raw)
+  return (raw.format == 'html' or raw.format == 'html5')
+    and raw.text:match('^%s*<!%-%-') ~= nil
+end
+
+function RawInline(raw)
+  if is_comment(raw) then return {} end
+  return nil
+end
+
 -- The zero-width space the repair puts between adjacent bookmarks.
 function Str(s)
   if s.text == '\226\128\139' then return {} end
@@ -816,6 +830,7 @@ function Plain(plain) return drop_figure_mark(plain) end
 -- or a figure it wrote that way because it carries an id: read back
 -- into the block it was, so the rest of the filter can work on it.
 function RawBlock(raw)
+  if is_comment(raw) then return {} end
   if (raw.format == 'html' or raw.format == 'html5')
       and raw.text:match('^%s*<[tf][ai][bg]') then
     local doc = pandoc.read(raw.text, 'html')
@@ -2053,6 +2068,7 @@ return {
   {
     Image = Image,
     Str = Str,
+    RawInline = RawInline,
     Link = Link,
     Para = Para,
     Plain = Plain,

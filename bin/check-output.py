@@ -41,13 +41,13 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
 import argparse
-import csv
 import os
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(HERE), "lib"))
 import outputcheck  # noqa: E402
+import findings as findings_lib  # noqa: E402
 
 
 def main():
@@ -89,10 +89,17 @@ def main():
 
     if args.report:
         if findings:
-            with open(args.report, "w", encoding="utf-8", newline="") as fh:
-                writer = csv.writer(fh)
-                writer.writerow(["Where", "Check", "Detail"])
-                writer.writerows(f.row() for f in findings)
+            # The shared findings format: the first three columns are
+            # the ones this report has always had, the rest say more.
+            findings_lib.write_csv(args.report, [
+                findings_lib.Finding(
+                    f.where, f.check, f.detail,
+                    file=f.where.split("#")[0].split("/")[-1],
+                    kind="epub" if f.where.startswith("EPUB/") else "html",
+                    tool=("vnu" if f.check.startswith("vnu") else
+                          "epubcheck" if f.check.startswith("epubcheck")
+                          else "oer"))
+                for f in findings])
         elif os.path.exists(args.report):
             os.remove(args.report)
 

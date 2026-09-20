@@ -1997,6 +1997,41 @@ local function figure_div(div)
   return pandoc.Figure(image, caption and { long = caption } or {}, attr)
 end
 
+-- No two elements on a page may carry the same id, and a Word export can
+-- produce them: OpenStax names a bookmark for a repeated heading the way
+-- Pandoc numbers an auto id ("site-selection", "site-selection-1"), so
+-- uniqueIdent's next candidate for the second heading is a name already
+-- taken (Readers/Docx.hs 589, Shared.hs 616). The later element is
+-- renumbered; links are left pointing where they pointed, since a
+-- browser resolves a repeated id to the first one anyway. Pandoc walks
+-- every inline before any block, so an anchor keeps its name and a
+-- heading is what gets renumbered, which is the right way round: an
+-- anchor is a link target another file may name, and a heading's auto
+-- id is Pandoc's own invention.
+local function make_ids_unique(doc)
+  local seen, renamed = {}, 0
+  local function fix(el)
+    local id = el.identifier
+    if id == nil or id == '' then return nil end
+    if not seen[id] then
+      seen[id] = true
+      return nil
+    end
+    local base = id:gsub('%-%d+$', '')
+    local n = 1
+    while seen[base .. '-' .. n] do n = n + 1 end
+    el.identifier = base .. '-' .. n
+    seen[el.identifier] = true
+    renamed = renamed + 1
+    return el
+  end
+  doc = doc:walk({ Block = fix, Inline = fix })
+  if renamed > 0 then
+    warn(('%d duplicate id(s) on this page were renumbered'):format(renamed))
+  end
+  return doc
+end
+
 return {
   -- A table or figure written as HTML, or a figure written as a div, by
   -- a Markdown target: the block it was, before anything counts or
@@ -2014,6 +2049,7 @@ return {
       return doc
     end,
   },
+  { Pandoc = make_ids_unique },
   {
     Image = Image,
     Str = Str,

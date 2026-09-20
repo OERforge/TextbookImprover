@@ -441,9 +441,33 @@ def check_layout_tables():
          lambda: "<table" in with_text),
     ]
 
+DUPLICATE_IDS = ('<h4 id="site-selection">One</h4>'
+                 '<p><span id="term-1" class="anchor"></span></p>'
+                 '<h4 id="site-selection-1">Two</h4>'
+                 '<h4 id="site-selection-1">Three</h4>')
+
+
+def check_unique_ids():
+    """No id twice on a page, and an anchor keeps its name."""
+    out = subprocess.run(
+        ["pandoc", "-f", "html", "-t", "html", "--lua-filter",
+         os.path.join(ROOT, "bin", "figures-and-tables.lua")],
+        input=DUPLICATE_IDS, capture_output=True, text=True)
+    ids = re.findall(r'id="([^"]*)"', out.stdout)
+    return [
+        ("every id on the page is unique",
+         lambda: len(ids) == len(set(ids))),
+        ("the anchor keeps the name another file may link to",
+         lambda: "term-1" in ids),
+        ("the repeated heading is the one renumbered",
+         lambda: ids.count("site-selection-1") == 1
+         and "site-selection-2" in ids),
+    ]
+
 
 GROUPS = [
     ("layout tables", check_layout_tables),
+    ("unique ids", check_unique_ids),
     ("front and back matter by name", check_matter_by_name),
     ("caption contrast", check_contrast),
     ("manifest names", check_manifest_names),

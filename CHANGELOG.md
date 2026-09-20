@@ -9,6 +9,7 @@ Versions are two-part and pre-1.0: breaking changes may land in any of them unti
 ### Fixed
 
 - A one-cell layout table whose image the export wrapped in a bullet list stayed a table instead of becoming a figure, so the output check reported it as a data table with no headers. The scan that decides "this cell holds an image and nothing else" now looks inside list items, as it already did inside divs and block quotes. On *Clinical Nursing Skills* that is 18 of the 98 tables the check had flagged.
+- Two headings with the same text on one page could come out with the same id, which no page may have: OpenStax names a bookmark for a repeated heading the way Pandoc numbers an auto id, so the reader's next candidate for the second heading was a name already taken. The filter makes every id on a page unique as its last step, renumbering the later element; an anchor keeps the name another file may link to, and links are left pointing where they pointed. Sixteen of them in *Clinical Nursing Skills*; epubcheck's matching errors go with them.
 
 ## [0.5] - 2026-09-19
 

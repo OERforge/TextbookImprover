@@ -154,8 +154,9 @@ book counts the way a printed one does: main groups and top-level pages
 1, 2, 3 and their pages 1.1, 1.2; appendices A, B and A.1; front and
 back matter unnumbered, a chapter's own opening page taking the
 chapter's number. The numbers show in the EPUB's table of contents and
-headings, the cartridge organization, and the generated contents page;
-a target can say `numbering: on` or `off` for itself. A Markdown book
+headings, the cartridge organization, the generated contents page, and
+each page's own heading and `<title>`; a target can say `numbering: on`
+or `off` for itself. A Markdown book
 written for a Pandoc PDF build declares its parts already, with
 `\frontmatter`, `\mainmatter`, `\appendix`, `\backmatter`, and
 `{.appendix}` on a heading, and the guess reads those, so the sample

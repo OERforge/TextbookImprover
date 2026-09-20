@@ -12,6 +12,9 @@ Versions are two-part and pre-1.0: breaking changes may land in any of them unti
 
 - **A markdown target can merge.** `merge: groups` writes one file per top-level entry of the book's contents instead of one per page, so a book whose sources are one file per section comes back as one file per chapter (853 pages into 17 on the statistics book). Pages nest the way the book does, links between merged pages become links inside the file, and an id two pages shared is renamed with its page's links following it. Roadmap item 1. See [Merging sections into chapters](docs/markdown.md#merging-sections-into-chapters).
 
+- `audit.py --report-html` and `--report-docx` write the report as a page and as a Word document (declared as the current Word format, so Word's own checker runs on it) beside the Markdown it always writes.
+- With `numbering` on, each page's own heading and `<title>` carry the book's number (`16.1 Learning Objectives`), as the tables of contents and the EPUB's headings already did.
+
 ### Fixed
 
 - A raw HTML comment in a source reached the HTML pages, where `--` inside one draws a warning from the Nu checker ("not mappable to XML 1.0") and would break an EPUB. The filter drops raw HTML comments for every target; the EPUB assembler's own removal stays for hand-written pages, which the filter doesn't see.

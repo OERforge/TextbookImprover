@@ -4,7 +4,7 @@
 
 ```bash
 python3 $T/bin/audit.py ~/books/nursing            # everything in a directory
-python3 $T/bin/audit.py syllabus.pdf book.epub -o ~/reports
+python3 $T/bin/audit.py syllabus.pdf book.epub -o ~/reports --report-docx
 ```
 
 It depends on `lib/` and on Pandoc, to read a source. `pypdf` (for PDFs), epubcheck, the Nu HTML checker, and veraPDF are used when present and reported as absent when not; `--quick` skips the external ones.
@@ -35,7 +35,7 @@ The first three are what `output-check.csv` has always carried, so anything read
 
 The same hashes key `audit-cache.json` beside the report. Run again with nothing changed, the audit says so at the prompt (`Nothing has changed since the audit of <date>; audit.md is current`) and leaves the report alone, so its date stays the date of the audit it records; the exit code still reflects the findings. With some inputs changed, only those are read again and the report is rewritten. `--force` reads everything, `--no-cache` ignores the cache both ways. A PDF is always re-read, since its metadata section is built fresh each time.
 
-`--html` also writes `audit.html`, the report as a page with the pipeline's own stylesheet embedded, for someone who doesn't read Markdown. For a Word version, `pandoc audit.md -o audit.docx` and then `util/docx-compat.py`, which makes Word treat it as a current file so its own Accessibility Checker will run on it.
+Markdown is the report's own form. `--report-html` also writes `audit.html`, the report as a page with the pipeline's own stylesheet embedded; `--report-docx` also writes `audit.docx`, declared as the current Word format so Word treats it as a current file and its own Accessibility Checker runs on it (Pandoc's own Word output opens in Compatibility Mode, which turns that checker off). The switches are named for the report's format, not the input's: the audit reads any mix of files whatever it writes.
 
 ## `convert.py --check-only`
 

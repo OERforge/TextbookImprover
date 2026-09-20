@@ -133,7 +133,7 @@ def case_front_door():
                  WORK)
     untouched = os.path.getmtime(os.path.join(out, "audit.md")) == stamp
     forced = run([os.path.join(BIN, "audit.py"), WORK, "-o", out, "--quick",
-                  "--force", "--html"], WORK)
+                  "--force", "--report-html", "--report-docx"], WORK)
     back = fl.read_csv(csv_path)
     standards = {r[6] for r in body if r[6]}
     return [
@@ -154,8 +154,9 @@ def case_front_door():
         ("unless forced",
          lambda: "unchanged" not in forced.stderr and "is current"
          not in forced.stderr),
-        ("--html renders the report as a page",
-         lambda: os.path.exists(os.path.join(out, "audit.html"))),
+        ("--report-html and --report-docx render the report",
+         lambda: os.path.exists(os.path.join(out, "audit.html"))
+         and os.path.exists(os.path.join(out, "audit.docx"))),
         ("a WCAG standard names the version, the criterion, and its level",
          lambda: all(re.match(r"WCAG 2\.\d SC \d\.\d+\.\d+ \((A|AA|AAA)\)$", s)
                      for s in standards if s.startswith("WCAG"))),

@@ -125,9 +125,12 @@ def main():
                         help="neither read nor write the cache")
     parser.add_argument("--quick", action="store_true",
                         help="skip the external validators")
-    parser.add_argument("--html", action="store_true",
-                        help="also render the report as audit.html, with "
-                             "Pandoc")
+    parser.add_argument("--report-html", action="store_true",
+                        help="also write the report as audit.html")
+    parser.add_argument("--report-docx", action="store_true",
+                        help="also write the report as audit.docx, in the "
+                             "current Word format so Word's own checker "
+                             "runs on it")
     args = parser.parse_args()
 
     files = gather(args.paths)
@@ -172,9 +175,12 @@ def main():
         cache.save()
     fl.write_csv(os.path.join(out_dir, "audit.csv"), all_found)
     fl.write_report(report_md, all_found, inputs, sections, version=VERSION)
-    if args.html:
+    if args.report_html:
         fl.render_html(report_md, os.path.join(out_dir, "audit.html"),
                        os.path.join(HERE, "page.css"))
+    if args.report_docx:
+        fl.render_docx(report_md, os.path.join(out_dir, "audit.docx"),
+                       os.path.join(HERE, "..", "util", "docx-compat.py"))
     print("\n".join(fl.summary_lines(all_found)), file=sys.stderr)
     print(f"Written to {os.path.join(out_dir, 'audit.csv')} and audit.md.",
           file=sys.stderr)

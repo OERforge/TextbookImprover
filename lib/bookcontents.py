@@ -583,9 +583,13 @@ def number_tree(tree, titles=None):
 
 
 def numbered_title(entry, title):
-    """The title with its number in front, when it has one."""
+    """The title with its number in front, when it has one. A title that
+    already starts with the number (a page's own heading, once the run
+    has numbered it) is left as it is."""
     number = getattr(entry, "number", None)
-    return f"{number} {title}" if number and title else title
+    if not (number and title) or title.startswith(number + " "):
+        return title
+    return f"{number} {title}"
 
 
 def toc_blocks(tree, titles, link_for):

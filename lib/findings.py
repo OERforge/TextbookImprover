@@ -321,6 +321,28 @@ def render_html(markdown_path, html_path, css_path=None):
               file=sys.stderr)
 
 
+def render_docx(markdown_path, docx_path, compat_tool=None):
+    """The report as a Word document, through Pandoc, then declared as
+    the current Word format so Word treats it as a current file and its
+    own Accessibility Checker runs on it (Pandoc's reference document
+    carries no compatibility mode; see util/docx-compat.py)."""
+    import subprocess
+    import sys
+    try:
+        subprocess.run(["pandoc", os.path.abspath(markdown_path), "-o",
+                        os.path.abspath(docx_path), "--metadata",
+                        "lang=en"], check=True, capture_output=True,
+                       text=True)
+        if compat_tool and os.path.exists(compat_tool):
+            subprocess.run([sys.executable, compat_tool, "--set", "15",
+                            os.path.abspath(docx_path)], check=True,
+                           capture_output=True, text=True)
+    except (OSError, subprocess.CalledProcessError) as exc:
+        detail = getattr(exc, "stderr", "") or str(exc)
+        print(f"audit.docx not written: {detail.strip()[:200]}",
+              file=sys.stderr)
+
+
 def write_report(path, findings, inputs, sections=None, version="",
                  title="Accessibility audit"):
     """A Markdown report: the header that dates and hashes it, the

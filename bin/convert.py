@@ -1102,6 +1102,45 @@ def render_markdown(target, pages, base, work, project, env):
     return written
 
 
+def number_page_headings(target, tree, titles):
+    """The book's numbers on each page's own heading and <title>, when
+    the book is numbered: "1.2 Data, Sampling, and Variation", as the
+    EPUB's headings and the tables of contents already say. A post-edit
+    of the rendered page, since the number is a fact about the book's
+    structure, which the page doesn't know until the tree is built."""
+    changed = []
+
+    def walk(nodes):
+        for entry in nodes:
+            kind, a, b = entry
+            if kind == "group":
+                walk(b)
+                continue
+            if is_generated(entry) or not getattr(entry, "number", None):
+                continue
+            path = os.path.join(target.output_dir, a + ".html")
+            if not os.path.exists(path):
+                continue
+            with open(path, encoding="utf-8") as fh:
+                text = fh.read()
+            title = b or titles.get(a, a)
+            number = entry.number
+            new = text
+            new = re.sub(r"(<title>)(" + re.escape(title) + r")(</title>)",
+                         lambda m: m.group(1) + number + " " + m.group(2)
+                         + m.group(3), new, count=1)
+            new = re.sub(r'(<h1 class="title"[^>]*>)(' + re.escape(title)
+                         + r")(</h1>)",
+                         lambda m: m.group(1) + number + " " + m.group(2)
+                         + m.group(3), new, count=1)
+            if new != text:
+                with open(path, "w", encoding="utf-8") as fh:
+                    fh.write(new)
+                changed.append(path)
+    walk(tree)
+    return changed
+
+
 def render_html(target, pages, base, fragments, language, env):
     env = dict(env, TARGET_NAME=target.name,
                TITLE_BLOCK=str(target["title_block"]))
@@ -1558,6 +1597,8 @@ def main():
                 tree, titles, api = book_tree(
                     project, pages_by_dir[target.pages_dir],
                     numbering_for(target, project))
+                if numbering_for(target, project):
+                    number_page_headings(target, tree, titles)
                 written[target.name] += write_generated(
                     target, tree, titles, api, base, work,
                     fragments[target.name], language, renv)

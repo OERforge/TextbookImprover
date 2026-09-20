@@ -6,7 +6,15 @@ Versions are two-part and pre-1.0: breaking changes may land in any of them unti
 
 ## [Unreleased]
 
+### Added
+
+- **A markdown target can merge.** `merge: groups` writes one file per top-level entry of the book's contents instead of one per page, so a book whose sources are one file per section comes back as one file per chapter (853 pages into 17 on the statistics book). Pages nest the way the book does, links between merged pages become links inside the file, and an id two pages shared is renamed with its page's links following it. Roadmap item 1. See [Merging sections into chapters](docs/markdown.md#merging-sections-into-chapters).
+
 ### Fixed
+
+- Merging a book whose pages all come from one source wrote every file to the same name, so one survived. A file is named for its source only when it holds all of that source's pages; otherwise it takes its own entry's title, made unique.
+- A markdown target copied media under the safe names the HTML targets use, so the Markdown it wrote (which keeps the author's paths, being source) referred to files that weren't there. Its copies keep the author's names.
+- A link from one Markdown source to another by file name (`other.md#x`) now points at the page in whatever the target writes, instead of being left as a link to a file the output doesn't contain.
 
 - [Installation](docs/installation.md) is written for a fresh Ubuntu, WSL included: how to get the tools (a release archive or a clone, with `$T` explained), what WSL is and where Microsoft's setup guide lives, `sudo apt update && sudo apt upgrade` first, the fact that Ubuntu 24.04's `pandoc` is 3.1.3 and below this project's floor (install the `.deb` from Pandoc's releases), `python3-pypdf` rather than `pip3 install pypdf` (which stops with `externally-managed-environment`, and on a fresh WSL install `pip3` isn't there), epubcheck 5.4.0, what `~/.bashrc` is and how to edit it, and a closing check that runs the suites.
 - A one-cell layout table whose image the export wrapped in a bullet list stayed a table instead of becoming a figure, so the output check reported it as a data table with no headers. The scan that decides "this cell holds an image and nothing else" now looks inside list items, as it already did inside divs and block quotes. On *Clinical Nursing Skills* that is 18 of the 98 tables the check had flagged.

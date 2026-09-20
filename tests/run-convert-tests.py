@@ -579,8 +579,51 @@ def case_markdown_target(work):
     ]
 
 
+MERGE_BOOK = {
+    "ch1.md": ("# Chapter One\n\nIntro.\n\n## First\n\nA. See "
+               "[Second](ch1--second.html) and [Two](ch2.html).\n\n"
+               "### Deeper\n\nD.\n\n## Second\n\n[]{#dup}B [x](#dup).\n"),
+    "ch2.md": "# Chapter Two\n\n## Only\n\n[]{#dup}C [y](#dup).\n",
+}
+
+
+def case_merge(work):
+    """A markdown target that merges: one file per chapter."""
+    os.makedirs(work, exist_ok=True)
+    for name, text in MERGE_BOOK.items():
+        with open(os.path.join(work, name), "w", encoding="utf-8") as fh:
+            fh.write(text)
+    result = convert(work, "defaults:\n  pages:\n    split_level: 2\n"
+                           "targets:\n  src:\n    format: markdown\n"
+                           "    merge: groups\n")
+    one = read(work, "src", "ch1.md") if exists(work, "src", "ch1.md") else ""
+    two = read(work, "src", "ch2.md") if exists(work, "src", "ch2.md") else ""
+    levels = [len(m.group(1)) for m in re.finditer(r"^(#+) ", one, re.M)]
+    return [
+        ("the run succeeds", lambda: result.returncode == 0),
+        ("a chapter's pages come back as one file",
+         lambda: one and two
+         and not exists(work, "src", "ch1--first.md")),
+        ("the file is titled for the chapter, its pages are sections",
+         lambda: "title: Chapter One" in one
+         and "## First {#ch1--first}" in one),
+        ("nesting follows the book, not the page count",
+         lambda: levels == [2, 3, 2]),
+        ("a link to a merged page becomes a link inside the file",
+         lambda: "](#ch1--second)" in one),
+        ("a link to another file names that file",
+         lambda: "](ch2.md)" in one),
+        ("two groups from one source get a file each, not one file",
+         lambda: len([n for n in os.listdir(os.path.join(work, "src"))
+                      if n.endswith(".md")]) >= 2),
+        ("an id two pages shared is renamed, and its page's link follows",
+         lambda: one.count("#dup)") == 1 and two.count("#dup)") == 1),
+    ]
+
+
 CASES = [
     ("a bare directory", case_bare),
+    ("a markdown target that merges", case_merge),
     ("a Markdown target, round trip", case_markdown_target),
     ("two editions from one directory", case_editions),
     ("roles, numbering, and a contents page", case_structure),

@@ -4,6 +4,12 @@ All notable changes to this project are documented in this file. The format is b
 
 Versions are two-part and pre-1.0: breaking changes may land in any of them until 1.0, and each is marked **Breaking** below. But we intend to keep the configuration schema, the command-line interface of each script, and the format of the sidecar CSV files stable in each version.
 
+## [Unreleased]
+
+### Fixed
+
+- A one-cell layout table whose image the export wrapped in a bullet list stayed a table instead of becoming a figure, so the output check reported it as a data table with no headers. The scan that decides "this cell holds an image and nothing else" now looks inside list items, as it already did inside divs and block quotes. On *Clinical Nursing Skills* that is 18 of the 98 tables the check had flagged.
+
 ## [0.5] - 2026-09-19
 
 The release where the pipeline stopped being a DOCX-to-HTML converter with extras. Every target in `conversion.yaml` is built from one set of intermediates, into a directory of its own: HTML pages, an EPUB, and now the book as Markdown source. Markdown is a source too, alongside Word, and a round trip through it holds: read back, *Introductory Business Statistics 2e* gives identical HTML on all 169 pages. A book's structure gained roles and numbering, footnotes learned to gather, editions can differ in a page or a passage without a second directory, and two things Word's export had always broken (cross-references and the anchors an index points at) land. Tested on seven books, two of them new this release: a 33-chapter Markdown textbook and *Clinical Nursing Skills* (379 files, an index of 2,045 entries). Two changes break a v0.4 directory; see [Upgrading from v0.4](docs/configuration.md#upgrading-from-v04).

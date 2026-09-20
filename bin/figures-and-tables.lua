@@ -322,6 +322,17 @@ local function scan_blocks(blocks, found)
       scan_inlines(block.content)
     elseif block.t == 'Div' or block.t == 'BlockQuote' then
       scan_blocks(block.content, found)
+    elseif block.t == 'BulletList' or block.t == 'OrderedList' then
+      -- A layout table whose image the export wrapped in a one-item
+      -- list: the list is Word's bullet, not content, and the cell is
+      -- still an image and nothing else. (18 of them in Clinical
+      -- Nursing Skills, each reported as a data table with no headers
+      -- until the scan looked inside.)
+      local items = block.t == 'BulletList' and block.content
+        or block.content[2] or block.content
+      for _, item in ipairs(items) do
+        scan_blocks(item, found)
+      end
     elseif block.t == 'Figure' then
       -- Pandoc's implicit_figures turns a lone image in a cell into a
       -- nested Figure whose caption just repeats the alt text. Unwrap it.

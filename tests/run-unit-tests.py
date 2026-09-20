@@ -40,6 +40,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
 import importlib.util
+import subprocess
 import os
 import re
 import tempfile
@@ -412,7 +413,37 @@ def check_matter_by_name():
     ]
 
 
+LIST_WRAPPED = ('<table><tr><td><ul><li><img src="x.png" alt="An eye"></li>'
+                '</ul></td></tr></table>')
+PLAIN_CELL = '<table><tr><td><img src="x.png" alt="An eye"></td></tr></table>'
+WITH_TEXT = ('<table><tr><td><ul><li><img src="x.png" alt="An eye"></li>'
+             '<li>A caption-like sentence.</li></ul></td></tr></table>')
+
+
+def check_layout_tables():
+    """A one-cell table holding only an image is a figure, whatever the
+    export wrapped the image in."""
+    def render(markup):
+        out = subprocess.run(
+            ["pandoc", "-f", "html", "-t", "html",
+             "--lua-filter", os.path.join(ROOT, "bin",
+                                          "figures-and-tables.lua")],
+            input=markup, capture_output=True, text=True)
+        return out.stdout
+    wrapped, plain, with_text = (render(LIST_WRAPPED), render(PLAIN_CELL),
+                                 render(WITH_TEXT))
+    return [
+        ("a plain image cell becomes a figure",
+         lambda: "<figure" in plain and "<table" not in plain),
+        ("so does one whose image the export wrapped in a list",
+         lambda: "<figure" in wrapped and "<table" not in wrapped),
+        ("a cell with anything else in it stays a table",
+         lambda: "<table" in with_text),
+    ]
+
+
 GROUPS = [
+    ("layout tables", check_layout_tables),
     ("front and back matter by name", check_matter_by_name),
     ("caption contrast", check_contrast),
     ("manifest names", check_manifest_names),

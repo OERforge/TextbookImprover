@@ -14,7 +14,7 @@ Reads a book's sources, one file per page (Word, Markdown, or a page written by 
 
 **Packaging** turns the pages into a Common Cartridge with the book's structure as the module tree, validated against the IMS schemas, and into an EPUB 3 that validates with epubcheck and says what it can claim about itself.
 
-**Every run checks what it wrote**: dead links and fragments, missing alt text, heading order, invalid ids, tables without headers or caption, and, when the validators are installed, epubcheck and the Nu HTML checker.
+**Every run checks what it wrote**: dead links and fragments, missing alt text, heading order, invalid ids, tables without headers or caption, and, when the validators are installed, epubcheck and the Nu HTML checker. The same checks, plus what a Word, Markdown, or PDF file says about itself, run on any file without converting it: `audit.py` writes a findings CSV and a report.
 
 Everything a run decides is written down: reports name what to fix, sidecar files hold what you decided, and the configuration file lists every setting with a sentence explaining it.
 

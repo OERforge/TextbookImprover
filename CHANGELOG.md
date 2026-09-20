@@ -4,14 +4,14 @@ All notable changes to this project are documented in this file. The format is b
 
 Versions are two-part and pre-1.0: breaking changes may land in any of them until 1.0, and each is marked **Breaking** below. But we intend to keep the configuration schema, the command-line interface of each script, and the format of the sidecar CSV files stable in each version.
 
-## [Unreleased]
+## [0.6] - 2026-09-20
+
+Two tools and a round of what the books found. The audit is a fourth tool in the box: `audit.py` says what is wrong with a Word, Markdown, HTML, EPUB, or PDF file without converting it, in one findings format that names the standard each finding answers to, with a report a person can read and a cache that skips what hasn't changed. A markdown target can merge, so a book whose sources are one file per section comes back as one file per chapter. And *Clinical Nursing Skills* and a fresh Ubuntu each turned up things worth fixing: two table shapes the filter misread, a Pandoc package below this project's own floor, and the way the release archive is meant to be installed. Nothing here breaks a v0.5 directory.
 
 ### Added
 
 - **`audit.py`: what is wrong with a file, without converting it.** Word and Markdown sources (read by Pandoc with no filter: alt text, table headers, bare-URL links, heading levels, raw HTML, and for Word what the census would guess), HTML pages and EPUBs (the output check and the validators), and PDFs (metadata, claims, tagging, structure tree, outline, scanned pages, fonts, with veraPDF when installed). One findings format for every check, `Where, Check, Detail, File, Kind, Severity, Standard, Tool, Fix`, whose first three columns are `output-check.csv`'s and which `output-check.csv` now uses too; a Markdown report with every input's SHA-256, so a stale report says so; a cache that skips an unchanged input. `convert.py --check-only` writes the conversion's reports and stops. Roadmap item 1. See [Auditing](docs/auditing.md).
-
 - **A markdown target can merge.** `merge: groups` writes one file per top-level entry of the book's contents instead of one per page, so a book whose sources are one file per section comes back as one file per chapter (853 pages into 17 on the statistics book). Pages nest the way the book does, links between merged pages become links inside the file, and an id two pages shared is renamed with its page's links following it. Roadmap item 1. See [Merging sections into chapters](docs/markdown.md#merging-sections-into-chapters).
-
 - `audit.py --report-html` and `--report-docx` write the report as a page and as a Word document (declared as the current Word format, so Word's own checker runs on it) beside the Markdown it always writes.
 - With `numbering` on, each page's own heading and `<title>` carry the book's number (`16.1 Learning Objectives`), as the tables of contents and the EPUB's headings already did.
 
@@ -21,7 +21,6 @@ Versions are two-part and pre-1.0: breaking changes may land in any of them unti
 - Merging a book whose pages all come from one source wrote every file to the same name, so one survived. A file is named for its source only when it holds all of that source's pages; otherwise it takes its own entry's title, made unique.
 - A markdown target copied media under the safe names the HTML targets use, so the Markdown it wrote (which keeps the author's paths, being source) referred to files that weren't there. Its copies keep the author's names.
 - A link from one Markdown source to another by file name (`other.md#x`) now points at the page in whatever the target writes, instead of being left as a link to a file the output doesn't contain.
-
 - [Installation](docs/installation.md) is written for a fresh Ubuntu, WSL included: how to get the tools (a release archive or a clone, with `$T` explained), what WSL is and where Microsoft's setup guide lives, `sudo apt update && sudo apt upgrade` first, the fact that Ubuntu 24.04's `pandoc` is 3.1.3 and below this project's floor (install the `.deb` from Pandoc's releases), `python3-pypdf` rather than `pip3 install pypdf` (which stops with `externally-managed-environment`, and on a fresh WSL install `pip3` isn't there), epubcheck 5.4.0, what `~/.bashrc` is and how to edit it, and a closing check that runs the suites.
 - A one-cell layout table whose image the export wrapped in a bullet list stayed a table instead of becoming a figure, so the output check reported it as a data table with no headers. The scan that decides "this cell holds an image and nothing else" now looks inside list items, as it already did inside divs and block quotes. On *Clinical Nursing Skills* that is 18 of the 98 tables the check had flagged.
 - Two headings with the same text on one page could come out with the same id, which no page may have: OpenStax names a bookmark for a repeated heading the way Pandoc numbers an auto id, so the reader's next candidate for the second heading was a name already taken. The filter makes every id on a page unique as its last step, renumbering the later element; an anchor keeps the name another file may link to, and links are left pointing where they pointed. Sixteen of them in *Clinical Nursing Skills*; epubcheck's matching errors go with them.
@@ -219,6 +218,7 @@ Sidecar files need no migration, and can now be moved out of the book's director
 
 First release. DOCX to accessible HTML via Markdown, with a Pandoc filter handling figures, tables, alt text, and captions; sidecar CSV files for decisions a script can't make; and an IMS Common Cartridge builder.
 
+[0.6]: https://github.com/OERforge/TextbookImprover/compare/v0.5...v0.6
 [0.5]: https://github.com/OERforge/TextbookImprover/compare/v0.4...v0.5
 [0.4]: https://github.com/OERforge/TextbookImprover/compare/v0.3...v0.4
 [0.3]: https://github.com/OERforge/TextbookImprover/compare/v0.2...v0.3

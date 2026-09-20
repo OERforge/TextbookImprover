@@ -4,12 +4,15 @@ The pieces, what each one does to a page, and how to run the central filter on i
 
 ## The pieces
 
-The project has two halves that no longer depend on each other. Conversion
+The project is a box of tools that happen to work together. Conversion
 turns source documents into accessible pages; packaging assembles pages
-into something an LMS can import. Either is useful alone — remediating a
-folder of documents needs nothing from the cartridge side, and building a
-cartridge from pages this project never converted needs nothing from the
-conversion side.
+into something an LMS can import; the audit says what is wrong with a
+file and changes nothing. Each is useful alone: remediating a folder of
+documents needs nothing from the cartridge side, building a cartridge
+from pages this project never converted needs nothing from the
+conversion side, and auditing a PDF needs neither. The rule that keeps
+it so: a `bin/` script depends on `lib/` and on external programs, never
+on another `bin/` script.
 
 **`bin/` — conversion**
 
@@ -24,6 +27,9 @@ conversion side.
 | `header-includes.lua` | Adds the stylesheet to a page's `header-includes` at render time, alongside what the page already carries there; `--include-in-header` would replace it. |
 | `lib/docxrepair.py` | What a `.docx` needs done to it before Pandoc reads it, on a copy: bookmarks moved to where the reader keeps them, invisible links so bookmarks only other files point at survive. |
 | `lib/notes.py` | Footnote numbering and placement across pages, after rendering, for HTML and EPUB alike. |
+| `lib/findings.py` | One format for everything a check finds: the CSV, the Markdown report, the input hashes, the cache. |
+| `lib/sourcecheck.py` | What a Word or Markdown source says about itself, from Pandoc's unfiltered reading. |
+| `lib/pdfcheck.py` | What a PDF states about itself: metadata, claims, structure, with veraPDF when installed. |
 | `lib/names.py` | The one rule for a safe file name, shared with `safe-media.lua`. |
 | `split-pages.py` | Cuts filtered intermediates into one page per heading, names the pieces, rewrites links between them, and records where each came from. |
 | `page.css` | The rules every page carries beyond Pandoc's own stylesheet: caption contrast, real table display, the scroll wrapper. |
@@ -31,6 +37,12 @@ conversion side.
 | `check-output.py` | Checks the pages and EPUBs a run wrote for dead links, missing alt text, skipped headings, and the like; the command line over `lib/outputcheck.py`. |
 | `build-epub.py` | Assembles the filtered intermediates into one EPUB3, ordered by `project.contents`, with accessibility claims computed from the build. |
 | `schema-conversion.yaml` | Declares every conversion setting, its type, default, and meaning. |
+
+**`bin/` — auditing**
+
+| File | What it does |
+|---|---|
+| `audit.py` | The audit's front door: any mix of Word, Markdown, HTML, EPUB, and PDF files, in; `audit.csv` and `audit.md` out. See [Auditing](auditing.md). |
 
 **`bin/` — packaging**
 

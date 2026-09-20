@@ -1,6 +1,6 @@
 # Checking the output
 
-Every run ends by checking what it wrote: each page of the run, and each EPUB built from them. The findings go to `output-check.csv` beside the other reports, and the run isn't stopped by them. The output exists; the report is the list to work through. When there's nothing to report the file is removed, so its existing at all is the signal.
+Every run ends by checking what it wrote: each page of the run, and each EPUB built from them. The findings go to `output-check.csv` beside the other reports, in the [findings format](auditing.md#the-findings-format) every check in this project shares (`Where, Check, Detail` first, then the file, its kind, a severity, the standard, the tool, and where the fix lives), and a summary goes to the terminal. The check never stops the run: the output exists, and the report is the list to work through. For the same checks on files that didn't come from a run, and for Word, Markdown, and PDF as well, see [Auditing](auditing.md).
 
 ```bash
 python3 bin/check-output.py *.html --epub epub/book.epub --report output-check.csv
@@ -20,6 +20,7 @@ The checks are the class of defect that has reached this project's output before
 | `image-empty-alt-not-decorative` | `alt=""` without `aria-hidden="true"`: the image was neither described nor declared decorative. In an EPUB this is the usual form of a missing description, since Pandoc's writer gives every image an `alt`. |
 | `heading-skips-level` | A heading is more than one level below the one before it. |
 | `empty-heading` | A heading with no text. |
+| `invalid-id` | An `id` containing whitespace, which no `id` may. |
 | `duplicate-id` | An `id` used more than once in one document, so links to it are ambiguous. |
 | `vnu:error`, `vnu:warning`, `epubcheck:<ID>` | What the full validators reported, when installed; see below. |
 | `table-not-in-scroll-region` | A data table on an HTML page outside the focusable wrapper the filter puts around every data table (WCAG 1.4.10). The filter's own invariant, checked on the output. |

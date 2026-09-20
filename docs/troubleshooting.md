@@ -93,7 +93,7 @@ keys on the media path ignoring its extension.
   conform, and the useful thing to add is a caption, not a layout
   marking.
 - **Two PAC errors on a tagged PDF are the validator's, not the file's.**
-  This matters only once PDF is an output (roadmap item 4), but it's
+  This matters only once PDF is an output (roadmap item 3), but it's
   worth recognizing rather than chasing. *Table header cell has no
   associated subcells* is raised because `latex-lab` sets `Scope` through
   an attribute class and PAC doesn't resolve `/ClassMap` references:

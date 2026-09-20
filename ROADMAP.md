@@ -6,10 +6,7 @@ We're attempting to follow two principles: build the tool that can check a chang
 
 Two sections sit after the numbered items. **Refinements to the table headers work** is what v0.3 left undone in the feature it shipped, kept separate because none of it is large enough to be an item and all of it is worth doing before that work is called finished. **Smaller things** is everything that has no dependency on anything else.
 
-## 1. Merging sources into chapters
-
-Markdown reads and writes now (see [Markdown sources](docs/markdown.md)); the round trip holds on the statistics book and on a Markdown textbook. What a Markdown target should do next is merge: a book whose sources are cut at the section level, as OpenStax ships them, written as one file per `contents` group, the sections in order under the chapter heading. The structure to merge into is already declared; the writer needs to consume a group rather than a page, and the split's provenance says which file each section came from.
-## 2. HTML and EPUB as input formats
+## 1. HTML and EPUB as input formats
 
 With Markdown handled above, what remains is HTML and EPUB, and they're close relatives: an EPUB is zipped XHTML, and Pandoc reads it with the same reader.
 
@@ -21,7 +18,7 @@ One thing to know before relying on it: the reader keeps the attribute but not t
 
 
 Two notes from the Markdown work. An HTML source's passages for some editions take Jinja's block syntax (`{% if target == "print" %} … {% endif %}`), the syntax and not the engine: a source is a page, not a template. And a title page belongs to `generate:` in `contents`, built from project metadata (title, subtitle, authors, date, license, an accessibility statement) and never from a source's YAML, which is what a web interface would edit; the source's own YAML stays the author's PDF business.
-## 3. Link text sidecar, for bare URLs
+## 2. Link text sidecar, for bare URLs
 
 **Held until the WCAG question is settled.** Rewriting the publisher's links (done in 0.5) no longer waits on it; this item changes what a link says or where it goes, and the question is the same for each: whether the result still meets the letter and the spirit of the guidelines. Here it's whether supplying an accessible name the visible text doesn't show—so that a sighted reader and a screen reader user are given different link text—is the right reading of 2.4.4, or whether the honest fix is to change the visible text so everyone sees it. The research below stands; what waits is the decision it feeds.
 
@@ -57,7 +54,7 @@ Still worth deciding deliberately rather than by default, and the PDF testing ar
 
 It's smaller than most of what is on this list and shares all its plumbing with the table headers sidecar that shipped in v0.3: report what needs a human, read a CSV, apply it, report what is still outstanding. That machinery is built and has one user, so this is the second, which is what tests whether it's actually general—cheaper to find out with two than after a third sidecar is bolted on. What holds the item is the question above, not the work.
 
-## 4. PDF, and DOCX output
+## 3. PDF, and DOCX output
 
 **PDF** is gated on something outside this project. Pandoc 3.9 can drive LaTeX's tagging via `-V pdfstandard=ua-2`, but `latex-lab-table` states plainly that only simple header rows and columns are supported; that complex headers with subheaders need syntax changes not yet made; and that a cell `Headers` array (the mechanism the hard cases need) is an open item. Until that lands, a tagged PDF from this pipeline can carry simple tables correctly and can't carry the complex ones. Worth revisiting each LaTeX release rather than working around.
 
@@ -67,7 +64,7 @@ Three defects in the meantime are candidates for a post-processing pass with `pi
 
 **DOCX output** is the riskier one, and deserves scoping care. The writer does preserve `w:tblHeader`, so in principle `table-headers-missing.csv` could stop being a report and start being an input that produces a corrected source document. But a Pandoc round trip discards everything Pandoc doesn't model: converting a file and back turned a layout table's `FigureTable` style into plain `Table`, and that style is the cleanest signal available for identifying layout tables. Section properties, content controls, comments, field codes, and tracked changes have the same exposure. If this is built, it should annotate the OOXML directly rather than rebuild the document. It's more code, but the difference between annotating and rebuilding.
 
-## 5. Common Cartridge 1.3, for assignments
+## 4. Common Cartridge 1.3, for assignments
 
 The 1.1 profile already carries everything this project emits today. Quizzes and question banks (`imsqti_xmlv1p2`), discussion topics, web links, LTI links, and the authorization attributes are all in 1.1. The only thing worth moving for is **assignments**, which arrive in 1.3.
 
@@ -75,17 +72,17 @@ The cost is reach. Brightspace and Canvas read up to 1.3, Blackboard up to 1.2, 
 
 Worth doing when there's an assignment to ship, not before.
 
-## 6. A web front end
+## 5. A web front end
 
 Here's why the configuration is schema-driven and why conversion becomes a library: a front end needs to render a form from the settings that exist, write a complete config back without losing anything, and report progress and failures structurally.
 
 Two pieces are already in place for it: the schema carries a description per setting, which is what a form's help text should say, and the writer is proven lossless by test. The third piece (resolving a config in JavaScript) is what the conformance fixtures in `tests/config/` exist to make safe.
 
-## 7. A check-only run, and a source audit
+## 6. A check-only run, and a source audit
 
 Almost everything an automated accessibility check can say about a book already exists here in pieces: the table census and classifier (what shape every table takes, what the run would guess, and the evidence), the output check with the two validators it folds in, the alt-text, caption, and header reports, the media identification, `docx-compat.py`, and what the filter knows about Word's export. What is missing is a front door: a way to point all of it at a directory or a file and get the report without producing output, and a report on a Word source that says what is wrong with it *as a source*. That is plumbing over existing parts, with Ace and veraPDF staying external, and it would make the project useful to someone who is not converting anything yet.
 
-## 8. Splitting into separate repositories
+## 7. Splitting into separate repositories
 
 Eventually the two halves may be separate projects with a small shared library between them. Both standalone cases are already close: packaging is read-only with respect to page content and runs against any directory of HTML, and conversion has no packaging logic. v0.2 removed the last coupling, which was the config.
 
@@ -155,3 +152,5 @@ The distinction between the two matters more than either case. A table whose rea
 ## Done in 0.5, recorded here because the roadmap named it
 
 **Rewriting the publisher's links.** Shipped as `links.rewrite_publisher`: a link to a page of the book on the publisher's site becomes a link to the page here, in every output, when the book has the page. What is left of the item is the link-text question that held it (a bare URL as link text, which the WCAG reading in the notes says conforms at level A and is a bad experience), and that is the sidecar item below it.
+
+**Merging sections into chapters** shipped with `merge: groups` on a markdown target; see the changelog for v0.6.

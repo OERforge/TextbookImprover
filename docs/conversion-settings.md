@@ -88,6 +88,10 @@ What happens to links on the way through.
 
 A link to a page of this book on the publisher's site -- https://openstax.org/books/<book>/pages/<page>#anchor, the shape OpenStax's export uses for its index and its cross-references -- becomes a link to the page here, anchor and all, when the book has that page. A link to a page the book doesn't have is left as it is.
 
+**`merge`**—one of `False`, `groups`; default `false`
+
+For a markdown target: off writes one file per page, as the rest of the run sees pages. groups writes one file per top-level entry of the book's contents, with each page under it as a section, so a book whose sources are one file per section comes back as one file per chapter. Links between merged pages become links inside the file, and links to a page in another file name that file.
+
 ## notes
 
 Where footnotes go and how they count, once a source has been cut into pages. Pandoc numbers them per page and keeps each page's at its end; these settings rearrange that in the rendered pages and in the EPUB alike.

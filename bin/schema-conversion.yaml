@@ -225,6 +225,19 @@ keys:
           has that page. A link to a page the book doesn't have is left
           as it is.
 
+  merge:
+    type: enum
+    values: [off, groups]
+    stage: render
+    default: off
+    description: >
+      For a markdown target: off writes one file per page, as the rest
+      of the run sees pages. groups writes one file per top-level entry
+      of the book's contents, with each page under it as a section, so
+      a book whose sources are one file per section comes back as one
+      file per chapter. Links between merged pages become links inside
+      the file, and links to a page in another file name that file.
+
   notes:
     stage: render
     description: >

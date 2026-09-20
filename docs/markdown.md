@@ -25,6 +25,25 @@ Word says nothing about which cells head a table or what a link is for; a Markdo
 
 **Raw LaTeX.** `\frontmatter`, `\chaptermark{…}`, and the like pass through Pandoc as raw blocks, which the HTML and EPUB writers drop. A PDF target, when there is one, would carry them.
 
+### Merging sections into chapters
+
+A book whose sources are one file per section, as OpenStax ships them, comes back as one file per chapter when the target says so:
+
+```yaml
+targets:
+  src:
+    format: markdown
+    merge: groups
+```
+
+One file per top-level entry of the book's [contents](configuration.md#contents), named after the source its pages came from when they share one and after the entry's title otherwise; each page becomes a section under it, nested the way the book is, so a chapter's sections are one level down and pages cut from them another. A page the contents never names is a file of its own, so nothing is dropped. On *Introductory Business Statistics 2e* that is 853 pages into 17 files.
+
+What merging follows is the book's declared structure, so it's worth declaring it: with no `contents`, the guess is used, and for a single source cut into pages that is mostly a flat list, which gives one file per page and merges little. Declare the chapters as groups and each becomes a file.
+
+Media travel under the names the author gave them, since what a markdown target writes is source; every other target copies them under names that need no encoding in a link.
+
+Links follow: a link to a page now in the same file becomes a link to its anchor, one to a page in another file names that file, and a link naming a file that no longer has a page of its own points at the file. Each merged page keeps an anchor of its own name, so a link can still reach it. Where two pages of a chapter used the same id (the export numbers some anchors per file), the later one is renamed and the links in that page follow it, which can only be done here, while the page boundary is still known.
+
 ## A book written for a Pandoc PDF build
 
 A Markdown book is often set up for `pandoc *.md -o book.pdf`: a `_preamble.md` opening with a YAML block (title, author, LaTeX `header-includes`, `toc: true`, `pdfstandard`) and the front-matter chapters, then one file per chapter, then a back-matter file. Nothing about that needs changing for this pipeline, and only its structure is read: `\frontmatter`, `\mainmatter`, `\appendix`, `\backmatter`, and `{.appendix}` on a heading give the pages their `role` (see [Contents](configuration.md#contents)), and with `numbering: true` the HTML, EPUB, and cartridge count chapters and appendices the way the PDF does; `generate: toc` in `contents` makes the full table of contents a page. The preamble is a page like the others: its YAML becomes that page's metadata (the title is its title; epigraphs in `include-before` appear on that page in HTML), and with `split_level: 2` its front-matter chapters become pages of their own. The book's title, author, and structure come from `project.yaml`, as for any book. The PDF build stays the author's own Pandoc invocation until the PDF target exists, and that target is what would consume the preamble as written.

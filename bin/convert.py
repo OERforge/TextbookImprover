@@ -60,6 +60,7 @@ import json
 import os
 import re
 import shutil
+import copy
 import subprocess
 import sys
 import tempfile
@@ -726,10 +727,12 @@ PUBLISHER_PAGE = re.compile(r"^https?://[^/]+/books/[^/]+/pages/([^#?/]+)([#?].*
 
 
 def rewrite_publisher_links(pages):
-    """A link to one of this book's pages on the publisher's site becomes
-    a link to the page here. Runs on the filtered intermediates before
-    the split, so the split and the assembler treat it as any other link
-    between pages."""
+    """A link to one of this book's pages becomes a link to the page
+    here: from the publisher's site, or from a Markdown source naming
+    another source by file name. Runs on the filtered intermediates
+    before the split, so the split and the assembler treat it as any
+    other link between pages; a markdown target turns it back into a
+    link to the .md file when it merges."""
     stems = {os.path.basename(p)[:-len(INTERMEDIATE)] for p in pages}
     total = 0
     for path in pages:
@@ -747,6 +750,16 @@ def rewrite_publisher_links(pages):
                         node["c"][2][0] = safe_stem(m.group(1)) + ".html" \
                             + (m.group(2) or "")
                         count += 1
+                    else:
+                        # A Markdown source naming another source: the
+                        # page is what a reader wants, in whatever the
+                        # target writes.
+                        local = re.match(r"^([^/#?:]+)\.md(#.*)?$", target)
+                        if local and safe_stem(local.group(1)) in stems:
+                            node["c"][2][0] = (safe_stem(local.group(1))
+                                               + ".html"
+                                               + (local.group(2) or ""))
+                            count += 1
                 for value in node.values():
                     walk(value)
             elif isinstance(node, list):
@@ -781,16 +794,296 @@ def split_pages(target, pages, paths, reports):
     return [line for line in result.stdout.split("\n") if line.strip()]
 
 
-def render_markdown(target, pages, base, env):
-    """One Markdown file per intermediate, as source: what the author
-    decided, in Pandoc's own flavor, and nothing the filter derived. A
-    target with no split writes one file per source document; one with
-    a split writes the pages."""
+def inline_text(text):
+    """A string as Pandoc inlines."""
+    out = []
+    for index, word in enumerate(text.split()):
+        if index:
+            out.append({"t": "Space"})
+        out.append({"t": "Str", "c": word})
+    return out
+
+
+def with_depth(entry, titles, depth):
+    """(stem, title, depth) for a contents entry and everything under
+    it, so a merged file keeps the nesting the book declares: a
+    chapter's sections are one level down, their own pages another."""
+    kind, a, b = entry
+    if kind == "page":
+        return [(a, titles.get(a, a), depth)]
+    out = []
+    for index, child in enumerate(b):
+        # A group's own opening page is the group, not a level below it.
+        child_depth = depth if (index == 0 and child[0] == "page"
+                                and (child[2] or titles.get(child[1]))
+                                == a) else depth + 1
+        out += with_depth(child, titles, child_depth)
+    return out
+
+
+def merge_plan(tree, titles, pages):
+    """[(file stem, group title, [(page stem, page title)])] for a
+    markdown target that merges: one file per top-level contents entry,
+    the pages under it in reading order. A page not in contents is a
+    file of its own, so nothing is lost."""
+    have = {os.path.basename(p)[:-len(INTERMEDIATE)]: p for p in pages}
+    plan, placed, used_names = [], set(), set()
+    for entry in tree:
+        kind, a, b = entry
+        if is_generated(entry):
+            continue
+        members = [(s, t, d) for s, t, d in with_depth(entry, titles, 0)
+                   if s in have]
+        if not members:
+            continue
+        title = a if kind == "group" else titles.get(a, a)
+        # The file takes the name of the source its pages came from, so a
+        # chapter keeps the name the author knows -- but only when they
+        # are all of that source. A single-file book cut into chapters
+        # has one source for every group, and each file is named for its
+        # own entry instead.
+        sources = {m[0].split("--", 1)[0] for m in members}
+        stem = None
+        if len(sources) == 1:
+            source = next(iter(sources))
+            whole = sum(1 for s in have if s.split("--", 1)[0] == source)
+            if whole == len(members):
+                stem = source
+        stem = stem or safe_stem(title) or safe_stem(members[0][0])
+        if stem in used_names:
+            n = 2
+            while f"{stem}-{n}" in used_names:
+                n += 1
+            stem = f"{stem}-{n}"
+        used_names.add(stem)
+        plan.append((stem, title, members))
+        placed.update(m[0] for m in members)
+    for stem in have:
+        if stem not in placed:
+            plan.append((stem, titles.get(stem, stem),
+                         [(stem, titles.get(stem, stem), 0)]))
+    return plan
+
+
+def header_levels(node, found):
+    if isinstance(node, dict):
+        if node.get("t") == "Header":
+            found.append(node["c"][0])
+        for value in node.values():
+            header_levels(value, found)
+    elif isinstance(node, list):
+        for item in node:
+            header_levels(item, found)
+
+
+def shift_headers(blocks, by):
+    for block in blocks:
+        if isinstance(block, dict):
+            if block.get("t") == "Header":
+                block["c"][0] = max(1, min(6, block["c"][0] + by))
+            for value in block.values():
+                if isinstance(value, (list, dict)):
+                    shift_headers(value if isinstance(value, list)
+                                  else [value], by)
+
+
+def retarget_links(blocks, where):
+    """A link to a page becomes a link to the file that page is in:
+    inside this file, just the fragment; in another, that file and the
+    page's anchor."""
+    def walk(node, here):
+        if isinstance(node, dict):
+            if node.get("t") == "Link":
+                target = node["c"][2][0]
+                m = re.match(r"^([^/#?]+)\.html(#.*)?$", target)
+                if m and m.group(1) in where:
+                    stem, fragment = m.group(1), m.group(2) or ""
+                    holder = where[stem]
+                    names_file = stem == holder    # the file, not a page
+                    if holder == here:
+                        node["c"][2][0] = fragment or (
+                            "" if names_file else "#" + stem)
+                    else:
+                        node["c"][2][0] = holder + ".md" + (
+                            fragment or ("" if names_file else "#" + stem))
+            for value in node.values():
+                walk(value, here)
+        elif isinstance(node, list):
+            for item in node:
+                walk(item, here)
+    walk(blocks, where.get("__here__"))
+
+
+def ids_in(node, found):
+    if isinstance(node, dict):
+        attr = None
+        if node.get("t") in ("Header", "Div", "Span", "Table", "Figure",
+                             "CodeBlock", "Code", "Link", "Image"):
+            c = node.get("c")
+            if isinstance(c, list):
+                for part in c:
+                    if (isinstance(part, list) and len(part) == 3
+                            and isinstance(part[0], str)):
+                        attr = part
+                        break
+        if attr and attr[0]:
+            found.append(attr)
+        for value in node.values():
+            ids_in(value, found)
+    elif isinstance(node, list):
+        for item in node:
+            ids_in(item, found)
+
+
+def unique_within_file(body, seen):
+    """Rename ids this file has already used, and repoint the links in
+    this page that named them. Two pages of a chapter each carry an
+    anchor the export numbered per file; merged, one has to move, and
+    only here is it known which links belong with which copy."""
+    attrs = []
+    ids_in(body, attrs)
+    renamed = {}
+    raw_blocks = []
+
+    def collect_raw(node):
+        if isinstance(node, dict):
+            if node.get("t") in ("RawBlock", "RawInline") \
+                    and isinstance(node.get("c"), list) \
+                    and node["c"][0] in ("html", "html5"):
+                raw_blocks.append(node)
+            for value in node.values():
+                collect_raw(value)
+        elif isinstance(node, list):
+            for item in node:
+                collect_raw(item)
+    collect_raw(body)
+    for attr in attrs:
+        old = attr[0]
+        if old not in seen:
+            seen.add(old)
+            continue
+        base_id = re.sub(r"-\d+$", "", old)
+        n = 1
+        while f"{base_id}-{n}" in seen:
+            n += 1
+        attr[0] = f"{base_id}-{n}"
+        seen.add(attr[0])
+        renamed[old] = attr[0]
+    # Ids inside a fenced HTML block (a merged-cell table the Markdown
+    # target wrote that way) collide too, and no attribute holds them.
+    for node in raw_blocks:
+        def rename_raw(m):
+            old_id = m.group(2)
+            if old_id in seen and old_id not in renamed:
+                base_id = re.sub(r"-\d+$", "", old_id)
+                n = 1
+                while f"{base_id}-{n}" in seen:
+                    n += 1
+                renamed[old_id] = f"{base_id}-{n}"
+                seen.add(renamed[old_id])
+            elif old_id not in seen:
+                seen.add(old_id)
+            return m.group(1) + renamed.get(old_id, old_id) + m.group(3)
+        node["c"][1] = re.sub(r'(\sid=")([^"]+)(")', rename_raw, node["c"][1])
+    for node in raw_blocks:
+        node["c"][1] = re.sub(
+            r'(href="#)([^"]+)(")',
+            lambda m: m.group(1) + renamed.get(m.group(2), m.group(2))
+            + m.group(3), node["c"][1])
+
+    if renamed:
+        def walk(node):
+            if isinstance(node, dict):
+                if node.get("t") == "Link":
+                    target = node["c"][2][0]
+                    if target.startswith("#") and target[1:] in renamed:
+                        node["c"][2][0] = "#" + renamed[target[1:]]
+                for value in node.values():
+                    walk(value)
+            elif isinstance(node, list):
+                for item in node:
+                    walk(item)
+        walk(body)
+    return len(renamed)
+
+
+def merged_document(members, title, where, holder, base):
+    """One document from several pages: the group's title as its own
+    heading, each page a section under it, every page anchored by its
+    stem so a link can still name it."""
+    api, blocks, seen, moved = None, [], set(), 0
+    for index, (stem, page_title, depth) in enumerate(members):
+        with open(os.path.join(base, stem + INTERMEDIATE),
+                  encoding="utf-8") as fh:
+            doc = json.load(fh)
+        api = api or doc["pandoc-api-version"]
+        body = copy.deepcopy(doc["blocks"])
+        level = min(6, depth + 1)
+        # The page's own headings continue below its heading in the
+        # merged file, whatever level they started at: a page whose
+        # first heading is an h2 under a section at h2 becomes h3, not
+        # h4. Shifting by the level alone skipped a level per page.
+        levels = []
+        header_levels(body, levels)
+        shift = (level + 1 - min(levels)) if levels else 0
+        shift_headers(body, shift)
+        # The page's own anchor, which a previous merge wrote as the
+        # heading's id and the split preserved: the heading below
+        # carries it again, so one copy is enough.
+        body = [b for b in body
+                if not (isinstance(b, dict) and b.get("t") in ("Div", "Plain")
+                        and not json.dumps(b.get("c", [])).count('"Str"')
+                        and stem in json.dumps(b.get("c", []))[:200])]
+        seen.add(stem)
+        moved += unique_within_file(body, seen)
+        opens_group = index == 0 and page_title == title
+        heading = {"t": "Header", "c": [level, [stem, [], []],
+                                        inline_text(page_title)]}
+        if opens_group:
+            # The group's own opening page: its content follows the
+            # file's heading rather than repeating the title.
+            blocks += body
+        else:
+            blocks += [heading] + body
+    where = dict(where); where["__here__"] = holder
+    retarget_links(blocks, where)
+    if moved:
+        say(f"  {holder}: {moved} id(s) renamed where two pages used one")
+    return {"pandoc-api-version": api,
+            "meta": {"title": {"t": "MetaString", "c": title}},
+            "blocks": blocks}
+
+
+def render_markdown(target, pages, base, work, project, env):
+    """Markdown files as source: what the author decided, in Pandoc's
+    own flavor, and nothing the filter derived. One file per page, or
+    with merge: groups, one per top-level entry of the book's contents,
+    each page a section under it."""
     env = dict(env, TARGET_NAME=target.name)
     os.makedirs(target.output_dir, exist_ok=True)
+    jobs = [(os.path.basename(p)[:-len(INTERMEDIATE)], p) for p in pages]
+    if str(target["merge"]) == "groups":
+        tree, titles, _ = book_tree(project, pages,
+                                    numbering_for(target, project))
+        plan = merge_plan(tree, titles, pages)
+        where = {stem: holder for holder, _, members in plan
+                 for stem, _, _ in members}
+        # A link may name the file itself (the source a chapter's pages
+        # were cut from), which is no longer a page of its own.
+        for holder, _, _ in plan:
+            where.setdefault(holder, holder)
+        jobs = []
+        for holder, title, members in plan:
+            document = merged_document(members, title, where, holder,
+                                       os.path.dirname(pages[0]))
+            source = os.path.join(work, f"{target.name}-{holder}.json")
+            with open(source, "w", encoding="utf-8") as fh:
+                json.dump(document, fh)
+            jobs.append((holder, source))
+        say(f"{target.name}: {len(pages)} page(s) merged into "
+            f"{len(jobs)} file(s).")
     written = []
-    for page in pages:
-        stem = os.path.basename(page)[:-len(INTERMEDIATE)]
+    for stem, page in jobs:
         out = os.path.join(target.output_dir, stem + ".md")
         # Pipe or grid tables, which keep an empty cell and a
         # multi-paragraph one. What Markdown cannot say (a merged-cell
@@ -805,7 +1098,7 @@ def render_markdown(target, pages, base, env):
              "--lua-filter=" + TARGET_FILTER,
              "--lua-filter=" + MARKDOWN_FILTER], env=env, cwd=base)
         written.append(out)
-    copy_media(base, target.output_dir, pages)
+    copy_media(base, target.output_dir, pages, safe=False)
     return written
 
 
@@ -1033,7 +1326,7 @@ def arrange_notes(target, pages, base, work, fragments, language, env):
     return written
 
 
-def copy_media(base, output_dir, pages):
+def copy_media(base, output_dir, pages, safe=True):
     """Every local image a page refers to, copied beside the page at the
     same relative path: <source>/media/... for what was extracted from a
     .docx, assets/... or wherever for what a Markdown source names. A
@@ -1047,8 +1340,12 @@ def copy_media(base, output_dir, pages):
             src = os.path.normpath(os.path.join(base, unquote(ref)))
             if not os.path.isfile(src):
                 continue
-            # Under the safe name safe-media.lua wrote into the page.
-            dest = os.path.join(output_dir, safe_path(unquote(ref)))
+            # Under the safe name safe-media.lua wrote into the page;
+            # a markdown target writes source, whose references are the
+            # author's, so its copies keep the author's names.
+            dest = os.path.join(output_dir,
+                                safe_path(unquote(ref)) if safe
+                                else unquote(ref))
             if os.path.abspath(dest) == os.path.abspath(src):
                 continue
             os.makedirs(os.path.dirname(dest), exist_ok=True)
@@ -1239,7 +1536,7 @@ def main():
                 written[target.name] = render_markdown(
                     target, [p for p in pages_by_dir[target.pages_dir]
                              if os.path.basename(p)[:-len(INTERMEDIATE)]
-                             not in hand_stems], base, renv)
+                             not in hand_stems], base, work, project, renv)
             if target.format == "html":
                 rendered = [p for p in pages_by_dir[target.pages_dir]
                             if os.path.basename(p)[:-len(INTERMEDIATE)]

@@ -321,9 +321,82 @@ def case_parsers(work):
     return checks
 
 
+def warc_record(url, http, body, chunked=False, gzipped=False):
+    import gzip as gz
+    headers = "HTTP/1.1 " + http + "\r\n"
+    if gzipped:
+        body = gz.compress(body)
+        headers += "Content-Encoding: gzip\r\n"
+    if chunked:
+        half = len(body) // 2
+        body = b"".join(b"%x\r\n" % len(c) + c + b"\r\n"
+                        for c in (body[:half], body[half:])) + b"0\r\n\r\n"
+        headers += "Transfer-Encoding: chunked\r\n"
+    block = (headers + "\r\n").encode() + body
+    record = (f"WARC/1.1\r\nWARC-Type: response\r\nWARC-Target-URI: {url}"
+              f"\r\nContent-Length: {len(block)}\r\n\r\n").encode() + block \
+        + b"\r\n\r\n"
+    return gz.compress(record)
+
+
+def case_warc(work):
+    os.makedirs(work)
+    page = """<html><head><title>{t} | Archived</title></head><body>
+<nav><ul><li><a href="/book/one.html">One</a></li><li><a href="/book/two.html">
+Two</a></li><li><a href="/book/three.html">Three</a></li></ul></nav>
+<main><h1>{t}</h1><p><a href="/book/old.html#here">moved</a>
+<img src="/book/pic.png" alt="p"></p></main></body></html>"""
+    records = [
+        warc_record(SITE + "book/one.html", "200 OK\r\nContent-Type: text/html",
+                    page.format(t="One").encode()),
+        warc_record(SITE + "book/two.html", "200 OK\r\nContent-Type: text/html; "
+                    "charset=utf-8", page.format(t="Two").encode(),
+                    chunked=True, gzipped=True),
+        warc_record(SITE + "book/three.html", "200 OK\r\nContent-Type: text/html",
+                    page.format(t="Three").encode(), gzipped=True),
+        warc_record(SITE + "book/old.html", "301 Moved\r\nLocation: /book/three.html",
+                    b""),
+        warc_record(SITE + "book/pic.png", "200 OK\r\nContent-Type: image/png",
+                    PNG, chunked=True),
+    ]
+    warc = os.path.join(work, "crawl.warc.gz")
+    with open(warc, "wb") as fh:
+        fh.write(b"".join(records))
+    wacz = os.path.join(work, "crawl.wacz")
+    import zipfile
+    with zipfile.ZipFile(wacz, "w") as z:
+        z.write(warc, "archive/data.warc.gz")
+        z.writestr("datapackage.json", "{}")
+    out, out2 = os.path.join(work, "book"), os.path.join(work, "book2")
+    result = unpack([warc], out)
+    unpack([wacz], out2)
+    two = read(out, "two.html") if os.path.exists(os.path.join(out, "two.html")) \
+        else ""
+    return [
+        ("a WARC's HTML responses are the pages, gzipped per record, "
+         "chunked, and content-encoded",
+         lambda: result.returncode == 0 and sorted(
+             n for n in os.listdir(out) if n.endswith(".html"))
+         == ["one.html", "three.html", "two.html"] and "<h1>Two</h1>" in two),
+        ("a link to a URL that redirected goes where the redirect went",
+         lambda: 'href="three.html#here"' in two),
+        ("a resource is its response's body",
+         lambda: open(os.path.join(out, "assets", "pic.png"), "rb").read()
+         == PNG),
+        ("the menu gives the order",
+         lambda: "page: one" in read(out, "project.yaml")
+         and read(out, "project.yaml").index("page: two")
+         < read(out, "project.yaml").index("page: three")),
+        ("a WACZ holding the same WARC gives the same pages",
+         lambda: all(read(out, n) == read(out2, n)
+                     for n in ("one.html", "two.html", "three.html"))),
+    ]
+
+
 CASES = [
     ("a browser's saves", case_browser_save),
     ("an MHTML set", case_mhtml),
+    ("a WARC and a WACZ", case_warc),
     ("the parsers", case_parsers),
 ]
 

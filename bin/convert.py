@@ -90,6 +90,8 @@ TARGET_FILTER = os.path.join(HERE, "target-blocks.lua")
 MARKDOWN_FILTER = os.path.join(HERE, "markdown-source.lua")
 HTML_SOURCE_FILTER = os.path.join(HERE, "html-source.lua")
 HTML_RAW_FILTER = os.path.join(HERE, "html-raw.lua")
+ASCIIDOC_FILTER = os.path.join(HERE, "asciidoc-source.lua")
+INCLUDE = re.compile(r"^include::([^\[\s]+\.(?:adoc|asciidoc|asc))\[", re.M)
 SOURCE_EXTENSIONS = (".docx", ".md", ".html")
 PAGE_CSS = os.path.join(HERE, "page.css")
 HEADERS_TOOL = os.path.join(HERE, "table-headers.py")
@@ -319,6 +321,147 @@ def markdown_sources(base, fragments):
             continue
         found.append(name)
     return found
+
+
+def asciidoc_sources(base):
+    """(sources, order, attributes): the AsciiDoc files this run converts,
+    the order a master file gives them, and the master's imagesdir, which
+    the files it includes would have inherited.
+
+    A master is a file that include::s others. Read through it, Pandoc's
+    reader (3.11) loses each included chapter's title and ignores
+    :leveloffset:, so the master isn't read. Each file it includes is a
+    source in its own right, whose title is its = line, and the order
+    it includes them in is the book's order."""
+    sources, order, masters, imagesdir = [], [], [], ""
+    for path in sorted(glob.glob(os.path.join(base, "*.adoc"))
+                       + glob.glob(os.path.join(base, "*.asciidoc"))):
+        name = os.path.basename(path)
+        if is_variant(name):
+            continue
+        with open(path, encoding="utf-8", errors="replace") as fh:
+            text = fh.read()
+        included = [n for n in INCLUDE.findall(text)
+                    if os.path.isfile(os.path.join(base, n)) and "/" not in n]
+        if included:
+            masters.append(name)
+            m = re.search(r"^:imagesdir:\s*(\S+)\s*$", text, re.M)
+            imagesdir = imagesdir or (m.group(1) if m else "")
+            order += [n for n in included if n not in order]
+        else:
+            sources.append(name)
+    for name in masters:
+        say(f"{name} includes other files, so it is the book's order and "
+            "not a page: each file it includes is read on its own.")
+    return sources, order, imagesdir
+
+
+def read_asciidoc_to_json(base, docs, env, imagesdir=""):
+    """An AsciiDoc source, read into the same intermediate a .docx gets.
+    asciidoc-source.lua applies imagesdir, moves the sections below the
+    title, and drops Asciidoctor's own settings from the metadata."""
+    stems = []
+    env = dict(env, ASCIIDOC_IMAGESDIR=imagesdir)
+    for name in docs:
+        stem = safe_stem(os.path.splitext(name)[0])
+        run(["pandoc", "-f", "asciidoc", "-t", "json", name,
+             "-o", stem + ".json", "--lua-filter=" + ASCIIDOC_FILTER,
+             "--lua-filter=" + MEDIA_FILTER], env=env, cwd=base)
+        portable_media_paths(os.path.join(base, stem + ".json"), base, name)
+        stems.append(stem)
+    return stems
+
+
+def resolve_asciidoc_xrefs(base, stems):
+    """Cross-references between the chapters of an AsciiDoc book, which
+    were one document when Asciidoctor built it and are pages here.
+
+    <<Unix File Permissions>> names a section by its title; Asciidoctor
+    resolves that to the section's id, and Pandoc's reader (3.11) leaves
+    the title as the fragment. <<crypto_review>> names an id that may
+    now be in another chapter. Each such link goes to the heading or the
+    id, on whichever page holds it, when exactly one does. Returns the
+    number resolved."""
+    docs, ids, titles = {}, {}, {}
+
+    def text(inlines):
+        return " ".join("".join(i.get("c", " ") if i["t"] == "Str" else " "
+                                for i in inlines).split())
+
+    def collect(node, stem):
+        if isinstance(node, dict):
+            kind, c = node.get("t"), node.get("c")
+            if kind == "Header":
+                ids.setdefault(c[1][0], set()).add(stem)
+                titles.setdefault(text(c[2]), set()).add((stem, c[1][0]))
+            elif kind in ("Div", "Span", "Figure", "Table", "CodeBlock",
+                          "Code", "Link", "Image") and c and c[0][0]:
+                ids.setdefault(c[0][0], set()).add(stem)
+            for value in node.values():
+                collect(value, stem)
+        elif isinstance(node, list):
+            for value in node:
+                collect(value, stem)
+    for stem in stems:
+        with open(os.path.join(base, stem + ".json"), encoding="utf-8") as fh:
+            docs[stem] = json.load(fh)
+        collect(docs[stem]["blocks"], stem)
+        # <<Malware>> names a chapter, whose title is its = line: metadata.
+        title = docs[stem].get("meta", {}).get("title")
+        if title and title.get("t") == "MetaInlines":
+            titles.setdefault(text(title["c"]), set()).add((stem, ""))
+    resolved = 0
+
+    def fix(node, stem):
+        nonlocal resolved
+        if isinstance(node, dict):
+            if node.get("t") == "Link":
+                target = node["c"][2]
+                if target[0].startswith("#"):
+                    fragment = target[0][1:]
+                    if stem not in ids.get(fragment, ()):
+                        where = None
+                        if len(titles.get(fragment, ())) == 1:
+                            where = next(iter(titles[fragment]))
+                        elif len(ids.get(fragment, ())) == 1:
+                            where = (next(iter(ids[fragment])), fragment)
+                        if where:
+                            page, anchor = where
+                            target[0] = ("" if page == stem
+                                         else page + ".html") + (
+                                "#" + anchor if anchor else "")
+                            resolved += 1
+            for value in node.values():
+                fix(value, stem)
+        elif isinstance(node, list):
+            for value in node:
+                fix(value, stem)
+    for stem, doc in docs.items():
+        before = resolved
+        fix(doc["blocks"], stem)
+        if resolved != before:
+            with open(os.path.join(base, stem + ".json"), "w",
+                      encoding="utf-8") as fh:
+                json.dump(doc, fh)
+    if resolved:
+        say(f"{resolved} AsciiDoc cross-reference(s) resolved to the "
+            "section or id they name.")
+    return resolved
+
+
+def write_order_sample(order):
+    """The order a master AsciiDoc file includes its chapters in, as
+    contents for project.yaml. Not applied: contents is the author's,
+    and this run guesses as it always has until it is declared."""
+    import yaml
+    stems = [safe_stem(os.path.splitext(n)[0]) for n in order]
+    with open(CONTENTS_SAMPLE, "w", encoding="utf-8") as fh:
+        fh.write("# Written by convert.py: the order the master AsciiDoc "
+                 "file includes its\n# chapters in. Copy the contents into "
+                 "project.yaml to use it.\n" + yaml.safe_dump(
+                     {"project": {"contents": stems}}, sort_keys=False))
+    say(f"No contents declared: {CONTENTS_SAMPLE} holds the order the "
+        "master file gives. Copy it into project.yaml to use it.")
 
 
 def source_documents(base):
@@ -1719,6 +1862,12 @@ def main():
         stems += read_markdown_to_json(base, markdown_sources(base,
                                                               fragment_files),
                                        env)
+        adoc, adoc_order, imagesdir = asciidoc_sources(base)
+        adoc_stems = read_asciidoc_to_json(base, adoc, env, imagesdir)
+        resolve_asciidoc_xrefs(base, adoc_stems)
+        stems += adoc_stems
+        if adoc_order and not project.get("contents"):
+            write_order_sample(adoc_order)
         web = html_sources(base, project, stems)
         for target in targets:
             if web and target.format == "html" and os.path.abspath(
@@ -1728,8 +1877,8 @@ def main():
                     "it an output_dir of its own.")
         stems += read_html_to_json(base, web, env, work)
         if not stems:
-            die("No .docx, .md, or .html files here, so there is nothing "
-                "to convert.")
+            die("No .docx, .md, .adoc, or .html files here, so there is "
+                "nothing to convert.")
         warn_about_leftovers(base, stems, fragment_files, web)
 
         # ---- 2. the gate ------------------------------------------------------

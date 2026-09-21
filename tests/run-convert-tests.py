@@ -338,6 +338,49 @@ def same_pages(one, two):
         == open(os.path.join(two, n), "rb").read() for n in names)
 
 
+def case_asciidoc(work):
+    """An AsciiDoc book: a master file that includes its chapters."""
+    os.makedirs(os.path.join(work, "images"))
+    with open(os.path.join(work, "images", "lock.png"), "wb") as fh:
+        fh.write(ONE_PIXEL)
+    files = {
+        "index.adoc": "= The Book\n:imagesdir: images\n:toc: left\n\n"
+                      "include::one.adoc[]\n\ninclude::two.adoc[]\n",
+        "one.adoc": "= Chapter One\n\n== Keys\n\nSee <<Locks>> and "
+                    "<<Chapter Two>>.\n\nimage::lock.png[A lock]\n",
+        "two.adoc": "= Chapter Two\n\n[[locks-id]]\n== Locks\n\nBack to "
+                    "<<Keys>>.\n",
+    }
+    for name, text in files.items():
+        with open(os.path.join(work, name), "w", encoding="utf-8") as fh:
+            fh.write(text)
+    result = convert(work, "targets:\n  html:\n    format: html\n")
+    one = read(work, "html", "one.html") if exists(work, "html",
+                                                    "one.html") else ""
+    sample = read(work, "contents-sample.yaml") if exists(
+        work, "contents-sample.yaml") else ""
+    return [
+        ("each included file is a page, and the master isn't",
+         lambda: result.returncode == 0 and one
+         and exists(work, "html", "two.html")
+         and not exists(work, "html", "index.html")),
+        ("the chapter's = line is its title, its == sections are h2",
+         lambda: "<title>Chapter One</title>" in one
+         and re.search(r"<h2[^>]*>Keys</h2>", one)),
+        ("an image takes the master's imagesdir",
+         lambda: 'src="images/lock.png"' in one),
+        ("Asciidoctor's own settings don't reach the page",
+         lambda: 'id="TOC"' not in one),
+        ("a reference by section title or chapter title lands, across "
+         "chapters",
+         lambda: 'href="two.html#locks-id"' in one
+         and 'href="two.html"' in one
+         and 'href="one.html#_keys"' in read(work, "html", "two.html")),
+        ("the master's order is offered as contents",
+         lambda: sample.index("- one") < sample.index("- two")),
+    ]
+
+
 def case_html_source(work):
     """An HTML page is a source when the book says so, and converting
     what this pipeline wrote changes nothing."""
@@ -777,6 +820,7 @@ CASES = [
     ("footnote numbering and placement", case_notes),
     ("a Markdown source", case_markdown),
     ("an HTML source", case_html_source),
+    ("an AsciiDoc source", case_asciidoc),
     ("a hand-written page", case_hand_written),
     ("several targets", case_targets),
     ("arguments passed to the packager", case_passthrough),

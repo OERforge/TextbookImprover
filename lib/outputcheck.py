@@ -212,6 +212,9 @@ def check_page(page, findings):
         elif not alt.strip() and not decorative:
             findings.append(Finding(where, "image-empty-alt-not-decorative",
                                     src))
+        elif alt_is_file_name(alt, src):
+            findings.append(Finding(where, "image-alt-is-file-name",
+                                    f"{src}: {alt!r}"))
     last = 0
     for level, text in page.headings:
         if not text:
@@ -404,6 +407,22 @@ def summarize(findings):
     return sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
 
 
+def alt_is_file_name(alt, src):
+    """True when the alt text says only what the file is called:
+    "db locked" for db-locked.png, which is what Asciidoctor writes when
+    the author gave none (49 of one EPUB's 51 images), and what several
+    editors fill in. It passes a check for alt's presence and describes
+    nothing."""
+    import posixpath
+    import re
+    from urllib.parse import unquote
+    leaf = posixpath.basename(unquote(src.split("?", 1)[0].split("#", 1)[0]))
+    def squash(text):
+        return re.sub(r"[\W_]+", "", text).lower()
+    stem = leaf.rsplit(".", 1)[0]
+    return bool(squash(alt)) and squash(alt) in (squash(stem), squash(leaf))
+
+
 # Kept for callers that only have a regex to hand: what a check name means.
 DESCRIPTIONS = {
     "link-to-missing-file": "a link names a file that is not in the set",
@@ -411,6 +430,7 @@ DESCRIPTIONS = {
     "image-without-alt": "an img element has no alt attribute",
     "image-empty-alt-not-decorative":
         "alt is empty but the image is not marked aria-hidden=\"true\"",
+    "image-alt-is-file-name": "an img's alt only repeats its file name",
     "heading-skips-level": "a heading is more than one level below the last",
     "empty-heading": "a heading with no text",
     "duplicate-id": "an id used more than once in one document",

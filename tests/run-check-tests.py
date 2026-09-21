@@ -52,7 +52,7 @@ OTHER = """<!DOCTYPE html><html lang="en"><head><title>Other</title></head>
 
 BAD = """<!DOCTYPE html><html><head><title></title></head>
 <body><h1 id="a">A</h1><h3 id="a">Skipped</h3><h2 id="two words"></h2>
-<img src="p.png"><img src="q.png" alt="">
+<img src="p.png"><img src="q.png" alt=""><img src="media/db-locked.png" alt="db locked">
 <table><tr><td>1</td></tr></table>
 <a href="#nowhere">x</a><a href="gone.html">y</a><a href="other.html#no">z</a>
 </body></html>"""
@@ -92,6 +92,7 @@ def main():
                  "heading-skips-level",
                  "empty-heading", "image-without-alt",
                  "image-empty-alt-not-decorative",
+                 "image-alt-is-file-name",
                  "table-without-headers-or-caption",
                  "table-not-in-scroll-region",
                  "link-to-missing-fragment", "link-to-missing-file",

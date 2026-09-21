@@ -6,9 +6,11 @@ However the pages arrived, the first step makes them the same thing. A
 browser's "complete" save is an .html per page that says in a comment
 which URL it was, and a <name>_files directory beside it holding what
 the page used, under names the browser chose. An .mhtml is one message
-per page, each resource a part that names its URL. (A WARC, which every
-archiving crawler writes, is the same thing again and is the next
-loader to add.) From there on, one pipeline:
+per page, each resource a part that names its URL. A WARC, which every
+archiving crawler writes (wget, Browsertrix, ArchiveWeb.page, Heritrix),
+is the best of the three: each URL with the bytes the server sent,
+before any script ran. A WACZ is WARCs in a zip. From there on, one
+pipeline:
 
   - every reference in every page is resolved: against the saved file's
     directory when the browser rewrote it to a local copy, otherwise
@@ -42,7 +44,11 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import email
 import glob
+import gzip
 import hashlib
+import io
+import zlib
+import zipfile
 import os
 import posixpath
 import re
@@ -133,6 +139,7 @@ class Site:
         self.pages = {}
         self.resources = {}
         self.by_url = {}            # resource URL -> key
+        self.redirects = {}         # URL -> where it redirected
         self.notes = []
         self.kind = ""
 
@@ -220,8 +227,141 @@ def load_mhtml(paths):
     return site
 
 
+def _warc_records(stream):
+    """(headers, block) for each record of a WARC, gzipped per record or
+    not: a version line, headers, a blank line, Content-Length bytes."""
+    while True:
+        line = stream.readline()
+        if not line:
+            return
+        if not line.strip():
+            continue
+        if not line.startswith(b"WARC/"):
+            raise ValueError(f"not a WARC record: {line[:40]!r}")
+        headers = {}
+        while True:
+            line = stream.readline()
+            if not line or not line.strip():
+                break
+            name, _, value = line.decode("utf-8", "replace").partition(":")
+            headers[name.strip().lower()] = value.strip()
+        length = int(headers.get("content-length", "0"))
+        yield headers, stream.read(length)
+
+
+def _http_response(block):
+    """(status, headers, body) from an HTTP response as a WARC holds it:
+    chunked transfer undone, gzip or deflate content decoded."""
+    head, _, body = block.partition(b"\r\n\r\n")
+    lines = head.decode("iso-8859-1").split("\r\n")
+    parts = lines[0].split(" ", 2)
+    status = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 0
+    headers = {}
+    for line in lines[1:]:
+        name, _, value = line.partition(":")
+        headers[name.strip().lower()] = value.strip()
+    if "chunked" in headers.get("transfer-encoding", "").lower():
+        out, rest = b"", body
+        while rest:
+            size_line, _, rest = rest.partition(b"\r\n")
+            size = int(size_line.split(b";")[0].strip() or b"0", 16)
+            if size == 0:
+                break
+            out, rest = out + rest[:size], rest[size + 2:]
+        body = out
+    encoding = headers.get("content-encoding", "").lower()
+    if encoding in ("gzip", "x-gzip"):
+        body = gzip.decompress(body)
+    elif encoding == "deflate":
+        try:
+            body = zlib.decompress(body)
+        except zlib.error:
+            body = zlib.decompress(body, -zlib.MAX_WBITS)
+    elif encoding and encoding != "identity":
+        raise ValueError(f"content encoded as {encoding}, which the "
+                         "standard library can't decode")
+    return status, headers, body
+
+
+def _warc_streams(path):
+    """Each WARC in path: the file itself, or a WACZ's archive/*.warc*."""
+    if zipfile.is_zipfile(path):
+        with zipfile.ZipFile(path) as archive:
+            for name in sorted(archive.namelist()):
+                if name.startswith("archive/") and ".warc" in name:
+                    data = archive.read(name)
+                    yield name, (gzip.GzipFile(fileobj=io.BytesIO(data))
+                                 if name.endswith(".gz") else io.BytesIO(data))
+        return
+    with open(path, "rb") as fh:
+        head = fh.read(2)
+    yield path, (gzip.open(path) if head == b"\x1f\x8b" else open(path, "rb"))
+
+
+def load_warc(paths):
+    """Response records from one or more WARC or WACZ files. An HTML
+    response on the host of the first page is a page; anything else a
+    resource. A redirect is followed when a reference is looked up."""
+    site = Site()
+    site.kind = "WARC"
+    htmls = []
+    for path in sorted(paths):
+        for name, stream in _warc_streams(path):
+            with stream:
+                for headers, block in _warc_records(stream):
+                    if headers.get("warc-type") != "response":
+                        continue
+                    url = headers.get("warc-target-uri", "").strip("<>")
+                    if not url.startswith(("http://", "https://")):
+                        continue
+                    try:
+                        status, http, body = _http_response(block)
+                    except ValueError as exc:
+                        site.notes.append((url, "unreadable-response",
+                                           str(exc)))
+                        continue
+                    if 300 <= status < 400 and http.get("location"):
+                        site.redirects[urldefrag(url)[0]] = urljoin(
+                            url, http["location"])
+                        continue
+                    if status != 200:
+                        continue
+                    kind = http.get("content-type", "").split(";")[0].strip()
+                    if kind in ("text/html", "application/xhtml+xml"):
+                        charset = re.search(r"charset=([\w-]+)",
+                                            http.get("content-type", ""))
+                        htmls.append((url, body.decode(
+                            charset.group(1) if charset else "utf-8",
+                            errors="replace")))
+                    else:
+                        leaf = posixpath.basename(urlsplit(url).path)
+                        site.add_resource(body, leaf or "file", url)
+    host = urlsplit(htmls[0][0]).netloc if htmls else ""
+    for url, text in htmls:
+        if urlsplit(url).netloc == host:
+            page = Page(url, text)
+            site.pages.setdefault(page.url, page)
+        else:
+            site.add_resource(text.encode("utf-8"),
+                              posixpath.basename(urlsplit(url).path)
+                              or "page.html", url)
+    return site
+
+
+def follow(site, url):
+    """A URL after any redirects the archive recorded."""
+    seen = set()
+    while url in site.redirects and url not in seen:
+        seen.add(url)
+        url = site.redirects[url]
+    return url
+
+
 def load(inputs):
-    """A directory of saves, a directory of .mhtml, or .mhtml files."""
+    """A directory of saves, a directory of .mhtml, .mhtml files, or WARC
+    and WACZ files."""
+    if all(re.search(r"\.(warc(\.gz)?|wacz)$", p, re.I) for p in inputs):
+        return load_warc(inputs)
     if len(inputs) == 1 and os.path.isdir(inputs[0]):
         mhtml = glob.glob(os.path.join(inputs[0], "*.mhtml")) + \
             glob.glob(os.path.join(inputs[0], "*.mht"))
@@ -451,7 +591,12 @@ def localize(site, page, value, origin, base_dir, keep_hosts, used, missing,
                 return PLACEHOLDER + key
     absolute = urljoin(page.url, value)
     target, fragment = urldefrag(absolute)
-    target_page = site.pages.get(canonical(absolute))
+    # A redirect may have been recorded for the URL as written or for its
+    # canonical form (a directory, before index.html was added).
+    target = follow(site, target)
+    absolute = target + ("#" + fragment if fragment else "")
+    target_page = site.pages.get(canonical(absolute)) or site.pages.get(
+        canonical(follow(site, canonical(absolute))))
     if target_page is not None:
         return target_page.name + ".html" + ("#" + fragment_href(fragment)
                                              if fragment else "")

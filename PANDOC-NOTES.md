@@ -54,6 +54,10 @@ What Pandoc does, as read from its source or established by test, for the questi
 
 **With `raw_html` on, a tag the reader has no element for is a fragment of raw markup**, opening and closing tags separately: `<footer>`, `<nav epub:type="toc">`, `<cite>`, and an unbalanced `</code>` the author never opened, which the writers then pass through. Measured: that last one made an EPUB that was not well-formed. `html-source.lua` drops the fragments and keeps what was between them, which is what the reader does with `raw_html` off.
 
+**The HTML reader gives a heading an id from its text when it has none** (`auto_identifiers` is on for it), so an anchor inside a heading can't simply take the heading's place: it has one already. Measured.
+
+**The EPUB writer builds each navigation entry from the heading's inlines**, attributes and all, so an empty `<span id>` inside a heading is an empty span inside `<nav>`, which epubcheck rejects. Measured on 11 headings.
+
 **A paragraph keeps none of its attributes.** `pPara` builds a `Para` from the inlines and discards the tag's class and id. `<p class="subtitle">` and `<p class="date">` in Pandoc's own title block come back as bare paragraphs, and so does a web page's `<p class="caption">`. Read from the source and measured. Anything a paragraph's class has to say must be said before Pandoc reads it, or read out of the file.
 
 **Pandoc's own title block is content to the reader**: `<header id="title-block-header">` becomes a `Div` with that id, while `<title>` and the `<meta name=…>` elements become metadata. Measured: reading our own page and writing it again gave two titles.

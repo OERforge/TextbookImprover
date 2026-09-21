@@ -34,6 +34,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import zipfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -371,11 +372,23 @@ def case_html_source(work):
     for name in ("web.html", "finished.html"):
         with open(os.path.join(mixed, name), "w", encoding="utf-8") as fh:
             fh.write(WEB)
+    with open(os.path.join(mixed, "conversion.yaml"), "w",
+              encoding="utf-8") as fh:
+        fh.write("targets:\n  html:\n    format: html\n"
+                 "  epub:\n    format: epub3\n")
     marked = run_in(mixed, "  contents:\n    - tables\n"
                            "    - page: web\n      convert: true\n"
                            "    - finished\n")
     web = read(mixed, "html", "web.html") if exists(
         mixed, "html", "web.html") else ""
+    epub_page = ""
+    for name in (os.listdir(os.path.join(mixed, "epub"))
+                 if exists(mixed, "epub") else []):
+        with zipfile.ZipFile(os.path.join(mixed, "epub", name)) as book:
+            epub_page = "".join(book.read(n).decode("utf-8")
+                                for n in book.namelist()
+                                if n.endswith(".xhtml") and "example.invalid"
+                                in book.read(n).decode("utf-8"))
     return [
         ("a directory of nothing but .html is read as sources, and says so",
          lambda: "as sources" in again.stdout + again.stderr
@@ -408,11 +421,15 @@ def case_html_source(work):
         ("only what is in <main> is the page, and no iframe is fetched",
          lambda: "other.html" not in web
          and "Could not fetch" not in marked.stdout + marked.stderr),
-        ("an iframe is a link to what it framed, named by its title, and "
-         "no raw tag is left",
-         lambda: '<a href="https://example.invalid/embed/x">A video</a>'
-         in re.sub(r"\s+", " ", web) and "<iframe" not in web
-         and "iframe x1" in marked.stderr),
+        ("an iframe stays an iframe in an HTML target, and nothing else "
+         "raw is left",
+         lambda: '<iframe src="https://example.invalid/embed/x" '
+         'title="A video"></iframe>' in web
+         and "</nav>" not in web and "iframe x1" in marked.stderr),
+        ("in the EPUB it is a link to what it framed, named by its title",
+         lambda: epub_page and "<iframe" not in epub_page
+         and '<a href="https://example.invalid/embed/x">A video</a>'
+         in re.sub(r"\s+", " ", epub_page)),
         ("a table with no th anywhere is reported, not guessed",
          lambda: "no header row and no declaration"
          in marked.stdout + marked.stderr),

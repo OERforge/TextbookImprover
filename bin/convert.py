@@ -76,7 +76,7 @@ try:
     import oerconfig
     from bookcontents import (guess_contents, walk_contents, number_tree,
                               is_generated, toc_blocks, pages_to_convert,
-                              expand_split_sources)
+                              expand_split_sources, contents_from_tree)
     from names import safe_path, safe_stem, is_safe
 except ImportError:
     sys.exit("Cannot find the configuration library. It should be in a "
@@ -89,6 +89,7 @@ SAFE_MEDIA_FILTER = os.path.join(HERE, "safe-media.lua")
 TARGET_FILTER = os.path.join(HERE, "target-blocks.lua")
 MARKDOWN_FILTER = os.path.join(HERE, "markdown-source.lua")
 HTML_SOURCE_FILTER = os.path.join(HERE, "html-source.lua")
+HTML_RAW_FILTER = os.path.join(HERE, "html-raw.lua")
 SOURCE_EXTENSIONS = (".docx", ".md", ".html")
 PAGE_CSS = os.path.join(HERE, "page.css")
 HEADERS_TOOL = os.path.join(HERE, "table-headers.py")
@@ -442,7 +443,12 @@ def html_sources(base, project, others):
     candidates = []
     for path in sorted(glob.glob(os.path.join(base, "*.html"))):
         name = os.path.basename(path)
-        if is_variant(name) or "--" in name:
+        if is_variant(name):
+            continue
+        if "--" in name:
+            say(f"WARNING: {name} is not read: '--' in a page's name is "
+                "reserved for the pages the split writes. Rename it to "
+                "convert it.")
             continue
         candidates.append(name)
     contents = project.get("contents") or []
@@ -483,7 +489,8 @@ def read_html_to_json(base, docs, env, work):
                 "keeps")
         run(["pandoc", "-f", "html+raw_html+epub_html_exts", "-t", "json",
              repaired,
-             "-o", stem + ".json", "--lua-filter=" + HTML_SOURCE_FILTER,
+             "-o", stem + ".json", "--lua-filter=" + HTML_RAW_FILTER,
+             "--lua-filter=" + HTML_SOURCE_FILTER,
              "--lua-filter=" + MEDIA_FILTER], env=env, cwd=base)
         portable_media_paths(os.path.join(base, stem + ".json"), base, name)
         stems.append(stem)
@@ -602,7 +609,10 @@ def copy_hand_pages(base, hand, target_dir, variants=None):
 
 def read_hand_pages(base, hand, pages_dir, env, variants=None):
     """An intermediate for each hand-written page, read from its HTML, so
-    the EPUB can hold it. No filter runs: a person finished this page."""
+    the EPUB can hold it. A person finished this page, so the only filter
+    is html-raw.lua: raw tags the EPUB can't hold go, and an <iframe> is
+    carried so the EPUB gets a link to it (the HTML target copies the
+    page as it stands)."""
     variants = variants or {}
     out = []
     for stem in hand:
@@ -612,7 +622,8 @@ def read_hand_pages(base, hand, pages_dir, env, variants=None):
         # raw_html, or the reader fetches every <iframe> over the network
         # to read it into the page (Readers/HTML.hs, pIframe).
         run(["pandoc", "-f", "html+raw_html", "-t", "json", source,
-             "-o", target], env=env, cwd=base)
+             "-o", target, "--lua-filter=" + HTML_RAW_FILTER],
+            env=env, cwd=base)
         out.append(target)
     return out
 
@@ -1403,9 +1414,11 @@ def book_tree(project, pages, numbered=None):
     available.add("notes")          # a page the run may write itself
     contents = project.get("contents") or []
     if contents:
-        tree = walk_contents(
-            expand_split_sources(contents, stems, titles, parts, roles),
-            available, used, problems, suffix=INTERMEDIATE)
+        expanded = expand_split_sources(contents, stems, titles, parts, roles)
+        tree = walk_contents(expanded, available, used, problems,
+                             suffix=INTERMEDIATE)
+        if expanded is not contents:
+            write_contents_sample(project, tree)
     else:
         tree = walk_contents(guess_contents(stems, None, titles, parts, roles),
                              available, used, problems, suffix=INTERMEDIATE)
@@ -1414,6 +1427,51 @@ def book_tree(project, pages, numbered=None):
     if project.get("numbering") if numbered is None else numbered:
         number_tree(tree, titles)
     return tree, titles, api
+
+
+CONTENTS_SAMPLE = "contents-sample.yaml"
+
+
+def write_contents_sample(project, tree):
+    """contents names a page the split cut, so it stood for its pieces.
+    What it resolved to is written out, in the shape project.yaml takes,
+    for anyone who means to arrange the pieces themselves: copied into
+    project.yaml, it names every piece, and a declared piece is left as
+    declared. Written once per run, and only when it would differ from
+    what project.yaml says; the run's own output never reads it."""
+    global CONTENTS_SAMPLE_WRITTEN
+    if CONTENTS_SAMPLE_WRITTEN:
+        return
+    CONTENTS_SAMPLE_WRITTEN = True
+    import yaml
+    marked = pages_to_convert(project.get("contents") or [])
+    sample = contents_from_tree(tree)
+
+    def pages_in(node):
+        if isinstance(node, str):
+            return [node]
+        if "items" in node:
+            return [p for item in node["items"] for p in pages_in(item)]
+        return [node.get("page", "")]
+    for index, node in enumerate(sample):
+        if any(p in marked or p.split("--", 1)[0] in marked
+               for p in pages_in(node)):
+            node = {"page": node} if isinstance(node, str) else node
+            node["convert"] = True
+            sample[index] = node
+    path = os.path.join(os.getcwd(), CONTENTS_SAMPLE)
+    body = yaml.safe_dump({"project": {"contents": sample}},
+                          sort_keys=False, allow_unicode=True, width=1000)
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write("# Written by convert.py: project.yaml's contents names a "
+                 "page the split cut,\n# so the page stood for its pieces. "
+                 "This is what it resolved to. Copy\n# the contents into "
+                 "project.yaml to arrange the pieces yourself.\n" + body)
+    say(f"contents names a page the split cut; {CONTENTS_SAMPLE} lists "
+        "its pieces, to copy into project.yaml if you mean to arrange them.")
+
+
+CONTENTS_SAMPLE_WRITTEN = False
 
 
 def generated_pages(tree):

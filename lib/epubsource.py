@@ -105,14 +105,18 @@ class Package:
         self.nav_path = next((p for p, _, props in self.manifest.values()
                               if "nav" in props), None)
         ncx = self.manifest.get(spine.get("toc") or "")
-        self.ncx_path = ncx[0] if ncx else None
+        self.ncx_path = ncx[0] if ncx else next(
+            (p for p, kind, _ in self.manifest.values()
+             if kind == "application/x-dtbncx+xml"), None)
 
     def read(self, name):
         return self.archive.read(name)
 
     def outline(self):
         """The table of contents as (depth, title, archive path, fragment),
-        from the navigation document, or toc.ncx when there is none."""
+        from the navigation document, or from toc.ncx when there is none
+        or it names nothing. Titles have their whitespace collapsed and
+        are otherwise as the publisher wrote them."""
         entries = []
         if self.nav_path:
             base = posixpath.dirname(self.nav_path)
@@ -138,7 +142,7 @@ class Package:
                         walk(sub, depth + 1)
             if toc is not None and toc.find("x:ol", NS) is not None:
                 walk(toc.find("x:ol", NS), 0)
-        elif self.ncx_path:
+        if not entries and self.ncx_path:
             base = posixpath.dirname(self.ncx_path)
             ncx = ET.fromstring(self.read(self.ncx_path))
 

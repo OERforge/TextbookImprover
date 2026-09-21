@@ -39,16 +39,14 @@ nothing, which is the test.
     declared. The reader moves a heading's id onto the section when the
     two agree (pDiv), so the id goes back on the heading; any other id
     a section had is kept as an empty anchor.
-  - Raw HTML goes. raw_html is on so that the reader fetches nothing
-    (see convert.py), and the price is that every tag the reader has no
-    element for arrives as a fragment of markup: <footer>, </footer>,
-    <nav epub:type="toc">, and a stray </code> the author never opened,
-    which the writers pass through and which made an EPUB that was not
-    well-formed. Dropping the fragment keeps what was between the tags,
-    which is what the reader does with raw_html off. An <iframe> becomes
-    a link to what it framed, named by its title: that is what an EPUB
-    can hold and what a reader who cannot use the embed needs anyway.
-    What was dropped is counted on stderr, by tag.
+  - An empty span holding an id inside a heading (an anchor, like the
+    <a name> Scribble puts in every heading) moves out of it: the id
+    becomes the heading's when it has none, and an empty anchor before
+    the heading otherwise. Pandoc's EPUB writer builds the navigation
+    from a heading's inlines, and an empty span in a nav entry is an
+    epubcheck error (11 of them in one book).
+  - Raw HTML is html-raw.lua's, which runs before this filter on a
+    source and alone on a finished page.
   - An aria-describedby or aria-labelledby that names an id the page no
     longer has is dropped, the rest of its list kept. WordPress points
     every <figure> at its own <figcaption> that way, the reader keeps
@@ -137,36 +135,6 @@ function Meta(meta)
   return changed and meta or nil
 end
 
-local dropped = {}
-
-local function raw_tag(text)
-  return text:match('^%s*<%s*/?%s*([%w:-]+)')
-end
-
-local function framed(text)
-  local src = text:match('%ssrc%s*=%s*"([^"]+)"') or text:match("%ssrc%s*=%s*'([^']+)'")
-  if src == nil then return nil end
-  src = src:gsub('&amp;', '&')
-  local title = text:match('%stitle%s*=%s*"([^"]+)"')
-  local host = src:match('^%a+://([^/]+)') or src
-  return pandoc.Link(title or ('Embedded content at ' .. host), src)
-end
-
-local function raw_html(el, block)
-  if el.format ~= 'html' then return nil end
-  local tag = (raw_tag(el.text) or ''):lower()
-  if tag == 'iframe' and not el.text:match('^%s*</') then
-    local link = framed(el.text)
-    if link then
-      return block and pandoc.Para({ link }) or link
-    end
-  end
-  if tag ~= '' then dropped[tag] = (dropped[tag] or 0) + 1 end
-  return {}
-end
-
-function RawInline(el) return raw_html(el, false) end
-function RawBlock(el) return raw_html(el, true) end
 
 local function open_up(div)
   local blocks = pandoc.List(div.content)
@@ -182,8 +150,43 @@ local function open_up(div)
   return blocks
 end
 
+local function empty_anchor(inline)
+  return inline.t == 'Span' and inline.identifier ~= ''
+    and #inline.content == 0
+end
+
+function Header(h)
+  local ids = {}
+  local kept = pandoc.Inlines({})
+  for _, inline in ipairs(h.content) do
+    if empty_anchor(inline) then ids[#ids + 1] = inline.identifier
+    else kept:insert(inline) end
+  end
+  if #ids == 0 then return nil end
+  h.content = kept
+  local before = {}
+  for _, id in ipairs(ids) do
+    if h.identifier == '' then h.identifier = id
+    else before[#before + 1] = pandoc.Div({}, pandoc.Attr(id, { 'anchor' })) end
+  end
+  before[#before + 1] = h
+  return before
+end
+
+-- An href on something that isn't a link: RDFa on a licence statement
+-- (<span href="http://purl.org/dc/dcmitype/Text" rel="dct:type">). The
+-- HTML writer passes it through, and XHTML allows it on no such element.
+function Span(span)
+  if span.attributes.href then
+    span.attributes.href = nil
+    return span
+  end
+  return nil
+end
+
 function Div(div)
   if div.identifier == 'title-block-header' then return {} end
+  if div.attributes.href then div.attributes.href = nil end
   if div.classes:includes('section') or div.classes:includes('header') then
     return open_up(div)
   end
@@ -207,21 +210,7 @@ local function with_attr(handler)
   return filter
 end
 
-local function report_dropped()
-  local names = {}
-  for tag in pairs(dropped) do names[#names + 1] = tag end
-  if #names == 0 then return end
-  table.sort(names)
-  local parts = {}
-  for _, tag in ipairs(names) do
-    parts[#parts + 1] = ('%s x%d'):format(tag, dropped[tag])
-  end
-  io.stderr:write(('[html-source] %s: raw tags dropped, their contents kept: %s\n')
-    :format(PANDOC_STATE.input_files[1] or '-', table.concat(parts, ', ')))
-end
-
 function Pandoc(doc)
-  report_dropped()
   local ids = {}
   doc:walk(with_attr(function(el)
     if el.identifier ~= '' then ids[el.identifier] = true end

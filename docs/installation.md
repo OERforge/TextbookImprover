@@ -55,6 +55,7 @@ Put that `export` line in `~/.bashrc` (see [below](#optional-the-full-validators
 | `python3` | Required, 3.9 or later. Runs the driver and every script. | present on Ubuntu |
 | PyYAML | Reading configuration | `sudo apt install python3-yaml` |
 | `file` | Detecting real image types | present on Ubuntu |
+| `html5lib` | Recommended. Parsing pages saved from the web (`unpack-site.py`), the way a browser does; without it `lxml` is used, and without either `unpack-site.py` stops | `sudo apt install python3-html5lib` |
 | `lxml` | Optional. Full schema validation of the manifest; without it a smaller set of checks runs. | `sudo apt install python3-lxml` |
 | `pypdf` | `--toc` with a PDF only; an EPUB needs nothing | `sudo apt install python3-pypdf` |
 | `zip` | Only if you package with the printed command instead of `--zip` | `sudo apt install zip` |

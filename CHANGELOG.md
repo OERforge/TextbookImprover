@@ -4,6 +4,12 @@ All notable changes to this project are documented in this file. The format is b
 
 Versions are two-part and pre-1.0: breaking changes may land in any of them until 1.0, and each is marked **Breaking** below. But we intend to keep the configuration schema, the command-line interface of each script, and the format of the sidecar CSV files stable in each version.
 
+## [Unreleased]
+
+### Fixed
+
+- **A Markdown image path written with a backslash no longer stops the run.** `assets\Bastiat.png` resolves on Windows and nowhere else, and one such path among a book's fifty stopped the conversion at the media gate with no page written. When the path with forward slashes is a file, the intermediate takes that and the run warns, naming the source and the path; the same goes for a backslash Markdown consumed as an escape (`assets\_fig.png` reads as `assets_fig.png`). A reference that resolves neither way still stops at the gate. The source isn't touched.
+
 ## [0.6] - 2026-09-20
 
 Two tools and a round of what the books found. The audit is a fourth tool in the box: `audit.py` says what is wrong with a Word, Markdown, HTML, EPUB, or PDF file without converting it, in one findings format that names the standard each finding answers to, with a report a person can read and a cache that skips what hasn't changed. A markdown target can merge, so a book whose sources are one file per section comes back as one file per chapter. And *Clinical Nursing Skills* and a fresh Ubuntu each turned up things worth fixing: two table shapes the filter misread, a Pandoc package below this project's own floor, and the way the release archive is meant to be installed. Nothing here breaks a v0.5 directory.

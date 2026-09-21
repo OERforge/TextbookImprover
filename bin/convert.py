@@ -352,6 +352,63 @@ def source_documents(base):
     return found
 
 
+def portable_media_paths(path, base, name):
+    """A Markdown source written on Windows may name an image
+    assets\\figure.png. Windows resolves that, and so does a browser;
+    nothing else does, an EPUB least of all. When the same path with
+    forward slashes is a file here, the intermediate takes that path and
+    the run says so; the source stays the author's to fix. A backslash
+    before punctuation is a Markdown escape and never reaches the path
+    (assets\\_fig.png reads as assets_fig.png), so a reference that
+    resolves once a separator follows a directory's name is the same
+    mistake and is treated the same way. Anything else is left for the
+    media gate."""
+    with open(path, encoding="utf-8") as fh:
+        doc = json.load(fh)
+    fixed = []
+
+    def candidate(ref):
+        if os.path.isfile(os.path.join(base, unquote(ref))):
+            return None
+        swapped = ref.replace("\\", "/").replace("%5C", "/") \
+                     .replace("%5c", "/")
+        if swapped != ref and os.path.isfile(
+                os.path.join(base, unquote(swapped))):
+            return swapped
+        for entry in sorted(os.listdir(base)):
+            rest = ref[len(entry):]
+            if ref.startswith(entry) and rest \
+                    and os.path.isdir(os.path.join(base, entry)) \
+                    and os.path.isfile(os.path.join(base, entry,
+                                                    unquote(rest))):
+                return entry + "/" + rest
+        return None
+
+    def walk(node):
+        if isinstance(node, dict):
+            if node.get("t") == "Image":
+                ref = node["c"][2][0]
+                better = None if ref.startswith(EXTERNAL_REF) \
+                    else candidate(ref)
+                if better:
+                    fixed.append((ref, better))
+                    node["c"][2][0] = better
+            for value in node.values():
+                walk(value)
+        elif isinstance(node, list):
+            for value in node:
+                walk(value)
+    walk(doc["blocks"])
+    if fixed:
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(doc, fh)
+        for ref, better in fixed:
+            say(f"WARNING: {name} names an image {ref}, a path only "
+                f"Windows resolves; read as {better}. Changing it in the "
+                "source is the fix.")
+    return fixed
+
+
 def read_markdown_to_json(base, docs, env):
     """A Markdown source is read as Pandoc's markdown, into the same
     intermediate a .docx gets. Its images are files it names by path,
@@ -367,6 +424,7 @@ def read_markdown_to_json(base, docs, env):
         run(["pandoc", "-f", "markdown", "-t", "json", name,
              "-o", stem + ".json", "--lua-filter=" + MEDIA_FILTER],
             env=env, cwd=base)
+        portable_media_paths(os.path.join(base, stem + ".json"), base, name)
         stems.append(stem)
     return stems
 
@@ -515,6 +573,7 @@ def read_variants(base, target, work, env):
         else:
             run(["pandoc", "-f", "markdown", "-t", "json", path, "-o", out,
                  "--lua-filter=" + MEDIA_FILTER], env=env, cwd=base)
+            portable_media_paths(out, base, name)
         raw[stem] = out
     return raw
 

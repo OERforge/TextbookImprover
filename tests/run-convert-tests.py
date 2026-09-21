@@ -219,6 +219,8 @@ Text with a [reference](https://doi.org/10.1017/x){aria-label="DOI for Seidel 20
 
 ![A pipe vs. a tube](assets/Pipe Sizes.png)
 
+![Written on Windows](assets\\Curve.png) ![Escaped away](assets\\_under.png)
+
 ::: matrix
 |      | Left | Right |
 |------|------|-------|
@@ -241,8 +243,9 @@ def case_markdown(work):
     os.makedirs(os.path.join(work, "assets"), exist_ok=True)
     with open(os.path.join(work, "long run.md"), "w", encoding="utf-8") as fh:
         fh.write(MARKDOWN)            # a space in the name, on purpose
-    with open(os.path.join(work, "assets", "Pipe Sizes.png"), "wb") as fh:
-        fh.write(ONE_PIXEL)
+    for image in ("Pipe Sizes.png", "Curve.png", "_under.png"):
+        with open(os.path.join(work, "assets", image), "wb") as fh:
+            fh.write(ONE_PIXEL)
     # A leftover from v0.1: an .md with the same name as a .docx.
     with open(os.path.join(work, "tables.md"), "w", encoding="utf-8") as fh:
         fh.write("# old\n")
@@ -281,6 +284,11 @@ def case_markdown(work):
          lambda: exists(work, "html", "assets", "Pipe-Sizes.png")
          and 'src="assets/Pipe-Sizes.png"' in page
          and not exists(work, "html", "assets", "Pipe Sizes.png")),
+        ("an image path written with a backslash is read with a slash, "
+         "and the run says so",
+         lambda: 'src="assets/Curve.png"' in page
+         and 'src="assets/_under.png"' in page
+         and result.stderr.count("a path only Windows resolves") == 2),
         ("raw LaTeX is dropped, not shown",
          lambda: "frontmatter" not in page),
         ("a raw HTML comment is dropped, so a -- inside one reaches no "

@@ -67,7 +67,9 @@ table stops the run, since a correction that silently fails to apply
 destroys work invisibly; the report names the row. Values this version does
 not act on yet (`manual`, `list`) are accepted and kept, so a book can
 start carrying them. The value in effect—the sidecar's where one was declared, the guess
-otherwise—is applied when the page is built. A status of `needs-word` in
+otherwise—is applied when the page is built.
+
+An HTML source's tables are in the same sidecar, the same report, and the same new-rows file. The key is computed the same way from the table as Pandoc reads it. A table whose page marks its header cells with `<th>` says so itself, and the report names `source` as the supplier; the sidecar outranks that as it outranks the guess. The rest are guessed from what survives reading, which is the cells' text and their bold. Word's inferences about merged title rows and grouping bands (`caption-rows`, `split-at`) don't apply to HTML tables yet. A status of `needs-word` in
 the report means no cell of the table could serve as a header, so no value
 can help and headers have to be written in Word; that's the one thing the
 old `table-headers-missing.csv` reported, and it's now a row in the report

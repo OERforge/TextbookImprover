@@ -936,7 +936,7 @@ def media_references(path):
                   if not r.startswith(("http://", "https://", "//", "data:")))
 
 
-def media_gate(base, stems, media_rows, report_path):
+def media_gate(base, stems, media_rows, report_path, safe=True):
     """A dead image link is invisible in the generated HTML -- Pandoc
     emits an <embed> rather than an <img> for an extension it does not
     recognise. Stopping here is deliberate: broken output that looks fine
@@ -950,11 +950,25 @@ def media_gate(base, stems, media_rows, report_path):
     browser-renderable equivalent and have to go back to the author.
     """
     problems, rows = [], []
+    # Two files an HTML target would copy to one name: "a b.png" and
+    # "a-b.png" are both written as a-b.png, and the second copy would
+    # replace the first under every page that shows either.
+    written = {}
     for stem in stems:
         for ref in media_references(os.path.join(base, stem + ".json")):
             # A Markdown source writes a space in a file name as %20, as a
             # link must; the file on disk has the space.
             path = os.path.join(base, unquote(ref))
+            if safe and os.path.isfile(path):
+                name = safe_path(unquote(ref))
+                real = os.path.realpath(path)
+                other = written.setdefault(name, (real, unquote(ref)))
+                if other[0] != real:
+                    problems.append(f"UNRESOLVED: {other[1]} and "
+                                    f"{unquote(ref)} would both be written "
+                                    f"as {name}.")
+                    rows.append(f"{ref},{stem}.json,,would be written as "
+                                f"{name}, the name {other[1]} is written as")
             if not os.path.isfile(path):
                 problems.append(f"UNRESOLVED: {stem}.json references "
                                 f"missing {ref}.")
@@ -1898,20 +1912,7 @@ def main():
             "MEDIA_STRICT": "1" if first["media.strict"] else "",
         })
 
-        # ---- 0.5 the pre-pass ------------------------------------------------
-        # Runs on the .docx files, before Pandoc sees them, because the
-        # evidence the guess reads -- repeat-header rows, bold, shading --
-        # does not survive Pandoc's reader. A sidecar row whose key matches
-        # no table stops the run.
         docs = source_documents(base)
-        if docs:
-            env["TABLE_HEADERS_RESOLVED"] = os.path.join(work,
-                                                        "table-headers.json")
-            run(["python3", HEADERS_TOOL] + docs
-                + ["--sidecar", paths["table_headers"],
-                   "--new", reports["table_headers_new"],
-                   "--report", reports["table_headers_report"],
-                   "--resolved", env["TABLE_HEADERS_RESOLVED"]], cwd=base)
 
         # ---- 3. fragments, per target ----------------------------------------
         fragments = {}
@@ -1950,7 +1951,26 @@ def main():
                 die(f"Target {target.name} writes its pages beside the "
                     "sources, which would overwrite the .html sources. Give "
                     "it an output_dir of its own.")
-        stems += read_html_to_json(base, web, env, work)
+        html_stems = read_html_to_json(base, web, env, work)
+        stems += html_stems
+
+        # ---- 1.5 the header pre-pass -------------------------------------
+        # On the .docx files themselves, because the evidence the guess
+        # reads there -- repeat-header rows, bold, shading -- doesn't
+        # survive Pandoc's reader; on an HTML source's intermediate, where
+        # it does (a <th>, a <strong>). One run, so the book has one
+        # report and one new-rows file. A sidecar row whose key matches no
+        # table stops the run.
+        prepass = list(docs) + [os.path.join(base, s + ".json")
+                                for s in html_stems]
+        if prepass:
+            env["TABLE_HEADERS_RESOLVED"] = os.path.join(work,
+                                                        "table-headers.json")
+            run(["python3", HEADERS_TOOL] + prepass
+                + ["--sidecar", paths["table_headers"],
+                   "--new", reports["table_headers_new"],
+                   "--report", reports["table_headers_report"],
+                   "--resolved", env["TABLE_HEADERS_RESOLVED"]], cwd=base)
         if not stems:
             die("No .docx, .md, .adoc, or .html files here, so there is "
                 "nothing to convert.")
@@ -1958,7 +1978,8 @@ def main():
 
         # ---- 2. the gate ------------------------------------------------------
         media_gate(base, stems, collected["media_unresolved"],
-                   reports["media_unresolved"])
+                   reports["media_unresolved"],
+                   safe=any(t.format != "markdown" for t in targets))
 
         # Past the gate, this run will finish and the reports at the end
         # will be written with whatever is outstanding. Clear them now so

@@ -139,7 +139,13 @@ def mhtml(directory, stem, title, body):
 
 SCRIBBLE_TABLES = (
     '<table class="PyretReplInteraction"><tr><td><span class="PyretReplPrompt">'
-    '›</span><pre>1 == 1</pre></td><td><pre>true</pre></td></tr></table>'
+    '›</span><pre>1 == 1</pre></td><td><pre>true</pre>'
+    '<table class="PyretReplInteraction"><tr><td><pre>2 == 2</pre></td>'
+    '</tr></table></td></tr></table>'
+    '<table class="TwoColumnAsRows"><tr><td>Python</td><td><pre>a = 1</pre>'
+    '</td></tr><tr><td>Pyret</td><td><pre>a = 1</pre></td></tr></table>'
+    '<table class="RktBlk"><tr><td>(define x</td></tr><tr><td>\u00a0\u00a01)</td></tr>'
+    '</table>'
     '<table><tr><td><a class="toclink" href="#a">2.1 One</a></td></tr>'
     '<tr><td><a class="toclink" href="#b">2.2 Two</a></td></tr></table>'
     '<table class="SVerbatim"><tr><td>line one</td></tr><tr><td>line two'
@@ -297,14 +303,19 @@ def case_mhtml(work):
         ("a REPL interaction isn't a table: its prompt, code, and result "
          "remain",
          lambda: "PyretReplInteraction" not in tables
-         and "<pre>1 == 1</pre>" in tables and "<pre>true</pre>" in tables),
+         and "<pre>1 == 1</pre>" in tables and "<pre>true</pre>" in tables
+         and "<pre>2 == 2</pre>" in tables),
+        ("a Racket block laid out a line a row is one <pre>, indentation "
+         "kept",
+         lambda: "<pre>(define x\n  1)</pre>" in tables),
         ("a section's own table of contents goes, a verbatim table is one "
          "<pre>",
          lambda: "toclink" not in tables
          and "<pre>line one\nline two</pre>" in tables),
         ("a comparison stays a table, its language row the header",
          lambda: '<th scope="col">Python</th>' in tables
-         and '<th scope="col">Pyret</th>' in tables),
+         and '<th scope="col">Pyret</th>' in tables
+         and '<th scope="row">Python</th>' in tables),
         ("equations present only as MathJax's rendering are reported",
          lambda: any(r["Check"] == "math-lost" and r["Where"] == "tables.html"
                      for r in rows)),

@@ -423,6 +423,9 @@ def case_stem_collisions(work):
         "pics.md": "# Pics\n\n![](assets/logo.png)\n\n![](assets/logo.svg)\n",
         "assets/logo.png": ONE_PIXEL, "assets/logo.svg": svg,
         "image-alt.csv": "Image,Alt\nassets/logo.png,A logo\n"})
+    h, spaced = book("spaced", {
+        "pics.md": "# Pics\n\n![One](assets/a%20b.png)\n\n![Two](assets/a-b.png)\n",
+        "assets/a b.png": ONE_PIXEL, "assets/a-b.png": ONE_PIXEL + b"\0"})
     page = read(f, "html", "pics.html") if exists(f, "html", "pics.html") \
         else ""
     missing = read(f, "image-alt-missing.csv") if exists(
@@ -449,6 +452,10 @@ def case_stem_collisions(work):
          lambda: "Print text." in read(g, "print", "ch1.html")
          and "Web text." in read(g, "web", "ch1.html")
          and not exists(g, "web", "ch1.print.html")),
+        ("two images an HTML target would write under one name stop the run",
+         lambda: spaced.returncode != 0
+         and "would both be written as assets/a-b.png" in said(spaced)
+         and not exists(h, "html")),
         ("an image's alt text goes to that image, not one sharing its stem",
          lambda: re.search(r'src="assets/logo\.png"[^>]*alt="A logo"|'
                            r'alt="A logo"[^>]*src="assets/logo\.png"', page)
@@ -505,6 +512,58 @@ def case_adopt(work):
          and exists(out, "html", "ch1-first-part.html")
          and 'href="ch1-second-part.html#second-part"'
          in read(out, "html", "ch1-first-part.html")),
+    ]
+
+
+HEADED = """<!DOCTYPE html><html lang="en"><head><title>Data</title></head>
+<body><main><h1>Data</h1>
+<table><tr><td><b>Set</b></td><td><b>Hours</b></td></tr>
+<tr><td>Alpha</td><td>9.8</td></tr><tr><td>Beta</td><td>5.3</td></tr></table>
+<table><thead><tr><th>Country</th><th>GDP</th></tr></thead>
+<tbody><tr><td>Brazil</td><td>3,153</td></tr></tbody></table>
+<table><tr><td>Government purchases</td><td>$120 billion</td></tr>
+<tr><td>Depreciation</td><td>$40 billion</td></tr>
+<tr><td>Consumption</td><td>$400 billion</td></tr></table>
+</main></body></html>
+"""
+
+
+def case_html_headers(work):
+    """An HTML source's tables go through the header pre-pass: the guess
+    where the page says nothing, the page's own <th> where it does, and
+    the sidecar over both."""
+    os.makedirs(work)
+    with open(os.path.join(work, "data.html"), "w", encoding="utf-8") as fh:
+        fh.write(HEADED)
+    first = run_in(work, "")
+    page = read(work, "html", "data.html") if exists(
+        work, "html", "data.html") else ""
+    new_rows = read(work, "table-headers-new.csv") if exists(
+        work, "table-headers-new.csv") else ""
+    import csv
+    with open(os.path.join(work, "table-headers-report.csv"),
+              encoding="utf-8") as fh:
+        report = list(csv.DictReader(fh))
+    country = next((r for r in report if "Country" in r["preview"]), {})
+    with open(os.path.join(work, "table-headers.csv"), "w",
+              encoding="utf-8") as fh:
+        fh.write("key,headers\n" + country.get("key", "x") + ",none\n")
+    run_in(work)
+    again = read(work, "html", "data.html") if exists(
+        work, "html", "data.html") else ""
+    return [
+        ("an unmarked bold row is guessed a header row",
+         lambda: re.search(r'<th scope="col">(<strong>)?Set', page)),
+        ("labels over values get row headers by the guess",
+         lambda: '<th scope="row">Government purchases</th>' in page),
+        ("the report says who supplied each: the guess, or the page",
+         lambda: sorted(r["supplier"] for r in report)
+         == ["guess", "guess", "source"]),
+        ("every HTML table is in the new-rows file, keyed",
+         lambda: len(new_rows.splitlines()) == 4),
+        ("a sidecar row outranks the page's own <th>",
+         lambda: '<th scope="col">Country</th>' in page
+         and "Country</th>" not in again and "<td>Country</td>" in again),
     ]
 
 
@@ -606,9 +665,10 @@ def case_html_source(work):
          lambda: epub_page and "<iframe" not in epub_page
          and '<a href="https://example.invalid/embed/x">A video</a>'
          in re.sub(r"\s+", " ", epub_page)),
-        ("a table with no th anywhere is reported, not guessed",
-         lambda: "no header row and no declaration"
-         in marked.stdout + marked.stderr),
+        ("a table of bare numbers is guessed to have no headers, and listed "
+         "for review",
+         lambda: "needs-word" in read(mixed, "table-headers-report.csv")
+         and len(read(mixed, "table-headers-new.csv").splitlines()) >= 2),
         ("a page in _pt is copied as it stands",
          lambda: read(mixed, "html", "finished.html") == WEB),
     ]
@@ -960,6 +1020,7 @@ CASES = [
     ("an AsciiDoc source", case_asciidoc),
     ("two files, one page", case_stem_collisions),
     ("adopting a split book's pages", case_adopt),
+    ("an HTML source's tables and the header sidecar", case_html_headers),
     ("a hand-written page", case_hand_written),
     ("several targets", case_targets),
     ("arguments passed to the packager", case_passthrough),

@@ -376,6 +376,65 @@ def view_from_pandoc(table):
     return View(grid, marked=marked)
 
 
+def _keyed_text_pandoc(blocks):
+    """A cell's text for hashing, as keyed_text() reads a Word cell:
+    paragraphs and line breaks separated by a newline, a nested table
+    replaced by that table's own key."""
+    parts = []
+
+    def walk(node):
+        if isinstance(node, list):
+            for item in node:
+                walk(item)
+            return
+        if not isinstance(node, dict):
+            return
+        kind, content = node.get("t"), node.get("c")
+        if kind == "Table":
+            parts.append("\x00" + key_from_pandoc(node) + "\x00")
+            return
+        if kind == "Str":
+            parts.append(content)
+        elif kind in ("Space", "SoftBreak"):
+            parts.append(" ")
+        elif kind == "LineBreak":
+            parts.append("\n")
+        elif kind in ("Code", "Math"):
+            parts.append(content[-1])
+        elif kind in ("Para", "Plain") and parts and parts[-1] != "\n":
+            parts.append("\n")
+            walk(content)
+            return
+        elif content is not None:
+            walk(content)
+    walk(blocks)
+    return "".join(parts).strip()
+
+
+def key_from_pandoc(table):
+    """table_key() for a table in Pandoc's AST: every cell's text,
+    row-major, then the row count, the column count, and the number of
+    cells in each row, hashed the same way. Rows in the order
+    view_from_pandoc() reads them."""
+    _attr, _caption, _specs, head, bodies, foot = table["c"]
+    rows = list(head[1])
+    for body in bodies:
+        rows += body[2] + body[3]
+    rows += foot[1]
+    counts = []
+    digest = hashlib.sha256()
+    for row in rows:
+        counts.append(len(row[1]))
+        for cell in row[1]:
+            digest.update(_keyed_text_pandoc(cell[4]).encode("utf-8"))
+            digest.update(b"\x1f")
+        digest.update(b"\x1e")
+    ncols = max(counts) if counts else 0
+    digest.update(("%d;%d;%s" % (len(rows), ncols,
+                                 ",".join(str(c) for c in counts))).encode())
+    return digest.hexdigest()
+
+
 def looks_like_header_band(cells, allow_blank_corner=False):
     """A run of cells that reads as headers: text in all of them, and either
     uniformly bold or uniformly shaded.

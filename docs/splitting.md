@@ -30,6 +30,8 @@ Each piece records its source, its part number, its position among the cut headi
 <meta name="page-parent" content="Economies of Scale" />
 ```
 
+A page `contents` declares that the split then cuts stands for its pieces: the entry becomes a group holding the source's opening page, when it kept one, and its pieces nested by their headings. `contents` that already names the pieces is left as declared. A link into a cut source from any other page of the book (its contents page, an index, a cross-reference in another chapter) follows its target to the piece that now holds it, and a link to a source that kept no page of its own goes to its first piece.
+
 The packager and the EPUB assembler read that, so with no `contents` declared the pieces are grouped under the headings they sat beneath, in reading order, with a heading's own page first in its group. A book that is a single source isn't wrapped in a group for the source, since the book is the source. The guess is written to `packaging-sample.yaml` and is the place to adjust it.
 
 ## Naming the pages

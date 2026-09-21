@@ -71,6 +71,7 @@ except ImportError:
 from bookcontents import (  # noqa: E402
     natural_key, chapter_of, within_chapter_key, unrecognised_roles,
     guess_contents, walk_contents, flatten_pages, contents_from_tree,
+    expand_split_sources,
     stem_title, slugify, clean_title, number_tree, numbered_title,
 )
 
@@ -1171,7 +1172,9 @@ def main():
 
     guessed_contents = False
     if config.get("contents"):
-        tree = walk_contents(config["contents"], available, used, problems)
+        tree = walk_contents(
+            expand_split_sources(config["contents"], stems, TITLES, PARTS,
+                                 ROLES), available, used, problems)
     elif args.toc:
         # Nothing curated and an outline to follow: start empty so every
         # page counts as unplaced and the outline orders all of them.

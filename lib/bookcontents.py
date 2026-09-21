@@ -338,6 +338,71 @@ def chapter_heading(number, pages, titles):
     return f"Chapter {number}"
 
 
+def pieces_by_source(stems, parts=None):
+    """(plain, ordered): the stems that are not pieces, and for each split
+    source (whether it still has a page of its own, its pieces in reading
+    order as (stem, parents, position, role))."""
+    parts = parts or {}
+    pieces, plain = {}, []
+    for stem in stems:
+        if stem in parts:
+            padded = tuple(parts[stem]) + (None, "", "", "")
+            source, number, parents, position = padded[:4]
+            role = padded[5] if len(padded) > 5 else ""
+        elif piece_source(stem):
+            source, number, parents, position, role = (piece_source(stem),
+                                                       None, None, "", "")
+        else:
+            plain.append(stem)
+            continue
+        pieces.setdefault(source, []).append(
+            (number, stem, parents or [], position or "", role or ""))
+    ordered = {}
+    for source, members in pieces.items():
+        members.sort(key=lambda m: (m[0] is None, m[0] or 0,
+                                    natural_key(m[1])))
+        ordered[source] = (source in plain,
+                           [(m[1], m[2], m[3], m[4]) for m in members])
+    return plain, ordered
+
+
+def declared_pages(nodes):
+    found = set()
+    for node in nodes or []:
+        if isinstance(node, str):
+            found.add(node)
+        elif isinstance(node, dict):
+            if "items" in node:
+                found |= declared_pages(node["items"])
+            elif node.get("page"):
+                page = str(node["page"]).strip()
+                found.add(page[:-5] if page.endswith(".html") else page)
+    return found
+
+
+def expand_split_sources(contents, stems, titles=None, parts=None,
+                         roles=None):
+    """A declared page that the split cut into pieces stands for them:
+    the entry becomes a group holding the source's own page, when it
+    kept one, and its pieces nested by their headings, exactly as the
+    guess arranges them. A book unpacked from a one-file EPUB declares
+    that one file, and its chapters are pieces. A source whose pieces
+    contents already names is left as declared, since someone arranged
+    them."""
+    _plain, ordered = pieces_by_source(stems, parts)
+    named = declared_pages(contents)
+    stand_in = {source: value for source, value in ordered.items()
+                if source in named
+                and not any(m[0] in named for m in value[1]
+                            if m[0] != source)}
+    # The page that holds what came before the first cut keeps the
+    # source's name and is a piece of it like the rest.
+    if not stand_in:
+        return contents
+    return strip_source(group_pieces(contents, stand_in, titles or {},
+                                     roles))
+
+
 def guess_contents(stems, back_matter=None, titles=None, parts=None,
                    roles=None):
     """Best-effort contents tree from filenames alone.
@@ -364,28 +429,8 @@ def guess_contents(stems, back_matter=None, titles=None, parts=None,
     parts = parts or {}
     roles = roles or {}          # stem -> role, for a page that was not split
 
-    pieces = {}
-    plain = []
-    for stem in stems:
-        if stem in parts:
-            padded = tuple(parts[stem]) + (None, "", "", "")
-            source, number, parents, position = padded[:4]
-            role = padded[5] if len(padded) > 5 else ""
-        elif piece_source(stem):
-            source, number, parents, position, role = (piece_source(stem),
-                                                       None, None, "", "")
-        else:
-            plain.append(stem)
-            continue
-        pieces.setdefault(source, []).append(
-            (number, stem, parents or [], position or "", role or ""))
-    if pieces:
-        ordered = {}
-        for source, members in pieces.items():
-            members.sort(key=lambda m: (m[0] is None, m[0] or 0,
-                                        natural_key(m[1])))
-            ordered[source] = (source in plain,
-                               [(m[1], m[2], m[3], m[4]) for m in members])
+    plain, ordered = pieces_by_source(stems, parts)
+    if ordered:
         stems = plain + [s for s in ordered if s not in plain]
         tree = strip_source(group_pieces(
             guess_contents(stems, back_matter, titles, None, roles), ordered,

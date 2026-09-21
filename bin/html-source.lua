@@ -31,6 +31,30 @@ nothing, which is the test.
     body. When the table has no head and its first body opens with
     such rows, they are the table's head and are moved there.
 
+  - A <section> or <header> is opened up and its contents stand where
+    it stood. Every generator wraps a heading and what follows it in a
+    <section> (Asciidoctor, Scribble, Pandoc's own --section-divs), and
+    the split cuts only at headings that are not inside something, so
+    a chapter-per-section book arrived as one page however it was
+    declared. The reader moves a heading's id onto the section when the
+    two agree (pDiv), so the id goes back on the heading; any other id
+    a section had is kept as an empty anchor.
+  - Raw HTML goes. raw_html is on so that the reader fetches nothing
+    (see convert.py), and the price is that every tag the reader has no
+    element for arrives as a fragment of markup: <footer>, </footer>,
+    <nav epub:type="toc">, and a stray </code> the author never opened,
+    which the writers pass through and which made an EPUB that was not
+    well-formed. Dropping the fragment keeps what was between the tags,
+    which is what the reader does with raw_html off. An <iframe> becomes
+    a link to what it framed, named by its title: that is what an EPUB
+    can hold and what a reader who cannot use the embed needs anyway.
+    What was dropped is counted on stderr, by tag.
+  - An aria-describedby or aria-labelledby that names an id the page no
+    longer has is dropped, the rest of its list kept. WordPress points
+    every <figure> at its own <figcaption> that way, the reader keeps
+    no id of a figcaption, and an ARIA reference to nothing is an error
+    in every checker (118 of them in one Pressbooks book's EPUB).
+
 Copyright 2026 Robert Szarka
 
 This program is free software: you can redistribute it and/or modify
@@ -113,11 +137,112 @@ function Meta(meta)
   return changed and meta or nil
 end
 
+local dropped = {}
+
+local function raw_tag(text)
+  return text:match('^%s*<%s*/?%s*([%w:-]+)')
+end
+
+local function framed(text)
+  local src = text:match('%ssrc%s*=%s*"([^"]+)"') or text:match("%ssrc%s*=%s*'([^']+)'")
+  if src == nil then return nil end
+  src = src:gsub('&amp;', '&')
+  local title = text:match('%stitle%s*=%s*"([^"]+)"')
+  local host = src:match('^%a+://([^/]+)') or src
+  return pandoc.Link(title or ('Embedded content at ' .. host), src)
+end
+
+local function raw_html(el, block)
+  if el.format ~= 'html' then return nil end
+  local tag = (raw_tag(el.text) or ''):lower()
+  if tag == 'iframe' and not el.text:match('^%s*</') then
+    local link = framed(el.text)
+    if link then
+      return block and pandoc.Para({ link }) or link
+    end
+  end
+  if tag ~= '' then dropped[tag] = (dropped[tag] or 0) + 1 end
+  return {}
+end
+
+function RawInline(el) return raw_html(el, false) end
+function RawBlock(el) return raw_html(el, true) end
+
+local function open_up(div)
+  local blocks = pandoc.List(div.content)
+  if div.identifier ~= '' then
+    local first = blocks[1]
+    if first and first.t == 'Header' and first.identifier == '' then
+      first.identifier = div.identifier
+    else
+      blocks:insert(1, pandoc.Div({}, pandoc.Attr(div.identifier,
+                                                  { 'anchor' })))
+    end
+  end
+  return blocks
+end
+
 function Div(div)
   if div.identifier == 'title-block-header' then return {} end
+  if div.classes:includes('section') or div.classes:includes('header') then
+    return open_up(div)
+  end
   if div.classes:includes('table-wrapper') and #div.content == 1
       and div.content[1].t == 'Table' then
     return div.content[1]
   end
   return nil
+end
+
+-- Dangling ARIA references, as the last step: every id has to have been
+-- seen, and a handler in the same table runs before the ids settle.
+local IDREFS = { 'aria-describedby', 'aria-labelledby' }
+
+local function with_attr(handler)
+  local filter = {}
+  for _, name in ipairs({ 'Div', 'Span', 'Header', 'Figure', 'Table', 'Link',
+                          'Image', 'Code', 'CodeBlock' }) do
+    filter[name] = handler
+  end
+  return filter
+end
+
+local function report_dropped()
+  local names = {}
+  for tag in pairs(dropped) do names[#names + 1] = tag end
+  if #names == 0 then return end
+  table.sort(names)
+  local parts = {}
+  for _, tag in ipairs(names) do
+    parts[#parts + 1] = ('%s x%d'):format(tag, dropped[tag])
+  end
+  io.stderr:write(('[html-source] %s: raw tags dropped, their contents kept: %s\n')
+    :format(PANDOC_STATE.input_files[1] or '-', table.concat(parts, ', ')))
+end
+
+function Pandoc(doc)
+  report_dropped()
+  local ids = {}
+  doc:walk(with_attr(function(el)
+    if el.identifier ~= '' then ids[el.identifier] = true end
+    return nil
+  end))
+  return doc:walk(with_attr(function(el)
+    local changed = false
+    for _, name in ipairs(IDREFS) do
+      local value = el.attributes[name]
+      if value then
+        local kept = {}
+        for id in value:gmatch('%S+') do
+          if ids[id] then kept[#kept + 1] = id end
+        end
+        local joined = table.concat(kept, ' ')
+        if joined ~= value then
+          el.attributes[name] = (#kept > 0) and joined or nil
+          changed = true
+        end
+      end
+    end
+    return changed and el or nil
+  end))
 end

@@ -71,10 +71,12 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(HERE), "lib"))
 try:
     import docxrepair
+    import htmlrepair
     import notes as notes_lib
     import oerconfig
     from bookcontents import (guess_contents, walk_contents, number_tree,
-                              is_generated, toc_blocks, pages_to_convert)
+                              is_generated, toc_blocks, pages_to_convert,
+                              expand_split_sources)
     from names import safe_path, safe_stem, is_safe
 except ImportError:
     sys.exit("Cannot find the configuration library. It should be in a "
@@ -456,16 +458,31 @@ def html_sources(base, project, others):
     return candidates
 
 
-def read_html_to_json(base, docs, env):
+def read_html_to_json(base, docs, env, work):
     """An HTML source is read with raw_html on, which is what stops the
     reader fetching every <iframe> over the network (Readers/HTML.hs,
     pIframe), and through html-source.lua, which turns what the page says
     about its tables into declarations and takes out what an earlier run
-    of this pipeline derived. Its images are files it names by path."""
+    of this pipeline derived. epub_html_exts lets the reader match an
+    EPUB page's epub:type="noteref" to its footnote, as it matches the
+    role="doc-noteref" Pandoc writes without being asked; a page with
+    neither is read the same either way. Its images are files it names
+    by path."""
     stems = []
+    repaired_dir = os.path.join(work, "repaired-html")
+    os.makedirs(repaired_dir, exist_ok=True)
     for name in docs:
         stem = safe_stem(name[:-5])
-        run(["pandoc", "-f", "html+raw_html", "-t", "json", name,
+        # Pandoc reads a repaired copy -- ids moved to where its reader
+        # keeps them; see lib/htmlrepair.py -- run from the book's
+        # directory, so the paths the page names are still the files'.
+        repaired = os.path.join(repaired_dir, name)
+        moved = htmlrepair.repaired_copy(os.path.join(base, name), repaired)
+        if moved and TRACE:
+            say(f"# {name}: {moved} id(s) moved onto anchors the reader "
+                "keeps")
+        run(["pandoc", "-f", "html+raw_html+epub_html_exts", "-t", "json",
+             repaired,
              "-o", stem + ".json", "--lua-filter=" + HTML_SOURCE_FILTER,
              "--lua-filter=" + MEDIA_FILTER], env=env, cwd=base)
         portable_media_paths(os.path.join(base, stem + ".json"), base, name)
@@ -703,10 +720,24 @@ def media_gate(base, stems, media_rows, report_path):
         for ref in media_references(os.path.join(base, stem + ".json")):
             # A Markdown source writes a space in a file name as %20, as a
             # link must; the file on disk has the space.
-            if not os.path.isfile(os.path.join(base, unquote(ref))):
+            path = os.path.join(base, unquote(ref))
+            if not os.path.isfile(path):
                 problems.append(f"UNRESOLVED: {stem}.json references "
                                 f"missing {ref}.")
                 rows.append(f"{ref},{stem}.json,,referenced but not on disk")
+                continue
+            # On disk and not an image: an exporter that could not fetch a
+            # picture has been seen to save the server's error page under
+            # the picture's name, 120 times in one EPUB. Only a positive
+            # identification stops the run; a format this does not know
+            # is not evidence of anything.
+            with open(path, "rb") as fh:
+                head = fh.read(512).lstrip().lower()
+            if head.startswith((b"<!doctype html", b"<html", b"<head")):
+                problems.append(f"UNRESOLVED: {stem}.json shows {ref} as an "
+                                "image, and it is an HTML page.")
+                rows.append(f"{ref},{stem}.json,text/html,an HTML page where "
+                            "an image should be")
     # Anything the media filter could not identify. Its rows are already
     # in the right shape, so they are folded in here and one gate covers
     # both.
@@ -1372,8 +1403,9 @@ def book_tree(project, pages, numbered=None):
     available.add("notes")          # a page the run may write itself
     contents = project.get("contents") or []
     if contents:
-        tree = walk_contents(contents, available, used, problems,
-                             suffix=INTERMEDIATE)
+        tree = walk_contents(
+            expand_split_sources(contents, stems, titles, parts, roles),
+            available, used, problems, suffix=INTERMEDIATE)
     else:
         tree = walk_contents(guess_contents(stems, None, titles, parts, roles),
                              available, used, problems, suffix=INTERMEDIATE)
@@ -1636,7 +1668,7 @@ def main():
                 die(f"Target {target.name} writes its pages beside the "
                     "sources, which would overwrite the .html sources. Give "
                     "it an output_dir of its own.")
-        stems += read_html_to_json(base, web, env)
+        stems += read_html_to_json(base, web, env, work)
         if not stems:
             die("No .docx, .md, or .html files here, so there is nothing "
                 "to convert.")

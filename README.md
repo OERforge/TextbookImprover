@@ -68,6 +68,7 @@ Each target writes into a directory of its own; the content directory keeps the 
 | [Checking the output](docs/checking.md) | What every run checks about the pages and EPUBs it wrote, and what it doesn't |
 | [Auditing](docs/auditing.md) | `audit.py`: what is wrong with a Word, Markdown, HTML, EPUB, or PDF file, without converting it; the findings format every check shares |
 | [HTML sources](docs/html.md) | An `.html` that `contents` marks `convert: true` is a source: what is read from it, what isn't, and why converting this pipeline's own pages changes nothing |
+| [An EPUB as the source](docs/epub-input.md) | `unpack-epub.py`: a publisher's EPUB into pages, media, and a `project.yaml` with its metadata and its navigation as `contents`; a book that is one file |
 | [Markdown sources](docs/markdown.md) | A `.md` beside the sources is a page: what it can declare, how its images travel, and a book set up for a Pandoc PDF build |
 | [Splitting pages](docs/splitting.md) | One page per heading from a source that arrived as one file per chapter, or one file |
 | [Brightspace](docs/brightspace.md) | What importing and deleting actually do there, confirmed by D2L |

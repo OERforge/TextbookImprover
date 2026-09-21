@@ -349,6 +349,8 @@ def case_html_source(work):
     for image in ("Pipe Sizes.png", "Curve.png", "_under.png"):
         with open(os.path.join(work, "assets", image), "wb") as fh:
             fh.write(ONE_PIXEL)
+    with open(os.path.join(work, "noted.md"), "w", encoding="utf-8") as fh:
+        fh.write(NOTED)
     convert(work, "targets:\n  html:\n    format: html\n")
     second, third = work + "-second", work + "-third"
     shutil.copytree(os.path.join(work, "html"), second)
@@ -383,6 +385,13 @@ def case_html_source(work):
         ("the second write is the third, byte for byte",
          lambda: same_pages(os.path.join(second, "html"),
                             os.path.join(third, "html"))),
+        # The second write equalling the third says nothing about what the
+        # first reading lost: a footnote's text once went missing between
+        # the first write and the second, and the second and third agreed.
+        ("a footnote is still a footnote, text and all",
+         lambda: "Note C." in read(second, "html", "noted.html")
+         and read(second, "html", "noted.html")
+         == read(work, "html", "noted.html")),
         ("the title is written once and a table is wrapped once",
          lambda: page.count("<h1") == 1
          and page.count('class="table-wrapper"') == page.count("<table")),
@@ -399,6 +408,11 @@ def case_html_source(work):
         ("only what is in <main> is the page, and no iframe is fetched",
          lambda: "other.html" not in web
          and "Could not fetch" not in marked.stdout + marked.stderr),
+        ("an iframe is a link to what it framed, named by its title, and "
+         "no raw tag is left",
+         lambda: '<a href="https://example.invalid/embed/x">A video</a>'
+         in re.sub(r"\s+", " ", web) and "<iframe" not in web
+         and "iframe x1" in marked.stderr),
         ("a table with no th anywhere is reported, not guessed",
          lambda: "no header row and no declaration"
          in marked.stdout + marked.stderr),
@@ -725,8 +739,10 @@ def case_merge(work):
          lambda: levels == [2, 3, 2]),
         ("a link to a merged page becomes a link inside the file",
          lambda: "](#ch1--second)" in one),
-        ("a link to another file names that file",
-         lambda: "](ch2.md)" in one),
+        # ch2 kept no page of its own, so a link to it lands on its first
+        # piece, which the merge then finds inside ch2.md.
+        ("a link to another file names that file, where its target went",
+         lambda: "](ch2.md#ch2--only)" in one),
         ("two groups from one source get a file each, not one file",
          lambda: len([n for n in os.listdir(os.path.join(work, "src"))
                       if n.endswith(".md")]) >= 2),

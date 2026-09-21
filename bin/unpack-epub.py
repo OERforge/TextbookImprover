@@ -68,6 +68,11 @@ def page_names(package):
             stem = safe_stem(posixpath.splitext(
                 posixpath.relpath(path, package.root or "."))[0]
                 .replace("/", "-"))
+        # Two files of one name but for the extension, in one directory
+        # (chapter1.xhtml and chapter1.html), still meet: number them.
+        base_stem, n = stem, 2
+        while stem in taken:
+            stem, n = f"{base_stem}-{n}", n + 1
         taken.add(stem)
         names[path] = stem
     return names

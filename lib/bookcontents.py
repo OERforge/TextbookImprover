@@ -721,3 +721,62 @@ def contents_from_tree(tree):
             node["role"] = role
         out.append(node)
     return out
+
+
+# What a page's head says about it, for tools that read only HTML.
+TITLE_RE = re.compile(r"<title[^>]*>(.*?)</title>", re.I | re.S)
+# What a page split by split-pages.py says about where it came from.
+META_RE = re.compile(r'<meta\s+name="(source-page|source-title|page-part|'
+                     r'page-parent|page-position|page-role)"\s+content="([^"]*)"',
+                     re.I)
+
+
+def page_title(path, stem):
+    """Title from the page's own <title>, falling back to the filename."""
+    try:
+        with open(path, encoding="utf-8", errors="replace") as handle:
+            markup = handle.read(20000)
+    except OSError:
+        return stem
+    m = TITLE_RE.search(markup)
+    if m:
+        title = clean_title(m.group(1))
+        if title:
+            return title
+    return stem_title(stem)
+
+
+def page_provenance(path):
+    """(source stem, part number, parent titles, position, source title)
+    for a page split-pages.py wrote, from the <meta> elements it put in
+    the head, or None."""
+    try:
+        with open(path, encoding="utf-8", errors="replace") as handle:
+            markup = handle.read(20000)
+    except OSError:
+        return None
+    found, parents = {}, []
+    for name, value in META_RE.findall(markup.split("</head>", 1)[0]):
+        value = html_module.unescape(value)
+        if name == "page-parent":
+            parents.append(value)
+        else:
+            found[name] = value
+    if not found.get("source-page"):
+        return None
+    m = re.match(r"(\d+)/", found.get("page-part", ""))
+    return (found["source-page"], int(m.group(1)) if m else None, parents,
+            found.get("page-position", ""), found.get("source-title", ""),
+            found.get("page-role", ""))
+
+
+def page_role(path):
+    """A page's own role, from the <meta> the filter wrote when it
+    promoted a heading carrying one ({.appendix})."""
+    try:
+        with open(path, encoding="utf-8", errors="replace") as handle:
+            markup = handle.read(20000)
+    except OSError:
+        return ""
+    found = dict(META_RE.findall(markup.split("</head>", 1)[0]))
+    return found.get("page-role", "")

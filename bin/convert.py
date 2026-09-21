@@ -93,7 +93,7 @@ HTML_SOURCE_FILTER = os.path.join(HERE, "html-source.lua")
 HTML_RAW_FILTER = os.path.join(HERE, "html-raw.lua")
 ASCIIDOC_FILTER = os.path.join(HERE, "asciidoc-source.lua")
 INCLUDE = re.compile(r"^include::([^\[\s]+\.(?:adoc|asciidoc|asc))\[", re.M)
-SOURCE_EXTENSIONS = (".docx", ".md", ".html")
+SOURCE_EXTENSIONS = (".docx", ".md", ".html", ".adoc", ".asciidoc")
 PAGE_CSS = os.path.join(HERE, "page.css")
 HEADERS_TOOL = os.path.join(HERE, "table-headers.py")
 SPLIT_TOOL = os.path.join(HERE, "split-pages.py")
@@ -294,7 +294,7 @@ def variant_sources(base, target_name):
     """{stem: path} of the files that replace a source for one target:
     <stem>.<target>.md, .docx, or .html. The page keeps the stem, so
     contents, links, and sidecars don't know which file produced it."""
-    found = {}
+    found, clashes = {}, []
     where = [base] + ([os.path.join(base, PASSTHROUGH)] if PASSTHROUGH
                       else [])
     for directory in where:
@@ -302,7 +302,13 @@ def variant_sources(base, target_name):
             for path in sorted(glob.glob(os.path.join(
                     directory, f"*.{target_name}{ext}"))):
                 stem = os.path.basename(path)[:-len(f".{target_name}{ext}")]
+                if safe_stem(stem) in found:
+                    clashes.append((found[safe_stem(stem)], path))
                 found[safe_stem(stem)] = path
+    for one, other in clashes:
+        die(f"{os.path.relpath(one, base)} and {os.path.relpath(other, base)} "
+            f"are both target {target_name}'s variant of the same page. "
+            "Keep one. Nothing was converted.")
     return found
 
 
@@ -337,6 +343,38 @@ def markdown_sources(base, fragments):
             continue
         found.append(name)
     return found
+
+
+def page_name_of(name):
+    """The page a source file becomes: its name without the extension,
+    made safe for a link. Every format is named the same way, so this is
+    where two of them can meet."""
+    return safe_stem(os.path.splitext(os.path.basename(name))[0])
+
+
+def check_page_names(groups):
+    """Stop when two files would be one page. The leftover rules have run
+    by now (an .md beside a same-named .docx is v0.1's, an .html named
+    after another source is an older layout's), so what's left is two
+    files someone means as sources: ch1.md and ch1.adoc, Chapter 1.docx
+    and Chapter-1.html, _pt/about.md and about.docx. One would silently
+    overwrite the other's intermediate, and every sidecar keyed on the
+    page (page-names.csv, a table caption's fallback key) would describe
+    whichever won."""
+    seen = {}
+    for names in groups:
+        for name in names:
+            seen.setdefault(page_name_of(name), []).append(name)
+    clashes = sorted((page, sorted(set(names))) for page, names in seen.items()
+                     if len(set(names)) > 1)
+    if clashes:
+        lines = "\n".join(f"  {page}: " + ", ".join(names)
+                          for page, names in clashes)
+        die("These files would each be the same page:\n" + lines + "\n\n"
+            "A page is named after its file, without the extension and made "
+            "safe for a link, so two files can't both be one page. Rename "
+            "one, or move the one that isn't a source out of the "
+            "directory. Nothing was converted.")
 
 
 def asciidoc_sources(base):
@@ -730,10 +768,6 @@ def hand_pages(base, stems):
         stem = os.path.basename(path)[:-5]
         if is_variant(os.path.basename(path)):
             continue
-        if stem in stems or safe_stem(stem) in stems:
-            say(f"WARNING: {PASSTHROUGH}/{stem}.html has the name of a page "
-                "converted from a source; the converted page is kept.")
-            continue
         if not is_safe(stem):
             say(f"WARNING: {stem}.html has a space or other character in "
                 "its name that an LMS may not resolve in a link; renaming "
@@ -822,6 +856,11 @@ def read_variants(base, target, work, env):
             run(["pandoc", "-f", "docx", "-t", "json", repaired, "-o", out,
                  "--lua-filter=" + MEDIA_FILTER, "--extract-media=" + stem],
                 env=env, cwd=base)
+        elif name.endswith((".adoc", ".asciidoc")):
+            run(["pandoc", "-f", "asciidoc", "-t", "json", path, "-o", out,
+                 "--lua-filter=" + ASCIIDOC_FILTER,
+                 "--lua-filter=" + MEDIA_FILTER], env=env, cwd=base)
+            portable_media_paths(out, base, name)
         elif name.endswith(".html"):
             repaired = os.path.join(out_dir, name)
             htmlrepair.repaired_copy(path, repaired)
@@ -1889,17 +1928,22 @@ def main():
             fragments[target.name] = tuple(pair)
 
         # ---- 1. read ----------------------------------------------------------
-        stems = read_to_json(base, docs, env, work)
-        stems += read_markdown_to_json(base, markdown_sources(base,
-                                                              fragment_files),
-                                       env)
+        # Every file that becomes a page is found before any is read, so
+        # two that would be one page stop the run before either is.
+        markdown = markdown_sources(base, fragment_files)
         adoc, adoc_order, imagesdir = asciidoc_sources(base)
+        named = {page_name_of(n) for n in list(docs) + markdown + adoc}
+        hand = hand_pages(base, named)
+        web = html_sources(base, named, set(hand))
+        check_page_names([docs, markdown, adoc, web,
+                          [f"{PASSTHROUGH}/{h}.html" for h in hand]])
+        stems = read_to_json(base, docs, env, work)
+        stems += read_markdown_to_json(base, markdown, env)
         adoc_stems = read_asciidoc_to_json(base, adoc, env, imagesdir)
         resolve_asciidoc_xrefs(base, adoc_stems)
         stems += adoc_stems
         if adoc_order and not project.get("contents"):
             write_order_sample(adoc_order)
-        web = html_sources(base, stems, set(hand_pages(base, stems)))
         for target in targets:
             if web and target.format == "html" and os.path.abspath(
                     target.output_dir) == os.path.abspath(base):

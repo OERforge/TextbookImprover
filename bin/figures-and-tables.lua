@@ -729,14 +729,19 @@ end
 
 local image_alts = nil
 
--- Image alt entries are keyed on the media path with the extension
--- removed. The extension is not stable: step 2 of the conversion script
+-- Image alt entries are keyed on the media path, and matched without
+-- the extension when the exact path isn't there. The extension is not
+-- stable for Word's media: step 2 of the conversion script
 -- renames each extracted file to match its real content type, so a path
 -- recorded as ".../rId57.so" becomes ".../rId57.jpg" once resolved, and a
 -- literal key would stop matching the moment that happened -- silently
 -- reporting an image as missing alt text that has already been written.
--- The stem is unique within a document's media directory, so nothing is
--- lost by ignoring the extension.
+-- Word's part names are unique within a document's media directory, so
+-- nothing is lost by ignoring the extension there. An author's own files
+-- are another matter: images/logo.png and images/logo.svg are two images,
+-- and a row written for one must not describe the other. So the stem
+-- match is used only when no other file in the image's directory shares
+-- its stem.
 --
 -- Deliberately not applied to the table sidecar: those keys are labels
 -- like "Table 2.1", where stripping the last dot would give "Table 2".
@@ -744,10 +749,32 @@ local function media_stem(path)
   return (path:gsub('%.%w+$', ''))
 end
 
+local exact_alts = nil
+local shared_stems = {}
+
+-- Whether another file in src's directory has the same name but for its
+-- extension, which makes the extension-less match ambiguous.
+local function stem_is_shared(src)
+  local dir = src:match('^(.*)/[^/]*$') or '.'
+  local counts = shared_stems[dir]
+  if counts == nil then
+    counts = {}
+    local ok, files = pcall(pandoc.system.list_directory, dir)
+    if ok then
+      for _, file in ipairs(files) do
+        local stem = media_stem(file)
+        counts[stem] = (counts[stem] or 0) + 1
+      end
+    end
+    shared_stems[dir] = counts
+  end
+  return (counts[media_stem(src:match('([^/]*)$'))] or 0) > 1
+end
+
 local function alt_for(src)
   if image_alts == nil then
-    image_alts = {}
-    for key, value in pairs(load_sidecar(ALT_FILE)) do
+    image_alts, exact_alts = {}, load_sidecar(ALT_FILE)
+    for key, value in pairs(exact_alts) do
       local stem = media_stem(key)
       local existing = image_alts[stem]
       if existing ~= nil and existing ~= '' and value ~= '' and existing ~= value then
@@ -760,6 +787,8 @@ local function alt_for(src)
       end
     end
   end
+  if exact_alts[src] ~= nil then return exact_alts[src] end
+  if stem_is_shared(src) then return nil end
   return image_alts[media_stem(src)]
 end
 

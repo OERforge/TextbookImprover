@@ -71,7 +71,8 @@ except ImportError:
 from bookcontents import (  # noqa: E402
     natural_key, chapter_of, within_chapter_key, unrecognised_roles,
     guess_contents, walk_contents, flatten_pages, contents_from_tree,
-    expand_split_sources,
+    expand_split_sources, page_title, page_provenance, page_role,
+    TITLE_RE, META_RE,
     stem_title, slugify, clean_title, number_tree, numbered_title,
 )
 
@@ -108,12 +109,6 @@ class _References:
 
 
 SRC_RE = _References()
-TITLE_RE = re.compile(r"<title[^>]*>(.*?)</title>", re.I | re.S)
-# What a page split by split-pages.py says about where it came from.
-META_RE = re.compile(r'<meta\s+name="(source-page|source-title|page-part|'
-                     r'page-parent|page-position|page-role)"\s+content="([^"]*)"',
-                     re.I)
-
 REQUIRED = ["identifier", "title"]
 
 # Outline entries that name no page of their own.
@@ -141,57 +136,6 @@ def ncname(text):
 def xml_escape(text):
     return (text.replace("&", "&amp;").replace("<", "&lt;")
                 .replace(">", "&gt;").replace('"', "&quot;"))
-
-
-def page_title(path, stem):
-    """Title from the page's own <title>, falling back to the filename."""
-    try:
-        with open(path, encoding="utf-8", errors="replace") as handle:
-            markup = handle.read(20000)
-    except OSError:
-        return stem
-    m = TITLE_RE.search(markup)
-    if m:
-        title = clean_title(m.group(1))
-        if title:
-            return title
-    return stem_title(stem)
-
-
-def page_provenance(path):
-    """(source stem, part number, parent titles, position, source title)
-    for a page split-pages.py wrote, from the <meta> elements it put in
-    the head, or None."""
-    try:
-        with open(path, encoding="utf-8", errors="replace") as handle:
-            markup = handle.read(20000)
-    except OSError:
-        return None
-    found, parents = {}, []
-    for name, value in META_RE.findall(markup.split("</head>", 1)[0]):
-        value = html_module.unescape(value)
-        if name == "page-parent":
-            parents.append(value)
-        else:
-            found[name] = value
-    if not found.get("source-page"):
-        return None
-    m = re.match(r"(\d+)/", found.get("page-part", ""))
-    return (found["source-page"], int(m.group(1)) if m else None, parents,
-            found.get("page-position", ""), found.get("source-title", ""),
-            found.get("page-role", ""))
-
-
-def page_role(path):
-    """A page's own role, from the <meta> the filter wrote when it
-    promoted a heading carrying one ({.appendix})."""
-    try:
-        with open(path, encoding="utf-8", errors="replace") as handle:
-            markup = handle.read(20000)
-    except OSError:
-        return ""
-    found = dict(META_RE.findall(markup.split("</head>", 1)[0]))
-    return found.get("page-role", "")
 
 
 def page_references(path, base_dir):

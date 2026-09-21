@@ -28,6 +28,7 @@ on another `bin/` script.
 | `markdown-source.lua` | For a markdown target: takes out what the filter derived and writes what it decided as source markup. |
 | `header-includes.lua` | Adds the stylesheet to a page's `header-includes` at render time, alongside what the page already carries there; `--include-in-header` would replace it. |
 | `unpack-epub.py` | Turns an EPUB into a directory `convert.py` converts: a page per content document, the media, and a `project.yaml` with the package's metadata and its navigation as `contents`. See [An EPUB as the source](epub-input.md). |
+| `adopt-pages.py` | Takes a converted book's pages as the sources of a new one: pieces renamed without `--`, references rewritten, the split's provenance removed, `contents` written. |
 | `unpack-site.py` | Turns pages saved from the web into a directory `convert.py` converts, or with `--whole-pages` into an offline copy of the site. See [A book saved from the web](site-input.md). |
 | `lib/sitesource.py` | A saved site as URLs with bytes: the loaders (browser saves, MHTML), the generator profiles, reading the order from menus, and pointing every reference at what is held. |
 | `lib/htmlparse.py` | Parsing and serializing HTML with html5lib, or lxml when that's all there is, behind one interface. |

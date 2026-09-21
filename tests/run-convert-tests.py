@@ -390,6 +390,124 @@ def case_asciidoc(work):
     ]
 
 
+def case_stem_collisions(work):
+    """Two files that would be one page stop the run; the leftover rules
+    still hold; and an image's alt text isn't lent to a file that merely
+    shares its stem."""
+    def book(name, files, config="targets:\n  html:\n    format: html\n"):
+        where = os.path.join(work, name)
+        for path, text in files.items():
+            os.makedirs(os.path.dirname(os.path.join(where, path)) or where,
+                        exist_ok=True)
+            mode = "wb" if isinstance(text, bytes) else "w"
+            with open(os.path.join(where, path), mode) as fh:
+                fh.write(text)
+        return where, convert(where, config)
+    md, adoc = "# One\n\nText.\n", "= One\n\nText.\n"
+    with open(os.path.join(FIXTURES, "tables.docx"), "rb") as fh:
+        docx = fh.read()
+    a, same = book("formats", {"ch1.md": md, "ch1.adoc": adoc})
+    b, safe = book("safe", {"Chapter 1.md": md, "Chapter-1.adoc": adoc})
+    c, passthrough = book("pt", {"about.docx": docx, "_pt/about.md": md})
+    d, variant = book("variants", {"ch1.md": md, "ch1.print.md": md,
+                                   "ch1.print.adoc": adoc},
+                      "targets:\n  html:\n    format: html\n"
+                      "  print:\n    format: html\n")
+    e, leftover = book("leftover", {"x.docx": docx, "x.md": md})
+    g, _ = book("adoc-variant", {"ch1.adoc": "= One\n\nWeb text.\n",
+                                 "ch1.print.adoc": "= One\n\nPrint text.\n"},
+                "targets:\n  web:\n    format: html\n"
+                "  print:\n    format: html\n")
+    svg = '<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"/>'
+    f, logos = book("logos", {
+        "pics.md": "# Pics\n\n![](assets/logo.png)\n\n![](assets/logo.svg)\n",
+        "assets/logo.png": ONE_PIXEL, "assets/logo.svg": svg,
+        "image-alt.csv": "Image,Alt\nassets/logo.png,A logo\n"})
+    page = read(f, "html", "pics.html") if exists(f, "html", "pics.html") \
+        else ""
+    missing = read(f, "image-alt-missing.csv") if exists(
+        f, "image-alt-missing.csv") else ""
+    said = lambda r: r.stdout + r.stderr
+    return [
+        ("ch1.md and ch1.adoc stop the run, both named, nothing converted",
+         lambda: same.returncode != 0 and "ch1: ch1.adoc, ch1.md" in said(same)
+         and not exists(a, "html") and not exists(a, "ch1.json")),
+        ("names that differ only until made safe for a link meet too",
+         lambda: safe.returncode != 0
+         and "Chapter 1.md" in said(safe) and "Chapter-1.adoc" in said(safe)),
+        ("a pass-through page can't share a source's name",
+         lambda: passthrough.returncode != 0
+         and "_pt/about.md" in said(passthrough)
+         and "about.docx" in said(passthrough)),
+        ("two variants of one page for one target stop the run",
+         lambda: variant.returncode != 0
+         and "variant of the same page" in said(variant)),
+        ("an .md beside its .docx is still a v0.1 leftover, not a clash",
+         lambda: leftover.returncode in (0, 1) and exists(e, "html", "x.html")),
+        ("an AsciiDoc variant replaces its page for its target, and isn't "
+         "a page of its own",
+         lambda: "Print text." in read(g, "print", "ch1.html")
+         and "Web text." in read(g, "web", "ch1.html")
+         and not exists(g, "web", "ch1.print.html")),
+        ("an image's alt text goes to that image, not one sharing its stem",
+         lambda: re.search(r'src="assets/logo\.png"[^>]*alt="A logo"|'
+                           r'alt="A logo"[^>]*src="assets/logo\.png"', page)
+         and not re.search(r'src="assets/logo\.svg"[^>]*alt="A logo"|'
+                           r'alt="A logo"[^>]*src="assets/logo\.svg"', page)),
+        ("and the other is reported as needing its own",
+         lambda: "assets/logo.svg" in missing
+         and "assets/logo.png" not in missing),
+    ]
+
+
+def case_adopt(work):
+    """A split book's pages adopted as the sources of a new one."""
+    os.makedirs(os.path.join(work, "_pt"))
+    with open(os.path.join(work, "ch1.md"), "w", encoding="utf-8") as fh:
+        fh.write("# Chapter One\n\nOpening.\n\n## First Part\n\nSee "
+                 "[the second](#second-part).\n\n## Second Part\n\nEnd.\n")
+    with open(os.path.join(work, "_pt", "about.html"), "w",
+              encoding="utf-8") as fh:
+        fh.write(HAND.replace("Front Matter", "About"))
+    convert(work, "defaults:\n  pages:\n    split_level: 2\n"
+                  "targets:\n  html:\n    format: html\n")
+    out = work + "-adopted"
+    adopted = subprocess.run(
+        ["python3", os.path.join(BIN, "adopt-pages.py"),
+         os.path.join(work, "html"), "-o", out],
+        capture_output=True, text=True)
+    first = read(out, "ch1-first-part.html") if exists(
+        out, "ch1-first-part.html") else ""
+    import yaml
+    project = yaml.safe_load(read(out, "project.yaml"))["project"] if exists(
+        out, "project.yaml") else {}
+    again = run_in(out)
+    return [
+        ("the pieces are renamed with one hyphen",
+         lambda: adopted.returncode == 0 and first
+         and not any("--" in n for n in os.listdir(out))),
+        ("a link between pieces follows the rename",
+         lambda: 'href="ch1-second-part.html#second-part"' in first),
+        ("the split's provenance is gone from the page",
+         lambda: 'name="source-page"' not in first
+         and 'name="page-part"' not in first),
+        ("contents names the pages as they are now, grouped as before",
+         lambda: next(e["items"] for e in project["contents"]
+                      if isinstance(e, dict) and e.get("title")
+                      == "Chapter One")
+         == ["ch1", "ch1-first-part", "ch1-second-part"]),
+        ("a finished page goes back into _pt/",
+         lambda: exists(out, "_pt", "about.html")
+         and not exists(out, "about.html")),
+        ("the adopted book converts, every page in contents, links landing",
+         lambda: again.returncode in (0, 1)
+         and "not listed in contents" not in again.stdout + again.stderr
+         and exists(out, "html", "ch1-first-part.html")
+         and 'href="ch1-second-part.html#second-part"'
+         in read(out, "html", "ch1-first-part.html")),
+    ]
+
+
 def case_html_source(work):
     """An HTML page is a source when the book says so, and converting
     what this pipeline wrote changes nothing."""
@@ -840,6 +958,8 @@ CASES = [
     ("a Markdown source", case_markdown),
     ("an HTML source", case_html_source),
     ("an AsciiDoc source", case_asciidoc),
+    ("two files, one page", case_stem_collisions),
+    ("adopting a split book's pages", case_adopt),
     ("a hand-written page", case_hand_written),
     ("several targets", case_targets),
     ("arguments passed to the packager", case_passthrough),

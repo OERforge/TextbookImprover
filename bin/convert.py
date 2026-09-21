@@ -1572,6 +1572,61 @@ def render_html(target, pages, base, fragments, language, env):
     return written
 
 
+def add_menu(target, tree, titles, written, hand, work):
+    """A contents menu at the top of every page this target rendered and
+    previous/next links at its foot: for pages posted as a site of their
+    own. The menu is the book's tree as the contents page shows it,
+    rendered once, and marks each page's own entry aria-current; it sits
+    in a <details> so it takes one line until it's wanted, and a <nav>
+    so it's a landmark. A pass-through page is someone's finished page
+    and isn't touched."""
+    from bookcontents import toc_blocks, flatten_pages
+    api = json.loads(subprocess.run(
+        ["pandoc", "-f", "markdown", "-t", "json"], input="",
+        capture_output=True, text=True, check=True).stdout)["pandoc-api-version"]
+    doc = {"pandoc-api-version": api, "meta": {},
+           "blocks": toc_blocks(tree, titles, lambda s: s + ".html")}
+    source = os.path.join(work, f"{target.name}-menu.json")
+    with open(source, "w", encoding="utf-8") as fh:
+        json.dump(doc, fh)
+    listing = subprocess.run(["pandoc", "-f", "json", "-t", "html5", source,
+                              "--ascii"], capture_output=True, text=True,
+                             check=True).stdout
+    order = [stem for stem in flatten_pages(tree)]
+    for path in written:
+        stem = os.path.basename(path)[:-5]
+        if stem in hand or not path.endswith(".html") or stem not in order:
+            continue
+        mine = listing.replace(f'href="{stem}.html"',
+                               f'href="{stem}.html" aria-current="page"', 1)
+        menu = ('<nav class="book-menu" aria-label="Contents">\n'
+                '<details>\n<summary>Contents</summary>\n' + mine +
+                '</details>\n</nav>\n')
+        index = order.index(stem)
+        steps = []
+        for rel, other, arrow in (("prev", index - 1, "Previous: "),
+                                  ("next", index + 1, "Next: ")):
+            if 0 <= other < len(order):
+                name = order[other]
+                title = html_escape(titles.get(name) or name)
+                steps.append(f'<a rel="{rel}" href="{name}.html">{arrow}'
+                             f'{title}</a>')
+        pager = ('<nav class="book-pager" aria-label="Previous and next">\n'
+                 + "\n".join(steps) + "\n</nav>\n") if steps else ""
+        with open(path, encoding="utf-8") as fh:
+            page = fh.read()
+        page = re.sub(r"(<body[^>]*>\n?)", lambda m: m.group(1) + menu,
+                      page, count=1)
+        page = page.replace("</body>", pager + "</body>", 1)
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(page)
+
+
+def html_escape(text):
+    return (str(text).replace("&", "&amp;").replace("<", "&lt;")
+            .replace(">", "&gt;"))
+
+
 def page_group(intermediate):
     """(group key, group title) for a page, from the provenance a split
     left in it. A chapter file's sections share the source; a single-file
@@ -2058,6 +2113,9 @@ def main():
                                           renv):
                     if path not in written[target.name]:
                         written[target.name].append(path)
+                if target["menu"] == "on":
+                    add_menu(target, tree, titles, written[target.name],
+                             hand_stems, work)
 
         # ---- 5. reports, once per book ----------------------------------------
         missing = write_report(

@@ -51,6 +51,10 @@ Nesting comes from the menu's lists. A menu that is one flat list, like Scribble
 
 A browser saves the page as it stood after its scripts ran. Where the site renders math with MathJax, a "complete" save keeps the `<script type="math/tex">` source and Pandoc reads it. An `.mhtml` save keeps no scripts, so the TeX is gone and only MathJax's rendering is left, which isn't math to anyone reading the output. The report names each such page (`math-lost`). That's a property of the save, and a different way of saving the book would do better.
 
+## Posting the clean copy as a site
+
+`--whole-pages` keeps a site's own menus, pointed at the local pages. To post the converted book instead, set `menu: on` on its HTML target in `conversion.yaml`: every page then carries the book's contents, from `contents`, as a collapsed menu at its top and previous/next links at its foot.
+
 ## Parsers
 
 Saved pages are parsed with html5lib, which builds the tree a browser builds; install it with `sudo apt install python3-html5lib`. Without it `lxml` is used, and the run says so once: libxml2's HTML parser doesn't know `<wbr>` is empty and nests what follows inside it, which changed the tree of 42 of one book's 80 pages. With neither, the run stops and says what to install.

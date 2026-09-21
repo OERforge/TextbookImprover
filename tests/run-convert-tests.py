@@ -567,6 +567,47 @@ def case_html_headers(work):
     ]
 
 
+def case_menu(work):
+    """menu: on gives every rendered page the book's contents and a
+    previous/next pager; a pass-through page is left as it stands."""
+    os.makedirs(os.path.join(work, "_pt"))
+    with open(os.path.join(work, "ch1.md"), "w", encoding="utf-8") as fh:
+        fh.write("# Chapter One\n\nOpening.\n\n## First Part\n\nA.\n\n"
+                 "## Second Part\n\nB.\n")
+    with open(os.path.join(work, "_pt", "about.html"), "w",
+              encoding="utf-8") as fh:
+        fh.write(HAND.replace("Front Matter", "About"))
+    result = convert(work, "defaults:\n  pages:\n    split_level: 2\n"
+                           "targets:\n  html:\n    format: html\n"
+                           "    menu: \"on\"\n"
+                           "  plain:\n    format: html\n")
+    first = read(work, "html", "ch1--first-part.html") if exists(
+        work, "html", "ch1--first-part.html") else ""
+    checks = read(work, "output-check.csv") if exists(
+        work, "output-check.csv") else ""
+    return [
+        ("a page carries the book's contents as a collapsed menu, its own "
+         "entry marked current",
+         lambda: result.returncode in (0, 1)
+         and '<nav class="book-menu" aria-label="Contents">' in first
+         and '<summary>Contents</summary>' in first
+         and 'href="ch1--first-part.html" aria-current="page"' in first
+         and first.count('aria-current="page"') == 1),
+        ("and previous and next pages at its foot, by title",
+         lambda: 'rel="prev" href="ch1.html"' in first
+         and 'rel="next" href="ch1--second-part.html">Next: Second Part'
+         in first),
+        ("every link the menu adds leads somewhere",
+         lambda: "link-to-missing" not in checks),
+        ("a pass-through page is left as it stands",
+         lambda: read(work, "html", "about.html")
+         == HAND.replace("Front Matter", "About")),
+        ("a target without menu: on has none",
+         lambda: '<nav class="book-menu"' not in read(
+             work, "plain", "ch1--first-part.html")),
+    ]
+
+
 def case_html_source(work):
     """An HTML page is a source when the book says so, and converting
     what this pipeline wrote changes nothing."""
@@ -1021,6 +1062,7 @@ CASES = [
     ("two files, one page", case_stem_collisions),
     ("adopting a split book's pages", case_adopt),
     ("an HTML source's tables and the header sidecar", case_html_headers),
+    ("a menu for pages posted as a site", case_menu),
     ("a hand-written page", case_hand_written),
     ("several targets", case_targets),
     ("arguments passed to the packager", case_passthrough),

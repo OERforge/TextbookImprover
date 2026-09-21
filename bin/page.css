@@ -62,3 +62,9 @@ figcaption {
     color: black;
   }
 }
+
+/* The book's menu and pager, when a target turns menu on. */
+nav.book-menu { margin: 0 0 1.5em; }
+nav.book-menu summary { cursor: pointer; font-weight: bold; }
+nav.book-pager { display: flex; justify-content: space-between;
+                 gap: 1em; margin: 2em 0 0; flex-wrap: wrap; }

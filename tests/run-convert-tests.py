@@ -116,11 +116,16 @@ HAND = """<!DOCTYPE html><html lang="en"><head><title>Front Matter</title>
 
 def case_hand_written(work):
     """A page the author wrote is copied, not rendered, and is in every
-    output."""
+    output. It lives in _pt/ and its references resolve from the book's
+    directory, as though it sat beside the sources."""
     os.makedirs(os.path.join(work, "front"), exist_ok=True)
-    with open(os.path.join(work, "frontmatter.html"), "w",
+    os.makedirs(os.path.join(work, "_pt"), exist_ok=True)
+    with open(os.path.join(work, "_pt", "frontmatter.html"), "w",
               encoding="utf-8") as fh:
         fh.write(HAND)
+    with open(os.path.join(work, "_pt", "notes.md"), "w",
+              encoding="utf-8") as fh:
+        fh.write("# Notes by hand\n\n![A logo](front/logo.png)\n")
     with open(os.path.join(work, "front", "style.css"), "w") as fh:
         fh.write("body {}\n")
     with open(os.path.join(work, "front", "logo.png"), "wb") as fh:
@@ -147,11 +152,15 @@ def case_hand_written(work):
          and exists(work, "html", "front", "logo.png")),
         ("it is in the EPUB",
          lambda: "Front Matter" in nav),
+        ("a Markdown page in _pt is converted, its image found from the "
+         "book's directory",
+         lambda: exists(work, "html", "notes.html")
+         and 'src="front/logo.png"' in read(work, "html", "notes.html")),
         ("and in the cartridge, with its files",
          lambda: any(n.endswith("/frontmatter.html") for n in names)
          and any(n.endswith("/front/style.css") for n in names)),
         ("and the output check looked at it",
-         lambda: "Output check: 6 page(s)" in result.stderr),
+         lambda: "Output check: 7 page(s)" in result.stderr),
     ]
 
 
@@ -305,9 +314,9 @@ def case_markdown(work):
     ]
 
 
-WEB = """<!DOCTYPE html><html lang="en"><head><title>A Web Page</title></head>
+WEB = """<!DOCTYPE html><html lang="en"><head><title>A Web Page -- The Site</title></head>
 <body><nav><ul><li><a href="other.html">Other</a></li></ul></nav>
-<main><h1>A Web Page</h1>
+<main><div class="chapter"><div class="wrap"><p></p><h1>A Web Page</h1></div></div>
 <table><thead><tr><th>Country</th><th>GDP</th></tr></thead>
 <tbody><tr><th>Brazil</th><td>3,153</td></tr>
 <tr><th>Canada</th><td>1,827</td></tr></tbody></table>
@@ -412,15 +421,15 @@ def case_html_source(work):
     mixed = work + "-mixed"
     os.makedirs(mixed)
     shutil.copy(os.path.join(FIXTURES, "tables.docx"), mixed)
-    for name in ("web.html", "finished.html"):
+    os.makedirs(os.path.join(mixed, "_pt"))
+    for name in ("web.html", os.path.join("_pt", "finished.html")):
         with open(os.path.join(mixed, name), "w", encoding="utf-8") as fh:
             fh.write(WEB)
     with open(os.path.join(mixed, "conversion.yaml"), "w",
               encoding="utf-8") as fh:
         fh.write("targets:\n  html:\n    format: html\n"
                  "  epub:\n    format: epub3\n")
-    marked = run_in(mixed, "  contents:\n    - tables\n"
-                           "    - page: web\n      convert: true\n"
+    marked = run_in(mixed, "  contents:\n    - tables\n    - web\n"
                            "    - finished\n")
     web = read(mixed, "html", "web.html") if exists(
         mixed, "html", "web.html") else ""
@@ -433,9 +442,9 @@ def case_html_source(work):
                                 if n.endswith(".xhtml") and "example.invalid"
                                 in book.read(n).decode("utf-8"))
     return [
-        ("a directory of nothing but .html is read as sources, and says so",
-         lambda: "as sources" in again.stdout + again.stderr
-         and exists(second, "html", "tables.html")),
+        ("a directory of nothing but .html is read as sources",
+         lambda: exists(second, "html", "tables.html")
+         and exists(second, "tables.json")),
         ("converting our own pages gives the same book",
          lambda: "Runs agree" in compared.stdout),
         ("the second write is the third, byte for byte",
@@ -451,7 +460,13 @@ def case_html_source(work):
         ("the title is written once and a table is wrapped once",
          lambda: page.count("<h1") == 1
          and page.count('class="table-wrapper"') == page.count("<table")),
-        ("a page contents marks convert: true is converted",
+        ("an .html beside a .docx is a source, and the run says how to keep "
+         "one as it stands",
+         lambda: "belongs in _pt/" in marked.stdout + marked.stderr),
+        ("a page's only h1, inside wrappers, is its title: one h1, and "
+         "the <title> the site gave it goes",
+         lambda: web.count("<h1") == 1 and "<title>A Web Page</title>" in web),
+        ("a page beside the sources is converted",
          lambda: marked.returncode in (0, 1)
          and 'class="table-wrapper"' in web),
         ("a th in every body row is a row header again, and a thead's "
@@ -476,7 +491,7 @@ def case_html_source(work):
         ("a table with no th anywhere is reported, not guessed",
          lambda: "no header row and no declaration"
          in marked.stdout + marked.stderr),
-        ("a page contents does not mark is copied as it stands",
+        ("a page in _pt is copied as it stands",
          lambda: read(mixed, "html", "finished.html") == WEB),
     ]
 
@@ -661,6 +676,10 @@ def case_editions(work):
     some targets, a hand-written variant, and the title-block switch."""
     os.makedirs(work, exist_ok=True)
     for name, text in EDITIONS.items():
+        # A finished page and its variant live in _pt/.
+        if name.startswith("front"):
+            name = os.path.join("_pt", name)
+            os.makedirs(os.path.join(work, "_pt"), exist_ok=True)
         with open(os.path.join(work, name), "w", encoding="utf-8") as fh:
             fh.write(text)
     result = convert(work, "targets:\n  web:\n    format: html\n"

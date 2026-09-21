@@ -1,23 +1,20 @@
 # HTML sources
 
-An `.html` file beside the sources is one of two things, and the book says which. By default it's a page someone finished: it's copied into every HTML target as it stands and read only so the EPUB can carry it. Marked `convert: true` in `contents`, it's a source: read into the same intermediate a `.docx` gets, filtered, split, and rendered by every target.
+Every `.html` file beside the sources is a source: read into the same intermediate a `.docx` gets, filtered, split, and rendered by every target. Three kinds are left alone because a run put them there: a page named after another source (the page an older layout wrote beside it), a piece the split named with `--`, and a target's copy of a pass-through page.
 
-```yaml
-project:
-  contents:
-    - frontmatter            # a finished page, copied
-    - title: Chapter 1
-      convert: true          # everything in the group is a source
-      items:
-        - 1-1-supply
-        - 1-2-demand
-        - page: 1-3-credits
-          convert: false     # except this one
+A page someone finished by hand goes in the **pass-through directory**, `_pt/` unless `passthrough` in `project.yaml` names another. An `.html` there is copied into every HTML target as it stands and read only so the EPUB can carry it; an `.md` there is converted alongside the sources. Either way its files are treated as though they sat beside the sources: a reference in `_pt/about.html` to `images/logo.png` names the book's `images/logo.png`, and that's what is copied with it. A variant of a pass-through page (`_pt/about.print.html`) is that target's copy.
+
+```
+book/
+  chapter-1.html        a source
+  chapter-2.html        a source
+  images/
+  _pt/
+    about.html          copied as it stands; its images/… are the book's
+    errata.md           converted with the sources
 ```
 
-The mark is inherited the way a role is, from a group to what's in it. One case needs no mark: a directory holding no `.docx` or `.md` and a project with no `contents` yet, where reading the pages is the only thing a conversion could mean. The run says it's doing so.
-
-A target that writes its pages beside the sources (`output_dir: .`) would overwrite an HTML source with the page made from it, so the run refuses that combination.
+A book with `.docx` or `.md` sources and `.html` beside them says so on every run, since before v0.7 an `.html` beside the sources was a finished page.
 
 ## What is read, and what isn't
 

@@ -12,7 +12,7 @@ python3 $T/bin/convert.py
 
 - **One `.html` per content document**, named for the file it was and made safe for a link. The text is the publisher's, byte for byte, except that its references point at where things now are: a link to another file of the book is a link to that page, fragment kept; an image is at the path it had beside the package document. The navigation document isn't a page.
 - **The book's other files**, images and stylesheets, where they sat.
-- **`project.yaml`**, with what the package said about the book (title, language, authors, publisher, description, an identifier made into an XML name) and, as `contents`, what its navigation said about the order. A navigation entry with entries beneath it is a group, opened by its own page when it has one. Every top-level entry carries `convert: true`, so the pages are sources (see [HTML sources](html.md)); there's no group around the whole book, which would push every page a level down in the cartridge and the EPUB's table of contents. The file is yours to edit.
+- **`project.yaml`**, with what the package said about the book (title, language, authors, publisher, description, an identifier made into an XML name) and, as `contents`, what its navigation said about the order. A navigation entry with entries beneath it is a group, opened by its own page when it has one. There's no group around the whole book, which would push every page a level down in the cartridge and the EPUB's table of contents.md)); there's no group around the whole book, which would push every page a level down in the cartridge and the EPUB's table of contents. The file is yours to edit.
 - **`unpack-report.csv`**, for what the unpacking noticed and didn't decide.
 
 | Check | What it means |

@@ -45,6 +45,12 @@ nothing, which is the test.
     the heading otherwise. Pandoc's EPUB writer builds the navigation
     from a heading's inlines, and an empty span in a nav entry is an
     epubcheck error (11 of them in one book).
+  - A page's only h1, when it sits inside wrappers (Pressbooks puts it
+    in section > div.chapter > div.chapter-title-wrap), is lifted out to
+    stand before them, where promote_h1_to_title can see it. Left where
+    it was, the page's <title> became the title ("1.3. Information
+    Systems Components -- Information Systems for Business and Beyond")
+    and the chapter's own h1 a second one, on 166 of 168 pages.
   - Raw HTML is html-raw.lua's, which runs before this filter on a
     source and alone on a finished page.
   - An aria-describedby or aria-labelledby that names an id the page no
@@ -210,7 +216,42 @@ local function with_attr(handler)
   return filter
 end
 
+local function count_h1(blocks)
+  local n = 0
+  pandoc.Blocks(blocks):walk({ Header = function(h)
+    if h.level == 1 then n = n + 1 end
+  end })
+  return n
+end
+
+-- Remove the first level-1 Header inside a Div, however deep; return it.
+local function take_h1(div)
+  for i, block in ipairs(div.content) do
+    if block.t == 'Header' and block.level == 1 then
+      table.remove(div.content, i)
+      return block
+    elseif block.t == 'Div' then
+      local found = take_h1(block)
+      if found then return found end
+    end
+  end
+  return nil
+end
+
+local function lift_h1(doc)
+  if count_h1(doc.blocks) ~= 1 then return end
+  for i, block in ipairs(doc.blocks) do
+    if block.t == 'Header' and block.level == 1 then return end
+    if block.t == 'Div' and count_h1({ block }) == 1 then
+      local h1 = take_h1(block)
+      if h1 then doc.blocks:insert(i, h1) end
+      return
+    end
+  end
+end
+
 function Pandoc(doc)
+  lift_h1(doc)
   local ids = {}
   doc:walk(with_attr(function(el)
     if el.identifier ~= '' then ids[el.identifier] = true end

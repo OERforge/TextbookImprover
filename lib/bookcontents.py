@@ -575,30 +575,6 @@ def walk_contents(nodes, available, used, problems, depth=0,
 
 
 
-def pages_to_convert(nodes, inherited=False):
-    """The pages contents marks "convert: true": an .html beside the
-    sources is a finished page unless the book says it is a source, on
-    the page's own entry or on a group above it. "convert: false" on a
-    page under such a group takes it back out."""
-    found = set()
-    for node in nodes or []:
-        if isinstance(node, str):
-            node = {"page": node}
-        if not isinstance(node, dict) or "generate" in node:
-            continue
-        mark = node.get("convert")
-        mark = inherited if mark is None else bool(mark)
-        if "items" in node:
-            found |= pages_to_convert(node["items"], mark)
-            continue
-        stem = str(node.get("page", "")).strip()
-        if stem.endswith(".html"):
-            stem = stem[:-5]
-        if stem and mark:
-            found.add(stem)
-    return found
-
-
 def role_of(entry):
     return getattr(entry, "role", None) or "main"
 

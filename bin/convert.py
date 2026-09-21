@@ -14,8 +14,9 @@ writes into a directory of its own, html/ for the one implied when no
 configuration says otherwise. A page the author wrote by hand -- an
 .html here with no .docx behind it -- is copied into every HTML
 target's directory as it stands, with the local files it refers to, and
-read into an intermediate so the EPUB has it too. An .html that contents
-marks "convert: true" is a source instead, read like any other.
+read into an intermediate so the EPUB has it too. Such a page lives in
+the pass-through directory (_pt/ unless project.yaml says otherwise); an
+.html beside the sources is a source, read like any other.
 
 THE RUN
 
@@ -75,7 +76,7 @@ try:
     import notes as notes_lib
     import oerconfig
     from bookcontents import (guess_contents, walk_contents, number_tree,
-                              is_generated, toc_blocks, pages_to_convert,
+                              is_generated, toc_blocks,
                               expand_split_sources, contents_from_tree)
     from names import safe_path, safe_stem, is_safe
 except ImportError:
@@ -294,11 +295,20 @@ def variant_sources(base, target_name):
     <stem>.<target>.md, .docx, or .html. The page keeps the stem, so
     contents, links, and sidecars don't know which file produced it."""
     found = {}
-    for ext in SOURCE_EXTENSIONS:
-        for path in sorted(glob.glob(os.path.join(base, f"*.{target_name}{ext}"))):
-            stem = os.path.basename(path)[:-len(f".{target_name}{ext}")]
-            found[safe_stem(stem)] = path
+    where = [base] + ([os.path.join(base, PASSTHROUGH)] if PASSTHROUGH
+                      else [])
+    for directory in where:
+        for ext in SOURCE_EXTENSIONS:
+            for path in sorted(glob.glob(os.path.join(
+                    directory, f"*.{target_name}{ext}"))):
+                stem = os.path.basename(path)[:-len(f".{target_name}{ext}")]
+                found[safe_stem(stem)] = path
     return found
+
+
+def in_passthrough(base, path):
+    return bool(PASSTHROUGH) and os.path.dirname(os.path.abspath(path)) \
+        == os.path.abspath(os.path.join(base, PASSTHROUGH))
 
 
 def is_variant(name):
@@ -307,14 +317,20 @@ def is_variant(name):
 
 
 def markdown_sources(base, fragments):
-    """The .md files this run converts: a page each, the way a .docx is.
+    """The .md files this run converts: a page each, the way a .docx is,
+    those in the pass-through directory too (named by its path, since
+    they're read from the book's directory as though they sat there).
 
     One with a same-named .docx beside it is what a v0.1 run left behind
     and is not a source; neither is a file the header or footer setting
     names. Everything else written in Markdown is a page of the book."""
     found = []
-    for path in sorted(glob.glob(os.path.join(base, "*.md"))):
-        name = os.path.basename(path)
+    here = sorted(glob.glob(os.path.join(base, "*.md")))
+    passthrough = passthrough_dir(base)
+    if passthrough:
+        here += sorted(glob.glob(os.path.join(passthrough, "*.md")))
+    for path in here:
+        name = os.path.relpath(path, base).replace(os.sep, "/")
         if os.path.abspath(path) in fragments or is_variant(name):
             continue
         if os.path.exists(os.path.join(base, name[:-3] + ".docx")):
@@ -568,7 +584,7 @@ def read_markdown_to_json(base, docs, env):
         # A page is named after its source, made safe for an href: the
         # cartridge's, the EPUB's, an LMS's. "01 BigPicture.md" is the
         # page 01-BigPicture.
-        stem = safe_stem(name[:-3])
+        stem = safe_stem(os.path.basename(name)[:-3])
         run(["pandoc", "-f", "markdown", "-t", "json", name,
              "-o", stem + ".json", "--lua-filter=" + MEDIA_FILTER],
             env=env, cwd=base)
@@ -577,34 +593,32 @@ def read_markdown_to_json(base, docs, env):
     return stems
 
 
-def html_sources(base, project, others):
-    """The .html files this run converts. An .html beside the sources is
-    a page someone finished unless contents says "convert: true" of it
-    or of a group above it. One case needs no declaration: a directory
-    holding no other source and no contents yet, where reading the
-    pages is the only thing a conversion could mean; the run says so."""
-    candidates = []
+def html_sources(base, others, hand):
+    """The .html files this run converts: every one beside the sources,
+    except what a run left there. A page named after another source is
+    the page an older layout wrote beside it; a piece's name (with --)
+    is the split's; a page named after one in the pass-through
+    directory is a target's copy of it. A page finished by hand belongs
+    in the pass-through directory, where it's copied as it stands."""
+    found = []
     for path in sorted(glob.glob(os.path.join(base, "*.html"))):
         name = os.path.basename(path)
-        if is_variant(name):
+        stem = name[:-5]
+        if is_variant(name) or stem in hand or stem in others \
+                or safe_stem(stem) in others:
             continue
-        if "--" in name:
-            say(f"WARNING: {name} is not read: '--' in a page's name is "
-                "reserved for the pages the split writes. Rename it to "
-                "convert it.")
+        if "--" in stem:
+            if stem.split("--", 1)[0] not in others:
+                say(f"WARNING: {name} is not read: '--' in a page's name "
+                    "is reserved for the pages the split writes. Rename it "
+                    "to convert it.")
             continue
-        candidates.append(name)
-    contents = project.get("contents") or []
-    if contents:
-        marked = pages_to_convert(contents)
-        return [n for n in candidates
-                if n[:-5] in marked or safe_stem(n[:-5]) in marked]
-    if others or not candidates:
-        return []
-    say(f"No .docx or .md here and no contents: reading the "
-        f"{len(candidates)} .html file(s) as sources. Mark them "
-        '"convert: true" in contents to say so yourself.')
-    return candidates
+        found.append(name)
+    if found and others:
+        say(f"Reading {len(found)} .html file(s) as sources alongside the "
+            f"others. A page finished by hand belongs in {PASSTHROUGH}/, "
+            "which is copied as it stands.")
+    return found
 
 
 def read_html_to_json(base, docs, env, work):
@@ -689,16 +703,36 @@ EXTERNAL_REF = ("http://", "https://", "//", "data:", "mailto:", "tel:", "#",
                 "javascript:")
 
 
+PASSTHROUGH = "_pt"
+
+
+def passthrough_dir(base):
+    """The pass-through directory, when the project has one and it's here."""
+    if not PASSTHROUGH:
+        return None
+    path = os.path.join(base, PASSTHROUGH)
+    return path if os.path.isdir(path) else None
+
+
+def hand_path(base, stem):
+    return os.path.join(base, PASSTHROUGH, stem + ".html")
+
+
 def hand_pages(base, stems):
-    """Pages the author wrote: .html files beside the sources with no
-    .docx behind them and not a piece an earlier split left behind. They
-    are final, so they are copied rather than rendered."""
+    """Pages someone finished: the .html files in the pass-through
+    directory. They are final, so they are copied rather than rendered,
+    and their references resolve from the book's directory, as though
+    they sat beside the sources."""
     found = []
-    for path in sorted(glob.glob(os.path.join(base, "*.html"))):
+    passthrough = passthrough_dir(base)
+    for path in sorted(glob.glob(os.path.join(passthrough, "*.html"))
+                       if passthrough else []):
         stem = os.path.basename(path)[:-5]
-        if stem in stems or safe_stem(stem) in stems \
-                or stem.split("--", 1)[0] in stems \
-                or is_variant(os.path.basename(path)):
+        if is_variant(os.path.basename(path)):
+            continue
+        if stem in stems or safe_stem(stem) in stems:
+            say(f"WARNING: {PASSTHROUGH}/{stem}.html has the name of a page "
+                "converted from a source; the converted page is kept.")
             continue
         if not is_safe(stem):
             say(f"WARNING: {stem}.html has a space or other character in "
@@ -726,13 +760,11 @@ def copy_hand_pages(base, hand, target_dir, variants=None):
     one. A page linking another page of the book is left to that page; a
     file that isn't there is reported and skipped."""
     variants = variants or {}
-    if os.path.abspath(target_dir) == os.path.abspath(base):
-        return [os.path.join(base, stem + ".html") for stem in hand]
     os.makedirs(target_dir, exist_ok=True)
     copied = []
     for stem in hand:
         source = variants.get(stem) if str(variants.get(stem, "")).endswith(
-            ".html") else os.path.join(base, stem + ".html")
+            ".html") else hand_path(base, stem)
         shutil.copy2(source, os.path.join(target_dir, stem + ".html"))
         copied.append(os.path.join(target_dir, stem + ".html"))
         for ref in local_references(source):
@@ -745,6 +777,8 @@ def copy_hand_pages(base, hand, target_dir, variants=None):
                     "here; not copied.")
                 continue
             dest = os.path.join(target_dir, ref)
+            if os.path.abspath(dest) == os.path.abspath(src):
+                continue                # a target writing beside the sources
             os.makedirs(os.path.dirname(dest), exist_ok=True)
             shutil.copy2(src, dest)
     return copied
@@ -761,7 +795,7 @@ def read_hand_pages(base, hand, pages_dir, env, variants=None):
     for stem in hand:
         target = os.path.join(pages_dir, stem + INTERMEDIATE)
         source = variants.get(stem) if str(variants.get(stem, "")).endswith(
-            ".html") else stem + ".html"
+            ".html") else os.path.relpath(hand_path(base, stem), base)
         # raw_html, or the reader fetches every <iframe> over the network
         # to read it into the page (Readers/HTML.hs, pIframe).
         run(["pandoc", "-f", "html+raw_html", "-t", "json", source,
@@ -777,7 +811,7 @@ def read_variants(base, target, work, env):
     raw = {}
     for stem, path in target.variants.items():
         name = os.path.basename(path)
-        if name.endswith(".html"):
+        if name.endswith(".html") and in_passthrough(base, path):
             continue                    # a hand page: copied, not read
         out_dir = os.path.join(work, "variants", target.name)
         os.makedirs(out_dir, exist_ok=True)
@@ -788,6 +822,13 @@ def read_variants(base, target, work, env):
             run(["pandoc", "-f", "docx", "-t", "json", repaired, "-o", out,
                  "--lua-filter=" + MEDIA_FILTER, "--extract-media=" + stem],
                 env=env, cwd=base)
+        elif name.endswith(".html"):
+            repaired = os.path.join(out_dir, name)
+            htmlrepair.repaired_copy(path, repaired)
+            run(["pandoc", "-f", "html+raw_html+epub_html_exts", "-t", "json",
+                 repaired, "-o", out, "--lua-filter=" + HTML_RAW_FILTER,
+                 "--lua-filter=" + HTML_SOURCE_FILTER,
+                 "--lua-filter=" + MEDIA_FILTER], env=env, cwd=base)
         else:
             run(["pandoc", "-f", "markdown", "-t", "json", path, "-o", out,
                  "--lua-filter=" + MEDIA_FILTER], env=env, cwd=base)
@@ -1587,21 +1628,7 @@ def write_contents_sample(project, tree):
         return
     CONTENTS_SAMPLE_WRITTEN = True
     import yaml
-    marked = pages_to_convert(project.get("contents") or [])
     sample = contents_from_tree(tree)
-
-    def pages_in(node):
-        if isinstance(node, str):
-            return [node]
-        if "items" in node:
-            return [p for item in node["items"] for p in pages_in(item)]
-        return [node.get("page", "")]
-    for index, node in enumerate(sample):
-        if any(p in marked or p.split("--", 1)[0] in marked
-               for p in pages_in(node)):
-            node = {"page": node} if isinstance(node, str) else node
-            node["convert"] = True
-            sample[index] = node
     path = os.path.join(os.getcwd(), CONTENTS_SAMPLE)
     body = yaml.safe_dump({"project": {"contents": sample}},
                           sort_keys=False, allow_unicode=True, width=1000)
@@ -1796,6 +1823,10 @@ def main():
         die(f"Pandoc {version} is too old; 3.9 or later is required.")
 
     targets, project = load_targets(base, args.allow_unknown_keys)
+    global PASSTHROUGH
+    PASSTHROUGH = str(project.get("passthrough", "_pt") or "").strip("/")
+    for target in targets:
+        target.variants = variant_sources(base, target.name)
     language = project["language"]
     first = targets[0]        # sidecars and reports are book-level settings
 
@@ -1868,7 +1899,7 @@ def main():
         stems += adoc_stems
         if adoc_order and not project.get("contents"):
             write_order_sample(adoc_order)
-        web = html_sources(base, project, stems)
+        web = html_sources(base, stems, set(hand_pages(base, stems)))
         for target in targets:
             if web and target.format == "html" and os.path.abspath(
                     target.output_dir) == os.path.abspath(base):

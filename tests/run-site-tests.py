@@ -153,7 +153,8 @@ def build_mhtml(directory):
         f'<a href="{SCRIBBLE}{s}.html#(part._x)" class="toclink">{n}.x More</a></p>'
         for n, t, s in rows)
     mhtml(directory, "index", "The Scribble Book",
-          heading("", "The Scribble Book", "index") + toc)
+          heading("", "The Scribble Book", "index")
+          + '<p class="author">Ann One, Bo Two and Cy Three</p>' + toc)
     for n, t, s in rows:
         mhtml(directory, s, f"{n} {t}", heading(n, t, s)
               + f'<p>See <a href="{SCRIBBLE}naming.html#(part._naming)">naming'
@@ -268,6 +269,8 @@ def case_mhtml(work):
          and contents[1]["items"][1]["title"] == "1 Getting Started"
          and contents[1]["items"][1]["items"][1]["page"] == "naming"
          and contents[2]["items"][1]["page"] == "tables"),
+        ("the authors are read from Scribble's author line",
+         lambda: project.get("authors") == ["Ann One", "Bo Two", "Cy Three"]),
         ("neither a heading's icon nor an \"up\" link is a title: the "
          "contents page is named for itself",
          lambda: contents[0]["title"] == "The Scribble Book"),

@@ -73,6 +73,7 @@ PROFILES = [
     {"name": "scribble",
      "detect": [r'class="navsettop"'],
      "content": ["div.main"],
+     "authors": ["p.author"],
      "chrome": ["div.navsettop", "div.navsetbottom", "span.button-group",
                 "a.heading-anchor", "div.tocset", "div.versionbox"]},
     {"name": "asciidoctor",

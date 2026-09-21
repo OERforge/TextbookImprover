@@ -32,6 +32,10 @@ Number the book's structure the way a printed book does: groups and top-level pa
 
 Who wrote the book, one entry each, as a reader should see them. An EPUB records each as a creator; the cartridge has nowhere to put one. For an OpenStax book the publisher is usually the right entry.
 
+**`passthrough`**—`path`; default `_pt`
+
+A directory, inside the book's, for pages that aren't converted from the book's sources: an .html here is a page someone finished and is copied into every HTML target as it stands (and read for the EPUB), and an .md here is converted alongside the sources. Its files are treated as though they sat beside the sources, so a reference in _pt/about.html to images/logo.png names the book's images/logo.png. Every .html beside the sources is a source.
+
 **`contents`**—`opaque`; default `[]`
 
-The book's structure as a nested list of pages and groups. This describes the book, not any one package, so a cartridge organisation and an EPUB table of contents are both built from it. A group or page may carry a role, front, main, appendix, or back, which says how it counts when numbering is on and where it belongs in the book; the default is main. An entry "generate: toc" is a page the run writes, a full table of contents with links, named toc unless "name" says otherwise and titled Contents unless "title" does. A page or group may carry "convert: true", which says an .html beside the sources is a source to convert and not a finished page to copy; a group's pages inherit it, and "convert: false" takes one back out. Left empty, tools that need an order guess one and say so.
+The book's structure as a nested list of pages and groups. This describes the book, not any one package, so a cartridge organisation and an EPUB table of contents are both built from it. A group or page may carry a role, front, main, appendix, or back, which says how it counts when numbering is on and where it belongs in the book; the default is main. An entry "generate: toc" is a page the run writes, a full table of contents with links, named toc unless "name" says otherwise and titled Contents unless "title" does. Left empty, tools that need an order guess one and say so.

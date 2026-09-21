@@ -72,16 +72,13 @@ def contents_tree(outline, names, notes):
 
 
 def write_contents(nodes, lines, indent, flagged, top=True):
-    """Every top-level entry says convert: true, which its pages inherit.
-    One group around the whole book would say it once, and would push
-    every page a level down in the cartridge and the EPUB's contents."""
+    """No group around the whole book: it would push every page a level
+    down in the cartridge and the EPUB's contents."""
     pad = " " * indent
     for node in nodes:
         page, items = node.get("page"), node["items"]
         if items:
             lines.append(f"{pad}- title: {yaml_string(node['title'])}")
-            if top:
-                lines.append(f"{pad}  convert: true")
             lines.append(f"{pad}  items:")
             if page:
                 lines.append(f"{pad}    - page: {page}")
@@ -91,8 +88,6 @@ def write_contents(nodes, lines, indent, flagged, top=True):
             lines.append(f"{pad}- page: {page}" + (
                 "        # " + flagged[page] if page in flagged else ""))
             lines.append(f"{pad}  title: {yaml_string(node['title'])}")
-            if top:
-                lines.append(f"{pad}  convert: true")
 
 
 def project_yaml(source, meta, tree, flagged, unnamed, title):
@@ -108,14 +103,11 @@ def project_yaml(source, meta, tree, flagged, unnamed, title):
     if meta.get("creator"):
         lines.append("  authors:")
         lines += ["    - " + yaml_string(a) for a in meta["creator"]]
-    lines += ["  # convert: true marks an .html as a source to convert, not a "
-              "finished page;", "  # a group's pages inherit it.",
-              "  contents:"]
+    lines += ["  contents:"]
     write_contents(tree, lines, 4, flagged)
     for page in unnamed:
         lines.append(f"    - page: {page}" + (
             "        # " + flagged[page] if page in flagged else ""))
-        lines.append("      convert: true")
     return "\n".join(lines) + "\n"
 
 

@@ -141,6 +141,25 @@ def main():
                                   page.text):
             math_lost.append(page.name + ".html")
     book_title, titles = split_titles(titles)
+
+    # Authors: the profile's element (Scribble writes them as a paragraph
+    # on the contents page), else <meta name="author">, from the first
+    # page that has either.
+    authors = []
+    ordered = [e[2] for e in entries] + list(site.pages)
+    for url in ordered:
+        root = site.pages[url].root
+        found = [hp.text_of(e) for s in profile.get("authors", [])
+                 for e in hp.select(root, s)]
+        found += [e.get("content", "") for e in root.iter()
+                  if hp.local(e.tag) == "meta"
+                  and (e.get("name") or "").lower() == "author"]
+        for text in found:
+            for name in re.split(r",\s*(?:and\s+)?|\s+and\s+", text):
+                if name.strip() and name.strip() not in authors:
+                    authors.append(name.strip())
+        if authors:
+            break
     for name in math_lost:
         notes.append((name, "math-lost",
                       "equations are here only as MathJax's rendering; the "
@@ -231,7 +250,7 @@ def main():
     title = book_title or (titles.get(entries[0][2]) if entries else "") \
         or host
     language = max(languages, key=languages.get) or "en"
-    meta = {"title": [title], "language": [language],
+    meta = {"title": [title], "language": [language], "creator": authors,
             "identifier": [host + site.root]}
     if not args.whole_pages:
         with open(os.path.join(out, "project.yaml"), "w",

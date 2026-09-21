@@ -135,7 +135,6 @@ def case_unpack(work):
     chapter = read(out, "chapter-1.html")
     with open(os.path.join(out, "unpack-report.csv"), encoding="utf-8") as fh:
         report = {(r["Where"], r["Check"]) for r in csv.DictReader(fh)}
-    from bookcontents import pages_to_convert
     return [
         ("the run succeeds, a page per content document, the navigation "
          "document not among them",
@@ -167,9 +166,10 @@ def case_unpack(work):
          lambda: project["contents"][0]["title"] == "Chapter 1"
          and [i["page"] for i in project["contents"][0]["items"]]
          == ["chapter-1", "section-1-1"]),
-        ("every page is marked a source, with no group around the book",
-         lambda: pages_to_convert(project["contents"])
-         == {"chapter-1", "section-1-1", "credits"}),
+        ("no group around the whole book, and no marks to say the pages "
+         "are sources",
+         lambda: project["contents"][0]["title"] == "Chapter 1"
+         and "convert" not in read(out, "project.yaml")),
         ("a spine page the navigation never names is listed last and "
          "reported",
          lambda: project["contents"][-1]["page"] == "credits"

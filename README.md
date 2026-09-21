@@ -67,9 +67,10 @@ Each target writes into a directory of its own; the content directory keeps the 
 | [Building an EPUB](docs/epub.md) | One EPUB per book from the same pages and the same contents, and what it claims about itself |
 | [Checking the output](docs/checking.md) | What every run checks about the pages and EPUBs it wrote, and what it doesn't |
 | [Auditing](docs/auditing.md) | `audit.py`: what is wrong with a Word, Markdown, HTML, EPUB, or PDF file, without converting it; the findings format every check shares |
-| [HTML sources](docs/html.md) | An `.html` that `contents` marks `convert: true` is a source: what is read from it, what isn't, and why converting this pipeline's own pages changes nothing |
+| [HTML sources](docs/html.md) | Every `.html` beside the sources is a source, and a finished page goes in `_pt/`: what is read from it, what isn't, and why converting this pipeline's own pages changes nothing |
 | [A book saved from the web](docs/site-input.md) | `unpack-site.py`: browser saves or `.mhtml` into pages whose every reference is local, the generator recognized, the order read from the site's own menus |
 | [AsciiDoc sources](docs/asciidoc.md) | `.adoc` chapters as sources, a master file that includes them as the book's order, and what is done on reading that the reader leaves undone |
+| [Making a WARC](docs/making-warcs.md) | Installing and running wget or Browsertrix Crawler to capture a book's website for `unpack-site.py` |
 | [An EPUB as the source](docs/epub-input.md) | `unpack-epub.py`: a publisher's EPUB into pages, media, and a `project.yaml` with its metadata and its navigation as `contents`; a book that is one file |
 | [Markdown sources](docs/markdown.md) | A `.md` beside the sources is a page: what it can declare, how its images travel, and a book set up for a Pandoc PDF build |
 | [Splitting pages](docs/splitting.md) | One page per heading from a source that arrived as one file per chapter, or one file |

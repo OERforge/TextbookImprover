@@ -75,3 +75,9 @@ What is lossy, and known: a merged-cell table round-trips in structure but is th
 ## What isn't here yet
 
 A Markdown table with no marker gets no guess and no report; the census that makes the guess reads Word files. And merging sections into their chapter (one file per `contents` group from sources cut at the section level, as OpenStax ships them) is the next thing a Markdown target should do.
+
+## Raw HTML
+
+HTML written into a Markdown source gets what an HTML source's HTML gets. Pandoc's Markdown reader keeps it a tag at a time (`x<sup>2</sup>` is a raw `<sup>`, the text `2`, and a raw `</sup>`), so `markdown-html.lua` puts each opening tag back together with its closing tag and what lies between, and reads the whole with Pandoc's HTML reader: the superscript is a superscript, an `<img>` an image the media gate checks and the run copies, a `<table>` a table the header sidecar reaches. What comes back is cleaned by the same two filters an HTML source goes through, loaded from their own files: HTML's obsolete presentational attributes (`align`, `valign`, `bgcolor`, and their kind) go, an `href` on a `<span>` goes, a frame becomes an embed, a tag with no element and no match is dropped with what it wrapped kept, and `<details>` and `<summary>` are kept.
+
+Code is never touched: a code span or block is a Code element and holds no raw HTML to find, and a raw `<pre>`, `<code>`, `<script>`, or `<style>` is left as written. On CS168's Markdown, 796 raw HTML elements were read this way and the book's EPUB went from 103 epubcheck errors to none.

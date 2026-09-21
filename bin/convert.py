@@ -89,6 +89,7 @@ HEADER_FILTER = os.path.join(HERE, "header-includes.lua")
 SAFE_MEDIA_FILTER = os.path.join(HERE, "safe-media.lua")
 TARGET_FILTER = os.path.join(HERE, "target-blocks.lua")
 MARKDOWN_FILTER = os.path.join(HERE, "markdown-source.lua")
+MARKDOWN_HTML_FILTER = os.path.join(HERE, "markdown-html.lua")
 HTML_SOURCE_FILTER = os.path.join(HERE, "html-source.lua")
 HTML_RAW_FILTER = os.path.join(HERE, "html-raw.lua")
 ASCIIDOC_FILTER = os.path.join(HERE, "asciidoc-source.lua")
@@ -624,7 +625,8 @@ def read_markdown_to_json(base, docs, env):
         # page 01-BigPicture.
         stem = safe_stem(os.path.basename(name)[:-3])
         run(["pandoc", "-f", "markdown", "-t", "json", name,
-             "-o", stem + ".json", "--lua-filter=" + MEDIA_FILTER],
+             "-o", stem + ".json", "--lua-filter=" + MARKDOWN_HTML_FILTER,
+             "--lua-filter=" + MEDIA_FILTER],
             env=env, cwd=base)
         portable_media_paths(os.path.join(base, stem + ".json"), base, name)
         stems.append(stem)
@@ -870,6 +872,7 @@ def read_variants(base, target, work, env):
                  "--lua-filter=" + MEDIA_FILTER], env=env, cwd=base)
         else:
             run(["pandoc", "-f", "markdown", "-t", "json", path, "-o", out,
+                 "--lua-filter=" + MARKDOWN_HTML_FILTER,
                  "--lua-filter=" + MEDIA_FILTER], env=env, cwd=base)
             portable_media_paths(out, base, name)
         raw[stem] = out

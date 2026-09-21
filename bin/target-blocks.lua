@@ -49,6 +49,22 @@ local function wanted(spec)
   return true
 end
 
+-- An image on another server can't be in an EPUB: the package holds its
+-- images, and a reading system won't fetch one (epubcheck: RSC-007). So
+-- for an EPUB it's a link to the image, named by its alt text; every
+-- other writer keeps the image. The same decision as for a frame.
+local function remote_image(img)
+  if not FORMAT:match('epub') then return nil end
+  if not (img.src:match('^%a[%w+.-]*://') or img.src:match('^//')) then
+    return nil
+  end
+  local text = pandoc.utils.stringify(img.caption)
+  if text == '' then
+    text = 'Image at ' .. (img.src:match('^%a*:?//([^/?#]+)') or img.src)
+  end
+  return pandoc.Link(text, img.src)
+end
+
 local function escape(value)
   return (value:gsub('&', '&amp;'):gsub('"', '&quot;'):gsub('<', '&lt;'))
 end
@@ -89,6 +105,6 @@ local function drop_title_block(meta)
 end
 
 return {
-  { Div = resolve, Span = resolve },
+  { Div = resolve, Span = resolve, Image = remote_image },
   { Meta = drop_title_block },
 }

@@ -269,10 +269,100 @@ def case_split_source(work):
     ]
 
 
+JEKYLL = {
+    "_config.yml": "title: The Site Book\nlang: en-GB\n",
+    "index.md": "---\ntitle: Home\nnav_order: 0\n---\n\n# Home\n\nWelcome.\n",
+    "sec/index.md": "---\ntitle: Section\nnav_order: 1\nhas_children: true\n---",
+    "sec/page.md": """---
+title: A Page
+parent: Section
+nav_order: 1
+---
+
+# A Page
+
+Space is $$3.4 \\times 10^{38}$$ addresses.
+{: .blue}
+
+$$
+E = mc^2
+$$
+
+Write `<img src="/logo.png">` or `$$x$$` in code.
+
+```
+<img src="/logo.png">
+{: .kept}
+$$kept$$
+```
+
+1. A step:
+
+    <img width="800px" src="/assets/a.png">
+
+See [the home page](/index.html).
+""",
+    "404.html": "---\nlayout: default\n---\nNot found\n",
+    "assets/a.png": ONE_PIXEL,
+    "README.md": "# Repository readme\n",
+}
+
+
+def case_jekyll(work):
+    """A Jekyll site's Markdown, flattened into a book's sources."""
+    src = os.path.join(work, "site")
+    for name, text in JEKYLL.items():
+        path = os.path.join(src, *name.split("/"))
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "wb" if isinstance(text, bytes) else "w") as fh:
+            fh.write(text)
+    out = os.path.join(work, "book")
+    result = subprocess.run(["python3", os.path.join(BIN, "unpack-jekyll.py"),
+                             src, "-o", out], capture_output=True, text=True)
+    import yaml
+    project = yaml.safe_load(read(out, "project.yaml"))["project"]
+    page = read(out, "sec-page.md")
+    code = page[page.index("```"):page.rindex("```")]
+    return [
+        ("a page per .md with front matter, named from its path; a readme "
+         "isn't one",
+         lambda: result.returncode == 0 and sorted(
+             n for n in os.listdir(out) if n.endswith(".md"))
+         == ["index.md", "sec-index.md", "sec-page.md"]),
+        ("a section whose page is only front matter is a group, ordered "
+         "by nav_order",
+         lambda: project["contents"][0]["page"] == "index"
+         and project["contents"][1]["title"] == "Section"
+         and [i["page"] for i in project["contents"][1]["items"]]
+         == ["sec-index", "sec-page"]),
+        ("the site's title and language are the book's",
+         lambda: project["title"] == "The Site Book"
+         and project["language"] == "en-GB"),
+        ("inline $$..$$ is $..$, display math stays display",
+         lambda: "$3.4 \\times 10^{38}$ addresses" in page
+         and "$$\nE = mc^2\n$$" in page),
+        ("an attribute list goes",
+         lambda: "{: .blue}" not in page),
+        ("code is left exactly as written",
+         lambda: "`<img src=\"/logo.png\">`" in page and "`$$x$$`" in page
+         and '<img src="/logo.png">' in code and "{: .kept}" in code
+         and "$$kept$$" in code),
+        ("root-relative paths are relative, a page's to its flat name",
+         lambda: 'src="assets/a.png"' in page
+         and "](index.html)" in page),
+        ("the site's own 404.html isn't copied; the assets are",
+         lambda: not os.path.exists(os.path.join(out, "404.html"))
+         and os.path.exists(os.path.join(out, "assets", "a.png"))),
+        ("an image indented in a list isn't mistaken for code",
+         lambda: "indented-code-risk" not in read(out, "unpack-report.csv")),
+    ]
+
+
 CASES = [
     ("unpacking", case_unpack),
     ("a declared page that was split", case_split_source),
     ("converting what was unpacked", case_convert),
+    ("a Jekyll site's Markdown", case_jekyll),
 ]
 
 

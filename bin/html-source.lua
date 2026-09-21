@@ -51,6 +51,11 @@ nothing, which is the test.
     it was, the page's <title> became the title ("1.3. Information
     Systems Components -- Information Systems for Business and Beyond")
     and the chapter's own h1 a second one, on 166 of 168 pages.
+  - HTML's obsolete presentational attributes (align, valign, bgcolor,
+    cellpadding, hspace, and their kind) are dropped from what keeps its
+    attributes: a div, a span, an image, a link, a heading, a table.
+    XHTML allows them nowhere, and a stylesheet is where their work
+    goes; a table cell's align the reader has already made alignment.
   - Raw HTML is html-raw.lua's, which runs before this filter on a
     source and alone on a finished page.
   - An aria-describedby or aria-labelledby that names an id the page no
@@ -77,6 +82,24 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 local MARKER_ATTR = 'data-th-marker'
 
+local OBSOLETE = { align = true, valign = true, bgcolor = true,
+                   background = true, cellpadding = true, cellspacing = true,
+                   hspace = true, vspace = true, frame = true, rules = true,
+                   clear = true, nowrap = true, char = true, charoff = true,
+                   axis = true }
+
+local function drop_obsolete(el)
+  local changed = false
+  local kept = {}
+  for _, pair in ipairs(el.attr.attributes) do
+    if OBSOLETE[pair[1]:lower()] then changed = true
+    else kept[#kept + 1] = pair end
+  end
+  if changed then el.attr.attributes = kept end
+  return changed
+end
+
+
 local function header_columns(tbl)
   local found = nil
   for _, body in ipairs(tbl.bodies) do
@@ -98,7 +121,8 @@ local function lift_body_head(tbl)
 end
 
 function Table(tbl)
-  if tbl.attr.attributes[MARKER_ATTR] then return nil end
+  drop_obsolete(tbl)
+  if tbl.attr.attributes[MARKER_ATTR] then return tbl end
   lift_body_head(tbl)
   local row = #tbl.head.rows > 0
   local column = header_columns(tbl) > 0
@@ -156,6 +180,14 @@ local function open_up(div)
   return blocks
 end
 
+function Image(img)
+  if drop_obsolete(img) then return img end
+end
+
+function Link(link)
+  if drop_obsolete(link) then return link end
+end
+
 local function empty_anchor(inline)
   return inline.t == 'Span' and inline.identifier ~= ''
     and #inline.content == 0
@@ -183,16 +215,18 @@ end
 -- (<span href="http://purl.org/dc/dcmitype/Text" rel="dct:type">). The
 -- HTML writer passes it through, and XHTML allows it on no such element.
 function Span(span)
+  local changed = drop_obsolete(span)
   if span.attributes.href then
     span.attributes.href = nil
-    return span
+    changed = true
   end
-  return nil
+  return changed and span or nil
 end
 
 function Div(div)
   if div.identifier == 'title-block-header' then return {} end
   if div.attributes.href then div.attributes.href = nil end
+  drop_obsolete(div)
   if div.classes:includes('section') or div.classes:includes('header') then
     return open_up(div)
   end

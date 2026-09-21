@@ -89,9 +89,16 @@ local function framed(text, block)
   return pandoc.Span({ link }, attr)
 end
 
+-- Kept as they are: tags the reader has no element for that are valid
+-- in HTML and in an EPUB's XHTML and mean something. <details> and
+-- <summary> are how a book hides an answer until it's asked for;
+-- dropped, the answer sat open on the page.
+local KEEP = { details = true, summary = true }
+
 local function raw_html(el, block)
   if el.format ~= 'html' then return nil end
   local tag = (raw_tag(el.text) or ''):lower()
+  if KEEP[tag] then return nil end
   if tag == 'iframe' and not el.text:match('^%s*</') then
     local embed = framed(el.text, block)
     if embed then return embed end
@@ -102,6 +109,26 @@ end
 
 function RawInline(el) return raw_html(el, false) end
 function RawBlock(el) return raw_html(el, true) end
+
+-- A <summary> may hold phrasing content only, and both readers make its
+-- text a paragraph: <summary><p>Answer</p></summary>. A paragraph alone
+-- between the tags is plain text again.
+local function raw_is(block, pattern)
+  return block and block.t == 'RawBlock' and block.format == 'html'
+    and block.text:lower():match(pattern) ~= nil
+end
+
+function Blocks(blocks)
+  local changed = false
+  for i = 2, #blocks - 1 do
+    if blocks[i].t == 'Para' and raw_is(blocks[i - 1], '^%s*<summary[%s>]')
+        and raw_is(blocks[i + 1], '^%s*</summary') then
+      blocks[i] = pandoc.Plain(blocks[i].content)
+      changed = true
+    end
+  end
+  return changed and blocks or nil
+end
 
 local function report_dropped()
   local names = {}

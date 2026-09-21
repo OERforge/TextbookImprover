@@ -24,11 +24,13 @@ on another `bin/` script.
 | `safe-media.lua` | Rewrites a page's local media references at render time to names that need no encoding in a link, matching what `convert.py` copies beside the page. |
 | `target-blocks.lua` | At render time, keeps a passage marked for some targets and drops it for the rest, and applies `title_block`. |
 | `asciidoc-source.lua` | When an AsciiDoc source is read: `imagesdir` applied, sections moved below the title, Asciidoctor's own settings dropped from the metadata. |
+| `markdown-html.lua` | When a Markdown source is read: raw HTML reassembled a tag with its match, read as HTML, and cleaned by `html-raw.lua` and `html-source.lua`, loaded from their files. |
 | `html-source.lua` | When an HTML source is read: what the page says about its tables becomes a declaration, and what an earlier run derived (the title block, a table's scroll wrapper) is taken out. |
 | `markdown-source.lua` | For a markdown target: takes out what the filter derived and writes what it decided as source markup. |
 | `header-includes.lua` | Adds the stylesheet to a page's `header-includes` at render time, alongside what the page already carries there; `--include-in-header` would replace it. |
 | `unpack-epub.py` | Turns an EPUB into a directory `convert.py` converts: a page per content document, the media, and a `project.yaml` with the package's metadata and its navigation as `contents`. See [An EPUB as the source](epub-input.md). |
 | `adopt-pages.py` | Takes a converted book's pages as the sources of a new one: pieces renamed without `--`, references rewritten, the split's provenance removed, `contents` written. |
+| `unpack-jekyll.py` | Turns a Jekyll site's Markdown source into a book directory: flat pages named as `unpack-site.py` names them, contents from the front matter, kramdown's quirks fixed outside code. |
 | `unpack-site.py` | Turns pages saved from the web into a directory `convert.py` converts, or with `--whole-pages` into an offline copy of the site. See [A book saved from the web](site-input.md). |
 | `lib/sitesource.py` | A saved site as URLs with bytes: the loaders (browser saves, MHTML), the generator profiles, reading the order from menus, and pointing every reference at what is held. |
 | `lib/htmlparse.py` | Parsing and serializing HTML with html5lib, or lxml when that's all there is, behind one interface. |

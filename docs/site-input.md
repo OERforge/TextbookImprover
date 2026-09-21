@@ -51,6 +51,18 @@ Nesting comes from the menu's lists. A menu that is one flat list, like Scribble
 
 A browser saves the page as it stood after its scripts ran. Where the site renders math with MathJax, a "complete" save keeps the `<script type="math/tex">` source and Pandoc reads it. An `.mhtml` save keeps no scripts, so the TeX is gone and only MathJax's rendering is left, which isn't math to anyone reading the output. The report names each such page (`math-lost`). That's a property of the save, and a different way of saving the book would do better.
 
+## A site's own source
+
+When the site is built from Markdown by Jekyll, as a just-the-docs book is, its repository beats any copy of the site. `unpack-jekyll.py` turns it into a book directory:
+
+```bash
+python3 $T/bin/unpack-jekyll.py textbook/ -o ~/books/cs168-md
+```
+
+Each page is named from its path as `unpack-site.py` names the saved page for the same URL, so the two routes compare page by page with `compare-output.py`; `contents` comes from the front matter (`parent`, `grand_parent`, `nav_order`), and a section whose page is only front matter is a group. kramdown's inline `$$x$$` becomes Pandoc's `$x$`, its `{: .class}` attribute lists go, and root-relative paths become relative, none of it inside a code span or a fenced block: a book about the web writes `<img src="/logo.png">` as an example. The site's own HTML pages (a `404.html` with front matter) and its machinery aren't copied. Raw HTML is left to the run, which reads it as HTML ([Markdown sources](markdown.md#raw-html)).
+
+CS168 both ways: the same 62 pages and the same 772 images without alt text. The differences are the theme's generated section contents, the language (`en-US` from the theme, none in the source's `_config.yml`), and five pages whose images differ between the source and the published site, the source's looking like corrections the site hadn't yet had.
+
 ## Posting the clean copy as a site
 
 `--whole-pages` keeps a site's own menus, pointed at the local pages. To post the converted book instead, set `menu: on` on its HTML target in `conversion.yaml`: every page then carries the book's contents, from `contents`, as a collapsed menu at its top and previous/next links at its foot.

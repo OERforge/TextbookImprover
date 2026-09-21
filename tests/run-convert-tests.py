@@ -608,6 +608,87 @@ def case_menu(work):
     ]
 
 
+RAW_MD = """---
+title: Raw HTML
+---
+
+# Raw HTML
+
+Energy is mc<sup>2</sup>, and <span href="http://purl.org/dc/dcmitype/Text"
+rel="dct:type">this work</span> is licensed.<br>A new line.
+
+<p align="center"><img src="assets/Curve.png" alt="A curve" align="left"></p>
+
+<details><summary>Answer</summary>
+
+Hidden *until asked*.
+
+</details>
+
+<table>
+<tr><th>Year</th><th>Output</th></tr>
+<tr><td align="right">2000</td><td>10</td></tr>
+</table>
+
+A remote badge: <img src="https://example.invalid/badge.png" alt="A badge">
+
+Code stays: `<p align="center">` and
+
+```
+<img src="/logo.png" align="left">
+```
+"""
+
+
+def case_markdown_html(work):
+    """Raw HTML in a Markdown source is read as HTML and cleaned the way
+    an HTML source is; code is left exactly as written."""
+    os.makedirs(os.path.join(work, "assets"))
+    with open(os.path.join(work, "assets", "Curve.png"), "wb") as fh:
+        fh.write(ONE_PIXEL)
+    with open(os.path.join(work, "raw.md"), "w", encoding="utf-8") as fh:
+        fh.write(RAW_MD)
+    result = convert(work, "targets:\n  html:\n    format: html\n"
+                           "  md:\n    format: markdown\n"
+                           "  epub:\n    format: epub3\n")
+    page = read(work, "html", "raw.html") if exists(
+        work, "html", "raw.html") else ""
+    chapter = ""
+    for name in (os.listdir(os.path.join(work, "epub"))
+                 if exists(work, "epub") else []):
+        with zipfile.ZipFile(os.path.join(work, "epub", name)) as book:
+            chapter = "".join(book.read(n).decode("utf-8")
+                              for n in book.namelist() if "badge" in
+                              book.read(n).decode("utf-8", "replace"))
+    return [
+        ("a superscript written in HTML is a superscript",
+         lambda: result.returncode in (0, 1) and "mc<sup>2</sup>" in page),
+        ("an HTML image is an image: copied, and without align",
+         lambda: re.search(r'<img src="assets/Curve\.png"[^>]*alt="A curve"',
+                           page) and 'align="left"' not in page
+         and exists(work, "html", "assets", "Curve.png")),
+        ("RDFa's href leaves the span, the text stays",
+         lambda: "this work" in page
+         and "purl.org/dc/dcmitype/Text" not in page),
+        ("details and summary are kept, the summary's text plain",
+         lambda: re.search(r"<summary>\s*Answer\s*</summary>", page)
+         and "<details>" in page),
+        ("an HTML table is a table, its th row the header, no align",
+         lambda: re.search(r'<th[^>]*scope="col"[^>]*>Year</th>', page)
+         and 'align="right"' not in page),
+        ("a remote image stays an image in HTML and is a link in the EPUB",
+         lambda: 'src="https://example.invalid/badge.png"' in page
+         and '<a href="https://example.invalid/badge.png">A badge</a>'
+         in chapter and "<img" not in chapter.split("A badge")[0][-200:]),
+        ("code is left exactly as written",
+         lambda: "<code>&lt;p align=&quot;center&quot;&gt;</code>" in page
+         or '<code>&lt;p align="center"&gt;</code>' in page),
+        ("and so is a code block",
+         lambda: '&lt;img src=&quot;/logo.png&quot; align=&quot;left&quot;&gt;'
+         in page or '&lt;img src="/logo.png" align="left"&gt;' in page),
+    ]
+
+
 def case_html_source(work):
     """An HTML page is a source when the book says so, and converting
     what this pipeline wrote changes nothing."""
@@ -1063,6 +1144,7 @@ CASES = [
     ("adopting a split book's pages", case_adopt),
     ("an HTML source's tables and the header sidecar", case_html_headers),
     ("a menu for pages posted as a site", case_menu),
+    ("raw HTML in a Markdown source", case_markdown_html),
     ("a hand-written page", case_hand_written),
     ("several targets", case_targets),
     ("arguments passed to the packager", case_passthrough),

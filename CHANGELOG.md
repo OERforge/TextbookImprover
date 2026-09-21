@@ -8,7 +8,7 @@ Versions are two-part and pre-1.0: breaking changes may land in any of them unti
 
 ### Added
 
-- **HTML as a source.** An `.html` beside the sources that `contents` marks `convert: true` (on the page or on a group above it) is read, filtered, split, and rendered like any source, instead of being copied as a finished page; a directory of nothing but `.html`, with no `contents`, is read that way without being told, and the run says so. `html-source.lua` runs as the page is read: a table's `<thead>` and the `<th>` opening its body rows become a header declaration, and Pandoc's title block and the filter's own scroll wrapper are taken out so they can be written again. Converting this pipeline's own pages now changes nothing: the runs agree on the statistics book's 169 pages but for one caption, and the second write equals the third byte for byte. See [HTML sources](docs/html.md).
+- **HTML as a source.** An `.html` beside the sources that `contents` marks `convert: true` (on the page or on a group above it) is read, filtered, split, and rendered like any source, instead of being copied as a finished page; a directory of nothing but `.html`, with no `contents`, is read that way without being told, and the run says so. `html-source.lua` runs as the page is read: a table's `<thead>` and the `<th>` opening its body rows become a header declaration, a header row written inside `<tbody>` is moved to the table's head, and Pandoc's title block and the filter's own scroll wrapper are taken out so they can be written again. Converting this pipeline's own pages now changes nothing: the runs agree on the statistics book's 169 pages but for one caption, and the second write equals the third byte for byte. See [HTML sources](docs/html.md).
 
 ### Fixed
 

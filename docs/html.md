@@ -28,6 +28,7 @@ Pandoc's HTML reader does the reading, with two things set for it.
 **`html-source.lua` runs first**, and turns what the page says about itself into declarations:
 
 - A table with a header row (a `<thead>`, or a first row of nothing but `<th>`) and a `<th>` opening every body row is declared `both`; with one and not the other, `first-row` or `first-column`. That is the same declaration a `::: matrix` div makes for a Markdown table, and it outranks the guess. A table with no `<th>` anywhere is left undeclared and reported like any other; `table-headers.csv` doesn't reach HTML tables yet.
+- A header row written inside `<tbody>`, which is where Pressbooks and most editors put one, is moved to the table's head. Pandoc's reader keeps it as a head row of the body and would write it back inside the body.
 - What an earlier run of this pipeline derived is taken out so it can be derived again: Pandoc's title block (its subtitle and date are kept as metadata) and the scroll wrapper around a table.
 
 The reader itself decides one more thing: when a page has exactly one `<main>` (or `role="main"`), only what's inside it is the page. Site navigation outside `<main>` is gone; a menu inside it is content as far as anyone can tell, since the reader keeps no trace of `<nav>`.

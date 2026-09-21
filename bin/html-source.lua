@@ -25,6 +25,11 @@ nothing, which is the test.
     filter would set it back to none, because a Word table never has
     one to keep. A table with no <th> anywhere is left undeclared, and
     the run reports it like any other.
+  - A header row written inside <tbody>, which is where Pressbooks and
+    most editors put one, is read as that body's own head rows
+    (pTableBody's bodyheads) and would be written back inside the
+    body. When the table has no head and its first body opens with
+    such rows, they are the table's head and are moved there.
 
 Copyright 2026 Robert Szarka
 
@@ -55,8 +60,18 @@ local function header_columns(tbl)
   return found or 0
 end
 
+local function lift_body_head(tbl)
+  if #tbl.head.rows > 0 then return false end
+  local body = tbl.bodies[1]
+  if body == nil or #body.head == 0 then return false end
+  tbl.head = pandoc.TableHead(body.head, tbl.head.attr)
+  body.head = {}
+  return true
+end
+
 function Table(tbl)
   if tbl.attr.attributes[MARKER_ATTR] then return nil end
+  lift_body_head(tbl)
   local row = #tbl.head.rows > 0
   local column = header_columns(tbl) > 0
   local value = (row and column and 'both') or (row and 'first-row')

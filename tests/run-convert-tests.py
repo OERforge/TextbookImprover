@@ -311,6 +311,8 @@ WEB = """<!DOCTYPE html><html lang="en"><head><title>A Web Page</title></head>
 <tbody><tr><th>Brazil</th><td>3,153</td></tr>
 <tr><th>Canada</th><td>1,827</td></tr></tbody></table>
 <table><tbody><tr><td>1</td><td>2</td></tr><tr><td>3</td><td>4</td></tr></tbody></table>
+<table><tbody><tr><th>Prefix</th><th>Represents</th></tr>
+<tr><td>kilo</td><td>one thousand</td></tr></tbody></table>
 <iframe src="https://example.invalid/embed/x" title="A video"></iframe>
 </main></body></html>
 """
@@ -391,6 +393,9 @@ def case_html_source(work):
          "cells column headers",
          lambda: 'scope="row">Brazil' in web and 'scope="row">Canada' in web
          and 'scope="col">Country' in web),
+        ("a header row written inside tbody is the table's head",
+         lambda: re.search(r'<thead>\s*<tr>\s*<th scope="col">Prefix', web)
+         is not None),
         ("only what is in <main> is the page, and no iframe is fetched",
          lambda: "other.html" not in web
          and "Could not fetch" not in marked.stdout + marked.stderr),

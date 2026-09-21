@@ -166,7 +166,7 @@ def main():
                       "TeX they were written in isn't in the save"))
 
     os.makedirs(out, exist_ok=True)
-    used, missing, markup = set(), [], {}
+    used, missing, markup, transformed = set(), [], {}, {}
     for url, page in site.pages.items():
         root = page.root
         if not args.whole_pages:
@@ -190,6 +190,10 @@ def main():
                            sitesource.MATH_SCRIPT.search(e.get("type") or ""))]
             for element in doomed:
                 hp.drop(element, parent_of)
+            if profile.get("transform"):
+                changed = getattr(sitesource, profile["transform"])(content)
+                for kind, count in changed.items():
+                    transformed[kind] = transformed.get(kind, 0) + count
             # <a name="x"> with no href: an anchor Pandoc's reader drops.
             # Ids and fragments take one form (see fragment_id).
             for element in content.iter():
@@ -220,6 +224,11 @@ def main():
                 + hp._escape_text(titles[url]) + "</title>\n</head>\n"
                 "<body>\n<main>\n" + inner + "\n</main>\n</body>\n</html>\n")
 
+    for kind, count in sorted(transformed.items()):
+        if count:
+            notes.append(("site", "table-" + kind,
+                          f"{count} {profile['name']} table(s) of this kind "
+                          "rewritten as what they are"))
     names = sitesource.resource_names(site, used)
     notes += [n for n in site.notes if n[1] == "extension-corrected"]
     for key, relative in names.items():

@@ -37,6 +37,8 @@ What surrounds the content depends on what built the site, and a profile says wh
 | `wordpress` | its generator meta | `<main>`, `#content`, or `<article>` | navigation, footers, sharing buttons |
 | `generic` | anything else | `<main>`, `role="main"`, `<article>`, or the body | navigation and footers |
 
+A profile may also say what its generator lays out as a table that isn't one. Scribble does that four ways, and of DCIC's 335 tables 210 were these: a REPL interaction (prompt, code, result) becomes its contents; a section's own table of contents, nothing but `toclink` links, goes, like just-the-docs' per-page contents; a verbatim block with a line per row becomes one `<pre>`; and a Python/Pyret comparison, the one kind that is data, keeps its table and gets its row of language names as header cells. The report counts each kind.
+
 A book's pages keep no `<script>` except math (`type="math/tex"`, which Pandoc reads), no stylesheets, and no `<style>`. An `<a name>` with no link becomes an empty `<span>` holding the id, since Pandoc's reader drops the name.
 
 ## The order, from the pages' own menus

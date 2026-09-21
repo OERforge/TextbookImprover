@@ -72,6 +72,7 @@ PROFILES = [
                 "footer", "div.search"]},
     {"name": "scribble",
      "detect": [r'class="navsettop"'],
+     "transform": "scribble_tables",
      "content": ["div.main"],
      "authors": ["p.author"],
      "chrome": ["div.navsettop", "div.navsetbottom", "span.button-group",
@@ -94,6 +95,76 @@ PROFILES = [
 # with an href (a link, an RDFa property on a span) is only a pointer.
 RESOURCE_TAGS = ("img", "script", "link", "source", "video", "audio",
                  "track", "iframe", "embed", "object", "input", "image")
+
+def _replace(element, replacements, parent_of):
+    """Put replacements where element was, keeping its tail."""
+    parent = parent_of.get(element)
+    if parent is None:
+        return
+    index = list(parent).index(element)
+    tail = element.tail
+    parent.remove(element)
+    for offset, new in enumerate(replacements):
+        parent.insert(index + offset, new)
+        parent_of[new] = parent
+    if replacements:
+        last = replacements[-1]
+        last.tail = (last.tail or "") + (tail or "")
+    elif tail:
+        if index > 0:
+            before = parent[index - 1]
+            before.tail = (before.tail or "") + tail
+        else:
+            parent.text = (parent.text or "") + tail
+
+
+def scribble_tables(content):
+    """Scribble lays out things that aren't tables as tables. Of DCIC's
+    335: a REPL interaction (prompt, code, result) is its cells' contents;
+    a section's local table of contents (nothing but toclink links) is
+    navigation, and goes; a verbatim block (one line a row) is one <pre>;
+    and a Python/Pyret comparison, the one kind that is data, gets its
+    first row as header cells when that row is only short labels.
+    Returns how many of each were changed."""
+    import copy
+    parent_of = hp.parents(content)
+    counts = {"repl": 0, "local-toc": 0, "verbatim": 0, "comparison": 0}
+    for table in [e for e in content.iter() if hp.local(e.tag) == "table"]:
+        classes = (table.get("class") or "").split()
+        cells = [c for c in table.iter() if hp.local(c.tag) in ("td", "th")]
+        links = [a for a in table.iter() if hp.local(a.tag) == "a"]
+        if "PyretReplInteraction" in classes:
+            blocks = []
+            for cell in cells:
+                wrapper = copy.copy(cell)
+                wrapper.tag = "div"
+                wrapper.attrib.clear()
+                blocks.append(wrapper)
+            _replace(table, blocks, parent_of)
+            counts["repl"] += 1
+        elif links and all("toclink" in (a.get("class") or "").split()
+                           for a in links) and not classes:
+            _replace(table, [], parent_of)
+            counts["local-toc"] += 1
+        elif "SVerbatim" in classes:
+            pre = table.makeelement("pre", {})
+            pre.text = "\n".join(hp.text_of(row) for row in table.iter()
+                                  if hp.local(row.tag) == "tr")
+            _replace(table, [pre], parent_of)
+            counts["verbatim"] += 1
+        elif "TwoColumn" in classes:
+            rows = [r for r in table.iter() if hp.local(r.tag) == "tr"]
+            first = [c for c in rows[0] if hp.local(c.tag) in ("td", "th")] \
+                if rows else []
+            if first and all(len(hp.text_of(c)) <= 20 and not any(
+                    hp.local(x.tag) in ("pre", "code") for x in c.iter())
+                    for c in first):
+                for cell in first:
+                    cell.tag = "th"
+                    cell.set("scope", "col")
+                counts["comparison"] += 1
+    return counts
+
 
 NAVIGATION_WORDS = {"up", "prev", "previous", "next", "home", "top", "back",
                     "contents", "toc"}

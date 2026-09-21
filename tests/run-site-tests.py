@@ -137,6 +137,17 @@ def mhtml(directory, stem, title, body):
         fh.write(message.as_bytes())
 
 
+SCRIBBLE_TABLES = (
+    '<table class="PyretReplInteraction"><tr><td><span class="PyretReplPrompt">'
+    '›</span><pre>1 == 1</pre></td><td><pre>true</pre></td></tr></table>'
+    '<table><tr><td><a class="toclink" href="#a">2.1 One</a></td></tr>'
+    '<tr><td><a class="toclink" href="#b">2.2 Two</a></td></tr></table>'
+    '<table class="SVerbatim"><tr><td>line one</td></tr><tr><td>line two'
+    '</td></tr></table>'
+    '<table class="TwoColumn"><tr><td>Python</td><td>Pyret</td></tr>'
+    '<tr><td><pre>x = 1</pre></td><td><pre>x = 1</pre></td></tr></table>')
+
+
 def heading(number, title, stem):
     return (f'<h3>{number}<a name="(part._{stem})"></a>{title}'
             f'<span class="button-group"><a href="{SCRIBBLE}{stem}.html" '
@@ -159,7 +170,8 @@ def build_mhtml(directory):
         mhtml(directory, s, f"{n} {t}", heading(n, t, s)
               + f'<p>See <a href="{SCRIBBLE}naming.html#(part._naming)">naming'
               f'</a>.<img src="{SCRIBBLE}pict.png" alt="p"></p>'
-              '<span class="MathJax">x</span>' if s == "tables" else
+              '<span class="MathJax">x</span>' + SCRIBBLE_TABLES
+              if s == "tables" else
               heading(n, t, s) + f'<p><img src="{SCRIBBLE}pict.png" alt="p"></p>')
 
 
@@ -282,6 +294,17 @@ def case_mhtml(work):
          and os.path.exists(os.path.join(out, "assets", "pict.png"))),
         ("a link into another page keeps its fragment",
          lambda: 'href="naming.html#(part._naming)"' in tables),
+        ("a REPL interaction isn't a table: its prompt, code, and result "
+         "remain",
+         lambda: "PyretReplInteraction" not in tables
+         and "<pre>1 == 1</pre>" in tables and "<pre>true</pre>" in tables),
+        ("a section's own table of contents goes, a verbatim table is one "
+         "<pre>",
+         lambda: "toclink" not in tables
+         and "<pre>line one\nline two</pre>" in tables),
+        ("a comparison stays a table, its language row the header",
+         lambda: '<th scope="col">Python</th>' in tables
+         and '<th scope="col">Pyret</th>' in tables),
         ("equations present only as MathJax's rendering are reported",
          lambda: any(r["Check"] == "math-lost" and r["Where"] == "tables.html"
                      for r in rows)),

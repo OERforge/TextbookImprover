@@ -6,6 +6,8 @@ What Pandoc does, as read from its source or established by test, for the questi
 
 - `src/Text/Pandoc/Readers/Docx.hs` — the DOCX reader's document walk: bookmarks, links, anchors, tables, styles to headers.
 - `src/Text/Pandoc/Readers/Docx/Parse.hs` — the OOXML parse: what becomes a `BodyPart`, `ParPart`, `Run`; what is ignored.
+- `src/Text/Pandoc/Readers/HTML.hs` (and `Readers/HTML/`) — what becomes a `Div`, what is skipped, `extractMain`, iframes, MathJax, math in `<script>`.
+- `src/Text/Pandoc/Readers/EPUB.hs` — 300 lines: the spine walk, the id and link rewriting, what metadata is read.
 - `src/Text/Pandoc/Writers/EPUB.hs` — chunking, the chapter template's variables, the OPF and nav, accessibility metadata.
 - `src/Text/Pandoc/Writers/Markdown.hs` (and `Writers/Markdown/Table.hs`) — which table form is written, what becomes raw HTML, how figures are written.
 - `src/Text/Pandoc/Readers/Markdown.hs` — raw HTML blocks, implicit figures, the `figure` div.
@@ -33,6 +35,36 @@ What Pandoc does, as read from its source or established by test, for the questi
 **Heading ids are made unique against the anchor map's values, and a bookmark can hold the next candidate.** `makeHeaderAnchor'` computes a heading's id with `uniqueIdent`, checking each candidate (`base`, `base-1`, `base-2`, …) against `M.elems docxAnchorMap` (`Readers/Docx.hs` 589; `Shared.hs` 616). OpenStax names the bookmark for a repeated heading `site-selection-1`, which is exactly the candidate the second "Site Selection" heading is offered, so two headings got one id. Read from the source; measured on *Clinical Nursing Skills* (16 pages). Our filter renumbers duplicates as its last pass.
 
 **A style based on `Heading N` is a heading.** `Heading2Grey` (OpenStax) becomes a level-2 `Header` with the style as a class. Measured.
+
+## The HTML reader
+
+**One `<main>` is the whole document.** `extractMain` keeps only the contents of the element with `role="main"` (a `<main>` gets that role on read) when the page has exactly one, and everything otherwise (`Readers/HTML.hs`, after `parseDoc`). Read from the source; measured on 60 just-the-docs pages, where the site navigation is gone with no work from us. A generator that marks its content with a `div` and a class gets no such help.
+
+**`<nav>` and `<footer>` leave no trace of themselves.** `isDivLike` is `div`, `section`, `header`, `main`, `aside`; `section`, `header`, and `aside` become a `Div` with that class. A `<nav>`'s tags are skipped and its list is read as an ordinary `BulletList`, so a filter cannot tell a menu from content. Read from the source; measured (a page's own table of contents inside `<main>` arrives as a list of links). What has to go has to go from the DOM, before Pandoc.
+
+**An `<iframe src>` is fetched over the network unless `raw_html` is on**, which it isn't by default for this reader: `pIframe` is guarded by `guardDisabled Ext_raw_html`, opens the URL, and reads what comes back into a `Div` with class `iframe`. With `-f html+raw_html` the tag is two `RawBlock`s and nothing is fetched. Read from the source and measured (the fetch attempt is logged as `Could not fetch resource`). The EPUB reader turns `raw_html` on itself.
+
+**MathJax's rendering is skipped, its source is read.** Spans with class `mjx-chtml`, `MathJax_CHTML`, or `MathJax_Preview` are dropped (#10673), and `<script type="math/tex">` becomes `Math`, display when the type ends in `display`. Measured: 36 scripts, 36 `Math`, no duplicates. Not covered: MathJax 2's HTML-CSS output (class `MathJax`, with `mi`/`mo`/`mrow` spans), which is read as nested spans of text. A page saved as MHTML has no scripts, so there the TeX is gone and only that rendering is left.
+
+**A `<th>` in every body row is a header column; the reader works it out.** `pTableBody` counts the leading `<th>` cells of each row and sets `RowHeadColumns` when every row agrees, 0 when they don't (`Readers/HTML/Table.hs`, citing #8984 and #8634); `scope` rides along as an attribute on the cell. A row of `<th>` alone at the top is the head even with no `<thead>`. Read from the source and measured. So the roadmap's old note that the reader "keeps the attribute but not the element" was wrong for the ordinary case, and what lost our own pages' row headers on reading them back was our filter, which sets `row_head_columns` to 0 on any table with no declaration, because a Word table never arrives with one. `html-source.lua` turns what the reader found into a declaration.
+
+**A paragraph keeps none of its attributes.** `pPara` builds a `Para` from the inlines and discards the tag's class and id. `<p class="subtitle">` and `<p class="date">` in Pandoc's own title block come back as bare paragraphs, and so does a web page's `<p class="caption">`. Read from the source and measured. Anything a paragraph's class has to say must be said before Pandoc reads it, or read out of the file.
+
+**Pandoc's own title block is content to the reader**: `<header id="title-block-header">` becomes a `Div` with that id, while `<title>` and the `<meta name=…>` elements become metadata. Measured: reading our own page and writing it again gave two titles.
+
+**An inline `<svg>` becomes an `Image` with a `data:` URI** (`pSvg`), including a twelve-pixel link icon inside a heading. Measured.
+
+**The reader is lenient where an XML parser is not.** An EPUB content document with an unclosed `<br>` (Asciidoctor's, in one of our samples) reads without complaint; `xml.etree` refuses the file and epubcheck calls it fatal (RSC-016). Measured.
+
+## The EPUB reader
+
+**The spine is concatenated into one document**, each file preceded by an empty `Span` whose id is the file's name, and non-linear items are dropped (`parseSpine`). Only `dc:` elements become metadata: no `meta property=` (so none of the `schema:accessibility*` claims), and each file's own `<title>` and `lang` are lost. Read from the source.
+
+**Every id is rewritten to `<file>_<id>`, but only on `Div`, `Header`, `CodeBlock`, `Span`, `Code`, and `Link`** (`fixBlockIRs`, `fixInlineIRs`), while every internal link is rewritten to `#<file>_<fragment>`. A `Figure`, `Table`, or `Image` keeps its bare id, so a link to a figure or a table is dead after reading. Read from the source; measured on a Pressbooks EPUB (117 figure ids and 6 table ids unprefixed). Candidate upstream report; tracker not searched yet.
+
+**Every `epub:` attribute is removed** (`removeEPUBAttrs`), so `epub:type="footnote"`, `noteref`, and the landmarks leave nothing. Read from the source.
+
+**The navigation document is not read** unless the spine lists it, and then it is content.
 
 ## The DOCX writer
 

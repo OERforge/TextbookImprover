@@ -14,13 +14,14 @@ writes into a directory of its own, html/ for the one implied when no
 configuration says otherwise. A page the author wrote by hand -- an
 .html here with no .docx behind it -- is copied into every HTML
 target's directory as it stands, with the local files it refers to, and
-read into an intermediate so the EPUB has it too.
+read into an intermediate so the EPUB has it too. An .html that contents
+marks "convert: true" is a source instead, read like any other.
 
 THE RUN
 
   0.   read the configuration and resolve the sidecar paths
   0.5  the table-headers pre-pass, on the .docx files
-  1.   .docx -> .json, extracting media           (once per document)
+  1.   .docx, .md, .html -> .json                 (once per document)
   2.   check every media reference resolves       (the gate)
   3.   render header and footer fragments         (per target)
   4.   filter the .json -> .filtered.json         (once per filter stage)
@@ -73,7 +74,7 @@ try:
     import notes as notes_lib
     import oerconfig
     from bookcontents import (guess_contents, walk_contents, number_tree,
-                              is_generated, toc_blocks)
+                              is_generated, toc_blocks, pages_to_convert)
     from names import safe_path, safe_stem, is_safe
 except ImportError:
     sys.exit("Cannot find the configuration library. It should be in a "
@@ -85,6 +86,7 @@ HEADER_FILTER = os.path.join(HERE, "header-includes.lua")
 SAFE_MEDIA_FILTER = os.path.join(HERE, "safe-media.lua")
 TARGET_FILTER = os.path.join(HERE, "target-blocks.lua")
 MARKDOWN_FILTER = os.path.join(HERE, "markdown-source.lua")
+HTML_SOURCE_FILTER = os.path.join(HERE, "html-source.lua")
 SOURCE_EXTENSIONS = (".docx", ".md", ".html")
 PAGE_CSS = os.path.join(HERE, "page.css")
 HEADERS_TOOL = os.path.join(HERE, "table-headers.py")
@@ -429,6 +431,48 @@ def read_markdown_to_json(base, docs, env):
     return stems
 
 
+def html_sources(base, project, others):
+    """The .html files this run converts. An .html beside the sources is
+    a page someone finished unless contents says "convert: true" of it
+    or of a group above it. One case needs no declaration: a directory
+    holding no other source and no contents yet, where reading the
+    pages is the only thing a conversion could mean; the run says so."""
+    candidates = []
+    for path in sorted(glob.glob(os.path.join(base, "*.html"))):
+        name = os.path.basename(path)
+        if is_variant(name) or "--" in name:
+            continue
+        candidates.append(name)
+    contents = project.get("contents") or []
+    if contents:
+        marked = pages_to_convert(contents)
+        return [n for n in candidates
+                if n[:-5] in marked or safe_stem(n[:-5]) in marked]
+    if others or not candidates:
+        return []
+    say(f"No .docx or .md here and no contents: reading the "
+        f"{len(candidates)} .html file(s) as sources. Mark them "
+        '"convert: true" in contents to say so yourself.')
+    return candidates
+
+
+def read_html_to_json(base, docs, env):
+    """An HTML source is read with raw_html on, which is what stops the
+    reader fetching every <iframe> over the network (Readers/HTML.hs,
+    pIframe), and through html-source.lua, which turns what the page says
+    about its tables into declarations and takes out what an earlier run
+    of this pipeline derived. Its images are files it names by path."""
+    stems = []
+    for name in docs:
+        stem = safe_stem(name[:-5])
+        run(["pandoc", "-f", "html+raw_html", "-t", "json", name,
+             "-o", stem + ".json", "--lua-filter=" + HTML_SOURCE_FILTER,
+             "--lua-filter=" + MEDIA_FILTER], env=env, cwd=base)
+        portable_media_paths(os.path.join(base, stem + ".json"), base, name)
+        stems.append(stem)
+    return stems
+
+
 def read_to_json(base, docs, env, work):
     """JSON rather than Markdown. Markdown is a format with opinions, and
     everything has to survive its grammar: it has no syntax for a cell
@@ -485,7 +529,8 @@ def hand_pages(base, stems):
     found = []
     for path in sorted(glob.glob(os.path.join(base, "*.html"))):
         stem = os.path.basename(path)[:-5]
-        if stem in stems or stem.split("--", 1)[0] in stems \
+        if stem in stems or safe_stem(stem) in stems \
+                or stem.split("--", 1)[0] in stems \
                 or is_variant(os.path.basename(path)):
             continue
         if not is_safe(stem):
@@ -547,7 +592,9 @@ def read_hand_pages(base, hand, pages_dir, env, variants=None):
         target = os.path.join(pages_dir, stem + INTERMEDIATE)
         source = variants.get(stem) if str(variants.get(stem, "")).endswith(
             ".html") else stem + ".html"
-        run(["pandoc", "-f", "html", "-t", "json", source,
+        # raw_html, or the reader fetches every <iframe> over the network
+        # to read it into the page (Readers/HTML.hs, pIframe).
+        run(["pandoc", "-f", "html+raw_html", "-t", "json", source,
              "-o", target], env=env, cwd=base)
         out.append(target)
     return out
@@ -578,7 +625,7 @@ def read_variants(base, target, work, env):
     return raw
 
 
-def warn_about_leftovers(base, stems, fragments):
+def warn_about_leftovers(base, stems, fragments, web=()):
     """An intermediate with no matching .docx is not this run's output.
     Say so and leave it alone rather than treating its stale state as an
     error. Markdown from a v0.1 run is no longer read by anything; it is
@@ -602,8 +649,9 @@ def warn_about_leftovers(base, stems, fragments):
     # script's decision; but they are not this run's pages, which go to
     # each target's directory.
     old = [os.path.basename(p) for p in glob.glob(os.path.join(base, "*.html"))
-           if os.path.basename(p)[:-5] in stems
-           or os.path.basename(p)[:-5].split("--", 1)[0] in stems]
+           if os.path.basename(p) not in web
+           and (os.path.basename(p)[:-5] in stems
+                or os.path.basename(p)[:-5].split("--", 1)[0] in stems)]
     if old:
         say(f"Note: {len(old)} page(s) beside the sources ({old[0]}, ...) are "
             "from an earlier run; pages now go to each target's directory.")
@@ -1581,9 +1629,18 @@ def main():
         stems += read_markdown_to_json(base, markdown_sources(base,
                                                               fragment_files),
                                        env)
+        web = html_sources(base, project, stems)
+        for target in targets:
+            if web and target.format == "html" and os.path.abspath(
+                    target.output_dir) == os.path.abspath(base):
+                die(f"Target {target.name} writes its pages beside the "
+                    "sources, which would overwrite the .html sources. Give "
+                    "it an output_dir of its own.")
+        stems += read_html_to_json(base, web, env)
         if not stems:
-            die("No .docx or .md files here, so there is nothing to convert.")
-        warn_about_leftovers(base, stems, fragment_files)
+            die("No .docx, .md, or .html files here, so there is nothing "
+                "to convert.")
+        warn_about_leftovers(base, stems, fragment_files, web)
 
         # ---- 2. the gate ------------------------------------------------------
         media_gate(base, stems, collected["media_unresolved"],

@@ -23,6 +23,7 @@ on another `bin/` script.
 | `media-extensions.lua` | Pandoc filter naming extracted images by their real content type. |
 | `safe-media.lua` | Rewrites a page's local media references at render time to names that need no encoding in a link, matching what `convert.py` copies beside the page. |
 | `target-blocks.lua` | At render time, keeps a passage marked for some targets and drops it for the rest, and applies `title_block`. |
+| `html-source.lua` | When an HTML source is read: what the page says about its tables becomes a declaration, and what an earlier run derived (the title block, a table's scroll wrapper) is taken out. |
 | `markdown-source.lua` | For a markdown target: takes out what the filter derived and writes what it decided as source markup. |
 | `header-includes.lua` | Adds the stylesheet to a page's `header-includes` at render time, alongside what the page already carries there; `--include-in-header` would replace it. |
 | `lib/docxrepair.py` | What a `.docx` needs done to it before Pandoc reads it, on a copy: bookmarks moved to where the reader keeps them, invisible links so bookmarks only other files point at survive. |

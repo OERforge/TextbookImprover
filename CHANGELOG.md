@@ -6,7 +6,13 @@ Versions are two-part and pre-1.0: breaking changes may land in any of them unti
 
 ## [Unreleased]
 
+### Added
+
+- **HTML as a source.** An `.html` beside the sources that `contents` marks `convert: true` (on the page or on a group above it) is read, filtered, split, and rendered like any source, instead of being copied as a finished page; a directory of nothing but `.html`, with no `contents`, is read that way without being told, and the run says so. `html-source.lua` runs as the page is read: a table's `<thead>` and the `<th>` opening its body rows become a header declaration, and Pandoc's title block and the filter's own scroll wrapper are taken out so they can be written again. Converting this pipeline's own pages now changes nothing: the runs agree on the statistics book's 169 pages but for one caption, and the second write equals the third byte for byte. See [HTML sources](docs/html.md).
+
 ### Fixed
+
+- **A finished `.html` page with an `<iframe>` no longer sends Pandoc to the network.** The page was read for the EPUB with the HTML reader's defaults, under which the reader fetches an iframe's `src` to read it into the page. It's read with `raw_html` on now, as HTML sources are.
 
 - **A Markdown image path written with a backslash no longer stops the run.** `assets\Bastiat.png` resolves on Windows and nowhere else, and one such path among a book's fifty stopped the conversion at the media gate with no page written. When the path with forward slashes is a file, the intermediate takes that and the run warns, naming the source and the path; the same goes for a backslash Markdown consumed as an escape (`assets\_fig.png` reads as `assets_fig.png`). A reference that resolves neither way still stops at the gate. The source isn't touched.
 

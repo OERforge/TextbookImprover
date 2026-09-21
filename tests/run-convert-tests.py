@@ -304,6 +304,104 @@ def case_markdown(work):
     ]
 
 
+WEB = """<!DOCTYPE html><html lang="en"><head><title>A Web Page</title></head>
+<body><nav><ul><li><a href="other.html">Other</a></li></ul></nav>
+<main><h1>A Web Page</h1>
+<table><thead><tr><th>Country</th><th>GDP</th></tr></thead>
+<tbody><tr><th>Brazil</th><td>3,153</td></tr>
+<tr><th>Canada</th><td>1,827</td></tr></tbody></table>
+<table><tbody><tr><td>1</td><td>2</td></tr><tr><td>3</td><td>4</td></tr></tbody></table>
+<iframe src="https://example.invalid/embed/x" title="A video"></iframe>
+</main></body></html>
+"""
+
+
+def run_in(directory, contents=None):
+    if contents is not None:
+        with open(os.path.join(directory, "project.yaml"), "w",
+                  encoding="utf-8") as fh:
+            fh.write("project:\n  identifier: org.example.fixtures\n"
+                     "  title: The Fixture Book\n" + contents)
+    return subprocess.run(
+        ["python3", os.path.join(BIN, "convert.py"), "--quiet"],
+        cwd=directory, capture_output=True, text=True,
+        stdin=subprocess.DEVNULL)
+
+
+def same_pages(one, two):
+    names = sorted(n for n in os.listdir(one) if n.endswith(".html"))
+    return bool(names) and all(
+        open(os.path.join(one, n), "rb").read()
+        == open(os.path.join(two, n), "rb").read() for n in names)
+
+
+def case_html_source(work):
+    """An HTML page is a source when the book says so, and converting
+    what this pipeline wrote changes nothing."""
+    # The fixtures and a Markdown page, converted; then their pages as the
+    # sources of a second book, and that book's pages as a third's.
+    os.makedirs(os.path.join(work, "assets"), exist_ok=True)
+    with open(os.path.join(work, "long run.md"), "w", encoding="utf-8") as fh:
+        fh.write(MARKDOWN.replace("assets\\Curve.png", "assets/Curve.png")
+                 .replace("assets\\_under.png", "assets/_under.png"))
+    for image in ("Pipe Sizes.png", "Curve.png", "_under.png"):
+        with open(os.path.join(work, "assets", image), "wb") as fh:
+            fh.write(ONE_PIXEL)
+    convert(work, "targets:\n  html:\n    format: html\n")
+    second, third = work + "-second", work + "-third"
+    shutil.copytree(os.path.join(work, "html"), second)
+    again = run_in(second)
+    shutil.copytree(os.path.join(second, "html"), third)
+    run_in(third)
+    compared = subprocess.run(
+        ["python3", os.path.join(ROOT, "util", "compare-output.py"),
+         os.path.join(work, "html"), os.path.join(second, "html")],
+        capture_output=True, text=True)
+    page = read(second, "html", "long-run.html") if exists(
+        second, "html", "long-run.html") else ""
+
+    # A page from somewhere else, marked in contents, beside one that is not.
+    mixed = work + "-mixed"
+    os.makedirs(mixed)
+    shutil.copy(os.path.join(FIXTURES, "tables.docx"), mixed)
+    for name in ("web.html", "finished.html"):
+        with open(os.path.join(mixed, name), "w", encoding="utf-8") as fh:
+            fh.write(WEB)
+    marked = run_in(mixed, "  contents:\n    - tables\n"
+                           "    - page: web\n      convert: true\n"
+                           "    - finished\n")
+    web = read(mixed, "html", "web.html") if exists(
+        mixed, "html", "web.html") else ""
+    return [
+        ("a directory of nothing but .html is read as sources, and says so",
+         lambda: "as sources" in again.stdout + again.stderr
+         and exists(second, "html", "tables.html")),
+        ("converting our own pages gives the same book",
+         lambda: "Runs agree" in compared.stdout),
+        ("the second write is the third, byte for byte",
+         lambda: same_pages(os.path.join(second, "html"),
+                            os.path.join(third, "html"))),
+        ("the title is written once and a table is wrapped once",
+         lambda: page.count("<h1") == 1
+         and page.count('class="table-wrapper"') == page.count("<table")),
+        ("a page contents marks convert: true is converted",
+         lambda: marked.returncode in (0, 1)
+         and 'class="table-wrapper"' in web),
+        ("a th in every body row is a row header again, and a thead's "
+         "cells column headers",
+         lambda: 'scope="row">Brazil' in web and 'scope="row">Canada' in web
+         and 'scope="col">Country' in web),
+        ("only what is in <main> is the page, and no iframe is fetched",
+         lambda: "other.html" not in web
+         and "Could not fetch" not in marked.stdout + marked.stderr),
+        ("a table with no th anywhere is reported, not guessed",
+         lambda: "no header row and no declaration"
+         in marked.stdout + marked.stderr),
+        ("a page contents does not mark is copied as it stands",
+         lambda: read(mixed, "html", "finished.html") == WEB),
+    ]
+
+
 NOTED = """# Chapter One
 
 Text.[^a] More.[^b]
@@ -640,6 +738,7 @@ CASES = [
     ("roles, numbering, and a contents page", case_structure),
     ("footnote numbering and placement", case_notes),
     ("a Markdown source", case_markdown),
+    ("an HTML source", case_html_source),
     ("a hand-written page", case_hand_written),
     ("several targets", case_targets),
     ("arguments passed to the packager", case_passthrough),

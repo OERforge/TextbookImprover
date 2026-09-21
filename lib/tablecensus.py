@@ -253,6 +253,16 @@ def table_style(tbl):
 class Cell:
     __slots__ = ("text", "bold", "shaded", "image", "span", "vmerge")
 
+    @classmethod
+    def of(cls, text, bold=False, shaded=False, image=False, span=1,
+           vmerge=None):
+        """A cell from what a reader other than the OOXML one found."""
+        cell = cls.__new__(cls)
+        cell.text = " ".join((text or "").split())
+        cell.bold, cell.shaded, cell.image = bold, shaded, image
+        cell.span, cell.vmerge = span, vmerge
+        return cell
+
     def __init__(self, tc):
         self.text = " ".join(cell_text(tc).split())
         self.bold = is_bold(tc)
@@ -272,6 +282,98 @@ def build_grid(tbl):
             row.extend([c] * c.span)
         grid.append(row)
     return grid
+
+
+class View:
+    """What classify() and explain() read of a table, whichever reader
+    built it: the grid of cells, Word's table-look flags and style name
+    (empty for anything but Word), and the rows marked to repeat as a
+    header. The rules are the same for every source; only this differs."""
+    __slots__ = ("grid", "look", "style", "marked")
+
+    def __init__(self, grid, look=None, style="", marked=()):
+        self.grid, self.look, self.style = grid, look or {}, style
+        self.marked = list(marked)
+
+
+def view(tbl):
+    """A View of an OOXML table (a View is passed through)."""
+    if isinstance(tbl, View):
+        return tbl
+    return View(build_grid(tbl), tbl_look(tbl), table_style(tbl),
+                [i for i, tr in enumerate(tbl.findall(q("tr")))
+                 if repeats_as_header(tr)])
+
+
+def _stringify(node):
+    if isinstance(node, dict):
+        kind, content = node.get("t"), node.get("c")
+        if kind == "Str":
+            return content
+        if kind in ("Space", "SoftBreak", "LineBreak"):
+            return " "
+        if kind in ("Code", "Math"):
+            return content[-1]
+        return _stringify(content) if content is not None else ""
+    if isinstance(node, list):
+        return "".join(_stringify(n) for n in node)
+    return ""
+
+
+def _find(node, kind):
+    if isinstance(node, dict):
+        if node.get("t") == kind:
+            yield node
+        for value in node.values():
+            yield from _find(value, kind)
+    elif isinstance(node, list):
+        for value in node:
+            yield from _find(value, kind)
+
+
+def view_from_pandoc(table):
+    """A View of a table in Pandoc's JSON AST, as an HTML (or any other)
+    source reads to: head rows, each body's own head rows and its rows,
+    and the foot, in order. A cell is bold when all its text is inside
+    Strong; a row span is Word's vMerge, restart then continue, so the
+    grid lines up the same way. The head's rows are the marked ones,
+    which is what <thead> means. No look, no style: HTML has neither."""
+    _attr, _caption, _specs, head, bodies, foot = table["c"]
+    rows = list(head[1])
+    marked = list(range(len(rows)))
+    for body in bodies:
+        rows += body[2] + body[3]
+    rows += foot[1]
+    grid, pending = [], {}          # column -> rows still covered
+    for row in rows:
+        out, column = [], 0
+        cells = list(row[1])
+        while cells or any(c >= column for c in pending):
+            if column in pending:
+                out.append(Cell.of("", vmerge="continue"))
+                pending[column] -= 1
+                if not pending[column]:
+                    del pending[column]
+                column += 1
+                continue
+            if not cells:
+                break
+            _a, _align, rowspan, colspan, blocks = cells.pop(0)
+            text = _stringify(blocks)
+            strong = "".join(_stringify(s["c"]) for s in _find(blocks,
+                                                                "Strong"))
+            cell = Cell.of(text, bold=bool(text.strip()) and
+                           " ".join(strong.split()) == " ".join(text.split()),
+                           image=any(True for _ in _find(blocks, "Image")),
+                           span=colspan,
+                           vmerge="restart" if rowspan > 1 else None)
+            out.extend([cell] * colspan)
+            if rowspan > 1:
+                for offset in range(colspan):
+                    pending[column + offset] = rowspan - 1
+            column += colspan
+        grid.append(out)
+    return View(grid, marked=marked)
 
 
 def looks_like_header_band(cells, allow_blank_corner=False):
@@ -316,7 +418,8 @@ def mostly_numeric(cells):
 # --------------------------------------------------------------------------
 
 def classify(tbl):
-    grid = build_grid(tbl)
+    v = view(tbl)
+    grid = v.grid
     if not grid:
         return "empty", [], 0, 0
 
@@ -324,8 +427,8 @@ def classify(tbl):
     ncols = max(len(r) for r in grid)
     ev = []
 
-    look = tbl_look(tbl)
-    style = table_style(tbl)
+    look = v.look
+    style = v.style
     if style:
         ev.append(f"style={style}")
     if look.get("firstRow"):
@@ -340,7 +443,7 @@ def classify(tbl):
     if nrows == 1 and ncols == 1:
         return "layout(single-cell)", ev, nrows, ncols
 
-    marked = [i for i, tr in enumerate(tbl.findall(q("tr"))) if repeats_as_header(tr)]
+    marked = view(tbl).marked
     if marked:
         ev.append("tblHeader row " + ",".join(str(i + 1) for i in marked))
 
@@ -629,7 +732,7 @@ def explain(tbl, kind=None, ev=None):
     if kind == "empty" or kind.startswith("layout"):
         return None, "not a data table"
 
-    grid = build_grid(tbl)
+    grid = view(tbl).grid
     if not grid:
         return None, "no cells"
 
@@ -655,7 +758,7 @@ def explain(tbl, kind=None, ev=None):
         return None, "nothing left after the opening rows"
     skipped = ("read past %d opening row(s); " % start) if start else ""
 
-    marked = [i for i, tr in enumerate(tbl.findall(q("tr"))) if repeats_as_header(tr)]
+    marked = view(tbl).marked
     # Ignoring full-width rows would empty a one-column table, where every
     # row spans the width by definition.
     plain = [r for r in rows if not wide or not is_full_width_band(r)]

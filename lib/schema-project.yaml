@@ -112,6 +112,18 @@ keys:
       An EPUB records each as a creator; the cartridge has nowhere to put
       one. For an OpenStax book the publisher is usually the right entry.
 
+  passthrough:
+    type: path
+    default: _pt
+    description: >
+      A directory, inside the book's, for pages that aren't converted from
+      the book's sources: an .html here is a page someone finished and is
+      copied into every HTML target as it stands (and read for the EPUB),
+      and an .md here is converted alongside the sources. Its files are
+      treated as though they sat beside the sources, so a reference in
+      _pt/about.html to images/logo.png names the book's
+      images/logo.png. Every .html beside the sources is a source.
+
   contents:
     type: opaque
     default: []

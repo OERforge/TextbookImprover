@@ -394,9 +394,57 @@ def key_checks():
            inner_key != ka and len(inner_key) == 64, "")
 
 
+def pandoc_checks():
+    """The same rules on a table Pandoc read from HTML, through
+    view_from_pandoc. Skipped without Pandoc."""
+    import json
+    import shutil
+    import subprocess
+    if shutil.which("pandoc") is None:
+        return
+    shapes = [
+        ("html: an unmarked bold header row", "first-row",
+         "<tr><td><b>HW Set</b></td><td><b>1</b></td><td><b>2</b></td></tr>"
+         "<tr><td>Time (hr)</td><td>9.8</td><td>5.3</td></tr>"),
+        ("html: a thead over a first column keying numbers", "both",
+         "<thead><tr><th>Acres</th><th>Cost</th><th>Benefit</th></tr></thead>"
+         "<tr><td>North</td><td>$0</td><td>$0</td></tr>"
+         "<tr><td>South</td><td>$20</td><td>$140</td></tr>"
+         "<tr><td>East</td><td>$80</td><td>$240</td></tr>"),
+        ("html: row labels over values, no header row", "first-column",
+         "<tr><td>Government purchases</td><td>$120 billion</td></tr>"
+         "<tr><td>Depreciation</td><td>$40 billion</td></tr>"
+         "<tr><td>Consumption</td><td>$400 billion</td></tr>"
+         "<tr><td>Exports</td><td>$100 billion</td></tr>"),
+        ("html: one cell is layout, not data", None,
+         "<tr><td>Just a box of text.</td></tr>"),
+    ]
+    for name, expect, rows in shapes:
+        doc = json.loads(subprocess.run(
+            ["pandoc", "-f", "html", "-t", "json"],
+            input=f"<table>{rows}</table>", capture_output=True, text=True,
+            check=True).stdout)
+        table = next(b for b in doc["blocks"] if b["t"] == "Table")
+        got = tc.guess(tc.view_from_pandoc(table))
+        yield name, got == expect, f"guess={got}, expected {expect}"
+    doc = json.loads(subprocess.run(
+        ["pandoc", "-f", "html", "-t", "json"],
+        input="<table><tr><td rowspan='2'>A</td><td>1</td><td>2</td></tr>"
+              "<tr><td>3</td><td>4</td></tr>"
+              "<tr><td colspan='2'>B</td><td>5</td></tr></table>",
+        capture_output=True, text=True, check=True).stdout)
+    grid = tc.view_from_pandoc(next(b for b in doc["blocks"]
+                                    if b["t"] == "Table")).grid
+    yield ("html: a row span and a column span keep the columns aligned",
+           [len(r) for r in grid] == [3, 3, 3]
+           and grid[1][0].vmerge == "continue" and grid[1][1].text == "3"
+           and grid[2][0] is grid[2][1],
+           f"widths={[len(r) for r in grid]}")
+
+
 def main():
     failures = 0
-    for name, ok, detail in key_checks():
+    for name, ok, detail in list(key_checks()) + list(pandoc_checks()):
         if ok:
             print("  ok    %s" % name)
         else:
@@ -415,7 +463,8 @@ def main():
             print("  FAIL  %s" % name)
             print("          kind=%s guess=%s, expected %s" % (kind, got, expect))
             print("          evidence: %s" % "; ".join(ev))
-    total = len(CASES) + sum(1 for _ in key_checks())
+    total = len(CASES) + sum(1 for _ in key_checks()) + \
+        sum(1 for _ in pandoc_checks())
     print("")
     if failures:
         print("%d of %d census checks failed." % (failures, total),

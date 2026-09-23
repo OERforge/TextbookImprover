@@ -256,6 +256,83 @@ def no_header_text(grid):
     return bool(cells) and tc.mostly_values(cells, ratio=1.0)
 
 
+MARKER = "data-th-marker"
+
+
+def pandoc_tables(node, out):
+    """Every Table in a Pandoc document, outer before inner."""
+    if isinstance(node, dict):
+        if node.get("t") == "Table":
+            out.append(node)
+        for value in node.values():
+            pandoc_tables(value, out)
+    elif isinstance(node, list):
+        for value in node:
+            pandoc_tables(value, out)
+    return out
+
+
+def tables_in_json(path):
+    """The data tables of a Pandoc intermediate, for a source whose
+    evidence survives Pandoc's reader: an HTML page's <th> cells, which
+    html-source.lua turned into a marker, and its bold, which is Strong.
+    The value in effect is written back into the intermediate as the
+    table's marker (see apply_to_json), which the filter obeys, so no
+    position has to be matched afterwards."""
+    with open(path, encoding="utf-8") as fh:
+        doc = json.load(fh)
+    stem = os.path.splitext(os.path.basename(path))[0]
+    found = []
+    for index, table in enumerate(pandoc_tables(doc["blocks"], [])):
+        attributes = dict(table["c"][0][2])
+        view = tc.view_from_pandoc(table)
+        kind, ev, nrows, ncols = tc.classify(view)
+        value, reason = tc.explain(view, kind, ev)
+        source = attributes.get(MARKER)
+        if source:
+            value, reason = source, "the page marks its header cells (<th>)"
+        if value is None:
+            continue
+        grid = view.grid
+        first = grid[0][0].text if grid and grid[0] else ""
+        caption = tc._stringify(table["c"][1][1]) if table["c"][1] else ""
+        found.append({
+            "key": tc.key_from_pandoc(table), "rows": nrows, "cols": ncols,
+            "first": " ".join(first.split())[:40],
+            "source": stem + ".html", "index": index,
+            "label": " ".join(caption.split())[:60],
+            "preview": preview_of(grid),
+            "guess": "" if value == "unknown" else value,
+            "reason": reason, "caption-rows": "", "split-at": "",
+            "anchors": [],
+            "needs-word": value == "none" and no_header_text(grid),
+            "summary-row": "trailing row with no label" in reason,
+            "json": path, "from-source": bool(source),
+        })
+    return found
+
+
+def apply_to_json(infos):
+    """Write each HTML table's value in effect into its intermediate as
+    its marker, for the filter. The intermediate is read from the page
+    again every run, so what the page itself said is never lost."""
+    by_path = {}
+    for info in infos:
+        by_path.setdefault(info["json"], []).append(info)
+    for path, entries in by_path.items():
+        with open(path, encoding="utf-8") as fh:
+            doc = json.load(fh)
+        tables = pandoc_tables(doc["blocks"], [])
+        for info in entries:
+            attr = tables[info["index"]]["c"][0]
+            pairs = [p for p in attr[2] if p[0] != MARKER]
+            if info["in-effect"]:
+                pairs.append([MARKER, info["in-effect"]])
+            attr[2] = pairs
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(doc, fh)
+
+
 def tables_in(path):
     """Every data table in the document, with everything the sidecar and
     the report want to know about it."""
@@ -414,7 +491,8 @@ def main():
     tables = []
     for path in args.files:
         try:
-            tables.extend(tables_in(path))
+            tables.extend(tables_in_json(path) if path.endswith(".json")
+                          else tables_in(path))
         except RuntimeError as exc:
             warn(str(exc))
 
@@ -426,17 +504,22 @@ def main():
         if row is not None:
             claimed.add(info["key"])
         declared, supplier, status, note = decide(info, row)
+        if info.get("json"):
+            if info.get("from-source") and supplier == "guess":
+                supplier = "source"
+            info["in-effect"] = in_effect(info, row)
         # Keyed by stem, not filename: the filter runs on the JSON
         # intermediate named after the .docx, and knows only the stem.
         caption_rows = caption_rows_in_effect(info, row)
         split_at, part_captions = split_in_effect(info, row)
-        resolved.setdefault(os.path.splitext(info["source"])[0], []).append({
-            "index": info["index"], "headers": in_effect(info, row),
-            "caption_rows": caption_rows,
-            "split_at": split_at, "part_captions": part_captions,
-            "rows": info["rows"], "cols": info["cols"], "first": info["first"],
-            "anchors": info.get("anchors", []),
-        })
+        if not info.get("json"):
+            resolved.setdefault(os.path.splitext(info["source"])[0], []).append({
+                "index": info["index"], "headers": in_effect(info, row),
+                "caption_rows": caption_rows,
+                "split_at": split_at, "part_captions": part_captions,
+                "rows": info["rows"], "cols": info["cols"], "first": info["first"],
+                "anchors": info.get("anchors", []),
+            })
         if split_at:
             note = (note + "; " if note else "") + (
                 "split-at=%s: one table per band, each with the header row "
@@ -483,6 +566,7 @@ def main():
         with open(args.resolved, "w", encoding="utf-8") as handle:
             json.dump(resolved, handle, indent=1, sort_keys=True)
     if report:
+        apply_to_json([i for i in tables if i.get("json")])
         write_csv(args.report, REPORT_COLUMNS, report)
     else:
         remove_if_present(args.report)

@@ -63,6 +63,7 @@ except ImportError:
              "lib/ directory beside bin/.")
 from bookcontents import (  # noqa: E402
     guess_contents, walk_contents, flatten_pages, natural_key, stem_title,
+    expand_split_sources,
     number_tree, numbered_title, is_generated, toc_blocks,
 )
 
@@ -765,8 +766,9 @@ def build(base, name, resolved, keep, intermediates=None):
         available.add("notes")      # the Notes chapter, written after
     contents = project.get("contents") or []
     if contents:
-        tree = walk_contents(contents, available, used, problems,
-                             suffix=INTERMEDIATE)
+        tree = walk_contents(
+            expand_split_sources(contents, stems, titles, parts, roles),
+            available, used, problems, suffix=INTERMEDIATE)
     else:
         problems.append("contents not specified; using guessed order. The "
                         "packager's sample config is the place to fix it.")

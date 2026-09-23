@@ -30,6 +30,8 @@ Each piece records its source, its part number, its position among the cut headi
 <meta name="page-parent" content="Economies of Scale" />
 ```
 
+A page `contents` declares that the split then cuts stands for its pieces: the entry becomes a group holding the source's opening page, when it kept one, and its pieces nested by their headings. `contents` that already names the pieces is left as declared. A link into a cut source from any other page of the book (its contents page, an index, a cross-reference in another chapter) follows its target to the piece that now holds it, and a link to a source that kept no page of its own goes to its first piece.
+
 The packager and the EPUB assembler read that, so with no `contents` declared the pieces are grouped under the headings they sat beneath, in reading order, with a heading's own page first in its group. A book that is a single source isn't wrapped in a group for the source, since the book is the source. The guess is written to `packaging-sample.yaml` and is the place to adjust it.
 
 ## Naming the pages
@@ -73,6 +75,21 @@ The `notes` page is back matter to the packager's guess and to the EPUB; list it
 ## Headings that aren't headings
 
 The splitter cuts at what Pandoc reads as headings, and Pandoc's DOCX reader reads `Heading 1` through `Heading 9`. A book whose top level is styled `Title` (one text in reach uses `Title` for its modules and `Heading 1` for their sections, and its own TOC field says so: `Title,1,Heading 1,2,...`) loses that level on the way in: the first `Title` paragraph becomes the document's metadata title and the rest become plain paragraphs. The result is a flat list of sections with no modules over them, and every module's *Introduction* colliding with every other's. The fix is in the source: restyle `Title` to `Heading 1` and shift the rest down. [`util/restyle-headings.py`](utilities.md#repairing-heading-styles-in-the-source) does that from a map, or from what the TOC field declares, and drops the empty `Title` paragraphs Word leaves behind. `pandoc -f docx+styles` shows what was being lost, as `Div` blocks with `custom-style="Title"`.
+
+## Adopting the pages as sources
+
+A piece is named `<source>--<heading>`, and `--` in a source's own name is reserved for pieces, so the pages a split wrote can't be read back as sources as they stand. `adopt-pages.py` writes a new book directory where they can:
+
+```bash
+python3 $T/bin/adopt-pages.py book/html -o book-2
+cd book-2 && python3 $T/bin/convert.py
+```
+
+Each piece is renamed with one hyphen in place of the two (`chapter-3--supply.html` becomes `chapter-3-supply.html`, numbered when that name is taken), every reference to it from every page follows it with its fragment, and the split's record of where each page came from is removed from its head, since each page is a source now. A page the book copied from `_pt/` goes back into `_pt/`. `project.yaml` is the book's, with `contents` naming the pages as they are now, grouped as the book was, and the sidecars keyed on a table's content or an image's path come along; `page-names.csv` doesn't, since there are no pieces left for it to name. Nothing in the book is changed. The pages can come from an HTML target or a Markdown one.
+
+Adopted and converted again, the security textbook's 16 pages came out with the same text as before and the same findings, and no link broken.
+
+A table caption keyed on its position (`chapter-3#table-2`) rather than its label won't find its table after adoption, since the page and the position have both changed; it shows up in the missing-captions report again.
 
 ## Splitting your source files
 

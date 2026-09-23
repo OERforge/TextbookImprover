@@ -34,6 +34,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import zipfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -115,11 +116,16 @@ HAND = """<!DOCTYPE html><html lang="en"><head><title>Front Matter</title>
 
 def case_hand_written(work):
     """A page the author wrote is copied, not rendered, and is in every
-    output."""
+    output. It lives in _pt/ and its references resolve from the book's
+    directory, as though it sat beside the sources."""
     os.makedirs(os.path.join(work, "front"), exist_ok=True)
-    with open(os.path.join(work, "frontmatter.html"), "w",
+    os.makedirs(os.path.join(work, "_pt"), exist_ok=True)
+    with open(os.path.join(work, "_pt", "frontmatter.html"), "w",
               encoding="utf-8") as fh:
         fh.write(HAND)
+    with open(os.path.join(work, "_pt", "notes.md"), "w",
+              encoding="utf-8") as fh:
+        fh.write("# Notes by hand\n\n![A logo](front/logo.png)\n")
     with open(os.path.join(work, "front", "style.css"), "w") as fh:
         fh.write("body {}\n")
     with open(os.path.join(work, "front", "logo.png"), "wb") as fh:
@@ -146,11 +152,15 @@ def case_hand_written(work):
          and exists(work, "html", "front", "logo.png")),
         ("it is in the EPUB",
          lambda: "Front Matter" in nav),
+        ("a Markdown page in _pt is converted, its image found from the "
+         "book's directory",
+         lambda: exists(work, "html", "notes.html")
+         and 'src="front/logo.png"' in read(work, "html", "notes.html")),
         ("and in the cartridge, with its files",
          lambda: any(n.endswith("/frontmatter.html") for n in names)
          and any(n.endswith("/front/style.css") for n in names)),
         ("and the output check looked at it",
-         lambda: "Output check: 6 page(s)" in result.stderr),
+         lambda: "Output check: 7 page(s)" in result.stderr),
     ]
 
 
@@ -301,6 +311,488 @@ def case_markdown(work):
          and "tables.md is left over" in result.stderr),
         ("the EPUB has the page",
          lambda: exists(work, "epub", "org.example.fixtures.epub")),
+    ]
+
+
+WEB = """<!DOCTYPE html><html lang="en"><head><title>A Web Page -- The Site</title></head>
+<body><nav><ul><li><a href="other.html">Other</a></li></ul></nav>
+<main><div class="chapter"><div class="wrap"><p></p><h1>A Web Page</h1></div></div>
+<table><thead><tr><th>Country</th><th>GDP</th></tr></thead>
+<tbody><tr><th>Brazil</th><td>3,153</td></tr>
+<tr><th>Canada</th><td>1,827</td></tr></tbody></table>
+<table><tbody><tr><td>1</td><td>2</td></tr><tr><td>3</td><td>4</td></tr></tbody></table>
+<table><tbody><tr><th>Prefix</th><th>Represents</th></tr>
+<tr><td>kilo</td><td>one thousand</td></tr></tbody></table>
+<iframe src="https://example.invalid/embed/x" title="A video"></iframe>
+</main></body></html>
+"""
+
+
+def run_in(directory, contents=None):
+    if contents is not None:
+        with open(os.path.join(directory, "project.yaml"), "w",
+                  encoding="utf-8") as fh:
+            fh.write("project:\n  identifier: org.example.fixtures\n"
+                     "  title: The Fixture Book\n" + contents)
+    return subprocess.run(
+        ["python3", os.path.join(BIN, "convert.py"), "--quiet"],
+        cwd=directory, capture_output=True, text=True,
+        stdin=subprocess.DEVNULL)
+
+
+def same_pages(one, two):
+    names = sorted(n for n in os.listdir(one) if n.endswith(".html"))
+    return bool(names) and all(
+        open(os.path.join(one, n), "rb").read()
+        == open(os.path.join(two, n), "rb").read() for n in names)
+
+
+def case_asciidoc(work):
+    """An AsciiDoc book: a master file that includes its chapters."""
+    os.makedirs(os.path.join(work, "images"))
+    with open(os.path.join(work, "images", "lock.png"), "wb") as fh:
+        fh.write(ONE_PIXEL)
+    files = {
+        "index.adoc": "= The Book\n:imagesdir: images\n:toc: left\n\n"
+                      "include::one.adoc[]\n\ninclude::two.adoc[]\n",
+        "one.adoc": "= Chapter One\n\n== Keys\n\nSee <<Locks>> and "
+                    "<<Chapter Two>>.\n\nimage::lock.png[A lock]\n",
+        "two.adoc": "= Chapter Two\n\n[[locks-id]]\n== Locks\n\nBack to "
+                    "<<Keys>>.\n",
+    }
+    for name, text in files.items():
+        with open(os.path.join(work, name), "w", encoding="utf-8") as fh:
+            fh.write(text)
+    result = convert(work, "targets:\n  html:\n    format: html\n")
+    one = read(work, "html", "one.html") if exists(work, "html",
+                                                    "one.html") else ""
+    sample = read(work, "contents-sample.yaml") if exists(
+        work, "contents-sample.yaml") else ""
+    return [
+        ("each included file is a page, and the master isn't",
+         lambda: result.returncode == 0 and one
+         and exists(work, "html", "two.html")
+         and not exists(work, "html", "index.html")),
+        ("the chapter's = line is its title, its == sections are h2",
+         lambda: "<title>Chapter One</title>" in one
+         and re.search(r"<h2[^>]*>Keys</h2>", one)),
+        ("an image takes the master's imagesdir",
+         lambda: 'src="images/lock.png"' in one),
+        ("Asciidoctor's own settings don't reach the page",
+         lambda: 'id="TOC"' not in one),
+        ("a reference by section title or chapter title lands, across "
+         "chapters",
+         lambda: 'href="two.html#locks-id"' in one
+         and 'href="two.html"' in one
+         and 'href="one.html#_keys"' in read(work, "html", "two.html")),
+        ("the master's order is offered as contents",
+         lambda: sample.index("- one") < sample.index("- two")),
+    ]
+
+
+def case_stem_collisions(work):
+    """Two files that would be one page stop the run; the leftover rules
+    still hold; and an image's alt text isn't lent to a file that merely
+    shares its stem."""
+    def book(name, files, config="targets:\n  html:\n    format: html\n"):
+        where = os.path.join(work, name)
+        for path, text in files.items():
+            os.makedirs(os.path.dirname(os.path.join(where, path)) or where,
+                        exist_ok=True)
+            mode = "wb" if isinstance(text, bytes) else "w"
+            with open(os.path.join(where, path), mode) as fh:
+                fh.write(text)
+        return where, convert(where, config)
+    md, adoc = "# One\n\nText.\n", "= One\n\nText.\n"
+    with open(os.path.join(FIXTURES, "tables.docx"), "rb") as fh:
+        docx = fh.read()
+    a, same = book("formats", {"ch1.md": md, "ch1.adoc": adoc})
+    b, safe = book("safe", {"Chapter 1.md": md, "Chapter-1.adoc": adoc})
+    c, passthrough = book("pt", {"about.docx": docx, "_pt/about.md": md})
+    d, variant = book("variants", {"ch1.md": md, "ch1.print.md": md,
+                                   "ch1.print.adoc": adoc},
+                      "targets:\n  html:\n    format: html\n"
+                      "  print:\n    format: html\n")
+    e, leftover = book("leftover", {"x.docx": docx, "x.md": md})
+    g, _ = book("adoc-variant", {"ch1.adoc": "= One\n\nWeb text.\n",
+                                 "ch1.print.adoc": "= One\n\nPrint text.\n"},
+                "targets:\n  web:\n    format: html\n"
+                "  print:\n    format: html\n")
+    svg = '<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"/>'
+    f, logos = book("logos", {
+        "pics.md": "# Pics\n\n![](assets/logo.png)\n\n![](assets/logo.svg)\n",
+        "assets/logo.png": ONE_PIXEL, "assets/logo.svg": svg,
+        "image-alt.csv": "Image,Alt\nassets/logo.png,A logo\n"})
+    h, spaced = book("spaced", {
+        "pics.md": "# Pics\n\n![One](assets/a%20b.png)\n\n![Two](assets/a-b.png)\n",
+        "assets/a b.png": ONE_PIXEL, "assets/a-b.png": ONE_PIXEL + b"\0"})
+    page = read(f, "html", "pics.html") if exists(f, "html", "pics.html") \
+        else ""
+    missing = read(f, "image-alt-missing.csv") if exists(
+        f, "image-alt-missing.csv") else ""
+    said = lambda r: r.stdout + r.stderr
+    return [
+        ("ch1.md and ch1.adoc stop the run, both named, nothing converted",
+         lambda: same.returncode != 0 and "ch1: ch1.adoc, ch1.md" in said(same)
+         and not exists(a, "html") and not exists(a, "ch1.json")),
+        ("names that differ only until made safe for a link meet too",
+         lambda: safe.returncode != 0
+         and "Chapter 1.md" in said(safe) and "Chapter-1.adoc" in said(safe)),
+        ("a pass-through page can't share a source's name",
+         lambda: passthrough.returncode != 0
+         and "_pt/about.md" in said(passthrough)
+         and "about.docx" in said(passthrough)),
+        ("two variants of one page for one target stop the run",
+         lambda: variant.returncode != 0
+         and "variant of the same page" in said(variant)),
+        ("an .md beside its .docx is still a v0.1 leftover, not a clash",
+         lambda: leftover.returncode in (0, 1) and exists(e, "html", "x.html")),
+        ("an AsciiDoc variant replaces its page for its target, and isn't "
+         "a page of its own",
+         lambda: "Print text." in read(g, "print", "ch1.html")
+         and "Web text." in read(g, "web", "ch1.html")
+         and not exists(g, "web", "ch1.print.html")),
+        ("two images an HTML target would write under one name stop the run",
+         lambda: spaced.returncode != 0
+         and "would both be written as assets/a-b.png" in said(spaced)
+         and not exists(h, "html")),
+        ("an image's alt text goes to that image, not one sharing its stem",
+         lambda: re.search(r'src="assets/logo\.png"[^>]*alt="A logo"|'
+                           r'alt="A logo"[^>]*src="assets/logo\.png"', page)
+         and not re.search(r'src="assets/logo\.svg"[^>]*alt="A logo"|'
+                           r'alt="A logo"[^>]*src="assets/logo\.svg"', page)),
+        ("and the other is reported as needing its own",
+         lambda: "assets/logo.svg" in missing
+         and "assets/logo.png" not in missing),
+    ]
+
+
+def case_adopt(work):
+    """A split book's pages adopted as the sources of a new one."""
+    os.makedirs(os.path.join(work, "_pt"))
+    with open(os.path.join(work, "ch1.md"), "w", encoding="utf-8") as fh:
+        fh.write("# Chapter One\n\nOpening.\n\n## First Part\n\nSee "
+                 "[the second](#second-part).\n\n## Second Part\n\nEnd.\n")
+    with open(os.path.join(work, "_pt", "about.html"), "w",
+              encoding="utf-8") as fh:
+        fh.write(HAND.replace("Front Matter", "About"))
+    convert(work, "defaults:\n  pages:\n    split_level: 2\n"
+                  "targets:\n  html:\n    format: html\n")
+    out = work + "-adopted"
+    adopted = subprocess.run(
+        ["python3", os.path.join(BIN, "adopt-pages.py"),
+         os.path.join(work, "html"), "-o", out],
+        capture_output=True, text=True)
+    first = read(out, "ch1-first-part.html") if exists(
+        out, "ch1-first-part.html") else ""
+    import yaml
+    project = yaml.safe_load(read(out, "project.yaml"))["project"] if exists(
+        out, "project.yaml") else {}
+    again = run_in(out)
+    return [
+        ("the pieces are renamed with one hyphen",
+         lambda: adopted.returncode == 0 and first
+         and not any("--" in n for n in os.listdir(out))),
+        ("a link between pieces follows the rename",
+         lambda: 'href="ch1-second-part.html#second-part"' in first),
+        ("the split's provenance is gone from the page",
+         lambda: 'name="source-page"' not in first
+         and 'name="page-part"' not in first),
+        ("contents names the pages as they are now, grouped as before",
+         lambda: next(e["items"] for e in project["contents"]
+                      if isinstance(e, dict) and e.get("title")
+                      == "Chapter One")
+         == ["ch1", "ch1-first-part", "ch1-second-part"]),
+        ("a finished page goes back into _pt/",
+         lambda: exists(out, "_pt", "about.html")
+         and not exists(out, "about.html")),
+        ("the adopted book converts, every page in contents, links landing",
+         lambda: again.returncode in (0, 1)
+         and "not listed in contents" not in again.stdout + again.stderr
+         and exists(out, "html", "ch1-first-part.html")
+         and 'href="ch1-second-part.html#second-part"'
+         in read(out, "html", "ch1-first-part.html")),
+    ]
+
+
+HEADED = """<!DOCTYPE html><html lang="en"><head><title>Data</title></head>
+<body><main><h1>Data</h1>
+<table><tr><td><b>Set</b></td><td><b>Hours</b></td></tr>
+<tr><td>Alpha</td><td>9.8</td></tr><tr><td>Beta</td><td>5.3</td></tr></table>
+<table><thead><tr><th>Country</th><th>GDP</th></tr></thead>
+<tbody><tr><td>Brazil</td><td>3,153</td></tr></tbody></table>
+<table><tr><td>Government purchases</td><td>$120 billion</td></tr>
+<tr><td>Depreciation</td><td>$40 billion</td></tr>
+<tr><td>Consumption</td><td>$400 billion</td></tr></table>
+</main></body></html>
+"""
+
+
+def case_html_headers(work):
+    """An HTML source's tables go through the header pre-pass: the guess
+    where the page says nothing, the page's own <th> where it does, and
+    the sidecar over both."""
+    os.makedirs(work)
+    with open(os.path.join(work, "data.html"), "w", encoding="utf-8") as fh:
+        fh.write(HEADED)
+    first = run_in(work, "")
+    page = read(work, "html", "data.html") if exists(
+        work, "html", "data.html") else ""
+    new_rows = read(work, "table-headers-new.csv") if exists(
+        work, "table-headers-new.csv") else ""
+    import csv
+    with open(os.path.join(work, "table-headers-report.csv"),
+              encoding="utf-8") as fh:
+        report = list(csv.DictReader(fh))
+    country = next((r for r in report if "Country" in r["preview"]), {})
+    with open(os.path.join(work, "table-headers.csv"), "w",
+              encoding="utf-8") as fh:
+        fh.write("key,headers\n" + country.get("key", "x") + ",none\n")
+    run_in(work)
+    again = read(work, "html", "data.html") if exists(
+        work, "html", "data.html") else ""
+    return [
+        ("an unmarked bold row is guessed a header row",
+         lambda: re.search(r'<th scope="col">(<strong>)?Set', page)),
+        ("labels over values get row headers by the guess",
+         lambda: '<th scope="row">Government purchases</th>' in page),
+        ("the report says who supplied each: the guess, or the page",
+         lambda: sorted(r["supplier"] for r in report)
+         == ["guess", "guess", "source"]),
+        ("every HTML table is in the new-rows file, keyed",
+         lambda: len(new_rows.splitlines()) == 4),
+        ("a sidecar row outranks the page's own <th>",
+         lambda: '<th scope="col">Country</th>' in page
+         and "Country</th>" not in again and "<td>Country</td>" in again),
+    ]
+
+
+def case_menu(work):
+    """menu: on gives every rendered page the book's contents and a
+    previous/next pager; a pass-through page is left as it stands."""
+    os.makedirs(os.path.join(work, "_pt"))
+    with open(os.path.join(work, "ch1.md"), "w", encoding="utf-8") as fh:
+        fh.write("# Chapter One\n\nOpening.\n\n## First Part\n\nA.\n\n"
+                 "## Second Part\n\nB.\n")
+    with open(os.path.join(work, "_pt", "about.html"), "w",
+              encoding="utf-8") as fh:
+        fh.write(HAND.replace("Front Matter", "About"))
+    result = convert(work, "defaults:\n  pages:\n    split_level: 2\n"
+                           "targets:\n  html:\n    format: html\n"
+                           "    menu: \"on\"\n"
+                           "  plain:\n    format: html\n")
+    first = read(work, "html", "ch1--first-part.html") if exists(
+        work, "html", "ch1--first-part.html") else ""
+    checks = read(work, "output-check.csv") if exists(
+        work, "output-check.csv") else ""
+    return [
+        ("a page carries the book's contents as a collapsed menu, its own "
+         "entry marked current",
+         lambda: result.returncode in (0, 1)
+         and '<nav class="book-menu" aria-label="Contents">' in first
+         and '<summary>Contents</summary>' in first
+         and 'href="ch1--first-part.html" aria-current="page"' in first
+         and first.count('aria-current="page"') == 1),
+        ("and previous and next pages at its foot, by title",
+         lambda: 'rel="prev" href="ch1.html"' in first
+         and 'rel="next" href="ch1--second-part.html">Next: Second Part'
+         in first),
+        ("every link the menu adds leads somewhere",
+         lambda: "link-to-missing" not in checks),
+        ("a pass-through page is left as it stands",
+         lambda: read(work, "html", "about.html")
+         == HAND.replace("Front Matter", "About")),
+        ("a target without menu: on has none",
+         lambda: '<nav class="book-menu"' not in read(
+             work, "plain", "ch1--first-part.html")),
+    ]
+
+
+RAW_MD = """---
+title: Raw HTML
+---
+
+# Raw HTML
+
+Energy is mc<sup>2</sup>, and <span href="http://purl.org/dc/dcmitype/Text"
+rel="dct:type">this work</span> is licensed.<br>A new line.
+
+<p align="center"><img src="assets/Curve.png" alt="A curve" align="left"></p>
+
+<details><summary>Answer</summary>
+
+Hidden *until asked*.
+
+</details>
+
+<table>
+<tr><th>Year</th><th>Output</th></tr>
+<tr><td align="right">2000</td><td>10</td></tr>
+</table>
+
+A remote badge: <img src="https://example.invalid/badge.png" alt="A badge">
+
+Code stays: `<p align="center">` and
+
+```
+<img src="/logo.png" align="left">
+```
+"""
+
+
+def case_markdown_html(work):
+    """Raw HTML in a Markdown source is read as HTML and cleaned the way
+    an HTML source is; code is left exactly as written."""
+    os.makedirs(os.path.join(work, "assets"))
+    with open(os.path.join(work, "assets", "Curve.png"), "wb") as fh:
+        fh.write(ONE_PIXEL)
+    with open(os.path.join(work, "raw.md"), "w", encoding="utf-8") as fh:
+        fh.write(RAW_MD)
+    result = convert(work, "targets:\n  html:\n    format: html\n"
+                           "  md:\n    format: markdown\n"
+                           "  epub:\n    format: epub3\n")
+    page = read(work, "html", "raw.html") if exists(
+        work, "html", "raw.html") else ""
+    chapter = ""
+    for name in (os.listdir(os.path.join(work, "epub"))
+                 if exists(work, "epub") else []):
+        with zipfile.ZipFile(os.path.join(work, "epub", name)) as book:
+            chapter = "".join(book.read(n).decode("utf-8")
+                              for n in book.namelist() if "badge" in
+                              book.read(n).decode("utf-8", "replace"))
+    return [
+        ("a superscript written in HTML is a superscript",
+         lambda: result.returncode in (0, 1) and "mc<sup>2</sup>" in page),
+        ("an HTML image is an image: copied, and without align",
+         lambda: re.search(r'<img src="assets/Curve\.png"[^>]*alt="A curve"',
+                           page) and 'align="left"' not in page
+         and exists(work, "html", "assets", "Curve.png")),
+        ("RDFa's href leaves the span, the text stays",
+         lambda: "this work" in page
+         and "purl.org/dc/dcmitype/Text" not in page),
+        ("details and summary are kept, the summary's text plain",
+         lambda: re.search(r"<summary>\s*Answer\s*</summary>", page)
+         and "<details>" in page),
+        ("an HTML table is a table, its th row the header, no align",
+         lambda: re.search(r'<th[^>]*scope="col"[^>]*>Year</th>', page)
+         and 'align="right"' not in page),
+        ("a remote image stays an image in HTML and is a link in the EPUB",
+         lambda: 'src="https://example.invalid/badge.png"' in page
+         and '<a href="https://example.invalid/badge.png">A badge</a>'
+         in chapter and "<img" not in chapter.split("A badge")[0][-200:]),
+        ("code is left exactly as written",
+         lambda: "<code>&lt;p align=&quot;center&quot;&gt;</code>" in page
+         or '<code>&lt;p align="center"&gt;</code>' in page),
+        ("and so is a code block",
+         lambda: '&lt;img src=&quot;/logo.png&quot; align=&quot;left&quot;&gt;'
+         in page or '&lt;img src="/logo.png" align="left"&gt;' in page),
+    ]
+
+
+def case_html_source(work):
+    """An HTML page is a source when the book says so, and converting
+    what this pipeline wrote changes nothing."""
+    # The fixtures and a Markdown page, converted; then their pages as the
+    # sources of a second book, and that book's pages as a third's.
+    os.makedirs(os.path.join(work, "assets"), exist_ok=True)
+    with open(os.path.join(work, "long run.md"), "w", encoding="utf-8") as fh:
+        fh.write(MARKDOWN.replace("assets\\Curve.png", "assets/Curve.png")
+                 .replace("assets\\_under.png", "assets/_under.png"))
+    for image in ("Pipe Sizes.png", "Curve.png", "_under.png"):
+        with open(os.path.join(work, "assets", image), "wb") as fh:
+            fh.write(ONE_PIXEL)
+    with open(os.path.join(work, "noted.md"), "w", encoding="utf-8") as fh:
+        fh.write(NOTED)
+    convert(work, "targets:\n  html:\n    format: html\n")
+    second, third = work + "-second", work + "-third"
+    shutil.copytree(os.path.join(work, "html"), second)
+    again = run_in(second)
+    shutil.copytree(os.path.join(second, "html"), third)
+    run_in(third)
+    compared = subprocess.run(
+        ["python3", os.path.join(ROOT, "util", "compare-output.py"),
+         os.path.join(work, "html"), os.path.join(second, "html")],
+        capture_output=True, text=True)
+    page = read(second, "html", "long-run.html") if exists(
+        second, "html", "long-run.html") else ""
+
+    # A page from somewhere else, marked in contents, beside one that is not.
+    mixed = work + "-mixed"
+    os.makedirs(mixed)
+    shutil.copy(os.path.join(FIXTURES, "tables.docx"), mixed)
+    os.makedirs(os.path.join(mixed, "_pt"))
+    for name in ("web.html", os.path.join("_pt", "finished.html")):
+        with open(os.path.join(mixed, name), "w", encoding="utf-8") as fh:
+            fh.write(WEB)
+    with open(os.path.join(mixed, "conversion.yaml"), "w",
+              encoding="utf-8") as fh:
+        fh.write("targets:\n  html:\n    format: html\n"
+                 "  epub:\n    format: epub3\n")
+    marked = run_in(mixed, "  contents:\n    - tables\n    - web\n"
+                           "    - finished\n")
+    web = read(mixed, "html", "web.html") if exists(
+        mixed, "html", "web.html") else ""
+    epub_page = ""
+    for name in (os.listdir(os.path.join(mixed, "epub"))
+                 if exists(mixed, "epub") else []):
+        with zipfile.ZipFile(os.path.join(mixed, "epub", name)) as book:
+            epub_page = "".join(book.read(n).decode("utf-8")
+                                for n in book.namelist()
+                                if n.endswith(".xhtml") and "example.invalid"
+                                in book.read(n).decode("utf-8"))
+    return [
+        ("a directory of nothing but .html is read as sources",
+         lambda: exists(second, "html", "tables.html")
+         and exists(second, "tables.json")),
+        ("converting our own pages gives the same book",
+         lambda: "Runs agree" in compared.stdout),
+        ("the second write is the third, byte for byte",
+         lambda: same_pages(os.path.join(second, "html"),
+                            os.path.join(third, "html"))),
+        # The second write equalling the third says nothing about what the
+        # first reading lost: a footnote's text once went missing between
+        # the first write and the second, and the second and third agreed.
+        ("a footnote is still a footnote, text and all",
+         lambda: "Note C." in read(second, "html", "noted.html")
+         and read(second, "html", "noted.html")
+         == read(work, "html", "noted.html")),
+        ("the title is written once and a table is wrapped once",
+         lambda: page.count("<h1") == 1
+         and page.count('class="table-wrapper"') == page.count("<table")),
+        ("an .html beside a .docx is a source, and the run says how to keep "
+         "one as it stands",
+         lambda: "belongs in _pt/" in marked.stdout + marked.stderr),
+        ("a page's only h1, inside wrappers, is its title: one h1, and "
+         "the <title> the site gave it goes",
+         lambda: web.count("<h1") == 1 and "<title>A Web Page</title>" in web),
+        ("a page beside the sources is converted",
+         lambda: marked.returncode in (0, 1)
+         and 'class="table-wrapper"' in web),
+        ("a th in every body row is a row header again, and a thead's "
+         "cells column headers",
+         lambda: 'scope="row">Brazil' in web and 'scope="row">Canada' in web
+         and 'scope="col">Country' in web),
+        ("a header row written inside tbody is the table's head",
+         lambda: re.search(r'<thead>\s*<tr>\s*<th scope="col">Prefix', web)
+         is not None),
+        ("only what is in <main> is the page, and no iframe is fetched",
+         lambda: "other.html" not in web
+         and "Could not fetch" not in marked.stdout + marked.stderr),
+        ("an iframe stays an iframe in an HTML target, and nothing else "
+         "raw is left",
+         lambda: '<iframe src="https://example.invalid/embed/x" '
+         'title="A video"></iframe>' in web
+         and "</nav>" not in web and "iframe x1" in marked.stderr),
+        ("in the EPUB it is a link to what it framed, named by its title",
+         lambda: epub_page and "<iframe" not in epub_page
+         and '<a href="https://example.invalid/embed/x">A video</a>'
+         in re.sub(r"\s+", " ", epub_page)),
+        ("a table of bare numbers is guessed to have no headers, and listed "
+         "for review",
+         lambda: "needs-word" in read(mixed, "table-headers-report.csv")
+         and len(read(mixed, "table-headers-new.csv").splitlines()) >= 2),
+        ("a page in _pt is copied as it stands",
+         lambda: read(mixed, "html", "finished.html") == WEB),
     ]
 
 
@@ -484,6 +976,10 @@ def case_editions(work):
     some targets, a hand-written variant, and the title-block switch."""
     os.makedirs(work, exist_ok=True)
     for name, text in EDITIONS.items():
+        # A finished page and its variant live in _pt/.
+        if name.startswith("front"):
+            name = os.path.join("_pt", name)
+            os.makedirs(os.path.join(work, "_pt"), exist_ok=True)
         with open(os.path.join(work, name), "w", encoding="utf-8") as fh:
             fh.write(text)
     result = convert(work, "targets:\n  web:\n    format: html\n"
@@ -622,8 +1118,10 @@ def case_merge(work):
          lambda: levels == [2, 3, 2]),
         ("a link to a merged page becomes a link inside the file",
          lambda: "](#ch1--second)" in one),
-        ("a link to another file names that file",
-         lambda: "](ch2.md)" in one),
+        # ch2 kept no page of its own, so a link to it lands on its first
+        # piece, which the merge then finds inside ch2.md.
+        ("a link to another file names that file, where its target went",
+         lambda: "](ch2.md#ch2--only)" in one),
         ("two groups from one source get a file each, not one file",
          lambda: len([n for n in os.listdir(os.path.join(work, "src"))
                       if n.endswith(".md")]) >= 2),
@@ -640,6 +1138,13 @@ CASES = [
     ("roles, numbering, and a contents page", case_structure),
     ("footnote numbering and placement", case_notes),
     ("a Markdown source", case_markdown),
+    ("an HTML source", case_html_source),
+    ("an AsciiDoc source", case_asciidoc),
+    ("two files, one page", case_stem_collisions),
+    ("adopting a split book's pages", case_adopt),
+    ("an HTML source's tables and the header sidecar", case_html_headers),
+    ("a menu for pages posted as a site", case_menu),
+    ("raw HTML in a Markdown source", case_markdown_html),
     ("a hand-written page", case_hand_written),
     ("several targets", case_targets),
     ("arguments passed to the packager", case_passthrough),

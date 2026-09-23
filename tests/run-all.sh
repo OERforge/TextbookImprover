@@ -45,6 +45,14 @@
 #                          to accept the syntax, so this cannot be left to
 #                          the suites themselves.
 #
+#   run-unpack-tests.py    unpack-epub.py on an EPUB built by hand in the
+#                          shape of real publishers', defects included,
+#                          and the unpacked book converted. Unpacking
+#                          needs no Pandoc; the last case skips without.
+#
+#   run-site-tests.py      unpack-site.py on saves built by hand in the
+#                          shape of real ones. Needs html5lib or lxml.
+#
 #   run-filter-tests.py    the accessibility work the Lua filters do,
 #                          against four small .docx fixtures. Needs
 #                          Pandoc.
@@ -116,6 +124,8 @@ run run-unit-tests.py
 run run-census-tests.py
 run run-check-tests.py
 run run-headers-tests.py
+run run-unpack-tests.py
+run run-site-tests.py
 
 # The filter tests convert real documents, so they need Pandoc. Skipping
 # is reported rather than silent: a suite that quietly does not run is

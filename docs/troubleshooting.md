@@ -4,6 +4,10 @@
 
 OpenStax's DOCX export bookmarks a paragraph, heading, list, or table by putting the bookmark *between* blocks, and Pandoc's reader keeps a bookmark only inside a paragraph, so in v0.4 and earlier every cross-reference to one of these was a dead link (104 of them in *Introductory Business Statistics 2e*, 4,231 bookmarks in all). The conversion now reads a repaired copy of each `.docx` with those bookmarks moved into the block that follows, and the table-headers pre-pass hands the filter the ones that stood before a table. The source file isn't changed. Running the filter by hand on a `.docx`, as [How it works](architecture.md#running-the-pandoc-filter-on-its-own) describes, doesn't get the repair, so links to tables stay dead that way.
 
+## "These files would each be the same page"
+
+A page is named after its file, without the extension and made safe for a link, so `ch1.md` and `ch1.adoc` would both be the page `ch1`, and so would `Chapter 1.docx` and `Chapter-1.html`, or `about.docx` and `_pt/about.md`. The run stops before reading either, naming both, rather than let one overwrite the other and every sidecar keyed on the page describe whichever won. Rename one, or move the one that isn't a source out of the book's directory. Two leftovers are recognized and skipped instead: an `.md` beside the `.docx` of the same name (what v0.1 wrote) and an `.html` named after another source (what a target writing beside the sources wrote). Two variants of one page for one target (`ch1.print.md` and `ch1.print.adoc`) stop the run the same way.
+
 ## Converting on a cloud-synced drive
 
 Both the rename and the reference rewrite in step 2 are checked after the

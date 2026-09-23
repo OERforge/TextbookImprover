@@ -71,6 +71,8 @@ except ImportError:
 from bookcontents import (  # noqa: E402
     natural_key, chapter_of, within_chapter_key, unrecognised_roles,
     guess_contents, walk_contents, flatten_pages, contents_from_tree,
+    expand_split_sources, page_title, page_provenance, page_role,
+    TITLE_RE, META_RE,
     stem_title, slugify, clean_title, number_tree, numbered_title,
 )
 
@@ -88,13 +90,25 @@ CRLF = "\r\n"
 EXTERNAL = ("http://", "https://", "//", "data:", "mailto:", "tel:", "#",
             "javascript:")
 
-SRC_RE = re.compile(r'\b(?:src|href)\s*=\s*"([^"]+)"', re.I)
-TITLE_RE = re.compile(r"<title[^>]*>(.*?)</title>", re.I | re.S)
-# What a page split by split-pages.py says about where it came from.
-META_RE = re.compile(r'<meta\s+name="(source-page|source-title|page-part|'
-                     r'page-parent|page-position|page-role)"\s+content="([^"]*)"',
-                     re.I)
+# Inside a tag only: a page may write <img src="/logo.png"> as text, in
+# code, where it's escaped as &lt;img and names nothing. Every reference
+# a tag holds counts, not just the first.
+TAG_RE = re.compile(r'<[a-zA-Z][^<>]*>')
+_ATTR_RE = re.compile(r'\b(?:src|href)\s*=\s*"([^"]+)"', re.I)
 
+
+class _References:
+    """SRC_RE's interface, over the references tags hold."""
+    def findall(self, text):
+        return [m for tag in TAG_RE.findall(text)
+                for m in _ATTR_RE.findall(tag)]
+
+    def finditer(self, text):
+        for tag in TAG_RE.finditer(text):
+            yield from _ATTR_RE.finditer(text, tag.start(), tag.end())
+
+
+SRC_RE = _References()
 REQUIRED = ["identifier", "title"]
 
 # Outline entries that name no page of their own.
@@ -122,57 +136,6 @@ def ncname(text):
 def xml_escape(text):
     return (text.replace("&", "&amp;").replace("<", "&lt;")
                 .replace(">", "&gt;").replace('"', "&quot;"))
-
-
-def page_title(path, stem):
-    """Title from the page's own <title>, falling back to the filename."""
-    try:
-        with open(path, encoding="utf-8", errors="replace") as handle:
-            markup = handle.read(20000)
-    except OSError:
-        return stem
-    m = TITLE_RE.search(markup)
-    if m:
-        title = clean_title(m.group(1))
-        if title:
-            return title
-    return stem_title(stem)
-
-
-def page_provenance(path):
-    """(source stem, part number, parent titles, position, source title)
-    for a page split-pages.py wrote, from the <meta> elements it put in
-    the head, or None."""
-    try:
-        with open(path, encoding="utf-8", errors="replace") as handle:
-            markup = handle.read(20000)
-    except OSError:
-        return None
-    found, parents = {}, []
-    for name, value in META_RE.findall(markup.split("</head>", 1)[0]):
-        value = html_module.unescape(value)
-        if name == "page-parent":
-            parents.append(value)
-        else:
-            found[name] = value
-    if not found.get("source-page"):
-        return None
-    m = re.match(r"(\d+)/", found.get("page-part", ""))
-    return (found["source-page"], int(m.group(1)) if m else None, parents,
-            found.get("page-position", ""), found.get("source-title", ""),
-            found.get("page-role", ""))
-
-
-def page_role(path):
-    """A page's own role, from the <meta> the filter wrote when it
-    promoted a heading carrying one ({.appendix})."""
-    try:
-        with open(path, encoding="utf-8", errors="replace") as handle:
-            markup = handle.read(20000)
-    except OSError:
-        return ""
-    found = dict(META_RE.findall(markup.split("</head>", 1)[0]))
-    return found.get("page-role", "")
 
 
 def page_references(path, base_dir):
@@ -226,84 +189,21 @@ def pdf_outline(path):
 
 
 def epub_outline(path):
-    """(depth, title) for each entry of an EPUB's table of contents.
-
-    EPUB 3 keeps it in the navigation document, a nested <ol> inside
-    <nav epub:type="toc">; EPUB 2 in toc.ncx, as nested navPoint
-    elements. The container says where the package document is, and
-    the package document says which item is which. Nothing but the
-    standard library, so this needs no pypdf.
-    """
+    """(depth, title) for each entry of an EPUB's table of contents: the
+    navigation document's toc, or toc.ncx for an EPUB 2. Read by
+    lib/epubsource.py, which unpack-epub.py uses too, so the two can't
+    disagree about a book's outline."""
     import xml.etree.ElementTree as ET
     import zipfile
-    import posixpath
-
-    NS = {"c": "urn:oasis:names:tc:opendocument:xmlns:container",
-          "opf": "http://www.idpf.org/2007/opf",
-          "x": "http://www.w3.org/1999/xhtml",
-          "epub": "http://www.idpf.org/2007/ops",
-          "ncx": "http://www.daisy.org/z3986/2005/ncx/"}
+    import epubsource
     try:
-        archive = zipfile.ZipFile(path)
+        package = epubsource.Package(path)
     except zipfile.BadZipFile:
         sys.exit(f"{path} is not an EPUB (not a zip archive).")
-    with archive:
-        try:
-            container = ET.fromstring(archive.read("META-INF/container.xml"))
-            opf_name = container.find(".//c:rootfile", NS).get("full-path")
-            opf = ET.fromstring(archive.read(opf_name))
-        except (KeyError, ET.ParseError, AttributeError) as exc:
-            sys.exit(f"{path} has no readable package document: {exc}")
-        opf_dir = posixpath.dirname(opf_name)
-        nav_item = ncx_item = None
-        spine = opf.find("opf:spine", NS)
-        toc_id = spine.get("toc") if spine is not None else None
-        for item in opf.iter("{%s}item" % NS["opf"]):
-            if "nav" in (item.get("properties") or "").split():
-                nav_item = item.get("href")
-            if item.get("media-type") == "application/x-dtbncx+xml" \
-                    or item.get("id") == toc_id:
-                ncx_item = item.get("href")
-
-        def read(href):
-            return ET.fromstring(archive.read(
-                posixpath.normpath(posixpath.join(opf_dir, href))))
-
-        entries = []
-        if nav_item:
-            nav = read(nav_item)
-            toc = None
-            for candidate in nav.iter("{%s}nav" % NS["x"]):
-                if candidate.get("{%s}type" % NS["epub"]) == "toc":
-                    toc = candidate
-                    break
-            if toc is not None:
-                def walk_ol(ol, depth):
-                    for li in ol.findall("x:li", NS):
-                        label = li.find("x:a", NS)
-                        if label is None:
-                            label = li.find("x:span", NS)
-                        if label is not None:
-                            entries.append((depth, clean_title(
-                                "".join(label.itertext()))))
-                        for child in li.findall("x:ol", NS):
-                            walk_ol(child, depth + 1)
-                first = toc.find("x:ol", NS)
-                if first is not None:
-                    walk_ol(first, 0)
-        if not entries and ncx_item:
-            ncx = read(ncx_item)
-
-            def walk_nav(node, depth):
-                for point in node.findall("ncx:navPoint", NS):
-                    text = point.find("ncx:navLabel/ncx:text", NS)
-                    entries.append((depth, clean_title(
-                        "".join(text.itertext()) if text is not None
-                        else "")))
-                    walk_nav(point, depth + 1)
-            nav_map = ncx.find("ncx:navMap", NS)
-            if nav_map is not None:
-                walk_nav(nav_map, 0)
+    except (KeyError, ET.ParseError, ValueError) as exc:
+        sys.exit(f"{path} has no readable package document: {exc}")
+    entries = [(depth, clean_title(title))
+               for depth, title, _target, _fragment in package.outline()]
     if not entries:
         sys.exit(f"{path} has no table of contents to read: no toc nav in "
                  "its navigation document, and no toc.ncx.")
@@ -1171,7 +1071,9 @@ def main():
 
     guessed_contents = False
     if config.get("contents"):
-        tree = walk_contents(config["contents"], available, used, problems)
+        tree = walk_contents(
+            expand_split_sources(config["contents"], stems, TITLES, PARTS,
+                                 ROLES), available, used, problems)
     elif args.toc:
         # Nothing curated and an outline to follow: start empty so every
         # page counts as unplaced and the outline orders all of them.

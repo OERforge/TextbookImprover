@@ -197,6 +197,32 @@ def rewrite_links(node, own, home):
             rewrite_links(value, own, home)
 
 
+def retarget_links(node, homes, first):
+    """Point a link from another page at the piece its target moved to:
+    source.html#id becomes piece.html#id, and a bare source.html the
+    first piece when the source kept no page of its own. Returns how
+    many links moved."""
+    moved = 0
+    if isinstance(node, dict):
+        if node.get("t") == "Link":
+            target = node["c"][2]
+            m = re.match(r"^([^/#?:]+)\.html(?:#(.*))?$", target[0])
+            if m and m.group(1) in homes:
+                source, fragment = m.group(1), m.group(2)
+                where = homes[source].get(fragment) if fragment \
+                    else first.get(source)
+                if where and where != source:
+                    target[0] = where + ".html" + (
+                        "#" + fragment if fragment else "")
+                    moved += 1
+        for value in node.values():
+            moved += retarget_links(value, homes, first)
+    elif isinstance(node, list):
+        for value in node:
+            moved += retarget_links(value, homes, first)
+    return moved
+
+
 def shift_headers(node, by):
     if by == 0:
         return
@@ -466,6 +492,7 @@ def main():
 
     names = read_sidecar(args.sidecar)
     problems, new_rows, report_rows, written = [], [], [], []
+    homes, first = {}, {}      # source -> {id: piece}; source -> first piece
     seen_keys = set()
     sources = {os.path.basename(p)[:-len(INTERMEDIATE)] for p in args.files
                if p.endswith(INTERMEDIATE)}
@@ -509,6 +536,9 @@ def main():
             collect_ids(pdoc["blocks"], ids)
             for identifier in ids:
                 home.setdefault(identifier, piece)
+        homes[stem] = home
+        if stem not in {piece for piece, _, _, _, _, _ in pieces}:
+            first[stem] = pieces[0][0]
         total = len(pieces)
         for index, (piece, title, key, parents, position, pdoc) \
                 in enumerate(pieces, 1):
@@ -534,6 +564,23 @@ def main():
         if stem not in {piece for piece, _, _, _, _, _ in pieces}:
             os.remove(path)
         print(f"split-pages: {stem}: {total} page(s)", file=sys.stderr)
+
+    # Links from every other page into a source that was cut. A book's
+    # own contents page, an index, a "see Section 3.2" in another
+    # chapter: each names the source's file, and the id has moved.
+    if homes:
+        moved = 0
+        for path in written:
+            with open(path, encoding="utf-8") as fh:
+                doc = json.load(fh)
+            count = retarget_links(doc["blocks"], homes, first)
+            if count:
+                with open(path, "w", encoding="utf-8") as fh:
+                    json.dump(doc, fh)
+                moved += count
+        if moved:
+            print(f"split-pages: {moved} link(s) from other pages now point "
+                  "at the pieces their targets moved to", file=sys.stderr)
 
     for key in names:
         if key[:3] not in seen_keys and key[0] in sources:

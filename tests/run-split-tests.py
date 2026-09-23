@@ -363,6 +363,37 @@ def case_levels(work):
     ]
 
 
+def case_links_from_other_pages(work):
+    """A link from another source into a source that was cut follows its
+    target: a book's own contents page, an index, a cross-reference."""
+    book = prepare(work, "book",
+                   "---\ntitle: Book\n---\n\n# Book\n\n## One\n\n"
+                   "[]{#deep}First. See [deep](#deep).\n\n## Two\n\nSecond.\n")
+    index = prepare(work, "index",
+                    "---\ntitle: Index\n---\n\n# Index\n\n[deep](book.html#deep), "
+                    "[the book](book.html), [two](book.html#two), "
+                    "[nowhere](book.html#nowhere), [out](https://x.org/book.html#deep)\n")
+    result = split(work, [book, index], level=2)
+    pieces = Pieces(work, result)
+    links = pieces.links("index") if "index" in pieces.stems else []
+    return [
+        ("the split succeeds and the other source is left whole",
+         lambda: pieces.status == 0 and "index" in pieces.stems
+         and "book--one" in pieces.stems),
+        ("a link to an id goes to the piece that holds it",
+         lambda: "book--one.html#deep" in links),
+        ("a link to a heading goes to the piece it became",
+         lambda: "book--two.html#two" in links),
+        ("a link to a source that kept no page goes to its first piece",
+         lambda: "book--one.html" in links),
+        ("a fragment no piece has, and a link elsewhere, are left alone",
+         lambda: "book.html#nowhere" in links
+         and "https://x.org/book.html#deep" in links),
+        ("and the run says how many moved",
+         lambda: "3 link(s) from other pages" in result.stderr),
+    ]
+
+
 def case_readers(work):
     """What the packager and the EPUB assembler make of the pieces."""
     source = prepare(work)
@@ -515,6 +546,7 @@ CASES = [
     ("document metadata stays on the document", case_document_meta),
     ("the page-names sidecar", case_names),
     ("levels and refusals", case_levels),
+    ("links from other pages into a cut source", case_links_from_other_pages),
     ("the packager and the assembler read the pieces", case_readers),
 ]
 

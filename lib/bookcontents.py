@@ -338,6 +338,71 @@ def chapter_heading(number, pages, titles):
     return f"Chapter {number}"
 
 
+def pieces_by_source(stems, parts=None):
+    """(plain, ordered): the stems that are not pieces, and for each split
+    source (whether it still has a page of its own, its pieces in reading
+    order as (stem, parents, position, role))."""
+    parts = parts or {}
+    pieces, plain = {}, []
+    for stem in stems:
+        if stem in parts:
+            padded = tuple(parts[stem]) + (None, "", "", "")
+            source, number, parents, position = padded[:4]
+            role = padded[5] if len(padded) > 5 else ""
+        elif piece_source(stem):
+            source, number, parents, position, role = (piece_source(stem),
+                                                       None, None, "", "")
+        else:
+            plain.append(stem)
+            continue
+        pieces.setdefault(source, []).append(
+            (number, stem, parents or [], position or "", role or ""))
+    ordered = {}
+    for source, members in pieces.items():
+        members.sort(key=lambda m: (m[0] is None, m[0] or 0,
+                                    natural_key(m[1])))
+        ordered[source] = (source in plain,
+                           [(m[1], m[2], m[3], m[4]) for m in members])
+    return plain, ordered
+
+
+def declared_pages(nodes):
+    found = set()
+    for node in nodes or []:
+        if isinstance(node, str):
+            found.add(node)
+        elif isinstance(node, dict):
+            if "items" in node:
+                found |= declared_pages(node["items"])
+            elif node.get("page"):
+                page = str(node["page"]).strip()
+                found.add(page[:-5] if page.endswith(".html") else page)
+    return found
+
+
+def expand_split_sources(contents, stems, titles=None, parts=None,
+                         roles=None):
+    """A declared page that the split cut into pieces stands for them:
+    the entry becomes a group holding the source's own page, when it
+    kept one, and its pieces nested by their headings, exactly as the
+    guess arranges them. A book unpacked from a one-file EPUB declares
+    that one file, and its chapters are pieces. A source whose pieces
+    contents already names is left as declared, since someone arranged
+    them."""
+    _plain, ordered = pieces_by_source(stems, parts)
+    named = declared_pages(contents)
+    stand_in = {source: value for source, value in ordered.items()
+                if source in named
+                and not any(m[0] in named for m in value[1]
+                            if m[0] != source)}
+    # The page that holds what came before the first cut keeps the
+    # source's name and is a piece of it like the rest.
+    if not stand_in:
+        return contents
+    return strip_source(group_pieces(contents, stand_in, titles or {},
+                                     roles))
+
+
 def guess_contents(stems, back_matter=None, titles=None, parts=None,
                    roles=None):
     """Best-effort contents tree from filenames alone.
@@ -364,28 +429,8 @@ def guess_contents(stems, back_matter=None, titles=None, parts=None,
     parts = parts or {}
     roles = roles or {}          # stem -> role, for a page that was not split
 
-    pieces = {}
-    plain = []
-    for stem in stems:
-        if stem in parts:
-            padded = tuple(parts[stem]) + (None, "", "", "")
-            source, number, parents, position = padded[:4]
-            role = padded[5] if len(padded) > 5 else ""
-        elif piece_source(stem):
-            source, number, parents, position, role = (piece_source(stem),
-                                                       None, None, "", "")
-        else:
-            plain.append(stem)
-            continue
-        pieces.setdefault(source, []).append(
-            (number, stem, parents or [], position or "", role or ""))
-    if pieces:
-        ordered = {}
-        for source, members in pieces.items():
-            members.sort(key=lambda m: (m[0] is None, m[0] or 0,
-                                        natural_key(m[1])))
-            ordered[source] = (source in plain,
-                               [(m[1], m[2], m[3], m[4]) for m in members])
+    plain, ordered = pieces_by_source(stems, parts)
+    if ordered:
         stems = plain + [s for s in ordered if s not in plain]
         tree = strip_source(group_pieces(
             guess_contents(stems, back_matter, titles, None, roles), ordered,
@@ -676,3 +721,62 @@ def contents_from_tree(tree):
             node["role"] = role
         out.append(node)
     return out
+
+
+# What a page's head says about it, for tools that read only HTML.
+TITLE_RE = re.compile(r"<title[^>]*>(.*?)</title>", re.I | re.S)
+# What a page split by split-pages.py says about where it came from.
+META_RE = re.compile(r'<meta\s+name="(source-page|source-title|page-part|'
+                     r'page-parent|page-position|page-role)"\s+content="([^"]*)"',
+                     re.I)
+
+
+def page_title(path, stem):
+    """Title from the page's own <title>, falling back to the filename."""
+    try:
+        with open(path, encoding="utf-8", errors="replace") as handle:
+            markup = handle.read(20000)
+    except OSError:
+        return stem
+    m = TITLE_RE.search(markup)
+    if m:
+        title = clean_title(m.group(1))
+        if title:
+            return title
+    return stem_title(stem)
+
+
+def page_provenance(path):
+    """(source stem, part number, parent titles, position, source title)
+    for a page split-pages.py wrote, from the <meta> elements it put in
+    the head, or None."""
+    try:
+        with open(path, encoding="utf-8", errors="replace") as handle:
+            markup = handle.read(20000)
+    except OSError:
+        return None
+    found, parents = {}, []
+    for name, value in META_RE.findall(markup.split("</head>", 1)[0]):
+        value = html_module.unescape(value)
+        if name == "page-parent":
+            parents.append(value)
+        else:
+            found[name] = value
+    if not found.get("source-page"):
+        return None
+    m = re.match(r"(\d+)/", found.get("page-part", ""))
+    return (found["source-page"], int(m.group(1)) if m else None, parents,
+            found.get("page-position", ""), found.get("source-title", ""),
+            found.get("page-role", ""))
+
+
+def page_role(path):
+    """A page's own role, from the <meta> the filter wrote when it
+    promoted a heading carrying one ({.appendix})."""
+    try:
+        with open(path, encoding="utf-8", errors="replace") as handle:
+            markup = handle.read(20000)
+    except OSError:
+        return ""
+    found = dict(META_RE.findall(markup.split("</head>", 1)[0]))
+    return found.get("page-role", "")

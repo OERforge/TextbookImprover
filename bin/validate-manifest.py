@@ -85,7 +85,7 @@ def validate_with_schema(path):
 
         The IMS schemas import each other by absolute https URL. Rewriting
         those to relative paths would be the obvious fix and is not
-        permitted: the licence grants redistribution to developers who
+        permitted: the license grants redistribution to developers who
         "have not changed this document". So they are stored exactly as
         published and resolved here instead, which also means validation
         never touches the network.

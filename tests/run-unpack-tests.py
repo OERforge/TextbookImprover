@@ -284,6 +284,11 @@ nav_order: 1
 Space is $$3.4 \\times 10^{38}$$ addresses.
 {: .blue}
 
+{: .note}
+> A quote kramdown styles.
+>
+> Its second paragraph.
+
 $$
 E = mc^2
 $$
@@ -301,6 +306,10 @@ $$kept$$
     <img width="800px" src="/assets/a.png">
 
 See [the home page](/index.html).
+
+An indented code block:
+
+    $$code$$ and src="/y" and {: .z}
 """,
     "404.html": "---\nlayout: default\n---\nNot found\n",
     "assets/a.png": ONE_PIXEL,
@@ -322,7 +331,7 @@ def case_jekyll(work):
     import yaml
     project = yaml.safe_load(read(out, "project.yaml"))["project"]
     page = read(out, "sec-page.md")
-    code = page[page.index("```"):page.rindex("```")]
+    report = read(out, "unpack-report.csv")
     return [
         ("a page per .md with front matter, named from its path; a readme "
          "isn't one",
@@ -345,16 +354,23 @@ def case_jekyll(work):
          lambda: "{: .blue}" not in page),
         ("code is left exactly as written",
          lambda: "`<img src=\"/logo.png\">`" in page and "`$$x$$`" in page
-         and '<img src="/logo.png">' in code and "{: .kept}" in code
-         and "$$kept$$" in code),
+         and '    <img src="/logo.png">' in page and "    {: .kept}" in page
+         and "    $$kept$$" in page),
+        ("an indented code block is left exactly as written",
+         lambda: '    $$code$$ and src="/y" and {: .z}' in page),
         ("root-relative paths are relative, a page's to its flat name",
          lambda: 'src="assets/a.png"' in page
          and "](index.html)" in page),
         ("the site's own 404.html isn't copied; the assets are",
          lambda: not os.path.exists(os.path.join(out, "404.html"))
          and os.path.exists(os.path.join(out, "assets", "a.png"))),
-        ("an image indented in a list isn't mistaken for code",
-         lambda: "indented-code-risk" not in read(out, "unpack-report.csv")),
+        ("the report counts what was changed",
+         lambda: "2 root-relative path(s)" in report
+         and "1 kramdown inline formula(s)" in report
+         and "2 kramdown attribute list(s)" in report),
+        ("an attribute list above a blockquote leaves the quote a quote",
+         lambda: "> A quote kramdown styles." in page
+         and "> Its second paragraph." in page and "\\>" not in page),
     ]
 
 

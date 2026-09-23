@@ -105,7 +105,7 @@ def saved_page(directory, path, title):
 <a href="{SITE}unsaved.html">a page nobody saved</a> and
 <a href="https://elsewhere.example.com/">another site</a>.</p>
 <p><img src="./{files}/figure.png" alt="A figure"> <img src="{SITE}missing.png" alt="Gone"></p>
-<p><span href="http://purl.org/dc/dcmitype/Text" rel="dct:type">licence</span>
+<p><span href="http://purl.org/dc/dcmitype/Text" rel="dct:type">license</span>
 <code>&lt;img src="/logo.png"&gt;</code></p>{extra}
 <script>var tocbot = 1;</script>
 </main><footer>Site footer</footer></body></html>"""

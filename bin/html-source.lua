@@ -244,7 +244,7 @@ function Header(h)
   return before
 end
 
--- An href on something that isn't a link: RDFa on a licence statement
+-- An href on something that isn't a link: RDFa on a license statement
 -- (<span href="http://purl.org/dc/dcmitype/Text" rel="dct:type">). The
 -- HTML writer passes it through, and XHTML allows it on no such element.
 function Span(span)

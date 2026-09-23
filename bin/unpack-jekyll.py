@@ -14,17 +14,19 @@ reads differently. The directory this writes has:
     names the saved page for the same URL (end-to-end/dhcp.md is
     end-to-end-dhcp.md, intro/index.md is intro-index.md), so the two
     routes to one book can be compared page by page;
-  - in each: the front matter reduced to its title; kramdown's inline
-    math ($$x$$ inside a sentence, which Pandoc reads as display math)
-    written $x$; kramdown's attribute lists ({: .blue}) removed, which
-    Pandoc would print; and root-relative paths (/assets/x.png,
-    /routing/bgp.html) made relative to the flat directory. None of it
-    inside code: a fenced block or a code span is left exactly as it
-    was, since a textbook about the web shows <img src="/logo.png"> as
-    an example. (An indented code block isn't recognized; the report
-    counts any line that looks like one and holds something these
-    rewrites would touch.) Raw HTML is left for convert.py, which reads
-    it as HTML when the page is read (markdown-html.lua);
+  - in each: the front matter reduced to its title, and the body read
+    with Pandoc and written back as Pandoc's Markdown, changed on the
+    way through: kramdown's attribute lists ({: .blue}), which Pandoc
+    would print, removed before it reads the page, never on a line of a
+    code block as Pandoc's own CommonMark reader places them;
+    kramdown's inline math ($$x$$ inside a sentence, which Pandoc reads
+    as display math) made inline; root-relative paths (/assets/x.png,
+    /routing/bgp.html) in links, images, and raw HTML made relative to
+    the flat directory. Those two are made on Pandoc's document tree,
+    where code of every kind (a code span, a fenced block, an indented
+    block) is an element neither looks inside: a textbook about the web
+    shows <img src="/logo.png"> as an example. Raw HTML is left for convert.py, which reads it as HTML
+    when the page is read (markdown-html.lua);
   - the files those pages use, where they were;
   - project.yaml: the site's title and language from _config.yml, and
     contents from the front matter's tree.
@@ -48,10 +50,12 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
 import argparse
+import json
 import os
 import posixpath
 import re
 import shutil
+import subprocess
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -70,39 +74,107 @@ SKIP_FILES = {"README.md", "LICENSE.md", "CONTRIBUTING.md", "CHANGELOG.md"}
 # The closing --- may end the file: a section's page is often nothing
 # but its front matter.
 FRONT = re.compile(r"\A---[ \t]*\r?\n(.*?)\r?\n---[ \t]*(?:\r?\n|\Z)", re.S)
-IAL = re.compile(r"^[ \t]*\{:[^}\n]*\}[ \t]*\n?|\{:[^}\n]*\}", re.M)
-LINK = re.compile(r"(\]\(|src=\"|href=\")(/[^)\"\s#?]*)([#?][^)\"\s]*)?")
-INLINE_MATH = re.compile(r"\$\$(.+?)\$\$")
-# Code, which no rewrite may touch: a fenced block, or a code span.
-CODE = re.compile(r"^(```+|~~~+)[^\n]*\n.*?^\1[ \t]*$|(`+)[^`].*?(?<!`)\2(?!`)",
-                  re.M | re.S)
-INDENTED_RISK = re.compile(r"^(?: {4}|\t).*(?:\$\$|\{:|src=\"/|href=\"/|\]\(/)",
-                           re.M)
+ATTRIBUTE_LIST = re.compile(r"^\s*\{:[^}]*\}\s*$")
+RAW_PATH = re.compile(r"""(\b(?:src|href)\s*=\s*["'])(/[^/"'][^"']*|/)(["'])""",
+                      re.I)
 
 
-LIST_ITEM = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s")
+def pandoc(arguments, text):
+    result = subprocess.run(["pandoc"] + arguments, input=text,
+                            capture_output=True, text=True)
+    if result.returncode != 0:
+        sys.exit("pandoc failed: " + result.stderr.strip())
+    return result.stdout
 
 
-def in_list_item(text, offset):
-    """Whether the indented line at offset continues a list item, which
-    makes it the item's content rather than a code block: the nearest
-    line above it that is less indented opens an item."""
-    lines = text[:offset].split("\n")[:-1]
-    for line in reversed(lines):
-        if line.strip() and not line.startswith(("    ", "\t")):
-            return bool(LIST_ITEM.match(line))
-    return False
-
-
-def outside_code(text, rewrite):
-    """rewrite applied to everything but code, which is kept byte for byte."""
-    out, last = [], 0
-    for m in CODE.finditer(text):
-        out.append(rewrite(text[last:m.start()]))
-        out.append(m.group(0))
-        last = m.end()
-    out.append(rewrite(text[last:]))
+def _text(inlines):
+    out = []
+    for node in inlines:
+        kind = node.get("t")
+        if kind == "Str":
+            out.append(node["c"])
+        elif kind in ("Space", "SoftBreak", "LineBreak"):
+            out.append(" ")
+        else:
+            return None                    # anything else isn't a plain {: }
     return "".join(out)
+
+
+def code_lines(text):
+    """The lines of text that are code blocks, as Pandoc's CommonMark
+    reader places them (with sourcepos, each block carries its own line
+    range; an end at column 1 is the start of the line after). Fenced and
+    indented blocks alike, in a list or out."""
+    doc = json.loads(pandoc(["-f", "commonmark_x+sourcepos", "-t", "json"],
+                            text))
+    lines = set()
+
+    def walk(node):
+        if isinstance(node, dict):
+            if node.get("t") == "CodeBlock":
+                spans = [v for k, v in node["c"][0][2] if k == "data-pos"]
+                m = re.match(r"(\d+):\d+-(\d+):(\d+)", spans[-1]) \
+                    if spans else None
+                if m:
+                    first, last, column = map(int, m.groups())
+                    lines.update(range(first, last + (column > 1)))
+            for value in node.values():
+                walk(value)
+        elif isinstance(node, list):
+            for value in node:
+                walk(value)
+    walk(doc["blocks"])
+    return lines
+
+
+def drop_attribute_lists(text, counts):
+    """kramdown's attribute lists, a line of their own each ({: .blue}),
+    removed before Pandoc reads the page. It has to be before: one on the
+    line above a blockquote applies to the quote in kramdown, and Pandoc,
+    which doesn't know them, reads that line and the quote's > lines as
+    one paragraph of text, so the quote is gone from the tree. A line
+    inside a code block is never touched."""
+    skip = code_lines(text)
+    kept = []
+    for number, line in enumerate(text.split("\n"), 1):
+        if number not in skip and ATTRIBUTE_LIST.match(line):
+            counts["attribute-list"] += 1
+            continue
+        kept.append(line)
+    return "\n".join(kept)
+
+
+def fix_tree(node, relative, counts):
+    """The kramdown fixes, made on Pandoc's document tree. Code and
+    CodeBlock hold strings, not elements, so nothing here reaches into
+    code; a Math, a Link, an Image, or raw HTML is never inside one."""
+    if isinstance(node, list):
+        for item in node:
+            if isinstance(item, dict) and item.get("t") in ("Para", "Plain"):
+                inlines = item["c"]
+                if any(n.get("t") not in ("Math", "Space", "SoftBreak")
+                       for n in inlines):
+                    for n in inlines:
+                        if n.get("t") == "Math" and \
+                                n["c"][0]["t"] == "DisplayMath":
+                            n["c"][0] = {"t": "InlineMath"}
+                            counts["inline-math"] += 1
+            fix_tree(item, relative, counts)
+    elif isinstance(node, dict):
+        kind = node.get("t")
+        if kind in ("Link", "Image"):
+            target = node["c"][2][0]
+            if target.startswith("/") and not target.startswith("//"):
+                node["c"][2][0] = relative(target)
+                counts["path"] += 1
+        elif kind in ("RawInline", "RawBlock") and node["c"][0] == "html":
+            def fix(m):
+                counts["path"] += 1
+                return m.group(1) + relative(m.group(2)) + m.group(3)
+            node["c"][1] = RAW_PATH.sub(fix, node["c"][1])
+        for value in node.values():
+            if isinstance(value, (list, dict)):
+                fix_tree(value, relative, counts)
 
 
 def page_name(relative):
@@ -111,34 +183,18 @@ def page_name(relative):
     return safe_stem(stem) or "page"
 
 
-def kramdown_math(text):
-    """$$..$$ inside a line of prose is kramdown's inline math; a $$ block
-    on lines of its own stays display math. Called on text with no code
-    in it (see outside_code)."""
-    out = []
-    for line in text.split("\n"):
-        stripped = line.strip()
-        if (stripped.startswith("$$") and stripped.endswith("$$")) \
-                or stripped == "$$":
-            out.append(line)
-            continue
-        out.append(INLINE_MATH.sub(lambda m: "$" + m.group(1).strip() + "$",
-                                   line))
-    return "\n".join(out)
-
-
-def localize(text, pages_by_path, root_files):
-    """Root-relative references, made relative to the flat directory: a
+def localize(target, pages_by_path):
+    """A root-relative reference, made relative to the flat directory: a
     page becomes its flat name, anything else keeps its path."""
-    def fix(match):
-        lead, path, rest = match.group(1), match.group(2), match.group(3) or ""
-        bare = path.strip("/")
-        for candidate in (bare, bare + ".md", bare + "/index.md",
-                          re.sub(r"\.html$", ".md", bare)):
-            if candidate in pages_by_path:
-                return lead + pages_by_path[candidate] + ".html" + rest
-        return lead + bare + rest
-    return LINK.sub(fix, text)
+    path, _, rest = target.partition("#")
+    path, _, query = path.partition("?")
+    bare = path.strip("/")
+    tail = ("?" + query if query else "") + ("#" + rest if rest else "")
+    for candidate in (bare, bare + ".md", bare + "/index.md",
+                      re.sub(r"\.html$", ".md", bare)):
+        if candidate in pages_by_path:
+            return pages_by_path[candidate] + ".html" + tail
+    return (bare or ".") + tail
 
 
 def tree_from_front_matter(pages):
@@ -207,28 +263,24 @@ def main():
     by_path = {p["relative"]: p["name"] for p in pages}
 
     os.makedirs(out, exist_ok=True)
-    counts = {"attribute-list": 0, "indented-code-risk": 0}
+    counts = {"attribute-list": 0, "inline-math": 0, "path": 0}
     for page in pages:
-        body = page["body"]
-        counts["attribute-list"] += len(IAL.findall(CODE.sub("", body)))
-        prose = CODE.sub("", body)
-        for m in INDENTED_RISK.finditer(prose):
-            if in_list_item(prose, m.start()):
-                continue
-            counts["indented-code-risk"] += 1
-            notes.append((page["name"] + ".md", "indented-code-risk",
-                          "an indented line holds something rewritten "
-                          "outside code; if it's code, check it"))
-        body = outside_code(body, lambda t: localize(
-            kramdown_math(IAL.sub("", t)), by_path, None))
+        tree = json.loads(pandoc(["-f", "markdown", "-t", "json"],
+                                 drop_attribute_lists(page["body"], counts)))
+        fix_tree(tree["blocks"], lambda t: localize(t, by_path), counts)
+        body = pandoc(["-f", "json", "-t", "markdown", "--wrap=none"],
+                      json.dumps(tree))
         front = yaml.safe_dump({"title": page["title"]}, allow_unicode=True,
                                sort_keys=False)
         with open(os.path.join(out, page["name"] + ".md"), "w",
                   encoding="utf-8") as fh:
-            fh.write("---\n" + front + "---\n\n" + body.lstrip("\n"))
-    if counts["attribute-list"]:
-        notes.append(("site", "attribute-list", f"{counts['attribute-list']} "
-                      "kramdown attribute list(s) removed"))
+            fh.write("---\n" + front + "---\n\n" + body)
+    for kind, label in (("inline-math", "kramdown inline formula(s) made "
+                         "inline"), ("attribute-list", "kramdown attribute "
+                         "list(s) removed"), ("path", "root-relative "
+                         "path(s) made relative")):
+        if counts[kind]:
+            notes.append(("site", kind, f"{counts[kind]} {label}"))
 
     # The files the pages use: everything outside the skipped directories
     # that isn't a page or the site's own machinery.

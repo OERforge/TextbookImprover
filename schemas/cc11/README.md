@@ -40,7 +40,7 @@ keeping them byte-for-byte satisfies both at once.
 This has a practical consequence. The schemas import each other by
 absolute `https://` URL, so they will not load from a directory without
 help. The obvious fix — rewriting those to relative paths — is exactly
-the change the licence does not allow. `validate-manifest.py` therefore
+the change the license does not allow. `validate-manifest.py` therefore
 registers a resolver that serves each import from this directory by
 filename, leaving the files untouched. That also means validation never
 touches the network.

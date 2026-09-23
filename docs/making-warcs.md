@@ -46,7 +46,7 @@ What the options do:
 
 Don't use `--mirror`. It turns on timestamping, which wget can't combine with a WARC, and it says so and turns it off again.
 
-wget stays on the host it started on. `--page-requisites` fetches what a page needs from that host and records a reference to anything elsewhere without fetching it. A browser's save fetches everything a page shows, wherever it lives, which is why the two can differ. *CS 168*'s front page shows the Creative Commons licence badge from `i.creativecommons.org`, so its save has the badge and its crawl doesn't. `unpack-site.py` reports such a file as `resource-not-held`; the book's HTML then points at the badge online, and its EPUB, which can't hold an image from another server, links to it by its alt text instead. To fetch images from another host as well, let wget leave the starting host and name the hosts it may go to:
+wget stays on the host it started on. `--page-requisites` fetches what a page needs from that host and records a reference to anything elsewhere without fetching it. A browser's save fetches everything a page shows, wherever it lives, which is why the two can differ. *CS 168*'s front page shows the Creative Commons license badge from `i.creativecommons.org`, so its save has the badge and its crawl doesn't. `unpack-site.py` reports such a file as `resource-not-held`; the book's HTML then points at the badge online, and its EPUB, which can't hold an image from another server, links to it by its alt text instead. To fetch images from another host as well, let wget leave the starting host and name the hosts it may go to:
 
 ```bash
 wget --recursive --level=inf --no-parent --page-requisites \
@@ -106,7 +106,7 @@ Both books were crawled with the wget commands above and compared with the brows
 
 *A Data-Centric Introduction to Computing*: 80 pages either way, but the crawl's HTML still holds the TeX of 397 formulas that the `.mhtml` save had only as MathJax's rendering, so the EPUB has real MathML. The crawl is also smaller: 12 MB of responses against the save's 22 MB (8.7 MB against 11 MB compressed), since a save stores its own copy of an image in every page that shows it.
 
-*CS 168*: the same 62 pages with the same names and the same order, one asset fewer (the licence badge from another host, described above), and the order read from the site's real `<ul>` rather than what its scripts had built. Nine pages differ in their text, images, and formulas, because the book itself changed between the save and the crawl: a page that read "there are $p$ nodes" now reads "$D$".
+*CS 168*: the same 62 pages with the same names and the same order, one asset fewer (the license badge from another host, described above), and the order read from the site's real `<ul>` rather than what its scripts had built. Nine pages differ in their text, images, and formulas, because the book itself changed between the save and the crawl: a page that read "there are $p$ nodes" now reads "$D$".
 
 ## Converting it
 

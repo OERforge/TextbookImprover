@@ -68,9 +68,9 @@ Let images shrink on narrow viewports rather than reproducing the source's fixed
 
 How data tables are rendered.
 
-**`tables.bands`**—one of `auto`, `split`, `group`; default `auto`
+**`tables.bands`**—one of `auto`, `split`, `group`, `column`; default `auto`
 
-What a table whose rows are grouped under bands becomes: a merged row across the table labeling the rows beneath it, as in a Word table, or a tbody headed by one in HTML. split makes one table per band, the band's text in each part's caption, which NVDA reads on arrival (tested in Chrome and Firefox). Of HTML's grouped forms, NVDA names a group for a data cell only when its heading is a column of its own spanning its rows, and then only moving down a column; a band as a row of its own it never names there. group keeps one table with a body per band, each band a row-group header, which is the author's form and reads back as it was written. auto derives from the target's format: split for html, epub3, and pdf; group for markdown and docx, whose output becomes a source.
+What a table whose rows are grouped under bands becomes: a merged row across the table labeling the rows beneath it, as in a Word table, or a tbody headed by one in HTML. split makes one table per band, the band's text in each part's caption, which NVDA reads on arrival (tested in Chrome and Firefox). Of HTML's grouped forms, NVDA names a group for a data cell only when its heading is a column of its own spanning its rows, and then only moving down a column; a band as a row of its own it never names there. group keeps one table with a body per band, each band a row-group header, which is the author's form and reads back as it was written. auto derives from the target's format: split for html, epub3, and pdf; group for markdown and docx, whose output becomes a source. column, never the default, keeps one table and gives the bands a column of their own at its left, each a row-group header spanning its rows: the form NVDA names with the row header on every data cell moving down (W3C's pattern for irregular headers), for trying in HTML. Only a table whose parts share their column headers takes it; any other is split. In testing NVDA announced the column header inconsistently in this form, and no other screen reader has been tried.
 
 **`tables.wrap`**—`bool`; default `true`
 

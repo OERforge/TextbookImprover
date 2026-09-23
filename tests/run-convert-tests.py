@@ -799,6 +799,21 @@ def case_bands(work):
     run_with(captioned, "targets:\n  html:\n    format: html\n")
     with_parts = read(captioned, "html", "bands.html") if exists(
         captioned, "html", "bands.html") else ""
+    # tables.bands: column, and its output converted again.
+    column = work + "-column"
+    shutil.copytree(work, column, ignore=shutil.ignore_patterns(
+        "html", "md", "*.json", "*.csv"))
+    column_config = ("targets:\n  html:\n    format: html\n"
+                     "    tables:\n      bands: column\n")
+    run_with(column, column_config)
+    in_column = read(column, "html", "bands.html") if exists(
+        column, "html", "bands.html") else ""
+    column_again = column + "-again"
+    os.makedirs(column_again)
+    for name in ("bands.html", "untitled.html"):
+        shutil.copy(os.path.join(column, "html", name), column_again)
+    run_with(column_again, column_config)
+    cells = lambda text: re.findall(r"<t[hd][^>]*>[^<]*", text)
     fixed = work + "-from-html"
     os.makedirs(fixed)
     for name in ("bands.html", "untitled.html"):
@@ -834,6 +849,16 @@ def case_bands(work):
          lambda: [c for c in captions(with_parts) if "worker" in c]
          == ["Cost at $40 a worker", "Cost at $55 a worker"]
          and not any(c.startswith("Example") for c in captions(with_parts))),
+        ("tables.bands: column keeps one table, each band a row-group "
+         "header spanning its rows beside the row headers",
+         lambda: '<th rowspan="2" scope="rowgroup">Example A' in in_column
+         and '<th rowspan="2" scope="rowgroup">Example B' in in_column
+         and '<th scope="rowgroup">Group one' in in_column
+         and in_column.count('<th scope="row">Tech') == 4
+         and not any(c.startswith("Example") for c in captions(in_column))),
+        ("and converting that output again gives the same cells",
+         lambda: cells(in_column) and cells(read(
+             column_again, "html", "bands.html")) == cells(in_column)),
         ("converting the HTML output again gives the same tables",
          lambda: captions(read(fixed, "html", "bands.html")) == captions(page)),
     ]

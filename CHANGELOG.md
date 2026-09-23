@@ -12,6 +12,7 @@ Versions are two-part and pre-1.0: breaking changes may land in any of them unti
 
 ### Added
 
+- **`tables.bands: column`**, for trying in HTML: one table whose bands form a column of their own at its left, each a row-group header spanning its rows, which is the form NVDA names with the row header on every data cell moving down a column. Not the default: NVDA announced the column header inconsistently in it, and no other screen reader has been tried.
 - **Title rows and bands in HTML tables**, inferred as for Word: a merged row across the top becomes the caption, and merged rows partway down band the rows beneath, as does a `<tbody>` the page heads with one cell. `tables.bands` says what a banded table becomes per target: `split` (HTML, EPUB, and PDF by default) makes a table per band, captioned with it, which NVDA reads on arrival, where it names a group for a data cell in only one of HTML's grouped forms and only moving down; `group` (Markdown and DOCX by default) keeps the author's single table, a body per band, so it reads back as written. *Business Communication*'s Table 22.6 splits into Front Matter, Body, and Back Matter for HTML and stays whole in Markdown. A person's captions for the parts, in the sidecar's `part-captions` column, reach an HTML table as they reach a Word one.
 - **A spelling check.** `tests/run-spelling-tests.py` fails on a UK spelling in any tracked text file, prose or name, naming the file and line. It found two the last sweep had missed.
 - **A browser's archive as a source.** `unpack-site.py` reads a WACZ recorded with ArchiveWeb.page: the book's site is the first page the archive lists; redirects and repeated responses stored as revisit records are followed; and a section a page fetched as JSON (OER Commons's `?section=3`) is a page of its own, named by its query. An OER Commons profile takes each section's content and makes its heading the page's title. *Business Communication*, whose EPUB had no images, came out as 16 chapters and a title page with 213 of 214 images and an EPUB epubcheck passes. `docs/making-warcs.md` says how to record one.
@@ -49,6 +50,7 @@ Versions are two-part and pre-1.0: breaking changes may land in any of them unti
 
 ### Fixed
 
+- **Row headers are found by column, not by a row's first cell.** Under a cell spanning rows from above, a row's first cell is in the second column, and it was marked as the row's header while the real header became a data cell. A source that marks more than one column of row headers keeps them.
 - **A header row above the first band heads every part** when a table is split. Unmarked (a bold row in HTML, an unmarked one in Word), it had become a part of its own, and the parts after it had no headers.
 - **A band's non-breaking spaces stay out of its caption.** A band centered by hand put forty of them in one.
 - **A page with no title is named by itself.** Its `<title>` was the intermediate's file name (`costs.filtered`), and converted again it grew a heading saying so.

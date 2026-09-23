@@ -1218,18 +1218,31 @@ local function demote_head(tbl)
   body.body = merged
 end
 
+-- Row headers by grid column, not by a row's first cell: under a cell
+-- spanning rows from above (a group heading in a column of its own), a
+-- row's first cell is in the second column. A source that gave more than
+-- one row-header column keeps them; a row-group header keeps its scope.
 local function set_row_headers(tbl, on)
   for _, body in ipairs(tbl.bodies) do
-    body.row_head_columns = on and 1 or 0
+    local count = on and math.max(1, body.row_head_columns or 0) or 0
+    body.row_head_columns = count
+    local covered = {}   -- grid column -> rows a span above still covers
     for _, row in ipairs(body.body) do
-      local cell = row.cells[1]
-      if cell then
-        if on then
-          cell.attr.attributes['scope'] = 'row'
-        else
+      local column = 1
+      for _, cell in ipairs(row.cells) do
+        while (covered[column] or 0) > 0 do column = column + 1 end
+        local scope = cell.attr.attributes['scope']
+        if column <= count then
+          if scope ~= 'rowgroup' then cell.attr.attributes['scope'] = 'row' end
+        elseif scope == 'row' or scope == 'rowgroup' then
           cell.attr.attributes['scope'] = nil
         end
+        for c = column, column + (cell.col_span or 1) - 1 do
+          covered[c] = math.max(covered[c] or 0, cell.row_span or 1)
+        end
+        column = column + (cell.col_span or 1)
       end
+      for c, left in pairs(covered) do covered[c] = left - 1 end
     end
   end
 end
@@ -1419,9 +1432,10 @@ end
 -- split-at: one table per band
 --
 -- A merged full-width row partway down a table labels the rows beneath
--- it. <th scope="rowgroup"> is the HTML for that and nothing reads it
--- reliably, PDF has no rowgroup scope at all, so instead the table is
--- split at each band: the band row becomes the caption of the part below
+-- it. <th scope="rowgroup"> as a row of its own is the HTML for that,
+-- and NVDA names it only on its own cell, never for a data cell (tested
+-- in Chrome and Firefox); PDF has no rowgroup scope at all. So by default
+-- (tables.bands: split) the table is split at each band: the band row becomes the caption of the part below
 -- it, composed onto the table's own caption -- "Table 7.12: Example B" --
 -- unless part-captions supplies the text. Every part gets the original
 -- header rows where the table had a head; where it did not, the part's
@@ -1683,6 +1697,61 @@ local function group_parts(parts, tbl, label)
     pandoc.Attr(tbl.attr.identifier, tbl.attr.classes, {}))
 end
 
+-- tables.bands: column. The parts joined into one table whose first
+-- column holds each band as a row-group header spanning its rows: W3C's
+-- pattern for irregular headers, and the one HTML form NVDA names with
+-- the row header on every data cell moving down a column. Only when
+-- every part is headed by a band and the parts share their column
+-- headers; anything else (a band that is itself a header row) is split.
+local function column_parts(parts, tbl, label)
+  local first = parts[1].table
+  for _, part in ipairs(parts) do
+    if not part.band then return nil end
+    local a, b = part.table.head.rows, first.head.rows
+    if #a ~= #b then return nil end
+    for i = 1, #a do
+      if row_text(a[i]) ~= row_text(b[i]) then return nil end
+    end
+  end
+  local function empty_cell()
+    return pandoc.Cell({}, 'AlignDefault', 1, 1,
+      pandoc.Attr('', {}, { { 'scope', 'col' } }))
+  end
+  local head_rows = {}
+  for _, row in ipairs(first.head.rows) do
+    local cells = pandoc.List({ empty_cell() })
+    cells:extend(row.cells)
+    head_rows[#head_rows + 1] = pandoc.Row(cells, row.attr)
+  end
+  local bodies = {}
+  for _, part in ipairs(parts) do
+    local body = part.table.bodies[1]
+    local rows = body.body
+    if #rows > 0 then
+      local text = pandoc.utils.stringify(part.band.cells[1].contents)
+        :gsub('\u{00A0}', ' '):gsub('%s+', ' '):gsub('^ ', ''):gsub(' $', '')
+      local group = pandoc.Cell({ pandoc.Plain(text_to_inlines(text)) },
+        'AlignDefault', #rows, 1,
+        pandoc.Attr('', {}, { { 'scope', 'rowgroup' } }))
+      local lead = rows[1]
+      local cells = pandoc.List({ group })
+      cells:extend(lead.cells)
+      rows[1] = pandoc.Row(cells, lead.attr)
+      bodies[#bodies + 1] = pandoc.TableBody(rows, {},
+        body.row_head_columns + 1, body.attr)
+    end
+  end
+  local specs = { { 'AlignDefault', nil } }
+  for _, spec in ipairs(first.colspecs) do specs[#specs + 1] = spec end
+  local caption = tbl.caption
+  if #caption.long == 0 and label then
+    caption = mk_caption({ pandoc.Plain(text_to_inlines(label)) })
+  end
+  return pandoc.Table(caption, specs, pandoc.TableHead(head_rows,
+    first.head.attr), bodies, pandoc.TableFoot({}),
+    pandoc.Attr(tbl.attr.identifier, tbl.attr.classes, {}))
+end
+
 local function resolved_for(tbl)
   -- A marker in the source outranks nothing: it is the author's own
   -- declaration, and a Markdown source has no pre-pass to disagree.
@@ -1829,6 +1898,10 @@ local function caption_data_table(tbl, next_block, after_next, after_after, out)
     entry and (entry.headers == 'first-row' or entry.headers == 'both'))
   if parts and TABLE_BANDS == 'group' and #parts > 1 then
     return { wrap_table(group_parts(parts, tbl, label), label) }, consumed
+  end
+  if parts and TABLE_BANDS == 'column' and #parts > 1 then
+    local joined = column_parts(parts, tbl, label)
+    if joined then return { wrap_table(joined, label) }, consumed end
   end
   if parts then
     local blocks = {}

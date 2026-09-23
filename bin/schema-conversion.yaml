@@ -181,7 +181,7 @@ keys:
 
       bands:
         type: enum
-        values: [auto, split, group]
+        values: [auto, split, group, column]
         default: auto
         stage: filter
         description: >
@@ -197,6 +197,14 @@ keys:
           is the author's form and reads back as it was written. auto
           derives from the target's format: split for html, epub3, and
           pdf; group for markdown and docx, whose output becomes a source.
+          column, never the default, keeps one table and gives the bands a
+          column of their own at its left, each a row-group header spanning
+          its rows: the form NVDA names with the row header on every data
+          cell moving down (W3C's pattern for irregular headers), for
+          trying in HTML. Only a table whose parts share their column
+          headers takes it; any other is split. In testing NVDA announced
+          the column header inconsistently in this form, and no other
+          screen reader has been tried.
 
       wrap:
         type: bool

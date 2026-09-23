@@ -864,6 +864,36 @@ def case_bands(work):
     ]
 
 
+def case_compare_blocks(work):
+    """compare-output.py sees a quotation that became a paragraph and a
+    list that lost an item, which change no heading, table, or image."""
+    page = ('<!DOCTYPE html><html lang="en"><head><title>Q</title></head><body>'
+            '<h1>Q</h1>%s<ul><li>one</li><li>two<ol><li>a</li><li>b</li></ol>'
+            '</li>%s</ul></body></html>')
+    for name, quote, item in (("one", "<blockquote><p>Said.</p></blockquote>",
+                               "<li>three</li>"),
+                              ("two", "<p>Said.</p>", "")):
+        os.makedirs(os.path.join(work, name))
+        with open(os.path.join(work, name, "q.html"), "w",
+                  encoding="utf-8") as fh:
+            fh.write(page % (quote, item))
+    run = subprocess.run(["python3", os.path.join(ROOT, "util", "compare-output.py"),
+                          os.path.join(work, "one"), os.path.join(work, "two")],
+                         capture_output=True, text=True)
+    same = subprocess.run(["python3", os.path.join(ROOT, "util", "compare-output.py"),
+                           os.path.join(work, "one"), os.path.join(work, "one")],
+                          capture_output=True, text=True)
+    return [
+        ("a blockquote turned paragraph is reported",
+         lambda: "blockquote_count" in run.stdout),
+        ("a lost list item is reported, with each list's kind, depth, and items",
+         lambda: "list_outline" in run.stdout and "ul1:3,ol2:2" in run.stdout
+         and "ul1:2,ol2:2" in run.stdout),
+        ("a page compared with itself still agrees",
+         lambda: "Runs agree" in same.stdout),
+    ]
+
+
 def case_html_source(work):
     """An HTML page is a source when the book says so, and converting
     what this pipeline wrote changes nothing."""
@@ -1340,6 +1370,7 @@ CASES = [
     ("a menu for pages posted as a site", case_menu),
     ("raw HTML in a Markdown source", case_markdown_html),
     ("title rows and bands, split and grouped", case_bands),
+    ("compare-output sees lists and blockquotes", case_compare_blocks),
     ("a hand-written page", case_hand_written),
     ("several targets", case_targets),
     ("arguments passed to the packager", case_passthrough),

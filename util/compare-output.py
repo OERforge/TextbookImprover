@@ -16,7 +16,8 @@ trees reports every file and tells you nothing.
 
 This reduces each page to a signature of the things that carry meaning:
 the title, the heading outline, the shape of every table and the header
-markup on it, the figures, the images and their alt text. Two pages with
+markup on it, the lists and block quotes, the figures, the images and
+their alt text. Two pages with
 the same signature are the same page for accessibility purposes, however
 different their bytes. Anything that does differ is reported by field, so
 a noisy field can be silenced with --ignore once you have decided it does
@@ -90,6 +91,7 @@ TEXT_ELEMENTS = {"title", "caption", "figcaption",
                  "h1", "h2", "h3", "h4", "h5", "h6"}
 
 # Fields compared loosely rather than exactly. See within_tolerance.
+LIST_TAGS = ("ul", "ol", "dl")
 TOLERANT_FIELDS = {"word_count"}
 
 # A difference of this many words or fewer is never reported, whatever the
@@ -195,6 +197,9 @@ class PageParser(HTMLParser):
         self._table_seq = 0
         self.words = 0
         self._skip_depth = 0
+        self.blockquotes = 0
+        self.lists = []             # every list, in the order it opens
+        self._list_stack = []
 
     # -- text capture ------------------------------------------------------
 
@@ -230,6 +235,19 @@ class PageParser(HTMLParser):
 
         if tag in SKIP_ELEMENTS:
             self._skip_depth += 1
+        # Block structure outside the chrome: a quotation that became a
+        # paragraph, or a list that lost items or a level, changes no
+        # heading, table, or image, and was invisible here.
+        if not self._skip_depth:
+            if tag == "blockquote":
+                self.blockquotes += 1
+            elif tag in LIST_TAGS:
+                entry = {"tag": tag, "depth": len(self._list_stack) + 1,
+                         "items": 0}
+                self._list_stack.append(entry)
+                self.lists.append(entry)
+            elif tag in ("li", "dt") and self._list_stack:
+                self._list_stack[-1]["items"] += 1
         if tag == "html":
             self.lang = attr.get("lang", "")
         elif tag == "img":
@@ -314,6 +332,8 @@ class PageParser(HTMLParser):
     def handle_endtag(self, tag):
         if tag in SKIP_ELEMENTS and self._skip_depth:
             self._skip_depth -= 1
+        if tag in LIST_TAGS and self._list_stack and not self._skip_depth:
+            self._list_stack.pop()
         if tag == "thead" and self._table_stack:
             self._table_stack[-1]["_in_thead"] = False
             return
@@ -386,6 +406,14 @@ def read_page(path, fold=False):
     sig["img_alt_empty"] = sum(
         1 for _, _, _, alt in parser.images
         if alt is not None and not alt.strip())
+    sig["blockquote_count"] = parser.blockquotes
+    sig["list_count"] = len(parser.lists)
+    # Each list as its kind, its depth, and how many items it holds:
+    # "ul1:3,ol2:2" is a bulleted list of three with a numbered list of two
+    # inside it.
+    sig["list_outline"] = ",".join(
+        "%s%d:%d" % (entry["tag"], entry["depth"], entry["items"])
+        for entry in parser.lists)
     sig["table_count"] = len(parser.finished_tables)
     for index, table in enumerate(parser.finished_tables, start=1):
         for key in ("rows", "cols", "th", "td", "thead_rows", "colspan",

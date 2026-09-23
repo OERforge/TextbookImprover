@@ -15,6 +15,8 @@ wget --version | head -1        # anything from 1.14 writes WARCs
 sudo apt install wget           # if that said "command not found"
 ```
 
+The two commands below are examples: they're the ones used for the two books these instructions were tested on. For another book, change the URL, the working directory, and the WARC's name. What matters is where the crawl starts, since `--no-parent` keeps it inside the directory of its starting URL: start at the directory that holds the book, its home page or, for a site that keeps several editions, the edition's own contents page.
+
 Make a working directory, then crawl. For *CS 168*:
 
 ```bash
@@ -43,6 +45,18 @@ What the options do:
 - `--warc-file=cs168` writes `cs168.warc.gz` beside the copy of the site wget also writes (in a directory named for the host). The copy can be deleted afterwards; the WARC is what counts.
 
 Don't use `--mirror`. It turns on timestamping, which wget can't combine with a WARC, and it says so and turns it off again.
+
+wget stays on the host it started on. `--page-requisites` fetches what a page needs from that host and records a reference to anything elsewhere without fetching it. A browser's save fetches everything a page shows, wherever it lives, which is why the two can differ. *CS 168*'s front page shows the Creative Commons licence badge from `i.creativecommons.org`, so its save has the badge and its crawl doesn't. `unpack-site.py` reports such a file as `resource-not-held`; the book's HTML then points at the badge online, and its EPUB, which can't hold an image from another server, links to it by its alt text instead. To fetch images from another host as well, let wget leave the starting host and name the hosts it may go to:
+
+```bash
+wget --recursive --level=inf --no-parent --page-requisites \
+     --span-hosts --domains=textbook.cs168.io,i.creativecommons.org \
+     --wait=0.5 --random-wait --no-verbose \
+     --warc-file=cs168 \
+     https://textbook.cs168.io/
+```
+
+List only the hosts that serve the book's own files: `--span-hosts` applies to the links wget follows as well as to what pages show, and `--domains` is what keeps it from wandering. This variant hasn't been run against either book.
 
 wget obeys the site's `robots.txt`. If the crawl stops after the first page and the site's rules forbid crawlers, ask the site's owners before adding `-e robots=off`.
 
@@ -82,15 +96,20 @@ The crawler's options are from its documentation, and I couldn't run Docker wher
 
 Both books were crawled with the wget commands above and compared with the browser saves of the same sites.
 
-*A Data-Centric Introduction to Computing*: 80 pages either way, but the crawl's HTML still holds the TeX of 397 formulas that the `.mhtml` save had only as MathJax's rendering, so the EPUB has real MathML. Its 143 responses also came to a tenth of the save's size, since a save stores a copy of every shared asset per page.
+*A Data-Centric Introduction to Computing*: 80 pages either way, but the crawl's HTML still holds the TeX of 397 formulas that the `.mhtml` save had only as MathJax's rendering, so the EPUB has real MathML. The crawl is also smaller: 12 MB of responses against the save's 22 MB (8.7 MB against 11 MB compressed), since a save stores its own copy of an image in every page that shows it.
 
-*CS 168*: the same 62 pages with the same names and the same order, one asset fewer (a badge on another host, which the browser had already downloaded and a crawl inside the site doesn't fetch), and the order read from the site's real `<ul>` rather than what its scripts had built. Nine pages differ in their text, images, and formulas, because the book itself changed between the save and the crawl: a page that read "there are $p$ nodes" now reads "$D$".
+*CS 168*: the same 62 pages with the same names and the same order, one asset fewer (the licence badge from another host, described above), and the order read from the site's real `<ul>` rather than what its scripts had built. Nine pages differ in their text, images, and formulas, because the book itself changed between the save and the crawl: a page that read "there are $p$ nodes" now reads "$D$".
 
-## Unpacking it
+## Converting it
+
+Conversion is two steps. `convert.py` converts a directory of sources and doesn't read a WARC; `unpack-site.py` reads the WARC and writes that directory:
 
 ```bash
-python3 $T/bin/unpack-site.py ~/warcs/cs168/cs168.warc.gz -o ~/books/cs168-from-warc
-python3 $T/bin/unpack-site.py crawls/collections/cs168/cs168.wacz -o ~/books/cs168-from-wacz
+python3 $T/bin/unpack-site.py ~/warcs/cs168/cs168.warc.gz -o ~/books/cs168
+cd ~/books/cs168
+python3 $T/bin/convert.py
 ```
 
-Then convert as for any book: `cd` there and run `convert.py`.
+A WACZ from Browsertrix is unpacked the same way (`unpack-site.py crawls/collections/cs168/cs168.wacz -o …`), and the file is recognized by what it holds, whatever it's called.
+
+The directory is the book from then on. It holds the pages, their images once each, and a `project.yaml` with the order the site's menus gave, and it's where your corrections go: `project.yaml`, the sidecars, a `_pt/` of finished pages. Converting again reads the directory, not the WARC. Keep the WARC as the record of what was fetched and when. To start from a newer crawl, unpack it into a new directory (the unpacker won't write into one that isn't empty) and copy your `project.yaml` and sidecars across; `table-headers.csv` and `image-alt.csv` are keyed on a table's content and an image's path, so their rows still apply wherever those are unchanged.

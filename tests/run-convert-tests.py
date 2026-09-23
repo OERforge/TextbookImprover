@@ -789,7 +789,8 @@ def case_html_source(work):
          in re.sub(r"\s+", " ", epub_page)),
         ("a table of bare numbers is guessed to have no headers, and listed "
          "for review",
-         lambda: "needs-word" in read(mixed, "table-headers-report.csv")
+         lambda: "needs-source" in read(mixed, "table-headers-report.csv")
+         and "as <th> cells" in read(mixed, "table-headers-report.csv")
          and len(read(mixed, "table-headers-new.csv").splitlines()) >= 2),
         ("a page in _pt is copied as it stands",
          lambda: read(mixed, "html", "finished.html") == WEB),

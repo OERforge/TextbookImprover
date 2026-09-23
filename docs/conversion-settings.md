@@ -186,7 +186,7 @@ Prefilled sidecar rows for every data table the table_headers sidecar has no row
 
 **`reports.table_headers_report`**—`path`; default `table-headers-report.csv`
 
-What happened to every data table this run: what the sidecar declared, what the guess said and why, and a status of declared, new, blank, manual, needs-word, or unmatched.
+What happened to every data table this run: what the sidecar declared, what the guess said and why, and a status of declared, new, blank, manual, needs-source, or unmatched.
 
 **`reports.page_names_new`**—`path`; default `page-names-new.csv`
 

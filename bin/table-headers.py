@@ -251,7 +251,7 @@ def inferred_structure(grid):
 
 def no_header_text(grid):
     """Every cell is a value: nothing in the table could serve as a header,
-    so no sidecar value can help and the fix belongs in Word."""
+    so no sidecar value can help and the fix belongs in the source."""
     cells = [c for r in grid for c in r]
     return bool(cells) and tc.mostly_values(cells, ratio=1.0)
 
@@ -305,7 +305,7 @@ def tables_in_json(path):
             "guess": "" if value == "unknown" else value,
             "reason": reason, "caption-rows": "", "split-at": "",
             "anchors": [],
-            "needs-word": value == "none" and no_header_text(grid),
+            "needs-source": value == "none" and no_header_text(grid),
             "summary-row": "trailing row with no label" in reason,
             "json": path, "from-source": bool(source),
         })
@@ -373,7 +373,7 @@ def tables_in(path):
             "caption-rows": inferred[0],
             "split-at": inferred[1],
             "anchors": tc.anchors_before(body, tbl) if depth == 0 else [],
-            "needs-word": value == "none" and no_header_text(grid),
+            "needs-source": value == "none" and no_header_text(grid),
             "summary-row": "trailing row with no label" in reason,
         })
     return found
@@ -445,10 +445,12 @@ def decide(info, row):
             status, supplier = "declared", "sidecar"
         else:
             status, supplier = "blank", ("guess" if info["guess"] else "")
-    if status in ("new", "blank") and info["needs-word"]:
-        status = "needs-word"
+    if status in ("new", "blank") and info["needs-source"]:
+        status = "needs-source"
         notes.append("no cell in this table could serve as a header, so "
-                     "no value can help; author headers in Word")
+                     "no value can help; author headers "
+                     + ("in Word" if info["source"].lower().endswith(".docx")
+                        else "in the page, as <th> cells"))
     return declared, supplier, status, "; ".join(notes)
 
 

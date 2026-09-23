@@ -36,6 +36,7 @@ Versions are two-part and pre-1.0: breaking changes may land in any of them unti
 
 ### Changed
 
+- **`needs-word` is `needs-source`**, and its note says where the headers go: in Word for a `.docx`, as `<th>` cells in the page for HTML. A table no cell of which could be a header was reported as needing Word even when it came from an HTML page or an EPUB.
 - **The table census reads a table through a view**, not the OOXML itself: its grid, Word's table-look flags and style, and the rows marked to repeat as a header. A table from Pandoc's AST gets a view too (`view_from_pandoc`), so the header guess runs on a table read from HTML, EPUB, or anything else, by the same rules. Nothing changes for Word: every census and pre-pass check passes as it did. The guess isn't applied to HTML tables yet, or written to `table-headers-new.csv` for them.
 - **`build-cartridge.py --toc` reads an EPUB through `lib/epubsource.py`**, which `unpack-epub.py` uses too, so the two can't disagree about a book's outline.
 

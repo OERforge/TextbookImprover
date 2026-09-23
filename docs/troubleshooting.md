@@ -65,8 +65,9 @@ keys on the media path ignoring its extension.
 
 - **Header row text can't be invented.** A table whose cells hold nothing
   that could be a header—a grid of measurements—is reported as
-  `needs-word` in `table-headers-report.csv`, not fixed. Add the header in
-  Word, where it benefits every downstream format. Where the header text is
+  `needs-source` in `table-headers-report.csv`, not fixed. Add the header in
+  the source (in Word, or as `<th>` cells in an HTML page), where it benefits
+  every downstream format. Where the header text is
   there and only unmarked, a value in `table-headers.csv` is enough.
 - **Equation images stay images.** Rejoining MathSpeak identifiers is a
   mitigation. The real fix is authoring them as Word equations, which

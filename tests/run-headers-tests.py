@@ -187,7 +187,7 @@ def checks(workdir):
     yield "a first run exits 0", code == 0, err
     yield "the report has one row per data table", report is not None and len(report) == 7, \
         report and len(report)
-    yield "every table is new on a first run", all(r["status"] in ("new", "needs-word") for r in report), \
+    yield "every table is new on a first run", all(r["status"] in ("new", "needs-source") for r in report), \
         [r["status"] for r in report]
     yield "the new file has the same rows in sidecar form", new is not None and len(new) == 7, ""
     yield "the new file's columns are the sidecar's", new and list(new[0].keys()) == [
@@ -202,7 +202,7 @@ def checks(workdir):
     yield "a merged title row is written as caption-rows=1", titled and titled[0]["caption-rows"] == "1", \
         titled and titled[0]["caption-rows"]
     grid = by_label["Table 3.3"]
-    yield "a bare grid is needs-word", grid["status"] == "needs-word", grid["status"]
+    yield "a bare grid is needs-source, fixed in Word", grid["status"] == "needs-source" and "in Word" in grid["note"], grid["status"]
     inner = [r for r in report if r["label"].startswith("inside")]
     yield "a nested table borrows its container's label", inner and inner[0]["label"] == "inside Table 7.3", \
         [r["label"] for r in report]

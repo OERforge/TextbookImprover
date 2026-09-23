@@ -451,7 +451,7 @@ keys:
         description: >
           What happened to every data table this run: what the sidecar
           declared, what the guess said and why, and a status of
-          declared, new, blank, manual, needs-word, or unmatched.
+          declared, new, blank, manual, needs-source, or unmatched.
 
       page_names_new:
         type: path

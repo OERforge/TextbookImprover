@@ -894,6 +894,80 @@ def case_compare_blocks(work):
     ]
 
 
+def case_warc_direct(work):
+    """convert.py in a directory holding a web archive and nothing else
+    unpacks it and converts the pages; later runs leave the pages, the
+    book from then on, alone."""
+    import importlib.util
+    if not (importlib.util.find_spec("html5lib") or importlib.util.find_spec("lxml")):
+        return [("skip: unpacking needs html5lib or lxml", lambda: True)]
+    spec = importlib.util.spec_from_file_location(
+        "site_tests", os.path.join(HERE, "run-site-tests.py"))
+    site = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(site)
+    page = ('<html lang="en"><head><title>{t}</title></head><body><nav><ul>'
+            '<li><a href="/book/one.html">One</a></li>'
+            '<li><a href="/book/two.html">Two</a></li></ul></nav>'
+            '<main><h1>{t}</h1><p>The {t} page.</p></main></body></html>')
+    archive = b"".join(site.warc_record(
+        "https://example.org/book/%s.html" % name,
+        "200 OK\r\nContent-Type: text/html", page.format(t=name.title()).encode())
+        for name in ("one", "two"))
+    config = "targets:\n  html:\n    format: html\n"
+
+    def fresh(where, extra=None):
+        os.makedirs(where)
+        with open(os.path.join(where, "crawl.warc.gz"), "wb") as fh:
+            fh.write(archive)
+        with open(os.path.join(where, "conversion.yaml"), "w") as fh:
+            fh.write(config)
+        for name, text in (extra or {}).items():
+            with open(os.path.join(where, name), "w") as fh:
+                fh.write(text)
+
+    def run(where, *flags):
+        return subprocess.run(["python3", os.path.join(BIN, "convert.py"),
+                               "--quiet", *flags], cwd=where,
+                              capture_output=True, text=True,
+                              stdin=subprocess.DEVNULL)
+    fresh(work)
+    first = run(work)
+    pages = sorted(n for n in os.listdir(work) if n.endswith(".html"))
+    converted = sorted(n for n in os.listdir(os.path.join(work, "html"))
+                       if n.endswith(".html")) if os.path.isdir(
+        os.path.join(work, "html")) else []
+    corrected = ""
+    if pages:
+        path = os.path.join(work, pages[0])
+        with open(path, encoding="utf-8") as fh:
+            text = fh.read()
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(text.replace("page.", "page, corrected."))
+        second = run(work)
+        with open(os.path.join(work, "html", pages[0]), encoding="utf-8") as fh:
+            corrected = fh.read()
+    kept = work + "-kept"
+    fresh(kept, {"project.yaml": "project:\n  title: Mine\n"})
+    run(kept)
+    checked = work + "-checked"
+    fresh(checked)
+    check = run(checked, "--check-only")
+    return [
+        ("a directory holding only a WARC is unpacked into it, project.yaml "
+         "and all", lambda: len(pages) == 2 and os.path.isfile(
+             os.path.join(work, "project.yaml"))),
+        ("and its pages are converted in the same run",
+         lambda: len(converted) >= 2),
+        ("a later run converts the corrected page and doesn't unpack again",
+         lambda: "corrected" in corrected),
+        ("a project.yaml already there is kept, the unpacker's beside it",
+         lambda: "Mine" in open(os.path.join(kept, "project.yaml")).read()
+         and os.path.isfile(os.path.join(kept, "project-unpacked.yaml"))),
+        ("--check-only unpacks nothing",
+         lambda: not [n for n in os.listdir(checked) if n.endswith(".html")]),
+    ]
+
+
 def case_html_source(work):
     """An HTML page is a source when the book says so, and converting
     what this pipeline wrote changes nothing."""
@@ -1371,6 +1445,7 @@ CASES = [
     ("raw HTML in a Markdown source", case_markdown_html),
     ("title rows and bands, split and grouped", case_bands),
     ("compare-output sees lists and blockquotes", case_compare_blocks),
+    ("a web archive converted directly", case_warc_direct),
     ("a hand-written page", case_hand_written),
     ("several targets", case_targets),
     ("arguments passed to the packager", case_passthrough),

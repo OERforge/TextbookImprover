@@ -126,14 +126,18 @@ Both books were crawled with the wget commands above and compared with the brows
 
 ## Converting it
 
-Conversion is two steps. `convert.py` converts a directory of sources and doesn't read a WARC; `unpack-site.py` reads the WARC and writes that directory:
+Put the WARC in a directory of its own and run `convert.py` there. Finding a web archive and no sources, it unpacks the archive into the directory, then converts the pages:
 
 ```bash
-python3 $T/bin/unpack-site.py ~/warcs/cs168/cs168.warc.gz -o ~/books/cs168
+mkdir ~/books/cs168 && cp ~/warcs/cs168/cs168.warc.gz ~/books/cs168/
 cd ~/books/cs168
 python3 $T/bin/convert.py
 ```
 
-A WACZ from Browsertrix is unpacked the same way (`unpack-site.py crawls/collections/cs168/cs168.wacz -o …`), and the file is recognized by what it holds, whatever it's called.
+A WACZ from Browsertrix works the same way, and the file is recognized by what it holds, whatever it's called. A `project.yaml` already in the directory is kept, with the unpacker's written beside it as `project-unpacked.yaml`, and `--check-only` says what it would unpack without doing it. The unpacking is `unpack-site.py`'s, which you can also run yourself, into a new directory, when you need its options (a generator's profile, or whole pages for an offline copy):
 
-The directory is the book from then on. It holds the pages, their images once each, and a `project.yaml` with the order the site's menus gave, and it's where your corrections go: `project.yaml`, the sidecars, a `_pt/` of finished pages. Converting again reads the directory, not the WARC. Keep the WARC as the record of what was fetched and when. To start from a newer crawl, unpack it into a new directory (the unpacker won't write into one that isn't empty) and copy your `project.yaml` and sidecars across; `table-headers.csv` and `image-alt.csv` are keyed on a table's content and an image's path, so their rows still apply wherever those are unchanged.
+```bash
+python3 $T/bin/unpack-site.py ~/warcs/cs168/cs168.warc.gz -o ~/books/cs168
+```
+
+The directory is the book from then on. It holds the pages, their images once each, and a `project.yaml` with the order the site's menus gave, and it's where your corrections go: `project.yaml`, the sidecars, a `_pt/` of finished pages. Converting again reads the directory, not the WARC, and says it didn't read the archive: once there are pages, they're the sources, so a correction to one is never overwritten. Keep the WARC as the record of what was fetched and when. To start from a newer crawl, unpack it into a new directory (the unpacker won't write into one that isn't empty) and copy your `project.yaml` and sidecars across; `table-headers.csv` and `image-alt.csv` are keyed on a table's content and an image's path, so their rows still apply wherever those are unchanged.

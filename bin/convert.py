@@ -115,6 +115,60 @@ def say(text):
     print(text, file=sys.stderr)
 
 
+def unpack_archives(base, check_only=False):
+    """A web archive -- a WARC, compressed or not, or a WACZ, recognized
+    by its first bytes -- in a directory with no sources is unpacked there
+    first, as unpack-site.py would, and its pages are then converted. From
+    then on the pages are the book: they're where corrections are made, so
+    a later run, finding sources, never reads the archive again. A
+    project.yaml already here is kept, and the unpacker's is written
+    beside it as project-unpacked.yaml. For the unpacker's options (a
+    profile, whole pages), run unpack-site.py itself."""
+    import sitesource
+    skip = SOURCE_EXTENSIONS + (".yaml", ".yml", ".csv", ".json", ".css",
+                                ".lua", ".txt", ".pdf", ".epub")
+    archives = sorted(p for p in glob.glob(os.path.join(base, "*"))
+                      if os.path.isfile(p) and not p.lower().endswith(skip)
+                      and sitesource.is_warc(p))
+    if not archives:
+        return
+    names = ", ".join(os.path.basename(p) for p in archives)
+    if any(p.lower().endswith(SOURCE_EXTENSIONS)
+           for p in glob.glob(os.path.join(base, "*"))):
+        say(f"{names}: not read, since this directory has sources, which "
+            "are the book once an archive is unpacked. To unpack it afresh, "
+            "use unpack-site.py into a new directory.")
+        return
+    if check_only:
+        say(f"{names} would be unpacked here and its pages converted.")
+        return
+    work = tempfile.mkdtemp(prefix=".unpacking-", dir=base)
+    try:
+        run = subprocess.run([sys.executable, os.path.join(HERE, "unpack-site.py"),
+                              *archives, "-o", work],
+                             capture_output=True, text=True)
+        if run.returncode != 0:
+            die(f"Unpacking {names} failed:\n"
+                + (run.stderr.strip() or run.stdout.strip()))
+        for name in sorted(os.listdir(work)):
+            target = os.path.join(base, name)
+            if name == "project.yaml" and os.path.exists(target):
+                target = os.path.join(base, "project-unpacked.yaml")
+                say("project.yaml was already here and is kept; the "
+                    "unpacker's is project-unpacked.yaml.")
+            if os.path.exists(target):
+                die(f"{name} is already here; unpacking {names} would "
+                    "overwrite it. Unpack with unpack-site.py into a new "
+                    "directory instead.")
+            shutil.move(os.path.join(work, name), target)
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+    pages = len(glob.glob(os.path.join(base, "*.html")))
+    say(f"Unpacked {names}: {pages} page(s), which are the book from now on. "
+        "Correct them, not the archive: later runs don't read it again. "
+        "unpack-report.csv says what the unpacking found.")
+
+
 def die(text, code=1):
     say(text)
     sys.exit(code)
@@ -1975,6 +2029,7 @@ def main():
     if tuple(int(p) for p in re.findall(r"\d+", version)[:3]) < (3, 9):
         die(f"Pandoc {version} is too old; 3.9 or later is required.")
 
+    unpack_archives(base, check_only=args.check_only)
     targets, project = load_targets(base, args.allow_unknown_keys)
     global PASSTHROUGH
     PASSTHROUGH = str(project.get("passthrough", "_pt") or "").strip("/")

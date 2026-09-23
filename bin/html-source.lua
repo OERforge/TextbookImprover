@@ -63,6 +63,15 @@ nothing, which is the test.
     title comes from project.yaml, which convert.py passes in BOOK_TITLE.
     Nothing is dropped from a title that is only the book's name. A
     page with an h1 of its own takes that as its title anyway.
+  - Bold and italic written as a style (<span style="font-weight:
+    bold">, as Scribble and many editors' exports write them) are Strong
+    and Emph, which is what the reader makes of <b> and <i>: a header
+    row bold that way is a header row the census can see.
+  - A table column with nothing in any of its cells (Scribble puts one
+    between every pair of real columns, to space them) is dropped; a
+    cell spanning it narrows by one. A screen reader announces every
+    empty cell, and the column carried nothing.
+  - A table with nothing in it at all is dropped.
   - Raw HTML is html-raw.lua's, which runs before this filter on a
     source and alone on a finished page.
   - An aria-describedby or aria-labelledby that names an id the page no
@@ -127,16 +136,141 @@ local function lift_body_head(tbl)
   return true
 end
 
+local function styled(span)
+  local style = (span.attributes.style or ''):lower()
+  local bold = style:match('font%-weight%s*:%s*bold') or
+    style:match('font%-weight%s*:%s*bolder') or
+    style:match('font%-weight%s*:%s*[6-9]00')
+  local italic = style:match('font%-style%s*:%s*italic') or
+    style:match('font%-style%s*:%s*oblique')
+  if not bold and not italic then return nil end
+  local content = span.content
+  if italic then content = { pandoc.Emph(content) } end
+  if bold then content = { pandoc.Strong(content) } end
+  span.attributes.style = nil
+  local others = false
+  for _ in pairs(span.attributes) do others = true; break end
+  if span.identifier == '' and #span.classes == 0 and not others then
+    return content
+  end
+  span.content = content
+  return span
+end
+
+local function blank_cell(cell)
+  if pandoc.utils.stringify(cell.contents):gsub('[%s\u{00A0}]', '') ~= ''
+  then
+    return false
+  end
+  local holds = false
+  pandoc.Blocks(cell.contents):walk({
+    Image = function() holds = true end, Math = function() holds = true end,
+    RawInline = function() holds = true end, Table = function() holds = true end,
+  })
+  return not holds
+end
+
+local function table_rows(tbl)
+  local rows = {}
+  for _, row in ipairs(tbl.head.rows) do rows[#rows + 1] = row end
+  for _, body in ipairs(tbl.bodies) do
+    for _, row in ipairs(body.head) do rows[#rows + 1] = row end
+    for _, row in ipairs(body.body) do rows[#rows + 1] = row end
+  end
+  for _, row in ipairs(tbl.foot.rows) do rows[#rows + 1] = row end
+  return rows
+end
+
+-- Drop every column whose cells are all empty, or span it along with a
+-- column that stays. Returns true when the table changed.
+local function drop_empty_columns(tbl)
+  local rows = table_rows(tbl)
+  local ncols = #tbl.colspecs
+  if ncols < 2 then return false end
+  local at = {}                              -- at[r][c] = { cell, row, first }
+  for r = 1, #rows do at[r] = at[r] or {} end
+  for r, row in ipairs(rows) do
+    local c = 1
+    for index, cell in ipairs(row.cells) do
+      while at[r][c] do c = c + 1 end
+      for dr = 0, cell.row_span - 1 do
+        for dc = 0, cell.col_span - 1 do
+          at[r + dr] = at[r + dr] or {}
+          at[r + dr][c + dc] = { cell = cell, row = r, index = index,
+                                 first = (dr == 0 and dc == 0) }
+        end
+      end
+      c = c + cell.col_span
+    end
+  end
+  local empty = {}
+  for c = 1, ncols do
+    local lone, ok = 0, true
+    for r = 1, #rows do
+      local slot = at[r][c]
+      if slot then
+        if slot.cell.col_span == 1 then
+          if blank_cell(slot.cell) then lone = lone + 1 else ok = false end
+        end
+      end
+    end
+    empty[c] = ok and lone > 0
+  end
+  local kept = 0
+  for c = 1, ncols do if not empty[c] then kept = kept + 1 end end
+  if kept == ncols or kept == 0 then return false end
+  local drop, narrow = {}, {}
+  for c = 1, ncols do
+    if empty[c] then
+      for r = 1, #rows do
+        local slot = at[r][c]
+        if slot and slot.first and slot.cell.col_span == 1 then
+          drop[slot.cell] = true
+        elseif slot and slot.cell.col_span > 1 and r == slot.row then
+          narrow[slot.cell] = (narrow[slot.cell] or 0) + 1
+        end
+      end
+    end
+  end
+  for _, row in ipairs(rows) do
+    local cells = pandoc.List({})
+    for _, cell in ipairs(row.cells) do
+      if not drop[cell] then
+        if narrow[cell] then cell.col_span = math.max(1, cell.col_span - narrow[cell]) end
+        cells:insert(cell)
+      end
+    end
+    row.cells = cells
+  end
+  local specs = {}
+  for c = 1, ncols do if not empty[c] then specs[#specs + 1] = tbl.colspecs[c] end end
+  tbl.colspecs = specs
+  return true
+end
+
+local function empty_table(tbl)
+  for _, row in ipairs(table_rows(tbl)) do
+    for _, cell in ipairs(row.cells) do
+      if not blank_cell(cell) then return false end
+    end
+  end
+  return pandoc.utils.stringify(tbl.caption.long) == ''
+end
+
 function Table(tbl)
+  if empty_table(tbl) then return {} end
   drop_obsolete(tbl)
+  drop_empty_columns(tbl)
   if tbl.attr.attributes[MARKER_ATTR] then return tbl end
   lift_body_head(tbl)
   local row = #tbl.head.rows > 0
   local column = header_columns(tbl) > 0
   local value = (row and column and 'both') or (row and 'first-row')
     or (column and 'first-column') or nil
-  if value == nil then return nil end
-  tbl.attr.attributes[MARKER_ATTR] = value
+  -- Returned even with nothing to declare: a handler that returns nil
+  -- keeps the table as it was read, discarding the columns dropped and
+  -- the attributes removed above.
+  if value ~= nil then tbl.attr.attributes[MARKER_ATTR] = value end
   return tbl
 end
 
@@ -273,6 +407,8 @@ end
 -- (<span href="http://purl.org/dc/dcmitype/Text" rel="dct:type">). The
 -- HTML writer passes it through, and XHTML allows it on no such element.
 function Span(span)
+  local styled_span = styled(span)
+  if styled_span then return styled_span end
   local changed = drop_obsolete(span)
   if span.attributes.href then
     span.attributes.href = nil

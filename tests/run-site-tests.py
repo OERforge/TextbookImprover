@@ -144,6 +144,15 @@ SCRIBBLE_TABLES = (
     '</tr></table></td></tr></table>'
     '<table class="TwoColumnAsRows"><tr><td>Python</td><td><pre>a = 1</pre>'
     '</td></tr><tr><td>Pyret</td><td><pre>a = 1</pre></td></tr></table>'
+    '<table><tr><td><span class="hspace">\u00a0\u00a0</span><span class="stt">'
+    'b1 = box(7)</span></td></tr><tr><td><span class="stt">b2 = b1</span></td>'
+    '</tr></table>'
+    '<table><tr><td><a class="toptoclink" href="#p1">I<span class="hspace">'
+    '\u00a0</span>Part</a></td></tr><tr><td><span class="hspace">\u00a0</span>'
+    '</td></tr><tr><td><span class="hspace">\u00a0</span><a class="toclink" '
+    'href="#c1">1 Chapter</a></td></tr></table>'
+    '<table><tr><td>T(k)</td><td>=</td><td>T(k-1) + c</td></tr><tr><td></td>'
+    '<td>=</td><td>T(k-2) + 2c</td></tr></table>'
     '<table class="RktBlk"><tr><td>(define x</td></tr><tr><td>\u00a0\u00a01)</td></tr>'
     '</table>'
     '<table><tr><td><a class="toclink" href="#a">2.1 One</a></td></tr>'
@@ -305,12 +314,17 @@ def case_mhtml(work):
          lambda: "PyretReplInteraction" not in tables
          and "<pre>1 == 1</pre>" in tables and "<pre>true</pre>" in tables
          and "<pre>2 == 2</pre>" in tables),
+        ("code a line a row is one <pre>; the contents, a link a row, a "
+         "list; a derivation lined up at its equals signs, a layout table",
+         lambda: "<pre>  b1 = box(7)\nb2 = b1</pre>" in tables
+         and '<ul class="contents"><li><a class="toptoclink"' in tables
+         and tables.count("<li>") == 2 and 'role="presentation"' in tables),
         ("a Racket block laid out a line a row is one <pre>, indentation "
          "kept",
          lambda: "<pre>(define x\n  1)</pre>" in tables),
         ("a section's own table of contents goes, a verbatim table is one "
          "<pre>",
-         lambda: "toclink" not in tables
+         lambda: "2.1 One" not in tables and "2.2 Two" not in tables
          and "<pre>line one\nline two</pre>" in tables),
         ("a comparison stays a table, its language row the header",
          lambda: '<th scope="col">Python</th>' in tables

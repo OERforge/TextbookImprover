@@ -285,6 +285,8 @@ def tables_in_json(path):
     found = []
     for index, table in enumerate(pandoc_tables(doc["blocks"], [])):
         attributes = dict(table["c"][0][2])
+        if attributes.get("role") in ("presentation", "none"):
+            continue                  # a layout table, and says so
         view = tc.view_from_pandoc(table)
         kind, ev, nrows, ncols = tc.classify(view)
         value, reason = tc.explain(view, kind, ev)

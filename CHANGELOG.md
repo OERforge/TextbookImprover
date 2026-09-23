@@ -48,6 +48,8 @@ Versions are two-part and pre-1.0: breaking changes may land in any of them unti
 
 ### Fixed
 
+- **A header row bold by its style is a header row.** `<span style="font-weight: bold">` is read as bold (italic likewise), so the header guess sees what `<b>` would have shown it; and a table column with nothing in any cell, like the spacers Scribble puts between columns, is dropped, as is a table with nothing in it. DCIC's last 19 tables without headers were these, and three Scribble shapes: code a line a row (now a `<pre>`), the contents a link a row (a list), and derivations lined up at their equals signs (layout tables).
+- **Changes made to an HTML source's table are kept when it has no headers to declare.** The reading filter discarded its own work on such a table, obsolete attributes included.
 - **A video's frame links to the video in the EPUB**, not to its player. Opened on its own, a YouTube embed address shows a "Video unavailable" page that only links onward; the link now goes to the video's own page (a start time and a playlist kept), and a Vimeo player's to its video. HTML keeps the player.
 - **The last UK-spelled names are US.** Inside the filter, `normalise()` and `NORMALISE_MATH_ALT` are `normalize()` and `NORMALIZE_MATH_ALT`, and a table with no label is reported as `(unlabeled)`.
 - **A frame keeps pointing at what it shows.** An archive that recorded a video's player had the frame rewritten to a local copy of the player.

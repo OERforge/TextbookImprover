@@ -142,11 +142,28 @@ def scribble_tables(content):
     when the languages are columns (TwoColumn), each row's first cell
     when they are rows (TwoColumnAsRows).
 
+    Three more have no class to go by, only their shape: code a line a
+    row (each line a span.stt) is one <pre>; the book's contents, a link
+    a row and nothing else, is a list; and a derivation laid out to line
+    up its equals signs (T(k) | = | T(k-1) + c, and a relation alone in
+    the middle column of every row) is marked a layout table.
+
     A REPL interaction nests: its result can hold another. So its cells
     are moved, not copied, and an inner table keeps a parent in the tree
     to be rewritten in turn. Returns how many of each were changed."""
     parent_of = hp.parents(content)
-    counts = {"repl": 0, "local-toc": 0, "verbatim": 0, "comparison": 0}
+    counts = {"repl": 0, "local-toc": 0, "verbatim": 0, "comparison": 0,
+              "code": 0, "contents": 0, "derivation": 0}
+    relations = {"=", "<", ">", "\u2264", "\u2265", "\u2248", "\u2261",
+                 "\u2192", "\u21d2", "<=", ">="}
+
+    def own_rows(table):
+        return [[c for c in r if hp.local(c.tag) in ("td", "th")]
+                for r in table.iter() if hp.local(r.tag) == "tr"
+                and _owner(r, parent_of) is table]
+
+    def spaced_text(element):
+        return "".join(element.itertext()).replace("\u00a0", " ")
 
     def short_label(cell):
         return len(hp.text_of(cell)) <= 20 and not any(
@@ -177,6 +194,43 @@ def scribble_tables(content):
                 for row in table.iter() if hp.local(row.tag) == "tr")
             _replace(table, [pre], parent_of)
             counts["verbatim"] += 1
+        elif not classes and own_rows(table) and all(
+                len(r) == 1 for r in own_rows(table)) and all(
+                "".join(t for s in r[0].iter()
+                        if hp.local(s.tag) == "span"
+                        and "stt" in (s.get("class") or "").split()
+                        for t in s.itertext()).strip()
+                == spaced_text(r[0]).strip() != ""
+                for r in own_rows(table)):
+            pre = table.makeelement("pre", {})
+            pre.text = "\n".join(spaced_text(r[0]).rstrip()
+                                  for r in own_rows(table))
+            _replace(table, [pre], parent_of)
+            counts["code"] += 1
+        elif not classes and own_rows(table) and all(
+                not spaced_text(r[0]).strip() and len(r) == 1
+                or len(r) == 1 and len([a for a in r[0].iter()
+                                        if hp.local(a.tag) == "a"]) == 1
+                and " ".join(spaced_text(r[0]).split()) == " ".join(
+                    spaced_text(next(a for a in r[0].iter()
+                                     if hp.local(a.tag) == "a")).split())
+                for r in own_rows(table)):
+            listing = table.makeelement("ul", {"class": "contents"})
+            for r in own_rows(table):
+                if not spaced_text(r[0]).strip():
+                    continue                     # a spacer between parts
+                item = listing.makeelement("li", {})
+                link = next(a for a in r[0].iter() if hp.local(a.tag) == "a")
+                link.tail = None
+                item.append(link)
+                listing.append(item)
+            _replace(table, [listing], parent_of)
+            counts["contents"] += 1
+        elif not classes and own_rows(table) and all(
+                len(r) == 3 and spaced_text(r[1]).strip() in relations
+                for r in own_rows(table)):
+            table.set("role", "presentation")
+            counts["derivation"] += 1
         elif "TwoColumn" in classes or "TwoColumnAsRows" in classes:
             rows = [r for r in table.iter() if hp.local(r.tag) == "tr"
                     and _owner(r, parent_of) is table]
@@ -700,7 +754,7 @@ def mathjax_math(content):
     not the TeX; an archive of the site has the TeX, which is the whole
     reason to prefer one.
 
-    Only text is looked at, and never inside code: \( is a character
+    Only text is looked at, and never inside code: \\( is a character
     pair a programming book may print, and Pandoc's own
     tex_math_single_backslash extension would read it as math there too
     (measured). Returns how many formulas were found."""

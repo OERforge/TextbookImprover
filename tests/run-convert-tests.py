@@ -533,6 +533,11 @@ HEADED = """<!DOCTYPE html><html lang="en"><head><title>Data</title></head>
 <tr><td>Alpha</td><td>9.8</td></tr><tr><td>Beta</td><td>5.3</td></tr></table>
 <table><thead><tr><th>Country</th><th>GDP</th></tr></thead>
 <tbody><tr><td>Brazil</td><td>3,153</td></tr></tbody></table>
+<table><tr><td><span style="font-weight: bold">Method</span></td>
+<td><span class="hspace">&nbsp;&nbsp;</span></td>
+<td><span style="font-weight: bold">Cost</span></td></tr>
+<tr><td>Memoization</td><td>&nbsp;</td><td>Space</td></tr></table>
+<table><tr><td></td></tr></table>
 <table><tr><td>Government purchases</td><td>$120 billion</td></tr>
 <tr><td>Depreciation</td><td>$40 billion</td></tr>
 <tr><td>Consumption</td><td>$400 billion</td></tr></table>
@@ -570,9 +575,16 @@ def case_html_headers(work):
          lambda: '<th scope="row">Government purchases</th>' in page),
         ("the report says who supplied each: the guess, or the page",
          lambda: sorted(r["supplier"] for r in report)
-         == ["guess", "guess", "source"]),
+         == ["guess", "guess", "guess", "source"]),
         ("every HTML table is in the new-rows file, keyed",
-         lambda: len(new_rows.splitlines()) == 4),
+         lambda: len(new_rows.splitlines()) == 5),
+        ("bold written as a style is bold, a column with nothing in it goes, "
+         "and the guess then sees the header row",
+         lambda: re.search(r'<th scope="col">(<strong>)?Method', page)
+         and "&nbsp;" not in page.split("Method")[1].split("</table>")[0]
+         and page.split("Method")[1].split("</table>")[0].count("<td") == 2),
+        ("a table with nothing in it is dropped",
+         lambda: "<td></td>" not in page),
         ("a sidecar row outranks the page's own <th>",
          lambda: '<th scope="col">Country</th>' in page
          and "Country</th>" not in again and "<td>Country</td>" in again),

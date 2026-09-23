@@ -353,12 +353,14 @@ def case_asciidoc(work):
     with open(os.path.join(work, "images", "lock.png"), "wb") as fh:
         fh.write(ONE_PIXEL)
     files = {
-        "index.adoc": "= The Book\n:imagesdir: images\n:toc: left\n\n"
+        "index.adoc": "= The Book\nAnn Author <ann@example.org>; Bo Writer\n"
+                      ":imagesdir: images\n:toc: left\n:lang: en-GB\n\n"
                       "include::one.adoc[]\n\ninclude::two.adoc[]\n",
         "one.adoc": "= Chapter One\n\n== Keys\n\nSee <<Locks>> and "
                     "<<Chapter Two>>.\n\nimage::lock.png[A lock]\n",
         "two.adoc": "= Chapter Two\n\n[[locks-id]]\n== Locks\n\nBack to "
-                    "<<Keys>>.\n",
+                    "<<Keys>>. Write to mailto:ann@example.org[Ann], or "
+                    "try the `ftp://` scheme.\n",
     }
     for name, text in files.items():
         with open(os.path.join(work, name), "w", encoding="utf-8") as fh:
@@ -387,6 +389,16 @@ def case_asciidoc(work):
          and 'href="one.html#_keys"' in read(work, "html", "two.html")),
         ("the master's order is offered as contents",
          lambda: sample.index("- one") < sample.index("- two")),
+        ("and its title, authors, and language with it",
+         lambda: "title: The Book" in sample
+         and "- Ann Author" in sample and "- Bo Writer" in sample
+         and "language: en-GB" in sample),
+        ("a mailto: link keeps its scheme; a scheme in code is code, not a "
+         "link",
+         lambda: 'href="mailto:ann@example.org"' in read(work, "html",
+                                                         "two.html")
+         and "<code>ftp://</code>" in read(work, "html", "two.html")
+         and 'href="ftp://"' not in read(work, "html", "two.html")),
     ]
 
 

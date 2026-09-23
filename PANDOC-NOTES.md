@@ -66,6 +66,12 @@ What Pandoc does, as read from its source or established by test, for the questi
 
 **The reader is lenient where an XML parser is not.** An EPUB content document with an unclosed `<br>` (Asciidoctor's, in one of our samples) reads without complaint; `xml.etree` refuses the file and epubcheck calls it fatal (RSC-016). Measured.
 
+**`<details>` and `<summary>` have no element.** With `raw_html` they arrive as raw fragments, a tag at a time, and a summary's text between them becomes a `Para`, which is invalid inside `<summary>` once written back. Without `raw_html` the tags are dropped and the answer they hid sits open on the page. Measured; the Markdown reader does the same.
+
+**Pandoc's own math markup doesn't read back as math.** `<span class="math inline">\(k^2\)</span>`, which the HTML writer produces for MathJax, is read as a `Span` with those classes holding the literal text `\(k^2\)`. Measured. What does read as math is `<script type="math/tex">` (MathJax 2's markup), or the delimiters themselves with `tex_math_single_backslash`, next.
+
+**`tex_math_single_backslash` finds math inside `<code>`.** `<code>\(not math\)</code>` comes back as `Math InlineMath "not math"`. Measured. So the extension is unsafe for a programming book; `unpack-site.py` converts MathJax's delimiters itself, outside code, into `<script type="math/tex">`. Candidate upstream report.
+
 ## The EPUB reader
 
 **The spine is concatenated into one document**, each file preceded by an empty `Span` whose id is the file's name, and non-linear items are dropped (`parseSpine`). Only `dc:` elements become metadata: no `meta property=` (so none of the `schema:accessibility*` claims), and each file's own `<title>` and `lang` are lost. Read from the source.
@@ -103,6 +109,20 @@ What Pandoc does, as read from its source or established by test, for the questi
 
 **Table attributes** are written and read on the caption line (`: Caption {#id}`) and, for us, on a wrapping div.
 
+**The reader parses `<span>` and `<div>` and keeps every other tag raw, one tag at a time.** `x<sup>2</sup>` is a raw `<sup>`, `Str "2"`, and a raw `</sup>`; `<span href="…" rel="…">` is a `Span` whose `href` is an ordinary attribute, which the HTML writer then passes through where XHTML forbids it. Measured. `markdown-html.lua` reassembles the tags and reads each element with the HTML reader.
+
+## The AsciiDoc reader
+
+The reader is the `asciidoc` library (jgm/asciidoc-hs), not part of Pandoc's tree, so everything here is measured on 3.11 against a real Asciidoctor book (Computer Systems Security) rather than read from source.
+
+**`include::` is followed**, each included file wrapped in a `Div` with class `included`. **But through a master file, an included chapter's `= Title` is lost**: it's neither a heading nor metadata. Read on its own, a chapter's title is its metadata and its `==` sections are level 1. So `convert.py` reads each included file as a source and takes the master only for its order and header.
+
+**`:leveloffset:` is ignored**, **`:imagesdir:` is kept as metadata and not applied** to image paths, and the document's other attributes (`toc`, `icons`, `stylesheet`, `sectnums`) arrive as metadata too.
+
+**A cross-reference by title isn't resolved.** `<<Unix File Permissions>>` and `<<Malware>>` are links whose fragment is the title itself; Asciidoctor resolves them to the section's id or the chapter. 54 in one book.
+
+**`mailto:someone@example.org[Name]` loses its scheme**: a link to a file called `someone@example.org`. **A code span holding a URL scheme** (`` `ftp://` ``) becomes a link to `ftp://` around the code.
+
 ## The EPUB writer
 
 **Chapter files are titled by file name**: the template's `<title>$pagetitle$</title>` is filled with `ch002.xhtml` by the writer's own variables (`Writers/EPUB.hs`), and `title-meta` is empty in a chapter. Read from the source and measured. Our assembler rewrites each `<title>` from the chapter's heading after the archive exists.
@@ -112,6 +132,8 @@ What Pandoc does, as read from its source or established by test, for the questi
 **`--css` replaces `epub.css`** rather than adding to it. **Chapter splitting is by heading level only.** **The heading's id goes on the `<section>`**, not the heading. **Every image gets an `alt`**, so decorative and undescribed look alike. **Footnotes are `<aside epub:type="footnote">` with no number.** **A footnote number restarts per chapter file.** **The cover is an SVG `<image>` with no text alternative.** **The footnotes `<section>` has no heading.** All measured.
 
 **Several JSON inputs concatenate; the last file's metadata wins.** Measured.
+
+**An image the EPUB writer can't fetch is written with `../` before its source**, as if it were a path relative to the chapter's directory: `../https://example.invalid/badge.png`. Measured. An EPUB can't hold a remote image anyway, so `target-blocks.lua` turns one into a link before the writer sees it.
 
 ## The HTML writer
 
@@ -124,6 +146,8 @@ What Pandoc does, as read from its source or established by test, for the questi
 
 **`AttributeList` is not a plain table**: `next()` on it errors; iterate with `pairs`. Measured. **A filter's table of attributes is iterated in hash order**, so build an `Attr` from a list of pairs for stable output. Measured. **Filters in a returned list run in order**, each over the whole document; a handler returning `{}` removes the element, `nil` leaves it. **`pandoc.read(text, 'html')`** reads MathML into `Math` and `<thead>` into head rows; **`pandoc.write(doc, 'html', {html_math_method = 'mathml'})`** writes math as MathML. Measured.
 
+**A filter file that returns a table of filters ignores its global functions.** `target-blocks.lua` ends `return { {Div = …}, {Meta = …} }`, so a global `function Image` added to it never ran, and nothing said so. Measured, the hard way. A handler has to be in the returned table.
+
 ## Upstream
 
-Filed: #11869 (ScreenTip). Candidates, tracker searched, not filed: body-level bookmarks dropped (#6178 and #6781 unread, rate-limited); the orphan-anchor removal deleting cross-file targets (no search yet); the Markdown writer dropping spans without a warning; the EPUB chapter `<title>`.
+Filed: #11869 (ScreenTip). Candidates, tracker not yet searched: the HTML reader's `tex_math_single_backslash` reading math inside `<code>`; and, for jgm/asciidoc-hs rather than Pandoc, a chapter's title lost through `include::`, `:leveloffset:` and `:imagesdir:` not applied, cross-references by title unresolved, and `mailto:` dropped. Candidates, tracker searched, not filed: body-level bookmarks dropped (#6178 and #6781 unread, rate-limited); the orphan-anchor removal deleting cross-file targets (no search yet); the Markdown writer dropping spans without a warning; the EPUB chapter `<title>`.

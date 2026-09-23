@@ -42,6 +42,8 @@ Versions are two-part and pre-1.0: breaking changes may land in any of them unti
 
 ### Fixed
 
+- **An AsciiDoc book's title and authors reach the first run's sample.** The master file's header (its `=` title, the author line beneath, and `:lang:`) was read by nothing, so a book with no `project.yaml` came out "Untitled"; `contents-sample.yaml` now holds them with the order.
+- **Two AsciiDoc links are repaired**: `mailto:` links keep their scheme, which Pandoc's reader drops, and a code span holding a URL scheme is no longer a link to it.
 - **A page's title no longer repeats the book's name.** A page whose `<title>` ends with the book's own title after a separator (`Copyright -- Information Systems for Business and Beyond`) keeps only its own part, the book's title being the one in `project.yaml`. It's how a Pressbooks export titles every page, and a page with no heading of its own kept it.
 - **A WARC is recognized by its first bytes**, not by its name, since an upload or a download may have renamed it.
 - **A menu entry keeps its own words.** "Home" and "Contents" were treated as directions to a page rather than names of one, so the page's own title was used instead, with the site's name still on it.

@@ -389,6 +389,7 @@ def asciidoc_sources(base):
     source in its own right, whose title is its = line, and the order
     it includes them in is the book's order."""
     sources, order, masters, imagesdir = [], [], [], ""
+    header = {}
     for path in sorted(glob.glob(os.path.join(base, "*.adoc"))
                        + glob.glob(os.path.join(base, "*.asciidoc"))):
         name = os.path.basename(path)
@@ -402,13 +403,36 @@ def asciidoc_sources(base):
             masters.append(name)
             m = re.search(r"^:imagesdir:\s*(\S+)\s*$", text, re.M)
             imagesdir = imagesdir or (m.group(1) if m else "")
+            header = header or asciidoc_header(text)
             order += [n for n in included if n not in order]
         else:
             sources.append(name)
     for name in masters:
         say(f"{name} includes other files, so it is the book's order and "
             "not a page: each file it includes is read on its own.")
-    return sources, order, imagesdir
+    return sources, order, imagesdir, header
+
+
+def asciidoc_header(text):
+    """What a master file's header says about the book: its = title, the
+    author line beneath it (names separated by ";", an email in angle
+    brackets after each), and :lang:. None of it reaches the book any
+    other way, since the master isn't read as a page."""
+    found = {}
+    lines = text.replace("\r\n", "\n").split("\n")
+    for index, line in enumerate(lines):
+        if line.startswith("= ") and "title" not in found:
+            found["title"] = line[2:].strip()
+            after = lines[index + 1].strip() if index + 1 < len(lines) else ""
+            if after and not after.startswith((":", "//", "=")):
+                names = [re.sub(r"\s*<[^>]*>\s*$", "", part).strip()
+                         for part in after.split(";")]
+                found["authors"] = [n for n in names if n]
+            break
+    m = re.search(r"^:lang:\s*(\S+)\s*$", text, re.M)
+    if m:
+        found["language"] = m.group(1)
+    return found
 
 
 def read_asciidoc_to_json(base, docs, env, imagesdir=""):
@@ -504,19 +528,27 @@ def resolve_asciidoc_xrefs(base, stems):
     return resolved
 
 
-def write_order_sample(order):
-    """The order a master AsciiDoc file includes its chapters in, as
-    contents for project.yaml. Not applied: contents is the author's,
-    and this run guesses as it always has until it is declared."""
+def write_order_sample(order, header=None):
+    """What a master AsciiDoc file says about the book, in the shape
+    project.yaml takes: its title, authors, and language, and as
+    contents the order it includes its chapters in. Not applied: the
+    project is the author's, and a run with none declared goes on as it
+    always has (an EPUB called "Untitled") until it is."""
     import yaml
     stems = [safe_stem(os.path.splitext(n)[0]) for n in order]
+    project = dict(header or {})
+    project["contents"] = stems
     with open(CONTENTS_SAMPLE, "w", encoding="utf-8") as fh:
-        fh.write("# Written by convert.py: the order the master AsciiDoc "
-                 "file includes its\n# chapters in. Copy the contents into "
-                 "project.yaml to use it.\n" + yaml.safe_dump(
-                     {"project": {"contents": stems}}, sort_keys=False))
+        fh.write("# Written by convert.py from the master AsciiDoc file: the "
+                 "book's title,\n# authors, and language, and the order it "
+                 "includes its chapters in.\n# Copy them into project.yaml "
+                 "to use them.\n" + yaml.safe_dump(
+                     {"project": project}, sort_keys=False,
+                     allow_unicode=True))
     say(f"No contents declared: {CONTENTS_SAMPLE} holds the order the "
-        "master file gives. Copy it into project.yaml to use it.")
+        "master file gives" + (", and its title and authors" if header
+                               else "") + ". Copy it into project.yaml to "
+        "use it.")
 
 
 def source_documents(base):
@@ -1993,7 +2025,7 @@ def main():
         # Every file that becomes a page is found before any is read, so
         # two that would be one page stop the run before either is.
         markdown = markdown_sources(base, fragment_files)
-        adoc, adoc_order, imagesdir = asciidoc_sources(base)
+        adoc, adoc_order, imagesdir, adoc_header = asciidoc_sources(base)
         named = {page_name_of(n) for n in list(docs) + markdown + adoc}
         hand = hand_pages(base, named)
         web = html_sources(base, named, set(hand))
@@ -2005,7 +2037,7 @@ def main():
         resolve_asciidoc_xrefs(base, adoc_stems)
         stems += adoc_stems
         if adoc_order and not project.get("contents"):
-            write_order_sample(adoc_order)
+            write_order_sample(adoc_order, adoc_header)
         for target in targets:
             if web and target.format == "html" and os.path.abspath(
                     target.output_dir) == os.path.abspath(base):

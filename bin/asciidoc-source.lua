@@ -17,6 +17,11 @@ undone (Pandoc 3.11's reader, which is the asciidoc library's):
     from the metadata, where Pandoc's templates would read "toc" as a
     switch. What describes the book (title, author, date, description,
     keywords, lang) is kept.
+  - A link to an email address gets back the mailto: the reader drops:
+    mailto:someone@example.org[Someone] arrives as a link to a file
+    called someone@example.org.
+  - A link to a scheme and nothing else (a chapter that writes ftp://
+    in passing, which the reader takes for a URL) is its text again.
   - An included file's wrapper (a Div with class included, which the
     reader adds around what an include:: brought in) is opened up.
 
@@ -42,6 +47,19 @@ local KEEP = { title = true, subtitle = true, author = true, date = true,
 local function relative(src)
   return not src:match('^%a[%w+.-]*:') and not src:match('^/')
     and not src:match('^#')
+end
+
+local function fix_link(link)
+  local target = link.target
+  if not target:match('^%a[%w+.-]*:') and not target:match('[/#?]')
+      and target:match('^[^@%s]+@[^@%s]+%.%a+$') then
+    link.target = 'mailto:' .. target
+    return link
+  end
+  if target:match('^%a[%w+.-]*://$') then
+    return link.content
+  end
+  return nil
 end
 
 function Pandoc(doc)
@@ -70,6 +88,7 @@ function Pandoc(doc)
     Div = function(div)
       if div.classes:includes('included') then return div.content end
     end,
+    Link = fix_link,
   })
   return doc
 end

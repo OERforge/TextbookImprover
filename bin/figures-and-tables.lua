@@ -1257,15 +1257,25 @@ end
 -- Every row of the table in source order: the head's rows, then each
 -- body's. The pre-pass numbers rows the way the file does, and a merged
 -- title row the reader put in the head is still row 1.
+-- Rows in the order the header pre-pass numbers them, so a row number in
+-- a declaration names the same row here: the head, then each body's own
+-- head rows and its rows, then the foot. A Word table has no body heads
+-- and no foot; an HTML table grouped by <tbody> has both kinds of body.
 local function all_rows(tbl)
   local rows = {}
   for _, row in ipairs(tbl.head.rows) do
     rows[#rows + 1] = { row = row, holder = tbl.head.rows, }
   end
   for _, body in ipairs(tbl.bodies) do
+    for _, row in ipairs(body.head) do
+      rows[#rows + 1] = { row = row, holder = body.head }
+    end
     for _, row in ipairs(body.body) do
       rows[#rows + 1] = { row = row, holder = body.body }
     end
+  end
+  for _, row in ipairs(tbl.foot.rows) do
+    rows[#rows + 1] = { row = row, holder = tbl.foot.rows }
   end
   return rows
 end
@@ -1274,6 +1284,14 @@ local function remove_row(tbl, target)
   for _, body in ipairs(tbl.bodies) do
     for i, row in ipairs(body.body) do
       if row == target then table.remove(body.body, i); return true end
+    end
+    for i, row in ipairs(body.head) do
+      if row == target then
+        local head = body.head
+        table.remove(head, i)
+        body.head = head
+        return true
+      end
     end
   end
   local kept = {}
@@ -1415,8 +1433,23 @@ end
 -- neither renumbers the other.
 -- ---------------------------------------------------------------------------
 
+-- The band rows: those the declaration names, and those the source
+-- already groups by -- a body whose head row is one cell across the
+-- table, as HTML writes a <tbody> headed by a row-group header.
 local function band_targets(tbl, entry)
-  local out = {}
+  local out, seen = {}, {}
+  local function add(row)
+    if not seen[row] then seen[row] = true; out[#out + 1] = row end
+  end
+  local width = #tbl.colspecs
+  for _, body in ipairs(tbl.bodies) do
+    for _, row in ipairs(body.head) do
+      if width > 1 and #row.cells == 1
+          and (row.cells[1].col_span or 1) >= width then
+        add(row)
+      end
+    end
+  end
   local wanted = entry and entry.split_at
   if type(wanted) ~= 'table' or #wanted == 0 then return out end
   local rows = all_rows(tbl)
@@ -1426,7 +1459,7 @@ local function band_targets(tbl, entry)
       warn(('table-headers: split-at names row %s of a %d-row table in %s; ignored')
         :format(tostring(n), #rows, source_stem()))
     else
-      out[#out + 1] = at.row
+      add(at.row)
     end
   end
   return out
@@ -1477,16 +1510,18 @@ local function is_band_row(row, width)
 end
 
 -- Returns a list of tables, or nil when there is nothing to split.
-local function split_table(tbl, bands, part_captions, apply)
+local function split_table(tbl, bands, part_captions, apply, head_leads)
   if #bands == 0 then return nil end
   local is_band = {}
   for _, row in ipairs(bands) do is_band[row] = true end
 
-  -- Flatten every body's rows in order, keeping the first body's
-  -- settings for the parts.
+  -- Flatten every body's rows in order, its own head rows first (a band
+  -- the source grouped by is one), keeping the first body's settings
+  -- for the parts.
   local model = tbl.bodies[1]
   local rows = {}
   for _, body in ipairs(tbl.bodies) do
+    for _, row in ipairs(body.head) do rows[#rows + 1] = row end
     for _, row in ipairs(body.body) do rows[#rows + 1] = row end
   end
 
@@ -1509,6 +1544,20 @@ local function split_table(tbl, bands, part_captions, apply)
   end
   if #segments < 2 and pending_band == nil then return nil end
 
+  -- One header row above the first band, not marked as the table's head
+  -- (a bold row in HTML, an unmarked one in Word), heads every part: it
+  -- isn't a part of its own. Only when the declaration says there is a
+  -- header row and that row is all that comes before the first band.
+  local lead = nil
+  if head_leads and #tbl.head.rows == 0 and #segments > 1
+      and band_for[1] == nil and #segments[1] == 1 then
+    lead = segments[1][1]
+    table.remove(segments, 1)
+    local shifted = {}
+    for i = 2, #segments + 1 do shifted[i - 1] = band_for[i] end
+    band_for = shifted
+  end
+
   local base = nil
   if #tbl.caption.long > 0 then
     base = pandoc.utils.blocks_to_inlines(tbl.caption.long)
@@ -1521,6 +1570,13 @@ local function split_table(tbl, bands, part_captions, apply)
     local own_head = nil
     if band and is_band_row(band, width) then
       band_inlines, band_text = row_as_caption(band)
+      -- A band centered by hand is padded with non-breaking spaces (forty
+      -- of them before "Front Matter" in one book); a caption isn't.
+      local cleaned = band_text:gsub('\u{00A0}', ' '):gsub('%s+', ' ')
+        :gsub('^ ', ''):gsub(' $', '')
+      if cleaned ~= band_text then
+        band_text, band_inlines = cleaned, text_to_inlines(cleaned)
+      end
     elseif band then
       -- A header row: it heads this part, and its corner cell names it.
       own_head = band
@@ -1537,6 +1593,7 @@ local function split_table(tbl, bands, part_captions, apply)
       tbl.attr.identifier ~= '' and (tbl.attr.identifier .. '-' .. i) or '',
       tbl.attr.classes, {})
     local head_rows = clone_rows(tbl.head.rows)
+    if lead then head_rows[#head_rows + 1] = lead:clone() end
     if own_head then head_rows[#head_rows + 1] = own_head end
     local head = pandoc.TableHead(head_rows, tbl.head.attr)
     local body = pandoc.TableBody(segment, {},
@@ -1546,9 +1603,74 @@ local function split_table(tbl, bands, part_captions, apply)
         or pandoc.Caption(),
       tbl.colspecs, head, { body }, pandoc.TableFoot({}), attr)
     apply(part)
-    parts[#parts + 1] = { table = part, label = caption_text ~= '' and caption_text or nil }
+    parts[#parts + 1] = { table = part,
+                          label = caption_text ~= '' and caption_text or nil,
+                          band = (band and is_band_row(band, width)) and band
+                                 or nil }
   end
   return parts
+end
+
+local TABLE_BANDS = (os.getenv('TABLE_BANDS') or 'split'):lower()
+local CAPTION_ROWS_ATTR = 'data-caption-rows'
+local SPLIT_AT_ATTR = 'data-split-at'
+
+local function row_numbers(value)
+  local out = {}
+  for n in tostring(value or ''):gmatch('%d+') do out[#out + 1] = tonumber(n) end
+  return out
+end
+
+local function row_text(row)
+  local parts = {}
+  for _, cell in ipairs(row.cells) do
+    parts[#parts + 1] = pandoc.utils.stringify(cell.contents)
+  end
+  return table.concat(parts, '\31')
+end
+
+-- tables.bands: group. The parts split_table made, each with its
+-- headers applied, joined back into one table: a body per band, headed
+-- by the band, and the column headers shared in
+-- the table's head when every part has the same ones (each body's own
+-- otherwise, as when a band is itself a header row). What a Markdown or
+-- DOCX target writes, so the author's table reads back as written.
+local function group_parts(parts, tbl, label)
+  local first = parts[1].table
+  local shared = true
+  for _, part in ipairs(parts) do
+    local a, b = part.table.head.rows, first.head.rows
+    if #a ~= #b then shared = false else
+      for i = 1, #a do
+        if row_text(a[i]) ~= row_text(b[i]) then shared = false end
+      end
+    end
+  end
+  local bodies = {}
+  for _, part in ipairs(parts) do
+    local head_rows = {}
+    if part.band then
+      -- The band heads its body, as HTML's reader and writer express a
+      -- row group and as Word's merged row reads back.
+      head_rows[#head_rows + 1] = part.band
+    end
+    if not shared then
+      for _, row in ipairs(part.table.head.rows) do
+        head_rows[#head_rows + 1] = row
+      end
+    end
+    local body = part.table.bodies[1]
+    bodies[#bodies + 1] = pandoc.TableBody(body.body, head_rows,
+      body.row_head_columns, body.attr)
+  end
+  local caption = tbl.caption
+  if #caption.long == 0 and label then
+    caption = mk_caption({ pandoc.Plain(text_to_inlines(label)) })
+  end
+  return pandoc.Table(caption, first.colspecs,
+    shared and first.head or pandoc.TableHead({}, first.head.attr),
+    bodies, pandoc.TableFoot({}),
+    pandoc.Attr(tbl.attr.identifier, tbl.attr.classes, {}))
 end
 
 local function resolved_for(tbl)
@@ -1556,7 +1678,11 @@ local function resolved_for(tbl)
   -- declaration, and a Markdown source has no pre-pass to disagree.
   local marked = tbl.attr.attributes[MARKER_ATTR]
   if marked then
-    return { headers = marked, caption_rows = {}, split_at = {},
+    -- An HTML source's title rows and bands come beside its marker,
+    -- written by the header pre-pass.
+    return { headers = marked,
+             caption_rows = row_numbers(tbl.attr.attributes[CAPTION_ROWS_ATTR]),
+             split_at = row_numbers(tbl.attr.attributes[SPLIT_AT_ATTR]),
              part_captions = {}, anchors = {} }
   end
   local index = tonumber(tbl.attr.attributes[TH_INDEX_ATTR])
@@ -1609,6 +1735,8 @@ local function caption_data_table(tbl, next_block, after_next, after_after, out)
   local entry = resolved_for(tbl)
   tbl.attr.attributes[TH_INDEX_ATTR] = nil
   tbl.attr.attributes[MARKER_ATTR] = nil
+  tbl.attr.attributes[CAPTION_ROWS_ATTR] = nil
+  tbl.attr.attributes[SPLIT_AT_ATTR] = nil
   local pending = pending_caption_rows(tbl, entry)
   local bands = band_targets(tbl, entry)
 
@@ -1684,7 +1812,11 @@ local function caption_data_table(tbl, next_block, after_next, after_after, out)
   if folded then label = folded end
 
   local parts = split_table(tbl, bands, entry and entry.part_captions,
-    function(part) apply_headers(part, label, entry) end)
+    function(part) apply_headers(part, label, entry) end,
+    entry and (entry.headers == 'first-row' or entry.headers == 'both'))
+  if parts and TABLE_BANDS == 'group' and #parts > 1 then
+    return { wrap_table(group_parts(parts, tbl, label), label) }, consumed
+  end
   if parts then
     local blocks = {}
     for _, part in ipairs(parts) do

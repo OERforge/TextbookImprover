@@ -731,6 +731,90 @@ def case_markdown_html(work):
     ]
 
 
+BANDED = """<!DOCTYPE html><html lang="en"><head><title>Bands</title></head>
+<body><main><h1>Bands</h1>
+<table><tr><td colspan="3"><b>The Message Triangle</b></td></tr>
+<tr><td><b>Element</b></td><td><b>Focus</b></td><td><b>Example</b></td></tr>
+<tr><td>Purpose</td><td>The core idea</td><td>A request</td></tr>
+<tr><td>Clarity</td><td>How simply</td><td>A number</td></tr></table>
+<table><tr><td></td><td><b>Labor</b></td><td><b>Total</b></td></tr>
+<tr><td colspan="3">Example A: workers cost $40</td></tr>
+<tr><td>Tech 1</td><td>$400</td><td>$560</td></tr>
+<tr><td>Tech 2</td><td>$280</td><td>$600</td></tr>
+<tr><td colspan="3">Example B: workers cost $55</td></tr>
+<tr><td>Tech 1</td><td>$550</td><td>$710</td></tr>
+<tr><td>Tech 2</td><td>$385</td><td>$705</td></tr></table>
+<table><tbody><tr><th colspan="2" scope="rowgroup">Group one</th></tr>
+<tr><td>a</td><td>1</td></tr></tbody>
+<tbody><tr><th colspan="2" scope="rowgroup">Group two</th></tr>
+<tr><td>b</td><td>2</td></tr></tbody></table>
+</main></body></html>
+"""
+
+
+def case_bands(work):
+    """An HTML source's title rows and bands: split for an HTML target,
+    kept as one grouped table for a Markdown one, and the grouped table
+    read back splits the same way. And a page with no title stays one."""
+    os.makedirs(work)
+    with open(os.path.join(work, "bands.html"), "w", encoding="utf-8") as fh:
+        fh.write(BANDED)
+    with open(os.path.join(work, "untitled.html"), "w", encoding="utf-8") as fh:
+        fh.write('<!DOCTYPE html><html lang="en"><head></head><body>'
+                 "<p>No title here.</p></body></html>\n")
+    def run_with(where, config):
+        with open(os.path.join(where, "conversion.yaml"), "w",
+                  encoding="utf-8") as fh:
+            fh.write(config)
+        return run_in(where, "  contents:\n    - bands\n    - untitled\n")
+    run_with(work, "targets:\n  html:\n    format: html\n"
+                   "  md:\n    format: markdown\n")
+    page = read(work, "html", "bands.html") if exists(
+        work, "html", "bands.html") else ""
+    md = read(work, "md", "bands.md") if exists(work, "md", "bands.md") else ""
+    captions = lambda text: [" ".join(re.sub(r"<[^>]+>", "", c).split())
+                             for c in re.findall(r"<caption>(.*?)</caption>",
+                                                 text, re.S)]
+    back = work + "-from-md"
+    shutil.copytree(os.path.join(work, "md"), back)
+    run_with(back, "targets:\n  html:\n    format: html\n")
+    again = read(back, "html", "bands.html") if exists(
+        back, "html", "bands.html") else ""
+    fixed = work + "-from-html"
+    os.makedirs(fixed)
+    for name in ("bands.html", "untitled.html"):
+        shutil.copy(os.path.join(work, "html", name), fixed)
+    run_with(fixed, "targets:\n  html:\n    format: html\n")
+    return [
+        ("a merged title row is the caption, and the header row beneath it "
+         "is the header row",
+         lambda: "The Message Triangle" in captions(page)
+         and re.search(r'<th scope="col">(<strong>)?Element', page)),
+        ("bands split an HTML target's table, one header row heading each "
+         "part",
+         lambda: [c for c in captions(page) if c.startswith("Example")]
+         == ["Example A: workers cost $40", "Example B: workers cost $55"]
+         and page.count('scope="col">(<strong>)?Labor') == 0
+         and len(re.findall(r'<th scope="col">(?:<strong>)?Labor', page)) == 2),
+        ("groups the source already made split the same way",
+         lambda: "Group one" in captions(page) and "Group two" in captions(page)),
+        ("a Markdown target keeps each banded table whole, a body per band "
+         "headed by the band",
+         lambda: len(re.findall(r'<tbody>\s*<tr>\s*<th colspan="\d">'
+                                r'(Example|Group)', md)) == 4
+         and not any(c.startswith("Example") for c in captions(md))),
+        ("read back from Markdown, the groups split into the same captions",
+         lambda: captions(again) == captions(page) and captions(page)),
+        ("a page with no title is named by itself, and converting it again "
+         "adds no heading",
+         lambda: "<title>untitled</title>" in read(work, "html", "untitled.html")
+         and "<h1" not in read(fixed, "html", "untitled.html")
+         and "filtered" not in read(work, "html", "untitled.html")),
+        ("converting the HTML output again gives the same tables",
+         lambda: captions(read(fixed, "html", "bands.html")) == captions(page)),
+    ]
+
+
 def case_html_source(work):
     """An HTML page is a source when the book says so, and converting
     what this pipeline wrote changes nothing."""
@@ -1206,6 +1290,7 @@ CASES = [
     ("an HTML source's tables and the header sidecar", case_html_headers),
     ("a menu for pages posted as a site", case_menu),
     ("raw HTML in a Markdown source", case_markdown_html),
+    ("title rows and bands, split and grouped", case_bands),
     ("a hand-written page", case_hand_written),
     ("several targets", case_targets),
     ("arguments passed to the packager", case_passthrough),

@@ -68,6 +68,10 @@ Let images shrink on narrow viewports rather than reproducing the source's fixed
 
 How data tables are rendered.
 
+**`tables.bands`**—one of `auto`, `split`, `group`; default `auto`
+
+What a table whose rows are grouped under bands becomes: a merged row across the table labeling the rows beneath it, as in a Word table, or a tbody headed by one in HTML. split makes one table per band, the band's text in each part's caption, which is what a screen reader announces (NVDA, tested in Chrome and Firefox, names none of the ways HTML marks a row group). group keeps one table with a body per band, each band a row-group header, which is the author's form and reads back as it was written. auto derives from the target's format: split for html, epub3, and pdf; group for markdown and docx, whose output becomes a source.
+
 **`tables.wrap`**—`bool`; default `true`
 
 Put wide tables in a focusable scroll container so a long table doesn't force the whole page to scroll sideways (WCAG 1.4.10).

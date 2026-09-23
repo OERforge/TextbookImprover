@@ -157,9 +157,18 @@ class Target:
         self.output_dir = os.path.normpath(
             os.path.join(base, str(resolved["output_dir"] or name)))
         self.fingerprint = None      # set once every target is known
+        # tables.bands: auto derives from the format, and is resolved here,
+        # before targets are compared, so two targets that differ in it
+        # don't share a filtered intermediate.
+        self.derived = {}
+        if resolved["tables.bands"] == "auto":
+            self.derived["tables.bands"] = ("group" if self.format in
+                                            ("markdown", "docx") else "split")
         self.pages_dir = None        # where its filtered intermediates are
 
     def __getitem__(self, key):
+        if key in self.derived:
+            return self.derived[key]
         return self.resolved[key]
 
 
@@ -230,8 +239,8 @@ def load_targets(base, allow_unknown):
     walk(schema.root)
     names = {t.name for t in targets}
     for target in targets:
-        values = {path: target.resolved[path] for path, stage in stages.items()
-                 if stage == "filter"}
+        values = {path: target[path] for path, stage in stages.items()
+                  if stage == "filter"}
         # A variant source for this target -- <stem>.<target>.md -- makes
         # its intermediates its own, so it goes into the fingerprint.
         target.variants = variant_sources(base, target.name)
@@ -1111,6 +1120,7 @@ def filter_env(target, base, paths, env):
                                               r["captions.figure_prefixes"])),
         "AUTHOR_BYLINE": str(r["author_byline"]),
         "PROMOTE_H1_TO_TITLE": str(r["promote_h1_to_title"]),
+        "TABLE_BANDS": str(target["tables.bands"]),
         "TABLE_CAPTIONS": paths["table_captions"],
         "IMAGE_ALT": paths["image_alt"],
         "TABLE_HEADERS": paths["table_headers"],

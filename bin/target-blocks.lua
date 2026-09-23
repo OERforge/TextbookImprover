@@ -95,7 +95,19 @@ local function resolve(el)
   return el.content
 end
 
+-- A page with no title is named by its own name in <title>, not by
+-- the intermediate's file name, which is what Pandoc falls back to
+-- ("costs.filtered").
+local function own_name()
+  local name = (PANDOC_STATE.input_files[1] or ''):match('([^/\\]+)$') or ''
+  return (name:gsub('%.json$', ''):gsub('%.filtered$', ''))
+end
+
 local function drop_title_block(meta)
+  if meta.title == nil and meta.pagetitle == nil and own_name() ~= '' then
+    meta.pagetitle = pandoc.MetaString(own_name())
+    if TITLE_BLOCK then return meta end
+  end
   if TITLE_BLOCK then return meta end
   for _, key in ipairs({ 'subtitle', 'date', 'abstract', 'include-before',
                          'include-after' }) do

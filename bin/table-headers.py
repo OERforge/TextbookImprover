@@ -257,6 +257,8 @@ def no_header_text(grid):
 
 
 MARKER = "data-th-marker"
+CAPTION_ROWS = "data-caption-rows"
+SPLIT_AT = "data-split-at"
 
 
 def pandoc_tables(node, out):
@@ -290,6 +292,7 @@ def tables_in_json(path):
         view = tc.view_from_pandoc(table)
         kind, ev, nrows, ncols = tc.classify(view)
         value, reason = tc.explain(view, kind, ev)
+        inferred = inferred_structure(view.grid)
         source = attributes.get(MARKER)
         if source:
             value, reason = source, "the page marks its header cells (<th>)"
@@ -305,7 +308,8 @@ def tables_in_json(path):
             "label": " ".join(caption.split())[:60],
             "preview": preview_of(grid),
             "guess": "" if value == "unknown" else value,
-            "reason": reason, "caption-rows": "", "split-at": "",
+            "reason": reason, "caption-rows": inferred[0],
+            "split-at": inferred[1],
             "anchors": [],
             "needs-source": value == "none" and no_header_text(grid),
             "summary-row": "trailing row with no label" in reason,
@@ -327,9 +331,17 @@ def apply_to_json(infos):
         tables = pandoc_tables(doc["blocks"], [])
         for info in entries:
             attr = tables[info["index"]]["c"][0]
-            pairs = [p for p in attr[2] if p[0] != MARKER]
+            pairs = [p for p in attr[2]
+                     if p[0] not in (MARKER, CAPTION_ROWS, SPLIT_AT)]
             if info["in-effect"]:
                 pairs.append([MARKER, info["in-effect"]])
+            # Title rows and bands, as the filter reads them for a Word
+            # table from the resolved file: row numbers, 1-based, counted
+            # over head, bodies, and foot in that order.
+            for name, rows in ((CAPTION_ROWS, info["caption-rows-in-effect"]),
+                               (SPLIT_AT, info["split-at-in-effect"])):
+                if rows:
+                    pairs.append([name, ",".join(str(r) for r in rows)])
             attr[2] = pairs
         with open(path, "w", encoding="utf-8") as fh:
             json.dump(doc, fh)
@@ -512,6 +524,8 @@ def main():
             if info.get("from-source") and supplier == "guess":
                 supplier = "source"
             info["in-effect"] = in_effect(info, row)
+            info["caption-rows-in-effect"] = caption_rows_in_effect(info, row)
+            info["split-at-in-effect"] = split_in_effect(info, row)[0]
         # Keyed by stem, not filename: the filter runs on the JSON
         # intermediate named after the .docx, and knows only the stem.
         caption_rows = caption_rows_in_effect(info, row)

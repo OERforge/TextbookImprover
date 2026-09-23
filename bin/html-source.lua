@@ -128,7 +128,9 @@ local function header_columns(tbl)
 end
 
 local function lift_body_head(tbl)
-  if #tbl.head.rows > 0 then return false end
+  -- One body only: with several, each body's head is its group's (a
+  -- row-group header), not the table's column headers.
+  if #tbl.head.rows > 0 or #tbl.bodies ~= 1 then return false end
   local body = tbl.bodies[1]
   if body == nil or #body.head == 0 then return false end
   tbl.head = pandoc.TableHead(body.head, tbl.head.attr)
@@ -316,6 +318,14 @@ end
 
 function Meta(meta)
   local changed = false
+  -- A <title> that is only the page's own file name is what the run
+  -- writes for a page with no title; read back, it isn't one.
+  local file = (PANDOC_STATE.input_files[1] or ''):match('([^/\\]+)$') or ''
+  local stem = file:gsub('%.x?html?$', '')
+  if meta.title and stem ~= '' and pandoc.utils.stringify(meta.title) == stem then
+    meta.title = nil
+    return meta
+  end
   if meta.title then
     local shorter = without_book_title(pandoc.utils.stringify(meta.title))
     if shorter then

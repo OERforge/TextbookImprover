@@ -56,7 +56,7 @@ wget --recursive --level=inf --no-parent --page-requisites \
      https://textbook.cs168.io/
 ```
 
-List only the hosts that serve the book's own files: `--span-hosts` applies to the links wget follows as well as to what pages show, and `--domains` is what keeps it from wandering. This variant hasn't been run against either book.
+List only the hosts that serve the book's own files: `--span-hosts` applies to the links wget follows as well as to what pages show, and `--domains` is what keeps it from wandering. Run against *CS 168*, it held the badge and changed nothing else: the same 62 pages, 61 of them byte-identical to the first crawl's once unpacked, and the front page differing only in the badge's address, now local.
 
 wget obeys the site's `robots.txt`. If the crawl stops after the first page and the site's rules forbid crawlers, ask the site's owners before adding `-e robots=off`.
 

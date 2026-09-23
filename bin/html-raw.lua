@@ -72,6 +72,37 @@ local function tag_attributes(text)
   return pairs_
 end
 
+-- The page a reader can open in place of a video player's frame. An
+-- embed address opened on its own shows YouTube's "Video unavailable"
+-- page, which only links onward; the link in an EPUB, or anywhere else a
+-- frame can't be, goes straight to the video. YouTube (its no-cookie
+-- domain too, a playlist, a start time) and Vimeo; any other frame's
+-- link is its own address.
+local YOUTUBE = { ['youtube.com'] = true, ['www.youtube.com'] = true,
+                  ['m.youtube.com'] = true, ['youtube-nocookie.com'] = true,
+                  ['www.youtube-nocookie.com'] = true }
+
+local function watch_url(src)
+  local host, path, query = src:match('^%a*:?//([^/?#]+)([^?#]*)%??([^#]*)')
+  if not host then return src end
+  host = host:lower()
+  if YOUTUBE[host] then
+    local id = path:match('^/embed/([^/]+)$')
+    if id == 'videoseries' then
+      local list = query:match('list=([^&]+)')
+      if list then return 'https://www.youtube.com/playlist?list=' .. list end
+    elseif id then
+      local url = 'https://www.youtube.com/watch?v=' .. id
+      local start = query:match('start=(%d+)')
+      return start and (url .. '&t=' .. start .. 's') or url
+    end
+  elseif host == 'player.vimeo.com' then
+    local id = path:match('^/video/(%d+)')
+    if id then return 'https://vimeo.com/' .. id end
+  end
+  return src
+end
+
 local function framed(text, block)
   local attributes, src, title = tag_attributes(text), nil, nil
   for _, pair in ipairs(attributes) do
@@ -84,7 +115,7 @@ local function framed(text, block)
     attributes[#attributes + 1] = { 'title', title }
   end
   local attr = pandoc.Attr('', { 'embed' }, attributes)
-  local link = pandoc.Link(title, src)
+  local link = pandoc.Link(title, watch_url(src))
   if block then return pandoc.Div({ pandoc.Para({ link }) }, attr) end
   return pandoc.Span({ link }, attr)
 end

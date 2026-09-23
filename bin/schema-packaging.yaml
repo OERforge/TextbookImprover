@@ -192,7 +192,7 @@ keys:
         description: >
           The order back matter appears in within a chapter. Books differ:
           Statistics has chapter-review and homework where Economics has
-          key-concepts-and-summary and problems, so anything unrecognised
+          key-concepts-and-summary and problems, so anything unrecognized
           sorts after this list and is reported rather than silently
           misplaced.
 

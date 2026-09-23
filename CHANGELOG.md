@@ -12,6 +12,7 @@ Versions are two-part and pre-1.0: breaking changes may land in any of them unti
 
 ### Added
 
+- **A spelling check.** `tests/run-spelling-tests.py` fails on a UK spelling in any tracked text file, prose or name, naming the file and line. It found two the last sweep had missed.
 - **A browser's archive as a source.** `unpack-site.py` reads a WACZ recorded with ArchiveWeb.page: the book's site is the first page the archive lists; redirects and repeated responses stored as revisit records are followed; and a section a page fetched as JSON (OER Commons's `?section=3`) is a page of its own, named by its query. An OER Commons profile takes each section's content and makes its heading the page's title. *Business Communication*, whose EPUB had no images, came out as 16 chapters and a title page with 213 of 214 images and an EPUB epubcheck passes. `docs/making-warcs.md` says how to record one.
 - **A book's math survives an archive.** A site that writes its formulas for MathJax keeps them in its HTML as TeX between MathJax's delimiters; `unpack-site.py` writes those as the `<script type="math/tex">` Pandoc reads as math, on any page whose own HTML loads MathJax, and never inside code. DCIC's WARC gave 397 formulas, where its `.mhtml` save gave none, and its EPUB has that many MathML formulas.
 - **HTML as a source.** An `.html` beside the sources is read, filtered, split, and rendered like any source (see Breaking, below). `html-source.lua` runs as the page is read: a table's `<thead>` and the `<th>` opening its body rows become a header declaration, a header row written inside `<tbody>` is moved to the table's head, and Pandoc's title block and the filter's own scroll wrapper are taken out so they can be written again. Converting this pipeline's own pages now changes nothing: the runs agree on the statistics book's 169 pages but for one caption, and the second write equals the third byte for byte. See [HTML sources](docs/html.md).
@@ -41,8 +42,14 @@ Versions are two-part and pre-1.0: breaking changes may land in any of them unti
 - **The table census reads a table through a view**, not the OOXML itself: its grid, Word's table-look flags and style, and the rows marked to repeat as a header. A table from Pandoc's AST gets a view too (`view_from_pandoc`), so the header guess runs on a table read from HTML, EPUB, or anything else, by the same rules. Nothing changes for Word: every census and pre-pass check passes as it did. The guess isn't applied to HTML tables yet, or written to `table-headers-new.csv` for them.
 - **`build-cartridge.py --toc` reads an EPUB through `lib/epubsource.py`**, which `unpack-epub.py` uses too, so the two can't disagree about a book's outline.
 
+### Deprecated
+
+- **`bookcontents.unrecognised_roles()` is `unrecognized_roles()`.** The old name still works, with a `DeprecationWarning`, until 1.0. No setting, option, environment variable, or report column had a UK spelling to change.
+
 ### Fixed
 
+- **A video's frame links to the video in the EPUB**, not to its player. Opened on its own, a YouTube embed address shows a "Video unavailable" page that only links onward; the link now goes to the video's own page (a start time and a playlist kept), and a Vimeo player's to its video. HTML keeps the player.
+- **The last UK-spelled names are US.** Inside the filter, `normalise()` and `NORMALISE_MATH_ALT` are `normalize()` and `NORMALIZE_MATH_ALT`, and a table with no label is reported as `(unlabeled)`.
 - **A frame keeps pointing at what it shows.** An archive that recorded a video's player had the frame rewritten to a local copy of the player.
 - **A heading with no text in it is dropped** when an HTML source is read, keeping an id its author gave it; an editor's `<h3>&nbsp;</h3>` was an `empty-heading` finding in every page and the EPUB.
 - **A heading holding only a described image isn't reported empty.** Its image's alt text is its accessible name, and the output check now counts it.

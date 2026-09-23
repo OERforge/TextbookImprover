@@ -68,7 +68,7 @@ How pages with no explicit place in the book's contents are arranged.
   review-questions, critical-thinking-questions, bringing-it-together-practice, homework,
   bringing-it-together-homework, problems, references, solutions]`
 
-The order back matter appears in within a chapter. Books differ: Statistics has chapter-review and homework where Economics has key-concepts-and-summary and problems, so anything unrecognised sorts after this list and is reported rather than silently misplaced.
+The order back matter appears in within a chapter. Books differ: Statistics has chapter-review and homework where Economics has key-concepts-and-summary and problems, so anything unrecognized sorts after this list and is reported rather than silently misplaced.
 
 **`grouping.unsorted_title`**—`string`; default `Unsorted`
 

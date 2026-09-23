@@ -53,7 +53,7 @@ local TABLE_PREFIXES = label_prefixes('TABLE_LABEL_PREFIXES', 'Table')
 -- Collapse runs of whitespace and trim. Declared here because the caption
 -- helpers below need it, and a Lua local is only visible after its
 -- definition.
-local function normalise(text)
+local function normalize(text)
   return (text:gsub('%s+', ' '):gsub('^ ', ''):gsub(' $', ''))
 end
 
@@ -169,7 +169,7 @@ local WRAP_TABLES = (os.getenv('WRAP_TABLES') or 'true'):lower() ~= 'false'
 -- the structural words (StartFraction, Over, equals), so it cannot change
 -- what the maths says. It is a mitigation, not a fix: the real fix is for
 -- these to be real equations in the DOCX rather than images.
-local NORMALISE_MATH_ALT = true
+local NORMALIZE_MATH_ALT = true
 
 -- Word documents often use a tiny transparent GIF as a bullet or spacer.
 -- They carry no meaning, they have no alt text, and there can be hundreds
@@ -401,7 +401,7 @@ local function caption_below(block)
   block = unwrap_lone_list_item(block)
   if block == nil then return nil end
   if block.t ~= 'Para' and block.t ~= 'Plain' then return nil end
-  if opens_with(normalise(pandoc.utils.stringify(block.content)),
+  if opens_with(normalize(pandoc.utils.stringify(block.content)),
                 FIGURE_PREFIXES) == nil then
     return nil
   end
@@ -620,7 +620,7 @@ local function table_excerpt(tbl)
   local function from_rows(rows)
     for _, row in ipairs(rows) do
       for _, cell in ipairs(row.cells) do
-        local text = normalise(pandoc.utils.stringify(cell.contents))
+        local text = normalize(pandoc.utils.stringify(cell.contents))
         if text ~= '' then return text end
       end
     end
@@ -696,11 +696,11 @@ local function load_sidecar(path)
   local rows = parse_csv(fh:read('a'))
   fh:close()
   for _, row in ipairs(rows) do
-    local key = normalise(row[1] or '')
+    local key = normalize(row[1] or '')
     -- Tolerate header rows anywhere, not just the first line: appending
     -- successive reports carries one along each time.
     if key ~= '' and not HEADER_KEYS[key:lower()] then
-      map[key] = normalise(row[2] or '')
+      map[key] = normalize(row[2] or '')
     end
   end
   return map
@@ -965,7 +965,7 @@ function Image(img)
   end
   local is_equation = false
 
-  if NORMALISE_MATH_ALT and alt ~= '' and looks_spelled_out(alt) then
+  if NORMALIZE_MATH_ALT and alt ~= '' and looks_spelled_out(alt) then
     is_equation = true
     alt = unspell(alt)
     img.caption = pandoc.Inlines({ pandoc.Str(alt) })
@@ -1055,7 +1055,7 @@ local function table_label(block)
   block = unwrap_lone_list_item(block)
   if block == nil then return nil end
   if block.t ~= 'Para' and block.t ~= 'Plain' then return nil end
-  local text = normalise(pandoc.utils.stringify(block.content))
+  local text = normalize(pandoc.utils.stringify(block.content))
   if opens_with(text, TABLE_PREFIXES) == nil then return nil end
   if looks_like_sentence(text, TABLE_PREFIXES) then return nil end
   return text
@@ -1082,7 +1082,7 @@ local function wrap_table(tbl, label)
   return pandoc.Div({ tbl }, pandoc.Attr('', { 'table-wrapper' }, attributes))
 end
 
--- A paragraph that is nothing but emphasised text -- Word's usual way of
+-- A paragraph that is nothing but emphasized text -- Word's usual way of
 -- marking a table title. Used to tell a caption sitting above a table
 -- from ordinary prose that happens to mention it.
 local function is_emphasised_para(block)
@@ -1096,12 +1096,12 @@ local function is_emphasised_para(block)
   return content[1].t == 'Strong' or content[1].t == 'Emph'
 end
 
--- A short emphasised line with no sentence-ending punctuation: the title
+-- A short emphasized line with no sentence-ending punctuation: the title
 -- half of a two-paragraph caption such as "**Table 7.1**" followed by
 -- "*Sample Code of Conduct*".
 local function is_title_para(block)
   if not is_emphasised_para(block) then return false end
-  local text = normalise(pandoc.utils.stringify(block.content))
+  local text = normalize(pandoc.utils.stringify(block.content))
   if text == '' or #text > 100 then return false end
   if text:match('[%.%?!]$') then return false end
   return true
@@ -1114,7 +1114,7 @@ end
 -- the paragraphs from the body so they are not repeated.
 --
 -- Anchoring on the label pattern is what keeps this safe: prose that only
--- mentions a table mid-sentence never starts with it, and an unlabelled
+-- mentions a table mid-sentence never starts with it, and an unlabeled
 -- title is only taken when a labeled paragraph sits directly above it.
 local function caption_above(out, has_bare_caption)
   local last = out[#out]
@@ -1132,7 +1132,7 @@ local function caption_above(out, has_bare_caption)
   end
 
   if is_title_para(last) then
-    local title = normalise(pandoc.utils.stringify(last.content))
+    local title = normalize(pandoc.utils.stringify(last.content))
     local prior_label = table_label(prior)
     if prior_label and is_emphasised_para(prior) then
       out:remove(#out)
@@ -1321,7 +1321,7 @@ local function row_as_caption(row)
   local parts, seen = {}, {}
   for _, cell in ipairs(row.cells) do
     local inlines = trim_inlines(cell_inlines(cell))
-    local text = normalise(pandoc.utils.stringify(inlines))
+    local text = normalize(pandoc.utils.stringify(inlines))
     if text ~= '' and not seen[text] then
       seen[text] = true
       parts[#parts + 1] = { inlines = inlines, text = text }
@@ -1382,7 +1382,7 @@ local function fold_caption_rows(tbl, pending)
   if pending.text == '' then return nil end
   local existing, existing_inlines = '', nil
   if #tbl.caption.long > 0 then
-    existing = normalise(pandoc.utils.stringify(tbl.caption.long))
+    existing = normalize(pandoc.utils.stringify(tbl.caption.long))
     existing_inlines = pandoc.utils.blocks_to_inlines(tbl.caption.long)
   end
   if existing:find(pending.text, 1, true) then return existing end
@@ -1394,7 +1394,7 @@ local function fold_caption_rows(tbl, pending)
   end
   out:extend(pending.inlines)
   tbl.caption = mk_caption({ pandoc.Plain(out) })
-  return normalise(pandoc.utils.stringify(out))
+  return normalize(pandoc.utils.stringify(out))
 end
 
 -- ---------------------------------------------------------------------------
@@ -1446,7 +1446,7 @@ local function compose_part_caption(base, band_inlines, band_text, given, part_n
   local text = ''
   if base and #base > 0 then
     out:extend(base)
-    text = normalise(pandoc.utils.stringify(base))
+    text = normalize(pandoc.utils.stringify(base))
   end
   if band_text ~= '' then
     if #out > 0 then
@@ -1527,7 +1527,7 @@ local function split_table(tbl, bands, part_captions, apply)
       local corner = band.cells[1]
       if corner then
         band_inlines = trim_inlines(cell_inlines(corner))
-        band_text = normalise(pandoc.utils.stringify(band_inlines))
+        band_text = normalize(pandoc.utils.stringify(band_inlines))
       end
     end
     local caption_inlines, caption_text = compose_part_caption(
@@ -1591,7 +1591,7 @@ local function apply_headers(tbl, label, entry)
   elseif value == '' then
     local rows, columns = table_shape(tbl)
     warn(('data table has no header row and no declaration: %s (%d rows x %d columns)')
-      :format(label or '(unlabelled)', rows, columns))
+      :format(label or '(unlabeled)', rows, columns))
   end
 end
 
@@ -1615,7 +1615,7 @@ local function caption_data_table(tbl, next_block, after_next, after_after, out)
   if #tbl.caption.long > 0 then
     -- Already captioned: reuse that text to name the scroll region. A
     -- bare label may still have its descriptive title sitting above.
-    label = normalise(pandoc.utils.stringify(tbl.caption.long))
+    label = normalize(pandoc.utils.stringify(tbl.caption.long))
     if is_bare_label(label) then
       local extra = caption_above(out, true)
       if extra and extra ~= label and not is_bare_label(extra) then

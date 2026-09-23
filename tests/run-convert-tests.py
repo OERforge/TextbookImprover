@@ -644,6 +644,13 @@ Hidden *until asked*.
 
 A remote badge: <img src="https://example.invalid/badge.png" alt="A badge">
 
+<iframe src="https://www.youtube.com/embed/abc123?start=30"></iframe>
+
+<iframe src="https://player.vimeo.com/video/76979871" title="A film"></iframe>
+
+<iframe src="https://www.youtube-nocookie.com/embed/videoseries?list=PL123"
+title="A playlist"></iframe>
+
 Code stays: `<p align="center">` and
 
 ```
@@ -665,9 +672,13 @@ def case_markdown_html(work):
                            "  epub:\n    format: epub3\n")
     page = read(work, "html", "raw.html") if exists(
         work, "html", "raw.html") else ""
-    chapter = ""
+    chapter, epub_text = "", ""
     for name in (os.listdir(os.path.join(work, "epub"))
                  if exists(work, "epub") else []):
+        with zipfile.ZipFile(os.path.join(work, "epub", name)) as book:
+            epub_text += "".join(book.read(n).decode("utf-8", "replace")
+                                 for n in book.namelist()
+                                 if n.endswith(".xhtml"))
         with zipfile.ZipFile(os.path.join(work, "epub", name)) as book:
             chapter = "".join(book.read(n).decode("utf-8")
                               for n in book.namelist() if "badge" in
@@ -692,6 +703,13 @@ def case_markdown_html(work):
          lambda: 'src="https://example.invalid/badge.png"' in page
          and '<a href="https://example.invalid/badge.png">A badge</a>'
          in chapter and "<img" not in chapter.split("A badge")[0][-200:]),
+        ("a video's frame stays the player in HTML, and in the EPUB links to "
+         "the video's own page, start time and playlist kept",
+         lambda: 'src="https://www.youtube.com/embed/abc123?start=30"' in page
+         and all(link in epub_text for link in (
+             'href="https://www.youtube.com/watch?v=abc123&amp;t=30s"',
+             'href="https://vimeo.com/76979871"',
+             'href="https://www.youtube.com/playlist?list=PL123"'))),
         ("code is left exactly as written",
          lambda: "<code>&lt;p align=&quot;center&quot;&gt;</code>" in page
          or '<code>&lt;p align="center"&gt;</code>' in page),

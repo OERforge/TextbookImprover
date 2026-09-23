@@ -123,7 +123,7 @@ FOLD = {
 }
 
 
-def normalise_text(text, fold=False):
+def normalize_text(text, fold=False):
     """Collapse whitespace, and optionally fold curly punctuation."""
     if fold:
         for char, plain in FOLD.items():
@@ -145,7 +145,7 @@ def stem_of(value):
     media/rId35.so, /books/econ/10-problems.docx, and 10-problems.md become
     rId35 and 10-problems, so a row survives both a change of intermediate
     format and a change of working directory. The anchor is kept because
-    the filter uses it to tell one unlabelled table in a document from the
+    the filter uses it to tell one unlabeled table in a document from the
     next: 10-problems.md#table-6 and 10-problems.docx#table-6 must agree,
     but neither may collapse into plain 10-problems.
     """
@@ -205,7 +205,7 @@ class PageParser(HTMLParser):
         if not self._capture:
             return None, ""
         name, buf = self._capture.pop()
-        return name, normalise_text("".join(buf), self.fold)
+        return name, normalize_text("".join(buf), self.fold)
 
     def handle_data(self, data):
         if self._capture:

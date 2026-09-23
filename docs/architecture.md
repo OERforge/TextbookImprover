@@ -206,5 +206,5 @@ TABLE_CAPTIONS_MISSING=/tmp/rows.csv SPACER_BELOW=0.3in \
 
 There's also one toggle near the top of the filter that isn't exposed
 through the config, because no book has yet needed it to differ:
-`NORMALISE_MATH_ALT`, which rejoins MathSpeak identifiers. Responsive
+`NORMALIZE_MATH_ALT`, which rejoins MathSpeak identifiers. Responsive
 images used to sit beside it and are now the `images.responsive` setting.

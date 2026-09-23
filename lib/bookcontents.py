@@ -35,7 +35,7 @@ import re
 # The order back matter appears in within a chapter. Different books use
 # different names for these -- Statistics has "chapter-review" and
 # "homework", Economics has "key-concepts-and-summary" and "problems" -- so
-# this is the union of both, and anything unrecognised is sorted after the
+# this is the union of both, and anything unrecognized is sorted after the
 # names listed here and reported rather than silently misplaced.
 #
 # Override it in the config with:
@@ -224,7 +224,7 @@ def within_chapter_key(stem, back_matter):
     """Sort key for one page inside its chapter.
 
     Opener, then introduction, then numbered sections in order, then back
-    matter in the configured order, then anything unrecognised.
+    matter in the configured order, then anything unrecognized.
     """
     if re.match(r"^chapter-\d+$", stem):
         return (0, 0, "")
@@ -243,12 +243,12 @@ def within_chapter_key(stem, back_matter):
     if tail in back_matter:
         return (3, back_matter.index(tail), "")
 
-    # Unrecognised: after the known back matter, alphabetically, and
+    # Unrecognized: after the known back matter, alphabetically, and
     # reported so the name can be added to the configured order.
     return (4, 0, tail)
 
 
-def unrecognised_roles(stems, back_matter):
+def unrecognized_roles(stems, back_matter):
     """Chapter pages whose role name is not in the configured order."""
     found = set()
     for stem in stems:
@@ -271,6 +271,15 @@ FRONT_WORDS = {"frontmatter", "preamble", "preface", "foreword", "titlepage",
 BACK_WORDS = {"notes", "index", "references", "bibliography", "glossary",
               "solutions", "appendix", "backmatter", "colophon"}
 
+
+
+def unrecognised_roles(stems, back_matter):
+    """unrecognized_roles() under its old spelling, kept working until
+    1.0 so a script that imported it doesn't break; it warns."""
+    import warnings
+    warnings.warn("unrecognised_roles() is deprecated; use "
+                  "unrecognized_roles()", DeprecationWarning, stacklevel=2)
+    return unrecognized_roles(stems, back_matter)
 
 def matter_role(stem):
     """front, back, or middle, from the words of a file name. A leading
@@ -421,7 +430,7 @@ def guess_contents(stems, back_matter=None, titles=None, parts=None,
     Detection is by shape, not by vocabulary: anything with a numeric
     chapter prefix belongs to that chapter, whatever the rest of the name
     says. Only the *order* of back matter within a chapter depends on
-    knowing the names, and unrecognised ones sort last rather than
+    knowing the names, and unrecognized ones sort last rather than
     preventing the grouping.
     """
     back_matter = back_matter or BACK_MATTER_ORDER

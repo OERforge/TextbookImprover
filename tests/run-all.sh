@@ -11,6 +11,9 @@
 #
 # WHAT EACH ONE COVERS
 #
+#   run-spelling-tests.py  US spelling in every tracked text file,
+#                          prose and names alike; a released
+#                          changelog section is history and skipped.
 #   run-config-tests.py    the configuration cascade: what a false
 #                          override means, what an explicit null means,
 #                          whether lists append, which identifiers are
@@ -118,6 +121,7 @@ if ! python3 "$here/../util/settings-reference.py" --check; then
   failed="$failed settings-reference.py"
 fi
 
+run run-spelling-tests.py
 run run-config-tests.py
 run run-roundtrip-test.py
 run run-unit-tests.py

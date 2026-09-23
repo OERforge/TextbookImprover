@@ -100,7 +100,7 @@ for a pipeline change — see `util/compare-output.py`.
 
 ## House style
 
-Reminder for Claude: Prose in this repository—these pages, the README, the changelog, the roadmap, code comments, docstrings, and the descriptions in the schemas—is US English and uses contractions: *can't*, *doesn't*, *isn't*, *it's*. The expanded forms are for the rare place where the emphasis is the point, as in the roadmap's heading "What the PDF half can and cannot do".
+Reminder for Claude: Prose in this repository—these pages, the README, the changelog, the roadmap, code comments, docstrings, and the descriptions in the schemas—is US English and uses contractions: *can't*, *doesn't*, *isn't*, *it's*. The expanded forms are for the rare place where the emphasis is the point, as in the roadmap's heading "What the PDF half can and cannot do". `tests/run-spelling-tests.py` holds the spelling mechanically, in prose and in the names of our own functions and settings, and says which file and line; a released changelog section, a name that isn't ours (ARIA's `aria-labelledby`), and an old name kept working until 1.0 are left alone.
 
 Two things are not prose and are left alone: anything inside a code span or a fenced block, and any string the programs print. A message a user reads on their terminal is part of the interface, and restyling one is a change to the interface rather than to the documentation.
 

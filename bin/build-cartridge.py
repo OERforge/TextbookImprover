@@ -69,7 +69,7 @@ except ImportError:
 # The contents tree and the filename guess live in the library because the
 # EPUB assembler builds its table of contents from the same declaration.
 from bookcontents import (  # noqa: E402
-    natural_key, chapter_of, within_chapter_key, unrecognised_roles,
+    natural_key, chapter_of, within_chapter_key, unrecognized_roles,
     guess_contents, walk_contents, flatten_pages, contents_from_tree,
     expand_split_sources, page_title, page_provenance, page_role,
     TITLE_RE, META_RE,
@@ -1045,7 +1045,7 @@ def main():
     # Computed from every page, not only appended ones, so the block lands
     # in the sample whenever the ordering was worked out by the script --
     # which is exactly when knowing about unplaced roles is useful.
-    unknown_roles = unrecognised_roles(stems, back_matter)
+    unknown_roles = unrecognized_roles(stems, back_matter)
 
     manifest = config.get("manifest") or {}
     guessed = default_config(stems)["manifest"]

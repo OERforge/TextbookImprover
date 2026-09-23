@@ -11,7 +11,9 @@ the shapes no sidecar value covers -- layout tables, tables whose header
 band is not the first row, and tables with no header signal at all.
 
 `Guess` is the value a table-headers sidecar would be prefilled with, and
-is one of first-row, first-column, both, or none. It reads content as well
+is one of first-row, first-column, both, or none, or unknown where no rule
+recognizes the table's headers and nothing shows it has none. It reads
+content as well
 as formatting, because these books rarely mark a row-header column in any
 way a file can be asked about. See lib/tablecensus.py, which holds the classification and the guess;
 this is the command line over it.
@@ -61,8 +63,8 @@ from collections import Counter
 # than installed, so the project stays clone-and-run.
 sys.path.insert(0, os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "lib"))
-from tablecensus import (q, all_tables, classify, guess,  # noqa: E402
-                         nearby_label)
+from tablecensus import (q, all_tables, classify,  # noqa: E402
+                         guess_table, nearby_label)
 
 
 # --------------------------------------------------------------------------
@@ -119,7 +121,7 @@ def census(items, verbose=False):
             continue
         for tbl, depth in all_tables(body):
             kind, ev, nrows, ncols = classify(tbl)
-            g = guess(tbl, kind, ev)
+            g = guess_table(tbl, kind, ev)[0]
             label = nearby_label(body, tbl) if depth == 0 else ""
             tally[kind] += 1
             per["tables"] += 1

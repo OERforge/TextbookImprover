@@ -338,6 +338,71 @@ case("an image-only table gets no value", None, [
 # The key: what must and must not change it
 # ---------------------------------------------------------------------------
 
+# What the fallback does when no header rule fires: a shape it knows, or
+# none with evidence, or unknown.
+case("two columns of short labels beside longer values head their rows",
+     "first-column",
+     [row([cell("Nursing Notes"), cell("1300: Patient reports shortness of breath")]),
+      row([cell("Flow Chart"), cell("1330: Blood pressure 120/80, pulse 88")])])
+case("labels beside amounts head their rows", "first-column",
+     [row([cell("In the labor force"), cell("162.052 million")]),
+      row([cell("Employed"), cell("155.175 million")]),
+      row([cell("Unemployed"), cell("6.877 million")])])
+case("under a title, a row of short labels over data is the header row",
+     "first-row",
+     [row([cell("Beginning Data", span=3)]),
+      row([cell("OrderID"), cell("Product"), cell("TotalPrice")]),
+      row([cell("101"), cell("Shirt"), cell("$75")]),
+      row([cell("102"), cell("Hat"), cell("$50")])])
+case("a label that begins with a number is a value, not a header",
+     "first-column",
+     [row([cell("Market shares", span=2)]),
+      row([cell("Smooth as Glass"), cell("16% of the market")]),
+      row([cell("Auto Glass Doctor"), cell("10% of the market")])])
+case("a grid of amounts has no headers", "none",
+     [row([cell("$46,500.00"), cell("$0"), cell("$40,966.50")]),
+      row([cell("$29,050.00"), cell("$19,500.00"), cell("$181,557.20")])])
+case("terms in order down each column are a list, with no headers", "none",
+     [row([cell("Class"), cell("JavaDoc"), cell("private")]),
+      row([cell("Code Block"), cell("Keywords"), cell("public")]),
+      row([cell("Comments"), cell("Local Variables"), cell("Scope")])])
+case("a table no rule recognizes is unknown, not none", "unknown",
+     [row([cell("Tuesday"), cell("Apple"), cell("Seven")]),
+      row([cell("Monday"), cell("Pear"), cell("Three")]),
+      row([cell("Friday"), cell("Plum"), cell("Nine")])])
+
+
+def part_checks():
+    """guess_table: a banded table guessed part by part."""
+    def band(text):
+        return row([cell(text, span=3)])
+    # Parts of bare amounts vote none on their own, so without the header
+    # row above the first band shared with them, none outvotes it.
+    shared_header = [row([cell("Year", bold=True), cell("Sales", bold=True),
+                          cell("Costs", bold=True)]),
+                     band("East"),
+                     row([cell("2019"), cell("$1,200"), cell("$800")]),
+                     row([cell("2020"), cell("$1,350"), cell("$900")]),
+                     band("West"),
+                     row([cell("2019"), cell("$700"), cell("$650")]),
+                     row([cell("2020"), cell("$760"), cell("$640")])]
+    got = tc.guess_table(table(shared_header))
+    yield ("one header row above the first band heads every part, and the "
+           "parts vote first-row", got[0] == "first-row", str(got[:2]))
+    # The first band is partway down, so the whole table has no title and
+    # only the part under the band can find its header row.
+    under_bands = [row([cell("OrderID"), cell("Product"), cell("Price")]),
+                   row([cell("101"), cell("Shirt"), cell("$75")]),
+                   row([cell("102"), cell("Hat"), cell("$50")]),
+                   band("Customers"),
+                   row([cell("CustomerID"), cell("Name"), cell("City")]),
+                   row([cell("1"), cell("John Doe"), cell("Boston")]),
+                   row([cell("2"), cell("Jane Roe"), cell("Denver")])]
+    got = tc.guess_table(table(under_bands))
+    yield ("a part that opens under a band reads it as a title, so its row of "
+           "short labels is its header row", got[0] == "first-row", str(got[:2]))
+
+
 def key_checks():
     """Each returns (name, ok, detail)."""
     base = [row([cell("Year"), cell("GDP")]),
@@ -489,7 +554,7 @@ def script_checks():
 def main():
     failures = 0
     for name, ok, detail in (list(key_checks()) + list(pandoc_checks())
-                             + list(script_checks())):
+                             + list(script_checks()) + list(part_checks())):
         if ok:
             print("  ok    %s" % name)
         else:
@@ -509,7 +574,8 @@ def main():
             print("          kind=%s guess=%s, expected %s" % (kind, got, expect))
             print("          evidence: %s" % "; ".join(ev))
     total = len(CASES) + sum(1 for _ in key_checks()) + \
-        sum(1 for _ in pandoc_checks()) + sum(1 for _ in script_checks())
+        sum(1 for _ in pandoc_checks()) + sum(1 for _ in script_checks()) + \
+        sum(1 for _ in part_checks())
     print("")
     if failures:
         print("%d of %d census checks failed." % (failures, total),

@@ -289,11 +289,14 @@ class View:
     built it: the grid of cells, Word's table-look flags and style name
     (empty for anything but Word), and the rows marked to repeat as a
     header. The rules are the same for every source; only this differs."""
-    __slots__ = ("grid", "look", "style", "marked")
+    __slots__ = ("grid", "look", "style", "marked", "titled")
 
     def __init__(self, grid, look=None, style="", marked=()):
         self.grid, self.look, self.style = grid, look or {}, style
         self.marked = list(marked)
+        # A part of a banded table that opens under a band: the band is
+        # its title, though it isn't in the grid.
+        self.titled = False
 
 
 def view(tbl):
@@ -469,6 +472,11 @@ def mostly_numeric(cells):
     if not vals:
         return False
     hits = sum(1 for v in vals if NUMERIC.match(v))
+    # int() truncates, so a small column passes on less than 60% (one
+    # number in three cells). Left so on purpose: measured on the whole
+    # corpus, an exact 60% changes one guess of 1,045, the parts of a
+    # banded database table ("CustomerID | CustomerName | Address" over
+    # "1 | John Doe | 123 Main St"), from a right first-row to none.
     return hits >= max(1, int(0.6 * len(vals)))
 
 
@@ -661,6 +669,90 @@ QUANTITY = re.compile(r"""^[(\[]?[-+\u2212]?[$\u00a3\u20ac\u00a5]?\s*
                           [)\]]?$""", re.X)
 
 
+
+AMOUNT = re.compile(r"^[-−–+(]?[$€£]?[-−–]?\d[\d,]*(\.\d+)?[)%]?$")
+
+
+def is_amount(text):
+    """A number, a percentage, or a sum of money ("$46,500.00")."""
+    return bool(NUMERIC.match(text) or AMOUNT.match(text.replace(" ", "")))
+
+
+def header_like(row, below):
+    """A row of short, distinct labels that aren't numbers and don't begin
+    with one ("16% of the market" is a value), over rows that hold longer
+    text or numbers: a header row nothing marks."""
+    texts = [c.text for c in row]
+    if (len(row) < 2 or not all(texts) or len(set(map(id, row))) < len(row)
+            or any(len(t) > 40 or is_amount(t) or t[0].isdigit() for t in texts)):
+        return False
+    under = [c.text for r in below for c in r if c.text]
+    if not under:
+        return False
+    return (sum(map(len, under)) / len(under) > sum(map(len, texts)) / len(texts)
+            or any(is_amount(t) for t in under))
+
+
+def label_value(rows):
+    """Two columns, each row a short label beside a longer value or an
+    amount: a box of labeled fields ("Nursing Notes | 1300: ...", "In the
+    labor force | 162.052 million"), whose first column heads its rows."""
+    if not rows or any(len(r) != 2 or r[0] is r[1] for r in rows):
+        return False
+    labels = [r[0].text for r in rows]
+    values = [r[1].text for r in rows]
+    if (not all(labels) or not any(values) or any(len(t) > 40 for t in labels)
+            or mostly_numeric([r[0] for r in rows])):
+        return False
+    amounts = all(v[0].isdigit() or v[0] in "$€£−-+(<>" for v in values if v)
+    return amounts or sum(map(len, values)) > sum(map(len, labels))
+
+
+
+def plain_grid(rows):
+    """Every filled cell a number or an amount: observations laid out in
+    rows to fit the page, with nothing to head them."""
+    vals = [c.text for r in rows for c in r if c.text]
+    return bool(vals) and all(is_amount(v) for v in vals)
+
+
+def snaked_list(rows):
+    """Short terms that read in alphabetical order down each column and
+    on into the next: a list laid out in columns, which has no headers
+    and wants authoring as a list."""
+    width = max((len(r) for r in rows), default=0)
+    if width < 2 or len(rows) < 2:
+        return False
+    terms = []
+    for i in range(width):
+        for r in rows:
+            if i < len(r) and r[i].text:
+                if any(r[i] is other for other in r[:i]):
+                    return False          # a merged cell: not a list
+                terms.append(r[i].text)
+    if len(terms) < 6 or any(len(t) > 40 or is_amount(t) for t in terms):
+        return False
+    keys = [t.casefold() for t in terms if t[:1].isalpha()]
+    return len(keys) >= 0.8 * len(terms) and keys == sorted(keys)
+
+
+def no_headers(rows, skipped, small):
+    """The fallback when no rule recognizes a header: none only with
+    evidence the table has no headers, and unknown otherwise, since
+    unknown asks a person to look where none would claim to know."""
+    body = [r for r in rows if not (len(r) > 1 and is_full_width_band(r))]
+    if plain_grid(body):
+        return "none", skipped + "every filled cell is a number or an amount"
+    if snaked_list(body):
+        return "none", skipped + ("short terms in alphabetical order down each "
+                                  "column: a list laid out in columns")
+    if small:
+        return "unknown", skipped + "too small to read, and nothing marks a header"
+    return "unknown", skipped + ("no header row, no header column, and no "
+                                 "keying first column: no rule recognizes "
+                                 "this table's headers")
+
+
 def mostly_values(cells, ratio=0.8):
     """A body of measurements rather than prose.
 
@@ -766,7 +858,10 @@ def explain(tbl, kind=None, ev=None):
     Returns "unknown" where the file shows a header band the four values
     cannot place. That is a third state on purpose: "none" is a claim
     about the table and "unknown" is a claim about the guess, and a report
-    that conflates them tells a person nothing about where to look.
+    that conflates them tells a person nothing about where to look. It is
+    also what the fallback gives when no rule recognizes a header: none
+    only with evidence that the table has none (every filled cell a number
+    or an amount, or a list laid out in columns), unknown otherwise.
 
     The key-column rule fires with or without a header row above it, but
     not on the same terms: see the comment where it does.
@@ -868,13 +963,32 @@ def explain(tbl, kind=None, ev=None):
         return "both", (skipped + "the corner cell is blank with labels along the top "
                         "row and down the first column, so the two axes label each other")
 
+    if not has_head and plain:
+        width = max(len(r) for r in rows)
+        titled = (bool(skipped) or getattr(tbl, "titled", False)
+                  or (width > 1 and is_full_width_band(rows[0])
+                      and bool(rows[0][0].text)))
+        # Bands left out whatever the table's width made of plain: the
+        # title itself is one, and so are bands further down.
+        lead = [r for r in rows if not (width > 1 and is_full_width_band(r))]
+        if titled and len(lead) > 1 and header_like(lead[0], lead[1:]):
+            if label_value(lead[1:]):
+                return "both", (skipped + "under the title a row of short labels "
+                                "heads rows that are each a short label beside "
+                                "a longer value")
+            return "first-row", (skipped + "under the title a row of short labels "
+                                 "heads rows of longer text or numbers")
+        if label_value(plain):
+            return "first-column", (skipped + "two columns, each row a short label "
+                                    "beside a longer value or an amount")
+
     ncols = max(len(r) for r in rows)
     body = [r for r in rows[1 if has_head else 0:]
             if r and not is_full_width_band(r)]
     if ncols < 2 or len(body) < 2:
         if has_head:
             return "first-row", skipped + head_why
-        return "none", skipped + "too small to read, and nothing marks a header"
+        return no_headers(rows, skipped, small=True)
 
     # A trailing summary row ("Total = 600") often has nothing in its
     # label cell, and one blank is enough to make the whole first column
@@ -920,7 +1034,7 @@ def explain(tbl, kind=None, ev=None):
     if has_head:
         return "first-row", skipped + head_why + (
             ", and the first column does not key its rows over a body of values")
-    return "none", skipped + "no header row, no header column, and no keying first column"
+    return no_headers(rows, skipped, small=False)
 
 
 LABEL = re.compile(r"\b(Table|Exhibit)\s+([A-Z]?[\d.]+[a-z]?)", re.I)
@@ -1044,3 +1158,146 @@ def read_body(path):
         xml = archive.read("word/document.xml")
     root = ET.fromstring(xml)
     return root.find(q("body"))
+
+
+# --------------------------------------------------------------------------
+# Title rows and bands, and the guess for a table that will be split
+# --------------------------------------------------------------------------
+
+
+def rows_list(text):
+    rows = []
+    for part in (text or "").split(","):
+        part = part.strip()
+        if part.isdigit() and int(part) > 0:
+            rows.append(int(part))
+    return rows
+
+
+def band_rows(grid):
+    """0-based indices of merged full-width rows with text."""
+    if not grid or max(len(r) for r in grid) < 2:
+        return []
+    return [i for i, r in enumerate(grid) if is_full_width_band(r) and r[0].text]
+
+
+def repeated_header_rows(grid):
+    """0-based indices of rows that repeat row 1's header cells with a
+    different first cell: the corner names a group, and the rest of the
+    row is the same header again. Table 7.2 of the sociology book --
+    Functionalism, Conflict Theory, Symbolic Interactionism, each over
+    `| Associated Theorist | Deviance arises from:` -- and two tables in
+    Economics 3e. Three of the eighteen tables with header-looking rows
+    below row 1 have this shape, and nothing else does."""
+    if len(grid) < 4 or max(len(r) for r in grid) < 2:
+        return []
+    first = grid[0]
+    if len({id(c) for c in first}) < 2 or not looks_like_header_band(first):
+        return []
+    tail = lambda r: tuple(c.text for c in r[1:])
+    later = [i for i, r in enumerate(grid) if i > 0
+             and len({id(c) for c in r}) > 1
+             and looks_like_header_band(r)
+             and tail(r) == tail(first) and r[0].text != first[0].text]
+    return [0] + later if later else []
+
+
+def inferred_structure(grid):
+    """(caption-rows, split-at) as the sidecar strings.
+
+    A merged full-width row with text is one of two things. Alone at the
+    top it is a title, and becomes the caption. Partway down it is a
+    grouping band, a label for the rows beneath it, which no header
+    markup can express in every output format; the table is split there.
+    And when row 1 is merged *and* there are bands below it, row 1 is the
+    first band, not a title -- 7-5-costs-in-the-long-run.docx opens with
+    "Example A", then "Example B" at row 6, each with its own header row
+    beneath. Written into the prefilled row so the plan is visible."""
+    bands = band_rows(grid)
+    if not bands:
+        repeated = repeated_header_rows(grid)
+        if repeated:
+            return "", ",".join(str(i + 1) for i in repeated)
+        return "", ""
+    below = [i for i in bands if i > 0]
+    if not below:
+        return "1", ""
+    if 0 in bands:
+        return "", ",".join(str(i + 1) for i in bands)
+    return "", ",".join(str(i + 1) for i in below)
+
+
+def guess_by_parts(tbl, split_at, whole_value, whole_reason):
+    """The guess for a table that will be split, taken part by part.
+    The bands break every rule when the table is read whole -- a blank
+    corner matrix's first column has band text in it, a key column has
+    gaps -- so the whole-table guess for a banded table is usually none.
+    Each part between the bands is an ordinary table, so guess each and
+    let them vote; the parts nearly always agree, and one value covers
+    them all in the sidecar.
+
+    The rows above the first band that every part will carry are guessed
+    with each part, as the filter copies them: the rows Pandoc reads as the
+    table's head (row 1 when Word's table look sets its first-row flag, and
+    rows marked to repeat), or, when there are none, the one row above the
+    first band of a table whose whole guess has a header row. A part too
+    small to judge abstains, and a tie goes to the whole table's guess,
+    then to a value over none."""
+    v = view(tbl)
+    grid = v.grid
+    cuts = sorted(set(i - 1 for i in split_at if 0 < i <= len(grid)))
+    if not cuts:
+        return whole_value, whole_reason
+    marked = set(v.marked)
+    first_row = bool(v.look.get("firstRow"))
+    shared = 0
+    while shared < cuts[0] and (shared in marked or (shared == 0 and first_row)):
+        shared += 1
+    if shared == 0 and cuts[0] == 1 and whole_value in ("first-row", "both"):
+        shared = 1
+    is_band = {c: is_full_width_band(grid[c]) and len(grid[c]) > 1 for c in cuts}
+    edges = [shared] + cuts + [len(grid)]
+    bounds = []
+    for k in range(len(cuts) + 1):
+        lo, hi = edges[k], edges[k + 1]
+        if k > 0 and is_band[cuts[k - 1]]:
+            lo = cuts[k - 1] + 1
+        if hi > lo:
+            bounds.append((lo, hi))
+    head_marks = [i for i in range(shared) if i in marked or (i == 0 and first_row)]
+    votes = []
+    for lo, hi in bounds:
+        part = View(grid[:shared] + grid[lo:hi], v.look, v.style,
+                    head_marks + [shared + i - lo for i in range(lo, hi)
+                                  if i in marked])
+        part.titled = lo > 0 and (lo - 1) in is_band and is_band[lo - 1]
+        kind, ev, _, _ = classify(part)
+        value, reason = explain(part, kind, ev)
+        if value in (None, "unknown") or "too small" in reason:
+            continue
+        votes.append(value)
+    if not votes:
+        return whole_value, whole_reason
+    top = max(votes.count(x) for x in votes)
+    tied = [x for x in votes if votes.count(x) == top]
+    if whole_value in tied:
+        winner = whole_value
+    else:
+        winner = next((x for x in tied if x != "none"), tied[0])
+    return winner, ("guessed part by part between the bands: %s"
+                    % ", ".join(votes))
+
+
+def guess_table(tbl, kind=None, ev=None):
+    """(value, reason, (caption-rows, split-at)): what the header pre-pass
+    guesses for a table and plans for its title rows and bands, whichever
+    reader built it. The census and the pre-pass both ask this, so what the
+    census reports is what a conversion will do."""
+    v = view(tbl)
+    if kind is None:
+        kind, ev, _, _ = classify(v)
+    value, reason = explain(v, kind, ev)
+    inferred = inferred_structure(v.grid)
+    if inferred[1] and value is not None:
+        value, reason = guess_by_parts(v, rows_list(inferred[1]), value, reason)
+    return value, reason, inferred

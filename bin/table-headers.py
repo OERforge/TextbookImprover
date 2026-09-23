@@ -138,115 +138,18 @@ def label_for(body, tbl, depth, parents):
     return ("inside %s" % label) if label else ""
 
 
-def guess_by_parts(tbl, split_at, whole_value, whole_reason):
-    """The guess for a table that will be split, taken part by part.
-
-    The bands break every rule when the table is read whole -- a blank
-    corner matrix's first column has band text in it, a key column has
-    gaps -- so the whole-table guess for a banded table is usually none.
-    Each part between the bands is an ordinary table, so guess each and
-    let them vote; the parts nearly always agree, and one value covers
-    them all in the sidecar."""
-    trs = tbl.findall(tc.q("tr"))
-    cuts = sorted(set(i - 1 for i in split_at if 0 < i <= len(trs)))
-    if not cuts:
-        return whole_value, whole_reason
-    # Rows above the first band that Word marks to repeat are the table's
-    # header rows, shared by every part -- the filter copies them into
-    # each -- so the parts are guessed with them in place. Anything else
-    # above the first band is a leading part of its own.
-    shared = []
-    while (len(shared) < cuts[0]
-           and tc.repeats_as_header(trs[len(shared)])):
-        shared.append(trs[len(shared)])
-    # A split row that is a merged band leaves the part; one with several
-    # cells is the part's own header row and stays at its top.
-    grid = tc.build_grid(tbl)
-    is_band = {c: (c < len(grid) and tc.is_full_width_band(grid[c])
-                   and len(grid[c]) > 1) for c in cuts}
-    # Segments run between cut points. A band cut is left out of the
-    # segment it opens; a header-row cut is its first row.
-    bounds = []
-    edges = [len(shared)] + cuts + [len(trs)]
-    for k in range(len(cuts) + 1):
-        lo = edges[k]
-        hi = edges[k + 1]
-        if k > 0 and is_band[cuts[k - 1]]:
-            lo = cuts[k - 1] + 1
-        if hi > lo:
-            bounds.append((lo, hi))
-    votes = []
-    for lo, hi in bounds:
-        part = ET.Element(tc.q("tbl"))
-        pr = tbl.find(tc.q("tblPr"))
-        if pr is not None:
-            part.append(pr)
-        for tr in shared:
-            part.append(tr)
-        for tr in trs[lo:hi]:
-            part.append(tr)
-        kind, ev, _, _ = tc.classify(part)
-        v, _ = tc.explain(part, kind, ev)
-        if v and v != "unknown":
-            votes.append(v)
-    if not votes:
-        return whole_value, whole_reason
-    winner = max(set(votes), key=votes.count)
-    return winner, ("guessed part by part between the bands: %s"
-                    % ", ".join(votes))
 
 
-def band_rows(grid):
-    """0-based indices of merged full-width rows with text."""
-    if not grid or max(len(r) for r in grid) < 2:
-        return []
-    return [i for i, r in enumerate(grid) if tc.is_full_width_band(r) and r[0].text]
 
 
-def repeated_header_rows(grid):
-    """0-based indices of rows that repeat row 1's header cells with a
-    different first cell: the corner names a group, and the rest of the
-    row is the same header again. Table 7.2 of the sociology book --
-    Functionalism, Conflict Theory, Symbolic Interactionism, each over
-    `| Associated Theorist | Deviance arises from:` -- and two tables in
-    Economics 3e. Three of the eighteen tables with header-looking rows
-    below row 1 have this shape, and nothing else does."""
-    if len(grid) < 4 or max(len(r) for r in grid) < 2:
-        return []
-    first = grid[0]
-    if len({id(c) for c in first}) < 2 or not tc.looks_like_header_band(first):
-        return []
-    tail = lambda r: tuple(c.text for c in r[1:])
-    later = [i for i, r in enumerate(grid) if i > 0
-             and len({id(c) for c in r}) > 1
-             and tc.looks_like_header_band(r)
-             and tail(r) == tail(first) and r[0].text != first[0].text]
-    return [0] + later if later else []
 
 
-def inferred_structure(grid):
-    """(caption-rows, split-at) as the sidecar strings.
 
-    A merged full-width row with text is one of two things. Alone at the
-    top it is a title, and becomes the caption. Partway down it is a
-    grouping band, a label for the rows beneath it, which no header
-    markup can express in every output format; the table is split there.
-    And when row 1 is merged *and* there are bands below it, row 1 is the
-    first band, not a title -- 7-5-costs-in-the-long-run.docx opens with
-    "Example A", then "Example B" at row 6, each with its own header row
-    beneath. Written into the prefilled row so the plan is visible."""
-    bands = band_rows(grid)
-    if not bands:
-        repeated = repeated_header_rows(grid)
-        if repeated:
-            return "", ",".join(str(i + 1) for i in repeated)
-        return "", ""
-    below = [i for i in bands if i > 0]
-    if not below:
-        return "1", ""
-    if 0 in bands:
-        return "", ",".join(str(i + 1) for i in bands)
-    return "", ",".join(str(i + 1) for i in below)
+
+rows_list = tc.rows_list
+band_rows = tc.band_rows
+repeated_header_rows = tc.repeated_header_rows
+inferred_structure = tc.inferred_structure
 
 
 def no_header_text(grid):
@@ -292,8 +195,7 @@ def tables_in_json(path):
             continue                  # a layout table, and says so
         view = tc.view_from_pandoc(table)
         kind, ev, nrows, ncols = tc.classify(view)
-        value, reason = tc.explain(view, kind, ev)
-        inferred = inferred_structure(view.grid)
+        value, reason, inferred = tc.guess_table(view, kind, ev)
         source = attributes.get(MARKER)
         if source:
             value, reason = source, "the page marks its header cells (<th>)"
@@ -371,14 +273,11 @@ def tables_in(path):
     found = []
     for index, (tbl, depth) in enumerate(tc.all_tables(body)):
         kind, ev, nrows, ncols = tc.classify(tbl)
-        value, reason = tc.explain(tbl, kind, ev)
+        value, reason, inferred = tc.guess_table(tbl, kind, ev)
         if value is None:
             continue
         grid = tc.build_grid(tbl)
         first = grid[0][0].text if grid and grid[0] else ""
-        inferred = inferred_structure(grid)
-        if inferred[1]:
-            value, reason = guess_by_parts(tbl, rows_list(inferred[1]), value, reason)
         found.append({
             "key": tc.table_key(tbl, keys),
             "rows": nrows,
@@ -416,13 +315,6 @@ def caption_rows_in_effect(info, row):
     return rows
 
 
-def rows_list(text):
-    rows = []
-    for part in (text or "").split(","):
-        part = part.strip()
-        if part.isdigit() and int(part) > 0:
-            rows.append(int(part))
-    return rows
 
 
 def split_in_effect(info, row):

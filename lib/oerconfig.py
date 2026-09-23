@@ -30,7 +30,7 @@ fixing the instance.
 THE MERGE RULES
 
 Five, kept few on purpose. Every configuration system that grows richer
-merge semantics ends up with behaviour nobody can predict from reading
+merge semantics ends up with behavior nobody can predict from reading
 the file, and this one has to be reimplemented one day in whatever the
 web front end is written in.
 

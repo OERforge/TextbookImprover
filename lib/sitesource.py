@@ -77,6 +77,11 @@ PROFILES = [
      "authors": ["p.author"],
      "chrome": ["div.navsettop", "div.navsetbottom", "span.button-group",
                 "a.heading-anchor", "div.tocset", "div.versionbox"]},
+    {"name": "oercommons",
+     "detect": [r'class="js-courseware-ct"'],
+     "content": ["article.lesson-task-slide", "div.js-courseware-ct"],
+     "title": "h2.lesson-task-title",
+     "chrome": ["div.lesson-task-slides-controls"]},
     {"name": "asciidoctor",
      "detect": [r'<meta name="generator" content="Asciidoctor'],
      "content": ["div#content"],
@@ -93,6 +98,7 @@ PROFILES = [
 
 # Elements whose reference is fetched to show the page; anything else
 # with an href (a link, an RDFa property on a span) is only a pointer.
+FRAME_TAGS = ("iframe", "embed", "object")
 RESOURCE_TAGS = ("img", "script", "link", "source", "video", "audio",
                  "track", "iframe", "embed", "object", "input", "image")
 
@@ -209,12 +215,25 @@ def detect_profile(texts):
 
 
 def canonical(url):
-    """A page's URL for comparing: no fragment, no query, and a
-    directory named for its index file."""
-    url = urldefrag(url)[0].split("?", 1)[0]
-    if url.endswith("/"):
-        url += "index.html"
-    return url
+    """A page's URL for comparing: no fragment, and a directory named for
+    its index file. The query stays, since some sites tell their pages
+    apart by nothing else (OER Commons's ?section=3); page_key() tries a
+    reference without it when it matches no page with it."""
+    base, _, query = urldefrag(url)[0].partition("?")
+    if base.endswith("/"):
+        base += "index.html"
+    return base + ("?" + query if query else "")
+
+
+def page_key(site, url):
+    """The page a reference names, or None: its canonical URL, or that
+    URL without its query (a tracking parameter, or ?section=0 naming the
+    lesson page that holds section 0)."""
+    key = canonical(url)
+    if key in site.pages:
+        return key
+    bare = key.split("?", 1)[0]
+    return bare if bare in site.pages else None
 
 
 class Page:
@@ -400,15 +419,35 @@ def load_warc(paths):
     resource. A redirect is followed when a reference is looked up."""
     site = Site()
     site.kind = "WARC"
-    htmls = []
+    htmls, aliases, seeds, parts = [], [], [], []
     for path in sorted(paths):
+        seeds += _recorded_pages(path)
         for name, stream in _warc_streams(path):
             with stream:
                 for headers, block in _warc_records(stream):
-                    if headers.get("warc-type") != "response":
+                    kind_of_record = headers.get("warc-type")
+                    if kind_of_record not in ("response", "revisit"):
                         continue
                     url = headers.get("warc-target-uri", "").strip("<>")
                     if not url.startswith(("http://", "https://")):
+                        continue
+                    if kind_of_record == "revisit":
+                        # A browser's archive stores a redirect, and a
+                        # payload it has already recorded, as a revisit:
+                        # the HTTP headers, and a pointer to the earlier
+                        # record in place of the body.
+                        try:
+                            status, http, _ = _http_response(block)
+                        except ValueError:
+                            continue
+                        if 300 <= status < 400 and http.get("location"):
+                            site.redirects[urldefrag(url)[0]] = urljoin(
+                                url, http["location"])
+                        elif 200 <= status < 300:
+                            earlier = headers.get("warc-refers-to-target-uri",
+                                                  "").strip("<>")
+                            if earlier and earlier != url:
+                                aliases.append((url, earlier))
                         continue
                     try:
                         status, http, body = _http_response(block)
@@ -423,7 +462,10 @@ def load_warc(paths):
                     if status != 200:
                         continue
                     kind = http.get("content-type", "").split(";")[0].strip()
-                    if kind in ("text/html", "application/xhtml+xml"):
+                    fragment = _html_in_json(body) if "json" in kind else None
+                    if fragment is not None:
+                        parts.append((url, fragment, body))
+                    elif kind in ("text/html", "application/xhtml+xml"):
                         charset = re.search(r"charset=([\w-]+)",
                                             http.get("content-type", ""))
                         htmls.append((url, body.decode(
@@ -432,7 +474,16 @@ def load_warc(paths):
                     else:
                         leaf = posixpath.basename(urlsplit(url).path)
                         site.add_resource(body, leaf or "file", url)
-    host = urlsplit(htmls[0][0]).netloc if htmls else ""
+    for url, earlier in aliases:
+        key = site.by_url.get(urldefrag(earlier)[0])
+        if key:
+            site.by_url.setdefault(urldefrag(url)[0], key)
+    # The book's site: the first page the archive says was recorded (a
+    # WACZ lists them), or else the first HTML fetched, which for a crawl
+    # is where it started. A browser fetches other sites' HTML first
+    # often enough (a sign-in relay, a share widget).
+    host = urlsplit(seeds[0]).netloc if seeds else (
+        urlsplit(htmls[0][0]).netloc if htmls else "")
     for url, text in htmls:
         if urlsplit(url).netloc == host:
             page = Page(url, text)
@@ -441,7 +492,62 @@ def load_warc(paths):
             site.add_resource(text.encode("utf-8"),
                               posixpath.basename(urlsplit(url).path)
                               or "page.html", url)
+    # HTML delivered as JSON is a page only when it's part of a page the
+    # archive holds: the same address with another query, as a lesson
+    # fetches its sections. Anything else carrying HTML in JSON (an
+    # oEmbed answer, a widget) is a resource like any JSON.
+    for url, fragment, body in parts:
+        bare = canonical(url).split("?", 1)[0]
+        if bare in site.pages and canonical(url) not in site.pages:
+            page = Page(url, fragment)
+            site.pages[page.url] = page
+        else:
+            site.add_resource(body, posixpath.basename(urlsplit(url).path)
+                              or "data.json", url)
     return site
+
+
+def _recorded_pages(path):
+    """The pages a WACZ says were recorded, in order."""
+    if not zipfile.is_zipfile(path):
+        return []
+    import json
+    with zipfile.ZipFile(path) as archive:
+        if "pages/pages.jsonl" not in archive.namelist():
+            return []
+        urls = []
+        for line in archive.read("pages/pages.jsonl").decode(
+                "utf-8", "replace").splitlines():
+            try:
+                entry = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(entry, dict) and entry.get("url"):
+                urls.append(entry["url"])
+        return urls
+
+
+def _html_in_json(body):
+    """A page of HTML delivered as JSON, as a site that draws its pages
+    by script fetches them (OER Commons: {"template": "<div ...>"}), as
+    a document with its first heading for a title; None for any other
+    JSON."""
+    import json
+    try:
+        data = json.loads(body)
+    except ValueError:
+        return None
+    if not isinstance(data, dict):
+        return None
+    for key in ("template", "html", "content"):
+        value = data.get(key)
+        if isinstance(value, str) and value.lstrip().startswith("<"):
+            m = re.search(r"<h[1-3][^>]*>(.*?)</h[1-3]>", value, re.S)
+            title = " ".join(re.sub(r"<[^>]+>", " ", m.group(1)).split()) \
+                if m else ""
+            return ("<!DOCTYPE html><html><head><title>" + title +
+                    "</title></head><body>" + value + "</body></html>")
+    return None
 
 
 def follow(site, url):
@@ -507,6 +613,12 @@ def page_names(site):
         if dirs.count(top) >= 0.8 * len(dirs):
             common = top
     site.root = common
+    one_path = len({urlsplit(u).path for u in site.pages}) == 1
+    # The page with no query, among pages numbered by one (?section=1,
+    # ?section=2), is the one a menu calls ?section=0: named so.
+    numbered = {m.group(1) for u in site.pages for m in
+                [re.fullmatch(r"(\w+)=\d+", urlsplit(u).query)] if m}
+    zero = numbered.pop() + "=0" if one_path and len(numbered) == 1 else ""
     taken = set()
     for url, page in site.pages.items():
         path = urlsplit(url).path
@@ -514,6 +626,11 @@ def page_names(site):
             path + "/").startswith(common.rstrip("/") + "/") \
             else path.lstrip("/")
         stem = re.sub(r"\.x?html?$", "", rest).replace("/", "-")
+        # Pages told apart by their query take it into their names; when
+        # every page has one path, the query alone names them.
+        query = urlsplit(url).query or zero
+        if query:
+            stem = query if one_path else stem + "-" + query
         stem = safe_stem(stem) or "page"
         base, n = stem, 2
         while stem in taken:
@@ -656,8 +773,8 @@ def order(site, titles=None):
             for a in element.iter():
                 if hp.local(a.tag) != "a" or not _href(a):
                     continue
-                target = canonical(urljoin(url, _href(a)))
-                if target in site.pages:
+                target = page_key(site, urljoin(url, _href(a)))
+                if target:
                     links.append(target)
                     if target not in sequence:
                         sequence.append(target)
@@ -682,8 +799,8 @@ def order(site, titles=None):
     for a in container.iter():
         if hp.local(a.tag) != "a" or not _href(a):
             continue
-        target = canonical(urljoin(where, _href(a)))
-        if target not in site.pages or target in placed:
+        target = page_key(site, urljoin(where, _href(a)))
+        if target is None or target in placed:
             continue
         placed.add(target)
         depth, node = 0, parent_of.get(a)
@@ -742,6 +859,14 @@ def rewrite(site, page, keep_hosts, resource_key_names, used, missing):
                                               "javascript:", "tel:")):
                 continue
             tag = hp.local(element.tag)
+            if tag in FRAME_TAGS and attribute in ("src", "data"):
+                # A frame shows something that lives elsewhere (a video's
+                # player) and stays pointed there, even when the archive
+                # recorded what it showed; it's never reported missing.
+                absolute = urljoin(page.url, value)
+                if absolute != value and not value.startswith("//"):
+                    element.set(attribute, absolute)
+                continue
             is_link = tag not in RESOURCE_TAGS or (
                 tag == "link" and "stylesheet" not in (element.get("rel")
                                                        or "")
@@ -785,8 +910,9 @@ def localize(site, page, value, origin, base_dir, keep_hosts, used, missing,
     # canonical form (a directory, before index.html was added).
     target = follow(site, target)
     absolute = target + ("#" + fragment if fragment else "")
-    target_page = site.pages.get(canonical(absolute)) or site.pages.get(
-        canonical(follow(site, canonical(absolute))))
+    key = page_key(site, absolute) or page_key(
+        site, follow(site, canonical(absolute)))
+    target_page = site.pages.get(key) if key else None
     if target_page is not None:
         return target_page.name + ".html" + ("#" + fragment_href(fragment)
                                              if fragment else "")

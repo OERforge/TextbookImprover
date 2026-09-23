@@ -35,6 +35,7 @@ What surrounds the content depends on what built the site, and a profile says wh
 | `scribble` | its `navsettop` bar (Scribble names itself nowhere) | `div.main` | the prev/up/next bars, the 🔗 on every heading, the sidebar |
 | `asciidoctor` | its generator meta | `#content` | the table of contents, the footer, heading anchors |
 | `wordpress` | its generator meta | `<main>`, `#content`, or `<article>` | navigation, footers, sharing buttons |
+| `oercommons` | its courseware markup (`js-courseware-ct`) | the section (`article.lesson-task-slide`), or the lesson's opening | the previous/next controls and their section menu; the section's `h2` becomes its page's title |
 | `generic` | anything else | `<main>`, `role="main"`, `<article>`, or the body | navigation and footers |
 
 A profile may also say what its generator lays out as a table that isn't one. Scribble does that four ways, and of DCIC's 335 tables 210 were these: a REPL interaction (prompt, code, result) becomes its contents; a section's own table of contents, nothing but `toclink` links, goes, like just-the-docs' per-page contents; a verbatim block with a line per row becomes one `<pre>`; and a Python/Pyret comparison, the one kind that is data, keeps its table and gets its row of language names as header cells. The report counts each kind.
@@ -68,6 +69,12 @@ python3 $T/bin/unpack-jekyll.py textbook/ -o ~/books/cs168-md
 Each page is named from its path as `unpack-site.py` names the saved page for the same URL, so the two routes compare page by page with `compare-output.py`; `contents` comes from the front matter (`parent`, `grand_parent`, `nav_order`), and a section whose page is only front matter is a group. Each page's body is read with Pandoc and written back as Pandoc's Markdown, changed on the way: kramdown's inline `$$x$$`, which Pandoc reads as display math in the middle of a sentence, is made inline; its `{: .class}` attribute lists go; and root-relative paths in links, images, and raw HTML become relative. The changes are made on Pandoc's document tree, where code of every kind (a code span, a fenced block, an indented block) is an element none of them looks inside: a book about the web writes `<img src="/logo.png">` as an example. The site's own HTML pages (a `404.html` with front matter) and its machinery aren't copied. Raw HTML is left to the run, which reads it as HTML ([Markdown sources](markdown.md#raw-html)).
 
 CS168 both ways: the same 62 pages and the same 772 images without alt text. The differences are the theme's generated section contents, the language (`en-US` from the theme, none in the source's `_config.yml`), and five pages whose images differ between the source and the published site, the source's looking like corrections the site hadn't yet had.
+
+## What a browser's archive holds
+
+A browser records a site the way a reader's browser receives it, which differs from a crawl in three ways the unpacker handles. A WACZ lists the pages that were recorded, and the first of them names the book's site; the first HTML the browser fetched is often another site's (a sign-in relay, a share button). A redirect, and a response the archive already holds, is stored as a revisit record, which is followed like any redirect. And a site that draws its pages by script may fetch each section as data: OER Commons fetches `?section=3` of a lesson as JSON holding the section's HTML. Such a response is a page when it's part of a page the archive holds (the same address with another query); any other JSON with HTML in it, such as an oEmbed answer, is not. Pages told apart only by their query are named by it (`section-3`), and the page without one, which a lesson's menu calls `?section=0`, is `section-0`.
+
+A frame (`<iframe>`, `<embed>`, `<object>`) always keeps pointing at what it shows, even when the archive recorded the player: a browser's archive of a lesson with videos holds each video's player page, and a book shouldn't.
 
 ## Posting the clean copy as a site
 

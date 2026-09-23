@@ -36,7 +36,7 @@ worse than a failed run, because it destroys work invisibly. The report
 lists the unmatched rows beside the tables no row claimed, so a person can
 see "that is my row, the table changed."
 
-A `headers` value the reader does not recognise is warned about once and
+A `headers` value the reader does not recognize is warned about once and
 treated as blank. That is what lets `manual`, `list`, and `caption-rows` be
 declared before anything acts on them, and what keeps a sidecar written
 against a newer version from losing work under an older one.

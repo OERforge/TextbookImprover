@@ -45,7 +45,7 @@ keys:
     default: book
     description: >
       A name for this book that no other book anywhere will use. It is
-      what an LMS matches on to recognise a re-import as the same course,
+      what an LMS matches on to recognize a re-import as the same course,
       it's what the content folder inside a package is named after, and
       two books sharing one are two books the LMS will treat as one. The
       IMS schema only requires it to be unique within the package;
@@ -130,7 +130,7 @@ keys:
     description: >
       The book's structure as a nested list of pages and groups. This
       describes the book, not any one package, so a cartridge
-      organisation and an EPUB table of contents are both built from it.
+      organization and an EPUB table of contents are both built from it.
       A group or page may carry a role, front, main, appendix, or back,
       which says how it counts when numbering is on and where it belongs
       in the book; the default is main. An entry "generate: toc" is a

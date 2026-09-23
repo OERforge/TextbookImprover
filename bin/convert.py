@@ -974,7 +974,7 @@ def media_references(path):
 def media_gate(base, stems, media_rows, report_path, safe=True):
     """A dead image link is invisible in the generated HTML -- Pandoc
     emits an <embed> rather than an <img> for an extension it does not
-    recognise. Stopping here is deliberate: broken output that looks fine
+    recognize. Stopping here is deliberate: broken output that looks fine
     is worse than no output.
 
     v0.1 spent this step repairing as well as checking, because the
@@ -2205,7 +2205,7 @@ def main():
     # ---- 6. the cartridge --------------------------------------------------
     # Handed off to build-cartridge.py, which is read-only with respect to
     # page content and can be run on its own against any directory of
-    # HTML. Arguments not recognised here are passed straight through, so
+    # HTML. Arguments not recognized here are passed straight through, so
     # `--zip` builds the archive too. It reads its configuration here and
     # its pages from the first html target's directory; a package whose
     # includes name another html target is a roadmap item.

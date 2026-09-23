@@ -130,7 +130,7 @@ The sentence or two a reading system shows a reader about the book's accessibili
 
 ## captions
 
-How table and figure labels are recognised in the source.
+How table and figure labels are recognized in the source.
 
 **`captions.table_prefixes`**—`list`; default `[Table]`
 

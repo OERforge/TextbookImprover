@@ -109,6 +109,10 @@ class _Collector(HTMLParser):
         elif tag == "img":
             self.page.images.append(("alt" in a, a.get("alt") or "",
                                      is_decorative(a), a.get("src", "")))
+            # An image's alt text is part of a heading's accessible name,
+            # so a heading holding only a described image isn't empty.
+            if self._heading is not None:
+                self._heading[1].append(" " + (a.get("alt") or "") + " ")
         elif tag in ("h1", "h2", "h3", "h4", "h5", "h6"):
             self._heading = [int(tag[1]), []]
         elif tag == "div" and "table-wrapper" in (a.get("class") or ""):
@@ -175,8 +179,10 @@ def read_xhtml(name, markup):
             page.images.append(("alt" in el.attrib, el.get("alt") or "",
                                 is_decorative(el.attrib), el.get("src", "")))
         elif tag in ("h1", "h2", "h3", "h4", "h5", "h6"):
-            page.headings.append((int(tag[1]),
-                                  " ".join("".join(el.itertext()).split())))
+            alts = " ".join(i.get("alt") or "" for i in el.iter()
+                            if i.tag.replace(XHTML, "") == "img")
+            page.headings.append((int(tag[1]), " ".join(
+                ("".join(el.itertext()) + " " + alts).split())))
         elif tag == "table":
             has_th = any(c.tag.replace(XHTML, "") == "th" for c in el.iter())
             has_caption = any(c.tag.replace(XHTML, "") == "caption"

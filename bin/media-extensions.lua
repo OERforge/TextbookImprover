@@ -7,7 +7,7 @@ Image references to match -- entirely inside a single pandoc run.
 Word stores images with whatever content type the DOCX declares. OpenStax
 files routinely declare application/octet-stream, which pandoc maps to a
 ".so" extension. Pandoc emits <embed> rather than <img> for an extension it
-does not recognise, so a wrong extension produces an image that silently
+does not recognize, so a wrong extension produces an image that silently
 does not appear.
 
 This replaces a post-hoc rename plus a sed pass over the intermediate: it

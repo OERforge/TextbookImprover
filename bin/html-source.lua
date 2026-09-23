@@ -221,12 +221,37 @@ function Link(link)
   if drop_obsolete(link) then return link end
 end
 
+-- A heading with no text in it (an editor's leftover <h3>&nbsp;</h3>)
+-- names nothing and every checker flags it; it goes, its id kept as an
+-- anchor for anything that links to it. One holding an image stays.
+local function blank_heading(h)
+  if pandoc.utils.stringify(h.content):gsub('[%s\u{00A0}]', '') ~= '' then
+    return false
+  end
+  local holds = false
+  pandoc.Inlines(h.content):walk({
+    Image = function() holds = true end,
+    Math = function() holds = true end,
+    Code = function() holds = true end,
+    RawInline = function() holds = true end,
+  })
+  return not holds
+end
+
 local function empty_anchor(inline)
   return inline.t == 'Span' and inline.identifier ~= ''
     and #inline.content == 0
 end
 
 function Header(h)
+  if blank_heading(h) then
+    -- "section", "section-1": the reader's own id for a heading with no
+    -- text, which nothing outside the page can have linked to.
+    if h.identifier ~= '' and not h.identifier:match('^section%-?%d*$') then
+      return pandoc.Div({}, pandoc.Attr(h.identifier, { 'anchor' }))
+    end
+    return {}
+  end
   local ids = {}
   local kept = pandoc.Inlines({})
   for _, inline in ipairs(h.content) do

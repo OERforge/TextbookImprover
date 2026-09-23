@@ -40,6 +40,7 @@ import outputcheck  # noqa: E402
 
 GOOD = """<!DOCTYPE html><html lang="en"><head><title>A page</title></head>
 <body><h1 id="top">Top</h1><h2>Second</h2>
+<h2><img src="z.png" alt="A described figure"></h2>
 <img src="x.png" alt="A thing"><img src="y.png" alt="" aria-hidden="true">
 <div class="table-wrapper" tabindex="0" role="region" aria-label="Data">
 <table><caption>Data</caption><tr><th scope="col">H</th></tr></table></div>

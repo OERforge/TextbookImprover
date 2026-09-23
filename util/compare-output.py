@@ -756,7 +756,7 @@ def _report_files(before, after, args):
 
 
 def _by_extension(label, keys, table, args):
-    """Summarise a list of files by extension so a hundred do not print."""
+    """Summarize a list of files by extension so a hundred do not print."""
     if not keys:
         return
     counts = Counter(table[k]["ext"] or "(none)" for k in keys)

@@ -3,7 +3,7 @@ bookcontents.py -- the book's structure: the contents tree, and the guess
 made from filenames when no tree is declared.
 
 Shared by both halves of the pipeline. project.contents is declared once
-because a cartridge organisation and an EPUB table of contents are the
+because a cartridge organization and an EPUB table of contents are the
 same structure expressed twice, and the code that reads and guesses it has
 to be shared for the same reason: two copies would drift, and then the
 two outputs would disagree about the order of the book.
@@ -409,7 +409,7 @@ def guess_contents(stems, back_matter=None, titles=None, parts=None,
 
     parts maps a piece's stem to (source stem, part number, parent
     titles, position) when the caller has read that from the page; otherwise
-    pieces are recognised by the separator in their names and ordered by
+    pieces are recognized by the separator in their names and ordered by
     name, which is right only by luck. Either way the pieces of a source are grouped under
     it, with the source's own page first when it has one, and the group
     then takes the source's place in whatever chapter grouping applies.
@@ -508,7 +508,7 @@ class Entry(tuple):
 
 def walk_contents(nodes, available, used, problems, depth=0,
                   suffix=".html", inherited=None):
-    """Normalise the configured tree into (kind, ...) records.
+    """Normalize the configured tree into (kind, ...) records.
 
     available is the set of page stems that exist; suffix is only used to
     name a missing one in the way the caller's directory would show it,

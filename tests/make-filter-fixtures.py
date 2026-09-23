@@ -105,7 +105,7 @@ def mark_header_row(row):
 def titled(d, text, style):
     """A paragraph in a named style, creating the style if the template
     lacks it. Pandoc resolves a pStyle to the style's name, so a style
-    that only exists as an id is not recognised."""
+    that only exists as an id is not recognized."""
     if style not in [s.name for s in d.styles]:
         d.styles.add_style(style, WD_STYLE_TYPE.PARAGRAPH)
     p = d.add_paragraph(text)

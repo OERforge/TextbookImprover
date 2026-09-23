@@ -38,6 +38,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
 import argparse
+import html as html_module
 import os
 import re
 import sys
@@ -137,6 +138,18 @@ def main():
                                   page.text):
             math_lost.append(page.name + ".html")
     book_title, titles = split_titles(titles)
+    # A title that ends with the site's own name (og:site_name, "OER
+    # Commons") loses it: the site isn't the page.
+    for url, page in site.pages.items():
+        m = re.search(r"""<meta[^>]*property=["']og:site_name["'][^>]*"""
+                      r"""content=["']([^"']+)["']""", page.text)
+        if not m:
+            continue
+        name = html_module.unescape(m.group(1)).strip()
+        for sep in SEPARATORS:
+            if titles[url].endswith(sep + name) and \
+                    len(titles[url]) > len(sep + name):
+                titles[url] = titles[url][:-len(sep + name)].strip()
 
     # The order comes from the menus, so it is read before any is removed.
     entries, how = sitesource.order(site, titles)
@@ -190,6 +203,10 @@ def main():
                            sitesource.MATH_SCRIPT.search(e.get("type") or ""))]
             for element in doomed:
                 hp.drop(element, parent_of)
+            # The profile's chapter heading is the page's title.
+            if profile.get("title"):
+                for heading in hp.select(content, profile["title"])[:1]:
+                    heading.tag = "h1"
             if sitesource.USES_MATHJAX.search(page.text):
                 formulas += sitesource.mathjax_math(content)
             if profile.get("transform"):
@@ -262,8 +279,17 @@ def main():
                       "no menu names this page; listed at the end of "
                       "contents"))
     host = urlsplit(next(iter(site.pages))).netloc
-    title = book_title or (titles.get(entries[0][2]) if entries else "") \
-        or host
+    # The book's own name: the suffix every page's title shares, or what
+    # the first page says it is (og:title), or the first entry's title.
+    og = ""
+    for url in [e[2] for e in entries] + list(site.pages):
+        m = re.search(r"""<meta[^>]*property=["']og:title["'][^>]*"""
+                      r"""content=["']([^"']+)["']""", site.pages[url].text)
+        if m:
+            og = html_module.unescape(m.group(1)).strip()
+            break
+    title = book_title or og or (titles.get(entries[0][2]) if entries
+                                 else "") or host
     language = max(languages, key=languages.get) or "en"
     meta = {"title": [title], "language": [language], "creator": authors,
             "identifier": [host + site.root]}

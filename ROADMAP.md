@@ -128,7 +128,7 @@ The table headers sidecar shipped in v0.3 and is no longer a numbered item: the 
 
 The report already carries both `declared` and `guess`, so a row where they differ is one somebody certainly changed. That is a proxy and not the thing: a reviewer who reads a table and agrees with the guess leaves no trace at all.
 
-Recording the act needs a column of its own—`reviewed`, holding initials and a date, or empty. Adding one is safe whenever it is wanted, and does not have to be decided now: the reader maps columns by name and ignores what it doesn't recognise, verified by appending a `reviewed` column to a real sidecar and running the pre-pass, which read it unchanged. So the question is whether the workflow wants it, not whether the format allows it, and the honest answer is that nobody has yet worked through a whole book twice.
+Recording the act needs a column of its own—`reviewed`, holding initials and a date, or empty. Adding one is safe whenever it is wanted, and does not have to be decided now: the reader maps columns by name and ignores what it doesn't recognize, verified by appending a `reviewed` column to a real sidecar and running the pre-pass, which read it unchanged. So the question is whether the workflow wants it, not whether the format allows it, and the honest answer is that nobody has yet worked through a whole book twice.
 
 **`mostly_numeric` uses `int(0.6 * n)`**, so a four-cell column that is half numeric counts as mostly numeric. It decides whether a bin column (`1`, `2`, `3-4`, `5+`) reaches the ordering test at all. Left alone rather than changed inside another change; worth tightening deliberately and re-measuring.
 

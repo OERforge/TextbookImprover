@@ -24,12 +24,12 @@ still installed and a corpus is on hand. These assert the same things
 against six small documents, so the check survives the version it was
 written for.
 
-Some cases pin behaviour that is about to change -- a merged title row,
-a table with no header signal -- rather than behaviour that is right.
+Some cases pin behavior that is about to change -- a merged title row,
+a table with no header signal -- rather than behavior that is right.
 Those say so. A change is only checkable if the starting point was
 written down.
 
-Each case names the behaviour rather than the bug, because a test that
+Each case names the behavior rather than the bug, because a test that
 says what should happen is readable by someone who never saw the bug.
 
 Copyright 2026 Robert Szarka

@@ -38,7 +38,7 @@ Pages on disk that `contents` doesn't place are named on stderr and left out, as
 
 Each page is its own file inside the EPUB, titled by its heading. Every `id` in a page is prefixed with the page's name (`page-1-2-scarcity--table-1`), and links within the page follow, so two pages that both have a *Key Terms* heading don't send a link to the wrong one.
 
-With `numbering: true` on the project, the nav and the headings carry the book's numbers (`1 The Big Picture`, `1.1 …`, `A Math Review`); a `generate: toc` entry in `contents` is a chapter holding the full table of contents; and `notes.placement: book` gathers every footnote on a Notes chapter placed where `contents` lists `notes`, or last. A footnote is numbered where it appears and ends with a labelled link back to its reference.
+With `numbering: true` on the project, the nav and the headings carry the book's numbers (`1 The Big Picture`, `1.1 …`, `A Math Review`); a `generate: toc` entry in `contents` is a chapter holding the full table of contents; and `notes.placement: book` gathers every footnote on a Notes chapter placed where `contents` lists `notes`, or last. A footnote is numbered where it appears and ends with a labeled link back to its reference.
 
 ## What the package document claims
 

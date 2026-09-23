@@ -28,7 +28,7 @@ Anything describing one rendering is conversion-scoped. Anything
 describing one distributable archive is packaging-scoped.
 
 That moves `contents` somewhere that may surprise: it used to live with
-the cartridge settings, but a cartridge organisation and an EPUB table of
+the cartridge settings, but a cartridge organization and an EPUB table of
 contents are the same book's structure written twice, so it belongs to
 the book.
 

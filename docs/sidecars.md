@@ -98,7 +98,7 @@ BC-08#table-1,Comparison of chart types and when to use each
 
 That is page stem, then which table it's on the page. The key is stable
 as long as no table is inserted or removed above it on that page — the
-trade for being able to caption a table the source never named. Labelled
+trade for being able to caption a table the source never named. Labeled
 tables are unaffected and keep their label as the key.
 
 One alt per image file. If the same image appears twice on a page with

@@ -22,7 +22,7 @@
 # converted.
 #
 # Note what is absent: the book's structure. contents is project-scoped,
-# because a cartridge organisation and an EPUB table of contents are the
+# because a cartridge organization and an EPUB table of contents are the
 # same book's structure expressed twice, and it should be declared once.
 
 description: >

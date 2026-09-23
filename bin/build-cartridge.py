@@ -247,7 +247,7 @@ def contents_from_outline(path, stems, titles, parts=None):
     available = set(stems)
     placed, unmapped = set(), []
 
-    # A page is also found by its own title, normalised the way a heading
+    # A page is also found by its own title, normalized the way a heading
     # is, so files named BC-01 or cut from a chapter by split_level match
     # the entries that name them. A title two pages share is settled by
     # provenance -- the page from the source the rest of this group came
@@ -608,7 +608,7 @@ def chapter_groups(tree, found=None):
 
     A group represents a chapter when the pages directly inside it all
     belong to the same one. That is how an already-sorted chapter is
-    recognised on a later run, so newly converted pages join it instead of
+    recognized on a later run, so newly converted pages join it instead of
     starting a second group with the same heading.
     """
     if found is None:
@@ -708,7 +708,7 @@ MANIFEST_TAIL = """      </item>
 # --------------------------------------------------------------------------
 
 # How much of the title to keep in the prefix. Long enough to be
-# recognisable in a file manager, short enough that the longest page name
+# recognizable in a file manager, short enough that the longest page name
 # plus its media directory stays well inside any path limit.
 PREFIX_TITLE_CHARS = 32
 

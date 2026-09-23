@@ -63,10 +63,10 @@ wget obeys the site's `robots.txt`. If the crawl stops after the first page and 
 If wget stops at once with `ERROR 403: Forbidden`, the site is refusing it: some sites, or the services in front of them, turn away anything that doesn't identify itself as a browser. wget could claim to be one (`--user-agent`), but that's getting around a choice the site's owners made, as ignoring `robots.txt` is. What to try instead, in order:
 
 - **The publisher's own exports.** A platform like Pressbooks offers EPUB and PDF, and often XHTML or HTMLBook, in a book's "Download this book" menu. An EPUB goes to [`unpack-epub.py`](epub-input.md) and is usually the cleaner source anyway.
-- **A capture in a real browser.** The ArchiveWeb.page extension records what you visit as a WACZ, and Browsertrix Crawler (below) runs a browser. A site that serves its readers serves these too.
+- **A capture in a real browser**, with ArchiveWeb.page ([below](#archivewebpage-recording-as-you-read)) or Browsertrix Crawler. A site that serves its readers serves these too.
 - **The site's owners**, for a copy or for permission to crawl.
 
-The Pressbooks site of one book these instructions were tested against refused wget this way, and its EPUB was the source used.
+Two sites these instructions were tested against refused wget this way. For the Pressbooks one, its EPUB was the source used; for the OER Commons one, whose EPUB had no images, ArchiveWeb.page was.
 
 To see what the crawl got:
 
@@ -74,6 +74,22 @@ To see what the crawl got:
 ls -lh *.warc.gz
 zcat cs168.warc.gz | grep -c '^WARC-Type: response'
 ```
+
+## ArchiveWeb.page, recording as you read
+
+[ArchiveWeb.page](https://github.com/webrecorder/archiveweb.page) is a browser extension from Webrecorder, the makers of Browsertrix. While it's recording, it keeps every request the browser makes and every response it gets, and it saves them as a WACZ. It's the tool for a site that refuses wget, one that builds its pages with JavaScript, or one that shows its content only to someone signed in, because what it records is exactly what a reader's browser receives.
+
+It runs in Chrome and in browsers built on Chrome's engine (Edge, Brave). Install it from the Chrome Web Store (search for ArchiveWeb.page, published by Webrecorder) and pin it to the toolbar so its icon is at hand. It needs nothing else: no Docker, no command line.
+
+1. **Open the book's first page**, and sign in first if the site shows the book only to signed-in readers.
+2. **Start recording** from the extension's icon. It records the tab you're in, into an archive that it names "My Archiving Session" unless you give it another name.
+3. **Visit every page of the book.** Follow the book's own menu page by page rather than jumping around, and let each page finish loading. Scroll to the bottom of a long page, since many sites fetch an image only when it comes into view. Videos don't need to be played: a frame keeps pointing at the video wherever it lives, so the player isn't needed in the archive.
+4. **Stop recording**, then open the extension's list of archives, select the one you recorded, and download it as a WACZ.
+5. **Unpack it** as you would a WARC (next section), and read `unpack-report.csv`. The `order` row says how many of the book's pages the menu reached, and a `resource-not-held` row names anything a page showed that the archive doesn't hold. Record a page again, in a new session, to fill a gap.
+
+A site that fetches its sections into one page by script, as OER Commons does, is still one page per section after unpacking: the unpacker takes each section's HTML from the data the page fetched. *Business Communication* on OER Commons came out as its 16 chapters and its title page, with 213 of the pages' 214 images held. The one missing, the title page's cover, has no response in the archive at all, and was missing when the site was viewed as well. Its publisher's EPUB had none of the images: 121 of its "images" are a web server's refusal.
+
+These steps say what to do rather than quoting the extension's buttons, whose wording changes between versions; the test capture was made with version 0.17.1.
 
 ## Browsertrix Crawler, for a site built by JavaScript
 

@@ -454,7 +454,7 @@ def book_metadata(project, resolved, found, base):
         "title": meta_string(project["title"]),
         "lang": meta_string(project["language"]),
         # The book's own identifier rather than a fresh UUID per build, so
-        # a reading system recognises a rebuilt edition as the same book.
+        # a reading system recognizes a rebuilt edition as the same book.
         "identifier": meta_string(project["identifier"]),
     }
     if project.get("publisher"):

@@ -68,7 +68,7 @@ defaults:
     placement: book      # page, group, or book
 ```
 
-`numbering: group` continues the numbers across the pages of the enclosing group in reading order, whatever a group is called; a page that wasn't split is a group of one. `placement: group` gathers a group's notes at the end of its last page; `placement: book` gathers every note on a `notes` page at the end, with a heading for each group and the numbers per group. A reference always links to its note wherever it went, and every note ends with a link back to its reference, labelled for a screen reader ("Back to reference 3"). Pandoc can't be asked to start counting at 7, so the numbers are rewritten in the output, ids and all, which is why the EPUB's per-file MathML bookkeeping is redone when a note with an equation moves.
+`numbering: group` continues the numbers across the pages of the enclosing group in reading order, whatever a group is called; a page that wasn't split is a group of one. `placement: group` gathers a group's notes at the end of its last page; `placement: book` gathers every note on a `notes` page at the end, with a heading for each group and the numbers per group. A reference always links to its note wherever it went, and every note ends with a link back to its reference, labeled for a screen reader ("Back to reference 3"). Pandoc can't be asked to start counting at 7, so the numbers are rewritten in the output, ids and all, which is why the EPUB's per-file MathML bookkeeping is redone when a note with an equation moves.
 
 The `notes` page is back matter to the packager's guess and to the EPUB; list it in `contents` where you want it if that isn't the end.
 

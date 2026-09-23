@@ -448,10 +448,115 @@ Two</a></li><li><a href="/book/three.html">Three</a></li></ul></nav>
     ]
 
 
+def warc_revisit(url, http, refers=None):
+    import gzip as gz
+    block = ("HTTP/1.1 " + http + "\r\n\r\n").encode()
+    record = (f"WARC/1.1\r\nWARC-Type: revisit\r\nWARC-Target-URI: {url}\r\n"
+              + (f"WARC-Refers-To-Target-URI: {refers}\r\n" if refers else "")
+              + f"Content-Length: {len(block)}\r\n\r\n").encode() + block \
+        + b"\r\n\r\n"
+    return gz.compress(record)
+
+
+LESSON = "https://oer.example.org/courseware/lesson/7/student/70"
+
+
+def case_browser_archive(work):
+    """A browser's archive of a lesson whose sections are fetched as JSON,
+    in the shape ArchiveWeb.page recorded OER Commons."""
+    import json
+    import zipfile
+    os.makedirs(work)
+    menu = ('<ul class="task-slide-dropdown-ct">'
+            + "".join(f'<li><a href="?section={n}">{t}</a></li>' for n, t in
+                      ((0, "Title"), (1, "1 - Speaking"), (2, "2 - Writing"),
+                       (3, "View all as one page"))) + "</ul>")
+    controls = f'<div class="lesson-task-slides-controls">{menu}</div>'
+    base = f"""<html><head><title>Talk | Example Commons</title>
+<meta property="og:title" content="Talk">
+<meta property="og:site_name" content="Example Commons"></head><body>
+<nav>site menu</nav><div class="js-courseware-ct">{controls}
+<div class="text-center"><img src="/cover.png" alt="Talk"></div>{controls}
+</div></body></html>"""
+
+    def section(n, title, extra=""):
+        return json.dumps({"status": "success", "template": (
+            f'<div class="js-courseware-ct">{controls}<article '
+            f'class="lesson-task-slide"><h2 class="lesson-task-title">{title}'
+            f'</h2><p>Section {n}. {extra}</p></article>{controls}</div>')})
+    records = [
+        warc_record("https://accounts.example.com/relay", "200 OK\r\n"
+                    "Content-Type: text/html", b"<html><body>relay</body></html>"),
+        warc_record(LESSON, "200 OK\r\nContent-Type: text/html", base.encode()),
+        warc_record(LESSON + "?section=1", "200 OK\r\nContent-Type: "
+                    "application/json", section(1, "Speaking",
+                    '<img src="https://oer.example.org/editor/images/9" alt="A '
+                    'podium">').encode()),
+        warc_record(LESSON + "?section=2", "200 OK\r\nContent-Type: "
+                    "application/json", section(2, "Writing",
+                    '<iframe src="https://video.example.com/embed/abc" '
+                    'title="A talk"></iframe><h3>&nbsp;</h3>').encode()),
+        warc_record("https://video.example.com/embed/abc", "200 OK\r\n"
+                    "Content-Type: text/html", b"<html><body>player</body></html>"),
+        warc_record("https://oer.example.org/oembed/client?url=x", "200 OK\r\n"
+                    "Content-Type: application/json",
+                    json.dumps({"html": "<iframe src='x'></iframe>"}).encode()),
+        warc_revisit("https://oer.example.org/editor/images/9",
+                     "302 Found\r\nLocation: https://img.example.org/podium.png"),
+        warc_record("https://img.example.org/podium.png", "200 OK\r\n"
+                    "Content-Type: image/png", PNG),
+    ]
+    wacz = os.path.join(work, "session.wacz")
+    with zipfile.ZipFile(wacz, "w") as z:
+        z.writestr("archive/data.warc.gz", b"".join(records))
+        z.writestr("pages/pages.jsonl", '{"format": "json-pages-1.0"}\n'
+                   + json.dumps({"url": LESSON, "title": "Talk"}) + "\n")
+        z.writestr("datapackage.json", "{}")
+    out = os.path.join(work, "book")
+    result = unpack([wacz], out)
+    import yaml
+    project = yaml.safe_load(read(out, "project.yaml"))["project"] \
+        if os.path.exists(os.path.join(out, "project.yaml")) else {}
+    one = read(out, "section-1.html") if os.path.exists(
+        os.path.join(out, "section-1.html")) else ""
+    rows = report(out) if os.path.exists(
+        os.path.join(out, "unpack-report.csv")) else []
+    return [
+        ("the book is the site the archive says was recorded, not the first "
+         "HTML fetched",
+         lambda: result.returncode == 0 and sorted(
+             n for n in os.listdir(out) if n.endswith(".html"))
+         == ["section-0.html", "section-1.html", "section-2.html"]),
+        ("sections fetched as JSON are pages; an oEmbed answer isn't",
+         lambda: "Section 1." in one and not any(
+             "oembed" in n for n in os.listdir(out))),
+        ("the lesson's own menu gives the order, and names the lesson page "
+         "section-0",
+         lambda: [c["page"] for c in project["contents"]]
+         == ["section-0", "section-1", "section-2"]),
+        ("OER Commons is recognized: the chapter is the content, its heading "
+         "the page's h1, the controls gone",
+         lambda: any(r["Check"] == "profile" and r["Detail"].startswith(
+             "oercommons") for r in rows)
+         and "<h1" in one and "task-slide-dropdown" not in one),
+        ("an image reached through a redirect stored as a revisit is held",
+         lambda: 'src="assets/podium.png"' in one),
+        ("a frame keeps pointing at what it shows, though the archive holds "
+         "a copy",
+         lambda: 'src="https://video.example.com/embed/abc"'
+         in read(out, "section-2.html") and not any(
+             "video.example.com" in r["Detail"] for r in rows)),
+        ("the book's title is og:title, and the site's name leaves a page's",
+         lambda: project.get("title") == "Talk"
+         and "<title>Talk</title>" in read(out, "section-0.html")),
+    ]
+
+
 CASES = [
     ("a browser's saves", case_browser_save),
     ("an MHTML set", case_mhtml),
     ("a WARC and a WACZ", case_warc),
+    ("a browser's archive of a lesson", case_browser_archive),
     ("the parsers", case_parsers),
 ]
 

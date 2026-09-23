@@ -8,7 +8,7 @@ can put back what it never saw.
 Pandoc's HTML reader keeps the id of a div, a section, a span, a heading,
 a link, an image, a figure, a table, and code. It builds a paragraph, a
 list item, a definition, a table cell, a caption, a block quote, and
-every inline mark from their contents alone (pPara and its neighbours in
+every inline mark from their contents alone (pPara and its neighbors in
 Readers/HTML.hs take the tag's contents and none of its attributes), so
 `<p id="fs-id1167">` comes back as a paragraph with no name and every
 link to it is dead. Measured; it is how publishers anchor footnotes

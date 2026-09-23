@@ -330,7 +330,7 @@ keys:
 
   captions:
     description: >
-      How table and figure labels are recognised in the source.
+      How table and figure labels are recognized in the source.
     keys:
 
       table_prefixes:

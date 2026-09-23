@@ -267,7 +267,7 @@ local RESPONSIVE_IMAGES =
 -- rather than the author of the page.
 --
 --   meta     keep the head metadata, drop the visible byline (default)
---   visible  keep both, which is Pandoc's own behaviour
+--   visible  keep both, which is Pandoc's own behavior
 --   drop     remove both
 local BYLINE_MODES = { meta = true, visible = true, drop = true }
 local AUTHOR_BYLINE = (os.getenv('AUTHOR_BYLINE') or 'meta'):lower()
@@ -929,7 +929,7 @@ function Image(img)
       -- entirely, and a missing alt makes screen readers fall back to
       -- announcing the file name. Setting it explicitly emits alt="".
       --
-      -- --embed-resources re-serialises the HTML and rewrites alt="" to a
+      -- --embed-resources re-serializes the HTML and rewrites alt="" to a
       -- bare alt. The two are equivalent to an HTML5 parser, but some
       -- assistive technology treats a valueless alt as absent, so
       -- aria-hidden="true" is set as well: it survives that pass intact
@@ -1115,7 +1115,7 @@ end
 --
 -- Anchoring on the label pattern is what keeps this safe: prose that only
 -- mentions a table mid-sentence never starts with it, and an unlabelled
--- title is only taken when a labelled paragraph sits directly above it.
+-- title is only taken when a labeled paragraph sits directly above it.
 local function caption_above(out, has_bare_caption)
   local last = out[#out]
   local prior = out[#out - 1]

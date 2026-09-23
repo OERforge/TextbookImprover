@@ -36,6 +36,8 @@ What Pandoc does, as read from its source or established by test, for the questi
 
 **A style based on `Heading N` is a heading.** `Heading2Grey` (OpenStax) becomes a level-2 `Header` with the style as a class. Measured.
 
+**Row 1 is a header row whenever Word's table look says the table has one.** `splitHeaderRows (firstRowFormatting look)` in `Readers/Docx.hs`: with the first-row flag set in `w:tblLook`, row 1 is the head, and the rows after it join the head while they're marked to repeat (`w:tblHeader`) or continue a cell merged down from one; without the flag, only rows marked to repeat do, and when the first such row comes after unmarked ones, those are promoted with it so the order holds. So a header row can be declared by nothing but the table's style. The header pre-pass counts it as shared by every part of a banded table, as the filter copies it, and a declared `none` turns it back into ordinary cells: *Business Communication*'s Table 22.6 lost its header row that way until the per-part guess learned this. Read from the source (3.11).
+
 ## The HTML reader
 
 **One `<main>` is the whole document.** `extractMain` keeps only the contents of the element with `role="main"` (a `<main>` gets that role on read) when the page has exactly one, and everything otherwise (`Readers/HTML.hs`, after `parseDoc`). Read from the source; measured on 60 just-the-docs pages, where the site navigation is gone with no work from us. A generator that marks its content with a `div` and a class gets no such help.

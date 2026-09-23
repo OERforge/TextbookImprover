@@ -41,7 +41,9 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
 import hashlib
+import os
 import re
+import sys
 import zipfile
 import xml.etree.ElementTree as ET
 
@@ -1301,3 +1303,26 @@ def guess_table(tbl, kind=None, ev=None):
     if inferred[1] and value is not None:
         value, reason = guess_by_parts(v, rows_list(inferred[1]), value, reason)
     return value, reason, inferred
+
+def book_files(args):
+    """(path, book) for every .docx the arguments name, in a stable order."""
+    out = []
+    for arg in args:
+        if os.path.isdir(arg):
+            root = os.path.normpath(arg)
+            name = os.path.basename(os.path.abspath(root))
+            found = []
+            for here, dirs, files in os.walk(root):
+                dirs.sort()
+                found.extend(os.path.join(here, f) for f in sorted(files)
+                             if f.lower().endswith(".docx")
+                             and not f.startswith("~$"))
+            if not found:
+                print(f"{arg}: no .docx files", file=sys.stderr)
+            for path in found:
+                parts = os.path.relpath(path, root).split(os.sep)
+                out.append((path, parts[0] if len(parts) > 1 else name))
+        else:
+            out.append((arg, os.path.basename(
+                os.path.dirname(os.path.abspath(arg)))))
+    return out

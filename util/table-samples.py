@@ -208,14 +208,51 @@ case("header-row-unmarked", "Header row, not marked in Word",
      and not evidence(i, "tblHeader")
      and evidence(i, "header-looking row 1"))
 
-case("header-row-missing", "No header text anywhere",
+def row_repeats(i, n):
+    """Word marks row n (0-based) to repeat as a header."""
+    trs = i["tbl"].findall(tc.q("tr"))
+    return n < len(trs) and tc.repeats_as_header(trs[n])
+
+
+def body_rows(i):
+    return [r for r in i["grid"] if r and not tc.is_full_width_band(r)]
+
+
+case("header-row-missing", "A grid of numbers, with no headers",
      "No w:tblHeader, no uniformly bold or shaded band in row 1 or "
-     "column 1, and no first column that keys its rows over a body of "
-     "values. A sidecar cannot help if the words genuinely are not there: "
-     "nothing can invent them. Either it is a data grid or someone has to "
-     "author headers in Word. Read the table before deciding which.",
-     lambda i: i["guess"] == "none" and i["ncols"] > 1
-     and not evidence(i, "merged cells"))
+     "column 1, and every filled cell a number or an amount: observations "
+     "laid out in rows to fit the page. The guess is none, with that as its "
+     "evidence. A sidecar cannot help if the words are not there, and "
+     "nothing can invent them; what such a table wants is a caption.",
+     lambda i: i["kind"] == "no-header-signal" and i["ncols"] > 1
+     and not evidence(i, "merged cells") and tc.plain_grid(body_rows(i)))
+
+case("unrecognized", "A table no rule recognizes",
+     "Nothing marks a header and no rule reads one from the content, but "
+     "nothing shows the table has none either. The guess is unknown, which "
+     "asks a person to look, and the table is converted as the source "
+     "marks it. Payoff matrices, tables laid on their side, and formula "
+     "glossaries end up here.",
+     lambda i: i["guess"] == "unknown" and "no rule recognizes" in i["why"])
+
+case("label-value-box", "Two columns of labeled fields",
+     "Each row a short label beside a longer value or an amount (Nursing "
+     "Notes beside a timed entry, a count beside what it counts), and "
+     "nothing marking the labels. The first column heads its rows, so the "
+     "guess is first-column.",
+     lambda i: i["kind"] == "no-header-signal"
+     and tc.label_value(body_rows(i)))
+
+case("title-over-unmarked-header", "A title over a header row nothing marks",
+     "Row 1 is one merged cell, the table's title, and row 2 is a row of "
+     "short labels over longer text or numbers, neither bold nor shaded "
+     "nor set to repeat. The title becomes the caption and row 2 the "
+     "header row, so the guess is first-row.",
+     lambda i: i["grid"] and tc.is_full_width_band(i["grid"][0])
+     and len(body_rows(i)) > 1
+     and not evidence(i, "header-looking row")
+     and not row_repeats(i, 1)
+     and tc.header_like(body_rows(i)[0], body_rows(i)[1:]))
 
 case("row-headers-unformatted", "Row headers with nothing marking them",
      "A contingency table: the first column labels its rows and Word was "
@@ -339,7 +376,7 @@ case("column-major-list", "A list snaked into columns",
      "order. There are no headers to declare, so none is the right value "
      "and it does not describe the problem: the honest fix is authoring "
      "the content as a list.",
-     lambda i: i["guess"] == "none" and reads_down_the_columns(
+     lambda i: i["kind"] == "no-header-signal" and reads_down_the_columns(
          [r for r in i["grid"] if r and not tc.is_full_width_band(r)]))
 
 case("nested-table", "A table inside a table",
@@ -454,7 +491,9 @@ def collect(paths, verbose=False, modes=None):
             grid = tc.build_grid(tbl)
             if not grid:
                 continue
-            value, why = tc.explain(tbl, kind, ev)
+            # The guess a conversion makes, bands and all: guess_table is
+            # what the header pre-pass and the census ask.
+            value, why, _ = tc.guess_table(tbl, kind, ev)
             found.append({
                 "source": src, "path": path, "index": index, "tbl": tbl,
                 "depth": depth, "kind": kind, "ev": ev, "grid": grid,
@@ -797,7 +836,8 @@ def main():
     ap = argparse.ArgumentParser(
         description="Collect one real example of each table shape into a "
                     "single Word document.")
-    ap.add_argument("files", nargs="*", help="source .docx files")
+    ap.add_argument("files", nargs="*",
+                    help="source .docx files, or directories to search for them")
     ap.add_argument("-o", "--output", default="table-samples.docx")
     ap.add_argument("--case", action="append", default=[],
                     help="only this case (repeatable)")
@@ -826,6 +866,8 @@ def main():
     if seed is None and args.random:
         seed = random.randrange(10 ** 6)
     modes = {}
+    # A directory stands for every .docx in it, as for the census.
+    args.files = [path for path, _ in tc.book_files(args.files)]
     found = collect(args.files, modes=modes)
     if not found:
         print("no tables found", file=sys.stderr)

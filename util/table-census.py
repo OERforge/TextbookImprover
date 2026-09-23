@@ -64,33 +64,11 @@ from collections import Counter
 sys.path.insert(0, os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "lib"))
 from tablecensus import (q, all_tables, classify,  # noqa: E402
-                         guess_table, nearby_label)
+                         guess_table, nearby_label, book_files)
 
 
 # --------------------------------------------------------------------------
 
-def book_files(args):
-    """(path, book) for every .docx the arguments name, in a stable order."""
-    out = []
-    for arg in args:
-        if os.path.isdir(arg):
-            root = os.path.normpath(arg)
-            name = os.path.basename(os.path.abspath(root))
-            found = []
-            for here, dirs, files in os.walk(root):
-                dirs.sort()
-                found.extend(os.path.join(here, f) for f in sorted(files)
-                             if f.lower().endswith(".docx")
-                             and not f.startswith("~$"))
-            if not found:
-                print(f"{arg}: no .docx files", file=sys.stderr)
-            for path in found:
-                parts = os.path.relpath(path, root).split(os.sep)
-                out.append((path, parts[0] if len(parts) > 1 else name))
-        else:
-            out.append((arg, os.path.basename(
-                os.path.dirname(os.path.abspath(arg)))))
-    return out
 
 
 GUESSES = ("both", "first-row", "first-column", "none", "unknown")

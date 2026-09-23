@@ -16,7 +16,7 @@ Tools in `util/` that aren't part of a conversion but help before or around one:
 
 Each takes `--help`. The census and sample tools read Word files directly and need no Pandoc; `compare-output.py` reads HTML; `docx-compat.py` touches nothing but `word/settings.xml`; `restyle-headings.py` nothing but the paragraph styles.
 
-`table-census.py`, `table-samples.py`, and `docx-compat.py` are the ones to reach for before converting a book you haven't seen: the census says what shapes its tables take and what the run will guess about each, the sample document shows one real example of every shape so you can see what would be lost, and the compatibility check says whether Word will open the sources in Compatibility Mode.
+`table-census.py`, `table-samples.py`, and `docx-compat.py` are the ones to reach for before converting a book you haven't seen: the census says what shapes its tables take and what the run will guess about each (given a directory, it reads every `.docx` in it and gives each book's totals, a subdirectory being a book, so `table-census.py corpus/` surveys a whole corpus), the sample document shows one real example of every shape so you can see what would be lost, and the compatibility check says whether Word will open the sources in Compatibility Mode.
 
 ## Repairing heading styles in the source
 

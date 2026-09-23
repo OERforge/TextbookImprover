@@ -442,9 +442,54 @@ def pandoc_checks():
            f"widths={[len(r) for r in grid]}")
 
 
+def script_checks():
+    """util/table-census.py itself: directories, books, and --help."""
+    import csv
+    import io
+    import shutil
+    import subprocess
+    import tempfile
+    here = os.path.dirname(os.path.abspath(__file__))
+    script = os.path.join(os.path.dirname(here), "util", "table-census.py")
+    fixtures = os.path.join(here, "fixtures")
+    # Fixtures that hold tables: a file with none writes no rows.
+    names = ["metadata.docx", "tables-b.docx", "tables.docx"]
+    with tempfile.TemporaryDirectory() as tmp:
+        corpus = os.path.join(tmp, "corpus")
+        os.makedirs(os.path.join(corpus, "econ"))
+        os.makedirs(os.path.join(corpus, "stats", "chapters"))
+        shutil.copy(os.path.join(fixtures, names[0]), os.path.join(corpus, "econ"))
+        shutil.copy(os.path.join(fixtures, names[1]),
+                    os.path.join(corpus, "stats", "chapters"))
+        shutil.copy(os.path.join(fixtures, names[2]), corpus)
+        with open(os.path.join(corpus, "econ", "~$lock.docx"), "w") as fh:
+            fh.write("not a zip")
+        run = subprocess.run([sys.executable, script, corpus],
+                             capture_output=True, text=True)
+        rows = list(csv.DictReader(io.StringIO(run.stdout)))
+        books = {os.path.basename(r["Source"]): r["Book"] for r in rows}
+        yield ("a directory is searched at any depth, each file in the book "
+               "its subdirectory names",
+               run.returncode == 0 and books.get(names[0]) == "econ"
+               and books.get(names[1]) == "stats"
+               and books.get(names[2]) == "corpus", str(books))
+        yield ("Word's lock files are skipped",
+               "~$" not in run.stdout + run.stderr, run.stderr[-200:])
+        yield ("the summary gives each book's totals",
+               "By book:" in run.stderr and all(
+                   ("  %s " % b) in run.stderr for b in ("econ", "stats")),
+               run.stderr[:300])
+        helped = subprocess.run([sys.executable, script, "--help"],
+                                capture_output=True, text=True)
+        yield ("--help prints the usage and reads no file",
+               helped.returncode == 0 and "Usage:" in helped.stdout
+               and not helped.stderr, helped.stderr[-200:])
+
+
 def main():
     failures = 0
-    for name, ok, detail in list(key_checks()) + list(pandoc_checks()):
+    for name, ok, detail in (list(key_checks()) + list(pandoc_checks())
+                             + list(script_checks())):
         if ok:
             print("  ok    %s" % name)
         else:
@@ -464,7 +509,7 @@ def main():
             print("          kind=%s guess=%s, expected %s" % (kind, got, expect))
             print("          evidence: %s" % "; ".join(ev))
     total = len(CASES) + sum(1 for _ in key_checks()) + \
-        sum(1 for _ in pandoc_checks())
+        sum(1 for _ in pandoc_checks()) + sum(1 for _ in script_checks())
     print("")
     if failures:
         print("%d of %d census checks failed." % (failures, total),

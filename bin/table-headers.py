@@ -259,6 +259,7 @@ def no_header_text(grid):
 MARKER = "data-th-marker"
 CAPTION_ROWS = "data-caption-rows"
 SPLIT_AT = "data-split-at"
+PART_CAPTIONS = "data-part-captions"
 
 
 def pandoc_tables(node, out):
@@ -331,8 +332,8 @@ def apply_to_json(infos):
         tables = pandoc_tables(doc["blocks"], [])
         for info in entries:
             attr = tables[info["index"]]["c"][0]
-            pairs = [p for p in attr[2]
-                     if p[0] not in (MARKER, CAPTION_ROWS, SPLIT_AT)]
+            pairs = [p for p in attr[2] if p[0] not in
+                     (MARKER, CAPTION_ROWS, SPLIT_AT, PART_CAPTIONS)]
             if info["in-effect"]:
                 pairs.append([MARKER, info["in-effect"]])
             # Title rows and bands, as the filter reads them for a Word
@@ -342,6 +343,11 @@ def apply_to_json(infos):
                                (SPLIT_AT, info["split-at-in-effect"])):
                 if rows:
                     pairs.append([name, ",".join(str(r) for r in rows)])
+            # A person's caption for each part, "|" between them, as the
+            # sidecar's part-captions column has them.
+            if info.get("part-captions-in-effect"):
+                pairs.append([PART_CAPTIONS,
+                              "|".join(info["part-captions-in-effect"])])
             attr[2] = pairs
         with open(path, "w", encoding="utf-8") as fh:
             json.dump(doc, fh)
@@ -525,7 +531,8 @@ def main():
                 supplier = "source"
             info["in-effect"] = in_effect(info, row)
             info["caption-rows-in-effect"] = caption_rows_in_effect(info, row)
-            info["split-at-in-effect"] = split_in_effect(info, row)[0]
+            info["split-at-in-effect"], info["part-captions-in-effect"] = \
+                split_in_effect(info, row)
         # Keyed by stem, not filename: the filter runs on the JSON
         # intermediate named after the .docx, and knows only the stem.
         caption_rows = caption_rows_in_effect(info, row)

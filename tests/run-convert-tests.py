@@ -780,6 +780,25 @@ def case_bands(work):
     run_with(back, "targets:\n  html:\n    format: html\n")
     again = read(back, "html", "bands.html") if exists(
         back, "html", "bands.html") else ""
+    # A person's part captions, in the row the run prefilled for the table.
+    captioned = work + "-captioned"
+    shutil.copytree(work, captioned, ignore=shutil.ignore_patterns(
+        "html", "md", "*.json"))
+    import csv
+    with open(os.path.join(work, "table-headers-new.csv"),
+              encoding="utf-8") as fh:
+        rows = list(csv.DictReader(fh))
+    for row in rows:
+        if "Labor" in row["preview"]:
+            row["part-captions"] = "Cost at $40 a worker | Cost at $55 a worker"
+    with open(os.path.join(captioned, "table-headers.csv"), "w",
+              encoding="utf-8", newline="") as fh:
+        writer = csv.DictWriter(fh, fieldnames=list(rows[0].keys()))
+        writer.writeheader()
+        writer.writerows(rows)
+    run_with(captioned, "targets:\n  html:\n    format: html\n")
+    with_parts = read(captioned, "html", "bands.html") if exists(
+        captioned, "html", "bands.html") else ""
     fixed = work + "-from-html"
     os.makedirs(fixed)
     for name in ("bands.html", "untitled.html"):
@@ -810,6 +829,11 @@ def case_bands(work):
          lambda: "<title>untitled</title>" in read(work, "html", "untitled.html")
          and "<h1" not in read(fixed, "html", "untitled.html")
          and "filtered" not in read(work, "html", "untitled.html")),
+        ("a person's part captions, in the sidecar, name the parts of an "
+         "HTML table",
+         lambda: [c for c in captions(with_parts) if "worker" in c]
+         == ["Cost at $40 a worker", "Cost at $55 a worker"]
+         and not any(c.startswith("Example") for c in captions(with_parts))),
         ("converting the HTML output again gives the same tables",
          lambda: captions(read(fixed, "html", "bands.html")) == captions(page)),
     ]

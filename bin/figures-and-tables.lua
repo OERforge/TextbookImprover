@@ -1614,6 +1614,16 @@ end
 local TABLE_BANDS = (os.getenv('TABLE_BANDS') or 'split'):lower()
 local CAPTION_ROWS_ATTR = 'data-caption-rows'
 local SPLIT_AT_ATTR = 'data-split-at'
+local PART_CAPTIONS_ATTR = 'data-part-captions'
+
+local function part_caption_list(value)
+  local out = {}
+  if value == nil or value == '' then return out end
+  for part in (value .. '|'):gmatch('([^|]*)|') do
+    out[#out + 1] = part:gsub('^%s+', ''):gsub('%s+$', '')
+  end
+  return out
+end
 
 local function row_numbers(value)
   local out = {}
@@ -1683,7 +1693,9 @@ local function resolved_for(tbl)
     return { headers = marked,
              caption_rows = row_numbers(tbl.attr.attributes[CAPTION_ROWS_ATTR]),
              split_at = row_numbers(tbl.attr.attributes[SPLIT_AT_ATTR]),
-             part_captions = {}, anchors = {} }
+             part_captions = part_caption_list(
+               tbl.attr.attributes[PART_CAPTIONS_ATTR]),
+             anchors = {} }
   end
   local index = tonumber(tbl.attr.attributes[TH_INDEX_ATTR])
   local by_doc = load_resolved()[source_stem()]
@@ -1737,6 +1749,7 @@ local function caption_data_table(tbl, next_block, after_next, after_after, out)
   tbl.attr.attributes[MARKER_ATTR] = nil
   tbl.attr.attributes[CAPTION_ROWS_ATTR] = nil
   tbl.attr.attributes[SPLIT_AT_ATTR] = nil
+  tbl.attr.attributes[PART_CAPTIONS_ATTR] = nil
   local pending = pending_caption_rows(tbl, entry)
   local bands = band_targets(tbl, entry)
 

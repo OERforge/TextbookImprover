@@ -28,7 +28,7 @@ What Pandoc does, as read from its source or established by test, for the questi
 
 **Metadata comes from `Title`/`Author`-styled paragraphs, not `docProps/core.xml`.** Measured on 3.11; open upstream as #3034. The first `Title` paragraph becomes the title, later ones plain paragraphs.
 
-**A hyperlink's ScreenTip (`w:tooltip`) is discarded** in both directions. Measured; filed as #11869.
+**A hyperlink's ScreenTip (`w:tooltip`) is discarded** in both directions. Measured; filed as #11869. jgm replied on 2026-09-22: he treats a ScreenTip as the counterpart of HTML's `title` and would map it to the `Link` title in both directions, by default with no extension, and for internal links too if feasible. `w:hyperlinkRuby` and the question about contributing a patch drafted with Claude went unanswered. The *Introductory Business Statistics* files hold 2,324 hyperlinks and no ScreenTip, so for OpenStax books the change will bring nothing in; its value is for authors who write them.
 
 **`w:tblHeader w:val="0"` read as a header row until 3.10.** Measured across versions.
 
@@ -72,6 +72,10 @@ What Pandoc does, as read from its source or established by test, for the questi
 
 **`tex_math_single_backslash` finds math inside `<code>`.** `<code>\(not math\)</code>` comes back as `Math InlineMath "not math"`. Measured. So the extension is unsafe for a programming book; `unpack-site.py` converts MathJax's delimiters itself, outside code, into `<script type="math/tex">`. Candidate upstream report.
 
+**A table grouped by `<tbody>` keeps its groups.** Each `<tbody>` whose first row holds a `<th>` becomes a table body with that row as its own head row, and the HTML writer writes it back as a `<tbody>` with the row as `<th>` cells, attributes kept (`scope="rowgroup"`). So HTML to HTML preserves row groups exactly. Measured.
+
+**Bold or italic written as a style isn't read as bold or italic.** `<span style="font-weight: bold">` is a `Span` keeping its `style` attribute, not `Strong`, which is how Scribble and many exporters write a header row. Measured; `html-source.lua` makes it `Strong` and `Emph`.
+
 ## The EPUB reader
 
 **The spine is concatenated into one document**, each file preceded by an empty `Span` whose id is the file's name, and non-linear items are dropped (`parseSpine`). Only `dc:` elements become metadata: no `meta property=` (so none of the `schema:accessibility*` claims), and each file's own `<title>` and `lang` are lost. Read from the source.
@@ -85,6 +89,8 @@ What Pandoc does, as read from its source or established by test, for the questi
 ## The DOCX writer
 
 **Drops a table's `id`.** Measured. **Writes `w:styleId` before `w:type`** in `styles.xml`, the reverse of Word's order; parse attributes by name. Measured. **The bundled `reference.docx` declares no `compatibilityMode`**, so every `.docx` Pandoc writes opens in Word's Compatibility Mode; deliberate (#5645, #5358).
+
+**The DOCX writer flattens a table's bodies into one.** A body's head row becomes an ordinary row, and a head row that is one cell spanning the table becomes a merged cell (`w:gridSpan`): Word's own form for a band. Read back, it's one body with that row as a spanning `<td>`, which is the shape the header pre-pass infers bands from. So a grouped table survives a trip through Word in meaning, not in markup. Measured.
 
 ## The Markdown reader and writer
 
@@ -139,6 +145,8 @@ The reader is the `asciidoc` library (jgm/asciidoc-hs), not part of Pandoc's tre
 
 **Emits a bare `<th>` for a row-header column** (`row_head_columns`), never `<th scope="row">`; scope is the filter's to add. **`--include-in-header` replaces the `header-includes` metadata field** rather than merging. **`$title$` in a template renders inlines**, so a heading's `<em>` lands inside `<title>`. **Small lengths are written in scientific notation** (`5.0e-2in`). All measured.
 
+**With no title, the page's `<title>` is the input file's name.** Rendering `costs.filtered.json`, a page without a title gets `<title>costs.filtered</title>`. Measured; `target-blocks.lua` sets `pagetitle` to the page's own name first.
+
 ## The Lua filter environment
 
 **Within one filter table, every inline is walked before any block.** So a `Div`/`Span` handler pair that renames ids sees every span before every heading; a handler that must see elements in document order has to walk the blocks itself. Measured (`figures-and-tables.lua`, `make_ids_unique`).
@@ -148,6 +156,8 @@ The reader is the `asciidoc` library (jgm/asciidoc-hs), not part of Pandoc's tre
 
 **A filter file that returns a table of filters ignores its global functions.** `target-blocks.lua` ends `return { {Div = …}, {Meta = …} }`, so a global `function Image` added to it never ran, and nothing said so. Measured, the hard way. A handler has to be in the returned table.
 
+**A handler that returns `nil` keeps the element as it was, including changes made to it in place.** `html-source.lua`'s `Table` dropped empty columns from the table it was given and then returned `nil` when it had no headers to declare, and the columns came back. Return the element whenever it was changed.
+
 ## Upstream
 
-Filed: #11869 (ScreenTip). Candidates, tracker not yet searched: the HTML reader's `tex_math_single_backslash` reading math inside `<code>`; and, for jgm/asciidoc-hs rather than Pandoc, a chapter's title lost through `include::`, `:leveloffset:` and `:imagesdir:` not applied, cross-references by title unresolved, and `mailto:` dropped. Candidates, tracker searched, not filed: body-level bookmarks dropped (#6178 and #6781 unread, rate-limited); the orphan-anchor removal deleting cross-file targets (no search yet); the Markdown writer dropping spans without a warning; the EPUB chapter `<title>`.
+Filed: #11869 (ScreenTip), which jgm agreed to on 2026-09-22 (above); next, ask whether he'd like a pull request or will make the change himself. Candidates, tracker not yet searched: the HTML reader's `tex_math_single_backslash` reading math inside `<code>`; and, for jgm/asciidoc-hs rather than Pandoc, a chapter's title lost through `include::`, `:leveloffset:` and `:imagesdir:` not applied, cross-references by title unresolved, and `mailto:` dropped. Candidates, tracker searched, not filed: body-level bookmarks dropped (#6178 and #6781 unread, rate-limited); the orphan-anchor removal deleting cross-file targets (no search yet); the Markdown writer dropping spans without a warning; the EPUB chapter `<title>`.

@@ -188,8 +188,10 @@ def scribble_tables(content):
     return counts
 
 
-NAVIGATION_WORDS = {"up", "prev", "previous", "next", "home", "top", "back",
-                    "contents", "toc"}
+# Words that say where a link goes rather than what is there. "Home" and
+# "Contents" are left out: they are what a page is called as often as
+# they are a direction to it.
+NAVIGATION_WORDS = {"up", "prev", "previous", "next", "top", "back"}
 
 MATH_SCRIPT = re.compile(r"math/(tex|mml)", re.I)
 
@@ -451,10 +453,32 @@ def follow(site, url):
     return url
 
 
+def is_warc(path):
+    """Whether a file holds WARC records, by its first bytes rather than
+    its name: an upload or a download may have renamed it
+    (cs168_warc.gz), and a WACZ is a zip of them."""
+    if not os.path.isfile(path):
+        return False
+    if zipfile.is_zipfile(path):
+        with zipfile.ZipFile(path) as archive:
+            return any(name.startswith("archive/") and ".warc" in name
+                       for name in archive.namelist())
+    with open(path, "rb") as fh:
+        head = fh.read(2)
+    try:
+        if head == b"\x1f\x8b":
+            with gzip.open(path) as fh:
+                return fh.read(5) == b"WARC/"
+        with open(path, "rb") as fh:
+            return fh.read(5) == b"WARC/"
+    except OSError:
+        return False
+
+
 def load(inputs):
     """A directory of saves, a directory of .mhtml, .mhtml files, or WARC
-    and WACZ files."""
-    if all(re.search(r"\.(warc(\.gz)?|wacz)$", p, re.I) for p in inputs):
+    and WACZ files, whatever they are called."""
+    if all(is_warc(p) for p in inputs):
         return load_warc(inputs)
     if len(inputs) == 1 and os.path.isdir(inputs[0]):
         mhtml = glob.glob(os.path.join(inputs[0], "*.mhtml")) + \
@@ -535,7 +559,78 @@ def _href(element):
     return element.get("href")
 
 
-def order(site):
+USES_MATHJAX = re.compile(r"mathjax|math/tex", re.I)
+TEX = re.compile(r"\\\((.+?)\\\)|\\\[(.+?)\\\]", re.S)
+NO_MATH_IN = ("pre", "code", "script", "style", "textarea", "kbd", "samp")
+
+
+def _tex_parts(text):
+    """[(literal, tex, display)]: the text split at MathJax's delimiters."""
+    parts, last = [], 0
+    for m in TEX.finditer(text):
+        parts.append((text[last:m.start()], m.group(1) or m.group(2),
+                      m.group(1) is None))
+        last = m.end()
+    if parts:
+        parts.append((text[last:], None, False))
+    return parts
+
+
+def mathjax_math(content):
+    """MathJax's delimiters, as the page's own HTML carries them before
+    any script has run, written as the <script type="math/tex"> Pandoc's
+    HTML reader takes for math. A browser's save has the rendering and
+    not the TeX; an archive of the site has the TeX, which is the whole
+    reason to prefer one.
+
+    Only text is looked at, and never inside code: \( is a character
+    pair a programming book may print, and Pandoc's own
+    tex_math_single_backslash extension would read it as math there too
+    (measured). Returns how many formulas were found."""
+    found = 0
+
+    def script(tex, display):
+        el = content.makeelement(
+            "script", {"type": "math/tex; mode=display" if display
+                       else "math/tex"})
+        el.text = tex
+        return el
+
+    def walk(element):
+        nonlocal found
+        if hp.local(element.tag) in NO_MATH_IN:
+            return
+        for child in list(element):
+            walk(child)
+        # Each part holds the text before a formula, so that text is the
+        # tail of whatever was inserted for the formula before it.
+        def append(parts, into):
+            nonlocal found
+            for index, (literal, tex, display) in enumerate(parts):
+                if index and into:
+                    into[-1].tail = literal
+                if tex is not None:
+                    into.append(script(tex, display))
+                    found += 1
+
+        children = []
+        parts = _tex_parts(element.text or "")
+        if parts:
+            element.text = parts[0][0]
+            append(parts, children)
+        for child in list(element):
+            children.append(child)
+            parts = _tex_parts(child.tail or "")
+            if parts:
+                child.tail = parts[0][0]
+                append(parts, children)
+        if children:
+            element[:] = children
+    walk(content)
+    return found
+
+
+def order(site, titles=None):
     """The book's order from its own menus, as (depth, title, url) for
     each page the menu names, and a note on where it came from.
 
@@ -599,6 +694,7 @@ def order(site):
         title = hp.text_of(a)
         if not re.search(r"\w", title) or \
                 title.strip("←→«»<> ").lower() in NAVIGATION_WORDS:
+            title = (titles or {}).get(target) or title
             # An icon (🔗, a heading's anchor) or a word that says where
             # the link goes rather than what's there: the page's own title.
             title = next((hp.text_of(e) for e in

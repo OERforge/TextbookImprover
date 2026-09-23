@@ -78,6 +78,14 @@ The WACZ is written to `crawls/collections/cs168/cs168.wacz`. `--scopeType prefi
 
 The crawler's options are from its documentation, and I couldn't run Docker where these instructions were written: if one of them has been renamed, `docker run webrecorder/browsertrix-crawler crawl --help` lists the current ones.
 
+## What a WARC gave that a save didn't
+
+Both books were crawled with the wget commands above and compared with the browser saves of the same sites.
+
+*A Data-Centric Introduction to Computing*: 80 pages either way, but the crawl's HTML still holds the TeX of 397 formulas that the `.mhtml` save had only as MathJax's rendering, so the EPUB has real MathML. Its 143 responses also came to a tenth of the save's size, since a save stores a copy of every shared asset per page.
+
+*CS 168*: the same 62 pages with the same names and the same order, one asset fewer (a badge on another host, which the browser had already downloaded and a crawl inside the site doesn't fetch), and the order read from the site's real `<ul>` rather than what its scripts had built. Nine pages differ in their text, images, and formulas, because the book itself changed between the save and the crawl: a page that read "there are $p$ nodes" now reads "$D$".
+
 ## Unpacking it
 
 ```bash

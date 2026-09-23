@@ -125,10 +125,6 @@ def main():
                           "then body")
                   + f"; {site.kind}; parsed with {backend}"))
 
-    # The order comes from the menus, so it is read before any is removed.
-    entries, how = sitesource.order(site)
-    notes.append(("site", "order", how))
-
     titles, languages, math_lost = {}, {}, []
     for url, page in site.pages.items():
         title = next((hp.text_of(e) for e in page.root.iter()
@@ -141,6 +137,10 @@ def main():
                                   page.text):
             math_lost.append(page.name + ".html")
     book_title, titles = split_titles(titles)
+
+    # The order comes from the menus, so it is read before any is removed.
+    entries, how = sitesource.order(site, titles)
+    notes.append(("site", "order", how))
 
     # Authors: the profile's element (Scribble writes them as a paragraph
     # on the contents page), else <meta name="author">, from the first
@@ -166,7 +166,7 @@ def main():
                       "TeX they were written in isn't in the save"))
 
     os.makedirs(out, exist_ok=True)
-    used, missing, markup, transformed = set(), [], {}, {}
+    used, missing, markup, transformed, formulas = set(), [], {}, {}, 0
     for url, page in site.pages.items():
         root = page.root
         if not args.whole_pages:
@@ -190,6 +190,8 @@ def main():
                            sitesource.MATH_SCRIPT.search(e.get("type") or ""))]
             for element in doomed:
                 hp.drop(element, parent_of)
+            if sitesource.USES_MATHJAX.search(page.text):
+                formulas += sitesource.mathjax_math(content)
             if profile.get("transform"):
                 changed = getattr(sitesource, profile["transform"])(content)
                 for kind, count in changed.items():
@@ -224,6 +226,10 @@ def main():
                 + hp._escape_text(titles[url]) + "</title>\n</head>\n"
                 "<body>\n<main>\n" + inner + "\n</main>\n</body>\n</html>\n")
 
+    if formulas:
+        notes.append(("site", "mathjax-tex",
+                      f"{formulas} formula(s) written as TeX the run reads "
+                      "as math; a browser's save has only the rendering"))
     for kind, count in sorted(transformed.items()):
         if count:
             notes.append(("site", "table-" + kind,

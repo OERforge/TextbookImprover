@@ -12,7 +12,7 @@ Look for the book's source first. Two of the three web books this was built agai
 
 `unpack-site.py` takes a directory of a browser's "complete" saves (an `.html` per page, each with a `_files` directory beside it), a directory of `.mhtml` files, or WARC and WACZ files. It fetches nothing.
 
-**A WARC is the best of the three** ([Making a WARC](making-warcs.md) says how). Every archiving crawler writes one: `wget --mirror --page-requisites --no-parent --warc-file=book https://…` does, as do the ArchiveWeb.page browser extension, Browsertrix Crawler, and the Internet Archive's Heritrix. It holds each URL's bytes as the server sent them, before any script ran, so nothing a browser's save loses (a MathJax page's TeX, the original links) is lost. Redirects the crawl recorded are followed; gzipped and chunked responses are decoded. A WACZ is WARCs in a zip and is read the same way. A wget WARC of a copy of CS168 unpacked to pages byte-identical to the unpacked browser save, with the same contents and the same images. What it writes:
+**A WARC is the best of the three** ([Making a WARC](making-warcs.md) says how), and a file is taken for one by its first bytes, whatever it is called. Every archiving crawler writes one: `wget --mirror --page-requisites --no-parent --warc-file=book https://…` does, as do the ArchiveWeb.page browser extension, Browsertrix Crawler, and the Internet Archive's Heritrix. It holds each URL's bytes as the server sent them, before any script ran, so nothing a browser's save loses (a MathJax page's TeX, the original links) is lost. Redirects the crawl recorded are followed; gzipped and chunked responses are decoded. A WACZ is WARCs in a zip and is read the same way. A wget WARC of a copy of CS168 unpacked to pages byte-identical to the unpacked browser save, with the same contents and the same images. What it writes:
 
 - **One `.html` per page**, named from the page's URL below the directory the book's pages share (`end-to-end/dhcp.html` becomes `end-to-end-dhcp.html`). By default a page is its content and nothing around it; with `--whole-pages` it's the whole page, an offline copy of the site.
 - **`assets/`**, holding each image (and, for `--whole-pages`, each stylesheet and script) once, however many pages saved a copy. One save held 766 images as 763 files.
@@ -46,6 +46,12 @@ A book's pages keep no `<script>` except math (`type="math/tex"`, which Pandoc r
 Every element on every page that links to at least three pages is a candidate, and the one reaching most pages wins, a tie going to the smaller element. That alone would crown a back-of-book index, which links every page too. What separates a table of contents from an index isn't how often it links a page: a detailed contents links a chapter and then each of its sections. It's that a contents keeps a page's links together and an index scatters them through the alphabet. So a candidate's links, read in order with repeats of one page collapsed, must come to not much more than one run per page.
 
 Nesting comes from the menu's lists. A menu that is one flat list, like Scribble's, is nested by its numbering (`5.2 Processing Lists` under `5 Lists`), with a part numbered in roman numerals above the chapters that follow it. A link whose text is an icon or a word like "up" isn't a title; the page's own is used. Pages no menu names are listed at the end and reported (`not-in-menu`).
+
+## Math a save loses
+
+A site that writes its formulas for MathJax carries them in its HTML as TeX between MathJax's delimiters, `\(k^2\)` and `\[E=mc^2\]`, until a script in the reader's browser renders them. A browser's save keeps the rendering; an `.mhtml` save keeps neither the script nor the source. An archive of the site has the TeX, which is the reason to prefer one.
+
+So on a page whose own HTML loads MathJax, those delimiters are written as the `<script type="math/tex">` Pandoc reads as math, and the conversion then writes real MathML. Only text is looked at, never code: `\(` is a character pair a programming book prints, and Pandoc's own `tex_math_single_backslash` extension would read it as math inside `<code>` too. DCIC's WARC gave 397 formulas this way, where its `.mhtml` save gave none.
 
 ## What the save itself decides
 

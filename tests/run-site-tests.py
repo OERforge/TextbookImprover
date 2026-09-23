@@ -378,11 +378,15 @@ def warc_record(url, http, body, chunked=False, gzipped=False):
 
 def case_warc(work):
     os.makedirs(work)
-    page = """<html><head><title>{t} | Archived</title></head><body>
-<nav><ul><li><a href="/book/one.html">One</a></li><li><a href="/book/two.html">
+    page = """<html><head><title>{t} | Archived</title>
+<script src="https://cdn.example.org/mathjax/MathJax.js"></script></head><body>
+<nav><ul><li><a href="/book/one.html">Home</a></li><li><a href="/book/two.html">
 Two</a></li><li><a href="/book/three.html">Three</a></li></ul></nav>
 <main><h1>{t}</h1><p><a href="/book/old.html#here">moved</a>
-<img src="/book/pic.png" alt="p"></p></main></body></html>"""
+<img src="/book/pic.png" alt="p"></p>
+<p>Suppose \\(k^2\\) nodes, so \\[E = mc^2\\] holds.</p>
+<pre>print("\\(not math\\)")</pre>
+</main></body></html>"""
     records = [
         warc_record(SITE + "book/one.html", "200 OK\r\nContent-Type: text/html",
                     page.format(t="One").encode()),
@@ -405,8 +409,12 @@ Two</a></li><li><a href="/book/three.html">Three</a></li></ul></nav>
         z.write(warc, "archive/data.warc.gz")
         z.writestr("datapackage.json", "{}")
     out, out2 = os.path.join(work, "book"), os.path.join(work, "book2")
+    out3 = os.path.join(work, "book3")
     result = unpack([warc], out)
     unpack([wacz], out2)
+    odd = os.path.join(work, "crawl_warc.gz")          # as an upload renames it
+    shutil.copy(warc, odd)
+    renamed = unpack([odd], out3)
     two = read(out, "two.html") if os.path.exists(os.path.join(out, "two.html")) \
         else ""
     return [
@@ -420,10 +428,20 @@ Two</a></li><li><a href="/book/three.html">Three</a></li></ul></nav>
         ("a resource is its response's body",
          lambda: open(os.path.join(out, "assets", "pic.png"), "rb").read()
          == PNG),
-        ("the menu gives the order",
+        ("the menu gives the order, and \"Home\" is a title like any other",
          lambda: "page: one" in read(out, "project.yaml")
          and read(out, "project.yaml").index("page: two")
-         < read(out, "project.yaml").index("page: three")),
+         < read(out, "project.yaml").index("page: three")
+         and 'title: "Home"' in read(out, "project.yaml")),
+        ("MathJax's delimiters become math the run reads, display and "
+         "inline, and code keeps its backslashes",
+         lambda: '<script type="math/tex">k^2</script>' in two
+         and '<script type="math/tex; mode=display">E = mc^2</script>' in two
+         and '\\(not math\\)' in two
+         and any(r["Check"] == "mathjax-tex" for r in report(out))),
+        ("a WARC named anything is still a WARC",
+         lambda: renamed.returncode == 0 and os.path.exists(
+             os.path.join(out3, "one.html"))),
         ("a WACZ holding the same WARC gives the same pages",
          lambda: all(read(out, n) == read(out2, n)
                      for n in ("one.html", "two.html", "three.html"))),

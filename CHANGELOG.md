@@ -54,6 +54,7 @@ Versions are two-part and pre-1.0: breaking changes may land in any of them unti
 - **A finished `.html` page with an `<iframe>` no longer sends Pandoc to the network.** The page was read for the EPUB with the HTML reader's defaults, under which the reader fetches an iframe's `src` to read it into the page. It's read with `raw_html` on now, as HTML sources are.
 
 - **A Markdown image path written with a backslash no longer stops the run.** `assets\Bastiat.png` resolves on Windows and nowhere else, and one such path among a book's fifty stopped the conversion at the media gate with no page written. When the path with forward slashes is a file, the intermediate takes that and the run warns, naming the source and the path; the same goes for a backslash Markdown consumed as an escape (`assets\_fig.png` reads as `assets_fig.png`). A reference that resolves neither way still stops at the gate. The source isn't touched.
+- **The note about a missing Nu HTML checker says how to provide it.** Either validator is found by its environment variable or by its own name on the path, and epubcheck's note said both while the Nu checker's named only `VNU_JAR`.
 
 ## [0.6] - 2026-09-20
 

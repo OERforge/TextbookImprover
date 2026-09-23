@@ -62,6 +62,10 @@ def checks(findings):
     return sorted(f.check for f in findings)
 
 
+def fail(message):
+    raise AssertionError(message)
+
+
 def expect(condition, findings):
     """A failed expectation shows what the checker actually returned."""
     if not condition:
@@ -163,6 +167,22 @@ def main():
             ]
         else:
             print("  skip  the Nu HTML checker not installed (VNU_JAR)")
+        # Either validator is found by its environment variable or by its
+        # own name on the path, so a note about a missing one says both.
+        _, notes = outputcheck.run_validators(
+            [os.path.join(work, "good.html")], [epub])
+        missing = [(name, variable) for name, variable in
+                   (("epubcheck", "EPUBCHECK_JAR"), ("vnu", "VNU_JAR"))
+                   if not have[name]]
+        cases += [
+            ("a note about a validator that isn't here names the variable "
+             "and the path",
+             # expect() formats findings; a note is a plain line.
+             lambda: all(any(variable in note and "on the path" in note
+                             for note in notes)
+                         for _name, variable in missing)
+             or fail("got: " + " | ".join(notes))),
+        ]
         for label, predicate in cases:
             try:
                 ok = predicate()

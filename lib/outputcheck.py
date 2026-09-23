@@ -583,6 +583,6 @@ def run_validators(pages, epubs):
                              + (f"; {infos} informational message(s) not "
                                 "listed." if infos else "."))
         else:
-            notes.append("The Nu HTML checker not found (set VNU_JAR); "
-                         "skipped.")
+            notes.append("The Nu HTML checker not found (set VNU_JAR, or "
+                         "put vnu on the path); skipped.")
     return findings, notes

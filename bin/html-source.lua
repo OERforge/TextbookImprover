@@ -56,6 +56,13 @@ nothing, which is the test.
     attributes: a div, a span, an image, a link, a heading, a table.
     XHTML allows them nowhere, and a stylesheet is where their work
     goes; a table cell's align the reader has already made alignment.
+  - A page's title that ends with the book's own title after a separator
+    ("Copyright -- Information Systems for Business and Beyond") loses the
+    suffix: a site or an exporter adds the book's name to every page's
+    <title>, and the book's name is the book's, not the page's. The book's
+    title comes from project.yaml, which convert.py passes in BOOK_TITLE.
+    Nothing is dropped from a title that is only the book's name. A
+    page with an h1 of its own takes that as its title anyway.
   - Raw HTML is html-raw.lua's, which runs before this filter on a
     source and alone on a finished page.
   - An aria-describedby or aria-labelledby that names an id the page no
@@ -154,8 +161,34 @@ local function title_block_fields()
   return fields
 end
 
+local SEPARATORS = { ' -- ', ' | ', ' \u{2013} ', ' \u{2014} ', ' - ',
+                     ' \u{00B7} ' }
+
+local function without_book_title(title)
+  local book = (os.getenv('BOOK_TITLE') or ''):gsub('%s+', ' ')
+    :gsub('^ ', ''):gsub(' $', '')
+  if book == '' then return nil end
+  title = title:gsub('%s+', ' '):gsub('^ ', ''):gsub(' $', '')
+  for _, sep in ipairs(SEPARATORS) do
+    local suffix = sep .. book
+    if #title > #suffix
+        and title:sub(-#suffix):lower() == suffix:lower() then
+      local rest = title:sub(1, #title - #suffix)
+      if rest:match('%S') then return rest end
+    end
+  end
+  return nil
+end
+
 function Meta(meta)
   local changed = false
+  if meta.title then
+    local shorter = without_book_title(pandoc.utils.stringify(meta.title))
+    if shorter then
+      meta.title = pandoc.MetaString(shorter)
+      changed = true
+    end
+  end
   for key, value in pairs(title_block_fields()) do
     if meta[key] == nil then
       meta[key] = value

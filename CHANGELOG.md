@@ -42,6 +42,7 @@ Versions are two-part and pre-1.0: breaking changes may land in any of them unti
 
 ### Fixed
 
+- **A page's title no longer repeats the book's name.** A page whose `<title>` ends with the book's own title after a separator (`Copyright -- Information Systems for Business and Beyond`) keeps only its own part, the book's title being the one in `project.yaml`. It's how a Pressbooks export titles every page, and a page with no heading of its own kept it.
 - **A WARC is recognized by its first bytes**, not by its name, since an upload or a download may have renamed it.
 - **A menu entry keeps its own words.** "Home" and "Contents" were treated as directions to a page rather than names of one, so the page's own title was used instead, with the site's name still on it.
 - **Two images an HTML target would copy to one name stop the run** at the media gate, both named. `assets/a b.png` and `assets/a-b.png` are both written as `assets/a-b.png`, and the second copy replaced the first under every page that showed either.

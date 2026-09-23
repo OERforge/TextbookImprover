@@ -724,12 +724,22 @@ def case_html_source(work):
     for name in ("web.html", os.path.join("_pt", "finished.html")):
         with open(os.path.join(mixed, name), "w", encoding="utf-8") as fh:
             fh.write(WEB)
+    # Titles with no heading behind them: one repeats the book's name after
+    # its own, one names another site, one is only the book's name.
+    for name, title in (("cover", "Cover -- The Fixture Book"),
+                        ("elsewhere", "Notes | Another Site"),
+                        ("bookname", "The Fixture Book")):
+        with open(os.path.join(mixed, name + ".html"), "w",
+                  encoding="utf-8") as fh:
+            fh.write(f"<!DOCTYPE html><html lang=\"en\"><head><title>{title}"
+                     "</title></head><body><p>Text.</p></body></html>\n")
     with open(os.path.join(mixed, "conversion.yaml"), "w",
               encoding="utf-8") as fh:
         fh.write("targets:\n  html:\n    format: html\n"
                  "  epub:\n    format: epub3\n")
     marked = run_in(mixed, "  contents:\n    - tables\n    - web\n"
-                           "    - finished\n")
+                           "    - finished\n    - cover\n    - elsewhere\n"
+                           "    - bookname\n")
     web = read(mixed, "html", "web.html") if exists(
         mixed, "html", "web.html") else ""
     epub_page = ""
@@ -765,6 +775,14 @@ def case_html_source(work):
         ("a page's only h1, inside wrappers, is its title: one h1, and "
          "the <title> the site gave it goes",
          lambda: web.count("<h1") == 1 and "<title>A Web Page</title>" in web),
+        ("a page's title loses the book's name when it repeats it after "
+         "its own; another site's name, and a title that is only the "
+         "book's, stay",
+         lambda: "<title>Cover</title>" in read(mixed, "html", "cover.html")
+         and "<title>Notes | Another Site</title>"
+         in read(mixed, "html", "elsewhere.html")
+         and "<title>The Fixture Book</title>"
+         in read(mixed, "html", "bookname.html")),
         ("a page beside the sources is converted",
          lambda: marked.returncode in (0, 1)
          and 'class="table-wrapper"' in web),

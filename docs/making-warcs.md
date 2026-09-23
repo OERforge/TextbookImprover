@@ -60,6 +60,14 @@ List only the hosts that serve the book's own files: `--span-hosts` applies to t
 
 wget obeys the site's `robots.txt`. If the crawl stops after the first page and the site's rules forbid crawlers, ask the site's owners before adding `-e robots=off`.
 
+If wget stops at once with `ERROR 403: Forbidden`, the site is refusing it: some sites, or the services in front of them, turn away anything that doesn't identify itself as a browser. wget could claim to be one (`--user-agent`), but that's getting around a choice the site's owners made, as ignoring `robots.txt` is. What to try instead, in order:
+
+- **The publisher's own exports.** A platform like Pressbooks offers EPUB and PDF, and often XHTML or HTMLBook, in a book's "Download this book" menu. An EPUB goes to [`unpack-epub.py`](epub-input.md) and is usually the cleaner source anyway.
+- **A capture in a real browser.** The ArchiveWeb.page extension records what you visit as a WACZ, and Browsertrix Crawler (below) runs a browser. A site that serves its readers serves these too.
+- **The site's owners**, for a copy or for permission to crawl.
+
+The Pressbooks site of one book these instructions were tested against refused wget this way, and its EPUB was the source used.
+
 To see what the crawl got:
 
 ```bash

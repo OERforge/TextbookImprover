@@ -1963,6 +1963,9 @@ def main():
                       "media_unresolved")}
         env = dict(os.environ)
         env.update({
+            # For html-source.lua: a page's <title> that repeats the
+            # book's name after its own loses it.
+            "BOOK_TITLE": str(project.get("title") or ""),
             "TABLE_CAPTIONS_MISSING": collected["captions_missing"],
             "IMAGE_ALT_MISSING": collected["alt_missing"],
             "SPACER_LOG": collected["spacers"],

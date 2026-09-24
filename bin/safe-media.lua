@@ -42,3 +42,19 @@ function Image(img)
   end
   return img
 end
+
+-- A link to a local file that isn't a page -- a PDF, a Word file, a deck
+-- of slides the page offers -- is copied beside the page as an image is,
+-- so its reference takes the same safe name. A link to a page (.html)
+-- is the split's and the packager's to resolve, and a link with no
+-- extension isn't to a file.
+function Link(link)
+  if is_local(link.target) then
+    local path, rest = link.target:match('^([^#?]*)(.*)$')
+    if path ~= '' and path:match('%.%w+$')
+        and not path:lower():match('%.x?html?$') then
+      link.target = safe_path(decode(path)) .. rest
+    end
+  end
+  return link
+end

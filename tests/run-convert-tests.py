@@ -968,6 +968,132 @@ def case_warc_direct(work):
     ]
 
 
+CC_MANIFEST = """<?xml version="1.0" encoding="UTF-8"?>
+<manifest identifier="m" xmlns="http://www.imsglobal.org/xsd/imsccv1p1/imscp_v1p1">
+<metadata><schema>IMS Common Cartridge</schema><schemaversion>1.1.0</schemaversion>
+<lom xmlns="http://ltsc.ieee.org/xsd/imsccv1p1/LOM/manifest"><general><title>
+<string language="en-US">A Course</string></title></general></lom></metadata>
+<organizations><organization identifier="o" structure="rooted-hierarchy"><item identifier="root">
+<item identifier="w1"><title>Week 1</title>
+<item identifier="h1"><title>Readings</title></item>
+<item identifier="i1" identifierref="ra"><title>Page A</title></item>
+<item identifier="i2" identifierref="rb"><title>Read this week</title></item>
+<item identifier="i3" identifierref="rd"><title>Discuss</title></item>
+<item identifier="i4" identifierref="rl"><title>A site</title></item>
+<item identifier="i5" identifierref="rp"><title>The guide</title></item>
+</item>
+<item identifier="w2"><title>Week 2</title>
+<item identifier="i6" identifierref="rw"><title>The reading</title></item>
+<item identifier="i7" identifierref="ra"><title>Page A again</title></item>
+</item></item></organization></organizations>
+<resources>
+<resource identifier="ra" type="webcontent" href="wiki_content/a.html"><file href="wiki_content/a.html"/></resource>
+<resource identifier="rb" type="webcontent" href="content/Read this week..html"><file href="content/Read this week..html"/></resource>
+<resource identifier="rd" type="imsdt_xmlv1p1"><file href="d.xml"/></resource>
+<resource identifier="rl" type="imswl_xmlv1p1"><file href="l.xml"/></resource>
+<resource identifier="rp" type="webcontent" href="web_resources/guide.pdf"><file href="web_resources/guide.pdf"/></resource>
+<resource identifier="rw" type="webcontent" href="web_resources/reading.docx"><file href="web_resources/reading.docx"/></resource>
+<resource identifier="rc" type="webcontent" href="wiki_content/c.html"><file href="wiki_content/c.html"/></resource>
+<resource identifier="re" type="webcontent" href="wiki_content/e.html"><file href="wiki_content/e.html"/></resource>
+<resource identifier="rq" type="associatedcontent/imscc_xmlv1p1/learning-application-resource"><file href="non_cc_assessments/q.qti"/></resource>
+<resource identifier="rpic" type="webcontent" href="web_resources/Uploaded Media/pic.png"><file href="web_resources/Uploaded Media/pic.png"/></resource>
+</resources></manifest>"""
+
+
+def case_cartridge(work):
+    """A Common Cartridge unpacked and converted: Canvas's placeholders,
+    queries, and text headers, a Brightspace page with no title, what
+    isn't a page reported, and our own cartridge read back as the book it
+    was built from."""
+    import importlib.util
+    import zipfile
+    if not (importlib.util.find_spec("html5lib") or importlib.util.find_spec("lxml")):
+        return [("skip: HTML sources need html5lib or lxml", lambda: True)]
+    os.makedirs(work)
+    page_a = ('<html><head><title>Page A</title></head><body><h2>A</h2>'
+              '<p><img src="$IMS-CC-FILEBASE$/Uploaded%20Media/pic.png?canvas_=1&amp;canvas_qs_wrap=1" alt="A picture"></p>'
+              '<p><a href="$IMS-CC-FILEBASE$/guide.pdf?canvas_download=1">the guide</a> and '
+              '<a href="$WIKI_REFERENCE$/pages/e">page E</a></p></body></html>')
+    page_b = ('<!DOCTYPE html><html><head><link rel="stylesheet" '
+              'href="https://s.brightspace.com/lib/fonts/0.6.1/fonts.css"></head>'
+              '<body><p>Read the chapter.</p></body></html>')
+    unpublished = ('<html><head><title>C</title><meta name="workflow_state" '
+                   'content="unpublished"/></head><body><p>Draft.</p></body></html>')
+    listed_nowhere = '<html><head><title>E</title></head><body><p>E.</p></body></html>'
+    course = os.path.join(work, "course.imscc")
+    with zipfile.ZipFile(course, "w") as z:
+        z.writestr("imsmanifest.xml", CC_MANIFEST)
+        z.writestr("wiki_content/a.html", page_a)
+        z.writestr("content/Read this week..html", page_b)
+        z.writestr("wiki_content/c.html", unpublished)
+        z.writestr("wiki_content/e.html", listed_nowhere)
+        z.writestr("d.xml", "<topic/>")
+        z.writestr("l.xml", '<webLink><title>A site</title><url href="https://example.org/"/></webLink>')
+        z.writestr("web_resources/guide.pdf", b"%PDF-1.4 guide")
+        z.writestr("web_resources/Uploaded Media/pic.png", ONE_PIXEL)
+        z.write(os.path.join(FIXTURES, "metadata.docx"), "web_resources/reading.docx")
+        z.writestr("non_cc_assessments/q.qti", "<questestinterop/>")
+    book = os.path.join(work, "book")
+    os.makedirs(book)
+    shutil.copy(course, book)
+    with open(os.path.join(book, "conversion.yaml"), "w") as fh:
+        fh.write("targets:\n  html:\n    format: html\n")
+    run = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quiet"],
+                         cwd=book, capture_output=True, text=True,
+                         stdin=subprocess.DEVNULL)
+    project = open(os.path.join(book, "project.yaml")).read() if exists(
+        book, "project.yaml") else ""
+    report = open(os.path.join(book, "unpack-report.csv")).read() if exists(
+        book, "unpack-report.csv") else ""
+    page_b_out = read(book, "Read-this-week.html") if exists(
+        book, "Read-this-week.html") else ""
+    a_out = read(book, "html", "a.html") if exists(book, "html", "a.html") else ""
+
+    # Our own cartridge, read back.
+    ours = os.path.join(work, "ours")
+    convert(ours, "targets:\n  html:\n    format: html\n", arguments=["--zip"])
+    back = os.path.join(work, "back")
+    os.makedirs(back)
+    built = os.path.join(ours, "org.example.fixtures.imscc")
+    if os.path.exists(built):
+        shutil.copy(built, back)
+    with open(os.path.join(back, "conversion.yaml"), "w") as fh:
+        fh.write("targets:\n  html:\n    format: html\n")
+    subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quiet"],
+                   cwd=back, capture_output=True, text=True,
+                   stdin=subprocess.DEVNULL)
+    agree = subprocess.run(["python3", os.path.join(ROOT, "util", "compare-output.py"),
+                            os.path.join(ours, "html"), os.path.join(back, "html")],
+                           capture_output=True, text=True).stdout
+    return [
+        ("a cartridge alone in a directory is unpacked and converted",
+         lambda: run.returncode == 0 and exists(book, "html", "a.html")),
+        ("modules are groups, and a Canvas text header groups the entries "
+         "after it", lambda: re.search(r'title: "Week 1"\s+items:\s+- title: '
+                                       r'"Readings"\s+items:\s+- page: a', project)),
+        ("a Word file in the outline is a source, and converts",
+         lambda: exists(book, "reading.docx") and exists(book, "html", "reading.html")),
+        ("a page with no title takes the outline's, and a dotted file name "
+         "ends cleanly", lambda: "<title>Read this week</title>" in page_b_out),
+        ("Canvas's placeholders and queries resolve, and the linked file is "
+         "copied with the page", lambda: "Uploaded-Media/pic.png" in a_out
+         and 'href="web_resources/guide.pdf"' in a_out
+         and exists(book, "html", "web_resources", "guide.pdf")
+         and 'href="e.html"' in a_out),
+        ("a page listed twice is in the book once, and the report says so",
+         lambda: project.count("page: a\n") == 1 and "listed-twice" in report),
+        ("what isn't a page is reported: discussion, web link, file, test bank",
+         lambda: all(k in report for k in ("discussion", "web-link",
+                                           "file-in-outline",
+                                           "unlisted-assessment"))),
+        ("an unpublished page is left out; one the outline doesn't list is kept",
+         lambda: not exists(book, "c.html") and "page: e" in project
+         and "not-in-outline" in report),
+        ("our own cartridge converts back to the book it was built from",
+         lambda: os.path.exists(built) and "Runs agree" in agree),
+    ]
+
+
 def case_html_source(work):
     """An HTML page is a source when the book says so, and converting
     what this pipeline wrote changes nothing."""
@@ -1446,6 +1572,7 @@ CASES = [
     ("title rows and bands, split and grouped", case_bands),
     ("compare-output sees lists and blockquotes", case_compare_blocks),
     ("a web archive converted directly", case_warc_direct),
+    ("a Common Cartridge", case_cartridge),
     ("a hand-written page", case_hand_written),
     ("several targets", case_targets),
     ("arguments passed to the packager", case_passthrough),

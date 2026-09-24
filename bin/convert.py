@@ -117,34 +117,46 @@ def say(text):
 
 def unpack_archives(base, check_only=False):
     """A web archive -- a WARC, compressed or not, or a WACZ, recognized
-    by its first bytes -- in a directory with no sources is unpacked there
-    first, as unpack-site.py would, and its pages are then converted. From
+    by its first bytes -- or a Common Cartridge, recognized by its
+    manifest, in a directory with no sources is unpacked there first, as
+    unpack-site.py or unpack-cartridge.py would, and its pages are then
+    converted. From
     then on the pages are the book: they're where corrections are made, so
     a later run, finding sources, never reads the archive again. A
     project.yaml already here is kept, and the unpacker's is written
     beside it as project-unpacked.yaml. For the unpacker's options (a
     profile, whole pages), run unpack-site.py itself."""
     import sitesource
+    import cartridgesource
     skip = SOURCE_EXTENSIONS + (".yaml", ".yml", ".csv", ".json", ".css",
                                 ".lua", ".txt", ".pdf", ".epub")
-    archives = sorted(p for p in glob.glob(os.path.join(base, "*"))
-                      if os.path.isfile(p) and not p.lower().endswith(skip)
-                      and sitesource.is_warc(p))
-    if not archives:
+    candidates = sorted(p for p in glob.glob(os.path.join(base, "*"))
+                        if os.path.isfile(p) and not p.lower().endswith(skip))
+    cartridges = [p for p in candidates if cartridgesource.is_cartridge(p)]
+    archives = [p for p in candidates
+                if p not in cartridges and sitesource.is_warc(p)]
+    if not archives and not cartridges:
         return
+    if cartridges and (archives or len(cartridges) > 1):
+        die("More than one thing to unpack here ("
+            + ", ".join(os.path.basename(p) for p in cartridges + archives)
+            + "); a book comes from one cartridge, or from web archives. "
+            "Unpack them into directories of their own.")
+    tool = "unpack-cartridge.py" if cartridges else "unpack-site.py"
+    archives = cartridges or archives
     names = ", ".join(os.path.basename(p) for p in archives)
     if any(p.lower().endswith(SOURCE_EXTENSIONS)
            for p in glob.glob(os.path.join(base, "*"))):
         say(f"{names}: not read, since this directory has sources, which "
             "are the book once an archive is unpacked. To unpack it afresh, "
-            "use unpack-site.py into a new directory.")
+            f"use {tool} into a new directory.")
         return
     if check_only:
         say(f"{names} would be unpacked here and its pages converted.")
         return
     work = tempfile.mkdtemp(prefix=".unpacking-", dir=base)
     try:
-        run = subprocess.run([sys.executable, os.path.join(HERE, "unpack-site.py"),
+        run = subprocess.run([sys.executable, os.path.join(HERE, tool),
                               *archives, "-o", work],
                              capture_output=True, text=True)
         if run.returncode != 0:
@@ -1939,15 +1951,47 @@ def arrange_notes(target, pages, base, work, fragments, language, env):
     return written
 
 
+def linked_files(path):
+    """Local files a page links to that aren't pages: the PDF, Word file,
+    or slides a course page offers. Copied with the images, but never
+    checked by the media gate: a link to a missing file didn't stop a run
+    before, and isn't a reason to now."""
+    refs = []
+
+    def walk(node):
+        if isinstance(node, dict):
+            if node.get("t") == "Link":
+                try:
+                    refs.append(node["c"][2][0])
+                except (KeyError, IndexError, TypeError):
+                    pass
+            for value in node.values():
+                walk(value)
+        elif isinstance(node, list):
+            for value in node:
+                walk(value)
+    with open(path, encoding="utf-8") as fh:
+        walk(json.load(fh))
+    out = set()
+    for ref in refs:
+        if re.match(r"^[a-zA-Z][\w+.-]*:|^//|^#", ref):
+            continue
+        target = re.split(r"[#?]", ref, 1)[0]
+        if re.search(r"\.\w+$", target) and not re.search(r"\.x?html?$",
+                                                        target.lower()):
+            out.add(target)
+    return sorted(out)
+
+
 def copy_media(base, output_dir, pages, safe=True):
     """Every local image a page refers to, copied beside the page at the
     same relative path: <source>/media/... for what was extracted from a
     .docx, assets/... or wherever for what a Markdown source names. A
     copy keeps the target's pages self-contained, which is what the
-    packager assumes."""
+    packager assumes. So are the local files a page links to."""
     copied = set()
     for page in pages:
-        for ref in media_references(page):
+        for ref in media_references(page) + linked_files(page):
             if ref in copied:
                 continue
             src = os.path.normpath(os.path.join(base, unquote(ref)))

@@ -214,6 +214,25 @@ def unpack_archives(base, check_only=False, linked_documents=False):
         if linked_documents:
             say(unused + "there's no cartridge here.")
         return
+    # A directory with sources is a book already: nothing in it is read,
+    # however many archives sit there (a cartridge --zip built, say, beside
+    # the download it came from).
+    if any(p.lower().endswith(SOURCE_EXTENSIONS)
+           for p in glob.glob(os.path.join(base, "*"))):
+        found = cartridges + zips + archives
+        say(", ".join(os.path.basename(p) for p in found)
+            + ": not read, since this directory has sources, which are the "
+            "book once an archive is unpacked. To unpack "
+            + ("it afresh, " if len(found) == 1 else "one afresh, ")
+            + ("extract it into a new directory." if len(found) == 1 and zips
+               else "use unpack-cartridge.py or unpack-site.py, or extract "
+               "it, into a new directory." if len(found) > 1 else
+               f"use {'unpack-cartridge.py' if cartridges else 'unpack-site.py'}"
+               " into a new directory."))
+        if linked_documents:
+            say(unused + "the pages here are the book already, and "
+                "unpacking again into a new directory is how to change that.")
+        return
     if (cartridges or zips) and (archives or len(cartridges + zips) > 1):
         die("More than one thing to unpack here ("
             + ", ".join(os.path.basename(p) for p in cartridges + zips + archives)

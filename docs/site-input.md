@@ -10,6 +10,8 @@ python3 $T/bin/convert.py
 
 Look for the book's source first. Two of the three web books this was built against have public repositories (Markdown for one, AsciiDoc for another), and a source beats the best save.
 
+A `.zip` of saved pages, or a WARC or WACZ, left alone in a book's directory, is unpacked by `convert.py` on its first run, through `unpack-site.py` ([A book that arrives as an archive](first-run.md#a-book-that-arrives-as-an-archive)).
+
 `unpack-site.py` takes a directory of a browser's "complete" saves (an `.html` per page, each with a `_files` directory beside it), a directory of `.mhtml` files, or WARC and WACZ files. It fetches nothing.
 
 **A WARC is the best of the three** ([Making a WARC](making-warcs.md) says how), and a file is taken for one by its first bytes, whatever it is called. Every archiving crawler writes one: `wget --mirror --page-requisites --no-parent --warc-file=book https://…` does, as do the ArchiveWeb.page browser extension, Browsertrix Crawler, and the Internet Archive's Heritrix. It holds each URL's bytes as the server sent them, before any script ran, so nothing a browser's save loses (a MathJax page's TeX, the original links) is lost. Redirects the crawl recorded are followed; gzipped and chunked responses are decoded. A WACZ is WARCs in a zip and is read the same way. A wget WARC of a copy of CS168 unpacked to pages byte-identical to the unpacked browser save, with the same contents and the same images. What it writes:

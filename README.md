@@ -57,6 +57,7 @@ Each target writes into a directory of its own; the content directory keeps the 
 | --- | --- |
 | [Installation](docs/installation.md) | Prerequisites and how to check them |
 | [A first run](docs/first-run.md) | Start to finish, what each run writes, exit codes |
+| [Worked examples](docs/examples.md) | Two real books from start to finish: an OpenStax book from its Word files to a course cartridge, and a book website from a WARC to an EPUB and an HTML round trip. |
 | [Formats and packaging](docs/formats.md) | Every input, every way it can arrive, every output, how far each path is tested and what it loses, and how the output is packaged |
 | [How it works](docs/architecture.md) | The pieces, what conversion does to a page, running the filter alone |
 | [Configuration](docs/configuration.md) | How the configuration files fit together, precedence, contents, migration from v0.1 |
@@ -70,7 +71,7 @@ Each target writes into a directory of its own; the content directory keeps the 
 | [Auditing](docs/auditing.md) | `audit.py`: what is wrong with a Word, Markdown, HTML, EPUB, or PDF file, without converting it; the findings format every check shares |
 | [HTML sources](docs/html.md) | Every `.html` beside the sources is a source, and a finished page goes in `_pt/`: what is read from it, what isn't, and why converting this pipeline's own pages changes nothing |
 | [A book saved from the web](docs/site-input.md) | `unpack-site.py`: browser saves or `.mhtml` into pages whose every reference is local, the generator recognized, the order read from the site's own menus |
-| [AsciiDoc sources](docs/asciidoc.md) | `.adoc` chapters as sources, a master file that includes them as the book's order, and what is done on reading that the reader leaves undone |
+| [AsciiDoc sources](docs/asciidoc.md) | The AsciiDoc target, and `.adoc` chapters as sources, a master file that includes them as the book's order, and what is done on reading that the reader leaves undone |
 | [Adopting pages as sources](docs/splitting.md#adopting-the-pages-as-sources) | `adopt-pages.py`: a split book's pages renamed without `--`, links rewritten, as the sources of a new book |
 | [A site's own source](docs/site-input.md#a-sites-own-source) | `unpack-jekyll.py`: a Jekyll site's Markdown (just-the-docs) into a book directory, contents from its front matter, code left alone |
 | [Making a WARC](docs/making-warcs.md) | Installing and running wget or Browsertrix Crawler to capture a book's website for `unpack-site.py` |

@@ -286,6 +286,32 @@ def checks(workdir):
         len(stale) == 1 and stale[0]["label"] == "Table 9.9", [r["status"] for r in report]
     yield "the error names the report", "table-headers-report.csv" in err, err
 
+    # One table twice: one key. The prefilled file has one row for it, and
+    # adopting that file as the run says gives no warning; rows that
+    # disagree about a key still do.
+    twice = os.path.join(workdir, "twice")
+    os.makedirs(twice)
+    docx(os.path.join(twice, "c.docx"), [para("Table 1.1"), GRID,
+                                         para("Table 1.2"), GRID])
+    code, err = run(twice)
+    report = read(twice, "table-headers-report.csv")
+    new = read(twice, "table-headers-new.csv")
+    yield "a table that appears twice is reported twice and prefilled once", \
+        report is not None and len(report) == 2 and new is not None and len(new) == 1, \
+        (report and len(report), new and len(new))
+    shutil.copy(os.path.join(twice, "table-headers-new.csv"),
+                os.path.join(twice, "table-headers.csv"))
+    code, err = run(twice)
+    yield "adopting the prefilled file as it stands gives no warning", \
+        "more than once" not in err, err
+    with open(os.path.join(twice, "table-headers.csv"), "a", newline="",
+              encoding="utf-8") as h:
+        csv.writer(h).writerow([new[0]["key"], "none" if new[0]["headers"] != "none"
+                                else "first-row", "", "", "", "c.docx", "", ""])
+    code, err = run(twice)
+    yield "rows that disagree about a key are warned of", \
+        "more than once, with different decisions" in err, err
+
 
 def main():
     workdir = tempfile.mkdtemp(prefix="headers-test-")

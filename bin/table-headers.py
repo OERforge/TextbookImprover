@@ -110,9 +110,13 @@ def read_sidecar(path, warn):
                 unknown.add(row["headers"])
                 value = ""
             row["headers"] = value
-            if row["key"] in rows:
-                warn("%s: key %s appears more than once; the last row wins"
-                     % (path, row["key"][:12]))
+            # A repeated key matters only when the rows disagree: pasting a
+            # prefilled file in twice repeats rows that say the same thing.
+            decisions = ("headers", "split-at", "caption-rows", "part-captions")
+            if row["key"] in rows and any(rows[row["key"]][c] != row[c]
+                                          for c in decisions):
+                warn("%s: key %s appears more than once, with different "
+                     "decisions; the last row wins" % (path, row["key"][:12]))
             rows[row["key"]] = row
     for value in sorted(unknown):
         warn("%s: headers value %r is not one this version understands; "
@@ -458,7 +462,9 @@ def main():
             "guess": info["guess"], "reason": info["reason"],
             "status": status, "note": note,
         })
-        if row is None:
+        # One row per key: a table that appears twice has one key and one
+        # guess, and a second row would only make the pasted file warn.
+        if row is None and info["key"] not in {r["key"] for r in new_rows}:
             new_rows.append({
                 "key": info["key"], "headers": info["guess"],
                 "split-at": info["split-at"],

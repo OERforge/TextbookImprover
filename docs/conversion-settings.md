@@ -70,7 +70,7 @@ How data tables are rendered.
 
 **`tables.bands`**—one of `auto`, `split`, `group`, `column`; default `auto`
 
-What a table whose rows are grouped under bands becomes: a merged row across the table labeling the rows beneath it, as in a Word table, or a tbody headed by one in HTML. split makes one table per band, the band's text in each part's caption, which NVDA reads on arrival (tested in Chrome and Firefox). Of HTML's grouped forms, NVDA names a group for a data cell only when its heading is a column of its own spanning its rows, and then only moving down a column; a band as a row of its own it never names there. group keeps one table with a body per band, each band a row-group header, which is the author's form and reads back as it was written. auto derives from the target's format: split for html, epub3, and pdf; group for markdown and docx, whose output becomes a source. column, never the default, keeps one table and gives the bands a column of their own at its left, each a row-group header spanning its rows: the form NVDA names with the row header on every data cell moving down (W3C's pattern for irregular headers), for trying in HTML. Only a table whose parts share their column headers takes it; any other is split. In testing NVDA announced the column header inconsistently in this form, and no other screen reader has been tried.
+What a table whose rows are grouped under bands becomes: a merged row across the table labeling the rows beneath it, as in a Word table, or a tbody headed by one in HTML. split makes one table per band, the band's text in each part's caption, which NVDA reads on arrival (tested in Chrome and Firefox). Of HTML's grouped forms, NVDA names a group for a data cell only when its heading is a column of its own spanning its rows, and then only moving down a column; a band as a row of its own it never names there. group keeps one table with a body per band, each band a row-group header, which is the author's form and reads back as it was written. auto derives from the target's format: split for html, epub3, and pdf; group for markdown, asciidoc, and docx, whose output becomes a source. column, never the default, keeps one table and gives the bands a column of their own at its left, each a row-group header spanning its rows: the form NVDA names with the row header on every data cell moving down (W3C's pattern for irregular headers), for trying in HTML. Only a table whose parts share their column headers takes it; any other is split. In testing NVDA announced the column header inconsistently in this form, and no other screen reader has been tried.
 
 **`tables.wrap`**—`bool`; default `true`
 
@@ -78,7 +78,7 @@ Put wide tables in a focusable scroll container so a long table doesn't force th
 
 **`tables.markers`**—`opaque`; default `{matrix: both, row-headers: first-column}`
 
-What a fenced div around a table in a Markdown source declares about its headers, class by class: "::: matrix" means both a header row and a header column, "::: row-headers" a header column and no header row, unless this says otherwise. The values are the ones table-headers.csv takes (first-row, first-column, both, none); a header row alone and no headers need no marker, since a pipe or grid table says those itself. A Markdown target writes these markers back. A Markdown table with no marker is left as Pandoc read it; the guess and the report run only on Word sources.
+What a fenced div around a table in a Markdown source declares about its headers, class by class: "::: matrix" means both a header row and a header column, "::: row-headers" a header column and no header row, unless this says otherwise. The values are the ones table-headers.csv takes (first-row, first-column, both, none); a header row alone and no headers need no marker, since a pipe or grid table says those itself. An open block in an AsciiDoc source ([.matrix] then --) declares the same way. A Markdown or AsciiDoc target writes these markers back. A Markdown table with no marker is left as Pandoc read it; the guess and the report run only on Word sources.
 
 ## pages
 
@@ -98,7 +98,7 @@ A link to a page of this book on the publisher's site -- https://openstax.org/bo
 
 **`merge`**—one of `False`, `groups`; default `false`
 
-For a markdown target: off writes one file per page, as the rest of the run sees pages. groups writes one file per top-level entry of the book's contents, with each page under it as a section, so a book whose sources are one file per section comes back as one file per chapter. Links between merged pages become links inside the file, and links to a page in another file name that file.
+For a markdown or asciidoc target: off writes one file per page, as the rest of the run sees pages. groups writes one file per top-level entry of the book's contents, with each page under it as a section, so a book whose sources are one file per section comes back as one file per chapter. Links between merged pages become links inside the file, and links to a page in another file name that file.
 
 ## notes
 

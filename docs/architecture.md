@@ -26,7 +26,7 @@ on another `bin/` script.
 | `asciidoc-source.lua` | When an AsciiDoc source is read: `imagesdir` applied, sections moved below the title, Asciidoctor's own settings dropped from the metadata. |
 | `markdown-html.lua` | When a Markdown source is read: raw HTML reassembled a tag with its match, read as HTML, and cleaned by `html-raw.lua` and `html-source.lua`, loaded from their files. |
 | `html-source.lua` | When an HTML source is read: what the page says about its tables becomes a declaration, and what an earlier run derived (the title block, a table's scroll wrapper) is taken out. |
-| `markdown-source.lua` | For a markdown target: takes out what the filter derived and writes what it decided as source markup. |
+| `markdown-source.lua` | For a markdown or asciidoc target: takes out what the filter derived and writes what it decided as source markup. For AsciiDoc it runs in two passes, the tables that go as HTML first, and writes much of the output itself where Pandoc's AsciiDoc writer and reader disagree. |
 | `header-includes.lua` | Adds the stylesheet to a page's `header-includes` at render time, alongside what the page already carries there; `--include-in-header` would replace it. |
 | `unpack-epub.py` | Turns an EPUB into a directory `convert.py` converts: a page per content document, the media, and a `project.yaml` with the package's metadata and its navigation as `contents`. See [An EPUB as the source](epub-input.md). |
 | `unpack-cartridge.py` | Turns a Common Cartridge into a directory `convert.py` converts: its HTML pages and Word documents as sources, its other files, and a `project.yaml` with its modules as `contents`. See [A course cartridge as the source](cartridge-input.md). |

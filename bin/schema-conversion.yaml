@@ -200,7 +200,8 @@ keys:
           table with a body per band, each band a row-group header, which
           is the author's form and reads back as it was written. auto
           derives from the target's format: split for html, epub3, and
-          pdf; group for markdown and docx, whose output becomes a source.
+          pdf; group for markdown, asciidoc, and docx, whose output becomes a
+          source.
           column, never the default, keeps one table and gives the bands a
           column of their own at its left, each a row-group header spanning
           its rows: the form NVDA names with the row header on every data
@@ -228,7 +229,9 @@ keys:
           values are the ones table-headers.csv takes (first-row,
           first-column, both, none); a header row alone and no headers
           need no marker, since a pipe or grid table says those itself.
-          A Markdown target writes these markers back. A Markdown table
+          An open block in an AsciiDoc source ([.matrix] then --) declares
+          the same way. A Markdown or AsciiDoc target writes these markers
+          back. A Markdown table
           with no marker is left as Pandoc read it; the guess and the
           report run only on Word sources.
 
@@ -275,7 +278,7 @@ keys:
     stage: render
     default: off
     description: >
-      For a markdown target: off writes one file per page, as the rest
+      For a markdown or asciidoc target: off writes one file per page, as the rest
       of the run sees pages. groups writes one file per top-level entry
       of the book's contents, with each page under it as a section, so
       a book whose sources are one file per section comes back as one

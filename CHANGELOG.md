@@ -12,6 +12,7 @@ Versions are two-part and pre-1.0: breaking changes may land in any of them unti
 
 ### Added
 
+- **[Worked examples](docs/examples.md)**, a tutorial to read after the first run: *Introductory Business Statistics 2e* from OpenStax's Word files to a course cartridge, and DCIC from a WARC to an EPUB and an HTML round trip, with the output each step printed.
 - **An AsciiDoc target.** `format: asciidoc` writes the book as AsciiDoc to be read again as a source, as a `markdown` target does for Markdown, and `merge: groups` applies to it too. Pandoc's AsciiDoc writer and reader disagree in many places, so the target writes much of it itself (table markers, row-spanned and banded tables, images, anchors, footnotes, text AsciiDoc would read as markup) and reports the few changes it can't avoid. Measured round trips: the security textbook 14 of 14 pages identical, the statistics book 166 of 169, the economics book 31 of 34. See [AsciiDoc as a target](docs/asciidoc.md#asciidoc-as-a-target).
 - **[Formats and packaging](docs/formats.md)**: every input, every way it can arrive (a directory, a zip, a WARC, an EPUB, a cartridge), each output with how far the path is tested and what it loses, and how the output is packaged.
 - **`convert.py` extracts a plain `.zip` it finds alone**, as it unpacks a WARC or a cartridge: the folders wrapping everything dropped so the sources are at the top, macOS's litter left out, an entry that would land outside the directory refused and reported, and the directory's own `conversion.yaml` kept as its `project.yaml` is. A zip is known by its name, so a slide deck beside a book isn't unpacked, and one with no sources stops the run saying what it holds.
@@ -61,6 +62,9 @@ Versions are two-part and pre-1.0: breaking changes may land in any of them unti
 
 ### Fixed
 
+- **A book's third run no longer stops because its own cartridge is there.** After `--zip`, the `.imscc` sits beside the download it came from, and the next run stopped with "More than one thing to unpack here". Once a directory has sources, no archive in it is read, however many there are. Found by following the first-run page on a real book.
+- **Pasting `table-headers-new.csv` in as the run says no longer warns.** The prefilled file listed a table that appears twice once per appearance, under one key, and the sidecar reader warned of every repeated key; the file now has one row per key, and a repeated key is reported only when its rows disagree.
+- **The documentation reflects the AsciiDoc target** where it had spoken only of Markdown (`tables.bands`, `merge`, the markers, the sidecar page, the architecture table), and describes the empty-column rule for HTML tables and a zipped save's unpacking.
 - **A column of code blocks in an HTML table is kept.** The check for empty columns counted a cell by its text, which a code block has none of, so a column holding only listings (Scribble lays code out that way) was dropped as empty.
 - **A linked image with no alt text was deleted, link and all.** The filter drops empty links (the bookmark repair makes them, and an empty link fails WCAG 2.4.4), and a link holding only an undescribed image has no text. It's kept now, and the missing alt is reported. Found on the security textbook, whose Guy Fawkes image went missing in every target; any source format could lose one.
 - **A table written as HTML inside an AsciiDoc source keeps its header columns**, which Pandoc's reader finds and nothing had declared, so the filter dropped them.

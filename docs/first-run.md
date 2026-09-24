@@ -222,3 +222,7 @@ won't delete files you may want.
 A non-zero exit on a first run is normal — there's no config yet, so the
 manifest step writes a sample and stops. The HTML is already written by
 that point.
+
+## Next
+
+[Worked examples](examples.md) takes two real books through these steps from start to finish: an OpenStax book from its Word files to a course cartridge, and a book website from a WARC to an EPUB.

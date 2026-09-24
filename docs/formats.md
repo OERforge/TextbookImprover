@@ -80,6 +80,7 @@ Pages are parsed with html5lib, or with lxml where html5lib isn't installed; DCI
 **How it can arrive**
 
 - Files in the book's directory, with a master file whose `include::`s give the book's order ([AsciiDoc sources](asciidoc.md)).
+- An AsciiDoc target's output from an earlier conversion, which is written to be a source.
 - A plain `.zip` of them.
 
 **What it becomes**

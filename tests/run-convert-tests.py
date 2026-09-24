@@ -1175,6 +1175,9 @@ def case_zip(work):
         with open(os.path.join(book, "ch2.md"), "w") as fh:
             fh.write("# Two\n\nThe corrected draft.\n")
     second = run(book)
+    with zipfile.ZipFile(os.path.join(book, "another.zip"), "w") as z:
+        z.writestr("other.md", "# Other\n")
+    second_run = run(book)
     empty = os.path.join(work, "empty")
     os.makedirs(empty)
     with zipfile.ZipFile(os.path.join(empty, "handouts.zip"), "w") as z:
@@ -1238,6 +1241,10 @@ def case_zip(work):
          and exists(openstax, "html", "tables.html")
          and exists(openstax, "html", "metadata.html")
          and not exists(openstax, "Book_-_DOCX_Customization")),
+        ("with sources here, a second archive beside the first (a cartridge "
+         "--zip built, say) isn't read, and the run goes on",
+         lambda: second_run.returncode == second.returncode
+         and "More than one thing" not in second_run.stderr),
         ("a slide deck is a zip but not an archive to unpack",
          lambda: "talk.pptx" not in deck_run.stdout + deck_run.stderr
          and not exists(deck, "[Content_Types].xml")),

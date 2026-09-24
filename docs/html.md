@@ -39,7 +39,7 @@ Pandoc's HTML reader does the reading, with two things set for it.
 
 The reader itself decides one more thing: when a page has exactly one `<main>` (or `role="main"`), only what's inside it is the page. Site navigation outside `<main>` is gone; a menu inside it is content as far as anyone can tell, since the reader keeps no trace of `<nav>`.
 
-Images are files the page names by path, checked at the media gate and copied with the page, as for Markdown.
+Images are files the page names by path, checked at the media gate and copied with the page, as for Markdown. A file a page links to that isn't a page, such as a PDF or a Word document, is copied with it too, under the same safe name, though a missing one doesn't stop the run. An EPUB can't carry such a file, since a reading system follows links only among the book's own pages, so there the link's text stays and the output check reports the file as `link-to-file-dropped`.
 
 ## Converting this pipeline's own pages changes nothing
 

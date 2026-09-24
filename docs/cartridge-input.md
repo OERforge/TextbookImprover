@@ -26,7 +26,7 @@ A module is a group in `contents`, and an entry in it that names a page is that 
 
 A page is named after its file, made safe for a link, and a second file with the same name takes a number. A page with no `<title>` of its own, as Brightspace writes them, takes the outline's title for it. Canvas's link placeholders are resolved: `$IMS-CC-FILEBASE$` is the course's files, `$WIKI_REFERENCE$/pages/…` another page, and the query Canvas adds to a local link (`?canvas_=1&canvas_qs_wrap=1`) is dropped. When every file the pages use sits in one directory, as in a cartridge this project built, that directory drops out of the book's paths.
 
-A local file a page links to, like a PDF or a Word checklist, is copied into each target beside the page, as an image is.
+A local file a page links to, like a PDF or a Word checklist, is copied into each target beside the page, as an image is. An EPUB can't hold one, so there the link's text stays without the link, and the output check lists each file as `link-to-file-dropped`: OpenStax's cartridge has five, its setup checklists and a caption guide.
 
 ## What unpack-report.csv lists
 

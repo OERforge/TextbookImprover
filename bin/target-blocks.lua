@@ -65,6 +65,33 @@ local function remote_image(img)
   return pandoc.Link(text, img.src)
 end
 
+-- A link to a local file that isn't a page -- the PDF or Word file a
+-- course page offers -- can't be in an EPUB either: a reading system
+-- follows links only among the book's own content documents, so the
+-- file would be a dead link (epubcheck: RSC-007) or, packaged, a
+-- hyperlink to a resource outside the spine. Its text stays, so the
+-- sentence still reads, marked with the file it named, which the output
+-- check reports.
+local function local_file_link(link)
+  if not FORMAT:match('epub') then return nil end
+  local target = link.target
+  if target:match('^%a[%w+.-]*:') or target:match('^//')
+      or target:match('^#') then
+    return nil
+  end
+  local path = target:match('^([^#?]*)')
+  if path == '' or not path:match('%.%w+$')
+      or path:lower():match('%.x?html?$') then
+    return nil
+  end
+  -- Named as a person reads it, not percent-encoded.
+  local name = path:gsub('%%(%x%x)', function(hex)
+    return string.char(tonumber(hex, 16))
+  end)
+  return pandoc.Span(link.content,
+    pandoc.Attr('', { 'file-link' }, { { 'data-file', name } }))
+end
+
 local function escape(value)
   return (value:gsub('&', '&amp;'):gsub('"', '&quot;'):gsub('<', '&lt;'))
 end
@@ -117,6 +144,7 @@ local function drop_title_block(meta)
 end
 
 return {
-  { Div = resolve, Span = resolve, Image = remote_image },
+  { Div = resolve, Span = resolve, Image = remote_image,
+    Link = local_file_link },
   { Meta = drop_title_block },
 }

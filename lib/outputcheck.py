@@ -80,6 +80,7 @@ class Page:
         self.title = None
         self.ids = []               # in document order, duplicates kept
         self.links = []             # href values of <a>
+        self.dropped_files = []     # files an EPUB's links named, kept as text
         self.images = []            # (has_alt, alt, decorative, src)
         self.headings = []          # (level, text)
         self.tables = []            # (has_th, has_caption, role, wrapped)
@@ -106,6 +107,8 @@ class _Collector(HTMLParser):
             self._title = []
         elif tag == "a" and a.get("href") is not None:
             self.page.links.append(a["href"])
+        elif tag == "span" and a.get("data-file"):
+            self.page.dropped_files.append(a["data-file"])
         elif tag == "img":
             self.page.images.append(("alt" in a, a.get("alt") or "",
                                      is_decorative(a), a.get("src", "")))
@@ -175,6 +178,8 @@ def read_xhtml(name, markup):
             page.title = " ".join("".join(el.itertext()).split())
         elif tag == "a" and el.get("href") is not None:
             page.links.append(el.get("href"))
+        elif tag == "span" and el.get("data-file"):
+            page.dropped_files.append(el.get("data-file"))
         elif tag == "img":
             page.images.append(("alt" in el.attrib, el.get("alt") or "",
                                 is_decorative(el.attrib), el.get("src", "")))
@@ -198,6 +203,8 @@ def read_xhtml(name, markup):
 def check_page(page, findings):
     """Everything about one page that needs no other page."""
     where = page.name
+    for name in page.dropped_files:
+        findings.append(Finding(where, "link-to-file-dropped", name))
     if page.parse_error:
         findings.append(Finding(where, "not-well-formed", page.parse_error))
     if not page.lang:
@@ -257,6 +264,11 @@ def check_links(pages, findings, base_of=None):
                 here = posixpath.dirname(page.name)
                 name = posixpath.normpath(posixpath.join(here, target))
                 if name not in ids:
+                    # A file that isn't a page -- a PDF or Word file a
+                    # page offers -- counts when it's on disk: page names
+                    # are paths from where the run works.
+                    if os.path.isfile(name):
+                        continue
                     findings.append(Finding(page.name, "link-to-missing-file",
                                             href))
                     continue

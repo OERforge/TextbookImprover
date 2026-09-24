@@ -991,7 +991,7 @@ CC_MANIFEST = """<?xml version="1.0" encoding="UTF-8"?>
 <resource identifier="rb" type="webcontent" href="content/Read this week..html"><file href="content/Read this week..html"/></resource>
 <resource identifier="rd" type="imsdt_xmlv1p1"><file href="d.xml"/></resource>
 <resource identifier="rl" type="imswl_xmlv1p1"><file href="l.xml"/></resource>
-<resource identifier="rp" type="webcontent" href="web_resources/guide.pdf"><file href="web_resources/guide.pdf"/></resource>
+<resource identifier="rp" type="webcontent" href="web_resources/The Guide.pdf"><file href="web_resources/The Guide.pdf"/></resource>
 <resource identifier="rw" type="webcontent" href="web_resources/reading.docx"><file href="web_resources/reading.docx"/></resource>
 <resource identifier="rc" type="webcontent" href="wiki_content/c.html"><file href="wiki_content/c.html"/></resource>
 <resource identifier="re" type="webcontent" href="wiki_content/e.html"><file href="wiki_content/e.html"/></resource>
@@ -1012,7 +1012,7 @@ def case_cartridge(work):
     os.makedirs(work)
     page_a = ('<html><head><title>Page A</title></head><body><h2>A</h2>'
               '<p><img src="$IMS-CC-FILEBASE$/Uploaded%20Media/pic.png?canvas_=1&amp;canvas_qs_wrap=1" alt="A picture"></p>'
-              '<p><a href="$IMS-CC-FILEBASE$/guide.pdf?canvas_download=1">the guide</a> and '
+              '<p><a href="$IMS-CC-FILEBASE$/The%20Guide.pdf?canvas_download=1">the guide</a> and '
               '<a href="$WIKI_REFERENCE$/pages/e">page E</a></p></body></html>')
     page_b = ('<!DOCTYPE html><html><head><link rel="stylesheet" '
               'href="https://s.brightspace.com/lib/fonts/0.6.1/fonts.css"></head>'
@@ -1029,7 +1029,7 @@ def case_cartridge(work):
         z.writestr("wiki_content/e.html", listed_nowhere)
         z.writestr("d.xml", "<topic/>")
         z.writestr("l.xml", '<webLink><title>A site</title><url href="https://example.org/"/></webLink>')
-        z.writestr("web_resources/guide.pdf", b"%PDF-1.4 guide")
+        z.writestr("web_resources/The Guide.pdf", b"%PDF-1.4 guide")
         z.writestr("web_resources/Uploaded Media/pic.png", ONE_PIXEL)
         z.write(os.path.join(FIXTURES, "metadata.docx"), "web_resources/reading.docx")
         z.writestr("non_cc_assessments/q.qti", "<questestinterop/>")
@@ -1037,7 +1037,8 @@ def case_cartridge(work):
     os.makedirs(book)
     shutil.copy(course, book)
     with open(os.path.join(book, "conversion.yaml"), "w") as fh:
-        fh.write("targets:\n  html:\n    format: html\n")
+        fh.write("targets:\n  html:\n    format: html\n"
+                 "  epub:\n    format: epub3\n")
     run = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quiet"],
                          cwd=book, capture_output=True, text=True,
                          stdin=subprocess.DEVNULL)
@@ -1048,6 +1049,16 @@ def case_cartridge(work):
     page_b_out = read(book, "Read-this-week.html") if exists(
         book, "Read-this-week.html") else ""
     a_out = read(book, "html", "a.html") if exists(book, "html", "a.html") else ""
+    checked = open(os.path.join(book, "output-check.csv")).read() if exists(
+        book, "output-check.csv") else ""
+    epub_text = ""
+    for root_dir, _, files in os.walk(book):
+        for name in files:
+            if name.endswith(".epub"):
+                with zipfile.ZipFile(os.path.join(root_dir, name)) as z:
+                    epub_text = "".join(z.read(n).decode("utf-8", "replace")
+                                        for n in z.namelist()
+                                        if n.endswith(".xhtml"))
 
     # Our own cartridge, read back.
     ours = os.path.join(work, "ours")
@@ -1076,10 +1087,18 @@ def case_cartridge(work):
         ("a page with no title takes the outline's, and a dotted file name "
          "ends cleanly", lambda: "<title>Read this week</title>" in page_b_out),
         ("Canvas's placeholders and queries resolve, and the linked file is "
-         "copied with the page", lambda: "Uploaded-Media/pic.png" in a_out
-         and 'href="web_resources/guide.pdf"' in a_out
-         and exists(book, "html", "web_resources", "guide.pdf")
+         "copied with the page under its safe name",
+         lambda: "Uploaded-Media/pic.png" in a_out
+         and 'href="web_resources/The-Guide.pdf"' in a_out
+         and exists(book, "html", "web_resources", "The-Guide.pdf")
          and 'href="e.html"' in a_out),
+        ("the output check counts a linked file that's on disk as there",
+         lambda: checked and "html/a.html,link-to-missing-file" not in checked),
+        ("an EPUB keeps a link to a file as its text, and the output check "
+         "reports it", lambda: "the guide" in epub_text
+         and re.search(r'data-file="web_resources/The[ -]Guide\.pdf"', epub_text)
+         and not re.search(r'href="[^"]*Guide\.pdf"', epub_text)
+         and "link-to-file-dropped" in checked),
         ("a page listed twice is in the book once, and the report says so",
          lambda: project.count("page: a\n") == 1 and "listed-twice" in report),
         ("what isn't a page is reported: discussion, web link, file, test bank",

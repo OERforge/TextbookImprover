@@ -79,6 +79,10 @@ CHECKS = OrderedDict([
       "warning", "WCAG 2.1 SC 1.4.10 (AA)", "tool")),
     ("link-to-missing-file", ("a link names a file that is not in the set",
                               "error", "WCAG 2.0 SC 2.4.4 (A)", "source")),
+    ("link-to-file-dropped", ("a link to a file an EPUB can't carry; its "
+                              "text is kept and the file is only in the "
+                              "other targets", "warning", "EPUB 3.3",
+                              "source")),
     ("link-to-missing-fragment", ("a link's #fragment matches no id",
                                   "error", "WCAG 2.0 SC 2.4.4 (A)", "source")),
     ("epub-manifest", ("the EPUB's manifest or spine is inconsistent",

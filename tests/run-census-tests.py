@@ -544,6 +544,55 @@ def script_checks():
                "By book:" in run.stderr and all(
                    ("  %s " % b) in run.stderr for b in ("econ", "stats")),
                run.stderr[:300])
+        # slim-corpus.py: a book as a folder and a book as a zip download,
+        # slimmed, give the census the same totals as the originals.
+        slimmer = os.path.join(os.path.dirname(here), "util", "slim-corpus.py")
+        books = os.path.join(tmp, "books")
+        os.makedirs(os.path.join(books, "econ"))
+        os.makedirs(os.path.join(books, "stats"))
+        for name in names[:2]:
+            shutil.copy(os.path.join(fixtures, name), os.path.join(books, "econ"))
+        shutil.copy(os.path.join(fixtures, names[2]), os.path.join(books, "stats"))
+        import zipfile
+        with zipfile.ZipFile(os.path.join(tmp, "more.zip"), "w") as zf:
+            zf.write(os.path.join(fixtures, names[2]), "More/" + names[2])
+        shutil.move(os.path.join(tmp, "more.zip"), books)
+        slim_zip = os.path.join(tmp, "slim.zip")
+        made = subprocess.run([sys.executable, slimmer, books, slim_zip],
+                              capture_output=True, text=True)
+        slim_dir = os.path.join(tmp, "slim")
+        parts = set()
+        if made.returncode == 0:
+            with zipfile.ZipFile(slim_zip) as zf:
+                zf.extractall(slim_dir)
+            for dirpath, _, files in os.walk(slim_dir):
+                for f in files:
+                    with zipfile.ZipFile(os.path.join(dirpath, f)) as docx:
+                        parts.update(docx.namelist())
+        yield ("slim-corpus.py keeps each document.xml and nothing else, a "
+               "zipped book included", made.returncode == 0
+               and parts == {"word/document.xml"}
+               and os.path.isdir(os.path.join(slim_dir, "more.zip".replace(".zip", ""))),
+               made.stdout[-200:] + made.stderr[-200:])
+
+        def totals(where):
+            err = subprocess.run([sys.executable, script, where],
+                                 capture_output=True, text=True).stderr
+            return {line.split()[0]: line.split()[1:] for line in err.splitlines()
+                    if line.startswith("  ") and "files" in line}
+        before, after = totals(books), totals(slim_dir)
+        yield ("the census gives a slim copy the same totals book by book",
+               bool(before) and all(after.get(b) == v for b, v in before.items())
+               and after.get("more", [None])[2:] == before.get("stats", [None])[2:],
+               "%s | %s" % (before, after))
+        missing = subprocess.run([sys.executable, slimmer,
+                                  os.path.join(tmp, "nowhere"),
+                                  os.path.join(tmp, "none.zip")],
+                                 capture_output=True, text=True)
+        yield ("slim-corpus.py names a missing folder and writes no zip",
+               missing.returncode == 1 and "no such folder" in missing.stdout
+               and not os.path.exists(os.path.join(tmp, "none.zip")),
+               missing.stdout[-200:])
         helped = subprocess.run([sys.executable, script, "--help"],
                                 capture_output=True, text=True)
         yield ("--help prints the usage and reads no file",

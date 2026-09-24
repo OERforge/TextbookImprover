@@ -119,6 +119,8 @@ What Pandoc does, as read from its source or established by test, for the questi
 
 **The reader parses `<span>` and `<div>` and keeps every other tag raw, one tag at a time.** `x<sup>2</sup>` is a raw `<sup>`, `Str "2"`, and a raw `</sup>`; `<span href="…" rel="…">` is a `Span` whose `href` is an ordinary attribute, which the HTML writer then passes through where XHTML forbids it. Measured. `markdown-html.lua` reassembles the tags and reads each element with the HTML reader.
 
+**The reader's time grows steeply with how deeply bracketed spans nest.** `[[[x]{.a}]{.a}]{.a}`, nested: 9 ms at depth 4, 144 ms at 8, 1.8 s at 12, and a real page never finished. That page was HTML holding a formula as MathJax 2 draws it (eleven spans deep, each with a style), which the Markdown writer wrote faithfully and the reader couldn't read back. Measured on 3.11. Candidate upstream report; our fix would be not to write such spans.
+
 ## The AsciiDoc reader
 
 The reader is the `asciidoc` library (jgm/asciidoc-hs), not part of Pandoc's tree, so everything here is measured on 3.11 against a real Asciidoctor book (Computer Systems Security) rather than read from source.
@@ -130,6 +132,8 @@ The reader is the `asciidoc` library (jgm/asciidoc-hs), not part of Pandoc's tre
 **A cross-reference by title isn't resolved.** `<<Unix File Permissions>>` and `<<Malware>>` are links whose fragment is the title itself; Asciidoctor resolves them to the section's id or the chapter. 54 in one book.
 
 **`mailto:someone@example.org[Name]` loses its scheme**: a link to a file called `someone@example.org`. **A code span holding a URL scheme** (`` `ftp://` ``) becomes a link to `ftp://` around the code.
+
+**A block's layout attributes become element attributes.** `[width=300, float=right]` on an image, a listing, or a table, and a diagram's `target=`, arrive as attributes of the block, and the HTML writer writes `width` and `target` as they are, on `<figure>`, `<pre>`, `<div>`, and `<table>`, where XHTML allows neither: epubcheck's RSC-005, 43 times in the security textbook's EPUB. Measured; not fixed yet.
 
 ## The EPUB writer
 
@@ -162,4 +166,4 @@ The reader is the `asciidoc` library (jgm/asciidoc-hs), not part of Pandoc's tre
 
 ## Upstream
 
-Filed: #11869 (ScreenTip), which jgm agreed to on 2026-09-22 (above); next, ask whether he'd like a pull request or will make the change himself. Candidates, tracker not yet searched: the HTML reader's `tex_math_single_backslash` reading math inside `<code>`; and, for jgm/asciidoc-hs rather than Pandoc, a chapter's title lost through `include::`, `:leveloffset:` and `:imagesdir:` not applied, cross-references by title unresolved, and `mailto:` dropped. Candidates, tracker searched, not filed: body-level bookmarks dropped (#6178 and #6781 unread, rate-limited); the orphan-anchor removal deleting cross-file targets (no search yet); the Markdown writer dropping spans without a warning; the EPUB chapter `<title>`.
+Filed: #11869 (ScreenTip), which jgm agreed to on 2026-09-22 (above); next, ask whether he'd like a pull request or will make the change himself. Candidates, tracker not yet searched: the HTML reader's `tex_math_single_backslash` reading math inside `<code>`; the Markdown reader's time on nested bracketed spans; and, for jgm/asciidoc-hs rather than Pandoc, a chapter's title lost through `include::`, `:leveloffset:` and `:imagesdir:` not applied, cross-references by title unresolved, and `mailto:` dropped. Candidates, tracker searched, not filed: body-level bookmarks dropped (#6178 and #6781 unread, rate-limited); the orphan-anchor removal deleting cross-file targets (no search yet); the Markdown writer dropping spans without a warning; the EPUB chapter `<title>`.

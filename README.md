@@ -57,6 +57,7 @@ Each target writes into a directory of its own; the content directory keeps the 
 | --- | --- |
 | [Installation](docs/installation.md) | Prerequisites and how to check them |
 | [A first run](docs/first-run.md) | Start to finish, what each run writes, exit codes |
+| [Formats and packaging](docs/formats.md) | Every input, every way it can arrive, every output, how far each path is tested and what it loses, and how the output is packaged |
 | [How it works](docs/architecture.md) | The pieces, what conversion does to a page, running the filter alone |
 | [Configuration](docs/configuration.md) | How the configuration files fit together, precedence, contents, migration from v0.1 |
 | [Project settings](docs/project-settings.md) | Reference, generated from the schema |

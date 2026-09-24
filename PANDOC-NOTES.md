@@ -139,6 +139,47 @@ The reader is the `asciidoc` library (jgm/asciidoc-hs), not part of Pandoc's tre
 
 **A block's layout attributes become element attributes.** `[width=300, float=right]` on an image, a listing, or a table, and a diagram's `target=`, arrive as attributes of the block, and the HTML writer writes `width` and `target` as they are, on `<figure>`, `<pre>`, `<div>`, and `<table>`, where XHTML allows neither: epubcheck's RSC-005, 43 times in the security textbook's EPUB. Measured; `asciidoc-source.lua` moves a block's size to its image and drops the rest. Other names (`float`, `format`, `wrapper`, `link`, `align`) are written as `data-` attributes, which are valid.
 
+## The AsciiDoc writer, against the AsciiDoc reader
+
+Measured on 3.11 by writing each case with Pandoc's `asciidoc` writer and reading it back, for the AsciiDoc target. The writer is Pandoc's; the reader is `jgm/asciidoc-hs`, so its entries are candidates there. Asciidoctor's behavior is from its documentation, not run here. What the target does about each is in `docs/asciidoc.md`.
+
+**The writer and the reader disagree.** Each of these is written by the writer and misread by the reader:
+
+- A footnote after a word is joined to it (`notefootnote:[…]`), which the reader doesn't take for the macro.
+- An empty span with an id (an anchor) is `[#id]##`, which reads back as a highlighted span holding `id]`.
+- An image's alt is the macro's first value, unquoted: a comma splits it and an `=` makes it a named attribute. With no alt, the file name less its extension is written as the alt.
+- A table with no header row is written with no `noheader`, and the reader takes row 1 for a header whenever `noheader` is absent (Asciidoctor wants a blank line after the row as well).
+- A heading one level below the document title is `===`, skipping `==`; the reader then numbers it 1, and `====` 3.
+- A figure caption with a line break is a block title over two lines; the second starts a paragraph, which takes the image macro in as inline text.
+- Display math inside a description list is indented with the definition, delimiters and all, and an indented `++++` isn't a delimiter.
+- Text that means something at the start of a line isn't escaped: a leading `.` (a block title; in a list item the whole file fails to read), `=`, `//`, `----`, `NOTE:`, `:name:`. Nor are Asciidoctor's replacements other than `->`: `'`, `--`, `...`, `(C)`, `(R)`, `(TM)`, `=>`, `<=`, `<-`.
+
+**The writer drops:** a `Div` (its content stays), a raw HTML block, a footnote of several paragraphs (replaced by the words "[multiblock footnote omitted]"), a table's header column (it could write `cols="1h,…"`, which the reader doesn't read either), a row span, a table's groups, and the `subtitle` field. The standalone template writes `include-before` as plain blocks at the top.
+
+**The reader:**
+
+- Makes a description list of any line holding `::`, anywhere and with nothing after it: `std::cout`, `3::4`, an address with `::`. Asciidoctor wants a space or the line's end after it. `:{empty}:` prevents it in text; in an address nothing does, since `{empty}` isn't expanded there, and `link:++…++[]` is split too.
+- Ends `latexmath:[…]` and `footnote:[…]` at the first `]`, escaped or not; `\]` makes a footnote unrecognized. `{startsb}` and `{endsb}` work in a footnote; `\lbrack` and `\rbrack` in math.
+- Drops `latexmath:[…]` inside constrained italics (`_…_`), not inside `__…__` or bold.
+- Applies Asciidoctor's replacements to text and to inline code, and splits inline code at its spaces into several `Code` elements. `` `+…+` `` keeps code literal but is still split.
+- Reads `link:x.html[9.1 Null and]` with the text "9"; `{empty}9.1` or quoting keeps it.
+- Expands `{empty}` before deciding a line is a comment, so `{empty}//` is still one; `++//++` isn't.
+- Reads no inline passthrough (`pass:[…]`), though `++…++` works in text.
+- Loses an open block (`--`) when a blank line comes before its closing delimiter after another delimited block inside it.
+- Fails on a block anchor (`[[id]]` alone on a line) with no block after it.
+- Puts a block image's id, alt, size, and `link` on a `Div` marked `wrapper="1"` around the figure, and an inline image's `alt=` and `link=` in its attributes rather than its caption and a `Link`.
+- Honors no escaped quote in an attribute value, and doesn't take single quotes as quotes, so an alt with a double quote can't be written.
+- Reads an attribute entry anywhere, header or body, as metadata; so a document can say something to a filter.
+- Doesn't read `\root n \of`; neither does Pandoc's TeX reader, so a root with an index has no bracket-free form.
+- Ends a constrained span (`#…#`) at a `#` inside it, a link's fragment included; the unconstrained `##…##` holds one. Reads `[.a.b]` as one class, `a b`. Reads an empty span, `[.x]####`, as text.
+- Hangs, rather than failing, on a listing whose delimiter is never closed: a table cell whose listing holds a `|` breaks the cell there and leaves one. The process had to be killed.
+- Strips a non-breaking space at the end of a text element as trailing space; `{nbsp}` stays.
+- Reads a nested quotation written with a longer delimiter (`______` around `____`).
+
+**The writer, again:** it writes a `Div`'s blocks with blank lines between them, so inside a list item every block after the first falls out of the item; it nests a quotation in a quotation by wrapping the inner in an open block, which the reader loses (the blank line before `--`); it writes nested spans with the same delimiter, which is ambiguous; and a span that starts a line is `[.role]#…#`, which the reader takes for a block attribute line.
+
+**Open, not traced:** in a Markdown source, raw HTML holding a table whose cell has a `<pre>` listing with a line starting `  |` lost the listing on reading, from Markdown as a source and before any target. Seen once, in a test; the cause isn't established.
+
 ## The EPUB writer
 
 **Chapter files are titled by file name**: the template's `<title>$pagetitle$</title>` is filled with `ch002.xhtml` by the writer's own variables (`Writers/EPUB.hs`), and `title-meta` is empty in a chapter. Read from the source and measured. Our assembler rewrites each `<title>` from the chapter's heading after the archive exists.
@@ -164,10 +205,14 @@ The reader is the `asciidoc` library (jgm/asciidoc-hs), not part of Pandoc's tre
 
 **`AttributeList` is not a plain table**: `next()` on it errors; iterate with `pairs`. Measured. **A filter's table of attributes is iterated in hash order**, so build an `Attr` from a list of pairs for stable output. Measured. **Filters in a returned list run in order**, each over the whole document; a handler returning `{}` removes the element, `nil` leaves it. **`pandoc.read(text, 'html')`** reads MathML into `Math` and `<thead>` into head rows; **`pandoc.write(doc, 'html', {html_math_method = 'mathml'})`** writes math as MathML. Measured.
 
+**A metadata value has no `.t` in Pandoc 3.** A `MetaBlocks` field arrives in a filter as a `Blocks` list and a `MetaInlines` one as `Inlines`, so `value.t == 'MetaBlocks'` is never true and code testing it silently does nothing; `pandoc.utils.type(value)` says `Blocks`, `Inlines`, `List`, `string`, or `boolean`. Measured, the hard way (`include-before` in the AsciiDoc target).
+
+**Inline handlers run before block handlers, so a block handler sees what the inline ones made.** A `Table` handler that writes its table as HTML with `pandoc.write` loses every raw AsciiDoc inline the inline pass put in its cells, since the HTML writer drops raw content of another format. A filter file can return two filters that run in turn; the AsciiDoc target writes those tables in the first. Measured.
+
 **A filter file that returns a table of filters ignores its global functions.** `target-blocks.lua` ends `return { {Div = …}, {Meta = …} }`, so a global `function Image` added to it never ran, and nothing said so. Measured, the hard way. A handler has to be in the returned table.
 
 **A handler that returns `nil` keeps the element as it was, including changes made to it in place.** `html-source.lua`'s `Table` dropped empty columns from the table it was given and then returned `nil` when it had no headers to declare, and the columns came back. Return the element whenever it was changed.
 
 ## Upstream
 
-Filed: #11869 (ScreenTip), which jgm agreed to on 2026-09-22 (above); next, ask whether he'd like a pull request or will make the change himself. Candidates, tracker not yet searched: the HTML reader's `tex_math_single_backslash` reading math inside `<code>`; the Markdown reader's time on nested bracketed spans; and, for jgm/asciidoc-hs rather than Pandoc, a chapter's title lost through `include::`, `:leveloffset:` and `:imagesdir:` not applied, cross-references by title unresolved, and `mailto:` dropped. Candidates, tracker searched, not filed: body-level bookmarks dropped (#6178 and #6781 unread, rate-limited); the orphan-anchor removal deleting cross-file targets (no search yet); the Markdown writer dropping spans without a warning; the EPUB chapter `<title>`.
+Filed: #11869 (ScreenTip), which jgm agreed to on 2026-09-22 (above); next, ask whether he'd like a pull request or will make the change himself. Candidates, tracker not yet searched: the AsciiDoc writer's and reader's disagreements above, the writer's for Pandoc and the reader's for jgm/asciidoc-hs, of which the eager description list, `]` ending a macro whatever its escape, and a leading period failing a whole file are the ones worth filing first; the HTML reader's `tex_math_single_backslash` reading math inside `<code>`; the Markdown reader's time on nested bracketed spans; and, for jgm/asciidoc-hs rather than Pandoc, a chapter's title lost through `include::`, `:leveloffset:` and `:imagesdir:` not applied, cross-references by title unresolved, and `mailto:` dropped. Candidates, tracker searched, not filed: body-level bookmarks dropped (#6178 and #6781 unread, rate-limited); the orphan-anchor removal deleting cross-file targets (no search yet); the Markdown writer dropping spans without a warning; the EPUB chapter `<title>`.

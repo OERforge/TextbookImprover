@@ -845,7 +845,14 @@ end
 
 function Link(link)
   local text = pandoc.utils.stringify(link.content)
-  if text == '' or text == '\226\128\139' then return {} end
+  if text == '' or text == '\226\128\139' then
+    -- A linked image with no alt has no text either, and went with the
+    -- link, image and all. It stays; the missing alt is reported.
+    local image = false
+    link.content:walk({ Image = function() image = true end })
+    if image then return nil end
+    return {}
+  end
   return nil
 end
 

@@ -168,6 +168,10 @@ local function blank_cell(cell)
   pandoc.Blocks(cell.contents):walk({
     Image = function() holds = true end, Math = function() holds = true end,
     RawInline = function() holds = true end, Table = function() holds = true end,
+    -- stringify gives a code block nothing, so a column of listings was
+    -- dropped as empty.
+    CodeBlock = function() holds = true end, Code = function() holds = true end,
+    RawBlock = function() holds = true end,
   })
   return not holds
 end

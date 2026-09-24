@@ -97,7 +97,8 @@ local function escape(value)
 end
 
 local function embed(el, block)
-  if FORMAT:match('markdown') then return nil end
+  -- A source target keeps the frame, for its own filter to write.
+  if FORMAT:match('markdown') or FORMAT:match('asciidoc') then return nil end
   if not FORMAT:match('html') or FORMAT:match('epub') then
     return el.content
   end

@@ -90,6 +90,9 @@ MEDIA_FILTER = os.path.join(HERE, "media-extensions.lua")
 HEADER_FILTER = os.path.join(HERE, "header-includes.lua")
 SAFE_MEDIA_FILTER = os.path.join(HERE, "safe-media.lua")
 NOT_YET_IMPLEMENTED = ("pdf", "docx")
+# Targets whose output is written to be a source again: what the author
+# decided, and not what the filter derived from it.
+SOURCE_TARGETS = ("markdown", "asciidoc")
 TARGET_FILTER = os.path.join(HERE, "target-blocks.lua")
 MARKDOWN_FILTER = os.path.join(HERE, "markdown-source.lua")
 MARKDOWN_HTML_FILTER = os.path.join(HERE, "markdown-html.lua")
@@ -354,7 +357,8 @@ class Target:
         self.derived = {}
         if resolved["tables.bands"] == "auto":
             self.derived["tables.bands"] = ("group" if self.format in
-                                            ("markdown", "docx") else "split")
+                                            ("markdown", "asciidoc", "docx")
+                                            else "split")
         self.pages_dir = None        # where its filtered intermediates are
 
     def __getitem__(self, key):
@@ -657,7 +661,8 @@ def read_asciidoc_to_json(base, docs, env, imagesdir=""):
     for name in docs:
         stem = safe_stem(os.path.splitext(name)[0])
         run(["pandoc", "-f", "asciidoc", "-t", "json", name,
-             "-o", stem + ".json", "--lua-filter=" + ASCIIDOC_FILTER,
+             "-o", stem + ".json", "--lua-filter=" + MARKDOWN_HTML_FILTER,
+             "--lua-filter=" + ASCIIDOC_FILTER,
              "--lua-filter=" + MEDIA_FILTER], env=env, cwd=base)
         portable_media_paths(os.path.join(base, stem + ".json"), base, name)
         stems.append(stem)
@@ -1122,6 +1127,7 @@ def read_variants(base, target, work, env):
                 env=env, cwd=base)
         elif name.endswith((".adoc", ".asciidoc")):
             run(["pandoc", "-f", "asciidoc", "-t", "json", path, "-o", out,
+                 "--lua-filter=" + MARKDOWN_HTML_FILTER,
                  "--lua-filter=" + ASCIIDOC_FILTER,
                  "--lua-filter=" + MEDIA_FILTER], env=env, cwd=base)
             portable_media_paths(out, base, name)
@@ -1706,11 +1712,36 @@ def merged_document(members, title, where, holder, base):
             "blocks": blocks}
 
 
+def noheader(text):
+    """An AsciiDoc table with no header row, said to have none. Pandoc's
+    reader takes a table's first row as its header unless the table says
+    noheader (Asciidoctor wants a blank line after the row as well), and
+    its writer never says it, so a table with no header row came back
+    with one. A table opens and closes with |===, and the writer puts
+    options="header" in the attribute line before the opening one when
+    there is a header row; otherwise that line gets noheader, or the table
+    a line saying it."""
+    lines = text.split("\n")
+    out, inside = [], False
+    for line in lines:
+        if line == "|===":
+            if not inside:
+                before = out[-1] if out else ""
+                if before.startswith("[") and before.endswith("]"):
+                    if "header" not in before:
+                        out[-1] = before[:-1].rstrip(",") + ',options="noheader"]'
+                else:
+                    out.append('[options="noheader"]')
+            inside = not inside
+        out.append(line)
+    return "\n".join(out)
+
+
 def render_markdown(target, pages, base, work, project, env):
-    """Markdown files as source: what the author decided, in Pandoc's
-    own flavor, and nothing the filter derived. One file per page, or
-    with merge: groups, one per top-level entry of the book's contents,
-    each page a section under it."""
+    """Markdown or AsciiDoc files as source: what the author decided, in
+    Pandoc's own flavor of each, and nothing the filter derived. One file
+    per page, or with merge: groups, one per top-level entry of the book's
+    contents, each page a section under it."""
     env = dict(env, TARGET_NAME=target.name)
     os.makedirs(target.output_dir, exist_ok=True)
     jobs = [(os.path.basename(p)[:-len(INTERMEDIATE)], p) for p in pages]
@@ -1735,8 +1766,27 @@ def render_markdown(target, pages, base, work, project, env):
         say(f"{target.name}: {len(pages)} page(s) merged into "
             f"{len(jobs)} file(s).")
     written = []
+    asciidoc = target.format == "asciidoc"
     for stem, page in jobs:
-        out = os.path.join(target.output_dir, stem + ".md")
+        out = os.path.join(target.output_dir, stem + (".adoc" if asciidoc
+                                                      else ".md"))
+        if asciidoc:
+            # Pandoc's modern AsciiDoc, as Asciidoctor reads it. What its
+            # reader can't read back (a row span, raw HTML, an anchor as
+            # it writes one) the filter writes as AsciiDoc it can; see
+            # markdown-source.lua.
+            run(["pandoc", "-f", "json", "-t", "asciidoc", page, "-o", out,
+                 "--standalone", "--wrap=none",
+                 "--lua-filter=" + TARGET_FILTER,
+                 "--lua-filter=" + MARKDOWN_FILTER], env=env, cwd=base)
+            with open(out, encoding="utf-8") as fh:
+                text = fh.read()
+            fixed = noheader(text)
+            if fixed != text:
+                with open(out, "w", encoding="utf-8") as fh:
+                    fh.write(fixed)
+            written.append(out)
+            continue
         # Pipe or grid tables, which keep an empty cell and a
         # multi-paragraph one. What Markdown cannot say (a merged-cell
         # table, a figure with an id) is written as a fenced HTML block,
@@ -2342,7 +2392,7 @@ def main():
         # ---- 2. the gate ------------------------------------------------------
         media_gate(base, stems, collected["media_unresolved"],
                    reports["media_unresolved"],
-                   safe=any(t.format != "markdown" for t in targets))
+                   safe=any(t.format not in SOURCE_TARGETS for t in targets))
 
         # Past the gate, this run will finish and the reports at the end
         # will be written with whatever is outstanding. Clear them now so
@@ -2394,7 +2444,7 @@ def main():
         written = {}
         renv = dict(env, HEADER_INCLUDES_FILE=css_header)
         for target in targets:
-            if target.format == "markdown":
+            if target.format in SOURCE_TARGETS:
                 written[target.name] = render_markdown(
                     target, [p for p in pages_by_dir[target.pages_dir]
                              if os.path.basename(p)[:-len(INTERMEDIATE)]

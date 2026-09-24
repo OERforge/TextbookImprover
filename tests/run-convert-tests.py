@@ -1473,6 +1473,207 @@ def case_asciidoc_markdown(work):
     ]
 
 
+RICH_MD = """# Rich
+
+A word[^1] and a [link to the anchor](#here). An anchor []{#here} sits here.
+
+![A dot](d.png){#fig-dot}
+
+Decorative ![](d.png){.decorative} inline, math $x^2 + 1$.
+
+<details><summary>Answer</summary>
+
+Hidden text.
+
+</details>
+
+<iframe src="https://example.org/v" title="A video" width="400px"></iframe>
+
+<table><tbody><tr><td rowspan="2">Tall</td><td>a</td></tr><tr><td>b</td></tr></tbody></table>
+
+<table><tbody><tr><td>no</td><td>header</td></tr><tr><td>row</td><td>here</td></tr></tbody></table>
+
+::: matrix
+|       | Labor | Total |
+|-------|-------|-------|
+| Tech 1| $400  | $560  |
+| Tech 2| $280  | $600  |
+:::
+
+.8 of a paragraph starts with a period.
+
+// starts this one, which isn't a comment.
+
+NOTE: is only a word here, and `std::cout` and std::cout make no list.
+
+1. first
+2. .5 is an item that starts with a period
+
+See [the ::after page](https://developer.mozilla.org/en-US/docs/Web/CSS/::after).
+
+A linked image with no alt: [![](d.png)](https://example.org/linked), a second note[^2],
+_an italic $k_{0}$ here_, and an interval $x \\in [0,1]$.
+
+<figure id="fig-two"><img src="d.png" alt="Supply, demand, and y = 2"><figcaption>Figure 2<br>second line</figcaption></figure>
+
+Midpoint
+:   Defined as $$\\frac{a}{[b]}$$ for short.
+
+<table><thead><tr><th>Measure</th><th>Value</th></tr></thead>
+<tbody><tr><th colspan="2">Weight</th></tr><tr><td>1 lb</td><td>16 oz</td></tr></tbody>
+<tbody><tr><th colspan="2">Volume</th></tr><tr><td>1 qt</td><td>2 pt</td></tr></tbody></table>
+
+Part\u00a0<span class="stt">I</span> and a margin note <span class="refelem"><span class="refcolumn">see <a href="rich.html#(part._x)">the part</a> later</span></span> with a label <span class="lbl"></span>.
+
+<table role="presentation"><tbody><tr><td>T(k)</td><td>=</td><td>1</td></tr></tbody></table>
+
+- An item that goes on:
+
+    > A quotation in it.
+
+- A second item.
+
+> Do Now!
+>
+> > A quotation in a quotation.
+
+[^1]: The note.
+
+[^2]: See Friedman ([1976] 2007).
+
+    A second paragraph.
+"""
+
+FRONT_MD = """---
+title: A Book
+subtitle: Copyright 2026 An Author
+include-before: |
+  > An epigraph that isn't short.
+---
+
+# To the Reader
+
+Text.
+
+# Acknowledgements
+
+More text.
+"""
+
+SKIPS_MD = """---
+title: Skipping
+---
+
+### Level three
+
+Text.
+
+#### Level four
+
+More.
+"""
+
+
+def case_asciidoc_target(work):
+    """AsciiDoc written as source: what Pandoc's AsciiDoc reader can't read
+    back is written so it can, the pages read back as the same book, and
+    the second write is the third."""
+    import importlib.util
+    if not (importlib.util.find_spec("html5lib") or importlib.util.find_spec("lxml")):
+        return [("skip: raw HTML needs html5lib or lxml", lambda: True)]
+    os.makedirs(work)
+    for name in ("tables.docx", "metadata.docx"):
+        shutil.copy(os.path.join(FIXTURES, name), work)
+    with open(os.path.join(work, "d.png"), "wb") as fh:
+        fh.write(ONE_PIXEL)
+    with open(os.path.join(work, "rich.md"), "w", encoding="utf-8") as fh:
+        fh.write(RICH_MD)
+    with open(os.path.join(work, "front.md"), "w", encoding="utf-8") as fh:
+        fh.write(FRONT_MD)
+    with open(os.path.join(work, "skips.md"), "w", encoding="utf-8") as fh:
+        fh.write(SKIPS_MD)
+    with open(os.path.join(work, "cells.html"), "w", encoding="utf-8") as fh:
+        fh.write('<!DOCTYPE html><html lang="en"><head><title>Cells</title></head><body>'
+                 '<h1>Cells</h1><table><tbody><tr><td><pre><code>data Point:\n'
+                 '  | pt(x, y)\nend</code></pre></td><td>a listing</td></tr></tbody>'
+                 '</table><ul><li><p>An item holding a labeled listing:</p>'
+                 '<div id="labeled" class="label-box"><p>A label.</p><pre><code>'
+                 'print("in the item")</code></pre></div></li><li><p>Another.</p>'
+                 '</li></ul><p>See <a href="#labeled">the listing</a>.</p>'
+                 '</body></html>')
+
+    def convert_in(where, config):
+        with open(os.path.join(where, "conversion.yaml"), "w") as fh:
+            fh.write(config)
+        subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quiet"],
+                       cwd=where, capture_output=True, text=True,
+                       stdin=subprocess.DEVNULL)
+
+    def carry(src, dst):
+        shutil.copytree(src, dst, ignore=shutil.ignore_patterns("intermediates"))
+    both = "targets:\n  html:\n    format: html\n  adoc:\n    format: asciidoc\n"
+    convert_in(work, both)
+    back, again = work + "-back", work + "-again"
+    if exists(work, "adoc"):
+        carry(os.path.join(work, "adoc"), back)
+        convert_in(back, both)
+    if exists(back, "adoc"):
+        carry(os.path.join(back, "adoc"), again)
+        convert_in(again, "targets:\n  adoc:\n    format: asciidoc\n")
+    rich = read(work, "adoc", "rich.adoc") if exists(work, "adoc", "rich.adoc") else ""
+    meta = read(work, "adoc", "metadata.adoc") if exists(work, "adoc", "metadata.adoc") else ""
+    front = read(work, "adoc", "front.adoc") if exists(work, "adoc", "front.adoc") else ""
+    page = read(work, "html", "rich.html") if exists(work, "html", "rich.html") else ""
+    agree = subprocess.run(["python3", os.path.join(ROOT, "util", "compare-output.py"),
+                            os.path.join(work, "html"), os.path.join(back, "html")],
+                           capture_output=True, text=True).stdout
+
+    def fixed():
+        names = [n for n in os.listdir(os.path.join(back, "adoc")) if n.endswith(".adoc")]
+        return names and all(
+            open(os.path.join(back, "adoc", n), "rb").read()
+            == open(os.path.join(again, "adoc", n), "rb").read() for n in names)
+    return [
+        ("a footnote after a word, an anchor, and a decorative image are "
+         "written as the reader reads them", lambda: "word{empty}footnote:" in rich
+         and "[[here]]" in rich and "role=decorative" in rich),
+        ("text AsciiDoc would read as markup is kept as text, and an address "
+         "with :: in it is percent-encoded", lambda: "{empty}.8 of" in rich
+         and "++//++ starts" in rich and "std:{empty}:cout" in rich
+         and "CSS/%3A%3Aafter" in rich),
+        ("a table with no header row says so, and a header column rides on "
+         "its marker", lambda: 'options="noheader"' in rich and "[.matrix]\n--" in rich),
+        ("raw HTML, a frame, and a row-spanned table go in passthrough blocks",
+         lambda: "++++\n<details>" in rich and "++++\n<iframe" in rich
+         and 'rowspan="2"' in rich),
+        ("an image with no alt keeps none, not its file name, and an alt "
+         "is written whole", lambda: "image::metadata/media/image1.png[width=" in meta
+         and "media/image1\"" not in meta and 'alt="A dot"' in rich),
+        ("a footnote's brackets and paragraphs, italic math, an interval, and "
+         "a figure caption's line break are written as the reader reads them",
+         lambda: "{startsb}1976{endsb}" in rich and "__an italic" in rich
+         and "\\lbrack 0,1\\rbrack" in rich and ".Figure 2 second line" in rich),
+        ("a linked image with no alt is kept, and written with its link",
+         lambda: '<a href="https://example.org/linked"><img' in page
+         and 'link="https://example.org/linked"' in rich),
+        ("a subtitle, an epigraph, and headings at the title's level are "
+         "written so they read back", lambda: ":subtitle: Copyright" in front
+         and "[.include-before]" in front and ":heading-offset: -1" in front),
+        ("spans are written so a link inside them survives, a trailing "
+         "non-breaking space is {nbsp}, and a heading that skips a level says so",
+         lambda: "[.refelem.refcolumn]##" in rich and "[.lbl]##{empty}##" in rich
+         and "Part{nbsp}" in rich and ":heading-offset: 1" in read(work, "adoc", "skips.adoc")),
+        ("a div's id stays as an anchor, and a quotation in a quotation has "
+         "the longer delimiter", lambda: "[[labeled]]" in read(work, "adoc", "cells.adoc")
+         and "______\nDo Now!" in rich),
+        ("a table with a listing in a cell, or with a role, goes as HTML",
+         lambda: "<pre><code>data Point:" in read(work, "adoc", "cells.adoc")
+         and 'role="presentation"' in rich),
+        ("read back, the AsciiDoc gives the same pages", lambda: "Runs agree" in agree),
+        ("and written again, it's the same files", fixed),
+    ]
+
+
 def case_html_source(work):
     """An HTML page is a source when the book says so, and converting
     what this pipeline wrote changes nothing."""
@@ -1959,6 +2160,7 @@ CASES = [
     ("ids with spaces in HTML sources", case_html_ids),
     ("decorative images and frame sizes in HTML sources", case_html_images),
     ("AsciiDoc to Markdown and back", case_asciidoc_markdown),
+    ("an AsciiDoc target", case_asciidoc_target),
     ("a hand-written page", case_hand_written),
     ("several targets", case_targets),
     ("arguments passed to the packager", case_passthrough),

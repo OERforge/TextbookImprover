@@ -997,6 +997,7 @@ CC_MANIFEST = """<?xml version="1.0" encoding="UTF-8"?>
 <resource identifier="re" type="webcontent" href="wiki_content/e.html"><file href="wiki_content/e.html"/></resource>
 <resource identifier="rq" type="associatedcontent/imscc_xmlv1p1/learning-application-resource"><file href="non_cc_assessments/q.qti"/></resource>
 <resource identifier="rpic" type="webcontent" href="web_resources/Uploaded Media/pic.png"><file href="web_resources/Uploaded Media/pic.png"/></resource>
+<resource identifier="rchk" type="webcontent" href="web_resources/Setup Checklist.docx"><file href="web_resources/Setup Checklist.docx"/></resource>
 </resources></manifest>"""
 
 
@@ -1013,7 +1014,9 @@ def case_cartridge(work):
     page_a = ('<html><head><title>Page A</title></head><body><h2>A</h2>'
               '<p><img src="$IMS-CC-FILEBASE$/Uploaded%20Media/pic.png?canvas_=1&amp;canvas_qs_wrap=1" alt="A picture"></p>'
               '<p><a href="$IMS-CC-FILEBASE$/The%20Guide.pdf?canvas_download=1">the guide</a> and '
-              '<a href="$WIKI_REFERENCE$/pages/e">page E</a></p></body></html>')
+              '<a href="$WIKI_REFERENCE$/pages/e">page E</a>, with '
+              '<a href="$IMS-CC-FILEBASE$/Setup%20Checklist.docx?canvas_=1">the checklist</a></p>'
+              '</body></html>')
     page_b = ('<!DOCTYPE html><html><head><link rel="stylesheet" '
               'href="https://s.brightspace.com/lib/fonts/0.6.1/fonts.css"></head>'
               '<body><p>Read the chapter.</p></body></html>')
@@ -1032,6 +1035,7 @@ def case_cartridge(work):
         z.writestr("web_resources/The Guide.pdf", b"%PDF-1.4 guide")
         z.writestr("web_resources/Uploaded Media/pic.png", ONE_PIXEL)
         z.write(os.path.join(FIXTURES, "metadata.docx"), "web_resources/reading.docx")
+        z.write(os.path.join(FIXTURES, "tables.docx"), "web_resources/Setup Checklist.docx")
         z.writestr("non_cc_assessments/q.qti", "<questestinterop/>")
     book = os.path.join(work, "book")
     os.makedirs(book)
@@ -1059,6 +1063,22 @@ def case_cartridge(work):
                     epub_text = "".join(z.read(n).decode("utf-8", "replace")
                                         for n in z.namelist()
                                         if n.endswith(".xhtml"))
+
+    # The same cartridge with --linked-documents.
+    linked = os.path.join(work, "linked")
+    os.makedirs(linked)
+    shutil.copy(course, linked)
+    with open(os.path.join(linked, "conversion.yaml"), "w") as fh:
+        fh.write("targets:\n  html:\n    format: html\n"
+                 "  epub:\n    format: epub3\n")
+    subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quiet",
+                    "--linked-documents"], cwd=linked, capture_output=True,
+                   text=True, stdin=subprocess.DEVNULL)
+    linked_project = open(os.path.join(linked, "project.yaml")).read() if exists(
+        linked, "project.yaml") else ""
+    linked_a = read(linked, "html", "a.html") if exists(linked, "html", "a.html") else ""
+    linked_checked = open(os.path.join(linked, "output-check.csv")).read() if exists(
+        linked, "output-check.csv") else ""
 
     # Our own cartridge, read back.
     ours = os.path.join(work, "ours")
@@ -1099,6 +1119,19 @@ def case_cartridge(work):
          and re.search(r'data-file="web_resources/The[ -]Guide\.pdf"', epub_text)
          and not re.search(r'href="[^"]*Guide\.pdf"', epub_text)
          and "link-to-file-dropped" in checked),
+        ("a linked Word file stays a file by default, and the report says "
+         "the switch would make it a page",
+         lambda: 'href="web_resources/Setup-Checklist.docx"' in a_out
+         and "linked-document-kept" in report),
+        ("with --linked-documents it's a page beneath the page linking to it, "
+         "titled by the link, in the HTML and the EPUB",
+         lambda: re.search(r'- title: "Page A"\s+items:\s+- page: a\s+'
+                           r'title: "Page A"\s+- page: Setup-Checklist\s+'
+                           r'title: "the checklist"', linked_project)
+         and 'href="Setup-Checklist.html"' in linked_a
+         and exists(linked, "html", "Setup-Checklist.html")
+         and "Setup Checklist.docx" not in linked_checked
+         and "Setup-Checklist.docx" not in linked_checked),
         ("a page listed twice is in the book once, and the report says so",
          lambda: project.count("page: a\n") == 1 and "listed-twice" in report),
         ("what isn't a page is reported: discussion, web link, file, test bank",

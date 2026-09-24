@@ -16,8 +16,15 @@ unpack-report.csv, as are files the outline names that aren't pages (slides,
 PDFs), entries that name a resource twice, and pages that only link out to
 another site.
 
+A document a page only links to -- a Word checklist, say -- is kept as a
+file, which the HTML carries and an EPUB can't. With --linked-documents,
+each linked file the pipeline converts (Word, Markdown, AsciiDoc, HTML)
+becomes a page of the book instead, beneath the first page that links to
+it and titled by that link's text, and the link leads to the page.
+
 Usage:
     python3 unpack-cartridge.py course.imscc -o book/
+    python3 unpack-cartridge.py course.imscc -o book/ --linked-documents
 """
 import argparse
 import os
@@ -51,6 +58,9 @@ def main():
         description="Unpack an IMS Common Cartridge into a book's sources.")
     parser.add_argument("cartridge")
     parser.add_argument("-o", "--output", required=True)
+    parser.add_argument("--linked-documents", action="store_true",
+                        help="make each document a page links to, when the "
+                        "pipeline can convert it, a page of the book")
     args = parser.parse_args()
     out = args.output
     if os.path.exists(out) and os.listdir(out):
@@ -139,6 +149,55 @@ def main():
                       "a page the outline doesn't list; at the end of "
                       "contents"))
 
+    # Documents the pages link to that the pipeline can convert: pages of
+    # the book with --linked-documents, beneath the first page linking to
+    # each; otherwise files, which the report names.
+    children, kept = {}, {}
+    queue = [p for p in order if p.lower().endswith((".html", ".htm"))]
+    while queue:
+        page_path = queue.pop(0)
+        markup = cartridge.read(page_path).decode("utf-8", "replace")
+        markup, _ = cs.resolve_placeholders(markup, page_path)
+        for target, text in cs.local_links(markup, page_path):
+            target = cs.path_in(archive, target)
+            if (target not in archive or target in names
+                    or not target.lower().endswith(cs.CONVERTIBLE)):
+                continue
+            if not args.linked_documents:
+                kept.setdefault(target, page_path)
+                continue
+            name(target)
+            # Canvas's link text is often the file's own name; a title
+            # doesn't keep its extension.
+            stem, ext = os.path.splitext(posixpath.basename(target))
+            if text.lower().endswith(ext.lower()):
+                text = text[:-len(ext)].strip()
+            children.setdefault(page_path, []).append((text or stem, target))
+            notes.append((names[target] + os.path.splitext(target)[1].lower(),
+                          "linked-document",
+                          f"linked from {names[page_path]}.html; a page of the "
+                          "book beneath it"))
+            if target.lower().endswith((".html", ".htm")):
+                queue.append(target)
+    for target, page_path in sorted(kept.items()):
+        notes.append((target, "linked-document-kept",
+                      f"linked from {names[page_path]}.html and kept as a file, "
+                      "which an EPUB can't carry; --linked-documents makes it "
+                      "a page"))
+    if children:
+        placed = []
+
+        def place(depth, title, path):
+            placed.append((depth, title, path, None))
+            for text, doc in children.get(path, []):
+                place(depth + 1, text, doc)
+        for depth, title, path, fragment in entries:
+            if path is None:
+                placed.append((depth, title, path, fragment))
+            else:
+                place(depth, title, path)
+        entries = placed
+
     # What the outline never lists, by kind: a course's test banks sit
     # outside its modules, and matter for anyone making them into output.
     referenced = {ref for _, _, ref in outline if ref}
@@ -171,8 +230,11 @@ def main():
     titles = {path: title for _, title, path, _ in entries if path}
     unresolved = set()
     for path in order:
-        if path.lower().endswith(".docx"):
-            with open(os.path.join(out, names[path] + ".docx"), "wb") as fh:
+        if not path.lower().endswith((".html", ".htm")):
+            # A source the pipeline converts from its own format.
+            with open(os.path.join(out, names[path]
+                                   + os.path.splitext(path)[1].lower()),
+                      "wb") as fh:
                 fh.write(cartridge.read(path))
             continue
         markup = cartridge.read(path).decode("utf-8", "replace")

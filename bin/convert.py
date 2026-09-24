@@ -115,7 +115,7 @@ def say(text):
     print(text, file=sys.stderr)
 
 
-def unpack_archives(base, check_only=False):
+def unpack_archives(base, check_only=False, linked_documents=False):
     """A web archive -- a WARC, compressed or not, or a WACZ, recognized
     by its first bytes -- or a Common Cartridge, recognized by its
     manifest, in a directory with no sources is unpacked there first, as
@@ -135,7 +135,11 @@ def unpack_archives(base, check_only=False):
     cartridges = [p for p in candidates if cartridgesource.is_cartridge(p)]
     archives = [p for p in candidates
                 if p not in cartridges and sitesource.is_warc(p)]
+    unused = ("--linked-documents applies when a run unpacks a cartridge, "
+              "and this one doesn't: ")
     if not archives and not cartridges:
+        if linked_documents:
+            say(unused + "there's no cartridge here.")
         return
     if cartridges and (archives or len(cartridges) > 1):
         die("More than one thing to unpack here ("
@@ -144,12 +148,17 @@ def unpack_archives(base, check_only=False):
             "Unpack them into directories of their own.")
     tool = "unpack-cartridge.py" if cartridges else "unpack-site.py"
     archives = cartridges or archives
+    if linked_documents and tool != "unpack-cartridge.py":
+        say(unused + "a web archive's pages keep their links to files.")
     names = ", ".join(os.path.basename(p) for p in archives)
     if any(p.lower().endswith(SOURCE_EXTENSIONS)
            for p in glob.glob(os.path.join(base, "*"))):
         say(f"{names}: not read, since this directory has sources, which "
             "are the book once an archive is unpacked. To unpack it afresh, "
             f"use {tool} into a new directory.")
+        if linked_documents:
+            say(unused + "the pages here are the book already, and "
+                "unpacking again into a new directory is how to change that.")
         return
     if check_only:
         say(f"{names} would be unpacked here and its pages converted.")
@@ -157,7 +166,9 @@ def unpack_archives(base, check_only=False):
     work = tempfile.mkdtemp(prefix=".unpacking-", dir=base)
     try:
         run = subprocess.run([sys.executable, os.path.join(HERE, tool),
-                              *archives, "-o", work],
+                              *archives, "-o", work]
+                             + (["--linked-documents"] if linked_documents
+                                and tool == "unpack-cartridge.py" else []),
                              capture_output=True, text=True)
         if run.returncode != 0:
             die(f"Unpacking {names} failed:\n"
@@ -2047,6 +2058,11 @@ def main():
                "--toc FILE, --check, --includeallhtml.")
     parser.add_argument("--quiet", action="store_true",
                         help="don't trace each command as it runs")
+    parser.add_argument("--linked-documents", action="store_true",
+                        help="when this run unpacks a Common Cartridge, make "
+                        "each document its pages link to that can be "
+                        "converted a page of the book (unpack-cartridge.py "
+                        "--linked-documents)")
     parser.add_argument("--check-only", action="store_true",
                         help="read, gate, pre-pass, filter, and write the "
                              "reports, then stop: no output directory is "
@@ -2073,7 +2089,8 @@ def main():
     if tuple(int(p) for p in re.findall(r"\d+", version)[:3]) < (3, 9):
         die(f"Pandoc {version} is too old; 3.9 or later is required.")
 
-    unpack_archives(base, check_only=args.check_only)
+    unpack_archives(base, check_only=args.check_only,
+                    linked_documents=args.linked_documents)
     targets, project = load_targets(base, args.allow_unknown_keys)
     global PASSTHROUGH
     PASSTHROUGH = str(project.get("passthrough", "_pt") or "").strip("/")

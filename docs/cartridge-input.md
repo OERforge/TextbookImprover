@@ -26,7 +26,18 @@ A module is a group in `contents`, and an entry in it that names a page is that 
 
 A page is named after its file, made safe for a link, and a second file with the same name takes a number. A page with no `<title>` of its own, as Brightspace writes them, takes the outline's title for it. Canvas's link placeholders are resolved: `$IMS-CC-FILEBASE$` is the course's files, `$WIKI_REFERENCE$/pages/…` another page, and the query Canvas adds to a local link (`?canvas_=1&canvas_qs_wrap=1`) is dropped. When every file the pages use sits in one directory, as in a cartridge this project built, that directory drops out of the book's paths.
 
-A local file a page links to, like a PDF or a Word checklist, is copied into each target beside the page, as an image is. An EPUB can't hold one, so there the link's text stays without the link, and the output check lists each file as `link-to-file-dropped`: OpenStax's cartridge has five, its setup checklists and a caption guide.
+A Word document the outline names is a source, and becomes a page like any other. A local file a page only links to, like a PDF or a Word checklist, is copied into each target beside the page, as an image is. An EPUB can't hold one, so there the link's text stays without the link, and the output check lists each file as `link-to-file-dropped`: OpenStax's cartridge has five, its setup checklists and a caption guide.
+
+## Linked documents as pages
+
+A document a page links to stays a file unless you ask otherwise, since it may be a handout meant to be downloaded as it is. With `--linked-documents`, each linked file the pipeline can convert (Word, Markdown, AsciiDoc, HTML) becomes a page of the book instead: beneath the first page that links to it, titled by that link's text, with the link now leading to the page. As a page it's in every target, the EPUB included. PDFs and slides stay files either way.
+
+```bash
+python3 $T/bin/convert.py --linked-documents          # the run that unpacks the cartridge
+python3 $T/bin/unpack-cartridge.py course.imscc -o book/ --linked-documents
+```
+
+The switch acts when a cartridge is unpacked; given on a later run, `convert.py` says it has nothing to do. Without it, the report lists each convertible document it kept as a file (`linked-document-kept`). OpenStax's sociology cartridge has four, its setup checklists and an accessibility guide; with the switch, they're pages, and the EPUB's only dropped link is a PDF. A converted document brings its own defects with it, which the output check reports as for any source: two of those four link to bookmarks they don't contain.
 
 ## What unpack-report.csv lists
 

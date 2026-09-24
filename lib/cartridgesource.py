@@ -234,3 +234,26 @@ def path_in(archive_names, href):
         return href
     decoded = unquote(href)
     return decoded if decoded in archive_names else href
+
+
+CONVERTIBLE = (".docx", ".md", ".adoc", ".asciidoc", ".html", ".htm")
+
+
+def local_links(markup, page_path):
+    """(archive path, link text) for each link on a page to a file in the
+    cartridge, in the order they appear: the page's placeholders already
+    resolved, a query or fragment dropped."""
+    here = posixpath.dirname(page_path)
+    out = []
+    for match in re.finditer(r'<a\b[^>]*\bhref="([^"]*)"[^>]*>(.*?)</a>', markup,
+                             re.S | re.I):
+        href = html.unescape(match.group(1))
+        if not href or re.match(r"^[a-zA-Z][\w+.-]*:|^//|^#", href):
+            continue
+        target = re.split(r"[?#]", href, 1)[0]
+        if not target:
+            continue
+        path = posixpath.normpath(posixpath.join(here, unquote(target)))
+        text = " ".join(html.unescape(re.sub(r"<[^>]+>", " ", match.group(2))).split())
+        out.append((path, text))
+    return out

@@ -1681,6 +1681,36 @@ def case_asciidoc_target(work):
     ]
 
 
+def case_title_id(work):
+    """A page whose title is also its first section's heading reads back
+    without Pandoc warning of a duplicate id."""
+    import importlib.util
+    if not (importlib.util.find_spec("html5lib") or importlib.util.find_spec("lxml")):
+        return [("skip: HTML sources need html5lib or lxml", lambda: True)]
+    os.makedirs(work)
+    with open(os.path.join(work, "sets.md"), "w", encoding="utf-8") as fh:
+        fh.write("---\ntitle: Sets\n---\n\n## Sets\n\nText.\n")
+    with open(os.path.join(work, "conversion.yaml"), "w") as fh:
+        fh.write("targets:\n  html:\n    format: html\n")
+    subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quiet"],
+                   cwd=work, capture_output=True, text=True, stdin=subprocess.DEVNULL)
+    again = work + "-again"
+    if exists(work, "html"):
+        shutil.copytree(os.path.join(work, "html"), again)
+        with open(os.path.join(again, "conversion.yaml"), "w") as fh:
+            fh.write("targets:\n  html:\n    format: html\n")
+    run = subprocess.run(["python3", os.path.join(BIN, "convert.py")], cwd=again,
+                         capture_output=True, text=True, stdin=subprocess.DEVNULL)
+    page = read(again, "html", "sets.html") if exists(again, "html", "sets.html") else ""
+    return [
+        ("our own page, read back, raises no duplicate-id warning",
+         lambda: exists(again, "html", "sets.html")
+         and "Duplicate identifier" not in run.stderr),
+        ("and the id given to its title doesn't reach the output",
+         lambda: page and "title-block-title" not in page),
+    ]
+
+
 def case_html_source(work):
     """An HTML page is a source when the book says so, and converting
     what this pipeline wrote changes nothing."""
@@ -2168,6 +2198,7 @@ CASES = [
     ("decorative images and frame sizes in HTML sources", case_html_images),
     ("AsciiDoc to Markdown and back", case_asciidoc_markdown),
     ("an AsciiDoc target", case_asciidoc_target),
+    ("a page title that is also a heading", case_title_id),
     ("a hand-written page", case_hand_written),
     ("several targets", case_targets),
     ("arguments passed to the packager", case_passthrough),

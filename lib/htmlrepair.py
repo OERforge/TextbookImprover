@@ -101,7 +101,8 @@ def repaired(markup):
     markup = _INSIDE.sub(inside, markup)
     markup = _BEFORE.sub(before, markup)
     markup, marked = decorative_images(markup)
-    return markup, count + marked
+    markup, titled = title_block_id(markup)
+    return markup, count + marked + titled
 
 
 _IMG = re.compile(r"<img\b((?:[^<>\"']|\"[^\"]*\"|'[^']*')*)>", re.I)
@@ -142,6 +143,22 @@ def decorative_images(markup):
         count += 1
         return "<img" + attrs + ">"
     return _IMG.sub(mark, markup), count
+
+
+_TITLE_H1 = re.compile(
+    r'(<header\s+id="title-block-header"\s*>\s*<h1\b)((?:(?!\bid=)[^>])*>)', re.I)
+
+
+def title_block_id(markup):
+    """(markup, count): the title in the title block of a page Pandoc wrote,
+    given an id. Pandoc's reader makes one from a heading's text when it has
+    none, and a book's page title is usually its first heading's text too:
+    DCIC's "6.2 Collections of Structured Data" became
+    collections-of-structured-data, the id its h3 already had, and Pandoc
+    warned of a duplicate on 79 of 80 pages. The title block becomes the
+    page's metadata on reading, so the id goes no further."""
+    new, n = _TITLE_H1.subn(r'\1 id="title-block-title"\2', markup, count=1)
+    return new, n
 
 
 def repaired_copy(source, destination):

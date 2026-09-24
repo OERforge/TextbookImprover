@@ -62,6 +62,7 @@ Versions are two-part and pre-1.0: breaking changes may land in any of them unti
 
 ### Fixed
 
+- **Reading back a page this pipeline wrote no longer warns of duplicate ids.** Pandoc's reader gave the title-block heading an id made from its text, the same id as the page's first section heading when the two share their text, and warned on 79 of DCIC's 80 pages. The title now has its own id before reading, and it goes no further.
 - **A book's third run no longer stops because its own cartridge is there.** After `--zip`, the `.imscc` sits beside the download it came from, and the next run stopped with "More than one thing to unpack here". Once a directory has sources, no archive in it is read, however many there are. Found by following the first-run page on a real book.
 - **Pasting `table-headers-new.csv` in as the run says no longer warns.** The prefilled file listed a table that appears twice once per appearance, under one key, and the sidecar reader warned of every repeated key; the file now has one row per key, and a repeated key is reported only when its rows disagree.
 - **The documentation reflects the AsciiDoc target** where it had spoken only of Markdown (`tables.bands`, `merge`, the markers, the sidecar page, the architecture table), and describes the empty-column rule for HTML tables and a zipped save's unpacking.

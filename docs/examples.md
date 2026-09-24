@@ -247,7 +247,7 @@ cd ../dcic-check
 python3 $T/bin/convert.py
 ```
 
-Pandoc warns about a duplicate identifier on nearly every page it reads here (79 of the 80); the warnings don't affect the output. Then compare the two runs page by page:
+Then compare the two runs page by page:
 
 ```bash
 python3 $T/util/compare-output.py ../dcic/html html

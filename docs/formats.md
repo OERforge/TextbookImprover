@@ -26,7 +26,7 @@ PDF and Word output are NOT YET IMPLEMENTED ([roadmap item 2](../ROADMAP.md)): a
 **How it can arrive**
 
 - Files in the book's directory: one `.docx` per chapter or section, or one for the whole book, which [the split](splitting.md) cuts into pages.
-- A plain `.zip` of them, such as a publisher's DOCX download, which `convert.py` extracts when it finds the zip alone in a directory ([A book that arrives as an archive](first-run.md#a-book-that-arrives-as-an-archive)).
+- A plain `.zip` of them, such as a publisher's DOCX download, which `convert.py` extracts when it finds the zip alone in a directory ([A book that arrives as an archive](first-run.md#a-book-that-arrives-as-an-archive)). Tested on OpenStax's download of *Introductory Business Statistics 2e*, its 169 files two folders deep: the same 169 pages and 253 images as the files converted from a folder.
 - Inside a [Common Cartridge](cartridge-input.md): a Word file the course outline names is a source, and with `--linked-documents` so is one a page only links to.
 
 **What it becomes**

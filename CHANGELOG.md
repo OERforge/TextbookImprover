@@ -60,6 +60,7 @@ Versions are two-part and pre-1.0: breaking changes may land in any of them unti
 
 ### Fixed
 
+- **The sample document says what its sources declare.** Its compatibility note said the sources declared no compatibility mode, true of the corpus it was written for and contradicted a line above it by the corpus it was run on; it's built from the modes counted now. Three case descriptions lost numbers and a plan that had gone stale, since each case's own count is printed under its example.
 - **A zip of a browser's save is unpacked as one.** Extracted and converted as it stood, CS168 kept "| CS 168 Textbook" in every title and the browser's file names as its pages' names; it now goes through `unpack-site.py`, like the save itself, recognized by the address Chrome and Edge write into a saved page, a `_files` folder beside a page, or `.mhtml` files.
 - **An unpacker's notes reach you when it succeeds**, such as the one saying lxml parsed the pages because html5lib isn't installed. `convert.py` had kept them only for a failure.
 - **An HTML source's decorative images stay decorative.** Pandoc's reader can't tell `alt=""` from no alt, so an image its author marked decorative came out with no alt at all, read aloud by its file name and reported as undescribed; Canvas's `role="presentation"` without an alt, the same. Both are written `alt=""` now, with no role. Five in OpenStax's sociology cartridge.

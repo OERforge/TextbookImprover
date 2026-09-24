@@ -265,8 +265,8 @@ case("row-headers-unformatted", "Row headers with nothing marking them",
 
 case("row-headers-formatted", "Row headers Word does mark",
      "The same shape with bold or shading on the first column, which is "
-     "the only version a formatting-based rule can find. Rare: 19 tables "
-     "in 1,716.",
+     "the only version a formatting-based rule can find, and far the rarer "
+     "of the two (the counts are under each case's example).",
      lambda i: i["guess"] in ("both", "first-column")
      and evidence(i, "first column bold/shaded"))
 
@@ -317,9 +317,10 @@ case("single-column", "One column",
      and i["nrows"] > 2)
 
 case("grouping-bands", "Grouping bands partway down",
-     "Merged full-width rows that label the rows beneath them. Twelve "
-     "tables in five books. The plan is to split these into one table per "
-     "band, with the band text composed into each part's caption.",
+     "Merged full-width rows that label the rows beneath them. For HTML, "
+     "EPUB, and PDF the table is split into one table per band, the band's "
+     "text in each part's caption; for Markdown and DOCX it stays one table "
+     "with a body per band (tables.bands). The guess is made part by part.",
      lambda i: evidence(i, "full-width band at row"))
 
 case("payoff-matrix", "Two-level headers on both axes",
@@ -367,7 +368,7 @@ case("image-in-cell", "Images inside a data table",
 case("layout-table", "Layout table",
      "A table used to position images or blocks rather than to relate "
      "data. It wants role=\"presentation\" and no headers at all, and it "
-     "is 60% of the tables in the OpenStax corpus.",
+     "is most of the tables in the OpenStax books.",
      lambda i: i["kind"].startswith("layout"))
 
 case("column-major-list", "A list snaked into columns",
@@ -788,13 +789,26 @@ def build(picked, path, sources, compat="15", modes=None):
                              for k, v in sorted(modes.items())),
                  italic=True)
     if compat:
-        doc.para("This document declares compatibilityMode %s, so Word treats "
-                 "it as a current file and the Accessibility Checker will run "
-                 "against it. The sources it was built from declare no "
-                 "compatibility mode at all, which is why Word calls them an "
-                 "older format, so table layout here may differ slightly from "
-                 "the originals. Regenerate with --compat none to match the "
-                 "sources instead." % compat, italic=True)
+        # Said of the sources as counted, not as the first corpus was: the
+        # sources in Compatibility Mode are those declaring an older mode
+        # or none.
+        older = {k: v for k, v in modes.items()
+                 if k == "not declared" or (str(k).isdigit()
+                                            and int(k) < int(compat))}
+        text = ("This document declares compatibilityMode %s, so Word treats "
+                "it as a current file and the Accessibility Checker will run "
+                "against it." % compat)
+        if older:
+            described = " or ".join(
+                "no compatibility mode" if k == "not declared" else "mode %s" % k
+                for k in sorted(older))
+            text += (" %s of the %s sources declare %s, which is why Word "
+                     "opens them in Compatibility Mode, so table layout here "
+                     "may differ slightly from theirs. Regenerate with "
+                     "--compat none to match them instead."
+                     % ("{:,}".format(sum(older.values())),
+                        "{:,}".format(sum(modes.values())), described))
+        doc.para(text, italic=True)
     doc.para("Two things do not survive the copy. Numbering definitions are "
              "not carried over, so a numbered list inside a cell appears as "
              "plain paragraphs. And styles are merged by id across sources "

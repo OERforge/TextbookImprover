@@ -1185,6 +1185,16 @@ def case_zip(work):
     with zipfile.ZipFile(os.path.join(deck, "talk.pptx"), "w") as z:
         z.writestr("[Content_Types].xml", "<Types/>")
     deck_run = run(deck)
+    # An OpenStax DOCX download: two folders around the Word files.
+    openstax = os.path.join(work, "openstax")
+    os.makedirs(openstax)
+    with zipfile.ZipFile(os.path.join(openstax, "Book_-_DOCX_Customization.zip"), "w") as z:
+        for name in ("tables.docx", "metadata.docx"):
+            z.write(os.path.join(FIXTURES, name),
+                    "Book_-_DOCX_Customization/book/" + name)
+    with open(os.path.join(openstax, "conversion.yaml"), "w") as fh:
+        fh.write("targets:\n  html:\n    format: html\n")
+    run(openstax)
     saved = os.path.join(work, "saved")
     os.makedirs(saved)
     with zipfile.ZipFile(os.path.join(saved, "site.zip"), "w") as z:
@@ -1223,6 +1233,11 @@ def case_zip(work):
          lambda: "saved from a browser" in saved_run.stderr
          and len(saved_pages) == 1 and "_" not in saved_pages[0]
          and exists(saved, "project.yaml")),
+        ("Word files two folders deep, as OpenStax zips them, are sources "
+         "and convert", lambda: exists(openstax, "tables.docx")
+         and exists(openstax, "html", "tables.html")
+         and exists(openstax, "html", "metadata.html")
+         and not exists(openstax, "Book_-_DOCX_Customization")),
         ("a slide deck is a zip but not an archive to unpack",
          lambda: "talk.pptx" not in deck_run.stdout + deck_run.stderr
          and not exists(deck, "[Content_Types].xml")),

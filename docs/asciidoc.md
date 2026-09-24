@@ -9,6 +9,8 @@ An `.adoc` file beside the sources is a page of the book, read with Pandoc's Asc
 
 ## A master file
 
+- **A block's layout attributes are made valid.** Pandoc's reader passes `[width=300, float=right]` and a diagram's `target=` onto the block, and its HTML writer then puts `width` and `target` on `<figure>`, `<pre>`, `<div>`, and `<table>`, where neither HTML nor XHTML allows them (an EPUB with them fails epubcheck). A block's width and height go to the image it holds, as attributes when they're whole numbers and as a style otherwise; on a block with no image they go, and so does `target`. `float` and the others arrive as `data-` attributes, which are valid, and stay.
+
 A book is usually one file that `include::`s its chapters. Read through that file, the reader loses each chapter's `=` title (it is neither a heading nor the document's metadata there) and ignores `:leveloffset:`. So a file that includes others isn't read: it's the book's order, each file it includes is a source in its own right, and the run says so. With no `contents` declared, the run writes `contents-sample.yaml` in the shape `project.yaml` takes: the order the master includes its chapters in, and what its header says about the book (its `=` title, the author line beneath it, and `:lang:`). Nothing else carries those, since the master isn't read as a page, so without them the book's EPUB is called "Untitled". Copy the sample into `project.yaml`. Anything else the master holds besides its includes, such as a cover shown only to HTML (`ifdef::backend-html5[]`), isn't part of the book.
 
 ## Measured against the book's EPUB

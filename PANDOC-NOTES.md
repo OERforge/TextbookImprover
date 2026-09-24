@@ -60,6 +60,8 @@ What Pandoc does, as read from its source or established by test, for the questi
 
 **The EPUB writer builds each navigation entry from the heading's inlines**, attributes and all, so an empty `<span id>` inside a heading is an empty span inside `<nav>`, which epubcheck rejects. Measured on 11 headings.
 
+**An id with whitespace in it is kept as it is**, from `<a name="section 15">` or `id="section 15"`, though neither HTML nor XHTML allows one; the writers then emit it, and epubcheck rejects each (RSC-005, 469 in DCIC). Measured. `html-source.lua` makes the whitespace a hyphen, in ids and in links' fragments.
+
 **A paragraph keeps none of its attributes.** `pPara` builds a `Para` from the inlines and discards the tag's class and id. `<p class="subtitle">` and `<p class="date">` in Pandoc's own title block come back as bare paragraphs, and so does a web page's `<p class="caption">`. Read from the source and measured. Anything a paragraph's class has to say must be said before Pandoc reads it, or read out of the file.
 
 **Pandoc's own title block is content to the reader**: `<header id="title-block-header">` becomes a `Div` with that id, while `<title>` and the `<meta name=…>` elements become metadata. Measured: reading our own page and writing it again gave two titles.
@@ -119,7 +121,7 @@ What Pandoc does, as read from its source or established by test, for the questi
 
 **The reader parses `<span>` and `<div>` and keeps every other tag raw, one tag at a time.** `x<sup>2</sup>` is a raw `<sup>`, `Str "2"`, and a raw `</sup>`; `<span href="…" rel="…">` is a `Span` whose `href` is an ordinary attribute, which the HTML writer then passes through where XHTML forbids it. Measured. `markdown-html.lua` reassembles the tags and reads each element with the HTML reader.
 
-**The reader's time grows steeply with how deeply bracketed spans nest.** `[[[x]{.a}]{.a}]{.a}`, nested: 9 ms at depth 4, 144 ms at 8, 1.8 s at 12, and a real page never finished. That page was HTML holding a formula as MathJax 2 draws it (eleven spans deep, each with a style), which the Markdown writer wrote faithfully and the reader couldn't read back. Measured on 3.11. Candidate upstream report; our fix would be not to write such spans.
+**The reader's time grows steeply with how deeply bracketed spans nest.** `[[[x]{.a}]{.a}]{.a}`, nested: 9 ms at depth 4, 144 ms at 8, 1.8 s at 12, and a real page never finished. That page was HTML holding a formula as MathJax 2 draws it (eleven spans deep, each with a style), which the Markdown writer wrote faithfully and the reader couldn't read back. Measured on 3.11. Candidate upstream report. Our side: `lib/mathjax2.py` rebuilds a MathJax 2 rendering as MathML before Pandoc reads the page, so the spans never reach the writer.
 
 ## The AsciiDoc reader
 
@@ -133,7 +135,7 @@ The reader is the `asciidoc` library (jgm/asciidoc-hs), not part of Pandoc's tre
 
 **`mailto:someone@example.org[Name]` loses its scheme**: a link to a file called `someone@example.org`. **A code span holding a URL scheme** (`` `ftp://` ``) becomes a link to `ftp://` around the code.
 
-**A block's layout attributes become element attributes.** `[width=300, float=right]` on an image, a listing, or a table, and a diagram's `target=`, arrive as attributes of the block, and the HTML writer writes `width` and `target` as they are, on `<figure>`, `<pre>`, `<div>`, and `<table>`, where XHTML allows neither: epubcheck's RSC-005, 43 times in the security textbook's EPUB. Measured; not fixed yet.
+**A block's layout attributes become element attributes.** `[width=300, float=right]` on an image, a listing, or a table, and a diagram's `target=`, arrive as attributes of the block, and the HTML writer writes `width` and `target` as they are, on `<figure>`, `<pre>`, `<div>`, and `<table>`, where XHTML allows neither: epubcheck's RSC-005, 43 times in the security textbook's EPUB. Measured; `asciidoc-source.lua` moves a block's size to its image and drops the rest. Other names (`float`, `format`, `wrapper`, `link`, `align`) are written as `data-` attributes, which are valid.
 
 ## The EPUB writer
 

@@ -1212,6 +1212,166 @@ def case_zip(work):
     ]
 
 
+MATHJAX2 = """<!DOCTYPE html><html lang="en"><head><title>Growth</title></head><body><main><h1>Growth</h1>
+<p>Inline <span class="MathJax" id="MathJax-Element-1-Frame"><nobr><span class="math" id="MathJax-Span-1"><span><span class="mrow" id="MathJax-Span-2"><span class="msubsup" id="MathJax-Span-3"><span style="position: absolute; top: -4.0em;"><span class="mi" id="MathJax-Span-4">k</span></span><span style="position: absolute; top: -4.4em;"><span class="mn" id="MathJax-Span-5">2</span></span></span><span class="mo" id="MathJax-Span-6">+</span><span class="mfrac" id="MathJax-Span-7"><span style="position: absolute; top: -3.4em;"><span class="mn" id="MathJax-Span-9">2</span></span><span style="position: absolute; top: -4.6em;"><span class="mn" id="MathJax-Span-8">1</span></span></span></span></span></span></nobr></span> ends here.</p>
+<div class="MathJax_Display" style="text-align: center;"><span class="MathJax" id="MathJax-Element-2-Frame"><span class="math" id="MathJax-Span-10"><span class="mrow" id="MathJax-Span-11"><span class="mtable" id="MathJax-Span-12"><span style="position: absolute; top: -5.0em;"><span class="mtd" id="MathJax-Span-13"><span class="mn" id="MathJax-Span-14">4</span></span></span><span style="position: absolute; top: -3.0em;"><span class="mtd" id="MathJax-Span-17"><span class="mn" id="MathJax-Span-18">11</span></span></span><span style="position: absolute; top: -5.0em;"><span class="mtd" id="MathJax-Span-15"><span class="mtext" id="MathJax-Span-16">base</span></span></span><span style="position: absolute; top: -3.0em;"><span class="mtd" id="MathJax-Span-19"><span class="mtext" id="MathJax-Span-20">step</span></span></span></span></span></span></span></div>
+<p>With its TeX <span class="MathJax" id="MathJax-Element-3-Frame"><span class="math" id="MathJax-Span-21"><span class="mi" id="MathJax-Span-22">x</span></span></span><script type="math/tex" id="MathJax-Element-3">x+1</script> kept.</p>
+</main></body></html>
+"""
+
+
+def case_mathjax2(work):
+    """A formula as MathJax 2 drew it is rebuilt as MathML: children in
+    the formula's order, a lone script named by where it sits, a table's
+    rows found again; a rendering beside its TeX is dropped. And the
+    Markdown the page becomes reads back."""
+    import importlib.util
+    if not (importlib.util.find_spec("html5lib") or importlib.util.find_spec("lxml")):
+        return [("skip: HTML sources need html5lib or lxml", lambda: True)]
+    os.makedirs(work)
+    with open(os.path.join(work, "growth.html"), "w", encoding="utf-8") as fh:
+        fh.write(MATHJAX2)
+    with open(os.path.join(work, "conversion.yaml"), "w") as fh:
+        fh.write("targets:\n  html:\n    format: html\n  md:\n    format: markdown\n")
+    run = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quiet"],
+                         cwd=work, capture_output=True, text=True,
+                         stdin=subprocess.DEVNULL)
+    page = read(work, "html", "growth.html") if exists(work, "html", "growth.html") else ""
+    back = work + "-back"
+    if exists(work, "md"):
+        shutil.copytree(os.path.join(work, "md"), back)
+        with open(os.path.join(back, "conversion.yaml"), "w") as fh:
+            fh.write("targets:\n  html:\n    format: html\n")
+        try:
+            subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quiet"],
+                           cwd=back, capture_output=True, text=True,
+                           stdin=subprocess.DEVNULL, timeout=120)
+        except subprocess.TimeoutExpired:
+            pass
+    again = read(back, "html", "growth.html") if exists(back, "html", "growth.html") else ""
+    fraction = re.search(r"<mfrac>\s*<mn>1</mn>\s*<mn>2</mn>\s*</mfrac>", page)
+    return [
+        ("MathJax's rendering becomes MathML, and none of it is left",
+         lambda: page.count("<math") == 3 and 'class="MathJax' not in page
+         and "formula(s) rebuilt" in run.stderr),
+        ("children follow the formula's order, not the layout's",
+         lambda: bool(fraction)),
+        ("a lone script drawn as msubsup is a superscript",
+         lambda: re.search(r"<msup>\s*<mi>k</mi>\s*<mn>2</mn>\s*</msup>", page)),
+        ("a table's rows are found again from its cells' heights",
+         lambda: len(re.findall(r"<mtr>", page)) == 2
+         and re.search(r"<mtr>\s*<mtd[^>]*>\s*<mn>4</mn>\s*</mtd>\s*<mtd[^>]*>"
+                       r"\s*<mtext[^>]*>base", page)),
+        ("a rendering beside its TeX is dropped, so the formula is there once",
+         lambda: "x+1" in page.replace(" ", "") and page.count(">x<") <= 1),
+        ("the Markdown the page becomes reads back, math and all",
+         lambda: again.count("<math") == 3),
+    ]
+
+
+def case_asciidoc_layout(work):
+    """An AsciiDoc block's width and target don't reach an element XHTML
+    forbids them on; an image block's size goes to its image."""
+    os.makedirs(work)
+    with open(os.path.join(work, "ch.adoc"), "w", encoding="utf-8") as fh:
+        fh.write("= A chapter\n\n[width=300,float=right]\nimage::dot.png[A dot]\n\n"
+                 "[source,python,width=400]\n----\nprint('hi')\n----\n\n"
+                 "[width=50%,float=left]\n|===\n|Name |Count\n|a |1\n|===\n")
+    with open(os.path.join(work, "dot.png"), "wb") as fh:
+        fh.write(ONE_PIXEL)
+    with open(os.path.join(work, "conversion.yaml"), "w") as fh:
+        fh.write("targets:\n  html:\n    format: html\n  epub:\n    format: epub3\n")
+    subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quiet"],
+                   cwd=work, capture_output=True, text=True,
+                   stdin=subprocess.DEVNULL)
+    page = read(work, "html", "ch.html") if exists(work, "html", "ch.html") else ""
+    import zipfile
+    epub_text = ""
+    for root_dir, _, files in os.walk(os.path.join(work, "epub")):
+        for name in files:
+            if name.endswith(".epub"):
+                with zipfile.ZipFile(os.path.join(root_dir, name)) as z:
+                    epub_text = "".join(z.read(n).decode("utf-8", "replace")
+                                        for n in z.namelist() if n.endswith(".xhtml"))
+    checked = open(os.path.join(work, "output-check.csv")).read() if exists(
+        work, "output-check.csv") else ""
+    bad = r"<(figure|div|pre|table)\b[^>]*\b(width|target)="
+    return [
+        ("no width or target on a block, in the HTML or the EPUB",
+         lambda: page and epub_text and not re.search(bad, page)
+         and not re.search(bad, epub_text)),
+        ("an image block's width is its image's",
+         lambda: re.search(r'<img [^>]*width="300"', page)),
+        ("epubcheck finds nothing to object to, where it's installed",
+         lambda: "epubcheck:RSC-005" not in checked),
+    ]
+
+
+def case_not_implemented(work):
+    """A pdf or docx target says it's not implemented and is skipped;
+    with nothing else to build, the run stops and says why."""
+    os.makedirs(work)
+    with open(os.path.join(work, "ch.md"), "w") as fh:
+        fh.write("# One\n\nText.\n")
+    with open(os.path.join(work, "conversion.yaml"), "w") as fh:
+        fh.write("targets:\n  web:\n    format: html\n  print:\n    format: pdf\n"
+                 "  word:\n    format: docx\n")
+    mixed = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quiet"],
+                           cwd=work, capture_output=True, text=True,
+                           stdin=subprocess.DEVNULL)
+    only = work + "-only"
+    os.makedirs(only)
+    shutil.copy(os.path.join(work, "ch.md"), only)
+    with open(os.path.join(only, "conversion.yaml"), "w") as fh:
+        fh.write("targets:\n  print:\n    format: pdf\n")
+    alone = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quiet"],
+                           cwd=only, capture_output=True, text=True,
+                           stdin=subprocess.DEVNULL)
+    return [
+        ("each pdf or docx target is named NOT YET IMPLEMENTED and skipped",
+         lambda: mixed.stderr.count("NOT YET IMPLEMENTED") == 2
+         and exists(work, "web", "ch.html")
+         and not exists(work, "print") and not exists(work, "word")),
+        ("a book with only such targets stops and says why",
+         lambda: alone.returncode != 0
+         and "NOT YET IMPLEMENTED" in alone.stdout + alone.stderr),
+    ]
+
+
+def case_html_ids(work):
+    """An id with a space in it -- Scribble writes them -- becomes one
+    without, and every link to it follows, from its own page or another."""
+    import importlib.util
+    if not (importlib.util.find_spec("html5lib") or importlib.util.find_spec("lxml")):
+        return [("skip: HTML sources need html5lib or lxml", lambda: True)]
+    os.makedirs(work)
+    with open(os.path.join(work, "a.html"), "w", encoding="utf-8") as fh:
+        fh.write('<html lang="en"><head><title>A</title></head><body><h1>A</h1>'
+                 '<h2 id="section 15">Fifteen</h2><p>See <a href="#section 15">here</a> '
+                 'and <a href="#section%2015">there</a>.</p></body></html>')
+    with open(os.path.join(work, "b.html"), "w", encoding="utf-8") as fh:
+        fh.write('<html lang="en"><head><title>B</title></head><body><h1>B</h1>'
+                 '<p>Back to <a href="a.html#section 15">fifteen</a>.</p></body></html>')
+    with open(os.path.join(work, "conversion.yaml"), "w") as fh:
+        fh.write("targets:\n  html:\n    format: html\n  epub:\n    format: epub3\n")
+    subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quiet"],
+                   cwd=work, capture_output=True, text=True, stdin=subprocess.DEVNULL)
+    a = read(work, "html", "a.html") if exists(work, "html", "a.html") else ""
+    b = read(work, "html", "b.html") if exists(work, "html", "b.html") else ""
+    checked = open(os.path.join(work, "output-check.csv")).read() if exists(
+        work, "output-check.csv") else ""
+    return [
+        ("an id's whitespace becomes a hyphen",
+         lambda: 'id="section-15"' in a and 'id="section 15"' not in a),
+        ("links to it follow, encoded or not, from its page or another",
+         lambda: a.count('href="#section-15"') == 2
+         and 'href="a.html#section-15"' in b),
+        ("nothing is reported missing, and epubcheck has no complaint",
+         lambda: exists(work, "epub") and "missing-fragment" not in checked
+         and "RSC-005" not in checked),
+    ]
+
+
 def case_html_source(work):
     """An HTML page is a source when the book says so, and converting
     what this pipeline wrote changes nothing."""
@@ -1692,6 +1852,10 @@ CASES = [
     ("a web archive converted directly", case_warc_direct),
     ("a Common Cartridge", case_cartridge),
     ("a plain zip of a book's files", case_zip),
+    ("formulas as MathJax 2 drew them", case_mathjax2),
+    ("AsciiDoc layout attributes", case_asciidoc_layout),
+    ("formats not yet implemented", case_not_implemented),
+    ("ids with spaces in HTML sources", case_html_ids),
     ("a hand-written page", case_hand_written),
     ("several targets", case_targets),
     ("arguments passed to the packager", case_passthrough),

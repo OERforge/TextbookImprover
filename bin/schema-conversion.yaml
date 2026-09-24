@@ -35,7 +35,9 @@ keys:
     target_only: true
     stage: render
     description: >
-      What this target produces.
+      What this target produces. pdf and docx are NOT YET IMPLEMENTED
+      (roadmap item 2): a target naming either is skipped with a warning,
+      and nothing is written for it.
 
   output_dir:
     type: path

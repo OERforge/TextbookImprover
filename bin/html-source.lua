@@ -488,7 +488,45 @@ local function lift_h1(doc)
   end
 end
 
+-- An id can't hold whitespace, in HTML or XHTML, but a page can carry one
+-- (Scribble writes <a name="section 15">), and Pandoc keeps it: epubcheck
+-- then rejects every one (RSC-005, 469 times in one book). Whitespace in
+-- an id becomes a hyphen, and so does whitespace in a link's #fragment,
+-- decoded first, so a link to it -- here or from another page -- still
+-- finds it.
+local function unspaced(id)
+  return (id:gsub('%s+', '-'))
+end
+
+local function fix_fragment(target)
+  local path, fragment = target:match('^([^#]*)#(.*)$')
+  if not fragment then return target end
+  local decoded = fragment:gsub('%%(%x%x)', function(hex)
+    return string.char(tonumber(hex, 16))
+  end)
+  if not decoded:match('%s') then return target end
+  return path .. '#' .. unspaced(decoded)
+end
+
+local function fix_ids(el)
+  local changed = false
+  local ok, id = pcall(function() return el.identifier end)
+  if ok and id and id:match('%s') then
+    el.identifier = unspaced(id)
+    changed = true
+  end
+  if el.t == 'Link' then
+    local target = fix_fragment(el.target)
+    if target ~= el.target then
+      el.target = target
+      changed = true
+    end
+  end
+  return changed and el or nil
+end
+
 function Pandoc(doc)
+  doc = doc:walk({ Inline = fix_ids, Block = fix_ids })
   lift_h1(doc)
   local ids = {}
   doc:walk(with_attr(function(el)

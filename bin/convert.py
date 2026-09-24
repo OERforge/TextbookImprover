@@ -74,6 +74,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(HERE), "lib"))
 try:
     import docxrepair
     import htmlrepair
+    import mathjax2
     import notes as notes_lib
     import oerconfig
     from bookcontents import (guess_contents, walk_contents, number_tree,
@@ -88,6 +89,7 @@ FIGURE_FILTER = os.path.join(HERE, "figures-and-tables.lua")
 MEDIA_FILTER = os.path.join(HERE, "media-extensions.lua")
 HEADER_FILTER = os.path.join(HERE, "header-includes.lua")
 SAFE_MEDIA_FILTER = os.path.join(HERE, "safe-media.lua")
+NOT_YET_IMPLEMENTED = ("pdf", "docx")
 TARGET_FILTER = os.path.join(HERE, "target-blocks.lua")
 MARKDOWN_FILTER = os.path.join(HERE, "markdown-source.lua")
 MARKDOWN_HTML_FILTER = os.path.join(HERE, "markdown-html.lua")
@@ -365,6 +367,19 @@ def load_targets(base, allow_unknown):
             targets.append(Target(name, resolved, base))
     except oerconfig.ConfigError as exc:
         die(str(exc))
+    # pdf and docx are names the schema reserves for outputs not built
+    # yet. A target naming one is skipped, and said to be, rather than
+    # read, filtered, and then quietly never written.
+    for target in targets:
+        if target.format in NOT_YET_IMPLEMENTED:
+            say(f"WARNING: target {target.name} is format {target.format}, "
+                "which is NOT YET IMPLEMENTED (roadmap item 2); nothing is "
+                "written for it.")
+    targets = [t for t in targets if t.format not in NOT_YET_IMPLEMENTED]
+    if not targets:
+        die("Every target here is a format that is NOT YET IMPLEMENTED "
+            f"({', '.join(NOT_YET_IMPLEMENTED)}); add an html, epub3, or "
+            "markdown target to conversion.yaml.")
     for warning in targets[0].resolved.warnings if targets else []:
         say(f"WARNING: {warning}")
 
@@ -869,6 +884,19 @@ def read_html_to_json(base, docs, env, work):
         if moved and TRACE:
             say(f"# {name}: {moved} id(s) moved onto anchors the reader "
                 "keeps")
+        # A formula as MathJax 2 drew it, with no TeX left beside it, is
+        # rebuilt as MathML; see lib/mathjax2.py.
+        with open(repaired, encoding="utf-8") as fh:
+            markup = fh.read()
+        markup, made, dropped = mathjax2.rebuilt(markup)
+        if made or dropped:
+            with open(repaired, "w", encoding="utf-8") as fh:
+                fh.write(markup)
+            say(f"{name}: " + ", ".join(part for part in (
+                f"{made} formula(s) rebuilt as MathML from MathJax's "
+                "rendering" if made else "",
+                f"{dropped} MathJax rendering(s) dropped beside their TeX"
+                if dropped else "") if part))
         run(["pandoc", "-f", "html+raw_html+epub_html_exts", "-t", "json",
              repaired,
              "-o", stem + ".json", "--lua-filter=" + HTML_RAW_FILTER,

@@ -62,6 +62,45 @@ local function fix_link(link)
   return nil
 end
 
+-- A block's layout attributes -- [width=300, float=right] on an image
+-- block, a listing, or a table, and a diagram's target= -- arrive as
+-- attributes of the block. Pandoc's HTML writer prefixes names it doesn't
+-- know with data-, but writes width and target as they are, on <figure>,
+-- <pre>, <div>, and <table>, where XHTML allows neither (epubcheck:
+-- RSC-005, 43 times in one book's EPUB). A size on a block that holds an
+-- image belongs to the image, where it's valid: an attribute when it's a
+-- whole number of pixels, a style otherwise. Anywhere else it goes, and
+-- so does target, which names a diagram's output file.
+local function layout(el)
+  local attrs = el.attributes
+  local width, height = attrs.width, attrs.height
+  if not (width or height or attrs.target) then return nil end
+  attrs.width, attrs.height, attrs.target = nil, nil, nil
+  if (width or height) and (el.t == 'Div' or el.t == 'Figure') then
+    el = el:walk({
+      Image = function(img)
+        local style = {}
+        for name, value in pairs({ width = width, height = height }) do
+          if value and not img.attributes[name] then
+            if value:match('^%d+$') then
+              img.attributes[name] = value
+            else
+              style[#style + 1] = name .. ': ' .. value
+            end
+          end
+        end
+        if #style > 0 then
+          local before = img.attributes.style
+          img.attributes.style = (before and before ~= '' and before .. '; '
+                                  or '') .. table.concat(style, '; ')
+        end
+        return img
+      end,
+    })
+  end
+  return el
+end
+
 function Pandoc(doc)
   local imagesdir = doc.meta.imagesdir
     and pandoc.utils.stringify(doc.meta.imagesdir)
@@ -87,7 +126,11 @@ function Pandoc(doc)
     end,
     Div = function(div)
       if div.classes:includes('included') then return div.content end
+      return layout(div)
     end,
+    CodeBlock = layout,
+    Table = layout,
+    Figure = layout,
     Link = fix_link,
   })
   return doc

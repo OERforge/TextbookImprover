@@ -7,18 +7,19 @@ Every source format the pipeline reads, the ways a book in that format can arriv
 - **TESTED**: the test suite covers the path, and real books have gone through it and been checked: the [output check](checking.md) on every run, epubcheck for an EPUB, and `util/compare-output.py` for a round trip.
 - **NEEDS MORE TESTING**: covered by the suite or by one book, or a real book showed a problem that isn't fixed yet.
 - **NOT TESTED**: the code allows it, but neither a test nor a real book has taken the path.
-- **Not available**: nothing produces that output yet.
+- **NOT YET IMPLEMENTED**: an output the configuration names but nothing produces yet. A target declaring it is skipped with a warning.
+- **Not available**: an output no one has planned.
 
 ## At a glance
 
-| Input | HTML | EPUB | Markdown | Round trip to itself |
-|---|---|---|---|---|
-| Word (`.docx`) | TESTED | TESTED | TESTED | Not available (no Word output) |
-| Markdown (`.md`) | TESTED | TESTED | TESTED | TESTED |
-| HTML (`.html`) | TESTED | TESTED | NEEDS MORE TESTING | TESTED |
-| AsciiDoc (`.adoc`) | TESTED | NEEDS MORE TESTING | NOT TESTED | Not available (no AsciiDoc output) |
+| Input | HTML | EPUB | Markdown | PDF | Word | Round trip to itself |
+|---|---|---|---|---|---|---|
+| Word (`.docx`) | TESTED | TESTED | TESTED | NOT YET IMPLEMENTED | NOT YET IMPLEMENTED | NOT YET IMPLEMENTED (Word output) |
+| Markdown (`.md`) | TESTED | TESTED | TESTED | NOT YET IMPLEMENTED | NOT YET IMPLEMENTED | TESTED |
+| HTML (`.html`) | TESTED | TESTED | TESTED | NOT YET IMPLEMENTED | NOT YET IMPLEMENTED | TESTED |
+| AsciiDoc (`.adoc`) | TESTED | TESTED | NEEDS MORE TESTING | NOT YET IMPLEMENTED | NOT YET IMPLEMENTED | Not available (no AsciiDoc output) |
 
-PDF and Word output aren't built yet ([roadmap item 2](../ROADMAP.md)). A target declaring `format: pdf` or `format: docx` is accepted and, for now, produces nothing without saying so. PDF is read only by [the audit](auditing.md), which reports on a Word, Markdown, HTML, EPUB, or PDF file without converting it.
+PDF and Word output are NOT YET IMPLEMENTED ([roadmap item 2](../ROADMAP.md)): a target declaring `format: pdf` or `format: docx` is skipped with a warning saying so, and a book with no other target stops. PDF is read only by [the audit](auditing.md), which reports on a Word, Markdown, HTML, EPUB, or PDF file without converting it.
 
 ## Word
 
@@ -33,7 +34,7 @@ PDF and Word output aren't built yet ([roadmap item 2](../ROADMAP.md)). A target
 - **HTML: TESTED.** The census has read all nine books of the test corpus (1,782 files); the statistics, nursing, marketing, business communication, and programming books have been converted, and cartridges this pipeline builds have been imported into Brightspace. Lost on the way: a hyperlink's ScreenTip, which Pandoc's reader discards ([#11869](https://github.com/jgm/pandoc/issues/11869), agreed upstream), and the document's properties, since the title and author come from paragraphs styled Title and Author. Bookmarks Pandoc's reader would drop are repaired before it reads the file, and table headers come from Word's marks, the [sidecar](sidecars.md), or the guess.
 - **EPUB: TESTED**, on the same books and the suite's fixtures. It loses what [every EPUB loses](#epub), as well.
 - **Markdown: TESTED**, on the statistics book (merged by chapter) and the suite's round trip: read back, it gives the same HTML, and written again it's the same file. The first write normalizes Word's residue (paragraphs holding only a non-breaking space, stray spaces), so the second write is the fixed point. A table with merged cells, and a figure with an id, are written as fenced HTML, since Pandoc's Markdown can't express them; a banded table is kept as one table.
-- **Word: Not available.** Word output is roadmap item 2.
+- **PDF and Word: NOT YET IMPLEMENTED**, roadmap item 2; so the round trip to Word is too.
 
 ## Markdown
 
@@ -49,6 +50,7 @@ PDF and Word output aren't built yet ([roadmap item 2](../ROADMAP.md)). A target
 - **HTML: TESTED**, on the economics book, the 33-chapter Markdown textbook, and the suite. HTML written into the Markdown is read as HTML and cleaned the way an HTML source is.
 - **EPUB: TESTED.** The economics book's 34 pages build an EPUB epubcheck passes without an error or a warning.
 - **Markdown (round trip): TESTED**, by the suite and on the economics book: the second write equals the third.
+- **PDF and Word: NOT YET IMPLEMENTED.**
 
 ## HTML
 
@@ -56,18 +58,19 @@ PDF and Word output aren't built yet ([roadmap item 2](../ROADMAP.md)). A target
 
 - Files in the book's directory: every `.html` beside the sources is a source ([HTML sources](html.md)), and a finished page that shouldn't be converted goes in `_pt/`, copied as it is.
 - A plain `.zip` of them.
-- A website saved from a browser, or saved as `.mhtml`, through [`unpack-site.py`](site-input.md). Tested on CS168 and DCIC. A browser's `.mhtml` save holds only MathJax's rendering of a formula, not its TeX, so formulas can't become math.
+- A website saved from a browser, or saved as `.mhtml`, through [`unpack-site.py`](site-input.md). Tested on CS168 and DCIC. A browser's `.mhtml` save holds only MathJax's rendering of a formula, not its TeX; a MathJax 2 rendering is rebuilt as MathML from its own structure (410 formulas in DCIC), and a MathJax 3 one isn't read yet.
 - A WARC or WACZ, which `convert.py` unpacks when it finds one alone in a directory ([Making a WARC](making-warcs.md)). Tested on DCIC, CS168, and the OER Commons business communication book.
 - An EPUB, through [`unpack-epub.py`](epub-input.md), whose content documents become pages. Tested on three publishers' EPUBs: Pressbooks, OER Commons, and Asciidoctor's.
 - A Common Cartridge exported from an LMS or a publisher, which `convert.py` unpacks when it finds one alone ([A course cartridge as the source](cartridge-input.md)). Tested on a Brightspace export and OpenStax's Canvas cartridge. Discussions, assignments, web links, test banks, and tool links are reported, not converted.
 
-Whatever the route, scripts don't run, so a page a script draws in the browser has nothing to read; only what's inside a page's `<main>` is read when it has one; tags Pandoc has no element for (`<footer>`, `<nav>`, `<cite>`) go, their contents kept; and a paragraph's class is lost. The full list is in [HTML sources](html.md).
+Whatever the route, scripts don't run, so a page a script draws in the browser has nothing to read; only what's inside a page's `<main>` is read when it has one; tags Pandoc has no element for (`<footer>`, `<nav>`, `<cite>`) go, their contents kept; a paragraph's class is lost; and an id with a space in it, which HTML doesn't allow, has its spaces made hyphens, links to it following. The full list is in [HTML sources](html.md).
 
 **What it becomes**
 
 - **HTML (round trip): TESTED.** Converting this pipeline's own pages changes nothing, which the suite checks. Real books: DCIC (80 pages), CS168 (a browser save, a WARC, and the site's own source agree on 62 pages), *Information Systems for Business and Beyond*, the business communication book, and both cartridges, including one this pipeline built, which converts back to the book it came from.
 - **EPUB: TESTED.** epubcheck finds no errors in DCIC's, the business communication book's, or OpenStax's sociology cartridge's; the five in *Information Systems* are the publisher's own.
-- **Markdown: NEEDS MORE TESTING.** The suite converts HTML to Markdown and back, and a banded table survives the trip. But on DCIC's pages, one page held a formula as MathJax 2 draws it, eleven spans deep, and Pandoc's Markdown reader didn't finish reading back what its own writer wrote: its time grows steeply with how deeply spans nest.
+- **Markdown: TESTED.** The suite converts HTML to Markdown and back, formulas and banded tables included, and DCIC's 80 pages come back identical. They didn't until two fixes: a formula as MathJax 2 drew it nests spans eleven deep, which Pandoc's Markdown reader never got through, and a link to an id with a space in it isn't a link to that reader, so its address came back as words.
+- **PDF and Word: NOT YET IMPLEMENTED.**
 
 ## AsciiDoc
 
@@ -78,9 +81,10 @@ Whatever the route, scripts don't run, so a page a script draws in the browser h
 
 **What it becomes**
 
-- **HTML: TESTED**, on the security textbook (14 pages, its 54 cross-references by title resolved) and the suite. Asciidoctor's own settings (`:toc:`, `:icons:`, `:stylesheet:`, `:sectnums:`) are dropped, and a block's layout attributes are passed through as they are (next item).
-- **EPUB: NEEDS MORE TESTING.** The security textbook's EPUB fails epubcheck with 43 errors, all one cause: Pandoc's AsciiDoc reader turns a block's `width`, and a diagram's `target`, into attributes the HTML writer puts on `<figure>`, `<pre>`, `<div>`, and `<table>`, where XHTML doesn't allow them. Not fixed yet.
-- **Markdown: NOT TESTED.**
+- **HTML: TESTED**, on the security textbook (14 pages, its 54 cross-references by title resolved) and the suite. Asciidoctor's own settings (`:toc:`, `:icons:`, `:stylesheet:`, `:sectnums:`) are dropped. A block's `width` goes to the image it holds, or goes if it holds none, and a diagram's `target` goes: Pandoc passes both through onto elements where HTML doesn't allow them.
+- **EPUB: TESTED.** The security textbook's EPUB passes epubcheck with no errors or warnings, and the suite builds one from a chapter with a sized image, a listing, and a table.
+- **Markdown: NEEDS MORE TESTING.** The security textbook goes to Markdown and back with all 14 pages identical, but no suite case covers the path yet.
+- **PDF and Word: NOT YET IMPLEMENTED.**
 - **AsciiDoc: Not available.**
 
 ## The outputs, and how each is packaged
@@ -111,4 +115,4 @@ A directory of `.md` files whose media keep the author's names, written to be a 
 
 ### PDF and Word
 
-Not available: [roadmap item 2](../ROADMAP.md). PDF waits on LaTeX's tagging support for complex table headers, and Word output is the riskier of the two, for the reasons the roadmap gives.
+NOT YET IMPLEMENTED: [roadmap item 2](../ROADMAP.md). A target naming either format is skipped with a warning. PDF waits on LaTeX's tagging support for complex table headers, and Word output is the riskier of the two, for the reasons the roadmap gives.

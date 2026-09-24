@@ -8,6 +8,8 @@ tests/fixtures/_dot.png
 # conversion output
 *.html
 *.json
+# ... except test fixtures, which are data, not intermediates.
+!tests/fixtures/mathjax/*.json
 *.imscc
 settings.sh
 table-captions.csv

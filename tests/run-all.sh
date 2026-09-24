@@ -56,6 +56,10 @@
 #   run-site-tests.py      unpack-site.py on saves built by hand in the
 #                          shape of real ones. Needs html5lib or lxml.
 #
+#   run-mathjax-tests.py   lib/mathjax.py on renderings MathJax 2, 3,
+#                          and 4 produced of three formulas. Needs
+#                          html5lib or lxml, and Pandoc.
+#
 #   run-filter-tests.py    the accessibility work the Lua filters do,
 #                          against four small .docx fixtures. Needs
 #                          Pandoc.
@@ -136,6 +140,7 @@ run run-check-tests.py
 run run-headers-tests.py
 run run-unpack-tests.py
 run run-site-tests.py
+run run-mathjax-tests.py
 
 # The filter tests convert real documents, so they need Pandoc. Skipping
 # is reported rather than silent: a suite that quietly does not run is

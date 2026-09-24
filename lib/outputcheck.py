@@ -81,6 +81,7 @@ class Page:
         self.ids = []               # in document order, duplicates kept
         self.links = []             # href values of <a>
         self.dropped_files = []     # files an EPUB's links named, kept as text
+        self.lost_formulas = 0      # MathJax renderings nothing could read
         self.images = []            # (has_alt, alt, decorative, src)
         self.headings = []          # (level, text)
         self.tables = []            # (has_th, has_caption, role, wrapped)
@@ -109,6 +110,8 @@ class _Collector(HTMLParser):
             self.page.links.append(a["href"])
         elif tag == "span" and a.get("data-file"):
             self.page.dropped_files.append(a["data-file"])
+        elif tag == "span" and "math-lost" in (a.get("class") or "").split():
+            self.page.lost_formulas += 1
         elif tag == "img":
             self.page.images.append(("alt" in a, a.get("alt") or "",
                                      is_decorative(a), a.get("src", "")))
@@ -180,6 +183,8 @@ def read_xhtml(name, markup):
             page.links.append(el.get("href"))
         elif tag == "span" and el.get("data-file"):
             page.dropped_files.append(el.get("data-file"))
+        elif tag == "span" and "math-lost" in (el.get("class") or "").split():
+            page.lost_formulas += 1
         elif tag == "img":
             page.images.append(("alt" in el.attrib, el.get("alt") or "",
                                 is_decorative(el.attrib), el.get("src", "")))
@@ -205,6 +210,9 @@ def check_page(page, findings):
     where = page.name
     for name in page.dropped_files:
         findings.append(Finding(where, "link-to-file-dropped", name))
+    if page.lost_formulas:
+        findings.append(Finding(where, "formula-lost",
+                                f"{page.lost_formulas} formula(s)"))
     if page.parse_error:
         findings.append(Finding(where, "not-well-formed", page.parse_error))
     if not page.lang:

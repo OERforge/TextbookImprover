@@ -74,7 +74,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(HERE), "lib"))
 try:
     import docxrepair
     import htmlrepair
-    import mathjax2
+    import mathjax
     import notes as notes_lib
     import oerconfig
     from bookcontents import (guess_contents, walk_contents, number_tree,
@@ -884,19 +884,23 @@ def read_html_to_json(base, docs, env, work):
         if moved and TRACE:
             say(f"# {name}: {moved} id(s) moved onto anchors the reader "
                 "keeps")
-        # A formula as MathJax 2 drew it, with no TeX left beside it, is
-        # rebuilt as MathML; see lib/mathjax2.py.
+        # A formula as MathJax drew it is made math again, from whatever
+        # the rendering still holds; see lib/mathjax.py.
         with open(repaired, encoding="utf-8") as fh:
             markup = fh.read()
-        markup, made, dropped = mathjax2.rebuilt(markup)
-        if made or dropped:
+        markup, counts = mathjax.rebuilt(markup)
+        if any(counts.values()):
             with open(repaired, "w", encoding="utf-8") as fh:
                 fh.write(markup)
-            say(f"{name}: " + ", ".join(part for part in (
-                f"{made} formula(s) rebuilt as MathML from MathJax's "
-                "rendering" if made else "",
-                f"{dropped} MathJax rendering(s) dropped beside their TeX"
-                if dropped else "") if part))
+            said = {"hidden-mathml": "taken from the MathML MathJax hid "
+                                     "for screen readers",
+                    "tex": "read from the TeX the rendering carried",
+                    "rebuilt": "rebuilt as MathML from MathJax's rendering",
+                    "tex-follows": "dropped beside their TeX, which is read",
+                    "lost": "lost, marked [formula]: nothing in the "
+                            "rendering can be read back"}
+            say(f"{name}: " + "; ".join(f"{n} formula(s) {said[k]}"
+                                        for k, n in counts.items() if n))
         run(["pandoc", "-f", "html+raw_html+epub_html_exts", "-t", "json",
              repaired,
              "-o", stem + ".json", "--lua-filter=" + HTML_RAW_FILTER,

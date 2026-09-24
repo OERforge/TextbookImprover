@@ -1185,6 +1185,18 @@ def case_zip(work):
     with zipfile.ZipFile(os.path.join(deck, "talk.pptx"), "w") as z:
         z.writestr("[Content_Types].xml", "<Types/>")
     deck_run = run(deck)
+    saved = os.path.join(work, "saved")
+    os.makedirs(saved)
+    with zipfile.ZipFile(os.path.join(saved, "site.zip"), "w") as z:
+        z.writestr("Intro _ Site.html", '<!DOCTYPE html>\n<!-- saved from url=(0036)'
+                   'https://example.org/book/intro.html -->\n<html lang="en"><head>'
+                   '<title>Intro | Site</title></head><body><main><h1>Intro</h1>'
+                   '<p>Hello.</p></main></body></html>')
+        z.writestr("Intro _ Site_files/style.css", "body { }")
+    with open(os.path.join(saved, "conversion.yaml"), "w") as fh:
+        fh.write("targets:\n  html:\n    format: html\n")
+    saved_run = run(saved)
+    saved_pages = [n for n in os.listdir(saved) if n.endswith(".html")]
     report = open(os.path.join(book, "unpack-report.csv")).read() if exists(
         book, "unpack-report.csv") else ""
     return [
@@ -1206,6 +1218,11 @@ def case_zip(work):
         ("a zip with no sources stops the run, saying what it holds",
          lambda: none.returncode != 0 and "slides.pdf" in none.stdout + none.stderr
          and not exists(empty, "slides.pdf")),
+        ("a zip of a browser's save goes through unpack-site.py: pages named "
+         "from their addresses, not the browser's file names",
+         lambda: "saved from a browser" in saved_run.stderr
+         and len(saved_pages) == 1 and "_" not in saved_pages[0]
+         and exists(saved, "project.yaml")),
         ("a slide deck is a zip but not an archive to unpack",
          lambda: "talk.pptx" not in deck_run.stdout + deck_run.stderr
          and not exists(deck, "[Content_Types].xml")),
@@ -1369,6 +1386,75 @@ def case_html_ids(work):
         ("nothing is reported missing, and epubcheck has no complaint",
          lambda: exists(work, "epub") and "missing-fragment" not in checked
          and "RSC-005" not in checked),
+    ]
+
+
+def case_html_images(work):
+    """An HTML source's decorative images stay decorative: an empty alt,
+    or Canvas's role="presentation" with none. An image with no alt is
+    still reported, and a frame's size is made valid."""
+    import importlib.util
+    if not (importlib.util.find_spec("html5lib") or importlib.util.find_spec("lxml")):
+        return [("skip: HTML sources need html5lib or lxml", lambda: True)]
+    os.makedirs(work)
+    with open(os.path.join(work, "d.png"), "wb") as fh:
+        fh.write(ONE_PIXEL)
+    with open(os.path.join(work, "p.html"), "w", encoding="utf-8") as fh:
+        fh.write('<!DOCTYPE html><html lang="en"><head><title>P</title></head><body><h1>P</h1>'
+                 '<p><img src="d.png" alt=""> empty</p>'
+                 '<p><img src="d.png" role="presentation"> Canvas</p>'
+                 '<p><img src="d.png" alt="A dot"> described</p>'
+                 '<p><img src="d.png"> missing</p>'
+                 '<p><iframe src="https://example.org/x" width="1200px" height="100%" '
+                 'style="border: 0"></iframe></p></body></html>')
+    with open(os.path.join(work, "conversion.yaml"), "w") as fh:
+        fh.write("targets:\n  html:\n    format: html\n")
+    subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quiet"],
+                   cwd=work, capture_output=True, text=True, stdin=subprocess.DEVNULL)
+    page = read(work, "html", "p.html") if exists(work, "html", "p.html") else ""
+    images = re.findall(r"<img[^>]*>", page)
+    report = open(os.path.join(work, "output-check.csv")).read() if exists(
+        work, "output-check.csv") else ""
+    frame = (re.findall(r"<iframe[^>]*>", page) or [""])[0]
+    return [
+        ("an empty alt, and role=presentation without one, are decorative: "
+         "alt=\"\", no role", lambda: len(images) == 4
+         and all('alt=""' in i and "role=" not in i for i in images[:2])),
+        ("a described image keeps its alt; one without is still reported",
+         lambda: 'alt="A dot"' in images[2] and "alt=" not in images[3]
+         and report.count("image-without-alt") == 1),
+        ("a frame's width in px loses the unit, and a percentage is a style",
+         lambda: 'width="1200"' in frame and "height=" not in frame
+         and "height: 100%" in frame),
+    ]
+
+
+def case_asciidoc_markdown(work):
+    """An AsciiDoc chapter written as Markdown reads back as the same page."""
+    os.makedirs(work)
+    with open(os.path.join(work, "ch.adoc"), "w", encoding="utf-8") as fh:
+        fh.write("= A chapter\n\nIntro with *strong* and a https://example.org[link].\n\n"
+                 "== A section\n\n* one\n* two\n\n[source,python]\n----\nprint('hi')\n----\n\n"
+                 "|===\n|Name |Count\n|a |1\n|b |2\n|===\n\nimage::dot.png[A dot]\n")
+    with open(os.path.join(work, "dot.png"), "wb") as fh:
+        fh.write(ONE_PIXEL)
+    with open(os.path.join(work, "conversion.yaml"), "w") as fh:
+        fh.write("targets:\n  html:\n    format: html\n  md:\n    format: markdown\n")
+    subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quiet"],
+                   cwd=work, capture_output=True, text=True, stdin=subprocess.DEVNULL)
+    back = work + "-back"
+    if exists(work, "md"):
+        shutil.copytree(os.path.join(work, "md"), back)
+        with open(os.path.join(back, "conversion.yaml"), "w") as fh:
+            fh.write("targets:\n  html:\n    format: html\n")
+        subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quiet"],
+                       cwd=back, capture_output=True, text=True, stdin=subprocess.DEVNULL)
+    agree = subprocess.run(["python3", os.path.join(ROOT, "util", "compare-output.py"),
+                            os.path.join(work, "html"), os.path.join(back, "html")],
+                           capture_output=True, text=True).stdout
+    return [
+        ("AsciiDoc to Markdown and back gives the same page",
+         lambda: exists(back, "html", "ch.html") and "Runs agree" in agree),
     ]
 
 
@@ -1856,6 +1942,8 @@ CASES = [
     ("AsciiDoc layout attributes", case_asciidoc_layout),
     ("formats not yet implemented", case_not_implemented),
     ("ids with spaces in HTML sources", case_html_ids),
+    ("decorative images and frame sizes in HTML sources", case_html_images),
+    ("AsciiDoc to Markdown and back", case_asciidoc_markdown),
     ("a hand-written page", case_hand_written),
     ("several targets", case_targets),
     ("arguments passed to the packager", case_passthrough),

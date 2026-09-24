@@ -154,6 +154,31 @@ def extract_zip(path, work):
     return notes
 
 
+def browser_save(directory):
+    """Whether a directory holds pages a browser saved: an .mhtml, or a page
+    whose files sit beside it in <name>_files, or one Chrome or Edge marked
+    with the address it was saved from."""
+    for name in os.listdir(directory):
+        path = os.path.join(directory, name)
+        if name.lower().endswith((".mhtml", ".mht")):
+            return True
+        if name.lower().endswith((".html", ".htm")) and os.path.isfile(path):
+            if os.path.isdir(os.path.splitext(path)[0] + "_files"):
+                return True
+            with open(path, encoding="utf-8", errors="replace") as fh:
+                if "saved from url=" in fh.read(2048):
+                    return True
+    return False
+
+
+def pass_on(run):
+    """An unpacker's notes and warnings, which say something worth knowing
+    even when it succeeds (that lxml, not html5lib, parsed the pages)."""
+    for line in (run.stderr or "").splitlines():
+        if line.startswith(("NOTE", "WARNING")):
+            say(line)
+
+
 def unpack_archives(base, check_only=False, linked_documents=False):
     """A web archive -- a WARC, compressed or not, or a WACZ, recognized
     by its first bytes -- or a Common Cartridge, recognized by its
@@ -215,6 +240,25 @@ def unpack_archives(base, check_only=False, linked_documents=False):
     try:
         if tool == "zip":
             notes = extract_zip(archives[0], work)
+            # A zip of pages a browser saved is a capture of a site, like a
+            # WARC: unpack-site.py strips the site's chrome and names pages
+            # from their addresses, where converting the saved files would
+            # keep "| Site" in every title and the browser's file names.
+            if browser_save(work):
+                site = tempfile.mkdtemp(prefix=".unpacking-", dir=base)
+                run = subprocess.run([sys.executable,
+                                      os.path.join(HERE, "unpack-site.py"),
+                                      work, "-o", site],
+                                     capture_output=True, text=True)
+                if run.returncode != 0:
+                    shutil.rmtree(site, ignore_errors=True)
+                    die(f"Unpacking the pages saved in {names} failed:\n"
+                        + (run.stderr.strip() or run.stdout.strip()))
+                pass_on(run)
+                shutil.rmtree(work, ignore_errors=True)
+                work = site
+                say(f"{names} holds pages saved from a browser; they're "
+                    "unpacked as unpack-site.py unpacks a browser's save.")
             held = sorted(os.listdir(work))
             if not any(n.lower().endswith(SOURCE_EXTENSIONS) for n in held):
                 inside = [n for n in held if n.lower().endswith(
@@ -239,6 +283,7 @@ def unpack_archives(base, check_only=False, linked_documents=False):
             if run.returncode != 0:
                 die(f"Unpacking {names} failed:\n"
                     + (run.stderr.strip() or run.stdout.strip()))
+            pass_on(run)
         kept = {"project.yaml": "project-unpacked.yaml",
                 "conversion.yaml": "conversion-unpacked.yaml"}
         for name in sorted(os.listdir(work)):

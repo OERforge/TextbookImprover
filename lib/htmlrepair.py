@@ -99,7 +99,49 @@ def repaired(markup):
         return f"<div id={name}></div><{tag}{lead}{rest}>"
 
     markup = _INSIDE.sub(inside, markup)
-    return _BEFORE.sub(before, markup), count
+    markup = _BEFORE.sub(before, markup)
+    markup, marked = decorative_images(markup)
+    return markup, count + marked
+
+
+_IMG = re.compile(r"<img\b((?:[^<>\"']|\"[^\"]*\"|'[^']*')*)>", re.I)
+_ATTR = r"""\b%s\s*=\s*("[^"]*"|'[^']*'|[^\s"'>]+)"""
+
+
+def decorative_images(markup):
+    """(markup, count): each image its author marked decorative given the
+    class the pipeline reads as that. In HTML an empty alt says so (it
+    isn't an omission, as it is in a Word file), and so does
+    role="presentation" or role="none" with no alt, which is how Canvas
+    marks one. Pandoc's reader can't tell an empty alt from none, so without
+    the class the image came out with no alt at all, and a screen reader
+    read its file name. The role goes: an image with alt="" may carry
+    none."""
+    count = 0
+
+    def mark(match):
+        nonlocal count
+        attrs = match.group(1)
+        alt = re.search(_ATTR % "alt", attrs, re.I)
+        role = re.search(_ATTR % "role", attrs, re.I)
+        role_value = role.group(1).strip("\"'").strip().lower() if role else ""
+        if alt is not None and alt.group(1).strip("\"'").strip():
+            return match.group(0)              # a description: not decorative
+        if alt is None and role_value not in ("presentation", "none"):
+            return match.group(0)              # an omission: reported, not decided
+        if role is not None:
+            attrs = attrs[:role.start()] + attrs[role.end():]
+        cls = re.search(_ATTR % "class", attrs, re.I)
+        if cls is not None:
+            value = cls.group(1).strip("\"'")
+            if "decorative" in value.split():
+                return "<img" + attrs + ">"
+            attrs = attrs[:cls.start()] + 'class="%s decorative"' % value + attrs[cls.end():]
+        else:
+            attrs = ' class="decorative"' + attrs
+        count += 1
+        return "<img" + attrs + ">"
+    return _IMG.sub(mark, markup), count
 
 
 def repaired_copy(source, destination):

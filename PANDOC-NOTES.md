@@ -62,6 +62,8 @@ What Pandoc does, as read from its source or established by test, for the questi
 
 **An id with whitespace in it is kept as it is**, from `<a name="section 15">` or `id="section 15"`, though neither HTML nor XHTML allows one; the writers then emit it, and epubcheck rejects each (RSC-005, 469 in DCIC). Measured. `html-source.lua` makes the whitespace a hyphen, in ids and in links' fragments.
 
+**An empty alt and no alt read the same.** `<img alt="">` and `<img>` both become an `Image` with an empty caption, and the HTML writer writes that with no `alt` at all. In HTML an empty alt is the author saying the image is decorative, so without help every deliberately decorative image comes out undescribed, and a screen reader reads its file name. Measured. `lib/htmlrepair.py` gives such an image, and one with `role="presentation"` and no alt (Canvas's way), the class `decorative` before Pandoc reads the page, which the filter writes as `alt=""`.
+
 **A paragraph keeps none of its attributes.** `pPara` builds a `Para` from the inlines and discards the tag's class and id. `<p class="subtitle">` and `<p class="date">` in Pandoc's own title block come back as bare paragraphs, and so does a web page's `<p class="caption">`. Read from the source and measured. Anything a paragraph's class has to say must be said before Pandoc reads it, or read out of the file.
 
 **Pandoc's own title block is content to the reader**: `<header id="title-block-header">` becomes a `Div` with that id, while `<title>` and the `<meta name=…>` elements become metadata. Measured: reading our own page and writing it again gave two titles.

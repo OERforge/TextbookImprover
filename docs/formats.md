@@ -17,7 +17,7 @@ Every source format the pipeline reads, the ways a book in that format can arriv
 | Word (`.docx`) | TESTED | TESTED | TESTED | NOT YET IMPLEMENTED | NOT YET IMPLEMENTED | NOT YET IMPLEMENTED (Word output) |
 | Markdown (`.md`) | TESTED | TESTED | TESTED | NOT YET IMPLEMENTED | NOT YET IMPLEMENTED | TESTED |
 | HTML (`.html`) | TESTED | TESTED | TESTED | NOT YET IMPLEMENTED | NOT YET IMPLEMENTED | TESTED |
-| AsciiDoc (`.adoc`) | TESTED | TESTED | NEEDS MORE TESTING | NOT YET IMPLEMENTED | NOT YET IMPLEMENTED | Not available (no AsciiDoc output) |
+| AsciiDoc (`.adoc`) | TESTED | TESTED | TESTED | NOT YET IMPLEMENTED | NOT YET IMPLEMENTED | Not available (no AsciiDoc output) |
 
 PDF and Word output are NOT YET IMPLEMENTED ([roadmap item 2](../ROADMAP.md)): a target declaring `format: pdf` or `format: docx` is skipped with a warning saying so, and a book with no other target stops. PDF is read only by [the audit](auditing.md), which reports on a Word, Markdown, HTML, EPUB, or PDF file without converting it.
 
@@ -57,13 +57,13 @@ PDF and Word output are NOT YET IMPLEMENTED ([roadmap item 2](../ROADMAP.md)): a
 **How it can arrive**
 
 - Files in the book's directory: every `.html` beside the sources is a source ([HTML sources](html.md)), and a finished page that shouldn't be converted goes in `_pt/`, copied as it is.
-- A plain `.zip` of them.
+- A plain `.zip` of them. A zip holding a browser's save (pages marked with the address they were saved from, or with a `_files` folder beside them, or `.mhtml` files) goes through `unpack-site.py`, as the save itself would. Tested on CS168 as a browser's save zipped: 62 pages, named from their addresses and ordered by the site's menus.
 - A website saved from a browser, or saved as `.mhtml`, through [`unpack-site.py`](site-input.md). Tested on CS168 and DCIC. A browser's `.mhtml` save holds only MathJax's rendering of a formula, not its TeX, and each rendering is made math again from what it still holds ([HTML sources](html.md) says how). MathJax 2's HTML-CSS rendering is TESTED, on DCIC's 410 formulas. The rest NEEDS MORE TESTING: MathJax 2's CommonHTML and SVG, and MathJax 3's and 4's CommonHTML and SVG, with and without the MathML they hide for screen readers, have been tested only on renderings MathJax itself produced, not on a page saved from a real book. MathJax 2's SVG without that hidden MathML can't be read back at all; such a formula is marked `[formula]`, and the output check reports it.
 - A WARC or WACZ, which `convert.py` unpacks when it finds one alone in a directory ([Making a WARC](making-warcs.md)). Tested on DCIC, CS168, and the OER Commons business communication book.
-- An EPUB, through [`unpack-epub.py`](epub-input.md), whose content documents become pages. Tested on three publishers' EPUBs: Pressbooks, OER Commons, and Asciidoctor's.
+- An EPUB, through [`unpack-epub.py`](epub-input.md), whose content documents become pages. Tested on three publishers' EPUBs (Pressbooks, OER Commons, and Asciidoctor's) and on one this pipeline built: DCIC's, unpacked and converted again, keeps all 410 formulas and builds an EPUB epubcheck passes.
 - A Common Cartridge exported from an LMS or a publisher, which `convert.py` unpacks when it finds one alone ([A course cartridge as the source](cartridge-input.md)). Tested on a Brightspace export and OpenStax's Canvas cartridge. Discussions, assignments, web links, test banks, and tool links are reported, not converted.
 
-Whatever the route, scripts don't run, so a page a script draws in the browser has nothing to read; only what's inside a page's `<main>` is read when it has one; tags Pandoc has no element for (`<footer>`, `<nav>`, `<cite>`) go, their contents kept; a paragraph's class is lost; and an id with a space in it, which HTML doesn't allow, has its spaces made hyphens, links to it following. The full list is in [HTML sources](html.md).
+Pages are parsed with html5lib, or with lxml where html5lib isn't installed; DCIC's WARC unpacked and converted with each gives the same 80 pages. Whatever the route, scripts don't run, so a page a script draws in the browser has nothing to read; only what's inside a page's `<main>` is read when it has one; tags Pandoc has no element for (`<footer>`, `<nav>`, `<cite>`) go, their contents kept; a paragraph's class is lost; and an id with a space in it, which HTML doesn't allow, has its spaces made hyphens, links to it following. The full list is in [HTML sources](html.md).
 
 **What it becomes**
 
@@ -83,7 +83,7 @@ Whatever the route, scripts don't run, so a page a script draws in the browser h
 
 - **HTML: TESTED**, on the security textbook (14 pages, its 54 cross-references by title resolved) and the suite. Asciidoctor's own settings (`:toc:`, `:icons:`, `:stylesheet:`, `:sectnums:`) are dropped. A block's `width` goes to the image it holds, or goes if it holds none, and a diagram's `target` goes: Pandoc passes both through onto elements where HTML doesn't allow them.
 - **EPUB: TESTED.** The security textbook's EPUB passes epubcheck with no errors or warnings, and the suite builds one from a chapter with a sized image, a listing, and a table.
-- **Markdown: NEEDS MORE TESTING.** The security textbook goes to Markdown and back with all 14 pages identical, but no suite case covers the path yet.
+- **Markdown: TESTED.** The security textbook goes to Markdown and back with all 14 pages identical, and the suite converts a chapter the same way.
 - **PDF and Word: NOT YET IMPLEMENTED.**
 - **AsciiDoc: Not available.**
 

@@ -114,6 +114,30 @@ local function framed(text, block)
     title = 'Embedded content at ' .. (src:match('^%a*:?//([^/?#]+)') or src)
     attributes[#attributes + 1] = { 'title', title }
   end
+  -- A frame's width and height are a number of pixels, and nothing else:
+  -- embed code often writes width="1200px" or width="100%", which HTML
+  -- rejects. Pixels lose their unit; anything else becomes a style.
+  local kept, style = {}, {}
+  for _, pair in ipairs(attributes) do
+    local name, value = pair[1], pair[2]
+    if name == 'width' or name == 'height' then
+      local pixels = value:match('^%s*(%d+)%s*px%s*$') or value:match('^%s*(%d+)%s*$')
+      if pixels then
+        kept[#kept + 1] = { name, pixels }
+      elseif value:match('%S') then
+        style[#style + 1] = name .. ': ' .. value
+      end
+    elseif name ~= 'style' then
+      kept[#kept + 1] = pair
+    end
+  end
+  for _, pair in ipairs(attributes) do
+    if pair[1] == 'style' and pair[2]:match('%S') then
+      table.insert(style, 1, (pair[2]:gsub('%s*;%s*$', '')))
+    end
+  end
+  if #style > 0 then kept[#kept + 1] = { 'style', table.concat(style, '; ') } end
+  attributes = kept
   local attr = pandoc.Attr('', { 'embed' }, attributes)
   local link = pandoc.Link(title, watch_url(src))
   if block then return pandoc.Div({ pandoc.Para({ link }) }, attr) end

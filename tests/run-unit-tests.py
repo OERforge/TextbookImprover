@@ -258,10 +258,19 @@ def check_sidecar_paths():
     convert = load(os.path.join(ROOT, "bin", "convert.py"), "convert")
     base = tempfile.mkdtemp(prefix="sidecar-paths-")
 
+    import contextlib
+    import io
+    said = []
+
     def stops(path, setting, default):
+        # What convert.py prints on the way out is the check's to read,
+        # not the terminal's: an expected error shouldn't look like one.
+        err = io.StringIO()
         try:
-            convert.check_sidecar(path, setting, default, base)
+            with contextlib.redirect_stderr(err):
+                convert.check_sidecar(path, setting, default, base)
         except SystemExit:
+            said.append(err.getvalue())
             return True
         return False
 
@@ -275,9 +284,11 @@ def check_sidecar_paths():
         ("a path escaping the content directory stays relative to it",
          lambda: convert.resolve_path(base, "../corrections/t.csv")
                  == os.path.join(base, "../corrections/t.csv")),
-        ("a configured sidecar that does not exist stops the run",
+        ("a configured sidecar that does not exist stops the run, naming "
+         "the setting and the file",
          lambda: stops(os.path.join(base, "corrections", "t.csv"),
-                       "sidecars.table_captions", "table-captions.csv")),
+                       "sidecars.table_captions", "table-captions.csv")
+         and "sidecars.table_captions" in said[-1] and "t.csv" in said[-1]),
         ("the default name, not yet written, is the normal starting state",
          lambda: not stops(os.path.join(base, "table-captions.csv"),
                            "sidecars.table_captions", "table-captions.csv")),

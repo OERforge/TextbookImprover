@@ -57,6 +57,7 @@ Versions are two-part and pre-1.0: breaking changes may land in any of them unti
 
 ### Fixed
 
+- **`run-all.sh` lists the checks it skipped.** A check skipped for want of a validator or a library passes, so the summary used to say only that every suite passed; it now ends with each skip and its reason. And a unit test that expects an error no longer prints it to the terminal, where it read like a failure.
 - **An EPUB's links to local files.** Pandoc's EPUB writer carries a page's images but leaves a link to a PDF or Word file as written, pointing at a file the EPUB doesn't hold (epubcheck: RSC-007), and an EPUB can't link to a file outside its pages anyway. The link's text now stays without the link, and the output check reports the file as `link-to-file-dropped`. OpenStax's sociology cartridge built as an EPUB went from five RSC-007 errors and an RSC-005 to none.
 - **The output check counts a linked file that's on disk.** It treated every link to something other than a page as missing, which no book had tripped until course pages linked to their own documents.
 - **`table-samples.py` shows the guess a conversion makes.** It asked for the whole-table guess, which says `none` for most banded tables, and picked two of its examples by a `none` that now needs evidence. It uses the census's guess, chooses those examples by the table's own shape, adds cases for a table no rule recognizes, a box of labeled fields, and a title over an unmarked header row, and takes directories as the census does.

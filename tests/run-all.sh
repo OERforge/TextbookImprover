@@ -90,7 +90,8 @@ failures=0
 failed=""
 skipped=""
 summary="$(mktemp)"
-trap 'rm -f "$summary" "$summary.suite"' EXIT
+skips="$(mktemp)"
+trap 'rm -f "$summary" "$summary.suite" "$skips"' EXIT
 
 run () {
   local script="$1"
@@ -100,7 +101,12 @@ run () {
   # lines for a summary at the end, where they are findable after ten
   # suites have scrolled past.
   python3 "$here/$script" "$@" 2>&1 | tee "$summary.suite"
-  if [ "${PIPESTATUS[0]}" -ne 0 ]; then
+  local status="${PIPESTATUS[0]}"
+  # A check skipped for want of a tool or a library passes, and a summary
+  # that says only "passed" hides it, so the skips are listed at the end.
+  grep -E '^ *skip\b|\bskip: ' "$summary.suite" \
+    | sed -E "s/^ *(ok +)?//; s|^|  $script: |" >> "$skips"
+  if [ "$status" -ne 0 ]; then
     failures=$((failures + 1))
     failed="$failed $script"
     grep -E '^ *(FAIL|ERROR)\b' "$summary.suite" \
@@ -152,6 +158,10 @@ fi
 printf '\n'
 if [ -n "$skipped" ]; then
   echo "skipped: $skipped" >&2
+fi
+if [ -s "$skips" ]; then
+  echo "$(wc -l < "$skips") check(s) skipped, which passing doesn't cover:" >&2
+  cat "$skips" >&2
 fi
 if [ "$failures" -gt 0 ]; then
   echo "$failures suite(s) failed:$failed" >&2

@@ -60,6 +60,7 @@ import argparse
 import glob
 import json
 import os
+import csv
 import re
 import shutil
 import copy
@@ -115,17 +116,55 @@ def say(text):
     print(text, file=sys.stderr)
 
 
+def extract_zip(path, work):
+    """A plain zip's files, written into work. Folders that wrap everything
+    ("My Book/...") are dropped, so the sources sit at the top where
+    convert.py finds them; macOS's __MACOSX and .DS_Store are left out; and
+    an entry that would land outside the book -- an absolute path, or one
+    with .. in it -- is refused rather than written. Returns the report's
+    rows."""
+    import zipfile
+    notes, entries = [], []
+    with zipfile.ZipFile(path) as archive:
+        for info in archive.infolist():
+            name = info.filename.replace("\\", "/")
+            parts = [p for p in name.split("/") if p not in ("", ".")]
+            if name.startswith("__MACOSX/") or (parts and parts[-1] in (
+                    ".DS_Store", "Thumbs.db", "desktop.ini")):
+                continue
+            if (name.startswith("/") or re.match(r"^[A-Za-z]:", name)
+                    or ".." in parts):
+                notes.append((info.filename, "unsafe-path",
+                              "would land outside the book; not extracted"))
+                continue
+            if info.is_dir() or not parts:
+                continue
+            entries.append((info, parts))
+        strip = 0
+        while entries and all(len(parts) > strip + 1 for _, parts in entries) \
+                and len({parts[strip] for _, parts in entries}) == 1:
+            strip += 1
+        for info, parts in entries:
+            dest = os.path.join(work, *parts[strip:])
+            os.makedirs(os.path.dirname(dest), exist_ok=True)
+            with archive.open(info) as source, open(dest, "wb") as out:
+                shutil.copyfileobj(source, out)
+    return notes
+
+
 def unpack_archives(base, check_only=False, linked_documents=False):
     """A web archive -- a WARC, compressed or not, or a WACZ, recognized
     by its first bytes -- or a Common Cartridge, recognized by its
-    manifest, in a directory with no sources is unpacked there first, as
-    unpack-site.py or unpack-cartridge.py would, and its pages are then
-    converted. From
-    then on the pages are the book: they're where corrections are made, so
-    a later run, finding sources, never reads the archive again. A
-    project.yaml already here is kept, and the unpacker's is written
-    beside it as project-unpacked.yaml. For the unpacker's options (a
-    profile, whole pages), run unpack-site.py itself."""
+    manifest, or a plain .zip of a book's files, in a directory with no
+    sources is unpacked there first, as unpack-site.py or
+    unpack-cartridge.py would or by extracting the zip, and its sources
+    are then converted. From then on they're the book: they're where
+    corrections are made, so a later run, finding sources, never reads the
+    archive again. A project.yaml or conversion.yaml already here is kept,
+    and the archive's is written beside it (project-unpacked.yaml). For an
+    unpacker's own options (a profile, whole pages), run it yourself. A
+    plain zip is known by its name, since Word files, slide decks, EPUBs,
+    and cartridges are zips too."""
     import sitesource
     import cartridgesource
     skip = SOURCE_EXTENSIONS + (".yaml", ".yml", ".csv", ".json", ".css",
@@ -135,27 +174,34 @@ def unpack_archives(base, check_only=False, linked_documents=False):
     cartridges = [p for p in candidates if cartridgesource.is_cartridge(p)]
     archives = [p for p in candidates
                 if p not in cartridges and sitesource.is_warc(p)]
+    import zipfile
+    zips = [p for p in candidates
+            if p not in cartridges and p not in archives
+            and p.lower().endswith(".zip") and zipfile.is_zipfile(p)]
     unused = ("--linked-documents applies when a run unpacks a cartridge, "
               "and this one doesn't: ")
-    if not archives and not cartridges:
+    if not archives and not cartridges and not zips:
         if linked_documents:
             say(unused + "there's no cartridge here.")
         return
-    if cartridges and (archives or len(cartridges) > 1):
+    if (cartridges or zips) and (archives or len(cartridges + zips) > 1):
         die("More than one thing to unpack here ("
-            + ", ".join(os.path.basename(p) for p in cartridges + archives)
-            + "); a book comes from one cartridge, or from web archives. "
-            "Unpack them into directories of their own.")
-    tool = "unpack-cartridge.py" if cartridges else "unpack-site.py"
-    archives = cartridges or archives
+            + ", ".join(os.path.basename(p) for p in cartridges + zips + archives)
+            + "); a book comes from one cartridge or zip, or from web "
+            "archives. Unpack them into directories of their own.")
+    tool = ("unpack-cartridge.py" if cartridges else
+            "zip" if zips else "unpack-site.py")
+    archives = cartridges or zips or archives
     if linked_documents and tool != "unpack-cartridge.py":
-        say(unused + "a web archive's pages keep their links to files.")
+        say(unused + ("a zip's files are the book as they are." if zips
+                      else "a web archive's pages keep their links to files."))
     names = ", ".join(os.path.basename(p) for p in archives)
     if any(p.lower().endswith(SOURCE_EXTENSIONS)
            for p in glob.glob(os.path.join(base, "*"))):
         say(f"{names}: not read, since this directory has sources, which "
             "are the book once an archive is unpacked. To unpack it afresh, "
-            f"use {tool} into a new directory.")
+            + ("extract it into a new directory." if tool == "zip" else
+               f"use {tool} into a new directory."))
         if linked_documents:
             say(unused + "the pages here are the book already, and "
                 "unpacking again into a new directory is how to change that.")
@@ -165,31 +211,52 @@ def unpack_archives(base, check_only=False, linked_documents=False):
         return
     work = tempfile.mkdtemp(prefix=".unpacking-", dir=base)
     try:
-        run = subprocess.run([sys.executable, os.path.join(HERE, tool),
-                              *archives, "-o", work]
-                             + (["--linked-documents"] if linked_documents
-                                and tool == "unpack-cartridge.py" else []),
-                             capture_output=True, text=True)
-        if run.returncode != 0:
-            die(f"Unpacking {names} failed:\n"
-                + (run.stderr.strip() or run.stdout.strip()))
+        if tool == "zip":
+            notes = extract_zip(archives[0], work)
+            held = sorted(os.listdir(work))
+            if not any(n.lower().endswith(SOURCE_EXTENSIONS) for n in held):
+                inside = [n for n in held if n.lower().endswith(
+                    (".imscc", ".warc", ".gz", ".wacz", ".epub", ".zip"))]
+                die(f"{names} holds no source convert.py reads at its top "
+                    "(" + (", ".join(held[:8]) + (", ..." if len(held) > 8
+                                                   else "") or "nothing")
+                    + ")." + (" To convert " + ", ".join(inside) + ", put it "
+                              "in a directory of its own." if inside else ""))
+            if notes:
+                with open(os.path.join(work, "unpack-report.csv"), "w",
+                          newline="", encoding="utf-8") as fh:
+                    writer = csv.writer(fh)
+                    writer.writerow(["Where", "Check", "Detail"])
+                    writer.writerows(notes)
+        else:
+            run = subprocess.run([sys.executable, os.path.join(HERE, tool),
+                                  *archives, "-o", work]
+                                 + (["--linked-documents"] if linked_documents
+                                    and tool == "unpack-cartridge.py" else []),
+                                 capture_output=True, text=True)
+            if run.returncode != 0:
+                die(f"Unpacking {names} failed:\n"
+                    + (run.stderr.strip() or run.stdout.strip()))
+        kept = {"project.yaml": "project-unpacked.yaml",
+                "conversion.yaml": "conversion-unpacked.yaml"}
         for name in sorted(os.listdir(work)):
             target = os.path.join(base, name)
-            if name == "project.yaml" and os.path.exists(target):
-                target = os.path.join(base, "project-unpacked.yaml")
-                say("project.yaml was already here and is kept; the "
-                    "unpacker's is project-unpacked.yaml.")
+            if name in kept and os.path.exists(target):
+                target = os.path.join(base, kept[name])
+                say(f"{name} was already here and is kept; the archive's is "
+                    f"{kept[name]}.")
             if os.path.exists(target):
                 die(f"{name} is already here; unpacking {names} would "
-                    "overwrite it. Unpack with unpack-site.py into a new "
-                    "directory instead.")
+                    "overwrite it. Unpack it into a new directory instead.")
             shutil.move(os.path.join(work, name), target)
     finally:
         shutil.rmtree(work, ignore_errors=True)
-    pages = len(glob.glob(os.path.join(base, "*.html")))
-    say(f"Unpacked {names}: {pages} page(s), which are the book from now on. "
-        "Correct them, not the archive: later runs don't read it again. "
-        "unpack-report.csv says what the unpacking found.")
+    sources = sum(1 for p in glob.glob(os.path.join(base, "*"))
+                  if p.lower().endswith(SOURCE_EXTENSIONS))
+    say(f"Unpacked {names}: {sources} source(s), which are the book from now "
+        "on. Correct them, not the archive: later runs don't read it again."
+        + (" unpack-report.csv says what the unpacking found."
+           if os.path.exists(os.path.join(base, "unpack-report.csv")) else ""))
 
 
 def die(text, code=1):

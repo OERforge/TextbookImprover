@@ -109,6 +109,16 @@ script.
 Work on the Linux filesystem, not under `/mnt/c` or `/mnt/h`. See
 [Converting on a cloud-synced drive](troubleshooting.md#converting-on-a-cloud-synced-drive).
 
+## A book that arrives as an archive
+
+A book often comes packed: a `.zip` of its Word or Markdown files, a course exported from an LMS as a cartridge, a website captured as a WARC. Put the archive in a directory of its own and run `convert.py` there. Finding an archive and no sources, it unpacks it into the directory first, then converts what it unpacked:
+
+- **A `.zip`** is extracted. The folders that wrap everything (`My Book/…`) are dropped, so the sources land at the top, where `convert.py` looks for them; macOS's `__MACOSX` and `.DS_Store` are left out; and an entry that would land outside the directory is refused, and listed in `unpack-report.csv`. A zip is known by its name, since a Word file, a slide deck, and an EPUB are zips too, and one with no sources at its top stops the run with a list of what it holds.
+- **A Common Cartridge** is unpacked as [A course cartridge as the source](cartridge-input.md) describes.
+- **A WARC or WACZ** is unpacked as [Making WARCs](making-warcs.md) describes.
+
+From then on the unpacked files are the book: correct them, not the archive, which later runs don't read again. A `project.yaml` or `conversion.yaml` already in the directory is kept, and the archive's is written beside it (`project-unpacked.yaml`, `conversion-unpacked.yaml`). One archive makes one book, so two in a directory stop the run, except several WARCs of one site, which are read together.
+
 ## A first conversion, start to finish
 
 ```bash

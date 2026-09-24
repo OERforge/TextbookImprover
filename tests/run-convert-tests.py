@@ -1146,6 +1146,72 @@ def case_cartridge(work):
     ]
 
 
+def case_zip(work):
+    """A plain zip of a book's files, alone in a directory: extracted with
+    the folder around it dropped, nothing let outside the book, the
+    directory's own settings kept, and nothing done with a zip holding no
+    sources or with a slide deck, which is a zip too."""
+    import zipfile
+    os.makedirs(work)
+    book = os.path.join(work, "book")
+    os.makedirs(book)
+    with zipfile.ZipFile(os.path.join(book, "My Book.zip"), "w") as z:
+        z.writestr("My Book/ch1.md", "# One\n\n![A dot](images/dot.png)\n")
+        z.writestr("My Book/ch2.md", "# Two\n\nThe first draft.\n")
+        z.writestr("My Book/images/dot.png", ONE_PIXEL)
+        z.writestr("My Book/conversion.yaml", "targets:\n  md:\n    format: markdown\n")
+        z.writestr("My Book/.DS_Store", "junk")
+        z.writestr("__MACOSX/My Book/._ch1.md", "junk")
+        z.writestr("../evil.txt", "outside")
+    with open(os.path.join(book, "conversion.yaml"), "w") as fh:
+        fh.write("targets:\n  html:\n    format: html\n")
+
+    def run(where):
+        return subprocess.run(["python3", os.path.join(BIN, "convert.py"),
+                               "--quiet"], cwd=where, capture_output=True,
+                              text=True, stdin=subprocess.DEVNULL)
+    first = run(book)
+    if exists(book, "ch2.md"):
+        with open(os.path.join(book, "ch2.md"), "w") as fh:
+            fh.write("# Two\n\nThe corrected draft.\n")
+    second = run(book)
+    empty = os.path.join(work, "empty")
+    os.makedirs(empty)
+    with zipfile.ZipFile(os.path.join(empty, "handouts.zip"), "w") as z:
+        z.writestr("handouts/slides.pdf", b"%PDF-1.4")
+    none = run(empty)
+    deck = os.path.join(work, "deck")
+    os.makedirs(deck)
+    with zipfile.ZipFile(os.path.join(deck, "talk.pptx"), "w") as z:
+        z.writestr("[Content_Types].xml", "<Types/>")
+    deck_run = run(deck)
+    report = open(os.path.join(book, "unpack-report.csv")).read() if exists(
+        book, "unpack-report.csv") else ""
+    return [
+        ("a zip alone in a directory is extracted, the folder around it "
+         "dropped, and converted", lambda: "Unpacked My Book.zip" in first.stderr
+         and exists(book, "ch1.md") and exists(book, "images", "dot.png")
+         and not exists(book, "My Book") and exists(book, "html", "ch1.html")),
+        ("macOS's litter stays out", lambda: not exists(book, "__MACOSX")
+         and not exists(book, ".DS_Store")),
+        ("an entry that would land outside the book is refused and reported",
+         lambda: not os.path.exists(os.path.join(work, "evil.txt"))
+         and "unsafe-path" in report),
+        ("the directory's own conversion.yaml is kept, the zip's beside it",
+         lambda: "html" in open(os.path.join(book, "conversion.yaml")).read()
+         and exists(book, "conversion-unpacked.yaml")),
+        ("a later run converts a correction and doesn't extract again",
+         lambda: "corrected" in read(book, "html", "ch2.html")
+         and "not read" in second.stdout + second.stderr),
+        ("a zip with no sources stops the run, saying what it holds",
+         lambda: none.returncode != 0 and "slides.pdf" in none.stdout + none.stderr
+         and not exists(empty, "slides.pdf")),
+        ("a slide deck is a zip but not an archive to unpack",
+         lambda: "talk.pptx" not in deck_run.stdout + deck_run.stderr
+         and not exists(deck, "[Content_Types].xml")),
+    ]
+
+
 def case_html_source(work):
     """An HTML page is a source when the book says so, and converting
     what this pipeline wrote changes nothing."""
@@ -1625,6 +1691,7 @@ CASES = [
     ("compare-output sees lists and blockquotes", case_compare_blocks),
     ("a web archive converted directly", case_warc_direct),
     ("a Common Cartridge", case_cartridge),
+    ("a plain zip of a book's files", case_zip),
     ("a hand-written page", case_hand_written),
     ("several targets", case_targets),
     ("arguments passed to the packager", case_passthrough),

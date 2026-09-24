@@ -1,11 +1,15 @@
 # Pandoc notes
 
-What Pandoc does, as read from its source or established by test, for the questions this project keeps asking. Separate from PROJECT-NOTES.md because it's about Pandoc, not about us. Read this before answering a "what does Pandoc do when…" question, and read the source before running an experiment: a shallow clone of `jgm/pandoc` at the version in use (3.11 as written) lives in the working container at `~/pandoc-src`, and the files below are where the answers are. Each entry says whether it was read from the source or measured.
+What Pandoc does, as read from its source or established by test, for the questions this project keeps asking. Separate from PROJECT-NOTES.md because it's about Pandoc, not about us. Read this before answering a "what does Pandoc do when…" question, and read the source before running an experiment: a shallow clone of `jgm/pandoc` at the version in use (3.11 as written) lives in the working container at `~/pandoc-src`, and the files below are where the answers are. Each entry says whether it was read from the source or measured. Building Pandoc itself, which only an upstream patch needs, is in the section before Upstream.
 
 ## Where things are
 
 - `src/Text/Pandoc/Readers/Docx.hs` — the DOCX reader's document walk: bookmarks, links, anchors, tables, styles to headers.
 - `src/Text/Pandoc/Readers/Docx/Parse.hs` — the OOXML parse: what becomes a `BodyPart`, `ParPart`, `Run`; what is ignored.
+- `src/Text/Pandoc/Readers/Docx/Fields.hs`: field instructions (`HYPERLINK`, `PAGEREF`, `REF`, `XE`, the citation `ADDIN`s) and their switches.
+- `src/Text/Pandoc/Readers/Docx/Combine.hs`: how adjacent runs, and the links and spans around them, are merged.
+- `src/Text/Pandoc/Writers/Docx/OpenXML.hs`: what the DOCX writer makes of each block and inline, among them links, images, notes, and bookmarks (`toBookmarkName`).
+- `test/Tests/Readers/Docx.hs` (fixtures in `test/docx/`), `test/Tests/Writers/Docx.hs` (goldens in `test/docx/golden/`, and tests of a single attribute that need none), and `test/command/`, where a test is a Markdown file named for its issue.
 - `src/Text/Pandoc/Readers/HTML.hs` (and `Readers/HTML/`) — what becomes a `Div`, what is skipped, `extractMain`, iframes, MathJax, math in `<script>`.
 - `src/Text/Pandoc/Readers/EPUB.hs` — 300 lines: the spine walk, the id and link rewriting, what metadata is read.
 - `src/Text/Pandoc/Writers/EPUB.hs` — chunking, the chapter template's variables, the OPF and nav, accessibility metadata.
@@ -28,7 +32,19 @@ What Pandoc does, as read from its source or established by test, for the questi
 
 **Metadata comes from `Title`/`Author`-styled paragraphs, not `docProps/core.xml`.** Measured on 3.11; open upstream as #3034. The first `Title` paragraph becomes the title, later ones plain paragraphs.
 
-**A hyperlink's ScreenTip (`w:tooltip`) is discarded** in both directions. Measured; filed as #11869. jgm replied on 2026-09-22: he treats a ScreenTip as the counterpart of HTML's `title` and would map it to the `Link` title in both directions, by default with no extension, and for internal links too if feasible. `w:hyperlinkRuby` and the question about contributing a patch drafted with Claude went unanswered. The *Introductory Business Statistics* files hold 2,324 hyperlinks and no ScreenTip, so for OpenStax books the change will bring nothing in; its value is for authors who write them.
+**A hyperlink's ScreenTip (`w:tooltip`) is discarded** in both directions, in 3.11 and in `main` as of f0a20d437. Measured; filed as #11869. Where: the two `w:hyperlink` cases of `elemToParPart'` in `Parse.hs` read `r:id` and `w:anchor` and nothing else, `parPartToInlines'` builds each `Link` with an empty title, and the writer's two `Link` cases in `OpenXML.hs` ignore the title. Read from the source. jgm replied on 2026-09-22: he treats a ScreenTip as the counterpart of HTML's `title` and would map it to the `Link` title in both directions, by default with no extension, and for internal links too if feasible. `w:hyperlinkRuby` and the question about contributing a patch drafted with Claude went unanswered. A patch series doing what he described is on the `docx-screentips` branch (see Upstream). No file in the corpus has a ScreenTip: 25,017 `w:hyperlink` elements in the `document.xml` of 1,782 files, none with `w:tooltip`, and no `\o` switch or `w:hyperlinkRuby` anywhere; the full statistics files' footers add 169 hyperlinks, also without. Measured. So for these books the change brings nothing in; its value is for authors who write them.
+
+**A `HYPERLINK` field's switches are all parsed, and only `\l` is used.** `hyperlink` in `Fields.hs` collects every switch; `\l` becomes the fragment, while `\o` (the field-code form of a ScreenTip), `\t`, `\m`, and `\n` are dropped. A quoted argument keeps `\"` as written, backslash included. Read from the source. The corpus's only field-code hyperlinks, seven in the BC files (BC-03, 10, 13, 14, and 15, pasted from the web), have no `\o`.
+
+**Word saves a `HYPERLINK` field's `\o` as `w:tooltip`.** A hyperlink made with Ctrl+K, its field code then edited by hand to add `\o "…"`, was saved as a plain `w:hyperlink` carrying `w:tooltip`, with no field left. And an address typed as `https://example.org/guide.html#install` was saved as the relationship target `https://example.org/guide.html` with `w:anchor="install"`, which the reader joins back with a `#`, as Microsoft's notes say Word itself does. Measured on Word for Microsoft 365, Version 2609 (the fixture `test/docx/link_tooltips.docx` on the ScreenTip branch). So a Word-saved file has one form of ScreenTip, and reading `\o` was dropped from the patch.
+
+**Word limits a ScreenTip to 260 characters.** [MS-OI29500 §2.1.521](https://learn.microsoft.com/en-us/openspecs/office_standards/ms-oi29500/df06e423-11a6-4a36-bfb3-82139e531781): the standard sets no limit on `w:tooltip`, Word restricts it to 260, and `anchor`, `docLocation`, and `tgtFrame` to 255. The same note says Word appends `#` and `w:anchor` to an `r:id` link's target, where the standard says to ignore the anchor. What Word does with a longer one isn't stated there. It opens the file without complaint, shows the first 260 characters, and cuts the ScreenTip to 260 when it saves. Read from Microsoft's documentation; the behavior measured on Word 2609 with `screentip-writer-check.docx`, written by the patched writer with ScreenTips of 260, 261, and 400 characters. So the writer writes a title whole: Word handles its own copy, and a round trip that never passes through Word keeps it.
+
+**Adjacent links merge only when target and title both match.** `Combine.hs` treats a `Link` as a modifier and compares two by applying each to empty inlines, so a hyperlink Word split into two `w:hyperlink` elements comes back as one link, and two with different titles stay two. Read from the source.
+
+**An image's title already goes both ways.** `getTitleAndAlt` reads `wp:docPr/@title` into the `Image`'s title and `@descr` into its alt text, and the writer writes both back to `wp:docPr`. It's the precedent for the ScreenTip. Read from the source.
+
+**The reader finds `document.xml` only through `_rels/.rels`.** `getDocumentXmlPath` has no fallback, so a package without that part is a `DocxError`. Nothing else is required: `_rels/.rels` and `word/document.xml` alone read, with external links' targets empty for want of `document.xml.rels`. Read from the source; measured on all 1,782 slim corpus files once that part was added.
 
 **`w:tblHeader w:val="0"` read as a header row until 3.10.** Measured across versions.
 
@@ -94,7 +110,9 @@ What Pandoc does, as read from its source or established by test, for the questi
 
 ## The DOCX writer
 
-**Drops a table's `id`.** Measured. **Writes `w:styleId` before `w:type`** in `styles.xml`, the reverse of Word's order; parse attributes by name. Measured. **The bundled `reference.docx` declares no `compatibilityMode`**, so every `.docx` Pandoc writes opens in Word's Compatibility Mode; deliberate (#5645, #5358).
+**Drops a table's `id`.** Measured. **Writes `w:styleId` before `w:type`** in `styles.xml`, the reverse of Word's order; parse attributes by name. Measured. **The bundled `reference.docx` declares no `compatibilityMode`**, so every `.docx` Pandoc writes opens in Word's Compatibility Mode; deliberate (#5645, #5358). Saving one in Word 2609 warns that it will be "upgraded to the newest file format", and the saved copy declares `compatibilityMode` 15. Measured.
+
+**An internal link doesn't come back to its own target.** `toBookmarkName` gives every bookmark the writer makes a leading `_`, which hides it in Word's interface (an id of 40 characters or more, or with anything but letters, digits, and `_`, becomes a SHA-1 instead), and the link's `w:anchor` the same name, so `[x](#methods)` reads back as `[x](#_methods)`. Measured on `main` (f0a20d437).
 
 **The DOCX writer flattens a table's bodies into one.** A body's head row becomes an ordinary row, and a head row that is one cell spanning the table becomes a merged cell (`w:gridSpan`): Word's own form for a band. Read back, it's one body with that row as a spanning `<td>`, which is the shape the header pre-pass infers bands from. So a grouped table survives a trip through Word in meaning, not in markup. Measured.
 
@@ -213,6 +231,86 @@ Measured on 3.11 by writing each case with Pandoc's `asciidoc` writer and readin
 
 **A handler that returns `nil` keeps the element as it was, including changes made to it in place.** `html-source.lua`'s `Table` dropped empty columns from the table it was given and then returned `nil` when it had no headers to declare, and the columns came back. Return the element whenever it was changed.
 
+## Building Pandoc here
+
+Only an upstream patch needs this. Measured on `main` at f0a20d437 (2026-09-24).
+
+The container can't reach Hackage (`hackage.haskell.org` isn't on the allowed list, and cabal's default mirror answers 403), and Ubuntu 24.04's GHC 9.4.7 is below Pandoc's floor of 9.6. What works: GHC 9.6.6 and cabal-install 3.10.3 from Ubuntu 25.10 (`questing`), whose archive is still reachable; Ubuntu's prebuilt `libghc-*-dev` packages for most of the dependencies; and the rest cloned from GitHub at the versions in `stack.yaml`'s `extra-deps`, which is the list to trust (re-read it: it moved twice in two days). Ubuntu 26.04's GHC 9.10.3 needs glibc 2.43, which 24.04 can't get. Installing from `questing` also upgrades the container's libc to 2.42, systemd, and OpenSSL, which is harmless in a scratch container.
+
+```bash
+cat > /etc/apt/sources.list.d/questing.sources <<'EOF'
+Types: deb
+URIs: http://archive.ubuntu.com/ubuntu
+Suites: questing
+Components: main universe
+Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg
+EOF
+printf 'Package: *\nPin: release n=questing\nPin-Priority: 100\n' > /etc/apt/preferences.d/questing
+apt-get update -qq
+apt-get install -y -q -t questing --no-install-recommends ghc cabal-install happy alex hlint \
+  libghc-{diff,glob,juicypixels,aeson,aeson-pretty,attoparsec,base64-bytestring,blaze-html,blaze-markup,case-insensitive,conduit,crypton,crypton-connection,crypton-x509-system,data-default,file-embed,gridtables,haddock-library,http-client,http-client-tls,http-types,ipynb,jira-wiki-markup,libyaml,mime-types,network,network-uri,random,safe,scientific,split,syb,tagsoup,tasty,tasty-golden,tasty-hunit,tasty-quickcheck,temporary,text-conversions,unicode-collation,unicode-transforms,vector,xml,xml-conduit,xml-types,yaml,zlib,pandoc-types,pretty-show,cassava,digest,ordered-containers,regex-tdfa,toml-parser,utf8-string,text-builder-linear,erf,uniplate,optparse-applicative,semigroups}-dev
+
+# cabal must not look for Hackage: write its default config, then remove the repository
+cabal --version > /dev/null; cabal user-config init 2> /dev/null
+python3 -c "import re,os; p=os.path.expanduser('~/.config/cabal/config'); s=open(p).read(); open(p,'w').write(re.sub(r'\nrepository hackage\.haskell\.org\n(  .*\n)*', '\n', s))"
+
+mkdir -p ~/deps && cd ~/deps
+while read repo tag dir; do git -c advice.detachedHead=false clone -q --depth 1 --branch "$tag" "https://github.com/$repo" "$dir"; done <<'EOF'
+jgm/skylighting 0.15 skylighting
+jgm/typst-symbols 0.3 typst-symbols
+jgm/zip-archive 0.5 zip-archive
+jgm/citeproc 0.14 citeproc
+jgm/doclayout 0.6 doclayout
+jgm/doctemplates 0.11.1 doctemplates
+jgm/asciidoc-hs 0.1.1 asciidoc-hs
+jgm/texmath 0.13.3 texmath
+jgm/commonmark-hs commonmark-extensions-0.2.7.3 commonmark-hs
+jgm/djoths 0.1.4.3 djoths
+jgm/typst-hs 0.12 typst-hs
+jgm/pandoc-types 1.23.1.2 pandoc-types
+jgm/emojis 0.1.5 emojis
+nikita-volkov/text-builder 1.0.0.5 text-builder
+nikita-volkov/text-builder-core 0.1.1.3 text-builder-core
+composewell/unicode-data v0.6.0 unicode-data
+glguy/toml-parser toml-parser-2.0.2.0 toml-parser
+EOF
+git clone -q --depth 1 https://github.com/tarleb/gridtables          # b177e5a, 0.1.1.0
+git clone -q https://github.com/composewell/unicode-transforms       # 1832ee6, allows unicode-data < 0.9
+
+# toml-parser: without Hackage the solver can't satisfy build-tool-depends, even with happy and alex installed
+python3 -c "p='/root/deps/toml-parser/toml-parser.cabal'; s=open(p).read(); o='    build-tool-depends:\n        alex:alex       >= 3.2,\n        happy:happy     >= 1.19,\n'; assert s.count(o)==1; open(p,'w').write(s.replace(o,''))"
+```
+
+Then `~/pbuild/cabal.project`, outside the repository so it stays clean, with `packages:` listing the Pandoc tree (not `pandoc-cli` or the Lua engine, which need hslua) and each directory above, `skylighting-core`, `skylighting`, and the five `skylighting-format-*` from the one clone, `commonmark`, `commonmark-extensions`, and `commonmark-pandoc` from the other, and `unicode-data/unicode-data`, followed by:
+
+```
+optimization: False
+tests: False
+benchmarks: False
+documentation: False
+
+package pandoc
+  flags: -http +embed_data_files
+  tests: True
+
+allow-newer: gridtables:doclayout, djot:doclayout
+
+package skylighting-core
+  flags: +executable
+```
+
+`-http` is Pandoc's own flag, and it drops the TLS 2.x chain, which Ubuntu has only at 1.8. Skylighting's git checkout lacks its generated `Syntax` modules, so before the first full build: `cabal build skylighting-core:exe:skylighting-extract`, then run the binary `cabal list-bin` names from `~/deps/skylighting/skylighting` with `../skylighting-core/xml` as its argument (195 modules). Three of Ubuntu's libraries were compiled against older versions of what's cloned and have to come from source too, which is why `gridtables`, `unicode-transforms`, and `pandoc-types` are in the list. Then `cabal build pandoc:test:test-pandoc` and `cabal test pandoc:test:test-pandoc --test-show-details=direct --test-options=--hide-successes`, detached (`setsid nohup … &`) when they'd outrun the 300-second limit on one command.
+
+The first build, dependencies included, took about 15 minutes; Pandoc's 238 modules alone take a few minutes at `-O0` on one core, and the suite 67 to 92 seconds. `main` gives 4,194 tests and one failure, `7099.md` #2, which expects an HTTP fetch: an artifact of `-http`, not a defect. The test feeds the HTML reader an `<iframe>` whose `src` is `h:invalid@url` and expects the HTTP library's `InvalidUrlException`; built without the flag, `Class/IO/HTTP.hs` compiles its `#else` branch, which makes no request and reports "pandoc was compiled without HTTP support" instead. The failure is identical, apart from timing, on `main` and on each commit of the ScreenTip series. CI (`ci.yml`) builds with `-fhttp` and `-Werror`, so there it runs as written. The build is `-Wall` clean. A DOCX chapter converts in 0.2 seconds. Measured.
+
+The test binary is a pandoc: `test-pandoc --emulate` takes pandoc's arguments. The command tests call it through the shell by the name `test-pandoc`, from the repository root, so a copy under another name can't run them (`test-pandoc: not found`), and it has to be started from the root. Command tests are read at run time, so an older binary runs a new one, which makes the baseline a free break test for a command test. Measured.
+
 ## Upstream
 
-Filed: #11869 (ScreenTip), which jgm agreed to on 2026-09-22 (above); next, ask whether he'd like a pull request or will make the change himself. Candidates, tracker not yet searched: the AsciiDoc writer's and reader's disagreements above, the writer's for Pandoc and the reader's for jgm/asciidoc-hs, of which the eager description list, `]` ending a macro whatever its escape, and a leading period failing a whole file are the ones worth filing first; the HTML reader's `tex_math_single_backslash` reading math inside `<code>`; the Markdown reader's time on nested bracketed spans; and, for jgm/asciidoc-hs rather than Pandoc, a chapter's title lost through `include::`, `:leveloffset:` and `:imagesdir:` not applied, cross-references by title unresolved, and `mailto:` dropped. Candidates, tracker searched, not filed: body-level bookmarks dropped (#6178 and #6781 unread, rate-limited); the orphan-anchor removal deleting cross-file targets (no search yet); the Markdown writer dropping spans without a warning; the EPUB chapter `<title>`.
+Filed: #11869 (ScreenTip), which jgm agreed to on 2026-09-22 (above). A two-commit series drafted by Claude is on the `docx-screentips` branch of a local clone, built on f0a20d437: the reader (`w:tooltip` on any of the three forms of `w:hyperlink` becomes the title), tested on a fixture Rob made in Word, and the writer (`w:tooltip` from a non-empty title), tested on its attributes and by a round trip in `test/command/11869.md`. Reading `\o` was drafted and dropped once the fixture showed Word saves it as `w:tooltip`. Each commit builds without warnings and passes the suite but for the `-http` artifact (4,195 and 4,197 tests); breaking each parser branch, and the writer, fails the test that covers it; `hlint` finds nothing new; the reader's output on 1,951 files (the statistics book and the slim corpus) was byte-identical before and after; and the patches apply to a fresh clone of GitHub's `main` with the branch's tree. The Word check of ScreenTips over 260 characters found nothing to change (above). The two patches went to Rob in a directory of their own (`pandoc-11869/`), byte-identical to those verified; next, his fork, `git am`, a push, and the pull request.
+
+What a pull request meets besides `ci.yml`. `commit-validation-pr.yml` fails on any line of `git log` output over 78 characters, and `git log` indents a message by four spaces, so a message line may have 74 (a line holding only a URL is exempt); the series' longest is 73. `docx-validation.yaml` runs only when `test/docx/golden/` or its tools change. Its schema check runs here: `apt-get install libxml2-utils`, clone `devoidfury/docx-validator` beside the tree as `docx-validator` and apply the repository's `wml.xsd.patch`, then `sh tools/validate-docx.sh file.docx`. The writer's check document validates, and a copy with an attribute the schema lacks added to a `w:hyperlink` fails, so the check discriminates. Measured.
+
+How Pandoc's history does things, which `CONTRIBUTING.md` doesn't say. 187 of jgm's commits since 2026-01-22 end with `Co-Authored-By: Claude <noreply@anthropic.com>` (a few name the model), as do two outside contributors', so that's the disclosure; `CONTRIBUTING.md` still has no policy. An issue is cited in the body, `Closes #N.` (96 of the last 600 commits) or `See #N.` (16), with the trailer last. Subjects commonly end with a period. The lint workflow is disabled (`.github/workflows/lint.yml.bkp`), so CI doesn't run `hlint`. `CONTRIBUTING.md` asks for a changed docx golden to be opened in Word; a writer test built on `documentXml` and `findAttr` (the #10578 and #11482 cases) checks an attribute without one. Measured on `git log`.
+
+Candidates, tracker not yet searched: the AsciiDoc writer's and reader's disagreements above, the writer's for Pandoc and the reader's for jgm/asciidoc-hs, of which the eager description list, `]` ending a macro whatever its escape, and a leading period failing a whole file are the ones worth filing first; the HTML reader's `tex_math_single_backslash` reading math inside `<code>`; the Markdown reader's time on nested bracketed spans; and, for jgm/asciidoc-hs rather than Pandoc, a chapter's title lost through `include::`, `:leveloffset:` and `:imagesdir:` not applied, cross-references by title unresolved, and `mailto:` dropped. Candidates, tracker searched, not filed: body-level bookmarks dropped (#6178 and #6781 unread, rate-limited); the orphan-anchor removal deleting cross-file targets (no search yet); the Markdown writer dropping spans without a warning; the EPUB chapter `<title>`.

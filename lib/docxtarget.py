@@ -40,6 +40,7 @@ the page's AST to the XML in document order, which is the order Pandoc
 writes it; a rule that finds nothing to match changes nothing.
 """
 
+import hashlib
 import html
 import json
 import os
@@ -397,6 +398,64 @@ def jaws_titles(xml, titles):
     return xml, len(inserts)
 
 
+# Ids. Pandoc's writer names a bookmark after its id only when the id
+# starts with a letter and is at most 40 characters, Word's rule; any
+# other becomes X and a SHA-1 of the id (Writers/Docx/OpenXML.hs,
+# toBookmarkName). A link within the page follows, but a link from
+# another page names the id itself, and read back, the id is the hash:
+# 475 dead links in DCIC's round trip, and every cross-reference into an
+# Asciidoctor section, whose ids start with an underscore. So the file
+# carries the names it hashed, in a custom XML part, which Word keeps,
+# and reading Word renames them back (docxrepair.apply_id_map).
+ID_MAP_PART = "customXml/item1.xml"
+ID_MAP_NS = "https://github.com/OERforge/TextbookImprover/ids"
+
+
+def bookmark_name(ident):
+    """The bookmark name Pandoc's writer gives an id."""
+    if ident and ident[0].isalpha() and len(ident) <= 40:
+        return ident
+    return "X" + hashlib.sha1(ident.encode("utf-8")).hexdigest()[1:]
+
+
+def id_map(doc):
+    """{bookmark name: id} for every id on the page, and every link to one
+    within it, whose bookmark name isn't the id."""
+    found = {}
+
+    def note(ident):
+        if ident and bookmark_name(ident) != ident:
+            found[bookmark_name(ident)] = ident
+
+    def walk(node):
+        if isinstance(node, list):
+            for item in node:
+                walk(item)
+        elif isinstance(node, dict):
+            c = node.get("c")
+            t = node.get("t")
+            if t == "Link":
+                target = c[2][0]
+                if target.startswith("#"):
+                    note(target[1:])
+            if isinstance(c, list) and c and isinstance(c[0], list) and len(c[0]) == 3 \
+                    and isinstance(c[0][0], str):
+                note(c[0][0])
+            elif t == "Header":
+                note(c[1][0])
+            walk(c)
+    walk(doc.get("blocks", []))
+    return found
+
+
+def _id_map_xml(mapping):
+    rows = "".join('<id bookmark="%s" name="%s"/>' % (html.escape(b, quote=True),
+                                                     html.escape(n, quote=True))
+                   for b, n in sorted(mapping.items()))
+    return ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
+            '<ids xmlns="%s">%s</ids>' % (ID_MAP_NS, rows))
+
+
 def finish(path, doc):
     """Rewrite the .docx at path with what the page's AST says; returns a
     dict of counts: tooltips, decorative, first_columns, and compat (1
@@ -406,7 +465,7 @@ def finish(path, doc):
             doc = json.load(fh)
     body, notes = gather(doc)
     counts = {"compat": 0, "tooltips": 0, "decorative": 0, "first_columns": 0,
-              "quotes": 0, "jaws_titles": 0}
+              "quotes": 0, "jaws_titles": 0, "ids": 0}
     with zipfile.ZipFile(path) as z:
         names = z.namelist()
         parts = {n: z.read(n) for n in names}
@@ -433,6 +492,24 @@ def finish(path, doc):
         xml, n = jaws_titles(xml, facts["titles"])
         counts["jaws_titles"] += n
         parts[part] = xml.encode("utf-8")
+    mapping = id_map(doc)
+    if mapping and ID_MAP_PART not in parts:
+        parts[ID_MAP_PART] = _id_map_xml(mapping).encode("utf-8")
+        names.append(ID_MAP_PART)
+        infos[ID_MAP_PART] = zipfile.ZipInfo(ID_MAP_PART)
+        rels = "word/_rels/document.xml.rels"
+        if rels in parts:
+            parts[rels] = text(rels).replace(
+                "</Relationships>",
+                '<Relationship Id="rIdTiqIds" Type="http://schemas.openxmlformats.org/'
+                'officeDocument/2006/relationships/customXml" Target="../%s"/>'
+                "</Relationships>" % ID_MAP_PART, 1).encode("utf-8")
+        types = text("[Content_Types].xml")
+        if 'Extension="xml"' not in types:
+            parts["[Content_Types].xml"] = types.replace(
+                "</Types>", '<Override PartName="/%s" ContentType="application/xml"/>'
+                "</Types>" % ID_MAP_PART, 1).encode("utf-8")
+        counts["ids"] = len(mapping)
     handle, temporary = tempfile.mkstemp(suffix=".docx",
                                          dir=os.path.dirname(os.path.abspath(path)))
     os.close(handle)

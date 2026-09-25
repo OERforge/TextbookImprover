@@ -530,6 +530,59 @@ def join_nested_quotes(doc):
     return joined
 
 
+def id_map(docx_path):
+    """{bookmark name: id} from the map a Word target writes into its
+    file (docxtarget.ID_MAP_PART), or {} for any other file."""
+    with zipfile.ZipFile(docx_path) as z:
+        for name in z.namelist():
+            if name.startswith("customXml/") and name.endswith(".xml"):
+                data = z.read(name).decode("utf-8", "replace")
+                if "OERforge/TextbookImprover/ids" in data:
+                    return {html.unescape(b): html.unescape(n) for b, n in re.findall(
+                        r'<id bookmark="([^"]*)" name="([^"]*)"\s*/>', data)}
+    return {}
+
+
+def apply_id_map(docx_path, json_path):
+    """The page's ids, and its links to them, renamed from the bookmark
+    names Pandoc's writer hashed back to what they were. Returns how many
+    were renamed."""
+    import json
+    mapping = id_map(docx_path)
+    if not mapping:
+        return 0
+    with open(json_path, encoding="utf-8") as fh:
+        doc = json.load(fh)
+    renamed = 0
+
+    def walk(node):
+        nonlocal renamed
+        if isinstance(node, list):
+            for item in node:
+                walk(item)
+        elif isinstance(node, dict):
+            c = node.get("c")
+            if node.get("t") == "Link" and c[2][0].startswith("#") \
+                    and c[2][0][1:] in mapping:
+                c[2][0] = "#" + mapping[c[2][0][1:]]
+                renamed += 1
+            attr = None
+            if isinstance(c, list) and c and isinstance(c[0], list) and len(c[0]) == 3 \
+                    and isinstance(c[0][0], str):
+                attr = c[0]
+            elif node.get("t") == "Header":
+                attr = c[1]
+            if attr is not None and attr[0] in mapping:
+                attr[0] = mapping[attr[0]]
+                renamed += 1
+            walk(c)
+    walk(doc.get("blocks", []))
+    if renamed:
+        with open(json_path, "w", encoding="utf-8") as fh:
+            json.dump(doc, fh, ensure_ascii=False)
+    return renamed
+
+
 def apply_definition_terms(json_path):
     """join_definition_terms and join_nested_quotes on a page's JSON
     file. Returns how many terms and quotes were joined."""

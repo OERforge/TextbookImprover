@@ -1918,12 +1918,18 @@ def case_docx_target(work):
                  "- alpha\n- beta\n\n  ```\n  code in beta\n  ```\n- gamma\n\n"
                  "> Outer quote.\n>\n> ```\n> quoted code\n> ```\n>\n> > Inner quote.\n> >\n> > Inner, second paragraph.\n\n> A second quote, right after.\n\nAfter the quotes.\n\n"
                  "What is a set?\n:   \n\nWhy is order irrelevant?\n:   \n\n"
+                 "## Foundations {#_foundations}\n\nSee [the foundations](#_foundations).\n\n"
+                 "## Long {#an-identifier-well-past-the-forty-characters-word-allows}\n\n"
+                 "Back to [the long one](#an-identifier-well-past-the-forty-characters-word-allows).\n\n"
                  '[^1]: The [source](https://example.org/source "Where the data came from") explains it.\n')
     with open(os.path.join(work, "two.html"), "w", encoding="utf-8") as fh:
         fh.write('<!DOCTYPE html><html lang="en"><head><title>Two</title></head><body><h1>Two</h1>'
                  "<table><caption>Costs by year</caption><thead><tr><th>Item</th><th>2024</th>"
                  "<th>2025</th></tr></thead><tbody><tr><th>Labor</th><td>10</td><td>12</td></tr>"
-                 "<tr><th>Parts</th><td>4</td><td>5</td></tr></tbody></table></body></html>")
+                 "<tr><th>Parts</th><td>4</td><td>5</td></tr></tbody></table>"
+                 '<p>See <a href="one.html#_foundations">foundations</a> and '
+                 '<a href="one.html#an-identifier-well-past-the-forty-characters-word-allows">the long one</a>.</p>'
+                 "</body></html>")
     with open(os.path.join(work, "three.html"), "w", encoding="utf-8") as fh:
         fh.write('<!DOCTYPE html><html lang="en"><head><title>Three</title></head><body><h1>Three</h1>'
                  "<table><caption>Addresses used</caption><thead><tr><th>Name</th><th>IP address</th></tr></thead>"
@@ -1999,6 +2005,15 @@ def case_docx_target(work):
         ("terms with no definition, like review questions, read back as one description list",
          lambda: re.search(r"<dl>\s*<dt>What is a set\?</dt>(?:(?!</dl>).)*<dt>Why is order irrelevant\?</dt>",
                            one_back, re.S)),
+        ("ids Pandoc's writer hashes are mapped in the Word file and read back as they were",
+         lambda: "OERforge/TextbookImprover/ids" in part("one.docx", "customXml/item1.xml")
+         and 'id="_foundations"' in one_back
+         and 'id="an-identifier-well-past-the-forty-characters-word-allows"' in one_back
+         and 'href="#_foundations"' in one_back),
+        ("so a link from another page still lands on it",
+         lambda: all(f'href="one.html#{i}"' in two_back and f'id="{i}"' in one_back
+                     for i in ("_foundations",
+                               "an-identifier-well-past-the-forty-characters-word-allows"))),
         ("each table carries the bookmark JAWS reads as its headers, and a banded table with no header row none",
          lambda: 'w:name="Title_1"' in two and 'w:name="ColumnTitle_1"' in three
          and not re.search(r'w:name="(?:Column|Row)?Title_2"', three)),

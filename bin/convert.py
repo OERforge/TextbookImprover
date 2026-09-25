@@ -1027,6 +1027,8 @@ def read_to_json(base, docs, env, work):
         docxrepair.apply_decorative(repaired, os.path.join(base, stem + ".json"))
         # A term with no definition, which the reader reads as a Div.
         docxrepair.apply_definition_terms(os.path.join(base, stem + ".json"))
+        # Ids Pandoc's writer hashed, named again from the file's own map.
+        docxrepair.apply_id_map(repaired, os.path.join(base, stem + ".json"))
         if tips and TRACE:
             say(f"# {name}: {tips} ScreenTip(s) kept as link titles")
         stems.append(stem)
@@ -1159,6 +1161,8 @@ def read_variants(base, target, work, env):
                                         if not os.path.isabs(out) else out)
             docxrepair.apply_definition_terms(os.path.join(base, out)
                                               if not os.path.isabs(out) else out)
+            docxrepair.apply_id_map(repaired, os.path.join(base, out)
+                                    if not os.path.isabs(out) else out)
         elif name.endswith((".adoc", ".asciidoc")):
             run(["pandoc", "-f", "asciidoc", "-t", "json", path, "-o", out,
                  "--lua-filter=" + MARKDOWN_HTML_FILTER,

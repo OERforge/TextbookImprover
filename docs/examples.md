@@ -16,6 +16,8 @@ T=/path/to/TextbookImprover
 
 OpenStax offers the Word files for its books as an instructor resource. Create a free instructor account at [openstax.org](https://openstax.org), then open the [instructor resources for *Introductory Business Statistics 2e*](https://openstax.org/details/books/introductory-business-statistics-2e?Instructor%20resources) and download the Word files. They arrive as one zip, `Introductory_Business_Statistics_2e_-_DOCX_Customization.zip`. OpenStax puts them behind the instructor account on purpose, so when you point someone else to them, point to the resources page rather than to the file.
 
+The book's PDF is free for anyone: download [*Introductory Business Statistics 2e* as a PDF](https://assets.openstax.org/oscms-prodcms/media/documents/introductory-business-statistics-2e_-_WEB.pdf) too. Its bookmarks are the book's table of contents, which step 2 uses for the order of the pages and the chapters' titles.
+
 ### 1. A directory of its own, and a first run
 
 Put the zip alone in a new directory and convert:
@@ -53,7 +55,44 @@ Wrote packaging-sample.yaml.
 Edit it, rename it to packaging.yaml, and run again.
 ```
 
-### 2. Name the book
+### 2. Order the pages from the book's PDF
+
+Put the PDF beside the Word files and run again with `--toc`, which reads its bookmarks:
+
+```bash
+mv ~/Downloads/introductory-business-statistics-2e_-_WEB.pdf .
+python3 $T/bin/convert.py --toc introductory-business-statistics-2e_-_WEB.pdf
+```
+
+```
+Read introductory-business-statistics-2e_-_WEB.pdf: 169 of 169 unplaced page(s) ordered from the outline.
+```
+
+The order is in `packaging-sample.yaml` under `contents` now, with the book's own chapter titles:
+
+```yaml
+  contents:
+  - preface
+  - title: Chapter 1 Sampling and Data
+    items:
+    - 1-introduction
+    - 1-1-definitions-of-statistics-probability-and-key-terms
+    - 1-2-data-sampling-and-variation-in-data-and-sampling
+    - 1-3-levels-of-measurement
+    - 1-4-experimental-design-and-ethics
+    - 1-key-terms
+    - 1-chapter-review
+    - 1-homework
+    - 1-references
+    - 1-solutions
+  - title: Chapter 2 Descriptive Statistics
+```
+
+Do this before the next step. `--toc` orders only the pages the contents don't place already, and the sample a first run writes places every page, by guessing. So once that sample is adopted as `packaging.yaml`, the PDF has nothing left to order, and `--toc` says so and changes nothing. (If that happens, delete the `contents` block from `packaging.yaml` and run it again.) Without a PDF, step 5 is the way to fix the order by hand.
+
+The run still stops at packaging, as the first one did: the book needs a name.
+
+### 3. Name the book
 
 Open `packaging-sample.yaml`, and near the top set the book's identifier and title:
 
@@ -75,7 +114,7 @@ This time the run goes through to the end and writes the cartridge's manifest. I
 Introductory_Business_Statistics_2e_-_DOCX_Customization.zip: not read, since this directory has sources, which are the book once an archive is unpacked.
 ```
 
-### 3. Credit OpenStax on every page
+### 4. Credit OpenStax on every page
 
 OpenStax asks that every page of a book built from its files carry the line "Access for free at openstax.org." A footer does that. It's Markdown, placed at the bottom of every page, and it goes in `conversion.yaml`, which until now the book hasn't needed:
 
@@ -89,9 +128,9 @@ python3 $T/bin/convert.py
 
 In `defaults`, it applies to every target the book has: to the HTML in the cartridge now, and to an EPUB if you add one later. A footer isn't read by the filters the way a page is, so it isn't checked or changed; write it as it should appear.
 
-### 4. Check the order
+### 5. Without the PDF: the guessed order
 
-With no order given, the pages were put in one guessed from their file names, and it's in `packaging.yaml` under `contents`. The guesser knows OpenStax's naming, so each chapter's introduction comes first and its end-of-chapter pages last:
+Without step 2, the pages are in an order guessed from their file names. The guesser knows OpenStax's naming, so each chapter's introduction comes first and its end-of-chapter pages last, as in the PDF's order:
 
 ```yaml
   contents:
@@ -114,10 +153,10 @@ With no order given, the pages were put in one guessed from their file names, an
 What it can't know is what the chapters are called. Give each its title from the book's contents, which then shows in the LMS's outline:
 
 ```yaml
-  - title: 1 Sampling and Data
+  - title: Chapter 1 Sampling and Data
 ```
 
-### 5. Work through the reports
+### 6. Work through the reports
 
 Each report is a CSV file listing what needs a person, and each decision goes into a sidecar file beside it, which later runs read. [Sidecar files](sidecars.md) describes them all; this is how the first pass goes.
 
@@ -164,7 +203,7 @@ Wrote image-alt-missing.csv (207 image(s) needing alt text).
 
 The four `blank` tables have a sidecar row with nothing in `headers`: the guess was left blank because the file doesn't say enough to guess. Fill theirs in. This is the loop you'll spend the most time in: add rows, run again, and watch the reports shrink. Nothing requires them to reach zero before you build, but each row left is a table or image a screen-reader user meets without what it needs.
 
-### 6. Build the cartridge
+### 7. Build the cartridge
 
 ```bash
 python3 $T/bin/convert.py --zip

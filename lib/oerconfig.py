@@ -148,7 +148,7 @@ class Node:
     """One schema entry: a section holding keys, or a single setting."""
 
     __slots__ = ("name", "path", "description", "type", "default", "values",
-                 "item", "target_only", "default_from_target", "keys",
+                 "item", "target_only", "book_level", "default_from_target", "keys",
                  "stage")
 
     def __init__(self, name, path, raw, stage=None):
@@ -161,6 +161,7 @@ class Node:
         self.values = None
         self.item = None
         self.target_only = bool(raw.get("target_only", False))
+        self.book_level = bool(raw.get("book_level", False))
         self.default_from_target = bool(raw.get("default_from_target", False))
         # Which step of a run a setting changes: filter (the intermediate
         # the filter writes), render (how a target writes its pages),
@@ -563,6 +564,16 @@ def resolve(schema, project_schema, documents, target=None,
                 problems.append(
                     f"{doc.source}: {name} belongs to a target, not to "
                     "defaults, because it has to differ between them")
+
+    # And the reverse: a book-level setting in a target would apply to the
+    # whole book or to nothing, depending on the order of the targets, since
+    # it's read once, from the first.
+    if target_block:
+        for name, child in schema.keys.items():
+            if child.book_level and target_block.get(name) not in (None, {}, []):
+                problems.append(
+                    f"{target_source}: {name} belongs to defaults, not to "
+                    f"target {target!r}, because the whole book shares it")
 
     if problems:
         raise ConfigError("\n".join(problems))

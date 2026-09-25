@@ -1,0 +1,4 @@
+# A sidecar path is read once, for the whole book, from the first
+# target: in one target it would apply everywhere or nowhere.
+target: web
+error: belongs to defaults

@@ -407,6 +407,7 @@ keys:
           collecting every such image and stopping once at the gate.
 
   sidecars:
+    book_level: true
     description: >
       CSV files holding decisions a person made about the source. These
       describe the book rather than one rendering, so a target should
@@ -475,6 +476,7 @@ keys:
           means a heading was edited or the row was mistyped.
 
   reports:
+    book_level: true
     stage: report
     description: >
       Where the run records what still needs human attention. Removing a

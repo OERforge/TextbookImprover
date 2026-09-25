@@ -2500,7 +2500,20 @@ def main():
     for target in targets:
         target.variants = variant_sources(base, target.name)
     language = project["language"]
-    first = targets[0]        # sidecars and reports are book-level settings
+    first = targets[0]        # sidecars and reports are book-level settings,
+    #                           which the configuration keeps out of targets
+    # Two source targets write the same copies unless they differ in the one
+    # setting of their own; nothing breaks, but one of them is wasted work.
+    seen_sources = {}
+    for target in targets:
+        if target.format == "source":
+            mode = str(target["compatibility_mode"])
+            if mode in seen_sources:
+                say(f"WARNING: {seen_sources[mode]} and {target.name} both have "
+                    f"format source and compatibility_mode {mode}, so they write "
+                    "the same copies; one of them would do.")
+            else:
+                seen_sources[mode] = target.name
 
     paths = {key: resolve_path(base, first[f"sidecars.{key}"])
              for key in ("table_captions", "image_alt", "table_headers",

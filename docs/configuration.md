@@ -114,6 +114,13 @@ govern the rest, kept few on purpose:
   `--allow-unknown-keys` to report and ignore them instead, which is for
   reading a config written for a newer version of the tools.
 
+Two kinds of setting have a place of their own. One that has to differ
+between targets, such as `format` and `output_dir`, is an error in
+`defaults:`. One the whole book shares, the `sidecars:` and `reports:`
+paths, is an error in a target: they're read once, for the whole book, so
+in a target they'd apply everywhere or nowhere depending on the order of
+the targets. Set them under `defaults:`.
+
 ### Two YAML traps
 
 Both bite in this configuration specifically, and both are now caught

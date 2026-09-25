@@ -1,0 +1,5 @@
+targets:
+  web:
+    format: html
+    sidecars:
+      image_alt: other-alt.csv

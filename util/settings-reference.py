@@ -105,6 +105,10 @@ def render_keys(keys, path, depth, out):
             if spec.get("description"):
                 out.append(one_line(spec["description"]))
                 out.append("")
+            if spec.get("book_level"):
+                out.append("*Book level:* set these under `defaults:`, never in a target, "
+                           "since the whole book shares them; in a target they stop the run.")
+                out.append("")
             render_keys(spec["keys"], path + [name], depth + 1, out)
             continue
         bits = []
@@ -119,6 +123,8 @@ def render_keys(keys, path, depth, out):
             bits.append("default " + fmt_default(spec["default"]))
         if spec.get("target_only"):
             bits.append("*target only*")
+        if spec.get("book_level"):
+            bits.append("*book level: in defaults, never a target*")
         if spec.get("required"):
             bits.append("**required**")
         out.append("**`%s`**—%s" % (full, "; ".join(bits)) if bits

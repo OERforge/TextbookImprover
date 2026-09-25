@@ -1976,6 +1976,10 @@ def case_source_target(work):
     kept_compat = differ("ch1.docx") == ["word/document.xml"]
     conf('    compatibility_mode: "15"\n')
     third = run()
+    set_compat = "word/settings.xml" in differ("ch1.docx") and 'w:name="compatibilityMode"' in \
+        zipfile.ZipFile(os.path.join(work, "fixed", "ch1.docx")).read("word/settings.xml").decode()
+    conf("  again:\n    format: source\n")
+    fourth = run()
     return [
         ("a first run, with no sidecar, writes the files unchanged and says what's left to a guess",
          lambda: first_differ == {"ch1.docx": [], "ch2.docx": []}
@@ -1989,9 +1993,7 @@ def case_source_target(work):
         ("the author's files never change, and the copy's compatibility mode is theirs",
          lambda: {n: digest(n) for n in before} == before and kept_compat),
         ("compatibility_mode: 15 sets it",
-         lambda: "word/settings.xml" in differ("ch1.docx")
-         and 'w:name="compatibilityMode"' in zipfile.ZipFile(
-             os.path.join(work, "fixed", "ch1.docx")).read("word/settings.xml").decode()),
+         lambda: set_compat),
         ("an HTML page's copy: on a first run only lang, from the book's language, the rest as written",
          lambda: '<html lang="en">' in first_page and "<td>Name</td>" in first_page
          and first_page.replace(' lang="en"', "") == read(work, "page.html")),
@@ -2000,6 +2002,9 @@ def case_source_target(work):
          and 'alt="A bar chart of the scores"' in page
          and '<a href="https://doi.org/10/abcd" title="The source study">https://doi.org/10/abcd</a>' in page
          and "<!-- the author's comment -->" in page),
+        ("two source targets that would write the same copies are warned about, and one alone isn't",
+         lambda: "WARNING: fixed and again both have format source" in fourth.stderr
+         and "both have format source" not in third.stderr),
         ("a Markdown source is named as left out",
          lambda: "1 Markdown or AsciiDoc source(s) left out" in third.stderr),
     ]

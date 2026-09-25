@@ -17,6 +17,7 @@ Versions are two-part and pre-1.0: breaking changes may land in any of them unti
 
 ### Changed
 
+- **A `sidecars:` or `reports:` setting inside a target stops the run.** They're read once, for the whole book, from the first target, so in one target they applied to every target or to none, depending on the order. Set them under `defaults:`; the message says so. The schema marks such settings `book_level`, the counterpart of `target_only`, and the settings reference says it. [How values are settled](docs/configuration.md#how-values-are-settled).
 - **A table-headers sidecar row that matches no table is a warning**, not an error that stops the run. Editing a table in its source changes its key, as when a Word file converted once is edited in Word and converted again. The row goes to `table-headers-unmatched.csv`, and `table-headers-sample.csv` is the sidecar without such rows, to adopt.
 
 ### Fixed

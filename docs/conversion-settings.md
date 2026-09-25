@@ -160,6 +160,8 @@ Abort as soon as an image can't be identified, rather than collecting every such
 
 CSV files holding decisions a person made about the source. These describe the book rather than one rendering, so a target should rarely override them. These files are read, never written, and hold work no script can reproduce. A bare name resolves against the content directory, which is convenient but leaves them among the generated HTML, the extracted media, and the disposable reports: the directory you would delete to rebuild, and the one replaced wholesale when the publisher reissues the source. An absolute path, or one relative to the content directory such as "../corrections/ibs2e/table-captions.csv", keeps them somewhere you can put under version control. A path set here that doesn't exist stops the run, because the alternative is converting the whole book while silently discarding every correction in it.
 
+*Book level:* set these under `defaults:`, never in a target, since the whole book shares them; in a target they stop the run.
+
 **`sidecars.table_captions`**—`path`; default `table-captions.csv`
 
 Descriptive captions, keyed on the table's label. A bare label is a valid caption but describes nothing, and no script can invent the description.
@@ -183,6 +185,8 @@ Names for the pages split_level cuts, keyed on the source and the heading text: 
 ## reports
 
 Where the run records what still needs human attention. Removing a report when nothing is outstanding is deliberate: the file existing at all is the signal that there's work to do.
+
+*Book level:* set these under `defaults:`, never in a target, since the whole book shares them; in a target they stop the run.
 
 **`reports.table_captions_missing`**—`path`; default `table-captions-missing.csv`
 

@@ -1,0 +1,5 @@
+targets:
+  web:
+    format: html
+    reports:
+      image_alt_missing: other-missing.csv

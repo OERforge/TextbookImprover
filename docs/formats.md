@@ -173,6 +173,8 @@ targets:
     format: source
 ```
 
+The target's name is yours, and names its folder. Two `source` targets write the same copies unless their `compatibility_mode` differs, since the sidecars are the book's, not a target's; a run with two that would write the same copies warns that one would do.
+
 ### PDF
 
 NOT YET IMPLEMENTED: [on the roadmap](../ROADMAP.md). A target naming it is skipped with a warning. PDF waits on LaTeX's tagging support for complex table headers.

@@ -212,8 +212,31 @@ AFTER_IND = ("w:contextualSpacing", "w:mirrorIndents", "w:suppressOverlap",
 
 
 QUOTE_SEPARATOR = QUOTE_MARK + "sep-"
+# Pandoc's reader joins adjacent code paragraphs into one code block, as it
+# joins adjacent quotes: two code blocks in a row get the same separator.
+CODE_SEPARATOR = "tiq-code-sep-"
 TABLE_MARK = "tiq-table-"
 DECORATIVE_MARK = "tiq-decorative-"
+LINES_MARK = "tiq-lines-"
+CODE_MARK = "tiq-code-"
+NUMBER_CLASSES = ("numberLines", "number-lines")
+# A code block's language, the class Pandoc highlights by, has nowhere to
+# go in Word either. It goes in a hidden bookmark (a name starting with an
+# underscore) in the code's paragraph, _tiqCode_<language>_<n>, which
+# reading Word matches back to the block by its text. Bookmark names hold
+# letters, digits, and underscores, to 40 characters; a language that
+# doesn't fit is reported instead.
+CODE_BOOKMARK = "_tiqCode_"
+NOT_LANGUAGES = NUMBER_CLASSES + ("sourceCode", "numberSource")
+
+
+def code_language(block):
+    """The language a code block is highlighted as, or None."""
+    return next((k for k in block["c"][0][1] if k not in NOT_LANGUAGES), None)
+
+
+def _bookmarkable(language):
+    return bool(re.fullmatch(r"[A-Za-z0-9]{1,24}", language or ""))
 
 
 def _decorative(image):
@@ -238,6 +261,14 @@ def _lone_image(figure):
     return None
 
 
+def _separator(prefix, n):
+    """A paragraph Pandoc's reader keeps, to keep two blocks apart: a
+    zero-width space and a bookmark. A bookmark alone was kept in one place
+    and dropped in another, the blocks on either side joined."""
+    return {"t": "Para", "c": [{"t": "Str", "c": "\u200b"},
+                               {"t": "Span", "c": [[prefix + str(n), [], []], []]}]}
+
+
 def mark_blocks(doc):
     """The page's AST with what the post-processing needs marked on the
     elements themselves, never counted: each block quote's content in a
@@ -248,7 +279,7 @@ def mark_blocks(doc):
     a marked Div, since a figure holding more than an image is written as
     a table. Matching by position went wrong on Pandoc's own output: a
     figure holding two images is a w:tbl too. Returns (doc, marks)."""
-    counts = {"quote": 0, "sep": 0, "table": 0, "decorative": 0}
+    counts = {"quote": 0, "sep": 0, "table": 0, "decorative": 0, "lines": 0, "code": 0}
 
     def marked(prefix, kind, inner, block):
         counts[kind] += 1
@@ -266,9 +297,13 @@ def mark_blocks(doc):
             return value
         if not _elements(value):
             return [visit(v) for v in value]
-        out = []
+        out, previous = [], None
         for item in value:
             t = item.get("t")
+            if t == "CodeBlock" and previous == "CodeBlock":
+                counts["sep"] += 1
+                out.append(_separator(CODE_SEPARATOR, counts["sep"]))
+            previous = t
             if t == "Figure" and _lone_image(item) is not None \
                     and _decorative(_lone_image(item)):
                 out.append(marked(DECORATIVE_MARK, "decorative", [item], True))
@@ -276,10 +311,15 @@ def mark_blocks(doc):
             item = visit(item)
             if out and t == "BlockQuote" and out[-1].get("t") == "BlockQuote":
                 counts["sep"] += 1
-                out.append({"t": "Para", "c": [{"t": "Span", "c": [
-                    [QUOTE_SEPARATOR + str(counts["sep"]), [], []], []]}]})
+                out.append(_separator(QUOTE_SEPARATOR, counts["sep"]))
             if t == "Table":
                 item = marked(TABLE_MARK, "table", [item], True)
+            elif t == "CodeBlock":
+                if _bookmarkable(code_language(item)):
+                    item = marked(CODE_MARK, "code", [item], True)
+                if any(k in item["c"][1][0]["c"][0][1] if item.get("t") == "Div" else k in item["c"][0][1]
+                       for k in NUMBER_CLASSES):
+                    item = marked(LINES_MARK, "lines", [item], True)
             elif t == "Image" and _decorative(item):
                 item = marked(DECORATIVE_MARK, "decorative", [item], False)
             out.append(item)
@@ -287,6 +327,83 @@ def mark_blocks(doc):
 
     doc["blocks"] = visit(doc.get("blocks", []))
     return doc, sum(counts.values())
+
+
+def lines_marks(doc):
+    """{n: first line's number} for each numbered code block mark_blocks
+    marked."""
+    found = {}
+
+    def walk(node):
+        if isinstance(node, list):
+            for item in node:
+                walk(item)
+        elif isinstance(node, dict):
+            c = node.get("c")
+            if node.get("t") == "Div" and c[0][0].startswith(LINES_MARK) and len(c[1]) == 1:
+                block = c[1][0]
+                # Inside the language's mark, when the block has one.
+                while block.get("t") == "Div" and len(block["c"][1]) == 1:
+                    block = block["c"][1][0]
+                keys = dict(block["c"][0][2]) if block.get("t") == "CodeBlock" else {}
+                start = keys.get("startFrom") or keys.get("start-from") or "1"
+                found[int(c[0][0][len(LINES_MARK):])] = int(start) if start.isdigit() else 1
+            walk(c)
+    walk(doc.get("blocks", []))
+    return found
+
+
+# Numbered code lines. Word has no numbering for a block (its line
+# numbering is a section's), and a code block's numberLines class has
+# nowhere to go, so the numbers are written as text, each line's in a run
+# of Word's own "Line Number" character style: a reader of the Word file
+# sees them, and reading the file back takes them out again and numbers
+# the block (docxrepair.apply_number_lines). Copying the code out of Word
+# copies the numbers with it.
+LINE_NUMBER_STYLE = ('<w:style w:type="character" w:styleId="LineNumber">'
+                     '<w:name w:val="line number" /><w:basedOn w:val="DefaultParagraphFont" />'
+                     '<w:uiPriority w:val="99" /><w:semiHidden /><w:unhideWhenUsed />'
+                     '</w:style>')
+
+
+def _number_run(text):
+    return ('<w:r><w:rPr><w:rStyle w:val="LineNumber" /></w:rPr>'
+            '<w:t xml:space="preserve">%s</w:t></w:r>' % text)
+
+
+def number_lines(xml, at, start):
+    """The code paragraph after position at with each line's number at
+    its start; returns (xml, lines numbered)."""
+    para = xml.find("<w:p>", at)
+    end = xml.find("</w:p>", para)
+    if para < 0 or end < 0 or 'w:val="SourceCode"' not in xml[para:end]:
+        return xml, 0
+    body = xml[para:end]
+    breaks = [m.end() for m in re.finditer(r"<w:r><w:br\s*/></w:r>", body)]
+    width = len(str(start + len(breaks)))
+    head = re.compile(r"<w:p>\s*(?:<w:pPr>.*?</w:pPr>)?", re.S).match(body).end()
+    points = [head] + breaks
+    for i, point in reversed(list(enumerate(points))):
+        body = body[:point] + _number_run("%*d  " % (width, start + i)) + body[point:]
+    return xml[:para] + body + xml[end:], len(points)
+
+
+def code_marks(doc):
+    """{n: language} for each code block mark_blocks marked for its
+    language."""
+    found = {}
+
+    def walk(node):
+        if isinstance(node, list):
+            for item in node:
+                walk(item)
+        elif isinstance(node, dict):
+            c = node.get("c")
+            if node.get("t") == "Div" and c[0][0].startswith(CODE_MARK):
+                found[int(c[0][0][len(CODE_MARK):])] = code_language(c[1][0])
+            walk(c)
+    walk(doc.get("blocks", []))
+    return found
 
 
 def table_marks(doc):
@@ -319,21 +436,39 @@ def table_marks(doc):
 # The page calls it an older technique. The table census reads the same
 # bookmarks back as the table's declaration, which holds either way.
 JAWS_ID = 800000
+CODE_ID = 850000
 
 
-def apply_markers(xml, tables):
+def apply_markers(xml, tables, lines=None, codes=None):
     """What each marked element calls for, applied to the element each
     mark stands before: a table's First Column flag and its JAWS
     bookmark, an image's decorative mark. The marks are then removed.
     Returns (xml, counts)."""
-    counts = {"first_columns": 0, "jaws_titles": 0, "decorative": 0}
-    marks = re.findall(r'<w:bookmarkStart w:id="(\d+)" w:name="((?:%s|%s)\d+)"\s*/>'
-                       % (TABLE_MARK, DECORATIVE_MARK), xml)
+    counts = {"first_columns": 0, "jaws_titles": 0, "decorative": 0, "code_lines": 0,
+              "code_languages": 0}
+    lines, codes = lines or {}, codes or {}
+    marks = re.findall(r'<w:bookmarkStart w:id="(\d+)" w:name="((?:%s|%s|%s|%s)\d+)"\s*/>'
+                       % (TABLE_MARK, DECORATIVE_MARK, LINES_MARK, CODE_MARK), xml)
     if not marks:
         return xml, counts
     edits = []                    # (start, end, replacement), applied from the end
     for ident, name in marks:
         at = xml.find('w:name="%s"' % name)
+        if name.startswith(LINES_MARK):
+            continue
+        if name.startswith(CODE_MARK):
+            n = int(name[len(CODE_MARK):])
+            para = xml.find("<w:p>", at)
+            if para >= 0 and n in codes:
+                here = para + len("<w:p>")
+                props = re.compile(r"\s*<w:pPr>.*?</w:pPr>", re.S).match(xml, here)
+                if props:
+                    here = props.end()
+                edits.append((here, here, '<w:bookmarkStart w:id="%d" w:name="%s%s_%d" />'
+                              '<w:bookmarkEnd w:id="%d" />' % (CODE_ID + n, CODE_BOOKMARK,
+                                                               codes[n], n, CODE_ID + n)))
+                counts["code_languages"] += 1
+            continue
         if name.startswith(TABLE_MARK):
             n = int(name[len(TABLE_MARK):])
             row, col = tables.get(n, (False, False))
@@ -376,9 +511,15 @@ def apply_markers(xml, tables):
                 counts["decorative"] += 1
     for start, end, new in sorted(edits, key=lambda e: e[0], reverse=True):
         xml = xml[:start] + new + xml[end:]
+    # Code last, from the end: each numbering changes the text after it.
+    for ident, name in reversed(marks):
+        if name.startswith(LINES_MARK):
+            n = int(name[len(LINES_MARK):])
+            xml, numbered = number_lines(xml, xml.find('w:name="%s"' % name), lines.get(n, 1))
+            counts["code_lines"] += numbered
     ids = [ident for ident, _ in marks]
-    xml = re.sub(r'<w:bookmarkStart w:id="(?:%s)" w:name="(?:%s|%s)\d+"\s*/>'
-                 % ("|".join(ids), TABLE_MARK, DECORATIVE_MARK), "", xml)
+    xml = re.sub(r'<w:bookmarkStart w:id="(?:%s)" w:name="(?:%s|%s|%s|%s)\d+"\s*/>'
+                 % ("|".join(ids), TABLE_MARK, DECORATIVE_MARK, LINES_MARK, CODE_MARK), "", xml)
     xml = re.sub(r'<w:bookmarkEnd w:id="(?:%s)"\s*/>' % "|".join(ids), "", xml)
     return xml, counts
 
@@ -404,8 +545,9 @@ def keep_captions(xml):
 LOSSES = {
     "list-in-quotation": "a list inside a quotation comes back outside it, "
                          "the quotation split around it",
-    "numbered-code": "numbered code lines lose their numbers",
     "uncaptioned-figure": "a figure with no caption comes back as an image",
+    "code-language": "a code block's language (its highlighting) is lost; "
+                     "only letters and digits fit in the bookmark that carries one",
     "layout-table": "a layout table comes back as a data table",
     "cell-headers": "a table's cells lose the header cells they name "
                     "(headers); its header rows and column stay",
@@ -418,7 +560,26 @@ def losses(doc):
     found = []
 
     def words(node, n=8):
-        return " ".join(_stringify(node if isinstance(node, list) else [node]).split()[:n])
+        # Any node: a list item can open with a list or a Div, not only a
+        # paragraph's inlines.
+        out = []
+
+        def collect(x):
+            if isinstance(x, list):
+                for y in x:
+                    collect(y)
+            elif isinstance(x, dict):
+                t = x.get("t")
+                if t == "Str":
+                    out.append(x["c"])
+                elif t in ("Space", "SoftBreak", "LineBreak"):
+                    out.append(" ")
+                elif t in ("Code", "Math"):
+                    out.append(x["c"][1])
+                else:
+                    collect(x.get("c"))
+        collect(node)
+        return " ".join("".join(out).split()[:n])
 
     def walk(node, quoted):
         if isinstance(node, list):
@@ -433,8 +594,8 @@ def losses(doc):
                 items = c if t == "BulletList" else c[1]
                 first = items[0][0]["c"] if items and items[0] and items[0][0].get("c") else []
                 found.append(("list-in-quotation", words(first)))
-            elif t == "CodeBlock" and any(k in c[0][1] for k in ("numberLines", "number-lines")):
-                found.append(("numbered-code", c[1].splitlines()[0][:60] if c[1] else ""))
+            elif t == "CodeBlock" and code_language(node) and not _bookmarkable(code_language(node)):
+                found.append(("code-language", code_language(node)))
             elif t == "Figure" and not c[1][1]:
                 alts = []
                 walk_alts(c[2], alts)
@@ -574,8 +735,11 @@ def finish(path, doc):
             doc = json.load(fh)
     body, notes = gather(doc)
     tables = table_marks(doc)
+    lines = lines_marks(doc)
+    codes = code_marks(doc)
     counts = {"compat": 0, "tooltips": 0, "decorative": 0, "first_columns": 0,
-              "quotes": 0, "jaws_titles": 0, "ids": 0, "captions_kept": 0}
+              "quotes": 0, "jaws_titles": 0, "ids": 0, "captions_kept": 0,
+              "code_lines": 0, "code_languages": 0}
     with zipfile.ZipFile(path) as z:
         names = z.namelist()
         parts = {n: z.read(n) for n in names}
@@ -593,7 +757,7 @@ def finish(path, doc):
         xml = text(part)
         xml, n = screentips(xml, text(rels), facts["links"])
         counts["tooltips"] += n
-        xml, found = apply_markers(xml, tables)
+        xml, found = apply_markers(xml, tables, lines, codes)
         for key, n in found.items():
             counts[key] += n
         xml, n = indent_quotes(xml)
@@ -601,6 +765,10 @@ def finish(path, doc):
         xml, n = keep_captions(xml)
         counts["captions_kept"] += n
         parts[part] = xml.encode("utf-8")
+    if counts["code_lines"] and "word/styles.xml" in parts \
+            and 'w:styleId="LineNumber"' not in text("word/styles.xml"):
+        parts["word/styles.xml"] = text("word/styles.xml").replace(
+            "</w:styles>", LINE_NUMBER_STYLE + "</w:styles>", 1).encode("utf-8")
     mapping = id_map(doc)
     if mapping and ID_MAP_PART not in parts:
         parts[ID_MAP_PART] = _id_map_xml(mapping).encode("utf-8")

@@ -41,14 +41,17 @@ import zipfile
 # A run of bookmark starts and ends standing directly before a paragraph.
 BEFORE_PARAGRAPH = re.compile(
     r"((?:<w:bookmarkStart\b[^>]*/>\s*|<w:bookmarkEnd\b[^>]*/>\s*)+)"
-    r"(<w:p\b[^>]*>)(\s*<w:pPr>.*?</w:pPr>)?", re.S)
+    r"(<w:p\b[^>]*>)(\s*<w:pPr>(?:(?!</w:pPr>).)*</w:pPr>)?", re.S)
 START = re.compile(r"<w:bookmarkStart\b[^>]*/>")
 HEADING_STYLE = re.compile(r'<w:pStyle w:val="(?:Heading|Title|Subtitle)[^"]*"')
 ZWSP_RUN = "<w:r><w:t>&#8203;</w:t></w:r>"
 PARAGRAPH = re.compile(r"<w:p\b[^>]*>.*?</w:p>", re.S)
 ADJACENT = re.compile(r"(<w:bookmarkStart\b[^>]*/>)(\s*(?:<w:bookmarkEnd\b[^>]*/>\s*)*)"
                       r"(?=<w:bookmarkStart)")
-IN_HEADING = re.compile(r"(<w:p\b[^>]*>)(<w:pPr>.*?</w:pPr>)"
+# A paragraph's own properties, never running on into the next
+# paragraph's: unbounded, this matched from a heading to a later paragraph
+# that opens with a bookmark and moved that bookmark to the heading.
+IN_HEADING = re.compile(r"(<w:p\b[^>]*>)(<w:pPr>(?:(?!</w:pPr>).)*</w:pPr>)"
                         r"((?:<w:bookmarkStart\b[^>]*/>\s*)+)", re.S)
 END = re.compile(r"<w:bookmarkEnd\b[^>]*/>")
 
@@ -493,10 +496,14 @@ def join_nested_quotes(doc):
         # What a Word target writes between two quotes in a row to keep
         # them apart: a paragraph holding only a bookmark, which the
         # reader reads as an empty paragraph or an empty anchor.
-        if block.get("t") != "Para":
+        # a zero-width space and a bookmark, which the reader reads as the
+        # space and an empty anchor, or the space alone.
+        if block.get("t") != "Para" or not block["c"]:
             return False
-        return all(el.get("t") == "Span" and el["c"][0][0].startswith("tiq-quote-sep-")
-                   and not el["c"][1] for el in block["c"])
+        return all((el.get("t") == "Str" and not el["c"].strip("\u200b"))
+                   or (el.get("t") == "Span" and el["c"][0][0].startswith(
+                       ("tiq-quote-sep-", "tiq-code-sep-")) and not el["c"][1])
+                   for el in block["c"])
 
     def fix(blocks, inside):
         nonlocal joined
@@ -511,11 +518,12 @@ def join_nested_quotes(doc):
             elif isinstance(block.get("c"), list):
                 walk(block["c"])
             out.append(block)
-        # The separators, once they've kept their quotes apart.
+        # The separators, once they've kept their quotes, or their code
+        # blocks, apart.
         return [b for i, b in enumerate(out)
                 if not (separator(b) and 0 < i < len(out) - 1
-                        and out[i - 1].get("t") == "BlockQuote"
-                        and out[i + 1].get("t") == "BlockQuote")]
+                        and out[i - 1].get("t") == out[i + 1].get("t")
+                        and out[i - 1].get("t") in ("BlockQuote", "CodeBlock"))]
 
     def walk(node):
         if isinstance(node, list):
@@ -581,6 +589,81 @@ def apply_id_map(docx_path, json_path):
         with open(json_path, "w", encoding="utf-8") as fh:
             json.dump(doc, fh, ensure_ascii=False)
     return renamed
+
+
+def numbered_code(docx_path):
+    """[(text as Pandoc reads it, text without the numbers, first number or
+    0, language or None)] for each code paragraph a Word target numbered
+    (each line opening with a run in the Line Number character style,
+    docxtarget.number_lines) or gave its language (a _tiqCode_ bookmark)."""
+    with zipfile.ZipFile(docx_path) as z:
+        if "word/document.xml" not in z.namelist():
+            return []
+        xml = z.read("word/document.xml").decode("utf-8")
+    found = []
+    for para in re.findall(r"<w:p>(?:(?!</w:p>).)*?(?:LineNumber|_tiqCode_)(?:(?!</w:p>).)*</w:p>", xml, re.S):
+        if 'w:val="SourceCode"' not in para:
+            continue
+        full, plain, numbers = [], [], []
+        language = re.search(r'w:name="_tiqCode_([A-Za-z0-9]+)_\d+"', para)
+        for run in re.findall(r"<w:r>.*?</w:r>", para, re.S):
+            text = html.unescape("".join(re.findall(r"<w:t[^>]*>([^<]*)</w:t>", run)))
+            text += "\t" * len(re.findall(r"<w:tab\s*/>", run))
+            if re.search(r"<w:br\s*/>", run):
+                full.append("\n"), plain.append("\n")
+                continue
+            full.append(text)
+            if 'w:rStyle w:val="LineNumber"' in run:
+                numbers.append(text.strip())
+            else:
+                plain.append(text)
+        if (numbers and numbers[0].isdigit()) or language:
+            numbers = numbers or ["0"]
+            found.append(("".join(full), "".join(plain), int(numbers[0]),
+                          language.group(1) if language else None))
+    return found
+
+
+def apply_number_lines(docx_path, json_path):
+    """Each code block a Word target numbered or gave a language, found by
+    its text as read, given its text without the numbers, its numbering
+    from its first number, and its language. Returns how many."""
+    import json
+    entries = numbered_code(docx_path)
+    if not entries:
+        return 0
+    with open(json_path, encoding="utf-8") as fh:
+        doc = json.load(fh)
+    done = 0
+
+    def walk(node):
+        nonlocal done
+        if isinstance(node, list):
+            for item in node:
+                walk(item)
+        elif isinstance(node, dict):
+            if node.get("t") == "CodeBlock":
+                for i, (full, plain, start, language) in enumerate(entries):
+                    if node["c"][1] == full:
+                        attr = node["c"][0]
+                        node["c"][1] = plain
+                        if language and language not in attr[1]:
+                            attr[1].insert(0, language)
+                        if start and "numberLines" not in attr[1]:
+                            attr[1].append("numberLines")
+                        if start and start != 1:
+                            attr[2] = [kv for kv in attr[2] if kv[0] != "startFrom"] \
+                                + [["startFrom", str(start)]]
+                        del entries[i]
+                        done += 1
+                        break
+                return
+            walk(node.get("c"))
+    walk(doc.get("blocks", []))
+    if done:
+        with open(json_path, "w", encoding="utf-8") as fh:
+            json.dump(doc, fh, ensure_ascii=False)
+    return done
 
 
 def apply_definition_terms(json_path):

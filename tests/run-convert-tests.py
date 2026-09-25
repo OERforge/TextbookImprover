@@ -1918,6 +1918,9 @@ def case_docx_target(work):
                  "- alpha\n- beta\n\n  ```\n  code in beta\n  ```\n- gamma\n\n"
                  "> Outer quote.\n>\n> ```\n> quoted code\n> ```\n>\n> > Inner quote.\n> >\n> > Inner, second paragraph.\n\n> A second quote, right after.\n\nAfter the quotes.\n\n"
                  "What is a set?\n:   \n\nWhy is order irrelevant?\n:   \n\n"
+                 "```{.python .numberLines startFrom=\"5\"}\ntotal = 0\nfor x in data:\n    total += x\n```\n\n"
+                 "```js\nlet shown = true;\n```\n\n"
+                 "```{.my-lang}\nno bookmark for this one\n```\n\n"
                  "## Foundations {#_foundations}\n\nSee [the foundations](#_foundations).\n\n"
                  "## Long {#an-identifier-well-past-the-forty-characters-word-allows}\n\n"
                  "Back to [the long one](#an-identifier-well-past-the-forty-characters-word-allows).\n\n"
@@ -1937,6 +1940,7 @@ def case_docx_target(work):
                  "<figcaption>Before and after</figcaption></figure>"
                  '<figure><img src="assets/rule.png" alt=""></figure>'
                  "<blockquote><p>Try these:</p><ul><li>sorting</li><li>reversing</li></ul></blockquote>"
+                 "<blockquote><ul><li><ul><li>a list that opens with a list</li></ul></li></ul></blockquote>"
                  "<table><caption>Addresses used</caption><thead><tr><th>Name</th><th>IP address</th></tr></thead>"
                  "<tbody><tr><td>server</td><td>172.20.0.5</td></tr><tr><td>victim</td><td>172.20.0.6</td></tr>"
                  "<tr><td>attacker</td><td>172.20.0.7</td></tr></tbody></table>"
@@ -2026,6 +2030,16 @@ def case_docx_target(work):
          lambda: all(f'href="one.html#{i}"' in two_back and f'id="{i}"' in one_back
                      for i in ("_foundations",
                                "an-identifier-well-past-the-forty-characters-word-allows"))),
+        ("numbered code shows its numbers in Word, in Word's Line Number style, from its first number",
+         lambda: re.search(r'LineNumber" /></w:rPr><w:t xml:space="preserve">5  </w:t>', one)
+         and re.search(r'LineNumber" /></w:rPr><w:t xml:space="preserve">7  </w:t>', one)
+         and 'w:styleId="LineNumber"' in part("one.docx", "word/styles.xml")),
+        ("read back, it's numbered again from 5, without the numbers in its text, and keeps its language",
+         lambda: re.search(r'<pre\s+class="[^"]*python[^"]*numberLines[^"]*">', one_back)
+         and "counter-reset: source-line 4" in one_back and "5  total" not in one_back),
+        ("a code block keeps its language through Word, and one whose name can't go in a bookmark is reported",
+         lambda: re.search(r'<code class="sourceCode (?:js|javascript)"', one_back)
+         and "word,one,code-language,my-lang" in fidelity),
         ("each table carries the bookmark JAWS reads as its headers, and a banded table with no header row none",
          lambda: 'w:name="Title_1"' in two
          and re.search(r'w:name="ColumnTitle_\d+"', table_with(three, "172.20.0.5"))

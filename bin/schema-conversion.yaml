@@ -489,8 +489,9 @@ keys:
         description: >
           What a target's files can't carry, one row per page and kind of
           loss, known before writing: for a docx target, a list inside a
-          quotation, numbered code lines, a figure with no caption, a
-          layout table, and a table's per-cell headers. Nothing to fix in
+          quotation, a figure with no caption, a layout table, a table's
+          per-cell headers, and a code block's language when its name
+          can't go in a bookmark. Nothing to fix in
           the book; it says what reading the files back won't restore.
 
       bare_links_new:

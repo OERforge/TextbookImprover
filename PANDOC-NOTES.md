@@ -340,6 +340,8 @@ Each is a workaround the pipeline carries because Pandoc's DOCX reader or writer
 - **The reader joins adjacent quotes only at their own level**, and joins two separate quotes in a row. Workarounds: `docxrepair.join_nested_quotes`, and a bookmark-only paragraph between two quotes, which the reader keeps.
 - **The reader drops a description-list term with no definition** into a `Div` of class `Definition-Term`. Workaround: `docxrepair.join_definition_terms`.
 - **The writer puts a table's caption before the table without keep with next, and the reader pairs such a caption with the table before.** A table with no caption takes the next one's. Workaround: `docxtarget.keep_captions`.
+- **The reader joins adjacent code paragraphs into one code block**, as it joins adjacent quotes, so two code blocks in a row come back as one. Workaround: a separator paragraph between them. A paragraph holding only a bookmark isn't a dependable separator: read directly by Pandoc, one such paragraph between two code blocks came back as an empty paragraph and another in the same file was dropped, its blocks joined (measured, cause not traced). A zero-width space beside the bookmark keeps it.
+- **The writer drops a code block's classes**: its numbering (`numberLines`, `startFrom`) and its language. Workarounds: `docxtarget.number_lines` writes the numbers as text in Word's Line Number style, a hidden `_tiqCode_<language>_<n>` bookmark carries the language, and `docxrepair.apply_number_lines` restores both, matching blocks by their text.
 - **The writer hashes an id that isn't a valid bookmark name, and nothing maps it back.** A link from another page to it is dead after a round trip. Workaround: the id map in a custom XML part (`docxtarget.id_map`, `docxrepair.apply_id_map`).
 
 ## Possible Pandoc enhancements
@@ -348,7 +350,6 @@ Not workarounds the pipeline carries: losses it reports (`fidelity.csv`) and doe
 
 - **A list inside a block quote.** The writer doesn't indent a list inside a quote at all, so Word shows it outside; and the reader's rule that makes an indented paragraph a quote explicitly excludes numbered paragraphs (`not (numbered pPr)` in `paragraphStyleToTransform`). Two changes: the writer indents a list by its quote's depth; the reader compares a numbered paragraph's indent with its numbering level's own, not its style's, which needs care, since lists are indented by design. A crude search of the tracker (2026-09-25) found no issue.
 - **A figure with no caption.** The writer styles its paragraph `Figure`; the reader doesn't read that style back as a figure.
-- **Numbered code lines.** A code block's `numberLines` class has nowhere to go in Word.
 
 ## Upstream
 

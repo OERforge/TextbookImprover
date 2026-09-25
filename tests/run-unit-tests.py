@@ -340,6 +340,16 @@ def check_docx_repair():
                       '<w:bookmarkStart w:id="9" w:name="term-9"/>'
                       '<w:r><w:t>Term</w:t></w:r></w:p></w:body></w:document>'
                       % W)[0])),
+        ("a bookmark opening a paragraph after a heading stays in that paragraph",
+         lambda: (lambda f: '<w:pStyle w:val="SourceCode"/></w:pPr><w:bookmarkStart w:id="7" '
+                  'w:name="code-7"/>' in f and f.count("code-7") == 1)(
+                      docxrepair.move_bookmarks_into_paragraphs(
+                          '<w:document xmlns:w="%s"><w:body><w:p><w:pPr>'
+                          '<w:pStyle w:val="Heading2"/></w:pPr><w:r><w:t>Heading</w:t></w:r></w:p>'
+                          '<w:p><w:pPr><w:pStyle w:val="BodyText"/></w:pPr><w:r><w:t>Text'
+                          '</w:t></w:r></w:p><w:p><w:pPr><w:pStyle w:val="SourceCode"/></w:pPr>'
+                          '<w:bookmarkStart w:id="7" w:name="code-7"/><w:r><w:t>x = 1</w:t>'
+                          '</w:r></w:p></w:body></w:document>' % W)[0])),
         ("bookmarks no link in the document points at get a keeper link",
          lambda: count == 2 and 'w:anchor="fs-one"' in kept
          and 'w:anchor="fs-tbl"' in kept),

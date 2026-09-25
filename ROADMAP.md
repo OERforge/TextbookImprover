@@ -128,6 +128,7 @@ The distinction between the two matters more than either case. A table whose rea
 
 ## Smaller things
 
+- **Speakable math in a table region's name.** A wide table's scrolling wrapper is named with its caption flattened to text, and math flattens to its TeX source: `Selected values for Q=100 \sqrt{LK}`. Tested with NVDA 2026.2 (MathCAT built in) on three versions (the label as it is, `aria-labelledby` pointing to the caption, and a label from Pandoc's plain-text rendering), every version reads the caption twice, once as the region's name and once as the caption, and differs only in which reading handles the math better. So the label stays as it is. MathSpeak text for the label, generated reliably, would help, and so might better screen-reader support for math in accessible names.
 - **Retire the ScreenTip recovery.** Pandoc reads and writes ScreenTips from its first release after 3.11 ([pandoc#11890](https://github.com/jgm/pandoc/pull/11890), merged 2026-09-25). Once the pipeline requires that release, `docxrepair.apply_screentips` has nothing left to do and can go.
 - **Addresses written as plain text**, not linked: a screen reader reads them as text, and WCAG's link criteria don't apply, but a shortDOI would shorten them too. Finding one in running text is the hard part.
 - **Old DOI formats** (`doi:10.1037/...`, `DOI: 10.1037/...`) in reference lists, which APA 7 and Chicago 18 both write as `https://doi.org/10.1037/...`. A one-time utility that finds and rewrites them in a source seems a better fit than the pipeline.

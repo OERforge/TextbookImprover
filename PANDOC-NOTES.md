@@ -233,6 +233,8 @@ Measured on 3.11 by writing each case with Pandoc's `asciidoc` writer and readin
 
 **A metadata value has no `.t` in Pandoc 3.** A `MetaBlocks` field arrives in a filter as a `Blocks` list and a `MetaInlines` one as `Inlines`, so `value.t == 'MetaBlocks'` is never true and code testing it silently does nothing; `pandoc.utils.type(value)` says `Blocks`, `Inlines`, `List`, `string`, or `boolean`. Measured, the hard way (`include-before` in the AsciiDoc target).
 
+**`pandoc.utils.stringify` gives math as its TeX source.** A caption holding `$Q=100 \sqrt{LK}$` stringifies to `Selected values for Q=100 \sqrt{LK}`, which is where a table region's `aria-label` came from. The plain-text writer does better but not always: it renders `MC=\Delta {TC} / \Delta Q` as `MC = ΔTC/ΔQ`, and gives up on `\sqrt{LK}`, warning `Could not convert TeX math` and writing the TeX between dollar signs. Measured with 3.11.
+
 **A table's head and bodies are copies when read.** `tbl.head.rows = …` changes a copy and leaves the table as it was; the head has to be read, changed, and assigned back (`local head = tbl.head; head.rows = …; tbl.head = head`), as the bodies do. A body's own head rows (`body.head`) come along with a cloned body, and the reader puts a table's first `th` row there when the source has no `thead`. Measured, splitting a table in `html-source.lua`.
 
 **Inline handlers run before block handlers, so a block handler sees what the inline ones made.** A `Table` handler that writes its table as HTML with `pandoc.write` loses every raw AsciiDoc inline the inline pass put in its cells, since the HTML writer drops raw content of another format. A filter file can return two filters that run in turn; the AsciiDoc target writes those tables in the first. Measured.

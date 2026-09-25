@@ -1925,8 +1925,17 @@ def case_source_target(work):
     shutil.rmtree(os.path.join(work, "assets"))
     with open(os.path.join(work, "notes.md"), "w", encoding="utf-8") as fh:
         fh.write("---\ntitle: Notes\nlang: en\n---\n\n# Notes\n\nA Markdown chapter.\n")
+    os.makedirs(os.path.join(work, "img"), exist_ok=True)
+    Image.new("RGB", (40, 20), "teal").save(os.path.join(work, "img", "bar.png"))
+    with open(os.path.join(work, "page.html"), "w", encoding="utf-8") as fh:
+        fh.write("<!DOCTYPE html>\n<html>\n<head><meta charset=\"utf-8\"><title>Scores</title></head>\n"
+                 "<body>\n<h1>Scores</h1>\n<!-- the author's comment -->\n<table>\n"
+                 "  <tr><td>Name</td><td>Score</td></tr>\n  <tr><td>Ana</td><td>90</td></tr>\n"
+                 "  <tr><td>Ben</td><td>85</td></tr>\n  <tr><td>Cy</td><td>70</td></tr>\n</table>\n"
+                 "<p><img src=\"img/bar.png\"></p>\n<p>See <a href=\"https://doi.org/10.1000/xyz123\">"
+                 "https://doi.org/10.1000/xyz123</a>.</p>\n</body>\n</html>\n")
     digest = lambda n: hashlib.sha256(open(os.path.join(work, n), "rb").read()).hexdigest()
-    before = {n: digest(n) for n in ("ch1.docx", "ch2.docx")}
+    before = {n: digest(n) for n in ("ch1.docx", "ch2.docx", "page.html")}
 
     def conf(extra=""):
         with open(os.path.join(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
@@ -1943,6 +1952,7 @@ def case_source_target(work):
 
     conf()
     first = run()
+    first_page = read(work, "fixed", "page.html") if exists(work, "fixed", "page.html") else ""
     first_differ = {n: differ(n) for n in ("ch1.docx", "ch2.docx")} \
         if os.path.exists(os.path.join(work, "fixed", "ch1.docx")) else None
     shutil.copy(os.path.join(work, "table-headers-new.csv"), os.path.join(work, "table-headers.csv"))
@@ -1953,8 +1963,11 @@ def case_source_target(work):
     with zipfile.ZipFile(os.path.join(work, "ch1.docx")) as z:
         rid = re.search(r'r:embed="([^"]+)"', z.read("word/document.xml").decode()).group(1)
     with open(os.path.join(work, "image-alt.csv"), "w", encoding="utf-8") as fh:
-        fh.write(f"Image,Alt\nch1/media/{rid}.png,A navy rectangle\n")
+        fh.write(f"Image,Alt\nch1/media/{rid}.png,A navy rectangle\nimg/bar.png,A bar chart of the scores\n")
+    with open(os.path.join(work, "bare-links.csv"), "w", encoding="utf-8") as fh:
+        fh.write("URL,Replacement,Title\nhttps://doi.org/10.1000/xyz123,https://doi.org/10/abcd,The source study\n")
     second = run()
+    page = read(work, "fixed", "page.html") if exists(work, "fixed", "page.html") else ""
 
     def xml(n):
         with zipfile.ZipFile(os.path.join(work, "fixed", n)) as z:
@@ -1979,15 +1992,23 @@ def case_source_target(work):
          lambda: "word/settings.xml" in differ("ch1.docx")
          and 'w:name="compatibilityMode"' in zipfile.ZipFile(
              os.path.join(work, "fixed", "ch1.docx")).read("word/settings.xml").decode()),
-        ("a source that isn't Word is named as left out",
-         lambda: "1 source(s) not in Word left out" in third.stderr),
+        ("an HTML page's copy: on a first run only lang, from the book's language, the rest as written",
+         lambda: '<html lang="en">' in first_page and "<td>Name</td>" in first_page
+         and first_page.replace(' lang="en"', "") == read(work, "page.html")),
+        ("once decided, its header cells, alt text, and the link's replacement and title are written",
+         lambda: '<th scope="col">Name</th>' in page and '<th scope="row">Ana</th><td>90</td>' in page
+         and 'alt="A bar chart of the scores"' in page
+         and '<a href="https://doi.org/10/abcd" title="The source study">https://doi.org/10/abcd</a>' in page
+         and "<!-- the author's comment -->" in page),
+        ("a Markdown source is named as left out",
+         lambda: "1 Markdown or AsciiDoc source(s) left out" in third.stderr),
     ]
 
 
 def case_remediate_docx(work):
     """A remediated copy of a Word file: the pre-pass's table declarations,
     and alt text from the image-alt sidecar, written into the author's own
-    file, every other part left as it was (util/remediate-docx.py)."""
+    file, every other part left as it was (util/remediate.py)."""
     import zipfile
     import json
     from PIL import Image
@@ -2007,15 +2028,15 @@ def case_remediate_docx(work):
     headers = run_tool(work, ["table-headers.py", "ch1.docx", "--sidecar", "none.csv",
                               "--new", "new.csv", "--report", "report.csv",
                               "--resolved", "resolved.json"])
-    plain = run_tool(work, ["remediate-docx.py", "ch1.docx", "--resolved", "resolved.json",
+    plain = run_tool(work, ["remediate.py", "ch1.docx", "--resolved", "resolved.json",
                             "--out", "plain"], util=True)
     plain_xml = ""
     if os.path.exists(os.path.join(work, "plain", "ch1.docx")):
         with zipfile.ZipFile(os.path.join(work, "plain", "ch1.docx")) as z:
             plain_xml = z.read("word/document.xml").decode("utf-8")
-    rem = run_tool(work, ["remediate-docx.py", "ch1.docx", "--resolved", "resolved.json",
+    rem = run_tool(work, ["remediate.py", "ch1.docx", "--resolved", "resolved.json",
                           "--alt", "image-alt.csv", "--include-guesses", "--out", "out"], util=True)
-    refused = run_tool(work, ["remediate-docx.py", "ch1.docx", "--out", "."], util=True)
+    refused = run_tool(work, ["remediate.py", "ch1.docx", "--out", "."], util=True)
     out = os.path.join(work, "out", "ch1.docx")
     changed, xml = [], ""
     if os.path.exists(out):

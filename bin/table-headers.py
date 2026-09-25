@@ -406,6 +406,9 @@ def main():
                     help="where prefilled rows for unclaimed tables go")
     ap.add_argument("--report", default="table-headers-report.csv",
                     help="where the per-table report goes")
+    ap.add_argument("--resolved-html", default=None,
+                    help="where to write the value in effect for each HTML page's tables, "
+                         "with who decided it, for a remediated source")
     ap.add_argument("--resolved", default=None,
                     help="JSON of the value in effect per table, for the filter")
     ap.add_argument("--verbose", action="store_true")
@@ -425,6 +428,7 @@ def main():
 
     report, new_rows = [], []
     resolved = {}
+    resolved_html = {}
     claimed = set()
     for info in tables:
         row = sidecar.get(info["key"])
@@ -442,6 +446,21 @@ def main():
         # intermediate named after the .docx, and knows only the stem.
         caption_rows = caption_rows_in_effect(info, row)
         split_at, part_captions = split_in_effect(info, row)
+        entry = {
+            "index": info["index"], "headers": in_effect(info, row),
+            "caption_rows": caption_rows,
+            "split_at": split_at, "part_captions": part_captions,
+            "rows": info["rows"], "cols": info["cols"], "first": info["first"],
+            "anchors": info.get("anchors", []),
+            # Who decided: "sidecar" for a person's row, "source" for the
+            # file's own declaration, "guess" for the census. A remediated
+            # source writes only what a person decided.
+            "supplier": supplier,
+        }
+        if info.get("json"):
+            # An HTML page's, for a remediated source only: the filter
+            # reads the page's own marker, never this.
+            resolved_html.setdefault(os.path.splitext(info["source"])[0], []).append(entry)
         if not info.get("json"):
             resolved.setdefault(os.path.splitext(info["source"])[0], []).append({
                 "index": info["index"], "headers": in_effect(info, row),
@@ -498,6 +517,9 @@ def main():
                     % os.path.basename(args.new_path),
         })
 
+    if args.resolved_html:
+        with open(args.resolved_html, "w", encoding="utf-8") as handle:
+            json.dump(resolved_html, handle, indent=1, sort_keys=True)
     if args.resolved:
         with open(args.resolved, "w", encoding="utf-8") as handle:
             json.dump(resolved, handle, indent=1, sort_keys=True)

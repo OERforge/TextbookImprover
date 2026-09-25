@@ -13,7 +13,7 @@ Tools in `util/` that aren't part of a conversion but help before or around one:
 | `docx-compat.py` | Reads, and optionally sets, the Word compatibility mode of a DOCX. |
 | `restyle-headings.py` | Reports the paragraph styles a DOCX uses, and rewrites its heading styles from a map: the repair a book whose top level is styled `Title` needs before its structure can be seen. |
 | `settings-reference.py` | Writes the three settings reference pages under `docs/` from the schemas; `--check` says whether they're current. |
-| `remediate-docx.py` | Writes remediated copies of an author's Word files: the sidecars' decisions about tables, images, and links written into the files themselves, as a `format: source` target does. |
+| `remediate.py` | Writes remediated copies of a book's Word files and hand-maintained HTML pages: the sidecars' decisions about tables, images, and links written into the files themselves, as a `format: source` target does. |
 
 Each takes `--help`. The census and sample tools read Word files directly and need no Pandoc; `compare-output.py` reads HTML; `docx-compat.py` touches nothing but `word/settings.xml`; `restyle-headings.py` nothing but the paragraph styles.
 
@@ -42,12 +42,12 @@ Restyling removes the `Title` paragraphs, so the converted pages take their titl
 
 ## A remediated copy of a Word file
 
-`remediate-docx.py` writes the decisions made about a Word source back into a copy of the file, so the author can go on working in Word from an accessible document. A target with `format: source` does the same in a run of `convert.py` ([Source](formats.md#source)). It edits the file's XML as text, changing only what it names; every part it doesn't change is copied byte for byte.
+`remediate.py` writes the decisions made about a Word source, or a hand-maintained HTML page, back into a copy of the file, so the author can go on working in their own file from an accessible one. What an HTML page gets is described under [Source](formats.md#source); what follows is Word's. A target with `format: source` does the same in a run of `convert.py` ([Source](formats.md#source)). It edits the file's XML as text, changing only what it names; every part it doesn't change is copied byte for byte.
 
 ```sh
 table-headers.py *.docx --sidecar table-headers.csv --new new.csv \
     --report report.csv --resolved resolved.json
-remediate-docx.py *.docx --resolved resolved.json \
+remediate.py *.docx --resolved resolved.json \
     --alt image-alt.csv --links bare-links.csv --out remediated
 ```
 

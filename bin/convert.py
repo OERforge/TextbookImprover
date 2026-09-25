@@ -74,6 +74,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(HERE), "lib"))
 try:
     import docxrepair
     import docxremediate
+    import htmlremediate
     import docxtarget
     import htmlrepair
     import mathjax
@@ -1781,13 +1782,15 @@ def noheader(text):
     return "\n".join(out)
 
 
-def remediate_sources(target, base, docs, paths, env):
+def remediate_sources(target, base, docs, paths, env, html_stems=(), language=None,
+                      work=None):
     """A target with format source: the book's own files, remediated, one
     copy each in the target's folder under the source's name. A Word file
     gets what a person decided in the sidecars written into it, and nothing
     else changed (lib/docxremediate.py); a guess is never written, since
-    in the file it would read back as the author's own. Other sources
-    aren't written yet."""
+    in the file it would read back as the author's own. An HTML page gets
+    the same (lib/htmlremediate.py), and lang when it has none. Markdown
+    and AsciiDoc sources aren't written yet."""
     os.makedirs(target.output_dir, exist_ok=True)
     resolved = {}
     if env.get("TABLE_HEADERS_RESOLVED") and os.path.exists(env["TABLE_HEADERS_RESOLVED"]):
@@ -1805,9 +1808,32 @@ def remediate_sources(target, base, docs, paths, env):
         for key, n in counts.items():
             totals[key] = totals.get(key, 0) + n
         written.append(out)
-    others = sorted(f for f in os.listdir(base) if f.endswith((".md", ".adoc", ".html"))
+    resolved_html = {}
+    html_json = os.path.join(work, "table-headers-html.json") if work else ""
+    if html_json and os.path.exists(html_json):
+        with open(html_json, encoding="utf-8") as fh:
+            resolved_html = json.load(fh)
+    page_alts = htmlremediate.alt_rows(paths["image_alt"])
+    links = htmlremediate.link_rows(paths["bare_links"])
+    pages = 0
+    for stem in html_stems:
+        name = stem + ".html"
+        if not os.path.exists(os.path.join(base, name)):
+            continue
+        counts = htmlremediate.remediate(os.path.join(base, name),
+                                         os.path.join(target.output_dir, name),
+                                         resolved_html.get(stem, []), page_alts, links, language)
+        for key, n in counts.items():
+            totals[key] = totals.get(key, 0) + n
+        written.append(os.path.join(target.output_dir, name))
+        pages += 1
+    if pages:
+        say(f"{target.name}: {pages} HTML page(s) remediated: "
+            f"{totals.get('replaced', 0)} link(s) given their replacement address, "
+            f"lang set on {totals.get('language', 0)}.")
+    others = sorted(f for f in os.listdir(base) if f.endswith((".md", ".adoc"))
                     and not f.startswith("."))
-    say(f"{target.name}: {len(docs)} Word file(s) remediated: "
+    say(f"{target.name}: {len(docs)} Word file(s) and {pages} HTML page(s) remediated: "
         f"{totals.get('header_rows', 0)} table(s) given header rows and "
         f"{totals.get('header_columns', 0)} a header column from the sidecar, "
         f"{totals.get('described', 0)} image(s) described, "
@@ -1821,8 +1847,8 @@ def remediate_sources(target, base, docs, paths, env):
             "the census's guess; adopt their rows from the table_headers_new report "
             "to have them written.")
     if others:
-        say(f"{target.name}: {len(others)} source(s) not in Word left out; format "
-            "source writes Word files so far.")
+        say(f"{target.name}: {len(others)} Markdown or AsciiDoc source(s) left out; format "
+            "source writes Word and HTML sources so far.")
     return written
 
 
@@ -2570,7 +2596,8 @@ def main():
                 + ["--sidecar", paths["table_headers"],
                    "--new", reports["table_headers_new"],
                    "--report", reports["table_headers_report"],
-                   "--resolved", env["TABLE_HEADERS_RESOLVED"]], cwd=base)
+                   "--resolved", env["TABLE_HEADERS_RESOLVED"],
+                   "--resolved-html", os.path.join(work, "table-headers-html.json")], cwd=base)
         if not stems:
             die("No .docx, .md, .adoc, or .html files here, so there is "
                 "nothing to convert.")
@@ -2633,7 +2660,8 @@ def main():
         renv = dict(env, HEADER_INCLUDES_FILE=css_header)
         for target in targets:
             if target.format == "source":
-                written[target.name] = remediate_sources(target, base, docs, paths, env)
+                written[target.name] = remediate_sources(target, base, docs, paths, env,
+                                                         html_stems, language, work)
             if target.format in SOURCE_TARGETS or target.format == "docx":
                 written[target.name] = render_markdown(
                     target, [p for p in pages_by_dir[target.pages_dir]

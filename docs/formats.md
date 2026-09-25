@@ -14,12 +14,12 @@ Every source format the pipeline reads, the ways a book in that format can arriv
 
 | Input | HTML | EPUB | Markdown | AsciiDoc | PDF | Word | Round trip to itself |
 |---|---|---|---|---|---|---|---|
-| Word (`.docx`) | TESTED | TESTED | TESTED | TESTED | NOT YET IMPLEMENTED | NOT YET IMPLEMENTED | NOT YET IMPLEMENTED (Word output) |
-| Markdown (`.md`) | TESTED | TESTED | TESTED | TESTED | NOT YET IMPLEMENTED | NOT YET IMPLEMENTED | TESTED |
-| HTML (`.html`) | TESTED | TESTED | TESTED | TESTED | NOT YET IMPLEMENTED | NOT YET IMPLEMENTED | TESTED |
-| AsciiDoc (`.adoc`) | TESTED | TESTED | TESTED | TESTED | NOT YET IMPLEMENTED | NOT YET IMPLEMENTED | TESTED |
+| Word (`.docx`) | TESTED | TESTED | TESTED | TESTED | NOT YET IMPLEMENTED | TESTED | TESTED, with losses (see [Word output](#word-output)) |
+| Markdown (`.md`) | TESTED | TESTED | TESTED | TESTED | NOT YET IMPLEMENTED | TESTED | TESTED |
+| HTML (`.html`) | TESTED | TESTED | TESTED | TESTED | NOT YET IMPLEMENTED | TESTED | TESTED |
+| AsciiDoc (`.adoc`) | TESTED | TESTED | TESTED | TESTED | NOT YET IMPLEMENTED | TESTED | TESTED |
 
-PDF and Word output are NOT YET IMPLEMENTED ([on the roadmap](../ROADMAP.md)): a target declaring `format: pdf` or `format: docx` is skipped with a warning saying so, and a book with no other target stops. PDF is read only by [the audit](auditing.md), which reports on a Word, Markdown, HTML, EPUB, or PDF file without converting it.
+PDF output is NOT YET IMPLEMENTED ([on the roadmap](../ROADMAP.md)): a target declaring `format: pdf` is skipped with a warning saying so, and a book with no other target stops. PDF is read only by [the audit](auditing.md), which reports on a Word, Markdown, HTML, EPUB, or PDF file without converting it.
 
 ## Word
 
@@ -37,7 +37,8 @@ A hyperlink's ScreenTip becomes the link's title, which the HTML and EPUB target
 - **EPUB: TESTED**, on the same books and the suite's fixtures. It loses what [every EPUB loses](#epub), as well.
 - **Markdown: TESTED**, on the statistics book (merged by chapter) and the suite's round trip: read back, it gives the same HTML, and written again it's the same file. The first write normalizes Word's residue (paragraphs holding only a non-breaking space, stray spaces), so the second write is the fixed point. A table with merged cells, and a figure with an id, are written as fenced HTML, since Pandoc's Markdown can't express them; a banded table is kept as one table.
 - **AsciiDoc: TESTED**, on the statistics book: read back, 166 of its 169 pages are identical to the book converted directly. Two lose a root with an index (`\sqrt[n]{…}`), which Pandoc's AsciiDoc reader can't read, and one a list's depth ([AsciiDoc as a target](asciidoc.md#asciidoc-as-a-target)).
-- **PDF and Word: NOT YET IMPLEMENTED**, [on the roadmap](../ROADMAP.md); so the round trip to Word is too.
+- **Word: TESTED**, on the statistics book: 169 files, valid against Word's schema, with 229 header columns flagged. Read back as a book, 131 of its 169 pages give the same HTML; the rest lose what Word has no structure for ([Word output](#word-output)).
+- **PDF: NOT YET IMPLEMENTED**, [on the roadmap](../ROADMAP.md).
 
 ## Markdown
 
@@ -54,7 +55,8 @@ A hyperlink's ScreenTip becomes the link's title, which the HTML and EPUB target
 - **EPUB: TESTED.** The economics book's 34 pages build an EPUB epubcheck passes without an error or a warning.
 - **Markdown (round trip): TESTED**, by the suite and on the economics book: the second write equals the third.
 - **AsciiDoc: TESTED**, on the economics book and the suite: read back, 31 of the book's 34 pages are identical to the book converted directly. The other three hold a footnote with a list or a quotation inside, which an AsciiDoc footnote can't keep; the words stay.
-- **PDF and Word: NOT YET IMPLEMENTED.**
+- **Word: TESTED**, on *Principles of Economics*: 34 files, valid against Word's schema, with 37 ScreenTips.
+- **PDF: NOT YET IMPLEMENTED.**
 
 ## HTML
 
@@ -75,7 +77,8 @@ Pages are parsed with html5lib, or with lxml where html5lib isn't installed; DCI
 - **EPUB: TESTED.** epubcheck finds no errors in DCIC's, the business communication book's, or OpenStax's sociology cartridge's; the five in *Information Systems* are the publisher's own.
 - **Markdown: TESTED.** The suite converts HTML to Markdown and back, formulas and banded tables included, and DCIC's 80 pages come back identical. They didn't until two fixes: a formula as MathJax 2 drew it nests spans eleven deep, which Pandoc's Markdown reader never got through, and a link to an id with a space in it isn't a link to that reader, so its address came back as words.
 - **AsciiDoc: TESTED**, on DCIC: read back, 74 of its 80 pages are identical to the book converted directly. The other six each held a list with no items, which AsciiDoc can't write. Scribble's markup, spans nested in spans around links, code laid out in tables, quotations in quotations, is what most of the target's own forms were built against ([AsciiDoc as a target](asciidoc.md#asciidoc-as-a-target)).
-- **PDF and Word: NOT YET IMPLEMENTED.**
+- **Word: TESTED**, on DCIC: 80 files, valid against Word's schema, with 38 decorative images marked. Read back, 32 of 80 pages give the same HTML: DCIC nests its quotations and puts code inside list items, which Word can't hold as structure.
+- **PDF: NOT YET IMPLEMENTED.**
 
 ## AsciiDoc
 
@@ -90,7 +93,8 @@ Pages are parsed with html5lib, or with lxml where html5lib isn't installed; DCI
 - **HTML: TESTED**, on the security textbook (14 pages, its 54 cross-references by title resolved) and the suite. Asciidoctor's own settings (`:toc:`, `:icons:`, `:stylesheet:`, `:sectnums:`) are dropped. A block's `width` goes to the image it holds, or goes if it holds none, and a diagram's `target` goes: Pandoc passes both through onto elements where HTML doesn't allow them.
 - **EPUB: TESTED.** The security textbook's EPUB passes epubcheck with no errors or warnings, and the suite builds one from a chapter with a sized image, a listing, and a table.
 - **Markdown: TESTED.** The security textbook goes to Markdown and back with all 14 pages identical, and the suite converts a chapter the same way.
-- **PDF and Word: NOT YET IMPLEMENTED.**
+- **Word: TESTED**, on the security textbook: 14 files, valid against Word's schema.
+- **PDF: NOT YET IMPLEMENTED.**
 - **AsciiDoc: TESTED.** The security textbook goes to AsciiDoc and back with all 14 pages identical, and the suite round-trips a chapter holding every case the target writes itself ([AsciiDoc as a target](asciidoc.md#asciidoc-as-a-target)). Writing it again gives the same files.
 
 ## The outputs, and how each is packaged
@@ -123,6 +127,12 @@ A directory of `.md` files whose media keep the author's names, written to be a 
 
 A directory of `.adoc` files whose media keep the author's names, written to be a source again, as for Markdown. `merge: groups` works the same way. It's packaged as the directory. What the target writes itself, and the few things it changes, are in [AsciiDoc as a target](asciidoc.md#asciidoc-as-a-target).
 
-### PDF and Word
+### Word output
 
-NOT YET IMPLEMENTED: [on the roadmap](../ROADMAP.md). A target naming either format is skipped with a warning. PDF waits on LaTeX's tagging support for complex table headers, and Word output is the riskier of the two, for the reasons the roadmap gives.
+`format: docx` writes a Word file per page, or with `merge: groups` one per chapter. Pandoc's writer marks a header row to repeat, writes an image's alt text as its description, sets the language and title, and writes equations as Word's own. The target adds what it leaves out (`lib/docxtarget.py`): compatibility mode 15, without which Word opens the file in Compatibility Mode and won't run its Accessibility Checker; a link's title as its ScreenTip; Word's marker on a decorative image, without which the checker reports its empty description as missing; and the First Column flag on a table whose first column heads its rows. The media goes inside each file.
+
+Read back as a source, a Word file gives back its text, headings, images and alt text, captioned figures, tables and header rows, link titles, decorative images, and math. What Word has no structure for is lost: a quotation inside a quotation flattens to one; a list item holding a code block or a second paragraph splits its list; a layout table becomes a data table, since Word keeps no mark of one; and a figure with no caption comes back as an image. A header column is written as a flag the census reads as evidence, not as a declaration, so a table whose header column has nothing else to show for it is reported for review. The files validate against Word's schema with `tools/validate-docx.sh` from Pandoc's source, which wrongly rejects `m:sty` in an equation, as `PANDOC-NOTES.md` explains.
+
+### PDF
+
+NOT YET IMPLEMENTED: [on the roadmap](../ROADMAP.md). A target naming it is skipped with a warning. PDF waits on LaTeX's tagging support for complex table headers.

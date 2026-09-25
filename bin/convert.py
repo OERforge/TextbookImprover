@@ -73,6 +73,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(HERE), "lib"))
 try:
     import docxrepair
+    import docxtarget
     import htmlrepair
     import mathjax
     import notes as notes_lib
@@ -89,7 +90,7 @@ FIGURE_FILTER = os.path.join(HERE, "figures-and-tables.lua")
 MEDIA_FILTER = os.path.join(HERE, "media-extensions.lua")
 HEADER_FILTER = os.path.join(HERE, "header-includes.lua")
 SAFE_MEDIA_FILTER = os.path.join(HERE, "safe-media.lua")
-NOT_YET_IMPLEMENTED = ("pdf", "docx")
+NOT_YET_IMPLEMENTED = ("pdf",)
 # Targets whose output is written to be a source again: what the author
 # decided, and not what the filter derived from it.
 SOURCE_TARGETS = ("markdown", "asciidoc")
@@ -1022,6 +1023,8 @@ def read_to_json(base, docs, env, work):
             env=env, cwd=base)
         # ScreenTips, which Pandoc's reader drops, as the links' titles.
         tips = docxrepair.apply_screentips(repaired, os.path.join(base, stem + ".json"))
+        # Word's decorative marker, which Pandoc's reader doesn't read.
+        docxrepair.apply_decorative(repaired, os.path.join(base, stem + ".json"))
         if tips and TRACE:
             say(f"# {name}: {tips} ScreenTip(s) kept as link titles")
         stems.append(stem)
@@ -1149,6 +1152,8 @@ def read_variants(base, target, work, env):
                  "--lua-filter=" + MEDIA_FILTER, "--extract-media=" + stem],
                 env=env, cwd=base)
             docxrepair.apply_screentips(repaired, os.path.join(base, out)
+                                        if not os.path.isabs(out) else out)
+            docxrepair.apply_decorative(repaired, os.path.join(base, out)
                                         if not os.path.isabs(out) else out)
         elif name.endswith((".adoc", ".asciidoc")):
             run(["pandoc", "-f", "asciidoc", "-t", "json", path, "-o", out,
@@ -1765,7 +1770,8 @@ def noheader(text):
 
 def render_markdown(target, pages, base, work, project, env):
     """Markdown or AsciiDoc files as source: what the author decided, in
-    Pandoc's own flavor of each, and nothing the filter derived. One file
+    Pandoc's own flavor of each, and nothing the filter derived. Or Word
+    files, from the same intermediates, finished by docxtarget. One file
     per page, or with merge: groups, one per top-level entry of the book's
     contents, each page a section under it."""
     env = dict(env, TARGET_NAME=target.name)
@@ -1793,9 +1799,20 @@ def render_markdown(target, pages, base, work, project, env):
             f"{len(jobs)} file(s).")
     written = []
     asciidoc = target.format == "asciidoc"
+    word = target.format == "docx"
+    added = {"compat": 0, "tooltips": 0, "decorative": 0, "first_columns": 0}
     for stem, page in jobs:
-        out = os.path.join(target.output_dir, stem + (".adoc" if asciidoc
-                                                      else ".md"))
+        out = os.path.join(target.output_dir, stem + (
+            ".adoc" if asciidoc else ".docx" if word else ".md"))
+        if word:
+            # Pandoc's writer, then what it leaves out; see docxtarget.
+            # The media goes inside the file, so none is copied beside it.
+            run(["pandoc", "-f", "json", "-t", "docx", page, "-o", out,
+                 "--lua-filter=" + TARGET_FILTER], env=env, cwd=base)
+            for key, n in docxtarget.finish(out, page).items():
+                added[key] += n
+            written.append(out)
+            continue
         if asciidoc:
             # Pandoc's modern AsciiDoc, as Asciidoctor reads it. What its
             # reader can't read back (a row span, raw HTML, an anchor as
@@ -1826,6 +1843,12 @@ def render_markdown(target, pages, base, work, project, env):
              "--lua-filter=" + TARGET_FILTER,
              "--lua-filter=" + MARKDOWN_FILTER], env=env, cwd=base)
         written.append(out)
+    if word:
+        say(f"{target.name}: {len(written)} Word file(s), compatibility mode "
+            f"15; {added['tooltips']} ScreenTip(s), {added['decorative']} "
+            f"decorative image(s) marked, {added['first_columns']} header "
+            "column(s) flagged.")
+        return written
     copy_media(base, target.output_dir, pages, safe=False)
     return written
 
@@ -2517,7 +2540,7 @@ def main():
         written = {}
         renv = dict(env, HEADER_INCLUDES_FILE=css_header)
         for target in targets:
-            if target.format in SOURCE_TARGETS:
+            if target.format in SOURCE_TARGETS or target.format == "docx":
                 written[target.name] = render_markdown(
                     target, [p for p in pages_by_dir[target.pages_dir]
                              if os.path.basename(p)[:-len(INTERMEDIATE)]

@@ -6,6 +6,16 @@ Versions are two-part and pre-1.0: breaking changes may land in any of them unti
 
 ## [Unreleased]
 
+### Added
+
+- **A Word target.** `format: docx` writes a Word file per page, or per chapter with `merge: groups`: Pandoc's writer, then what it leaves out, in `lib/docxtarget.py`: compatibility mode 15, so Word runs its Accessibility Checker; a link's title as its ScreenTip; Word's marker on a decorative image; and the First Column flag on a table with a header column. Measured on four books from four source formats, every file valid against Word's schema; read back as a book, the statistics book gives the same HTML on 131 of 169 pages. [Word output](docs/formats.md#word-output).
+- **Word's decorative marker is read.** An image an author marked decorative in Word (Office 2019 and later) was treated as undescribed and reported; it's decorative now, in conversion and in the audit. Four images in the test corpus carry the marker.
+
+### Fixed
+
+- **A captioned figure with a bookmark before it lost its caption** when a Word source was read. The repair that moves a body-level bookmark into the next paragraph put it beside the figure's drawing, and Pandoc's reader pairs a caption only with a paragraph holding the drawing alone; the bookmark goes into the caption now. Pandoc's own writer puts such a bookmark before every figure with an id.
+- **`util/docx-compat.py` could write settings Word calls corrupt.** A new compatibility setting went before Word's legacy options in `w:compat`, where the schema puts it after them, and a new `w:compat` block went at the end of the settings, after elements the schema puts after it.
+
 ## [0.7] - 2026-09-25
 
 New sources, mostly. A book can now arrive as HTML, AsciiDoc, or an EPUB; be captured from the web, as a browser's save, a WARC or WACZ, a Jekyll site's Markdown, or an EdTech Books archive; or be unpacked from a course's Common Cartridge. It goes out as HTML, an EPUB, Markdown, a new AsciiDoc target, and a cartridge, and converting the pipeline's own HTML changes nothing. Tables get title rows and bands, found in HTML as in Word. And links: bare links get a sidecar and shortDOIs, a link's title survives every route through the pipeline, and the project's first contribution to Pandoc, reading and writing Word's ScreenTips, was merged upstream.

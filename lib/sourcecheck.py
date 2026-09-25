@@ -47,7 +47,12 @@ def read(path, kind):
                             capture_output=True, text=True)
     if result.returncode != 0:
         raise RuntimeError(result.stderr.strip()[:300])
-    return json.loads(result.stdout)
+    doc = json.loads(result.stdout)
+    if reader == "docx":
+        # Word's decorative marker, which Pandoc's reader doesn't read.
+        import docxrepair
+        docxrepair.mark_decorative(doc, docxrepair.decorative_media(path))
+    return doc
 
 
 def text_of(inlines):

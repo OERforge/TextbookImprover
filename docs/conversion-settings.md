@@ -6,7 +6,7 @@ How the book is rendered into one output format.
 
 **`format`**—one of `html`, `epub3`, `pdf`, `docx`, `markdown`, `asciidoc`; default `html`; *target only*
 
-What this target produces. markdown and asciidoc write source again: what the author decided, which the pipeline reads back to the same book. pdf and docx are NOT YET IMPLEMENTED (see the roadmap): a target naming either is skipped with a warning, and nothing is written for it.
+What this target produces. markdown and asciidoc write source again: what the author decided, which the pipeline reads back to the same book. docx writes Word files from the same pages, in compatibility mode 15 with ScreenTips and Word's decorative marker. pdf is NOT YET IMPLEMENTED (see the roadmap): a target naming it is skipped with a warning, and nothing is written for it.
 
 **`output_dir`**—`path`; default `""` (empty); *target only*
 
@@ -98,7 +98,7 @@ A link to a page of this book on the publisher's site -- https://openstax.org/bo
 
 **`merge`**—one of `False`, `groups`; default `false`
 
-For a markdown or asciidoc target: off writes one file per page, as the rest of the run sees pages. groups writes one file per top-level entry of the book's contents, with each page under it as a section, so a book whose sources are one file per section comes back as one file per chapter. Links between merged pages become links inside the file, and links to a page in another file name that file.
+For a markdown, asciidoc, or docx target: off writes one file per page, as the rest of the run sees pages. groups writes one file per top-level entry of the book's contents, with each page under it as a section, so a book whose sources are one file per section comes back as one file per chapter. Links between merged pages become links inside the file, and links to a page in another file name that file.
 
 ## notes
 

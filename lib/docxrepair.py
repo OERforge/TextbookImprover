@@ -112,7 +112,30 @@ def move_bookmarks_into_paragraphs(xml):
             text = "<w:p>" + ZWSP_RUN + text[len("<w:p>"):]
         return text
     body = PARAGRAPH.sub(within, body)
+    body = CAPTIONED_DRAWING.sub(_bookmarks_to_caption, body)
     return head + sep + body, moved
+
+
+# A picture's paragraph followed by its caption is a figure to Pandoc's
+# reader only while the picture's paragraph holds the drawing and nothing
+# else (Parse.hs, isCaptionable). A bookmark moved in there, as Pandoc's
+# own writer places one before every figure with an id, costs the figure
+# its caption; in the caption, it keeps the figure's id beside it. The
+# zero-width runs that keep adjacent bookmarks apart move with them.
+CAPTIONED_DRAWING = re.compile(
+    r'(<w:p>\s*(?:<w:pPr>(?:(?!</w:pPr>).)*</w:pPr>)?\s*)'
+    r'((?:<w:bookmarkStart\b[^>]*/>\s*|' + re.escape(ZWSP_RUN) + r'\s*)+)'
+    r'(<w:r>(?:(?!</w:p>).)*?<w:drawing>(?:(?!</w:p>).)*?</w:drawing>\s*</w:r>\s*</w:p>\s*'
+    r'(?:<w:bookmarkEnd\b[^>]*/>\s*)*)'
+    r'(<w:p>\s*<w:pPr>(?:(?!</w:pPr>).)*<w:pStyle w:val="(?:Caption|ImageCaption|TableCaption)"'
+    r'(?:(?!</w:pPr>).)*</w:pPr>)', re.S)
+
+
+def _bookmarks_to_caption(m):
+    drawing = re.sub(r"<w:drawing>.*?</w:drawing>", "", m.group(3), flags=re.S)
+    if "<w:t" in drawing:
+        return m.group(0)
+    return m.group(1) + m.group(3) + m.group(4) + m.group(2)
 
 
 BOOKMARK_NAME = re.compile(r'<w:bookmarkStart\b[^>]*\bw:name="([^"]+)"')
@@ -252,6 +275,94 @@ def apply_screentips(docx_path, json_path):
         with open(json_path, "w", encoding="utf-8") as fh:
             json.dump(doc, fh, ensure_ascii=False)
     return given
+
+
+DECORATIVE_MARK = re.compile(r'<\w+:decorative\b[^>]*\bval="(?:1|true)"')
+
+
+def decorative_media(docx_path):
+    """For each picture the body and footnotes embed, whether Word marks
+    each use of it decorative (Office 2019 and later write the mark in the
+    drawing's properties), in document order: {key: [flag, ...]}, keyed
+    both by the file's name in the package and by the SHA-1 of its bytes,
+    which is how Pandoc names what it extracts."""
+    import hashlib
+    import posixpath
+    from collections import defaultdict
+    out = defaultdict(list)
+    with zipfile.ZipFile(docx_path) as z:
+        names = set(z.namelist())
+        for part, rels in (("word/document.xml", "word/_rels/document.xml.rels"),
+                           ("word/footnotes.xml", "word/_rels/footnotes.xml.rels")):
+            if part not in names:
+                continue
+            xml = z.read(part).decode("utf-8")
+            relxml = z.read(rels).decode("utf-8") if rels in names else ""
+            targets = {}
+            for m in re.finditer(r"<Relationship\b[^>]*>", relxml):
+                ident = re.search(r'Id="([^"]+)"', m.group(0))
+                target = re.search(r'Target="([^"]+)"', m.group(0))
+                if ident and target:
+                    targets[ident.group(1)] = target.group(1)
+            for m in re.finditer(r"<w:drawing\b.*?</w:drawing>", xml, re.S):
+                blip = re.search(r'<a:blip\b[^>]*r:embed="([^"]+)"', m.group(0))
+                if not blip or blip.group(1) not in targets:
+                    continue
+                inside = posixpath.normpath(posixpath.join(
+                    "word", targets[blip.group(1)]))
+                flag = bool(DECORATIVE_MARK.search(m.group(0)))
+                out[posixpath.basename(inside)].append(flag)
+                if inside in names:
+                    out[hashlib.sha1(z.read(inside)).hexdigest()].append(flag)
+    return out
+
+
+def mark_decorative(doc, flags):
+    """Give each image Word marked decorative the class decorative, which
+    is how a Markdown source says it and what the filter and the audit
+    read. An image is matched by its file, by name or by the hash Pandoc
+    named it with, each use in turn. Returns how many were marked."""
+    import posixpath
+    if not any(any(v) for v in flags.values()):
+        return 0
+    queues = {key: list(values) for key, values in flags.items()}
+    marked = 0
+
+    def walk(node):
+        nonlocal marked
+        if isinstance(node, dict):
+            if node.get("t") == "Image":
+                attr = node["c"][0]
+                name = posixpath.basename(node["c"][2][0])
+                for key in (name, name.rsplit(".", 1)[0]):
+                    if queues.get(key):
+                        if queues[key].pop(0) and "decorative" not in attr[1]:
+                            attr[1].append("decorative")
+                            marked += 1
+                        break
+            for value in node.values():
+                walk(value)
+        elif isinstance(node, list):
+            for value in node:
+                walk(value)
+    walk(doc.get("blocks", []))
+    return marked
+
+
+def apply_decorative(docx_path, json_path):
+    """mark_decorative on a page's JSON, read from and written back to
+    json_path. Returns how many images were marked."""
+    import json
+    flags = decorative_media(docx_path)
+    if not any(any(v) for v in flags.values()):
+        return 0
+    with open(json_path, encoding="utf-8") as fh:
+        doc = json.load(fh)
+    marked = mark_decorative(doc, flags)
+    if marked:
+        with open(json_path, "w", encoding="utf-8") as fh:
+            json.dump(doc, fh, ensure_ascii=False)
+    return marked
 
 
 def repaired_copy(source, destination):

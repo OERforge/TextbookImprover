@@ -1347,8 +1347,9 @@ def case_asciidoc_layout(work):
 
 
 def case_not_implemented(work):
-    """A pdf or docx target says it's not implemented and is skipped;
-    with nothing else to build, the run stops and says why."""
+    """A pdf target says it's not implemented and is skipped, while a
+    docx target beside it is written; with nothing else to build, the
+    run stops and says why."""
     os.makedirs(work)
     with open(os.path.join(work, "ch.md"), "w") as fh:
         fh.write("# One\n\nText.\n")
@@ -1367,10 +1368,10 @@ def case_not_implemented(work):
                            cwd=only, capture_output=True, text=True,
                            stdin=subprocess.DEVNULL)
     return [
-        ("each pdf or docx target is named NOT YET IMPLEMENTED and skipped",
-         lambda: mixed.stderr.count("NOT YET IMPLEMENTED") == 2
-         and exists(work, "web", "ch.html")
-         and not exists(work, "print") and not exists(work, "word")),
+        ("a pdf target is named NOT YET IMPLEMENTED and skipped; a docx target is written",
+         lambda: mixed.stderr.count("NOT YET IMPLEMENTED") == 1
+         and exists(work, "web", "ch.html") and exists(work, "word", "ch.docx")
+         and not exists(work, "print")),
         ("a book with only such targets stops and says why",
          lambda: alone.returncode != 0
          and "NOT YET IMPLEMENTED" in alone.stdout + alone.stderr),
@@ -1895,6 +1896,84 @@ def case_bare_links(work):
     ]
 
 
+PNG_1PX = bytes.fromhex("89504e470d0a1a0a0000000d4948445200000001000000010806000000"
+                        "1f15c4890000000d49444154789c6360000002000154a24f5d0000000049454e44ae426082")
+
+
+def case_docx_target(work):
+    """A docx target: Pandoc's Word file, then compatibility mode 15,
+    ScreenTips, Word's decorative marker, and the First Column flag; and
+    the file read back as a source gives the book back."""
+    import zipfile as zf
+    os.makedirs(os.path.join(work, "assets"))
+    for name in ("chart.png", "rule.png"):
+        with open(os.path.join(work, "assets", name), "wb") as fh:
+            fh.write(PNG_1PX if name == "chart.png" else PNG_1PX + b"\0")
+    with open(os.path.join(work, "one.md"), "w", encoding="utf-8") as fh:
+        fh.write("---\ntitle: One\nlang: en\n---\n\n# One\n\n"
+                 'See [the data](https://example.org/data "The data, as a CSV file").[^1]\n\n'
+                 "![A navy bar standing for the chart](assets/chart.png)\n\n![](assets/rule.png)\n\n"
+                 "![Chart of the data](assets/chart.png){#fig-chart}\n\nAs [the chart](#fig-chart) shows.\n\n"
+                 '[^1]: The [source](https://example.org/source "Where the data came from") explains it.\n')
+    with open(os.path.join(work, "two.html"), "w", encoding="utf-8") as fh:
+        fh.write('<!DOCTYPE html><html lang="en"><head><title>Two</title></head><body><h1>Two</h1>'
+                 "<table><caption>Costs by year</caption><thead><tr><th>Item</th><th>2024</th>"
+                 "<th>2025</th></tr></thead><tbody><tr><th>Labor</th><td>10</td><td>12</td></tr>"
+                 "<tr><th>Parts</th><td>4</td><td>5</td></tr></tbody></table></body></html>")
+    with open(os.path.join(work, "image-alt.csv"), "w", encoding="utf-8") as fh:
+        fh.write("Image,Alt\nassets/rule.png,[decorative]\n")
+    with open(os.path.join(work, "conversion.yaml"), "w") as fh:
+        fh.write("targets:\n  word:\n    format: docx\n")
+    run = subprocess.run(["python3", os.path.join(BIN, "convert.py")], cwd=work,
+                         capture_output=True, text=True, stdin=subprocess.DEVNULL)
+
+    def part(name, inside):
+        path = os.path.join(work, "word", name)
+        if not os.path.exists(path):
+            return ""
+        with zf.ZipFile(path) as z:
+            return z.read(inside).decode("utf-8") if inside in z.namelist() else ""
+    one = part("one.docx", "word/document.xml") + part("one.docx", "word/footnotes.xml")
+    two = part("two.docx", "word/document.xml")
+    # Read the Word files back, as a book of their own.
+    back = os.path.join(work, "back")
+    os.makedirs(back)
+    for name in ("one.docx", "two.docx"):
+        if os.path.exists(os.path.join(work, "word", name)):
+            shutil.copy(os.path.join(work, "word", name), back)
+    with open(os.path.join(back, "conversion.yaml"), "w") as fh:
+        fh.write("targets:\n  html:\n    format: html\n")
+    subprocess.run(["python3", os.path.join(BIN, "convert.py")], cwd=back,
+                   capture_output=True, text=True, stdin=subprocess.DEVNULL)
+    one_back = read(back, "html", "one.html") if exists(back, "html", "one.html") else ""
+    two_back = read(back, "html", "two.html") if exists(back, "html", "two.html") else ""
+    return [
+        ("a docx target writes a Word file per page, in compatibility mode 15",
+         lambda: "2 Word file(s)" in run.stderr and all(
+             'w:name="compatibilityMode"' in part(n, "word/settings.xml")
+             and 'w:val="15"' in part(n, "word/settings.xml") for n in ("one.docx", "two.docx"))),
+        ("a link's title is its ScreenTip, in the body and in a footnote",
+         lambda: 'w:tooltip="The data, as a CSV file"' in one
+         and 'w:tooltip="Where the data came from"' in one),
+        ("a decorative image carries Word's marker; a described one its description",
+         lambda: one.count("adec:decorative") == 1
+         and 'descr="A navy bar standing for the chart"' in one),
+        ("a table's header row repeats and its header column is flagged",
+         lambda: "<w:tblHeader" in two and 'w:firstColumn="1"' in two and 'w:val="00A0"' in two),
+        ("read back as a source, the links have their titles and the image is decorative",
+         lambda: 'title="The data, as a CSV file"' in one_back
+         and 'title="Where the data came from"' in one_back
+         and re.search(r'<img[^>]*alt=""[^>]*aria-hidden="true"', one_back)),
+        ("a captioned figure with an id reads back as a figure with its caption, "
+         "and a link to it still lands", lambda: re.search(
+             r"<figure\b[^>]*>(?:(?!</figure>).)*<figcaption[^>]*>(?:(?!</figcaption>).)*Chart of the data", one_back, re.S)
+         and re.search(r'href="#([^"]+)"[^>]*>the chart<', one_back)
+         and 'id="' + re.search(r'href="#([^"]+)"[^>]*>the chart<', one_back).group(1) + '"' in one_back),
+        ("and the table has its header row and header column",
+         lambda: '<th scope="col">' in two_back and '<th scope="row">Labor</th>' in two_back),
+    ]
+
+
 def case_html_source(work):
     """An HTML page is a source when the book says so, and converting
     what this pipeline wrote changes nothing."""
@@ -2386,6 +2465,7 @@ CASES = [
     ("link titles from every source through every target", case_link_titles),
     ("HTML table repairs", case_html_table_repairs),
     ("bare links and their sidecar", case_bare_links),
+    ("a docx target", case_docx_target),
     ("a hand-written page", case_hand_written),
     ("several targets", case_targets),
     ("arguments passed to the packager", case_passthrough),

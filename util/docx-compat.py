@@ -126,12 +126,26 @@ def patch_settings(xml, mode):
     found = FIND_MODE.search(xml)
     if found:
         return xml[:found.start()] + setting(mode) + xml[found.end():]
-    if "<w:compat>" in xml:
-        return xml.replace("<w:compat>", "<w:compat>" + setting(mode), 1)
+    if "</w:compat>" in xml:
+        # CT_Compat puts Word's legacy options first, every compatSetting
+        # after them.
+        return xml.replace("</w:compat>", setting(mode) + "</w:compat>", 1)
     if "<w:compat/>" in xml or "<w:compat />" in xml:
         return re.sub(r"<w:compat\s*/>",
                       "<w:compat>" + setting(mode) + "</w:compat>", xml, count=1)
     block = "<w:compat>" + setting(mode) + "</w:compat>"
+    # CT_Settings is a sequence, and these follow w:compat in it; Word
+    # calls a file whose settings are out of order corrupt.
+    later = [xml.find("<" + name) for name in (
+        "w:docVars", "w:rsids", "m:mathPr", "w:attachedSchema",
+        "w:themeFontLang", "w:clrSchemeMapping", "w:doNotIncludeSubdocsInStats",
+        "w:doNotAutoCompressPictures", "w:forceUpgrade", "w:captions",
+        "w:readModeInkLockDown", "w:smartTagType", "sl:schemaLibrary",
+        "w:shapeDefaults", "w:doNotEmbedSmartTags", "w:decimalSymbol",
+        "w:listSeparator")]
+    later = [at for at in later if at >= 0]
+    if later:
+        return xml[:min(later)] + block + xml[min(later):]
     if "</w:settings>" in xml:
         return xml.replace("</w:settings>", block + "</w:settings>", 1)
     return re.sub(r"<w:settings([^>]*)/>",

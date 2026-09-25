@@ -75,7 +75,21 @@ This time the run goes through to the end and writes the cartridge's manifest. I
 Introductory_Business_Statistics_2e_-_DOCX_Customization.zip: not read, since this directory has sources, which are the book once an archive is unpacked.
 ```
 
-### 3. Check the order
+### 3. Credit OpenStax on every page
+
+OpenStax asks that every page of a book built from its files carry the line "Access for free at openstax.org." A footer does that. It's Markdown, placed at the bottom of every page, and it goes in `conversion.yaml`, which until now the book hasn't needed:
+
+```bash
+cat > conversion.yaml <<'EOF'
+defaults:
+  footer: "Access for free at [openstax.org](https://openstax.org)."
+EOF
+python3 $T/bin/convert.py
+```
+
+In `defaults`, it applies to every target the book has: to the HTML in the cartridge now, and to an EPUB if you add one later. A footer isn't read by the filters the way a page is, so it isn't checked or changed; write it as it should appear.
+
+### 4. Check the order
 
 With no order given, the pages were put in one guessed from their file names, and it's in `packaging.yaml` under `contents`. The guesser knows OpenStax's naming, so each chapter's introduction comes first and its end-of-chapter pages last:
 
@@ -103,7 +117,7 @@ What it can't know is what the chapters are called. Give each its title from the
   - title: 1 Sampling and Data
 ```
 
-### 4. Work through the reports
+### 5. Work through the reports
 
 Each report is a CSV file listing what needs a person, and each decision goes into a sidecar file beside it, which later runs read. [Sidecar files](sidecars.md) describes them all; this is how the first pass goes.
 
@@ -150,7 +164,7 @@ Wrote image-alt-missing.csv (207 image(s) needing alt text).
 
 The four `blank` tables have a sidecar row with nothing in `headers`: the guess was left blank because the file doesn't say enough to guess. Fill theirs in. This is the loop you'll spend the most time in: add rows, run again, and watch the reports shrink. Nothing requires them to reach zero before you build, but each row left is a table or image a screen-reader user meets without what it needs.
 
-### 5. Build the cartridge
+### 6. Build the cartridge
 
 ```bash
 python3 $T/bin/convert.py --zip

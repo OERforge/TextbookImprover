@@ -1787,6 +1787,40 @@ def case_link_titles(work):
     ]
 
 
+def case_html_table_repairs(work):
+    """A table with a second header row partway down is two tables; a
+    scope Pandoc can't place and an impossible attribute name are dropped."""
+    import importlib.util
+    if not (importlib.util.find_spec("html5lib") or importlib.util.find_spec("lxml")):
+        return [("skip: HTML sources need html5lib or lxml", lambda: True)]
+    os.makedirs(work)
+    with open(os.path.join(work, "t.html"), "w", encoding="utf-8") as fh:
+        fh.write('<!DOCTYPE html><html lang="en"><head><title>T</title></head><body><h1>T</h1>'
+                 '<table id="tab"><tbody id="body1"><tr id="r1"><th scope="col">Nouns</th>'
+                 '<th scope="col">Not</th></tr><tr><td>Mom</td><td>mom</td></tr>'
+                 '<tr id="r3"><th scope="col">Adjectives</th><th scope="col">Not</th></tr>'
+                 '<tr><td>French</td><td>french fries</td></tr></tbody></table>'
+                 '<table><tr><th>K</th><th>V</th></tr><tr><th scope="col">a</th><td>1</td></tr>'
+                 '<tr><td>b</td><td>2</td></tr></table>'
+                 '<div style="color: red" font-family:\'montserrat\',sans-serif;"="">Styled.</div>'
+                 '</body></html>')
+    with open(os.path.join(work, "conversion.yaml"), "w") as fh:
+        fh.write("targets:\n  html:\n    format: html\n")
+    subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quiet"],
+                   cwd=work, capture_output=True, text=True, stdin=subprocess.DEVNULL)
+    page = read(work, "html", "t.html") if exists(work, "html", "t.html") else ""
+    return [
+        ("a second header row partway down makes a second table, headed by it",
+         lambda: page.count("<table") == 3 and page.count("<thead") == 3
+         and page.index("Nouns") < page.index("Adjectives")),
+        ("no cell keeps a scope as a td, and no id is written twice",
+         lambda: "<td scope" not in page and page.count('id="body1"') <= 1
+         and page.count('id="r1"') == 1),
+        ("an attribute name that can't be one is dropped",
+         lambda: "montserrat" not in page and "Styled." in page),
+    ]
+
+
 def case_html_source(work):
     """An HTML page is a source when the book says so, and converting
     what this pipeline wrote changes nothing."""
@@ -2276,6 +2310,7 @@ CASES = [
     ("an AsciiDoc target", case_asciidoc_target),
     ("a page title that is also a heading", case_title_id),
     ("link titles from every source through every target", case_link_titles),
+    ("HTML table repairs", case_html_table_repairs),
     ("a hand-written page", case_hand_written),
     ("several targets", case_targets),
     ("arguments passed to the packager", case_passthrough),

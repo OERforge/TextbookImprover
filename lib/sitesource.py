@@ -279,6 +279,17 @@ def canonical(url):
     return base + ("?" + query if query else "")
 
 
+def resource_address(url):
+    """A resource's URL for looking it up: no fragment, and its path
+    percent-encoded as a browser sends it. A page names an image as
+    "Exec summary 1.png"; the archive holds it as "Exec%20summary%201.png",
+    because that is what the browser asked for."""
+    from urllib.parse import quote, unquote, urlunsplit
+    parts = urlsplit(urldefrag(url)[0])
+    path = quote(unquote(parts.path), safe="/:@!$&'()*+,;=-._~")
+    return urlunsplit((parts.scheme, parts.netloc, path, parts.query, ""))
+
+
 def page_key(site, url):
     """The page a reference names, or None: its canonical URL, or that
     URL without its query (a tracking parameter, or ?section=0 naming the
@@ -316,7 +327,7 @@ class Site:
         key = "sha1:" + hashlib.sha1(data).hexdigest()
         self.resources.setdefault(key, (data, name))
         if url:
-            self.by_url[urldefrag(url)[0]] = key
+            self.by_url[resource_address(url)] = key
         return key
 
 
@@ -473,7 +484,7 @@ def load_warc(paths):
     resource. A redirect is followed when a reference is looked up."""
     site = Site()
     site.kind = "WARC"
-    htmls, aliases, seeds, parts = [], [], [], []
+    htmls, aliases, seeds, parts, edtech = [], [], [], [], []
     for path in sorted(paths):
         seeds += _recorded_pages(path)
         for name, stream in _warc_streams(path):
@@ -516,6 +527,10 @@ def load_warc(paths):
                     if status != 200:
                         continue
                     kind = http.get("content-type", "").split(";")[0].strip()
+                    record = _edtech_record(url, body) if "json" in kind else None
+                    if record:
+                        edtech.append(record)
+                        continue
                     fragment = _html_in_json(body) if "json" in kind else None
                     if fragment is not None:
                         parts.append((url, fragment, body))
@@ -526,12 +541,14 @@ def load_warc(paths):
                             charset.group(1) if charset else "utf-8",
                             errors="replace")))
                     else:
-                        leaf = posixpath.basename(urlsplit(url).path)
+                        # Named as the site names it, not as it was encoded
+                        # for the request: "Exec summary 1.png".
+                        leaf = unquote(posixpath.basename(urlsplit(url).path))
                         site.add_resource(body, leaf or "file", url)
     for url, earlier in aliases:
-        key = site.by_url.get(urldefrag(earlier)[0])
+        key = site.by_url.get(resource_address(earlier))
         if key:
-            site.by_url.setdefault(urldefrag(url)[0], key)
+            site.by_url.setdefault(resource_address(url), key)
     # The book's site: the first page the archive says was recorded (a
     # WACZ lists them), or else the first HTML fetched, which for a crawl
     # is where it started. A browser fetches other sites' HTML first
@@ -558,7 +575,173 @@ def load_warc(paths):
         else:
             site.add_resource(body, posixpath.basename(urlsplit(url).path)
                               or "data.json", url)
+    _edtech_pages(site, edtech)
     return site
+
+
+# ---------------------------------------------------------------------------
+# EdTech Books
+# ---------------------------------------------------------------------------
+# EdTech Books (open.byu.edu, edtechbooks.org) draws every page by script:
+# the one HTML page an archive holds is an empty shell, and the book is two
+# kinds of JSON record the page fetches. /book/<name>/view has the book's
+# title, subtitle, authors, abstract, and chapter_links, its chapters in
+# order with a chapter_level each (a chapter nests under the nearest one
+# before it at a lower level; "children" misses some); /chapter/<id>/view
+# has a chapter's HTML in settings.text. So the pages are made from the
+# records: one per chapter at its own address, and a cover whose contents
+# list is the book's order, which order() then reads like any menu.
+
+_EDTECH_BOOK = re.compile(r"^/book/([^/]+)/view/?$")
+_EDTECH_CHAPTER = re.compile(r"^/chapter/(\d+)/view/?$")
+
+
+def _edtech_record(url, body):
+    """("book" or "chapter", url, entity) for an EdTech Books record;
+    None for any other JSON."""
+    path = urlsplit(url).path
+    kind = ("book" if _EDTECH_BOOK.match(path) else
+            "chapter" if _EDTECH_CHAPTER.match(path) else None)
+    if not kind:
+        return None
+    import json
+    try:
+        data = json.loads(body)
+    except ValueError:
+        return None
+    entity = data.get("entity") if isinstance(data, dict) else None
+    if not isinstance(entity, dict) or not isinstance(entity.get("settings"), dict):
+        return None
+    if kind == "book" and not isinstance(entity.get("chapter_links"), list):
+        return None
+    return kind, url, entity
+
+
+def _edtech_markup(text):
+    """A chapter's HTML as the site shows it, not as it's stored.
+
+    A video is a placeholder the page's script fills in,
+    <div data-template="youtube" data-youtube-id="...">, and becomes the
+    player's frame. An h6 is the site's label style ("Story", "Agenda",
+    "Further Reading", and many left empty), not a heading, and becomes a
+    paragraph classed label. And a chapter's headings start below the
+    page's title: when the highest is below h2, they move up to it."""
+    def video(match):
+        found = re.search(r'data-youtube-id="([\w-]+)"', match.group(1))
+        if not found:
+            return match.group(0)
+        return ('<iframe src="https://www.youtube.com/embed/%s" '
+                'title="YouTube video" allowfullscreen></iframe>' % found.group(1))
+    text = re.sub(r'(<div\b[^>]*data-template="youtube"[^>]*>)(.*?)</div>',
+                  video, text, flags=re.S)
+    text = re.sub(r"<h6\b[^>]*>(.*?)</h6>", r'<p class="label">\1</p>', text,
+                  flags=re.S)
+    levels = [int(n) for n in re.findall(r"<h([1-5])\b", text)]
+    if levels and min(levels) > 2:
+        shift = min(levels) - 2
+        text = re.sub(r"(</?h)([1-5])\b",
+                      lambda m: m.group(1) + str(int(m.group(2)) - shift), text)
+    return text
+
+
+def _edtech_pages(site, records):
+    """The book's pages, made from its records, in place of the shell and
+    its templates. Nothing happens without a book record."""
+    import html as html_module
+    esc = html_module.escape
+    books = [(u, e) for kind, u, e in records if kind == "book"]
+    if not books:
+        return False
+    book_url, book = books[0]
+    chapters = {str(e.get("id")): e for kind, u, e in records if kind == "chapter"}
+    parts = urlsplit(book_url)
+    root = "%s://%s/%s" % (parts.scheme, parts.netloc, book.get("short_name", ""))
+    cover_url = root + "/"                  # a directory: its page is index
+
+    tree, stack = [], []
+    for link in book["chapter_links"]:
+        node = {"link": link, "children": []}
+        try:
+            level = int(link.get("chapter_level") or 0)
+        except (TypeError, ValueError):
+            level = 0
+        while stack and stack[-1][0] >= level:
+            stack.pop()
+        (stack[-1][1]["children"] if stack else tree).append(node)
+        stack.append((level, node))
+
+    def address(link):
+        return root + "/" + str(link.get("short_name") or link.get("id"))
+
+    def title_of(link):
+        record = chapters.get(str(link.get("id")), {})
+        return " ".join(str(link.get("title") or record.get("title") or "").split())
+
+    def listing(nodes):
+        items = []
+        for node in nodes:
+            inner = listing(node["children"]) if node["children"] else ""
+            items.append('<li><a href="%s">%s</a>%s</li>'
+                         % (esc(address(node["link"])), esc(title_of(node["link"])), inner))
+        return "<ul>" + "".join(items) + "</ul>"
+
+    def document(title, body, head=""):
+        return ('<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">'
+                "<title>%s</title>%s</head><body><main>%s</main></body></html>"
+                % (esc(title), head, body))
+
+    made = {}
+    def make(nodes):
+        for node in nodes:
+            link = node["link"]
+            record = chapters.get(str(link.get("id")))
+            title = title_of(link)
+            if record is None:
+                site.notes.append((address(link), "chapter-not-captured", title))
+            else:
+                text = _edtech_markup(str(record.get("settings", {}).get("text") or ""))
+                if not re.sub(r"<[^>]+>|\s|&nbsp;", "", text):
+                    # A section with no text of its own: a list of what's in
+                    # it, as the site shows.
+                    text = listing(node["children"]) if node["children"] else ""
+                if text:
+                    page = Page(address(link), document(
+                        title, "<h1>%s</h1>%s" % (esc(title), text)))
+                    made[page.url] = page
+                else:
+                    site.notes.append((address(link), "chapter-empty", title))
+            make(node["children"])
+    make(tree)
+
+    title = " ".join(str(book.get("title") or "").split())
+    authors = [str(a.get("name")).strip() for a in book.get("authorships") or []
+               if isinstance(a, dict) and a.get("name")]
+    head = '<meta property="og:title" content="%s">' % esc(title)
+    head += "".join('<meta name="author" content="%s">' % esc(a) for a in authors)
+    body = "<h1>%s</h1>" % esc(title)
+    if book.get("subtitle"):
+        body += '<p class="subtitle">%s</p>' % esc(" ".join(str(book["subtitle"]).split()))
+    if authors:
+        body += "<p>By %s</p>" % esc(", ".join(authors))
+    cover = book.get("cover_image_lg")
+    if cover:
+        found = [u for u in site.by_url if u.endswith("/" + str(cover))]
+        if found:
+            body += '<img src="%s" alt="">' % esc(found[0])
+    abstract = str(book.get("abstract") or "").strip()
+    if abstract:
+        body += abstract if abstract.startswith("<") else "<p>%s</p>" % esc(" ".join(abstract.split()))
+    # The cover heads its own contents, so the book's order starts with it.
+    body += '<nav><h2>Contents</h2><ul><li><a href="%s">%s</a></li></ul>%s</nav>' % (
+        esc(cover_url), esc(title), listing(tree))
+    cover_page = Page(cover_url, document(title, body, head))
+
+    # The shell and the templates it fetched (/ui/.../*.html) are no pages.
+    site.pages.clear()
+    site.pages[cover_page.url] = cover_page
+    site.pages.update(made)
+    site.kind = "WARC (EdTech Books)"
+    return True
 
 
 def _recorded_pages(path):
@@ -970,7 +1153,7 @@ def localize(site, page, value, origin, base_dir, keep_hosts, used, missing,
     if target_page is not None:
         return target_page.name + ".html" + ("#" + fragment_href(fragment)
                                              if fragment else "")
-    key = site.by_url.get(target)
+    key = site.by_url.get(resource_address(target))
     if key:
         used.add(key)
         return PLACEHOLDER + key + ("#" + fragment if fragment else "")

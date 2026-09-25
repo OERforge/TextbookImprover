@@ -12,6 +12,7 @@ Versions are two-part and pre-1.0: breaking changes may land in any of them unti
 
 ### Added
 
+- **EdTech Books, from a browser's archive.** The site draws every page by script, so its archive holds a shell and JSON records; the unpacker makes the book from the records: a cover with the contents, a page per chapter nested by its level, videos as players, the site's `h6` labels as labels, and headings starting at `h2`. Tested on *Management Communication 320*. See [EdTech Books](docs/site-input.md#edtech-books).
 - **A link's title survives from every source through every target.** Word's ScreenTips, which Pandoc 3.11's reader drops, are recovered on reading; a Markdown target writes a titled bare link in full rather than as an autolink, which loses the title; an AsciiDoc target writes every titled link as `link:…["text",title="…"]`, since Pandoc's writer drops them all, and reading AsciiDoc moves that attribute to the title. HTML and EPUB show it as a tooltip.
 - **[Worked examples](docs/examples.md)**, a tutorial to read after the first run: *Introductory Business Statistics 2e* from OpenStax's Word files to a course cartridge, and DCIC from a WARC to an EPUB and an HTML round trip, with the output each step printed.
 - **An AsciiDoc target.** `format: asciidoc` writes the book as AsciiDoc to be read again as a source, as a `markdown` target does for Markdown, and `merge: groups` applies to it too. Pandoc's AsciiDoc writer and reader disagree in many places, so the target writes much of it itself (table markers, row-spanned and banded tables, images, anchors, footnotes, text AsciiDoc would read as markup) and reports the few changes it can't avoid. Measured round trips: the security textbook 14 of 14 pages identical, the statistics book 166 of 169, the economics book 31 of 34. See [AsciiDoc as a target](docs/asciidoc.md#asciidoc-as-a-target).
@@ -63,6 +64,9 @@ Versions are two-part and pre-1.0: breaking changes may land in any of them unti
 
 ### Fixed
 
+- **An image with spaces in its name was lost from a captured site.** The page names `Exec summary 1.png` and the archive holds `Exec%20summary%201.png`; addresses are now compared encoded the same way, and the file keeps the site's name.
+- **A second header row partway down an HTML table** came out as data cells with `scope="col"` on a `td`, invalid and silent to a screen reader. The table is split there, the row heading the part below.
+- **An attribute whose name can't be one** (CSS left as a name by a broken editor) was written back into the HTML; it's dropped.
 - **Reading back a page this pipeline wrote no longer warns of duplicate ids.** Pandoc's reader gave the title-block heading an id made from its text, the same id as the page's first section heading when the two share their text, and warned on 79 of DCIC's 80 pages. The title now has its own id before reading, and it goes no further.
 - **A book's third run no longer stops because its own cartridge is there.** After `--zip`, the `.imscc` sits beside the download it came from, and the next run stopped with "More than one thing to unpack here". Once a directory has sources, no archive in it is read, however many there are. Found by following the first-run page on a real book.
 - **Pasting `table-headers-new.csv` in as the run says no longer warns.** The prefilled file listed a table that appears twice once per appearance, under one key, and the sidecar reader warned of every repeated key; the file now has one row per key, and a repeated key is reported only when its rows disagree.

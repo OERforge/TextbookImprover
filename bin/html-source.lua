@@ -263,8 +263,81 @@ local function empty_table(tbl)
   return pandoc.utils.stringify(tbl.caption.long) == ''
 end
 
+-- A row of <th scope="col"> partway down a table's body is a second
+-- header row: the source is two tables, one under the other, each with its
+-- own column headers. Pandoc has no header cells in a body, so the row
+-- would be read as data, and only the scope it carried would be left, on a
+-- <td>. The table is split there instead, the row heading the part below.
+local function header_row(row)
+  if #row.cells < 2 then return false end
+  for _, cell in ipairs(row.cells) do
+    if cell.attr.attributes.scope ~= 'col' then return false end
+  end
+  return true
+end
+
+local function split_at_header_rows(tbl)
+  if #tbl.bodies ~= 1 then return nil end
+  local rows, cuts = tbl.bodies[1].body, {}
+  for i, row in ipairs(rows) do
+    if i > 1 and header_row(row) then cuts[#cuts + 1] = i end
+  end
+  if #cuts == 0 then return nil end
+  local parts, start = {}, 1
+  cuts[#cuts + 1] = #rows + 1
+  for n, cut in ipairs(cuts) do
+    local part = tbl:clone()
+    local body = part.bodies[1]
+    local slice = pandoc.List({})
+    for i = start, cut - 1 do slice:insert(rows[i]:clone()) end
+    if n > 1 then
+      -- The part's own header row heads it; the caption and the ids stay
+      -- with the first part. (A table's head and bodies are copies when
+      -- read: each is changed, then assigned back.)
+      local head = part.head
+      head.rows = pandoc.List({ slice:remove(1) })
+      part.head = head
+      part.caption = pandoc.Caption()
+      part.attr.identifier = ''
+      body.attr.identifier = ''
+      body.head = pandoc.List({})   -- the first part's header, as the reader left it
+    end
+    body.body = slice
+    part.bodies = pandoc.List({ body })
+    parts[#parts + 1] = part
+    start = cut
+  end
+  return parts
+end
+
+local function drop_scopes(tbl)
+  -- scope="col" on a cell below the header rows: Pandoc can't place it,
+  -- and the writer would put it on a <td>. Other scopes stay: the filter
+  -- sets or clears "row" itself, and a band written as a row-group header
+  -- (scope="rowgroup") is how that HTML reads back with its bands.
+  local function rows(list)
+    for _, row in ipairs(list) do
+      for _, cell in ipairs(row.cells) do
+        if cell.attr.attributes.scope == 'col' then cell.attr.attributes.scope = nil end
+      end
+    end
+  end
+  for _, body in ipairs(tbl.bodies) do rows(body.body) end
+  rows(tbl.foot.rows)
+end
+
 function Table(tbl)
+  local parts = split_at_header_rows(tbl)
+  if parts then
+    local out = pandoc.Blocks({})
+    for _, part in ipairs(parts) do
+      local done = Table(part)
+      if done then out:extend(done.t == 'Table' and { done } or done) end
+    end
+    return out
+  end
   if empty_table(tbl) then return {} end
+  drop_scopes(tbl)
   drop_obsolete(tbl)
   drop_empty_columns(tbl)
   if tbl.attr.attributes[MARKER_ATTR] then return tbl end
@@ -529,8 +602,26 @@ local function fix_ids(el)
   return changed and el or nil
 end
 
+-- An attribute whose name can't be one: markup broken in the source, as
+-- EdTech Books' editor left `font-family:'montserrat',sans-serif;"` as a
+-- name, which html5lib reads as written and the HTML writer writes back.
+local function drop_bad_names(el)
+  if not el.attributes then return nil end
+  local bad = {}
+  for name, _ in pairs(el.attributes) do
+    if not name:match('^[%a_:][%w_:%.%-]*$') then bad[#bad + 1] = name end
+  end
+  for _, name in ipairs(bad) do el.attributes[name] = nil end
+  return #bad > 0 and el or nil
+end
+
+local function repair_attributes(el)
+  local named = drop_bad_names(el)
+  return fix_ids(named or el) or named
+end
+
 function Pandoc(doc)
-  doc = doc:walk({ Inline = fix_ids, Block = fix_ids })
+  doc = doc:walk({ Inline = repair_attributes, Block = repair_attributes })
   lift_h1(doc)
   local ids = {}
   doc:walk(with_attr(function(el)

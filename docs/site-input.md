@@ -74,9 +74,21 @@ CS168 both ways: the same 62 pages and the same 772 images without alt text. The
 
 ## What a browser's archive holds
 
+An image or file whose name has spaces is found whichever way a page and the archive write its address: a page names `Exec summary 1.png`, while the browser asked for, and the archive holds, `Exec%20summary%201.png`. It's saved under the name the site gave it.
+
 A browser records a site the way a reader's browser receives it, which differs from a crawl in three ways the unpacker handles. A WACZ lists the pages that were recorded, and the first of them names the book's site; the first HTML the browser fetched is often another site's (a sign-in relay, a share button). A redirect, and a response the archive already holds, is stored as a revisit record, which is followed like any redirect. And a site that draws its pages by script may fetch each section as data: OER Commons fetches `?section=3` of a lesson as JSON holding the section's HTML. Such a response is a page when it's part of a page the archive holds (the same address with another query); any other JSON with HTML in it, such as an oEmbed answer, is not. Pages told apart only by their query are named by it (`section-3`), and the page without one, which a lesson's menu calls `?section=0`, is `section-0`.
 
 A frame (`<iframe>`, `<embed>`, `<object>`) always keeps pointing at what it shows, even when the archive recorded the player: a browser's archive of a lesson with videos holds each video's player page, and a book shouldn't.
+
+## EdTech Books
+
+[EdTech Books](https://edtechbooks.org) (also at `open.byu.edu`) draws every page with a script, so a crawler like `wget`, which runs none, finds only an empty shell with no links to follow. A browser's archive works: record a session with ArchiveWeb.page, open the book's cover, and visit each chapter. The book isn't in the archive as pages, though. The site fetches two kinds of record, one for the book and one for each chapter, and the unpacker makes the pages from those:
+
+- **A cover page** from the book's record: its title, subtitle, authors, abstract, cover image, and a contents list, which gives the book its order.
+- **A page for each chapter**, at the chapter's own address. The book's chapter list gives each chapter a level, and a chapter nests under the nearest one before it at a lower level; the list's `children` field misses some, so the levels decide. A section with no text of its own, like an "Appendices", gets a list of the chapters in it.
+- **What the site's script does to a chapter, done here:** a video, stored as a placeholder naming the YouTube video, becomes the player's frame. An `h6`, which the site uses as a small label ("Story", "Agenda", "Further Reading", and often empty), becomes a paragraph classed `label`. And when a chapter's highest heading is below `h2`, its headings move up to start there, under the page's title.
+
+A chapter the book lists but the archive lacks is reported, as is an empty one with nothing in it. Tested on *Management Communication 320* (`open.byu.edu/mcom320`): 22 chapters, 21 with text, and 15 videos.
 
 ## Posting the clean copy as a site
 

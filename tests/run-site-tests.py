@@ -566,12 +566,90 @@ def case_browser_archive(work):
     ]
 
 
+def case_edtech_books(work):
+    """An EdTech Books capture: a shell page and JSON records, from which
+    the book is made."""
+    import json
+    import zipfile
+    os.makedirs(work)
+    host = "https://open.example.edu"
+    png = bytes.fromhex("89504e470d0a1a0a0000000d4948445200000001000000010806000000"
+                        "1f15c4890000000d49444154789c6360000002000154a24f5d0000000049454e44ae426082")
+
+    def record(kind, n, entity):
+        entity = dict(entity, settings=entity.get("settings", {}))
+        return warc_record(f"{host}/{kind}/{n}/view", "200 OK\r\nContent-Type: application/json",
+                           json.dumps({"status": "success", "entity": entity}).encode())
+    links = [
+        {"id": 1, "title": "Intro ", "short_name": "intro", "chapter_level": 0, "children": []},
+        {"id": 2, "title": "Section", "short_name": "section", "chapter_level": 0, "children": [3]},
+        {"id": 3, "title": "Inside", "short_name": "inside", "chapter_level": 1, "children": []},
+        {"id": 4, "title": "Deeper", "short_name": "deeper", "chapter_level": 3, "children": []},
+    ]
+    intro = ('<div class="story-header"><h6>Story</h6><h3>A story</h3></div>'
+             '<p>Intro text.</p><div data-template="youtube" contenteditable="false" '
+             'placeholder="YouTube Video" data-youtube-id="abc123"></div>'
+             '<img src="/images/content_images/bk/Exec summary 1.png" alt="A chart">'
+             '<h6></h6><h4>Sub</h4><p>More.</p>')
+    records = [
+        warc_record(f"{host}/bk", "200 OK\r\nContent-Type: text/html",
+                    b"<html><head><title>EdTech Books</title></head><body>"
+                    b"<a href='#main'>Skip to main content</a></body></html>"),
+        warc_record(f"{host}/ui/default/chapter.html", "200 OK\r\nContent-Type: text/html",
+                    b"<div>{{chapter.title}}</div>"),
+        warc_record(f"{host}/book/bk/view", "200 OK\r\nContent-Type: application/json",
+                    json.dumps({"status": "success", "entity": {
+                        "settings": {}, "short_name": "bk", "title": "A Test Book",
+                        "subtitle": "For testing", "authorships": [{"name": "Ann Author"}],
+                        "abstract": "An abstract.", "chapter_links": links}}).encode()),
+        record("chapter", 1, {"id": 1, "title": "Intro", "settings": {"text": intro}}),
+        record("chapter", 2, {"id": 2, "title": "Section", "settings": {"text": " "}}),
+        record("chapter", 3, {"id": 3, "title": "Inside", "settings": {"text": "<p>Inside text.</p>"}}),
+        record("chapter", 4, {"id": 4, "title": "Deeper", "settings": {"text": "<p>Deeper text.</p>"}}),
+        warc_record(f"{host}/images/content_images/bk/Exec%20summary%201.png",
+                    "200 OK\r\nContent-Type: image/png", png),
+    ]
+    wacz = os.path.join(work, "session.wacz")
+    with zipfile.ZipFile(wacz, "w") as z:
+        z.writestr("pages/pages.jsonl", '{"format": "json-pages-1.0"}\n'
+                   + json.dumps({"url": f"{host}/bk"}) + "\n")
+        z.writestr("archive/data.warc.gz", b"".join(records))
+    out = os.path.join(work, "out")
+    unpack([wacz], out)
+    project = read(out, "project.yaml") if os.path.exists(os.path.join(out, "project.yaml")) else ""
+    page = read(out, "intro.html") if os.path.exists(os.path.join(out, "intro.html")) else ""
+    pages = sorted(f for f in os.listdir(out) if f.endswith(".html")) if os.path.isdir(out) else []
+    notes = report(out) if os.path.exists(os.path.join(out, "unpack-report.csv")) else ""
+    return [
+        ("the book is made from its records: a cover and a page per chapter, "
+         "and neither the shell nor a template", lambda: pages == [
+            "deeper.html", "index.html", "inside.html", "intro.html", "section.html"]),
+        ("the title and author come from the book record, the cover first",
+         lambda: 'title: "A Test Book"' in project and '"Ann Author"' in project
+         and project.index("page: index") < project.index("page: intro")),
+        ("chapters nest by their levels, deeper than children says",
+         lambda: project.index("page: section") < project.index("page: inside")
+         < project.index("page: deeper") and "      items:" in project),
+        ("a video placeholder is the player's frame",
+         lambda: 'src="https://www.youtube.com/embed/abc123"' in page),
+        ("an h6 is a label, an empty one goes, and headings start at h2",
+         lambda: '<p class="label">Story</p>' in page and "<h6" not in page
+         and "<h2>A story</h2>" in page and "<h3>Sub</h3>" in page),
+        ("an image named with spaces is found under its encoded address, and "
+         "saved under its own name", lambda: "resource-not-held" not in notes
+         and any("Exec" in f and "20" not in f for f in os.listdir(os.path.join(out, "assets")))),
+        ("a section with no text lists what's in it",
+         lambda: 'href="inside.html"' in read(out, "section.html")),
+    ]
+
+
 CASES = [
     ("a browser's saves", case_browser_save),
     ("an MHTML set", case_mhtml),
     ("a WARC and a WACZ", case_warc),
     ("a browser's archive of a lesson", case_browser_archive),
     ("the parsers", case_parsers),
+    ("EdTech Books", case_edtech_books),
 ]
 
 

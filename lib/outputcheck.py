@@ -85,6 +85,7 @@ class Page:
         self.images = []            # (has_alt, alt, decorative, src)
         self.headings = []          # (level, text)
         self.tables = []            # (has_th, has_caption, role, wrapped)
+        self.labeled_links = []     # (aria-label, visible text) of <a>
         self.parse_error = None
 
 
@@ -97,6 +98,7 @@ class _Collector(HTMLParser):
         self._heading = None
         self._title = None
         self._table = None
+        self._link = None
 
     def handle_starttag(self, tag, attrs):
         a = dict(attrs)
@@ -108,6 +110,8 @@ class _Collector(HTMLParser):
             self._title = []
         elif tag == "a" and a.get("href") is not None:
             self.page.links.append(a["href"])
+            if a.get("aria-label") is not None:
+                self._link = [a["aria-label"], []]
         elif tag == "span" and a.get("data-file"):
             self.page.dropped_files.append(a["data-file"])
         elif tag == "span" and "math-lost" in (a.get("class") or "").split():
@@ -119,6 +123,8 @@ class _Collector(HTMLParser):
             # so a heading holding only a described image isn't empty.
             if self._heading is not None:
                 self._heading[1].append(" " + (a.get("alt") or "") + " ")
+            if self._link is not None:
+                self._link[1].append(" " + (a.get("alt") or "") + " ")
         elif tag in ("h1", "h2", "h3", "h4", "h5", "h6"):
             self._heading = [int(tag[1]), []]
         elif tag == "div" and "table-wrapper" in (a.get("class") or ""):
@@ -132,7 +138,11 @@ class _Collector(HTMLParser):
             self._table[1] = True
 
     def handle_endtag(self, tag):
-        if tag == "title" and self._title is not None:
+        if tag == "a" and self._link is not None:
+            self.page.labeled_links.append((self._link[0], " ".join(
+                "".join(self._link[1]).split())))
+            self._link = None
+        elif tag == "title" and self._title is not None:
             self.page.title = " ".join("".join(self._title).split())
             self._title = None
         elif tag in ("h1", "h2", "h3", "h4", "h5", "h6") and self._heading:
@@ -150,6 +160,8 @@ class _Collector(HTMLParser):
             self._title.append(data)
         if self._heading:
             self._heading[1].append(data)
+        if self._link is not None:
+            self._link[1].append(data)
 
 
 def read_html(name, markup):
@@ -236,6 +248,13 @@ def check_page(page, findings):
         elif alt_is_file_name(alt, src):
             findings.append(Finding(where, "image-alt-is-file-name",
                                     f"{src}: {alt!r}"))
+    for label, text in page.labeled_links:
+        # WCAG 2.5.3: a speech user says what's on screen, so the name has
+        # to contain it. An aria-label replaces the name a link's text
+        # would give it.
+        if text and text.casefold() not in " ".join(label.split()).casefold():
+            findings.append(Finding(where, "link-label-without-text",
+                                    f"{text[:60]!r} named {label[:80]!r}"))
     last = 0
     for level, text in page.headings:
         if not text:
@@ -454,6 +473,8 @@ DESCRIPTIONS = {
     "link-to-missing-file": "a link names a file that is not in the set",
     "link-to-missing-fragment": "a link's #fragment matches no id",
     "image-without-alt": "an img element has no alt attribute",
+    "link-label-without-text":
+        "a link's aria-label doesn't contain its visible text (WCAG 2.5.3)",
     "image-empty-alt-not-decorative":
         "alt is empty but the image is not marked aria-hidden=\"true\"",
     "image-alt-is-file-name": "an img's alt only repeats its file name",

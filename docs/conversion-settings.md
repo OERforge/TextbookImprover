@@ -6,7 +6,7 @@ How the book is rendered into one output format.
 
 **`format`**—one of `html`, `epub3`, `pdf`, `docx`, `markdown`, `asciidoc`; default `html`; *target only*
 
-What this target produces. markdown and asciidoc write source again: what the author decided, which the pipeline reads back to the same book. pdf and docx are NOT YET IMPLEMENTED (roadmap item 2): a target naming either is skipped with a warning, and nothing is written for it.
+What this target produces. markdown and asciidoc write source again: what the author decided, which the pipeline reads back to the same book. pdf and docx are NOT YET IMPLEMENTED (see the roadmap): a target naming either is skipped with a warning, and nothing is written for it.
 
 **`output_dir`**—`path`; default `""` (empty); *target only*
 

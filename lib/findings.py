@@ -56,6 +56,9 @@ CHECKS = OrderedDict([
     # output: pages and EPUBs
     ("image-without-alt", ("an img element has no alt attribute",
                            "error", "WCAG 2.0 SC 1.1.1 (A)", "sidecar")),
+    ("link-label-without-text",
+     ("a link's aria-label doesn't contain its visible text", "error",
+      "WCAG 2.1 SC 2.5.3 (A)", "source")),
     ("image-empty-alt-not-decorative",
      ("an img has alt=\"\" but is not marked decorative", "warning",
       "WCAG 2.0 SC 1.1.1 (A)", "sidecar")),

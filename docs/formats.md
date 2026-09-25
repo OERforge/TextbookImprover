@@ -19,7 +19,7 @@ Every source format the pipeline reads, the ways a book in that format can arriv
 | HTML (`.html`) | TESTED | TESTED | TESTED | TESTED | NOT YET IMPLEMENTED | NOT YET IMPLEMENTED | TESTED |
 | AsciiDoc (`.adoc`) | TESTED | TESTED | TESTED | TESTED | NOT YET IMPLEMENTED | NOT YET IMPLEMENTED | TESTED |
 
-PDF and Word output are NOT YET IMPLEMENTED ([roadmap item 2](../ROADMAP.md)): a target declaring `format: pdf` or `format: docx` is skipped with a warning saying so, and a book with no other target stops. PDF is read only by [the audit](auditing.md), which reports on a Word, Markdown, HTML, EPUB, or PDF file without converting it.
+PDF and Word output are NOT YET IMPLEMENTED ([on the roadmap](../ROADMAP.md)): a target declaring `format: pdf` or `format: docx` is skipped with a warning saying so, and a book with no other target stops. PDF is read only by [the audit](auditing.md), which reports on a Word, Markdown, HTML, EPUB, or PDF file without converting it.
 
 ## Word
 
@@ -37,7 +37,7 @@ A hyperlink's ScreenTip becomes the link's title, which the HTML and EPUB target
 - **EPUB: TESTED**, on the same books and the suite's fixtures. It loses what [every EPUB loses](#epub), as well.
 - **Markdown: TESTED**, on the statistics book (merged by chapter) and the suite's round trip: read back, it gives the same HTML, and written again it's the same file. The first write normalizes Word's residue (paragraphs holding only a non-breaking space, stray spaces), so the second write is the fixed point. A table with merged cells, and a figure with an id, are written as fenced HTML, since Pandoc's Markdown can't express them; a banded table is kept as one table.
 - **AsciiDoc: TESTED**, on the statistics book: read back, 166 of its 169 pages are identical to the book converted directly. Two lose a root with an index (`\sqrt[n]{…}`), which Pandoc's AsciiDoc reader can't read, and one a list's depth ([AsciiDoc as a target](asciidoc.md#asciidoc-as-a-target)).
-- **PDF and Word: NOT YET IMPLEMENTED**, roadmap item 2; so the round trip to Word is too.
+- **PDF and Word: NOT YET IMPLEMENTED**, [on the roadmap](../ROADMAP.md); so the round trip to Word is too.
 
 ## Markdown
 
@@ -125,4 +125,4 @@ A directory of `.adoc` files whose media keep the author's names, written to be 
 
 ### PDF and Word
 
-NOT YET IMPLEMENTED: [roadmap item 2](../ROADMAP.md). A target naming either format is skipped with a warning. PDF waits on LaTeX's tagging support for complex table headers, and Word output is the riskier of the two, for the reasons the roadmap gives.
+NOT YET IMPLEMENTED: [on the roadmap](../ROADMAP.md). A target naming either format is skipped with a warning. PDF waits on LaTeX's tagging support for complex table headers, and Word output is the riskier of the two, for the reasons the roadmap gives.

@@ -46,7 +46,8 @@ GOOD = """<!DOCTYPE html><html lang="en"><head><title>A page</title></head>
 <table><caption>Data</caption><tr><th scope="col">H</th></tr></table></div>
 <table role="presentation"><tr><td>layout</td></tr></table>
 <a href="#top">up</a><a href="other.html#there">over</a>
-<a href="https://example.org/#x">out</a></body></html>"""
+<a href="https://example.org/#x">out</a><p><a href="other.html" aria-label="Read more about cats">Read more</a> <a href="other.html" aria-label="Chart of sales, larger"><img src="c.png" alt="Chart of sales"></a> <a href="other.html">no label</a></p>
+</body></html>"""
 
 OTHER = """<!DOCTYPE html><html lang="en"><head><title>Other</title></head>
 <body><h1 id="there">There</h1></body></html>"""
@@ -56,6 +57,7 @@ BAD = """<!DOCTYPE html><html><head><title></title></head>
 <img src="p.png"><img src="q.png" alt=""><img src="media/db-locked.png" alt="db locked">
 <table><tr><td>1</td></tr></table>
 <a href="#nowhere">x</a><a href="gone.html">y</a><a href="other.html#no">z</a>
+<a href="other.html" aria-label="DOI for Klein and Stern 2005">https://doi.org/10/b8xx35</a>
 </body></html>"""
 
 
@@ -98,6 +100,7 @@ def main():
                  "empty-heading", "image-without-alt",
                  "image-empty-alt-not-decorative",
                  "image-alt-is-file-name",
+                 "link-label-without-text",
                  "table-without-headers-or-caption",
                  "table-not-in-scroll-region",
                  "link-to-missing-fragment", "link-to-missing-file",

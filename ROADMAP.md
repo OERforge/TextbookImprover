@@ -1,31 +1,12 @@
 # Roadmap
 
-What's planned, in the order that seems most productive. What has shipped is in [the changelog](CHANGELOG.md); what the tools do now is in [the docs](docs/). EPUB3 output, page splitting, output checking, and multiple targets with the Python driver shipped after v0.3 and are no longer numbered items; see [Building an EPUB](docs/epub.md), [Splitting pages](docs/splitting.md), and [Checking the output](docs/checking.md).
+What's planned, in the order that seems most productive. What has shipped is in [the changelog](CHANGELOG.md); what the tools do now is in [the docs](docs/). EPUB3 output, page splitting, output checking, and multiple targets with the Python driver shipped after v0.3 and are no longer numbered items; HTML, AsciiDoc, EPUB, web, and cartridge sources, and the bare-links sidecar, shipped in v0.7; see [Building an EPUB](docs/epub.md), [Splitting pages](docs/splitting.md), and [Checking the output](docs/checking.md).
 
 We're attempting to follow two principles: build the tool that can check a change before making the change and, where a decision can't be made by a script, make it declarable by a person once.
 
 Two sections sit after the numbered items. **Refinements to the table headers work** is what v0.3 left undone in the feature it shipped, kept separate because none of it is large enough to be an item and all of it is worth doing before that work is called finished. **Smaller things** is everything that has no dependency on anything else.
 
-## 1. HTML and EPUB as input formats
-
-With Markdown handled above, what remains is HTML and EPUB, and they're close relatives: an EPUB is zipped XHTML, and Pandoc reads it with the same reader.
-
-**HTML opens same-format remediation**—reading an HTML file and writing it back improved. Pandoc's HTML reader preserves `scope`, `headers`, `id`, and `role`, so this round-trips, which gives a testable invariant worth having: **running the pipeline on its own output should change nothing.** That is a stronger regression test than golden files, because it catches any filter that applies twice or acts non-deterministically. Note the fixed point is reached after one pass, not zero: the reader normalizes irregular tables on the way in.
-
-**The fixed point is built and tested** (see [HTML sources](docs/html.md)): an `.html` beside the sources is a source, and converting our own pages changes nothing. An earlier note here said the reader keeps `scope="row"` and loses the `<th>`. That was wrong for the ordinary case: the reader sets `row_head_columns` itself when every body row opens with a `<th>` (`Readers/HTML/Table.hs`), and it was our filter that set it back to 0 on a table with no declaration. `html-source.lua` makes what the reader found a declaration.
-
-**EPUB and saved web pages are unpacked into sources** by `unpack-epub.py` and `unpack-site.py` ([An EPUB as the source](docs/epub-input.md), [A book saved from the web](docs/site-input.md)). Next: a WARC and WACZ loader for `unpack-site.py`, since every archiving crawler writes one and it holds each URL's bytes as the server sent them; `.adoc` as a source; the table census reading HTML tables (the rules run on them now; keys, the sidecar, and applying the guess are next); and a menu written from `contents` for an HTML target meant to be posted as a site (built: `menu: on`).
-
-**Common Cartridge and SCORM as input, next.** Both are a zip whose `imsmanifest.xml` orders its items in an organization and points each at a resource, and a web-content resource is HTML pages and their files. So `unpack-cartridge.py` is `unpack-epub.py` over a different manifest: the pages, their files where they were, and a `project.yaml` with the organization as `contents`, every page a source. What isn't a page is reported rather than converted: QTI assessments (which item 4 will want as test banks), discussion topics, web links, and LTI links. An LMS's export writes its links through tokens such as `$IMS-CC-FILEBASE$`, which have to be resolved, and a SCORM package may launch a script-driven player rather than pages, which is reported as what it is. It won't rescue the business communication book: its cartridge and SCORM exports lack the images too.
-
-What this list said before those were built, kept for the reasoning: unpacking an EPUB into pages ourselves (Pandoc's EPUB reader rewrites ids on some elements and every link, so a link to a figure or table dies; see `PANDOC-NOTES.md`), with `contents` from its navigation document; then pages saved from the web, which need a pre-pass on the DOM (what to strip can't be seen once Pandoc has read the page), the order read from the pages' own menus, links to the live site turned into links between pages, and a way to fetch a book that keeps more than a browser's save does. A book's source repository, when it has one, beats all of these and is worth looking for first.
-
-**EPUB earns its place twice over.** Its `nav.xhtml` is the book's table of contents in machine-readable form, which is the packager's module tree without needing the PDF's bookmark outline, and `--toc` reads it now. And it's built from the same source as the DOCX but keeps the ids the DOCX export drops, which is where the anchors the publisher-link rewrite depends on would have to come from; the DOCX repair now recovers them, so this matters less than it did.
-
-
-Two notes from the Markdown work. An HTML source's passages for some editions take Jinja's block syntax (`{% if target == "print" %} … {% endif %}`), the syntax and not the engine: a source is a page, not a template. And a title page belongs to `generate:` in `contents`, built from project metadata (title, subtitle, authors, date, license, an accessibility statement) and never from a source's YAML, which is what a web interface would edit; the source's own YAML stays the author's PDF business.
-
-## 2. PDF, and DOCX output
+## 1. PDF, and DOCX output
 
 **PDF** is gated on something outside this project. Pandoc 3.9 can drive LaTeX's tagging via `-V pdfstandard=ua-2`, but `latex-lab-table` states plainly that only simple header rows and columns are supported; that complex headers with subheaders need syntax changes not yet made; and that a cell `Headers` array (the mechanism the hard cases need) is an open item. Until that lands, a tagged PDF from this pipeline can carry simple tables correctly and can't carry the complex ones. Worth revisiting each LaTeX release rather than working around.
 
@@ -35,11 +16,7 @@ Three defects in the meantime are candidates for a post-processing pass with `pi
 
 **DOCX output** is the riskier one, and deserves scoping care. The writer does preserve `w:tblHeader`, so in principle `table-headers-missing.csv` could stop being a report and start being an input that produces a corrected source document. But a Pandoc round trip discards everything Pandoc doesn't model: converting a file and back turned a layout table's `FigureTable` style into plain `Table`, and that style is the cleanest signal available for identifying layout tables. Section properties, content controls, comments, field codes, and tracked changes have the same exposure. If this is built, it should annotate the OOXML directly rather than rebuild the document. It's more code, but the difference between annotating and rebuilding.
 
-## 3. Bare links (built, not yet released)
-
-A bare link is one whose text is its own address, as in a reference list, and a screen reader reads all of it. The design changed as it was worked out: an `aria-label` naming the link fails WCAG 2.5.3 (Label in Name), and NVDA reads a `title` or `aria-describedby` only after the whole address, so no conforming description shortens what's heard. What does is a shorter address, which APA allows for DOIs. So the sidecar (`bare-links.csv`, reported as `bare-links-new.csv`) replaces an address and its text, or the text alone, or sets a title, and `util/shortdoi.py` fills in shortDOIs from the shortDOI service. A link's title, meanwhile, survives every source and target, Word's ScreenTips included. The alternatives and the NVDA results are in [Bare links](docs/bare-links.md). What's left is in Smaller things.
-
-## 4. Slides and test banks
+## 2. Slides and test banks
 
 Two kinds of teaching material that aren't book pages, and that the same architecture serves: one intermediate, read from whatever the author has, written to whatever the course needs, with the accessibility work done once in between.
 
@@ -60,7 +37,7 @@ The questions to settle first, since they shape the intermediate: what a slide i
 - The cartridge format for questions is QTI, not LTI: a CC 1.1 or 1.3 cartridge carries question banks and assessments as `imsqti_xmlv1p2`, and the schemas for that are already in the repository. LTI is the launch protocol for an external tool and is a different item. So the test-bank writer is the first real content of the Common Cartridge 1.3 item below, and the two are one piece of work in practice.
 - The Word reader is the table census's problem in another form: classify what the export gave us by evidence, guess the shape, report what the guess could not settle, and let a sidecar hold the decision. Writing Brightspace's CSV as well as reading it makes a round trip, which is the check.
 
-## 5. Common Cartridge 1.3, for assignments
+## 3. Common Cartridge 1.3, for assignments
 
 The test banks in item 4 are the first real content here: a question bank is a cartridge resource, and QTI 1.2 is how a cartridge carries it. The 1.1 profile already carries everything this project emits today. Quizzes and question banks (`imsqti_xmlv1p2`), discussion topics, web links, LTI links, and the authorization attributes are all in 1.1. The only thing worth moving for is **assignments**, which arrive in 1.3.
 
@@ -68,13 +45,13 @@ The cost is reach. Brightspace and Canvas read up to 1.3, Blackboard up to 1.2, 
 
 Worth doing when there's an assignment to ship, not before.
 
-## 6. A web front end
+## 4. A web front end
 
 Here's why the configuration is schema-driven and why conversion becomes a library: a front end needs to render a form from the settings that exist, write a complete config back without losing anything, and report progress and failures structurally.
 
 Two pieces are already in place for it: the schema carries a description per setting, which is what a form's help text should say, and the writer is proven lossless by test. The third piece (resolving a config in JavaScript) is what the conformance fixtures in `tests/config/` exist to make safe.
 
-## 7. Splitting into separate repositories
+## 5. Splitting into separate repositories
 
 Eventually the two halves may be separate projects with a small shared library between them. Both standalone cases are already close: packaging is read-only with respect to page content and runs against any directory of HTML, and conversion has no packaging logic. v0.2 removed the last coupling, which was the config.
 
@@ -128,6 +105,8 @@ The distinction between the two matters more than either case. A table whose rea
 
 ## Smaller things
 
+- **Passages for some editions** in an HTML source could take Jinja's block syntax (`{% if target == "print" %} … {% endif %}`), the syntax and not the engine, since a source is a page, not a template.
+- **A generated title page**, from `generate:` in `contents`, built from project metadata (title, subtitle, authors, date, license, an accessibility statement) and never from a source's YAML, which stays the author's PDF business.
 - **Speakable math in a table region's name.** A wide table's scrolling wrapper is named with its caption flattened to text, and math flattens to its TeX source: `Selected values for Q=100 \sqrt{LK}`. Tested with NVDA 2026.2 (MathCAT built in) on three versions (the label as it is, `aria-labelledby` pointing to the caption, and a label from Pandoc's plain-text rendering), every version reads the caption twice, once as the region's name and once as the caption, and differs only in which reading handles the math better. So the label stays as it is. MathSpeak text for the label, generated reliably, would help, and so might better screen-reader support for math in accessible names.
 - **Retire the ScreenTip recovery.** Pandoc reads and writes ScreenTips from its first release after 3.11 ([pandoc#11890](https://github.com/jgm/pandoc/pull/11890), merged 2026-09-25). Once the pipeline requires that release, `docxrepair.apply_screentips` has nothing left to do and can go.
 - **Addresses written as plain text**, not linked: a screen reader reads them as text, and WCAG's link criteria don't apply, but a shortDOI would shorten them too. Finding one in running text is the hard part.
@@ -146,9 +125,14 @@ The distinction between the two matters more than either case. A table whose rea
 - **Deduplicating identical media.** Each page of a DOCX gets its own copy from Word. Sharing them would shrink a cartridge substantially but requires rewriting page markup. Worth more than it looks: an LMS that doesn't reclaim images when a module is deleted (looking at you, Brightspace!) accumulates every copy, so the duplication is paid for repeatedly rather than once.
 - **One media directory per book** rather than per page. Pandoc's `--extract-media` produces `<page>/media/`, which inside a prefixed package means a directory per page. Flattening to `<prefix>/media/` would make the leftovers after a deletion one folder to remove instead of dozens. Cosmetic, but the cleanup is manual.
 
-## Done in 0.5, recorded here because the roadmap named it
+## Done, recorded here because the roadmap named it
 
-**Rewriting the publisher's links.** Shipped as `links.rewrite_publisher`: a link to a page of the book on the publisher's site becomes a link to the page here, in every output, when the book has the page. What is left of the item is the link-text question that held it (a bare URL as link text, which the WCAG reading in the notes says conforms at level A and is a bad experience), and that is the sidecar item below it.
+**HTML and EPUB as input** shipped in 0.7, with AsciiDoc, a book saved from the web (browser saves, WARC and WACZ, EdTech Books), a Jekyll site's Markdown, and Common Cartridge besides. The invariant the item promised holds: converting the pipeline's own HTML changes nothing. See [Formats and packaging](docs/formats.md).
+
+**Bare links** shipped in 0.7 as the bare-links sidecar and `util/shortdoi.py`. The design changed as it was worked out: an `aria-label` naming a link fails WCAG 2.5.3, and NVDA reads a `title` or `aria-describedby` only after the whole address, so what shortens the reading is a shorter address. [Bare links](docs/bare-links.md) has the alternatives and the NVDA results.
+
+
+**Rewriting the publisher's links.** Shipped as `links.rewrite_publisher`: a link to a page of the book on the publisher's site becomes a link to the page here, in every output, when the book has the page. The link-text question that held it, a bare URL as link text, was answered in 0.7 by the bare-links sidecar.
 
 **Merging sections into chapters** shipped with `merge: groups` on a markdown target; see the changelog for v0.6.
 

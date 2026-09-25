@@ -46,7 +46,7 @@ import pdfcheck  # noqa: E402
 import sourcecheck  # noqa: E402
 import tablecensus  # noqa: E402
 
-VERSION = "0.6-dev"
+VERSION = "0.7"
 KIND_OF = {".docx": "source-docx", ".md": "source-md", ".html": "html",
            ".xhtml": "html", ".epub": "epub", ".pdf": "pdf"}
 

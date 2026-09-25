@@ -441,7 +441,7 @@ def load_targets(base, allow_unknown):
     for target in targets:
         if target.format in NOT_YET_IMPLEMENTED:
             say(f"WARNING: target {target.name} is format {target.format}, "
-                "which is NOT YET IMPLEMENTED (roadmap item 2); nothing is "
+                "which is NOT YET IMPLEMENTED (see ROADMAP.md); nothing is "
                 "written for it.")
     targets = [t for t in targets if t.format not in NOT_YET_IMPLEMENTED]
     if not targets:

@@ -143,6 +143,115 @@ def keep_unlinked_bookmarks(xml):
     return xml[:at] + paragraph + xml[at:], len(unlinked)
 
 
+_W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+_R = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}"
+_PR = "{http://schemas.openxmlformats.org/package/2006/relationships}"
+
+
+def _words(text):
+    return " ".join(text.split())
+
+
+def screentips(path):
+    """[(target, text, tip)]: each hyperlink with a ScreenTip, in document
+    order, then those in footnotes and endnotes. Pandoc 3.11's reader drops
+    w:tooltip (#11869; pandoc pull request #11890 would read it). target is
+    what the reader makes the link's target: the relationship's target, with
+    #anchor after it when there is one, or #anchor alone."""
+    import xml.etree.ElementTree as ET
+    found = []
+    try:
+        z = zipfile.ZipFile(path)
+    except (OSError, zipfile.BadZipFile):
+        return found
+    with z:
+        names = set(z.namelist())
+        for part in ("word/document.xml", "word/footnotes.xml", "word/endnotes.xml"):
+            if part not in names:
+                continue
+            rels = {}
+            relpart = "word/_rels/" + part.split("/")[-1] + ".rels"
+            if relpart in names:
+                for rel in ET.fromstring(z.read(relpart)).iter(_PR + "Relationship"):
+                    rels[rel.get("Id")] = rel.get("Target", "")
+            for link in ET.fromstring(z.read(part)).iter(_W + "hyperlink"):
+                tip = link.get(_W + "tooltip")
+                if not tip:
+                    continue
+                target = rels.get(link.get(_R + "id"), "")
+                anchor = link.get(_W + "anchor")
+                if anchor:
+                    target += "#" + anchor
+                text = "".join(t.text or "" for t in link.iter(_W + "t"))
+                found.append((target, _words(text), tip))
+    return found
+
+
+def _stringify(inlines):
+    out = []
+    for el in inlines:
+        t, c = el.get("t"), el.get("c")
+        if t == "Str":
+            out.append(c)
+        elif t in ("Space", "SoftBreak", "LineBreak"):
+            out.append(" ")
+        elif t in ("Code", "Math", "RawInline"):
+            out.append(c[1])
+        elif t in ("Emph", "Strong", "Underline", "Strikeout", "Superscript",
+                   "Subscript", "SmallCaps"):
+            out.append(_stringify(c))
+        elif t in ("Span", "Quoted", "Cite", "Link"):
+            out.append(_stringify(c[1]))
+    return "".join(out)
+
+
+def apply_screentips(docx_path, json_path):
+    """Give each link Pandoc read without a title its ScreenTip, matched by
+    target and text in document order; a link Pandoc merged from pieces of
+    one hyperlink matches by target alone, when that target's ScreenTips all
+    agree. A link that has a title keeps it, so a Pandoc that reads
+    ScreenTips itself changes nothing here. Returns how many were given."""
+    import json
+    from collections import defaultdict, deque
+    from urllib.parse import unquote
+    tips = screentips(docx_path)
+    if not tips:
+        return 0
+    by_key, by_target = defaultdict(deque), defaultdict(list)
+    for target, text, tip in tips:
+        by_key[(unquote(target), text)].append(tip)
+        by_target[unquote(target)].append(tip)
+    with open(json_path, encoding="utf-8") as fh:
+        doc = json.load(fh)
+    given = 0
+
+    def walk(node):
+        nonlocal given
+        if isinstance(node, dict):
+            if node.get("t") == "Link":
+                attr, inlines, (target, title) = node["c"]
+                if not title:
+                    key = (unquote(target), _words(_stringify(inlines)))
+                    tip = None
+                    if by_key.get(key):
+                        tip = by_key[key].popleft()
+                    elif len(set(by_target.get(key[0], []))) == 1:
+                        tip = by_target[key[0]][0]
+                    if tip:
+                        node["c"][2] = [target, tip]
+                        given += 1
+            for value in node.values():
+                walk(value)
+        elif isinstance(node, list):
+            for value in node:
+                walk(value)
+    walk(doc["blocks"])
+    if given:
+        with open(json_path, "w", encoding="utf-8") as fh:
+            json.dump(doc, fh, ensure_ascii=False)
+    return given
+
+
 def repaired_copy(source, destination):
     """Write a copy of the .docx with the repairs applied to
     word/document.xml and every other part byte for byte. Returns how

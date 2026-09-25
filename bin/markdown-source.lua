@@ -699,8 +699,9 @@ function Link(link)
       text:sub(1, -2) .. join .. 'link="' .. target .. '"]')
   end
   -- A link that is its own address, written as the bare URL, as the
-  -- writer would: its text isn't escaped as a URL in text is.
-  if ADOC and pandoc.utils.stringify(link.content) == link.target
+  -- writer would: its text isn't escaped as a URL in text is. (One with a
+  -- title is written below, with the title.)
+  if ADOC and link.title == '' and pandoc.utils.stringify(link.content) == link.target
       and link.target:match('^%a[%w+.-]*:') and not link.target:find('::', 1, true)
       and not link.target:find('[%s%[%]]') then
     return pandoc.RawInline('asciidoc', link.target)
@@ -709,7 +710,45 @@ function Link(link)
     io.stderr:write(('markdown-source: %s written with %%3A for its "::"\n')
       :format(link.target))
     link.target = link.target:gsub('::', '%%3A%%3A')
-    return link
+    unwrapped = true
+  end
+  -- A link's title. The AsciiDoc writer drops every one; the macro's
+  -- title attribute reads back, as an attribute asciidoc-source.lua moves
+  -- to the title. The text is quoted, since a comma would split it, and
+  -- the escaping pass still sees it, as ordinary inlines between the two
+  -- raw pieces. A double quote in either has no form the reader keeps.
+  if ADOC and link.title ~= '' then
+    local title = link.title
+    if title:find('"', 1, true) then
+      local open = true
+      title = title:gsub('"', function()
+        open = not open
+        return open and '\226\128\157' or '\226\128\156'
+      end)
+      io.stderr:write(('markdown-source: a link title with double quotes is '
+        .. 'written with typographic ones: %s\n'):format(title))
+    end
+    local content = link.content:walk({ Str = function(s)
+      if s.text:find('"', 1, true) then
+        return pandoc.Str((s.text:gsub('"', '\226\128\157')))
+      end
+    end })
+    local out = pandoc.Inlines({ pandoc.RawInline('asciidoc',
+      'link:' .. link.target .. '["') })
+    out:extend(content)
+    out:insert(pandoc.RawInline('asciidoc', '",title="' .. title .. '"]'))
+    return out
+  end
+  -- The Markdown writer writes a link that is its own address as an
+  -- autolink, <https://...>, which has no room for a title: a titled one
+  -- is written in full.
+  if not ADOC and link.title ~= ''
+      and pandoc.utils.stringify(link.content) == link.target then
+    local text = pandoc.write(pandoc.Pandoc({ pandoc.Plain(link.content) }),
+                              'markdown', { wrap_text = 'none' }):gsub('%s+$', '')
+    local title = link.title:gsub('\\', '\\\\'):gsub('"', '\\"')
+    return pandoc.RawInline('markdown',
+      '[' .. text .. '](' .. link.target .. ' "' .. title .. '")')
   end
   -- Returned when changed: nil would keep the link as it was read.
   if unwrapped then return link end

@@ -1020,6 +1020,10 @@ def read_to_json(base, docs, env, work):
              "-o", stem + ".json",
              "--lua-filter=" + MEDIA_FILTER, "--extract-media=" + stem],
             env=env, cwd=base)
+        # ScreenTips, which Pandoc's reader drops, as the links' titles.
+        tips = docxrepair.apply_screentips(repaired, os.path.join(base, stem + ".json"))
+        if tips and TRACE:
+            say(f"# {name}: {tips} ScreenTip(s) kept as link titles")
         stems.append(stem)
     return stems
 
@@ -1144,6 +1148,8 @@ def read_variants(base, target, work, env):
             run(["pandoc", "-f", "docx", "-t", "json", repaired, "-o", out,
                  "--lua-filter=" + MEDIA_FILTER, "--extract-media=" + stem],
                 env=env, cwd=base)
+            docxrepair.apply_screentips(repaired, os.path.join(base, out)
+                                        if not os.path.isabs(out) else out)
         elif name.endswith((".adoc", ".asciidoc")):
             run(["pandoc", "-f", "asciidoc", "-t", "json", path, "-o", out,
                  "--lua-filter=" + MARKDOWN_HTML_FILTER,

@@ -51,6 +51,13 @@ local function relative(src)
 end
 
 local function fix_link(link)
+  -- link:...[text,title="..."] reads with the title as an attribute; it's
+  -- the link's title, where every writer looks for it.
+  if link.attributes.title and link.title == '' then
+    link.title = link.attributes.title
+    link.attributes.title = nil
+    return fix_link(link) or link
+  end
   local target = link.target
   if not target:match('^%a[%w+.-]*:') and not target:match('[/#?]')
       and target:match('^[^@%s]+@[^@%s]+%.%a+$') then

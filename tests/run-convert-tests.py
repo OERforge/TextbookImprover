@@ -1711,6 +1711,82 @@ def case_title_id(work):
     ]
 
 
+def case_link_titles(work):
+    """A link's title survives from every source through every target:
+    Markdown and AsciiDoc titles, HTML's title attribute, and Word's
+    ScreenTip, which Pandoc's reader drops; and the Markdown and AsciiDoc
+    targets, whose writers drop it, write it so it reads back."""
+    import importlib.util, zipfile as zf
+    if not (importlib.util.find_spec("html5lib") or importlib.util.find_spec("lxml")):
+        return [("skip: HTML sources need html5lib or lxml", lambda: True)]
+    os.makedirs(work)
+    pages = {
+        "md.md": '# Markdown page\n\nBare: [https://doi.org/10.5555/md](https://doi.org/10.5555/md "DOI for Markdown").\n'
+                 'Hard: [Smith, J. 2005](https://example.org/md "Smith\'s study, 2005").\n',
+        "html.html": '<!DOCTYPE html><html lang="en"><head><title>HTML page</title></head><body><h1>HTML page</h1>'
+                     '<p>Bare: <a href="https://doi.org/10.5555/html" title="DOI for HTML">https://doi.org/10.5555/html</a>.</p></body></html>',
+        "adoc.adoc": '= AsciiDoc page\n\nNamed: link:https://example.org/adoc["the AsciiDoc site",title="Named in AsciiDoc"].\n',
+    }
+    for name, text in pages.items():
+        with open(os.path.join(work, name), "w", encoding="utf-8") as fh:
+            fh.write(text)
+    word = os.path.join(work, "word.docx")
+    subprocess.run(["pandoc", "-f", "markdown", "-o", word], input=
+                   "# Word page\n\nBare: [https://doi.org/10.5555/docx](https://doi.org/10.5555/docx).\n"
+                   "Internal: [the heading](#word-page).\n", text=True, capture_output=True)
+    with zf.ZipFile(word) as z:
+        items = [(i, z.read(i.filename)) for i in z.infolist()]
+    fixed = []
+    for info, data in items:
+        if info.filename == "word/document.xml":
+            xml = data.decode("utf-8")
+            xml = re.sub(r'(<w:hyperlink r:id="[^"]+")', r'\1 w:tooltip="DOI for Word"', xml, count=1)
+            xml = re.sub(r'(<w:hyperlink w:anchor="word-page")', r'\1 w:tooltip="Internal, in Word"', xml, count=1)
+            data = xml.encode("utf-8")
+        fixed.append((info, data))
+    with zf.ZipFile(word, "w", zf.ZIP_DEFLATED) as z:
+        for info, data in fixed:
+            z.writestr(info, data)
+
+    def convert_in(where, config):
+        with open(os.path.join(where, "conversion.yaml"), "w") as fh:
+            fh.write(config)
+        subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quiet"],
+                       cwd=where, capture_output=True, text=True, stdin=subprocess.DEVNULL)
+    convert_in(work, "targets:\n  html:\n    format: html\n  md:\n    format: markdown\n"
+                     "  adoc:\n    format: asciidoc\n")
+    back = {}
+    for t in ("md", "adoc"):
+        where = work + "-" + t
+        if exists(work, t):
+            shutil.copytree(os.path.join(work, t), where,
+                            ignore=shutil.ignore_patterns("intermediates"))
+            convert_in(where, "targets:\n  html:\n    format: html\n")
+        back[t] = where
+
+    def titles(where):
+        found = {}
+        for name in sorted(os.listdir(os.path.join(where, "html"))) if exists(where, "html") else []:
+            if name.endswith(".html"):
+                s = read(where, "html", name)
+                for m in re.finditer(r'<a\b([^>]*)>(.*?)</a>', s, re.S):
+                    title = re.search(r'title="([^"]*)"', m.group(1))
+                    if title:
+                        found[(name, re.sub(r"<[^>]+>|\s+", " ", m.group(2)).strip())] = title.group(1)
+        return found
+    direct = titles(work)
+    expected = {"DOI for Markdown", "Smith&#39;s study, 2005", "DOI for HTML",
+                "Named in AsciiDoc", "DOI for Word", "Internal, in Word"}
+    return [
+        ("every source's link titles reach the HTML, Word's ScreenTips "
+         "included", lambda: set(direct.values()) == expected),
+        ("written as Markdown and read back, every title is the same",
+         lambda: titles(back["md"]) == direct),
+        ("written as AsciiDoc and read back, every title is the same",
+         lambda: titles(back["adoc"]) == direct),
+    ]
+
+
 def case_html_source(work):
     """An HTML page is a source when the book says so, and converting
     what this pipeline wrote changes nothing."""
@@ -2199,6 +2275,7 @@ CASES = [
     ("AsciiDoc to Markdown and back", case_asciidoc_markdown),
     ("an AsciiDoc target", case_asciidoc_target),
     ("a page title that is also a heading", case_title_id),
+    ("link titles from every source through every target", case_link_titles),
     ("a hand-written page", case_hand_written),
     ("several targets", case_targets),
     ("arguments passed to the packager", case_passthrough),

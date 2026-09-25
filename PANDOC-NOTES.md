@@ -32,6 +32,8 @@ What Pandoc does, as read from its source or established by test, for the questi
 
 **Metadata comes from `Title`/`Author`-styled paragraphs, not `docProps/core.xml`.** Measured on 3.11; open upstream as #3034. The first `Title` paragraph becomes the title, later ones plain paragraphs.
 
+**The pipeline recovers ScreenTips on reading, until a Pandoc release does.** `docxrepair.apply_screentips` reads each `w:tooltip` from the package (the document, footnotes, and endnotes, with their relationships) after Pandoc has read the repaired copy, and gives each link Pandoc left without a title its ScreenTip, matched by target and text in document order, or by target alone when Pandoc merged a hyperlink's pieces and that target's ScreenTips agree. A link that already has a title keeps it, so a Pandoc with #11890 changes nothing. Measured on fixtures built from Pandoc's own output with `w:tooltip` added, internal links included.
+
 **A hyperlink's ScreenTip (`w:tooltip`) is discarded** in both directions, in 3.11 and in `main` as of f0a20d437. Measured; filed as #11869. Where: the two `w:hyperlink` cases of `elemToParPart'` in `Parse.hs` read `r:id` and `w:anchor` and nothing else, `parPartToInlines'` builds each `Link` with an empty title, and the writer's two `Link` cases in `OpenXML.hs` ignore the title. Read from the source. jgm replied on 2026-09-22: he treats a ScreenTip as the counterpart of HTML's `title` and would map it to the `Link` title in both directions, by default with no extension, and for internal links too if feasible. `w:hyperlinkRuby` and the question about contributing a patch drafted with Claude went unanswered. A patch series doing what he described is on the `docx-screentips` branch (see Upstream). No file in the corpus has a ScreenTip: 25,017 `w:hyperlink` elements in the `document.xml` of 1,782 files, none with `w:tooltip`, and no `\o` switch or `w:hyperlinkRuby` anywhere; the full statistics files' footers add 169 hyperlinks, also without. Measured. So for these books the change brings nothing in; its value is for authors who write them.
 
 **A `HYPERLINK` field's switches are all parsed, and only `\l` is used.** `hyperlink` in `Fields.hs` collects every switch; `\l` becomes the fragment, while `\o` (the field-code form of a ScreenTip), `\t`, `\m`, and `\n` are dropped. A quoted argument keeps `\"` as written, backslash included. Read from the source. The corpus's only field-code hyperlinks, seven in the BC files (BC-03, 10, 13, 14, and 15, pasted from the web), have no `\o`.
@@ -122,6 +124,8 @@ What Pandoc does, as read from its source or established by test, for the questi
 
 **The reader keeps duplicate ids and warns.** `[WARNING] Duplicate identifier 'x' at file.md line N` on stderr; both elements keep the id. Measured on a merged file with 733 of them. Relevant because Pandoc's HTML writer then emits invalid HTML without complaint.
 
+**The Markdown writer drops a bare link's title.** A link whose text is its own address is written as an autolink, `<https://…>`, whatever its title, so `[https://x](https://x "t")` comes back without `t`; a link with other text keeps its title. Measured on 3.11. The Markdown target writes such a link in full.
+
 
 **A plain raw HTML block is read one tag at a time.** `<table>…</table>` written as bare HTML comes back as dozens of `RawBlock`s (125 on one page). A fenced raw block (` ```{=html} `) is one `RawBlock`. Measured. Our Markdown target writes with `-raw_html` so every raw block is fenced.
 
@@ -174,7 +178,7 @@ Measured on 3.11 by writing each case with Pandoc's `asciidoc` writer and readin
 - Display math inside a description list is indented with the definition, delimiters and all, and an indented `++++` isn't a delimiter.
 - Text that means something at the start of a line isn't escaped: a leading `.` (a block title; in a list item the whole file fails to read), `=`, `//`, `----`, `NOTE:`, `:name:`. Nor are Asciidoctor's replacements other than `->`: `'`, `--`, `...`, `(C)`, `(R)`, `(TM)`, `=>`, `<=`, `<-`.
 
-**The writer drops:** a `Div` (its content stays), a raw HTML block, a footnote of several paragraphs (replaced by the words "[multiblock footnote omitted]"), a table's header column (it could write `cols="1h,…"`, which the reader doesn't read either), a row span, a table's groups, and the `subtitle` field. The standalone template writes `include-before` as plain blocks at the top.
+**The writer drops:** every link's title, bare or named (the reader reads `link:…[text,title="…"]`, with the title as a link attribute rather than in the title slot), a `Div` (its content stays), a raw HTML block, a footnote of several paragraphs (replaced by the words "[multiblock footnote omitted]"), a table's header column (it could write `cols="1h,…"`, which the reader doesn't read either), a row span, a table's groups, and the `subtitle` field. The standalone template writes `include-before` as plain blocks at the top.
 
 **The reader:**
 

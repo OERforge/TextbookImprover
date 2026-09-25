@@ -38,7 +38,7 @@ on another `bin/` script.
 | `lib/unpacking.py` | What both unpackers write: `project.yaml` and `unpack-report.csv`. |
 | `lib/epubsource.py` | The package document, the spine, the navigation, and the rewriting of a page's references, for the unpacker. Parses no content document. |
 | `lib/htmlrepair.py` | What an HTML source needs done to it before Pandoc reads it, on a copy: an id on a paragraph, a list item, a cell, or an inline mark moves onto an anchor the reader keeps. |
-| `lib/docxrepair.py` | What a `.docx` needs done to it before Pandoc reads it, on a copy: bookmarks moved to where the reader keeps them, invisible links so bookmarks only other files point at survive. |
+| `lib/docxrepair.py` | What a `.docx` needs done to it before Pandoc reads it, on a copy: bookmarks moved to where the reader keeps them, invisible links so bookmarks only other files point at survive. After Pandoc reads the copy, each hyperlink's ScreenTip, which the reader drops, is given to its link as the title. |
 | `lib/notes.py` | Footnote numbering and placement across pages, after rendering, for HTML and EPUB alike. |
 | `lib/findings.py` | One format for everything a check finds: the CSV, the Markdown report, the input hashes, the cache. |
 | `lib/sourcecheck.py` | What a Word or Markdown source says about itself, from Pandoc's unfiltered reading. |

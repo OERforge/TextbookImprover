@@ -72,6 +72,8 @@ The checks, which the driver's test suite runs on the fixtures: read the Markdow
 
 What is lossy, and known: a merged-cell table round-trips in structure but is the manual case it always was.
 
+A link keeps its title. Pandoc's writer writes a link whose text is its own address as an autolink, `<https://…>`, which has no room for one, so a titled one is written in full: `[https://…](https://… "its title")`.
+
 ## What isn't here yet
 
 A Markdown table with no marker gets no guess and no report; the census that makes the guess reads Word files. And merging sections into their chapter (one file per `contents` group from sources cut at the section level, as OpenStax ships them) is the next thing a Markdown target should do.

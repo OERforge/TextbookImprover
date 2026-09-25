@@ -15,8 +15,8 @@ person wrote by hand and decides what to do with it. Every rule about that
 file -- which values it accepts, what a blank means, what happens to a row
 whose key matches nothing -- is a rule about someone's work surviving,
 and the failure mode for each is silent. So each is pinned here, and the
-unmatched-key case in particular is checked for the exit status and not
-just the report, because the exit status is what stops the run.
+unmatched-key case in particular is checked for what it leaves behind:
+the run goes on, and the row is set aside where a person will see it.
 
 Copyright 2026 Robert Szarka
 
@@ -275,16 +275,30 @@ def checks(workdir):
     yield "the resolved file carries the value in effect", \
         entries[""]["headers"] == "first-row" if "" in entries else False, ""
 
-    # A stale key stops the run, after writing the report.
+    # A stale key is warned about and set aside; the run goes on.
+    with open(os.path.join(workdir, "table-headers.csv"), encoding="utf-8") as h:
+        before = [r for r in csv.DictReader(h)]
     with open(os.path.join(workdir, "table-headers.csv"), "a", newline="", encoding="utf-8") as h:
         csv.writer(h).writerow(["0" * 64, "both", "", "", "", "gone.docx", "Table 9.9", "not here"])
     code, err = run(workdir)
     report = read(workdir, "table-headers-report.csv")
     stale = [r for r in report if r["status"] == "unmatched"]
-    yield "a sidecar row matching no table exits 1", code == 1, err
+    yield "a sidecar row matching no table warns, and the run goes on", \
+        code == 0 and "WARNING" in err and "match no table" in err, err
     yield "the report is still written and names the unmatched row", \
         len(stale) == 1 and stale[0]["label"] == "Table 9.9", [r["status"] for r in report]
-    yield "the error names the report", "table-headers-report.csv" in err, err
+    unmatched = read(workdir, "table-headers-unmatched.csv") \
+        if os.path.exists(os.path.join(workdir, "table-headers-unmatched.csv")) else []
+    sample = read(workdir, "table-headers-sample.csv") \
+        if os.path.exists(os.path.join(workdir, "table-headers-sample.csv")) else []
+    yield "the unmatched row is set aside in a file of its own", \
+        [r["key"] for r in unmatched] == ["0" * 64], unmatched
+    yield "and the sample is the sidecar without it, every other row kept", \
+        "0" * 64 not in [r["key"] for r in sample] \
+        and len(sample) == len({r["key"] for r in before if r["key"] not in ("", "key")}), \
+        (len(sample), len(before))
+    yield "the warning names both files", \
+        "table-headers-unmatched.csv" in err and "table-headers-sample.csv" in err, err
 
     # One table twice: one key. The prefilled file has one row for it, and
     # adopting that file as the run says gives no warning; rows that

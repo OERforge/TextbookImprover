@@ -30,11 +30,14 @@ one was declared, the guess otherwise -- with the table's position among
 all the document's tables, its shape, and its first cell, so the filter
 can confirm it is applying the value to the table it was computed for.
 
-A sidecar row whose key matches no table is an error, and the run stops
-after writing the report: a correction that silently does not apply is
-worse than a failed run, because it destroys work invisibly. The report
-lists the unmatched rows beside the tables no row claimed, so a person can
-see "that is my row, the table changed."
+A sidecar row whose key matches no table is warned about, not silently
+dropped: a correction that silently does not apply destroys work
+invisibly. The run goes on, since a table edited in its source (a Word
+file remediated and then edited, say) changes its key, and stopping every
+run on that helps no one. The unmatched rows go to a file of their own,
+the sidecar without them to a sample beside it, ready to adopt, and the
+report lists the unmatched rows beside the tables no row claimed, so a
+person can see "that is my row, the table changed."
 
 A `headers` value the reader does not recognize is warned about once and
 treated as blank. That is what lets `manual`, `list`, and `caption-rows` be
@@ -282,7 +285,7 @@ def tables_in(path):
         # declaration, as <th> cells are a page's.
         jaws, mark = tc.jaws_declaration(tbl)
         if jaws:
-            value, reason = jaws, f"the table's {mark} bookmark declares its headers for JAWS"
+            value, reason = jaws, f"the table's {mark} bookmark declares its headers (JAWS's bookmark convention)"
         if value is None:
             continue
         grid = tc.build_grid(tbl)
@@ -514,12 +517,22 @@ def main():
         print("table-headers: %d table(s) have no sidecar row; prefilled "
               "rows are in %s -- paste them into %s"
               % (len(new_rows), args.new_path, args.sidecar), file=sys.stderr)
+    stem = (args.new_path[:-len("-new.csv")] if args.new_path.endswith("-new.csv")
+            else os.path.splitext(args.new_path)[0])
+    unmatched_path, sample_path = stem + "-unmatched.csv", stem + "-sample.csv"
     if unmatched:
-        print("table-headers: ERROR: %d sidecar row(s) match no table. The "
-              "run stops here rather than silently discard a correction; "
-              "see the 'unmatched' rows in %s" % (len(unmatched), args.report),
-              file=sys.stderr)
-        return 1
+        write_csv(unmatched_path, SIDECAR_COLUMNS, unmatched)
+        write_csv(sample_path, SIDECAR_COLUMNS,
+                  [r for k, r in sidecar.items() if k in claimed])
+        print("table-headers: WARNING: %d sidecar row(s) match no table, so "
+              "nothing applies them: a table's text or shape changed, or it's "
+              "gone. They're in %s, and each changed table's row as it is now "
+              "is in %s. %s is %s without them, to adopt."
+              % (len(unmatched), unmatched_path, args.new_path, sample_path,
+                 args.sidecar), file=sys.stderr)
+    else:
+        remove_if_present(unmatched_path)
+        remove_if_present(sample_path)
     return 0
 
 

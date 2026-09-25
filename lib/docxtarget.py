@@ -22,14 +22,17 @@ things it doesn't do, each of which Word's Accessibility Checker or a
 reader of the file notices:
 
 - **Compatibility mode.** Pandoc's reference document declares none, so
-  Word opens the file in Compatibility Mode, and won't run its
-  Accessibility Checker until the file is converted. Mode 15 is set.
+  Word opens the file in Compatibility Mode, in which, according to
+  accessibility guides for Word and reports on Microsoft's Q&A (not tested
+  here), its Accessibility Checker won't run until the file is converted.
+  Mode 15 is set.
 - **ScreenTips.** A link's title is a Word hyperlink's ScreenTip
   (w:tooltip); 3.11's writer drops it. Pandoc's release after 3.11
   writes it itself (pandoc#11890), so a hyperlink that has one is left.
 - **Decorative images.** An image the book marks decorative has empty
   alt text, which Word's checker reports as missing. Word's own marker
-  (Office 2019 and later) is added to its drawing.
+  ("Mark as decorative", documented by Microsoft; Word 2019 and Microsoft
+  365 on, per the guides) is added to its drawing.
 - **Header columns.** A table whose first column heads its rows gets its
   First Column flag (tblLook), which is also what the table census reads
   when the file is read back as a source.
@@ -117,11 +120,10 @@ def _words(text):
 
 
 def gather(doc):
-    """(body, notes): each a dict of the page's titled links, decorative
-    images, and tables, in the order Pandoc writes them into the body
-    part and into the footnotes part."""
-    parts = {"body": {"links": [], "images": [], "tables": [], "titles": []},
-             "notes": {"links": [], "images": [], "tables": [], "titles": []}}
+    """(body, notes): each a dict of the page's titled links, in the order
+    Pandoc writes them into the body part and into the footnotes part.
+    A link is matched by its target and text, never by position."""
+    parts = {"body": {"links": []}, "notes": {"links": []}}
 
     def walk(node, where):
         if isinstance(node, list):
@@ -140,24 +142,6 @@ def gather(doc):
                 parts[where]["links"].append(
                     (target, _words(_stringify(content)), title))
             walk(content, where)
-            return
-        if t == "Image":
-            attr, alt, _ = c
-            keys = dict(attr[2])
-            parts[where]["images"].append(
-                not _stringify(alt).strip()
-                and (keys.get("aria-hidden") == "true"
-                     or keys.get("role") == "presentation"))
-            return
-        if t == "Table":
-            head, bodies = c[3], c[4]
-            parts[where]["tables"].append(
-                any(body[1] > 0 for body in bodies))
-            # A header row is the table's head; a band (a body's own
-            # head row, a group's heading) is not one.
-            parts[where]["titles"].append(
-                (bool(head[1]), any(body[1] > 0 for body in bodies)))
-            walk(c, where)
             return
         for value in (c if isinstance(c, list) else [c]):
             walk(value, where)
@@ -211,55 +195,6 @@ def screentips(xml, rels, links):
     return xml, count
 
 
-def decorative(xml, flags):
-    """The drawings of decorative images marked decorative, the nth
-    wp:docPr for the nth image; returns (xml, count)."""
-    if not any(flags):
-        return xml, 0
-    it = iter(flags)
-    count = 0
-
-    def one(m):
-        nonlocal count
-        if not next(it, False) or "decorative" in m.group(0):
-            return m.group(0)
-        count += 1
-        tag = m.group(1)
-        if m.group(0).endswith("/>"):
-            return "<wp:docPr%s>%s</wp:docPr>" % (tag.rstrip(" /"), DECORATIVE)
-        return m.group(0) + DECORATIVE
-    xml = re.sub(r"<wp:docPr\b([^>]*?)\s*/?>", one, xml)
-    return xml, count
-
-
-def first_columns(xml, flags):
-    """tblLook's firstColumn set on each table whose rows have a header
-    column, the nth w:tblLook for the nth table; returns (xml, count)."""
-    if not any(flags):
-        return xml, 0
-    it = iter(flags)
-    count = 0
-
-    def one(m):
-        nonlocal count
-        if not next(it, False):
-            return m.group(0)
-        look = m.group(0)
-        if 'w:firstColumn="1"' in look:
-            return look
-        look = re.sub(r'w:firstColumn="0"', 'w:firstColumn="1"', look)
-        if "w:firstColumn=" not in look:
-            look = look.replace("<w:tblLook", '<w:tblLook w:firstColumn="1"', 1)
-        val = re.search(r'w:val="([0-9A-Fa-f]{4})"', look)
-        if val:
-            look = look.replace(val.group(0), 'w:val="%04X"'
-                                % (int(val.group(1), 16) | FIRST_COLUMN))
-        count += 1
-        return look
-    xml = re.sub(r"<w:tblLook\b[^>]*/>", one, xml)
-    return xml, count
-
-
 # Nested quotations. Pandoc's writer styles a quotation's paragraphs
 # Block Text at every depth, and a list or code inside one not at all, so
 # Word shows a quote in a quote as one, and Pandoc's reader, which nests
@@ -277,47 +212,254 @@ AFTER_IND = ("w:contextualSpacing", "w:mirrorIndents", "w:suppressOverlap",
 
 
 QUOTE_SEPARATOR = QUOTE_MARK + "sep-"
+TABLE_MARK = "tiq-table-"
+DECORATIVE_MARK = "tiq-decorative-"
 
 
-def mark_quotes(doc):
-    """The page's AST with each block quote's content in a marked Div, and
-    a paragraph holding only a bookmark between two quotes in a row, which
-    Pandoc's reader would otherwise join (it drops an empty paragraph
-    first, and keeps this one); returns (doc, count)."""
-    count = 0
-    separators = 0
+def _decorative(image):
+    attr, alt, _ = image["c"]
+    keys = dict(attr[2])
+    return not _stringify(alt).strip() and (
+        keys.get("aria-hidden") == "true" or keys.get("role") == "presentation")
 
-    def separate(blocks):
-        nonlocal separators
+
+def _elements(value):
+    """A list of AST elements (blocks or inlines), as opposed to an attr,
+    a caption's parts, or a table's rows."""
+    return isinstance(value, list) and bool(value) and all(
+        isinstance(x, dict) and "t" in x for x in value)
+
+
+def _lone_image(figure):
+    body = figure["c"][2]
+    if len(body) == 1 and body[0].get("t") in ("Plain", "Para") \
+            and len(body[0]["c"]) == 1 and body[0]["c"][0].get("t") == "Image":
+        return body[0]["c"][0]
+    return None
+
+
+def mark_blocks(doc):
+    """The page's AST with what the post-processing needs marked on the
+    elements themselves, never counted: each block quote's content in a
+    marked Div, and a paragraph holding only a bookmark between two quotes
+    in a row, which Pandoc's reader would otherwise join; each table in a
+    marked Div, which the writer makes a bookmark range around it; each
+    decorative image in a marked Span, or the figure it's the whole of in
+    a marked Div, since a figure holding more than an image is written as
+    a table. Matching by position went wrong on Pandoc's own output: a
+    figure holding two images is a w:tbl too. Returns (doc, marks)."""
+    counts = {"quote": 0, "sep": 0, "table": 0, "decorative": 0}
+
+    def marked(prefix, kind, inner, block):
+        counts[kind] += 1
+        return {"t": "Div" if block else "Span",
+                "c": [[prefix + str(counts[kind]), [], []], inner]}
+
+    def visit(value):
+        if isinstance(value, dict):
+            if value.get("t") == "BlockQuote":
+                value["c"] = [marked(QUOTE_MARK, "quote", visit(value["c"]), True)]
+            elif "c" in value:
+                value["c"] = visit(value["c"])
+            return value
+        if not isinstance(value, list):
+            return value
+        if not _elements(value):
+            return [visit(v) for v in value]
         out = []
-        for block in blocks:
-            if out and block.get("t") == "BlockQuote" and out[-1].get("t") == "BlockQuote":
-                separators += 1
+        for item in value:
+            t = item.get("t")
+            if t == "Figure" and _lone_image(item) is not None \
+                    and _decorative(_lone_image(item)):
+                out.append(marked(DECORATIVE_MARK, "decorative", [item], True))
+                continue
+            item = visit(item)
+            if out and t == "BlockQuote" and out[-1].get("t") == "BlockQuote":
+                counts["sep"] += 1
                 out.append({"t": "Para", "c": [{"t": "Span", "c": [
-                    [QUOTE_SEPARATOR + str(separators), [], []], []]}]})
-            out.append(block)
+                    [QUOTE_SEPARATOR + str(counts["sep"]), [], []], []]}]})
+            if t == "Table":
+                item = marked(TABLE_MARK, "table", [item], True)
+            elif t == "Image" and _decorative(item):
+                item = marked(DECORATIVE_MARK, "decorative", [item], False)
+            out.append(item)
         return out
 
+    doc["blocks"] = visit(doc.get("blocks", []))
+    return doc, sum(counts.values())
+
+
+def table_marks(doc):
+    """{n: (header row, header column)} for each table mark_blocks marked.
+    A header row is the table's head; a band (a body's own head row, a
+    group's heading) is not one."""
+    found = {}
+
     def walk(node):
-        nonlocal count
         if isinstance(node, list):
-            if node and all(isinstance(b, dict) and "t" in b for b in node):
-                node[:] = separate(node)
             for item in node:
                 walk(item)
         elif isinstance(node, dict):
-            if node.get("t") == "BlockQuote":
-                count += 1
-                inner = node["c"]
-                node["c"] = [{"t": "Div", "c": [[QUOTE_MARK + str(count), [], []],
-                                                 inner]}]
-                walk(inner)
+            c = node.get("c")
+            if node.get("t") == "Div" and c[0][0].startswith(TABLE_MARK) \
+                    and len(c[1]) == 1 and c[1][0].get("t") == "Table":
+                table = c[1][0]["c"]
+                found[int(c[0][0][len(TABLE_MARK):])] = (
+                    bool(table[3][1]), any(body[1] > 0 for body in table[4]))
+            walk(c)
+    walk(doc.get("blocks", []))
+    return found
+
+
+# JAWS, according to Freedom Scientific's documentation (not tested here),
+# reads a table's headers from a bookmark in the table named Title (a
+# header row and a header column), ColumnTitle (a header row), or
+# RowTitle (a header column):
+# https://doccenter.freedomscientific.com/doccenter/archives/training/samplefiles/usethebookmarkfeatureinwordfortableheaders-oldertechnique.htm
+# The page calls it an older technique. The table census reads the same
+# bookmarks back as the table's declaration, which holds either way.
+JAWS_ID = 800000
+
+
+def apply_markers(xml, tables):
+    """What each marked element calls for, applied to the element each
+    mark stands before: a table's First Column flag and its JAWS
+    bookmark, an image's decorative mark. The marks are then removed.
+    Returns (xml, counts)."""
+    counts = {"first_columns": 0, "jaws_titles": 0, "decorative": 0}
+    marks = re.findall(r'<w:bookmarkStart w:id="(\d+)" w:name="((?:%s|%s)\d+)"\s*/>'
+                       % (TABLE_MARK, DECORATIVE_MARK), xml)
+    if not marks:
+        return xml, counts
+    edits = []                    # (start, end, replacement), applied from the end
+    for ident, name in marks:
+        at = xml.find('w:name="%s"' % name)
+        if name.startswith(TABLE_MARK):
+            n = int(name[len(TABLE_MARK):])
+            row, col = tables.get(n, (False, False))
+            start = xml.find("<w:tbl>", at)
+            if start < 0:
+                continue
+            if col:
+                look = re.compile(r"<w:tblLook\b[^>]*/>").search(xml, start)
+                if look and 'w:firstColumn="1"' not in look.group(0):
+                    tag = look.group(0).replace('w:firstColumn="0"', 'w:firstColumn="1"')
+                    if "w:firstColumn=" not in tag:
+                        tag = tag.replace("<w:tblLook", '<w:tblLook w:firstColumn="1"', 1)
+                    val = re.search(r'w:val="([0-9A-Fa-f]{4})"', tag)
+                    if val:
+                        tag = tag.replace(val.group(0), 'w:val="%04X"'
+                                          % (int(val.group(1), 16) | FIRST_COLUMN))
+                    edits.append((look.start(), look.end(), tag))
+                    counts["first_columns"] += 1
+            if row or col:
+                cell = xml.find("<w:tc>", start)
+                para = xml.find("<w:p>", cell) if cell >= 0 else -1
+                if para >= 0:
+                    here = para + len("<w:p>")
+                    props = re.compile(r"\s*<w:pPr>.*?</w:pPr>", re.S).match(xml, here)
+                    if props:
+                        here = props.end()
+                    title = ("Title" if row and col else "ColumnTitle" if row
+                             else "RowTitle") + "_%d" % n
+                    edits.append((here, here, '<w:bookmarkStart w:id="%d" w:name="%s" />'
+                                  '<w:bookmarkEnd w:id="%d" />' % (JAWS_ID + n, title, JAWS_ID + n)))
+                    counts["jaws_titles"] += 1
+        else:
+            m = re.compile(r"<wp:docPr\b([^>]*?)\s*(/?)>").search(xml, at)
+            if m and "decorative" not in xml[m.start():m.start() + 600]:
+                if m.group(2):
+                    edits.append((m.start(), m.end(), "<wp:docPr%s>%s</wp:docPr>"
+                                  % (m.group(1), DECORATIVE)))
+                else:
+                    edits.append((m.end(), m.end(), DECORATIVE))
+                counts["decorative"] += 1
+    for start, end, new in sorted(edits, key=lambda e: e[0], reverse=True):
+        xml = xml[:start] + new + xml[end:]
+    ids = [ident for ident, _ in marks]
+    xml = re.sub(r'<w:bookmarkStart w:id="(?:%s)" w:name="(?:%s|%s)\d+"\s*/>'
+                 % ("|".join(ids), TABLE_MARK, DECORATIVE_MARK), "", xml)
+    xml = re.sub(r'<w:bookmarkEnd w:id="(?:%s)"\s*/>' % "|".join(ids), "", xml)
+    return xml, counts
+
+
+# Pandoc's writer puts a table's caption before the table without "keep
+# with next", and its reader pairs a caption paragraph without it with
+# the table before, not after (Readers/Docx/Parse.hs, addCaptioned): a
+# table with no caption takes the next one's. Word users want a caption
+# kept with its table anyway. A workaround pending Pandoc.
+def keep_captions(xml):
+    """Keep with next on each table caption; returns (xml, count)."""
+    count = 0
+
+    def one(m):
+        nonlocal count
+        count += 1
+        return m.group(1) + "<w:keepNext />"
+    xml = re.sub(r'(<w:pStyle w:val="TableCaption"\s*/>)(?!\s*<w:keepNext)', one, xml)
+    return xml, count
+
+
+# What a page has that a Word file can't carry, known before writing.
+LOSSES = {
+    "list-in-quotation": "a list inside a quotation comes back outside it, "
+                         "the quotation split around it",
+    "numbered-code": "numbered code lines lose their numbers",
+    "uncaptioned-figure": "a figure with no caption comes back as an image",
+    "layout-table": "a layout table comes back as a data table",
+    "cell-headers": "a table's cells lose the header cells they name "
+                    "(headers); its header rows and column stay",
+}
+
+
+def losses(doc):
+    """[(kind, detail)] for what a page has that its Word file can't carry
+    and reading it back won't restore."""
+    found = []
+
+    def words(node, n=8):
+        return " ".join(_stringify(node if isinstance(node, list) else [node]).split()[:n])
+
+    def walk(node, quoted):
+        if isinstance(node, list):
+            for item in node:
+                walk(item, quoted)
+        elif isinstance(node, dict):
+            t, c = node.get("t"), node.get("c")
+            if t == "BlockQuote":
+                walk(c, True)
                 return
-            for value in node.values():
-                walk(value)
-    doc["blocks"] = separate(doc.get("blocks", []))
-    walk(doc["blocks"])
-    return doc, count
+            if t in ("BulletList", "OrderedList") and quoted:
+                items = c if t == "BulletList" else c[1]
+                first = items[0][0]["c"] if items and items[0] and items[0][0].get("c") else []
+                found.append(("list-in-quotation", words(first)))
+            elif t == "CodeBlock" and any(k in c[0][1] for k in ("numberLines", "number-lines")):
+                found.append(("numbered-code", c[1].splitlines()[0][:60] if c[1] else ""))
+            elif t == "Figure" and not c[1][1]:
+                alts = []
+                walk_alts(c[2], alts)
+                found.append(("uncaptioned-figure", alts[0] if alts else ""))
+            elif t == "Table":
+                attr = dict(c[0][2])
+                if attr.get("role") == "presentation":
+                    found.append(("layout-table", ""))
+                cells = [cell for body in c[4] for row in body[2] + body[3] for cell in row[1]] \
+                    + [cell for row in c[3][1] for cell in row[1]]
+                if any(k == "headers" for cell in cells for k, _ in cell[0][2]):
+                    found.append(("cell-headers", words(
+                        [i for b in c[1][1] for i in (b.get("c") or [])]) if c[1][1] else ""))
+            walk(c, quoted)
+
+    def walk_alts(node, out):
+        if isinstance(node, list):
+            for item in node:
+                walk_alts(item, out)
+        elif isinstance(node, dict):
+            if node.get("t") == "Image":
+                out.append(" ".join(_stringify(node["c"][1]).split())[:60])
+            walk_alts(node.get("c"), out)
+    walk(doc.get("blocks", []), False)
+    return found
 
 
 def _set_indent(paragraph, left, right=None):
@@ -363,39 +505,6 @@ def indent_quotes(xml):
                 count += 1
         out.append(token)
     return "".join(out), count
-
-
-# JAWS reads a Word table's first row and first column as headers unless
-# a bookmark in the table says otherwise: Title for both, ColumnTitle for
-# a header row, RowTitle for a header column (Freedom Scientific's
-# convention). Each table gets the one its headers call for, which the
-# table census reads back as its declaration.
-JAWS_ID = 800000
-
-
-def jaws_titles(xml, titles):
-    """The nth table's first cell given the bookmark for its headers, the
-    nth w:tbl for the nth table in the page; returns (xml, count)."""
-    if not any(row or col for row, col in titles):
-        return xml, 0
-    inserts = []
-    for n, (m, (row, col)) in enumerate(zip(re.finditer(r"<w:tbl>", xml), titles), 1):
-        if not (row or col):
-            continue
-        cell = xml.find("<w:tc>", m.end())
-        para = xml.find("<w:p>", cell) if cell >= 0 else -1
-        if para < 0:
-            continue
-        at = para + len("<w:p>")
-        props = re.match(r"\s*<w:pPr>.*?</w:pPr>", xml[at:at + 4000], re.S)
-        if props:
-            at += props.end()
-        name = ("Title" if row and col else "ColumnTitle" if row else "RowTitle") + "_%d" % n
-        inserts.append((at, '<w:bookmarkStart w:id="%d" w:name="%s" />'
-                            '<w:bookmarkEnd w:id="%d" />' % (JAWS_ID + n, name, JAWS_ID + n)))
-    for at, mark in reversed(inserts):
-        xml = xml[:at] + mark + xml[at:]
-    return xml, len(inserts)
 
 
 # Ids. Pandoc's writer names a bookmark after its id only when the id
@@ -464,8 +573,9 @@ def finish(path, doc):
         with open(doc, encoding="utf-8") as fh:
             doc = json.load(fh)
     body, notes = gather(doc)
+    tables = table_marks(doc)
     counts = {"compat": 0, "tooltips": 0, "decorative": 0, "first_columns": 0,
-              "quotes": 0, "jaws_titles": 0, "ids": 0}
+              "quotes": 0, "jaws_titles": 0, "ids": 0, "captions_kept": 0}
     with zipfile.ZipFile(path) as z:
         names = z.namelist()
         parts = {n: z.read(n) for n in names}
@@ -483,14 +593,13 @@ def finish(path, doc):
         xml = text(part)
         xml, n = screentips(xml, text(rels), facts["links"])
         counts["tooltips"] += n
-        xml, n = decorative(xml, facts["images"])
-        counts["decorative"] += n
-        xml, n = first_columns(xml, facts["tables"])
-        counts["first_columns"] += n
+        xml, found = apply_markers(xml, tables)
+        for key, n in found.items():
+            counts[key] += n
         xml, n = indent_quotes(xml)
         counts["quotes"] += n
-        xml, n = jaws_titles(xml, facts["titles"])
-        counts["jaws_titles"] += n
+        xml, n = keep_captions(xml)
+        counts["captions_kept"] += n
         parts[part] = xml.encode("utf-8")
     mapping = id_map(doc)
     if mapping and ID_MAP_PART not in parts:

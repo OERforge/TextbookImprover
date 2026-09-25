@@ -1932,6 +1932,11 @@ def case_docx_target(work):
                  "</body></html>")
     with open(os.path.join(work, "three.html"), "w", encoding="utf-8") as fh:
         fh.write('<!DOCTYPE html><html lang="en"><head><title>Three</title></head><body><h1>Three</h1>'
+                 '<table role="presentation"><tr><td><p>Layout, left.</p></td><td><p>Layout, right.</p></td></tr></table>'
+                 '<figure><img src="assets/chart.png" alt="Before"><img src="assets/chart.png" alt="After">'
+                 "<figcaption>Before and after</figcaption></figure>"
+                 '<figure><img src="assets/rule.png" alt=""></figure>'
+                 "<blockquote><p>Try these:</p><ul><li>sorting</li><li>reversing</li></ul></blockquote>"
                  "<table><caption>Addresses used</caption><thead><tr><th>Name</th><th>IP address</th></tr></thead>"
                  "<tbody><tr><td>server</td><td>172.20.0.5</td></tr><tr><td>victim</td><td>172.20.0.6</td></tr>"
                  "<tr><td>attacker</td><td>172.20.0.7</td></tr></tbody></table>"
@@ -1966,6 +1971,13 @@ def case_docx_target(work):
     one_back = read(back, "html", "one.html") if exists(back, "html", "one.html") else ""
     two_back = read(back, "html", "two.html") if exists(back, "html", "two.html") else ""
     three = part("three.docx", "word/document.xml")
+    fidelity = read(work, "fidelity.csv") if exists(work, "fidelity.csv") else ""
+
+    def table_with(xml, text):
+        return next((t for t in re.findall(r"<w:tbl>.*?</w:tbl>", xml, re.S) if text in t), "")
+
+    def html_table_with(page, text):
+        return next((t for t in re.findall(r"<table\b.*?</table>", page, re.S) if text in t), "")
     three_back = read(back, "html", "three.html") if exists(back, "html", "three.html") else ""
     return [
         ("a docx target writes a Word file per page, in compatibility mode 15",
@@ -2015,11 +2027,30 @@ def case_docx_target(work):
                      for i in ("_foundations",
                                "an-identifier-well-past-the-forty-characters-word-allows"))),
         ("each table carries the bookmark JAWS reads as its headers, and a banded table with no header row none",
-         lambda: 'w:name="Title_1"' in two and 'w:name="ColumnTitle_1"' in three
-         and not re.search(r'w:name="(?:Column|Row)?Title_2"', three)),
+         lambda: 'w:name="Title_1"' in two
+         and re.search(r'w:name="ColumnTitle_\d+"', table_with(three, "172.20.0.5"))
+         and not re.search(r'Title_\d+', table_with(three, "Group A"))),
+        ("the marks land on the table they belong to, not by position: a figure written "
+         "as a table and a layout table carry none",
+         lambda: not re.search(r'Title_\d+|w:firstColumn="1"', table_with(three, "Layout, left"))
+         and "<w:drawing>" in three and not any(
+             "Title_" in t or 'w:firstColumn="1"' in t
+             for t in re.findall(r"<w:tbl>.*?</w:tbl>", three, re.S) if "<w:drawing>" in t)
+         and "tiq-table" not in three and "tiq-decorative" not in three),
+        ("a decorative image that is a figure's whole content stays a picture, marked decorative",
+         lambda: three.count("adec:decorative") == 1 and not any(
+             "adec:decorative" in t for t in re.findall(r"<w:tbl>.*?</w:tbl>", three, re.S))),
+        ("a table's caption is kept with it, so the table before doesn't take it on reading",
+         lambda: 'TableCaption" /><w:keepNext' in three
+         and re.search(r"<caption>(?:(?!</table>).)*Addresses used(?:(?!</table>).)*172\.20\.0\.5",
+                       three_back, re.S)
+         and not re.search(r"<caption>(?:(?!</table>).)*Layout, left", three_back, re.S)),
+        ("what the Word files can't carry is reported, page by page",
+         lambda: all(k in fidelity for k in ("word,three,layout-table", "word,three,list-in-quotation",
+                                              "word,three,uncaptioned-figure"))),
         ("read back, a table declared with a header row only has no header column, "
-         "and the bookmark leaves no anchor", lambda: three_back.count('<th scope="col"') == 2
-         and 'scope="row"' not in three_back and "ColumnTitle" not in three_back
+         "and the bookmark leaves no anchor", lambda: html_table_with(three_back, "172.20.0.5").count('<th scope="col"') == 2
+         and 'scope="row"' not in html_table_with(three_back, "172.20.0.5") and "ColumnTitle" not in three_back
          and "Title_1" not in two_back),
         ("and the table has its header row and header column",
          lambda: '<th scope="col">' in two_back and '<th scope="row">Labor</th>' in two_back),

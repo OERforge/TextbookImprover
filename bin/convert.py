@@ -1776,7 +1776,7 @@ def noheader(text):
     return "\n".join(out)
 
 
-def render_markdown(target, pages, base, work, project, env):
+def render_markdown(target, pages, base, work, project, env, losses=None):
     """Markdown or AsciiDoc files as source: what the author decided, in
     Pandoc's own flavor of each, and nothing the filter derived. Or Word
     files, from the same intermediates, finished by docxtarget. One file
@@ -1816,8 +1816,12 @@ def render_markdown(target, pages, base, work, project, env):
             # Pandoc's writer, then what it leaves out; see docxtarget.
             # The media goes inside the file, so none is copied beside it.
             with open(page, encoding="utf-8") as fh:
-                marked, quotes = docxtarget.mark_quotes(json.load(fh))
-            if quotes:
+                source = json.load(fh)
+            if losses is not None:
+                losses.extend((target.name, stem, kind, detail)
+                              for kind, detail in docxtarget.losses(source))
+            marked, marks = docxtarget.mark_blocks(source)
+            if marks:
                 page = os.path.join(work, f"{target.name}-{stem}.docx.json")
                 with open(page, "w", encoding="utf-8") as fh:
                     json.dump(marked, fh)
@@ -2305,6 +2309,28 @@ def write_report(rows_file, report, header, noun, sidecar=None, hint=None):
     return rows
 
 
+def write_fidelity(losses, report):
+    """What each target's files can't carry, one row per page and kind,
+    and a line per target on stderr; or no report when there's nothing.
+    Known before writing, from each page's AST; a Word target's so far."""
+    import csv
+    from collections import Counter
+    if not losses:
+        if os.path.exists(report):
+            os.remove(report)
+        return
+    with open(report, "w", encoding="utf-8", newline="") as fh:
+        w = csv.writer(fh, lineterminator="\n")
+        w.writerow(["Target", "Page", "Loss", "Detail", "What happens"])
+        for target, page, kind, detail in losses:
+            w.writerow([target, page, kind, detail, docxtarget.LOSSES[kind]])
+    for target in sorted({row[0] for row in losses}):
+        kinds = Counter(kind for t, _, kind, _ in losses if t == target)
+        say(f"{target}: {sum(kinds.values())} thing(s) its files can't carry "
+            "(" + ", ".join(f"{n} {k}" for k, n in sorted(kinds.items()))
+            + f"); see {os.path.basename(report)}.")
+
+
 def write_bare_links(rows_file, report, sidecar):
     """The bare links no sidecar row decides, one row per address with the
     pages it's on and the text before its first use; or no report when
@@ -2411,7 +2437,7 @@ def main():
         check_sidecar(paths[key], f"sidecars.{key}", default, base)
     reports = {key: resolve_path(base, first[f"reports.{key}"])
                for key in ("table_captions_missing", "image_alt_missing",
-                           "bare_links_new",
+                           "bare_links_new", "fidelity",
                            "table_headers_new", "table_headers_report",
                            "page_names_new", "page_names_report",
                            "media_unresolved", "spacer_images",
@@ -2483,7 +2509,8 @@ def main():
         # survive Pandoc's reader; on an HTML source's intermediate, where
         # it does (a <th>, a <strong>). One run, so the book has one
         # report and one new-rows file. A sidecar row whose key matches no
-        # table stops the run.
+        # table is warned about and set aside, with a sample sidecar
+        # without it.
         prepass = list(docs) + [os.path.join(base, s + ".json")
                                 for s in html_stems]
         if prepass:
@@ -2552,13 +2579,15 @@ def main():
 
         # ---- 4.7 render, per html target --------------------------------------
         written = {}
+        losses = []
         renv = dict(env, HEADER_INCLUDES_FILE=css_header)
         for target in targets:
             if target.format in SOURCE_TARGETS or target.format == "docx":
                 written[target.name] = render_markdown(
                     target, [p for p in pages_by_dir[target.pages_dir]
                              if os.path.basename(p)[:-len(INTERMEDIATE)]
-                             not in hand_stems], base, work, project, renv)
+                             not in hand_stems], base, work, project, renv,
+                    losses)
             if target.format == "html":
                 rendered = [p for p in pages_by_dir[target.pages_dir]
                             if os.path.basename(p)[:-len(INTERMEDIATE)]
@@ -2586,6 +2615,7 @@ def main():
                              hand_stems, work)
 
         # ---- 5. reports, once per book ----------------------------------------
+        write_fidelity(losses, reports["fidelity"])
         missing = write_report(
             collected["captions_missing"], reports["table_captions_missing"],
             "Label,Description,Source,Excerpt",

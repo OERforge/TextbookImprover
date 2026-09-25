@@ -449,8 +449,9 @@ keys:
           writes prefilled rows to the table_headers_new report; rename
           or paste them here. Values this version doesn't act on yet
           (manual, list) are accepted and kept. A row whose key matches
-          no table stops the run, because a correction that silently
-          fails to apply destroys work invisibly.
+          no table, since the table changed or is gone, is warned about
+          and written to table-headers-unmatched.csv, with the sidecar
+          without it as table-headers-sample.csv, to adopt.
 
       page_names:
         type: path
@@ -481,6 +482,16 @@ keys:
         default: image-alt-missing.csv
         description: >
           Images with no alt text, or with alt text over the length limit.
+
+      fidelity:
+        type: path
+        default: fidelity.csv
+        description: >
+          What a target's files can't carry, one row per page and kind of
+          loss, known before writing: for a docx target, a list inside a
+          quotation, numbered code lines, a figure with no caption, a
+          layout table, and a table's per-cell headers. Nothing to fix in
+          the book; it says what reading the files back won't restore.
 
       bare_links_new:
         type: path

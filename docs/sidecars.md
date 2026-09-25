@@ -22,6 +22,9 @@ the others. A report existing at all means there's work outstanding.
 | `spacer-images.csv` | Nothing — it records what the spacer rule did. |
 | `output-check.csv` | Fixing what it names: dead links, images with no alt, headings that skip, tables with no headers. Written when the [output check](checking.md) finds anything. |
 | `media-unresolved.csv` | Replacing the images named in it. Written only when the run stops. |
+| `table-headers-unmatched.csv` | Looking at each row, whose key matches no table now: the table's text or shape changed, or it's gone. The table's row as it is now is in `table-headers-new.csv`. |
+| `table-headers-sample.csv` | Renaming it to `table-headers.csv` once you've looked: the sidecar without the unmatched rows. Written with `table-headers-unmatched.csv`. |
+| `fidelity.csv` | Nothing in the book: it says what a target's files can't carry, a row per page and kind, so reading them back won't restore it. See [Word output](formats.md#word-output). |
 
 ### Sidecar files
 
@@ -67,15 +70,20 @@ the first run writes `table-headers-new.csv` with a prefilled row for every
 data table—the guess in `headers`, the source file and first cells beside
 it so you can find the table—and you rename that file, or paste its rows
 in on later runs when tables have been added. A row whose key matches no
-table stops the run, since a correction that silently fails to apply
-destroys work invisibly; the report names the row. Values this version does
+table, because the table's text or shape changed or it's gone, isn't
+silently dropped: the run warns and goes on, the row goes to
+`table-headers-unmatched.csv`, the table's row as it is now to
+`table-headers-new.csv`, and `table-headers-sample.csv` is the sidecar
+without the unmatched rows, to adopt once you've looked. This happens
+whenever a table is edited in its source, as when a Word file converted
+once is edited in Word and converted again. Values this version does
 not act on yet (`manual`, `list`) are accepted and kept, so a book can
 start carrying them. The value in effect—the sidecar's where one was declared, the guess
 otherwise—is applied when the page is built.
 
 The guess is `none` only with evidence that a table has no headers: every filled cell is a number or an amount, or the cells are a list laid out in columns, reading in order down each one. Where no rule recognizes a table's headers and nothing shows it has none, the guess is `unknown`, the reason says so, and the table is converted as the source marks it, so the report sends a person to look rather than claiming to know. Across the nine books in the test corpus, 20 of 1,045 data tables are `unknown`: payoff matrices, tables laid on their side, and formula glossaries, among others.
 
-A Word table can declare its own headers too, with the bookmarks JAWS reads: `Title` for a header row and a header column, `ColumnTitle` for a header row, `RowTitle` for a header column, anything after it keeping the name unique (`ColumnTitle_2`), in one of the table's cells ([Freedom Scientific's convention](https://doccenter.freedomscientific.com/doccenter/archives/training/samplefiles/usethebookmarkfeatureinwordfortableheaders-oldertechnique.htm)). Such a table is declared, not guessed, and the report names `source` as the supplier. A Word target writes them, so its tables read back as declared.
+A Word table can declare its own headers too, with the bookmarks [Freedom Scientific documents for JAWS](https://doccenter.freedomscientific.com/doccenter/archives/training/samplefiles/usethebookmarkfeatureinwordfortableheaders-oldertechnique.htm): `Title` for a header row and a header column, `ColumnTitle` for a header row, `RowTitle` for a header column, anything after it keeping the name unique (`ColumnTitle_2`), in one of the table's cells. Such a table is declared, not guessed, and the report names `source` as the supplier. A Word target writes them, so its tables read back as declared. What JAWS does with them is documented, on a page that calls the method an older technique, and not tested here.
 
 An HTML source's tables are in the same sidecar, the same report, and the same new-rows file. The key is computed the same way from the table as Pandoc reads it. A table whose page marks its header cells with `<th>` says so itself, and the report names `source` as the supplier; the sidecar outranks that as it outranks the guess. The rest are guessed from what survives reading, which is the cells' text and their bold. Their merged title rows and grouping bands are inferred as a Word table's are (`caption-rows`, `split-at`), captions for the parts can be written in `part-captions` as for a Word table, and a table the page already groups, a `<tbody>` headed by one cell across the table, counts as banded without being told.
 

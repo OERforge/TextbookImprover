@@ -13,7 +13,7 @@ Tools in `util/` that aren't part of a conversion but help before or around one:
 | `docx-compat.py` | Reads, and optionally sets, the Word compatibility mode of a DOCX. |
 | `restyle-headings.py` | Reports the paragraph styles a DOCX uses, and rewrites its heading styles from a map: the repair a book whose top level is styled `Title` needs before its structure can be seen. |
 | `settings-reference.py` | Writes the three settings reference pages under `docs/` from the schemas; `--check` says whether they're current. |
-| `remediate-docx.py` | Writes remediated copies of an author's Word files: the pipeline's decisions about tables, images, and links written into the files themselves. A first version, run by hand. |
+| `remediate-docx.py` | Writes remediated copies of an author's Word files: the sidecars' decisions about tables, images, and links written into the files themselves, as a `format: source` target does. |
 
 Each takes `--help`. The census and sample tools read Word files directly and need no Pandoc; `compare-output.py` reads HTML; `docx-compat.py` touches nothing but `word/settings.xml`; `restyle-headings.py` nothing but the paragraph styles.
 
@@ -42,7 +42,7 @@ Restyling removes the `Title` paragraphs, so the converted pages take their titl
 
 ## A remediated copy of a Word file
 
-`remediate-docx.py` writes the decisions the pipeline makes about a Word source back into a copy of the file, so the author can go on working in Word from an accessible document. It edits the file's XML as text, changing only what it names; every part it doesn't change is copied byte for byte.
+`remediate-docx.py` writes the decisions made about a Word source back into a copy of the file, so the author can go on working in Word from an accessible document. A target with `format: source` does the same in a run of `convert.py` ([Source](formats.md#source)). It edits the file's XML as text, changing only what it names; every part it doesn't change is copied byte for byte.
 
 ```sh
 table-headers.py *.docx --sidecar table-headers.csv --new new.csv \
@@ -51,14 +51,14 @@ remediate-docx.py *.docx --resolved resolved.json \
     --alt image-alt.csv --links bare-links.csv --out remediated
 ```
 
-- **Tables** get the header declaration in effect, the sidecar's where it has a row and the guess otherwise. A header row becomes Word's repeating header row, with any title rows above it, since Word's header rows start at the top of a table. A header column becomes the table style's First Column flag. Either gets a bookmark naming the table's headers, `Title`, `ColumnTitle`, or `RowTitle`, the convention [Freedom Scientific documents for JAWS](https://doccenter.freedomscientific.com/doccenter/archives/training/samplefiles/usethebookmarkfeatureinwordfortableheaders-oldertechnique.htm). Each table is found by its position among the file's tables and changed only when its row count and first cell are what the pre-pass saw; any other is skipped and counted.
+- **Tables** get the header declaration from the sidecar, and a table with no sidecar row is left as it is: a guess written into the file would read back as the author's own declaration. `--include-guesses` writes the census's guess too, for trying it out. A header row becomes Word's repeating header row, with any title rows above it, since Word's header rows start at the top of a table. A header column becomes the table style's First Column flag. Either gets a bookmark naming the table's headers, `Title`, `ColumnTitle`, or `RowTitle`, the convention [Freedom Scientific documents for JAWS](https://doccenter.freedomscientific.com/doccenter/archives/training/samplefiles/usethebookmarkfeatureinwordfortableheaders-oldertechnique.htm). Each table is found by its position among the file's tables and changed only when its row count and first cell are what the pre-pass saw; any other is skipped and counted.
 - **Images** get their alt text from the image-alt sidecar, as the picture's description, and `[decorative]` gets Word's "Mark as decorative", with no description or title.
 - **Links** get their title from the bare-links sidecar, as a ScreenTip.
 - **Compatibility mode 15** is set only with `--compat`.
 
-Measured on the statistics book's 169 Word files: 308 of its 332 data tables got header rows and 229 a header column, none was skipped, and the header pre-pass, run again on the copies, reads every one of the 332 as declared with the same value, from the file's own bookmarks. Only `word/document.xml` changed, and only in the 57 files that have tables; the others are the originals byte for byte. OpenStax's files fail Word's schema check on their own, mostly for a paragraph style out of place, and the copies fail it with exactly the same errors. What Word and screen readers do with the changes is documented, not tested here.
+Measured on the statistics book's 169 Word files with `--include-guesses`, since the book has no table-headers sidecar: 308 of its 332 data tables got header rows and 229 a header column, none was skipped, and the header pre-pass, run again on the copies, reads every one of the 332 as declared with the same value, from the file's own bookmarks. Only `word/document.xml` changed, and only in the 57 files that have tables; the others are the originals byte for byte. OpenStax's files fail Word's schema check on their own, mostly for a paragraph style out of place, and the copies fail it with exactly the same errors. What Word and screen readers do with the changes is documented, not tested here.
 
-Not yet: bands and table splits have no Word equivalent and are left alone; a table's caption, a link's replacement address (a shortDOI), and anything the pipeline decides in the filter rather than a sidecar aren't written. `convert.py` doesn't call it yet.
+Not yet: bands and table splits have no Word equivalent and are left alone; a table's caption, a link's replacement address (a shortDOI), and anything the pipeline decides in the filter rather than a sidecar aren't written.
 
 ## Repairing tracked deletions in the source
 

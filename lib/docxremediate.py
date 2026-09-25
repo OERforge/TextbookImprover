@@ -4,9 +4,12 @@ author can go on working in Word from an accessible document.
 
 What it changes, all of it decided elsewhere in the pipeline:
 
-- **Tables.** The header declaration in effect for each table, as the
-  header pre-pass resolves it (`table-headers.py --resolved`): the
-  sidecar's where there's a row, the guess otherwise. A header row is
+- **Tables.** The header declaration a person made for each table in the
+  table-headers sidecar, as the header pre-pass resolves it
+  (`table-headers.py --resolved`). Never a guess: written into the file,
+  a guess would read back as the file's own declaration, and nothing
+  would say it was never reviewed. A guess becomes a decision when its
+  prefilled row is adopted into the sidecar. A header row is
   written as Word's repeating header row (`w:tblHeader`), with any title
   rows above it, since Word's header rows start at the top; a header
   column as the table style's First Column flag. Both get the bookmark
@@ -146,14 +149,20 @@ def _title_bookmark(table, name, ident):
             % (ident, name, ident) + table[at:])
 
 
-def remediate_tables(xml, resolved):
-    """Each table's resolved declaration written into it. resolved is the
-    pre-pass's list for this file. Returns (xml, counts)."""
-    counts = {"header_rows": 0, "header_columns": 0, "titles": 0, "skipped": 0}
+def remediate_tables(xml, resolved, guesses=False):
+    """Each table's declaration from the sidecar written into it, or with
+    guesses, the census's guess too. resolved is the pre-pass's list for
+    this file. Returns (xml, counts)."""
+    counts = {"header_rows": 0, "header_columns": 0, "titles": 0, "skipped": 0,
+              "undecided": 0}
     spans = table_spans(xml)
     edits = []
     for entry in resolved:
         value = entry.get("headers")
+        if entry.get("supplier") != "sidecar" and not (guesses and entry.get("supplier") == "guess"):
+            counts["undecided"] += entry.get("supplier") == "guess" and value in (
+                "first-row", "first-column", "both")
+            continue
         if value not in ("first-row", "first-column", "both"):
             continue
         index = entry.get("index")
@@ -229,6 +238,37 @@ def remediate_images(xml, alts):
     return xml, counts
 
 
+def alt_rows(path):
+    """{stem: {relationship id: alt, or None for decorative}} from an
+    image-alt sidecar, whose Image column names <stem>/media/rIdN.ext."""
+    import csv
+    found = {}
+    if not path or not os.path.exists(path):
+        return found
+    with open(path, encoding="utf-8-sig", newline="") as fh:
+        for row in csv.DictReader(fh):
+            image, alt = (row.get("Image") or "").strip(), (row.get("Alt") or "").strip()
+            parts = image.split("/")
+            if len(parts) != 3 or parts[1] != "media" or not alt:
+                continue
+            found.setdefault(parts[0], {})[os.path.splitext(parts[2])[0]] = \
+                None if alt == "[decorative]" else alt
+    return found
+
+
+def link_titles(path):
+    """{address: title} from a bare-links sidecar."""
+    import csv
+    found = {}
+    if not path or not os.path.exists(path):
+        return found
+    with open(path, encoding="utf-8-sig", newline="") as fh:
+        for row in csv.DictReader(fh):
+            if (row.get("URL") or "").strip() and (row.get("Title") or "").strip():
+                found[row["URL"].strip()] = row["Title"].strip()
+    return found
+
+
 def remediate_links(xml, rels, titles):
     """titles: {address: title}. Each hyperlink to one gets its ScreenTip.
     Returns (xml, count)."""
@@ -254,7 +294,8 @@ def remediate_links(xml, rels, titles):
 # The file
 # ---------------------------------------------------------------------------
 
-def remediate(source, destination, tables=None, alts=None, titles=None, compat=False):
+def remediate(source, destination, tables=None, alts=None, titles=None, compat=False,
+              guesses=False):
     """Write destination, a copy of source with the decisions applied.
     tables: the pre-pass's resolved list for this file; alts: {relationship
     id: alt or None}; titles: {address: title}. Returns a dict of counts."""
@@ -266,7 +307,7 @@ def remediate(source, destination, tables=None, alts=None, titles=None, compat=F
     changed = set()
     if "word/document.xml" in parts:
         xml = text("word/document.xml")
-        new, found = remediate_tables(xml, tables or [])
+        new, found = remediate_tables(xml, tables or [], guesses)
         counts.update(found)
         new, found = remediate_images(new, alts or {})
         counts.update(found)

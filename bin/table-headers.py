@@ -449,6 +449,10 @@ def main():
                 "split_at": split_at, "part_captions": part_captions,
                 "rows": info["rows"], "cols": info["cols"], "first": info["first"],
                 "anchors": info.get("anchors", []),
+                # Who decided: "sidecar" for a person's row, "source" for
+                # the file's own declaration, "guess" for the census. A
+                # remediated source writes only what a person decided.
+                "supplier": supplier,
             })
         if split_at:
             note = (note + "; " if note else "") + (

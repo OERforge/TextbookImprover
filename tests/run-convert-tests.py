@@ -1907,6 +1907,83 @@ def run_tool(cwd, args, util=False):
                           capture_output=True, text=True)
 
 
+def case_source_target(work):
+    """format: source: the book's own Word files, remediated into the
+    target's folder, with only what a person decided in the sidecars, never
+    a guess; the author's files untouched."""
+    import zipfile, hashlib
+    from PIL import Image
+    os.makedirs(os.path.join(work, "assets"), exist_ok=True)
+    Image.new("RGB", (40, 20), "navy").save(os.path.join(work, "assets", "a.png"))
+    for n in (1, 2):
+        with open(os.path.join(work, f"ch{n}.md"), "w", encoding="utf-8") as fh:
+            fh.write(f"---\ntitle: Chapter {n}\nlang: en\n---\n\n# Chapter {n}\n\n"
+                     f"| Name | Score |\n|------|------:|\n| Ana | 9{n} |\n| Ben | 8{n} |\n| Cy | 7{n} |\n\n"
+                     "![](assets/a.png)\n\nText.\n")
+        subprocess.run(["pandoc", f"ch{n}.md", "-o", f"ch{n}.docx"], cwd=work, check=True)
+        os.remove(os.path.join(work, f"ch{n}.md"))
+    shutil.rmtree(os.path.join(work, "assets"))
+    with open(os.path.join(work, "notes.md"), "w", encoding="utf-8") as fh:
+        fh.write("---\ntitle: Notes\nlang: en\n---\n\n# Notes\n\nA Markdown chapter.\n")
+    digest = lambda n: hashlib.sha256(open(os.path.join(work, n), "rb").read()).hexdigest()
+    before = {n: digest(n) for n in ("ch1.docx", "ch2.docx")}
+
+    def conf(extra=""):
+        with open(os.path.join(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
+            fh.write("targets:\n  html:\n    format: html\n  fixed:\n    format: source\n" + extra)
+
+    def run():
+        return subprocess.run([sys.executable, "-B", os.path.join(BIN, "convert.py")],
+                              cwd=work, capture_output=True, text=True)
+
+    def differ(n):
+        with zipfile.ZipFile(os.path.join(work, n)) as a, \
+                zipfile.ZipFile(os.path.join(work, "fixed", n)) as b:
+            return [p for p in a.namelist() if a.read(p) != b.read(p)]
+
+    conf()
+    first = run()
+    first_differ = {n: differ(n) for n in ("ch1.docx", "ch2.docx")} \
+        if os.path.exists(os.path.join(work, "fixed", "ch1.docx")) else None
+    shutil.copy(os.path.join(work, "table-headers-new.csv"), os.path.join(work, "table-headers.csv"))
+    with open(os.path.join(work, "table-headers.csv"), encoding="utf-8") as fh:
+        rows = fh.read().splitlines()
+    with open(os.path.join(work, "table-headers.csv"), "w", encoding="utf-8") as fh:
+        fh.write("\n".join(r for r in rows if "ch2.docx" not in r) + "\n")
+    with zipfile.ZipFile(os.path.join(work, "ch1.docx")) as z:
+        rid = re.search(r'r:embed="([^"]+)"', z.read("word/document.xml").decode()).group(1)
+    with open(os.path.join(work, "image-alt.csv"), "w", encoding="utf-8") as fh:
+        fh.write(f"Image,Alt\nch1/media/{rid}.png,A navy rectangle\n")
+    second = run()
+
+    def xml(n):
+        with zipfile.ZipFile(os.path.join(work, "fixed", n)) as z:
+            return z.read("word/document.xml").decode()
+    one, two = xml("ch1.docx"), xml("ch2.docx")
+    kept_compat = differ("ch1.docx") == ["word/document.xml"]
+    conf('    compatibility_mode: "15"\n')
+    third = run()
+    return [
+        ("a first run, with no sidecar, writes the files unchanged and says what's left to a guess",
+         lambda: first_differ == {"ch1.docx": [], "ch2.docx": []}
+         and "left as they are, with only the census's guess" in first.stderr),
+        ("once a table's row is adopted, its headers are written; a table with none is left alone",
+         lambda: re.search(r'w:name="(?:Column|Row)?Title_\d+"', one)
+         and not re.search(r'w:name="(?:Column|Row)?Title_\d+"', two)
+         and "1 table(s) left as they are" in second.stderr),
+        ("an image described in the sidecar gets its alt text",
+         lambda: 'descr="A navy rectangle"' in one),
+        ("the author's files never change, and the copy's compatibility mode is theirs",
+         lambda: {n: digest(n) for n in before} == before and kept_compat),
+        ("compatibility_mode: 15 sets it",
+         lambda: "word/settings.xml" in differ("ch1.docx")
+         and 'w:name="compatibilityMode"' in zipfile.ZipFile(
+             os.path.join(work, "fixed", "ch1.docx")).read("word/settings.xml").decode()),
+        ("a source that isn't Word is named as left out",
+         lambda: "1 source(s) not in Word left out" in third.stderr),
+    ]
+
+
 def case_remediate_docx(work):
     """A remediated copy of a Word file: the pre-pass's table declarations,
     and alt text from the image-alt sidecar, written into the author's own
@@ -1930,8 +2007,14 @@ def case_remediate_docx(work):
     headers = run_tool(work, ["table-headers.py", "ch1.docx", "--sidecar", "none.csv",
                               "--new", "new.csv", "--report", "report.csv",
                               "--resolved", "resolved.json"])
+    plain = run_tool(work, ["remediate-docx.py", "ch1.docx", "--resolved", "resolved.json",
+                            "--out", "plain"], util=True)
+    plain_xml = ""
+    if os.path.exists(os.path.join(work, "plain", "ch1.docx")):
+        with zipfile.ZipFile(os.path.join(work, "plain", "ch1.docx")) as z:
+            plain_xml = z.read("word/document.xml").decode("utf-8")
     rem = run_tool(work, ["remediate-docx.py", "ch1.docx", "--resolved", "resolved.json",
-                          "--alt", "image-alt.csv", "--out", "out"], util=True)
+                          "--alt", "image-alt.csv", "--include-guesses", "--out", "out"], util=True)
     refused = run_tool(work, ["remediate-docx.py", "ch1.docx", "--out", "."], util=True)
     out = os.path.join(work, "out", "ch1.docx")
     changed, xml = [], ""
@@ -1948,9 +2031,12 @@ def case_remediate_docx(work):
         entries = json.loads(read(work, "resolved.json")).get("ch1", [])
         resolved = entries[0]["headers"] if entries else ""
     return [
+        ("with no sidecar row, the table is left alone, and the guess counted as left",
+         lambda: plain.returncode == 0 and "1 left to their guess" in plain.stderr
+         and not re.search(r'w:name="(?:Column|Row)?Title_\d+"', plain_xml)),
         ("the copy is written, and only word/document.xml differs from the original",
          lambda: rem.returncode == 0 and changed == ["word/document.xml"]),
-        ("the table's header row is Word's repeating header row, with the bookmark for JAWS",
+        ("with --include-guesses, the table's header row is Word's repeating header row, with the bookmark for JAWS",
          lambda: "<w:tblHeader/>" in xml and re.search(r'w:name="(?:Column|Row)?Title_\d+"', xml)),
         ("read back, the pre-pass finds the table declared by the file itself, as it resolved it",
          lambda: back is not None and resolved and f",source,{resolved},"  in report),
@@ -2626,6 +2712,7 @@ CASES = [
     ("bare links and their sidecar", case_bare_links),
     ("a docx target", case_docx_target),
     ("a remediated copy of a Word file", case_remediate_docx),
+    ("format: source", case_source_target),
     ("a hand-written page", case_hand_written),
     ("several targets", case_targets),
     ("arguments passed to the packager", case_passthrough),

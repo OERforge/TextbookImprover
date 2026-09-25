@@ -73,6 +73,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(HERE), "lib"))
 try:
     import docxrepair
+    import docxremediate
     import docxtarget
     import htmlrepair
     import mathjax
@@ -1780,6 +1781,51 @@ def noheader(text):
     return "\n".join(out)
 
 
+def remediate_sources(target, base, docs, paths, env):
+    """A target with format source: the book's own files, remediated, one
+    copy each in the target's folder under the source's name. A Word file
+    gets what a person decided in the sidecars written into it, and nothing
+    else changed (lib/docxremediate.py); a guess is never written, since
+    in the file it would read back as the author's own. Other sources
+    aren't written yet."""
+    os.makedirs(target.output_dir, exist_ok=True)
+    resolved = {}
+    if env.get("TABLE_HEADERS_RESOLVED") and os.path.exists(env["TABLE_HEADERS_RESOLVED"]):
+        with open(env["TABLE_HEADERS_RESOLVED"], encoding="utf-8") as fh:
+            resolved = json.load(fh)
+    alts = docxremediate.alt_rows(paths["image_alt"])
+    titles = docxremediate.link_titles(paths["bare_links"])
+    written, totals = [], {}
+    for name in docs:
+        stem = os.path.splitext(name)[0]
+        out = os.path.join(target.output_dir, name)
+        counts = docxremediate.remediate(os.path.join(base, name), out, resolved.get(stem, []),
+                                         alts.get(stem, {}), titles,
+                                         str(target["compatibility_mode"]) == "15")
+        for key, n in counts.items():
+            totals[key] = totals.get(key, 0) + n
+        written.append(out)
+    others = sorted(f for f in os.listdir(base) if f.endswith((".md", ".adoc", ".html"))
+                    and not f.startswith("."))
+    say(f"{target.name}: {len(docs)} Word file(s) remediated: "
+        f"{totals.get('header_rows', 0)} table(s) given header rows and "
+        f"{totals.get('header_columns', 0)} a header column from the sidecar, "
+        f"{totals.get('described', 0)} image(s) described, "
+        f"{totals.get('decorative', 0)} marked decorative, "
+        f"{totals.get('links', 0)} link title(s)"
+        + (f"; {totals['skipped']} table(s) skipped as changed since the pre-pass"
+           if totals.get("skipped") else "")
+        + ".")
+    if totals.get("undecided"):
+        say(f"{target.name}: {totals['undecided']} table(s) left as they are, with only "
+            "the census's guess; adopt their rows from the table_headers_new report "
+            "to have them written.")
+    if others:
+        say(f"{target.name}: {len(others)} source(s) not in Word left out; format "
+            "source writes Word files so far.")
+    return written
+
+
 def render_markdown(target, pages, base, work, project, env, losses=None):
     """Markdown or AsciiDoc files as source: what the author decided, in
     Pandoc's own flavor of each, and nothing the filter derived. Or Word
@@ -2586,6 +2632,8 @@ def main():
         losses = []
         renv = dict(env, HEADER_INCLUDES_FILE=css_header)
         for target in targets:
+            if target.format == "source":
+                written[target.name] = remediate_sources(target, base, docs, paths, env)
             if target.format in SOURCE_TARGETS or target.format == "docx":
                 written[target.name] = render_markdown(
                     target, [p for p in pages_by_dir[target.pages_dir]

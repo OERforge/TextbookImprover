@@ -4,7 +4,7 @@ Settings that describe one rendering of the book, under `conversion:` in `packag
 
 How the book is rendered into one output format.
 
-**`format`**—one of `html`, `epub3`, `pdf`, `docx`, `markdown`, `asciidoc`; default `html`; *target only*
+**`format`**—one of `html`, `epub3`, `pdf`, `docx`, `markdown`, `asciidoc`, `source`; default `html`; *target only*
 
 What this target produces. markdown and asciidoc write source again: what the author decided, which the pipeline reads back to the same book. docx writes Word files from the same pages, in compatibility mode 15 with ScreenTips and Word's decorative marker. pdf is NOT YET IMPLEMENTED (see the roadmap): a target naming it is skipped with a warning, and nothing is written for it.
 
@@ -19,6 +19,10 @@ For a format that produces one file for the whole book, such as epub3, the file 
 **`menu`**—one of `on`, `off`; default `off`
 
 Whether every page of an HTML target carries the book's contents as a menu at its top (collapsed, the current page marked) and links to the previous and next page at its foot. For posting the pages as a site of their own. Off by default, since an LMS gives the pages its own navigation and the EPUB has its reading system's. A page from the pass-through directory is left as it stands.
+
+**`compatibility_mode`**—one of `keep`, `15`; default `keep`
+
+For a target with format source: whether a remediated Word file keeps the compatibility mode its author's file has, or is set to 15, which guides for Word say its Accessibility Checker needs. Kept by default, since the file is the author's.
 
 **`title_block`**—one of `on`, `off`; default `on`
 

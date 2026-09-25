@@ -155,6 +155,22 @@ The post-processing finds what it changes by marks the target puts on the elemen
 
 Read back as a source, a Word file gives back its text, headings, images and alt text, captioned figures, tables and header rows, link titles, decorative images, math, nested quotations, a list item's second paragraph or code block, and numbered and highlighted code. A term with no definition, such as a review question, reads back as a term. Measured on four books: the statistics book gives the same HTML on 135 of its 169 pages, DCIC on 49 of 80, and the security textbook on 9 of 14, with no dead links in any. The schema check is `tools/validate-docx.sh` from Pandoc's source, which wrongly rejects `m:sty` in an equation, as `PANDOC-NOTES.md` explains.
 
+### Source
+
+`format: source` gives the book's own files back, remediated, one copy of each in the target's folder under its original name; the originals are never touched. What it writes is only what a person decided in the sidecars, never a guess: a guess written into the author's file would read back as the file's own declaration, and nothing would say it was never reviewed.
+
+For a Word file, it's the remediated copy described under [Utilities](utilities.md#a-remediated-copy-of-a-word-file): each table's header declaration from the table-headers sidecar, alt text and decorative marks from the image-alt sidecar, and link titles from the bare-links sidecar, written into the file's XML, with every part nothing decided copied byte for byte. So the first run on a book changes no table: the census's guesses go to `table-headers-new.csv` as usual, the run says how many tables it left to their guess, and adopting their rows into `table-headers.csv` is what gets them written on the next run. `compatibility_mode` keeps the author's compatibility mode unless it's set to `"15"`.
+
+Markdown, AsciiDoc, and HTML sources aren't written yet; the run names them as left out. The `markdown` and `asciidoc` targets are close for a Markdown or AsciiDoc source, since they write back what the sidecars decided, but they write the book's pages, not its files, and Pandoc's writer re-serializes the rest, so line wrapping and markup choices change.
+
+```yaml
+targets:
+  html:
+    format: html
+  fixed:
+    format: source
+```
+
 ### PDF
 
 NOT YET IMPLEMENTED: [on the roadmap](../ROADMAP.md). A target naming it is skipped with a warning. PDF waits on LaTeX's tagging support for complex table headers.

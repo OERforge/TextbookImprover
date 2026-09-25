@@ -30,7 +30,7 @@ keys:
 
   format:
     type: enum
-    values: [html, epub3, pdf, docx, markdown, asciidoc]
+    values: [html, epub3, pdf, docx, markdown, asciidoc, source]
     default: html
     target_only: true
     stage: render
@@ -76,6 +76,17 @@ keys:
       site of their own. Off by default, since an LMS gives the pages
       its own navigation and the EPUB has its reading system's. A page
       from the pass-through directory is left as it stands.
+
+  compatibility_mode:
+    type: enum
+    values: ["keep", "15"]
+    default: "keep"
+    stage: render
+    description: >
+      For a target with format source: whether a remediated Word file keeps
+      the compatibility mode its author's file has, or is set to 15, which
+      guides for Word say its Accessibility Checker needs. Kept by default,
+      since the file is the author's.
 
   title_block:
     type: enum

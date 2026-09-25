@@ -119,8 +119,8 @@ def gather(doc):
     """(body, notes): each a dict of the page's titled links, decorative
     images, and tables, in the order Pandoc writes them into the body
     part and into the footnotes part."""
-    parts = {"body": {"links": [], "images": [], "tables": []},
-             "notes": {"links": [], "images": [], "tables": []}}
+    parts = {"body": {"links": [], "images": [], "tables": [], "titles": []},
+             "notes": {"links": [], "images": [], "tables": [], "titles": []}}
 
     def walk(node, where):
         if isinstance(node, list):
@@ -149,9 +149,13 @@ def gather(doc):
                      or keys.get("role") == "presentation"))
             return
         if t == "Table":
-            bodies = c[4]
+            head, bodies = c[3], c[4]
             parts[where]["tables"].append(
                 any(body[1] > 0 for body in bodies))
+            # A header row is the table's head; a band (a body's own
+            # head row, a group's heading) is not one.
+            parts[where]["titles"].append(
+                (bool(head[1]), any(body[1] > 0 for body in bodies)))
             walk(c, where)
             return
         for value in (c if isinstance(c, list) else [c]):
@@ -271,14 +275,33 @@ AFTER_IND = ("w:contextualSpacing", "w:mirrorIndents", "w:suppressOverlap",
              "w:rPr", "w:sectPr", "w:pPrChange")
 
 
+QUOTE_SEPARATOR = QUOTE_MARK + "sep-"
+
+
 def mark_quotes(doc):
-    """The page's AST with each block quote's content in a marked Div;
-    returns (doc, count)."""
+    """The page's AST with each block quote's content in a marked Div, and
+    a paragraph holding only a bookmark between two quotes in a row, which
+    Pandoc's reader would otherwise join (it drops an empty paragraph
+    first, and keeps this one); returns (doc, count)."""
     count = 0
+    separators = 0
+
+    def separate(blocks):
+        nonlocal separators
+        out = []
+        for block in blocks:
+            if out and block.get("t") == "BlockQuote" and out[-1].get("t") == "BlockQuote":
+                separators += 1
+                out.append({"t": "Para", "c": [{"t": "Span", "c": [
+                    [QUOTE_SEPARATOR + str(separators), [], []], []]}]})
+            out.append(block)
+        return out
 
     def walk(node):
         nonlocal count
         if isinstance(node, list):
+            if node and all(isinstance(b, dict) and "t" in b for b in node):
+                node[:] = separate(node)
             for item in node:
                 walk(item)
         elif isinstance(node, dict):
@@ -291,7 +314,8 @@ def mark_quotes(doc):
                 return
             for value in node.values():
                 walk(value)
-    walk(doc.get("blocks", []))
+    doc["blocks"] = separate(doc.get("blocks", []))
+    walk(doc["blocks"])
     return doc, count
 
 
@@ -340,6 +364,39 @@ def indent_quotes(xml):
     return "".join(out), count
 
 
+# JAWS reads a Word table's first row and first column as headers unless
+# a bookmark in the table says otherwise: Title for both, ColumnTitle for
+# a header row, RowTitle for a header column (Freedom Scientific's
+# convention). Each table gets the one its headers call for, which the
+# table census reads back as its declaration.
+JAWS_ID = 800000
+
+
+def jaws_titles(xml, titles):
+    """The nth table's first cell given the bookmark for its headers, the
+    nth w:tbl for the nth table in the page; returns (xml, count)."""
+    if not any(row or col for row, col in titles):
+        return xml, 0
+    inserts = []
+    for n, (m, (row, col)) in enumerate(zip(re.finditer(r"<w:tbl>", xml), titles), 1):
+        if not (row or col):
+            continue
+        cell = xml.find("<w:tc>", m.end())
+        para = xml.find("<w:p>", cell) if cell >= 0 else -1
+        if para < 0:
+            continue
+        at = para + len("<w:p>")
+        props = re.match(r"\s*<w:pPr>.*?</w:pPr>", xml[at:at + 4000], re.S)
+        if props:
+            at += props.end()
+        name = ("Title" if row and col else "ColumnTitle" if row else "RowTitle") + "_%d" % n
+        inserts.append((at, '<w:bookmarkStart w:id="%d" w:name="%s" />'
+                            '<w:bookmarkEnd w:id="%d" />' % (JAWS_ID + n, name, JAWS_ID + n)))
+    for at, mark in reversed(inserts):
+        xml = xml[:at] + mark + xml[at:]
+    return xml, len(inserts)
+
+
 def finish(path, doc):
     """Rewrite the .docx at path with what the page's AST says; returns a
     dict of counts: tooltips, decorative, first_columns, and compat (1
@@ -349,7 +406,7 @@ def finish(path, doc):
             doc = json.load(fh)
     body, notes = gather(doc)
     counts = {"compat": 0, "tooltips": 0, "decorative": 0, "first_columns": 0,
-              "quotes": 0}
+              "quotes": 0, "jaws_titles": 0}
     with zipfile.ZipFile(path) as z:
         names = z.namelist()
         parts = {n: z.read(n) for n in names}
@@ -373,6 +430,8 @@ def finish(path, doc):
         counts["first_columns"] += n
         xml, n = indent_quotes(xml)
         counts["quotes"] += n
+        xml, n = jaws_titles(xml, facts["titles"])
+        counts["jaws_titles"] += n
         parts[part] = xml.encode("utf-8")
     handle, temporary = tempfile.mkstemp(suffix=".docx",
                                          dir=os.path.dirname(os.path.abspath(path)))

@@ -413,6 +413,157 @@ def join_continuations(xml, blank):
     return NUM_PR.sub(one, xml), count
 
 
+def join_definition_terms(doc):
+    """Runs of lone terms made a description list again. A term with no
+    definition (a review question, say) is written in Word as a
+    Definition Term paragraph with nothing after it, and Pandoc's reader
+    builds a description list only from a term followed by a definition,
+    so each comes back as a Div of class Definition-Term. Each becomes a
+    term with one empty definition, as it was. Returns how many terms."""
+    count = 0
+
+    def lone_term(block):
+        if block.get("t") != "Div":
+            return None
+        attr, blocks = block["c"]
+        if attr[1] != ["Definition-Term"] or len(blocks) != 1 \
+                or blocks[0].get("t") not in ("Para", "Plain"):
+            return None
+        return blocks[0]["c"]
+
+    def fix(blocks):
+        # A joined run next to a description list the reader built is one
+        # list with it, as the source's was; two the reader built are
+        # left as they are.
+        nonlocal count
+        out, run, made = [], [], set()
+
+        def add(block, joined):
+            prev = out[-1] if out else None
+            if prev is not None and prev.get("t") == "DefinitionList" \
+                    and block.get("t") == "DefinitionList" \
+                    and (joined or id(prev) in made):
+                prev["c"].extend(block["c"])
+                made.add(id(prev))
+                return
+            out.append(block)
+            if joined:
+                made.add(id(block))
+        for block in blocks + [None]:
+            term = lone_term(block) if block is not None else None
+            if term is not None:
+                run.append(term)
+                continue
+            if run:
+                add({"t": "DefinitionList", "c": [[t, [[]]] for t in run]}, True)
+                count += len(run)
+                run = []
+            if block is not None:
+                add(block, False)
+        return out
+
+    def walk(node):
+        if isinstance(node, dict):
+            for key, value in node.items():
+                if isinstance(value, list) and value and all(
+                        isinstance(b, dict) and "t" in b for b in value):
+                    node[key] = fix(value)
+                walk(node[key])
+        elif isinstance(node, list):
+            for i, value in enumerate(node):
+                if isinstance(value, list) and value and all(
+                        isinstance(b, dict) and "t" in b for b in value):
+                    node[i] = fix(value)
+                walk(node[i])
+    doc["blocks"] = fix(doc.get("blocks", []))
+    walk(doc["blocks"])
+    return count
+
+
+def join_nested_quotes(doc):
+    """Adjacent quotes inside a quote joined, at every depth. Pandoc's
+    reader wraps each quote paragraph in a quote of its own, and one more
+    for each level of indent beyond its style, then joins adjacent quotes
+    only where they sit: an outer quote's paragraphs come back as one
+    quote, and the paragraphs of a quote inside it as a quote each.
+    Returns how many were joined."""
+    joined = 0
+
+    def separator(block):
+        # What a Word target writes between two quotes in a row to keep
+        # them apart: a paragraph holding only a bookmark, which the
+        # reader reads as an empty paragraph or an empty anchor.
+        if block.get("t") != "Para":
+            return False
+        return all(el.get("t") == "Span" and el["c"][0][0].startswith("tiq-quote-sep-")
+                   and not el["c"][1] for el in block["c"])
+
+    def fix(blocks, inside):
+        nonlocal joined
+        out = []
+        for block in blocks:
+            if block.get("t") == "BlockQuote":
+                block["c"] = fix(block["c"], True)
+                if inside and out and out[-1].get("t") == "BlockQuote":
+                    out[-1]["c"] = fix(out[-1]["c"] + block["c"], True)
+                    joined += 1
+                    continue
+            elif isinstance(block.get("c"), list):
+                walk(block["c"])
+            out.append(block)
+        # The separators, once they've kept their quotes apart.
+        return [b for i, b in enumerate(out)
+                if not (separator(b) and 0 < i < len(out) - 1
+                        and out[i - 1].get("t") == "BlockQuote"
+                        and out[i + 1].get("t") == "BlockQuote")]
+
+    def walk(node):
+        if isinstance(node, list):
+            if node and all(isinstance(b, dict) and "t" in b for b in node):
+                node[:] = fix(node, False)
+            else:
+                for item in node:
+                    walk(item)
+        elif isinstance(node, dict) and isinstance(node.get("c"), list):
+            walk(node["c"])
+    doc["blocks"] = fix(doc.get("blocks", []), False)
+    return joined
+
+
+def apply_definition_terms(json_path):
+    """join_definition_terms and join_nested_quotes on a page's JSON
+    file. Returns how many terms and quotes were joined."""
+    import json
+    with open(json_path, encoding="utf-8") as fh:
+        doc = json.load(fh)
+    count = join_definition_terms(doc) + join_nested_quotes(doc)
+    if count:
+        with open(json_path, "w", encoding="utf-8") as fh:
+            json.dump(doc, fh, ensure_ascii=False)
+    return count
+
+
+JAWS_TITLE = re.compile(r'<w:bookmarkStart\b[^>]*\bw:id="(\d+)"[^>]*\bw:name="((?:Column|Row)?Title[^"]*)"[^>]*/>', re.I)
+
+
+def drop_jaws_titles(xml):
+    """The bookmarks JAWS reads as a table's headers, once the header
+    pre-pass has read them from the original, out of the copy Pandoc
+    reads, where each would be a stray anchor; one a link names stays."""
+    linked = set(ANCHOR_LINK.findall(xml))
+    ids = []
+
+    def one(m):
+        if m.group(2) in linked:
+            return m.group(0)
+        ids.append(m.group(1))
+        return ""
+    xml = JAWS_TITLE.sub(one, xml)
+    for ident in ids:
+        xml = re.sub(r'<w:bookmarkEnd\b[^>]*\bw:id="%s"[^>]*/>' % ident, "", xml)
+    return xml
+
+
 def repaired_copy(source, destination):
     """Write a copy of the .docx with the repairs applied to
     word/document.xml and word/footnotes.xml and every other part byte
@@ -428,7 +579,7 @@ def repaired_copy(source, destination):
             data = zin.read(info.filename)
             if info.filename == "word/document.xml":
                 text, moved = move_bookmarks_into_paragraphs(
-                    data.decode("utf-8"))
+                    drop_jaws_titles(data.decode("utf-8")))
                 text, _ = keep_unlinked_bookmarks(text)
                 text, _ = join_continuations(text, blank)
                 data = text.encode("utf-8")

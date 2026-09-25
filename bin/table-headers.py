@@ -278,6 +278,11 @@ def tables_in(path):
     for index, (tbl, depth) in enumerate(tc.all_tables(body)):
         kind, ev, nrows, ncols = tc.classify(tbl)
         value, reason, inferred = tc.guess_table(tbl, kind, ev)
+        # The bookmarks JAWS reads as a table's headers are the author's
+        # declaration, as <th> cells are a page's.
+        jaws, mark = tc.jaws_declaration(tbl)
+        if jaws:
+            value, reason = jaws, f"the table's {mark} bookmark declares its headers for JAWS"
         if value is None:
             continue
         grid = tc.build_grid(tbl)
@@ -298,6 +303,7 @@ def tables_in(path):
             "anchors": tc.anchors_before(body, tbl) if depth == 0 else [],
             "needs-source": value == "none" and no_header_text(grid),
             "summary-row": "trailing row with no label" in reason,
+            "from-source": bool(jaws),
         })
     return found
 
@@ -422,9 +428,9 @@ def main():
         if row is not None:
             claimed.add(info["key"])
         declared, supplier, status, note = decide(info, row)
+        if info.get("from-source") and supplier == "guess":
+            supplier = "source"
         if info.get("json"):
-            if info.get("from-source") and supplier == "guess":
-                supplier = "source"
             info["in-effect"] = in_effect(info, row)
             info["caption-rows-in-effect"] = caption_rows_in_effect(info, row)
             info["split-at-in-effect"], info["part-captions-in-effect"] = \

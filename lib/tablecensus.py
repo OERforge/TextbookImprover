@@ -65,6 +65,35 @@ def top_level_tables(body):
             yield child
 
 
+JAWS_TITLES = (("columntitle", "first-row"), ("rowtitle", "first-column"),
+               ("title", "both"))
+
+
+def jaws_declaration(tbl):
+    """(value, bookmark name) when a table carries the bookmarks JAWS reads
+    as its headers, or (None, None). Freedom Scientific's convention: a
+    bookmark named Title (a header row and a header column), ColumnTitle
+    (a header row), or RowTitle (a header column) in a cell of the table,
+    with anything after it to keep the name unique (ColumnTitle_2). Only
+    the table's own cells count, not a table nested in one."""
+    found = {}
+    for row in tbl.findall(q("tr")):
+        for cell in row.findall(q("tc")):
+            for paragraph in cell.findall(q("p")):
+                for mark in paragraph.iter(q("bookmarkStart")):
+                    name = mark.get(q("name")) or ""
+                    for prefix, value in JAWS_TITLES:
+                        if name.lower().startswith(prefix):
+                            found[value] = name
+                            break
+    if "both" in found or ("first-row" in found and "first-column" in found):
+        return "both", found.get("both") or found["first-row"]
+    for value in ("first-row", "first-column"):
+        if value in found:
+            return value, found[value]
+    return None, None
+
+
 def anchors_before(body, tbl):
     """Bookmark names standing between the previous block and this table.
 

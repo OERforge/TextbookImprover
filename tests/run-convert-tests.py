@@ -1916,13 +1916,22 @@ def case_docx_target(work):
                  "![Chart of the data](assets/chart.png){#fig-chart}\n\nAs [the chart](#fig-chart) shows.\n\n"
                  "- one\n- two, first paragraph\n\n  two, second paragraph\n- three\n\nThen code:\n\n"
                  "- alpha\n- beta\n\n  ```\n  code in beta\n  ```\n- gamma\n\n"
-                 "> Outer quote.\n>\n> ```\n> quoted code\n> ```\n>\n> > Inner quote.\n\nAfter the quotes.\n\n"
+                 "> Outer quote.\n>\n> ```\n> quoted code\n> ```\n>\n> > Inner quote.\n> >\n> > Inner, second paragraph.\n\n> A second quote, right after.\n\nAfter the quotes.\n\n"
+                 "What is a set?\n:   \n\nWhy is order irrelevant?\n:   \n\n"
                  '[^1]: The [source](https://example.org/source "Where the data came from") explains it.\n')
     with open(os.path.join(work, "two.html"), "w", encoding="utf-8") as fh:
         fh.write('<!DOCTYPE html><html lang="en"><head><title>Two</title></head><body><h1>Two</h1>'
                  "<table><caption>Costs by year</caption><thead><tr><th>Item</th><th>2024</th>"
                  "<th>2025</th></tr></thead><tbody><tr><th>Labor</th><td>10</td><td>12</td></tr>"
                  "<tr><th>Parts</th><td>4</td><td>5</td></tr></tbody></table></body></html>")
+    with open(os.path.join(work, "three.html"), "w", encoding="utf-8") as fh:
+        fh.write('<!DOCTYPE html><html lang="en"><head><title>Three</title></head><body><h1>Three</h1>'
+                 "<table><caption>Addresses used</caption><thead><tr><th>Name</th><th>IP address</th></tr></thead>"
+                 "<tbody><tr><td>server</td><td>172.20.0.5</td></tr><tr><td>victim</td><td>172.20.0.6</td></tr>"
+                 "<tr><td>attacker</td><td>172.20.0.7</td></tr></tbody></table>"
+                 "<table><caption>Two groups</caption><tbody><tr><th colspan=\"2\">Group A</th></tr>"
+                 "<tr><td>1</td><td>2</td></tr></tbody><tbody><tr><th colspan=\"2\">Group B</th></tr>"
+                 "<tr><td>3</td><td>4</td></tr></tbody></table></body></html>")
     with open(os.path.join(work, "image-alt.csv"), "w", encoding="utf-8") as fh:
         fh.write("Image,Alt\nassets/rule.png,[decorative]\n")
     with open(os.path.join(work, "conversion.yaml"), "w") as fh:
@@ -1941,7 +1950,7 @@ def case_docx_target(work):
     # Read the Word files back, as a book of their own.
     back = os.path.join(work, "back")
     os.makedirs(back)
-    for name in ("one.docx", "two.docx"):
+    for name in ("one.docx", "two.docx", "three.docx"):
         if os.path.exists(os.path.join(work, "word", name)):
             shutil.copy(os.path.join(work, "word", name), back)
     with open(os.path.join(back, "conversion.yaml"), "w") as fh:
@@ -1950,9 +1959,11 @@ def case_docx_target(work):
                    capture_output=True, text=True, stdin=subprocess.DEVNULL)
     one_back = read(back, "html", "one.html") if exists(back, "html", "one.html") else ""
     two_back = read(back, "html", "two.html") if exists(back, "html", "two.html") else ""
+    three = part("three.docx", "word/document.xml")
+    three_back = read(back, "html", "three.html") if exists(back, "html", "three.html") else ""
     return [
         ("a docx target writes a Word file per page, in compatibility mode 15",
-         lambda: "2 Word file(s)" in run.stderr and all(
+         lambda: "3 Word file(s)" in run.stderr and all(
              'w:name="compatibilityMode"' in part(n, "word/settings.xml")
              and 'w:val="15"' in part(n, "word/settings.xml") for n in ("one.docx", "two.docx"))),
         ("a link's title is its ScreenTip, in the body and in a footnote",
@@ -1978,9 +1989,23 @@ def case_docx_target(work):
          and len(re.findall(r"<ul\b", one_back)) == 2),
         ("a quote keeps its code and the quote nested in it, and no marker is left",
          lambda: re.search(r"<blockquote>\s*<p>Outer quote\.</p>\s*<pre[^>]*>(?:(?!</blockquote>).)*"
-                           r"quoted code(?:(?!</blockquote>).)*<blockquote>\s*<p>Inner quote\.</p>",
+                           r"quoted code(?:(?!</blockquote>).)*<blockquote>\s*<p>Inner quote\.</p>\s*"
+                           r"<p>Inner, second paragraph\.</p>\s*</blockquote>",
                            one_back, re.S)
-         and "tiq-quote" not in one and "tiq-quote" not in one_back),
+         and "tiq-quote-1" not in one and "tiq-quote" not in one_back),
+        ("two quotes in a row come back as two",
+         lambda: re.search(r"<p>Inner, second paragraph\.</p>\s*</blockquote>\s*</blockquote>\s*"
+                           r"<blockquote>\s*<p>A second quote, right after\.</p>\s*</blockquote>", one_back)),
+        ("terms with no definition, like review questions, read back as one description list",
+         lambda: re.search(r"<dl>\s*<dt>What is a set\?</dt>(?:(?!</dl>).)*<dt>Why is order irrelevant\?</dt>",
+                           one_back, re.S)),
+        ("each table carries the bookmark JAWS reads as its headers, and a banded table with no header row none",
+         lambda: 'w:name="Title_1"' in two and 'w:name="ColumnTitle_1"' in three
+         and not re.search(r'w:name="(?:Column|Row)?Title_2"', three)),
+        ("read back, a table declared with a header row only has no header column, "
+         "and the bookmark leaves no anchor", lambda: three_back.count('<th scope="col"') == 2
+         and 'scope="row"' not in three_back and "ColumnTitle" not in three_back
+         and "Title_1" not in two_back),
         ("and the table has its header row and header column",
          lambda: '<th scope="col">' in two_back and '<th scope="row">Labor</th>' in two_back),
     ]

@@ -155,7 +155,9 @@ def _words(text):
 def screentips(path):
     """[(target, text, tip)]: each hyperlink with a ScreenTip, in document
     order, then those in footnotes and endnotes. Pandoc 3.11's reader drops
-    w:tooltip (#11869; pandoc pull request #11890 would read it). target is
+    w:tooltip (#11869), which Pandoc's main reads since #11890 (c51b6a6,
+    2026-09-25); with a release that includes it, this changes nothing,
+    since a link Pandoc gave a title keeps it. target is
     what the reader makes the link's target: the relationship's target, with
     #anchor after it when there is one, or #anchor alone."""
     import xml.etree.ElementTree as ET

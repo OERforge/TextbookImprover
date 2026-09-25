@@ -128,6 +128,7 @@ The distinction between the two matters more than either case. A table whose rea
 
 ## Smaller things
 
+- **Retire the ScreenTip recovery.** Pandoc reads and writes ScreenTips from its first release after 3.11 ([pandoc#11890](https://github.com/jgm/pandoc/pull/11890), merged 2026-09-25). Once the pipeline requires that release, `docxrepair.apply_screentips` has nothing left to do and can go.
 - **Addresses written as plain text**, not linked: a screen reader reads them as text, and WCAG's link criteria don't apply, but a shortDOI would shorten them too. Finding one in running text is the hard part.
 - **Old DOI formats** (`doi:10.1037/...`, `DOI: 10.1037/...`) in reference lists, which APA 7 and Chicago 18 both write as `https://doi.org/10.1037/...`. A one-time utility that finds and rewrites them in a source seems a better fit than the pipeline.
 - **Other addresses shortened by a URL shortener**, as APA allows, for a book whose author wants it: a second mode of `util/shortdoi.py`.

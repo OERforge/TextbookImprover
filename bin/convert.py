@@ -1375,6 +1375,7 @@ def filter_env(target, base, paths, env):
         "TABLE_BANDS": str(target["tables.bands"]),
         "TABLE_CAPTIONS": paths["table_captions"],
         "IMAGE_ALT": paths["image_alt"],
+        "BARE_LINKS": paths["bare_links"],
         "TABLE_HEADERS": paths["table_headers"],
     })
     return out
@@ -2267,6 +2268,50 @@ def write_report(rows_file, report, header, noun, sidecar=None, hint=None):
     return rows
 
 
+def write_bare_links(rows_file, report, sidecar):
+    """The bare links no sidecar row decides, one row per address with the
+    pages it's on and the text before its first use; or no report when
+    there are none. And a word about sidecar rows that match no bare link
+    in the book, which are most likely a mistyped address."""
+    import csv
+    found = []
+    if os.path.exists(rows_file):
+        with open(rows_file, encoding="utf-8", newline="") as fh:
+            found = [row for row in csv.reader(fh) if len(row) >= 5]
+    new, seen = {}, set()
+    for status, url, title, source, context in (r[:5] for r in found):
+        seen.add(url)
+        if status != "new":
+            continue
+        entry = new.setdefault(url, {"title": title, "sources": [],
+                                     "context": context})
+        if source not in entry["sources"]:
+            entry["sources"].append(source)
+    if new:
+        with open(report, "w", encoding="utf-8", newline="") as fh:
+            w = csv.writer(fh, lineterminator="\n")
+            w.writerow(["URL", "Replacement", "Title", "Source", "Context"])
+            for url in sorted(new):
+                e = new[url]
+                w.writerow([url, "", e["title"], "; ".join(e["sources"]),
+                            e["context"]])
+        say(f"Wrote {report} ({len(new)} bare link(s) with no row in "
+            f"{os.path.basename(sidecar)}).")
+        say(f"Copy the rows into {sidecar}; fill in a Replacement, a Title, "
+            "or neither to keep a link as it is.")
+    elif os.path.exists(report):
+        os.remove(report)
+    if sidecar and os.path.exists(sidecar):
+        with open(sidecar, encoding="utf-8", newline="") as fh:
+            rows = [r for r in csv.reader(fh) if r and r[0].strip()
+                    and r[0].strip().lower() != "url"]
+        stale = [r[0].strip() for r in rows if r[0].strip() not in seen]
+        if stale:
+            say(f"{len(stale)} row(s) in {os.path.basename(sidecar)} match no "
+                "bare link in the book: "
+                + ", ".join(stale[:3]) + (" ..." if len(stale) > 3 else ""))
+
+
 # --------------------------------------------------------------------------
 
 def main():
@@ -2320,14 +2365,16 @@ def main():
 
     paths = {key: resolve_path(base, first[f"sidecars.{key}"])
              for key in ("table_captions", "image_alt", "table_headers",
-                         "page_names")}
+                         "page_names", "bare_links")}
     for key, default in (("table_captions", "table-captions.csv"),
                          ("image_alt", "image-alt.csv"),
+                         ("bare_links", "bare-links.csv"),
                          ("table_headers", "table-headers.csv"),
                          ("page_names", "page-names.csv")):
         check_sidecar(paths[key], f"sidecars.{key}", default, base)
     reports = {key: resolve_path(base, first[f"reports.{key}"])
                for key in ("table_captions_missing", "image_alt_missing",
+                           "bare_links_new",
                            "table_headers_new", "table_headers_report",
                            "page_names_new", "page_names_report",
                            "media_unresolved", "spacer_images",
@@ -2337,7 +2384,7 @@ def main():
     try:
         collected = {key: os.path.join(work, key) for key in
                      ("captions_missing", "alt_missing", "spacers",
-                      "media_unresolved")}
+                      "media_unresolved", "bare_links")}
         env = dict(os.environ)
         env.update({
             # For html-source.lua: a page's <title> that repeats the
@@ -2345,6 +2392,7 @@ def main():
             "BOOK_TITLE": str(project.get("title") or ""),
             "TABLE_CAPTIONS_MISSING": collected["captions_missing"],
             "IMAGE_ALT_MISSING": collected["alt_missing"],
+            "BARE_LINKS_FOUND": collected["bare_links"],
             "SPACER_LOG": collected["spacers"],
             "MEDIA_UNRESOLVED": collected["media_unresolved"],
             "MEDIA_STRICT": "1" if first["media.strict"] else "",
@@ -2511,6 +2559,8 @@ def main():
             "image(s) needing alt text", paths["image_alt"],
             "Use [decorative] in the Alt column for images that carry no "
             "meaning.")
+        write_bare_links(collected["bare_links"], reports["bare_links_new"],
+                         paths["bare_links"])
         write_report(collected["spacers"], reports["spacer_images"],
                      "Image,Source,Width,Action", "spacer image(s) handled")
         labels = {row.split(",")[0] for row in missing}

@@ -164,6 +164,10 @@ Descriptive captions, keyed on the table's label. A bare label is a valid captio
 
 Alt text, keyed on the image path with the extension ignored. Use [decorative] for an image that carries no meaning.
 
+**`sidecars.bare_links`**—`path`; default `bare-links.csv`
+
+What to do with each bare link, one whose text is its own address, keyed on the address: a Replacement that is a URL (http, https, or ftp) replaces the address and the text; any other Replacement replaces only the text; a blank one keeps the link bare. A Title sets the link's title (a tooltip in HTML); a blank one keeps the source's. See docs/bare-links.md.
+
 **`sidecars.table_headers`**—`path`; default `table-headers.csv`
 
 Where each table's headers are, keyed on a hash of the table's content: first-row, first-column, both, or none. A first run writes prefilled rows to the table_headers_new report; rename or paste them here. Values this version doesn't act on yet (manual, list) are accepted and kept. A row whose key matches no table stops the run, because a correction that silently fails to apply destroys work invisibly.
@@ -183,6 +187,10 @@ Tables whose caption is a bare label with no description.
 **`reports.image_alt_missing`**—`path`; default `image-alt-missing.csv`
 
 Images with no alt text, or with alt text over the length limit.
+
+**`reports.bare_links_new`**—`path`; default `bare-links-new.csv`
+
+Bare links with no row in the bare-links sidecar, one row per address, with the pages it's on and the text before it; paste the rows into the sidecar.
 
 **`reports.table_headers_new`**—`path`; default `table-headers-new.csv`
 

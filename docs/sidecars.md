@@ -2,6 +2,10 @@
 
 A run writes reports naming what still needs a person, and reads sidecar files holding what a person decided. Reports are regenerated every run and live beside the book; sidecars are read, never written, and hold the only thing in the pipeline no script can reproduce.
 
+## Bare links
+
+`bare-links.csv` decides each link whose text is its own address: a URL Replacement (a shortDOI, say) replaces the address and the text, other text replaces only the text, and a Title sets the link's title. `bare-links-new.csv` reports the undecided ones, one row per address with the citation before it. [Bare links](bare-links.md) has the detail, the shortDOI helper, and why a description can't do what it seems it should.
+
 ## Reports
 
 Each run writes only the reports that have something in them, and deletes

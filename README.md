@@ -65,6 +65,7 @@ Each target writes into a directory of its own; the content directory keeps the 
 | [Conversion settings](docs/conversion-settings.md) | Reference, generated from the schema |
 | [Packaging settings](docs/packaging-settings.md) | Reference, generated from the schema |
 | [Sidecars and reports](docs/sidecars.md) | Each report, each sidecar, and what goes in them |
+| [Bare links](docs/bare-links.md) | Links whose text is their own address: the sidecar that replaces them with a shortDOI or text or gives them a title, the shortDOI helper, and why a screen-reader description can't do what it seems it should |
 | [Building the cartridge](docs/packaging.md) | The packager, ordering from a PDF, validating the manifest |
 | [Building an EPUB](docs/epub.md) | One EPUB per book from the same pages and the same contents, and what it claims about itself |
 | [Checking the output](docs/checking.md) | What every run checks about the pages and EPUBs it wrote, and what it doesn't |

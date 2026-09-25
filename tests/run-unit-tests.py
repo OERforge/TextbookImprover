@@ -42,6 +42,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 import importlib.util
 import subprocess
 import os
+import csv
+import json
 import re
 import tempfile
 import sys
@@ -476,6 +478,83 @@ def check_unique_ids():
     ]
 
 
+def check_shortdoi():
+    """util/shortdoi.py against a local stand-in for the shortDOI service:
+    the DOIs without a Replacement get https://doi.org/ and the shortDOI,
+    and nothing else in the sidecar changes."""
+    import http.server
+    import threading
+    import tempfile
+    seen = []
+    busy = {"once": True}
+
+    class Service(http.server.BaseHTTPRequestHandler):
+        def log_message(self, *args):
+            pass
+
+        def do_GET(self):
+            seen.append((self.path, self.headers.get("User-Agent", "")))
+            path = self.path.split("?")[0]
+            if path == "/10.1080/08913810508443640":
+                body = {"DOI": "10.1080/08913810508443640", "ShortDOI": "10/b8xx35",
+                        "IsNew": False}
+            elif path == "/10.1002/(SICI)1097:15%3C1661%3E":
+                if busy["once"]:
+                    busy["once"] = False
+                    self.send_response(429)
+                    self.send_header("Retry-After", "0")
+                    self.end_headers()
+                    return
+                body = {"DOI": "x", "ShortDOI": "10/zz99", "IsNew": True}
+            else:
+                self.send_response(404)
+                self.end_headers()
+                return
+            data = json.dumps(body).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(data)
+    server = http.server.HTTPServer(("127.0.0.1", 0), Service)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    work = tempfile.mkdtemp(prefix="shortdoi-")
+    sidecar = os.path.join(work, "bare-links.csv")
+    with open(sidecar, "w", encoding="utf-8", newline="") as fh:
+        fh.write("URL,Replacement,Title\n"
+                 "https://doi.org/10.1080/08913810508443640,,DOI for Klein and Stern 2005\n"
+                 "http://dx.doi.org/10.1002/(SICI)1097:15%3C1661%3E,,\n"
+                 "https://doi.org/10.5555/decided,Kept as the author wrote it,\n"
+                 "https://example.org/not-a-doi,,\n")
+    tool = os.path.join(ROOT, "util", "shortdoi.py")
+    service = "http://127.0.0.1:%d" % server.server_address[1]
+    dry = subprocess.run([sys.executable, tool, sidecar, "--dry-run", "--service", service],
+                         capture_output=True, text=True)
+    asked_dry = len(seen)
+    real = subprocess.run([sys.executable, tool, sidecar, "--wait", "0", "--service", service],
+                          capture_output=True, text=True)
+    server.shutdown()
+    with open(sidecar, encoding="utf-8") as fh:
+        rows = list(csv.reader(fh))
+    return [
+        ("--dry-run names the two DOIs and asks nothing",
+         lambda: asked_dry == 0 and dry.stdout.count("would look up") == 2),
+        ("each DOI without a Replacement gets https://doi.org/ and its shortDOI",
+         lambda: rows[1][1] == "https://doi.org/10/b8xx35"
+         and rows[2][1] == "https://doi.org/10/zz99"),
+        ("a Replacement already there, and an address that isn't a DOI, are left alone",
+         lambda: rows[3][1] == "Kept as the author wrote it" and rows[4][1] == ""
+         and rows[1][2] == "DOI for Klein and Stern 2005"),
+        ("a 429 is waited out and asked again; a created shortDOI is counted",
+         lambda: real.returncode == 0 and "1 of them created" in real.stdout),
+        ("the DOI is sent encoded once, its parentheses and colons as they are, "
+         "with the tool's User-Agent", lambda: any(
+             p.startswith("/10.1002/(SICI)1097:15%3C1661%3E?format=json")
+             and "TextbookImprover" in agent for p, agent in seen)),
+        ("the sidecar as it was is kept beside it",
+         lambda: os.path.exists(sidecar + ".bak")),
+    ]
+
+
 GROUPS = [
     ("layout tables", check_layout_tables),
     ("unique ids", check_unique_ids),
@@ -489,6 +568,7 @@ GROUPS = [
     ("identifiers", check_identifiers),
     ("facts written down twice", check_consistency),
     ("sidecar paths", check_sidecar_paths),
+    ("shortDOIs for a bare-links sidecar", check_shortdoi),
 ]
 
 

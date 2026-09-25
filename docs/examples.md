@@ -42,6 +42,7 @@ table-headers: 319 table(s) have no sidecar row; prefilled rows are in table-hea
 1604 publisher link(s) now point at pages of this book.
 Wrote table-captions-missing.csv (262 table(s) needing a description).
 Wrote image-alt-missing.csv (208 image(s) needing alt text).
+Wrote bare-links-new.csv (169 bare link(s) with no row in bare-links.csv).
 Output check: 169 page(s), 64 finding(s):
      64  link-to-missing-fragment: a link's #fragment matches no id
 ```
@@ -186,6 +187,15 @@ Image,Alt
 Label,Description
 Table 1.1,"Speeds at which cars crashed, by the location of the driver."
 ```
+
+**Bare links.** `bare-links-new.csv` lists the 169 addresses the book shows as link text, 165 of them on the chapters' reference pages, each with the citation before it. A screen reader reads each one aloud. They conform as they are, since the citation gives each link its context, so decide what's worth changing: a Title gives the link a tooltip, and text in the Replacement column replaces the address shown, as [Bare links](bare-links.md) explains:
+
+```
+URL,Replacement,Title
+http://blog.flurry.com,The Flurry Blog,
+```
+
+None of this book's addresses is a DOI, so the shortDOI helper has nothing to do here; for a book whose references cite DOIs, it's the quickest way to shorten them.
 
 **The output check.** `output-check.csv` has the 64 links whose `#fragment` names nothing, all from a chapter's solutions page into its practice or homework page. They point at ids OpenStax's export leaves out of its own files, and the `Fix` column says `source` for each: they can be fixed only in the Word files, or by OpenStax.
 

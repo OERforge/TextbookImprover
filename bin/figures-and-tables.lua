@@ -689,6 +689,92 @@ end
 -- missing on every subsequent run.
 local HEADER_KEYS = { label = true, table = true, image = true, file = true }
 
+-- ---------------------------------------------------------------------------
+-- Bare links: a link whose text is its own address
+-- ---------------------------------------------------------------------------
+-- The sidecar decides each one, keyed on its address: a Replacement that
+-- is a URL replaces the address and the text (a shortDOI for a long DOI,
+-- say); any other text replaces only the text; a blank keeps it bare. A
+-- Title sets the link's title; a blank one keeps the source's. Every bare
+-- link is recorded, decided or not, for the report and for the sidecar
+-- rows that match none.
+
+local BARE_FILE = os.getenv('BARE_LINKS') or 'bare-links.csv'
+local BARE_FOUND_FILE = os.getenv('BARE_LINKS_FOUND')
+local BARE_SCHEMES = { http = true, https = true, ftp = true }
+local bare_rows = nil
+
+local function bare_trim(s) return (s:gsub('^%s+', ''):gsub('%s+$', '')) end
+
+local function load_bare_links()
+  if bare_rows then return bare_rows end
+  bare_rows = {}
+  local fh = io.open(BARE_FILE, 'r')
+  if not fh then return bare_rows end
+  for _, row in ipairs(parse_csv(fh:read('a'))) do
+    local url = bare_trim(row[1] or '')
+    if url ~= '' and url:lower() ~= 'url' then
+      bare_rows[url] = { replacement = bare_trim(row[2] or ''),
+                         title = bare_trim(row[3] or '') }
+    end
+  end
+  fh:close()
+  return bare_rows
+end
+
+-- An address as its text shows it: decoded, without its scheme or a
+-- trailing slash, in one case. Word's text for a link is often the
+-- address without https://, and a page's the address with it.
+local function address_form(s)
+  s = bare_trim(s):gsub('%%(%x%x)', function(h) return string.char(tonumber(h, 16)) end)
+  s = s:gsub('^%a[%w+.-]*://', ''):gsub('/+$', '')
+  return s:lower()
+end
+
+local function web_scheme(url)
+  local scheme = url:match('^(%a[%w+.-]*)://')
+  return scheme ~= nil and BARE_SCHEMES[scheme:lower()] == true
+end
+
+local function tail_chars(s, n)
+  local count = utf8.len(s)
+  if not count or count <= n then return s end
+  return s:sub(utf8.offset(s, count - n + 1))
+end
+
+local function bare_links(inlines)
+  local changed = false
+  for i, el in ipairs(inlines) do
+    if el.t == 'Link' and web_scheme(el.target) then
+      local text = bare_trim(pandoc.utils.stringify(el.content))
+      if text ~= '' and address_form(text) == address_form(el.target) then
+        local rows = load_bare_links()
+        local row = rows[el.target] or rows[text]
+        local before = {}
+        for j = 1, i - 1 do before[#before + 1] = inlines[j] end
+        local context = tail_chars(bare_trim(pandoc.utils.stringify(
+          pandoc.Inlines(before))), 160)
+        append_row(BARE_FOUND_FILE, { row and 'decided' or 'new', el.target,
+                                      el.title or '', source_stem(), context })
+        if row then
+          if row.title ~= '' then el.title = row.title end
+          local rep = row.replacement
+          if rep ~= '' then
+            if web_scheme(rep) then
+              el.target = rep
+              el.content = pandoc.Inlines({ pandoc.Str(rep) })
+            else
+              el.content = text_to_inlines(rep)
+            end
+          end
+          changed = true
+        end
+      end
+    end
+  end
+  return changed and inlines or nil
+end
+
 local function load_sidecar(path)
   local map = {}
   local fh = path and io.open(path, 'r')
@@ -2090,6 +2176,7 @@ local function should_promote_h1(doc, index)
 end
 
 function Pandoc(doc)
+  doc = doc:walk({ Inlines = bare_links })
   if SPACER_LIMIT == 0 and spacers_seen > 0 then
     warn(('%d image(s) narrower than %gin look like spacers; set '
       .. 'images.spacer_below in the config to strip or hide them')

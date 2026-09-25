@@ -1821,6 +1821,80 @@ def case_html_table_repairs(work):
     ]
 
 
+BARE_MD = """# References
+
+Klein and Stern. 2005. "Professors and Their Politics." [https://doi.org/10.1080/08913810508443640](https://doi.org/10.1080/08913810508443640).
+
+Data and Story Library. [dasl.datadescription.com/datafile/cars](https://dasl.datadescription.com/datafile/cars).
+
+An archive at [ftp://ftp.example.org/pub/data.csv](ftp://ftp.example.org/pub/data.csv) and a titled one [https://example.org/titled](https://example.org/titled "The source's own title").
+
+A [named link](https://example.org/named), and the DOI again: [https://doi.org/10.1080/08913810508443640](https://doi.org/10.1080/08913810508443640).
+"""
+
+
+def case_bare_links(work):
+    """Bare links are reported once per address, and the sidecar replaces
+    an address and its text, or the text alone, or sets a title, or keeps
+    the link and the source's title."""
+    import csv as csvmod
+    os.makedirs(work)
+    with open(os.path.join(work, "refs.md"), "w", encoding="utf-8") as fh:
+        fh.write(BARE_MD)
+    with open(os.path.join(work, "conversion.yaml"), "w") as fh:
+        fh.write("targets:\n  html:\n    format: html\n")
+
+    def run():
+        return subprocess.run(["python3", os.path.join(BIN, "convert.py")], cwd=work,
+                              capture_output=True, text=True, stdin=subprocess.DEVNULL)
+    first = run()
+    report = []
+    if exists(work, "bare-links-new.csv"):
+        with open(os.path.join(work, "bare-links-new.csv"), encoding="utf-8") as fh:
+            report = list(csvmod.DictReader(fh))
+    by_url = {r["URL"]: r for r in report}
+    with open(os.path.join(work, "bare-links.csv"), "w", encoding="utf-8") as fh:
+        fh.write("URL,Replacement,Title\n"
+                 "https://doi.org/10.1080/08913810508443640,https://doi.org/10/b8xx35,DOI for Klein and Stern 2005\n"
+                 "https://dasl.datadescription.com/datafile/cars,The Data and Story Library's cars data,\n"
+                 "ftp://ftp.example.org/pub/data.csv,,Car data as CSV\n"
+                 "https://example.org/titled,,\n"
+                 "https://example.org/not-in-the-book,,\n")
+    second = run()
+    page = read(work, "html", "refs.html") if exists(work, "html", "refs.html") else ""
+    links = [(" ".join(m.group(1).split()), " ".join(m.group(2).split()))
+             for m in re.finditer(r"<a\b(.*?)>(.*?)</a>", page, re.S)]
+    return [
+        ("each bare address is reported once, text without https:// included, "
+         "and a named link isn't", lambda: sorted(by_url) == [
+            "ftp://ftp.example.org/pub/data.csv",
+            "https://dasl.datadescription.com/datafile/cars",
+            "https://doi.org/10.1080/08913810508443640",
+            "https://example.org/titled"]),
+        ("a row has the text before the link, and the link's own title",
+         lambda: "Professors and Their Politics" in by_url[
+             "https://doi.org/10.1080/08913810508443640"]["Context"]
+         and by_url["https://example.org/titled"]["Title"] == "The source's own title"),
+        ("a URL replacement replaces the address and text everywhere, with "
+         "the title", lambda: links.count(('href="https://doi.org/10/b8xx35" '
+                                           'title="DOI for Klein and Stern 2005"',
+                                           "https://doi.org/10/b8xx35")) == 2),
+        ("text replaces only the text; a title alone leaves a link bare",
+         lambda: ('href="https://dasl.datadescription.com/datafile/cars"',
+                  "The Data and Story Library's cars data") in links
+         and ('href="ftp://ftp.example.org/pub/data.csv" title="Car data as CSV"',
+              "ftp://ftp.example.org/pub/data.csv") in links),
+        ("a blank row keeps the link and the source's title; a named link is "
+         "untouched", lambda: ('href="https://example.org/titled" '
+                               'title="The source&#39;s own title"',
+                               "https://example.org/titled") in links
+         and ('href="https://example.org/named"', "named link") in links),
+        ("with every bare link decided there's no report, and a row matching "
+         "none is named", lambda: not exists(work, "bare-links-new.csv")
+         and "not-in-the-book" in second.stderr),
+    ]
+
+
 def case_html_source(work):
     """An HTML page is a source when the book says so, and converting
     what this pipeline wrote changes nothing."""
@@ -2311,6 +2385,7 @@ CASES = [
     ("a page title that is also a heading", case_title_id),
     ("link titles from every source through every target", case_link_titles),
     ("HTML table repairs", case_html_table_repairs),
+    ("bare links and their sidecar", case_bare_links),
     ("a hand-written page", case_hand_written),
     ("several targets", case_targets),
     ("arguments passed to the packager", case_passthrough),

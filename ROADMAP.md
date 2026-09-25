@@ -35,42 +35,9 @@ Three defects in the meantime are candidates for a post-processing pass with `pi
 
 **DOCX output** is the riskier one, and deserves scoping care. The writer does preserve `w:tblHeader`, so in principle `table-headers-missing.csv` could stop being a report and start being an input that produces a corrected source document. But a Pandoc round trip discards everything Pandoc doesn't model: converting a file and back turned a layout table's `FigureTable` style into plain `Table`, and that style is the cleanest signal available for identifying layout tables. Section properties, content controls, comments, field codes, and tracked changes have the same exposure. If this is built, it should annotate the OOXML directly rather than rebuild the document. It's more code, but the difference between annotating and rebuilding.
 
-## 3. Link text sidecar, for bare URLs
+## 3. Bare links (built, not yet released)
 
-**The WCAG question is settled: a link's accessible name stays its visible text, and the description is its accessible description.** An `aria-label` that replaces a bare URL with "DOI for Klein and Stern 2005" fails 2.5.3 (Label in Name), a Level A criterion and so in scope for Title II's WCAG 2.1 AA, because the name no longer contains what's on the screen. The same list with bare URLs conforms at AA already: 2.4.4 accepts the citation around the link as its context. What the description adds is 2.4.9 (AAA) and a better experience, so it has to be added in a way that keeps 2.5.3.
-
-A reference list reads like this:
-
-    Seidel, G. E. 2014. "Update on Sexed Semen Technology in Cattle." _Animal_ 8 (January):160--64. [https://doi.org/10.1017/S1751731114000202](https://doi.org/10.1017/S1751731114000202).
-
-The link's visible text is the address. A screen reader announces all 57 characters of it, and the longest in *Introductory Business Statistics 2e* runs to 135 with `%20` and `+` escapes in the middle. There are 176 of them across 17 files in that book alone, 169 of them distinct, so the URL itself works as a sidecar key at almost exactly one row per link.
-
-A person or the sidecar supplies a short description, and it becomes the link's accessible description, never its name:
-
-- **HTML and EPUB**: the link's `title`, which is Pandoc's `Link` title slot and what its writers emit as `title="..."`; or an `aria-describedby` the source already points at an element holding the description, which the filter keeps. The name stays the URL, so a screen reader always announces the URL and announces the description where its verbosity settings say to.
-- **PDF**: every external link's `/Contents` becomes its visible text, followed by `, ` and the description when there is one. That puts the visible text first, as 2.5.3's best practice asks, gives PDF/UA the real `/Contents` value it requires, and replaces `tagpdf`'s default for every link without a description, which is the literal string `url`. Acrobat announces `/Contents` in place of the link text, so as things stand every unlabeled external link in a PDF this pipeline builds would be announced as "url, link", failing 2.4.4 outright; that needs confirming in Acrobat with NVDA before it's relied on. Internal (`GoTo`) links keep `tagpdf`'s defaults, which haven't been examined.
-- **Markdown** carries it as a link title, `[https://doi.org/...](https://doi.org/... "DOI for Klein and Stern 2005")`, which is Pandoc's own syntax for the same slot, reads back as it was written, and needs no attribute extension in any flavor.
-- **Word**, once Pandoc reads ScreenTips: in [#11869](https://github.com/jgm/pandoc/issues/11869) jgm agreed (2026-09-22) to map `w:tooltip` to the `Link` title in both directions, by default, internal links included where feasible. Then an author's ScreenTip is the source's description, and a DOCX target writes descriptions back as ScreenTips. The *Introductory Business Statistics* files carry 2,324 hyperlinks and not one ScreenTip, so for OpenStax books the sidecar remains the only source.
-
-**Precedence**, as for table headers: the sidecar, then the source's own description (a title, a ScreenTip, an `aria-describedby`), then the guess.
-
-**An `aria-label` in a source that doesn't contain the link's visible text** is reported by the audit and the output check as a 2.5.3 failure, and the filter moves it into the description so the name stays what's visible. My own textbook writes descriptions that way today and will be rewritten to use titles or `aria-describedby`; the move keeps any other book that did the same from failing in the meantime.
-
-### What has to be worked out
-
-**Detection.** Pandoc marks a bare URL with `class="uri"` when it comes from Markdown autolink syntax, but not when it comes from a `.docx`, so that signal isn't free. The rule that works: the link's text, normalized, equals its href. That found all 176 without hand-tuning.
-
-**The guess.** The description is usually already sitting next to the URL, because a citation names its source before giving the address. Taking the text preceding the link within the same paragraph and trimming trailing punctuation produces a usable description for **77%** of them — *The Data and Story Library*, *Gallup-Healthways Well-Being Index*. The other 23% produce something visibly wrong, like *Data from*, which a person fixes in a few seconds. As with the table-headers sidecar, that's a starting point to correct rather than an answer.
-
-Note that 144 of the 176 are in `-references.html` files and 32 are elsewhere, so the guess can't assume a citation is present.
-
-**Descriptive visible text was considered and rejected for reference lists.** Of seven mechanisms tested against NVDA for PDF, only the annotation `/Contents` announced anything, and only in Acrobat; `/ActualText` works but replaces what a reader copies, which for a DOI is a real loss. Shortening the visible text and restoring the address for print (`@media print { a[href]::after { content: " (" attr(href) ")" } }`) works in every viewer, but it hides the URL from a sighted reader of a reference list, where the URL is the point. It stays the right answer for a bare URL in running prose, which is a separate decision.
-
-**The LaTeX side needs a preamble.** The existing filter emits `\LinkAlt{...}` and `\LinkAltReset{}` around each link, and those macros live in a `link-alt-preamble.tex` that has to come along with it. It's also a no-op without `\DocumentMetadata` tagging enabled, so the PDF half of this arrives with item 2 rather than before it. The HTML and EPUB halves have no such dependency.
-
-### Why it isn't harder than it looks
-
-It's smaller than most of what is on this list and shares all its plumbing with the table headers sidecar that shipped in v0.3: report what needs a human, read a CSV, apply it, report what is still outstanding. That machinery is built and has two users now, the second being HTML tables, so the link sidecar is the third. Nothing holds the item any longer.
+A bare link is one whose text is its own address, as in a reference list, and a screen reader reads all of it. The design changed as it was worked out: an `aria-label` naming the link fails WCAG 2.5.3 (Label in Name), and NVDA reads a `title` or `aria-describedby` only after the whole address, so no conforming description shortens what's heard. What does is a shorter address, which APA allows for DOIs. So the sidecar (`bare-links.csv`, reported as `bare-links-new.csv`) replaces an address and its text, or the text alone, or sets a title, and `util/shortdoi.py` fills in shortDOIs from the shortDOI service. A link's title, meanwhile, survives every source and target, Word's ScreenTips included. The alternatives and the NVDA results are in [Bare links](docs/bare-links.md). What's left is in Smaller things.
 
 ## 4. Slides and test banks
 
@@ -161,6 +128,9 @@ The distinction between the two matters more than either case. A table whose rea
 
 ## Smaller things
 
+- **Addresses written as plain text**, not linked: a screen reader reads them as text, and WCAG's link criteria don't apply, but a shortDOI would shorten them too. Finding one in running text is the hard part.
+- **Old DOI formats** (`doi:10.1037/...`, `DOI: 10.1037/...`) in reference lists, which APA 7 and Chicago 18 both write as `https://doi.org/10.1037/...`. A one-time utility that finds and rewrites them in a source seems a better fit than the pipeline.
+- **Other addresses shortened by a URL shortener**, as APA allows, for a book whose author wants it: a second mode of `util/shortdoi.py`.
 - **Watch [pandoc#3034](https://github.com/jgm/pandoc/issues/3034).** The DOCX and ODT readers ignore `docProps/core.xml`, so a Word file whose title is set through File → Info → Properties converts with no metadata at all: the standalone HTML `<title>` falls back to the filename and an EPUB Pandoc builds straight from it gets no `dc:title` (ours takes the title from `project.yaml`). If the reader ever picks those up, `promote_h1_to_title` and the duplicate-H1 guard both need rechecking, since the condition they turn on is `doc.meta.title == nil`.
 - **veraPDF and Ace.** epubcheck and the Nu HTML checker now run when they're installed. veraPDF (PDF/UA, Java) joins them when PDF is an output, and DAISY's Ace (Node with a bundled browser) applies the accessibility rules to an EPUB as a reading system would; it is the least likely to be present and the most worth running by hand before a book is distributed.
 - **An index, and links to glossary entries.** Two generated things a textbook wants and no output here has: an index page built from terms the author marks in the source, and a term in the body linked to its glossary entry (the glossary being a page that already exists). Both are `generate:` entries in `contents` once there is a marker vocabulary for terms, which is the same question the table markers answered for tables.

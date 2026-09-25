@@ -255,6 +255,91 @@ def first_columns(xml, flags):
     return xml, count
 
 
+# Nested quotations. Pandoc's writer styles a quotation's paragraphs
+# Block Text at every depth, and a list or code inside one not at all, so
+# Word shows a quote in a quote as one, and Pandoc's reader, which nests
+# by indentation, reads it back as one. mark_quotes wraps each quote's
+# content in a Div with an id, which the writer makes a bookmark range;
+# indent_quotes indents each paragraph by its depth and takes the
+# bookmarks out. A numbered paragraph is left as it is: the reader never
+# puts a list inside a quote, however it's indented.
+QUOTE_MARK = "tiq-quote-"
+QUOTE_STEP = 480                      # the Block Text style's own indent
+AFTER_IND = ("w:contextualSpacing", "w:mirrorIndents", "w:suppressOverlap",
+             "w:jc", "w:textDirection", "w:textAlignment",
+             "w:textboxTightWrap", "w:outlineLvl", "w:divId", "w:cnfStyle",
+             "w:rPr", "w:sectPr", "w:pPrChange")
+
+
+def mark_quotes(doc):
+    """The page's AST with each block quote's content in a marked Div;
+    returns (doc, count)."""
+    count = 0
+
+    def walk(node):
+        nonlocal count
+        if isinstance(node, list):
+            for item in node:
+                walk(item)
+        elif isinstance(node, dict):
+            if node.get("t") == "BlockQuote":
+                count += 1
+                inner = node["c"]
+                node["c"] = [{"t": "Div", "c": [[QUOTE_MARK + str(count), [], []],
+                                                 inner]}]
+                walk(inner)
+                return
+            for value in node.values():
+                walk(value)
+    walk(doc.get("blocks", []))
+    return doc, count
+
+
+def _set_indent(paragraph, left, right=None):
+    ind = '<w:ind w:left="%d"%s />' % (left, ' w:right="%d"' % right if right else "")
+    if "<w:pPr>" not in paragraph:
+        return paragraph.replace("<w:p>", "<w:p><w:pPr>" + ind + "</w:pPr>", 1)
+    start = paragraph.index("<w:pPr>")
+    end = paragraph.index("</w:pPr>", start)
+    props = paragraph[start + len("<w:pPr>"):end]
+    props = re.sub(r"<w:ind\b[^>]*/>", "", props)
+    at = [props.find("<" + name) for name in AFTER_IND]
+    at = [i for i in at if i >= 0]
+    cut = min(at) if at else len(props)
+    props = props[:cut] + ind + props[cut:]
+    return paragraph[:start] + "<w:pPr>" + props + paragraph[end:]
+
+
+def indent_quotes(xml):
+    """Each paragraph inside the marked quote ranges indented by its
+    depth, the marks removed; returns (xml, count)."""
+    if QUOTE_MARK not in xml:
+        return xml, 0
+    names = dict(re.findall(r'<w:bookmarkStart w:id="(\d+)" w:name="(' + QUOTE_MARK
+                            + r'\d+)"\s*/>', xml))
+    tokens = re.split(r"(<w:bookmarkStart\b[^>]*/>|<w:bookmarkEnd\b[^>]*/>|"
+                      r"<w:tbl>|</w:tbl>|<w:p>.*?</w:p>)", xml, flags=re.S)
+    depth, tables, count, out = 0, 0, 0, []
+    for token in tokens:
+        mark = re.match(r'<w:bookmark(Start|End) w:id="(\d+)"', token)
+        if mark and mark.group(2) in names:
+            depth += 1 if mark.group(1) == "Start" else -1
+            continue
+        if token == "<w:tbl>":
+            tables += 1
+        elif token == "</w:tbl>":
+            tables -= 1
+        elif token.startswith("<w:p>") and depth and not tables \
+                and "<w:numPr>" not in token:
+            block_text = 'w:pStyle w:val="BlockText"' in token
+            if not (block_text and depth == 1):
+                token = _set_indent(token, QUOTE_STEP * depth,
+                                    QUOTE_STEP if block_text else None)
+                count += 1
+        out.append(token)
+    return "".join(out), count
+
+
 def finish(path, doc):
     """Rewrite the .docx at path with what the page's AST says; returns a
     dict of counts: tooltips, decorative, first_columns, and compat (1
@@ -263,7 +348,8 @@ def finish(path, doc):
         with open(doc, encoding="utf-8") as fh:
             doc = json.load(fh)
     body, notes = gather(doc)
-    counts = {"compat": 0, "tooltips": 0, "decorative": 0, "first_columns": 0}
+    counts = {"compat": 0, "tooltips": 0, "decorative": 0, "first_columns": 0,
+              "quotes": 0}
     with zipfile.ZipFile(path) as z:
         names = z.namelist()
         parts = {n: z.read(n) for n in names}
@@ -285,6 +371,8 @@ def finish(path, doc):
         counts["decorative"] += n
         xml, n = first_columns(xml, facts["tables"])
         counts["first_columns"] += n
+        xml, n = indent_quotes(xml)
+        counts["quotes"] += n
         parts[part] = xml.encode("utf-8")
     handle, temporary = tempfile.mkstemp(suffix=".docx",
                                          dir=os.path.dirname(os.path.abspath(path)))

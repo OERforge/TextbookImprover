@@ -1914,6 +1914,9 @@ def case_docx_target(work):
                  'See [the data](https://example.org/data "The data, as a CSV file").[^1]\n\n'
                  "![A navy bar standing for the chart](assets/chart.png)\n\n![](assets/rule.png)\n\n"
                  "![Chart of the data](assets/chart.png){#fig-chart}\n\nAs [the chart](#fig-chart) shows.\n\n"
+                 "- one\n- two, first paragraph\n\n  two, second paragraph\n- three\n\nThen code:\n\n"
+                 "- alpha\n- beta\n\n  ```\n  code in beta\n  ```\n- gamma\n\n"
+                 "> Outer quote.\n>\n> ```\n> quoted code\n> ```\n>\n> > Inner quote.\n\nAfter the quotes.\n\n"
                  '[^1]: The [source](https://example.org/source "Where the data came from") explains it.\n')
     with open(os.path.join(work, "two.html"), "w", encoding="utf-8") as fh:
         fh.write('<!DOCTYPE html><html lang="en"><head><title>Two</title></head><body><h1>Two</h1>'
@@ -1969,6 +1972,15 @@ def case_docx_target(work):
              r"<figure\b[^>]*>(?:(?!</figure>).)*<figcaption[^>]*>(?:(?!</figcaption>).)*Chart of the data", one_back, re.S)
          and re.search(r'href="#([^"]+)"[^>]*>the chart<', one_back)
          and 'id="' + re.search(r'href="#([^"]+)"[^>]*>the chart<', one_back).group(1) + '"' in one_back),
+        ("a list item's second paragraph and its code block stay in the item, the lists whole",
+         lambda: re.search(r"<li>\s*<p>two, first paragraph</p>\s*<p>two, second paragraph</p>\s*</li>", one_back)
+         and re.search(r"<li>\s*<p>beta</p>\s*<pre[^>]*>(?:(?!</li>).)*code in beta", one_back, re.S)
+         and len(re.findall(r"<ul\b", one_back)) == 2),
+        ("a quote keeps its code and the quote nested in it, and no marker is left",
+         lambda: re.search(r"<blockquote>\s*<p>Outer quote\.</p>\s*<pre[^>]*>(?:(?!</blockquote>).)*"
+                           r"quoted code(?:(?!</blockquote>).)*<blockquote>\s*<p>Inner quote\.</p>",
+                           one_back, re.S)
+         and "tiq-quote" not in one and "tiq-quote" not in one_back),
         ("and the table has its header row and header column",
          lambda: '<th scope="col">' in two_back and '<th scope="row">Labor</th>' in two_back),
     ]

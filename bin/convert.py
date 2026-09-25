@@ -1807,10 +1807,16 @@ def render_markdown(target, pages, base, work, project, env):
         if word:
             # Pandoc's writer, then what it leaves out; see docxtarget.
             # The media goes inside the file, so none is copied beside it.
+            with open(page, encoding="utf-8") as fh:
+                marked, quotes = docxtarget.mark_quotes(json.load(fh))
+            if quotes:
+                page = os.path.join(work, f"{target.name}-{stem}.docx.json")
+                with open(page, "w", encoding="utf-8") as fh:
+                    json.dump(marked, fh)
             run(["pandoc", "-f", "json", "-t", "docx", page, "-o", out,
                  "--lua-filter=" + TARGET_FILTER], env=env, cwd=base)
             for key, n in docxtarget.finish(out, page).items():
-                added[key] += n
+                added[key] = added.get(key, 0) + n
             written.append(out)
             continue
         if asciidoc:

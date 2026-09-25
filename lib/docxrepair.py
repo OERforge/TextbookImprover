@@ -34,6 +34,7 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
+import html
 import re
 import zipfile
 
@@ -365,19 +366,74 @@ def apply_decorative(docx_path, json_path):
     return marked
 
 
+# A list item's second paragraph, or its code block or figure, is a
+# numbered paragraph whose level has no marker: an invisible bullet
+# (Pandoc's writer uses one, lvlText " ", and so does OpenStax's export),
+# indenting it under the item's text. Pandoc's reader takes it for an
+# item of another list and splits the list there. Numbered with an id
+# that has no definition, it's what the reader calls a list paragraph,
+# which it folds into the item before it (Readers/Docx/Lists.hs).
+NO_DEFINITION = "4000000"
+NUM_PR = re.compile(r'(<w:numPr>\s*<w:ilvl w:val="(\d+)"\s*/>\s*<w:numId w:val=")(\d+)("\s*/>)')
+
+
+def blank_marker_levels(numbering):
+    """{(numId, ilvl)} of the bullet levels whose marker is blank."""
+    blank = set()
+    abstracts = {m.group(1): m.group(0) for m in re.finditer(
+        r'<w:abstractNum\b[^>]*w:abstractNumId="(\d+)".*?</w:abstractNum>',
+        numbering, re.S)}
+    for m in re.finditer(r'<w:num w:numId="(\d+)"[^>]*>.*?</w:num>', numbering, re.S):
+        ref = re.search(r'w:abstractNumId w:val="(\d+)"', m.group(0))
+        if not ref or ref.group(1) not in abstracts:
+            continue
+        for lvl in re.finditer(r'<w:lvl w:ilvl="(\d+)".*?</w:lvl>',
+                               abstracts[ref.group(1)], re.S):
+            fmt = re.search(r'<w:numFmt w:val="([^"]*)"', lvl.group(0))
+            text = re.search(r'<w:lvlText w:val="([^"]*)"', lvl.group(0))
+            if fmt and fmt.group(1) in ("bullet", "none") and text is not None \
+                    and not html.unescape(text.group(1)).strip():
+                blank.add((m.group(1), lvl.group(1)))
+    return blank
+
+
+def join_continuations(xml, blank):
+    """Paragraphs numbered at a blank-marker level renumbered with an id
+    that has no definition. Returns (xml, count)."""
+    if not blank:
+        return xml, 0
+    count = 0
+
+    def one(m):
+        nonlocal count
+        if (m.group(3), m.group(2)) not in blank:
+            return m.group(0)
+        count += 1
+        return m.group(1) + NO_DEFINITION + m.group(4)
+    return NUM_PR.sub(one, xml), count
+
+
 def repaired_copy(source, destination):
     """Write a copy of the .docx with the repairs applied to
-    word/document.xml and every other part byte for byte. Returns how
-    many bookmarks moved."""
+    word/document.xml and word/footnotes.xml and every other part byte
+    for byte. Returns how many bookmarks moved."""
     moved = 0
     with zipfile.ZipFile(source) as zin, \
             zipfile.ZipFile(destination, "w", zipfile.ZIP_DEFLATED) as zout:
+        names = zin.namelist()
+        blank = blank_marker_levels(
+            zin.read("word/numbering.xml").decode("utf-8", "replace")
+            if "word/numbering.xml" in names else "")
         for info in zin.infolist():
             data = zin.read(info.filename)
             if info.filename == "word/document.xml":
                 text, moved = move_bookmarks_into_paragraphs(
                     data.decode("utf-8"))
                 text, _ = keep_unlinked_bookmarks(text)
+                text, _ = join_continuations(text, blank)
+                data = text.encode("utf-8")
+            elif info.filename == "word/footnotes.xml" and blank:
+                text, _ = join_continuations(data.decode("utf-8"), blank)
                 data = text.encode("utf-8")
             zout.writestr(info, data)
     return moved

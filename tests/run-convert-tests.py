@@ -1900,6 +1900,68 @@ PNG_1PX = bytes.fromhex("89504e470d0a1a0a0000000d4948445200000001000000010806000
                         "1f15c4890000000d49444154789c6360000002000154a24f5d0000000049454e44ae426082")
 
 
+def run_tool(cwd, args, util=False):
+    """One of the pipeline's scripts, from bin/ or util/, run in cwd."""
+    script = os.path.join(ROOT, "util" if util else "bin", args[0])
+    return subprocess.run([sys.executable, "-B", script] + args[1:], cwd=cwd,
+                          capture_output=True, text=True)
+
+
+def case_remediate_docx(work):
+    """A remediated copy of a Word file: the pre-pass's table declarations,
+    and alt text from the image-alt sidecar, written into the author's own
+    file, every other part left as it was (util/remediate-docx.py)."""
+    import zipfile
+    import json
+    from PIL import Image
+    os.makedirs(os.path.join(work, "assets"), exist_ok=True)
+    for name in ("chart", "rule"):
+        Image.new("RGB", (40, 20), "navy").save(os.path.join(work, "assets", name + ".png"))
+    with open(os.path.join(work, "src.md"), "w", encoding="utf-8") as fh:
+        fh.write("# Remediate\n\n| Name | Score |\n|------|------:|\n| Ana | 90 |\n| Ben | 85 |\n| Cy | 70 |\n\n"
+                 "![](assets/chart.png)\n\nText.\n\n![](assets/rule.png){title=\"A rule\"}\n")
+    subprocess.run(["pandoc", "src.md", "-o", "ch1.docx"], cwd=work, check=True)
+    with zipfile.ZipFile(os.path.join(work, "ch1.docx")) as z:
+        doc = z.read("word/document.xml").decode("utf-8")
+        embeds = re.findall(r'r:embed="([^"]+)"', doc)
+    with open(os.path.join(work, "image-alt.csv"), "w", encoding="utf-8") as fh:
+        fh.write("Image,Alt\nch1/media/%s.png,Scores by student\nch1/media/%s.png,[decorative]\n"
+                 % (embeds[0], embeds[1]))
+    headers = run_tool(work, ["table-headers.py", "ch1.docx", "--sidecar", "none.csv",
+                              "--new", "new.csv", "--report", "report.csv",
+                              "--resolved", "resolved.json"])
+    rem = run_tool(work, ["remediate-docx.py", "ch1.docx", "--resolved", "resolved.json",
+                          "--alt", "image-alt.csv", "--out", "out"], util=True)
+    refused = run_tool(work, ["remediate-docx.py", "ch1.docx", "--out", "."], util=True)
+    out = os.path.join(work, "out", "ch1.docx")
+    changed, xml = [], ""
+    if os.path.exists(out):
+        with zipfile.ZipFile(os.path.join(work, "ch1.docx")) as a, zipfile.ZipFile(out) as b:
+            changed = [n for n in a.namelist() if a.read(n) != b.read(n)]
+            xml = b.read("word/document.xml").decode("utf-8")
+    back = run_tool(os.path.join(work, "out"), ["table-headers.py", "ch1.docx", "--sidecar", "none.csv",
+                                                "--new", "new.csv", "--report", "report.csv"]) \
+        if os.path.exists(out) else None
+    report = read(work, "out", "report.csv") if exists(work, "out", "report.csv") else ""
+    resolved = ""
+    if exists(work, "resolved.json"):
+        entries = json.loads(read(work, "resolved.json")).get("ch1", [])
+        resolved = entries[0]["headers"] if entries else ""
+    return [
+        ("the copy is written, and only word/document.xml differs from the original",
+         lambda: rem.returncode == 0 and changed == ["word/document.xml"]),
+        ("the table's header row is Word's repeating header row, with the bookmark for JAWS",
+         lambda: "<w:tblHeader/>" in xml and re.search(r'w:name="(?:Column|Row)?Title_\d+"', xml)),
+        ("read back, the pre-pass finds the table declared by the file itself, as it resolved it",
+         lambda: back is not None and resolved and f",source,{resolved},"  in report),
+        ("an image gets its alt text; a decorative one Word's mark and no title",
+         lambda: 'descr="Scores by student"' in xml and "adec:decorative" in xml
+         and 'title="A rule"' not in xml),
+        ("it won't write over the file it reads",
+         lambda: refused.returncode == 2 and "overwritten" in refused.stderr),
+    ]
+
+
 def case_docx_target(work):
     """A docx target: Pandoc's Word file, then compatibility mode 15,
     ScreenTips, Word's decorative marker, and the First Column flag; and
@@ -2563,6 +2625,7 @@ CASES = [
     ("HTML table repairs", case_html_table_repairs),
     ("bare links and their sidecar", case_bare_links),
     ("a docx target", case_docx_target),
+    ("a remediated copy of a Word file", case_remediate_docx),
     ("a hand-written page", case_hand_written),
     ("several targets", case_targets),
     ("arguments passed to the packager", case_passthrough),

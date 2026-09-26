@@ -29,6 +29,8 @@ python3 util/restyle-headings.py book.docx --from-toc   # what the TOC field dec
 python3 util/restyle-headings.py book.docx --from-toc -o book-restyled.docx
 ```
 
+The same repair, decided once for a whole book, is the `word.headings` setting, which applies it to what the conversion reads and to a `source` target's copy ([Word](formats.md#word)); this tool is for one file by hand, and for looking first.
+
 Three ways to say what to do, and they don't chain: the map is applied to every paragraph at once, so `Heading1=Heading2,Heading2=Heading3` does what it says.
 
 - `--from-toc` reads the levels from the document's own TOC field and builds the map from them.
@@ -77,6 +79,8 @@ for f in *.docx; do python3 untrack-deletions.py "$f" --check; done
 # Repair one file.
 python3 untrack-deletions.py BC-14.docx -o BC-14-fixed.docx
 ```
+
+The same repair, decided once for a whole book, is `word.tracked_deletions: strike`, which applies it to what the conversion reads and to a `source` target's copy; by default a run names each file with tracked deletions ([Word](formats.md#word)).
 
 Each `<w:del>` becomes ordinary runs with `<w:strike/>`, so the appearance
 is unchanged in Word but the meaning no longer depends on a revision being

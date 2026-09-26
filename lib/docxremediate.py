@@ -431,7 +431,8 @@ def remediate_links(xml, rels, titles):
 # ---------------------------------------------------------------------------
 
 def remediate(source, destination, tables=None, alts=None, titles=None, compat=False,
-              guesses=False, captions=None, replacements=None, language=None):
+              guesses=False, captions=None, replacements=None, language=None,
+              headings="keep", deletions="accept"):
     """Write destination, a copy of source with the decisions applied.
     tables: the pre-pass's resolved list for this file; alts: {relationship
     id: alt or None}; titles: {address: title}. Returns a dict of counts."""
@@ -467,6 +468,13 @@ def remediate(source, destination, tables=None, alts=None, titles=None, compat=F
         if new_styles != styles:
             parts["word/styles.xml"] = new_styles.encode("utf-8")
             changed.add("word/styles.xml")
+    # The book's word.headings and word.tracked_deletions, last: striking
+    # a deletion changes a cell's text, and a table is matched by its
+    # first cell as the pre-pass read it.
+    import wordrepairs
+    repaired, found, _ = wordrepairs.apply(parts, headings, deletions)
+    changed |= repaired
+    counts["restyled"], counts["deletions_struck"] = found["restyled"], found["deletions"]
     if compat and "word/settings.xml" in parts:
         new = docxtarget.compat_mode(text("word/settings.xml"))
         if new != text("word/settings.xml"):

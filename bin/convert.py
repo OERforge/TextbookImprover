@@ -528,6 +528,8 @@ def check_sidecar(path, setting, default, base):
 
 VARIANT_FILES = set()       # every <stem>.<target>.<ext> in the directory
 TARGET_NAMES = set()
+# The book's word.headings and word.tracked_deletions, read once.
+WORD_HEADINGS, WORD_DELETIONS = "keep", "accept"
 
 
 def variant_sources(base, target_name):
@@ -1015,7 +1017,11 @@ def read_to_json(base, docs, env, work):
         # never touched. The copy keeps the name so nothing downstream
         # sees a difference.
         repaired = os.path.join(repaired_dir, name)
-        moved = docxrepair.repaired_copy(os.path.join(base, name), repaired)
+        notes = []
+        moved = docxrepair.repaired_copy(os.path.join(base, name), repaired,
+                                         WORD_HEADINGS, WORD_DELETIONS, notes)
+        for note in notes:
+            say(f"WARNING: {name}: word.headings not applied: {note}.")
         if moved and TRACE:
             say(f"# {name}: {moved} bookmark(s) moved into the paragraphs "
                 "they precede")
@@ -1155,7 +1161,7 @@ def read_variants(base, target, work, env):
         out = os.path.join(out_dir, stem + ".json")
         if name.endswith(".docx"):
             repaired = os.path.join(out_dir, name)
-            docxrepair.repaired_copy(path, repaired)
+            docxrepair.repaired_copy(path, repaired, WORD_HEADINGS, WORD_DELETIONS)
             run(["pandoc", "-f", "docx", "-t", "json", repaired, "-o", out,
                  "--lua-filter=" + MEDIA_FILTER, "--extract-media=" + stem],
                 env=env, cwd=base)
@@ -1809,7 +1815,8 @@ def remediate_sources(target, base, docs, paths, env, html_stems=(), language=No
                                          str(target["compatibility_mode"]) == "15",
                                          captions=captions.get(stem, []),
                                          replacements={u: r for u, (r, _) in links.items() if r},
-                                         language=language)
+                                         language=language, headings=WORD_HEADINGS,
+                                         deletions=WORD_DELETIONS)
         for key, n in counts.items():
             totals[key] = totals.get(key, 0) + n
         written.append(out)
@@ -2509,6 +2516,9 @@ def main():
         target.variants = variant_sources(base, target.name)
     language = project["language"]
     first = targets[0]        # sidecars and reports are book-level settings,
+    global WORD_HEADINGS, WORD_DELETIONS
+    WORD_HEADINGS = str(first["word.headings"] or "keep")
+    WORD_DELETIONS = str(first["word.tracked_deletions"] or "accept")
     #                           which the configuration keeps out of targets
     # Two source targets write the same copies unless they differ in the one
     # setting of their own; nothing breaks, but one of them is wasted work.
@@ -2609,6 +2619,22 @@ def main():
         # report and one new-rows file. A sidecar row whose key matches no
         # table is warned about and set aside, with a sample sidecar
         # without it.
+        # Text deleted with tracked changes vanishes on reading unless the
+        # book says to keep it; say so, since nothing else would.
+        if WORD_DELETIONS == "accept":
+            import wordrepairs
+            import zipfile
+            with_deletions = []
+            for name in docs:
+                with zipfile.ZipFile(os.path.join(base, name)) as z:
+                    if "word/document.xml" in z.namelist() and wordrepairs.count_deletions(
+                            z.read("word/document.xml").decode("utf-8", "replace")):
+                        with_deletions.append(name)
+            if with_deletions:
+                say(f"WARNING: {len(with_deletions)} Word file(s) have text deleted with tracked "
+                    "changes, which won't appear: " + ", ".join(with_deletions[:5])
+                    + (", ..." if len(with_deletions) > 5 else "")
+                    + ". word.tracked_deletions: strike keeps it, struck through.")
         prepass = list(docs) + [os.path.join(base, s + ".json")
                                 for s in html_stems]
         if prepass:

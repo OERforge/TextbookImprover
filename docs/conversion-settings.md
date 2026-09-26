@@ -156,6 +156,20 @@ How media extracted from the source is handled.
 
 Abort as soon as an image can't be identified, rather than collecting every such image and stopping once at the gate.
 
+## word
+
+Repairs to a Word source that change what reading it means, decided once for the book and applied both to the copy the conversion reads and, with a source target, to the author's remediated copy, so the book and the file agree. They're what util/restyle-headings.py and util/untrack-deletions.py do by hand.
+
+*Book level:* set these under `defaults:`, never in a target, since the whole book shares them; in a target they stop the run.
+
+**`word.tracked_deletions`**—one of `accept`, `strike`; default `accept`
+
+What becomes of text deleted with Word's tracked changes. accept drops it, as Word's Accept All Changes and Pandoc do, and the run names each file that has any, since a before-and-after example loses its "before". strike keeps it as ordinary struck-through text, which reaches HTML as <del>.
+
+**`word.headings`**—`string`; default `keep`
+
+Which paragraph styles are headings, for a book whose top level is styled Title, or otherwise not Heading 1 to 9, which is all Pandoc reads as headings. keep leaves the styles as they are; from-toc takes the levels each file's own table-of-contents field declares; or a map of style ids, FROM=TO,..., applied all at once (Title=Heading1,Heading1=Heading2). A file the setting can't apply to, with no TOC field, or not defining a style the map needs, is left as it is and named.
+
 ## sidecars
 
 CSV files holding decisions a person made about the source. These describe the book rather than one rendering, so a target should rarely override them. These files are read, never written, and hold work no script can reproduce. A bare name resolves against the content directory, which is convenient but leaves them among the generated HTML, the extracted media, and the disposable reports: the directory you would delete to rebuild, and the one replaced wholesale when the publisher reissues the source. An absolute path, or one relative to the content directory such as "../corrections/ibs2e/table-captions.csv", keeps them somewhere you can put under version control. A path set here that doesn't exist stops the run, because the alternative is converting the whole book while silently discarding every correction in it.

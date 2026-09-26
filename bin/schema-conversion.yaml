@@ -406,6 +406,38 @@ keys:
           Abort as soon as an image can't be identified, rather than
           collecting every such image and stopping once at the gate.
 
+  word:
+    book_level: true
+    description: >
+      Repairs to a Word source that change what reading it means, decided
+      once for the book and applied both to the copy the conversion reads
+      and, with a source target, to the author's remediated copy, so the
+      book and the file agree. They're what util/restyle-headings.py and
+      util/untrack-deletions.py do by hand.
+    keys:
+      tracked_deletions:
+        type: enum
+        values: [accept, strike]
+        default: accept
+        description: >
+          What becomes of text deleted with Word's tracked changes. accept
+          drops it, as Word's Accept All Changes and Pandoc do, and the run
+          names each file that has any, since a before-and-after example
+          loses its "before". strike keeps it as ordinary struck-through
+          text, which reaches HTML as <del>.
+      headings:
+        type: string
+        default: keep
+        description: >
+          Which paragraph styles are headings, for a book whose top level
+          is styled Title, or otherwise not Heading 1 to 9, which is all
+          Pandoc reads as headings. keep leaves the styles as they are;
+          from-toc takes the levels each file's own table-of-contents field
+          declares; or a map of style ids, FROM=TO,..., applied all at once
+          (Title=Heading1,Heading1=Heading2). A file the setting can't apply
+          to, with no TOC field, or not defining a style the map needs, is
+          left as it is and named.
+
   sidecars:
     book_level: true
     description: >

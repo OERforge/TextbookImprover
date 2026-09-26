@@ -41,52 +41,8 @@ import re
 import sys
 import zipfile
 
-DEL_RE = re.compile(r"<w:del(?: [^>]*)?>(.*?)</w:del>", re.S)
-RUN_RE = re.compile(r"<w:r(?: [^>]*)?>.*?</w:r>", re.S)
-RPR_RE = re.compile(r"<w:rPr(?: [^>]*)?>", re.S)
-
-
-def strike_run(run):
-    """Add <w:strike/> to a run and turn its delText back into ordinary text."""
-    # <w:delText> is the deleted-text element; only valid inside <w:del>.
-    run = run.replace("<w:delText", "<w:t").replace("</w:delText>", "</w:t>")
-
-    if "<w:strike/>" in run or "<w:strike " in run:
-        return run
-
-    m = RPR_RE.search(run)
-    if m:
-        # w:strike belongs in the run properties, where order is loose
-        # enough that appending directly after the opening tag is safe.
-        return run[:m.end()] + "<w:strike/>" + run[m.end():]
-
-    # No properties yet. They must be the first child of <w:r>.
-    open_tag = re.match(r"<w:r(?: [^>]*)?>", run)
-    return (run[:open_tag.end()] + "<w:rPr><w:strike/></w:rPr>"
-            + run[open_tag.end():])
-
-
-def convert(xml):
-    counts = {"deletions": 0, "runs": 0, "words": 0}
-
-    def replace(match):
-        inner = match.group(1)
-        if "<w:delText" not in inner:
-            # A deleted paragraph mark or similar: no text to preserve, so
-            # accepting it is the right outcome and it is left alone.
-            return match.group(0)
-
-        counts["deletions"] += 1
-        for text in re.findall(r"<w:delText[^>]*>(.*?)</w:delText>", inner, re.S):
-            counts["words"] += len(text.split())
-
-        def fix(run_match):
-            counts["runs"] += 1
-            return strike_run(run_match.group(0))
-
-        return RUN_RE.sub(fix, inner)
-
-    return DEL_RE.sub(replace, xml), counts
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lib"))
+from wordrepairs import strike_run, strike_deletions as convert  # noqa: E402,F401
 
 
 def main():

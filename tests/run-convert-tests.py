@@ -2045,6 +2045,69 @@ def case_source_target(work):
     ]
 
 
+def case_word_repairs(work):
+    """word.tracked_deletions and word.headings: decided once, applied to
+    the copy the conversion reads and to a source target's copy."""
+    import zipfile
+    os.makedirs(work, exist_ok=True)
+    with open(os.path.join(work, "ch.md"), "w", encoding="utf-8") as fh:
+        fh.write("---\ntitle: Repairs\nlang: en\n---\n\n::: {custom-style=\"Title\"}\nModule One\n:::\n\n"
+                 "# Section A\n\nKeep this.\n\nCut the extra words.\n")
+    subprocess.run(["pandoc", "ch.md", "-o", "ch.docx"], cwd=work, check=True)
+    os.remove(os.path.join(work, "ch.md"))
+    path = os.path.join(work, "ch.docx")
+    with zipfile.ZipFile(path) as z:
+        parts = {i: z.read(i.filename) for i in z.infolist()}
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as z:
+        for info, data in parts.items():
+            if info.filename == "word/document.xml":
+                data = data.replace(b"Cut the extra words.</w:t></w:r>",
+                                    b'Cut the extra words.</w:t></w:r><w:del w:id="901" w:author="A" '
+                                    b'w:date="2026-01-01T00:00:00Z"><w:r><w:delText xml:space="preserve">'
+                                    b' Very much so.</w:delText></w:r></w:del>', 1)
+            z.writestr(info, data)
+
+    def run(config):
+        with open(os.path.join(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
+            fh.write(config)
+        result = subprocess.run([sys.executable, "-B", os.path.join(BIN, "convert.py")],
+                                cwd=work, capture_output=True, text=True)
+        pages = "".join(read(work, "html", f) for f in sorted(os.listdir(os.path.join(work, "html")))
+                        if f.endswith(".html")) if exists(work, "html") else ""
+        return result, pages
+
+    plain, plain_html = run("targets:\n  html:\n    format: html\n")
+    fixed, fixed_html = run("defaults:\n  word:\n    tracked_deletions: strike\n"
+                            "    headings: Title=Heading1,Heading1=Heading2\n"
+                            "targets:\n  html:\n    format: html\n  mine:\n    format: source\n")
+    copy = ""
+    if exists(work, "mine", "ch.docx"):
+        with zipfile.ZipFile(os.path.join(work, "mine", "ch.docx")) as z:
+            copy = z.read("word/document.xml").decode("utf-8")
+    missing, _ = run("defaults:\n  word:\n    headings: Title=Heading10\ntargets:\n  html:\n    format: html\n")
+    return [
+        ("by default, tracked deletions are dropped, and the run names the file",
+         lambda: "Very much so" not in plain_html
+         and re.search(r"WARNING: 1 Word file\(s\) have text deleted with tracked changes.*ch\.docx",
+                       plain.stderr)),
+        ("tracked_deletions: strike keeps the deleted text, struck through, and warns no more",
+         lambda: re.search(r"<del>\s*Very much so\.?\s*</del>", fixed_html)
+         and "deleted with tracked changes" not in fixed.stderr),
+        ("headings: a map makes the Title paragraph a heading, one level above the old Heading 1",
+         lambda: re.search(r"<h(\d)[^>]*>Module One", fixed_html)
+         and re.search(r"<h(\d)[^>]*>Section A", fixed_html)
+         and int(re.search(r"<h(\d)[^>]*>Module One", fixed_html).group(1))
+         < int(re.search(r"<h(\d)[^>]*>Section A", fixed_html).group(1))),
+        ("a source target's copy gets the same repairs: the styles mapped, the deletion struck",
+         lambda: re.search(r'<w:pStyle w:val="Heading1"\s*/>(?:(?!</w:p>).)*Module One', copy, re.S)
+         and re.search(r'<w:pStyle w:val="Heading2"\s*/>(?:(?!</w:p>).)*Section A', copy, re.S)
+         and "<w:del " not in copy and re.search(r"<w:strike/>(?:(?!</w:r>).)*Very much so", copy, re.S)),
+        ("a map to a style the file doesn't define leaves it as it is, and names it",
+         lambda: "WARNING: ch.docx: word.headings not applied" in missing.stderr
+         and "Heading10" in missing.stderr),
+    ]
+
+
 def case_remediate_docx(work):
     """A remediated copy of a Word file: the pre-pass's table declarations,
     and alt text from the image-alt sidecar, written into the author's own
@@ -2774,6 +2837,7 @@ CASES = [
     ("a docx target", case_docx_target),
     ("a remediated copy of a Word file", case_remediate_docx),
     ("format: source", case_source_target),
+    ("word.tracked_deletions and word.headings", case_word_repairs),
     ("a hand-written page", case_hand_written),
     ("several targets", case_targets),
     ("arguments passed to the packager", case_passthrough),

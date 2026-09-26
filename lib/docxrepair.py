@@ -700,19 +700,27 @@ def drop_jaws_titles(xml):
     return xml
 
 
-def repaired_copy(source, destination):
+def repaired_copy(source, destination, headings="keep", deletions="accept", notes=None):
     """Write a copy of the .docx with the repairs applied to
     word/document.xml and word/footnotes.xml and every other part byte
-    for byte. Returns how many bookmarks moved."""
+    for byte, after the book's word.headings and word.tracked_deletions
+    (lib/wordrepairs.py). Returns how many bookmarks moved; a heading
+    setting that can't apply to the file is appended to notes."""
+    import wordrepairs
     moved = 0
-    with zipfile.ZipFile(source) as zin, \
-            zipfile.ZipFile(destination, "w", zipfile.ZIP_DEFLATED) as zout:
-        names = zin.namelist()
+    with zipfile.ZipFile(source) as zin:
+        infos = zin.infolist()
+        parts = {i.filename: zin.read(i.filename) for i in infos}
+    _, _, problem = wordrepairs.apply(parts, headings, deletions)
+    if problem and notes is not None:
+        notes.append(problem)
+    with zipfile.ZipFile(destination, "w", zipfile.ZIP_DEFLATED) as zout:
+        names = list(parts)
         blank = blank_marker_levels(
-            zin.read("word/numbering.xml").decode("utf-8", "replace")
+            parts["word/numbering.xml"].decode("utf-8", "replace")
             if "word/numbering.xml" in names else "")
-        for info in zin.infolist():
-            data = zin.read(info.filename)
+        for info in infos:
+            data = parts[info.filename]
             if info.filename == "word/document.xml":
                 text, moved = move_bookmarks_into_paragraphs(
                     drop_jaws_titles(data.decode("utf-8")))

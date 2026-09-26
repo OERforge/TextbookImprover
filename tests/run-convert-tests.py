@@ -2200,6 +2200,32 @@ def case_fidelity_writers(work):
     ]
 
 
+def case_fidelity_epub(work):
+    """fidelity.csv for an EPUB target, and a frame in Word: what the
+    target filter turns into a link or text as it writes."""
+    os.makedirs(work, exist_ok=True)
+    with open(os.path.join(work, "handout.pdf"), "wb") as fh:
+        fh.write(b"%PDF-1.4\n%%EOF\n")
+    with open(os.path.join(work, "page.html"), "w", encoding="utf-8") as fh:
+        fh.write('<!DOCTYPE html><html lang="en"><head><title>Page</title></head><body><h1>Page</h1>'
+                 '<iframe src="https://www.youtube.com/embed/abc123" title="A lecture"></iframe>'
+                 '<p><img src="https://example.org/chart.png" alt="A remote chart"></p>'
+                 '<p>The <a href="handout.pdf">handout</a>.</p></body></html>')
+    with open(os.path.join(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
+        fh.write("targets:\n  epub:\n    format: epub3\n  word:\n    format: docx\n")
+    run = subprocess.run([sys.executable, "-B", os.path.join(BIN, "convert.py")],
+                         cwd=work, capture_output=True, text=True)
+    report = read(work, "fidelity.csv") if exists(work, "fidelity.csv") else ""
+    return [
+        ("an EPUB reports a frame, a remote image, and a link to a local file, each by name",
+         lambda: "epub,(book),frame,A lecture" in report
+         and "epub,(book),remote-image,https://example.org/chart.png" in report
+         and "epub,(book),file-link,handout.pdf" in report),
+        ("and a Word target reports the frame it writes as a link",
+         lambda: "word,page,frame,A lecture" in report),
+    ]
+
+
 def case_remediate_docx(work):
     """A remediated copy of a Word file: the pre-pass's table declarations,
     and alt text from the image-alt sidecar, written into the author's own
@@ -2932,6 +2958,7 @@ CASES = [
     ("word.tracked_deletions and word.headings", case_word_repairs),
     ("format: source for Markdown", case_markdown_source),
     ("fidelity.csv for markdown and asciidoc targets", case_fidelity_writers),
+    ("fidelity.csv for an EPUB target", case_fidelity_epub),
     ("a hand-written page", case_hand_written),
     ("several targets", case_targets),
     ("arguments passed to the packager", case_passthrough),

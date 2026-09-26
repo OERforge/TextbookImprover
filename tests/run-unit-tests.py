@@ -349,8 +349,9 @@ def check_docx_repair():
                  '<w:spacing/></w:pPr></w:p><w:p><w:r><w:t>Table 1.1</w:t></w:r></w:p></w:body>',
                  [(0, "label-after", "Table 1.1", "A description")], [])[0])),
         ("a bookmark opening a paragraph after a heading stays in that paragraph",
-         lambda: (lambda f: '<w:pStyle w:val="SourceCode"/></w:pPr><w:bookmarkStart w:id="7" '
-                  'w:name="code-7"/>' in f and f.count("code-7") == 1)(
+         lambda: (lambda f: re.search(r'<w:pStyle w:val="SourceCode"/></w:pPr>'
+                                      r'(?:<w:r><w:t>&#8203;</w:t></w:r>)?<w:bookmarkStart w:id="7" '
+                                      r'w:name="code-7"/>', f) and f.count("code-7") == 1)(
                       docxrepair.move_bookmarks_into_paragraphs(
                           '<w:document xmlns:w="%s"><w:body><w:p><w:pPr>'
                           '<w:pStyle w:val="Heading2"/></w:pPr><w:r><w:t>Heading</w:t></w:r></w:p>'
@@ -366,8 +367,8 @@ def check_docx_repair():
          and docxrepair.keep_unlinked_bookmarks(heading)[1] == 0),
         ("one bookmark moved, the one before a paragraph",
          lambda: moved == 1),
-        ("it sits after the paragraph's properties",
-         lambda: '</w:pPr><w:bookmarkStart w:id="1" w:name="fs-one"/>'
+        ("it sits after the paragraph's properties, a zero-width run keeping it apart",
+         lambda: '</w:pPr><w:r><w:t>&#8203;</w:t></w:r><w:bookmarkStart w:id="1" w:name="fs-one"/>'
          in fixed),
         ("it is no longer at body level",
          lambda: '<w:bookmarkEnd w:id="1"/><w:p>' in fixed

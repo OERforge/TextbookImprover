@@ -45,6 +45,8 @@ BEFORE_PARAGRAPH = re.compile(
 START = re.compile(r"<w:bookmarkStart\b[^>]*/>")
 HEADING_STYLE = re.compile(r'<w:pStyle w:val="(?:Heading|Title|Subtitle)[^"]*"')
 ZWSP_RUN = "<w:r><w:t>&#8203;</w:t></w:r>"
+LEADING_BOOKMARK = re.compile(
+    r"^(<w:p\b[^>]*>\s*(?:<w:pPr>(?:(?!</w:pPr>).)*</w:pPr>)?\s*)(?=<w:bookmarkStart\b)", re.S)
 PARAGRAPH = re.compile(r"<w:p\b[^>]*>.*?</w:p>", re.S)
 ADJACENT = re.compile(r"(<w:bookmarkStart\b[^>]*/>)(\s*(?:<w:bookmarkEnd\b[^>]*/>\s*)*)"
                       r"(?=<w:bookmarkStart)")
@@ -110,11 +112,15 @@ def move_bookmarks_into_paragraphs(xml):
     def within(par):
         text = ADJACENT.sub(lambda m: m.group(1) + ZWSP_RUN + m.group(2),
                             par.group(0))
-        if re.fullmatch(r"<w:p>(?:<w:bookmarkStart\b[^>]*/>)+</w:p>", text):
-            # First, not last: the state to reset is the previous
-            # paragraph's final bookmark.
-            text = "<w:p>" + ZWSP_RUN + text[len("<w:p>"):]
-        return text
+        # A paragraph that opens with a bookmark, after its properties,
+        # gets the run first: the state to reset is the previous
+        # paragraph's final bookmark. Only paragraphs holding nothing but
+        # bookmarks used to, so a styled one, bookmark ends and all, as
+        # Pandoc's writer makes for a page's anchors, left the next
+        # paragraph's first bookmark to be merged into its last: the first
+        # solution on each of the statistics book's solutions pages, read
+        # back from Word, lost its id.
+        return LEADING_BOOKMARK.sub(lambda m: m.group(1) + ZWSP_RUN, text, count=1)
     body = PARAGRAPH.sub(within, body)
     body = CAPTIONED_DRAWING.sub(_bookmarks_to_caption, body)
     return head + sep + body, moved

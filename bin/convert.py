@@ -1938,8 +1938,12 @@ def render_markdown(target, pages, base, work, project, env, losses=None):
                 page = os.path.join(work, f"{target.name}-{stem}.docx.json")
                 with open(page, "w", encoding="utf-8") as fh:
                     json.dump(marked, fh)
+            found = os.path.join(work, f"fidelity-{target.name}-{stem}.tsv")
+            if os.path.exists(found):
+                os.remove(found)
             run(["pandoc", "-f", "json", "-t", "docx", page, "-o", out,
-                 "--lua-filter=" + TARGET_FILTER], env=env, cwd=base)
+                 "--lua-filter=" + TARGET_FILTER], env=dict(env, FIDELITY_FOUND=found), cwd=base)
+            collect_losses(found, target.name, stem, losses)
             for key, n in docxtarget.finish(out, page).items():
                 added[key] = added.get(key, 0) + n
             written.append(out)
@@ -2448,6 +2452,10 @@ SOURCE_TARGET_LOSSES = {
     "alt-quotes": "an alt text's double quotes become typographic ones",
     "root-index": "a root with an index is written as Asciidoctor reads it; "
                   "Pandoc's reader cuts the formula short",
+    # EPUB, and Word for a frame (target-blocks.lua)
+    "frame": "a frame becomes a link to what it shows, a video's own page for a video",
+    "remote-image": "an image on another server becomes a link to it, named by its alt text",
+    "file-link": "a link to a local file keeps only its text (the output check lists it too)",
 }
 FIDELITY_KINDS = dict(docxtarget.LOSSES, **SOURCE_TARGET_LOSSES)
 
@@ -2807,7 +2815,6 @@ def main():
                              hand_stems, work)
 
         # ---- 5. reports, once per book ----------------------------------------
-        write_fidelity(losses, reports["fidelity"])
         missing = write_report(
             collected["captions_missing"], reports["table_captions_missing"],
             "Label,Description,Source,Excerpt",
@@ -2835,13 +2842,21 @@ def main():
         for target in targets:
             if target.format != "epub3":
                 continue
+            found = os.path.join(work, f"fidelity-{target.name}.tsv")
+            if os.path.exists(found):
+                os.remove(found)
             result = run(["python3", EPUB_TOOL, "-d", base,
                           "--target", target.name,
                           "--intermediates", target.pages_dir],
-                         capture=True)
+                         env=dict(os.environ, FIDELITY_FOUND=found), capture=True)
             sys.stderr.write(result.stderr)
             epubs += [line for line in result.stdout.split("\n")
                       if line.strip()]
+            # The EPUB is built from the whole book in one run, so its rows
+            # name the item, not the page.
+            collect_losses(found, target.name, "(book)", losses)
+        # After the EPUBs, which report their losses as they're built.
+        write_fidelity(losses, reports["fidelity"])
 
         # ---- 5.7 check, per target -------------------------------------------
         # Findings go to one report beside the others and never stop the

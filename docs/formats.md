@@ -44,7 +44,7 @@ Two repairs change what reading a Word file means, and each is a setting, decide
 - **EPUB: TESTED**, on the same books and the suite's fixtures. It loses what [every EPUB loses](#epub), as well.
 - **Markdown: TESTED**, on the statistics book (merged by chapter) and the suite's round trip: read back, it gives the same HTML, and written again it's the same file. The first write normalizes Word's residue (paragraphs holding only a non-breaking space, stray spaces), so the second write is the fixed point. A table with merged cells, and a figure with an id, are written as fenced HTML, since Pandoc's Markdown can't express them; a banded table is kept as one table.
 - **AsciiDoc: TESTED**, on the statistics book: read back, 166 of its 169 pages are identical to the book converted directly. Two lose a root with an index (`\sqrt[n]{…}`), which Pandoc's AsciiDoc reader can't read, and one a list's depth ([AsciiDoc as a target](asciidoc.md#asciidoc-as-a-target)).
-- **Word: TESTED**, on the statistics book: 169 files, valid against Word's schema, with 229 header columns flagged. Read back as a book, 135 of its 169 pages give the same HTML; the rest lose what Word has no structure for ([Word output](#word-output)), almost all of it figures without a caption, which come back as images.
+- **Word: TESTED**, on the statistics book: 169 files, valid against Word's schema, with 229 header columns flagged. Read back as a book, 167 of its 169 pages give the same HTML, with no dead links; the other two are solutions pages, each with one list fewer ([Word output](#word-output)).
 - **PDF: NOT YET IMPLEMENTED**, [on the roadmap](../ROADMAP.md).
 
 ## Markdown
@@ -84,7 +84,7 @@ Pages are parsed with html5lib, or with lxml where html5lib isn't installed; DCI
 - **EPUB: TESTED.** epubcheck finds no errors in DCIC's, the business communication book's, or OpenStax's sociology cartridge's; the five in *Information Systems* are the publisher's own.
 - **Markdown: TESTED.** The suite converts HTML to Markdown and back, formulas and banded tables included, and DCIC's 80 pages come back identical. They didn't until two fixes: a formula as MathJax 2 drew it nests spans eleven deep, which Pandoc's Markdown reader never got through, and a link to an id with a space in it isn't a link to that reader, so its address came back as words.
 - **AsciiDoc: TESTED**, on DCIC: read back, 74 of its 80 pages are identical to the book converted directly. The other six each held a list with no items, which AsciiDoc can't write. Scribble's markup, spans nested in spans around links, code laid out in tables, quotations in quotations, is what most of the target's own forms were built against ([AsciiDoc as a target](asciidoc.md#asciidoc-as-a-target)).
-- **Word: TESTED**, on DCIC: 80 files, valid against Word's schema, with 38 decorative images marked. Read back, 49 of 80 pages give the same HTML; most of the rest put a list inside a quotation, which Pandoc's reader takes back out.
+- **Word: TESTED**, on DCIC: 80 files, valid against Word's schema, with 38 decorative images marked. Read back, 50 of 80 pages give the same HTML, with no dead links; most of the rest put a list inside a quotation, which Pandoc's reader takes back out.
 - **PDF: NOT YET IMPLEMENTED.**
 
 ## AsciiDoc
@@ -100,7 +100,7 @@ Pages are parsed with html5lib, or with lxml where html5lib isn't installed; DCI
 - **HTML: TESTED**, on the security textbook (14 pages, its 54 cross-references by title resolved) and the suite. Asciidoctor's own settings (`:toc:`, `:icons:`, `:stylesheet:`, `:sectnums:`) are dropped. A block's `width` goes to the image it holds, or goes if it holds none, and a diagram's `target` goes: Pandoc passes both through onto elements where HTML doesn't allow them.
 - **EPUB: TESTED.** The security textbook's EPUB passes epubcheck with no errors or warnings, and the suite builds one from a chapter with a sized image, a listing, and a table.
 - **Markdown: TESTED.** The security textbook goes to Markdown and back with all 14 pages identical, and the suite converts a chapter the same way.
-- **Word: TESTED**, on the security textbook: 14 files, valid against Word's schema. Read back, 9 of 14 pages give the same HTML; the rest have tables with merged cells, or figures holding more than one block, which Pandoc's writer lays out as a table.
+- **Word: TESTED**, on the security textbook: 14 files, valid against Word's schema. Read back, 12 of 14 pages give the same HTML, with no dead links; the other two have tables with merged cells, or figures holding more than one block, which Pandoc's writer lays out as a table.
 - **PDF: NOT YET IMPLEMENTED.**
 - **AsciiDoc: TESTED.** The security textbook goes to AsciiDoc and back with all 14 pages identical, and the suite round-trips a chapter holding every case the target writes itself ([AsciiDoc as a target](asciidoc.md#asciidoc-as-a-target)). Writing it again gives the same files.
 
@@ -123,6 +123,8 @@ One `.epub` per `epub3` target, built by [`build-epub.py`](epub.md) from the sam
 - makes a frame a link to what it shows, a YouTube or Vimeo video's own page for a video;
 - keeps a link to a local file (a PDF, a Word file) as its text only, and the output check lists each one as `link-to-file-dropped`;
 - has no menu from `menu: on`, which HTML targets add for posting the pages as a site.
+
+The first three are reported in `fidelity.csv`, each by what it names (the image's address, the frame's title, the file), since the EPUB is built from the whole book at once.
 
 The `.epub` is itself the package: there's nothing further to package it in.
 
@@ -158,9 +160,10 @@ The post-processing finds what it changes by marks the target puts on the elemen
 | `uncaptioned-figure` | A figure with no caption comes back as an image. |
 | `code-language` | A code block's language, and so its highlighting, is lost, when its name holds more than letters and digits. |
 | `layout-table` | A layout table comes back as a data table, since Word keeps no mark of one. |
+| `frame` | A frame, a video say, becomes a link to what it shows. |
 | `cell-headers` | A table's cells lose the header cells they name (`headers`); its header rows and column stay. |
 
-Read back as a source, a Word file gives back its text, headings, images and alt text, captioned figures, tables and header rows, link titles, decorative images, math, nested quotations, a list item's second paragraph or code block, and numbered and highlighted code. A term with no definition, such as a review question, reads back as a term. Measured on four books: the statistics book gives the same HTML on 135 of its 169 pages, DCIC on 49 of 80, and the security textbook on 9 of 14, with no dead links in any. The schema check is `tools/validate-docx.sh` from Pandoc's source, which wrongly rejects `m:sty` in an equation, as `PANDOC-NOTES.md` explains.
+Read back as a source, a Word file gives back its text, headings, images and alt text, captioned figures, tables and header rows, link titles, decorative images, math, nested quotations, a list item's second paragraph or code block, and numbered and highlighted code. A term with no definition, such as a review question, reads back as a term. Measured on four books: the statistics book gives the same HTML on 167 of its 169 pages, DCIC on 50 of 80, and the security textbook on 12 of 14, with no dead links in any. The schema check is `tools/validate-docx.sh` from Pandoc's source, which wrongly rejects `m:sty` in an equation, as `PANDOC-NOTES.md` explains.
 
 ### Source
 

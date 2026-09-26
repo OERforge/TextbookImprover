@@ -30,6 +30,20 @@
 -- You should have received a copy of the GNU General Public License
 -- along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+-- What a target loses in the writing, for the run's fidelity report
+-- (fidelity.csv): convert.py names a file in FIDELITY_FOUND, and each
+-- change below that loses something is a row there, its kind and a
+-- detail, separated by a tab.
+local FIDELITY_FILE = os.getenv('FIDELITY_FOUND')
+local function lost(kind, detail)
+  if not FIDELITY_FILE or FIDELITY_FILE == '' then return end
+  local fh = io.open(FIDELITY_FILE, 'a')
+  if fh then
+    fh:write(kind .. '\t' .. (tostring(detail or ''):gsub('[\t\n]', ' ')) .. '\n')
+    fh:close()
+  end
+end
+
 local TARGET = os.getenv('TARGET_NAME') or ''
 local TITLE_BLOCK = (os.getenv('TITLE_BLOCK') or 'on') ~= 'off'
 
@@ -62,6 +76,7 @@ local function remote_image(img)
   if text == '' then
     text = 'Image at ' .. (img.src:match('^%a*:?//([^/?#]+)') or img.src)
   end
+  lost('remote-image', img.src)
   return pandoc.Link(text, img.src)
 end
 
@@ -88,6 +103,7 @@ local function local_file_link(link)
   local name = path:gsub('%%(%x%x)', function(hex)
     return string.char(tonumber(hex, 16))
   end)
+  lost('file-link', name)
   return pandoc.Span(link.content,
     pandoc.Attr('', { 'file-link' }, { { 'data-file', name } }))
 end
@@ -100,6 +116,7 @@ local function embed(el, block)
   -- A source target keeps the frame, for its own filter to write.
   if FORMAT:match('markdown') or FORMAT:match('asciidoc') then return nil end
   if not FORMAT:match('html') or FORMAT:match('epub') then
+    lost('frame', el.attributes['title'] or el.attributes['src'] or '')
     return el.content
   end
   local parts = { '<iframe' }

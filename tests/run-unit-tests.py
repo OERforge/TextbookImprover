@@ -301,6 +301,7 @@ def check_docx_repair():
     """Bookmarks between blocks move into the block that follows."""
     import xml.etree.ElementTree as ET
     import docxrepair
+    import docxremediate
     import tablecensus
     W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
     xml = ('<w:document xmlns:w="%s"><w:body>'
@@ -340,6 +341,13 @@ def check_docx_repair():
                       '<w:bookmarkStart w:id="9" w:name="term-9"/>'
                       '<w:r><w:t>Term</w:t></w:r></w:p></w:body></w:document>'
                       % W)[0])),
+        ("a label paragraph past a table's bookmark and an empty paragraph gets its description",
+         lambda: (lambda x: "Table 1.1</w:t></w:r><w:r><w:t xml:space=\"preserve\"> A description" in x)(
+             docxremediate.remediate_captions(
+                 '<w:body><w:bookmarkStart w:id="1" w:name="t1"/><w:tbl><w:tr><w:tc><w:p><w:r><w:t>a'
+                 '</w:t></w:r></w:p></w:tc></w:tr></w:tbl><w:bookmarkEnd w:id="1"/><w:p><w:pPr>'
+                 '<w:spacing/></w:pPr></w:p><w:p><w:r><w:t>Table 1.1</w:t></w:r></w:p></w:body>',
+                 [(0, "label-after", "Table 1.1", "A description")], [])[0])),
         ("a bookmark opening a paragraph after a heading stays in that paragraph",
          lambda: (lambda f: '<w:pStyle w:val="SourceCode"/></w:pPr><w:bookmarkStart w:id="7" '
                   'w:name="code-7"/>' in f and f.count("code-7") == 1)(

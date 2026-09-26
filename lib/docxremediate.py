@@ -21,7 +21,16 @@ What it changes, all of it decided elsewhere in the pipeline:
   description, and Word's "Mark as decorative" for `[decorative]`. A
   sidecar row names an image as Pandoc extracts it, `<stem>/media/rIdN`,
   which is its relationship in the file.
-- **Links.** A title from the bare-links sidecar, as the link's ScreenTip.
+- **Captions.** A description from the table-captions sidecar, found as
+  the filter recorded it (see htmlremediate): for a table with no label, a
+  paragraph in Word's Caption style before it, kept with the table, where
+  Word's Insert Caption puts one; for a label paragraph beside the table,
+  the description joined to its end.
+- **Links.** From the bare-links sidecar, a link's title as its ScreenTip,
+  and its replacement address, which replaces the link's address and, for
+  a bare link, its text.
+- **Language.** The book's language as the document's default, when the
+  file has none.
 - **Compatibility mode 15**, only when asked for.
 
 Everything else is left as it was: the XML is edited as text, never parsed
@@ -269,6 +278,133 @@ def link_titles(path):
     return found
 
 
+CAPTION_STYLE = ('<w:style w:type="paragraph" w:styleId="Caption"><w:name w:val="caption"/>'
+                 '<w:basedOn w:val="Normal"/><w:next w:val="Normal"/><w:uiPriority w:val="35"/>'
+                 '<w:unhideWhenUsed/><w:qFormat/><w:pPr><w:spacing w:after="200" w:line="240" '
+                 'w:lineRule="auto"/></w:pPr><w:rPr><w:i/><w:iCs/><w:color w:val="44546A" '
+                 'w:themeColor="text2"/><w:sz w:val="18"/><w:szCs w:val="18"/></w:rPr></w:style>')
+
+
+def _run(text):
+    return '<w:r><w:t xml:space="preserve">%s</w:t></w:r>' % html.escape(text, quote=False)
+
+
+SKIPPABLE = (r"(?:\s*(?:<w:bookmark(?:Start|End)\b[^>]*/>|<w:p\b[^>]*/>|"
+             r"<w:p\b[^>]*>\s*(?:<w:pPr>(?:(?!</w:pPr>).)*</w:pPr>)?\s*</w:p>))*\s*")
+
+
+def remediate_captions(xml, applied, resolved):
+    """applied: [(position, how, key, description)] the filter recorded
+    for the file; resolved: the pre-pass's entries, which give each
+    table's shape. Returns (xml, counts)."""
+    counts = {"captions": 0, "captions_left": 0, "labels_joined": 0}
+    shapes = {e.get("index"): e for e in resolved}
+    spans = table_spans(xml)
+    edits = []
+    for position, how, key, description in applied:
+        if position >= len(spans):
+            counts["captions_left"] += 1
+            continue
+        start, end = spans[position]
+        if how in ("label-after", "label-before"):
+            # Between a table and its label, only what Pandoc's reader
+            # doesn't count as content: bookmarks (OpenStax wraps each table
+            # in one) and empty paragraphs.
+            if how == "label-after":
+                para = re.compile(SKIPPABLE + r"(<w:p\b[^>]*>(?:(?!</w:p>).)*)(</w:p>)",
+                                  re.S).match(xml, end)
+            else:
+                paras = list(re.finditer(r"(<w:p\b[^>]*>(?:(?!</w:p>).)*)(</w:p>)" + SKIPPABLE + r"\Z",
+                                         xml[:start], re.S))
+                para = paras[-1] if paras else None
+            if para and _text(para.group(1)) == " ".join(key.split()):
+                edits.append((para.start(2), _run(" " + description)))
+                counts["labels_joined"] += 1
+            else:
+                counts["captions_left"] += 1
+            continue
+        entry = shapes.get(position)
+        table = xml[start:end]
+        rows = _own_rows(table)
+        first = re.search(r"<w:tc>.*?</w:tc>", table[rows[0][0]:rows[0][1]], re.S) if rows else None
+        if how != "position" or entry is None or len(rows) != entry.get("rows") or (
+                entry.get("first") and not (
+                    first and _text(first.group(0)).startswith(entry["first"][:30]))):
+            counts["captions_left"] += 1
+            continue
+        edits.append((start, '<w:p><w:pPr><w:pStyle w:val="Caption"/><w:keepNext/></w:pPr>'
+                             + _run(description) + "</w:p>"))
+        counts["captions"] += 1
+    for at, text in sorted(edits, key=lambda e: e[0], reverse=True):
+        xml = xml[:at] + text + xml[at:]
+    return xml, counts
+
+
+def replace_links(xml, rels, replacements):
+    """replacements: {address: replacement}. Each relationship to one gets
+    the replacement; each hyperlink using it whose text is the address
+    gets the replacement as its text, in its first run. Returns (xml,
+    rels, count)."""
+    if not replacements:
+        return xml, rels, 0
+    changed = {}
+
+    def rel(m):
+        target = html.unescape(m.group(2))
+        if target in replacements and 'TargetMode="External"' in m.group(0):
+            changed[m.group(1)] = (target, replacements[target])
+            return m.group(0).replace('Target="%s"' % m.group(2),
+                                      'Target="%s"' % html.escape(replacements[target], quote=True))
+        return m.group(0)
+    rels = re.sub(r'<Relationship\b[^>]*?Id="([^"]+)"[^>]*?Target="([^"]*)"[^>]*/>', rel, rels)
+    count = 0
+
+    def link(m):
+        nonlocal count
+        rid = re.search(r'r:id="([^"]+)"', m.group(1))
+        if not rid or rid.group(1) not in changed:
+            return m.group(0)
+        address, replacement = changed[rid.group(1)]
+        body = m.group(2)
+        if _text(body) != address:
+            return m.group(0)
+        seen = []
+
+        def text(t):
+            seen.append(1)
+            return "%s%s</w:t>" % (t.group(1), html.escape(replacement, quote=False) if len(seen) == 1 else "")
+        count += 1
+        return m.group(1) + re.sub(r"(<w:t(?:\s[^>]*)?>)[^<]*</w:t>", text, body) + "</w:hyperlink>"
+    xml = re.sub(r"(<w:hyperlink\b[^>]*>)(.*?)</w:hyperlink>", link, xml, flags=re.S)
+    return xml, rels, count
+
+
+def remediate_language(styles, language):
+    """The document's default language, when styles.xml declares none.
+    Returns (styles, 1 or 0)."""
+    if not language or "<w:docDefaults>" not in styles:
+        return styles, 0
+    defaults = re.search(r"<w:docDefaults>.*?</w:docDefaults>", styles, re.S)
+    if re.search(r"<w:lang\b", defaults.group(0)):
+        return styles, 0
+    lang = '<w:lang w:val="%s"/>' % html.escape(language, quote=True)
+    block = defaults.group(0)
+    if re.search(r"<w:rPrDefault>\s*<w:rPr>", block):
+        rpr = re.search(r"<w:rPrDefault>\s*<w:rPr>(.*?)</w:rPr>", block, re.S)
+        inner = rpr.group(1)
+        # Before the few elements CT_RPr puts after lang.
+        after = re.search(r"<w:(?:eastAsianLayout|specVanish|oMath)\b", inner)
+        cut = after.start() if after else len(inner)
+        new_block = block[:rpr.start(1)] + inner[:cut] + lang + inner[cut:] + block[rpr.end(1):]
+    elif "<w:rPrDefault/>" in block or "<w:rPrDefault />" in block:
+        new_block = re.sub(r"<w:rPrDefault\s*/>", "<w:rPrDefault><w:rPr>%s</w:rPr></w:rPrDefault>" % lang,
+                           block, count=1)
+    else:
+        new_block = block.replace("<w:docDefaults>",
+                                  "<w:docDefaults><w:rPrDefault><w:rPr>%s</w:rPr></w:rPrDefault>" % lang, 1)
+    return styles.replace(block, new_block, 1), 1
+
+
 def remediate_links(xml, rels, titles):
     """titles: {address: title}. Each hyperlink to one gets its ScreenTip.
     Returns (xml, count)."""
@@ -295,7 +431,7 @@ def remediate_links(xml, rels, titles):
 # ---------------------------------------------------------------------------
 
 def remediate(source, destination, tables=None, alts=None, titles=None, compat=False,
-              guesses=False):
+              guesses=False, captions=None, replacements=None, language=None):
     """Write destination, a copy of source with the decisions applied.
     tables: the pre-pass's resolved list for this file; alts: {relationship
     id: alt or None}; titles: {address: title}. Returns a dict of counts."""
@@ -309,14 +445,28 @@ def remediate(source, destination, tables=None, alts=None, titles=None, compat=F
         xml = text("word/document.xml")
         new, found = remediate_tables(xml, tables or [], guesses)
         counts.update(found)
+        new, found = remediate_captions(new, captions or [], tables or [])
+        counts.update(found)
         new, found = remediate_images(new, alts or {})
         counts.update(found)
-        new, counts["links"] = remediate_links(
-            new, text("word/_rels/document.xml.rels") if "word/_rels/document.xml.rels" in parts else "",
-            titles or {})
+        rels_name = "word/_rels/document.xml.rels"
+        rels = text(rels_name) if rels_name in parts else ""
+        new, counts["links"] = remediate_links(new, rels, titles or {})
+        new, new_rels, counts["replaced"] = replace_links(new, rels, replacements or {})
+        if new_rels != rels:
+            parts[rels_name] = new_rels.encode("utf-8")
+            changed.add(rels_name)
         if new != xml:
             parts["word/document.xml"] = new.encode("utf-8")
             changed.add("word/document.xml")
+    if "word/styles.xml" in parts:
+        styles = text("word/styles.xml")
+        new_styles, counts["language"] = remediate_language(styles, language)
+        if counts.get("captions") and 'w:styleId="Caption"' not in new_styles:
+            new_styles = new_styles.replace("</w:styles>", CAPTION_STYLE + "</w:styles>", 1)
+        if new_styles != styles:
+            parts["word/styles.xml"] = new_styles.encode("utf-8")
+            changed.add("word/styles.xml")
     if compat and "word/settings.xml" in parts:
         new = docxtarget.compat_mode(text("word/settings.xml"))
         if new != text("word/settings.xml"):

@@ -707,8 +707,9 @@ local BARE_FOUND_FILE = os.getenv('BARE_LINKS_FOUND')
 -- which can differ from the author's file (a table split at a header row,
 -- a table holding only an image), so the copy matches the position and
 -- the table's shape instead. Rows: page, position, how, key, description,
--- how being "position" (no label anywhere) or "label" (a label outside
--- the table, which the description is joined to).
+-- how being "position" (no label anywhere), or "label-after" or
+-- "label-before": a label paragraph beside the table, after or before it,
+-- which the description is joined to.
 local CAPTIONS_APPLIED_FILE = os.getenv('CAPTIONS_APPLIED')
 local BARE_SCHEMES = { http = true, https = true, ftp = true }
 local bare_rows = nil
@@ -1944,6 +1945,7 @@ local function caption_data_table(tbl, next_block, after_next, after_after, out)
     end
   else
     label = table_label(next_block)
+    local label_side = 'after'
     if label ~= nil and caption_side == 'above'
       and belongs_to_next_table(after_next, after_after) then
       label = nil   -- that paragraph captions the table after this one
@@ -1953,6 +1955,7 @@ local function caption_data_table(tbl, next_block, after_next, after_after, out)
       if above then
         tbl.caption = mk_caption({ pandoc.Plain(text_to_inlines(above)) })
         label = above
+        label_side = 'before'
       end
     end
     if label then
@@ -1962,7 +1965,7 @@ local function caption_data_table(tbl, next_block, after_next, after_after, out)
       if description and description ~= '' then
         inlines:insert(pandoc.Space())
         inlines:extend(text_to_inlines(description))
-        append_row(CAPTIONS_APPLIED_FILE, { source_stem(), th_index or '', 'label',
+        append_row(CAPTIONS_APPLIED_FILE, { source_stem(), th_index or '', 'label-' .. label_side,
                                             label, description })
       elseif description == nil and is_bare_label(label) then
         if pending.text ~= '' then

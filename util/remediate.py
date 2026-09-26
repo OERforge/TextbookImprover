@@ -66,7 +66,9 @@ def main(argv=None):
             return 2
         if ext.lower() == ".docx":
             counts = docxremediate.remediate(path, out, resolved.get(stem, []), alts.get(stem, {}),
-                                             titles, args.compat, args.include_guesses)
+                                             titles, args.compat, args.include_guesses,
+                                             replacements={u: r for u, (r, _) in links.items() if r},
+                                             language=args.language)
         elif ext.lower() in (".html", ".htm"):
             counts = htmlremediate.remediate(path, out, resolved_html.get(stem, []), page_alts,
                                              links, args.language)

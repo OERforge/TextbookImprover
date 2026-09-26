@@ -12,13 +12,13 @@ saved from a platform is better fixed in the platform.
   path, extension aside; `[decorative]` gives alt="".
 - **Links.** From the bare-links sidecar, a bare link's title, and its
   replacement address, which replaces both the address and the text.
-- **Captions.** A description from the table-captions sidecar, for a table
-  with no label anywhere, as its <caption>. The filter records which table
-  it gave each description to, by position (the sidecar's key names the
-  table as the filter sees the page, which can differ from the file), and
-  the copy finds that table as it does for headers. A description joined
-  to a label that's a paragraph beside the table isn't written: that
-  would mean moving the author's paragraph into the table.
+- **Captions.** A description from the table-captions sidecar: for a table
+  with no label anywhere, as its <caption>; for one whose label is a
+  paragraph beside it, joined to the end of that paragraph, where it
+  stands, as the rendered page joins it. The filter records which table it
+  gave each description to, by position (the sidecar's key names the table
+  as the filter sees the page, which can differ from the file), and the
+  copy finds that table as it does for headers.
 - **Language.** The book's language as lang on <html>, when it has none.
 
 Copyright 2026 Robert Szarka
@@ -129,14 +129,30 @@ def remediate_tables(page, resolved):
 
 
 def remediate_captions(page, applied, resolved):
-    """applied: [(position, how, description)] the filter recorded for the
+    """applied: [(position, how, key, description)] the filter recorded for the
     page; resolved: the pre-pass's entries for it, which give each table's
     shape. Returns (page, counts)."""
-    counts = {"captions": 0, "captions_left": 0}
+    counts = {"captions": 0, "captions_left": 0, "labels_joined": 0}
     shapes = {e.get("index"): e for e in resolved}
     spans = table_spans(page)
     edits = []
-    for position, how, description in applied:
+    for position, how, key, description in applied:
+        if how in ("label-after", "label-before") and position < len(spans):
+            start, end = spans[position]
+            if how == "label-after":
+                para = re.compile(r"\s*(?:<!--.*?-->\s*)*(<p\b[^>]*>)(.*?)(</p\s*>)",
+                                  re.I | re.S).match(page, end)
+            else:
+                # The paragraph's content bounded: never across a </p>.
+                paras = list(re.finditer(r"(<p\b[^>]*>)((?:(?!</p\s*>).)*)(</p\s*>)"
+                                         r"\s*(?:<!--.*?-->\s*)*\Z", page[:start], re.I | re.S))
+                para = paras[-1] if paras else None
+            if para and _text(para.group(2)) == " ".join(key.split()):
+                edits.append((para.start(3), " " + htmllib.escape(description, quote=False)))
+                counts["labels_joined"] += 1
+            else:
+                counts["captions_left"] += 1
+            continue
         if how != "position":
             counts["captions_left"] += 1
             continue
@@ -243,7 +259,7 @@ def alt_rows(path):
 
 
 def caption_rows(path):
-    """{page: [(position, how, description)]} from the file the filter
+    """{page: [(position, how, key, description)]} from the file the filter
     writes (CAPTIONS_APPLIED), each table once."""
     import csv
     found, seen = {}, set()
@@ -257,7 +273,7 @@ def caption_rows(path):
             if (stem, position) in seen:
                 continue
             seen.add((stem, position))
-            found.setdefault(stem, []).append((position, row[2], row[4]))
+            found.setdefault(stem, []).append((position, row[2], row[3], row[4]))
     return found
 
 

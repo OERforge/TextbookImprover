@@ -53,12 +53,13 @@ remediate.py *.docx --resolved resolved.json \
 
 - **Tables** get the header declaration from the sidecar, and a table with no sidecar row is left as it is: a guess written into the file would read back as the author's own declaration. `--include-guesses` writes the census's guess too, for trying it out. A header row becomes Word's repeating header row, with any title rows above it, since Word's header rows start at the top of a table. A header column becomes the table style's First Column flag. Either gets a bookmark naming the table's headers, `Title`, `ColumnTitle`, or `RowTitle`, the convention [Freedom Scientific documents for JAWS](https://doccenter.freedomscientific.com/doccenter/archives/training/samplefiles/usethebookmarkfeatureinwordfortableheaders-oldertechnique.htm). Each table is found by its position among the file's tables and changed only when its row count and first cell are what the pre-pass saw; any other is skipped and counted.
 - **Images** get their alt text from the image-alt sidecar, as the picture's description, and `[decorative]` gets Word's "Mark as decorative", with no description or title.
-- **Links** get their title from the bare-links sidecar, as a ScreenTip.
+- **Links** get their title from the bare-links sidecar, as a ScreenTip, and its replacement address (a shortDOI, say), in the link's address and, for a bare link, its text.
+- **The language**, from `--language`, becomes the document's default when the file declares none.
 - **Compatibility mode 15** is set only with `--compat`.
 
 Measured on the statistics book's 169 Word files with `--include-guesses`, since the book has no table-headers sidecar: 308 of its 332 data tables got header rows and 229 a header column, none was skipped, and the header pre-pass, run again on the copies, reads every one of the 332 as declared with the same value, from the file's own bookmarks. Only `word/document.xml` changed, and only in the 57 files that have tables; the others are the originals byte for byte. OpenStax's files fail Word's schema check on their own, mostly for a paragraph style out of place, and the copies fail it with exactly the same errors. What Word and screen readers do with the changes is documented, not tested here.
 
-Not yet: bands and table splits have no Word equivalent and are left alone; a table's caption, a link's replacement address (a shortDOI), and anything the pipeline decides in the filter rather than a sidecar aren't written.
+Not yet: bands and table splits have no Word equivalent and are left alone, and anything the pipeline decides in the filter rather than a sidecar isn't written. Table captions a run of `convert.py` writes ([Source](formats.md#source)), since they depend on which table the filter gave each description to.
 
 ## Repairing tracked deletions in the source
 

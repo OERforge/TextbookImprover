@@ -1919,10 +1919,19 @@ def case_source_target(work):
         with open(os.path.join(work, f"ch{n}.md"), "w", encoding="utf-8") as fh:
             fh.write(f"---\ntitle: Chapter {n}\nlang: en\n---\n\n# Chapter {n}\n\n"
                      f"| Name | Score |\n|------|------:|\n| Ana | 9{n} |\n| Ben | 8{n} |\n| Cy | 7{n} |\n\n"
-                     "![](assets/a.png)\n\nText.\n")
+                     + ("Table 2.1\n\n" if n == 2 else "See <https://doi.org/10.1000/xyz123>.\n\n")
+                     + "![](assets/a.png)\n\nText.\n")
         subprocess.run(["pandoc", f"ch{n}.md", "-o", f"ch{n}.docx"], cwd=work, check=True)
         os.remove(os.path.join(work, f"ch{n}.md"))
     shutil.rmtree(os.path.join(work, "assets"))
+    # Chapter 2 declares no language, for the copy to be given the book's.
+    with zipfile.ZipFile(os.path.join(work, "ch2.docx")) as z:
+        parts = {i: z.read(i.filename) for i in z.infolist()}
+    with zipfile.ZipFile(os.path.join(work, "ch2.docx"), "w", zipfile.ZIP_DEFLATED) as z:
+        for info, data in parts.items():
+            if info.filename == "word/styles.xml":
+                data = re.sub(rb"<w:lang\b[^>]*/>", b"", data)
+            z.writestr(info, data)
     with open(os.path.join(work, "notes.md"), "w", encoding="utf-8") as fh:
         fh.write("---\ntitle: Notes\nlang: en\n---\n\n# Notes\n\nA Markdown chapter.\n")
     os.makedirs(os.path.join(work, "img"), exist_ok=True)
@@ -1966,7 +1975,8 @@ def case_source_target(work):
     with open(os.path.join(work, "image-alt.csv"), "w", encoding="utf-8") as fh:
         fh.write(f"Image,Alt\nch1/media/{rid}.png,A navy rectangle\nimg/bar.png,A bar chart of the scores\n")
     with open(os.path.join(work, "table-captions.csv"), "w", encoding="utf-8") as fh:
-        fh.write("Label,Description\npage#table-1,Scores by student\nTable 1.2,Enrollment by term\n")
+        fh.write("Label,Description\npage#table-1,Scores by student\nTable 1.2,Enrollment by term\n"
+                 "ch1#table-1,Scores in chapter one\nTable 2.1,Scores in chapter two\n")
     with open(os.path.join(work, "bare-links.csv"), "w", encoding="utf-8") as fh:
         fh.write("URL,Replacement,Title\nhttps://doi.org/10.1000/xyz123,https://doi.org/10/abcd,The source study\n")
     second = run()
@@ -1976,7 +1986,13 @@ def case_source_target(work):
         with zipfile.ZipFile(os.path.join(work, "fixed", n)) as z:
             return z.read("word/document.xml").decode()
     one, two = xml("ch1.docx"), xml("ch2.docx")
-    kept_compat = differ("ch1.docx") == ["word/document.xml"]
+    kept_compat = "word/settings.xml" not in differ("ch1.docx")
+    with zipfile.ZipFile(os.path.join(work, "fixed", "ch1.docx")) as z:
+        one_rels = z.read("word/_rels/document.xml.rels").decode()
+    with zipfile.ZipFile(os.path.join(work, "fixed", "ch2.docx")) as z:
+        two_styles = z.read("word/styles.xml").decode()
+    one_read = subprocess.run(["pandoc", os.path.join(work, "fixed", "ch1.docx"), "-t", "html"],
+                              capture_output=True, text=True).stdout
     conf('    compatibility_mode: "15"\n')
     third = run()
     set_compat = "word/settings.xml" in differ("ch1.docx") and 'w:name="compatibilityMode"' in \
@@ -1984,8 +2000,8 @@ def case_source_target(work):
     conf("  again:\n    format: source\n")
     fourth = run()
     return [
-        ("a first run, with no sidecar, writes the files unchanged and says what's left to a guess",
-         lambda: first_differ == {"ch1.docx": [], "ch2.docx": []}
+        ("a first run, with no sidecar, changes only a missing language, and says what's left to a guess",
+         lambda: first_differ == {"ch1.docx": [], "ch2.docx": ["word/styles.xml"]}
          and "left as they are, with only the census's guess" in first.stderr),
         ("once a table's row is adopted, its headers are written; a table with none is left alone",
          lambda: re.search(r'w:name="(?:Column|Row)?Title_\d+"', one)
@@ -2010,9 +2026,20 @@ def case_source_target(work):
          and "both have format source" not in third.stderr),
         ("a table with no label gets its sidecar description as its caption, in the copy",
          lambda: "<table><caption>Scores by student</caption>" in page),
-        ("a description joined to a label paragraph beside its table is left out, and counted",
-         lambda: "Enrollment by term" not in page and "<p>Table 1.2</p>" in page
-         and "1 table description(s) left out of the copies" in second.stderr),
+        ("a description joined to a label paragraph is joined to it where it stands",
+         lambda: "<p>Table 1.2 Enrollment by term</p>" in page and "not written" not in second.stderr),
+        ("a Word table with no label gets a Caption paragraph, which Pandoc reads as its caption",
+         lambda: re.search(r'<w:pStyle w:val="Caption"/><w:keepNext/></w:pPr><w:r><w:t xml:space="preserve">'
+                           r'Scores in chapter one</w:t></w:r></w:p><w:tbl>', one)
+         and re.search(r"<caption>\s*<p>Scores in chapter one</p>\s*</caption>", one_read)),
+        ("a Word label paragraph gets its description joined",
+         lambda: re.search(r"Table 2\.1</w:t></w:r>(?:(?!</w:p>).)*Scores in chapter two", two, re.S)),
+        ("a Word link gets its replacement address and text, and its title",
+         lambda: 'Target="https://doi.org/10/abcd"' in one_rels
+         and "https://doi.org/10.1000/xyz123" not in one and "https://doi.org/10/abcd" in one
+         and 'w:tooltip="The source study"' in one),
+        ("a Word file declaring no language gets the book's",
+         lambda: re.search(r'<w:docDefaults>(?:(?!</w:docDefaults>).)*<w:lang w:val="en"/>', two_styles, re.S)),
         ("a Markdown source is named as left out",
          lambda: "1 Markdown or AsciiDoc source(s) left out" in third.stderr),
     ]

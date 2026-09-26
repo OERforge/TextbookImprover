@@ -1798,13 +1798,18 @@ def remediate_sources(target, base, docs, paths, env, html_stems=(), language=No
             resolved = json.load(fh)
     alts = docxremediate.alt_rows(paths["image_alt"])
     titles = docxremediate.link_titles(paths["bare_links"])
+    links = htmlremediate.link_rows(paths["bare_links"])
+    captions = htmlremediate.caption_rows(os.path.join(work, "captions_applied")) if work else {}
     written, totals = [], {}
     for name in docs:
         stem = os.path.splitext(name)[0]
         out = os.path.join(target.output_dir, name)
         counts = docxremediate.remediate(os.path.join(base, name), out, resolved.get(stem, []),
                                          alts.get(stem, {}), titles,
-                                         str(target["compatibility_mode"]) == "15")
+                                         str(target["compatibility_mode"]) == "15",
+                                         captions=captions.get(stem, []),
+                                         replacements={u: r for u, (r, _) in links.items() if r},
+                                         language=language)
         for key, n in counts.items():
             totals[key] = totals.get(key, 0) + n
         written.append(out)
@@ -1814,8 +1819,6 @@ def remediate_sources(target, base, docs, paths, env, html_stems=(), language=No
         with open(html_json, encoding="utf-8") as fh:
             resolved_html = json.load(fh)
     page_alts = htmlremediate.alt_rows(paths["image_alt"])
-    captions = htmlremediate.caption_rows(os.path.join(work, "captions_applied")) if work else {}
-    links = htmlremediate.link_rows(paths["bare_links"])
     pages = 0
     for stem in html_stems:
         name = stem + ".html"
@@ -1829,26 +1832,24 @@ def remediate_sources(target, base, docs, paths, env, html_stems=(), language=No
             totals[key] = totals.get(key, 0) + n
         written.append(os.path.join(target.output_dir, name))
         pages += 1
-    if pages:
-        say(f"{target.name}: {pages} HTML page(s) remediated: "
-            f"{totals.get('captions', 0)} table caption(s) added, "
-            f"{totals.get('replaced', 0)} link(s) given their replacement address, "
-            f"lang set on {totals.get('language', 0)}.")
-        if totals.get("captions_left"):
-            say(f"{target.name}: {totals['captions_left']} table description(s) left out of "
-                "the copies: each joins a label that's a paragraph beside its table, which "
-                "the copy doesn't move into the table.")
     others = sorted(f for f in os.listdir(base) if f.endswith((".md", ".adoc"))
                     and not f.startswith("."))
     say(f"{target.name}: {len(docs)} Word file(s) and {pages} HTML page(s) remediated: "
         f"{totals.get('header_rows', 0)} table(s) given header rows and "
         f"{totals.get('header_columns', 0)} a header column from the sidecar, "
+        f"{totals.get('captions', 0)} caption(s) added and "
+        f"{totals.get('labels_joined', 0)} description(s) joined to a label, "
         f"{totals.get('described', 0)} image(s) described, "
         f"{totals.get('decorative', 0)} marked decorative, "
-        f"{totals.get('links', 0)} link title(s)"
+        f"{totals.get('links', 0)} link title(s), "
+        f"{totals.get('replaced', 0)} link(s) given their replacement address, "
+        f"the language set in {totals.get('language', 0)}"
         + (f"; {totals['skipped']} table(s) skipped as changed since the pre-pass"
            if totals.get("skipped") else "")
         + ".")
+    if totals.get("captions_left"):
+        say(f"{target.name}: {totals['captions_left']} table description(s) not written: "
+            "the table, or the label paragraph beside it, isn't what the filter saw.")
     if totals.get("undecided"):
         say(f"{target.name}: {totals['undecided']} table(s) left as they are, with only "
             "the census's guess; adopt their rows from the table_headers_new report "

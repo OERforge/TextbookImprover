@@ -1944,6 +1944,8 @@ def case_source_target(work):
                  "<p><img src=\"img/bar.png\"></p>\n<table>\n  <tr><td>Term</td><td>Count</td></tr>\n"
                  "  <tr><td>Fall</td><td>12</td></tr>\n</table>\n<p>Table 1.2</p>\n<p>More text.</p>\n<p>See <a href=\"https://doi.org/10.1000/xyz123\">"
                  "https://doi.org/10.1000/xyz123</a>.</p>\n</body>\n</html>\n")
+    with open(os.path.join(work, "project.yaml"), "w", encoding="utf-8") as fh:
+        fh.write("project:\n  language: en\n")
     digest = lambda n: hashlib.sha256(open(os.path.join(work, n), "rb").read()).hexdigest()
     before = {n: digest(n) for n in ("ch1.docx", "ch2.docx", "page.html")}
 
@@ -2040,8 +2042,9 @@ def case_source_target(work):
          and 'w:tooltip="The source study"' in one),
         ("a Word file declaring no language gets the book's",
          lambda: re.search(r'<w:docDefaults>(?:(?!</w:docDefaults>).)*<w:lang w:val="en"/>', two_styles, re.S)),
-        ("a Markdown source is named as left out",
-         lambda: "1 Markdown or AsciiDoc source(s) left out" in third.stderr),
+        ("a Markdown source is remediated too, into the same folder",
+         lambda: "and 1 Markdown file(s) remediated" in third.stderr
+         and exists(work, "fixed", "notes.md")),
     ]
 
 
@@ -2105,6 +2108,72 @@ def case_word_repairs(work):
         ("a map to a style the file doesn't define leaves it as it is, and names it",
          lambda: "WARNING: ch.docx: word.headings not applied" in missing.stderr
          and "Heading10" in missing.stderr),
+    ]
+
+
+def case_markdown_source(work):
+    """format: source for a Markdown file: the sidecars' decisions written
+    where each element is, confirmed against Pandoc's reading, the rest of
+    the file exactly as written."""
+    import zipfile
+    from PIL import Image
+    os.makedirs(os.path.join(work, "img"), exist_ok=True)
+    for name in ("my chart", "rule", "code"):
+        Image.new("RGB", (40, 20), "navy").save(os.path.join(work, "img", name + ".png"))
+    original = (
+        "---\ntitle: Chapter\n---\n\nSetext Heading\n==============\n\nSome _emphasis_ kept as written.\n\n"
+        "![](img/my chart.png)\n\n![Rule](img/rule.png){ width=50% }\n\n"
+        "![A code image](img/code.png)\n\n```\n![A code image](img/code.png)\n```\n\n"
+        "See <https://doi.org/10.1000/xyz123>.\n\n"
+        "| A | B |\n|---|---|\n| 1 | 2 |\n\n"
+        "::: matrix\n|   | X | Y |\n|---|---|---|\n| P | 1 | 2 |\n:::\n\n"
+        "| C | D |\n|---|---|\n| 3 | 4 |\n\nTable 1.2\n\nThe end.\n")
+    with open(os.path.join(work, "ch.md"), "w", encoding="utf-8") as fh:
+        fh.write(original)
+
+    def run():
+        with open(os.path.join(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
+            fh.write("targets:\n  html:\n    format: html\n  mine:\n    format: source\n")
+        return subprocess.run([sys.executable, "-B", os.path.join(BIN, "convert.py")],
+                              cwd=work, capture_output=True, text=True)
+
+    first = run()
+    first_copy = read(work, "mine", "ch.md") if exists(work, "mine", "ch.md") else None
+    with open(os.path.join(work, "project.yaml"), "w", encoding="utf-8") as fh:
+        fh.write("project:\n  language: en\n")
+    with open(os.path.join(work, "image-alt.csv"), "w", encoding="utf-8") as fh:
+        fh.write('Image,Alt\n"img/my chart.png",A chart of the data\nimg/rule.png,[decorative]\n'
+                 "img/code.png,A described code image\n")
+    with open(os.path.join(work, "bare-links.csv"), "w", encoding="utf-8") as fh:
+        fh.write("URL,Replacement,Title\nhttps://doi.org/10.1000/xyz123,https://doi.org/10/abcd,The study\n")
+    with open(os.path.join(work, "table-captions.csv"), "w", encoding="utf-8") as fh:
+        fh.write("Label,Description\nch#table-1,First table\nch#table-2,Second table\n"
+                 "Table 1.2,Third table\n")
+    second = run()
+    copy = read(work, "mine", "ch.md") if exists(work, "mine", "ch.md") else ""
+    return [
+        ("with nothing decided and no language declared, the copy is the file, byte for byte",
+         lambda: first.returncode in (0, 1) and first_copy == original),
+        ("an image's alt text is written where it is, a path with spaces included",
+         lambda: "![A chart of the data](img/my chart.png)" in copy),
+        ("a decorative image loses its alt and gains .decorative in its own attributes",
+         lambda: "![](img/rule.png){ width=50% .decorative }" in copy),
+        ("an image whose syntax also appears inside code is left as it is, and counted",
+         lambda: copy.count("![A code image](img/code.png)") == 2
+         and "left as they are" in second.stderr),
+        ("a bare link becomes its replacement, with its title",
+         lambda: '[https://doi.org/10/abcd](https://doi.org/10/abcd "The study")' in copy),
+        ("a table with no caption gets a Table: line, inside its div when it's in one",
+         lambda: "| 1 | 2 |\n\nTable: First table\n" in copy
+         and "| P | 1 | 2 |\n\nTable: Second table\n:::" in copy),
+        ("a label paragraph gets its description joined, where it stands",
+         lambda: "\nTable 1.2 Third table\n" in copy),
+        ("the declared language goes in the front matter, and the rest is as written",
+         lambda: copy.startswith("---\ntitle: Chapter\nlang: en\n---")
+         and "Setext Heading\n==============\n\nSome _emphasis_ kept as written." in copy),
+        ("read back, the copy's changes are only the decisions",
+         lambda: subprocess.run(["pandoc", "-f", "markdown", "-t", "plain"], input=copy,
+                                capture_output=True, text=True).stdout.count("First table") == 1),
     ]
 
 
@@ -2838,6 +2907,7 @@ CASES = [
     ("a remediated copy of a Word file", case_remediate_docx),
     ("format: source", case_source_target),
     ("word.tracked_deletions and word.headings", case_word_repairs),
+    ("format: source for Markdown", case_markdown_source),
     ("a hand-written page", case_hand_written),
     ("several targets", case_targets),
     ("arguments passed to the packager", case_passthrough),

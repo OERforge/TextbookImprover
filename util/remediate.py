@@ -27,13 +27,14 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lib"))
 import docxremediate  # noqa: E402
 import htmlremediate  # noqa: E402
+import mdremediate  # noqa: E402
 
 DECORATIVE = "[decorative]"
 
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    ap.add_argument("files", nargs="+", help="Word files and HTML pages")
+    ap.add_argument("files", nargs="+", help="Word files, HTML pages, and Markdown files")
     ap.add_argument("--resolved", help="table-headers.py's --resolved file")
     ap.add_argument("--resolved-html", help="table-headers.py's --resolved-html file")
     ap.add_argument("--language", help="the book's language, for an HTML page with no lang")
@@ -72,8 +73,10 @@ def main(argv=None):
         elif ext.lower() in (".html", ".htm"):
             counts = htmlremediate.remediate(path, out, resolved_html.get(stem, []), page_alts,
                                              links, args.language)
+        elif ext.lower() == ".md":
+            counts = mdremediate.remediate(path, out, page_alts, links, [], args.language)
         else:
-            print(f"remediate: {path} is neither a Word file nor an HTML page; left out",
+            print(f"remediate: {path} isn't a Word file, an HTML page, or Markdown; left out",
                   file=sys.stderr)
             continue
         for key, n in counts.items():

@@ -75,6 +75,7 @@ try:
     import docxrepair
     import docxremediate
     import htmlremediate
+    import mdremediate
     import docxtarget
     import htmlrepair
     import mathjax
@@ -425,6 +426,10 @@ def load_targets(base, allow_unknown):
             "  or move the file aside to convert with the defaults.")
 
     declared = oerconfig.target_names(documents)
+    # Whether the book declares its language: a source target writes it
+    # into the author's files only then, never the schema's default.
+    global LANGUAGE_DECLARED
+    LANGUAGE_DECLARED = any((doc.project or {}).get("language") for doc in documents)
     targets = []
     try:
         for name in declared or [None]:
@@ -530,6 +535,7 @@ VARIANT_FILES = set()       # every <stem>.<target>.<ext> in the directory
 TARGET_NAMES = set()
 # The book's word.headings and word.tracked_deletions, read once.
 WORD_HEADINGS, WORD_DELETIONS = "keep", "accept"
+LANGUAGE_DECLARED = False
 
 
 def variant_sources(base, target_name):
@@ -1789,14 +1795,16 @@ def noheader(text):
 
 
 def remediate_sources(target, base, docs, paths, env, html_stems=(), language=None,
-                      work=None):
+                      work=None, markdown=()):
     """A target with format source: the book's own files, remediated, one
     copy each in the target's folder under the source's name. A Word file
     gets what a person decided in the sidecars written into it, and nothing
     else changed (lib/docxremediate.py); a guess is never written, since
     in the file it would read back as the author's own. An HTML page gets
-    the same (lib/htmlremediate.py), and lang when it has none. Markdown
-    and AsciiDoc sources aren't written yet."""
+    the same (lib/htmlremediate.py), and lang when it has none; a Markdown
+    file the same, edited where each element is and confirmed against
+    Pandoc's reading (lib/mdremediate.py). AsciiDoc sources aren't written
+    yet."""
     os.makedirs(target.output_dir, exist_ok=True)
     resolved = {}
     if env.get("TABLE_HEADERS_RESOLVED") and os.path.exists(env["TABLE_HEADERS_RESOLVED"]):
@@ -1839,9 +1847,18 @@ def remediate_sources(target, base, docs, paths, env, html_stems=(), language=No
             totals[key] = totals.get(key, 0) + n
         written.append(os.path.join(target.output_dir, name))
         pages += 1
-    others = sorted(f for f in os.listdir(base) if f.endswith((".md", ".adoc"))
-                    and not f.startswith("."))
-    say(f"{target.name}: {len(docs)} Word file(s) and {pages} HTML page(s) remediated: "
+    md_files = 0
+    for name in markdown:
+        counts = mdremediate.remediate(
+            os.path.join(base, name), os.path.join(target.output_dir, name), page_alts, links,
+            captions.get(safe_stem(os.path.basename(name)[:-3]), []), language)
+        for key, n in counts.items():
+            totals[key] = totals.get(key, 0) + n
+        written.append(os.path.join(target.output_dir, name))
+        md_files += 1
+    others = sorted(f for f in os.listdir(base) if f.endswith(".adoc") and not f.startswith("."))
+    say(f"{target.name}: {len(docs)} Word file(s), {pages} HTML page(s), and "
+        f"{md_files} Markdown file(s) remediated: "
         f"{totals.get('header_rows', 0)} table(s) given header rows and "
         f"{totals.get('header_columns', 0)} a header column from the sidecar, "
         f"{totals.get('captions', 0)} caption(s) added and "
@@ -1862,8 +1879,13 @@ def remediate_sources(target, base, docs, paths, env, html_stems=(), language=No
             "the census's guess; adopt their rows from the table_headers_new report "
             "to have them written.")
     if others:
-        say(f"{target.name}: {len(others)} Markdown or AsciiDoc source(s) left out; format "
-            "source writes Word and HTML sources so far.")
+        say(f"{target.name}: {len(others)} AsciiDoc source(s) left out; format source "
+            "writes Word, HTML, and Markdown sources so far.")
+    skipped = totals.get("images_skipped", 0) + totals.get("links_skipped", 0)
+    if skipped:
+        say(f"{target.name}: {skipped} Markdown image(s) or link(s) left as they are: the "
+            "text doesn't hold them as many times as Pandoc reads them, as when the same "
+            "syntax also appears inside code.")
     return written
 
 
@@ -2708,8 +2730,9 @@ def main():
         renv = dict(env, HEADER_INCLUDES_FILE=css_header)
         for target in targets:
             if target.format == "source":
-                written[target.name] = remediate_sources(target, base, docs, paths, env,
-                                                         html_stems, language, work)
+                written[target.name] = remediate_sources(
+                    target, base, docs, paths, env, html_stems,
+                    language if LANGUAGE_DECLARED else None, work, markdown)
             if target.format in SOURCE_TARGETS or target.format == "docx":
                 written[target.name] = render_markdown(
                     target, [p for p in pages_by_dir[target.pages_dir]

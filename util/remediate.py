@@ -13,7 +13,8 @@ convert.py does the same for a target with format: source. Tables get
 only what the sidecar declares, unless --include-guesses (Word only).
 An HTML page is read with the header pre-pass as convert.py reads it, so
 --resolved-html comes from a pre-pass run over the pages' intermediates;
-convert.py does that itself.
+convert.py does that itself. Table captions only a run of convert.py
+writes, since they depend on which table the filter gave each one to.
 
 Copyright 2026 Robert Szarka
 """

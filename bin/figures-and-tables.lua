@@ -701,6 +701,15 @@ local HEADER_KEYS = { label = true, table = true, image = true, file = true }
 
 local BARE_FILE = os.getenv('BARE_LINKS') or 'bare-links.csv'
 local BARE_FOUND_FILE = os.getenv('BARE_LINKS_FOUND')
+-- Each description the caption sidecar gave a table, with the table's
+-- position among all the page's tables (data-th-index), for a remediated
+-- source: the sidecar's key names the table as this filter sees the page,
+-- which can differ from the author's file (a table split at a header row,
+-- a table holding only an image), so the copy matches the position and
+-- the table's shape instead. Rows: page, position, how, key, description,
+-- how being "position" (no label anywhere) or "label" (a label outside
+-- the table, which the description is joined to).
+local CAPTIONS_APPLIED_FILE = os.getenv('CAPTIONS_APPLIED')
 local BARE_SCHEMES = { http = true, https = true, ftp = true }
 local bare_rows = nil
 
@@ -1907,6 +1916,7 @@ local function caption_data_table(tbl, next_block, after_next, after_after, out)
   -- What the pre-pass resolved for this table, checked against the table
   -- as the reader gave it, before any row is moved.
   local entry = resolved_for(tbl)
+  local th_index = tbl.attr.attributes[TH_INDEX_ATTR]
   tbl.attr.attributes[TH_INDEX_ATTR] = nil
   tbl.attr.attributes[MARKER_ATTR] = nil
   tbl.attr.attributes[CAPTION_ROWS_ATTR] = nil
@@ -1952,6 +1962,8 @@ local function caption_data_table(tbl, next_block, after_next, after_after, out)
       if description and description ~= '' then
         inlines:insert(pandoc.Space())
         inlines:extend(text_to_inlines(description))
+        append_row(CAPTIONS_APPLIED_FILE, { source_stem(), th_index or '', 'label',
+                                            label, description })
       elseif description == nil and is_bare_label(label) then
         if pending.text ~= '' then
           -- A title row is about to become the description this bare
@@ -1979,6 +1991,8 @@ local function caption_data_table(tbl, next_block, after_next, after_after, out)
       elseif description ~= '' then
         label = description
         tbl.caption = mk_caption({ pandoc.Plain(text_to_inlines(label)) })
+        append_row(CAPTIONS_APPLIED_FILE, { source_stem(), th_index or '', 'position',
+                                            key, description })
       end
     end
   end

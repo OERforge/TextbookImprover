@@ -1814,6 +1814,7 @@ def remediate_sources(target, base, docs, paths, env, html_stems=(), language=No
         with open(html_json, encoding="utf-8") as fh:
             resolved_html = json.load(fh)
     page_alts = htmlremediate.alt_rows(paths["image_alt"])
+    captions = htmlremediate.caption_rows(os.path.join(work, "captions_applied")) if work else {}
     links = htmlremediate.link_rows(paths["bare_links"])
     pages = 0
     for stem in html_stems:
@@ -1822,15 +1823,21 @@ def remediate_sources(target, base, docs, paths, env, html_stems=(), language=No
             continue
         counts = htmlremediate.remediate(os.path.join(base, name),
                                          os.path.join(target.output_dir, name),
-                                         resolved_html.get(stem, []), page_alts, links, language)
+                                         resolved_html.get(stem, []), page_alts, links, language,
+                                         captions.get(stem, []))
         for key, n in counts.items():
             totals[key] = totals.get(key, 0) + n
         written.append(os.path.join(target.output_dir, name))
         pages += 1
     if pages:
         say(f"{target.name}: {pages} HTML page(s) remediated: "
+            f"{totals.get('captions', 0)} table caption(s) added, "
             f"{totals.get('replaced', 0)} link(s) given their replacement address, "
             f"lang set on {totals.get('language', 0)}.")
+        if totals.get("captions_left"):
+            say(f"{target.name}: {totals['captions_left']} table description(s) left out of "
+                "the copies: each joins a label that's a paragraph beside its table, which "
+                "the copy doesn't move into the table.")
     others = sorted(f for f in os.listdir(base) if f.endswith((".md", ".adoc"))
                     and not f.startswith("."))
     say(f"{target.name}: {len(docs)} Word file(s) and {pages} HTML page(s) remediated: "
@@ -2536,7 +2543,7 @@ def main():
     try:
         collected = {key: os.path.join(work, key) for key in
                      ("captions_missing", "alt_missing", "spacers",
-                      "media_unresolved", "bare_links")}
+                      "media_unresolved", "bare_links", "captions_applied")}
         env = dict(os.environ)
         env.update({
             # For html-source.lua: a page's <title> that repeats the
@@ -2545,6 +2552,7 @@ def main():
             "TABLE_CAPTIONS_MISSING": collected["captions_missing"],
             "IMAGE_ALT_MISSING": collected["alt_missing"],
             "BARE_LINKS_FOUND": collected["bare_links"],
+            "CAPTIONS_APPLIED": collected["captions_applied"],
             "SPACER_LOG": collected["spacers"],
             "MEDIA_UNRESOLVED": collected["media_unresolved"],
             "MEDIA_STRICT": "1" if first["media.strict"] else "",

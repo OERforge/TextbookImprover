@@ -42,7 +42,7 @@ Restyling removes the `Title` paragraphs, so the converted pages take their titl
 
 ## A remediated copy of a Word file
 
-`remediate.py` writes the decisions made about a Word source, or a hand-maintained HTML page, back into a copy of the file, so the author can go on working in their own file from an accessible one. What an HTML page gets is described under [Source](formats.md#source); what follows is Word's. A target with `format: source` does the same in a run of `convert.py` ([Source](formats.md#source)). It edits the file's XML as text, changing only what it names; every part it doesn't change is copied byte for byte.
+`remediate.py` writes the decisions made about a Word source, or a hand-maintained HTML page, back into a copy of the file, so the author can go on working in their own file from an accessible one. What an HTML page gets is described under [Source](formats.md#source), apart from table captions, which only a run of `convert.py` writes, since they depend on which table the filter gave each description to; what follows is Word's. A target with `format: source` does the same in a run of `convert.py` ([Source](formats.md#source)). It edits the file's XML as text, changing only what it names; every part it doesn't change is copied byte for byte.
 
 ```sh
 table-headers.py *.docx --sidecar table-headers.csv --new new.csv \

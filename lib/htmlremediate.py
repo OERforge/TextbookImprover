@@ -12,6 +12,13 @@ saved from a platform is better fixed in the platform.
   path, extension aside; `[decorative]` gives alt="".
 - **Links.** From the bare-links sidecar, a bare link's title, and its
   replacement address, which replaces both the address and the text.
+- **Captions.** A description from the table-captions sidecar, for a table
+  with no label anywhere, as its <caption>. The filter records which table
+  it gave each description to, by position (the sidecar's key names the
+  table as the filter sees the page, which can differ from the file), and
+  the copy finds that table as it does for headers. A description joined
+  to a label that's a paragraph beside the table isn't written: that
+  would mean moving the author's paragraph into the table.
 - **Language.** The book's language as lang on <html>, when it has none.
 
 Copyright 2026 Robert Szarka
@@ -121,6 +128,41 @@ def remediate_tables(page, resolved):
     return page, counts
 
 
+def remediate_captions(page, applied, resolved):
+    """applied: [(position, how, description)] the filter recorded for the
+    page; resolved: the pre-pass's entries for it, which give each table's
+    shape. Returns (page, counts)."""
+    counts = {"captions": 0, "captions_left": 0}
+    shapes = {e.get("index"): e for e in resolved}
+    spans = table_spans(page)
+    edits = []
+    for position, how, description in applied:
+        if how != "position":
+            counts["captions_left"] += 1
+            continue
+        entry = shapes.get(position)
+        if entry is None or position >= len(spans):
+            counts["captions_left"] += 1
+            continue
+        start, end = spans[position]
+        table = page[start:end]
+        rows = _own_rows(table)
+        first = CELL.search(table[rows[0][0]:rows[0][1]]) if rows else None
+        opening = TABLE_TAG.match(table)
+        if len(rows) != entry.get("rows") or not opening \
+                or re.match(r"\s*<caption\b", table[opening.end():], re.I) \
+                or (entry.get("first") and not (
+                    first and _text(first.group(3)).startswith(entry["first"][:30]))):
+            counts["captions_left"] += 1
+            continue
+        at = start + opening.end()
+        edits.append((at, "<caption>%s</caption>" % htmllib.escape(description, quote=False)))
+        counts["captions"] += 1
+    for at, text in sorted(edits, reverse=True):
+        page = page[:at] + text + page[at:]
+    return page, counts
+
+
 def remediate_images(page, alts):
     """alts: {path without extension: alt, or None for decorative}.
     Returns (page, counts)."""
@@ -200,6 +242,25 @@ def alt_rows(path):
     return found
 
 
+def caption_rows(path):
+    """{page: [(position, how, description)]} from the file the filter
+    writes (CAPTIONS_APPLIED), each table once."""
+    import csv
+    found, seen = {}, set()
+    if not path or not os.path.exists(path):
+        return found
+    with open(path, encoding="utf-8", newline="") as fh:
+        for row in csv.reader(fh):
+            if len(row) < 5 or not row[1].strip().isdigit():
+                continue
+            stem, position = row[0], int(row[1])
+            if (stem, position) in seen:
+                continue
+            seen.add((stem, position))
+            found.setdefault(stem, []).append((position, row[2], row[4]))
+    return found
+
+
 def link_rows(path):
     """{address: (replacement, title)} from a bare-links sidecar."""
     import csv
@@ -215,7 +276,8 @@ def link_rows(path):
     return found
 
 
-def remediate(source, destination, tables=None, alts=None, links=None, language=None):
+def remediate(source, destination, tables=None, alts=None, links=None, language=None,
+              captions=None):
     """Write destination, a copy of source with the decisions applied.
     Returns a dict of counts."""
     with open(source, "rb") as fh:
@@ -223,6 +285,8 @@ def remediate(source, destination, tables=None, alts=None, links=None, language=
     page = raw.decode("utf-8")
     counts = {}
     new, found = remediate_tables(page, tables or [])
+    counts.update(found)
+    new, found = remediate_captions(new, captions or [], tables or [])
     counts.update(found)
     new, found = remediate_images(new, alts or {})
     counts.update(found)

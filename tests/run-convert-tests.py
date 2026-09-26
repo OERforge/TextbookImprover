@@ -1932,7 +1932,8 @@ def case_source_target(work):
                  "<body>\n<h1>Scores</h1>\n<!-- the author's comment -->\n<table>\n"
                  "  <tr><td>Name</td><td>Score</td></tr>\n  <tr><td>Ana</td><td>90</td></tr>\n"
                  "  <tr><td>Ben</td><td>85</td></tr>\n  <tr><td>Cy</td><td>70</td></tr>\n</table>\n"
-                 "<p><img src=\"img/bar.png\"></p>\n<p>See <a href=\"https://doi.org/10.1000/xyz123\">"
+                 "<p><img src=\"img/bar.png\"></p>\n<table>\n  <tr><td>Term</td><td>Count</td></tr>\n"
+                 "  <tr><td>Fall</td><td>12</td></tr>\n</table>\n<p>Table 1.2</p>\n<p>More text.</p>\n<p>See <a href=\"https://doi.org/10.1000/xyz123\">"
                  "https://doi.org/10.1000/xyz123</a>.</p>\n</body>\n</html>\n")
     digest = lambda n: hashlib.sha256(open(os.path.join(work, n), "rb").read()).hexdigest()
     before = {n: digest(n) for n in ("ch1.docx", "ch2.docx", "page.html")}
@@ -1964,6 +1965,8 @@ def case_source_target(work):
         rid = re.search(r'r:embed="([^"]+)"', z.read("word/document.xml").decode()).group(1)
     with open(os.path.join(work, "image-alt.csv"), "w", encoding="utf-8") as fh:
         fh.write(f"Image,Alt\nch1/media/{rid}.png,A navy rectangle\nimg/bar.png,A bar chart of the scores\n")
+    with open(os.path.join(work, "table-captions.csv"), "w", encoding="utf-8") as fh:
+        fh.write("Label,Description\npage#table-1,Scores by student\nTable 1.2,Enrollment by term\n")
     with open(os.path.join(work, "bare-links.csv"), "w", encoding="utf-8") as fh:
         fh.write("URL,Replacement,Title\nhttps://doi.org/10.1000/xyz123,https://doi.org/10/abcd,The source study\n")
     second = run()
@@ -2005,6 +2008,11 @@ def case_source_target(work):
         ("two source targets that would write the same copies are warned about, and one alone isn't",
          lambda: "WARNING: fixed and again both have format source" in fourth.stderr
          and "both have format source" not in third.stderr),
+        ("a table with no label gets its sidecar description as its caption, in the copy",
+         lambda: "<table><caption>Scores by student</caption>" in page),
+        ("a description joined to a label paragraph beside its table is left out, and counted",
+         lambda: "Enrollment by term" not in page and "<p>Table 1.2</p>" in page
+         and "1 table description(s) left out of the copies" in second.stderr),
         ("a Markdown source is named as left out",
          lambda: "1 Markdown or AsciiDoc source(s) left out" in third.stderr),
     ]

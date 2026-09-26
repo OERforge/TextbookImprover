@@ -350,6 +350,7 @@ Not workarounds the pipeline carries: losses it reports (`fidelity.csv`) and doe
 
 - **A list inside a block quote.** The writer doesn't indent a list inside a quote at all, so Word shows it outside; and the reader's rule that makes an indented paragraph a quote explicitly excludes numbered paragraphs (`not (numbered pPr)` in `paragraphStyleToTransform`). Two changes: the writer indents a list by its quote's depth; the reader compares a numbered paragraph's indent with its numbering level's own, not its style's, which needs care, since lists are indented by design. A crude search of the tracker (2026-09-25) found no issue.
 - **A figure with no caption.** The writer styles its paragraph `Figure`; the reader doesn't read that style back as a figure.
+- **The Markdown writer writes an example list as a numbered list** (measured, Pandoc 3.11). `(@)` items come out `(1)`, `(2)`, and a later example list `(3)`, which reads back as ordinary numbered lists starting where written, style `Decimal`, not `Example`: the numbers shown survive, the running numbering doesn't, and a reference to a labeled example, `(@good)`, is already written as the text `(1)`. Writing `(@)` for an `Example`-style list would round-trip. The Markdown target reports it in `fidelity.csv`.
 
 ## Upstream
 

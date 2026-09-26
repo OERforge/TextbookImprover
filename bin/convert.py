@@ -1949,10 +1949,15 @@ def render_markdown(target, pages, base, work, project, env, losses=None):
             # reader can't read back (a row span, raw HTML, an anchor as
             # it writes one) the filter writes as AsciiDoc it can; see
             # markdown-source.lua.
+            found = os.path.join(work, f"fidelity-{target.name}-{stem}.tsv")
+            if os.path.exists(found):
+                os.remove(found)
             run(["pandoc", "-f", "json", "-t", "asciidoc", page, "-o", out,
                  "--standalone", "--wrap=none",
                  "--lua-filter=" + TARGET_FILTER,
-                 "--lua-filter=" + MARKDOWN_FILTER], env=env, cwd=base)
+                 "--lua-filter=" + MARKDOWN_FILTER], env=dict(env, FIDELITY_FOUND=found),
+                cwd=base)
+            collect_losses(found, target.name, stem, losses)
             with open(out, encoding="utf-8") as fh:
                 text = fh.read()
             fixed = noheader(text)
@@ -1967,12 +1972,16 @@ def render_markdown(target, pages, base, work, project, env, losses=None):
         # which the reader keeps whole and the filter reads back into
         # the table or figure it was; plain raw HTML would come back one
         # tag at a time.
+        found = os.path.join(work, f"fidelity-{target.name}-{stem}.tsv")
+        if os.path.exists(found):
+            os.remove(found)
         run(["pandoc", "-f", "json",
              "-t", "markdown-simple_tables-multiline_tables-raw_html",
              page, "-o", out,
              "--standalone", "--wrap=none", "--markdown-headings=atx",
              "--lua-filter=" + TARGET_FILTER,
-             "--lua-filter=" + MARKDOWN_FILTER], env=env, cwd=base)
+             "--lua-filter=" + MARKDOWN_FILTER], env=dict(env, FIDELITY_FOUND=found), cwd=base)
+        collect_losses(found, target.name, stem, losses)
         written.append(out)
     if word:
         say(f"{target.name}: {len(written)} Word file(s), compatibility mode "
@@ -2422,6 +2431,38 @@ def write_report(rows_file, report, header, noun, sidecar=None, hint=None):
     return rows
 
 
+# What the Markdown and AsciiDoc targets can't write as it was, from the
+# notes markdown-source.lua makes as it writes them. The Word target's are
+# docxtarget.LOSSES.
+SOURCE_TARGET_LOSSES = {
+    "example-list": "an example list is written as a numbered list: read back, "
+                    "its numbering no longer runs on through the document",
+    "header-column-dropped": "a table's header column is written without it: "
+                             "no marker class is set for this combination",
+    "footnote-paragraphs": "a footnote of several paragraphs becomes one "
+                           "(an AsciiDoc footnote is one paragraph)",
+    "math-in-definition-list": "display math in a definition list is written inline",
+    "address-colons": "an address's \"::\" is written percent-encoded, which a "
+                      "server reads as the same address",
+    "title-quotes": "a link title's double quotes become typographic ones",
+    "alt-quotes": "an alt text's double quotes become typographic ones",
+    "root-index": "a root with an index is written as Asciidoctor reads it; "
+                  "Pandoc's reader cuts the formula short",
+}
+FIDELITY_KINDS = dict(docxtarget.LOSSES, **SOURCE_TARGET_LOSSES)
+
+
+def collect_losses(path, target, stem, losses):
+    """The rows the filter wrote for one page, added to losses."""
+    if losses is None or not os.path.exists(path):
+        return
+    with open(path, encoding="utf-8") as fh:
+        for line in fh:
+            kind, _, detail = line.rstrip("\n").partition("\t")
+            if kind:
+                losses.append((target, stem, kind, detail))
+
+
 def write_fidelity(losses, report):
     """What each target's files can't carry, one row per page and kind,
     and a line per target on stderr; or no report when there's nothing.
@@ -2436,7 +2477,7 @@ def write_fidelity(losses, report):
         w = csv.writer(fh, lineterminator="\n")
         w.writerow(["Target", "Page", "Loss", "Detail", "What happens"])
         for target, page, kind, detail in losses:
-            w.writerow([target, page, kind, detail, docxtarget.LOSSES[kind]])
+            w.writerow([target, page, kind, detail, FIDELITY_KINDS.get(kind, "")])
     for target in sorted({row[0] for row in losses}):
         kinds = Counter(kind for t, _, kind, _ in losses if t == target)
         say(f"{target}: {sum(kinds.values())} thing(s) its files can't carry "

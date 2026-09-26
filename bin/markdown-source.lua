@@ -33,6 +33,20 @@
 -- You should have received a copy of the GNU General Public License
 -- along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+-- What a page loses in the writing, for the run's fidelity report
+-- (fidelity.csv): convert.py names a file per page in FIDELITY_FOUND, and
+-- each note on the terminal below is a row there too, its kind and a
+-- detail, separated by a tab.
+local FIDELITY_FILE = os.getenv('FIDELITY_FOUND')
+local function lost(kind, detail)
+  if not FIDELITY_FILE or FIDELITY_FILE == '' then return end
+  local fh = io.open(FIDELITY_FILE, 'a')
+  if fh then
+    fh:write(kind .. '\t' .. (tostring(detail or ''):gsub('[\t\n]', ' ')) .. '\n')
+    fh:close()
+  end
+end
+
 local MARKERS = {}          -- value -> class, the reverse of the filter's
 for pair in (os.getenv('TABLE_MARKERS') or 'matrix=both,row-headers=first-column')
     :gmatch('[^,]+') do
@@ -142,6 +156,7 @@ function Div(div)
         -- the table is written without one and reported.
         local class = column and MARKERS[headers]
         if column and not class then
+          lost('header-column-dropped', headers)
           io.stderr:write(('markdown-source: no marker class for %s; '
             .. 'the table is written without its header column\n')
             :format(headers))
@@ -617,6 +632,7 @@ function Note(note)
   if not ADOC then return nil end
   local words = inlines_of(note.content)
   if #note.content > 1 then
+    lost('footnote-paragraphs', pandoc.utils.stringify(words):sub(1, 60))
     io.stderr:write(('markdown-source: a footnote of %d paragraphs is written '
       .. 'as one: %s\n'):format(#note.content,
         pandoc.utils.stringify(words):sub(1, 60)))
@@ -657,6 +673,7 @@ function DefinitionList(list)
     end
   end })
   if count == 0 then return nil end
+  lost('math-in-definition-list', tostring(count) .. ' formula(s)')
   io.stderr:write(('markdown-source: %d display formula(s) in a definition '
     .. 'list written inline\n'):format(count))
   return list
@@ -707,6 +724,7 @@ function Link(link)
     return pandoc.RawInline('asciidoc', link.target)
   end
   if ADOC and link.target:find('::', 1, true) then
+    lost('address-colons', link.target)
     io.stderr:write(('markdown-source: %s written with %%3A for its "::"\n')
       :format(link.target))
     link.target = link.target:gsub('::', '%%3A%%3A')
@@ -725,6 +743,7 @@ function Link(link)
         open = not open
         return open and '\226\128\157' or '\226\128\156'
       end)
+      lost('title-quotes', title)
       io.stderr:write(('markdown-source: a link title with double quotes is '
         .. 'written with typographic ones: %s\n'):format(title))
     end
@@ -782,6 +801,7 @@ function adoc_image(img)
         open = not open
         return open and '\226\128\157' or '\226\128\156'
       end)
+      lost('alt-quotes', alt)
       io.stderr:write(('markdown-source: an alt with double quotes is written '
         .. 'with typographic ones: %s\n'):format(alt))
     end
@@ -864,6 +884,7 @@ function inline_tex(text)
   if text:match('\\$') then text = text .. ' ' end
   if not text:find('[%[%]]') then return text end
   if text:find('\\sqrt%s*%[') then
+    lost('root-index', text)
     io.stderr:write(('markdown-source: a root index in brackets is written '
       .. 'for Asciidoctor, not Pandoc\'s reader: %s\n'):format(text))
     return (text:gsub('%]', '\\]'))
@@ -983,6 +1004,16 @@ function Pandoc(doc)
     h.level = h.level - (lowest - 1)
     return h
   end })
+end
+
+-- An example list: Pandoc's Markdown writer writes one as a numbered
+-- list, (1), (2), which reads back as a numbered list, not examples, so
+-- their numbering no longer runs on and a reference to one by label is
+-- already a number. Reported, not changed.
+function OrderedList(list)
+  if not ADOC and list.listAttributes.style == 'Example' then
+    lost('example-list', pandoc.utils.stringify(list.content[1] or {}):sub(1, 60))
+  end
 end
 
 -- For AsciiDoc, two passes: the tables that go as HTML, from the text as

@@ -2177,6 +2177,29 @@ def case_markdown_source(work):
     ]
 
 
+def case_fidelity_writers(work):
+    """fidelity.csv for markdown and asciidoc targets: what the writing
+    changes, as each run also says on the terminal."""
+    os.makedirs(work, exist_ok=True)
+    with open(os.path.join(work, "ch.md"), "w", encoding="utf-8") as fh:
+        fh.write("---\ntitle: Chapter\nlang: en\n---\n\n# Chapter\n\n(@) An example.\n(@) Another.\n\n"
+                 "A cube root, $\\sqrt[3]{x}$.\n")
+    with open(os.path.join(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
+        fh.write("targets:\n  md:\n    format: markdown\n  adoc:\n    format: asciidoc\n")
+    run = subprocess.run([sys.executable, "-B", os.path.join(BIN, "convert.py")],
+                         cwd=work, capture_output=True, text=True)
+    report = read(work, "fidelity.csv") if exists(work, "fidelity.csv") else ""
+    return [
+        ("a Markdown target reports an example list, which comes back a numbered list",
+         lambda: "md,ch,example-list,An example." in report),
+        ("an AsciiDoc target reports a root with an index, which Pandoc's reader cuts short",
+         lambda: "adoc,ch,root-index," in report),
+        ("and each target says so on the terminal",
+         lambda: "md: 1 thing(s) its files can't carry" in run.stderr
+         and "adoc: 1 thing(s) its files can't carry" in run.stderr),
+    ]
+
+
 def case_remediate_docx(work):
     """A remediated copy of a Word file: the pre-pass's table declarations,
     and alt text from the image-alt sidecar, written into the author's own
@@ -2908,6 +2931,7 @@ CASES = [
     ("format: source", case_source_target),
     ("word.tracked_deletions and word.headings", case_word_repairs),
     ("format: source for Markdown", case_markdown_source),
+    ("fidelity.csv for markdown and asciidoc targets", case_fidelity_writers),
     ("a hand-written page", case_hand_written),
     ("several targets", case_targets),
     ("arguments passed to the packager", case_passthrough),

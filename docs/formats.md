@@ -128,11 +128,11 @@ The `.epub` is itself the package: there's nothing further to package it in.
 
 ### Markdown
 
-A directory of `.md` files whose media keep the author's names, written to be a source again. `merge: groups` makes one file per top-level group of the book's contents instead of one per page. It's packaged as the directory.
+A directory of `.md` files whose media keep the author's names, written to be a source again. `merge: groups` makes one file per top-level group of the book's contents instead of one per page. It's packaged as the directory. Pandoc's Markdown writer writes an example list as a numbered list, which reads back as one, so the examples' numbering no longer runs on through the document; the run reports each in `fidelity.csv`.
 
 ### AsciiDoc
 
-A directory of `.adoc` files whose media keep the author's names, written to be a source again, as for Markdown. `merge: groups` works the same way. It's packaged as the directory. What the target writes itself, and the few things it changes, are in [AsciiDoc as a target](asciidoc.md#asciidoc-as-a-target).
+A directory of `.adoc` files whose media keep the author's names, written to be a source again, as for Markdown. `merge: groups` works the same way. It's packaged as the directory. What the target writes itself, and the few things it changes, are in [AsciiDoc as a target](asciidoc.md#asciidoc-as-a-target); each change is reported in `fidelity.csv` as well as on the terminal.
 
 ### Word output
 

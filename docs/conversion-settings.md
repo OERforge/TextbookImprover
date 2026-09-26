@@ -212,7 +212,7 @@ Images with no alt text, or with alt text over the length limit.
 
 **`reports.fidelity`**—`path`; default `fidelity.csv`
 
-What a target's files can't carry, one row per page and kind of loss, known before writing: for a docx target, a list inside a quotation, a figure with no caption, a layout table, a table's per-cell headers, and a code block's language when its name can't go in a bookmark. Nothing to fix in the book; it says what reading the files back won't restore.
+What a target's files can't carry, one row per page and kind of loss: for a docx target, a list inside a quotation, a figure with no caption, a layout table, a table's per-cell headers, and a code block's language when its name can't go in a bookmark; for markdown and asciidoc targets, what the writing changes, as each run also says on the terminal (an example list, a footnote of several paragraphs in AsciiDoc, a root with an index). Nothing to fix in the book; it says what reading the files back won't restore.
 
 **`reports.bare_links_new`**—`path`; default `bare-links-new.csv`
 

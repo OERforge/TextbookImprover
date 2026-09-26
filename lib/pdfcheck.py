@@ -26,6 +26,7 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
+import json
 import os
 import re
 import subprocess
@@ -79,9 +80,16 @@ def _xmp_raw(reader, key):
     return m.group(1).strip() if m else ""
 
 
-def _walk_structure(node, counts, depth=0, seen=0):
-    """Count structure elements by type, a bounded walk."""
-    if seen > 20000 or depth > 200:
+# How many structure elements the walk visits. A book LaTeX tags runs to
+# tens of thousands (MathML alone is thousands of elements per chapter),
+# and every Figure has to be reached for its /Alt to be checked.
+WALK_LIMIT = 500000
+
+
+def _walk_structure(node, counts, depth=0, seen=0, alts=None):
+    """Count structure elements by type, a bounded walk, and collect
+    each Figure's /Alt in alts."""
+    if seen > WALK_LIMIT or depth > 200:
         return seen
     try:
         obj = node.get_object() if hasattr(node, "get_object") else node
@@ -93,6 +101,8 @@ def _walk_structure(node, counts, depth=0, seen=0):
     if kind is not None:
         counts[_text(kind).lstrip("/")] += 1
         seen += 1
+        if alts is not None and _text(kind) == "/Figure":
+            alts.append(_text(obj.get("/Alt")) if "/Alt" in obj else None)
     kids = obj.get("/K")
     if kids is None:
         return seen
@@ -105,7 +115,7 @@ def _walk_structure(node, counts, depth=0, seen=0):
     for kid in kids:
         if isinstance(kid, int):
             continue                      # a marked-content id
-        seen = _walk_structure(kid, counts, depth + 1, seen)
+        seen = _walk_structure(kid, counts, depth + 1, seen, alts)
     return seen
 
 
@@ -200,12 +210,20 @@ def inspect(path):
     # structure
     tree = root.get("/StructTreeRoot") if isinstance(root, dict) else None
     counts = Counter()
+    alts = []
     if tree is not None:
-        _walk_structure(tree, counts)
+        _walk_structure(tree, counts, alts=alts)
     facts["structure-tree"] = tree is not None
     facts["tags"] = dict(counts.most_common(12))
     facts["tag-total"] = sum(counts.values())
-    facts["tag-total-capped"] = facts["tag-total"] >= 20000
+    facts["tag-total-capped"] = facts["tag-total"] >= WALK_LIMIT
+    # LaTeX's tagging code gives an image with no alt text its file name
+    # as /Alt (latex-lab-testphase-graphic.sty, the alt-text-missing
+    # warning), which a validator accepts and which describes nothing.
+    for alt in alts:
+        if alt is not None and FILE_NAME.search(alt.strip()):
+            out.append(Finding(name, "pdf-figure-alt-is-file-name", alt,
+                               file=name, kind="pdf"))
     try:
         depth, count = _outline_depth(reader.outline)
     except Exception:
@@ -341,23 +359,58 @@ def facts_lines(facts):
     return lines
 
 
+FILE_NAME = re.compile(r"(^|[/\\])[^/\\\s]+\.(png|jpe?g|gif|svg|pdf|eps|"
+                       r"tiff?|webp|bmp)$", re.I)
+
+
+def settle_claims(found, verapdf_found):
+    """The findings once veraPDF has run: its verdict replaces the note
+    that the file's claims are unverified. No failed rule means the
+    claims held for every profile veraPDF applied; a failed rule is a
+    finding of its own. If veraPDF couldn't run, the note stays."""
+    if any(f.check == "verapdf:failed" for f in verapdf_found):
+        return found + verapdf_found
+    return [f for f in found if f.check != "pdf-claims-unverified"] \
+        + verapdf_found
+
+
 def run_verapdf(command, path):
-    """veraPDF's failed rules as findings, when it is installed. Its
-    profile is chosen by the file's own claim, PDF/UA-2 if it makes one,
-    else PDF/UA-1, since a PDF that claims nothing is still judged by
-    the accessibility profile."""
+    """veraPDF's failed rules as findings, when it is installed, one per
+    rule and profile. The profiles are veraPDF's own choice from what the
+    file claims: given PDF/UA-2 and PDF/A-4f, veraPDF 1.30 applies PDF/UA-2
+    with Tagged PDF, PDF/A-4f, and both WTPDF 1.0 profiles (measured).
+    Read from its JSON report: its text format names the file and the
+    profile on a FAIL line, never the rule."""
     name = os.path.basename(path)
     try:
-        result = subprocess.run(command + ["--format", "text", path],
-                                capture_output=True, text=True, timeout=600)
-    except (OSError, subprocess.TimeoutExpired) as exc:
+        result = subprocess.run(command + ["--format", "json",
+                                           "--maxfailuresdisplayed", "1",
+                                           path],
+                                capture_output=True, text=True, timeout=1800)
+        report = json.loads(result.stdout)
+    except (OSError, subprocess.TimeoutExpired, ValueError) as exc:
         return [Finding(name, "verapdf:failed", str(exc)[:200], file=name,
-                        kind="pdf")]
+                        kind="pdf", tool="verapdf")]
     out = []
-    for line in result.stdout.splitlines():
-        m = re.match(r"\s*FAIL\s+(\S+)\s*(.*)", line)
-        if m:
-            out.append(Finding(name, "verapdf:" + m.group(1),
-                               m.group(2).strip()[:200], file=name,
-                               kind="pdf", tool="verapdf"))
+    for job in report.get("report", {}).get("jobs", []):
+        results = job.get("validationResult") or []
+        if isinstance(results, dict):
+            results = [results]
+        if not results:
+            out.append(Finding(name, "verapdf:failed",
+                               str(job.get("taskException")
+                                   or "no validation result")[:200],
+                               file=name, kind="pdf", tool="verapdf"))
+        for profile in results:
+            for rule in profile.get("details", {}).get("ruleSummaries", []):
+                spec = rule.get("specification", "")
+                clause = rule.get("clause", "")
+                test = rule.get("testNumber", "")
+                detail = (f"{rule.get('description', '').strip()} "
+                          f"({rule.get('failedChecks', 0)} failed check(s); "
+                          f"{profile.get('profileName', '')})")
+                out.append(Finding(name, f"verapdf:{clause}-{test}",
+                                   detail[:400], file=name, kind="pdf",
+                                   standard=f"{spec} clause {clause}",
+                                   tool="verapdf"))
     return out

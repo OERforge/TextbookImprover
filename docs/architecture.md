@@ -47,8 +47,10 @@ on another `bin/` script.
 | `split-pages.py` | Cuts filtered intermediates into one page per heading, names the pieces, rewrites links between them and links into them from the book's other pages, and records where each came from. |
 | `page.css` | The rules every page carries beyond Pandoc's own stylesheet: caption contrast, real table display, the scroll wrapper. |
 | `read-conversion-config.py` | Resolves `conversion.yaml` into settings `convert.py` reads. |
-| `check-output.py` | Checks the pages and EPUBs a run wrote for dead links, missing alt text, skipped headings, and the like; the command line over `lib/outputcheck.py`. |
+| `check-output.py` | Checks the pages, EPUBs, and PDFs a run wrote for dead links, missing alt text, skipped headings, and the like; the command line over `lib/outputcheck.py`. |
 | `build-epub.py` | Assembles the filtered intermediates into one EPUB3, ordered by `project.contents`, with accessibility claims computed from the build. |
+| `build-pdf.py` | Assembles the same way into one tagged PDF through Pandoc's LaTeX writer and LuaLaTeX: roles as division commands, the metadata file's YAML for the writer, and the macros `pdf-target.lua` uses. |
+| `pdf-target.lua` | What the LaTeX writer can't be told: a declared header column as row headers, a decorative image as an artifact, each link's `/Contents`. |
 | `schema-conversion.yaml` | Declares every conversion setting, its type, default, and meaning. |
 
 **`bin/` — auditing**
@@ -76,6 +78,7 @@ and redistributed under their own terms. See the README there.
 | `oerconfig.py` | Loads, merges, validates, and writes configuration. Both halves use it; neither uses the other. |
 | `tablecensus.py` | Reads the tables in a Word document and says what shape they're: the classification, the guess, and the sidecar key. Used by the pre-pass and by `table-census.py`. |
 | `outputcheck.py` | The output checks, in nothing but the standard library. |
+| `bookassembly.py` | Reads the filtered intermediates and assembles them into one Pandoc document by the contents tree, with every id prefixed by its page; `build-epub.py` and `build-pdf.py` share it. |
 | `bookcontents.py` | Reads `project.contents` into a tree, and guesses one from the filenames when it's absent. The packager builds the cartridge organization from it; `build-epub.py` builds the table of contents from the same tree. |
 | `schema-project.yaml` | Declares the settings that describe the book itself, which both halves read. |
 

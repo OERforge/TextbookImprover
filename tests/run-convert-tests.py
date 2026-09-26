@@ -1346,35 +1346,67 @@ def case_asciidoc_layout(work):
     ]
 
 
-def case_not_implemented(work):
-    """A pdf target says it's not implemented and is skipped, while a
-    docx target beside it is written; with nothing else to build, the
-    run stops and says why."""
+def case_pdf_without_latex(work):
+    """A pdf target on a machine without LuaLaTeX: the HTML is written,
+    and the run stops saying what's missing and where to read about it,
+    rather than a bare exit code. (pdf was NOT YET IMPLEMENTED until it
+    was built; no format is now, so that path has no case.)"""
     os.makedirs(work)
     with open(os.path.join(work, "ch.md"), "w") as fh:
         fh.write("# One\n\nText.\n")
     with open(os.path.join(work, "conversion.yaml"), "w") as fh:
-        fh.write("targets:\n  web:\n    format: html\n  print:\n    format: pdf\n"
-                 "  word:\n    format: docx\n")
-    mixed = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quiet"],
-                           cwd=work, capture_output=True, text=True,
-                           stdin=subprocess.DEVNULL)
-    only = work + "-only"
-    os.makedirs(only)
-    shutil.copy(os.path.join(work, "ch.md"), only)
-    with open(os.path.join(only, "conversion.yaml"), "w") as fh:
-        fh.write("targets:\n  print:\n    format: pdf\n")
-    alone = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quiet"],
-                           cwd=only, capture_output=True, text=True,
-                           stdin=subprocess.DEVNULL)
+        fh.write("targets:\n  web:\n    format: html\n  print:\n    format: pdf\n")
+    # A path holding Pandoc and Python and nothing else, so LuaLaTeX
+    # can't be found wherever it's installed.
+    tools = work + "-bin"
+    os.makedirs(tools)
+    for program in ("pandoc", "python3", "file"):
+        found = shutil.which(program)
+        if found:
+            os.symlink(found, os.path.join(tools, program))
+    result = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quiet"],
+                            cwd=work, capture_output=True, text=True,
+                            stdin=subprocess.DEVNULL,
+                            env=dict(os.environ, PATH=tools))
+    said = result.stdout + result.stderr
     return [
-        ("a pdf target is named NOT YET IMPLEMENTED and skipped; a docx target is written",
-         lambda: mixed.stderr.count("NOT YET IMPLEMENTED") == 1
-         and exists(work, "web", "ch.html") and exists(work, "word", "ch.docx")
-         and not exists(work, "print")),
-        ("a book with only such targets stops and says why",
-         lambda: alone.returncode != 0
-         and "NOT YET IMPLEMENTED" in alone.stdout + alone.stderr),
+        ("without LuaLaTeX, the HTML is written and the run stops",
+         lambda: exists(work, "web", "ch.html") and result.returncode != 0),
+        ("and says LuaLaTeX is missing and where to read about it",
+         lambda: "lualatex is not on the path" in said
+         and "installation" in said),
+    ]
+
+
+def case_pdf_with_old_latex(work):
+    """A LuaLaTeX whose LaTeX is older than the tagging code needs: the run
+    stops saying which release it found and which it needs, before LaTeX
+    fails on a test-phase package it can't find. The LuaLaTeX here is a
+    script that answers the release probe and nothing else."""
+    os.makedirs(work)
+    with open(os.path.join(work, "ch.md"), "w") as fh:
+        fh.write("# One\n\nText.\n")
+    with open(os.path.join(work, "conversion.yaml"), "w") as fh:
+        fh.write("targets:\n  web:\n    format: html\n  print:\n    format: pdf\n")
+    tools = work + "-bin"
+    os.makedirs(tools)
+    for program in ("pandoc", "python3", "file"):
+        found = shutil.which(program)
+        if found:
+            os.symlink(found, os.path.join(tools, program))
+    fake = os.path.join(tools, "lualatex")
+    with open(fake, "w") as fh:
+        fh.write("#!/bin/sh\necho 'OERFMT:2023-11-01'\n")
+    os.chmod(fake, 0o755)
+    result = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quiet"],
+                            cwd=work, capture_output=True, text=True,
+                            stdin=subprocess.DEVNULL,
+                            env=dict(os.environ, PATH=tools))
+    said = result.stdout + result.stderr
+    return [
+        ("an old LaTeX stops the PDF, naming the release found and the one needed",
+         lambda: result.returncode != 0 and "2023-11-01" in said
+         and "2025-11-01" in said and not exists(work, "print")),
     ]
 
 
@@ -2943,7 +2975,8 @@ CASES = [
     ("a plain zip of a book's files", case_zip),
     ("formulas as MathJax 2 drew them", case_mathjax2),
     ("AsciiDoc layout attributes", case_asciidoc_layout),
-    ("formats not yet implemented", case_not_implemented),
+    ("a pdf target without LuaLaTeX", case_pdf_without_latex),
+    ("a pdf target with a LaTeX too old to tag", case_pdf_with_old_latex),
     ("ids with spaces in HTML sources", case_html_ids),
     ("decorative images and frame sizes in HTML sources", case_html_images),
     ("AsciiDoc to Markdown and back", case_asciidoc_markdown),

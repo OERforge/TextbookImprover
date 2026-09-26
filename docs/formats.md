@@ -7,19 +7,19 @@ Every source format the pipeline reads, the ways a book in that format can arriv
 - **TESTED**: the test suite covers the path, and real books have gone through it and been checked: the [output check](checking.md) on every run, epubcheck for an EPUB, and `util/compare-output.py` for a round trip.
 - **NEEDS MORE TESTING**: covered by the suite or by one book, or a real book showed a problem that isn't fixed yet.
 - **NOT TESTED**: the code allows it, but neither a test nor a real book has taken the path.
-- **NOT YET IMPLEMENTED**: an output the configuration names but nothing produces yet. A target declaring it is skipped with a warning.
+- **NOT YET IMPLEMENTED**: an output the configuration names but nothing produces yet. A target declaring it is skipped with a warning. None is, now.
 - **Not available**: an output no one has planned.
 
 ## At a glance
 
 | Input | HTML | EPUB | Markdown | AsciiDoc | PDF | Word | Round trip to itself |
 |---|---|---|---|---|---|---|---|
-| Word (`.docx`) | TESTED | TESTED | TESTED | TESTED | NOT YET IMPLEMENTED | TESTED | TESTED, with losses (see [Word output](#word-output)) |
-| Markdown (`.md`) | TESTED | TESTED | TESTED | TESTED | NOT YET IMPLEMENTED | TESTED | TESTED |
-| HTML (`.html`) | TESTED | TESTED | TESTED | TESTED | NOT YET IMPLEMENTED | TESTED | TESTED |
-| AsciiDoc (`.adoc`) | TESTED | TESTED | TESTED | TESTED | NOT YET IMPLEMENTED | TESTED | TESTED |
+| Word (`.docx`) | TESTED | TESTED | TESTED | TESTED | NOT TESTED | TESTED | TESTED, with losses (see [Word output](#word-output)) |
+| Markdown (`.md`) | TESTED | TESTED | TESTED | TESTED | NEEDS MORE TESTING | TESTED | TESTED |
+| HTML (`.html`) | TESTED | TESTED | TESTED | TESTED | NOT TESTED | TESTED | TESTED |
+| AsciiDoc (`.adoc`) | TESTED | TESTED | TESTED | TESTED | NOT TESTED | TESTED | TESTED |
 
-PDF output is NOT YET IMPLEMENTED ([on the roadmap](../ROADMAP.md)): a target declaring `format: pdf` is skipped with a warning saying so, and a book with no other target stops. PDF is read only by [the audit](auditing.md), which reports on a Word, Markdown, HTML, EPUB, or PDF file without converting it.
+[PDF output](#pdf) is new, and so far measured on Markdown only. PDF is read only by [the audit](auditing.md), which reports on a Word, Markdown, HTML, EPUB, or PDF file without converting it.
 
 ## Word
 
@@ -45,7 +45,7 @@ Two repairs change what reading a Word file means, and each is a setting, decide
 - **Markdown: TESTED**, on the statistics book (merged by chapter) and the suite's round trip: read back, it gives the same HTML, and written again it's the same file. The first write normalizes Word's residue (paragraphs holding only a non-breaking space, stray spaces), so the second write is the fixed point. A table with merged cells, and a figure with an id, are written as fenced HTML, since Pandoc's Markdown can't express them; a banded table is kept as one table.
 - **AsciiDoc: TESTED**, on the statistics book: read back, 166 of its 169 pages are identical to the book converted directly. Two lose a root with an index (`\sqrt[n]{…}`), which Pandoc's AsciiDoc reader can't read, and one a list's depth ([AsciiDoc as a target](asciidoc.md#asciidoc-as-a-target)).
 - **Word: TESTED**, on the statistics book: 169 files, valid against Word's schema, with 229 header columns flagged. Read back as a book, 167 of its 169 pages give the same HTML, with no dead links; the other two are solutions pages, each with one list fewer ([Word output](#word-output)).
-- **PDF: NOT YET IMPLEMENTED**, [on the roadmap](../ROADMAP.md).
+- **PDF: NOT TESTED** ([PDF](#pdf)).
 
 ## Markdown
 
@@ -63,7 +63,7 @@ Two repairs change what reading a Word file means, and each is a setting, decide
 - **Markdown (round trip): TESTED**, by the suite and on the economics book: the second write equals the third.
 - **AsciiDoc: TESTED**, on the economics book and the suite: read back, 31 of the book's 34 pages are identical to the book converted directly. The other three hold a footnote with a list or a quotation inside, which an AsciiDoc footnote can't keep; the words stay.
 - **Word: TESTED**, on *Principles of Economics*: 34 files, valid against Word's schema, with 37 ScreenTips.
-- **PDF: NOT YET IMPLEMENTED.**
+- **PDF: NEEDS MORE TESTING.** The suite's book, and the whole economics book, pass veraPDF's PDF/UA-2, PDF/A-4f, and WTPDF profiles, and the economics book's structure matches its author's own build ([PDF](#pdf)).
 
 ## HTML
 
@@ -85,7 +85,7 @@ Pages are parsed with html5lib, or with lxml where html5lib isn't installed; DCI
 - **Markdown: TESTED.** The suite converts HTML to Markdown and back, formulas and banded tables included, and DCIC's 80 pages come back identical. They didn't until two fixes: a formula as MathJax 2 drew it nests spans eleven deep, which Pandoc's Markdown reader never got through, and a link to an id with a space in it isn't a link to that reader, so its address came back as words.
 - **AsciiDoc: TESTED**, on DCIC: read back, 74 of its 80 pages are identical to the book converted directly. The other six each held a list with no items, which AsciiDoc can't write. Scribble's markup, spans nested in spans around links, code laid out in tables, quotations in quotations, is what most of the target's own forms were built against ([AsciiDoc as a target](asciidoc.md#asciidoc-as-a-target)).
 - **Word: TESTED**, on DCIC: 80 files, valid against Word's schema, with 38 decorative images marked. Read back, 50 of 80 pages give the same HTML, with no dead links; most of the rest put a list inside a quotation, which Pandoc's reader takes back out.
-- **PDF: NOT YET IMPLEMENTED.**
+- **PDF: NOT TESTED** ([PDF](#pdf)).
 
 ## AsciiDoc
 
@@ -101,7 +101,7 @@ Pages are parsed with html5lib, or with lxml where html5lib isn't installed; DCI
 - **EPUB: TESTED.** The security textbook's EPUB passes epubcheck with no errors or warnings, and the suite builds one from a chapter with a sized image, a listing, and a table.
 - **Markdown: TESTED.** The security textbook goes to Markdown and back with all 14 pages identical, and the suite converts a chapter the same way.
 - **Word: TESTED**, on the security textbook: 14 files, valid against Word's schema. Read back, 12 of 14 pages give the same HTML, with no dead links; the other two have tables with merged cells, or figures holding more than one block, which Pandoc's writer lays out as a table.
-- **PDF: NOT YET IMPLEMENTED.**
+- **PDF: NOT TESTED** ([PDF](#pdf)).
 - **AsciiDoc: TESTED.** The security textbook goes to AsciiDoc and back with all 14 pages identical, and the suite round-trips a chapter holding every case the target writes itself ([AsciiDoc as a target](asciidoc.md#asciidoc-as-a-target)). Writing it again gives the same files.
 
 ## The outputs, and how each is packaged
@@ -193,4 +193,33 @@ The target's name is yours, and names its folder. Two `source` targets write the
 
 ### PDF
 
-NOT YET IMPLEMENTED: [on the roadmap](../ROADMAP.md). A target naming it is skipped with a warning. PDF waits on LaTeX's tagging support for complex table headers.
+One tagged PDF of the whole book, assembled from the pages as the EPUB is and written by Pandoc's LaTeX writer and LuaLaTeX, with LaTeX's tagging switched on by the PDF/UA standard the target declares (`pdf.standard`, `ua-2` by default). It needs LuaLaTeX from TeX Live 2026 ([installation](installation.md#for-a-pdf-target-lualatex)); the output check runs [veraPDF](installation.md#optional-verapdf) on it when that's installed.
+
+```yaml
+targets:
+  pdf:
+    format: pdf
+```
+
+**What the run adds to Pandoc's writer**, each because the writer has no way to say it (read in Pandoc 3.11's `Writers/LaTeX.hs` and `Writers/LaTeX/Table.hs`):
+
+- A table's declared header column is tagged as row headers. The writer folds a body's row-head cells into ordinary cells, so the run sets latex-lab's `table/header-columns` around the table. Header rows need nothing: the writer puts the head in `longtable`'s repeated head, which latex-lab tags as header cells.
+- A decorative image is an artifact. latex-lab tags an image with no alternative text as a figure described by its own file name (the `alt-text-missing` warning in `latex-lab-testphase-graphic.sty`), which veraPDF accepts; the output check reports any figure so described as `pdf-figure-alt-is-file-name`.
+- Every link the book's text makes gets a `/Contents`: its visible text, then its description in parentheses when it has one (its title, which is where the [bare-links sidecar](bare-links.md) puts a description). The visible text comes first because [WCAG 2.5.3](https://www.w3.org/WAI/WCAG21/Understanding/label-in-name.html) wants the accessible name to hold what is seen. LaTeX's own links, the contents lines and footnote marks, get none, since hyperref's default is the address or "Go to destination" and an id.
+- Each formula carries its MathML twice: as structure elements under the formula, and as a MathML file attached to it (`math/setup={mathml-SE,mathml-AF}`).
+- Characters the fonts lack are drawn. Latin Modern, the template's fonts when none is chosen, has no Greek and few mathematical symbols, and the statistics book writes μ, σ, ≤, ≈, and a dozen others as text. Latin Modern Math has them, and fills in for each font family the `pdf.metadata` file doesn't choose. A character no font has is still lost, in one of two ways: in an OpenType font it's drawn as the blank `.notdef` glyph, which veraPDF reports (PDF/UA-2 clause 8.4.5.9); in LaTeX's older math fonts, which an equation falls back to for a character unicode-math doesn't handle, it's dropped without a trace, and veraPDF finds nothing. The statistics book has 54 of those, the micro sign µ where the Greek μ was meant among them. Either way the build names each missing character in one warning with its code point and count.
+
+**Structure comes from the book, numbering from LaTeX.** Pages are placed by `project.contents`, as for the EPUB, and a page's role becomes the division command it stands for (`\frontmatter`, `\mainmatter`, `\appendix`, `\backmatter`) where the role changes; the source's own copies of those commands, read into the roles when the book was converted, are dropped. The book opens in the front matter, so its title page and contents are numbered in roman with the rest of the front matter. LaTeX numbers chapters and sections when the book's `numbering` is on; titles carry no numbers of their own. A book whose titles already carry numbers, as OpenStax's do, keeps `numbering` off, or each heading is numbered twice. A `generate: toc` entry in `project.contents` is where the contents go; without one, they follow the title page.
+
+**A book written for a Pandoc PDF build keeps its settings.** `pdf.metadata` names the file that held its YAML, a `_preamble.md` say, and whatever it sets (class, class options, `header-includes`, fonts, `include-before`, `toc-depth`) goes to the writer, ahead of `project.yaml` and the target's settings. The page made from that file, when it's titled by the book's title as a preamble is, gets no heading: the title block LaTeX draws is its heading. Its packages have to be installed, and a class without `\frontmatter` gets only `\appendix` from the roles.
+
+**What it loses, or can't yet do:**
+
+- A table's caption is tagged as a header row spanning the table, not as a caption. That's latex-lab's current behavior with `longtable`; veraPDF doesn't report it. The roadmap has a post-processing repair for it as a candidate.
+- latex-lab's table tagging supports header rows and columns only, so a table whose cells need a `Headers` list to name their headers (headers at several levels, or headers mid-table) can't be tagged fully. The table-headers work splits banded tables for PDF, as for HTML, which removes the commonest case.
+- An SVG image gets no alternative text from Pandoc's writer at all (read in its source, not tried), so LaTeX would describe it by its file name; the output check reports that.
+- `notes.placement` and `notes.numbering` don't apply: LaTeX puts each note at the foot of its page.
+
+Measured on Pandoc 3.11, LaTeX 2026-06-01, and veraPDF 1.30.2: the suite's book, and the whole Markdown economics textbook (431 pages, 1,141 formulas, 50 figures, 21 tables), pass PDF/UA-2 with Tagged PDF, PDF/A-4f, and both WTPDF 1.0 profiles with no rule failed. The economics book's PDF has the same structure as the one its author builds with his own Pandoc command (the same chapters, sections, contents entries, formulas, figures, and table cells), with a `/Contents` on every external link, and without the second run of roman page numbers that command's front matter produced.
+
+A book whose `contents` isn't declared gets the filename guess, and a book with one file per chapter, numbered, is guessed as a "Chapter N" group over each file, so each chapter's title becomes a section under a chapter called "Chapter 1". That's the guess's reading for the EPUB and the cartridge too; declaring `contents` gives each file its own chapter.

@@ -6,7 +6,7 @@ How the book is rendered into one output format.
 
 **`format`**—one of `html`, `epub3`, `pdf`, `docx`, `markdown`, `asciidoc`, `source`; default `html`; *target only*
 
-What this target produces. markdown and asciidoc write source again: what the author decided, which the pipeline reads back to the same book. docx writes Word files from the same pages, in compatibility mode 15 with ScreenTips and Word's decorative marker. pdf is NOT YET IMPLEMENTED (see the roadmap): a target naming it is skipped with a warning, and nothing is written for it.
+What this target produces. markdown and asciidoc write source again: what the author decided, which the pipeline reads back to the same book. docx writes Word files from the same pages, in compatibility mode 15 with ScreenTips and Word's decorative marker. pdf writes one tagged PDF of the whole book through LaTeX, which needs LuaLaTeX (see the installation page).
 
 **`output_dir`**—`path`; default `""` (empty); *target only*
 
@@ -135,6 +135,22 @@ What a screen reader says for the cover image. Left empty it is "Cover of" follo
 **`epub.accessibility_summary`**—`text`; default `""` (empty)
 
 The sentence or two a reading system shows a reader about the book's accessibility, alongside the claims the run computes for itself (see the docs). Left empty it's derived from what this run found: how many images lack alternative text, whether equations are MathML, and so on, so it stays true as the sidecars are filled in.
+
+## pdf
+
+Settings read only by a pdf target. One PDF holds the whole book, assembled from the pages the way the EPUB is, and written by Pandoc's LaTeX writer and LuaLaTeX with LaTeX's tagging on, so the file carries its structure, its images' alternative text, its tables' header cells, and its equations as MathML.
+
+**`pdf.standard`**—`list`; default `[ua-2]`
+
+The standards the PDF declares, as Pandoc's pdfstandard variable takes them: ua-2 for PDF/UA-2, and optionally a PDF/A part such as a-4f. PDF/UA turns LaTeX's tagging on. A standard declared here is a claim the file makes about itself; veraPDF, when the output check finds it, is what tests the claim.
+
+**`pdf.metadata`**—`path`; default `""` (empty)
+
+A YAML file, or a Markdown file that opens with a YAML block, whose metadata goes to Pandoc's LaTeX writer: documentclass, classoption, header-includes, include-before, fonts, geometry, and the rest of Pandoc's LaTeX variables. A book written for a Pandoc PDF build names the file that held its YAML (a _preamble.md, say), and its settings carry over. What it sets wins over what project.yaml says; what it leaves out comes from project.yaml and from these settings. A path that doesn't exist stops the build.
+
+**`pdf.toc_depth`**—`int`; default `2`
+
+How many levels the printed table of contents shows, counted as the EPUB's are: a group at the top of project.contents is level 1. The bookmarks a PDF viewer shows follow the same depth. The metadata file's toc-depth, when it sets one, wins.
 
 ## captions
 

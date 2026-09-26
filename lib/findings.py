@@ -140,6 +140,10 @@ CHECKS = OrderedDict([
                                 "warning", "PDF/UA-1 clause 7.21", "source")),
     ("pdf-encrypted", ("the PDF is encrypted, which may block assistive "
                        "technology", "warning", "PDF/UA-1 clause 7.1", "source")),
+    ("pdf-figure-alt-is-file-name",
+     ("a figure's alternative text in the PDF is a file name, which is "
+      "what LaTeX writes when an image has none", "error",
+      "WCAG 2.0 SC 1.1.1 (A)", "sidecar")),
     ("pdf-claims-unverified", ("the PDF claims a conformance level; only a "
                                "validator can confirm it", "note", "",
                                "tool")),

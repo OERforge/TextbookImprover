@@ -47,22 +47,25 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(HERE), "lib"))
 import outputcheck  # noqa: E402
+import pdfcheck  # noqa: E402
 import findings as findings_lib  # noqa: E402
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Check the pages and EPUBs a run wrote.")
+        description="Check the pages, EPUBs, and PDFs a run wrote.")
     parser.add_argument("pages", nargs="*", help="HTML pages to check")
     parser.add_argument("--pages", dest="pages_file",
                         help="a file listing pages, one per line; a "
                              ".filtered.json name stands for its .html")
     parser.add_argument("--epub", action="append", default=[],
                         help="an EPUB to check (repeatable)")
+    parser.add_argument("--pdf", action="append", default=[],
+                        help="a PDF to check (repeatable)")
     parser.add_argument("--report", help="write findings here as CSV")
     parser.add_argument("--quick", action="store_true",
-                        help="skip epubcheck and the Nu checker even if "
-                             "installed")
+                        help="skip epubcheck, the Nu checker, and veraPDF "
+                             "even if installed")
     args = parser.parse_args()
 
     pages = list(args.pages)
@@ -86,9 +89,23 @@ def main():
     if not args.quick:
         more, notes = outputcheck.run_validators(pages, epubs)
         findings += more
+    # A PDF's findings are in the full format already: what the file
+    # says about itself, then veraPDF's rules when it's installed.
+    pdfs = [p for p in args.pdf if os.path.exists(p)]
+    pdf_findings = []
+    for path in pdfs:
+        found = pdfcheck.inspect(path)[1]
+        command = None if args.quick else outputcheck.find_validator("verapdf")
+        if command:
+            found = pdfcheck.settle_claims(
+                found, pdfcheck.run_verapdf(command, path))
+        elif not args.quick:
+            notes.append("veraPDF not found (set VERAPDF, or put verapdf on "
+                         "the path); skipped.")
+        pdf_findings += found
 
     if args.report:
-        if findings:
+        if findings or pdf_findings:
             # The shared findings format: the first three columns are
             # the ones this report has always had, the rest say more.
             findings_lib.write_csv(args.report, [
@@ -99,22 +116,29 @@ def main():
                     tool=("vnu" if f.check.startswith("vnu") else
                           "epubcheck" if f.check.startswith("epubcheck")
                           else "oer"))
-                for f in findings])
+                for f in findings] + pdf_findings)
         elif os.path.exists(args.report):
             os.remove(args.report)
 
-    checked = f"{len(pages)} page(s)" + (
-        f" and {len(epubs)} EPUB(s)" if epubs else "")
+    parts = [f"{len(pages)} page(s)"] + (
+        [f"{len(epubs)} EPUB(s)"] if epubs else []) + (
+        [f"{len(pdfs)} PDF(s)"] if pdfs else [])
+    checked = parts[0] if len(parts) == 1 else (
+        f"{parts[0]} and {parts[1]}" if len(parts) == 2
+        else f"{parts[0]}, {parts[1]}, and {parts[2]}")
     for note in notes:
         print(f"  {note}", file=sys.stderr)
-    if not findings:
+    if not findings and not pdf_findings:
         print(f"Output check: {checked}, nothing found.", file=sys.stderr)
         return 0
-    print(f"Output check: {checked}, {len(findings)} finding(s):",
-          file=sys.stderr)
+    print(f"Output check: {checked}, "
+          f"{len(findings) + len(pdf_findings)} finding(s):", file=sys.stderr)
     for check, count in outputcheck.summarize(findings):
         print(f"  {count:5}  {check}: "
               f"{outputcheck.DESCRIPTIONS.get(check, '')}", file=sys.stderr)
+    for finding in pdf_findings:
+        print(f"  {finding.where}: {finding.check}: {finding.detail}",
+              file=sys.stderr)
     if args.report:
         print(f"Written to {args.report}.", file=sys.stderr)
     return 0

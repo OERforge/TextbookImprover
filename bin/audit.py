@@ -107,7 +107,8 @@ def audit_one(path, kind, validators):
         if validators:
             command = outputcheck.find_validator("verapdf")
             if command:
-                found += pdfcheck.run_verapdf(command, path)
+                found = pdfcheck.settle_claims(
+                    found, pdfcheck.run_verapdf(command, path))
         return found, [(f"{name}: metadata and claims",
                         pdfcheck.facts_lines(facts))]
     return [], []

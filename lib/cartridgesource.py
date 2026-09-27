@@ -250,7 +250,7 @@ def local_links(markup, page_path):
         href = html.unescape(match.group(1))
         if not href or re.match(r"^[a-zA-Z][\w+.-]*:|^//|^#", href):
             continue
-        target = re.split(r"[?#]", href, 1)[0]
+        target = re.split(r"[?#]", href, maxsplit=1)[0]
         if not target:
             continue
         path = posixpath.normpath(posixpath.join(here, unquote(target)))

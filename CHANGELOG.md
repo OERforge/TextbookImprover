@@ -33,6 +33,7 @@ Versions are two-part and pre-1.0: breaking changes may land in any of them unti
 - **A list item's second paragraph, code block, or figure split its list** when a Word source was read. Pandoc's writer, and OpenStax's export with it, number such a paragraph with an invisible bullet to indent it under the item, and Pandoc's reader took it for an item of another list. It's folded into its item now. The statistics book had 102 such paragraphs in 20 files: 11 pages' lists are whole again, and a table inside a solution's item has its caption.
 - **A captioned figure with a bookmark before it lost its caption** when a Word source was read. The repair that moves a body-level bookmark into the next paragraph put it beside the figure's drawing, and Pandoc's reader pairs a caption only with a paragraph holding the drawing alone; the bookmark goes into the caption now. Pandoc's own writer puts such a bookmark before every figure with an id.
 - **`util/docx-compat.py` could write settings Word calls corrupt.** A new compatibility setting went before Word's legacy options in `w:compat`, where the schema puts it after them, and a new `w:compat` block went at the end of the settings, after elements the schema puts after it.
+- **Python 3.13 warned in the middle of a run**, since two `re.split` calls passed `maxsplit` by position, which 3.13 deprecates. They name it now, and the portability test checks the source for those calls, since an older interpreter says nothing about them.
 
 ## [0.7] - 2026-09-25
 

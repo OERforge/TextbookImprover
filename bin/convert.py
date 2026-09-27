@@ -2374,7 +2374,7 @@ def linked_files(path):
     for ref in refs:
         if re.match(r"^[a-zA-Z][\w+.-]*:|^//|^#", ref):
             continue
-        target = re.split(r"[#?]", ref, 1)[0]
+        target = re.split(r"[#?]", ref, maxsplit=1)[0]
         if re.search(r"\.\w+$", target) and not re.search(r"\.x?html?$",
                                                         target.lower()):
             out.add(target)

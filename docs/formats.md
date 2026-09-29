@@ -14,7 +14,7 @@ Every source format the pipeline reads, the ways a book in that format can arriv
 
 | Input | HTML | EPUB | Markdown | AsciiDoc | PDF | Word | Round trip to itself |
 |---|---|---|---|---|---|---|---|
-| Word (`.docx`) | TESTED | TESTED | TESTED | TESTED | NOT TESTED | TESTED | TESTED, with losses (see [Word output](#word-output)) |
+| Word (`.docx`) | TESTED | TESTED | TESTED | TESTED | NEEDS MORE TESTING | TESTED | TESTED, with losses (see [Word output](#word-output)) |
 | Markdown (`.md`) | TESTED | TESTED | TESTED | TESTED | NEEDS MORE TESTING | TESTED | TESTED |
 | HTML (`.html`) | TESTED | TESTED | TESTED | TESTED | NOT TESTED | TESTED | TESTED |
 | AsciiDoc (`.adoc`) | TESTED | TESTED | TESTED | TESTED | NOT TESTED | TESTED | TESTED |
@@ -29,7 +29,7 @@ Every source format the pipeline reads, the ways a book in that format can arriv
 - A plain `.zip` of them, such as a publisher's DOCX download, which `convert.py` extracts when it finds the zip alone in a directory ([A book that arrives as an archive](first-run.md#a-book-that-arrives-as-an-archive)). Tested on OpenStax's download of *Introductory Business Statistics 2e*, its 169 files two folders deep: the same 169 pages and 253 images as the files converted from a folder.
 - Inside a [Common Cartridge](cartridge-input.md): a Word file the course outline names is a source, and with `--linked-documents` so is one a page only links to.
 
-A hyperlink's ScreenTip becomes the link's title, which the HTML and EPUB targets write as a tooltip and the Markdown and AsciiDoc targets keep. Pandoc 3.11's reader drops ScreenTips, so the pipeline recovers them itself. Pandoc's own reader and writer handle them from its first release after 3.11, which includes the change this project contributed ([pandoc#11890](https://github.com/jgm/pandoc/pull/11890)).
+A hyperlink's ScreenTip becomes the link's title, which the HTML and EPUB targets write as a tooltip and the Markdown and AsciiDoc targets keep. Pandoc 3.11's reader drops ScreenTips, so the pipeline recovers them itself. Pandoc 3.12's reader and writer handle them, with the change this project contributed ([pandoc#11890](https://github.com/jgm/pandoc/pull/11890)); the pipeline's own recovery is then a no-op, and stays for older versions.
 
 Two repairs change what reading a Word file means, and each is a setting, decided once for the book and applied both to what the conversion reads and to a `source` target's copy, so the book and the author's file agree ([settings](conversion-settings.md)):
 
@@ -45,7 +45,7 @@ Two repairs change what reading a Word file means, and each is a setting, decide
 - **Markdown: TESTED**, on the statistics book (merged by chapter) and the suite's round trip: read back, it gives the same HTML, and written again it's the same file. The first write normalizes Word's residue (paragraphs holding only a non-breaking space, stray spaces), so the second write is the fixed point. A table with merged cells, and a figure with an id, are written as fenced HTML, since Pandoc's Markdown can't express them; a banded table is kept as one table.
 - **AsciiDoc: TESTED**, on the statistics book: read back, 166 of its 169 pages are identical to the book converted directly. Two lose a root with an index (`\sqrt[n]{…}`), which Pandoc's AsciiDoc reader can't read, and one a list's depth ([AsciiDoc as a target](asciidoc.md#asciidoc-as-a-target)).
 - **Word: TESTED**, on the statistics book: 169 files, valid against Word's schema, with 229 header columns flagged. Read back as a book, 167 of its 169 pages give the same HTML, with no dead links; the other two are solutions pages, each with one list fewer ([Word output](#word-output)).
-- **PDF: NOT TESTED** ([PDF](#pdf)).
+- **PDF: NEEDS MORE TESTING**, on the statistics book: 932 pages, which pass the profiles veraPDF chooses for a PDF/UA-2 claim, with 3,046 header cells across its 342 tables and its cross-references given their visible text. 54 characters in its equations, the micro sign where μ was meant among them, are missing from the page, and veraPDF can't see that; the build names them ([PDF](#pdf)).
 
 ## Markdown
 
@@ -141,7 +141,7 @@ A directory of `.adoc` files whose media keep the author's names, written to be 
 `format: docx` writes a Word file per page, or with `merge: groups` one per chapter, with the media inside each file. Pandoc's writer marks a header row to repeat, writes an image's alt text as its description, sets the language and title, and writes equations as Word's own. The target adds what it leaves out (`lib/docxtarget.py`). What each addition is for rests on documentation, not on tests with Word or a screen reader here; the files themselves are tested, and validate against Word's schema.
 
 - **Compatibility mode 15.** Pandoc's reference document declares none, so Word opens its files in Compatibility Mode, and according to accessibility guides for Word ([Texas Governor's Committee on People with Disabilities](https://gov.texas.gov/uploads/files/organization/disabilities/02_AccChecker.pdf)) and [reports on Microsoft's Q&A](https://learn.microsoft.com/en-us/answers/questions/5386194/unable-to-run-accessibility-checker), the Accessibility Checker won't run until the file is converted.
-- **A link's title as its ScreenTip**, which Pandoc 3.11's writer drops.
+- **A link's title as its ScreenTip**, which Pandoc 3.11's writer drops and 3.12's writes.
 - **Word's "Mark as decorative"** on a decorative image ([Microsoft's documentation](https://support.microsoft.com/en-us/accessibility/office-accessibility/add-alternative-text-to-a-shape-picture-chart-smartart-graphic-or-other-object)); without it, the checker reports the empty description as missing alt text. Guides describe the checkbox from Word 2019 and Microsoft 365 on, and an earlier Word reports the image as undescribed.
 - **The First Column flag** on a table whose first column heads its rows, and **a bookmark naming the table's headers**, `Title`, `ColumnTitle`, or `RowTitle`: the convention [Freedom Scientific documents](https://doccenter.freedomscientific.com/doccenter/archives/training/samplefiles/usethebookmarkfeatureinwordfortableheaders-oldertechnique.htm) for JAWS, on a page it calls an older technique. A [2017 Freedom Scientific bulletin](https://support.freedomscientific.com/support/technicalsupport/bulletin/1633) says JAWS otherwise reads a Word table's first row and first column both as headers. Neither is tested with JAWS here. The table census reads the same bookmarks back as the table's declaration, which is tested.
 - **An indent for each level of a quotation**, and for the code inside one, which Pandoc's writer gives every level alike, with a blank paragraph between two quotations in a row, and between two code blocks in a row, which Pandoc's reader would otherwise join.
@@ -201,7 +201,7 @@ targets:
     format: pdf
 ```
 
-**What the run adds to Pandoc's writer**, each because the writer has no way to say it (read in Pandoc 3.11's `Writers/LaTeX.hs` and `Writers/LaTeX/Table.hs`):
+**What the run adds to Pandoc's writer**, each because the writer has no way to say it (read in Pandoc 3.11's and 3.12's `Writers/LaTeX.hs` and `Writers/LaTeX/Table.hs`):
 
 - A table's declared header column is tagged as row headers. The writer folds a body's row-head cells into ordinary cells, so the run sets latex-lab's `table/header-columns` around the table. Header rows need nothing: the writer puts the head in `longtable`'s repeated head, which latex-lab tags as header cells.
 - A decorative image is an artifact. latex-lab tags an image with no alternative text as a figure described by its own file name (the `alt-text-missing` warning in `latex-lab-testphase-graphic.sty`), which veraPDF accepts; the output check reports any figure so described as `pdf-figure-alt-is-file-name`.
@@ -220,6 +220,6 @@ targets:
 - An SVG image gets no alternative text from Pandoc's writer at all (read in its source, not tried), so LaTeX would describe it by its file name; the output check reports that.
 - `notes.placement` and `notes.numbering` don't apply: LaTeX puts each note at the foot of its page.
 
-Measured on Pandoc 3.11, LaTeX 2026-06-01, and veraPDF 1.30.2: the suite's book, and the whole Markdown economics textbook (431 pages, 1,141 formulas, 50 figures, 21 tables), pass PDF/UA-2 with Tagged PDF, PDF/A-4f, and both WTPDF 1.0 profiles with no rule failed. The economics book's PDF has the same structure as the one its author builds with his own Pandoc command (the same chapters, sections, contents entries, formulas, figures, and table cells), with a `/Contents` on every external link, and without the second run of roman page numbers that command's front matter produced.
+Measured on Pandoc 3.11, LaTeX 2026-06-01, and veraPDF 1.30.2: the suite's book, and the whole Markdown economics textbook (431 pages, 1,141 formulas, 50 figures, 21 tables), pass PDF/UA-2 with Tagged PDF, PDF/A-4f, and both WTPDF 1.0 profiles with no rule failed, and the Word statistics textbook (932 pages, 2,402 formulas, 342 tables) passes the profiles veraPDF chooses for its PDF/UA-2 claim, with the missing characters above. The economics book rebuilt under Pandoc 3.12 has the same structure, element for element. The economics book's PDF has the same structure as the one its author builds with his own Pandoc command (the same chapters, sections, contents entries, formulas, figures, and table cells), with a `/Contents` on every external link, and without the second run of roman page numbers that command's front matter produced.
 
 A book whose `contents` isn't declared gets the filename guess, and a book with one file per chapter, numbered, is guessed as a "Chapter N" group over each file, so each chapter's title becomes a section under a chapter called "Chapter 1". That's the guess's reading for the EPUB and the cartridge too; declaring `contents` gives each file its own chapter.

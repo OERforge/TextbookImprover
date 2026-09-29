@@ -1774,7 +1774,10 @@ def case_link_titles(work):
         if info.filename == "word/document.xml":
             xml = data.decode("utf-8")
             xml = re.sub(r'(<w:hyperlink r:id="[^"]+")', r'\1 w:tooltip="DOI for Word"', xml, count=1)
-            xml = re.sub(r'(<w:hyperlink w:anchor="word-page")', r'\1 w:tooltip="Internal, in Word"', xml, count=1)
+            # The anchor is the bookmark name Pandoc's writer gave the id,
+            # which is word-page in 3.11 and a hash in 3.12 (#11845).
+            xml = re.sub(r'(<w:hyperlink w:anchor="(?:word-page|_[0-9a-f]{39})")',
+                         r'\1 w:tooltip="Internal, in Word"', xml, count=1)
             data = xml.encode("utf-8")
         fixed.append((info, data))
     with zf.ZipFile(word, "w", zf.ZIP_DEFLATED) as z:
@@ -2436,7 +2439,7 @@ def case_docx_target(work):
                            r"quoted code(?:(?!</blockquote>).)*<blockquote>\s*<p>Inner quote\.</p>\s*"
                            r"<p>Inner, second paragraph\.</p>\s*</blockquote>",
                            one_back, re.S)
-         and "tiq-quote-1" not in one and "tiq-quote" not in one_back),
+         and "tiqQuote1" not in one and "tiqQuote" not in one_back),
         ("two quotes in a row come back as two",
          lambda: re.search(r"<p>Inner, second paragraph\.</p>\s*</blockquote>\s*</blockquote>\s*"
                            r"<blockquote>\s*<p>A second quote, right after\.</p>\s*</blockquote>", one_back)),
@@ -2472,7 +2475,7 @@ def case_docx_target(work):
          and "<w:drawing>" in three and not any(
              "Title_" in t or 'w:firstColumn="1"' in t
              for t in re.findall(r"<w:tbl>.*?</w:tbl>", three, re.S) if "<w:drawing>" in t)
-         and "tiq-table" not in three and "tiq-decorative" not in three),
+         and "tiqTable" not in three and "tiqDecorative" not in three),
         ("a decorative image that is a figure's whole content stays a picture, marked decorative",
          lambda: three.count("adec:decorative") == 1 and not any(
              "adec:decorative" in t for t in re.findall(r"<w:tbl>.*?</w:tbl>", three, re.S))),

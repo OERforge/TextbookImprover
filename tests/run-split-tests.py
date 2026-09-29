@@ -110,12 +110,55 @@ def run(arguments, cwd, environment=None, check=True):
     return result
 
 
+def word_bookmarks(docx, source_json):
+    """The Word file with each bookmark named after its id, as an author's
+    Word file names them. Pandoc 3.12's writer hides every bookmark behind
+    an underscore and hashes any id with a hyphen (#11845), and its reader
+    then points each internal link at the hidden name while the heading
+    takes a new id of its own, so a link to a heading leads nowhere; 3.11's
+    writer kept the ids. What's tested here is splitting a Word file, not
+    Pandoc's round trip, so the ids are put back."""
+    sys.path.insert(0, os.path.join(os.path.dirname(BIN), "lib"))
+    import docxtarget
+    with open(source_json, encoding="utf-8") as fh:
+        doc = json.load(fh)
+    ids = set()
+
+    def walk(node):
+        if isinstance(node, list):
+            for item in node:
+                walk(item)
+        elif isinstance(node, dict):
+            c = node.get("c")
+            if node.get("t") == "Header":
+                ids.add(c[1][0])
+            elif node.get("t") in ("Div", "Span"):
+                ids.add(c[0][0])
+            walk(c)
+    walk(doc["blocks"])
+    names = {}
+    for ident in ids:
+        for name in docxtarget.bookmark_names(ident):
+            names[name] = ident
+    with zipfile.ZipFile(docx) as z:
+        items = [(i, z.read(i.filename)) for i in z.infolist()]
+    with zipfile.ZipFile(docx, "w", zipfile.ZIP_DEFLATED) as z:
+        for info, data in items:
+            if info.filename == "word/document.xml":
+                data = re.sub(r'(w:(?:name|anchor)=")([^"]+)"',
+                              lambda m: m.group(1) + names.get(m.group(2), m.group(2)) + '"',
+                              data.decode("utf-8")).encode("utf-8")
+            z.writestr(info, data)
+
+
 def prepare(work, stem="chapter-7", source=SOURCE):
     """A filtered intermediate, as convert.py leaves one."""
     os.makedirs(work, exist_ok=True)
     with open(os.path.join(work, "src.md"), "w", encoding="utf-8") as fh:
         fh.write(source)
     run(["pandoc", "src.md", "-o", stem + ".docx"], work)
+    run(["pandoc", "src.md", "-t", "json", "-o", "src.json"], work)
+    word_bookmarks(os.path.join(work, stem + ".docx"), os.path.join(work, "src.json"))
     environment = dict(os.environ)
     environment.update({
         "TABLE_CAPTIONS": os.path.join(work, "table-captions.csv"),

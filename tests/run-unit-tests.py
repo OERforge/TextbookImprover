@@ -173,6 +173,47 @@ def check_wrapper_title():
 
 
 # --------------------------------------------------------------------------
+# the page stylesheet's contrast, light and dark
+# --------------------------------------------------------------------------
+
+def contrast(a, b):
+    """WCAG's contrast ratio of two #rrggbb colors."""
+    def luminance(h):
+        c = [int(h[i:i + 2], 16) / 255 for i in (1, 3, 5)]
+        c = [x / 12.92 if x <= 0.03928 else ((x + 0.055) / 1.055) ** 2.4 for x in c]
+        return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]
+    hi, lo = sorted((luminance(a), luminance(b)), reverse=True)
+    return (hi + 0.05) / (lo + 0.05)
+
+
+def expand(color):
+    return "#" + "".join(ch * 2 for ch in color[1:]) if len(color) == 4 else color
+
+
+def check_page_css():
+    """Pandoc's background is #fdfdfd, and #1a1a1a in the dark mode its
+    3.12 stylesheet follows. Every color page.css gives text has to clear
+    WCAG AA against the background it lands on, in both."""
+    import re as _re
+    with open(os.path.join(ROOT, "bin", "page.css"), encoding="utf-8") as fh:
+        css = _re.sub(r"/\*.*?\*/", "", fh.read(), flags=_re.S)
+    screen = css.split("@media print")[0]
+    pairs = _re.findall(r"light-dark\((#[0-9a-fA-F]{3,6}),\s*(#[0-9a-fA-F]{3,6})\)", screen)
+    fixed = _re.findall(r"(?<![-\w])color:\s*(#[0-9a-fA-F]{3,6})\s*;", screen)
+    outlines = _re.findall(r"outline:[^;]*?(#[0-9a-fA-F]{3,6})", screen)
+    return [
+        ("each light-dark() color clears 4.5:1 in light and dark mode",
+         lambda: pairs and all(contrast(expand(l), "#fdfdfd") >= 4.5
+                               and contrast(expand(d), "#1a1a1a") >= 4.5
+                               for l, d in pairs)),
+        ("a fixed text color has a light-dark() form beside it",
+         lambda: all(any(expand(c) == expand(l) for l, _ in pairs) for c in fixed)),
+        ("no outline is a fixed color that dark mode's background matches",
+         lambda: not outlines),
+    ]
+
+
+# --------------------------------------------------------------------------
 # identifiers, which IMS types as xs:ID
 # --------------------------------------------------------------------------
 
@@ -584,6 +625,7 @@ GROUPS = [
     ("the archive's name", check_archive_name),
     ("the content prefix", check_content_prefix),
     ("the wrapper module's name", check_wrapper_title),
+    ("the page stylesheet's contrast, light and dark", check_page_css),
     ("identifiers", check_identifiers),
     ("facts written down twice", check_consistency),
     ("sidecar paths", check_sidecar_paths),

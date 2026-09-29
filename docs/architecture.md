@@ -159,7 +159,10 @@ Beyond the Word-to-HTML translation, each page gets:
   rather than "upper C u s t o m e r".
 - **Caption contrast** is set to `#555`, which measures 7.33:1 against
   Pandoc's `#fdfdfd` background. The widely quoted `#767676` is only
-  4.47:1 there, because it's computed against pure white.
+  4.47:1 there, because it's computed against pure white. In dark mode,
+  which Pandoc 3.12's stylesheet follows with a `#1a1a1a` background,
+  captions are `#b6b6b6` (8.58:1), and a focused table's outline is the
+  text's own color.
 - **The leading H1 becomes the page title**, giving a meaningful `<title>`
   instead of a filename slug, and one H1 rather than two.
 

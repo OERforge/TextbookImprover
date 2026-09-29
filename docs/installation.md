@@ -2,7 +2,7 @@
 
 How to get the tools, what they need, and how to check the result. There's no initial configuration step for the tools themselves: `convert.py` finds its filters, schemas, and the shared library by path relative to itself, so they work from wherever you put them.
 
-v0.5 is developed and tested on Ubuntu 24.04 with Pandoc 3.11: on Windows under WSL 2, which is what the maintainer runs, and in an Ubuntu container, which is where the test suites run before a release. Nothing here is Windows-specific or WSL-specific, and the same commands work on a Linux machine or on macOS with Homebrew in place of `apt`.
+v0.5 is developed and tested on Ubuntu 24.04 with Pandoc 3.12 (and 3.11 still passes every suite): on Windows under WSL 2, which is what the maintainer runs, and in an Ubuntu container, which is where the test suites run before a release. Nothing here is Windows-specific or WSL-specific, and the same commands work on a Linux machine or on macOS with Homebrew in place of `apt`.
 
 ## On Windows: WSL first
 
@@ -64,8 +64,8 @@ Put that `export` line in `~/.bashrc` (see [below](#optional-the-full-validators
 **Pandoc has to come from Pandoc.** `sudo apt install pandoc` on Ubuntu 24.04 gives 3.1.3, which this project refuses to run with: Pandoc 3.6 and older write tables without cell spans, so a table with merged cells loses them silently, and several things the filter relies on arrived later. Install the `.deb` from [Pandoc's releases](https://github.com/jgm/pandoc/releases) instead:
 
 ```bash
-curl -L -O https://github.com/jgm/pandoc/releases/download/3.11/pandoc-3.11-1-amd64.deb
-sudo apt install ./pandoc-3.11-1-amd64.deb
+curl -L -O https://github.com/jgm/pandoc/releases/download/3.12/pandoc-3.12-1-amd64.deb
+sudo apt install ./pandoc-3.12-1-amd64.deb
 pandoc --version | head -1
 ```
 
@@ -119,7 +119,7 @@ tlmgr install latex-lab tagpdf luamml luatexbase selnolig luacolor lua-ul footno
 lualatex --version | head -1
 ```
 
-Pandoc's template loads the first five for every book; `luacolor` and `lua-ul` when the book has underlined or struck-out text (the statistics book does), and `footnotehyper` and `xurl` when they're installed, which is better than not (`xurl` lets a long address break anywhere).
+Pandoc's template loads the first five for every book; `luacolor` and `lua-ul` when the book has underlined or struck-out text (the statistics book does), and `xurl` when it's installed, which is better than not (it lets a long address break anywhere). Pandoc 3.11's template also loads `footnotehyper` when it's there; 3.12's writes notes in tables itself and doesn't.
 
 Two more kinds of package, depending on the book. A book with passages in another language needs that language's `babel-` and `hyphen-` packages (`tlmgr install babel-german hyphen-german` for German), or LuaLaTeX stops with babel's `Unknown option`. And whatever a `pdf.metadata` file's `header-includes` loads has to be installed too (`hanging`, say). When LuaLaTeX stops on `File 'something.sty' not found`, `tlmgr search --global --file /something.sty` names the package to install.
 

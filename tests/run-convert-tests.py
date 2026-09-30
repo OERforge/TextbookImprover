@@ -28,6 +28,7 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
+import json
 import os
 import re
 import shutil
@@ -76,6 +77,17 @@ def convert(work, config=None, project=True, arguments=()):
         ["python3", os.path.join(BIN, "convert.py"), "--quiet"]
         + list(arguments), cwd=work, capture_output=True, text=True,
         stdin=subprocess.DEVNULL)
+
+
+def walk_json(node):
+    """Every element of a Pandoc JSON document, depth first."""
+    if isinstance(node, dict):
+        yield node
+        for value in node.values():
+            yield from walk_json(value)
+    elif isinstance(node, list):
+        for value in node:
+            yield from walk_json(value)
 
 
 def exists(*parts):
@@ -1942,6 +1954,125 @@ def run_tool(cwd, args, util=False):
                           capture_output=True, text=True)
 
 
+# Word's own equations as the statistics textbook writes them: a bar as an
+# upper limit holding a macron, an en dash for a minus, the micro sign, a
+# slashed O for H's zero, a one-character y-hat, and the increment sign,
+# with an en dash inside normal text, which is text and stays.
+WORD_EQUATION = (
+    '<m:oMath><m:sSub><m:e><m:r><m:t>\u00b5</m:t></m:r></m:e><m:sub><m:limUpp>'
+    '<m:e><m:r><m:t>x</m:t></m:r></m:e><m:lim><m:r><m:rPr><m:sty m:val="p" /></m:rPr>'
+    '<m:t>\u00af</m:t></m:r></m:lim></m:limUpp></m:sub></m:sSub>'
+    '<m:r><m:rPr><m:sty m:val="p" /></m:rPr><m:t>\u2013</m:t></m:r>'
+    '<m:sSub><m:e><m:r><m:t>H</m:t></m:r></m:e><m:sub><m:r><m:t>\u00d8</m:t></m:r></m:sub></m:sSub>'
+    '<m:r><m:t>\u0177=a</m:t></m:r>'
+    '<m:r><m:rPr><m:nor /></m:rPr><m:t>pages 1\u20135 %\u2206Q</m:t></m:r></m:oMath>')
+
+
+def case_word_equations(work):
+    """format: source writes math.repair_equations into a Word file's own
+    equations, and with the setting off leaves them as they were."""
+    os.makedirs(work)
+    subprocess.run(["pandoc", "-o", os.path.join(work, "eq.docx")],
+                   input="# Equations\n\nThe test: $a$.\n", text=True, check=True)
+    path = os.path.join(work, "eq.docx")
+    with zipfile.ZipFile(path) as z:
+        items = [(i, z.read(i.filename)) for i in z.infolist()]
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as z:
+        for info, data in items:
+            if info.filename == "word/document.xml":
+                data = re.sub(r"<m:oMath>.*?</m:oMath>", WORD_EQUATION,
+                              data.decode("utf-8"), count=1, flags=re.S).encode("utf-8")
+            z.writestr(info, data)
+
+    def build(setting):
+        with open(os.path.join(work, "conversion.yaml"), "w") as fh:
+            fh.write("targets:\n  source:\n    format: source\n" + setting)
+        result = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quiet"],
+                                cwd=work, capture_output=True, text=True,
+                                stdin=subprocess.DEVNULL)
+        back = subprocess.run(["pandoc", "-f", "docx", "-t", "json",
+                               os.path.join(work, "source", "eq.docx")],
+                              capture_output=True, text=True)
+        tex = [n["c"][1] for n in walk_json(json.loads(back.stdout)) if n.get("t") == "Math"]
+        return result, (tex[0] if tex else "")
+    on_result, on = build("")
+    off_result, off = build("    math:\n      repair_equations: false\n")
+    return [
+        # As Pandoc reads it back: \mu for the Greek letter, - for the minus.
+        ("the copy's equation reads back with a bar, mu, a minus, H sub 0, "
+         "a hatted y, and Delta",
+         lambda: all(part in on for part in ("\\mu_{\\bar{x}} - H_{0}",
+                                             "\\hat{y}", "\u0394"))
+         and not any(c in on for c in "\u00b5\u00d8\u0177\u2206")),
+        ("an en dash in normal text stays an en dash",
+         lambda: "1\u20135" in on),
+        ("the run says how many equations it repaired",
+         lambda: "1 Word equation(s) given the characters they mean" in on_result.stdout + on_result.stderr),
+        ("with math.repair_equations off, the equation is as it was",
+         lambda: "\u00b5" in off and "\\overset" in off),
+    ]
+
+
+def case_word_text_math(work):
+    """format: source writes math.from_text into a Word file: the runs of
+    math typed as text replaced by Word's equation, what's around them kept
+    as it was, and the same text in two paragraphs told apart."""
+    os.makedirs(work)
+    subprocess.run(["pandoc", "-o", os.path.join(work, "tm.docx")], check=True, text=True,
+                   input="# Math as text\n\n"
+                         "We know *μ* = 34, and **so** *H*~0~: *μ* ≠ 34, with $x$ < 5 here.\n\n"
+                         "The same: $y$ < 5 here.\n\n"
+                         "The same: $z$ < 5 here.\n\n"
+                         "A lone *a*, a [link](https://example.org), and 3 < 5 stay.\n\n"
+                         "ONE-RUN\n")
+    # Word keeps a run of plain text together, where Pandoc writes a run a
+    # word: the equation begins and ends inside this one.
+    path = os.path.join(work, "tm.docx")
+    with zipfile.ZipFile(path) as z:
+        items = [(i, z.read(i.filename)) for i in z.infolist()]
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as z:
+        for info, data in items:
+            if info.filename == "word/document.xml":
+                data = re.sub(r"<w:r>(?:(?!</w:r>).)*ONE-RUN</w:t></w:r>",
+                              '<w:r><w:rPr><w:color w:val="C00000" /></w:rPr>'
+                              '<w:t xml:space="preserve">Level '
+                              '\u03b1 = 0.05 here.</w:t></w:r>',
+                              data.decode("utf-8"), flags=re.S).encode("utf-8")
+            z.writestr(info, data)
+
+    def build(setting):
+        with open(os.path.join(work, "conversion.yaml"), "w") as fh:
+            fh.write("targets:\n  source:\n    format: source\n" + setting)
+        result = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quiet"],
+                                cwd=work, capture_output=True, text=True,
+                                stdin=subprocess.DEVNULL)
+        back = subprocess.run(["pandoc", "-f", "docx", "-t", "markdown", "--wrap=none",
+                               os.path.join(work, "source", "tm.docx")],
+                              capture_output=True, text=True)
+        return result.stdout + result.stderr, back.stdout
+    said, on = build("")
+    with zipfile.ZipFile(os.path.join(work, "source", "tm.docx")) as z:
+        copy = z.read("word/document.xml").decode("utf-8")
+    colored = re.findall(r'<w:color w:val="C00000" /></w:rPr><w:t xml:space="preserve">([^<]*)</w:t>', copy)
+    _, off = build("    math:\n      from_text: false\n")
+    return [
+        ("each expression is an equation in the copy, what's between them text",
+         lambda: "We know $\\mu = 34$, and **so** $H_{0}:\\mu \\neq 34$, with $x < 5$ here." in on),
+        ("paragraphs with the same text each get their own equation",
+         lambda: "The same: $y < 5$ here." in on and "The same: $z < 5$ here." in on),
+        ("a lone italic letter, a link, and numbers alone stay as they were",
+         lambda: "A lone *a*, a [link](https://example.org), and 3 \\< 5 stay." in on),
+        ("an equation inside one run of text splits it, its formatting on "
+         "both sides", lambda: "Level $\\alpha = 0.05$ here." in on
+         and colored == ["Level ", " here."]),
+        ("the run says how many it wrote, and none was left",
+         lambda: "6 equation(s) made of math typed as text" in said
+         and "not written into the Word file" not in said),
+        ("with math.from_text off, the copy's text is as it was",
+         lambda: "We know *μ* = 34" in off and "$x$ \\< 5" in off),
+    ]
+
+
 def case_source_target(work):
     """format: source: the book's own Word files, remediated into the
     target's folder, with only what a person decided in the sidecars, never
@@ -2991,6 +3122,8 @@ CASES = [
     ("a docx target", case_docx_target),
     ("a remediated copy of a Word file", case_remediate_docx),
     ("format: source", case_source_target),
+    ("format: source repairs Word's equations", case_word_equations),
+    ("format: source makes equations of math typed as text in Word", case_word_text_math),
     ("word.tracked_deletions and word.headings", case_word_repairs),
     ("format: source for Markdown", case_markdown_source),
     ("fidelity.csv for markdown and asciidoc targets", case_fidelity_writers),

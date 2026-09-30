@@ -59,6 +59,12 @@ end
 local REPAIR = setting('MATH_REPAIR_EQUATIONS')
 local FROM_TEXT = setting('MATH_FROM_TEXT')
 local REPORT = os.getenv('MATH_REPAIRED')
+-- Where each text-made equation is, for writing it into a Word source
+-- (format: source): the paragraph's text as the source gives it, with an
+-- equation already there as one placeholder character, the equation's
+-- text, which occurrence of it in the paragraph, and its TeX.
+local PLACES = os.getenv('MATH_PLACES')
+local PLACEHOLDER = '\u{FFFC}'
 
 local page = ''
 if PANDOC_STATE and PANDOC_STATE.input_files and PANDOC_STATE.input_files[1] then
@@ -87,6 +93,54 @@ local function report(kind, before, after)
   if report_handle then
     report_handle:write(table.concat({csv(kind), csv(page), csv(before),
                                       csv(after)}, ',') .. '\n')
+  end
+end
+
+local places_handle
+-- Paragraphs can share a text, their equations differing only inside
+-- the placeholders; each recorded paragraph's number in the page tells
+-- them apart, in the order the Word file has them.
+local paragraph_number = 0
+
+local function place(number, paragraph, span, occurrence, tex)
+  if not PLACES or PLACES == '' then return end
+  if places_handle == nil then
+    places_handle = io.open(PLACES, 'a') or false
+  end
+  if places_handle then
+    places_handle:write(table.concat({csv(page), csv(number), csv(paragraph),
+                                      csv(span), csv(occurrence), csv(tex)}, ',')
+                        .. '\n')
+  end
+end
+
+-- A paragraph's text as the Word file holds it: what's typed, spaces for
+-- breaks, a placeholder for an equation, nothing for a note or an image.
+local function inline_text(el)
+  local t = el.t
+  if t == 'Str' or t == 'Code' then return el.text end
+  if t == 'Space' or t == 'SoftBreak' or t == 'LineBreak' then return ' ' end
+  if t == 'Math' then return PLACEHOLDER end
+  if t == 'Note' or t == 'Image' or t == 'RawInline' then return '' end
+  if el.content then
+    local out = {}
+    for _, c in ipairs(el.content) do out[#out + 1] = inline_text(c) end
+    return table.concat(out)
+  end
+  return ''
+end
+
+local function normalize(s)
+  return (s:gsub('%s+', ' '):gsub('^ ', ''):gsub(' $', ''))
+end
+
+-- How many times needle occurs in haystack, plain, not overlapping.
+local function occurrences(haystack, needle)
+  local n, start = 0, 1
+  while true do
+    local i, j = haystack:find(needle, start, true)
+    if not i then return n end
+    n, start = n + 1, j + 1
   end
 end
 
@@ -216,8 +270,9 @@ local function letters(s)
 end
 
 -- An atom: kind, its TeX, its text, and the inline it stands for.
-local function atom(kind, tex, text, el)
-  return {kind = kind, tex = tex, text = text, el = el}
+local function atom(kind, tex, text, el, src)
+  return {kind = kind, tex = tex, text = text, el = el,
+          src = src or (el and inline_text(el)) or text}
 end
 
 local function classify(piece, italic)
@@ -263,13 +318,13 @@ function atoms_of(inlines, italic)
     if t == 'Space' or t == 'SoftBreak' then
       out[#out + 1] = atom('sp', ' ', ' ', el)
     elseif t == 'Math' and el.mathtype == 'InlineMath' then
-      out[#out + 1] = atom('math', el.text, el.text, el)
+      out[#out + 1] = atom('math', el.text, el.text, el, PLACEHOLDER)
     elseif t == 'Str' then
       local ps = pieces(el.text)
       for _, p in ipairs(ps) do
         local kind, tex = classify(p, italic)
         out[#out + 1] = atom(kind, tex, p,
-                             #ps == 1 and el or pandoc.Str(p))
+                             #ps == 1 and el or pandoc.Str(p), p)
       end
     elseif t == 'Emph' and #el.content == 1 and el.content[1].t == 'Str'
         and #pieces(el.content[1].text) == 1 then
@@ -400,6 +455,25 @@ end
 
 local function from_text(inlines)
   local atoms = atoms_of(inlines, false)
+  local paragraph, number
+  local function located(first, last, tex)
+    if not PLACES or PLACES == '' then return end
+    if not paragraph then
+      local parts = {}
+      for _, el in ipairs(inlines) do parts[#parts + 1] = inline_text(el) end
+      paragraph = normalize(table.concat(parts))
+      paragraph_number = paragraph_number + 1
+      number = paragraph_number
+    end
+    local before, span = {}, {}
+    for k = 1, last do
+      local target = k < first and before or span
+      target[#target + 1] = atoms[k].src
+    end
+    local text = normalize(table.concat(span))
+    local upto = normalize(table.concat(before) .. table.concat(span))
+    place(number, paragraph, text, occurrences(upto, text), tex)
+  end
   -- A single plain letter right before an opening parenthesis names a
   -- function.
   for k = 1, #atoms - 1 do
@@ -425,6 +499,7 @@ local function from_text(inlines)
       local run = {table.unpack(atoms, f, l)}
       local tex = join_tex(run)
       report('expression', join_text(run), tex)
+      located(f, l, tex)
       out[#out + 1] = pandoc.Math('InlineMath', tex)
       changed = true
       i = l + 1
@@ -434,6 +509,7 @@ local function from_text(inlines)
         local run = {table.unpack(atoms, s, e)}
         local tex = join_tex(run)
         report('symbol', join_text(run), tex)
+        located(s, e, tex)
         out[#out + 1] = pandoc.Math('InlineMath', tex)
         changed = true
         i = e + 1

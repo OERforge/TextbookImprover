@@ -31,6 +31,13 @@ What it changes, all of it decided elsewhere in the pipeline:
   a bare link, its text.
 - **Language.** The book's language as the document's default, when the
   file has none.
+- **Equations.** With math.repair_equations, the characters of Word's own
+  equations as math-repair.lua repairs them in the pages: a bar for an
+  upper limit that is a macron or an en dash, mu for the micro sign, and
+  the rest. Each is written as Pandoc writes the TeX the filter writes, so
+  the file reads back as the pages already read. With math.from_text, math
+  typed as text made Word's equation where the filter made one in the
+  page (remediate_text_math).
 - **Compatibility mode 15**, only when asked for.
 
 Everything else is left as it was: the XML is edited as text, never parsed
@@ -340,6 +347,338 @@ def remediate_captions(xml, applied, resolved):
     return xml, counts
 
 
+# An equation's characters, as math-repair.lua repairs them in the pages
+# (math.repair_equations), written into Word's own equations (OMML). Each
+# structure below is what the statistics textbook's equations hold; each
+# replacement is what Pandoc writes for the TeX the filter writes, so the
+# file reads back as the pages already read.
+MATH_RUN = re.compile(r"(<m:r>)((?:(?!</m:r>).)*?)(<m:t(?:\s[^>]*)?>)([^<]*)(</m:t>)(</m:r>)", re.S)
+# A bar written as an upper limit: the base, and a macron or an en dash as
+# the limit. Pandoc writes \bar{x} as an accent with an overline.
+BAR = '<m:acc><m:accPr><m:chr m:val="\u203e" /></m:accPr><m:e>%s</m:e></m:acc>'
+HAT = '<m:acc><m:accPr><m:chr m:val="\u0302" /></m:accPr><m:e>%s</m:e></m:acc>'
+SUB_SLASHED_O = re.compile(r"(<m:sub><m:r>(?:(?!</m:r>).)*?<m:t(?:\s[^>]*)?>)\u00d8(</m:t></m:r></m:sub>)", re.S)
+EQUATION_CHARACTERS = {"\u00b5": "\u03bc", "\u2206": "\u0394"}
+
+
+def _repair_run(m, counts):
+    """One m:r: its characters, and y-hat as an accent over y, the run
+    split around it with its properties on each part."""
+    start, props, t_open, text, t_close, end = m.groups()
+    fixed = text
+    for old, new in EQUATION_CHARACTERS.items():
+        fixed = fixed.replace(old, new)
+    # An en dash is a minus, except in normal text (m:nor), which is what
+    # \text{} becomes.
+    if "<m:nor" not in props:
+        fixed = fixed.replace("\u2013", "\u2212")
+    counts["equation_characters"] += sum(a != b for a, b in zip(text, fixed))
+    if "\u0177" not in fixed and "\u0176" not in fixed:
+        return start + props + t_open + fixed + t_close + end
+    parts = []
+    for piece in re.split("([\u0176\u0177])", fixed):
+        if piece in ("\u0176", "\u0177"):
+            letter = "y" if piece == "\u0177" else "Y"
+            parts.append(HAT % (start + props + t_open + letter + t_close + end))
+            counts["equation_characters"] += 1
+        elif piece:
+            parts.append(start + props + t_open + piece + t_close + end)
+    return "".join(parts)
+
+
+LIMIT_OPEN = re.compile(r"<m:limUpp>")
+LIMIT_TAIL = re.compile(r"</m:e><m:lim><m:r>(?:(?!</m:r>).)*?<m:t(?:\s[^>]*)?>[\u00af\u2013]</m:t>"
+                        r"</m:r></m:lim></m:limUpp>", re.S)
+
+
+def _limit_bars(eq):
+    """Each upper limit whose limit is a macron or an en dash, as a bar
+    over its base, the base found by counting m:e, since it can hold
+    structures of its own (X sub 1). Returns (eq, count)."""
+    out, pos, count = [], 0, 0
+    for m in LIMIT_OPEN.finditer(eq):
+        if m.start() < pos:
+            continue
+        rest = eq[m.end():]
+        head = re.match(r"(?:<m:limUppPr>(?:(?!</m:limUppPr>).)*</m:limUppPr>)?<m:e>", rest, re.S)
+        if not head:
+            continue
+        depth, i = 1, head.end()
+        for tag in re.finditer(r"<m:e>|</m:e>", rest[i:]):
+            depth += 1 if tag.group(0) == "<m:e>" else -1
+            if depth == 0:
+                base_end = i + tag.start()
+                break
+        else:
+            continue
+        tail = LIMIT_TAIL.match(rest, base_end)
+        if not tail:
+            continue
+        out.append(eq[pos:m.start()])
+        out.append(BAR % rest[head.end():base_end])
+        pos = m.end() + tail.end()
+        count += 1
+    out.append(eq[pos:])
+    return "".join(out), count
+
+
+def remediate_equations(xml):
+    """The characters of each of Word's equations, as math.repair_equations
+    repairs them in the pages: mu for the micro sign, Delta for the
+    increment sign, a minus for an en dash, a bar for an upper limit that
+    is a macron or an en dash, a hat over y for the one-character y-hat,
+    and 0 for a subscript's slashed O. Only inside m:oMath; the text around
+    an equation is left to math.from_text. Returns (xml, counts)."""
+    counts = {"equations_repaired": 0, "equation_characters": 0}
+
+    def one(m):
+        eq = m.group(0)
+        fixed, bars = _limit_bars(eq)
+        counts["equation_characters"] += bars
+        fixed, zeros = SUB_SLASHED_O.subn(r"\g<1>0\g<2>", fixed)
+        counts["equation_characters"] += zeros
+        fixed = MATH_RUN.sub(lambda r: _repair_run(r, counts), fixed)
+        if fixed != eq:
+            counts["equations_repaired"] += 1
+        return fixed
+    xml = re.sub(r"<m:oMath>(?:(?!</m:oMath>).)*</m:oMath>", one, xml, flags=re.S)
+    return xml, counts
+
+
+# Math typed as text, made an equation in the Word file where the filter
+# made one in the page (math.from_text). The filter records each one's
+# place: the paragraph's text, the equation's text, which occurrence of it,
+# and its TeX (MATH_PLACES). Here the paragraph whose runs give that text is
+# found, the runs the equation's text spans are replaced by Word's equation
+# for the TeX, as Pandoc writes it, and a run the span begins or ends inside
+# is split, its formatting kept on what stays text. Only what maps exactly
+# is written: a paragraph with tracked changes, a field, a text box, or a
+# symbol font is left, and so is a span that crosses a link's edge or holds
+# a note reference or a picture. Each place not written is counted.
+PLACEHOLDER = "\ufffc"
+RUN = re.compile(r"<w:r(?:\s[^>]*)?>((?:(?!</w:r>).)*)</w:r>", re.S)
+UNIT = re.compile(r"(<m:oMath>(?:(?!</m:oMath>).)*</m:oMath>)|(<w:r(?:\s[^>]*)?>(?:(?!</w:r>).)*</w:r>)"
+                  r"|(<w:hyperlink\b[^>]*>)|(</w:hyperlink>)", re.S)
+RUN_PARTS = re.compile(r"(<w:rPr>(?:(?!</w:rPr>).)*</w:rPr>)|<w:t(?:\s[^>]*)?>([^<]*)</w:t>|<w:t\s*/>"
+                       r"|(<w:tab\s*/>|<w:br\b[^>]*/>|<w:cr\s*/>)|(<w:lastRenderedPageBreak\s*/>)"
+                       r"|(<[^>]+>)", re.S)
+UNMAPPABLE = ("<w:del ", "<w:del>", "<w:ins ", "<w:ins>", "<w:fldChar", "<w:instrText",
+              "<w:fldSimple", "<w:sym ", "<w:txbxContent", "<w:moveFrom", "<w:moveTo")
+KEEP_BETWEEN = re.compile(r"<w:bookmark(?:Start|End)\b[^>]*/>")
+
+
+def math_places(path):
+    """{page: [(number, paragraph, span, occurrence, tex)]} from the rows
+    the filter wrote, each once, in order."""
+    import csv
+    out, seen = {}, set()
+    if not path or not os.path.exists(path):
+        return out
+    with open(path, encoding="utf-8", newline="") as fh:
+        for row in csv.reader(fh):
+            if len(row) != 6 or tuple(row) in seen:
+                continue
+            seen.add(tuple(row))
+            page, number, paragraph, span, occurrence, tex = row
+            out.setdefault(page, []).append((int(number), paragraph, span,
+                                             int(occurrence), tex))
+    return out
+
+
+def _normalize(text):
+    """The text with each run of whitespace one space, and none at the
+    ends, and for each character kept, its index in text."""
+    out, index, space = [], [], False
+    for i, ch in enumerate(text):
+        if ch.isspace():
+            space = bool(out)
+            continue
+        if space:
+            out.append(" ")
+            index.append(i - 1)
+            space = False
+        out.append(ch)
+        index.append(i)
+    return "".join(out), index
+
+
+def _units(para):
+    """A paragraph's runs and equations in order, each (start, end, text,
+    kind, container, run parts), and the paragraph's text."""
+    units, container, text = [], 0, []
+    for m in UNIT.finditer(para):
+        if m.group(3):
+            container = m.start()
+            continue
+        if m.group(4):
+            container = 0
+            continue
+        if m.group(1):
+            units.append((m.start(), m.end(), PLACEHOLDER, "math", container, None))
+            text.append(PLACEHOLDER)
+            continue
+        inner = RUN.match(m.group(2)).group(1)
+        props, pieces, simple = "", [], True
+        for part in RUN_PARTS.finditer(inner):
+            if part.group(1):
+                props = part.group(1)
+            elif part.group(3):
+                pieces.append(" ")
+                simple = False if simple else simple
+            elif part.group(4):
+                continue
+            elif part.group(2) is not None or re.match(r"<w:t\s*/>", part.group(0)):
+                pieces.append(html.unescape(part.group(2) or ""))
+            else:
+                # A note's reference, a picture, anything else: no text
+                # the filter saw, and nothing to take into an equation.
+                pieces.append("")
+                simple = None
+        run_text = "".join(pieces)
+        units.append((m.start(), m.end(), run_text, "run", container,
+                      (m.group(2)[:m.group(2).index(">") + 1], props, simple)))
+        text.append(run_text)
+    return units, "".join(text)
+
+
+def _plain_run(open_tag, props, text):
+    return '%s%s<w:t xml:space="preserve">%s</w:t></w:r>' % (open_tag, props,
+                                                         html.escape(text, quote=False))
+
+
+def _place_in(para, spans, omml, counts):
+    """The paragraph with each (span, occurrence, tex) made an equation
+    where it maps exactly; the others counted as left."""
+    units, raw = _units(para)
+    norm, index = _normalize(raw)
+    # Which unit each character of raw belongs to.
+    owner = []
+    for n, unit in enumerate(units):
+        owner.extend([n] * len(unit[2]))
+    edits, taken = [], []
+    for span, occurrence, tex in spans:
+        start, found = -1, 0
+        while found < occurrence:
+            start = norm.find(span, start + 1)
+            if start < 0:
+                break
+            found += 1
+        equation = omml.get(tex)
+        if start < 0 or not equation or not span:
+            counts["text_equations_left"] += 1
+            continue
+        first, last = index[start], index[start + len(span) - 1]
+        a, b = owner[first], owner[last]
+        covered = units[a:b + 1]
+        head_offset = first - sum(len(u[2]) for u in units[:a])
+        tail_offset = last - sum(len(u[2]) for u in units[:b]) + 1
+        ok = len({u[4] for u in covered}) == 1 and covered[0][4] == 0
+        for n, u in enumerate(covered):
+            if u[3] == "run":
+                simple = u[5][2]
+                partial = (n == 0 and head_offset > 0) or (n == len(covered) - 1 and tail_offset < len(u[2]))
+                if simple is None or (partial and not simple):
+                    ok = False
+        # Two places over the same text: neither can be trusted.
+        if not ok or any(head_start < covered[-1][1] and covered[0][0] < head_end
+                         for head_start, head_end in taken):
+            counts["text_equations_left"] += 1
+            continue
+        taken.append((covered[0][0], covered[-1][1]))
+        pieces = []
+        head, tail = covered[0], covered[-1]
+        if head[3] == "run" and head_offset > 0:
+            pieces.append(_plain_run(head[5][0], head[5][1], head[2][:head_offset]))
+        pieces.append(equation)
+        kept = KEEP_BETWEEN.findall(para[head[1]:tail[0]]) if len(covered) > 1 else []
+        pieces.extend(kept)
+        if tail[3] == "run" and tail_offset < len(tail[2]):
+            pieces.append(_plain_run(tail[5][0], tail[5][1], tail[2][tail_offset:]))
+        edits.append((head[0], tail[1], "".join(pieces)))
+        counts["text_equations"] += 1
+    for start, end, new in sorted(edits, reverse=True):
+        para = para[:start] + new + para[end:]
+    return para
+
+
+PARAGRAPH = re.compile(r"<w:p(?:\s[^>]*)?>(?:(?!<w:p[\s>]).)*?</w:p>", re.S)
+
+
+def remediate_text_math(xml, places, omml):
+    """places: [(number, paragraph, span, occurrence, tex)] for this file;
+    omml: {tex: Word's equation}. Returns (xml, counts, the numbers of the
+    places' paragraphs written or accounted for).
+
+    Paragraphs are matched by their text, with an equation already there
+    as a placeholder. When several share a text, the filter's paragraph
+    numbers are given to them in order, but only when there are as many of
+    them here as the filter recorded; otherwise none is written, since
+    which equation belongs where can't be told."""
+    counts = {"text_equations": 0, "text_equations_left": 0}
+    by_text = {}
+    for number, paragraph, span, occurrence, tex in places:
+        by_text.setdefault(paragraph, {}).setdefault(number, []).append((span, occurrence, tex))
+    texts = [_normalize(_units(m.group(0))[1])[0] for m in PARAGRAPH.finditer(xml)]
+    present = {}
+    for t in texts:
+        present[t] = present.get(t, 0) + 1
+    seen_here, done = {}, set()
+    out, pos = [], 0
+    for m, norm in zip(PARAGRAPH.finditer(xml), texts):
+        numbers = by_text.get(norm)
+        if not numbers:
+            continue
+        k = seen_here.get(norm, 0)
+        seen_here[norm] = k + 1
+        ordered = sorted(numbers)
+        if present[norm] != len(ordered):
+            if k == 0:
+                counts["text_equations_left"] += sum(len(v) for v in numbers.values())
+                done.update(ordered)
+            continue
+        number = ordered[k]
+        spans = numbers[number]
+        done.add(number)
+        para = m.group(0)
+        if any(marker in para for marker in UNMAPPABLE):
+            counts["text_equations_left"] += len(spans)
+            continue
+        new = _place_in(para, spans, omml, counts)
+        out.append(xml[pos:m.start()])
+        out.append(new)
+        pos = m.end()
+    out.append(xml[pos:])
+    return "".join(out), counts, done
+
+
+def equations_for(texs):
+    """{tex: Word's equation for it}, as Pandoc writes each, in one run."""
+    import subprocess
+    texs = [t for t in dict.fromkeys(texs) if t]
+    if not texs:
+        return {}
+    source = "\n\n".join("$%s$" % t for t in texs) + "\n"
+    handle, path = tempfile.mkstemp(suffix=".docx")
+    os.close(handle)
+    try:
+        result = subprocess.run(["pandoc", "-f", "markdown", "-t", "docx", "-o", path],
+                                input=source, text=True, capture_output=True)
+        if result.returncode != 0:
+            return {}
+        with zipfile.ZipFile(path) as z:
+            document = z.read("word/document.xml").decode("utf-8")
+    finally:
+        os.remove(path)
+    body = document[document.index("<w:body>"):]
+    paras = re.findall(r"<w:p(?:\s[^>]*)?>(?:(?!</w:p>).)*</w:p>", body, re.S)
+    out = {}
+    for tex, para in zip(texs, paras):
+        found = re.findall(r"<m:oMath>(?:(?!</m:oMath>).)*</m:oMath>", para, re.S)
+        if len(found) == 1:
+            out[tex] = found[0]
+    return out
+
+
 def replace_links(xml, rels, replacements):
     """replacements: {address: replacement}. Each relationship to one gets
     the replacement; each hyperlink using it whose text is the address
@@ -432,11 +771,15 @@ def remediate_links(xml, rels, titles):
 
 def remediate(source, destination, tables=None, alts=None, titles=None, compat=False,
               guesses=False, captions=None, replacements=None, language=None,
-              headings="keep", deletions="accept"):
+              headings="keep", deletions="accept", equations=False, places=None):
     """Write destination, a copy of source with the decisions applied.
     tables: the pre-pass's resolved list for this file; alts: {relationship
-    id: alt or None}; titles: {address: title}. Returns a dict of counts."""
-    counts = {"compat": 0, "links": 0}
+    id: alt or None}; titles: {address: title}; equations: repair the
+    characters of Word's equations (math.repair_equations). Returns a dict
+    of counts."""
+    counts = {"compat": 0, "links": 0, "equations_repaired": 0,
+              "equation_characters": 0, "text_equations": 0,
+              "text_equations_left": 0}
     with zipfile.ZipFile(source) as z:
         infos = z.infolist()
         parts = {i.filename: z.read(i.filename) for i in infos}
@@ -460,6 +803,31 @@ def remediate(source, destination, tables=None, alts=None, titles=None, compat=F
         if new != xml:
             parts["word/document.xml"] = new.encode("utf-8")
             changed.add("word/document.xml")
+    # Equations are in notes too. Text made equations first: the places
+    # were recorded against the text as the source has it.
+    omml = equations_for([tex for _, _, _, _, tex in places or []])
+    matched = set()
+    for name in ("word/document.xml", "word/footnotes.xml", "word/endnotes.xml"):
+        if places and name in parts:
+            xml = text(name)
+            new, found, seen = remediate_text_math(xml, places, omml)
+            counts["text_equations"] += found["text_equations"]
+            counts["text_equations_left"] += found["text_equations_left"]
+            matched |= seen
+            if new != xml:
+                parts[name] = new.encode("utf-8")
+                changed.add(name)
+        if equations and name in parts:
+            xml = text(name)
+            new, found = remediate_equations(xml)
+            for key, n in found.items():
+                counts[key] += n
+            if new != xml:
+                parts[name] = new.encode("utf-8")
+                changed.add(name)
+    # A place no paragraph of any part matched is left too.
+    counts["text_equations_left"] += sum(1 for number, _, _, _, _ in places or []
+                                         if number not in matched)
     if "word/styles.xml" in parts:
         styles = text("word/styles.xml")
         new_styles, counts["language"] = remediate_language(styles, language)

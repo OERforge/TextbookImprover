@@ -46,6 +46,9 @@ def main(argv=None):
     ap.add_argument("--include-guesses", action="store_true",
                     help="write the census's guess for a table with no sidecar row too; "
                          "it then reads back as the file's own declaration")
+    ap.add_argument("--repair-equations", action="store_true",
+                    help="give Word's equations the characters they mean, as the "
+                         "pipeline's math.repair_equations does")
     ap.add_argument("--out", required=True, help="folder for the copies")
     args = ap.parse_args(argv)
     resolved, resolved_html = {}, {}
@@ -69,7 +72,8 @@ def main(argv=None):
             counts = docxremediate.remediate(path, out, resolved.get(stem, []), alts.get(stem, {}),
                                              titles, args.compat, args.include_guesses,
                                              replacements={u: r for u, (r, _) in links.items() if r},
-                                             language=args.language)
+                                             language=args.language,
+                                             equations=args.repair_equations)
         elif ext.lower() in (".html", ".htm"):
             counts = htmlremediate.remediate(path, out, resolved_html.get(stem, []), page_alts,
                                              links, args.language)

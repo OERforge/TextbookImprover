@@ -1820,6 +1820,8 @@ def remediate_sources(target, base, docs, paths, env, html_stems=(), language=No
     titles = docxremediate.link_titles(paths["bare_links"])
     links = htmlremediate.link_rows(paths["bare_links"])
     captions = htmlremediate.caption_rows(os.path.join(work, "captions_applied")) if work else {}
+    places = docxremediate.math_places(os.path.join(work, "math_places")) \
+        if work and target["math.from_text"] else {}
     written, totals = [], {}
     for name in docs:
         stem = os.path.splitext(name)[0]
@@ -1830,7 +1832,9 @@ def remediate_sources(target, base, docs, paths, env, html_stems=(), language=No
                                          captions=captions.get(stem, []),
                                          replacements={u: r for u, (r, _) in links.items() if r},
                                          language=language, headings=WORD_HEADINGS,
-                                         deletions=WORD_DELETIONS)
+                                         deletions=WORD_DELETIONS,
+                                         equations=bool(target["math.repair_equations"]),
+                                         places=places.get(stem, []))
         for key, n in counts.items():
             totals[key] = totals.get(key, 0) + n
         written.append(out)
@@ -1874,9 +1878,19 @@ def remediate_sources(target, base, docs, paths, env, html_stems=(), language=No
         f"{totals.get('links', 0)} link title(s), "
         f"{totals.get('replaced', 0)} link(s) given their replacement address, "
         f"the language set in {totals.get('language', 0)}"
+        + (f", {totals['equations_repaired']} Word equation(s) given the "
+           f"characters they mean ({totals['equation_characters']} change(s))"
+           if totals.get("equations_repaired") else "")
+        + (f", {totals['text_equations']} equation(s) made of math typed as text"
+           if totals.get("text_equations") else "")
         + (f"; {totals['skipped']} table(s) skipped as changed since the pre-pass"
            if totals.get("skipped") else "")
         + ".")
+    if totals.get("text_equations_left"):
+        say(f"{target.name}: {totals['text_equations_left']} equation(s) the pages make of "
+            "math typed as text not written into the Word file: its runs there aren't "
+            "what the filter read, or hold a field, a tracked change, a note, or a "
+            "picture. They're in math-repaired.csv.")
     if totals.get("captions_left"):
         say(f"{target.name}: {totals['captions_left']} table description(s) not written: "
             "the table, or the label paragraph beside it, isn't what the filter saw.")
@@ -2633,7 +2647,7 @@ def main():
         collected = {key: os.path.join(work, key) for key in
                      ("captions_missing", "alt_missing", "spacers",
                       "media_unresolved", "bare_links", "captions_applied",
-                      "math")}
+                      "math", "math_places")}
         env = dict(os.environ)
         env.update({
             # For html-source.lua: a page's <title> that repeats the
@@ -2645,6 +2659,7 @@ def main():
             "CAPTIONS_APPLIED": collected["captions_applied"],
             "SPACER_LOG": collected["spacers"],
             "MATH_REPAIRED": collected["math"],
+            "MATH_PLACES": collected["math_places"],
             "MEDIA_UNRESOLVED": collected["media_unresolved"],
             "MEDIA_STRICT": "1" if first["media.strict"] else "",
         })

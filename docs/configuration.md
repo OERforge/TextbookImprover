@@ -298,6 +298,30 @@ which a short equivalent has become a long description, and long
 descriptions belong in the prose where every reader gets them. Raising it
 silences the report rather than fixing anything.
 
+### Math
+
+Two repairs, both on unless turned off, and both recorded row by row in `math-repaired.csv` (its kind, the page, and the text before and after).
+
+**An equation's characters.** Word's equation editor lets an author type a character that looks right and means something else, and a screen reader reads the one that's there: the micro sign `µ` for the Greek `μ`, the increment sign `∆` for `Δ`, an en dash for a minus (read as "en dash"), a bar over x written as an en dash or a macron set above it, `ŷ` as one precomposed character rather than y with a hat, and `H` with a slashed `Ø` for the null hypothesis's `H₀`. Each has one right form, and `math.repair_equations` writes it. The statistics textbook has several hundred; some of them (µ, ŷ, Ø) are also characters no math font in LaTeX maps, so its PDF had dropped them.
+
+**Math typed as text.** Some books type math as ordinary text rather than as an equation: italic letters, Greek letters, sub- and superscripts, and `=` or `<` between them. It reads right on screen, but a screen reader gets `σ²` as "sigma 2", and a PDF's text font may have no Greek. `math.from_text` makes an equation of it, conservatively:
+
+- an expression needs a relation (`=`, `≠`, `<`, `≤`, `>`, `≥`, `≈`, `~`) with an operand at each end and at least one variable, an italic letter or a Greek one: `μ = 34`, `P(x ≤ 160) = 0.3`, `Z ~ N(0, 1)`. A plain letter is a word and ends the expression, except one right before a parenthesis, a function's name (`P` in `P(x ≤ 160)`). A comma and a space end it too, outside parentheses, so `μ = 5.51, s = 2.15` is two equations.
+- a symbol on its own is a Greek letter (`μ`), or an italic letter with a sub- or superscript (`H₀`, `σ²`).
+- left alone: a lone italic letter (outside a statistics book it's mostly emphasis or an initial), numbers with no variable (`3 < 5`, a year range), anything cut off at a relation (`A =` before a set in braces), and an ordinal's superscript (the *th* of *n*th).
+
+Measured before it was written: on the statistics textbook, 1,175 expressions and 457 symbols, and in samples every one was math; on 771 files of six other books from the test corpus, three expressions (nursing's dosage formulas) and two symbols.
+
+```yaml
+# in conversion.yaml, to turn either off
+defaults:
+  math:
+    repair_equations: false
+    from_text: false
+```
+
+For a Word source, `format: source` doesn't yet write these repairs back into the Word file: the equations it would write are Word's own, and that's still to do.
+
 ## Editions
 
 Two editions of a book usually differ in a page or a passage, not in

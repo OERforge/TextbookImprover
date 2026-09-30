@@ -49,7 +49,9 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
 import argparse
+import csv
 import glob
+import json
 import os
 import re
 import shutil
@@ -586,6 +588,87 @@ def case_math(work):
     ]
 
 
+MATH_TEXT = r"""The mean *μ* = 34, and *H*~0~: *μ* ≠ 34; *H*~a~: *σ*^2^ > 5^2^.
+
+We know P(*x* ≤ 160) = 0.3, and *μ* = 5.51, *s* = 2.15, from *X* ~ N(5.51, 2.15).
+
+The population mean μ is unknown; the parameter *p* is a proportion.
+
+Years 1773–1799, ±3%, and 3 < 5 stay text, as do *a* lot, *A* = {1, 2}, the *n*^th^ term, and a plain x = 3.
+
+Repaired: $\overset{–}{X} – µ + ŷ$ and $H_{Ø}$, but not $\text{pages 1–5}$.
+"""
+
+
+def math_run(work, name, settings):
+    """The sample through math-repair.lua alone: its equations' TeX and
+    the report's rows."""
+    os.makedirs(work, exist_ok=True)
+    source = os.path.join(work, name + ".md")
+    with open(source, "w", encoding="utf-8") as fh:
+        fh.write(MATH_TEXT)
+    report = os.path.join(work, name + ".csv")
+    environment = dict(os.environ, MATH_REPAIRED=report, **settings)
+    result = subprocess.run(
+        ["pandoc", "-f", "markdown", "-t", "json", source,
+         "--lua-filter", os.path.join(BIN, "math-repair.lua")],
+        capture_output=True, text=True, env=environment)
+    maths = []
+
+    def walk(node):
+        if isinstance(node, dict):
+            if node.get("t") == "Math":
+                maths.append(node["c"][1])
+            for value in node.values():
+                walk(value)
+        elif isinstance(node, list):
+            for value in node:
+                walk(value)
+    walk(json.loads(result.stdout)["blocks"])
+    rows = []
+    if os.path.exists(report):
+        with open(report, encoding="utf-8", newline="") as fh:
+            rows = list(csv.reader(fh))
+    return maths, rows
+
+
+def case_math_repair(work):
+    """math-repair.lua: an equation's wrong characters, and math typed as
+    text, conservatively."""
+    maths, rows = math_run(work, "on", {})
+    off_eq, _ = math_run(work, "no-equations", {"MATH_REPAIR_EQUATIONS": "false"})
+    off_text, _ = math_run(work, "no-text", {"MATH_FROM_TEXT": "false"})
+    kinds = {row[0] for row in rows}
+    return [
+        ("an equation's en dash bar, en dash minus, micro sign, and y-hat "
+         "are repaired", lambda: "\\bar{X} - \u03bc + \\hat{y}" in maths),
+        ("H sub slashed O is H sub 0", lambda: "H_{0}" in maths),
+        ("an en dash in \\text stays one",
+         lambda: "\\text{pages 1\u20135}" in maths),
+        ("a relation between a variable and a number is an equation",
+         lambda: "\u03bc=34" in maths),
+        ("a function's name joins its expression",
+         lambda: "P(x\\leq 160)=0.3" in maths),
+        ("a comma outside parentheses separates two equations, inside "
+         "them it doesn't",
+         lambda: "\u03bc=5.51" in maths and "s=2.15" in maths
+         and "X\\sim N(5.51,2.15)" in maths),
+        ("a Greek letter alone, and a subscripted italic letter, are "
+         "symbols", lambda: "\u03bc" in maths and "H_{0}" in maths),
+        ("a year range, a percentage, numbers alone, a lone italic letter, "
+         "a fragment, and an ordinal stay text",
+         lambda: not any(m for m in maths if "1773" in m or "3%" in m
+                         or m in ("3<5", "a", "n", "p", "x=3") or "A" in m
+                         or "th" in m)),
+        ("each change is reported by kind",
+         lambda: kinds == {"equation", "expression", "symbol"}),
+        ("math.repair_equations off leaves equations as they are",
+         lambda: "\\overset{\u2013}{X} \u2013 \u00b5 + \u0177" in off_eq),
+        ("math.from_text off makes no equation of text",
+         lambda: len(off_text) == 3),
+    ]
+
+
 def case_media(work):
     """Word's content types, alt text, and keys that must stay distinct."""
     out = Converted(work, ["media-a", "media-b"])
@@ -678,6 +761,7 @@ CASES = [
     ("declared table headers", case_headers),
     ("split at grouping bands", case_split),
     ("equations, MathSpeak, and spacers", case_math),
+    ("math repaired, and math typed as text", case_math_repair),
     ("media naming, alt text, and keys", case_media),
     ("media keys when converting in one pass", case_media_keys_single_pass),
 ]

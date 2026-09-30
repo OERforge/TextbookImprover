@@ -86,8 +86,9 @@ ONE = r"""# One
 
 ## First {#first}
 
-Greek and symbols as text, not math: the mean μ ≤ 5 and σ ≈ 2. And 漢,
-which no Latin Modern font has.
+Greek and symbols as text, and not math, which the math repair would make
+of a Greek letter alone: the letters αβγ as one word, and ≤ and ≈ named on
+their own. And 漢, which no Latin Modern font has.
 
 Inline math $x^2 + y^2 = z^2$, and a display:
 
@@ -337,7 +338,7 @@ def checks(work):
         # Latin Modern has no Greek; without the fallback font these are
         # drawn blank.
         ("Greek and symbols written as text are in the PDF's text",
-         lambda: all(c in text for c in "μ≤σ≈")),
+         lambda: all(c in text for c in "αβγ≤≈")),
         # The one character no fallback has is reported once, in a line
         # of its own, rather than as one warning per occurrence.
         ("a character no font has is reported in one line, with its code",

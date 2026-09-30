@@ -90,6 +90,7 @@ except ImportError:
              "lib/ directory beside bin/.")
 
 FIGURE_FILTER = os.path.join(HERE, "figures-and-tables.lua")
+MATH_FILTER = os.path.join(HERE, "math-repair.lua")
 MEDIA_FILTER = os.path.join(HERE, "media-extensions.lua")
 HEADER_FILTER = os.path.join(HERE, "header-includes.lua")
 SAFE_MEDIA_FILTER = os.path.join(HERE, "safe-media.lua")
@@ -1406,6 +1407,8 @@ def filter_env(target, base, paths, env):
         "AUTHOR_BYLINE": str(r["author_byline"]),
         "PROMOTE_H1_TO_TITLE": str(r["promote_h1_to_title"]),
         "TABLE_BANDS": str(target["tables.bands"]),
+        "MATH_REPAIR_EQUATIONS": "true" if r["math.repair_equations"] else "false",
+        "MATH_FROM_TEXT": "true" if r["math.from_text"] else "false",
         "TABLE_CAPTIONS": paths["table_captions"],
         "IMAGE_ALT": paths["image_alt"],
         "BARE_LINKS": paths["bare_links"],
@@ -1435,7 +1438,8 @@ def filter_pages(base, stems, target, env, raw=None):
         out = os.path.join(pages_dir, stem + INTERMEDIATE)
         source = (raw or {}).get(stem) or os.path.join(base, stem + ".json")
         run(["pandoc", "-f", "json", "-t", "json", source, "-o", out,
-             "--lua-filter=" + FIGURE_FILTER], env=env, cwd=base)
+             "--lua-filter=" + FIGURE_FILTER,
+             "--lua-filter=" + MATH_FILTER], env=env, cwd=base)
         written.append(out)
     return written
 
@@ -2565,7 +2569,8 @@ def main():
     TRACE = not args.quiet
     base = os.getcwd()
 
-    for required in (FIGURE_FILTER, MEDIA_FILTER, HEADER_FILTER, PAGE_CSS):
+    for required in (FIGURE_FILTER, MATH_FILTER, MEDIA_FILTER, HEADER_FILTER,
+                     PAGE_CSS):
         if not os.path.isfile(required):
             die(f"Missing {required} -- save it alongside this script.")
 
@@ -2621,13 +2626,14 @@ def main():
                            "table_headers_new", "table_headers_report",
                            "page_names_new", "page_names_report",
                            "media_unresolved", "spacer_images",
-                           "output_check")}
+                           "output_check", "math_repaired")}
 
     work = tempfile.mkdtemp(prefix="convert-")
     try:
         collected = {key: os.path.join(work, key) for key in
                      ("captions_missing", "alt_missing", "spacers",
-                      "media_unresolved", "bare_links", "captions_applied")}
+                      "media_unresolved", "bare_links", "captions_applied",
+                      "math")}
         env = dict(os.environ)
         env.update({
             # For html-source.lua: a page's <title> that repeats the
@@ -2638,6 +2644,7 @@ def main():
             "BARE_LINKS_FOUND": collected["bare_links"],
             "CAPTIONS_APPLIED": collected["captions_applied"],
             "SPACER_LOG": collected["spacers"],
+            "MATH_REPAIRED": collected["math"],
             "MEDIA_UNRESOLVED": collected["media_unresolved"],
             "MEDIA_STRICT": "1" if first["media.strict"] else "",
         })
@@ -2735,7 +2742,7 @@ def main():
         # has nothing to report. Doing it here rather than at the top means
         # a run that stops at the gate leaves the previous reports intact.
         for key in ("table_captions_missing", "image_alt_missing",
-                    "spacer_images"):
+                    "spacer_images", "math_repaired"):
             if os.path.exists(reports[key]):
                 os.remove(reports[key])
 
@@ -2829,6 +2836,11 @@ def main():
             "meaning.")
         write_bare_links(collected["bare_links"], reports["bare_links_new"],
                          paths["bare_links"])
+        write_report(collected["math"], reports["math_repaired"],
+                     "Kind,Page,Before,After", "math repair(s)", None,
+                     "Each is an equation's characters repaired, or math "
+                     "typed as text made an equation; math.repair_equations "
+                     "and math.from_text turn them off.")
         write_report(collected["spacers"], reports["spacer_images"],
                      "Image,Source,Width,Action", "spacer image(s) handled")
         labels = {row.split(",")[0] for row in missing}

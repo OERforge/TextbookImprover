@@ -48,6 +48,18 @@ Whether a page's leading H1 becomes its title. Reading .docx, the existing title
 
 What to do with author metadata from the source. Reading .docx this comes from a paragraph styled Author, which Pandoc consumes out of the body the same way it consumes a Title-styled one. meta keeps it in the page head and suppresses the visible byline Pandoc's template would otherwise print under every title; visible keeps both; drop removes it.
 
+## math
+
+Math the source wrote in the wrong characters, or as text. Every change is a row in reports.math_repaired.
+
+**`math.repair_equations`**—`bool`; default `true`
+
+Give each equation the characters it means: mu for the micro sign, Delta for the increment sign, a minus for an en dash, a bar for an en dash or macron set over a letter, y with a hat for the one-character y-hat, and 0 for the slashed O of H sub 0. Word's equation editor lets an author type a character that looks right and means something else; a screen reader reads the one that's there, and a PDF's math fonts have no glyph for some of them.
+
+**`math.from_text`**—`bool`; default `true`
+
+Make an equation of math typed as ordinary text: a relation (=, <, >, and the rest) between operands, with at least one variable, an italic letter or a Greek one (mu = 34, P(x < 160) = 0.3); and a Greek letter, or an italic letter with a sub- or superscript, standing alone (mu, H sub 0). A plain letter is a word, and a lone italic letter is left alone, since outside math it's mostly emphasis. Conservative on purpose: text becomes math only when it's clearly math.
+
 ## images
 
 How images extracted from the source are handled.
@@ -261,3 +273,7 @@ Media that could not be identified. EMF and WMF are the usual cause and have to 
 **`reports.spacer_images`**—`path`; default `spacer-images.csv`
 
 Spacer images found, and what was done with each.
+
+**`reports.math_repaired`**—`path`; default `math-repaired.csv`
+
+Each change the math settings made: an equation's characters repaired, or text made an equation, with the page and the text before and after.

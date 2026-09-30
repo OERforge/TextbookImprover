@@ -486,6 +486,33 @@ def check_matter_by_name():
     ]
 
 
+def check_one_file_chapters():
+    """A book written one file per numbered chapter: each file is its
+    chapter, not a page under a "Chapter N" of its own; a chapter of
+    several files is still a group; an appendix keeps its role."""
+    order = bookcontents.guess_contents(
+        # Page names as a run makes them from "01 BigPicture.md" and the
+        # rest; the chapter number is read from the leading digits.
+        ["_preamble", "01-BigPicture", "02-Models", "03-Questions",
+         "04-Trade", "A1-Intro", "A2-Math", "Z1-Glossary"],
+        roles={"A1-Intro": "appendix", "A2-Math": "appendix"})
+    grouped = bookcontents.guess_contents(
+        ["1-1-a", "1-2-b", "2-1-c", "2-2-d", "3-1-e"])
+    return [
+        ("each one-file chapter is a page at the top",
+         lambda: order[1:5] == ["01-BigPicture", "02-Models",
+                                "03-Questions", "04-Trade"]),
+        ("front, appendix, and back matter keep their roles",
+         lambda: order[0] == {"page": "_preamble", "role": "front"}
+         and order[5:] == [{"page": "A1-Intro", "role": "appendix"},
+                           {"page": "A2-Math", "role": "appendix"},
+                           {"page": "Z1-Glossary", "role": "back"}]),
+        ("a chapter of several files is still a group, one of one file isn't",
+         lambda: [isinstance(e, dict) and "items" in e for e in grouped]
+         == [True, True, False]),
+    ]
+
+
 LIST_WRAPPED = ('<table><tr><td><ul><li><img src="x.png" alt="An eye"></li>'
                 '</ul></td></tr></table>')
 PLAIN_CELL = '<table><tr><td><img src="x.png" alt="An eye"></td></tr></table>'
@@ -626,6 +653,7 @@ GROUPS = [
     ("the content prefix", check_content_prefix),
     ("the wrapper module's name", check_wrapper_title),
     ("the page stylesheet's contrast, light and dark", check_page_css),
+    ("one file per chapter", check_one_file_chapters),
     ("identifiers", check_identifiers),
     ("facts written down twice", check_consistency),
     ("sidecar paths", check_sidecar_paths),

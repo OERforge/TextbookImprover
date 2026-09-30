@@ -487,10 +487,20 @@ def guess_contents(stems, back_matter=None, titles=None, parts=None,
     for number in sorted(chapters):
         pages = sorted(chapters[number],
                        key=lambda s: within_chapter_key(s, back_matter))
+        # A chapter that is one file is that file, as a book written one
+        # file per chapter means it: a group of one would only push the
+        # page a level down, under a heading made from the number ("Chapter
+        # 1") above the page's own title.
+        if len(pages) == 1:
+            tree.append(pages[0])
+            continue
         tree.append({"title": chapter_heading(number, pages, titles),
                      "items": pages})
 
-    tree.extend(sorted(middle, key=natural_key))
+    # A page with no chapter number keeps the role it was read with, an
+    # appendix's among them.
+    tree.extend({"page": s, "role": "appendix"} if role_for(s) == "appendix"
+                else s for s in sorted(middle, key=natural_key))
     tree.extend({"page": s, "role": "back"} for s in sorted(tail, key=natural_key))
     return tree
 

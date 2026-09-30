@@ -205,7 +205,10 @@ Chapters are detected by shape, not vocabulary: a numeric prefix
 whose own `<title>` becomes the group heading. Within a chapter the order
 is opener, introduction, numbered sections, then back matter in the order
 set by `grouping.back_matter`. A role name not in that list sorts after the
-ones that are, and is reported rather than silently misplaced. The guess is written to
+ones that are, and is reported rather than silently misplaced. A chapter
+that is one file (`01 BigPicture.md`, a book written a file per chapter) is
+that file, with no group heading over it, and a page read as an appendix
+keeps that role. The guess is written to
 `packaging-sample.yaml` for you to correct. It's a starting point, not a
 finished book.
 

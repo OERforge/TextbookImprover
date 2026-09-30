@@ -506,9 +506,11 @@ def join_nested_quotes(doc):
         # space and an empty anchor, or the space alone.
         if block.get("t") != "Para" or not block["c"]:
             return False
+        # docxtarget's QUOTE_SEPARATOR and CODE_SEPARATOR, with the
+        # underscore Pandoc 3.12's writer puts before a bookmark's name.
         return all((el.get("t") == "Str" and not el["c"].strip("\u200b"))
-                   or (el.get("t") == "Span" and el["c"][0][0].startswith(
-                       ("tiq-quote-sep-", "tiq-code-sep-")) and not el["c"][1])
+                   or (el.get("t") == "Span" and el["c"][0][0].lstrip("_").startswith(
+                       ("tiqSepQuote", "tiqSepCode")) and not el["c"][1])
                    for el in block["c"])
 
     def fix(blocks, inside):

@@ -2,7 +2,7 @@
 
 How to get the tools, what they need, and how to check the result. There's no initial configuration step for the tools themselves: `convert.py` finds its filters, schemas, and the shared library by path relative to itself, so they work from wherever you put them.
 
-v0.5 is developed and tested on Ubuntu 24.04 with Pandoc 3.11: on Windows under WSL 2, which is what the maintainer runs, and in an Ubuntu container, which is where the test suites run before a release. Nothing here is Windows-specific or WSL-specific, and the same commands work on a Linux machine or on macOS with Homebrew in place of `apt`.
+v0.5 is developed and tested on Ubuntu 24.04 with Pandoc 3.12 (and 3.11 still passes every suite): on Windows under WSL 2, which is what the maintainer runs, and in an Ubuntu container, which is where the test suites run before a release. Nothing here is Windows-specific or WSL-specific, and the same commands work on a Linux machine or on macOS with Homebrew in place of `apt`.
 
 ## On Windows: WSL first
 
@@ -57,14 +57,15 @@ Put that `export` line in `~/.bashrc` (see [below](#optional-the-full-validators
 | `file` | Detecting real image types | present on Ubuntu |
 | `html5lib` | Recommended. Parsing pages saved from the web (`unpack-site.py`), the way a browser does; without it `lxml` is used, and without either `unpack-site.py` stops | `sudo apt install python3-html5lib` |
 | `lxml` | Optional. Full schema validation of the manifest; without it a smaller set of checks runs. | `sudo apt install python3-lxml` |
-| `pypdf` | `--toc` with a PDF only; an EPUB needs nothing | `sudo apt install python3-pypdf` |
+| `pypdf` | `--toc` with a PDF, and checking a PDF the run builds or the audit reads; an EPUB needs nothing | `sudo apt install python3-pypdf` |
+| LuaLaTeX | A `pdf` target only; see [below](#for-a-pdf-target-lualatex) | TeX Live 2026 |
 | `zip` | Only if you package with the printed command instead of `--zip` | `sudo apt install zip` |
 
 **Pandoc has to come from Pandoc.** `sudo apt install pandoc` on Ubuntu 24.04 gives 3.1.3, which this project refuses to run with: Pandoc 3.6 and older write tables without cell spans, so a table with merged cells loses them silently, and several things the filter relies on arrived later. Install the `.deb` from [Pandoc's releases](https://github.com/jgm/pandoc/releases) instead:
 
 ```bash
-curl -L -O https://github.com/jgm/pandoc/releases/download/3.11/pandoc-3.11-1-amd64.deb
-sudo apt install ./pandoc-3.11-1-amd64.deb
+curl -L -O https://github.com/jgm/pandoc/releases/download/3.12/pandoc-3.12-1-amd64.deb
+sudo apt install ./pandoc-3.12-1-amd64.deb
 pandoc --version | head -1
 ```
 
@@ -102,6 +103,43 @@ java -jar "$VNU_JAR" --version
 The next `convert.py` reports `epubcheck ran on 1 EPUB(s)` and `The Nu HTML checker ran on N page(s)`. If `java -version` still reports 11 after installing 17 (Ubuntu keeps both), `sudo update-alternatives --config java` picks the one the run sees. A `vnu:failed` finding carries the checker's own exception, which names the cause.
 
 Two notes on versions. Ubuntu packages `epubcheck` as well (`sudo apt install epubcheck`), which the run finds on the path with no variable set; it's 4.2.6 on 24.04, several years behind, and it checks EPUB 3 well enough that either works. And the `latest` link for `vnu.jar` moves with each release, which is what you want for a validator; the version it prints is the one to note if a finding needs discussing.
+
+## For a PDF target: LuaLaTeX
+
+A `pdf` target writes the book through Pandoc's LaTeX writer and LuaLaTeX, with LaTeX's tagging switched on, so it needs a TeX distribution recent enough to tag. The LaTeX Project's [tagging project](https://latex3.github.io/tagging-project/) describes tagging as usable in production since the LaTeX release of 2025-11-01, for documents that keep to packages that support it, and TeX Live 2026 ships that; what's verified here is LaTeX 2026-06-01, tagpdf 1.0g, and latex-lab 2026-06-01a. **Ubuntu's `texlive` packages are TeX Live 2023 on 24.04, too old to tag a book properly**, so install TeX Live from the TeX Live project instead. A build checks the release first (`\fmtversion`, which LuaLaTeX reports) and stops on anything older than 2025-11-01, saying which release it found; without that check, Ubuntu 24.04's LaTeX (2023-11-01) stops on a missing `pdfmanagement-testphase.sty`, which older releases load for `\DocumentMetadata` and current ones have replaced. The `tlmgr` that comes with Debian's and Ubuntu's texlive packages can't add it: it runs in a user mode that isn't set up, and installs nothing into the system's TeX Live. When a TeX Live from Ubuntu and one from the TeX Live project are both installed, the one earlier on the path is the one used: `which lualatex` says which. Nothing else in the project needs TeX, and a book without a `pdf` target never looks for it.
+
+Verified here: [TinyTeX](https://github.com/rstudio/tinytex-releases), a small TeX Live 2026, brought up to date and given the packages the tagging code and Pandoc's template load that it lacks.
+
+```bash
+curl -L -o /tmp/TinyTeX.tar.xz https://github.com/rstudio/tinytex-releases/releases/download/v2026.09/TinyTeX-linux-x86_64-v2026.09.tar.xz
+tar xJf /tmp/TinyTeX.tar.xz -C ~          # gives ~/.TinyTeX
+export PATH="$HOME/.TinyTeX/bin/x86_64-linux:$PATH"    # and add this line to ~/.bashrc
+tlmgr update --self --all
+tlmgr install latex-lab tagpdf luamml luatexbase selnolig luacolor lua-ul footnotehyper xurl
+lualatex --version | head -1
+```
+
+Pandoc's template loads the first five for every book; `luacolor` and `lua-ul` when the book has underlined or struck-out text (the statistics book does), and `xurl` when it's installed, which is better than not (it lets a long address break anywhere). Pandoc 3.11's template also loads `footnotehyper` when it's there; 3.12's writes notes in tables itself and doesn't.
+
+Two more kinds of package, depending on the book. A book with passages in another language needs that language's `babel-` and `hyphen-` packages (`tlmgr install babel-german hyphen-german` for German), or LuaLaTeX stops with babel's `Unknown option`. And whatever a `pdf.metadata` file's `header-includes` loads has to be installed too (`hanging`, say). When LuaLaTeX stops on `File 'something.sty' not found`, `tlmgr search --global --file /something.sty` names the package to install.
+
+`tlmgr` downloads from a CTAN mirror chosen for you. On a network that only allows named hosts, set a fixed one first, since the chooser redirects: `tlmgr option repository https://ctan.math.illinois.edu/systems/texlive/tlnet` is the one used here.
+
+A full TeX Live 2026 from the [TeX Live installer](https://tug.org/texlive/quickinstall.html) has everything above already, at several gigabytes. It hasn't been tried here.
+
+## Optional: veraPDF
+
+[veraPDF](https://verapdf.org) checks a PDF against PDF/UA and PDF/A. When it's installed, the output check runs it on every PDF a run builds, and the [audit](auditing.md) on every PDF it's given. It's Java, like the other validators, and installs from its own site without its graphical parts:
+
+```bash
+curl -L -o /tmp/verapdf.zip https://software.verapdf.org/releases/verapdf-installer.zip
+unzip -o /tmp/verapdf.zip -d /tmp/verapdf
+java -DINSTALL_PATH="$HOME/tools/verapdf" -jar /tmp/verapdf/verapdf-greenfield-*/verapdf-izpack-installer-*.jar -options-system
+export VERAPDF="$HOME/tools/verapdf/verapdf"    # and add this line to ~/.bashrc
+"$VERAPDF" --version
+```
+
+The run finds it through `VERAPDF` or as `verapdf` on the path. veraPDF chooses its profiles from what the file claims: for a PDF claiming PDF/UA-2 and PDF/A-4f, veraPDF 1.30 applies PDF/UA-2 with Tagged PDF, PDF/A-4f, and both WTPDF 1.0 profiles.
 
 ## Checking the whole setup
 

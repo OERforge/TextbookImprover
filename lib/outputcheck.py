@@ -505,22 +505,28 @@ DESCRIPTIONS = {
 VALIDATORS = {
     "epubcheck": ("EPUBCHECK_JAR", "epubcheck"),
     "vnu": ("VNU_JAR", "vnu"),
+    # veraPDF installs a launcher script, not a jar, so its variable names
+    # the script (VERAPDF=/opt/verapdf/verapdf).
+    "verapdf": ("VERAPDF", "verapdf"),
 }
 
 
 def find_validator(name):
     """The command to run, as a list, or None.
 
-    An environment variable naming the jar wins (EPUBCHECK_JAR, VNU_JAR);
-    otherwise a command of that name on the path, which is what a
-    package manager's epubcheck provides. Either needs java for a jar.
+    An environment variable naming the tool wins (EPUBCHECK_JAR, VNU_JAR,
+    VERAPDF); otherwise a command of that name on the path, which is what
+    a package manager's epubcheck provides. A jar is run with java; any
+    other file the variable names is run as it is.
     """
     variable, command = VALIDATORS[name]
-    jar = os.environ.get(variable, "").strip()
-    if jar:
-        if os.path.isfile(jar) and shutil.which("java"):
-            return ["java", "-jar", jar]
-        return None
+    named = os.environ.get(variable, "").strip()
+    if named:
+        if not os.path.isfile(named):
+            return None
+        if named.lower().endswith(".jar"):
+            return ["java", "-jar", named] if shutil.which("java") else None
+        return [named]
     found = shutil.which(command)
     return [found] if found else None
 

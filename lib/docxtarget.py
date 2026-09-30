@@ -163,7 +163,10 @@ def _relationships(rels):
 def screentips(xml, rels, links):
     """Each titled link's hyperlink given its w:tooltip; returns (xml,
     count). A hyperlink is matched by its target (an external address,
-    or #anchor) and its text, first come first served."""
+    or #anchor) and its text, first come first served. Pandoc 3.12's
+    writer writes the ScreenTip itself (#11869); a hyperlink that has one
+    already keeps it and uses up its link, so the rest still match and the
+    count is of the file's ScreenTips, whichever wrote them."""
     if not links:
         return xml, 0
     targets = _relationships(rels)
@@ -173,8 +176,6 @@ def screentips(xml, rels, links):
     def one(m):
         nonlocal count
         attrs, inner = m.group(1), m.group(2)
-        if "w:tooltip=" in attrs:
-            return m.group(0)
         rid = re.search(r'r:id="([^"]+)"', attrs)
         anchor = re.search(r'w:anchor="([^"]+)"', attrs)
         target = targets.get(rid.group(1), "") if rid else ""
@@ -183,10 +184,17 @@ def screentips(xml, rels, links):
                       if target else "#" + html.unescape(anchor.group(1)))
         text = _words(html.unescape("".join(
             re.findall(r"<w:t(?:\s[^>]*)?>([^<]*)</w:t>", inner))))
+        # An anchor is the bookmark name the writer gave the id, which
+        # isn't the id when either version hashes it or 3.12 hides it.
+        name = html.unescape(anchor.group(1)) if anchor else None
         for i, (want, words, title) in enumerate(queue):
-            if want == target and words == text:
+            if (want == target or (name and not rid and want.startswith("#")
+                                   and name in bookmark_names(want[1:]))) \
+                    and words == text:
                 del queue[i]
                 count += 1
+                if "w:tooltip=" in attrs:
+                    return m.group(0)
                 return ('<w:hyperlink%s w:tooltip="%s">%s</w:hyperlink>'
                         % (attrs, html.escape(title, quote=True), inner))
         return m.group(0)
@@ -203,7 +211,13 @@ def screentips(xml, rels, links):
 # indent_quotes indents each paragraph by its depth and takes the
 # bookmarks out. A numbered paragraph is left as it is: the reader never
 # puts a list inside a quote, however it's indented.
-QUOTE_MARK = "tiq-quote-"
+# Marks are ids the writer turns into bookmarks, found again in its XML by
+# name. Letters and digits only, and none the start of another: Pandoc 3.11
+# names a bookmark after an id that starts with a letter, and 3.12 (#11845)
+# puts an underscore before one of letters, digits, and underscores and
+# hashes anything else, so a hyphen in a mark would lose it. Each is found
+# with or without the underscore.
+QUOTE_MARK = "tiqQuote"
 QUOTE_STEP = 480                      # the Block Text style's own indent
 AFTER_IND = ("w:contextualSpacing", "w:mirrorIndents", "w:suppressOverlap",
              "w:jc", "w:textDirection", "w:textAlignment",
@@ -211,14 +225,14 @@ AFTER_IND = ("w:contextualSpacing", "w:mirrorIndents", "w:suppressOverlap",
              "w:rPr", "w:sectPr", "w:pPrChange")
 
 
-QUOTE_SEPARATOR = QUOTE_MARK + "sep-"
+QUOTE_SEPARATOR = "tiqSepQuote"
 # Pandoc's reader joins adjacent code paragraphs into one code block, as it
 # joins adjacent quotes: two code blocks in a row get the same separator.
-CODE_SEPARATOR = "tiq-code-sep-"
-TABLE_MARK = "tiq-table-"
-DECORATIVE_MARK = "tiq-decorative-"
-LINES_MARK = "tiq-lines-"
-CODE_MARK = "tiq-code-"
+CODE_SEPARATOR = "tiqSepCode"
+TABLE_MARK = "tiqTable"
+DECORATIVE_MARK = "tiqDecorative"
+LINES_MARK = "tiqLines"
+CODE_MARK = "tiqLang"
 NUMBER_CLASSES = ("numberLines", "number-lines")
 # A code block's language, the class Pandoc highlights by, has nowhere to
 # go in Word either. It goes in a hidden bookmark (a name starting with an
@@ -447,13 +461,13 @@ def apply_markers(xml, tables, lines=None, codes=None):
     counts = {"first_columns": 0, "jaws_titles": 0, "decorative": 0, "code_lines": 0,
               "code_languages": 0}
     lines, codes = lines or {}, codes or {}
-    marks = re.findall(r'<w:bookmarkStart w:id="(\d+)" w:name="((?:%s|%s|%s|%s)\d+)"\s*/>'
+    marks = re.findall(r'<w:bookmarkStart w:id="(\d+)" w:name="(_?)((?:%s|%s|%s|%s)\d+)"\s*/>'
                        % (TABLE_MARK, DECORATIVE_MARK, LINES_MARK, CODE_MARK), xml)
     if not marks:
         return xml, counts
     edits = []                    # (start, end, replacement), applied from the end
-    for ident, name in marks:
-        at = xml.find('w:name="%s"' % name)
+    for ident, under, name in marks:
+        at = xml.find('w:name="%s%s"' % (under, name))
         if name.startswith(LINES_MARK):
             continue
         if name.startswith(CODE_MARK):
@@ -512,13 +526,14 @@ def apply_markers(xml, tables, lines=None, codes=None):
     for start, end, new in sorted(edits, key=lambda e: e[0], reverse=True):
         xml = xml[:start] + new + xml[end:]
     # Code last, from the end: each numbering changes the text after it.
-    for ident, name in reversed(marks):
+    for ident, under, name in reversed(marks):
         if name.startswith(LINES_MARK):
             n = int(name[len(LINES_MARK):])
-            xml, numbered = number_lines(xml, xml.find('w:name="%s"' % name), lines.get(n, 1))
+            xml, numbered = number_lines(xml, xml.find('w:name="%s%s"' % (under, name)),
+                                         lines.get(n, 1))
             counts["code_lines"] += numbered
-    ids = [ident for ident, _ in marks]
-    xml = re.sub(r'<w:bookmarkStart w:id="(?:%s)" w:name="(?:%s|%s|%s|%s)\d+"\s*/>'
+    ids = [ident for ident, _, _ in marks]
+    xml = re.sub(r'<w:bookmarkStart w:id="(?:%s)" w:name="_?(?:%s|%s|%s|%s)\d+"\s*/>'
                  % ("|".join(ids), TABLE_MARK, DECORATIVE_MARK, LINES_MARK, CODE_MARK), "", xml)
     xml = re.sub(r'<w:bookmarkEnd w:id="(?:%s)"\s*/>' % "|".join(ids), "", xml)
     return xml, counts
@@ -643,7 +658,7 @@ def indent_quotes(xml):
     depth, the marks removed; returns (xml, count)."""
     if QUOTE_MARK not in xml:
         return xml, 0
-    names = dict(re.findall(r'<w:bookmarkStart w:id="(\d+)" w:name="(' + QUOTE_MARK
+    names = dict(re.findall(r'<w:bookmarkStart w:id="(\d+)" w:name="(_?' + QUOTE_MARK
                             + r'\d+)"\s*/>', xml))
     tokens = re.split(r"(<w:bookmarkStart\b[^>]*/>|<w:bookmarkEnd\b[^>]*/>|"
                       r"<w:tbl>|</w:tbl>|<w:p>.*?</w:p>)", xml, flags=re.S)
@@ -681,11 +696,18 @@ ID_MAP_PART = "customXml/item1.xml"
 ID_MAP_NS = "https://github.com/OERforge/TextbookImprover/ids"
 
 
-def bookmark_name(ident):
-    """The bookmark name Pandoc's writer gives an id."""
-    if ident and ident[0].isalpha() and len(ident) <= 40:
-        return ident
-    return "X" + hashlib.sha1(ident.encode("utf-8")).hexdigest()[1:]
+def bookmark_names(ident):
+    """The bookmark names Pandoc's writer gives an id: 3.11's, which keeps
+    one that starts with a letter, and 3.12's (#11845), which puts an
+    underscore before one of letters, digits, and underscores, so Word
+    hides it; either hashes the rest. Both go in the map, so a file from
+    either version reads back."""
+    digest = hashlib.sha1(ident.encode("utf-8")).hexdigest()[1:]
+    older = ident if ident and ident[0].isalpha() and len(ident) <= 40 \
+        else "X" + digest
+    newer = "_" + ident if ident and len(ident) < 40 and all(
+        c.isalnum() or c == "_" for c in ident) else "_" + digest
+    return (older, newer)
 
 
 def id_map(doc):
@@ -694,8 +716,9 @@ def id_map(doc):
     found = {}
 
     def note(ident):
-        if ident and bookmark_name(ident) != ident:
-            found[bookmark_name(ident)] = ident
+        for name in bookmark_names(ident) if ident else ():
+            if name != ident:
+                found[name] = ident
 
     def walk(node):
         if isinstance(node, list):

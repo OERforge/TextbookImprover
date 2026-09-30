@@ -4,10 +4,14 @@
    #555 on Pandoc's #fdfdfd background measures 7.33:1, which clears AAA
    while staying visibly lighter than the #1a1a1a body text. Note that the
    familiar "accessible grey" #767676 is only 4.47:1 here -- it is computed
-   against pure white, and Pandoc's background is not pure white. */
+   against pure white, and Pandoc's background is not pure white.
+   Pandoc 3.12's stylesheet follows the reader's dark mode, with a #1a1a1a
+   background, where #555 is 2.33:1; #b6b6b6 there is 8.58:1. A browser
+   without light-dark() keeps the first declaration. */
 figcaption,
 table caption {
   color: #555;
+  color: light-dark(#555, #b6b6b6);
 }
 
 /* Footnote numbers the EPUB assembler adds; Pandoc's HTML writer numbers
@@ -33,8 +37,10 @@ table {
   overflow-x: auto;
   margin: 1em 0;
 }
+/* The text's own color, so the outline shows in dark mode too, where a
+   fixed #1a1a1a would vanish into the background. */
 .table-wrapper:focus-visible {
-  outline: 2px solid #1a1a1a;
+  outline: 2px solid currentColor;
   outline-offset: 2px;
 }
 

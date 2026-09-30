@@ -39,6 +39,12 @@ constructs that a newer interpreter accepts silently:
 The scan is a heuristic and says so. A real interpreter is the authority,
 which is why it is preferred when available.
 
+The other direction too: what a newer interpreter deprecates. Python 3.13
+warns when re.split is given maxsplit, or re.sub and re.subn count, as a
+positional argument, and a run on 3.13 printed that warning in the middle
+of convert.py's trace. An interpreter older than 3.13 says nothing, so
+that is checked in the source, always.
+
 Copyright 2026 Robert Szarka
 
 This program is free software: you can redistribute it and/or modify
@@ -55,6 +61,7 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
+import ast
 import glob
 import io
 import os
@@ -165,6 +172,31 @@ def later_syntax(path):
     return found
 
 
+# Arguments a newer interpreter deprecates passing by position: the
+# number of positional arguments beyond which a call is warned about.
+POSITIONAL_LIMITS = {"split": 2, "sub": 3, "subn": 3}
+
+
+def newer_deprecations(path):
+    """Calls Python 3.13 deprecates: re.split with maxsplit, re.sub or
+    re.subn with count, given by position rather than by name."""
+    with open(path, encoding="utf-8") as handle:
+        tree = ast.parse(handle.read())
+    found = []
+    for node in ast.walk(tree):
+        if (isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and isinstance(node.func.value, ast.Name)
+                and node.func.value.id == "re"
+                and node.func.attr in POSITIONAL_LIMITS
+                and len(node.args) > POSITIONAL_LIMITS[node.func.attr]):
+            name = "maxsplit" if node.func.attr == "split" else "count"
+            found.append((node.lineno, f"re.{node.func.attr} with {name} "
+                                       "passed by position, which Python "
+                                       "3.13 deprecates"))
+    return found
+
+
 def main():
     files = list(sources())
     if not files:
@@ -191,6 +223,10 @@ def main():
             for line, what in fstring_problems(path) + later_syntax(path):
                 problems.append((path, line, what))
 
+    for path in files:
+        for line, what in newer_deprecations(path):
+            problems.append((path, line, what))
+
     for path, line, what in problems:
         where = os.path.relpath(path, ROOT)
         print(f"  FAIL  {where}"
@@ -198,7 +234,8 @@ def main():
 
     if problems:
         print(f"\n{len(problems)} portability problem(s). The project "
-              f"supports Python {MINIMUM[0]}.{MINIMUM[1]} and later.")
+              f"supports Python {MINIMUM[0]}.{MINIMUM[1]} and later, and "
+              "runs without warnings on the newest.")
         return 1
     print(f"\nall {len(files)} file(s) are portable to Python "
           f"{MINIMUM[0]}.{MINIMUM[1]}")

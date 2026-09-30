@@ -93,7 +93,8 @@ FIGURE_FILTER = os.path.join(HERE, "figures-and-tables.lua")
 MEDIA_FILTER = os.path.join(HERE, "media-extensions.lua")
 HEADER_FILTER = os.path.join(HERE, "header-includes.lua")
 SAFE_MEDIA_FILTER = os.path.join(HERE, "safe-media.lua")
-NOT_YET_IMPLEMENTED = ("pdf",)
+# Formats the schema names before a target can build them; none now.
+NOT_YET_IMPLEMENTED = ()
 # Targets whose output is written to be a source again: what the author
 # decided, and not what the filter derived from it.
 SOURCE_TARGETS = ("markdown", "asciidoc")
@@ -109,6 +110,7 @@ PAGE_CSS = os.path.join(HERE, "page.css")
 HEADERS_TOOL = os.path.join(HERE, "table-headers.py")
 SPLIT_TOOL = os.path.join(HERE, "split-pages.py")
 EPUB_TOOL = os.path.join(HERE, "build-epub.py")
+PDF_TOOL = os.path.join(HERE, "build-pdf.py")
 CHECK_TOOL = os.path.join(HERE, "check-output.py")
 CARTRIDGE_TOOL = os.path.join(HERE, "build-cartridge.py")
 
@@ -443,9 +445,9 @@ def load_targets(base, allow_unknown):
             targets.append(Target(name, resolved, base))
     except oerconfig.ConfigError as exc:
         die(str(exc))
-    # pdf and docx are names the schema reserves for outputs not built
-    # yet. A target naming one is skipped, and said to be, rather than
-    # read, filtered, and then quietly never written.
+    # A format the schema names before a target can build it is skipped,
+    # and said to be, rather than read, filtered, and then quietly never
+    # written. (pdf was one until it was built.)
     for target in targets:
         if target.format in NOT_YET_IMPLEMENTED:
             say(f"WARNING: target {target.name} is format {target.format}, "
@@ -2374,7 +2376,7 @@ def linked_files(path):
     for ref in refs:
         if re.match(r"^[a-zA-Z][\w+.-]*:|^//|^#", ref):
             continue
-        target = re.split(r"[#?]", ref, 1)[0]
+        target = re.split(r"[#?]", ref, maxsplit=1)[0]
         if re.search(r"\.\w+$", target) and not re.search(r"\.x?html?$",
                                                         target.lower()):
             out.add(target)
@@ -2848,13 +2850,31 @@ def main():
             result = run(["python3", EPUB_TOOL, "-d", base,
                           "--target", target.name,
                           "--intermediates", target.pages_dir],
-                         env=dict(os.environ, FIDELITY_FOUND=found), capture=True)
+                         env=dict(os.environ, FIDELITY_FOUND=found),
+                         capture=True, check=False)
+            # Its own messages first: a failure's reason is in them.
             sys.stderr.write(result.stderr)
+            if result.returncode:
+                die(f"The EPUB for target {target.name} wasn't built.")
             epubs += [line for line in result.stdout.split("\n")
                       if line.strip()]
             # The EPUB is built from the whole book in one run, so its rows
             # name the item, not the page.
             collect_losses(found, target.name, "(book)", losses)
+        # ---- 5.6 PDFs, per pdf target ----------------------------------------
+        pdfs = []
+        for target in targets:
+            if target.format != "pdf":
+                continue
+            result = run(["python3", PDF_TOOL, "-d", base,
+                          "--target", target.name,
+                          "--intermediates", target.pages_dir],
+                         capture=True, check=False)
+            sys.stderr.write(result.stderr)
+            if result.returncode:
+                die(f"The PDF for target {target.name} wasn't built.")
+            pdfs += [line for line in result.stdout.split("\n")
+                     if line.strip()]
         # After the EPUBs, which report their losses as they're built.
         write_fidelity(losses, reports["fidelity"])
 
@@ -2866,6 +2886,8 @@ def main():
             command += [p for p in pages if p.endswith(".html")]
         for epub in epubs:
             command += ["--epub", epub]
+        for pdf in pdfs:
+            command += ["--pdf", pdf]
         if os.path.isfile(CHECK_TOOL):
             run(command, check=False)
     finally:

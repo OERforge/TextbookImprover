@@ -636,6 +636,20 @@ def case_math_repair(work):
     """math-repair.lua: an equation's wrong characters, and math typed as
     text, conservatively."""
     maths, rows = math_run(work, "on", {})
+    # Rows as a person copies them from the report: one expression and one
+    # symbol on any page, the equation on this page, and one that names
+    # text the book doesn't have.
+    keep_file = os.path.join(work, "keep.csv")
+    with open(keep_file, "w", encoding="utf-8") as fh:
+        fh.write("Kind,Page,Before,After\n"
+                 "expression,,\u03bc = 5.51,\u03bc=5.51\n"
+                 "symbol,,\u03bc,\u03bc\n"
+                 "equation,kept,\\overset{\u2013}{X} \u2013 \u00b5 + \u0177,\n"
+                 "expression,,\u03b2 = 7,\u03b2=7\n")
+    kept_file = os.path.join(work, "kept-rows.csv")
+    kept_maths, _ = math_run(work, "kept", {"MATH_KEEP": keep_file, "MATH_KEPT": kept_file})
+    with open(kept_file, encoding="utf-8", newline="") as fh:
+        kept_rows = [tuple(r) for r in csv.reader(fh)]
     off_eq, _ = math_run(work, "no-equations", {"MATH_REPAIR_EQUATIONS": "false"})
     off_text, _ = math_run(work, "no-text", {"MATH_FROM_TEXT": "false"})
     kinds = {row[0] for row in rows}
@@ -666,6 +680,15 @@ def case_math_repair(work):
          lambda: "\\overset{\u2013}{X} \u2013 \u00b5 + \u0177" in off_eq),
         ("math.from_text off makes no equation of text",
          lambda: len(off_text) == 3),
+        ("the keep sidecar leaves its expression and its symbol text, and "
+         "its equation unrepaired",
+         lambda: "\u03bc=5.51" not in kept_maths and "\u03bc" not in kept_maths
+         and "\\overset{\u2013}{X} \u2013 \u00b5 + \u0177" in kept_maths),
+        ("and what it doesn't name is made an equation as before",
+         lambda: "s=2.15" in kept_maths and "\u03bc=34" in kept_maths),
+        ("each row that kept something is recorded, and only those",
+         lambda: {r[0] for r in kept_rows} == {"expression", "symbol", "equation"}
+         and not any("\u03b2" in r[2] for r in kept_rows)),
     ]
 
 

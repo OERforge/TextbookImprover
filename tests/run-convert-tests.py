@@ -28,6 +28,7 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
+import csv
 import json
 import os
 import re
@@ -1997,6 +1998,16 @@ def case_word_equations(work):
         return result, (tex[0] if tex else "")
     on_result, on = build("")
     off_result, off = build("    math:\n      repair_equations: false\n")
+    # The keep sidecar names the equation by the TeX Pandoc reads from the
+    # original, as the report shows it; a second row names nothing.
+    original = subprocess.run(["pandoc", "-f", "docx", "-t", "json",
+                               os.path.join(work, "eq.docx")], capture_output=True, text=True)
+    before = [n["c"][1] for n in walk_json(json.loads(original.stdout)) if n.get("t") == "Math"][0]
+    with open(os.path.join(work, "math-keep.csv"), "w", encoding="utf-8", newline="") as fh:
+        csv.writer(fh).writerows([["Kind", "Page", "Before"], ["equation", "eq", before],
+                                  ["expression", "", "\u03b2 = 7"]])
+    kept_result, kept = build("")
+    kept_said = kept_result.stdout + kept_result.stderr
     return [
         # As Pandoc reads it back: \mu for the Greek letter, - for the minus.
         ("the copy's equation reads back with a bar, mu, a minus, H sub 0, "
@@ -2010,6 +2021,12 @@ def case_word_equations(work):
          lambda: "1 Word equation(s) given the characters they mean" in on_result.stdout + on_result.stderr),
         ("with math.repair_equations off, the equation is as it was",
          lambda: "\u00b5" in off and "\\overset" in off),
+        ("an equation the keep sidecar names is as it was in the copy, and "
+         "the run says so",
+         lambda: kept == before and "1 equation(s) kept as they were" in kept_said),
+        ("a row of the keep sidecar that keeps nothing is warned about",
+         lambda: "1 row(s) of math-keep.csv kept nothing" in kept_said
+         and "expression,,\u03b2 = 7" in kept_said),
     ]
 
 

@@ -1409,6 +1409,7 @@ def filter_env(target, base, paths, env):
         "TABLE_BANDS": str(target["tables.bands"]),
         "MATH_REPAIR_EQUATIONS": "true" if r["math.repair_equations"] else "false",
         "MATH_FROM_TEXT": "true" if r["math.from_text"] else "false",
+        "MATH_KEEP": paths["math_keep"] if os.path.exists(paths["math_keep"]) else "",
         "TABLE_CAPTIONS": paths["table_captions"],
         "IMAGE_ALT": paths["image_alt"],
         "BARE_LINKS": paths["bare_links"],
@@ -1800,6 +1801,37 @@ def noheader(text):
     return "\n".join(out)
 
 
+def math_keep_rows(path):
+    """The keep sidecar's rows, (kind, page, before), each once."""
+    rows = []
+    if path and os.path.exists(path):
+        with open(path, encoding="utf-8-sig", newline="") as fh:
+            for n, row in enumerate(csv.reader(fh)):
+                if n == 0 and row and row[0].strip().lower() == "kind":
+                    continue
+                if len(row) >= 3 and row[2]:
+                    rows.append((row[0], row[1], row[2]))
+    return list(dict.fromkeys(rows))
+
+
+def warn_math_keep(sidecar, kept_file):
+    """A row of the keep sidecar that kept nothing in this run: the text it
+    names isn't in the book any more, or no longer reads that way."""
+    rows = math_keep_rows(sidecar)
+    if not rows:
+        return
+    matched = set()
+    if os.path.exists(kept_file):
+        with open(kept_file, encoding="utf-8", newline="") as fh:
+            matched = {tuple(r[:3]) for r in csv.reader(fh) if len(r) >= 3}
+    stale = [r for r in rows if r not in matched]
+    if stale:
+        say(f"WARNING: {len(stale)} row(s) of {os.path.basename(sidecar)} kept nothing in "
+            "this run; the math they name isn't in the book as written there:")
+        for kind, page, before in stale[:10]:
+            say(f"  {kind},{page},{before}")
+
+
 def remediate_sources(target, base, docs, paths, env, html_stems=(), language=None,
                       work=None, markdown=()):
     """A target with format source: the book's own files, remediated, one
@@ -1822,6 +1854,7 @@ def remediate_sources(target, base, docs, paths, env, html_stems=(), language=No
     captions = htmlremediate.caption_rows(os.path.join(work, "captions_applied")) if work else {}
     places = docxremediate.math_places(os.path.join(work, "math_places")) \
         if work and target["math.from_text"] else {}
+    keep_rows = math_keep_rows(paths.get("math_keep"))
     written, totals = [], {}
     for name in docs:
         stem = os.path.splitext(name)[0]
@@ -1834,7 +1867,9 @@ def remediate_sources(target, base, docs, paths, env, html_stems=(), language=No
                                          language=language, headings=WORD_HEADINGS,
                                          deletions=WORD_DELETIONS,
                                          equations=bool(target["math.repair_equations"]),
-                                         places=places.get(stem, []))
+                                         places=places.get(stem, []),
+                                         keep_equations={b for k, p, b in keep_rows
+                                                         if k == "equation" and p in ("", stem)})
         for key, n in counts.items():
             totals[key] = totals.get(key, 0) + n
         written.append(out)
@@ -1883,6 +1918,8 @@ def remediate_sources(target, base, docs, paths, env, html_stems=(), language=No
            if totals.get("equations_repaired") else "")
         + (f", {totals['text_equations']} equation(s) made of math typed as text"
            if totals.get("text_equations") else "")
+        + (f", {totals['equations_kept']} equation(s) kept as they were by the "
+           "math-keep sidecar" if totals.get("equations_kept") else "")
         + (f"; {totals['skipped']} table(s) skipped as changed since the pre-pass"
            if totals.get("skipped") else "")
         + ".")
@@ -2627,12 +2664,13 @@ def main():
 
     paths = {key: resolve_path(base, first[f"sidecars.{key}"])
              for key in ("table_captions", "image_alt", "table_headers",
-                         "page_names", "bare_links")}
+                         "page_names", "bare_links", "math_keep")}
     for key, default in (("table_captions", "table-captions.csv"),
                          ("image_alt", "image-alt.csv"),
                          ("bare_links", "bare-links.csv"),
                          ("table_headers", "table-headers.csv"),
-                         ("page_names", "page-names.csv")):
+                         ("page_names", "page-names.csv"),
+                         ("math_keep", "math-keep.csv")):
         check_sidecar(paths[key], f"sidecars.{key}", default, base)
     reports = {key: resolve_path(base, first[f"reports.{key}"])
                for key in ("table_captions_missing", "image_alt_missing",
@@ -2647,7 +2685,7 @@ def main():
         collected = {key: os.path.join(work, key) for key in
                      ("captions_missing", "alt_missing", "spacers",
                       "media_unresolved", "bare_links", "captions_applied",
-                      "math", "math_places")}
+                      "math", "math_places", "math_kept")}
         env = dict(os.environ)
         env.update({
             # For html-source.lua: a page's <title> that repeats the
@@ -2660,6 +2698,7 @@ def main():
             "SPACER_LOG": collected["spacers"],
             "MATH_REPAIRED": collected["math"],
             "MATH_PLACES": collected["math_places"],
+            "MATH_KEPT": collected["math_kept"],
             "MEDIA_UNRESOLVED": collected["media_unresolved"],
             "MEDIA_STRICT": "1" if first["media.strict"] else "",
         })
@@ -2851,6 +2890,7 @@ def main():
             "meaning.")
         write_bare_links(collected["bare_links"], reports["bare_links_new"],
                          paths["bare_links"])
+        warn_math_keep(paths["math_keep"], collected["math_kept"])
         write_report(collected["math"], reports["math_repaired"],
                      "Kind,Page,Before,After", "math repair(s)", None,
                      "Each is an equation's characters repaired, or math "

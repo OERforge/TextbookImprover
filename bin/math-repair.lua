@@ -36,6 +36,11 @@
 --
 -- Every change is a row in the report convert.py collects
 -- (MATH_REPAIRED): its kind, the page, the text before, the TeX after.
+-- A row copied from there into the math-keep sidecar (MATH_KEEP: Kind,
+-- Page, Before; a blank Page is every page) keeps that one as it was:
+-- the equation unrepaired, or the text left text. Each row that keeps
+-- something is recorded (MATH_KEPT), so a row that matches nothing, since
+-- the source changed, can be said to.
 --
 -- Copyright 2026 Robert Szarka
 --
@@ -63,13 +68,15 @@ local REPORT = os.getenv('MATH_REPAIRED')
 -- (format: source): the paragraph's text as the source gives it, with an
 -- equation already there as one placeholder character, the equation's
 -- text, which occurrence of it in the paragraph, and its TeX.
+local KEEP = os.getenv('MATH_KEEP')
+local KEPT = os.getenv('MATH_KEPT')
 local PLACES = os.getenv('MATH_PLACES')
 local PLACEHOLDER = '\u{FFFC}'
 
 local page = ''
 if PANDOC_STATE and PANDOC_STATE.input_files and PANDOC_STATE.input_files[1] then
   page = PANDOC_STATE.input_files[1]:match('([^/\\]+)$') or ''
-  page = page:gsub('%.filtered%.json$', ''):gsub('%.json$', '')
+  page = page:gsub('%.filtered%.json$', ''):gsub('%.[^.]+$', '')
 end
 
 -- ------------------------------------------------------------------------
@@ -94,6 +101,74 @@ local function report(kind, before, after)
     report_handle:write(table.concat({csv(kind), csv(page), csv(before),
                                       csv(after)}, ',') .. '\n')
   end
+end
+
+-- The keep sidecar, as {kind: {before: {page = true}}}, a blank page
+-- stored as the empty string.
+local function parse_csv(text)
+  text = text:gsub('^\239\187\191', ''):gsub('\r\n', '\n'):gsub('\r', '\n')
+  local rows, row, field, quoted = {}, {}, {}, false
+  local i, n = 1, #text
+  local function end_field() row[#row + 1] = table.concat(field); field = {} end
+  local function end_row()
+    end_field()
+    if #row > 1 or row[1] ~= '' then rows[#rows + 1] = row end
+    row = {}
+  end
+  while i <= n do
+    local c = text:sub(i, i)
+    if quoted then
+      if c == '"' then
+        if text:sub(i + 1, i + 1) == '"' then
+          field[#field + 1] = '"'
+          i = i + 1
+        else
+          quoted = false
+        end
+      else
+        field[#field + 1] = c
+      end
+    elseif c == '"' and #field == 0 then quoted = true
+    elseif c == ',' then end_field()
+    elseif c == '\n' then end_row()
+    else field[#field + 1] = c end
+    i = i + 1
+  end
+  if #field > 0 or #row > 0 then end_row() end
+  return rows
+end
+
+local keep = {}
+if KEEP and KEEP ~= '' then
+  local handle = io.open(KEEP, 'r')
+  if handle then
+    for n, row in ipairs(parse_csv(handle:read('a'))) do
+      local kind, where, before = row[1] or '', row[2] or '', row[3] or ''
+      if not (n == 1 and kind:lower() == 'kind') and before ~= '' then
+        keep[kind] = keep[kind] or {}
+        keep[kind][before] = keep[kind][before] or {}
+        keep[kind][before][where] = true
+      end
+    end
+    handle:close()
+  end
+end
+
+local kept_handle
+
+-- Whether the keep sidecar keeps this one, recording the row it matched.
+local function kept(kind, before)
+  local pages = keep[kind] and keep[kind][before]
+  if not pages then return false end
+  local where = pages[page] and page or (pages[''] and '' or nil)
+  if not where then return false end
+  if KEPT and KEPT ~= '' then
+    if kept_handle == nil then kept_handle = io.open(KEPT, 'a') or false end
+    if kept_handle then
+      kept_handle:write(table.concat({csv(kind), csv(where), csv(before)}, ',') .. '\n')
+    end
+  end
+  return true
 end
 
 local places_handle
@@ -188,6 +263,7 @@ end
 
 local function repair_math(el)
   local fixed = repair_tex(el.text)
+  if fixed ~= el.text and kept('equation', el.text) then return nil end
   if fixed ~= el.text then
     report('equation', el.text, fixed)
     el.text = fixed
@@ -493,7 +569,11 @@ local function from_text(inlines)
         -- expression_at returned (first, last)
       end
     end
-    if first then
+    if first and kept('expression', join_text({table.unpack(atoms, first, last)})) then
+      -- Kept as text, the whole of it: no symbol is made of a part.
+      for k = i, last do out[#out + 1] = atoms[k].el end
+      i = last + 1
+    elseif first then
       local f, l = first, last
       for k = i, f - 1 do out[#out + 1] = atoms[k].el end
       local run = {table.unpack(atoms, f, l)}
@@ -505,7 +585,10 @@ local function from_text(inlines)
       i = l + 1
     else
       local s, e = symbol_at(atoms, i)
-      if s then
+      if s and kept('symbol', join_text({table.unpack(atoms, s, e)})) then
+        for k = i, e do out[#out + 1] = atoms[k].el end
+        i = e + 1
+      elseif s then
         local run = {table.unpack(atoms, s, e)}
         local tex = join_tex(run)
         report('symbol', join_text(run), tex)

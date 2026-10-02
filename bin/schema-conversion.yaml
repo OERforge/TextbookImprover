@@ -88,6 +88,19 @@ keys:
       guides for Word say its Accessibility Checker needs. Kept by default,
       since the file is the author's.
 
+  bookmarks:
+    type: enum
+    values: ["linked", "all"]
+    default: "linked"
+    stage: render
+    description: >
+      For a target with format docx: which of Pandoc's bookmarks a Word file
+      keeps. Pandoc's writer bookmarks every heading and section, and NVDA
+      announces "bookmark" at each one, hidden or not. linked keeps those a
+      link somewhere in the book goes to, the table header bookmarks JAWS
+      reads, and the bookmarks that carry a code block's language; all
+      keeps every one.
+
   title_block:
     type: enum
     values: ["on", "off"]

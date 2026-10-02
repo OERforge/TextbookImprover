@@ -24,6 +24,10 @@ Whether every page of an HTML target carries the book's contents as a menu at it
 
 For a target with format source: whether a remediated Word file keeps the compatibility mode its author's file has, or is set to 15, which guides for Word say its Accessibility Checker needs. Kept by default, since the file is the author's.
 
+**`bookmarks`**—one of `linked`, `all`; default `linked`
+
+For a target with format docx: which of Pandoc's bookmarks a Word file keeps. Pandoc's writer bookmarks every heading and section, and NVDA announces "bookmark" at each one, hidden or not. linked keeps those a link somewhere in the book goes to, the table header bookmarks JAWS reads, and the bookmarks that carry a code block's language; all keeps every one.
+
 **`title_block`**—one of `on`, `off`; default `on`
 
 Whether a page's own subtitle, date, abstract, and include-before render on it for this target. A source's opening page carries the document's, which makes it a title page; off leaves the author to lay the front matter out by hand.

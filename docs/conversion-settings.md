@@ -160,6 +160,14 @@ The standards the PDF declares, as Pandoc's pdfstandard variable takes them: ua-
 
 A YAML file, or a Markdown file that opens with a YAML block, whose metadata goes to Pandoc's LaTeX writer: documentclass, classoption, header-includes, include-before, fonts, geometry, and the rest of Pandoc's LaTeX variables. A book written for a Pandoc PDF build names the file that held its YAML (a _preamble.md, say), and its settings carry over. What it sets wins over what project.yaml says; what it leaves out comes from project.yaml and from these settings. A path that doesn't exist stops the build.
 
+**`pdf.figures`**—one of `in_place`, `section`, `float`; default `in_place`
+
+Where a figure goes, on the page and in the order a screen reader reads. in_place keeps it where the text has it, on both, as the float package's H placement does. section lets it float within its section, flushed before the next one starts (placeins), and puts its tags after the section's text. float is LaTeX's own placement, wherever a figure fits, and LaTeX's tagging then gathers every figure's tags at the end of the document, where a screen reader reaches them after everything else: in the statistics textbook, 246 of its 270 figures. section needs the placeins package installed.
+
+**`pdf.repair_captions`**—`bool`; default `true`
+
+Retag each table's caption, which LaTeX's tagging code writes as a first row of one header cell spanning the table, as the table's Caption, and take out the empty copy of the table's head it leaves inside the table, so a screen reader reads the caption as one and counts the table's rows and columns right. Only a table the book gave a caption, matched in order. Needs pikepdf; without it the run says so and leaves the tags as LaTeX wrote them.
+
 **`pdf.toc_depth`**—`int`; default `2`
 
 How many levels the printed table of contents shows, counted as the EPUB's are: a group at the top of project.contents is level 1. The bookmarks a PDF viewer shows follow the same depth. The metadata file's toc-depth, when it sets one, wins.

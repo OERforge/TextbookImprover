@@ -422,7 +422,44 @@ def _limit_bars(eq):
     return "".join(out), count
 
 
-def remediate_equations(xml):
+EQUATION = re.compile(r"<m:oMath>(?:(?!</m:oMath>).)*</m:oMath>", re.S)
+
+
+def equation_texs(parts, name):
+    """The TeX Pandoc reads from each of a part's equations, in order: the
+    same TeX the filter saw, which is what the keep sidecar names. One
+    Pandoc run: a copy of the file whose body is the equations, one to a
+    paragraph."""
+    import json
+    import subprocess
+    equations = EQUATION.findall(parts[name].decode("utf-8"))
+    if not equations:
+        return []
+    document = parts["word/document.xml"].decode("utf-8")
+    body_start = document.index("<w:body>") + len("<w:body>")
+    body_end = document.rindex("</w:body>")
+    body = "".join("<w:p>%s</w:p>" % eq for eq in equations)
+    probe = document[:body_start] + body + document[body_end:]
+    handle, path = tempfile.mkstemp(suffix=".docx")
+    os.close(handle)
+    try:
+        with zipfile.ZipFile(path, "w") as z:
+            for filename, data in parts.items():
+                z.writestr(filename, probe.encode("utf-8") if filename == "word/document.xml" else data)
+        result = subprocess.run(["pandoc", "-f", "docx", "-t", "json", path],
+                                capture_output=True, text=True)
+    finally:
+        os.remove(path)
+    if result.returncode != 0:
+        return []
+    texs = []
+    for block in json.loads(result.stdout)["blocks"]:
+        found = [i["c"][1] for i in block.get("c", []) if isinstance(i, dict) and i.get("t") == "Math"]
+        texs.append(found[0] if len(found) == 1 else None)
+    return texs if len(texs) == len(equations) else []
+
+
+def remediate_equations(xml, skip=()):
     """The characters of each of Word's equations, as math.repair_equations
     repairs them in the pages: mu for the micro sign, Delta for the
     increment sign, a minus for an en dash, a bar for an upper limit that
@@ -430,9 +467,13 @@ def remediate_equations(xml):
     and 0 for a subscript's slashed O. Only inside m:oMath; the text around
     an equation is left to math.from_text. Returns (xml, counts)."""
     counts = {"equations_repaired": 0, "equation_characters": 0}
+    number = [-1]
 
     def one(m):
         eq = m.group(0)
+        number[0] += 1
+        if number[0] in skip:
+            return eq
         fixed, bars = _limit_bars(eq)
         counts["equation_characters"] += bars
         fixed, zeros = SUB_SLASHED_O.subn(r"\g<1>0\g<2>", fixed)
@@ -771,7 +812,8 @@ def remediate_links(xml, rels, titles):
 
 def remediate(source, destination, tables=None, alts=None, titles=None, compat=False,
               guesses=False, captions=None, replacements=None, language=None,
-              headings="keep", deletions="accept", equations=False, places=None):
+              headings="keep", deletions="accept", equations=False, places=None,
+              keep_equations=()):
     """Write destination, a copy of source with the decisions applied.
     tables: the pre-pass's resolved list for this file; alts: {relationship
     id: alt or None}; titles: {address: title}; equations: repair the
@@ -779,10 +821,11 @@ def remediate(source, destination, tables=None, alts=None, titles=None, compat=F
     of counts."""
     counts = {"compat": 0, "links": 0, "equations_repaired": 0,
               "equation_characters": 0, "text_equations": 0,
-              "text_equations_left": 0}
+              "text_equations_left": 0, "equations_kept": 0}
     with zipfile.ZipFile(source) as z:
         infos = z.infolist()
         parts = {i.filename: z.read(i.filename) for i in infos}
+    source_parts = dict(parts)
     text = lambda n: parts[n].decode("utf-8")
     changed = set()
     if "word/document.xml" in parts:
@@ -803,25 +846,34 @@ def remediate(source, destination, tables=None, alts=None, titles=None, compat=F
         if new != xml:
             parts["word/document.xml"] = new.encode("utf-8")
             changed.add("word/document.xml")
-    # Equations are in notes too. Text made equations first: the places
-    # were recorded against the text as the source has it.
+    # Equations are in notes too. The file's own equations are repaired
+    # first, while they're the ones the filter and the keep sidecar saw,
+    # counted in order; then text is made equations, the places found by
+    # text in which an equation is one placeholder either way.
     omml = equations_for([tex for _, _, _, _, tex in places or []])
     matched = set()
     for name in ("word/document.xml", "word/footnotes.xml", "word/endnotes.xml"):
+        if equations and name in parts:
+            # An equation the keep sidecar names, by the TeX Pandoc reads
+            # from it, stays as it was.
+            skip = set()
+            if keep_equations:
+                texs = equation_texs(source_parts, name)
+                skip = {n for n, tex in enumerate(texs) if tex in keep_equations}
+            xml = text(name)
+            new, found = remediate_equations(xml, skip)
+            for key, n in found.items():
+                counts[key] += n
+            counts["equations_kept"] += len(skip)
+            if new != xml:
+                parts[name] = new.encode("utf-8")
+                changed.add(name)
         if places and name in parts:
             xml = text(name)
             new, found, seen = remediate_text_math(xml, places, omml)
             counts["text_equations"] += found["text_equations"]
             counts["text_equations_left"] += found["text_equations_left"]
             matched |= seen
-            if new != xml:
-                parts[name] = new.encode("utf-8")
-                changed.add(name)
-        if equations and name in parts:
-            xml = text(name)
-            new, found = remediate_equations(xml)
-            for key, n in found.items():
-                counts[key] += n
             if new != xml:
                 parts[name] = new.encode("utf-8")
                 changed.add(name)

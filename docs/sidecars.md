@@ -6,6 +6,16 @@ A run writes reports naming what still needs a person, and reads sidecar files h
 
 `bare-links.csv` decides each link whose text is its own address: a URL Replacement (a shortDOI, say) replaces the address and the text, other text replaces only the text, and a Title sets the link's title. `bare-links-new.csv` reports the undecided ones, one row per address with the citation before it. [Bare links](bare-links.md) has the detail, the shortDOI helper, and why a description can't do what it seems it should.
 
+## Math kept as it was
+
+`math-keep.csv` lists math the [math repairs](configuration.md#math) would change and shouldn't: a micro sign that really means micro, text that looks like an expression and isn't. Its rows are copied from `math-repaired.csv`, whose first three columns (`Kind`, `Page`, `Before`) name each change; any column after those is ignored, so a whole row can be pasted. An `equation` row keeps that equation unrepaired, and an `expression` or `symbol` row keeps that text as text, the whole of it. A blank `Page` keeps it on every page. A Word source's remediated copy follows the sidecar too: a kept equation is left as it was, found by the TeX Pandoc reads from it, and kept text is never made an equation. A row that keeps nothing in a run, since the book no longer has that math as written there, is warned about and listed.
+
+```csv
+Kind,Page,Before
+equation,chapter-2,5 µm
+symbol,,μ
+```
+
 ## Reports
 
 Each run writes only the reports that have something in them, and deletes
@@ -20,7 +30,7 @@ the others. A report existing at all means there's work outstanding.
 | `page-names-new.csv` | Editing the `name` column and appending the rows to `page-names.csv`, if the names derived from headings aren't the ones you want. Written only when `pages.split_level` is on; see [Splitting pages](splitting.md#naming-the-pages). |
 | `page-names-report.csv` | Nothing: it records every page the split wrote, its source, and which part of how many it is. |
 | `spacer-images.csv` | Nothing — it records what the spacer rule did. |
-| `math-repaired.csv` | Nothing, unless a row shouldn't have changed: it records each equation whose characters were repaired and each piece of text made an equation ([Math](configuration.md#math)); `math.repair_equations` and `math.from_text` turn them off. |
+| `math-repaired.csv` | Nothing, unless a row shouldn't have changed: it records each equation whose characters were repaired and each piece of text made an equation ([Math](configuration.md#math)). Copy a row into `math-keep.csv` to keep that one as it was; `math.repair_equations` and `math.from_text` turn a whole kind off. |
 | `output-check.csv` | Fixing what it names: dead links, images with no alt, headings that skip, tables with no headers. Written when the [output check](checking.md) finds anything. |
 | `media-unresolved.csv` | Replacing the images named in it. Written only when the run stops. |
 | `table-headers-unmatched.csv` | Looking at each row, whose key matches no table now: the table's text or shape changed, or it's gone. The table's row as it is now is in `table-headers-new.csv`. |

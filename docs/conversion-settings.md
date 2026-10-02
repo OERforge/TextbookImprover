@@ -216,6 +216,10 @@ Alt text, keyed on the image path with the extension ignored. Use [decorative] f
 
 What to do with each bare link, one whose text is its own address, keyed on the address: a Replacement that is a URL (http, https, or ftp) replaces the address and the text; any other Replacement replaces only the text; a blank one keeps the link bare. A Title sets the link's title (a tooltip in HTML); a blank one keeps the source's. See docs/bare-links.md.
 
+**`sidecars.math_keep`**—`path`; default `math-keep.csv`
+
+Math the math settings would change, kept as it was: rows copied from the math_repaired report (Kind, Page, Before; the After column is ignored), each keeping that equation unrepaired or that text as text. A blank Page keeps it on every page. A row that keeps nothing, since the source changed, is warned about.
+
 **`sidecars.table_headers`**—`path`; default `table-headers.csv`
 
 Where each table's headers are, keyed on a hash of the table's content: first-row, first-column, both, or none. A first run writes prefilled rows to the table_headers_new report; rename or paste them here. Values this version doesn't act on yet (manual, list) are accepted and kept. A row whose key matches no table, since the table changed or is gone, is warned about and written to table-headers-unmatched.csv, with the sidecar without it as table-headers-sample.csv, to adopt.

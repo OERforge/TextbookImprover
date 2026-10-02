@@ -559,6 +559,16 @@ keys:
           link bare. A Title sets the link's title (a tooltip in HTML); a
           blank one keeps the source's. See docs/bare-links.md.
 
+      math_keep:
+        type: path
+        default: math-keep.csv
+        description: >
+          Math the math settings would change, kept as it was: rows copied
+          from the math_repaired report (Kind, Page, Before; the After column
+          is ignored), each keeping that equation unrepaired or that text as
+          text. A blank Page keeps it on every page. A row that keeps
+          nothing, since the source changed, is warned about.
+
       table_headers:
         type: path
         default: table-headers.csv

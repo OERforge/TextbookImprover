@@ -469,6 +469,18 @@ keys:
           without it the run says so and leaves the tags as LaTeX wrote
           them.
 
+      remove_empty_paragraphs:
+        type: bool
+        default: true
+        description: >
+          Remove the paragraph structure elements LaTeX's tagging code
+          leaves empty: around a longtable's caption, in a header cell
+          whose text wraps, in the repeated head, and around an image
+          scaled to fit. NVDA reads a file the same with them and without,
+          but PDF4WCAG's WCAG 2.2 Machine profile reports each one. Each
+          orphaned piece of content becomes an artifact; the page's text is
+          unchanged. Needs pikepdf; without it the run says so.
+
       toc_depth:
         type: int
         default: 2

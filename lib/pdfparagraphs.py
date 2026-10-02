@@ -1,71 +1,66 @@
-#!/usr/bin/env python3
-# NOT YET WIRED IN. Kept here because it repairs a defect the PDF half of
-# this project will produce as soon as it has a PDF half: LaTeX's tagging
-# code opens paragraph structure elements that never receive content, and
-# a PDF/UA checker reports each one as an empty paragraph. Two of the four
-# places it happens are ours -- the longtable caption wrapper and Pandoc's
-# minipage header cells -- so this is not a defect we can avoid by writing
-# better Markdown.
-#
-# Written in another session against a hand-built textbook, so it has not
-# been run against anything this pipeline produced. It needs pikepdf, which
-# nothing else here does. The roadmap's PDF work is where it gets picked up, along
-# with the two other post-processing candidates named there.
-#
 """
-fix_empty_paragraphs.py -- remove content-free paragraph structure elements
-from a tagged PDF produced by LaTeX (tagpdf / latex-lab) via Pandoc.
+pdfparagraphs.py -- remove content-free paragraph structure elements from a
+tagged PDF made by LaTeX (tagpdf, latex-lab) through Pandoc.
 
-Background
-----------
-LaTeX's tagging code opens a paragraph structure element at points where no
-paragraph content ever materialises:
+LaTeX's tagging code opens a paragraph structure element where no
+paragraph content ever arrives, and leaves it empty:
 
-  * around the parbox/multicolumn wrapper that longtable uses for \\caption
-  * around Pandoc's \\begin{minipage}...\\end{minipage} header cells
-  * inside the \\endhead repeated-header block, which longtable discards
-  * around \\pandocbounded's \\resizebox when an image is scaled down
+  * around the parbox or multicolumn wrapper longtable uses for \\caption
+    (still there inside the Caption pdfretag.py makes of it)
+  * around Pandoc's minipage header cells, when header text wraps
+  * inside the \\endhead repeated head, which longtable discards
+  * around \\pandocbounded's \\resizebox, when an image is scaled down
 
-The resulting `P` elements contain either nothing at all or a marked-content
-sequence holding only graphics-state operators. WCAG/PDF-UA checkers report
-these as "empty paragraph" errors.
+latex3/tagging-project#1622 reports a case of the same kind in a table
+float. NVDA in Acrobat Reader read a test file the same with them and
+without, but PDF4WCAG's WCAG 2.2 Machine profile reports each as an error
+(rule 4.1.2-16, "Paragraph structure element is empty"), and the same file
+without them came back clean there. Measured: 120 in the economics
+textbook, 3,449 in the statistics textbook.
 
-What this does
---------------
-1. Walks the structure tree and finds every element whose role resolves to
-   /P and whose subtree renders nothing -- no glyphs, no image, no path
-   painting.
-2. Deletes those elements, then prunes any purely-grouping ancestor left
-   childless (Part, Div, Span, Sect, NonStruct, Quote, Art). Table cells,
-   list items, notes, figures and captions are never pruned, even if empty.
-3. Rewrites the affected pages' content streams, turning each orphaned
-   marked-content sequence into an artifact (`/Artifact BMC ... EMC`) and
-   renumbering the surviving MCIDs so no gaps remain.
-4. Rebuilds those pages' /ParentTree arrays to match the new numbering, and
-   removes the deleted elements' /ID entries from the /IDTree.
+What it does: walks the structure tree for each element whose role
+resolves to P and whose content draws nothing (no glyph, image, or painted
+path); deletes it, and any purely grouping ancestor (Part, Div, Span, Sect,
+NonStruct, Art, Quote) left childless; turns each orphaned marked-content
+sequence on its page into an artifact and renumbers the page's surviving
+MCIDs; rebuilds those pages' entries in the parent tree; and drops the
+deleted elements' ids from the ID tree. A paragraph holding a \\rule or an
+inline figure draws something and stays; table cells, list items, notes,
+figures, and captions are never pruned, even when empty.
 
-Paragraphs that hold a `\\rule` (Markdown's `---` thematic break) or an
-inline Figure are NOT removed -- they draw something, and deleting them
-would orphan real page content. Pass --list to see what is being touched
-without writing anything.
+Written in another session against a hand-built textbook and contributed
+here as util/contrib/fix-empty-paragraphs.py; wired into the PDF target
+(pdf.remove_empty_paragraphs) once measured on both test books, with the
+page text and every table, figure, formula, and link left as they were.
+util/fix-empty-paragraphs.py runs it on any PDF. Needs pikepdf.
 
-Usage
------
-    python3 fix_empty_paragraphs.py in.pdf out.pdf
-    python3 fix_empty_paragraphs.py in.pdf --list
+Copyright 2026 Robert Szarka
 
-Requires pikepdf (tested with 10.5).
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
-import argparse
 import sys
 from collections import defaultdict
 
-import pikepdf
-from pikepdf import Name, Dictionary, Array
+try:
+    import pikepdf
+    from pikepdf import Name, Dictionary, Array
+except ImportError:
+    pikepdf = None
 
 # Operators that put something on the page. Anything else (graphics state,
-# text positioning, colour) is invisible on its own.
+# text positioning, color) is invisible on its own.
 RENDERING_OPS = {
     "Tj", "TJ", "'", '"',        # text showing
     "Do",                        # XObject (image or form)
@@ -298,7 +293,7 @@ class Fixer:
     # -- content streams ----------------------------------------------------
 
     def rewrite_page(self, page_objgen, removed):
-        """Artifact-ise removed sequences, renumber the rest.
+        """Make artifacts of removed sequences, and renumber the rest.
         Returns {old mcid: new mcid} for survivors."""
         page = self.page_by_objgen[page_objgen]
         instructions = pikepdf.parse_content_stream(page)
@@ -416,43 +411,37 @@ class Fixer:
         clean(idtree)
 
 
-def main():
-    ap = argparse.ArgumentParser(description=__doc__,
-                                 formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("input")
-    ap.add_argument("output", nargs="?")
-    ap.add_argument("--list", action="store_true",
-                    help="report what would be removed and exit")
-    args = ap.parse_args()
-    if not args.list and not args.output:
-        ap.error("give an output path, or use --list")
-
-    pdf = pikepdf.open(args.input)
-    if "/StructTreeRoot" not in pdf.Root:
-        sys.exit("no structure tree -- is this a tagged PDF?")
-
+def find(pdf):
+    """The Fixer for an open PDF, its empty paragraphs collected."""
     fixer = Fixer(pdf)
     fixer.collect()
+    return fixer
 
-    counts = defaultdict(int)
-    for _elem, _parent, pgnum, _n in fixer.doomed:
-        counts[pgnum] += 1
-    print(f"content-free paragraph elements: {len(fixer.doomed)}")
-    for pgnum in sorted(counts, key=lambda x: (x is None, x)):
-        print(f"  page {pgnum}: {counts[pgnum]}")
-    if args.list or not fixer.doomed:
-        return
 
+def remove(pdf):
+    """Remove the empty paragraphs from an open PDF. Returns how many, or
+    None when its parent tree is a number tree with kids, which this
+    doesn't rewrite; LaTeX writes it as one flat array."""
+    if "/StructTreeRoot" not in pdf.Root:
+        return 0
+    if "/Nums" not in pdf.Root.StructTreeRoot.get("/ParentTree", {}):
+        return None
+    fixer = find(pdf)
+    if not fixer.doomed:
+        return 0
     removed = fixer.remove_all()
     for page_objgen, mcids in removed.items():
         remap = fixer.rewrite_page(page_objgen, mcids)
         fixer.apply_remap(page_objgen, remap)
         fixer.rebuild_parent_tree(page_objgen, remap)
     fixer.clean_id_tree()
-
-    pdf.save(args.output)
-    print(f"wrote {args.output}")
+    return len(fixer.doomed)
 
 
-if __name__ == "__main__":
-    main()
+def remove_from(path):
+    """Remove the empty paragraphs from the PDF at path, in place."""
+    with pikepdf.open(path, allow_overwriting_input=True) as pdf:
+        count = remove(pdf)
+        if count:
+            pdf.save(path)
+    return count

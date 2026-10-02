@@ -168,6 +168,10 @@ Where a figure goes, on the page and in the order a screen reader reads. in_plac
 
 Retag each table's caption, which LaTeX's tagging code writes as a first row of one header cell spanning the table, as the table's Caption, and take out the empty copy of the table's head it leaves inside the table, so a screen reader reads the caption as one and counts the table's rows and columns right. Only a table the book gave a caption, matched in order. Needs pikepdf; without it the run says so and leaves the tags as LaTeX wrote them.
 
+**`pdf.remove_empty_paragraphs`**—`bool`; default `true`
+
+Remove the paragraph structure elements LaTeX's tagging code leaves empty: around a longtable's caption, in a header cell whose text wraps, in the repeated head, and around an image scaled to fit. NVDA reads a file the same with them and without, but PDF4WCAG's WCAG 2.2 Machine profile reports each one. Each orphaned piece of content becomes an artifact; the page's text is unchanged. Needs pikepdf; without it the run says so.
+
 **`pdf.toc_depth`**—`int`; default `2`
 
 How many levels the printed table of contents shows, counted as the EPUB's are: a group at the top of project.contents is level 1. The bookmarks a PDF viewer shows follow the same depth. The metadata file's toc-depth, when it sets one, wins.

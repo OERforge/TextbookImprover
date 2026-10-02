@@ -63,6 +63,7 @@ from bookassembly import (  # noqa: E402
     page_title, stringify,
 )
 from bookcontents import is_generated  # noqa: E402
+import pdfparagraphs  # noqa: E402
 import pdfretag  # noqa: E402
 from names import safe_stem  # noqa: E402
 
@@ -379,10 +380,6 @@ def captioned_tables(blocks):
 def repair_tables(path, blocks):
     """pdf.repair_captions, after LaTeX: see lib/pdfretag.py."""
     if pdfretag.pikepdf is None:
-        print("WARNING: pikepdf isn't installed, so table captions keep the tags "
-              "LaTeX gives them, a first row a screen reader reads as data "
-              "(pip install pikepdf, or sudo apt install python3-pikepdf).",
-              file=sys.stderr)
         return
     captioned = captioned_tables(blocks)
     counts = pdfretag.retag(path, captioned)
@@ -395,6 +392,17 @@ def repair_tables(path, blocks):
           "taken out of their tables"
           + (f", {counts['artifacts_left']} with content left in"
              if counts["artifacts_left"] else "") + ".", file=sys.stderr)
+
+
+def remove_empty_paragraphs(path):
+    """pdf.remove_empty_paragraphs, after the captions: see
+    lib/pdfparagraphs.py."""
+    count = pdfparagraphs.remove_from(path)
+    if count is None:
+        print("WARNING: the PDF's parent tree isn't the flat array LaTeX "
+              "writes, so its empty paragraph elements were left.", file=sys.stderr)
+    else:
+        print(f"Empty paragraph elements removed: {count}.", file=sys.stderr)
 
 
 def output_name(resolved, project, target):
@@ -501,8 +509,18 @@ def build(base, name, resolved, keep, intermediates=None, latex_only=False):
                               sorted(missing.items(), key=lambda i: -i[1]))
                   + ". Choose a font that has them in the pdf.metadata "
                   "file (mainfont).", file=sys.stderr)
-        if result.returncode == 0 and resolved["pdf.repair_captions"]:
-            repair_tables(os.path.abspath(out_path), assembly.blocks)
+        repairs = result.returncode == 0 and (
+            resolved["pdf.repair_captions"] or resolved["pdf.remove_empty_paragraphs"])
+        if repairs and pdfretag.pikepdf is None:
+            print("WARNING: pikepdf isn't installed, so table captions keep the tags "
+                  "LaTeX gives them, a first row a screen reader reads as data, and "
+                  "the empty paragraph elements LaTeX leaves stay (pip install "
+                  "pikepdf, or sudo apt install python3-pikepdf).", file=sys.stderr)
+        elif repairs:
+            if resolved["pdf.repair_captions"]:
+                repair_tables(os.path.abspath(out_path), assembly.blocks)
+            if resolved["pdf.remove_empty_paragraphs"]:
+                remove_empty_paragraphs(os.path.abspath(out_path))
         if result.returncode != 0:
             # tlmgr only manages a TeX Live installed from tug.org or as
             # TinyTeX; Debian's and Ubuntu's texlive packages come with a

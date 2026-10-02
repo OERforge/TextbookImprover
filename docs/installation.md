@@ -121,7 +121,7 @@ lualatex --version | head -1
 
 Pandoc's template loads the first five for every book; `luacolor` and `lua-ul` when the book has underlined or struck-out text (the statistics book does), and `xurl` when it's installed, which is better than not (it lets a long address break anywhere). Pandoc 3.11's template also loads `footnotehyper` when it's there; 3.12's writes notes in tables itself and doesn't.
 
-For the PDF's table captions, `pikepdf` too (`pip install pikepdf`, or `sudo apt install python3-pikepdf`); without it the run says so and leaves the captions as LaTeX tags them. `pdf.figures: section` needs `placeins` (`tlmgr install placeins`).
+For the PDF's table captions and empty paragraph elements, `pikepdf` too (`pip install pikepdf`, or `sudo apt install python3-pikepdf`); without it the run says so and leaves both as LaTeX tags them, and the PDF suite skips. `pdf.figures: section` needs `placeins` (`tlmgr install placeins`).
 
 Two more kinds of package, depending on the book. A book with passages in another language needs that language's `babel-` and `hyphen-` packages (`tlmgr install babel-german hyphen-german` for German), or LuaLaTeX stops with babel's `Unknown option`. And whatever a `pdf.metadata` file's `header-includes` loads has to be installed too (`hanging`, say). When LuaLaTeX stops on `File 'something.sty' not found`, `tlmgr search --global --file /something.sty` names the package to install.
 

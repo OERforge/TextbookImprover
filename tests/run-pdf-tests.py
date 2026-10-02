@@ -61,6 +61,9 @@ try:
 except ImportError:
     pypdf = None
 
+sys.path.insert(0, os.path.join(ROOT, "lib"))
+import pdfparagraphs  # noqa: E402
+
 FRONT = r"""---
 title: The Test Book
 subtitle: A book for checking the PDF target
@@ -308,6 +311,7 @@ def build(work):
 
 def checks(work):
     reader, source, rows, log = build(work)
+    pdf_path = os.path.join(work, "pdf", "org.example.pdf.pdf")
     root = reader.trailer["/Root"]
     tree = elements(root["/StructTreeRoot"])
     kinds = [kind(e) for e in tree]
@@ -354,6 +358,10 @@ def checks(work):
         # LaTeX writes a longtable's caption as a first row of one header
         # cell, and leaves the empty copy of the head it repeats inside the
         # table; pdfretag.py makes the one a Caption and takes the other out.
+        # The caption's wrapper also holds paragraph elements that stay
+        # empty, which pdfparagraphs.py removes.
+        ("no paragraph element is left empty",
+         lambda: not pdfparagraphs.find(pdfparagraphs.pikepdf.open(pdf_path)).doomed),
         ("a captioned table's caption is its Caption, before its rows",
          lambda: shape(table_elements[2]) == ["/Caption", 2, 2, 2]),
         ("a table whose first header row is one spanning cell, with no "
@@ -450,10 +458,11 @@ def main():
 
     if shutil.which("pandoc") is None:
         sys.exit("pandoc is not on the path.")
-    if shutil.which("lualatex") is None or pypdf is None:
+    if shutil.which("lualatex") is None or pypdf is None or pdfparagraphs.pikepdf is None:
         print("  skip  " + ("lualatex is not on the path"
                             if shutil.which("lualatex") is None
-                            else "pypdf is not installed")
+                            else "pypdf is not installed" if pypdf is None
+                            else "pikepdf is not installed, and the PDF's repairs need it")
               + "; the pdf target is not checked")
         print("\nall PDF checks skipped")
         return 0

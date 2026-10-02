@@ -1391,6 +1391,41 @@ def case_pdf_without_latex(work):
     ]
 
 
+def case_pdf_svg_without_converter(work):
+    """A book with an SVG image and a pdf target, on a machine without
+    rsvg-convert: the run stops before LaTeX, saying what to install. The
+    LuaLaTeX here is a script that answers the release probe and nothing
+    else, so nothing past the check could run anyway."""
+    os.makedirs(work)
+    with open(os.path.join(work, "ch.md"), "w") as fh:
+        fh.write("# One\n\n![A diagram](diagram.svg)\n")
+    with open(os.path.join(work, "diagram.svg"), "w") as fh:
+        fh.write('<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10">'
+                 '<rect width="10" height="10"/></svg>\n')
+    with open(os.path.join(work, "conversion.yaml"), "w") as fh:
+        fh.write("targets:\n  web:\n    format: html\n  print:\n    format: pdf\n")
+    tools = work + "-bin"
+    os.makedirs(tools)
+    for program in ("pandoc", "python3", "file"):
+        found = shutil.which(program)
+        if found:
+            os.symlink(found, os.path.join(tools, program))
+    fake = os.path.join(tools, "lualatex")
+    with open(fake, "w") as fh:
+        fh.write("#!/bin/sh\necho 'OERFMT:2026-06-01'\n")
+    os.chmod(fake, 0o755)
+    result = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quiet"],
+                            cwd=work, capture_output=True, text=True,
+                            stdin=subprocess.DEVNULL,
+                            env=dict(os.environ, PATH=tools))
+    said = result.stdout + result.stderr
+    return [
+        ("an SVG without rsvg-convert stops the PDF, naming what to install",
+         lambda: result.returncode != 0 and "rsvg-convert" in said
+         and "librsvg2-bin" in said and not exists(work, "print")),
+    ]
+
+
 def case_pdf_with_old_latex(work):
     """A LuaLaTeX whose LaTeX is older than the tagging code needs: the run
     stops saying which release it found and which it needs, before LaTeX
@@ -3128,6 +3163,7 @@ CASES = [
     ("AsciiDoc layout attributes", case_asciidoc_layout),
     ("a pdf target without LuaLaTeX", case_pdf_without_latex),
     ("a pdf target with a LaTeX too old to tag", case_pdf_with_old_latex),
+    ("a pdf target with an SVG and no rsvg-convert", case_pdf_svg_without_converter),
     ("ids with spaces in HTML sources", case_html_ids),
     ("decorative images and frame sizes in HTML sources", case_html_images),
     ("AsciiDoc to Markdown and back", case_asciidoc_markdown),

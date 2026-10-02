@@ -301,16 +301,27 @@ def build(work):
         raise RuntimeError("no LaTeX was written:\n" + latex.stderr[-3000:])
     with open(tex, encoding="utf-8") as fh:
         source = fh.read()
+    # The other two figure placements, as LaTeX gets them: written only,
+    # since LaTeX takes a while and the in_place default is built above.
+    placements = {}
+    for choice in ("section", "float"):
+        with open(os.path.join(work, "conversion.yaml"), "w") as fh:
+            fh.write(CONVERSION + "      figures: %s\n" % choice)
+        run(["python3", os.path.join(BIN, "build-pdf.py"), "--latex-only"], work)
+        with open(tex, encoding="utf-8") as fh:
+            placements[choice] = fh.read()
+    with open(os.path.join(work, "conversion.yaml"), "w") as fh:
+        fh.write(CONVERSION)
     report = os.path.join(work, "output-check.csv")
     rows = []
     if os.path.exists(report):
         with open(report, encoding="utf-8", newline="") as fh:
             rows = list(csv.DictReader(fh))
-    return pypdf.PdfReader(pdf), source, rows, converted.stderr
+    return pypdf.PdfReader(pdf), source, rows, converted.stderr, placements
 
 
 def checks(work):
-    reader, source, rows, log = build(work)
+    reader, source, rows, log, placements = build(work)
     pdf_path = os.path.join(work, "pdf", "org.example.pdf.pdf")
     root = reader.trailer["/Root"]
     tree = elements(root["/StructTreeRoot"])
@@ -372,6 +383,16 @@ def checks(work):
          lambda: not any(kind(k) == "/Artifact" for t in table_elements for k in children(t))),
         # pdf.figures in_place: H, so the tags stay where the text has them,
         # not gathered in a container at the end of the document.
+        ("pdf.figures section flushes each section's figure tags, and lets "
+         "figures float within it",
+         lambda: "float/flush=section" in placements["section"]
+         and "\\usepackage[section]{placeins}" in placements["section"]
+         and "floatplacement" not in placements["section"]),
+        ("pdf.figures float leaves LaTeX's placement alone",
+         lambda: not any(word in placements["float"] for word in
+                         ("floatplacement", "placeins", "float/flush"))),
+        ("and the default keeps figures in place",
+         lambda: "\\floatplacement{figure}{H}" in source),
         ("each figure's tags sit where the text has it",
          lambda: figures and not inside(tree, "/figures", "/Figure")),
         ("the described image is a figure with its alt text",

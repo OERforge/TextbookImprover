@@ -129,6 +129,23 @@ Table: Price by year
 +===========+==========+
 | 1         | 2        |
 +-----------+----------+
+
++-------------------+-------------------+
+| Racket            | Pyret             |
++===================+===================+
+| > (define x 1)    | x = 1             |
++-------------------+-------------------+
+
+#### Deep
+
+##### Run-in one
+
+###### Run-in two
+
+## After the run-in headings
+
+A heading below a subsection is run in to the text after it, and two of
+them followed by a section had left LaTeX's paragraph tagging one short.
 """
 
 APPENDIX = r"""\appendix
@@ -223,6 +240,25 @@ def classes(element):
     if value is None:
         return []
     return [str(v) for v in value] if isinstance(value, list) else [str(value)]
+
+
+def quoted_cells(path):
+    """BlockQuote elements under a table cell, by their standard role."""
+    pdf = pdfparagraphs.pikepdf.open(path)
+    role = pdfparagraphs.make_role_resolver(pdf.Root.StructTreeRoot)
+    found = []
+
+    def walk(element, in_cell):
+        if not pdfparagraphs.is_struct_elem(element):
+            return
+        kind_here = role(str(element["/S"]))
+        if in_cell and kind_here == "/BlockQuote":
+            found.append(element)
+        for kid in pdfparagraphs.kids_of(element):
+            walk(kid, in_cell or kind_here in ("/TD", "/TH"))
+    for kid in pdfparagraphs.kids_of(pdf.Root.StructTreeRoot):
+        walk(kid, False)
+    return found
 
 
 def children(element):
@@ -362,15 +398,20 @@ def checks(work):
         # first cell of each body row TH-row only if pdf-target.lua set
         # table/header-columns around it.
         ("the matrix table's first column is row headers",
-         lambda: len(tabled) == 4 and row_headers(tabled[0]) == 2),
+         lambda: len(tabled) == 5 and row_headers(tabled[0]) == 2),
         ("the plain table has header cells and no row headers",
-         lambda: len(tabled) == 4 and row_headers(tabled[1]) == 0
+         lambda: len(tabled) == 5 and row_headers(tabled[1]) == 0
          and any(kind(e) == "/TH" for e in tabled[1])),
         # LaTeX writes a longtable's caption as a first row of one header
         # cell, and leaves the empty copy of the head it repeats inside the
         # table; pdfretag.py makes the one a Caption and takes the other out.
         # The caption's wrapper also holds paragraph elements that stay
         # empty, which pdfparagraphs.py removes.
+        ("headings below a subsection, followed by a section, don't stop "
+         "LaTeX's tagging", lambda: "automatic begin" not in log
+         and "xxxSubParagraphNoStar" in source),
+        ("a quotation in a table cell is unwrapped, since a cell can't hold one",
+         lambda: not quoted_cells(pdf_path)),
         ("no paragraph element is left empty",
          lambda: not pdfparagraphs.find(pdfparagraphs.pikepdf.open(pdf_path)).doomed),
         ("a captioned table's caption is its Caption, before its rows",

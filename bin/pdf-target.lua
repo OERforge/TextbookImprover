@@ -66,7 +66,27 @@ local function squash(s)
   return (s:gsub("%s+", " "):gsub("^ ", ""):gsub(" $", ""))
 end
 
+-- A quotation inside a table cell is unwrapped to what it holds: a PDF's
+-- structure doesn't allow a BlockQuote in a TD (ISO/TS 32005, which veraPDF
+-- reports as TD-BlockQuote). DCIC sets code side by side in a table that
+-- way, five blocks of it, indented as quotations.
+local unquote = {BlockQuote = function(quote) return quote.content end}
+
+local function unquote_cells(rows)
+  for _, row in ipairs(rows) do
+    for _, cell in ipairs(row.cells) do
+      cell.contents = pandoc.Blocks(cell.contents):walk(unquote)
+    end
+  end
+end
+
 function Table(tbl)
+  unquote_cells(tbl.head.rows)
+  for _, body in ipairs(tbl.bodies) do
+    unquote_cells(body.head)
+    unquote_cells(body.body)
+  end
+  unquote_cells(tbl.foot.rows)
   local columns = 0
   for _, body in ipairs(tbl.bodies) do
     if body.row_head_columns > columns then
@@ -74,7 +94,7 @@ function Table(tbl)
     end
   end
   if columns == 0 then
-    return nil
+    return tbl
   end
   local list = {}
   for i = 1, columns do

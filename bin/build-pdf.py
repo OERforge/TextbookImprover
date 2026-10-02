@@ -366,6 +366,15 @@ def book_metadata(project, resolved, base, numbered):
     if document_class(meta) in FRONTMATTER_CLASSES:
         meta["has-frontmatter"] = meta_bool(False)
         ours += OPEN_FRONT
+    # A heading below a subsection is run in to the text that follows it in
+    # the standard classes, and one followed by another heading instead, as
+    # a page that opens with nested headings and no text between them is,
+    # leaves LaTeX's paragraph tagging one paragraph short: "The number of
+    # automatic begin (7286) and end (7285)" in DCIC, which stopped its PDF.
+    # The template's block-headings puts each such heading on its own line,
+    # and a metadata file can still say otherwise.
+    if "block-headings" not in meta:
+        meta["block-headings"] = meta_bool(True)
     includes["c"].append({"t": "MetaBlocks", "c": [raw_latex(ours)]})
     meta["header-includes"] = includes
     return meta

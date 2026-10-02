@@ -16,7 +16,7 @@ Every source format the pipeline reads, the ways a book in that format can arriv
 |---|---|---|---|---|---|---|---|
 | Word (`.docx`) | TESTED | TESTED | TESTED | TESTED | NEEDS MORE TESTING | TESTED | TESTED, with losses (see [Word output](#word-output)) |
 | Markdown (`.md`) | TESTED | TESTED | TESTED | TESTED | NEEDS MORE TESTING | TESTED | TESTED |
-| HTML (`.html`) | TESTED | TESTED | TESTED | TESTED | NOT TESTED | TESTED | TESTED |
+| HTML (`.html`) | TESTED | TESTED | TESTED | TESTED | NEEDS MORE TESTING | TESTED | TESTED |
 | AsciiDoc (`.adoc`) | TESTED | TESTED | TESTED | TESTED | NEEDS MORE TESTING | TESTED | TESTED |
 
 [PDF output](#pdf) is new, and so far measured on Markdown only. PDF is read only by [the audit](auditing.md), which reports on a Word, Markdown, HTML, EPUB, or PDF file without converting it.
@@ -85,7 +85,7 @@ Pages are parsed with html5lib, or with lxml where html5lib isn't installed; DCI
 - **Markdown: TESTED.** The suite converts HTML to Markdown and back, formulas and banded tables included, and DCIC's 80 pages come back identical. They didn't until two fixes: a formula as MathJax 2 drew it nests spans eleven deep, which Pandoc's Markdown reader never got through, and a link to an id with a space in it isn't a link to that reader, so its address came back as words.
 - **AsciiDoc: TESTED**, on DCIC: read back, 74 of its 80 pages are identical to the book converted directly. The other six each held a list with no items, which AsciiDoc can't write. Scribble's markup, spans nested in spans around links, code laid out in tables, quotations in quotations, is what most of the target's own forms were built against ([AsciiDoc as a target](asciidoc.md#asciidoc-as-a-target)).
 - **Word: TESTED**, on DCIC: 80 files, valid against Word's schema, with 38 decorative images marked. Read back, 50 of 80 pages give the same HTML, with no dead links; most of the rest put a list inside a quotation, which Pandoc's reader takes back out.
-- **PDF: NOT TESTED** ([PDF](#pdf)).
+- **PDF: NEEDS MORE TESTING**, on DCIC, from its WARC: 509 pages. It needed two fixes before it would build cleanly: headings below a subsection that run in to a following section had stopped LaTeX's tagging, and five blocks of code set as quotations inside table cells broke a PDF structure rule. 16 black-flag emoji remain undrawn, as no installed font draws one in a way veraPDF accepts ([PDF](#pdf)).
 
 ## AsciiDoc
 
@@ -218,6 +218,10 @@ targets:
 **Table captions are retagged after LaTeX** (`pdf.repair_captions`, on by default, needs `pikepdf`). LaTeX's tagging code writes a `longtable` caption as a first row of one header cell spanning the table, and leaves an empty copy of the repeated head inside the table ([latex3/tagging-project#1583](https://github.com/latex3/tagging-project/issues/1583)); NVDA in Acrobat Reader read the caption as row 1, and counted four rows and six columns in a three-by-three table. `lib/pdfretag.py` makes that cell the table's Caption and takes the empty copy out, and NVDA then read "Caption. Table 1 Output and price by year. Out of caption." and three rows and three columns. Only a table the book gave a caption is touched, matched to the PDF's tables in order, and nothing at all when the PDF's tables don't number the book's; only the first row, and only a row of one header cell. On the statistics textbook: 338 of its 342 captions retagged and 308 empty heads taken out.
 
 **Paragraph elements LaTeX leaves empty are removed** (`pdf.remove_empty_paragraphs`, on by default, needs `pikepdf`). Its tagging code opens a paragraph element around a longtable caption, in a header cell whose text wraps, in the repeated head, and around an image scaled to fit, and puts nothing in it. NVDA read a test file the same with them and without, but [PDF4WCAG](https://pdf4wcag.com/)'s WCAG 2.2 Machine profile reports each one (its rule 4.1.2-16), and the same file without them came back clean there. `lib/pdfparagraphs.py`, run after the caption repair, deletes them and turns what they marked into artifacts. On the economics textbook it removed 120 and on the statistics textbook 3,449, with each book's page text, read back with `pdftotext`, exactly as before, the same tables, figures, formulas, and links, and veraPDF still passing. `util/fix-empty-paragraphs.py` does it to a PDF made some other way.
+
+**Headings below a subsection stand on their own line** (Pandoc's `block-headings`, on unless the `pdf.metadata` file says otherwise). LaTeX runs such a heading in to the text after it, and two of them followed straight by another section left its paragraph tagging one paragraph short, which stopped DCIC's PDF.
+
+**A quotation inside a table cell is unwrapped** to what it holds, since a PDF's structure doesn't allow a block quotation in a table cell (ISO/TS 32005; veraPDF reports it). DCIC sets code side by side in a table that way.
 
 **What it loses, or can't yet do:**
 

@@ -1391,6 +1391,52 @@ def case_pdf_without_latex(work):
     ]
 
 
+def case_word_bookmarks(work):
+    """A docx target keeps the bookmarks a link goes to, from its own page
+    or another, and JAWS's table bookmarks, and drops the rest, which NVDA
+    announces; bookmarks: all keeps every one."""
+    os.makedirs(work)
+    with open(os.path.join(work, "a.md"), "w") as fh:
+        fh.write("# Alpha\n\n## Linked here {#here}\n\nSee [below](#also) and "
+                 "[the other page](b.md#there).\n\n## Not linked\n\nText.\n\n"
+                 "## Also linked {#also}\n\n| Year | Output |\n|------|--------|\n"
+                 "| 2020 | 5 |\n\nBack to [the top](#here).\n")
+    with open(os.path.join(work, "b.md"), "w") as fh:
+        fh.write("# Beta\n\n## Over there {#there}\n\nText.\n\n## Nobody comes here\n\nText.\n")
+
+    def build(setting):
+        with open(os.path.join(work, "conversion.yaml"), "w") as fh:
+            fh.write("targets:\n  word:\n    format: docx\n" + setting)
+        result = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quiet"],
+                                cwd=work, capture_output=True, text=True,
+                                stdin=subprocess.DEVNULL)
+        names = {}
+        for page in ("a", "b"):
+            path = os.path.join(work, "word", page + ".docx")
+            if os.path.exists(path):
+                with zipfile.ZipFile(path) as z:
+                    xml = z.read("word/document.xml").decode("utf-8")
+                names[page] = set(re.findall(r'<w:bookmarkStart w:id="\d+" w:name="([^"]+)"', xml))
+        return result.stdout + result.stderr, names
+    said, linked = build("")
+    _, every = build("    bookmarks: all\n")
+    a, b = linked.get("a", set()), linked.get("b", set())
+    return [
+        ("a heading linked from its own page keeps its bookmark",
+         lambda: {"_here", "_also"} <= a),
+        ("a heading linked from another page keeps its bookmark",
+         lambda: "_there" in b),
+        ("headings nothing links to lose theirs",
+         lambda: not any("not-linked" in n or "nobody" in n for n in a | b)
+         and len(a) == 3 and len(b) == 1),
+        ("JAWS's table bookmark stays",
+         lambda: any(n.startswith("ColumnTitle_") for n in a)),
+        ("the run says how many went", lambda: "no link goes to removed" in said),
+        ("bookmarks: all keeps every one",
+         lambda: len(every.get("a", set())) > len(a) and len(every.get("b", set())) > len(b)),
+    ]
+
+
 def case_pdf_svg_without_converter(work):
     """A book with an SVG image and a pdf target, on a machine without
     rsvg-convert: the run stops before LaTeX, saying what to install. The
@@ -3164,6 +3210,7 @@ CASES = [
     ("a pdf target without LuaLaTeX", case_pdf_without_latex),
     ("a pdf target with a LaTeX too old to tag", case_pdf_with_old_latex),
     ("a pdf target with an SVG and no rsvg-convert", case_pdf_svg_without_converter),
+    ("a docx target's bookmarks", case_word_bookmarks),
     ("ids with spaces in HTML sources", case_html_ids),
     ("decorative images and frame sizes in HTML sources", case_html_images),
     ("AsciiDoc to Markdown and back", case_asciidoc_markdown),

@@ -749,10 +749,54 @@ def _id_map_xml(mapping):
             '<ids xmlns="%s">%s</ids>' % (ID_MAP_NS, rows))
 
 
-def finish(path, doc):
+# Bookmarks the Word target writes for a reason of its own, kept whatever
+# links there are: JAWS's table header names, and a code block's language.
+OWN_BOOKMARKS = re.compile(r"(?:Title|ColumnTitle|RowTitle)_\d+$|" + re.escape(CODE_BOOKMARK))
+BOOKMARK_START = re.compile(r'<w:bookmarkStart w:id="(\d+)" w:name="([^"]*)"\s*/>')
+
+
+def linked_ids(docs):
+    """Every id a link in the book goes to, within its page or to another."""
+    found = set()
+
+    def walk(node):
+        if isinstance(node, list):
+            for item in node:
+                walk(item)
+        elif isinstance(node, dict):
+            if node.get("t") == "Link":
+                target = node["c"][2][0]
+                if "#" in target:
+                    found.add(target.split("#", 1)[1])
+            walk(node.get("c"))
+    for doc in docs:
+        walk(doc.get("blocks", []))
+    return found
+
+
+def keep_bookmarks(ids):
+    """The bookmark names to keep for links to these ids, as either
+    version of Pandoc names them."""
+    return {name for ident in ids for name in bookmark_names(ident)} | set(ids)
+
+
+def prune_bookmarks(xml, keep):
+    """xml without the bookmarks no link goes to, keeping the target's own;
+    returns (xml, how many went). NVDA announces every bookmark, hidden or
+    not, so one that nothing uses is only noise to a screen reader."""
+    drop = [ident for ident, name in BOOKMARK_START.findall(xml)
+            if name not in keep and not OWN_BOOKMARKS.match(name)]
+    for ident in drop:
+        xml = re.sub(r'\s*<w:bookmarkStart w:id="%s" w:name="[^"]*"\s*/>' % ident, "", xml)
+        xml = re.sub(r'\s*<w:bookmarkEnd w:id="%s"\s*/>' % ident, "", xml)
+    return xml, len(drop)
+
+
+def finish(path, doc, keep=None):
     """Rewrite the .docx at path with what the page's AST says; returns a
     dict of counts: tooltips, decorative, first_columns, and compat (1
-    when the mode was set)."""
+    when the mode was set). keep: the bookmark names links go to, when
+    the others are to go (bookmarks: linked); None keeps them all."""
     if isinstance(doc, str):
         with open(doc, encoding="utf-8") as fh:
             doc = json.load(fh)
@@ -762,7 +806,7 @@ def finish(path, doc):
     codes = code_marks(doc)
     counts = {"compat": 0, "tooltips": 0, "decorative": 0, "first_columns": 0,
               "quotes": 0, "jaws_titles": 0, "ids": 0, "captions_kept": 0,
-              "code_lines": 0, "code_languages": 0}
+              "code_lines": 0, "code_languages": 0, "bookmarks_removed": 0}
     with zipfile.ZipFile(path) as z:
         names = z.namelist()
         parts = {n: z.read(n) for n in names}
@@ -787,6 +831,9 @@ def finish(path, doc):
         counts["quotes"] += n
         xml, n = keep_captions(xml)
         counts["captions_kept"] += n
+        if keep is not None:
+            xml, n = prune_bookmarks(xml, keep)
+            counts["bookmarks_removed"] += n
         parts[part] = xml.encode("utf-8")
     if counts["code_lines"] and "word/styles.xml" in parts \
             and 'w:styleId="LineNumber"' not in text("word/styles.xml"):

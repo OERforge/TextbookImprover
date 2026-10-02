@@ -1955,6 +1955,15 @@ def render_markdown(target, pages, base, work, project, env, losses=None):
     env = dict(env, TARGET_NAME=target.name)
     os.makedirs(target.output_dir, exist_ok=True)
     jobs = [(os.path.basename(p)[:-len(INTERMEDIATE)], p) for p in pages]
+    # bookmarks: linked keeps the bookmarks a link anywhere in the book goes
+    # to, within its page or from another, and the Word target's own.
+    keep = None
+    if str(target["format"]) == "docx" and str(target["bookmarks"]) == "linked":
+        docs = []
+        for path in pages:
+            with open(path, encoding="utf-8") as fh:
+                docs.append(json.load(fh))
+        keep = docxtarget.keep_bookmarks(docxtarget.linked_ids(docs))
     if str(target["merge"]) == "groups":
         tree, titles, _ = book_tree(project, pages,
                                     numbering_for(target, project))
@@ -2001,7 +2010,7 @@ def render_markdown(target, pages, base, work, project, env, losses=None):
             run(["pandoc", "-f", "json", "-t", "docx", page, "-o", out,
                  "--lua-filter=" + TARGET_FILTER], env=dict(env, FIDELITY_FOUND=found), cwd=base)
             collect_losses(found, target.name, stem, losses)
-            for key, n in docxtarget.finish(out, page).items():
+            for key, n in docxtarget.finish(out, page, keep).items():
                 added[key] = added.get(key, 0) + n
             written.append(out)
             continue
@@ -2048,7 +2057,9 @@ def render_markdown(target, pages, base, work, project, env, losses=None):
         say(f"{target.name}: {len(written)} Word file(s), compatibility mode "
             f"15; {added['tooltips']} ScreenTip(s), {added['decorative']} "
             f"decorative image(s) marked, {added['first_columns']} header "
-            "column(s) flagged.")
+            "column(s) flagged"
+            + (f", {added['bookmarks_removed']} bookmark(s) no link goes to removed"
+               if added.get("bookmarks_removed") else "") + ".")
         return written
     copy_media(base, target.output_dir, pages, safe=False)
     return written

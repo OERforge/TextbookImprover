@@ -100,8 +100,15 @@ OPEN_FRONT = "\\AddToHook{begindocument/end}{\\frontmatter}\n"
 # font for. What it can't supply is reported after the build, because
 # veraPDF catches only some of it: a character an equation falls back to
 # one of LaTeX's older math fonts for is dropped with no trace at all.
-FALLBACK = ("\\directlua{luaotfload.add_fallback(\"oerfallback\", "
-            "{\"Latin Modern Math:mode=harf;\"})}\n")
+# DejaVu Sans comes after it when it's installed, as it is with most Linux
+# desktops: it has what Latin Modern Math doesn't, such as the circled
+# digits an AsciiDoc book's code callouts are (58 of them in the security
+# textbook, all drawn blank without it).
+FALLBACK = ("\\IfFontExistsTF{DejaVu Sans}\n"
+            "  {\\directlua{luaotfload.add_fallback(\"oerfallback\", "
+            "{\"Latin Modern Math:mode=harf;\", \"DejaVu Sans:mode=harf;\"})}}\n"
+            "  {\\directlua{luaotfload.add_fallback(\"oerfallback\", "
+            "{\"Latin Modern Math:mode=harf;\"})}}\n")
 FAMILIES = (("mainfont", "\\setmainfont{Latin Modern Roman}"),
             ("sansfont", "\\setsansfont{Latin Modern Sans}"),
             ("monofont", "\\setmonofont{Latin Modern Mono}"))
@@ -185,6 +192,23 @@ def latex_release():
         shutil.rmtree(work, ignore_errors=True)
     m = re.search(r"OERFMT:(\d{4}-\d{2}-\d{2})", result.stdout)
     return m.group(1) if m else None
+
+
+def svg_images(blocks):
+    """The SVG images the book holds."""
+    found = []
+
+    def walk(node):
+        if isinstance(node, dict):
+            if node.get("t") == "Image" and node["c"][2][0].lower().split("?")[0].endswith(".svg"):
+                found.append(node["c"][2][0])
+            for value in node.values():
+                walk(value)
+        elif isinstance(node, list):
+            for value in node:
+                walk(value)
+    walk(blocks)
+    return found
 
 
 def latex_problem():
@@ -448,6 +472,15 @@ def build(base, name, resolved, keep, intermediates=None, latex_only=False):
         assembly.add_single_page(tree[0][1], tree[0][2])
     else:
         assembly.add_tree(tree)
+    # Pandoc turns an SVG into a PDF with rsvg-convert before LaTeX sees
+    # it (convertImage in PDF.hs), and the image keeps its alt text; without
+    # rsvg-convert the LaTeX writer falls back to \\includesvg, which needs
+    # Inkscape and passes no alt text at all.
+    svgs = svg_images(assembly.blocks)
+    if svgs and not latex_only and shutil.which("rsvg-convert") is None:
+        sys.exit(f"The book has {len(svgs)} SVG image(s) ({svgs[0]} first), and a PDF "
+                 "needs rsvg-convert to turn them into PDF: sudo apt install "
+                 "librsvg2-bin (see docs/installation.md).")
 
     if assembly.toc_placed:
         # project.contents put the contents somewhere; it is there, and

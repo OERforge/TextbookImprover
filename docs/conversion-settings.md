@@ -158,7 +158,7 @@ Settings read only by a pdf target. One PDF holds the whole book, assembled from
 
 **`pdf.standard`**—`list`; default `[ua-2]`
 
-The standards the PDF declares, as Pandoc's pdfstandard variable takes them: ua-2 for PDF/UA-2, and optionally a PDF/A part such as a-4f. PDF/UA turns LaTeX's tagging on. A standard declared here is a claim the file makes about itself; veraPDF, when the output check finds it, is what tests the claim.
+The standards the PDF declares, as Pandoc's pdfstandard variable takes them: ua-2 for PDF/UA-2 (PDF 2.0), or ua-1 for PDF/UA-1 (PDF 1.7), which is what PAC checks, and optionally a PDF/A part such as a-4f with ua-2 or a-2u with ua-1. PDF/UA turns LaTeX's tagging on. A standard declared here is a claim the file makes about itself; veraPDF, when the output check finds it, is what tests the claim.
 
 **`pdf.metadata`**—`path`; default `""` (empty)
 
@@ -171,6 +171,10 @@ Where a figure goes, on the page and in the order a screen reader reads. in_plac
 **`pdf.repair_captions`**—`bool`; default `true`
 
 Retag each table's caption, which LaTeX's tagging code writes as a first row of one header cell spanning the table, as the table's Caption, and take out the empty copy of the table's head it leaves inside the table, so a screen reader reads the caption as one and counts the table's rows and columns right. Only a table the book gave a caption, matched in order. Needs pikepdf; without it the run says so and leaves the tags as LaTeX wrote them.
+
+**`pdf.ua1_math`**—one of `alt`, `office`; default `alt`
+
+How a PDF/UA-1 file carries its math. PDF 1.7, which PDF/UA-1 is built on, has no standard way to tag MathML, so alt gives each formula its TeX source as alternative text and attaches its MathML as a file, as LaTeX does by itself for PDF/UA-1; a screen reader reads the TeX as written. office also writes the MathML as Microsoft Office's own attribute on each formula, the one Word puts in the PDFs it saves, which some readers use. PDF/UA-2 tags the MathML itself, and neither applies there.
 
 **`pdf.remove_empty_paragraphs`**—`bool`; default `true`
 

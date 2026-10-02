@@ -224,6 +224,8 @@ targets:
 
 **A quotation inside a table cell is unwrapped** to what it holds, since a PDF's structure doesn't allow a block quotation in a table cell (ISO/TS 32005; veraPDF reports it). DCIC sets code side by side in a table that way.
 
+**PDF/UA-1 too** (`pdf.standard: [ua-1]`), for checkers such as PAC that test only PDF/UA-1. The file is PDF 1.7. PDF 1.7 has no standard way to tag MathML, so each formula is tagged as a Formula with LaTeX's own alternative text (its TeX source, between "LaTeX formula starts" and "ends", which a screen reader reads as written) and its MathML attached as a file; `pdf.ua1_math: office` also writes the MathML as Microsoft Office's own attribute on the formula, the one Word puts in the PDFs it saves, through LaTeX's `mathml-MS` option. A book with equations gets a warning saying so. PDF/UA-1 also asks for a description on every link: LaTeX's own links (contents lines, cross-references it makes) get hyperref's, "Go to destination" and its name, while the book's own links keep their text and description, and a footnote mark isn't made a link. The security textbook built this way passes veraPDF's PDF/UA-1 profile. A one-page book whose headings start at level 2 fails its rule against skipping heading level 1.
+
 **What it loses, or can't yet do:**
 
 - latex-lab's table tagging supports header rows and columns only, so a table whose cells need a `Headers` list to name their headers (headers at several levels, or headers mid-table) can't be tagged fully. The table-headers work splits banded tables for PDF, as for HTML, which removes the commonest case.

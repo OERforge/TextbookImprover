@@ -111,6 +111,21 @@ $$\frac{a}{b}$$
 A rule between paragraphs: ![](assets/rule.png){.decorative}
 
 ![](assets/blank.png)
+
+| Year | Price |
+|------|-------|
+| 2020 | 10    |
+| 2021 | 12    |
+
+Table: Price by year
+
++----------------------+
+| Both columns         |
++-----------+----------+
+| Left      | Right    |
++===========+==========+
+| 1         | 2        |
++-----------+----------+
 """
 
 APPENDIX = r"""\appendix
@@ -207,6 +222,22 @@ def classes(element):
     return [str(v) for v in value] if isinstance(value, list) else [str(value)]
 
 
+def children(element):
+    """An element's own structure elements, in order."""
+    kids = resolve(element.get("/K"))
+    kids = kids if isinstance(kids, list) else [kids]
+    return [resolve(k) for k in kids if isinstance(resolve(k), dict) and "/S" in resolve(k)]
+
+
+def inside(everything, outer, inner):
+    """The inner elements that sit anywhere under an outer one."""
+    found = []
+    for element in everything:
+        if kind(element) == outer:
+            found += [e for e in elements(element) if kind(e) == inner]
+    return found
+
+
 def tables(everything):
     """Each /Table's elements, the table's own and not a nested one's."""
     out = []
@@ -286,6 +317,11 @@ def checks(work):
     by_uri = {uri: contents for s, uri, contents in found if s == "/URI"}
     goto = [contents for s, uri, contents in found if s != "/URI"]
     tabled = tables(tree)
+    table_elements = [e for e in tree if kind(e) == "/Table"]
+
+    def shape(table):
+        """A table's own children, and for each row its cells' count."""
+        return [kind(k) if kind(k) != "/TR" else len(children(k)) for k in children(table)]
     pdf_rows = [r for r in rows if r.get("Kind") == "pdf"]
     verapdf_ran = shutil.which("verapdf") or os.environ.get("VERAPDF")
     body = source.split("\\begin{document}", 1)[-1]
@@ -311,10 +347,25 @@ def checks(work):
         # first cell of each body row TH-row only if pdf-target.lua set
         # table/header-columns around it.
         ("the matrix table's first column is row headers",
-         lambda: len(tabled) == 2 and row_headers(tabled[0]) == 2),
+         lambda: len(tabled) == 4 and row_headers(tabled[0]) == 2),
         ("the plain table has header cells and no row headers",
-         lambda: len(tabled) == 2 and row_headers(tabled[1]) == 0
+         lambda: len(tabled) == 4 and row_headers(tabled[1]) == 0
          and any(kind(e) == "/TH" for e in tabled[1])),
+        # LaTeX writes a longtable's caption as a first row of one header
+        # cell, and leaves the empty copy of the head it repeats inside the
+        # table; pdfretag.py makes the one a Caption and takes the other out.
+        ("a captioned table's caption is its Caption, before its rows",
+         lambda: shape(table_elements[2]) == ["/Caption", 2, 2, 2]),
+        ("a table whose first header row is one spanning cell, with no "
+         "caption, keeps that row",
+         lambda: shape(table_elements[3])[:2] == [1, 2]
+         and "/Caption" not in shape(table_elements[3])),
+        ("no table holds an empty artifact",
+         lambda: not any(kind(k) == "/Artifact" for t in table_elements for k in children(t))),
+        # pdf.figures in_place: H, so the tags stay where the text has them,
+        # not gathered in a container at the end of the document.
+        ("each figure's tags sit where the text has it",
+         lambda: figures and not inside(tree, "/figures", "/Figure")),
         ("the described image is a figure with its alt text",
          lambda: any(str(f.get("/Alt")) == "A small red square"
                      for f in figures)),

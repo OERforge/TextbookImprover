@@ -63,6 +63,7 @@ from bookassembly import (  # noqa: E402
     page_title, stringify,
 )
 from bookcontents import is_generated  # noqa: E402
+import pdfretag  # noqa: E402
 from names import safe_stem  # noqa: E402
 
 ENGINE = "lualatex"
@@ -104,6 +105,21 @@ FAMILIES = (("mainfont", "\\setmainfont{Latin Modern Roman}"),
             ("sansfont", "\\setsansfont{Latin Modern Sans}"),
             ("monofont", "\\setmonofont{Latin Modern Mono}"))
 MISSING = re.compile(r"Missing character: There is no (\S+)")
+
+# Where figures go (pdf.figures). LaTeX's tagging gathers the tags of a
+# figure that floats into one place: at the end of the document unless
+# told to flush them, which it does when a section begins (the float/flush
+# key of latex-lab-testphase-float.sty). A figure placed H doesn't float,
+# so its tags stay where the text has it.
+FIGURE_PLACEMENT = {
+    "in_place": "\\usepackage{float}\\floatplacement{figure}{H}\n",
+    "section": ("\\usepackage[section]{placeins}\n"
+                "\\ifdefined\\tagpdfsetup\n"
+                "  \\AddToHook{cmd/section/before}{\\tagpdfsetup{float/flush=section}}\n"
+                "  \\AddToHook{cmd/chapter/before}{\\tagpdfsetup{float/flush=chapter}}\n"
+                "\\fi\n"),
+    "float": "",
+}
 
 # Written into the preamble after the metadata file's own header-includes.
 # math/setup names both forms of MathML luamml makes (it needs
@@ -316,7 +332,7 @@ def book_metadata(project, resolved, base, numbered):
         includes = {"t": "MetaList", "c": []}
     elif includes.get("t") != "MetaList":
         includes = {"t": "MetaList", "c": [includes]}
-    ours = HEADER
+    ours = HEADER + FIGURE_PLACEMENT[str(resolved["pdf.figures"])]
     unchosen = [command for field, command in FAMILIES if field not in meta]
     if unchosen:
         ours += FALLBACK + "".join(
@@ -341,6 +357,44 @@ def meta_plain(value):
 
 def document_class(meta):
     return meta_plain(meta.get("documentclass"))
+
+
+def captioned_tables(blocks):
+    """For each table in the book, in order, whether it has a caption."""
+    found = []
+
+    def walk(node):
+        if isinstance(node, dict):
+            if node.get("t") == "Table":
+                found.append(bool(node["c"][1][1]))
+            for value in node.values():
+                walk(value)
+        elif isinstance(node, list):
+            for value in node:
+                walk(value)
+    walk(blocks)
+    return found
+
+
+def repair_tables(path, blocks):
+    """pdf.repair_captions, after LaTeX: see lib/pdfretag.py."""
+    if pdfretag.pikepdf is None:
+        print("WARNING: pikepdf isn't installed, so table captions keep the tags "
+              "LaTeX gives them, a first row a screen reader reads as data "
+              "(pip install pikepdf, or sudo apt install python3-pikepdf).",
+              file=sys.stderr)
+        return
+    captioned = captioned_tables(blocks)
+    counts = pdfretag.retag(path, captioned)
+    if not counts["matched"]:
+        print(f"WARNING: the PDF's tables don't line up with the book's "
+              f"{len(captioned)}, so no caption was retagged.", file=sys.stderr)
+        return
+    print(f"Table captions retagged: {counts['captions']} of "
+          f"{sum(captioned)}; {counts['artifacts']} empty repeated head(s) "
+          "taken out of their tables"
+          + (f", {counts['artifacts_left']} with content left in"
+             if counts["artifacts_left"] else "") + ".", file=sys.stderr)
 
 
 def output_name(resolved, project, target):
@@ -447,6 +501,8 @@ def build(base, name, resolved, keep, intermediates=None, latex_only=False):
                               sorted(missing.items(), key=lambda i: -i[1]))
                   + ". Choose a font that has them in the pdf.metadata "
                   "file (mainfont).", file=sys.stderr)
+        if result.returncode == 0 and resolved["pdf.repair_captions"]:
+            repair_tables(os.path.abspath(out_path), assembly.blocks)
         if result.returncode != 0:
             # tlmgr only manages a TeX Live installed from tug.org or as
             # TinyTeX; Debian's and Ubuntu's texlive packages come with a

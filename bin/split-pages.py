@@ -446,6 +446,10 @@ def split_document(doc, stem, level, names, taken, problems):
                                                     {"t": "Space"}
                                                     for i, w in enumerate(
                                                         interleave(title))]}
+        # The piece's heading is its title heading: the HTML shows it as the
+        # piece's own H1 (target-blocks.lua), as a whole page's.
+        if piece != stem:
+            meta["title-heading"] = dict(meta["title"])
         meta["source-page"] = meta_string(stem)
         meta["source-title"] = meta_string(source_title)
         meta["page-part"] = meta_string(f"{index}/{total}")

@@ -373,8 +373,10 @@ def case_contents_edges(work):
          lambda: "not in project.contents" in out.stderr
          and "  math" in out.stderr
          and "page-math" not in out.body()),
-        ("a one-page book gets no heading above its own",
-         lambda: one.status == 0 and "page-metadata" not in one.body()),
+        # Its title was its own H1, taken into the metadata by the filter;
+        # it comes back as the page's heading, once, with nothing above it.
+        ("a one-page book has its own title heading back, once, and none above it",
+         lambda: one.status == 0 and len(re.findall(r"<h1[ >]", one.body())) == 1),
         ("with no contents the order is guessed and said to be",
          lambda: guess.status == 0
          and "guessed order" in guess.stderr

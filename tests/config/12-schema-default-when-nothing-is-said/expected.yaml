@@ -2,7 +2,7 @@
 # the config is almost empty.
 target: web
 expect:
-  promote_h1_to_title: always
+  promote_h1_to_title: if-absent
   author_byline: meta
   images.alt_max_chars: 120
   captions.table_prefixes: [Table]

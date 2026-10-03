@@ -273,7 +273,7 @@ local BYLINE_MODES = { meta = true, visible = true, drop = true }
 local AUTHOR_BYLINE = (os.getenv('AUTHOR_BYLINE') or 'meta'):lower()
 
 local PROMOTE_MODES = { always = true, ['if-absent'] = true,
-                        longer = true, never = true }
+                        longer = true, shorter = true, never = true }
 local PROMOTE_H1_TO_TITLE =
   (os.getenv('PROMOTE_H1_TO_TITLE') or 'if-absent'):lower()
 
@@ -289,7 +289,7 @@ end
 
 if not PROMOTE_MODES[PROMOTE_H1_TO_TITLE] then
   warn(('PROMOTE_H1_TO_TITLE=%q is not one of always, if-absent, longer, '
-    .. 'never; using if-absent'):format(PROMOTE_H1_TO_TITLE))
+    .. 'shorter, never; using if-absent'):format(PROMOTE_H1_TO_TITLE))
   PROMOTE_H1_TO_TITLE = 'if-absent'
 end
 
@@ -2180,9 +2180,38 @@ local function title_header_index(doc)
   return nil
 end
 
+-- Whether the page's only H1 says its declared title: the same text, or
+-- one inside the other -- a section number before it ("1.1 Definitions of
+-- Statistics" under a Word Title "Definitions of Statistics"), or a site's
+-- name after it ("A Web Page -- The Site" in <title>). The H1 is then the
+-- page's title heading, shown as it is, and the title stays the declared
+-- one, unless the mode says otherwise (shorter, for a page saved from the
+-- web, takes the one without the site's name).
+-- Compared as a reader would: curly and straight quotes alike, dashes
+-- alike, any run of space one space, and case aside ("Cohen’s" in a Word
+-- Title, "Cohen's" in its heading).
+local function folded(text)
+  text = text:gsub('\u{2018}', "'"):gsub('\u{2019}', "'")
+             :gsub('\u{201C}', '"'):gsub('\u{201D}', '"')
+             :gsub('\u{2013}', '-'):gsub('\u{2014}', '-')
+             :gsub('%s+', ' '):gsub('^ ', ''):gsub(' $', '')
+  return pandoc.text.lower(text)
+end
+
+local function says_title(declared, h1)
+  declared, h1 = folded(declared), folded(h1)
+  if declared == '' or h1 == '' then return false end
+  return declared == h1 or h1:find(declared, 1, true) ~= nil
+    or declared:find(h1, 1, true) ~= nil
+end
+
 local function should_promote_h1(doc, index)
   if PROMOTE_H1_TO_TITLE == 'never' or index == nil then return false end
   if doc.meta.title == nil then return true end
+  if says_title(pandoc.utils.stringify(doc.meta.title),
+                pandoc.utils.stringify(doc.blocks[index].content)) then
+    return true
+  end
   if PROMOTE_H1_TO_TITLE == 'always' then return true end
   if PROMOTE_H1_TO_TITLE == 'longer' then
     local meta = pandoc.utils.stringify(doc.meta.title)
@@ -2229,7 +2258,41 @@ function Pandoc(doc)
   local title_index = title_header_index(doc)
   if should_promote_h1(doc, title_index) then
     local heading = doc.blocks[title_index]
-    doc.meta.title = pandoc.MetaInlines(heading.content)
+    local declared = doc.meta.title and pandoc.utils.stringify(doc.meta.title) or ''
+    local h1 = pandoc.utils.stringify(heading.content)
+    -- Which text is the title. A declared one stands under if-absent,
+    -- the default; the H1's is used when none is declared, under always,
+    -- under longer when the H1 contains the declared title, and under
+    -- shorter when the H1 is the shorter of two that contain one another.
+    local h1_wins = declared == '' or PROMOTE_H1_TO_TITLE == 'always'
+      or (PROMOTE_H1_TO_TITLE == 'longer' and h1 ~= declared
+          and h1:find(declared, 1, true) ~= nil)
+      or (PROMOTE_H1_TO_TITLE == 'shorter' and #h1 < #declared
+          and declared:find(h1, 1, true) ~= nil)
+    if h1_wins then
+      doc.meta.title = pandoc.MetaInlines(heading.content)
+    elseif folded(h1):match('^[%d%.]+%s') and folded(h1):find(folded(declared), 1, true) then
+      -- The title stands without the number its heading puts before it;
+      -- convert.py says so once, since a cartridge names pages by it.
+      local numbers = os.getenv('TITLE_NUMBERS')
+      if numbers and numbers ~= '' then
+        local handle = io.open(numbers, 'a')
+        if handle then
+          handle:write(h1 .. '\t' .. declared .. '\n')
+          handle:close()
+        end
+      end
+    end
+    -- The page's title is its heading: every writer puts it back as the
+    -- page's own H1, its id with it (target-blocks.lua, and the book
+    -- assembly for the EPUB and PDF). Inside the pipeline it lives here,
+    -- where the split, the contents, and the numbering read it.
+    doc.meta['title-heading'] = pandoc.MetaInlines(heading.content)
+    -- What came before it (a byline, a subtitle), which a title page holds.
+    doc.meta['title-index'] = pandoc.MetaString(tostring(title_index - 1))
+    if heading.identifier ~= '' then
+      doc.meta['title-id'] = pandoc.MetaString(heading.identifier)
+    end
     -- A class on the heading that says what part of the book this is
     -- ({.appendix}, as a Pandoc LaTeX build reads it) would go with the
     -- heading; it stays as the page's role, in the metadata and in the

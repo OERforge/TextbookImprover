@@ -120,6 +120,15 @@ def inlines(text):
     return out
 
 
+def title_heading_inlines(doc):
+    """The page's title heading as it said itself, when the filter took it
+    out of the body (title-heading), or None."""
+    value = (doc.get("meta") or {}).get("title-heading")
+    if isinstance(value, dict) and value.get("t") == "MetaInlines":
+        return copy.deepcopy(value["c"])
+    return None
+
+
 def header(level, content, identifier):
     return {"t": "Header", "c": [level, [identifier, [], []], content]}
 
@@ -247,6 +256,25 @@ def count_images(node, found):
             count_images(value, found)
 
 
+def wants_title_page(setting, tree, assembly):
+    """title_page for an EPUB or PDF: on and off as said; auto by the
+    book's structure, not its number of files. A book with more than one
+    top-level entry of its own (chapters, parts) gets one; a book that is
+    one page gets one when that page has more than one top-level heading,
+    or something before its title heading (a byline, a subtitle), as a
+    title page would; otherwise none, the title then in the file's
+    metadata only."""
+    if setting in ("on", "off"):
+        return setting == "on"
+    entries = [e for e in tree if not is_generated(e)]
+    if len(entries) > 1:
+        return True
+    tops = [b for b in assembly.blocks if b.get("t") == "Header" and b["c"][0] == 1]
+    if len(tops) > 1:
+        return True
+    return assembly.title_preceded
+
+
 class Assembly:
     """The book being built: blocks, and what was learned building them."""
 
@@ -261,6 +289,7 @@ class Assembly:
         self.found = {"images": 0, "without_alt": 0, "math": 0, "notes": 0}
         self.groups = {}             # page stem -> (group key, group title)
         self.notes_placed = False    # the Notes chapter, where contents put it
+        self.title_preceded = False  # a one-page book's title heading had something before it
 
     def add_tree(self, tree, depth=1):
         for index, entry in enumerate(tree):
@@ -344,7 +373,12 @@ class Assembly:
             blocks[0]["c"][2] = inlines(title) if (title_override or number) \
                 else blocks[0]["c"][2]
         else:
-            blocks.insert(0, header(depth, inlines(title), page_id(stem)))
+            # The page's own title heading, as it said itself ("1.1 ..."),
+            # unless the contents renames or numbers it.
+            own = title_heading_inlines(doc)
+            blocks.insert(0, header(depth, own if own is not None and not
+                                    (title_override or number) else inlines(title),
+                                    page_id(stem)))
         count_images(blocks, self.found)
         self.depth = max(self.depth, depth)
         self.pages.append((stem, title, depth))
@@ -358,8 +392,19 @@ class Assembly:
         blocks = copy.deepcopy(doc["blocks"])
         strip_comments(blocks)
         prefix_ids(blocks, page_id(stem) + "--", self.book_pages)
+        title = title_override or page_title(doc, stem)
+        # A page whose title is its own H1 (title-heading, from the filter)
+        # gets it back, as every page of a longer book does in add_page.
+        own = title_heading_inlines(doc)
+        if own is not None and not opens_with_h1(blocks):
+            blocks.insert(0, header(1, inlines(title) if title_override else own,
+                                    page_id(stem)))
+            try:
+                self.title_preceded = int(meta_text(doc["meta"], "title-index") or 0) > 0
+            except ValueError:
+                pass
         count_images(blocks, self.found)
-        self.pages.append((stem, title_override or page_title(doc, stem), 1))
+        self.pages.append((stem, title, 1))
         self.blocks.extend(blocks)
 
 

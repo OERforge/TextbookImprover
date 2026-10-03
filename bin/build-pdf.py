@@ -60,7 +60,7 @@ except ImportError:
              "lib/ directory beside bin/.")
 from bookassembly import (  # noqa: E402
     INTERMEDIATE, Assembly, load_documents, targets_of, plan_book, load_page,
-    page_title, stringify,
+    page_title, stringify, wants_title_page,
 )
 from bookcontents import is_generated  # noqa: E402
 import pdfparagraphs  # noqa: E402
@@ -599,6 +599,12 @@ def build(base, name, resolved, keep, intermediates=None, latex_only=False):
         # project.contents put the contents somewhere; it is there, and
         # not also where the template would put it.
         meta["toc"] = meta_bool(False)
+    # Without a title page the title is the PDF's metadata only (title-meta,
+    # which hyperref makes its /Title and dc:title), and the book's first
+    # heading says it.
+    if not wants_title_page(str(resolved["title_page"]), tree, assembly) \
+            and "title" in meta:
+        meta["title-meta"] = meta_string(meta_plain(meta.pop("title")))
     document = {
         "pandoc-api-version": load_page(pages_dir,
                                         real[0])["pandoc-api-version"],

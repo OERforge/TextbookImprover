@@ -298,6 +298,17 @@ def ua1_formulas(path):
         walk(kid)
     links = ["/Contents" in annot for page in pdf.pages for annot in page.get("/Annots") or []
              if str(annot.get("/Subtype")) == "/Link"]
+    role = pdfparagraphs.make_role_resolver(pdf.Root.StructTreeRoot)
+    kinds = []
+
+    def roles(element):
+        if pdfparagraphs.is_struct_elem(element):
+            kinds.append(role(str(element["/S"])))
+            for kid in pdfparagraphs.kids_of(element):
+                roles(kid)
+    for kid in pdfparagraphs.kids_of(pdf.Root.StructTreeRoot):
+        roles(kid)
+    found.append(("roles", kinds))
     return found, pdf.pdf_version, links
 
 
@@ -420,6 +431,8 @@ def checks(work):
     ua1_path, ua1_said, ua1_rows = build_ua1(work + "-ua1")
     ua1_math, ua1_version, ua1_links = ua1_formulas(ua1_path) if os.path.exists(ua1_path) \
         else ([], "", [])
+    ua1_roles = dict(f for f in ua1_math if f[0] == "roles").get("roles", [])
+    ua1_math = [f for f in ua1_math if f[0] != "roles"]
     pdf_path = os.path.join(work, "pdf", "org.example.pdf.pdf")
     root = reader.trailer["/Root"]
     tree = elements(root["/StructTreeRoot"])
@@ -486,6 +499,10 @@ def checks(work):
          and not ua1_math[0][2]),
         ("every link in it has a /Contents",
          lambda: ua1_links and all(ua1_links)),
+        # A one-page book whose heading is its title: no title page, and the
+        # heading is its first, at level 1 (title_page: auto).
+        ("a one-page book has no title page, and its title is its level-1 heading",
+         lambda: "/Title" not in ua1_roles and "/H1" in ua1_roles),
         ("the run warns that its equations are tagged as PDF/UA-1 allows",
          lambda: "PDF/UA-1 has no standard way to tag MathML" in ua1_said),
         ("no paragraph element is left empty",

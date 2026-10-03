@@ -46,6 +46,7 @@ end
 
 local TARGET = os.getenv('TARGET_NAME') or ''
 local TITLE_BLOCK = (os.getenv('TITLE_BLOCK') or 'on') ~= 'off'
+local TITLE_WRITER = os.getenv('TITLE_WRITER') or ''
 
 local function wanted(spec)
   -- Names keep; "!name" excludes. A list of only exclusions keeps by
@@ -148,6 +149,41 @@ local function own_name()
   return (name:gsub('%.json$', ''):gsub('%.filtered$', ''))
 end
 
+-- A page whose title is its own H1 (the filter marked it title-heading,
+-- having taken the heading out of the body so the split, the contents,
+-- and the numbering find the title in one place) gets the heading back as
+-- its first block, its id with it. HTML then names the page with
+-- pagetitle, for <title>, and has no title block to say it twice; Word
+-- gets a Heading 1 rather than a Title paragraph (docxtarget.py puts the
+-- title in the file's properties); Markdown and AsciiDoc keep the title in
+-- their metadata as well. A page with a subtitle, date, or abstract keeps
+-- the HTML title block, which shows them under the title.
+local function title_heading(doc)
+  local meta = doc.meta
+  local marked = meta['title-heading']
+  meta['title-heading'] = nil
+  local id = meta['title-id'] and pandoc.utils.stringify(meta['title-id']) or ''
+  meta['title-id'] = nil
+  meta['title-index'] = nil
+  if not marked or meta.title == nil or TITLE_WRITER == '' then return doc end
+  if TITLE_WRITER == 'html' and TITLE_BLOCK
+      and (meta.subtitle or meta.date or meta.abstract) then
+    return doc
+  end
+  local content = marked
+  if pandoc.utils.type(content) ~= 'Inlines' then
+    content = pandoc.Inlines(pandoc.utils.stringify(content))
+  end
+  doc.blocks:insert(1, pandoc.Header(1, content, pandoc.Attr(id)))
+  if TITLE_WRITER == 'html' then
+    meta.pagetitle = pandoc.MetaString(pandoc.utils.stringify(meta.title))
+    meta.title = nil
+  elseif TITLE_WRITER == 'docx' then
+    meta.title = nil
+  end
+  return doc
+end
+
 local function drop_title_block(meta)
   if meta.title == nil and meta.pagetitle == nil and own_name() ~= '' then
     meta.pagetitle = pandoc.MetaString(own_name())
@@ -164,5 +200,6 @@ end
 return {
   { Div = resolve, Span = resolve, Image = remote_image,
     Link = local_file_link },
+  { Pandoc = title_heading },
   { Meta = drop_title_block },
 }

@@ -63,7 +63,7 @@ except ImportError:
 from bookcontents import number_tree  # noqa: E402
 from bookassembly import (  # noqa: E402
     INTERMEDIATE, page_id, load_page, inlines, header, Assembly,
-    load_documents, targets_of, plan_book,
+    load_documents, targets_of, plan_book, wants_title_page,
     # not used here, but the EPUB tests reach them through this module
     count_images, page_title, prefix_ids, shift_headers,  # noqa: F401
 )
@@ -402,6 +402,7 @@ def build(base, name, resolved, keep, intermediates=None):
         assembly.add_single_page(tree[0][1], tree[0][2])
     else:
         assembly.add_tree(tree)
+    title_page = wants_title_page(str(resolved["title_page"]), tree, assembly)
     numbering = str(resolved["notes.numbering"])
     placement = str(resolved["notes.placement"])
     if placement == "book" and assembly.found["notes"] \
@@ -435,6 +436,9 @@ def build(base, name, resolved, keep, intermediates=None):
             f"--split-level={assembly.depth}",
             f"--toc-depth={toc_depth}",
             "--math-method=mathml",
+            # Without a title page the title is the package's dc:title, and
+            # the book's first heading says it (title_page).
+            "--epub-title-page=%s" % ("true" if title_page else "false"),
             # A passage for some editions, and the title-block switch,
             # resolved for this target.
             "--lua-filter", os.path.join(HERE, "target-blocks.lua"),

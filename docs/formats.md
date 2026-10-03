@@ -115,6 +115,14 @@ A directory of pages, one per target (`output_dir`), each page's images and link
 
 SCORM packaging is planned once SCORM is taken up as output.
 
+### A page's title
+
+A page's title heading, the H1 that names it, is its own heading in every output: the HTML's body `<h1>`, with the title in `<title>`; a Word file's Heading 1, with the title in the file's properties; Markdown's and AsciiDoc's `#` heading; the EPUB's and PDF's chapter heading. Inside the pipeline it's kept in the page's metadata, where the split, the contents, and the numbering read it, and each writer puts it back in its own words, with its id.
+
+A title the source declares stands (`promote_h1_to_title: if-absent`, the default): Markdown's `title`, HTML's `<title>`, a Word paragraph styled Title. The page's only H1 is its title heading when it says that title, the same or one inside the other, judged as a reader would (curly and straight quotes alike, case aside), as "1.1 Definitions of Statistics" under a Word Title "Definitions of Statistics" does, or "A Web Page" under a `<title>` of "A Web Page -- The Site"; it is shown once, and the declared title is the page's `<title>`. An H1 that says something else is a heading of its own, and the declared title is shown above it. `shorter` takes the H1 as the title when the declared one is it plus more, as a site's name; `always` takes it in any case. The run says when pages keep a declared title without the section number their heading puts before it, as an OpenStax book's do: their `<title>`, and the names a cartridge gives them, then have no number, and `always` keeps it. A `format: source` copy keeps the author's title whatever the setting.
+
+An EPUB or PDF opens with a title page (`title_page: auto`) when the book's structure calls for one, whatever its number of files: more than one top-level entry, or one page with more than one top-level heading or something before its title heading, as a byline. A document whose one top-level heading is its title has none, and the title is in the file's metadata.
+
 ### EPUB
 
 One `.epub` per `epub3` target, built by [`build-epub.py`](epub.md) from the same pages and the same contents, its accessibility claims computed from the build. An EPUB holds its own resources and a reading system follows links only among its pages, so every EPUB, whatever the input:

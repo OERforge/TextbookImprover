@@ -234,10 +234,11 @@ def remediate_images(xml, alts):
         if not doc_pr:
             return drawing
         # An author's own title stays with a described image; a decorative
-        # one has neither.
+        # one has neither, not even empty ones, as Word leaves it.
         attrs = re.sub(r'\s+descr="[^"]*"' if alt else r'\s+(?:descr|title)="[^"]*"',
                        "", doc_pr.group(1)).rstrip()
-        attrs += ' descr="%s"' % html.escape(alt or "", quote=True)
+        if alt is not None:
+            attrs += ' descr="%s"' % html.escape(alt, quote=True)
         if alt is None:
             counts["decorative"] += 1
             if "decorative" in drawing:

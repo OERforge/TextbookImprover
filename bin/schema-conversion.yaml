@@ -88,6 +88,21 @@ keys:
       guides for Word say its Accessibility Checker needs. Kept by default,
       since the file is the author's.
 
+  title_page:
+    type: enum
+    values: ["auto", "on", "off"]
+    default: "auto"
+    stage: render
+    description: >
+      For a target with format epub3 or pdf: whether the book opens with a
+      title page, its title and authors. auto goes by the book's structure,
+      not its number of files: a title page when the book has more than one
+      top-level entry (chapters, parts), or is one page with more than one
+      top-level heading, or has something before its title heading (a
+      byline, a subtitle); none for a document whose one top-level heading
+      is its title, which then appears once, as that heading, and in the
+      file's metadata.
+
   bookmarks:
     type: enum
     values: ["linked", "all"]
@@ -144,17 +159,26 @@ keys:
 
   promote_h1_to_title:
     type: enum
-    values: [always, if-absent, longer, never]
-    default: always
+    values: [always, if-absent, longer, shorter, never]
+    default: if-absent
     description: >
-      Whether a page's leading H1 becomes its title. Reading .docx, the
-      existing title comes from a paragraph styled Title, which Pandoc's
-      reader consumes out of the body as metadata. In the OpenStax books
-      that paragraph says the same thing as the H1 without its section
-      number, so the H1 is the more complete of the two and always is
-      right. Reading Markdown or HTML a title is deliberate, so if-absent
-      is. longer promotes only when the H1 contains the existing title;
-      never leaves both alone.
+      Which title a page has when it declares one and its only H1 says
+      something else. A declared title is Markdown's title or title-meta,
+      HTML's <title>, or a Word paragraph styled Title, which Pandoc's
+      reader takes out of the body as the title. if-absent keeps the
+      declared title, and the H1 stays a heading of its own; the H1 is the
+      title only when none is declared, or when it says the same. always
+      makes the H1 the title, as for the OpenStax books, whose Title
+      paragraph repeats the H1 without its section number; longer does only
+      when the H1 contains the declared title; shorter takes the H1 when the
+      declared title contains it and more, which cleans up a page saved from
+      the web whose <title> adds the site's name; never keeps the declared
+      title and every H1 a heading. An H1 that says the declared title, the
+      same or one inside the other, is the page's title heading whichever
+      text is the title. A format source copy keeps the author's own title
+      whatever this says: the source writers never write a page's title. Whichever H1 is the title, every
+      output shows it as the page's own H1 (the HTML's, the Word file's
+      Heading 1, the EPUB's and PDF's chapter heading), never twice.
 
   author_byline:
     type: enum

@@ -517,11 +517,12 @@ def apply_markers(xml, tables, lines=None, codes=None):
         else:
             m = re.compile(r"<wp:docPr\b([^>]*?)\s*(/?)>").search(xml, at)
             if m and "decorative" not in xml[m.start():m.start() + 600]:
-                if m.group(2):
-                    edits.append((m.start(), m.end(), "<wp:docPr%s>%s</wp:docPr>"
-                                  % (m.group(1), DECORATIVE)))
-                else:
-                    edits.append((m.end(), m.end(), DECORATIVE))
+                # No description and no title, as Word leaves an image it
+                # marks decorative. NVDA says "graphic picture decorative"
+                # either way, in Word's own file as in ours.
+                attributes = re.sub(r'\s(?:descr|title)="[^"]*"', "", m.group(1))
+                edits.append((m.start(), m.end(), "<wp:docPr%s>%s%s"
+                              % (attributes, DECORATIVE, "</wp:docPr>" if m.group(2) else "")))
                 counts["decorative"] += 1
     for start, end, new in sorted(edits, key=lambda e: e[0], reverse=True):
         xml = xml[:start] + new + xml[end:]
@@ -792,6 +793,24 @@ def prune_bookmarks(xml, keep):
     return xml, len(drop)
 
 
+def page_title_text(doc):
+    """The page's title as plain text, from its metadata."""
+    def text(node):
+        if isinstance(node, list):
+            return "".join(text(n) for n in node)
+        if isinstance(node, dict):
+            kind = node.get("t")
+            if kind == "Str":
+                return node["c"]
+            if kind in ("Space", "SoftBreak", "LineBreak"):
+                return " "
+            if kind == "MetaString":
+                return node["c"]
+            return text(node.get("c"))
+        return ""
+    return text((doc.get("meta") or {}).get("title")).strip()
+
+
 def finish(path, doc, keep=None):
     """Rewrite the .docx at path with what the page's AST says; returns a
     dict of counts: tooltips, decorative, first_columns, and compat (1
@@ -835,6 +854,17 @@ def finish(path, doc, keep=None):
             xml, n = prune_bookmarks(xml, keep)
             counts["bookmarks_removed"] += n
         parts[part] = xml.encode("utf-8")
+    # The page's title is its Heading 1, not a Title paragraph
+    # (target-blocks.lua), so Pandoc wrote no title into the file's
+    # properties; it goes there, where Word and a screen reader find it.
+    title = page_title_text(doc)
+    if title and "docProps/core.xml" in parts:
+        core = parts["docProps/core.xml"].decode("utf-8")
+        if not re.search(r"<dc:title>[^<]", core):
+            entry = "<dc:title>%s</dc:title>" % html.escape(title, quote=False)
+            core = re.sub(r"<dc:title\s*/>|<dc:title>\s*</dc:title>", "", core)
+            core = core.replace("</cp:coreProperties>", entry + "</cp:coreProperties>")
+            parts["docProps/core.xml"] = core.encode("utf-8")
     if counts["code_lines"] and "word/styles.xml" in parts \
             and 'w:styleId="LineNumber"' not in text("word/styles.xml"):
         parts["word/styles.xml"] = text("word/styles.xml").replace(

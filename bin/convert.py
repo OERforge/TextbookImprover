@@ -1814,6 +1814,22 @@ def math_keep_rows(path):
     return list(dict.fromkeys(rows))
 
 
+def warn_title_numbers(found):
+    """Pages whose declared title stands without the section number their
+    heading puts before it, said once: their <title>, and the names a
+    cartridge gives them, have no number where the heading has one."""
+    if not os.path.exists(found):
+        return
+    with open(found, encoding="utf-8") as fh:
+        pairs = list(dict.fromkeys(line.rstrip("\n") for line in fh if "\t" in line))
+    if pairs:
+        heading, title = pairs[0].split("\t", 1)
+        say(f"{len(pairs)} page(s) keep their declared title without the number their "
+            f"heading puts before it (\"{heading}\" is titled \"{title}\"), in <title> "
+            "and in the names a cartridge gives its pages; promote_h1_to_title: always "
+            "titles them with the number.")
+
+
 def warn_math_keep(sidecar, kept_file):
     """A row of the keep sidecar that kept nothing in this run: the text it
     names isn't in the book any more, or no longer reads that way."""
@@ -2008,7 +2024,8 @@ def render_markdown(target, pages, base, work, project, env, losses=None):
             if os.path.exists(found):
                 os.remove(found)
             run(["pandoc", "-f", "json", "-t", "docx", page, "-o", out,
-                 "--lua-filter=" + TARGET_FILTER], env=dict(env, FIDELITY_FOUND=found), cwd=base)
+                 "--lua-filter=" + TARGET_FILTER],
+                env=dict(env, FIDELITY_FOUND=found, TITLE_WRITER="docx"), cwd=base)
             collect_losses(found, target.name, stem, losses)
             for key, n in docxtarget.finish(out, page, keep).items():
                 added[key] = added.get(key, 0) + n
@@ -2025,7 +2042,8 @@ def render_markdown(target, pages, base, work, project, env, losses=None):
             run(["pandoc", "-f", "json", "-t", "asciidoc", page, "-o", out,
                  "--standalone", "--wrap=none",
                  "--lua-filter=" + TARGET_FILTER,
-                 "--lua-filter=" + MARKDOWN_FILTER], env=dict(env, FIDELITY_FOUND=found),
+                 "--lua-filter=" + MARKDOWN_FILTER],
+                env=dict(env, FIDELITY_FOUND=found, TITLE_WRITER="asciidoc"),
                 cwd=base)
             collect_losses(found, target.name, stem, losses)
             with open(out, encoding="utf-8") as fh:
@@ -2050,7 +2068,8 @@ def render_markdown(target, pages, base, work, project, env, losses=None):
              page, "-o", out,
              "--standalone", "--wrap=none", "--markdown-headings=atx",
              "--lua-filter=" + TARGET_FILTER,
-             "--lua-filter=" + MARKDOWN_FILTER], env=dict(env, FIDELITY_FOUND=found), cwd=base)
+             "--lua-filter=" + MARKDOWN_FILTER],
+            env=dict(env, FIDELITY_FOUND=found, TITLE_WRITER="markdown"), cwd=base)
         collect_losses(found, target.name, stem, losses)
         written.append(out)
     if word:
@@ -2089,10 +2108,12 @@ def number_page_headings(target, tree, titles):
             title = b or titles.get(a, a)
             number = entry.number
             new = text
-            new = re.sub(r"(<title>)(" + re.escape(title) + r")(</title>)",
+            # Either may be wrapped across lines by the writer.
+            new = re.sub(r"(<title>)(" + r"\s+".join(map(re.escape, title.split()))
+                         + r")(</title>)",
                          lambda m: m.group(1) + number + " " + m.group(2)
                          + m.group(3), new, count=1)
-            new = re.sub(r'(<h1 class="title"[^>]*>)(' + re.escape(title)
+            new = re.sub(r'(<h1(?:\s[^>]*)?>)(' + r"\s+".join(map(re.escape, title.split()))
                          + r")(</h1>)",
                          lambda m: m.group(1) + number + " " + m.group(2)
                          + m.group(3), new, count=1)
@@ -2106,7 +2127,7 @@ def number_page_headings(target, tree, titles):
 
 def render_html(target, pages, base, fragments, language, env):
     env = dict(env, TARGET_NAME=target.name,
-               TITLE_BLOCK=str(target["title_block"]))
+               TITLE_BLOCK=str(target["title_block"]), TITLE_WRITER="html")
     """--lua-filter figures-and-tables ran already; what remains is the
     writer. -M lang sets the html lang attribute (WCAG 3.1.1), from the
     project's declared language. v0.1 hardcoded "en" while the manifest
@@ -2696,7 +2717,7 @@ def main():
         collected = {key: os.path.join(work, key) for key in
                      ("captions_missing", "alt_missing", "spacers",
                       "media_unresolved", "bare_links", "captions_applied",
-                      "math", "math_places", "math_kept")}
+                      "math", "math_places", "math_kept", "title_numbers")}
         env = dict(os.environ)
         env.update({
             # For html-source.lua: a page's <title> that repeats the
@@ -2710,6 +2731,7 @@ def main():
             "MATH_REPAIRED": collected["math"],
             "MATH_PLACES": collected["math_places"],
             "MATH_KEPT": collected["math_kept"],
+            "TITLE_NUMBERS": collected["title_numbers"],
             "MEDIA_UNRESOLVED": collected["media_unresolved"],
             "MEDIA_STRICT": "1" if first["media.strict"] else "",
         })
@@ -2902,6 +2924,7 @@ def main():
         write_bare_links(collected["bare_links"], reports["bare_links_new"],
                          paths["bare_links"])
         warn_math_keep(paths["math_keep"], collected["math_kept"])
+        warn_title_numbers(collected["title_numbers"])
         write_report(collected["math"], reports["math_repaired"],
                      "Kind,Page,Before,After", "math repair(s)", None,
                      "Each is an equation's characters repaired, or math "

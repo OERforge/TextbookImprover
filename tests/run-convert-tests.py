@@ -29,6 +29,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
 import csv
+import glob
 import json
 import os
 import re
@@ -2561,6 +2562,11 @@ def case_remediate_docx(work):
          lambda: back is not None and resolved and f",source,{resolved},"  in report),
         ("an image gets its alt text; a decorative one Word's mark and no title",
          lambda: 'descr="Scores by student"' in xml and "adec:decorative" in xml
+         # and the decorative image has no description or title at all, as
+         # Word leaves one it marks decorative
+         and all('descr=' not in tag and 'title=' not in tag for tag in re.findall(
+             r"<wp:docPr\b[^>]*>(?=<a:extLst[^>]*><a:ext uri=\"\{C183D7F6)", xml))
+         and re.search(r"<wp:docPr\b[^>]*><a:extLst[^>]*><a:ext uri=\"\{C183D7F6", xml)
          and 'title="A rule"' not in xml),
         ("it won't write over the file it reads",
          lambda: refused.returncode == 2 and "overwritten" in refused.stderr),
@@ -2658,8 +2664,10 @@ def case_docx_target(work):
         ("a link's title is its ScreenTip, in the body and in a footnote",
          lambda: 'w:tooltip="The data, as a CSV file"' in one
          and 'w:tooltip="Where the data came from"' in one),
-        ("a decorative image carries Word's marker; a described one its description",
+        ("a decorative image carries Word's marker and no description or title, as "
+         "Word leaves it; a described one its description",
          lambda: one.count("adec:decorative") == 1
+         and re.search(r'<wp:docPr id="\d+" name="[^"]*"><a:extLst[^>]*><a:ext uri="\{C183D7F6', one)
          and 'descr="A navy bar standing for the chart"' in one),
         ("a table's header row repeats and its header column is flagged",
          lambda: "<w:tblHeader" in two and 'w:firstColumn="1"' in two and 'w:val="00A0"' in two),
@@ -2738,6 +2746,111 @@ def case_docx_target(work):
     ]
 
 
+def case_title_heading(work):
+    """A page's title heading is its own H1 in every output, shown once; a
+    declared title that isn't one of its headings is shown above them; the
+    EPUB's title page follows the book's structure (title_page: auto)."""
+    said = {}
+
+    def book(name, pages, targets, extra=""):
+        path = os.path.join(work, name)
+        os.makedirs(path)
+        for stem, text in pages:
+            with open(os.path.join(path, stem + ".md"), "w", encoding="utf-8") as fh:
+                fh.write(text)
+        with open(os.path.join(path, "project.yaml"), "w", encoding="utf-8") as fh:
+            fh.write("project:\n  title: The Book\n  identifier: org.example.%s\n"
+                     "  language: en-US\n  contents:\n" % name
+                     + "".join("    - %s\n" % stem for stem, _ in pages))
+        with open(os.path.join(path, "conversion.yaml"), "w", encoding="utf-8") as fh:
+            fh.write("targets:\n" + targets + extra)
+        result = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quiet"], cwd=path,
+                                capture_output=True, text=True, stdin=subprocess.DEVNULL)
+        said[name] = result.stdout + result.stderr
+        return path
+
+    def epub_files(path):
+        found = glob.glob(os.path.join(path, "epub", "*.epub"))
+        if not found:
+            return {}
+        with zipfile.ZipFile(found[0]) as z:
+            return {n: z.read(n).decode("utf-8") for n in z.namelist() if n.endswith(".xhtml")}
+
+    every = ("  html:\n    format: html\n  word:\n    format: docx\n"
+             "  md:\n    format: markdown\n  epub:\n    format: epub3\n")
+    one = book("one", [("first", "# First Chapter\n\nOpening.\n\n## A Section\n\nText.\n")], every)
+    html = read(one, "html", "first.html") if exists(one, "html", "first.html") else ""
+    markdown = read(one, "md", "first.md") if exists(one, "md", "first.md") else ""
+    word_styles, core = [], ""
+    if exists(one, "word", "first.docx"):
+        with zipfile.ZipFile(os.path.join(one, "word", "first.docx")) as z:
+            document = z.read("word/document.xml").decode("utf-8")
+            core = z.read("docProps/core.xml").decode("utf-8")
+        word_styles = re.findall(r'<w:pStyle w:val="([^"]+)"', document)
+    one_epub = epub_files(one)
+    two = book("two", [("a", "# Alpha\n\nText.\n"), ("b", "# Beta\n\nText.\n")],
+               "  epub:\n    format: epub3\n")
+    off = book("off", [("a", "# Alpha\n\nText.\n"), ("b", "# Beta\n\nText.\n")],
+               "  epub:\n    format: epub3\n    title_page: \"off\"\n")
+    report = book("report", [("report", "---\ntitle: A Short Report\n---\n\n# Background\n\n"
+                                        "Text.\n\n# Method\n\nText.\n\n# Results\n\nText.\n")],
+                  "  html:\n    format: html\n  epub:\n    format: epub3\n")
+    report_html = read(report, "html", "report.html") if exists(report, "html", "report.html") else ""
+    numbered = book("numbered", [("defs", "---\ntitle: Definitions\n---\n\n# 1.1 Definitions\n\nText.\n")],
+                    "  html:\n    format: html\n")
+    numbered_html = read(numbered, "html", "defs.html") if exists(numbered, "html", "defs.html") else ""
+    kept = book("kept", [("defs", "---\ntitle: Definitions\n---\n\n# 1.1 Definitions\n\nText.\n")],
+                "  html:\n    format: html\n", "defaults:\n  promote_h1_to_title: always\n")
+    kept_html = read(kept, "html", "defs.html") if exists(kept, "html", "defs.html") else ""
+    # A Word Title with a curly apostrophe over a heading with a straight one.
+    quoted = book("quoted", [("cohen", "---\ntitle: Cohen\u2019s Standards\n---\n\n"
+                                       "# 10.2 Cohen\\'s standards\n\nText.\n")],
+                  "  html:\n    format: html\n")
+    quoted_html = read(quoted, "html", "cohen.html") if exists(quoted, "html", "cohen.html") else ""
+    # A numbered book whose page title is long enough for the writer to wrap.
+    long_title = "A Chapter Title Long Enough That the HTML Writer Wraps It Across Two Lines"
+    wrapped = book("wrapped", [("a", "# %s\n\nText.\n" % long_title), ("b", "# Beta\n\nText.\n")],
+                   "  html:\n    format: html\n")
+    with open(os.path.join(wrapped, "project.yaml"), "a", encoding="utf-8") as fh:
+        fh.write("  numbering: true\n")
+    subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quiet"], cwd=wrapped,
+                   capture_output=True, text=True, stdin=subprocess.DEVNULL)
+    wrapped_html = " ".join(read(wrapped, "html", "a.html").split()) if exists(wrapped, "html", "a.html") else ""
+    return [
+        ("the HTML has the page's H1 in its body, with its id, and no title block",
+         lambda: '<h1 id="first-chapter">First Chapter</h1>' in html
+         and "title-block-header" not in html and "<title>First Chapter</title>" in html),
+        ("the Word file has it as a Heading 1, not a Title paragraph, and the title in "
+         "its properties", lambda: word_styles[:1] == ["Heading1"] and "Title" not in word_styles
+         and "<dc:title>First Chapter</dc:title>" in core),
+        ("the Markdown has it as a # heading, and the title in its metadata",
+         lambda: "\n# First Chapter\n" in markdown and "title: First Chapter" in markdown),
+        ("a one-page book's EPUB has no title page, and its one chapter's heading is the page's",
+         lambda: one_epub and not any("title_page" in n for n in one_epub)
+         and any(">First Chapter</h1>" in t for t in one_epub.values())),
+        ("a book of two chapters has a title page; title_page off takes it away",
+         lambda: any("title_page" in n for n in epub_files(two))
+         and epub_files(off) and not any("title_page" in n for n in epub_files(off))),
+        ("a declared title that isn't one of the page's headings is shown above them, "
+         "and its EPUB, three chapters, has a title page",
+         lambda: '<h1 class="title">A Short Report</h1>' in report_html
+         and report_html.count("<h1") == 4
+         and any("title_page" in n for n in epub_files(report))),
+        ("the run says when a title stands without its heading's number, and "
+         "always keeps the number", lambda: "without the number their heading" in said["numbered"]
+         and "<title>1.1 Definitions</title>" in kept_html
+         and "without the number their heading" not in said["kept"]),
+        ("curly and straight apostrophes, and case, don't keep a heading from "
+         "saying the title", lambda: quoted_html.count("<h1") == 1),
+        ("a numbered book numbers the page's own heading, wrapped or not",
+         lambda: ">1 " + long_title + "</h1>" in wrapped_html),
+        ("an H1 that says the declared title with a number before it is the title "
+         "heading, and the declared title stands",
+         lambda: "<title>Definitions</title>" in numbered_html
+         and numbered_html.count("<h1") == 1 and ">1.1 Definitions</h1>" in numbered_html),
+    ]
+
+
 def case_html_source(work):
     """An HTML page is a source when the book says so, and converting
     what this pipeline wrote changes nothing."""
@@ -2791,6 +2904,20 @@ def case_html_source(work):
                            "    - bookname\n")
     web = read(mixed, "html", "web.html") if exists(
         mixed, "html", "web.html") else ""
+    # The same page with promote_h1_to_title: shorter, which takes the H1 as
+    # the title when the <title> is it plus the site's name, and a format
+    # source copy, which keeps the author's own <title> whatever that says.
+    shorter = work + "-shorter"
+    os.makedirs(shorter)
+    with open(os.path.join(shorter, "web.html"), "w", encoding="utf-8") as fh:
+        fh.write(WEB)
+    with open(os.path.join(shorter, "conversion.yaml"), "w", encoding="utf-8") as fh:
+        fh.write("defaults:\n  promote_h1_to_title: shorter\ntargets:\n"
+                 "  html:\n    format: html\n  copy:\n    format: source\n")
+    run_in(shorter, "  contents:\n    - web\n")
+    shorter_page = read(shorter, "html", "web.html") if exists(shorter, "html", "web.html") else ""
+    copies = glob.glob(os.path.join(shorter, "copy", "**", "web.html"), recursive=True)
+    shorter_copy = open(copies[0], encoding="utf-8").read() if copies else ""
     epub_page = ""
     for name in (os.listdir(os.path.join(mixed, "epub"))
                  if exists(mixed, "epub") else []):
@@ -2821,9 +2948,15 @@ def case_html_source(work):
         ("an .html beside a .docx is a source, and the run says how to keep "
          "one as it stands",
          lambda: "belongs in _pt/" in marked.stdout + marked.stderr),
-        ("a page's only h1, inside wrappers, is its title: one h1, and "
-         "the <title> the site gave it goes",
-         lambda: web.count("<h1") == 1 and "<title>A Web Page</title>" in web),
+        # The <title> is the H1 and the site's name: the H1 is the page's
+        # title heading, shown once, and the declared title stands.
+        ("a page's only h1, inside wrappers, is its title heading: one h1, "
+         "and the <title> the site gave it stands",
+         lambda: web.count("<h1") == 1 and "<title>A Web Page -- The Site</title>" in web),
+        ("promote_h1_to_title: shorter drops the site's name from the title",
+         lambda: shorter_page.count("<h1") == 1 and "<title>A Web Page</title>" in shorter_page),
+        ("and a format source copy keeps the author's own title",
+         lambda: "<title>A Web Page -- The Site</title>" in shorter_copy),
         ("a page's title loses the book's name when it repeats it after "
          "its own; another site's name, and a title that is only the "
          "book's, stay",
@@ -3224,6 +3357,7 @@ CASES = [
     ("a pdf target with a LaTeX too old to tag", case_pdf_with_old_latex),
     ("a pdf target with an SVG and no rsvg-convert", case_pdf_svg_without_converter),
     ("a docx target's bookmarks", case_word_bookmarks),
+    ("a page's title heading, and the title page", case_title_heading),
     ("ids with spaces in HTML sources", case_html_ids),
     ("decorative images and frame sizes in HTML sources", case_html_images),
     ("AsciiDoc to Markdown and back", case_asciidoc_markdown),

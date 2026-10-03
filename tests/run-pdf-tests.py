@@ -136,6 +136,22 @@ Table: Price by year
 | > (define x 1)    | x = 1             |
 +-------------------+-------------------+
 
++-------+-------+
+| Group | Value |
++=======+=======+
+| Alpha | 1     |
++       +-------+
+|       | 2     |
++-------+-------+
+| Beta  | 3     |
++-------+-------+
+
+| After | Spans |
+|-------|-------|
+| a     | b     |
+| c     | d     |
+| e     | f     |
+
 #### Deep
 
 ##### Run-in one
@@ -312,6 +328,33 @@ def ua1_formulas(path):
     return found, pdf.pdf_version, links
 
 
+def spanning_table(path, index):
+    """The index-th table's rows, each as a list of its cells' RowSpan (1
+    when the cell has none), from the class map and the cells' own
+    attributes."""
+    import pdfretag
+    pdf = pdfparagraphs.pikepdf.open(path)
+    classes = pdf.Root.StructTreeRoot.get("/ClassMap") or {}
+    found = pdfretag.tables(pdf.Root.StructTreeRoot)
+    if len(found) <= index:
+        return []
+
+    def span(cell):
+        names = cell.get("/C")
+        names = list(names) if isinstance(names, pdfparagraphs.pikepdf.Array) else ([names] if names is not None else [])
+        owned = [classes.get(str(n)) for n in names] + [cell.get("/A")]
+        for attributes in owned:
+            for one in (attributes if isinstance(attributes, pdfparagraphs.pikepdf.Array) else [attributes]):
+                if isinstance(one, pdfparagraphs.pikepdf.Dictionary) and "/RowSpan" in one:
+                    return int(one["/RowSpan"])
+        return 1
+    rows = []
+    for row in pdfretag._kids(found[index]):
+        if pdfretag._kind(row) == "/TR":
+            rows.append([span(c) for c in pdfretag._cells(row)])
+    return rows
+
+
 def quoted_cells(path):
     """BlockQuote elements under a table cell, by their standard role."""
     pdf = pdfparagraphs.pikepdf.open(path)
@@ -473,9 +516,9 @@ def checks(work):
         # first cell of each body row TH-row only if pdf-target.lua set
         # table/header-columns around it.
         ("the matrix table's first column is row headers",
-         lambda: len(tabled) == 5 and row_headers(tabled[0]) == 2),
+         lambda: len(tabled) == 7 and row_headers(tabled[0]) == 2),
         ("the plain table has header cells and no row headers",
-         lambda: len(tabled) == 5 and row_headers(tabled[1]) == 0
+         lambda: len(tabled) == 7 and row_headers(tabled[1]) == 0
          and any(kind(e) == "/TH" for e in tabled[1])),
         # LaTeX writes a longtable's caption as a first row of one header
         # cell, and leaves the empty copy of the head it repeats inside the
@@ -485,6 +528,15 @@ def checks(work):
         ("headings below a subsection, followed by a section, don't stop "
          "LaTeX's tagging", lambda: "automatic begin" not in log
          and "xxxSubParagraphNoStar" in source),
+        # Pandoc sets a cell spanning rows with \\multirow, which LaTeX's
+        # tagging doesn't follow; pdf-target.lua says table/multirow in it.
+        ("a cell spanning two rows is tagged so, and the row it covers has "
+         "no cell of its own there",
+         lambda: spanning_table(pdf_path, 5) == [[1, 1], [2, 1], [1], [1, 1]]),
+        # LaTeX's record of the cells a span covers outlived its table, and
+        # the next table lost the cells at the same places (build-pdf.py).
+        ("and the table after it keeps every cell",
+         lambda: spanning_table(pdf_path, 6) == [[1, 1]] * 4),
         ("a quotation in a table cell is unwrapped, since a cell can't hold one",
          lambda: not quoted_cells(pdf_path)),
         # PDF/UA-1 is PDF 1.7: no MathML structure elements, a TeX alt text

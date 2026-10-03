@@ -72,10 +72,28 @@ end
 -- way, five blocks of it, indented as quotations.
 local unquote = {BlockQuote = function(quote) return quote.content end}
 
+-- A cell spanning rows is set with \multirow, which LaTeX's tagging code
+-- doesn't follow (the tagging project lists multirow as incompatible): it
+-- tags the cell as one row's and the rows below as having an empty cell
+-- of their own there. table/multirow, said inside the cell, gives it its
+-- RowSpan and leaves the cells it covers untagged.
+local function mark_row_span(cell)
+  if (cell.row_span or 1) <= 1 then return end
+  local raw = pandoc.RawInline('latex', string.format(
+    '\\ifdefined\\tagpdfsetup\\tagpdfsetup{table/multirow=%d}\\fi ', cell.row_span))
+  local first = cell.contents[1]
+  if first and (first.t == 'Plain' or first.t == 'Para') then
+    first.content:insert(1, raw)
+  else
+    cell.contents:insert(1, pandoc.Plain({raw}))
+  end
+end
+
 local function unquote_cells(rows)
   for _, row in ipairs(rows) do
     for _, cell in ipairs(row.cells) do
       cell.contents = pandoc.Blocks(cell.contents):walk(unquote)
+      mark_row_span(cell)
     end
   end
 end

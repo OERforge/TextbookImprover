@@ -2851,6 +2851,83 @@ def case_title_heading(work):
     ]
 
 
+def case_review_columns(work):
+    """Every report a person fills in has Drafted by and Reviewed columns;
+    the table-header guesses are drafted by TI; a sidecar value drafted
+    and not reviewed is used, and the run counts it."""
+    import struct
+    import zlib
+
+    def png(path):
+        def chunk(kind, data):
+            return (struct.pack(">I", len(data)) + kind + data
+                    + struct.pack(">I", zlib.crc32(kind + data) & 0xFFFFFFFF))
+        raw = b"".join(b"\x00" + b"\xff\x00\x00" * 4 for _ in range(4))
+        with open(path, "wb") as fh:
+            fh.write(b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", 4, 4, 8, 2, 0, 0, 0))
+                     + chunk(b"IDAT", zlib.compress(raw)) + chunk(b"IEND", b""))
+
+    os.makedirs(work)
+    png(os.path.join(work, "one.png"))
+    png(os.path.join(work, "two.png"))
+    with open(os.path.join(work, "page.md"), "w", encoding="utf-8") as fh:
+        fh.write("# Page\n\n![](one.png)\n\n![](two.png)\n\n"
+                 "| Country | GDP |\n|---|---|\n| Brazil | 3,153 |\n| Canada | 1,827 |\n\n"
+                 "See <https://example.org/a-page>.\n")
+    with open(os.path.join(work, "project.yaml"), "w", encoding="utf-8") as fh:
+        fh.write("project:\n  title: Review\n  identifier: org.example.review\n"
+                 "  language: en-US\n  contents:\n    - page\n    - tables\n")
+    # A Word file's tables, which the header pre-pass guesses at.
+    shutil.copy(os.path.join(FIXTURES, "tables.docx"), work)
+    with open(os.path.join(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
+        fh.write("targets:\n  html:\n    format: html\n")
+
+    def run():
+        return subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quiet"], cwd=work,
+                              capture_output=True, text=True, stdin=subprocess.DEVNULL)
+
+    def header(name):
+        path = os.path.join(work, name)
+        if not os.path.exists(path):
+            return []
+        with open(path, encoding="utf-8", newline="") as fh:
+            return next(csv.reader(fh), [])
+
+    run()
+    headers = {name: header(name) for name in ("image-alt-missing.csv", "table-captions-missing.csv",
+                                               "table-headers-new.csv", "bare-links-new.csv")}
+    guessed = []
+    if os.path.exists(os.path.join(work, "table-headers-new.csv")):
+        with open(os.path.join(work, "table-headers-new.csv"), encoding="utf-8", newline="") as fh:
+            guessed = list(csv.DictReader(fh))
+    missing = []
+    if os.path.exists(os.path.join(work, "image-alt-missing.csv")):
+        with open(os.path.join(work, "image-alt-missing.csv"), encoding="utf-8", newline="") as fh:
+            missing = [r for r in csv.reader(fh)][1:]
+    # One description drafted by a model and not reviewed, one reviewed.
+    with open(os.path.join(work, "image-alt.csv"), "w", encoding="utf-8", newline="") as fh:
+        w = csv.writer(fh)
+        w.writerow(headers.get("image-alt-missing.csv") or ["Image", "Alt"])
+        for row, (alt, reviewed) in zip(missing, (("A red square", ""), ("Another red square", "RS"))):
+            w.writerow([row[0], alt, row[2], row[3], row[4], "claude-sonnet-5-5", reviewed])
+    second = run()
+    said = second.stdout + second.stderr
+    page = read(work, "html", "page.html") if exists(work, "html", "page.html") else ""
+    return [
+        ("each report a person fills in ends with Drafted by and Reviewed",
+         lambda: all(h[-2:] == ["Drafted by", "Reviewed"] for name, h in headers.items()
+                     if name != "table-headers-new.csv" and h)
+         and headers["image-alt-missing.csv"] and headers["bare-links-new.csv"]
+         and missing and all(len(r) == len(headers["image-alt-missing.csv"]) for r in missing)
+         and headers["table-headers-new.csv"][-2:] == ["drafted-by", "reviewed"]),
+        ("a table-header guess is drafted by TI and not reviewed",
+         lambda: guessed and all(r["drafted-by"] == "TI" and r["reviewed"] == "" for r in guessed if r["headers"])),
+        ("a drafted value is used, reviewed or not, and the run counts the one not reviewed",
+         lambda: len(missing) == 2 and 'alt="A red square"' in page and 'alt="Another red square"' in page
+         and "1 value(s) in the sidecars were drafted" in said and "image-alt.csv 1" in said),
+    ]
+
+
 def case_html_source(work):
     """An HTML page is a source when the book says so, and converting
     what this pipeline wrote changes nothing."""
@@ -3358,6 +3435,7 @@ CASES = [
     ("a pdf target with an SVG and no rsvg-convert", case_pdf_svg_without_converter),
     ("a docx target's bookmarks", case_word_bookmarks),
     ("a page's title heading, and the title page", case_title_heading),
+    ("who drafted a sidecar value, and whether it's reviewed", case_review_columns),
     ("ids with spaces in HTML sources", case_html_ids),
     ("decorative images and frame sizes in HTML sources", case_html_images),
     ("AsciiDoc to Markdown and back", case_asciidoc_markdown),

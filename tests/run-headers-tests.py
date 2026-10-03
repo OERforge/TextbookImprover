@@ -191,7 +191,8 @@ def checks(workdir):
         [r["status"] for r in report]
     yield "the new file has the same rows in sidecar form", new is not None and len(new) == 7, ""
     yield "the new file's columns are the sidecar's", new and list(new[0].keys()) == [
-        "key", "headers", "split-at", "caption-rows", "part-captions", "source", "label", "preview"], \
+        "key", "headers", "split-at", "caption-rows", "part-captions", "source", "label", "preview",
+        "drafted-by", "reviewed"], \
         new and list(new[0].keys())
     by_label = {r["label"]: r for r in report}
     yield "labels come from the prose", "Table 3.1" in by_label and "Table 7.3" in by_label, \

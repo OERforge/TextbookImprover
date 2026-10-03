@@ -81,7 +81,8 @@ RESERVED = {"manual", "list"}
 KNOWN = ACTING | RESERVED
 
 SIDECAR_COLUMNS = ["key", "headers", "split-at", "caption-rows",
-                   "part-captions", "source", "label", "preview"]
+                   "part-captions", "source", "label", "preview",
+                   "drafted-by", "reviewed"]
 REPORT_COLUMNS = ["key", "source", "label", "preview", "declared", "supplier",
                   "guess", "reason", "status", "note"]
 
@@ -503,6 +504,9 @@ def main():
                 "caption-rows": info["caption-rows"],
                 "part-captions": "", "source": info["source"],
                 "label": info["label"], "preview": info["preview"],
+                # The guess is TextbookImprover's; a person who checks it
+                # fills in reviewed.
+                "drafted-by": "TI" if info["guess"] else "", "reviewed": "",
             })
 
     unmatched = [r for k, r in sidecar.items() if k not in claimed]

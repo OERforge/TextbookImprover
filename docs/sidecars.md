@@ -37,6 +37,12 @@ the others. A report existing at all means there's work outstanding.
 | `table-headers-sample.csv` | Renaming it to `table-headers.csv` once you've looked: the sidecar without the unmatched rows. Written with `table-headers-unmatched.csv`. |
 | `fidelity.csv` | Nothing in the book: it says what a target's files can't carry, a row per page and kind, so reading them back won't restore it. See [Word output](formats.md#word-output). |
 
+### Who drafted a value, and whether it's been reviewed
+
+The reports a person fills in, and so the sidecars their rows are pasted into, end with two columns: `Drafted by` and `Reviewed` (`drafted-by` and `reviewed` in `table-headers.csv`, whose columns are lowercase). `Drafted by` is blank when a person wrote the value, `TI` when TextbookImprover guessed it, as it does every table's headers, and a model's name when a model suggested it. `Reviewed` is blank until a person has checked the value; then a name or initials, and a date if you like. A row without the columns, as in every sidecar written before them, counts as a person's.
+
+A drafted value is used whether or not it's been reviewed, as the table-header guesses always have been: a plausible description serves a reader better than none. The run says how many drafted values haven't been reviewed, sidecar by sidecar, so they can be found and checked. Filling in `Reviewed` once you've checked a value, whether you kept it or changed it, keeps the record of where it came from as well as who stands behind it.
+
 ### Sidecar files
 
 `image-alt.csv`, `table-captions.csv`, `table-headers.csv`, and

@@ -4,11 +4,11 @@ What's planned, in the order that seems most productive. What has shipped is in 
 
 We're attempting to follow two principles: build the tool that can check a change before making the change and, where a decision can't be made by a script, make it declarable by a person once.
 
-Two sections sit after the numbered items. **Refinements to the table headers work** is what v0.3 left undone in the feature it shipped, kept separate because none of it is large enough to be an item and all of it is worth doing before that work is called finished. **Smaller things** is everything that has no dependency on anything else.
+After the numbered items come four for later, three of them after 1.0: PDF as input, suggestions from a language model, Braille and audio, and images of text. Then two more sections. **Refinements to the table headers work** is what v0.3 left undone in the feature it shipped, kept separate because none of it is large enough to be an item and all of it is worth doing before that work is called finished. **Smaller things** is everything that has no dependency on anything else.
 
 ## 1. PDF, and Word output
 
-**Both are built** ([PDF](docs/formats.md#pdf), [Word output](docs/formats.md#word-output)), and a `source` target writes the same remediation into an author's own Word and Markdown files ([Source](docs/formats.md#source)). Three things LaTeX's tagging code doesn't do yet are repaired after it, each to be retired when it does: a longtable caption retagged as the table's Caption, the empty repeated head taken out of the table (latex3/tagging-project#1583), and empty paragraph elements removed (#1622). What's left, by who has to act:
+**Both shipped in 0.8** ([PDF](docs/formats.md#pdf), [Word output](docs/formats.md#word-output)), and a `source` target writes the same remediation into an author's own Word and Markdown files ([Source](docs/formats.md#source)). Three things LaTeX's tagging code doesn't do yet are repaired after it, each to be retired when it does: a longtable caption retagged as the table's Caption, the empty repeated head taken out of the table (latex3/tagging-project#1583), and empty paragraph elements removed (#1622). What's left, by who has to act:
 
 - **On LaTeX's tagging:** a cell's `Headers` list, which complex table headers need (`latex-lab-table` tags header rows and columns only; splitting banded tables removes the commonest case); and the record of the cells a `table/multirow` covers, which outlives a long table and is cleared by the run until it doesn't. Worth revisiting at every LaTeX release.
 - **On Pandoc's next release:** heading ids without bookmarks. A `docx` target keeps only the bookmarks a link uses (`bookmarks: linked`), since NVDA announces every bookmark; Pandoc 3.12's reader never reads the rest, so nothing is lost on a round trip now, but a release with #11917 will read heading bookmarks, and an edited Word file would then lose the ids of the headings it no longer bookmarks. Recording those ids in the file's id map by position, and restoring them on reading, would keep both.
@@ -17,7 +17,13 @@ Two sections sit after the numbered items. **Refinements to the table headers wo
 - **What a Word file can't carry,** reported in `fidelity.csv`: an uncaptioned figure comes back an image, a code language whose name isn't letters and digits is lost, a layout table comes back a data table, a frame becomes a link, a cell's `headers` list goes. Read back, DCIC's images also come back under Word's own names.
 - **AsciiDoc as a `source` target,** which would need its own way of finding the elements a sidecar names.
 
-## LaTeX as input, after the PDF and Word release
+## 2. LaTeX, as output and as input
+
+LaTeX as a target first, since it is mostly the PDF build stopping before LuaLaTeX, then as a source.
+
+- **A `latex` target**, as `markdown` and `asciidoc` are: the book as LaTeX an author can go on working in, a file per chapter that a master file `\include`s, whose preamble is the PDF target's own (`\DocumentMetadata`, the tagging setup, the fonts the `pdf.metadata` file chooses). The decisions the run makes go where LaTeX's tagging reads them: alt text on each `\includegraphics`, `artifact` for a decorative image, the header declarations around each table and `table/multirow` in a cell spanning rows. The PDF target writes all of this already, as one temporary file.
+- **Its round trip**, the test the Markdown and AsciiDoc targets pass: read back, the book gives the same pages. What Pandoc's LaTeX reader makes of the tagging keys is the first thing to find out.
+- **LaTeX as a source**, which follows.
 
 A LaTeX source would be read the way the others are, and its PDF made by LaTeX itself, with tagging on, rather than through Pandoc. What the LaTeX team's tagging project and those who have tagged whole textbooks with it report (Tim Prescott, [Converting a PDF textbook to be accessible](https://doi.org/10.47397/tb/47-2/tb146prescott-book-accessibility), TUGboat 47:2, and [his collected advice](https://teepeemm.github.io/accessibility/)) sets out what the pipeline would have to do or check:
 
@@ -28,6 +34,49 @@ A LaTeX source would be read the way the others are, and its PDF made by LaTeX i
 - **Manual formatting**, the costliest part of his conversions: numbers typed before paragraphs instead of an `enumerate`, `\over`, spacing done by hand. A report of what looks typed could point to it.
 - **Resources.** Tagging multiplied his books' compile time about tenfold and memory about sixfold, and a large book ran out of strings and hash; the build should recognize TeX's "capacity exceeded" and say how to raise the limits ([tex.stackexchange.com/a/741777](https://tex.stackexchange.com/a/741777/)).
 - **Formulas' alt text.** `math/alt/use` gives every formula the TeX source as alt text, which a PDF/UA-1 build has already; for PDF/UA-2 it makes screen readers read the alt text instead of the MathML, so it would be a setting for a book judged by a checker that wants it (Blackboard Ally, which checks against PDF 1.7 and also wants headings in anything over two pages).
+
+## 3. Slides and test banks
+
+Two kinds of teaching material that aren't book pages, and that the same architecture serves: one intermediate, read from whatever the author has, written to whatever the course needs, with the accessibility work done once in between.
+
+**Slides.** A deck is a source of its own kind. Read from Markdown (Pandoc's slide conventions: a heading per slide), from PowerPoint, or from `beamer`-style LaTeX; written as PowerPoint, as `revealjs` (HTML, which is why this waits for HTML as a source), and as a tagged PDF through `ltx-talk`, the LaTeX Project's accessible successor to `beamer`. What is read and written, in the order the readers and writers can be had:
+
+1. Markdown to PowerPoint. Pandoc writes it; the reference document will need the same compatibility-mode treatment `reference.docx` needed, since Pandoc's ships without one and PowerPoint will call the file an older format.
+2. Markdown to PDF through `ltx-talk`. Pandoc has no `ltx-talk` writer; a custom writer over its LaTeX output, or a template, and the tagging concerns from the PDF item apply.
+3. Markdown to `revealjs`. Pandoc writes it; the work is the accessibility of what it writes and the HTML-source conventions.
+4. PowerPoint to Markdown. Pandoc reads `pptx` (the reader is in 3.11's list of input formats and its source), so this starts as a measurement of what that reader keeps (speaker notes, alt text, reading order, tables) and only becomes a reader of our own if it keeps too little.
+5. PowerPoint to `revealjs`, which is 4 followed by 3.
+6. `beamer` to `ltx-talk`. Many instructors have years of `beamer` decks, and `beamer` output will never tag. Two routes to measure before choosing: `beamer` LaTeX read by Pandoc's LaTeX reader (which knows `frame` environments only partly) into the intermediate and written for `ltx-talk`; or a direct LaTeX-to-LaTeX rewrite, if the two classes turn out to differ mostly in preamble and frame syntax. And whether Markdown written for `beamer` output differs from Markdown for `ltx-talk` at all, which decides whether a "beamer-flavored Markdown to ltx-talk Markdown" step exists.
+7. HTML as a source or target for decks, after item 1.
+
+The questions to settle first, since they shape the intermediate: what a slide is in the AST (Pandoc's slide level is a writer option, not a document fact), where speaker notes live, and how a figure's alt text and a table's headers travel into formats that have their own ideas about both. The table-headers pre-pass and the alt sidecar should apply to a deck unchanged; if they can't, that is the finding.
+
+**Test banks.** Questions arrive as Markdown, as Brightspace's quiz CSV, or as Word documents with questions written in a few common shapes (a numbered stem, lettered choices, an answer key at the end or an asterisk on the right choice), and a course needs them as a cartridge quiz. That is one question model in the middle, readers for the three inputs, and a QTI writer on the packaging side. Two notes on the shape of it:
+
+- The cartridge format for questions is QTI, not LTI: a CC 1.1 or 1.3 cartridge carries question banks and assessments as `imsqti_xmlv1p2`, and the schemas for that are already in the repository. LTI is the launch protocol for an external tool and is a different item. So the test-bank writer is the first real content of the Common Cartridge 1.3 item below, and the two are one piece of work in practice.
+- The Word reader is the table census's problem in another form: classify what the export gave us by evidence, guess the shape, report what the guess could not settle, and let a sidecar hold the decision. Writing Brightspace's CSV as well as reading it makes a round trip, which is the check.
+
+## 4. Common Cartridge 1.3, for assignments
+
+The test banks in item 4 are the first real content here: a question bank is a cartridge resource, and QTI 1.2 is how a cartridge carries it. The 1.1 profile already carries everything this project emits today. Quizzes and question banks (`imsqti_xmlv1p2`), discussion topics, web links, LTI links, and the authorization attributes are all in 1.1. The only thing worth moving for is **assignments**, which arrive in 1.3.
+
+The cost is reach. Brightspace and Canvas read up to 1.3, Blackboard up to 1.2, Moodle only to 1.1, so a 1.1 cartridge imports everywhere while a 1.3 one doesn't. So this isn't a migration but an option: a `cc_version` setting on the packaging target, defaulting to 1.1. The manifest differences are the namespace, the schemaversion, and the schema location, all already template substitutions, so the mechanism is small. But it requires a second set of schemas to validate against and a second set of resource types to emit correctly.
+
+Worth doing when there's an assignment to ship, not before.
+
+## 5. A web front end
+
+Here's why the configuration is schema-driven and why conversion becomes a library: a front end needs to render a form from the settings that exist, write a complete config back without losing anything, and report progress and failures structurally.
+
+Two pieces are already in place for it: the schema carries a description per setting, which is what a form's help text should say, and the writer is proven lossless by test. The third piece (resolving a config in JavaScript) is what the conformance fixtures in `tests/config/` exist to make safe.
+
+## 6. Splitting into separate repositories
+
+Eventually the two halves may be separate projects with a small shared library between them. Both standalone cases are already close: packaging is read-only with respect to page content and runs against any directory of HTML, and conversion has no packaging logic. v0.2 removed the last coupling, which was the config.
+
+When that time comes, we'll need the library versioned and released on its own, and the conformance fixtures promoted from tests to a compatibility contract, ensuring that a conversion repo pinned to one version still resolves configs the same way as a packaging repo on another.
+
+Not a goal in itself. Worth doing when one half has users the other doesn't.
 
 ## PDF as input, later
 
@@ -60,49 +109,6 @@ Two more outputs, each from the book's own structure rather than from a PDF's te
 ## Images of text
 
 An image that is text, a word-art heading or a decorated first letter, is read better as the text it shows than described as a picture. A marker in `image-alt.csv` (`[text]` before the text, say) could give the PDF LaTeX's `actualtext` instead of alt text, and HTML, EPUB, and Word the same text as alt text, which is the nearest they have. Measured: LaTeX tags `\includegraphics[actualtext=...]` as a `Span` with `ActualText` inside the paragraph under both PDF/UA-2 and PDF/UA-1. That is WTPDF's own example (8.2.2), but for PDF/UA-1 the PDF Association's [TN-PDFUA1-001](https://pdfa.org/resource/tn-pdfua1-001) wants a `Figure` with `ActualText` and `Placement` `Inline`, since PDF/UA-1 tags every non-text graphic `Figure`; veraPDF accepts LaTeX's form, so it is a question for the LaTeX team. How many such images the corpus has isn't known.
-
-## 2. Slides and test banks
-
-Two kinds of teaching material that aren't book pages, and that the same architecture serves: one intermediate, read from whatever the author has, written to whatever the course needs, with the accessibility work done once in between.
-
-**Slides.** A deck is a source of its own kind. Read from Markdown (Pandoc's slide conventions: a heading per slide), from PowerPoint, or from `beamer`-style LaTeX; written as PowerPoint, as `revealjs` (HTML, which is why this waits for HTML as a source), and as a tagged PDF through `ltx-talk`, the LaTeX Project's accessible successor to `beamer`. What is read and written, in the order the readers and writers can be had:
-
-1. Markdown to PowerPoint. Pandoc writes it; the reference document will need the same compatibility-mode treatment `reference.docx` needed, since Pandoc's ships without one and PowerPoint will call the file an older format.
-2. Markdown to PDF through `ltx-talk`. Pandoc has no `ltx-talk` writer; a custom writer over its LaTeX output, or a template, and the tagging concerns from the PDF item apply.
-3. Markdown to `revealjs`. Pandoc writes it; the work is the accessibility of what it writes and the HTML-source conventions.
-4. PowerPoint to Markdown. Pandoc reads `pptx` (the reader is in 3.11's list of input formats and its source), so this starts as a measurement of what that reader keeps (speaker notes, alt text, reading order, tables) and only becomes a reader of our own if it keeps too little.
-5. PowerPoint to `revealjs`, which is 4 followed by 3.
-6. `beamer` to `ltx-talk`. Many instructors have years of `beamer` decks, and `beamer` output will never tag. Two routes to measure before choosing: `beamer` LaTeX read by Pandoc's LaTeX reader (which knows `frame` environments only partly) into the intermediate and written for `ltx-talk`; or a direct LaTeX-to-LaTeX rewrite, if the two classes turn out to differ mostly in preamble and frame syntax. And whether Markdown written for `beamer` output differs from Markdown for `ltx-talk` at all, which decides whether a "beamer-flavored Markdown to ltx-talk Markdown" step exists.
-7. HTML as a source or target for decks, after item 1.
-
-The questions to settle first, since they shape the intermediate: what a slide is in the AST (Pandoc's slide level is a writer option, not a document fact), where speaker notes live, and how a figure's alt text and a table's headers travel into formats that have their own ideas about both. The table-headers pre-pass and the alt sidecar should apply to a deck unchanged; if they can't, that is the finding.
-
-**Test banks.** Questions arrive as Markdown, as Brightspace's quiz CSV, or as Word documents with questions written in a few common shapes (a numbered stem, lettered choices, an answer key at the end or an asterisk on the right choice), and a course needs them as a cartridge quiz. That is one question model in the middle, readers for the three inputs, and a QTI writer on the packaging side. Two notes on the shape of it:
-
-- The cartridge format for questions is QTI, not LTI: a CC 1.1 or 1.3 cartridge carries question banks and assessments as `imsqti_xmlv1p2`, and the schemas for that are already in the repository. LTI is the launch protocol for an external tool and is a different item. So the test-bank writer is the first real content of the Common Cartridge 1.3 item below, and the two are one piece of work in practice.
-- The Word reader is the table census's problem in another form: classify what the export gave us by evidence, guess the shape, report what the guess could not settle, and let a sidecar hold the decision. Writing Brightspace's CSV as well as reading it makes a round trip, which is the check.
-
-## 3. Common Cartridge 1.3, for assignments
-
-The test banks in item 4 are the first real content here: a question bank is a cartridge resource, and QTI 1.2 is how a cartridge carries it. The 1.1 profile already carries everything this project emits today. Quizzes and question banks (`imsqti_xmlv1p2`), discussion topics, web links, LTI links, and the authorization attributes are all in 1.1. The only thing worth moving for is **assignments**, which arrive in 1.3.
-
-The cost is reach. Brightspace and Canvas read up to 1.3, Blackboard up to 1.2, Moodle only to 1.1, so a 1.1 cartridge imports everywhere while a 1.3 one doesn't. So this isn't a migration but an option: a `cc_version` setting on the packaging target, defaulting to 1.1. The manifest differences are the namespace, the schemaversion, and the schema location, all already template substitutions, so the mechanism is small. But it requires a second set of schemas to validate against and a second set of resource types to emit correctly.
-
-Worth doing when there's an assignment to ship, not before.
-
-## 4. A web front end
-
-Here's why the configuration is schema-driven and why conversion becomes a library: a front end needs to render a form from the settings that exist, write a complete config back without losing anything, and report progress and failures structurally.
-
-Two pieces are already in place for it: the schema carries a description per setting, which is what a form's help text should say, and the writer is proven lossless by test. The third piece (resolving a config in JavaScript) is what the conformance fixtures in `tests/config/` exist to make safe.
-
-## 5. Splitting into separate repositories
-
-Eventually the two halves may be separate projects with a small shared library between them. Both standalone cases are already close: packaging is read-only with respect to page content and runs against any directory of HTML, and conversion has no packaging logic. v0.2 removed the last coupling, which was the config.
-
-When that time comes, we'll need the library versioned and released on its own, and the conformance fixtures promoted from tests to a compatibility contract, ensuring that a conversion repo pinned to one version still resolves configs the same way as a packaging repo on another.
-
-Not a goal in itself. Worth doing when one half has users the other doesn't.
 
 ## Refinements to the table headers work
 

@@ -14,10 +14,10 @@ Every source format the pipeline reads, the ways a book in that format can arriv
 
 | Input | HTML | EPUB | Markdown | AsciiDoc | PDF | Word | Round trip to itself |
 |---|---|---|---|---|---|---|---|
-| Word (`.docx`) | TESTED | TESTED | TESTED | TESTED | NEEDS MORE TESTING | TESTED | TESTED, with losses (see [Word output](#word-output)) |
-| Markdown (`.md`) | TESTED | TESTED | TESTED | TESTED | NEEDS MORE TESTING | TESTED | TESTED |
+| Word (`.docx`) | TESTED | TESTED | TESTED | TESTED | TESTED | TESTED | TESTED, with losses (see [Word output](#word-output)) |
+| Markdown (`.md`) | TESTED | TESTED | TESTED | TESTED | TESTED | TESTED | TESTED |
 | HTML (`.html`) | TESTED | TESTED | TESTED | TESTED | NEEDS MORE TESTING | TESTED | TESTED |
-| AsciiDoc (`.adoc`) | TESTED | TESTED | TESTED | TESTED | NEEDS MORE TESTING | TESTED | TESTED |
+| AsciiDoc (`.adoc`) | TESTED | TESTED | TESTED | TESTED | TESTED | TESTED | TESTED |
 
 [PDF output](#pdf) is new, and has been measured on a book from each input: the statistics book (Word), the economics book (Markdown), DCIC (HTML), and the security textbook (AsciiDoc). PDF is read only by [the audit](auditing.md), which reports on a Word, Markdown, HTML, EPUB, or PDF file without converting it.
 
@@ -45,7 +45,7 @@ Two repairs change what reading a Word file means, and each is a setting, decide
 - **Markdown: TESTED**, on the statistics book (merged by chapter) and the suite's round trip: read back, it gives the same HTML, and written again it's the same file. The first write normalizes Word's residue (paragraphs holding only a non-breaking space, stray spaces), so the second write is the fixed point. A table with merged cells, and a figure with an id, are written as fenced HTML, since Pandoc's Markdown can't express them; a banded table is kept as one table.
 - **AsciiDoc: TESTED**, on the statistics book: read back, 166 of its 169 pages are identical to the book converted directly. Two lose a root with an index (`\sqrt[n]{…}`), which Pandoc's AsciiDoc reader can't read, and one a list's depth ([AsciiDoc as a target](asciidoc.md#asciidoc-as-a-target)).
 - **Word: TESTED**, on the statistics book: 169 files, valid against Word's schema, with 229 header columns flagged. Read back as a book, 167 of its 169 pages give the same HTML, with no dead links; the other two are solutions pages, each with one list fewer ([Word output](#word-output)).
-- **PDF: NEEDS MORE TESTING**, on the statistics book: 948 pages, in which veraPDF finds nothing under the profiles it chooses for a PDF/UA-2 claim, with 3,046 header cells across its 342 tables, its cross-references given their visible text, its 270 figures in the reading order, 338 of its table captions tagged as captions, and its statistical tables' 79 cells that span rows tagged so. With its math repaired, every character in its equations is drawn; before, 54 were missing, the micro sign where μ was meant among them ([PDF](#pdf)).
+- **PDF: TESTED**, by the suite and on the statistics book: 948 pages, in which veraPDF finds nothing under the profiles it chooses for a PDF/UA-2 claim, with 3,046 header cells across its 342 tables, its cross-references given their visible text, its 270 figures in the reading order, 338 of its table captions tagged as captions, and its statistical tables' 79 cells that span rows tagged so. With its math repaired, every character in its equations is drawn; before, 54 were missing, the micro sign where μ was meant among them ([PDF](#pdf)).
 
 ## Markdown
 
@@ -63,7 +63,7 @@ Two repairs change what reading a Word file means, and each is a setting, decide
 - **Markdown (round trip): TESTED**, by the suite and on the economics book: the second write equals the third.
 - **AsciiDoc: TESTED**, on the economics book and the suite: read back, 31 of the book's 34 pages are identical to the book converted directly. The other three hold a footnote with a list or a quotation inside, which an AsciiDoc footnote can't keep; the words stay.
 - **Word: TESTED**, on *Principles of Economics*: 34 files, valid against Word's schema, with 37 ScreenTips.
-- **PDF: NEEDS MORE TESTING.** The suite's book, and the whole economics book, pass veraPDF's PDF/UA-2, PDF/A-4f, and WTPDF profiles, and the economics book's structure matches its author's own build ([PDF](#pdf)).
+- **PDF: TESTED.** The suite's book, and the whole economics book, pass veraPDF's PDF/UA-2, PDF/A-4f, and WTPDF profiles, and the economics book's structure matches its author's own build ([PDF](#pdf)).
 
 ## HTML
 
@@ -101,7 +101,7 @@ Pages are parsed with html5lib, or with lxml where html5lib isn't installed; DCI
 - **EPUB: TESTED.** The security textbook's EPUB passes epubcheck with no errors or warnings, and the suite builds one from a chapter with a sized image, a listing, and a table.
 - **Markdown: TESTED.** The security textbook goes to Markdown and back with all 14 pages identical, and the suite converts a chapter the same way.
 - **Word: TESTED**, on the security textbook: 14 files, valid against Word's schema. Read back, 12 of 14 pages give the same HTML, with no dead links; the other two have tables with merged cells, or figures holding more than one block, which Pandoc's writer lays out as a table.
-- **PDF: NEEDS MORE TESTING**, on the security textbook: 161 pages, passing veraPDF, its SVG diagrams converted with their alt text kept, and its code callouts drawn with the DejaVu Sans fallback. Its 22 images have no alt text in the source, which the output check reports for the PDF as for the HTML ([PDF](#pdf)).
+- **PDF: TESTED**, by the suite and on the security textbook: 161 pages, passing veraPDF, its SVG diagrams converted with their alt text kept, and its code callouts drawn with the DejaVu Sans fallback. Its 22 images have no alt text in the source, which the output check reports for the PDF as for the HTML ([PDF](#pdf)).
 - **AsciiDoc: TESTED.** The security textbook goes to AsciiDoc and back with all 14 pages identical, and the suite round-trips a chapter holding every case the target writes itself ([AsciiDoc as a target](asciidoc.md#asciidoc-as-a-target)). Writing it again gives the same files.
 
 ## The outputs, and how each is packaged

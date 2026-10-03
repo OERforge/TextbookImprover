@@ -2996,6 +2996,65 @@ A list outside any quote, one of whose items holds a quote:
     > Its second paragraph.
 
 - item two
+
+- An item holding a quote of a paragraph and code:
+
+    > Load it from a file:
+    >
+    > ```
+    > include csv
+    > ```
+
+- And one holding a quote with a quote inside it:
+
+    > Exercise
+    >
+    > > Why does rec work here but not above?
+    >
+    > Back in the outer quote.
+
+- And one holding a quote of code alone:
+
+    > ```
+    > include gdrive-sheets
+    > ```
+
+> A list in a quote, whose item holds code of its own, not quoted again:
+>
+> - an item
+>
+>     ```
+>     acct1
+>     ```
+>
+> - another
+
+> A quote whose inner quote holds a list and nothing else:
+>
+> > - first in the inner quote
+> > - second
+
+> Code in a quote in a quote, at two depths:
+>
+> > Inner paragraph.
+> >
+> > ```
+> > depth two
+> > ```
+> >
+> > > ```
+> > > depth three
+> > > ```
+
+Code with a language, alone and in a quote:
+
+```python
+x = 1
+```
+
+> ```python
+> y = 2
+> ```
 """
 
 
@@ -3028,11 +3087,19 @@ def case_quoted_lists(work):
                               capture_output=True, text=True).stdout
 
     source = os.path.join(work, "source")
-    book(source, {"page.md": QUOTED_LISTS}, "  word:\n    format: docx\n  html:\n    format: html\n")
+    # Two quotes kept apart only by the Divs they're in, which Word doesn't
+    # keep: they come back two quotes, not one.
+    divs = "Before.\n\n::: one\n> Quote A.\n:::\n\n::: two\n> Quote B.\n:::\n\nAfter.\n"
+    book(source, {"page.md": QUOTED_LISTS, "divs.md": divs},
+         "  word:\n    format: docx\n  html:\n    format: html\n")
     written = os.path.join(source, "word", "page.docx")
     data = open(written, "rb").read() if os.path.exists(written) else b""
+    written_divs = os.path.join(source, "word", "divs.docx")
     back = os.path.join(work, "back")
-    book(back, {"page.docx": data}, "  html:\n    format: html\n")
+    book(back, {"page.docx": data,
+                "divs.docx": open(written_divs, "rb").read() if os.path.exists(written_divs) else b""},
+         "  html:\n    format: html\n")
+    divs_back = read(back, "html", "divs.html") if exists(back, "html", "divs.html") else ""
     # The same file as an author's, without the variable.
     plain = b""
     if data:
@@ -3048,13 +3115,14 @@ def case_quoted_lists(work):
     author = os.path.join(work, "author")
     book(author, {"page.docx": plain}, "  html:\n    format: html\n")
     return [
-        # A quote inside a list item comes back as one quote per paragraph,
-        # a loss of its own that the round trip had before this; the check
-        # here is that the list holding it stays out of any quote.
-        ("every list in a quotation comes back in it, at its depth, and the plain lists outside",
-         lambda: data and markdown(source, "page") and markdown(back, "page").replace(
-             "  > A quote inside the item.\n\n  > Its second paragraph.",
-             "  > A quote inside the item.\n  >\n  > Its second paragraph.") == markdown(source, "page")),
+        # And a list item's quote comes back one quote, not one a paragraph;
+        # the code it holds comes back in it; a code block's language
+        # leaves no zero-width space at its start.
+        ("every list in a quotation comes back in it, at its depth, and the plain lists outside; "
+         "a list item's quote comes back whole, code and all",
+         lambda: data and markdown(source, "page") and markdown(back, "page") == markdown(source, "page")),
+        ("two quotes that only their Divs kept apart come back two quotes",
+         lambda: divs_back.count("<blockquote") == 2),
         ("an author's file, without the variable, is read as Pandoc reads it: the lists outside",
          lambda: plain and markdown(author, "page") != markdown(source, "page")
          and "> - opens with a list" not in markdown(author, "page")),

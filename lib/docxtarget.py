@@ -314,19 +314,18 @@ def mark_blocks(doc):
             return value
         if not _elements(value):
             return [visit(v) for v in value]
-        out, previous = [], None
+        out = []
         for item in value:
             t = item.get("t")
-            if t == "CodeBlock" and previous == "CodeBlock":
+            if out and _edge(item, True) == "CodeBlock" and _edge(out[-1], False) == "CodeBlock":
                 counts["sep"] += 1
                 out.append(_separator(CODE_SEPARATOR, counts["sep"]))
-            previous = t
             if t == "Figure" and _lone_image(item) is not None \
                     and _decorative(_lone_image(item)):
                 out.append(marked(DECORATIVE_MARK, "decorative", [item], True))
                 continue
             item = visit(item)
-            if out and t == "BlockQuote" and out[-1].get("t") == "BlockQuote":
+            if out and _edge(item, True) == "BlockQuote" and _edge(out[-1], False) == "BlockQuote":
                 counts["sep"] += 1
                 out.append(_separator(QUOTE_SEPARATOR, counts["sep"]))
             if t == "Table":
@@ -344,6 +343,15 @@ def mark_blocks(doc):
 
     doc["blocks"] = visit(doc.get("blocks", []))
     return doc, sum(counts.values())
+
+
+def _edge(block, first):
+    """The kind of block Word sees at the start (or end) of this one: a
+    Div writes no paragraph of its own, so two quotes in Divs side by side,
+    as DCIC's are, come out adjacent and need the separator too."""
+    while isinstance(block, dict) and block.get("t") == "Div" and block["c"][1]:
+        block = block["c"][1][0 if first else -1]
+    return block.get("t") if isinstance(block, dict) else None
 
 
 def lines_marks(doc):
@@ -636,12 +644,12 @@ def losses(doc):
     return found
 
 
-def level_indents(numbering):
+def level_indents(numbering, blank=False):
     """{(numId, ilvl): (left, hanging)} from word/numbering.xml: the
     indent each list level gives its items. A level whose marker is blank
     isn't a list's own: Pandoc's writer and OpenStax's export number an
     item's second paragraph, or its code or figure, with one, to keep it
-    in the item, so it's left out."""
+    in the item, so it's left out, unless blank asks for those alone."""
     found = {}
     abstracts = {m.group(1): m.group(0) for m in re.finditer(
         r'<w:abstractNum\b[^>]*w:abstractNumId="(\d+)".*?</w:abstractNum>', numbering, re.S)}
@@ -652,7 +660,7 @@ def level_indents(numbering):
         for lvl in re.finditer(r'<w:lvl w:ilvl="(\d+)".*?</w:lvl>', abstracts[ref.group(1)], re.S):
             ind = re.search(r'<w:ind\b([^>]*)/>', lvl.group(0))
             text = re.search(r'<w:lvlText w:val="([^"]*)"', lvl.group(0))
-            if not ind or (text is not None and not html.unescape(text.group(1)).strip()):
+            if not ind or (text is not None and not html.unescape(text.group(1)).strip()) != blank:
                 continue
             left = re.search(r'w:(?:left|start)="(-?\d+)"', ind.group(1))
             hanging = re.search(r'w:hanging="(\d+)"', ind.group(1))
@@ -683,10 +691,12 @@ def _set_indent(paragraph, left, right=None, hanging=None):
     return paragraph[:start] + "<w:pPr>" + props + paragraph[end:]
 
 
-def indent_quotes(xml, levels=None):
+def indent_quotes(xml, levels=None, blanks=None):
     """Each paragraph inside the marked quote ranges indented by its
     depth, a list's items beyond their level's own indent (levels, from
-    level_indents), the marks removed; returns (xml, count, list items)."""
+    level_indents), and code that a list item holds in a quote beyond its
+    blank level's (blanks, level_indents with blank), the marks removed;
+    returns (xml, count, list items and code)."""
     if QUOTE_MARK not in xml:
         return xml, 0, 0
     names = dict(re.findall(r'<w:bookmarkStart w:id="(\d+)" w:name="(_?' + QUOTE_MARK
@@ -694,11 +704,14 @@ def indent_quotes(xml, levels=None):
     tokens = re.split(r"(<w:bookmarkStart\b[^>]*/>|<w:bookmarkEnd\b[^>]*/>|"
                       r"<w:tbl>|</w:tbl>|<w:p>.*?</w:p>)", xml, flags=re.S)
     depth, tables, count, items, out = 0, 0, 0, 0, []
+    list_depth = 0                    # the quotes around the list being written
     for token in tokens:
         mark = re.match(r'<w:bookmark(Start|End) w:id="(\d+)"', token)
         if mark and mark.group(2) in names:
             depth += 1 if mark.group(1) == "Start" else -1
             continue
+        if token.startswith("<w:p>") and "<w:numPr>" not in token:
+            list_depth = 0
         if token == "<w:tbl>":
             tables += 1
         elif token == "</w:tbl>":
@@ -706,8 +719,41 @@ def indent_quotes(xml, levels=None):
         elif token.startswith("<w:p>") and depth and not tables \
                 and "<w:numPr>" in token:
             numbered = _numbering(token)
+            # A list's own paragraphs in a quote are the list's, not quoted
+            # again: Pandoc's writer styles them Block Text, and its reader
+            # would wrap each in a quote of its own. Body Text, with the
+            # quote's indent, says the same to the eye.
+            own = 'w:pStyle w:val="BlockText"'
             if numbered and levels and numbered in levels:
+                list_depth = depth
                 left, hanging = levels[numbered]
+                token = _set_indent(token.replace(own, 'w:pStyle w:val="BodyText"'),
+                                    left + QUOTE_STEP * depth, hanging=hanging)
+                count += 1
+                items += 1
+            elif numbered and blanks and numbered in blanks and own in token \
+                    and depth == list_depth:
+                left, hanging = blanks[numbered]
+                token = _set_indent(token.replace(own, 'w:pStyle w:val="BodyText"'),
+                                    left + QUOTE_STEP * depth, hanging=hanging)
+                count += 1
+            elif numbered and blanks and numbered in blanks and own in token:
+                # A paragraph of a quote inside a list item: the reader
+                # quotes it by its style, one level whatever its depth; the
+                # indent gives the depth, which reading Word restores
+                # (docxrepair.mark_quoted_lists, nest_item_quotes).
+                left, hanging = blanks[numbered]
+                token = _set_indent(token, left + QUOTE_STEP * depth, QUOTE_STEP, hanging)
+                count += 1
+                items += 1
+            elif numbered and blanks and numbered in blanks \
+                    and 'w:pStyle w:val="SourceCode"' in token:
+                # Code a list item holds in a quote: numbered at a blank
+                # level to stay in the item, which the reader keeps it in,
+                # but nothing tells it of the quote; this indent does, and
+                # reading Word wraps the code in its quote again
+                # (docxrepair.apply_quoted_code).
+                left, hanging = blanks[numbered]
                 token = _set_indent(token, left + QUOTE_STEP * depth, hanging=hanging)
                 count += 1
                 items += 1
@@ -717,6 +763,11 @@ def indent_quotes(xml, levels=None):
                 token = _set_indent(token, QUOTE_STEP * depth,
                                     QUOTE_STEP if block_text else None)
                 count += 1
+                # Code in a quote in a quote: the reader quotes code once,
+                # however far it's indented; reading Word nests it again
+                # (docxrepair.apply_quoted_code), in a file that says so.
+                if depth >= 2 and 'w:pStyle w:val="SourceCode"' in token:
+                    items += 1
         out.append(token)
     return "".join(out), count, items
 
@@ -907,8 +958,9 @@ def finish(path, doc, keep=None):
         xml, found = apply_markers(xml, tables, lines, codes)
         for key, n in found.items():
             counts[key] += n
-        xml, n, items = indent_quotes(xml, level_indents(text("word/numbering.xml"))
-                                      if "word/numbering.xml" in parts else None)
+        numbering = text("word/numbering.xml") if "word/numbering.xml" in parts else ""
+        xml, n, items = indent_quotes(xml, level_indents(numbering) if numbering else None,
+                                      level_indents(numbering, blank=True) if numbering else None)
         counts["quotes"] += n
         quoted_items += items
         xml, n = keep_captions(xml)

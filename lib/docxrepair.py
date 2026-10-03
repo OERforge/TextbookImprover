@@ -504,35 +504,131 @@ QUOTED_LIST = re.compile(r"^_?" + QUOTED_LIST_MARK + r"(\d+)x\d+$")
 QUOTE_STEP = 480                       # docxtarget.QUOTE_STEP, Block Text's indent
 
 
-def mark_quoted_lists(xml, levels):
+def _past_zero_width(inlines):
+    """The index of the first inline that isn't a zero-width space."""
+    at = 0
+    while at < len(inlines) and inlines[at].get("t") == "Str" \
+            and not inlines[at]["c"].strip("\u200b"):
+        at += 1
+    return at
+
+
+ITEM_QUOTE_MARK = "tiqItemQuote"
+ITEM_QUOTE = re.compile(r"^_?" + ITEM_QUOTE_MARK + r"(\d+)x\d+$")
+
+
+def mark_quoted_lists(xml, levels, blanks=None):
     """Each numbered paragraph indented at least half a quote step beyond
-    its level's own indent marked with its quote depth. Returns (xml,
-    count)."""
+    its level's own indent marked with its quote depth; and each paragraph
+    a list item holds in a quote (numbered at a blank level, styled Block
+    Text, indented beyond it, docxtarget.indent_quotes) marked with the
+    depth of its quote beyond the list's own, which the reader, quoting it
+    by its style alone, would give one level. Tables are left alone, as
+    the writer leaves them. Returns (xml, count)."""
     import docxtarget
     if not levels:
         return xml, 0
+    blanks = blanks or {}
     count = 0
+    list_depth = 0
+    tables = 0
 
-    def one(m):
-        nonlocal count
-        paragraph = m.group(0)
-        numbered = docxtarget._numbering(paragraph)
+    def left_of(paragraph):
         ind = re.search(r'<w:pPr>.*?<w:ind\b([^>]*)/>.*?</w:pPr>', paragraph, re.S)
-        if not numbered or numbered not in levels or not ind:
-            return paragraph
-        left = re.search(r'w:(?:left|start)="(-?\d+)"', ind.group(1))
-        if not left:
-            return paragraph
-        depth = round((int(left.group(1)) - levels[numbered][0]) / QUOTE_STEP)
-        if depth < 1 or int(left.group(1)) - levels[numbered][0] < QUOTE_STEP // 2:
-            return paragraph
+        left = ind and re.search(r'w:(?:left|start)="(-?\d+)"', ind.group(1))
+        return int(left.group(1)) if left else None
+
+    def marked(paragraph, name, depth):
+        nonlocal count
         count += 1
         ident = 2000000 + count
         mark = ('<w:bookmarkStart w:id="%d" w:name="%s%dx%d"/><w:bookmarkEnd w:id="%d"/>'
-                % (ident, QUOTED_LIST_MARK, depth, count, ident))
+                % (ident, name, depth, count, ident))
         end = paragraph.index("</w:pPr>") + len("</w:pPr>")
-        return paragraph[:end] + mark + paragraph[end:]
-    return re.sub(r"<w:p\b[^>]*>.*?</w:p>", one, xml, flags=re.S), count
+        # A zero-width run on each side, as move_bookmarks_into_paragraphs
+        # puts them: the reader joins a bookmark to the one before it with
+        # no text between, across paragraphs too, and the mark would be lost
+        # into the last paragraph's, or take the name of the next one here.
+        after = ZWSP_RUN if paragraph[end:].lstrip().startswith("<w:bookmarkStart") else ""
+        return paragraph[:end] + ZWSP_RUN + mark + after + paragraph[end:]
+
+    out = []
+    for token in re.split(r"(<w:tbl>|</w:tbl>|<w:p\b[^>]*>.*?</w:p>)", xml, flags=re.S):
+        if token in ("<w:tbl>", "</w:tbl>"):
+            tables += 1 if token == "<w:tbl>" else -1
+        elif token.startswith("<w:p") and not tables:
+            numbered = docxtarget._numbering(token)
+            left = left_of(token)
+            if not numbered:
+                list_depth = 0
+            elif numbered in levels:
+                depth = round((left - levels[numbered][0]) / QUOTE_STEP) \
+                    if left is not None and left - levels[numbered][0] >= QUOTE_STEP // 2 else 0
+                list_depth = depth
+                if depth >= 1:
+                    token = marked(token, QUOTED_LIST_MARK, depth)
+            elif numbered in blanks and left is not None \
+                    and 'w:pStyle w:val="BlockText"' in token:
+                depth = round((left - blanks[numbered][0]) / QUOTE_STEP) - list_depth
+                if depth >= 1:
+                    token = marked(token, ITEM_QUOTE_MARK, depth)
+        out.append(token)
+    return "".join(out), count
+
+
+def nest_item_quotes(doc):
+    """Each paragraph marked by mark_quoted_lists as in a list item's
+    quote, quoted to its depth: the reader quotes it once, by its style,
+    and join_nested_quotes then joins it to the quote's other paragraphs.
+    The marks are removed. Returns how many were nested deeper."""
+    nested = 0
+
+    def mark_depth(block):
+        if block.get("t") not in ("Para", "Plain") or not block["c"]:
+            return 0
+        at = _past_zero_width(block["c"])
+        lead = block["c"][at] if at < len(block["c"]) else None
+        if lead and lead.get("t") == "Span" and not lead["c"][1]:
+            m = ITEM_QUOTE.match(lead["c"][0][0])
+            if m:
+                del block["c"][at]
+                return int(m.group(1))
+        return 0
+
+    def fix(blocks):
+        nonlocal nested
+        for i, block in enumerate(blocks):
+            if block.get("t") == "BlockQuote" and len(block["c"]) == 1:
+                depth = mark_depth(block["c"][0])
+                if depth > 1:
+                    inner = block["c"][0]
+                    for _ in range(depth):
+                        inner = {"t": "BlockQuote", "c": [inner]}
+                    blocks[i] = inner
+                    nested += 1
+                    continue
+            elif block.get("t") in ("Para", "Plain"):
+                depth = mark_depth(block)
+                if depth:
+                    inner = block
+                    for _ in range(depth):
+                        inner = {"t": "BlockQuote", "c": [inner]}
+                    blocks[i] = inner
+                    nested += 1
+                    continue
+            walk(block.get("c"))
+
+    def walk(node):
+        if isinstance(node, list):
+            if node and all(isinstance(b, dict) and "t" in b for b in node):
+                fix(node)
+            else:
+                for item in node:
+                    walk(item)
+        elif isinstance(node, dict):
+            walk(node.get("c"))
+    walk(doc.get("blocks", []))
+    return nested
 
 
 def join_quoted_lists(doc):
@@ -546,24 +642,19 @@ def join_quoted_lists(doc):
         # The depth the list's own items say, at the start of each item's
         # first paragraph; a mark deeper in, in a list nested in it, goes
         # with this one, and every mark is removed.
-        # A loose list's items are styled Block Text inside a quote, so the
-        # reader wraps each item's content in a quote of its own: the mark
-        # is inside it, and the wrapper goes once the list is the quote's.
         found = 0
         items = block["c"] if block["t"] == "BulletList" else block["c"][1]
         for item in items:
             first = item[0] if item else None
             while first and first.get("t") == "BlockQuote" and first["c"]:
                 first = first["c"][0]
-            lead = first["c"][0] if first and first.get("t") in ("Plain", "Para") and first["c"] else None
+            inlines = first["c"] if first and first.get("t") in ("Plain", "Para") else []
+            at = _past_zero_width(inlines)
+            lead = inlines[at] if at < len(inlines) else None
             if isinstance(lead, dict) and lead.get("t") == "Span" and not lead["c"][1]:
                 m = QUOTED_LIST.match(lead["c"][0][0])
                 if m:
                     found = max(found, int(m.group(1)))
-        if found:
-            for item in items:
-                if len(item) == 1 and item[0].get("t") == "BlockQuote":
-                    item[:] = item[0]["c"]
 
         def strip(node):
             if isinstance(node, list):
@@ -577,11 +668,14 @@ def join_quoted_lists(doc):
         strip(block)
         return found
 
-    def innermost(quote, depth):
-        # The quote at depth inside quote, as far as it goes.
+    def place(quote, depth, block):
+        # Into the quote at depth inside quote: down the quotes it ends
+        # with, as far as they go, and in new ones for the rest.
         while depth > 1 and quote["c"] and quote["c"][-1].get("t") == "BlockQuote":
             quote, depth = quote["c"][-1], depth - 1
-        return quote
+        for _ in range(depth - 1):
+            block = {"t": "BlockQuote", "c": [block]}
+        quote["c"].append(block)
 
     def fix(blocks):
         nonlocal moved
@@ -592,7 +686,7 @@ def join_quoted_lists(doc):
             if t in ("BulletList", "OrderedList"):
                 depth = depth_of(block)
                 if depth and out and out[-1].get("t") == "BlockQuote":
-                    innermost(out[-1], depth)["c"].append(block)
+                    place(out[-1], depth, block)
                     joining = out[-1]
                     moved += 1
                     continue
@@ -654,7 +748,11 @@ def join_nested_quotes(doc):
         for block in blocks:
             if block.get("t") == "BlockQuote":
                 block["c"] = fix(block["c"], True)
-                if inside and out and out[-1].get("t") == "BlockQuote":
+                # At every level: a quote's paragraphs inside a list item
+                # come back a quote each too, the item's paragraphs being
+                # read one by one. Two quotes meant to be apart have a
+                # separator between them, which keeps them so.
+                if out and out[-1].get("t") == "BlockQuote":
                     out[-1]["c"] = fix(out[-1]["c"] + block["c"], True)
                     joined += 1
                     continue
@@ -762,9 +860,122 @@ def numbered_code(docx_path):
                 plain.append(text)
         if (numbers and numbers[0].isdigit()) or language:
             numbers = numbers or ["0"]
-            found.append(("".join(full), "".join(plain), int(numbers[0]),
+            # The zero-width run move_bookmarks_into_paragraphs put after
+            # the language's bookmark, at the paragraph's start, isn't the
+            # code's.
+            found.append(("".join(full), "".join(plain).lstrip("\u200b"), int(numbers[0]),
                           language.group(1) if language else None))
     return found
+
+
+def quoted_code(docx_path):
+    """[(text as Pandoc reads it, quotes to add)] for each code paragraph a
+    list item holds in a quote, in a Word target's file: numbered at a
+    blank level and indented beyond it (docxtarget.indent_quotes); and for
+    code in a quote in a quote, which the reader quotes once. The indent
+    counts every quote around the code; those around the list itself, as
+    far as its items are indented, are the list's (join_quoted_lists), and
+    only the rest are the item's own. The file as written, before
+    join_continuations renumbers those paragraphs."""
+    import docxtarget
+    with zipfile.ZipFile(docx_path) as z:
+        names = z.namelist()
+        if "word/document.xml" not in names or "word/numbering.xml" not in names:
+            return []
+        settings = z.read("word/settings.xml").decode("utf-8", "replace") \
+            if "word/settings.xml" in names else ""
+        if "TextbookImproverQuotedLists" not in settings:
+            return []
+        xml = z.read("word/document.xml").decode("utf-8")
+        numbering = z.read("word/numbering.xml").decode("utf-8", "replace")
+    levels = docxtarget.level_indents(numbering)
+    blanks = docxtarget.level_indents(numbering, blank=True)
+
+    def indent(para):
+        found = re.search(r'<w:pPr>.*?<w:ind\b[^>]*w:(?:left|start)="(-?\d+)"', para, re.S)
+        return int(found.group(1)) if found else None
+
+    found = []
+    tables, list_depth = 0, 0
+    for para in re.findall(r"<w:tbl>|</w:tbl>|<w:p>(?:(?!</w:p>).)*</w:p>", xml, re.S):
+        # Not in a table, which indent_quotes leaves alone.
+        if para in ("<w:tbl>", "</w:tbl>"):
+            tables += 1 if para == "<w:tbl>" else -1
+            continue
+        if tables:
+            continue
+        numbered = docxtarget._numbering(para)
+        left = indent(para)
+        if not numbered:
+            list_depth = 0
+            # Code in a quote in a quote, outside any list: the reader
+            # quotes it once, so the rest of its depth is wanted.
+            if left is not None and 'w:val="SourceCode"' in para \
+                    and round(left / QUOTE_STEP) >= 2:
+                found.append((_code_text(para), round(left / QUOTE_STEP) - 1))
+            continue
+        if numbered in levels:
+            # A list's own item: the quotes around the list.
+            list_depth = max(0, round((left - levels[numbered][0]) / QUOTE_STEP)) \
+                if left is not None else 0
+            continue
+        if numbered not in blanks or left is None or 'w:val="SourceCode"' not in para:
+            continue
+        depth = round((left - blanks[numbered][0]) / QUOTE_STEP) - list_depth
+        if depth < 1:
+            continue
+        found.append((_code_text(para), depth))
+    return found
+
+
+def _code_text(para):
+    """A code paragraph's text as Pandoc's reader gives it."""
+    text = []
+    for run in re.findall(r"<w:r>.*?</w:r>", para, re.S):
+        if re.search(r"<w:br\s*/>", run):
+            text.append("\n")
+            continue
+        text.append(html.unescape("".join(re.findall(r"<w:t[^>]*>([^<]*)</w:t>", run))))
+        text.append("\t" * len(re.findall(r"<w:tab\s*/>", run)))
+    return "".join(text).strip("\u200b")
+
+
+def apply_quoted_code(docx_path, json_path):
+    """Each code block quoted_code found, wrapped in the quotes it lost,
+    where it stands; join_nested_quotes then joins it to the quote's
+    paragraphs beside it. Returns how many."""
+    import json
+    entries = quoted_code(docx_path)
+    if not entries:
+        return 0
+    with open(json_path, encoding="utf-8") as fh:
+        doc = json.load(fh)
+    done = 0
+
+    def walk(node):
+        nonlocal done
+        if isinstance(node, list):
+            for i, item in enumerate(node):
+                if isinstance(item, dict) and item.get("t") == "CodeBlock":
+                    text = item["c"][1].strip("\u200b")
+                    for k, (wanted, depth) in enumerate(entries):
+                        if text == wanted:
+                            wrapped = item
+                            for _ in range(depth):
+                                wrapped = {"t": "BlockQuote", "c": [wrapped]}
+                            node[i] = wrapped
+                            del entries[k]
+                            done += 1
+                            break
+                else:
+                    walk(item)
+        elif isinstance(node, dict):
+            walk(node.get("c"))
+    walk(doc.get("blocks", []))
+    if done:
+        with open(json_path, "w", encoding="utf-8") as fh:
+            json.dump(doc, fh, ensure_ascii=False)
+    return done
 
 
 def apply_number_lines(docx_path, json_path):
@@ -815,7 +1026,8 @@ def apply_definition_terms(json_path):
     import json
     with open(json_path, encoding="utf-8") as fh:
         doc = json.load(fh)
-    count = join_definition_terms(doc) + join_quoted_lists(doc) + join_nested_quotes(doc)
+    count = join_definition_terms(doc) + join_quoted_lists(doc) + nest_item_quotes(doc) \
+        + join_nested_quotes(doc)
     if count:
         with open(json_path, "w", encoding="utf-8") as fh:
             json.dump(doc, fh, ensure_ascii=False)
@@ -870,8 +1082,9 @@ def repaired_copy(source, destination, headings="keep", deletions="accept", note
                 if "word/numbering.xml" in names and "TextbookImproverQuotedLists" in \
                         parts.get("word/settings.xml", b"").decode("utf-8", "replace"):
                     import docxtarget
-                    text, _ = mark_quoted_lists(text, docxtarget.level_indents(
-                        parts["word/numbering.xml"].decode("utf-8", "replace")))
+                    numbering = parts["word/numbering.xml"].decode("utf-8", "replace")
+                    text, _ = mark_quoted_lists(text, docxtarget.level_indents(numbering),
+                                                docxtarget.level_indents(numbering, blank=True))
                 text, _ = keep_unlinked_bookmarks(text)
                 text, _ = join_continuations(text, blank)
                 data = text.encode("utf-8")

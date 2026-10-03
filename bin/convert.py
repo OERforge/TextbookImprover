@@ -1042,6 +1042,8 @@ def read_to_json(base, docs, env, work):
         tips = docxrepair.apply_screentips(repaired, os.path.join(base, stem + ".json"))
         # Word's decorative marker, which Pandoc's reader doesn't read.
         docxrepair.apply_decorative(repaired, os.path.join(base, stem + ".json"))
+        # Code a list item holds in a quote, the quote the reader drops.
+        docxrepair.apply_quoted_code(os.path.join(base, name), os.path.join(base, stem + ".json"))
         # A term with no definition, which the reader reads as a Div.
         docxrepair.apply_definition_terms(os.path.join(base, stem + ".json"))
         # Ids Pandoc's writer hashed, named again from the file's own map.
@@ -1178,6 +1180,8 @@ def read_variants(base, target, work, env):
                                         if not os.path.isabs(out) else out)
             docxrepair.apply_decorative(repaired, os.path.join(base, out)
                                         if not os.path.isabs(out) else out)
+            docxrepair.apply_quoted_code(path, os.path.join(base, out)
+                                         if not os.path.isabs(out) else out)
             docxrepair.apply_definition_terms(os.path.join(base, out)
                                               if not os.path.isabs(out) else out)
             docxrepair.apply_id_map(repaired, os.path.join(base, out)

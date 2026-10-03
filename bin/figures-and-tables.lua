@@ -640,12 +640,14 @@ local function table_excerpt(tbl)
 end
 
 local function record_missing(label, excerpt)
-  append_row(MISSING_FILE, { label, '', source_stem(), excerpt or '' })
+  -- The last two columns, Drafted by and Reviewed, are for whoever fills
+  -- the row in: blank, since nothing here guesses a description.
+  append_row(MISSING_FILE, { label, '', source_stem(), excerpt or '', '', '' })
 end
 
 local function record_alt(src, reason, current)
   append_row(ALT_MISSING_FILE,
-    { qualify_media(src), '', source_stem(), reason, current })
+    { qualify_media(src), '', source_stem(), reason, current, '', '' })
 end
 
 -- A table with no label of any kind still needs a key so a caption can be

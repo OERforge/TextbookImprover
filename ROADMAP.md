@@ -40,12 +40,27 @@ Reading a PDF back into the pipeline, for the books that only exist as PDF. The 
 
 The pipeline's own PDFs are the first test: each claims WTPDF and carries MathML, so a book read back from its PDF can be compared with the book it came from, as the round-trip tests do for HTML and Word.
 
+## Suggestions from a language model, after 1.0
+
+A model, called through a standard API, could draft what the reports ask for: alt text, table descriptions, the table-header guesses where TextbookImprover's own is uncertain, link titles. The sidecars are ready for it: each report a person fills in ends with `Drafted by` and `Reviewed`, so a model's draft is recorded as the model's, used as it stands like TextbookImprover's own guesses, counted by the run until a person reviews it, and still known as the model's afterwards.
+
+- **A separate step, filling reports.** A tool that fills the blank values in a report, never a value already there, never a reviewed row, and changes nothing run twice; its drafts reach a sidecar only when a person pastes them in, as every report's rows do now.
+- **Context over model.** What the request carries decides the result: for an image, the image, its caption, the paragraph around it, and the book's subject; for a table, the table, its caption, and its surroundings. Instructions in line with the checks the run already makes: at most `images.alt_max_chars`, no opening with "image", and the answers `[decorative]` or "needs a longer description" allowed.
+- **The interface.** OpenAI-compatible chat completions, which most providers and local servers (Ollama, vLLM) speak, and Anthropic's Messages API; the key in an environment variable, never in a configuration file. Sending a book's images to a service is the author's choice, which is one reason for local models.
+- **A review record worth keeping.** With every alt text reviewed, a PDF could carry the [PDF Declaration](https://www.pdfa.org/resource/pdf-declarations/) WTPDF describes (7.2.2), attesting that its images have been checked for appropriate descriptions.
+
+Before then, and useful without a model: a fingerprint of the image or table beside each row of `image-alt.csv` and `table-captions.csv`, as `table-headers.csv`'s key already is, so a reviewed value whose image or table has since changed is reported rather than kept without anyone noticing.
+
 ## Braille and audio, after 1.0
 
 Two more outputs, each from the book's own structure rather than from a PDF's text, since the pipeline has the headings, lists, tables, alt text, and MathML that a PDF's text layer has lost.
 
 - **Braille.** [liblouis](https://github.com/liblouis/liblouis) translates text to braille, contracted or not, by tables for many languages and codes; [liblouisutdml](https://github.com/liblouis/liblouisutdml) formats an XML or HTML document into braille pages (BRF) with liblouis, so the HTML the pipeline writes could be its input. To find out: how it takes headings, tables, and lists; what it does with MathML, and whether the math wants a separate route to Nemeth or UEB; and what a braille reader and a transcriber would expect of a textbook's layout.
 - **Audio.** [pdf-to-audiobook](https://github.com/ikicker/pdf-to-audiobook) (MIT) extracts a PDF's text, splits it into sentences with NLTK, speaks them with Kokoro-82M or Parler-TTS, and writes MP3 or WAV, with a Python API (`AudiobookConverter`). Given a chapter's text from the pipeline instead, with its headings, image descriptions, and spoken math, the same voices could make one file per chapter, or an audiobook with chapter marks. To find out: how math should be spoken (MathML to speech text), how tables read aloud, and whether a synchronized form (EPUB 3 media overlays, or DAISY) is worth more than plain audio.
+
+## Images of text
+
+An image that is text, a word-art heading or a decorated first letter, is read better as the text it shows than described as a picture. A marker in `image-alt.csv` (`[text]` before the text, say) could give the PDF LaTeX's `actualtext` instead of alt text, and HTML, EPUB, and Word the same text as alt text, which is the nearest they have. Measured: LaTeX tags `\includegraphics[actualtext=...]` as a `Span` with `ActualText` inside the paragraph under both PDF/UA-2 and PDF/UA-1. That is WTPDF's own example (8.2.2), but for PDF/UA-1 the PDF Association's [TN-PDFUA1-001](https://pdfa.org/resource/tn-pdfua1-001) wants a `Figure` with `ActualText` and `Placement` `Inline`, since PDF/UA-1 tags every non-text graphic `Figure`; veraPDF accepts LaTeX's form, so it is a question for the LaTeX team. How many such images the corpus has isn't known.
 
 ## 2. Slides and test banks
 

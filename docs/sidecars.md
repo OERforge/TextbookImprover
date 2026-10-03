@@ -34,8 +34,14 @@ the others. A report existing at all means there's work outstanding.
 | `output-check.csv` | Fixing what it names: dead links, images with no alt, headings that skip, tables with no headers. Written when the [output check](checking.md) finds anything. |
 | `media-unresolved.csv` | Replacing the images named in it. Written only when the run stops. |
 | `table-headers-unmatched.csv` | Looking at each row, whose key matches no table now: the table's text or shape changed, or it's gone. The table's row as it is now is in `table-headers-new.csv`. |
-| `table-headers-sample.csv` | Renaming it to `table-headers.csv` once you've looked: the sidecar without the unmatched rows. Written with `table-headers-unmatched.csv`. |
+| `table-headers-sample.csv` | Renaming it to `table-headers.csv` once you've looked: the sidecar without the unmatched rows, and with `drafted-by` and `reviewed` added if it had no such columns. Written with `table-headers-unmatched.csv`, or when the sidecar predates the two columns. |
 | `fidelity.csv` | Nothing in the book: it says what a target's files can't carry, a row per page and kind, so reading them back won't restore it. See [Word output](formats.md#word-output). |
+
+### Who drafted a value, and whether it's been reviewed
+
+The reports a person fills in, and so the sidecars their rows are pasted into, end with two columns: `Drafted by` and `Reviewed` (`drafted-by` and `reviewed` in `table-headers.csv`, whose columns are lowercase). `Drafted by` is blank when a person wrote the value, `TI` when TextbookImprover guessed it, as it does every table's headers, and a model's name when a model suggested it. `Reviewed` is blank until a person has checked the value; then a name or initials, and a date if you like. A row without the columns, as in every sidecar written before them, counts as a person's. That is true of `image-alt.csv`, `table-captions.csv`, and `bare-links.csv`, whose values only a person ever wrote, so they need nothing. It isn't of `table-headers.csv`, whose rows were mostly pasted from `table-headers-new.csv`, TextbookImprover's guesses unchecked: when it has no `drafted-by` column, the run writes `table-headers-sample.csv`, the sidecar with the two columns added, `TI` on each row that says what the guess says now and blank on each that differs, since a person changed it. The sidecar itself is left alone; rename the sample to `table-headers.csv` once you've looked.
+
+A drafted value is used whether or not it's been reviewed, as the table-header guesses always have been: a plausible description serves a reader better than none. The run says how many drafted values haven't been reviewed, sidecar by sidecar, so they can be found and checked. Filling in `Reviewed` once you've checked a value, whether you kept it or changed it, keeps the record of where it came from as well as who stands behind it.
 
 ### Sidecar files
 

@@ -1814,6 +1814,52 @@ def math_keep_rows(path):
     return list(dict.fromkeys(rows))
 
 
+# Where each sidecar keeps its value, and its Drafted by and Reviewed
+# columns, by position, since the readers read by position: the report
+# a sidecar's rows are pasted from puts them last.
+REVIEW_COLUMNS = {
+    "image_alt": ((1,), 5, 6),
+    "table_captions": ((1,), 4, 5),
+    "table_headers": ((1,), 8, 9),
+    "bare_links": ((1, 2), 5, 6),
+}
+HEADER_WORDS = {"image", "label", "table", "file", "key", "url"}
+
+
+def unreviewed_rows(path, columns):
+    """The rows of a sidecar whose value was drafted by TextbookImprover
+    or a model (Drafted by filled in) and that nobody has reviewed. A row
+    without the columns was written by a person."""
+    values, drafted, reviewed = columns
+    found = 0
+    if not path or not os.path.exists(path):
+        return found
+    with open(path, encoding="utf-8", newline="") as fh:
+        for row in csv.reader(fh):
+            if not row or row[0].strip().lower() in HEADER_WORDS:
+                continue
+            row = row + [""] * (max(values + (drafted, reviewed)) + 1 - len(row))
+            if any(row[i].strip() for i in values) and row[drafted].strip() \
+                    and not row[reviewed].strip():
+                found += 1
+    return found
+
+
+def warn_unreviewed(paths):
+    """Values drafted by TextbookImprover or a model and not yet reviewed,
+    said once: they're used as they stand, as the table-header guesses
+    always have been, and named so a person can look at them."""
+    counts = [(os.path.basename(paths[key]), unreviewed_rows(paths[key], columns))
+              for key, columns in REVIEW_COLUMNS.items() if paths.get(key)]
+    counts = [(name, n) for name, n in counts if n]
+    if counts:
+        say("%d value(s) in the sidecars were drafted by TextbookImprover or a model "
+            "and not yet reviewed (%s); they're used as they stand. Put a name or "
+            "initials in a row's Reviewed column once a person has checked it."
+            % (sum(n for _, n in counts),
+               ", ".join("%s %d" % (name, n) for name, n in counts)))
+
+
 def warn_title_numbers(found):
     """Pages whose declared title stands without the section number their
     heading puts before it, said once: their <title>, and the names a
@@ -2604,11 +2650,12 @@ def write_bare_links(rows_file, report, sidecar):
     if new:
         with open(report, "w", encoding="utf-8", newline="") as fh:
             w = csv.writer(fh, lineterminator="\n")
-            w.writerow(["URL", "Replacement", "Title", "Source", "Context"])
+            w.writerow(["URL", "Replacement", "Title", "Source", "Context",
+                        "Drafted by", "Reviewed"])
             for url in sorted(new):
                 e = new[url]
                 w.writerow([url, "", e["title"], "; ".join(e["sources"]),
-                            e["context"]])
+                            e["context"], "", ""])
         say(f"Wrote {report} ({len(new)} bare link(s) with no row in "
             f"{os.path.basename(sidecar)}).")
         say(f"Copy the rows into {sidecar}; fill in a Replacement, a Title, "
@@ -2913,17 +2960,18 @@ def main():
         # ---- 5. reports, once per book ----------------------------------------
         missing = write_report(
             collected["captions_missing"], reports["table_captions_missing"],
-            "Label,Description,Source,Excerpt",
+            "Label,Description,Source,Excerpt,Drafted by,Reviewed",
             "table(s) needing a description", paths["table_captions"])
         write_report(
             collected["alt_missing"], reports["image_alt_missing"],
-            "Image,Alt,Source,Reason,CurrentAlt",
+            "Image,Alt,Source,Reason,CurrentAlt,Drafted by,Reviewed",
             "image(s) needing alt text", paths["image_alt"],
             "Use [decorative] in the Alt column for images that carry no "
             "meaning.")
         write_bare_links(collected["bare_links"], reports["bare_links_new"],
                          paths["bare_links"])
         warn_math_keep(paths["math_keep"], collected["math_kept"])
+        warn_unreviewed(paths)
         warn_title_numbers(collected["title_numbers"])
         write_report(collected["math"], reports["math_repaired"],
                      "Kind,Page,Before,After", "math repair(s)", None,

@@ -207,6 +207,15 @@ def is_ua1(standards):
 # /Contents -- the address, or "Go to destination" and an id -- is
 # switched off, since every link the book's text makes gets one here.
 HEADER = r"""\ExplSyntaxOn
+% A long table's cells that a row span covers are recorded as untagged
+% (table/multirow), and the record outlives the table: measured, every
+% table after one with spans lost the cells at the same positions. Each
+% long table starts with none.
+\AddToHook{env/longtable/begin}
+  {
+    \prop_if_exist:NT \g__tbl_untagged_cells_prop
+      { \prop_gclear:N \g__tbl_untagged_cells_prop }
+  }
 \tl_new:N \l__oer_link_contents_tl
 \NewDocumentCommand \OERLinkContents { m }
   {

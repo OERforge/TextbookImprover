@@ -505,7 +505,6 @@ RUN_PARTS = re.compile(r"(<w:rPr>(?:(?!</w:rPr>).)*</w:rPr>)|<w:t(?:\s[^>]*)?>([
                        r"|(<[^>]+>)", re.S)
 UNMAPPABLE = ("<w:del ", "<w:del>", "<w:ins ", "<w:ins>", "<w:fldChar", "<w:instrText",
               "<w:fldSimple", "<w:sym ", "<w:txbxContent", "<w:moveFrom", "<w:moveTo")
-KEEP_BETWEEN = re.compile(r"<w:bookmark(?:Start|End)\b[^>]*/>")
 
 
 def math_places(path):
@@ -531,7 +530,9 @@ def _normalize(text):
     ends, and for each character kept, its index in text."""
     out, index, space = [], [], False
     for i, ch in enumerate(text):
-        if ch.isspace():
+        # Lua's %s, which the filter's normalize uses: ASCII whitespace
+        # only, so a no-break or em space is text on both sides.
+        if ch in " \t\n\r\f\v":
             space = bool(out)
             continue
         if space:
@@ -589,14 +590,15 @@ def _plain_run(open_tag, props, text):
 
 def _place_in(para, spans, omml, counts):
     """The paragraph with each (span, occurrence, tex) made an equation
-    where it maps exactly; the others counted as left."""
+    where it maps exactly; the others counted as left. Several may fall in
+    one run, which is split around each."""
     units, raw = _units(para)
     norm, index = _normalize(raw)
-    # Which unit each character of raw belongs to.
-    owner = []
+    begin, owner = [], []
     for n, unit in enumerate(units):
+        begin.append(len(owner))
         owner.extend([n] * len(unit[2]))
-    edits, taken = [], []
+    chosen = []
     for span, occurrence, tex in spans:
         start, found = -1, 0
         while found < occurrence:
@@ -608,38 +610,56 @@ def _place_in(para, spans, omml, counts):
         if start < 0 or not equation or not span:
             counts["text_equations_left"] += 1
             continue
-        first, last = index[start], index[start + len(span) - 1]
-        a, b = owner[first], owner[last]
-        covered = units[a:b + 1]
-        head_offset = first - sum(len(u[2]) for u in units[:a])
-        tail_offset = last - sum(len(u[2]) for u in units[:b]) + 1
-        ok = len({u[4] for u in covered}) == 1 and covered[0][4] == 0
-        for n, u in enumerate(covered):
-            if u[3] == "run":
-                simple = u[5][2]
-                partial = (n == 0 and head_offset > 0) or (n == len(covered) - 1 and tail_offset < len(u[2]))
-                if simple is None or (partial and not simple):
-                    ok = False
+        first, last = index[start], index[start + len(span) - 1] + 1
+        a, b = owner[first], owner[last - 1]
+        ok = all(u[4] == 0 for u in units[a:b + 1])
+        for n in range(a, b + 1):
+            u = units[n]
+            if u[3] != "run":
+                continue
+            partial = begin[n] < first or begin[n] + len(u[2]) > last
+            if u[5][2] is None or (partial and u[5][2] is not True):
+                ok = False
         # Two places over the same text: neither can be trusted.
-        if not ok or any(head_start < covered[-1][1] and covered[0][0] < head_end
-                         for head_start, head_end in taken):
+        if not ok or any(first < e and s_ < last for s_, e, _ in chosen):
             counts["text_equations_left"] += 1
             continue
-        taken.append((covered[0][0], covered[-1][1]))
-        pieces = []
-        head, tail = covered[0], covered[-1]
-        if head[3] == "run" and head_offset > 0:
-            pieces.append(_plain_run(head[5][0], head[5][1], head[2][:head_offset]))
-        pieces.append(equation)
-        kept = KEEP_BETWEEN.findall(para[head[1]:tail[0]]) if len(covered) > 1 else []
-        pieces.extend(kept)
-        if tail[3] == "run" and tail_offset < len(tail[2]):
-            pieces.append(_plain_run(tail[5][0], tail[5][1], tail[2][tail_offset:]))
-        edits.append((head[0], tail[1], "".join(pieces)))
+        chosen.append((first, last, equation))
         counts["text_equations"] += 1
-    for start, end, new in sorted(edits, reverse=True):
-        para = para[:start] + new + para[end:]
-    return para
+    if not chosen:
+        return para
+    chosen.sort()
+
+    def in_span(i):
+        return next((c for c in chosen if c[0] <= i < c[1]), None)
+
+    touched = sorted({n for f, l, _ in chosen for n in range(owner[f], owner[l - 1] + 1)})
+    out, pos = [], 0
+    for n in touched:
+        u = units[n]
+        out.append(para[pos:u[0]])
+        pos = u[1]
+        if u[3] == "math":
+            c = in_span(begin[n])
+            if c and begin[n] == c[0]:
+                out.append(c[2])
+            continue
+        open_tag, props = u[5][0], u[5][1]
+        text, i = u[2], 0
+        while i < len(text):
+            c = in_span(begin[n] + i)
+            if c:
+                if begin[n] + i == c[0]:
+                    out.append(c[2])
+                i = c[1] - begin[n]
+                continue
+            j = i
+            while j < len(text) and not in_span(begin[n] + j):
+                j += 1
+            out.append(_plain_run(open_tag, props, text[i:j]))
+            i = j
+    out.append(para[pos:])
+    return "".join(out)
 
 
 PARAGRAPH = re.compile(r"<w:p(?:\s[^>]*)?>(?:(?!<w:p[\s>]).)*?</w:p>", re.S)

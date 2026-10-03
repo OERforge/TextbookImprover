@@ -242,6 +242,65 @@ def classes(element):
     return [str(v) for v in value] if isinstance(value, list) else [str(value)]
 
 
+UA1_PAGE = r"""# Old Standard
+
+## A section
+
+A [described link](https://example.org/ "Example, a test site") and a
+formula, $a^2 + b^2 = c^2$, with a note.[^1]
+
+[^1]: The note.
+"""
+
+
+def build_ua1(work):
+    """A one-chapter book claiming PDF/UA-1, its math as Office writes it:
+    (the PDF's path, what the run said, the output check's rows)."""
+    os.makedirs(work)
+    with open(os.path.join(work, "old.md"), "w", encoding="utf-8") as fh:
+        fh.write(UA1_PAGE)
+    with open(os.path.join(work, "project.yaml"), "w", encoding="utf-8") as fh:
+        fh.write("project:\n  title: Old Standard\n  identifier: org.example.ua1\n"
+                 "  language: en-US\n")
+    with open(os.path.join(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
+        fh.write("targets:\n  pdf:\n    format: pdf\n    pdf:\n      standard: [ua-1]\n"
+                 "      ua1_math: office\n")
+    converted = subprocess.run(["python3", os.path.join(BIN, "convert.py")], cwd=work,
+                               capture_output=True, text=True, stdin=subprocess.DEVNULL)
+    report = os.path.join(work, "output-check.csv")
+    rows = []
+    if os.path.exists(report):
+        with open(report, encoding="utf-8", newline="") as fh:
+            rows = list(csv.DictReader(fh))
+    return os.path.join(work, "pdf", "org.example.ua1.pdf"), converted.stdout + converted.stderr, rows
+
+
+def ua1_formulas(path):
+    """Each Formula's alt text, its attribute owners, and its kids' kinds."""
+    pdf = pdfparagraphs.pikepdf.open(path)
+    found = []
+
+    def walk(element):
+        if not pdfparagraphs.is_struct_elem(element):
+            return
+        if str(element["/S"]) == "/Formula":
+            attributes = element.get("/A")
+            attributes = attributes if isinstance(attributes, pdfparagraphs.pikepdf.Array) \
+                else ([attributes] if attributes is not None else [])
+            found.append((str(element.get("/Alt", "")),
+                          [str(a.get("/O")) for a in attributes
+                           if isinstance(a, pdfparagraphs.pikepdf.Dictionary)],
+                          [str(k["/S"]) for k in pdfparagraphs.kids_of(element)
+                           if pdfparagraphs.is_struct_elem(k)]))
+        for kid in pdfparagraphs.kids_of(element):
+            walk(kid)
+    for kid in pdfparagraphs.kids_of(pdf.Root.StructTreeRoot):
+        walk(kid)
+    links = ["/Contents" in annot for page in pdf.pages for annot in page.get("/Annots") or []
+             if str(annot.get("/Subtype")) == "/Link"]
+    return found, pdf.pdf_version, links
+
+
 def quoted_cells(path):
     """BlockQuote elements under a table cell, by their standard role."""
     pdf = pdfparagraphs.pikepdf.open(path)
@@ -358,6 +417,9 @@ def build(work):
 
 def checks(work):
     reader, source, rows, log, placements = build(work)
+    ua1_path, ua1_said, ua1_rows = build_ua1(work + "-ua1")
+    ua1_math, ua1_version, ua1_links = ua1_formulas(ua1_path) if os.path.exists(ua1_path) \
+        else ([], "", [])
     pdf_path = os.path.join(work, "pdf", "org.example.pdf.pdf")
     root = reader.trailer["/Root"]
     tree = elements(root["/StructTreeRoot"])
@@ -412,6 +474,20 @@ def checks(work):
          and "xxxSubParagraphNoStar" in source),
         ("a quotation in a table cell is unwrapped, since a cell can't hold one",
          lambda: not quoted_cells(pdf_path)),
+        # PDF/UA-1 is PDF 1.7: no MathML structure elements, a TeX alt text
+        # on each formula, Office's MathML attribute when asked for, and a
+        # /Contents on every link, LaTeX's own included.
+        ("a PDF/UA-1 book is PDF 1.7, and veraPDF finds nothing in it",
+         lambda: ua1_version == "1.7" and os.path.exists(ua1_path)
+         and (not shutil.which("verapdf") and not os.environ.get("VERAPDF") or not ua1_rows)),
+        ("its formula has alt text and Office's MathML attribute, and no "
+         "MathML structure elements",
+         lambda: len(ua1_math) == 1 and ua1_math[0][0] and "/MSFT_Office" in ua1_math[0][1]
+         and not ua1_math[0][2]),
+        ("every link in it has a /Contents",
+         lambda: ua1_links and all(ua1_links)),
+        ("the run warns that its equations are tagged as PDF/UA-1 allows",
+         lambda: "PDF/UA-1 has no standard way to tag MathML" in ua1_said),
         ("no paragraph element is left empty",
          lambda: not pdfparagraphs.find(pdfparagraphs.pikepdf.open(pdf_path)).doomed),
         ("a captioned table's caption is its Caption, before its rows",

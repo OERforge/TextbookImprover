@@ -129,6 +129,73 @@ FIGURE_PLACEMENT = {
     "float": "",
 }
 
+# How math is tagged, by the standard the PDF claims. PDF 2.0 (PDF/UA-2)
+# has a MathML namespace, so each formula gets its MathML as structure
+# elements and as an attached file. PDF 1.7 (PDF/UA-1) has neither, and
+# MathML structure elements there are non-standard types veraPDF rejects;
+# the formula keeps the attached file, and latex-lab gives it its TeX
+# source as alternative text, which it switches on itself for PDF/UA-1.
+# pdf.ua1_math: office adds the MathML as Microsoft Office's own attribute
+# on the formula (/O /MSFT_Office /MSFT_MathML), which Word writes in the
+# PDFs it saves and latex-lab's mathml-MS option reproduces.
+MATH_SETUP = {
+    "ua2": "mathml-SE,mathml-AF",
+    "ua1-alt": "mathml-AF",
+    "ua1-office": "mathml-AF,mathml-MS",
+}
+
+
+def math_setup(standards, choice):
+    """The math/setup value for the standards the PDF claims."""
+    if any(s.lower().startswith("ua-1") for s in standards) and \
+            not any(s.lower().startswith("ua-2") for s in standards):
+        return MATH_SETUP["ua1-" + choice]
+    return MATH_SETUP["ua2"]
+
+
+# PDF/UA-1 wants a /Contents on every link (7.18.5), LaTeX's own too: a
+# contents line, a cross-reference it makes. hyperref has a plug for that
+# ("Go to destination" and the destination's name, or the address), which
+# would overwrite the text-and-description /Contents pdf-target.lua gives a
+# text link. These plugs use hyperref's text only for a link that has none
+# of its own.
+UA1_LINKS = r"""\ExplSyntaxOn
+\AddToHook{begindocument/end}
+  {
+    \socket_if_exist:nT {hyp/link/GoTo/Contents}
+      {
+        \socket_new_plug:nnn {hyp/link/GoTo/Contents}{oer}
+          {
+            \tl_if_empty:NT \l__oer_link_contents_tl
+              {
+                \pdfstringdef \l_tmpa_tl {Go~to~destination~#1}
+                \pdfannot_dict_put:nne {link/GoTo}{Contents}{(\l_tmpa_tl)}
+              }
+          }
+        \socket_assign_plug:nn {hyp/link/GoTo/Contents}{oer}
+      }
+    \socket_if_exist:nT {hyp/link/URI/Contents}
+      {
+        \socket_new_plug:nnn {hyp/link/URI/Contents}{oer}
+          {
+            \tl_if_empty:NT \l__oer_link_contents_tl
+              {
+                \pdfstringdef \l_tmpa_tl {#1}
+                \pdfannot_dict_put:nne {link/URI}{Contents}{(\l_tmpa_tl)}
+              }
+          }
+        \socket_assign_plug:nn {hyp/link/URI/Contents}{oer}
+      }
+  }
+\ExplSyntaxOff
+"""
+
+
+def is_ua1(standards):
+    return any(s.lower().startswith("ua-1") for s in standards) and \
+        not any(s.lower().startswith("ua-2") for s in standards)
+
+
 # Written into the preamble after the metadata file's own header-includes.
 # math/setup names both forms of MathML luamml makes (it needs
 # unicode-math, which Pandoc's template loads under LuaLaTeX): structure
@@ -139,10 +206,7 @@ FIGURE_PLACEMENT = {
 # the ones pdf-target.lua puts around every link; LaTeX's own default
 # /Contents -- the address, or "Go to destination" and an id -- is
 # switched off, since every link the book's text makes gets one here.
-HEADER = r"""\ifdefined\tagpdfsetup
-  \tagpdfsetup{math/setup={mathml-SE,mathml-AF}}
-\fi
-\ExplSyntaxOn
+HEADER = r"""\ExplSyntaxOn
 \tl_new:N \l__oer_link_contents_tl
 \NewDocumentCommand \OERLinkContents { m }
   {
@@ -157,6 +221,7 @@ HEADER = r"""\ifdefined\tagpdfsetup
   }
 \NewDocumentCommand \OERLinkContentsReset { }
   {
+    \tl_clear:N \l__oer_link_contents_tl
     \cs_if_exist:NT \pdfannot_dict_remove:nn
       {
         \pdfannot_dict_remove:nn {link/URI} {Contents}
@@ -357,7 +422,18 @@ def book_metadata(project, resolved, base, numbered):
         includes = {"t": "MetaList", "c": []}
     elif includes.get("t") != "MetaList":
         includes = {"t": "MetaList", "c": [includes]}
-    ours = HEADER + FIGURE_PLACEMENT[str(resolved["pdf.figures"])]
+    # The standards in effect, the metadata file's if it set them.
+    claimed = meta.get("pdfstandard")
+    claimed = [meta_plain(c) for c in claimed["c"]] if claimed and claimed.get("t") == "MetaList" \
+        else ([meta_plain(claimed)] if claimed else [])
+    ours = ("\\ifdefined\\tagpdfsetup\n  \\tagpdfsetup{math/setup={%s}}\n\\fi\n"
+            % math_setup(claimed, str(resolved["pdf.ua1_math"]))) + HEADER
+    if is_ua1(claimed):
+        # LaTeX's own links, a footnote's mark among them, get no /Contents,
+        # which PDF/UA-1 requires of every link (7.18.5); a footnote mark
+        # isn't made a link. (The template loads hyperref after this.)
+        ours += "\\PassOptionsToPackage{hyperfootnotes=false}{hyperref}\n" + UA1_LINKS
+    ours += FIGURE_PLACEMENT[str(resolved["pdf.figures"])]
     unchosen = [command for field, command in FAMILIES if field not in meta]
     if unchosen:
         ours += FALLBACK + "".join(
@@ -391,6 +467,23 @@ def meta_plain(value):
 
 def document_class(meta):
     return meta_plain(meta.get("documentclass"))
+
+
+def count_math(blocks):
+    """How many equations the book holds."""
+    found = [0]
+
+    def walk(node):
+        if isinstance(node, dict):
+            if node.get("t") == "Math":
+                found[0] += 1
+            for value in node.values():
+                walk(value)
+        elif isinstance(node, list):
+            for value in node:
+                walk(value)
+    walk(blocks)
+    return found[0]
 
 
 def captioned_tables(blocks):
@@ -468,6 +561,9 @@ def build(base, name, resolved, keep, intermediates=None, latex_only=False):
     title_page = safe_stem(os.path.splitext(os.path.basename(setting))[0]) \
         if setting else None
     meta = book_metadata(project, resolved, base, numbered)
+    claimed = meta.get("pdfstandard")
+    claimed = [meta_plain(c) for c in claimed["c"]] if claimed and claimed.get("t") == "MetaList" \
+        else ([meta_plain(claimed)] if claimed else [])
     try:
         toc_depth = int(meta_plain(meta.get("toc-depth")))
     except ValueError:
@@ -485,6 +581,14 @@ def build(base, name, resolved, keep, intermediates=None, latex_only=False):
     # it (convertImage in PDF.hs), and the image keeps its alt text; without
     # rsvg-convert the LaTeX writer falls back to \\includesvg, which needs
     # Inkscape and passes no alt text at all.
+    formulas = count_math(assembly.blocks) if is_ua1(claimed) else 0
+    if formulas:
+        print(f"WARNING: PDF/UA-1 has no standard way to tag MathML, so the book's "
+              f"{formulas} equation(s) are tagged as formulas with their TeX source as "
+              "alternative text, which a screen reader reads as written, and their "
+              "MathML attached as files"
+              + (" and as Microsoft Office's attribute" if str(resolved["pdf.ua1_math"]) == "office"
+                 else "") + ". PDF/UA-2 tags MathML properly.", file=sys.stderr)
     svgs = svg_images(assembly.blocks)
     if svgs and not latex_only and shutil.which("rsvg-convert") is None:
         sys.exit(f"The book has {len(svgs)} SVG image(s) ({svgs[0]} first), and a PDF "

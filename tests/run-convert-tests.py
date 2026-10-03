@@ -2122,7 +2122,8 @@ def case_word_text_math(work):
                          "The same: $y$ < 5 here.\n\n"
                          "The same: $z$ < 5 here.\n\n"
                          "A lone *a*, a [link](https://example.org), and 3 < 5 stay.\n\n"
-                         "ONE-RUN\n")
+                         "ONE-RUN\n\nTWO-RUN\n\n"
+                         "No\u00a0break before *σ* = 2 here.\n")
     # Word keeps a run of plain text together, where Pandoc writes a run a
     # word: the equation begins and ends inside this one.
     path = os.path.join(work, "tm.docx")
@@ -2135,6 +2136,12 @@ def case_word_text_math(work):
                               '<w:r><w:rPr><w:color w:val="C00000" /></w:rPr>'
                               '<w:t xml:space="preserve">Level '
                               '\u03b1 = 0.05 here.</w:t></w:r>',
+                              data.decode("utf-8"), flags=re.S).encode("utf-8")
+                # Two equations in one run of text.
+                data = re.sub(r"<w:r>(?:(?!</w:r>).)*TWO-RUN</w:t></w:r>",
+                              '<w:r><w:rPr><w:color w:val="0000C0" /></w:rPr>'
+                              '<w:t xml:space="preserve">Let \u03b1 = 0.05 and '
+                              '\u03b2 = 0.2 here.</w:t></w:r>',
                               data.decode("utf-8"), flags=re.S).encode("utf-8")
             z.writestr(info, data)
 
@@ -2152,6 +2159,7 @@ def case_word_text_math(work):
     with zipfile.ZipFile(os.path.join(work, "source", "tm.docx")) as z:
         copy = z.read("word/document.xml").decode("utf-8")
     colored = re.findall(r'<w:color w:val="C00000" /></w:rPr><w:t xml:space="preserve">([^<]*)</w:t>', copy)
+    blue = re.findall(r'<w:color w:val="0000C0" /></w:rPr><w:t xml:space="preserve">([^<]*)</w:t>', copy)
     _, off = build("    math:\n      from_text: false\n")
     return [
         ("each expression is an equation in the copy, what's between them text",
@@ -2163,8 +2171,13 @@ def case_word_text_math(work):
         ("an equation inside one run of text splits it, its formatting on "
          "both sides", lambda: "Level $\\alpha = 0.05$ here." in on
          and colored == ["Level ", " here."]),
+        ("two equations in one run of text split it three ways, its formatting "
+         "on each piece", lambda: "Let $\\alpha = 0.05$ and $\\beta = 0.2$ here." in on
+         and blue == ["Let ", " and ", " here."]),
+        ("a paragraph with a no-break space is found, as the filter keeps one",
+         lambda: "$\\sigma = 2$ here." in on),
         ("the run says how many it wrote, and none was left",
-         lambda: "6 equation(s) made of math typed as text" in said
+         lambda: "9 equation(s) made of math typed as text" in said
          and "not written into the Word file" not in said),
         ("with math.from_text off, the copy's text is as it was",
          lambda: "We know *μ* = 34" in off and "$x$ \\< 5" in off),

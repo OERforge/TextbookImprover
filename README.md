@@ -1,6 +1,6 @@
 # TextbookImprover
 
-Converts a directory of Word or Markdown documents into more-accessible HTML pages, packages them as an IMS Common Cartridge for import into Brightspace or another LMS, and can assemble them into an EPUB.
+Converts a book's sources (Word, Markdown, AsciiDoc, or HTML, or a book saved from the web, an EPUB, or a course cartridge) into more-accessible HTML pages, an EPUB, a tagged PDF, Word files, or Markdown or AsciiDoc source, and packages the pages as an IMS Common Cartridge for import into Brightspace or another LMS.
 
 Licensed GPL 3.0. See `LICENSE` for more info.
 
@@ -12,7 +12,7 @@ Reads a book's sources, one file per page (Word, Markdown, AsciiDoc, or HTML), i
 
 **Conversion** runs each source through Pandoc and a Lua filter that makes the page more accessible: figures get real captions tied to their images, data tables get captions, header cells, and a focusable scroll region, images get their alt text checked and their layout spacers marked, equations stay equations, and cross-references that Word's export left dangling land. Where the source doesn't say something a screen reader needs, the run reports it, and a sidecar file holds what you decide; after a Markdown round trip, the decisions are in the source itself.
 
-**Packaging** turns the pages into a Common Cartridge with the book's structure as the module tree, validated against the IMS schemas, and into an EPUB 3 that validates with epubcheck and says what it can claim about itself.
+**Packaging** turns the pages into a Common Cartridge with the book's structure as the module tree, validated against the IMS schemas, and into an EPUB 3 that validates with epubcheck and says what it can claim about itself. **The PDF** is tagged by LaTeX itself, its formulas carrying MathML, and claims PDF/UA-2 and Well-Tagged PDF, or PDF/UA-1 for checkers that know only that; veraPDF checks it. **The Word files** open out of compatibility mode, so Word's Accessibility Checker runs, with ScreenTips, decorative images marked, and table headers declared, and read back as a source with what Pandoc alone would lose put back. A `source` target writes the same remediation into the author's own Word or Markdown files.
 
 **Every run checks what it wrote**: dead links and fragments, missing alt text, heading order, invalid ids, tables without headers or caption, and, when the validators are installed, epubcheck, the Nu HTML checker, and veraPDF. The same checks, plus what a Word, Markdown, or PDF file says about itself, run on any file without converting it: `audit.py` writes a findings CSV and a report.
 

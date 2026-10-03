@@ -98,8 +98,7 @@ keys on the media path ignoring its extension.
   conform, and the useful thing to add is a caption, not a layout
   marking.
 - **Two PAC errors on a tagged PDF are the validator's, not the file's.**
-  This matters only once PDF is an output (on the roadmap), but it's
-  worth recognizing rather than chasing. *Table header cell has no
+  They're worth recognizing rather than chasing. *Table header cell has no
   associated subcells* is raised because `latex-lab` sets `Scope` through
   an attribute class and PAC doesn't resolve `/ClassMap` references:
   rewriting the same value as an inline `/A` dictionary makes PAC pass
@@ -113,7 +112,9 @@ keys on the media path ignoring its extension.
   Table L.2 permits it, so the file conforms, and
   [tagging-project issue #1583](https://github.com/latex3/tagging-project/issues/1583)
   says the same. It has been reported to PAC; there's no public ticket to
-  watch.
+  watch. A PDF this pipeline makes takes that empty repeated head out of
+  the table (`pdf.repair_captions`), so it may not show the second error
+  at all.
 - **One conversion target, one package.** The configuration is shaped for
   several of each, and the tools resolve them correctly, but only `html`
   and `common-cartridge` are implemented.

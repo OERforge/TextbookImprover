@@ -34,7 +34,9 @@ contents:
 
 the nav lists *Preface* and *Unit 1 Foundations* at the first level and the two sections under the unit, and `toc_depth: 2` (the default, passed straight to Pandoc) is what makes it stop there. A book whose files were split at a different depth reads the same way once its tree says where each page sits. What the tree can't do yet is reach inside a file: a source that arrived as one `.docx` is one page, and its chapters appear as that page's internal headings. Splitting pages at a heading level is [planned](../ROADMAP.md).
 
-Pages on disk that `contents` doesn't place are named on stderr and left out, as the cartridge leaves them out; a page `contents` names that doesn't exist is a warning. With no `contents` at all the order is guessed from the filenames, the same guess the packager makes, and the run says so. A `contents` that is a single page is taken to be the book itself: nothing is added above its headings.
+Pages on disk that `contents` doesn't place are named on stderr and left out, as the cartridge leaves them out; a page `contents` names that doesn't exist is a warning. With no `contents` at all the order is guessed from the filenames, the same guess the packager makes, and the run says so. A `contents` that is a single page is taken to be the book itself: nothing is added above its headings, and the page's own title heading stays its first.
+
+The EPUB opens with a title page, the book's title and authors, when its structure calls for one (`title_page: auto`): more than one top-level entry, or a single page with more than one top-level heading or something before its title heading, as a byline. A document whose one top-level heading is its title has none, and its title is in the package's metadata. `title_page: on` and `off` decide it outright ([A page's title](formats.md#a-pages-title)).
 
 Each page is its own file inside the EPUB, titled by its heading. Every `id` in a page is prefixed with the page's name (`page-1-2-scarcity--table-1`), and links within the page follow, so two pages that both have a *Key Terms* heading don't send a link to the wrong one.
 

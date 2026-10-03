@@ -358,9 +358,11 @@ format, will take Jinja's block syntax for the same thing.
 
 **The title block.** A source's opening page carries the document's
 subtitle, date, abstract, and `include-before`, which the page
-template renders: that is its title page. `title_block: off` on a
-target leaves them out, for an author laying the front matter out by
-hand.
+template renders under its title: that is its title page. `title_block:
+off` on a target leaves them out, for an author laying the front matter
+out by hand. A page's title itself is its own H1 in every output
+([A page's title](formats.md#a-pages-title)), and an EPUB's or a PDF's
+title page follows the book's structure (`title_page`).
 
 ## Upgrading from v0.4
 

@@ -22,6 +22,7 @@ on another `bin/` script.
 | `figures-and-tables.lua` | Pandoc filter doing the accessibility work on each page. |
 | `media-extensions.lua` | Pandoc filter naming extracted images by their real content type. |
 | `safe-media.lua` | Rewrites a page's local media references at render time to names that need no encoding in a link, matching what `convert.py` copies beside the page. |
+| `math-repair.lua` | At the filter stage, after `figures-and-tables.lua`: equations Word's editor wrote in the wrong characters repaired, and math typed as text made equations, with `math-keep.csv` to leave any as it was; where each repair was, recorded so a `source` target can write it into the author's Word file. |
 | `target-blocks.lua` | At render time, keeps a passage marked for some targets and drops it for the rest, and applies `title_block`. |
 | `asciidoc-source.lua` | When an AsciiDoc source is read: `imagesdir` applied, sections moved below the title, Asciidoctor's own settings dropped from the metadata. |
 | `markdown-html.lua` | When a Markdown source is read: raw HTML reassembled a tag with its match, read as HTML, and cleaned by `html-raw.lua` and `html-source.lua`, loaded from their files. |
@@ -38,7 +39,13 @@ on another `bin/` script.
 | `lib/unpacking.py` | What both unpackers write: `project.yaml` and `unpack-report.csv`. |
 | `lib/epubsource.py` | The package document, the spine, the navigation, and the rewriting of a page's references, for the unpacker. Parses no content document. |
 | `lib/htmlrepair.py` | What an HTML source needs done to it before Pandoc reads it, on a copy: an id on a paragraph, a list item, a cell, or an inline mark moves onto an anchor the reader keeps. |
-| `lib/docxrepair.py` | What a `.docx` needs done to it before Pandoc reads it, on a copy: bookmarks moved to where the reader keeps them, invisible links so bookmarks only other files point at survive. After Pandoc reads the copy, each hyperlink's ScreenTip, which the reader drops, is given to its link as the title. |
+| `lib/docxrepair.py` | What a `.docx` needs done to it before Pandoc reads it, on a copy: bookmarks moved to where the reader keeps them, invisible links so bookmarks only other files point at survive, an item's second paragraph kept in its list, and, in a file a `docx` target wrote, the lists, paragraphs, and code in quotations marked with their depth. After Pandoc reads the copy, what its reader drops or misreads is put back: ScreenTips as link titles, Word's decorative mark, terms with no definition, quotations nested and joined, the ids Pandoc renamed, code's numbering and language. |
+| `lib/wordrepairs.py` | The repairs that change what reading a Word file means, `word.headings` and `word.tracked_deletions`, applied alike to the copy Pandoc reads and to a `source` target's copy. |
+| `lib/docxtarget.py` | What a `docx` target adds to Pandoc's Word file: compatibility mode 15, ScreenTips, Word's decorative mark, the First Column flag and the bookmarks JAWS reads as a table's headers, quotations indented by depth with the lists and code inside them, numbered code, the map of ids Pandoc renamed, and only the bookmarks something uses. |
+| `lib/docxremediate.py`, `lib/mdremediate.py`, `lib/htmlremediate.py` | A `source` target: the sidecars' decisions written into the author's own Word, Markdown, or HTML file, the rest of it as the author wrote it. |
+| `lib/pdfretag.py`, `lib/pdfparagraphs.py` | Repairs to the tagged PDF after LaTeX: a longtable's caption made its Caption and the empty repeated head taken out, and empty paragraph elements removed. |
+| `lib/mathjax.py` | Formulas a saved page holds only as MathJax drew them, made math again. |
+| `lib/cartridgesource.py` | A Common Cartridge read as a book's source: its outline, its pages, and the files they use. |
 | `lib/notes.py` | Footnote numbering and placement across pages, after rendering, for HTML and EPUB alike. |
 | `lib/findings.py` | One format for everything a check finds: the CSV, the Markdown report, the input hashes, the cache. |
 | `lib/sourcecheck.py` | What a Word or Markdown source says about itself, from Pandoc's unfiltered reading. |
@@ -50,7 +57,7 @@ on another `bin/` script.
 | `check-output.py` | Checks the pages, EPUBs, and PDFs a run wrote for dead links, missing alt text, skipped headings, and the like; the command line over `lib/outputcheck.py`. |
 | `build-epub.py` | Assembles the filtered intermediates into one EPUB3, ordered by `project.contents`, with accessibility claims computed from the build. |
 | `build-pdf.py` | Assembles the same way into one tagged PDF through Pandoc's LaTeX writer and LuaLaTeX: roles as division commands, the metadata file's YAML for the writer, and the macros `pdf-target.lua` uses. |
-| `pdf-target.lua` | What the LaTeX writer can't be told: a declared header column as row headers, a decorative image as an artifact, each link's `/Contents`. |
+| `pdf-target.lua` | What the LaTeX writer can't be told: a declared header column as row headers, a decorative image as an artifact, each link's `/Contents`, a cell spanning rows as `table/multirow`, and a quotation in a table cell unwrapped. |
 | `schema-conversion.yaml` | Declares every conversion setting, its type, default, and meaning. |
 
 **`bin/` — auditing**
@@ -95,6 +102,11 @@ and redistributed under their own terms. See the README there.
 | `docx-compat.py` | Reads, and optionally sets, the Word compatibility mode of a DOCX. |
 | `restyle-headings.py` | Rewrites a DOCX's heading styles from a map or from its TOC field, for a book whose top level is styled `Title`. |
 | `settings-reference.py` | Writes the settings reference pages under `docs/` from the schemas. |
+| `remediate.py` | Writes remediated copies of a book's Word files and hand-maintained HTML pages, as a `format: source` target does. |
+| `shortdoi.py` | Fills in shortDOIs for the DOIs in a bare-links sidecar. |
+| `fix-empty-paragraphs.py` | Removes the empty paragraph elements LaTeX's tagging leaves in a PDF made some other way. |
+| `slim-corpus.py` | A copy of a Word corpus with each file's document part alone, for the census. |
+| `make-import-tests.py` | Three cartridges differing in one way each, to see what an LMS does on re-import. |
 
 **`tests/`** holds the configuration conformance fixtures and the two test
 runners. See [Testing](testing.md).

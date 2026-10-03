@@ -14,6 +14,10 @@ Tools in `util/` that aren't part of a conversion but help before or around one:
 | `restyle-headings.py` | Reports the paragraph styles a DOCX uses, and rewrites its heading styles from a map: the repair a book whose top level is styled `Title` needs before its structure can be seen. |
 | `settings-reference.py` | Writes the three settings reference pages under `docs/` from the schemas; `--check` says whether they're current. |
 | `remediate.py` | Writes remediated copies of a book's Word files and hand-maintained HTML pages: the sidecars' decisions about tables, images, and links written into the files themselves, as a `format: source` target does. |
+| `shortdoi.py` | Fills in shortDOIs for the DOIs in a bare-links sidecar ([Bare links](bare-links.md)). |
+| `fix-empty-paragraphs.py` | Removes the empty paragraph elements LaTeX's tagging leaves in a PDF made some other way, as the PDF target does for its own (`pdf.remove_empty_paragraphs`). |
+| `slim-corpus.py` | Copies a corpus of Word books with nothing but `word/document.xml` in each file, for the table census: nine books, 1,782 files, in 10.5 MB. |
+| `make-import-tests.py` | Builds three cartridges that differ in one way each, to find out what an LMS does on re-import ([Brightspace](brightspace.md)). |
 
 Each takes `--help`. The census and sample tools read Word files directly and need no Pandoc; `compare-output.py` reads HTML; `docx-compat.py` touches nothing but `word/settings.xml`; `restyle-headings.py` nothing but the paragraph styles.
 

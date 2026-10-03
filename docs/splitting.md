@@ -13,7 +13,7 @@ The cut happens on the filtered intermediate, after the filter has done its work
 
 ## What a piece is
 
-Everything from a top-level heading of the chosen level or shallower up to the next one. The heading becomes the piece's title, the way `promote_h1_to_title` makes a source's H1 its page title, and its id is kept as an empty anchor at the top of the piece so links to the section still land. The piece's own headings move up so that each page starts its own structure at H2. Whatever precedes the first cut (a chapter's introduction, say) is a piece of its own, named after the source and titled by it, unless there's nothing there. A source with no heading at that level is left as it was.
+Everything from a top-level heading of the chosen level or shallower up to the next one. The heading becomes the piece's title, the way `promote_h1_to_title` makes a source's H1 its page title, and every output shows it as the piece's own H1; its id is kept as an empty anchor at the top of the piece so links to the section still land. The piece's own headings move up so that each page starts its own structure at H2. Whatever precedes the first cut (a chapter's introduction, say) is a piece of its own, named after the source and titled by it, unless there's nothing there. A source with no heading at that level is left as it was.
 
 Cut headings nest. With level 2, an H1 and the H2s under it are all pages, and the H2 pages belong under the H1. An H1 with nothing of its own before its first H2 isn't a page at all: it survives as a group, because the pages under it record it as their parent. Only top-level headings cut; a heading inside a Div, a list item, or a table cell is part of whatever contains it, and an empty heading (Word leaves these behind) cuts nothing.
 

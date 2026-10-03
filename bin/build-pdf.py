@@ -583,6 +583,10 @@ def build(base, name, resolved, keep, intermediates=None, latex_only=False):
         divisions=document_class(meta) in FRONTMATTER_CLASSES,
         toc_depth=toc_depth)
     if len(tree) == 1 and tree[0][0] == "page":
+        # The divisions are written where the role changes, between entries,
+        # so a book of one page never reached its main matter: numbered i in
+        # roman, its chapter unnumbered. Its one entry starts its division.
+        assembly.before_entry(tree[0], 1)
         assembly.add_single_page(tree[0][1], tree[0][2])
     else:
         assembly.add_tree(tree)

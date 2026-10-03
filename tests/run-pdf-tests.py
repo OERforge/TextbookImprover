@@ -328,6 +328,17 @@ def ua1_formulas(path):
     return found, pdf.pdf_version, links
 
 
+def page_label_styles(path):
+    """The numbering style of each run of pages, in order: /D for 1, 2,
+    3; /r for i, ii, iii."""
+    pdf = pdfparagraphs.pikepdf.open(path)
+    labels = pdf.Root.get("/PageLabels")
+    if labels is None:
+        return []
+    nums = list(labels.get("/Nums") or [])
+    return [str(nums[i + 1].get("/S")) for i in range(0, len(nums), 2)]
+
+
 def spanning_table(path, index):
     """The index-th table's rows, each as a list of its cells' RowSpan (1
     when the cell has none), from the class map and the cells' own
@@ -555,6 +566,10 @@ def checks(work):
         # heading is its first, at level 1 (title_page: auto).
         ("a one-page book has no title page, and its title is its level-1 heading",
          lambda: "/Title" not in ua1_roles and "/H1" in ua1_roles),
+        # The divisions are written between entries, so its one page never
+        # reached the main matter: numbered i, its chapter unnumbered.
+        ("and its page is in the main matter, numbered 1, 2, 3",
+         lambda: os.path.exists(ua1_path) and page_label_styles(ua1_path)[-1:] == ["/D"]),
         ("the run warns that its equations are tagged as PDF/UA-1 allows",
          lambda: "PDF/UA-1 has no standard way to tag MathML" in ua1_said),
         ("no paragraph element is left empty",

@@ -39,6 +39,7 @@ Versions are two-part and pre-1.0: breaking changes may land in any of them unti
 
 ### Fixed
 
+- **A one-page book's PDF is in its main matter.** The PDF writes `\frontmatter`, `\mainmatter`, and the rest where a book's roles change, between its entries, so a book of one page never reached the main matter: its pages were numbered i, ii in roman, and its chapter went unnumbered. Its one entry now starts its division.
 - **A table cell spanning rows is tagged so in a PDF.** Pandoc sets it with `\multirow`, which LaTeX's tagging doesn't follow: the cell was tagged as one row's, and each row it covered got an empty cell of its own, which veraPDF didn't report. Each such cell now says `table/multirow`, so it has its `RowSpan` and the cells it covers aren't tagged; and since LaTeX's record of those covered cells outlived the table, so that the next table lost its cells at the same places, the build clears it at the start of each table. The statistics book's statistical tables have 79 such cells.
 - **A decorative image in Word has no description or title at all.** The Word target and a remediated Word copy gave one Word's decorative mark beside Pandoc's empty description and title; Word, marking an image decorative, leaves neither, and so do they now. NVDA announces such an image as "graphic picture decorative" either way, in a file made in Word as in ours.
 - **A numbered book's long page titles are numbered.** The number went on a page's `<title>` and heading only when the writer had kept them on one line; a title long enough to wrap kept no number.

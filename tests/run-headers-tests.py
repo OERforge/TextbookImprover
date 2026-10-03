@@ -327,6 +327,52 @@ def checks(workdir):
     yield "rows that disagree about a key are warned of", \
         "more than once, with different decisions" in err, err
 
+    # A sidecar from before drafted-by and reviewed: its rows read as a
+    # person's, and the sample has the columns added, TI on a row that
+    # says what the guess says, blank on one a person changed.
+    old = os.path.join(workdir, "old")
+    os.makedirs(old)
+    docx(os.path.join(old, "d.docx"), [para("Table 1.1"), GRID, para("Table 1.2"), CONTINGENCY])
+    run(old)
+    fresh = read(old, "table-headers-new.csv")
+    columns = ["key", "headers", "split-at", "caption-rows", "part-captions", "source", "label", "preview"]
+    changed = {"first-row": "none"}
+    with open(os.path.join(old, "table-headers.csv"), "w", newline="", encoding="utf-8") as h:
+        w = csv.writer(h)
+        w.writerow(columns)
+        w.writerow([fresh[0][c] for c in columns])
+        w.writerow([changed.get(fresh[1]["headers"], "first-row") if c == "headers" else fresh[1][c]
+                    for c in columns])
+    with open(os.path.join(old, "table-headers.csv"), encoding="utf-8") as h:
+        before = h.read()
+    code, err = run(old)
+    sample = read(old, "table-headers-sample.csv") or []
+    by_key = {r["key"]: r for r in sample}
+    yield "an old sidecar gets a sample with drafted-by and reviewed added, and the run says so", \
+        code == 0 and len(sample) == 2 and list(sample[0].keys())[-2:] == ["drafted-by", "reviewed"] \
+        and "no drafted-by or reviewed column" in err, (len(sample), err)
+    yield "TI on the row that says what the guess says, blank on the one a person changed", \
+        by_key.get(fresh[0]["key"], {}).get("drafted-by") == "TI" \
+        and by_key.get(fresh[1]["key"], {}).get("drafted-by") == "" \
+        and all(r["reviewed"] == "" for r in sample), sample
+    with open(os.path.join(old, "table-headers.csv"), encoding="utf-8") as h:
+        after = h.read()
+    yield "and the sidecar itself is left as it was", before == after, ""
+    shutil.move(os.path.join(old, "table-headers-sample.csv"), os.path.join(old, "table-headers.csv"))
+    code, err = run(old)
+    yield "adopting the sample brings no sample back", \
+        not os.path.exists(os.path.join(old, "table-headers-sample.csv")) \
+        and "no drafted-by or reviewed column" not in err, err
+    # A header naming the columns is enough, even over rows typed short.
+    with open(os.path.join(old, "table-headers.csv"), "w", newline="", encoding="utf-8") as h:
+        w = csv.writer(h)
+        w.writerow(columns + ["drafted-by", "reviewed"])
+        w.writerow([fresh[0]["key"], fresh[0]["headers"]])
+    code, err = run(old)
+    yield "a sidecar whose header names them needs no sample, however short its rows", \
+        not os.path.exists(os.path.join(old, "table-headers-sample.csv")) \
+        and "no drafted-by or reviewed column" not in err, err
+
 
 def main():
     workdir = tempfile.mkdtemp(prefix="headers-test-")

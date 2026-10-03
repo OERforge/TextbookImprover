@@ -91,6 +91,27 @@ REPORT_COLUMNS = ["key", "source", "label", "preview", "declared", "supplier",
 # Reading the sidecar
 # ---------------------------------------------------------------------------
 
+def has_review_columns(path):
+    """Whether a sidecar has drafted-by and reviewed: a header row naming
+    them, or a row long enough to hold them. A sidecar from before them
+    has neither; an absent or empty one has nothing to bring up to date."""
+    if not path or not os.path.exists(path):
+        return True
+    rows = False
+    with open(path, newline="", encoding="utf-8") as handle:
+        for raw in csv.reader(handle):
+            if not raw or not raw[0].strip():
+                continue
+            if raw[0].strip().lower() == "key":
+                if "drafted-by" in (c.strip().lower() for c in raw):
+                    return True
+                continue
+            rows = True
+            if len(raw) >= len(SIDECAR_COLUMNS):
+                return True
+    return not rows
+
+
 def read_sidecar(path, warn):
     """Rows keyed on the key column. Header rows anywhere are skipped, so a
     file assembled by pasting table-headers-new.csv in repeatedly still
@@ -550,10 +571,21 @@ def main():
     stem = (args.new_path[:-len("-new.csv")] if args.new_path.endswith("-new.csv")
             else os.path.splitext(args.new_path)[0])
     unmatched_path, sample_path = stem + "-unmatched.csv", stem + "-sample.csv"
+    # A sidecar from before drafted-by and reviewed reads as a person's
+    # decisions, but its rows were mostly pasted from the prefilled file,
+    # TextbookImprover's guesses unchecked. The sample has the columns
+    # added: TI on a row that says what the guess says now, blank on one a
+    # person changed. The sidecar itself is left as it is.
+    old_format = bool(sidecar) and not has_review_columns(args.sidecar)
+    guessed = 0
+    if old_format:
+        guesses = {info["key"]: info["guess"] for info in tables}
+        for key, row in sidecar.items():
+            same = bool(row["headers"]) and row["headers"] == guesses.get(key)
+            row["drafted-by"], row["reviewed"] = ("TI" if same else ""), ""
+            guessed += same and key in claimed
     if unmatched:
         write_csv(unmatched_path, SIDECAR_COLUMNS, unmatched)
-        write_csv(sample_path, SIDECAR_COLUMNS,
-                  [r for k, r in sidecar.items() if k in claimed])
         print("table-headers: WARNING: %d sidecar row(s) match no table, so "
               "nothing applies them: a table's text or shape changed, or it's "
               "gone. They're in %s, and each changed table's row as it is now "
@@ -562,7 +594,18 @@ def main():
                  args.sidecar), file=sys.stderr)
     else:
         remove_if_present(unmatched_path)
+    if unmatched or old_format:
+        write_csv(sample_path, SIDECAR_COLUMNS,
+                  [r for k, r in sidecar.items() if k in claimed])
+    else:
         remove_if_present(sample_path)
+    if old_format:
+        print("table-headers: %s has no drafted-by or reviewed column, so its rows "
+              "read as a person's decisions. %s is %s with them added: drafted-by "
+              "TI on the %d row(s) that say what the guess says now, blank on the "
+              "others, which a person changed. Rename it to %s once you've looked."
+              % (args.sidecar, sample_path, args.sidecar, guessed,
+                 os.path.basename(args.sidecar)), file=sys.stderr)
     return 0
 
 

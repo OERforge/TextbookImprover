@@ -209,8 +209,11 @@ def screentips(xml, rels, links):
 # by indentation, reads it back as one. mark_quotes wraps each quote's
 # content in a Div with an id, which the writer makes a bookmark range;
 # indent_quotes indents each paragraph by its depth and takes the
-# bookmarks out. A numbered paragraph is left as it is: the reader never
-# puts a list inside a quote, however it's indented.
+# bookmarks out. A numbered paragraph, a list's item, keeps its numbering
+# level's own indent and gains the quote's beyond it, so Word shows the list
+# inside the quote; Pandoc's reader never puts a list inside a quote,
+# however it's indented, and reading Word puts it back by that indent
+# (docxrepair.mark_quoted_lists).
 # Marks are ids the writer turns into bookmarks, found again in its XML by
 # name. Letters and digits only, and none the start of another: Pandoc 3.11
 # names a bookmark after an id that starts with a letter, and 3.12 (#11845)
@@ -559,8 +562,6 @@ def keep_captions(xml):
 
 # What a page has that a Word file can't carry, known before writing.
 LOSSES = {
-    "list-in-quotation": "a list inside a quotation comes back outside it, "
-                         "the quotation split around it",
     "uncaptioned-figure": "a figure with no caption comes back as an image",
     "code-language": "a code block's language (its highlighting) is lost; "
                      "only letters and digits fit in the bookmark that carries one",
@@ -606,11 +607,7 @@ def losses(doc):
             if t == "BlockQuote":
                 walk(c, True)
                 return
-            if t in ("BulletList", "OrderedList") and quoted:
-                items = c if t == "BulletList" else c[1]
-                first = items[0][0]["c"] if items and items[0] and items[0][0].get("c") else []
-                found.append(("list-in-quotation", words(first)))
-            elif t == "CodeBlock" and code_language(node) and not _bookmarkable(code_language(node)):
+            if t == "CodeBlock" and code_language(node) and not _bookmarkable(code_language(node)):
                 found.append(("code-language", code_language(node)))
             elif t == "Figure" and not c[1][1]:
                 alts = []
@@ -639,8 +636,40 @@ def losses(doc):
     return found
 
 
-def _set_indent(paragraph, left, right=None):
-    ind = '<w:ind w:left="%d"%s />' % (left, ' w:right="%d"' % right if right else "")
+def level_indents(numbering):
+    """{(numId, ilvl): (left, hanging)} from word/numbering.xml: the
+    indent each list level gives its items. A level whose marker is blank
+    isn't a list's own: Pandoc's writer and OpenStax's export number an
+    item's second paragraph, or its code or figure, with one, to keep it
+    in the item, so it's left out."""
+    found = {}
+    abstracts = {m.group(1): m.group(0) for m in re.finditer(
+        r'<w:abstractNum\b[^>]*w:abstractNumId="(\d+)".*?</w:abstractNum>', numbering, re.S)}
+    for m in re.finditer(r'<w:num w:numId="(\d+)"[^>]*>.*?</w:num>', numbering, re.S):
+        ref = re.search(r'w:abstractNumId w:val="(\d+)"', m.group(0))
+        if not ref or ref.group(1) not in abstracts:
+            continue
+        for lvl in re.finditer(r'<w:lvl w:ilvl="(\d+)".*?</w:lvl>', abstracts[ref.group(1)], re.S):
+            ind = re.search(r'<w:ind\b([^>]*)/>', lvl.group(0))
+            text = re.search(r'<w:lvlText w:val="([^"]*)"', lvl.group(0))
+            if not ind or (text is not None and not html.unescape(text.group(1)).strip()):
+                continue
+            left = re.search(r'w:(?:left|start)="(-?\d+)"', ind.group(1))
+            hanging = re.search(r'w:hanging="(\d+)"', ind.group(1))
+            found[(m.group(1), lvl.group(1))] = (int(left.group(1)) if left else 0,
+                                                 int(hanging.group(1)) if hanging else 0)
+    return found
+
+
+def _numbering(paragraph):
+    """(numId, ilvl) of a numbered paragraph, or None."""
+    m = re.search(r'<w:numPr>\s*<w:ilvl w:val="(\d+)"\s*/>\s*<w:numId w:val="(\d+)"', paragraph)
+    return (m.group(2), m.group(1)) if m else None
+
+
+def _set_indent(paragraph, left, right=None, hanging=None):
+    ind = '<w:ind w:left="%d"%s%s />' % (left, ' w:right="%d"' % right if right else "",
+                                        ' w:hanging="%d"' % hanging if hanging else "")
     if "<w:pPr>" not in paragraph:
         return paragraph.replace("<w:p>", "<w:p><w:pPr>" + ind + "</w:pPr>", 1)
     start = paragraph.index("<w:pPr>")
@@ -654,16 +683,17 @@ def _set_indent(paragraph, left, right=None):
     return paragraph[:start] + "<w:pPr>" + props + paragraph[end:]
 
 
-def indent_quotes(xml):
+def indent_quotes(xml, levels=None):
     """Each paragraph inside the marked quote ranges indented by its
-    depth, the marks removed; returns (xml, count)."""
+    depth, a list's items beyond their level's own indent (levels, from
+    level_indents), the marks removed; returns (xml, count, list items)."""
     if QUOTE_MARK not in xml:
-        return xml, 0
+        return xml, 0, 0
     names = dict(re.findall(r'<w:bookmarkStart w:id="(\d+)" w:name="(_?' + QUOTE_MARK
                             + r'\d+)"\s*/>', xml))
     tokens = re.split(r"(<w:bookmarkStart\b[^>]*/>|<w:bookmarkEnd\b[^>]*/>|"
                       r"<w:tbl>|</w:tbl>|<w:p>.*?</w:p>)", xml, flags=re.S)
-    depth, tables, count, out = 0, 0, 0, []
+    depth, tables, count, items, out = 0, 0, 0, 0, []
     for token in tokens:
         mark = re.match(r'<w:bookmark(Start|End) w:id="(\d+)"', token)
         if mark and mark.group(2) in names:
@@ -674,14 +704,44 @@ def indent_quotes(xml):
         elif token == "</w:tbl>":
             tables -= 1
         elif token.startswith("<w:p>") and depth and not tables \
-                and "<w:numPr>" not in token:
+                and "<w:numPr>" in token:
+            numbered = _numbering(token)
+            if numbered and levels and numbered in levels:
+                left, hanging = levels[numbered]
+                token = _set_indent(token, left + QUOTE_STEP * depth, hanging=hanging)
+                count += 1
+                items += 1
+        elif token.startswith("<w:p>") and depth and not tables:
             block_text = 'w:pStyle w:val="BlockText"' in token
             if not (block_text and depth == 1):
                 token = _set_indent(token, QUOTE_STEP * depth,
                                     QUOTE_STEP if block_text else None)
                 count += 1
         out.append(token)
-    return "".join(out), count
+    return "".join(out), count, items
+
+
+# A file whose quotes hold lists says so in a document variable, which
+# Word keeps and shows nowhere: reading it, a list's items indented a quote
+# step beyond their level are put back in the quote (docxrepair). An
+# author's own file, without it, can indent a list for other reasons, a
+# step's sub-items under a numbered step, and is left as Pandoc reads it.
+QUOTED_LISTS_VAR = "TextbookImproverQuotedLists"
+
+
+def quoted_lists_var(settings):
+    """settings.xml with the document variable, after w:compat, where the
+    schema puts w:docVars."""
+    if QUOTED_LISTS_VAR in settings:
+        return settings
+    var = '<w:docVar w:name="%s" w:val="%d"/>' % (QUOTED_LISTS_VAR, QUOTE_STEP)
+    if "<w:docVars>" in settings:
+        return settings.replace("<w:docVars>", "<w:docVars>" + var, 1)
+    at = settings.find("</w:compat>")
+    if at < 0:
+        return settings
+    at += len("</w:compat>")
+    return settings[:at] + "<w:docVars>" + var + "</w:docVars>" + settings[at:]
 
 
 # Ids. Pandoc's writer names a bookmark after its id only when the id
@@ -823,6 +883,7 @@ def finish(path, doc, keep=None):
     tables = table_marks(doc)
     lines = lines_marks(doc)
     codes = code_marks(doc)
+    quoted_items = 0
     counts = {"compat": 0, "tooltips": 0, "decorative": 0, "first_columns": 0,
               "quotes": 0, "jaws_titles": 0, "ids": 0, "captions_kept": 0,
               "code_lines": 0, "code_languages": 0, "bookmarks_removed": 0}
@@ -846,14 +907,19 @@ def finish(path, doc, keep=None):
         xml, found = apply_markers(xml, tables, lines, codes)
         for key, n in found.items():
             counts[key] += n
-        xml, n = indent_quotes(xml)
+        xml, n, items = indent_quotes(xml, level_indents(text("word/numbering.xml"))
+                                      if "word/numbering.xml" in parts else None)
         counts["quotes"] += n
+        quoted_items += items
         xml, n = keep_captions(xml)
         counts["captions_kept"] += n
         if keep is not None:
             xml, n = prune_bookmarks(xml, keep)
             counts["bookmarks_removed"] += n
         parts[part] = xml.encode("utf-8")
+    if quoted_items and "word/settings.xml" in parts:
+        parts["word/settings.xml"] = quoted_lists_var(
+            parts["word/settings.xml"].decode("utf-8")).encode("utf-8")
     # The page's title is its Heading 1, not a Title paragraph
     # (target-blocks.lua), so Pandoc wrote no title into the file's
     # properties; it goes there, where Word and a screen reader find it.

@@ -489,6 +489,141 @@ def join_definition_terms(doc):
     return count
 
 
+# A list inside a quote. Pandoc's reader never puts a list inside a quote,
+# however it's indented: the quote's paragraphs before the list come back
+# as one quote, the list outside it, and the paragraphs after it as
+# another. A list's items indented beyond their numbering level's own
+# indent are in a quote, in a file whose settings say it puts lists in
+# quotes so (docxtarget.indent_quotes and QUOTED_LISTS_VAR); an author's
+# own file indents lists for other reasons, a numbered step's sub-items,
+# and is read as Pandoc reads it. Each is marked with a bookmark naming the
+# depth, which Pandoc reads as an anchor, and join_quoted_lists puts the
+# list back into the quote beside it.
+QUOTED_LIST_MARK = "tiqInQuote"
+QUOTED_LIST = re.compile(r"^_?" + QUOTED_LIST_MARK + r"(\d+)x\d+$")
+QUOTE_STEP = 480                       # docxtarget.QUOTE_STEP, Block Text's indent
+
+
+def mark_quoted_lists(xml, levels):
+    """Each numbered paragraph indented at least half a quote step beyond
+    its level's own indent marked with its quote depth. Returns (xml,
+    count)."""
+    import docxtarget
+    if not levels:
+        return xml, 0
+    count = 0
+
+    def one(m):
+        nonlocal count
+        paragraph = m.group(0)
+        numbered = docxtarget._numbering(paragraph)
+        ind = re.search(r'<w:pPr>.*?<w:ind\b([^>]*)/>.*?</w:pPr>', paragraph, re.S)
+        if not numbered or numbered not in levels or not ind:
+            return paragraph
+        left = re.search(r'w:(?:left|start)="(-?\d+)"', ind.group(1))
+        if not left:
+            return paragraph
+        depth = round((int(left.group(1)) - levels[numbered][0]) / QUOTE_STEP)
+        if depth < 1 or int(left.group(1)) - levels[numbered][0] < QUOTE_STEP // 2:
+            return paragraph
+        count += 1
+        ident = 2000000 + count
+        mark = ('<w:bookmarkStart w:id="%d" w:name="%s%dx%d"/><w:bookmarkEnd w:id="%d"/>'
+                % (ident, QUOTED_LIST_MARK, depth, count, ident))
+        end = paragraph.index("</w:pPr>") + len("</w:pPr>")
+        return paragraph[:end] + mark + paragraph[end:]
+    return re.sub(r"<w:p\b[^>]*>.*?</w:p>", one, xml, flags=re.S), count
+
+
+def join_quoted_lists(doc):
+    """A list marked by mark_quoted_lists put into the quote before it,
+    with the rest of the quote after it joined on; a marked list with no
+    quote before it opens one, which the quote after it, if any, joins.
+    The marks are removed. Returns how many lists moved."""
+    moved = 0
+
+    def depth_of(block):
+        # The depth the list's own items say, at the start of each item's
+        # first paragraph; a mark deeper in, in a list nested in it, goes
+        # with this one, and every mark is removed.
+        # A loose list's items are styled Block Text inside a quote, so the
+        # reader wraps each item's content in a quote of its own: the mark
+        # is inside it, and the wrapper goes once the list is the quote's.
+        found = 0
+        items = block["c"] if block["t"] == "BulletList" else block["c"][1]
+        for item in items:
+            first = item[0] if item else None
+            while first and first.get("t") == "BlockQuote" and first["c"]:
+                first = first["c"][0]
+            lead = first["c"][0] if first and first.get("t") in ("Plain", "Para") and first["c"] else None
+            if isinstance(lead, dict) and lead.get("t") == "Span" and not lead["c"][1]:
+                m = QUOTED_LIST.match(lead["c"][0][0])
+                if m:
+                    found = max(found, int(m.group(1)))
+        if found:
+            for item in items:
+                if len(item) == 1 and item[0].get("t") == "BlockQuote":
+                    item[:] = item[0]["c"]
+
+        def strip(node):
+            if isinstance(node, list):
+                node[:] = [x for x in node if not (
+                    isinstance(x, dict) and x.get("t") == "Span" and not x["c"][1]
+                    and QUOTED_LIST.match(x["c"][0][0]))]
+                for x in node:
+                    strip(x)
+            elif isinstance(node, dict):
+                strip(node.get("c"))
+        strip(block)
+        return found
+
+    def innermost(quote, depth):
+        # The quote at depth inside quote, as far as it goes.
+        while depth > 1 and quote["c"] and quote["c"][-1].get("t") == "BlockQuote":
+            quote, depth = quote["c"][-1], depth - 1
+        return quote
+
+    def fix(blocks):
+        nonlocal moved
+        out = []
+        joining = None                 # the quote a list just went into
+        for block in blocks:
+            t = block.get("t")
+            if t in ("BulletList", "OrderedList"):
+                depth = depth_of(block)
+                if depth and out and out[-1].get("t") == "BlockQuote":
+                    innermost(out[-1], depth)["c"].append(block)
+                    joining = out[-1]
+                    moved += 1
+                    continue
+                if depth:
+                    # A quote that opens with its list, or holds nothing
+                    # else; the rest of it, if any, joins it next.
+                    for _ in range(depth):
+                        block = {"t": "BlockQuote", "c": [block]}
+                    out.append(block)
+                    joining = block
+                    moved += 1
+                    continue
+            elif t == "BlockQuote" and joining is not None and out and out[-1] is joining:
+                joining["c"].extend(block["c"])
+                continue
+            joining = None
+            out.append(block)
+        return out
+
+    def walk(node):
+        if isinstance(node, list):
+            if node and all(isinstance(b, dict) and "t" in b for b in node):
+                node[:] = fix(node)
+            for item in node:
+                walk(item)
+        elif isinstance(node, dict):
+            walk(node.get("c"))
+    walk(doc.get("blocks", []))
+    return moved
+
+
 def join_nested_quotes(doc):
     """Adjacent quotes inside a quote joined, at every depth. Pandoc's
     reader wraps each quote paragraph in a quote of its own, and one more
@@ -680,7 +815,7 @@ def apply_definition_terms(json_path):
     import json
     with open(json_path, encoding="utf-8") as fh:
         doc = json.load(fh)
-    count = join_definition_terms(doc) + join_nested_quotes(doc)
+    count = join_definition_terms(doc) + join_quoted_lists(doc) + join_nested_quotes(doc)
     if count:
         with open(json_path, "w", encoding="utf-8") as fh:
             json.dump(doc, fh, ensure_ascii=False)
@@ -732,6 +867,11 @@ def repaired_copy(source, destination, headings="keep", deletions="accept", note
             if info.filename == "word/document.xml":
                 text, moved = move_bookmarks_into_paragraphs(
                     drop_jaws_titles(data.decode("utf-8")))
+                if "word/numbering.xml" in names and "TextbookImproverQuotedLists" in \
+                        parts.get("word/settings.xml", b"").decode("utf-8", "replace"):
+                    import docxtarget
+                    text, _ = mark_quoted_lists(text, docxtarget.level_indents(
+                        parts["word/numbering.xml"].decode("utf-8", "replace")))
                 text, _ = keep_unlinked_bookmarks(text)
                 text, _ = join_continuations(text, blank)
                 data = text.encode("utf-8")

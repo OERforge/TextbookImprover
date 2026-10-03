@@ -2735,8 +2735,17 @@ def case_docx_target(work):
                        three_back, re.S)
          and not re.search(r"<caption>(?:(?!</table>).)*Layout, left", three_back, re.S)),
         ("what the Word files can't carry is reported, page by page",
-         lambda: all(k in fidelity for k in ("word,three,layout-table", "word,three,list-in-quotation",
-                                              "word,three,uncaptioned-figure"))),
+         lambda: all(k in fidelity for k in ("word,three,layout-table",
+                                              "word,three,uncaptioned-figure"))
+         and "list-in-quotation" not in fidelity),
+        # Pandoc's reader never puts a list in a quote; the Word target
+        # indents a quote's list a quote step beyond its level, says so in a
+        # document variable, and reading Word puts the list back.
+        ("a list inside a quotation is indented inside it in Word, and read back it's in the quotation again",
+         lambda: re.search(r'<w:ind w:left="1200" w:hanging="360" />(?:(?!</w:p>).)*sorting', three, re.S)
+         and "TextbookImproverQuotedLists" in part("three.docx", "word/settings.xml")
+         and re.search(r"<blockquote>\s*<p>Try these:</p>\s*<ul>\s*<li>\s*(?:<p>)?sorting", three_back)
+         and re.search(r"<blockquote>\s*<ul>\s*<li>\s*<ul>\s*<li>\s*(?:<p>)?a list that opens", three_back)),
         ("read back, a table declared with a header row only has no header column, "
          "and the bookmark leaves no anchor", lambda: html_table_with(three_back, "172.20.0.5").count('<th scope="col"') == 2
          and 'scope="row"' not in html_table_with(three_back, "172.20.0.5") and "ColumnTitle" not in three_back
@@ -2925,6 +2934,130 @@ def case_review_columns(work):
         ("a drafted value is used, reviewed or not, and the run counts the one not reviewed",
          lambda: len(missing) == 2 and 'alt="A red square"' in page and 'alt="Another red square"' in page
          and "1 value(s) in the sidecars were drafted" in said and "image-alt.csv 1" in said),
+    ]
+
+
+QUOTED_LISTS = """# Quotes
+
+> - opens with a list
+> - second
+>
+> Then a paragraph.
+
+Between.
+
+> A paragraph, then a list that ends the quote:
+>
+> 1. one
+> 2. two
+
+> A different quote right after.
+
+Between again.
+
+> Outer paragraph.
+>
+> > Inner paragraph.
+> >
+> > - inner list
+> > - inner second
+> >
+> > Inner after.
+>
+> Outer after.
+
+A plain list, outside any quote:
+
+- plain one
+- plain two
+
+> Quoted list with a nested list:
+>
+> - top
+>     - nested
+> - top two
+>
+> End.
+
+> A loose list, whose items are paragraphs:
+>
+> - loose one
+>
+> - loose two
+>
+> After it.
+
+A list outside any quote, one of whose items holds a quote:
+
+- item one
+
+    > A quote inside the item.
+    >
+    > Its second paragraph.
+
+- item two
+"""
+
+
+def case_quoted_lists(work):
+    """Lists in quotations through the Word target and back: a quote that
+    opens with a list, one that ends with one before another quote, a list
+    in a quote in a quote, and a nested list. And an author's Word file,
+    without the target's document variable, read as Pandoc reads it."""
+    import zipfile as zf
+
+    def book(path, files, targets):
+        os.makedirs(path)
+        for name, data in files.items():
+            mode = "wb" if isinstance(data, bytes) else "w"
+            with open(os.path.join(path, name), mode, **({} if mode == "wb" else {"encoding": "utf-8"})) as fh:
+                fh.write(data)
+        with open(os.path.join(path, "project.yaml"), "w", encoding="utf-8") as fh:
+            fh.write("project:\n  title: Quotes\n  identifier: org.example.%s\n  language: en-US\n"
+                     % os.path.basename(path))
+        with open(os.path.join(path, "conversion.yaml"), "w", encoding="utf-8") as fh:
+            fh.write("targets:\n" + targets)
+        subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quiet"], cwd=path,
+                       capture_output=True, text=True, stdin=subprocess.DEVNULL)
+
+    def markdown(path, stem):
+        json_path = os.path.join(path, stem + ".filtered.json")
+        if not os.path.exists(json_path):
+            return ""
+        return subprocess.run(["pandoc", "-f", "json", json_path, "-t", "markdown"],
+                              capture_output=True, text=True).stdout
+
+    source = os.path.join(work, "source")
+    book(source, {"page.md": QUOTED_LISTS}, "  word:\n    format: docx\n  html:\n    format: html\n")
+    written = os.path.join(source, "word", "page.docx")
+    data = open(written, "rb").read() if os.path.exists(written) else b""
+    back = os.path.join(work, "back")
+    book(back, {"page.docx": data}, "  html:\n    format: html\n")
+    # The same file as an author's, without the variable.
+    plain = b""
+    if data:
+        import io
+        buffer = io.BytesIO()
+        with zf.ZipFile(io.BytesIO(data)) as zin, zf.ZipFile(buffer, "w", zf.ZIP_DEFLATED) as zout:
+            for info in zin.infolist():
+                part = zin.read(info.filename)
+                if info.filename == "word/settings.xml":
+                    part = re.sub(rb"<w:docVars>.*?</w:docVars>", b"", part)
+                zout.writestr(info, part)
+        plain = buffer.getvalue()
+    author = os.path.join(work, "author")
+    book(author, {"page.docx": plain}, "  html:\n    format: html\n")
+    return [
+        # A quote inside a list item comes back as one quote per paragraph,
+        # a loss of its own that the round trip had before this; the check
+        # here is that the list holding it stays out of any quote.
+        ("every list in a quotation comes back in it, at its depth, and the plain lists outside",
+         lambda: data and markdown(source, "page") and markdown(back, "page").replace(
+             "  > A quote inside the item.\n\n  > Its second paragraph.",
+             "  > A quote inside the item.\n  >\n  > Its second paragraph.") == markdown(source, "page")),
+        ("an author's file, without the variable, is read as Pandoc reads it: the lists outside",
+         lambda: plain and markdown(author, "page") != markdown(source, "page")
+         and "> - opens with a list" not in markdown(author, "page")),
     ]
 
 
@@ -3436,6 +3569,7 @@ CASES = [
     ("a docx target's bookmarks", case_word_bookmarks),
     ("a page's title heading, and the title page", case_title_heading),
     ("who drafted a sidecar value, and whether it's reviewed", case_review_columns),
+    ("lists in quotations through Word", case_quoted_lists),
     ("ids with spaces in HTML sources", case_html_ids),
     ("decorative images and frame sizes in HTML sources", case_html_images),
     ("AsciiDoc to Markdown and back", case_asciidoc_markdown),

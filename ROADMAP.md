@@ -40,6 +40,13 @@ Reading a PDF back into the pipeline, for the books that only exist as PDF. The 
 
 The pipeline's own PDFs are the first test: each claims WTPDF and carries MathML, so a book read back from its PDF can be compared with the book it came from, as the round-trip tests do for HTML and Word.
 
+## Braille and audio, after 1.0
+
+Two more outputs, each from the book's own structure rather than from a PDF's text, since the pipeline has the headings, lists, tables, alt text, and MathML that a PDF's text layer has lost.
+
+- **Braille.** [liblouis](https://github.com/liblouis/liblouis) translates text to braille, contracted or not, by tables for many languages and codes; [liblouisutdml](https://github.com/liblouis/liblouisutdml) formats an XML or HTML document into braille pages (BRF) with liblouis, so the HTML the pipeline writes could be its input. To find out: how it takes headings, tables, and lists; what it does with MathML, and whether the math wants a separate route to Nemeth or UEB; and what a braille reader and a transcriber would expect of a textbook's layout.
+- **Audio.** [pdf-to-audiobook](https://github.com/ikicker/pdf-to-audiobook) (MIT) extracts a PDF's text, splits it into sentences with NLTK, speaks them with Kokoro-82M or Parler-TTS, and writes MP3 or WAV, with a Python API (`AudiobookConverter`). Given a chapter's text from the pipeline instead, with its headings, image descriptions, and spoken math, the same voices could make one file per chapter, or an audiobook with chapter marks. To find out: how math should be spoken (MathML to speech text), how tables read aloud, and whether a synchronized form (EPUB 3 media overlays, or DAISY) is worth more than plain audio.
+
 ## 2. Slides and test banks
 
 Two kinds of teaching material that aren't book pages, and that the same architecture serves: one intermediate, read from whatever the author has, written to whatever the course needs, with the accessibility work done once in between.

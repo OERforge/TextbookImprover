@@ -4,7 +4,7 @@ What's planned, in the order that seems most productive. What has shipped is in 
 
 We're attempting to follow two principles: build the tool that can check a change before making the change and, where a decision can't be made by a script, make it declarable by a person once.
 
-After the numbered items come four for later, three of them after 1.0: PDF as input, suggestions from a language model, Braille and audio, and images of text. Then two more sections. **Refinements to the table headers work** is what v0.3 left undone in the feature it shipped, kept separate because none of it is large enough to be an item and all of it is worth doing before that work is called finished. **Smaller things** is everything that has no dependency on anything else.
+After the numbered items come five for later, three of them after 1.0: PDF as input, PreTeXt as input, suggestions from a language model, Braille and audio, and images of text. Then two more sections. **Refinements to the table headers work** is what v0.3 left undone in the feature it shipped, kept separate because none of it is large enough to be an item and all of it is worth doing before that work is called finished. **Smaller things** is everything that has no dependency on anything else.
 
 ## 1. PDF, and Word output
 
@@ -87,6 +87,15 @@ Reading a PDF back into the pipeline, for the books that only exist as PDF. The 
 - **An untagged PDF**: its text layer, made into Markdown with what structure can be guessed (headings from type size, lists from their labels), or the bare text, for an author to structure; a scan has no text layer and would need OCR first.
 
 The pipeline's own PDFs are the first test: each claims WTPDF and carries MathML, so a book read back from its PDF can be compared with the book it came from, as the round-trip tests do for HTML and Word.
+
+## PreTeXt as input, later
+
+[PreTeXt](https://pretextbook.org/) is an XML vocabulary for writing textbooks, with its own [command-line tool](https://github.com/PreTeXtBook/pretext-cli) that builds HTML and other forms from it. It isn't LaTeX, and Pandoc doesn't read it, so it would be a source of its own. Its markup already holds much of what our sidecars supply. By [the PreTeXt Guide](https://pretextbook.org/doc/guide/html/overview-images.html), every `<image>` is to have a `<shortdescription>`, which becomes the HTML `alt`, a longer `<description>`, or both, or else be marked `decorative`, and a diagram can be written in TikZ, Asymptote, or another graphics language that PreTeXt renders itself. Measured on [the PreTeXt edition of APEX Calculus](https://github.com/APEXCalculus/APEXCalculusPTX): 1,207 images, with 1,200 short descriptions and 1,173 long ones.
+
+Two routes, to weigh when this is taken up:
+
+- **PreTeXt's own HTML, read as an HTML source.** Everything the pipeline does for HTML applies, and the work would be mostly in recognizing PreTeXt's pages, as the web sources' generators are recognized. The first thing to find out is how much of the output check that HTML already passes, since what's left for the pipeline might then be packaging.
+- **The XML itself.** More of the book's structure would survive (exercises and their solutions, theorems and proofs, the long descriptions), at the cost of a reader of our own.
 
 ## Suggestions from a language model, after 1.0
 

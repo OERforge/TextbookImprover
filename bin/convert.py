@@ -665,11 +665,26 @@ def read_latex_to_json(base, master, env, work):
     header): the pages, the book's order as contents entries, and what
     the preamble says about the book."""
     import latexsource
+    _, missing = latexsource.reached(base, master)
+    if missing:
+        makefiles = sorted({os.path.relpath(os.path.join(d, "Makefile"), base)
+                            for d in [base] + [os.path.join(base, os.path.dirname(m))
+                                               for m in missing]
+                            if os.path.isfile(os.path.join(d, "Makefile"))})
+        die(f"{master} reaches {len(missing)} file(s) that aren't here: "
+            + ", ".join(missing[:8]) + (", ..." if len(missing) > 8 else "")
+            + ". A book's own build often makes files like these (figures "
+            "drawn by another program, say), and it has to run before the "
+            "book is converted, since what it makes is what the conversion "
+            "reads." + (f" A Makefile is here, {makefiles[0]}: run make "
+                        "there." if len(makefiles) == 1 else
+                        " Makefiles are here, " + ", ".join(makefiles)
+                        + ": run make in the one that makes them."
+                        if makefiles else
+                        " Run the book's build as its README says.")
+            + " Nothing was converted.")
     prep = latexsource.prepare(base, work, master, say, LATEX_MACROS)
     counts = prep["counts"]
-    for name in prep["missing"]:
-        say(f"WARNING: {master} reaches {name}, which isn't here. If the "
-            "book's own build makes it (a figure, say), run that first.")
     if counts.get("drawings"):
         say(f"{counts.get('drawings_made', 0)} of {counts['drawings']} "
             "drawing(s) made images by LaTeX, in "
@@ -702,6 +717,13 @@ def read_latex_to_json(base, master, env, work):
          "--lua-filter=" + LATEX_FILTER], env=env, cwd=prep["copy"])
     with open(out, encoding="utf-8") as fh:
         doc = json.load(fh)
+    suggested, left = latexsource.macro_sample(base, prep, LATEX_FILTER,
+                                               LATEX_MACROS, say)
+    if suggested or left:
+        say(f"Wrote {latexsource.SAMPLE}: {suggested + left} macro(s) whose "
+            "formulas texmath can't make MathML of, with a definition "
+            f"suggested for {suggested} and {left} for a person to define. "
+            f"Check it, then save it as {LATEX_MACROS}.")
     meta = doc.get("meta", {})
     master_stem = safe_stem(os.path.splitext(master)[0])
     pages = latexsource.cut_pages(doc, prep["order"], master_stem,

@@ -789,3 +789,184 @@ def cut_pages(doc, order, master_stem, front_role):
     if not pages[0][2]:
         pages.pop(0)
     return [tuple(p) for p in pages]
+
+
+# --------------------------------------------------------------------------
+# the definitions sample: the book's macros texmath can't read
+# --------------------------------------------------------------------------
+
+SAMPLE = "latex-conversion-macros-sample.tex"
+NEWCOMMAND = re.compile(r"\\(?:re|provide)?newcommand\*?\s*\{?\s*\\([A-Za-z@]+)"
+                        r"\s*\}?\s*(?:\[(\d)\])?\s*(?:\[[^]]*\])?\s*\{")
+MATH_SPANS = re.compile(
+    r"(?<!\\)\$\$(.+?)(?<!\\)\$\$|(?<!\\)\$(.+?)(?<!\\)\$|\\\((.+?)\\\)"
+    r"|\\\[(.+?)\\\]|\\begin\{(equation|align|gather|multline|eqnarray|"
+    r"displaymath|math)(\*?)\}(.+?)\\end\{\5\6\}", re.S)
+RULE = re.compile(r"\\rule\s*(?:\[[^]]*\])?\s*\{([^}]*)\}\s*\{([^}]*)\}")
+POINTS = {"pt": 1.0, "bp": 1.00375, "mm": 2.845, "cm": 28.45, "in": 72.27,
+          "em": 10.0, "ex": 4.3, "pc": 12.0, "sp": 1 / 65536}
+
+
+def points(length):
+    m = re.match(r"\s*(-?[\d.]+)\s*([a-z]{2})\s*$", length or "")
+    if not m or m.group(2) not in POINTS:
+        return None
+    try:
+        return float(m.group(1)) * POINTS[m.group(2)]
+    except ValueError:
+        return None
+
+
+def definitions(texts):
+    """{name: (arguments, body, definition as written)} for every macro
+    the book's files define with \\newcommand and its kin, in code."""
+    found = {}
+    for text in texts:
+        spans = skip_spans(text)
+        for m in NEWCOMMAND.finditer(text):
+            if in_spans(m.start(), spans):
+                continue
+            close = matching_brace(text, m.end() - 1)
+            if close < 0:
+                continue
+            found[m.group(1)] = (int(m.group(2) or 0), text[m.end():close - 1],
+                                 text[m.start():close])
+    return found
+
+
+def math_uses(texts, names):
+    """How often each macro is used inside a formula, in code."""
+    uses = dict.fromkeys(names, 0)
+    pattern = re.compile(r"\\(" + "|".join(re.escape(n) for n in names)
+                         + r")(?![A-Za-z@])") if names else None
+    for text in texts:
+        spans = skip_spans(text)
+        for m in MATH_SPANS.finditer(text):
+            if in_spans(m.start(), spans):
+                continue
+            for u in pattern.finditer(m.group(0)):
+                uses[u.group(1)] += 1
+    return uses
+
+
+def suggest(body):
+    """A definition saying what a drawn symbol means, when its drawing has
+    only one reading: rules no wider than a point and taller than six are
+    a vertical bar (\\mid when spaces are all that's around it); rules no
+    taller than a point and wider than they are tall, with nothing but
+    ticks and spaces beside them, are a blank to fill in. None otherwise."""
+    rules = list(RULE.finditer(body))
+    if not rules:
+        return None
+    kinds = []
+    for r in rules:
+        w, h = points(r.group(1)), points(r.group(2))
+        if w is None or h is None:
+            return None
+        if w == 0 or h == 0 or (w < 2 and h < 2):
+            kinds.append("nothing")
+        elif w <= 1 and h >= 6:
+            kinds.append("bar")
+        elif h <= 1 and w > h:
+            kinds.append("line")
+        else:
+            return None
+    rest = RULE.sub("", body)
+    spacing = re.fullmatch(r"(?:\s|\\[,;:!]|\\quad|\\qquad|\\ )*", rest)
+    if set(kinds) <= {"nothing", "line"} and "line" in kinds and spacing:
+        return "\\underline{\\quad}"
+    if set(kinds) <= {"nothing", "bar"} and kinds.count("bar") == 1:
+        if spacing:
+            return "\\mid"
+        out = body
+        for r, kind in reversed(list(zip(rules, kinds))):
+            out = out[:r.start()] + ("|" if kind == "bar" else "") + out[r.end():]
+        return " ".join(out.replace("\\,", " ").split())
+    return None
+
+
+def probe(copy, preamble, macros, filter_path, extra=""):
+    """Which of macros [(name, arguments)] give a formula texmath can't
+    make MathML of, read with the book's preamble (and extra definitions)
+    and the read-time repairs."""
+    if not macros:
+        return set()
+    head, _, _ = preamble.rpartition("\\begin")
+    body = "".join("\n\n$\\%s%s$\n" % (n, "".join("{x}" for _ in range(a)))
+                   for n, a in macros)
+    path = os.path.join(copy, "TextbookImproverProbe.tex")
+    write_text(path, head + extra + "\n\\begin{document}\n" + body
+               + "\n\\end{document}\n")
+    read = subprocess.run(["pandoc", "-f", "latex", "-t", "json",
+                           "TextbookImproverProbe.tex",
+                           "--lua-filter=" + filter_path],
+                          cwd=copy, capture_output=True, text=True)
+    if read.returncode != 0:
+        return set()
+    doc = json.loads(read.stdout)
+    html = subprocess.run(["pandoc", "-f", "json", "-t", "html",
+                           "--math-method=mathml"], input=read.stdout,
+                          capture_output=True, text=True).stdout
+    paragraphs = re.findall(r"<p>(.*?)</p>", html, re.S)
+    failing = set()
+    formulas = [b for b in doc["blocks"] if b.get("t") == "Para"]
+    for (name, _), block, para in zip(macros, formulas, paragraphs):
+        if "<math" not in para:
+            failing.add(name)
+    return failing
+
+
+def macro_sample(base, prep, filter_path, macros_file, say):
+    """Write latex-conversion-macros-sample.tex: the book's macros whose
+    formulas texmath still can't read, a definition for each whose drawing
+    has one reading, and the rest as written, for a person to define.
+    Returns (suggested, left)."""
+    copy = prep["copy"]
+    texts = [read_text(os.path.join(copy, n)) for n in prep["files"]]
+    defined = definitions(texts)
+    uses = math_uses(texts, sorted(defined))
+    used = [(n, defined[n][0]) for n in sorted(defined) if uses[n]]
+    copy_preamble = split_master(read_text(prep["master"]))[0]
+    failing = probe(copy, copy_preamble, used, filter_path)
+    sample = os.path.join(base, SAMPLE)
+    if not failing:
+        if os.path.exists(sample):
+            os.remove(sample)
+        return 0, 0
+    suggestions = {}
+    for name in sorted(failing):
+        args, body, _ = defined[name]
+        s = suggest(body)
+        if s is not None:
+            suggestions[name] = s
+    # Keep a suggestion only when texmath reads what it makes.
+    extra = "".join("\\renewcommand{\\%s}%s{%s}\n" % (
+        n, "[%d]" % defined[n][0] if defined[n][0] else "", s)
+        for n, s in suggestions.items())
+    still = probe(copy, copy_preamble, [(n, defined[n][0]) for n in suggestions],
+                  filter_path, extra) if suggestions else set()
+    for name in still:
+        suggestions.pop(name, None)
+    lines = [
+        "% Written by convert.py: the book's macros whose formulas texmath",
+        "% can't make MathML of, so they reach the pages as TeX. Check it,",
+        "% then save it as " + macros_file + " (or merge it into yours).",
+        "% Definitions there are read after the book's own, by the",
+        "% conversion only; the book itself never changes.", ""]
+    for name in sorted(failing):
+        args, body, written = defined[name]
+        lines.append("%% \\%s is used in %d formula(s). The book has:" % (
+            name, uses[name]))
+        lines.extend("%   " + line for line in written.splitlines())
+        if name in suggestions:
+            lines.append("% Suggested: it draws what this says; check that it "
+                         "means it.")
+            lines.append("\\renewcommand{\\%s}%s{%s}" % (
+                name, "[%d]" % args if args else "", suggestions[name]))
+        else:
+            lines.append("% Only a person can say what this draws:")
+            lines.append("%% \\renewcommand{\\%s}%s{}" % (
+                name, "[%d]" % args if args else ""))
+        lines.append("")
+    write_text(sample, "\n".join(lines))
+    return len(suggestions), len(failing) - len(suggestions)

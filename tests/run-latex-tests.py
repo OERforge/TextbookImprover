@@ -67,6 +67,7 @@ MASTER = r"""\documentclass{book}
 \newcommand{\Znoneg}{{\mathbb Z}^{\mbox{\tiny noneg}}}
 \newcommand{\relR}{\mbox{\textsf R}}
 \newcommand{\suchthat}{\; \rule[-3pt]{.5pt}{13pt} \;}
+\newcommand{\weird}{\mbox{\raisebox{2pt}{$\star$}}}
 \title{A Test Book}
 \author{A. Author}
 \begin{document}
@@ -112,7 +113,7 @@ and \includegraphics{img/square} and
 \includegraphics{img/diagram.pdf}.
 
 Sets: $\Znoneg$ and $a \relR b$ and $\{x \suchthat x > 0\}$, and
-$a\hspace{10mm}b$.
+$a\hspace{10mm}b$, and $a \weird b$.
 
 \tagpdfsetup{table/header-rows={1}}
 \begin{tabular}{cc}
@@ -216,6 +217,7 @@ def fingerprint(work):
         for name in names:
             path = os.path.join(top, name)
             if name.endswith((".tex", ".png", ".pdf", ".md")) and \
+                    not name.endswith("-sample.tex") and \
                     "rendered" not in path and "html" not in path:
                 with open(path, "rb") as fh:
                     found[os.path.relpath(path, work)] = \
@@ -279,6 +281,9 @@ def case_book(work):
     sample = yaml.safe_load(read(work, "contents-sample.yaml")) \
         if os.path.exists(os.path.join(work, "contents-sample.yaml")) else {}
     project = (sample or {}).get("project", {})
+    sample_text = read(work, "latex-conversion-macros-sample.tex") \
+        if os.path.exists(os.path.join(work,
+                                       "latex-conversion-macros-sample.tex")) else ""
     missing_alt = read(work, "image-alt-missing.csv") \
         if os.path.exists(os.path.join(work, "image-alt-missing.csv")) else ""
     return [
@@ -326,8 +331,12 @@ def case_book(work):
          lambda: 'src="rendered/img/diagram.svg"' in one
          if can_draw() else skip("no LaTeX or pdftocairo: drawings not rendered")),
         ("\\mbox{\\tiny ...} and \\mbox{\\textsf R} reach MathML",
-         lambda: "Could not convert TeX math" not in log
+         lambda: all("raisebox" in line for line in log.splitlines()
+                     if "Could not convert TeX math" in line)
          and "noneg" in one and "<math" in one),
+        ("the definitions sample lists what's left for a person, not what's defined",
+         lambda: "\\weird" in sample_text and "\\renewcommand{\\suchthat}"
+         not in sample_text),
         ("a length in mm inside a formula reaches MathML",
          lambda: "10mm" not in one),
         ("the author's tagging header declaration is the table's",
@@ -357,6 +366,9 @@ def case_masters(work):
         fh.write("defaults:\n  latex:\n    main: workbook.tex\n"
                  "targets:\n  html:\n    format: html\n")
     chosen = convert(work)
+    sample = read(work, "latex-conversion-macros-sample.tex") \
+        if os.path.exists(os.path.join(work,
+                                       "latex-conversion-macros-sample.tex")) else ""
     one = read(work, "html", "one.html") \
         if os.path.exists(os.path.join(work, "html", "one.html")) else ""
     return [
@@ -365,6 +377,9 @@ def case_masters(work):
          and "book.tex" in stopped.stderr + stopped.stdout
          and "workbook.tex" in stopped.stderr + stopped.stdout
          and "latex.main" in stopped.stderr + stopped.stdout),
+        ("with no definitions file, a drawn bar is suggested as \\mid",
+         lambda: "\\renewcommand{\\suchthat}{\\mid}" in sample
+         and "% \\renewcommand{\\weird}{}" in sample),
         ("latex.main picks the master, and its boolean holds",
          lambda: "SOLUTION TEXT" in one and "EXERCISE TEXT" not in one),
     ]
@@ -389,8 +404,28 @@ def case_single(work):
     ]
 
 
+def case_unbuilt(work):
+    """A file the book's own build makes, not made yet: the run stops."""
+    os.makedirs(os.path.join(work, "figures"))
+    with open(os.path.join(work, "notes.tex"), "w", encoding="utf-8") as fh:
+        fh.write("\\documentclass{article}\n\\begin{document}\nText.\n"
+                 "\\input{figures/venn.tex}\n\\end{document}\n")
+    with open(os.path.join(work, "figures", "Makefile"), "w") as fh:
+        fh.write("all:\n\tfig2dev -L pstex_t venn.fig > venn.tex\n")
+    with open(os.path.join(work, "conversion.yaml"), "w") as fh:
+        fh.write("targets:\n  html:\n    format: html\n")
+    result = convert(work)
+    said = result.stdout + result.stderr
+    return [
+        ("a file the book's own build makes, missing, stops the run",
+         lambda: result.returncode != 0 and "figures/venn.tex" in said
+         and "figures/Makefile" in said and "Nothing was converted" in said
+         and not os.path.exists(os.path.join(work, "html"))),
+    ]
+
+
 CASES = [("a LaTeX book", case_book), ("two masters", case_masters),
-         ("one file", case_single)]
+         ("one file", case_single), ("an unbuilt book", case_unbuilt)]
 
 
 def main():

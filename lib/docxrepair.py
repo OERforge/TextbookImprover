@@ -820,36 +820,45 @@ def apply_list_tables(docx_path, json_path):
         return 0
     with open(json_path, encoding="utf-8") as fh:
         doc = json.load(fh)
-    places = {"t": [], "r": []}  # (blocks, index) of each table and rule, in order
+    def find():
+        """{kind: [(blocks, index, position)]} of every table and rule, in
+        document order, wherever they stand now."""
+        places = {"t": [], "r": []}
 
-    def walk(blocks):
-        for i, block in enumerate(blocks):
-            if not isinstance(block, dict):
-                continue
-            kind = block.get("t")
-            if kind == "Table":
-                places["t"].append((blocks, i, len(places["t"]) + len(places["r"])))
-            elif kind == "HorizontalRule":
-                places["r"].append((blocks, i, len(places["t"]) + len(places["r"])))
-            elif kind in ("Div", "BlockQuote"):
-                walk(block["c"][1] if kind == "Div" else block["c"])
-            elif kind == "OrderedList":
-                for item in block["c"][1]:
-                    walk(item)
-            elif kind == "BulletList":
-                for item in block["c"]:
-                    walk(item)
-    walk(doc["blocks"])
+        def walk(blocks):
+            for i, block in enumerate(blocks):
+                if not isinstance(block, dict):
+                    continue
+                kind = block.get("t")
+                if kind == "Table":
+                    places["t"].append((blocks, i, len(places["t"]) + len(places["r"])))
+                elif kind == "HorizontalRule":
+                    places["r"].append((blocks, i, len(places["t"]) + len(places["r"])))
+                elif kind in ("Div", "BlockQuote"):
+                    walk(block["c"][1] if kind == "Div" else block["c"])
+                elif kind == "OrderedList":
+                    for item in block["c"][1]:
+                        walk(item)
+                elif kind == "BulletList":
+                    for item in block["c"]:
+                        walk(item)
+        walk(doc["blocks"])
+        places["q"] = places["t"]    # a quotation's table is counted with the tables
+        return places
     lists = ("OrderedList", "BulletList")
 
     def items(block):
         return block["c"][1] if block["t"] == "OrderedList" else block["c"]
     moved = 0
-    # Last first, so a move never shifts a place still to come.
-    places["q"] = places["t"]    # a quotation's table is counted with the tables
-    order = sorted(marks, key=lambda m: places[m[0]][m[1]][2]
-                   if m[1] < len(places[m[0]]) else -1, reverse=True)
+    # In document order, each found again where it stands: a list rejoined
+    # after one table or rule is the list the next one, further on, needs
+    # to find before it. A move keeps every table and rule in document
+    # order, so the ordinals hold.
+    first = find()
+    order = sorted(marks, key=lambda m: first[m[0]][m[1]][2]
+                   if m[1] < len(first[m[0]]) else -1)
     for kind, ordinal, follow, continues in order:
+        places = find()
         if ordinal >= len(places[kind]):
             continue
         blocks, i, _ = places[kind][ordinal]

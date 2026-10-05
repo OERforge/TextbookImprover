@@ -136,7 +136,10 @@ and text after it.
 
 \hrule
 
-\item Another nested item.
+\item Another nested item, with a blank too:
+
+\hrule
+
 \end{enumerate}
 \item The next item.
 \end{enumerate}
@@ -306,7 +309,7 @@ def word_list_reads_back(work):
     outer = page[page.find("An item with a formula"):]
     outer = outer[:outer.find("The next item") + 1]
     return whole and "The next item" in page and "<table" in outer \
-        and outer.count("<hr") >= 2 and "and text after it" in outer \
+        and outer.count("<hr") >= 3 and "and text after it" in outer \
         and "Another nested item" in outer \
         and len(re.findall(r"<ol", page[page.find("An item with a formula"):
                                        page.find("The next item")])) == 1

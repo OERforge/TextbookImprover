@@ -1922,6 +1922,9 @@ local function caption_data_table(tbl, next_block, after_next, after_after, out)
   local th_index = tbl.attr.attributes[TH_INDEX_ATTR]
   tbl.attr.attributes[TH_INDEX_ATTR] = nil
   tbl.attr.attributes[MARKER_ATTR] = nil
+  -- A LaTeX table's place in its file (latex-source.lua), for the
+  -- header pre-pass and a remediated source only.
+  tbl.attr.attributes['data-latex-table'] = nil
   tbl.attr.attributes[CAPTION_ROWS_ATTR] = nil
   tbl.attr.attributes[SPLIT_AT_ATTR] = nil
   tbl.attr.attributes[PART_CAPTIONS_ATTR] = nil

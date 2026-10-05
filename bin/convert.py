@@ -2112,12 +2112,25 @@ def remediate_sources(target, base, docs, paths, env, html_stems=(), language=No
         master = latex
         files, _ = latexsource.reached(base, master)
         tagging = str(target["tagging"]) == "on"
+        # A person's header decisions for the book's tables, by each
+        # table's place in its files (latexsource.table_place).
+        decisions = {e["latex"]: e["headers"] for entries in resolved_html.values()
+                     for e in entries if e.get("latex") and e.get("supplier") == "sidecar"}
         counts = texremediate.remediate(base, target.output_dir, master, files, page_alts,
-                                        tagging=tagging, language=language)
+                                        tagging=tagging, language=language,
+                                        headers=decisions)
         say(f"{target.name}: {counts['files']} LaTeX file(s) written, "
             f"{counts['changed']} of them changed: {counts.get('described', 0)} "
             f"image(s) and drawing(s) given alt text and {counts.get('decorative', 0)} "
             "marked artifact, as keys LaTeX's tagging reads."
+            + (f" {counts.get('header_rows', 0)} table(s) declared with a header row and "
+               f"{counts.get('header_columns', 0)} with a header column, from the sidecar."
+               if counts.get("header_rows") or counts.get("header_columns") else "")
+            + (f" {counts['declared_already']} table(s) the book declares already were left."
+               if counts.get("declared_already") else "")
+            + (f" {counts['headers_untagged']} table header decision(s) weren't written: "
+               "a declaration needs LaTeX's tagging, which this copy doesn't have "
+               "(tagging: \"on\")." if counts.get("headers_untagged") else "")
             + (" Made to build with LaTeX's tagging, with LuaLaTeX: "
                + ("\\DocumentMetadata added" if counts.get("tag_metadata")
                   else "its own \\DocumentMetadata kept")
@@ -3035,7 +3048,7 @@ def main():
                     + (", ..." if len(with_deletions) > 5 else "")
                     + ". word.tracked_deletions: strike keeps it, struck through.")
         prepass = list(docs) + [os.path.join(base, s + ".json")
-                                for s in html_stems]
+                                for s in list(html_stems) + (tex_stems if master else [])]
         if prepass:
             env["TABLE_HEADERS_RESOLVED"] = os.path.join(work,
                                                         "table-headers.json")

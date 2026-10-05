@@ -162,12 +162,16 @@ def remediate_file(base, name, text, alts, dirs, is_master=False):
     return text, counts
 
 
-def remediate(base, out_dir, master, files, alts, tagging=False, language=None):
+def remediate(base, out_dir, master, files, alts, tagging=False, language=None,
+              headers=None):
     """Write a remediated copy of each file in files (relative to base) to
     out_dir at the same relative path. alts: {key: alt, or None for
     decorative} (htmlremediate.alt_rows); tagging: made to build with
-    LaTeX's tagging (tag), the book's language its lang. Returns a dict
-    of counts."""
+    LaTeX's tagging (tag), the book's language its lang; headers:
+    {place: headers}, a person's table-header decisions, declared for
+    tagging when the copy is tagged (declare), since without tagging
+    \\tagpdfsetup isn't defined and the build stops. Returns a dict of
+    counts."""
     master_text = latexsource.read_text(os.path.join(base, master))
     dirs = latexsource.graphics_paths(latexsource.split_master(master_text)[0])
     totals = {"files": 0, "changed": 0}
@@ -178,6 +182,11 @@ def remediate(base, out_dir, master, files, alts, tagging=False, language=None):
                                              name == master)
         for key, n in counts.items():
             totals[key] = totals.get(key, 0) + n
+    tagged = tagging or bool(latexsource.code_matches(DOCUMENT_METADATA, originals[master]))
+    if headers and tagged:
+        totals.update(declare(texts, files, headers))
+    elif headers:
+        totals["headers_untagged"] = len(headers)
     if tagging:
         if not language:
             language = latexsource.preamble_language(
@@ -290,4 +299,54 @@ def tag(texts, master, language):
                 "lang=%s, " % language if language else "") + text[at:]
             counts["metadata"] = 1
     texts[master] = text
+    return counts
+
+
+# --------------------------------------------------------------------------
+# table headers: a person's decision, as LaTeX's tagging declares it
+# --------------------------------------------------------------------------
+
+HEADER_KEYS = {"first-row": "table/header-rows={1}",
+               "first-column": "table/header-columns={1}",
+               "both": "table/header-rows={1},table/header-columns={1}"}
+
+
+def declare(texts, files, decisions):
+    """texts: {name: text}, changed in place. decisions: {place: headers},
+    a place as latexsource.table_place names a table (its file's index
+    among files, its own among the file's tables) and headers one of
+    table-headers.csv's first-row, first-column, both. Each table gets
+    its declaration just before it, in a group of its own, since
+    \\tagpdfsetup holds until it's changed, and only where it's defined,
+    since it isn't without tagging and the book may yet be built without:
+    {\\ifdefined\\tagpdfsetup\\tagpdfsetup{...}\\fi\\begin{tabular}...\\end{tabular}}.
+    A table the author declared already is left.
+    Returns counts."""
+    counts = {"header_rows": 0, "header_columns": 0, "declared_already": 0}
+    by_file = {}
+    for place, headers in decisions.items():
+        m = re.fullmatch(r"F(\d+)N(\d+)", place)
+        if m and headers in HEADER_KEYS and int(m.group(1)) < len(files):
+            by_file.setdefault(files[int(m.group(1))], {})[int(m.group(2))] = headers
+    for name, wanted in by_file.items():
+        text = texts[name]
+        spans = latexsource.table_spans(text)
+        edits = []
+        for ordinal, headers in wanted.items():
+            if not 0 < ordinal <= len(spans):
+                continue
+            start, end = spans[ordinal - 1]
+            before = text[:start].rstrip()
+            if re.search(r"\\tagpdfsetup\s*\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}\s*(?:\\fi\b)?"
+                         r"\s*(?:%[^\n]*\n\s*)*$", before):
+                counts["declared_already"] += 1
+                continue
+            edits.append((end, "}"))
+            edits.append((start, "{\\ifdefined\\tagpdfsetup\\tagpdfsetup{%s}\\fi"
+                          % HEADER_KEYS[headers]))
+            counts["header_rows"] += int(headers in ("first-row", "both"))
+            counts["header_columns"] += int(headers in ("first-column", "both"))
+        for at, piece in sorted(edits, key=lambda e: e[0], reverse=True):
+            text = text[:at] + piece + text[at:]
+        texts[name] = text
     return counts

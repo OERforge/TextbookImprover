@@ -108,6 +108,17 @@ local DECLARED = { TextbookImproverHeadersFirstRow = 'first-row',
   TextbookImproverHeadersBoth = 'both' }
 
 function Div(div)
+  -- A table's place in the book's files, which latexsource.py wrapped it
+  -- in: kept on the table, for the header pre-pass and a remediated copy.
+  local place = div.classes[1] and div.classes[1]:match('^TextbookImproverTable(F%d+N%d+)$')
+  if place then
+    for _, block in ipairs(div.content) do
+      if block.t == 'Table' then
+        block.attr.attributes['data-latex-table'] = place
+      end
+    end
+    return div.content
+  end
   for _, class in ipairs(div.classes) do
     local declaration = DECLARED[class]
     if declaration then

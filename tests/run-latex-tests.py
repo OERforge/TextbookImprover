@@ -567,6 +567,8 @@ def case_source(work):
               "\\begin{picture}(40,20)\\put(0,0){\\framebox(40,20){two}}\\end{picture}\n\n"
               "A rule: \\includegraphics[height=2pt]{figures/f.png}\n\n"
               "\\begin{figure}\\input{figures/f.tex}\\caption{F}\\end{figure}\n"
+              "\\begin{tabular}{cc}\nName & Value \\\\\na & 1 \\\\\nb & 2 \\\\\n\\end{tabular}\n\n"
+              "\\begin{tabular}{cc}\nItem & Count \\\\\nx & 3 \\\\\ny & 4 \\\\\n\\end{tabular}\n\n"
               "% \\includegraphics{sq} in a comment\n"
               "\\end{document}\n")
     with open(os.path.join(work, "notes.tex"), "w", encoding="utf-8") as fh:
@@ -579,6 +581,14 @@ def case_source(work):
         fh.write("targets:\n  html:\n    format: html\n  fixed:\n    format: source\n"
                  "  tagged:\n    format: source\n    tagging: \"on\"\n")
     before = fingerprint(work)
+    convert(work)
+    # A person's header decision for the table, from the census's row.
+    new = os.path.join(work, "table-headers-new.csv")
+    rows = list(csv.DictReader(open(new, encoding="utf-8-sig"))) if os.path.exists(new) else []
+    with open(os.path.join(work, "table-headers.csv"), "w", encoding="utf-8") as fh:
+        fh.write("key,headers\n" + "".join("%s,first-row\n" % r["key"] for r in rows
+                                            if "Name" in r.get("preview", "")))
+    before = fingerprint(work, skip_dirs=("fixed", "tagged", "build"))
     result = convert(work)
     said = result.stdout + result.stderr
     fixed = os.path.join(work, "fixed")
@@ -657,6 +667,11 @@ def case_source(work):
         ("tagging: \\centerline redefined, and \\leavevmode before the formula",
          lambda: "\\renewcommand{\\centerline}" in tagged
          and "\\begin{center}\n\\leavevmode\\[" in tagged),
+        ("tagging: a person's header row declared for the table, in a group of its own",
+         lambda: "{\\ifdefined\\tagpdfsetup\\tagpdfsetup{table/header-rows={1}}\\fi"
+         "\\begin{tabular}{cc}" in tagged and tagged.count("\\tagpdfsetup{") == 1),
+        ("untagged, the decision isn't written, and the run says why",
+         lambda: "\\tagpdfsetup" not in notes and "need" in said and "tagging" in said),
         ("tagging off leaves the book's build alone",
          lambda: "\\DocumentMetadata" not in notes and "pdftex" in notes),
         ("the tagged copy builds with LuaLaTeX, no tagging error or warning", builds_tagged),

@@ -316,8 +316,9 @@ def substitute(pattern, text, replace, counter, key):
     return "".join(out)
 
 
-HEADER_SETUP = re.compile(r"\\tagpdfsetup\s*\{([^{}]*(?:\{[^{}]*\}[^{}]*)*)\}"
-                          r"((?:\s|%[^\n]*\n)*)\\begin\s*\{(tabular\*?|tabularx|"
+HEADER_SETUP = re.compile(r"(?:\\ifdefined\s*\\tagpdfsetup\s*)?"
+                          r"\\tagpdfsetup\s*\{([^{}]*(?:\{[^{}]*\}[^{}]*)*)\}"
+                          r"((?:\s|%[^\n]*\n|\\fi\b)*)\\begin\s*\{(tabular\*?|tabularx|"
                           r"longtable|array)\}")
 DECLARATIONS = {(True, False): "FirstRow", (False, True): "FirstColumn",
                 (True, True): "Both"}
@@ -348,7 +349,8 @@ def declare_headers(text, counter):
         if end < 0:
             continue
         name = "TextbookImproverHeaders" + DECLARATIONS[key]
-        out.append(text[last:m.start()] + m.group(2) + "\\begin{%s}" % name
+        out.append(text[last:m.start()] + re.sub(r"\\fi\b", "", m.group(2))
+                   + "\\begin{%s}" % name
                    + text[begin:end] + "\\end{%s}" % name)
         last = end
         counter["header_declared"] = counter.get("header_declared", 0) + 1
@@ -733,6 +735,8 @@ def prepare(base, work, master, say, macros=""):
                                       counts, say)
     if record:
         write_text(record_path, json.dumps(record, indent=1, sort_keys=True))
+    for index, name in enumerate(files):
+        texts[name] = mark_tables(texts[name], index)
 
     # The master: \centerline as a center environment, and a marker
     # before each \include. Split again, since its drawings and images
@@ -764,6 +768,46 @@ def prepare(base, work, master, say, macros=""):
     return {"master": os.path.join(copy, master), "order": order,
             "front_role": front_role, "files": files, "missing": missing,
             "counts": counts, "preamble": preamble, "copy": copy}
+
+
+TABLE_BEGIN = re.compile(r"\\begin\s*\{(tabular\*?|tabularx|longtable)\}")
+
+
+def table_spans(text):
+    """(start, end) of each table environment in code, in order of its
+    \\begin, nested ones too; none inside a drawing, which becomes an
+    image. The order a remediated copy finds the same tables in."""
+    spans = skip_spans(text)
+    inside = [(s, e) for s, e, _ in drawings(text)]
+    found = []
+    for m in TABLE_BEGIN.finditer(text):
+        if in_spans(m.start(), spans) or any(s <= m.start() < e for s, e in inside):
+            continue
+        end = environment_end(text, m.group(1), m.start())
+        if end > 0:
+            found.append((m.start(), end))
+    return found
+
+
+def table_place(file_index, ordinal):
+    return "F%dN%d" % (file_index, ordinal)
+
+
+def mark_tables(text, file_index):
+    """Each table wrapped in an environment naming its place, the file's
+    index among the files the master reaches and the table's among the
+    file's (table_spans), which the reader keeps as a div and
+    latex-source.lua puts on the table. Wrapped or not, the reader makes
+    the same blocks of it (measured: an inline tabular, one in a figure,
+    one nested in another)."""
+    edits = []
+    for ordinal, (start, end) in enumerate(table_spans(text), start=1):
+        name = "TextbookImproverTable" + table_place(file_index, ordinal)
+        edits.append((end, "\\end{%s}" % name))
+        edits.append((start, "\\begin{%s}" % name))
+    for at, piece in sorted(edits, key=lambda e: e[0], reverse=True):
+        text = text[:at] + piece + text[at:]
+    return text
 
 
 def stringify(inlines):

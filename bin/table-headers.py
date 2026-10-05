@@ -210,7 +210,8 @@ def pandoc_tables(node, out):
 def tables_in_json(path):
     """The data tables of a Pandoc intermediate, for a source whose
     evidence survives Pandoc's reader: an HTML page's <th> cells, which
-    html-source.lua turned into a marker, and its bold, which is Strong.
+    html-source.lua turned into a marker, and its bold, which is Strong;
+    a LaTeX page's tagging declaration, which latex-source.lua did.
     The value in effect is written back into the intermediate as the
     table's marker (see apply_to_json), which the filter obeys, so no
     position has to be matched afterwards."""
@@ -236,7 +237,10 @@ def tables_in_json(path):
         found.append({
             "key": tc.key_from_pandoc(table), "rows": nrows, "cols": ncols,
             "first": " ".join(first.split())[:40],
-            "source": stem + ".html", "index": index,
+            # A LaTeX page's table carries its place in the book's files;
+            # its page is named, since its file is the chapter's own.
+            "source": stem + (".tex" if attributes.get("data-latex-table") else ".html"),
+            "index": index, "latex": attributes.get("data-latex-table", ""),
             "label": " ".join(caption.split())[:60],
             "preview": preview_of(grid),
             "guess": "" if value == "unknown" else value,
@@ -478,6 +482,7 @@ def main():
             # file's own declaration, "guess" for the census. A remediated
             # source writes only what a person decided.
             "supplier": supplier,
+            "latex": info.get("latex", ""),
         }
         if info.get("json"):
             # An HTML page's, for a remediated source only: the filter

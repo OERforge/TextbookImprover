@@ -67,7 +67,7 @@ MASTER = r"""\documentclass{book}
 \newcommand{\Znoneg}{{\mathbb Z}^{\mbox{\tiny noneg}}}
 \newcommand{\relR}{\mbox{\textsf R}}
 \newcommand{\suchthat}{\; \rule[-3pt]{.5pt}{13pt} \;}
-\newcommand{\weird}{\mbox{\raisebox{2pt}{$\star$}}}
+\newcommand{\weird}{\mbox{\rotatebox{90}{$\star$}}}
 \title{A Test Book}
 \author{A. Author}
 \begin{document}
@@ -114,6 +114,8 @@ and \includegraphics{img/square} and
 
 Sets: $\Znoneg$ and $a \relR b$ and $\{x \suchthat x > 0\}$, and
 $a\hspace{10mm}b$, and $a \weird b$.
+Laws: $A \cong A \mbox{\hspace{12pt} and\hspace{4pt}also \hspace{12pt}} A \lor c$;
+a blank: $2, 9, \rule{12pt}{.5pt}, 37$; raised: $x = \mbox{\raisebox{-2pt}{$\emptyset$}}$.
 
 \begin{enumerate}
 \item An item with a formula:
@@ -438,12 +440,17 @@ def case_book(work):
          lambda: 'src="rendered/img/diagram.svg"' in one
          if can_draw() else skip("no LaTeX or pdftocairo: drawings not rendered")),
         ("\\mbox{\\tiny ...} and \\mbox{\\textsf R} reach MathML",
-         lambda: all("raisebox" in line for line in log.splitlines()
+         lambda: all("rotatebox" in line for line in log.splitlines()
                      if "Could not convert TeX math" in line)
          and "noneg" in one and "<math" in one),
         ("the definitions sample lists what's left for a person, not what's defined",
          lambda: "\\weird" in sample_text and "\\renewcommand{\\suchthat}"
          not in sample_text),
+        ("\\hspace inside \\mbox, a blank drawn as a rule, and \\raisebox reach MathML",
+         lambda: not any(s in line for line in log.splitlines()
+                         if "Could not convert TeX math" in line
+                         for s in ("and \\hspace", "rule{12pt}", "emptyset"))
+         and "<munder>" in one),
         ("a length in mm inside a formula reaches MathML",
          lambda: "10mm" not in one),
         ("the author's tagging header declaration is the table's",

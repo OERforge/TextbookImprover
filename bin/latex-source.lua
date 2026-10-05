@@ -76,6 +76,34 @@ function Math(m)
   text = text:gsub('\\rule%s*{%s*0[%a]*%s*}%s*%b{}', '')
   text = text:gsub('\\rule%s*%b[]%s*%b{}%s*{%s*0[%a]*%s*}', '\\ ')
   text = text:gsub('\\rule%s*%b{}%s*{%s*0[%a]*%s*}', '\\ ')
+  -- A rule no taller than a point and wider than it is tall is a line
+  -- to write on, a blank; underlined space says that, and texmath reads it.
+  local function blank(width, height)
+    local h = tonumber(height)
+    if h and h > 0 and h <= 1 then
+      return '\\underline{\\hspace{' .. width .. '}}'
+    end
+    return nil
+  end
+  text = text:gsub('\\rule%s*%b[]%s*{%s*([%d.]+%a%a)%s*}%s*{%s*([%d.]+)pt%s*}', blank)
+  text = text:gsub('\\rule%s*{%s*([%d.]+%a%a)%s*}%s*{%s*([%d.]+)pt%s*}', blank)
+  -- A box raised or lowered is the same symbol where texmath is concerned;
+  -- \raisebox{1pt}{$\not$} inside an \mbox stops it.
+  text = text:gsub('\\raisebox%s*%b{}%s*%b[]%s*%b[]%s*(%b{})', '%1')
+  text = text:gsub('\\raisebox%s*%b{}%s*%b[]%s*(%b{})', '%1')
+  text = text:gsub('\\raisebox%s*%b{}%s*(%b{})', '%1')
+  -- Space inside \mbox is text, which texmath reads as text: an \hspace
+  -- there stops it. One at either end goes outside the box, as math
+  -- space; one inside is a space.
+  text = text:gsub('\\mbox%s*(%b{})', function(arg)
+    local inner = arg:sub(2, -2)
+    if not inner:find('\\hspace') then return nil end
+    local before, after = '', ''
+    inner = inner:gsub('^%s*(\\hspace%*?%s*%b{})', function(s) before = s; return '' end)
+    inner = inner:gsub('(\\hspace%*?%s*%b{})%s*$', function(s) after = s; return '' end)
+    inner = inner:gsub('\\hspace%*?%s*%b{}', ' ')
+    return before .. '\\mbox{' .. inner .. '}' .. after
+  end)
   -- texmath knows em, pt, in, and cm, not mm; and a length set inside a
   -- formula (\setlength\tabcolsep in an array) lays out nothing a
   -- screen reader says.

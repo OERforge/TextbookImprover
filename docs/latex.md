@@ -63,7 +63,17 @@ The keys don't change an untagged build. With TeX Live 2026, `pdflatex` builds a
 
 **A file the book's build makes** can be written into, but building again writes over it: 93 of GIAM's drawings are in files fig2dev makes from xfig sources. A file beside a same-named `.fig` is counted as one, and the run says how many of its changes are in such files. Until the book's own build carries the alt text (an xfig comment it passes through, say), the copy is a version whose build is this one.
 
-Still to come: the book's language and `\DocumentMetadata`, which needs the book to build with LuaLaTeX (GIAM has three pdfTeX-only lines); table headers from the table-headers sidecar, as `\tagpdfsetup{table/header-rows=...}`; and definitions from `latex-conversion-macros.tex`, as changes to the author's own.
+**`tagging: "on"`** makes the copy build with LaTeX's own tagging, for an accessible PDF. It's a change to the author's build, so it's off by default: a tagged book is built with LuaLaTeX, since pdfLaTeX keeps the structure in TeX's main memory and GIAM's run out of it. Each change was needed on GIAM and found with a document of a few lines, and each keeps the untagged build working:
+
+- `\DocumentMetadata{lang=..., pdfstandard=ua-2, tagging=on}` before `\documentclass`, when the book has none, its language the book's declared one or babel's or polyglossia's.
+- The `pdftex` option taken out of `\documentclass`, `\usepackage`, and `\RequirePackage`, and pdfTeX's own settings (`\pdfcompresslevel=9`) out of the text.
+- A starred theorem the book defines beside its numbered one (`\newtheorem*{thm*}{Theorem}` with `\newtheorem{thm}`) defined only when it isn't yet: tagging's `\newtheorem{thm}` defines `thm*` too, and the second definition stops the build.
+- `\centerline` on a line of its own made a centered paragraph, by a definition before `\begin{document}`; inside a paragraph it's as before. As an `\hbox` between paragraphs it put every later paragraph inside a P (53 of GIAM's warnings).
+- `\leavevmode` before a display formula that opens a `center`, `flushleft`, or `flushright` environment. In LaTeX 2026-06-01 such a formula leaves a paragraph open (`Text. \begin{center} \[ 1! = 1 \] \end{center} After.` is enough), and in a list item the items after it nest in it.
+
+On GIAM, the target's copy laid over the author's tree, built from clean as its Makefile does (LuaLaTeX, BibTeX, makeindex, LuaLaTeX twice), has no error and no tagging warning but the missing alt text, and passes veraPDF's PDF/UA-2 profile; without `\DocumentMetadata` it builds with `pdflatex`. That pass says less than it seems: with no description in the image-alt sidecar, LaTeX gives each figure a placeholder (`picture environment`, or the image's file name), which veraPDF can't tell from a description. The run's tagging warnings (`Alternative text for graphic is missing`) say which.
+
+Still to come: table headers from the table-headers sidecar, as `\tagpdfsetup{table/header-rows=...}`; and definitions from `latex-conversion-macros.tex`, as changes to the author's own.
 
 ## What is lost
 

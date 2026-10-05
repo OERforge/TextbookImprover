@@ -1,8 +1,8 @@
 # Worked examples
 
-Two real books taken from the files their publishers offer to a finished result, one command at a time, with what each command prints. They follow [A first conversion](first-run.md) on real books, so read that first; the settings it explains aren't explained again here. The output below is from running these steps as written. Your numbers may differ if a publisher has changed its files since.
+Three real books taken from the files their publishers offer to a finished result, one command at a time, with what each command prints. They follow [A first conversion](first-run.md) on real books, so read that first; the settings it explains aren't explained again here. The output below is from running these steps as written. Your numbers may differ if a publisher has changed its files since.
 
-Both examples use `T` for the directory you cloned this repository into:
+The examples use `T` for the directory you cloned this repository into:
 
 ```bash
 T=/path/to/TextbookImprover
@@ -326,3 +326,203 @@ Runs agree.
 ```
 
 All 80 pages are identical, and all 228 links between them resolve. So the pages you publish from this conversion are also a source you can keep the book in, edit as HTML, and convert again.
+
+## A LaTeX book, from its repository to a tagged PDF
+
+Joseph E. Fields's [*A Gentle Introduction to the Art of Mathematics*](https://github.com/osj1961/giam) (GIAM) is an open textbook kept as LaTeX on GitHub under the GFDL: nine chapters, each a file the master `\include`-s, with figures drawn in xfig that the book's own Makefile turns into LaTeX. This example converts it to HTML and an EPUB, then writes a copy of its LaTeX that builds a tagged PDF. Besides LaTeX itself, it needs `pdftocairo` for the drawings ([Installation](installation.md)) and, for the book's own build, `fig2dev` (`sudo apt install fig2dev`). The output below is from commit 167696e, with paths shortened to the file's name.
+
+### Getting the files
+
+```bash
+mkdir -p ~/books && cd ~/books
+git clone https://github.com/osj1961/giam
+cd giam
+```
+
+The clone is the book's directory: the conversion reads it in place, never writes the author's files, and puts what it makes beside them.
+
+### 1. Which file is the book
+
+```bash
+python3 $T/bin/convert.py
+```
+
+```
+3 files here are each a whole LaTeX document: GIAM-hw.tex, GIAM-solutions_manual.tex, GIAM.tex. Set latex.main to the one that is the book.
+```
+
+One set of chapters makes the textbook, a workbook, and a solutions manual, each with a master file of its own. Name the textbook's:
+
+```bash
+cat > conversion.yaml <<'END'
+defaults:
+  latex:
+    main: GIAM.tex
+END
+```
+
+### 2. The book's own build
+
+```bash
+python3 $T/bin/convert.py
+```
+
+```
+GIAM.tex reaches 93 file(s) that aren't here: figures/Eratosthenes.tex, figures/if-then_flowchart.tex, figures/div_alg_flowchart.tex, figures/Euc_alg_flowchart.tex, figures/betweenness_example.tex, figures/transistor.tex, figures/series.tex, figures/parallel.tex, .... A book's own build often makes files like these (figures drawn by another program, say), and it has to run before the book is converted, since what it makes is what the conversion reads. Makefiles are here, Makefile, figures/Makefile: run make in the one that makes them. Nothing was converted.
+```
+
+The chapters `\input` figures that fig2dev writes from the xfig drawings, and the repository holds only the drawings. The conversion reads LaTeX, so the book's own build comes first:
+
+```bash
+(cd figures && make)
+```
+
+### 3. A first run
+
+```bash
+python3 $T/bin/convert.py
+```
+
+```
+93 of 93 drawing(s) made images by LaTeX, in rendered/.
+Read from a copy of the LaTeX: 21 \ifthenelse on a boolean read as a toggle; 1 \cline or \cmidrule read as a whole rule; 10 PDF or EPS image made SVG.
+Wrote latex-conversion-macros-sample.tex: 3 macro(s) whose formulas texmath can't make MathML of, with a definition suggested for 2 and 1 for a person to define. Check it, then save it as latex-conversion-macros.tex.
+GIAM.tex is the book: 10 page(s), one for each file it \include-s, and one for what it holds itself.
+19 LaTeX cross-reference(s) resolved to the section or id they name.
+No contents declared: contents-sample.yaml holds the order the master file gives, and its title and authors. Copy it into project.yaml to use it.
+table-headers: 101 data table(s): 4 needs-source, 97 new
+Wrote table-captions-missing.csv (92 table(s) needing a description).
+Wrote image-alt-missing.csv (102 image(s) needing alt text).
+Wrote bare-links-new.csv (3 bare link(s) with no row in bare-links.csv).
+Output check: 10 page(s), 134 finding(s):
+    104  image-without-alt: an img element has no alt attribute
+     30  table-without-headers-or-caption: a data table with no th and no caption
+```
+
+LaTeX drew each of the 93 drawings as an SVG, and the pages are in `html/`: one for each chapter, and one for what the master holds itself (the copyright page and acknowledgments). The book was read from a copy put right for Pandoc's reader: GIAM's `\ifthenelse` chooses between the textbook and the workbook, which the reader would drop, so each is read as a toggle set as the master sets it. [LaTeX sources](latex.md) lists what is put right and why. Among these lines Pandoc warns 57 times that it couldn't make MathML of a formula and left it as TeX, as in:
+
+```
+[WARNING] Could not convert TeX math \; \rule[-3pt]{.5pt}{13pt} \;, rendering as TeX:
+```
+
+### 4. Definitions for the formulas
+
+Those formulas use three of the book's own macros, and `latex-conversion-macros-sample.tex` says which:
+
+```latex
+% \nrelR is used in 3 formula(s). The book has:
+%   \newcommand{\nrelR}{\mbox{\raisebox{1pt}{$\not$}\hspace{1pt}{\textsf R}}}
+% Only a person can say what this draws:
+% \renewcommand{\nrelR}{}
+
+% \restrict is used in 8 formula(s). The book has:
+%   \newcommand{\restrict}[2]{#1 \,\rule[-4pt]{.25pt}{14pt}_{\,#2}}
+% Suggested: it draws what this says; check that it means it.
+\renewcommand{\restrict}[2]{#1 |_{ #2}}
+
+% \suchthat is used in 49 formula(s). The book has:
+%   \newcommand{\suchthat}{\; \rule[-3pt]{.5pt}{13pt} \;}
+% Suggested: it draws what this says; check that it means it.
+\renewcommand{\suchthat}{\mid}
+```
+
+GIAM draws "such that" and a function's restriction as bars made of rules, which say nothing to a screen reader; the suggestions say what they mean. `\nrelR`, "is not related to," is an R with a raised slash, and the sample leaves it to a person. Save the sample as `latex-conversion-macros.tex` with that line filled in:
+
+```latex
+\renewcommand{\nrelR}{\mathrel{\not R}}
+```
+
+The file is read after the book's preamble, by the conversion only; the book's own PDF never sees it.
+
+### 5. Name the book, and an EPUB
+
+`contents-sample.yaml` holds what the master says about the book. Its title reads "A Gentle Introduction to the Art of Mathematics Version 3.2 N", since GIAM's `\title` sets the version below the title, so correct it as you copy the rest into `project.yaml`, and give the book an identifier:
+
+```yaml
+project:
+  identifier: giam-3.2
+  title: A Gentle Introduction to the Art of Mathematics
+  authors:
+  - Joe Fields
+  language: en
+  contents:
+  - GIAM
+  - intro
+  - logic
+  - proof1
+  - sets
+  - proof2
+  - rel
+  - proof3
+  - card
+  - proof4
+```
+
+Then name an EPUB target beside the HTML:
+
+```bash
+cat > conversion.yaml <<'END'
+defaults:
+  latex:
+    main: GIAM.tex
+targets:
+  html:
+    format: html
+  epub:
+    format: epub3
+END
+python3 $T/bin/convert.py
+```
+
+```
+Read from a copy of the LaTeX: 21 \ifthenelse on a boolean read as a toggle; 1 \cline or \cmidrule read as a whole rule; 10 PDF or EPS image made SVG; the definitions in latex-conversion-macros.tex read after the preamble.
+...
+Wrote epub/giam-3.2.epub: 10 page(s), 104 image(s), 104 without alternative text.
+  Claims: accessMode textual, visual; sufficient textual,visual; features structuralNavigation, tableOfContents, readingOrder, MathML.
+  epubcheck ran on 1 EPUB(s).
+Output check: 10 page(s) and 1 EPUB(s), 270 finding(s):
+    104  image-empty-alt-not-decorative: alt is empty but the image is not marked aria-hidden="true"
+    104  image-without-alt: an img element has no alt attribute
+     62  table-without-headers-or-caption: a data table with no th and no caption
+```
+
+No formula is left as TeX now: Pandoc warns about none, and every one in the book is MathML. The EPUB passes epubcheck. What's left is the reports: alt text for the 102 images and drawings, and headers and descriptions for the tables, worked through as in [the first example](#6-work-through-the-reports). Until then the EPUB doesn't claim `alternativeText`, and the check finds each image twice, once in the HTML and once in the EPUB.
+
+### 6. A copy of the LaTeX that builds a tagged PDF
+
+The book's PDF is LaTeX's to make. A `source` target writes the book's own files back with what the reports decided, and `tagging: "on"` makes them build with LaTeX's tagging, for a PDF a screen reader can follow. Add one:
+
+```bash
+cat >> conversion.yaml <<'END'
+  tagged:
+    format: source
+    tagging: "on"
+END
+python3 $T/bin/convert.py
+```
+
+```
+tagged: 154 LaTeX file(s) written, 3 of them changed: 0 image(s) and drawing(s) given alt text and 0 marked artifact, as keys LaTeX's tagging reads. Made to build with LaTeX's tagging, with LuaLaTeX: \DocumentMetadata added, 2 pdftex option(s) and 1 pdfTeX setting(s) taken out, 2 starred theorem(s) defined only when tagging hasn't, \centerline on a line of its own made a centered paragraph, and 1 formula(s) opening a center environment given \leavevmode.
+```
+
+`tagged/` holds every file the master reaches, at the same paths. Lay it over a clean copy of the repository and build it as the Makefile builds the book, with LuaLaTeX in place of pdfLaTeX, which runs out of memory on a tagged book this size:
+
+```bash
+git clone . ../giam-tagged
+cp -r tagged/. ../giam-tagged/
+cd ../giam-tagged
+(cd figures && make)
+lualatex GIAM && bibtex GIAM && makeindex GIAM && lualatex GIAM && lualatex GIAM
+```
+
+The PDF has 434 pages, with no error in the log. Its tagging warnings are one for each of its 195 figures, for the alt text the book doesn't have yet, and one saying a link's destination, a figure, has no structure to point at, so the link's reference wasn't updated. [veraPDF](https://verapdf.org/) passes it as PDF/UA-2:
+
+```bash
+verapdf --flavour ua2 --format text GIAM.pdf
+```
+
+```
+PASS GIAM.pdf ua2
+```
+
+That pass says less than it seems. With nothing in `image-alt.csv`, LaTeX gives each figure a placeholder for its alt text, `picture environment` or the image's file name, and veraPDF can't tell a placeholder from a description. Once the image-alt sidecar has the book's descriptions, the next run writes each into the copy, as `\begin{picture}[alt={...}]` or `\includegraphics[alt={...}]`, and the PDF built from it carries them. 93 of the drawings are in the files fig2dev writes, so their descriptions go into the copy's versions of those files, and running `make` in the copy again would write over them; the run says so. [LaTeX sources](latex.md#the-source-target) says what the copy changes and why.

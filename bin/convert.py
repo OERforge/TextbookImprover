@@ -105,6 +105,7 @@ MARKDOWN_HTML_FILTER = os.path.join(HERE, "markdown-html.lua")
 HTML_SOURCE_FILTER = os.path.join(HERE, "html-source.lua")
 HTML_RAW_FILTER = os.path.join(HERE, "html-raw.lua")
 ASCIIDOC_FILTER = os.path.join(HERE, "asciidoc-source.lua")
+LATEX_FILTER = os.path.join(HERE, "latex-source.lua")
 INCLUDE = re.compile(r"^include::([^\[\s]+\.(?:adoc|asciidoc|asc))\[", re.M)
 SOURCE_EXTENSIONS = (".docx", ".md", ".html", ".adoc", ".asciidoc")
 PAGE_CSS = os.path.join(HERE, "page.css")
@@ -538,6 +539,8 @@ VARIANT_FILES = set()       # every <stem>.<target>.<ext> in the directory
 TARGET_NAMES = set()
 # The book's word.headings and word.tracked_deletions, read once.
 WORD_HEADINGS, WORD_DELETIONS = "keep", "accept"
+LATEX_MAIN = ""
+LATEX_MACROS = "latex-macros.tex"
 LANGUAGE_DECLARED = False
 
 
@@ -592,6 +595,8 @@ def markdown_sources(base, fragments):
             continue
         if os.path.exists(os.path.join(base, name[:-3] + ".docx")):
             continue
+        if name.lower() == "readme.md" and latex_master(base, quiet=True):
+            continue
         found.append(name)
     return found
 
@@ -626,6 +631,103 @@ def check_page_names(groups):
             "safe for a link, so two files can't both be one page. Rename "
             "one, or move the one that isn't a source out of the "
             "directory. Nothing was converted.")
+
+
+def latex_master(base, quiet=False):
+    """The LaTeX book's master file here, or None: the one .tex file in
+    the book's directory with \\documentclass and \\begin{document}, or
+    the one latex.main names when there are several, as there are when
+    one set of chapters makes a textbook and a workbook."""
+    import latexsource
+    found = latexsource.masters(base)
+    if LATEX_MAIN:
+        if LATEX_MAIN not in found:
+            if quiet:
+                return None
+            die(f"latex.main is {LATEX_MAIN}, which isn't a whole LaTeX "
+                "document here (one with \\documentclass and "
+                "\\begin{document})" + (": " + ", ".join(found) + " are."
+                                         if found else "."))
+        return LATEX_MAIN
+    if len(found) > 1:
+        if quiet:
+            return None
+        die(f"{len(found)} files here are each a whole LaTeX document: "
+            + ", ".join(found) + ". Set latex.main to the one that is the "
+            "book.")
+    return found[0] if found else None
+
+
+def read_latex_to_json(base, master, env, work):
+    """A LaTeX book, read whole through its master by Pandoc, from a copy
+    put right where Pandoc's reader can't take it (lib/latexsource.py),
+    and cut into a page per \\include-d file. Returns (stems, order,
+    header): the pages, the book's order as contents entries, and what
+    the preamble says about the book."""
+    import latexsource
+    prep = latexsource.prepare(base, work, master, say, LATEX_MACROS)
+    counts = prep["counts"]
+    for name in prep["missing"]:
+        say(f"WARNING: {master} reaches {name}, which isn't here. If the "
+            "book's own build makes it (a figure, say), run that first.")
+    if counts.get("drawings"):
+        say(f"{counts.get('drawings_made', 0)} of {counts['drawings']} "
+            "drawing(s) made images by LaTeX, in "
+            f"{latexsource.RENDERED}/.")
+    changed = [f"{counts[k]} {what}" for k, what in (
+        ("ifthenelse", "\\ifthenelse on a boolean read as a toggle"),
+        ("unbraced_input", "\\input without braces braced"),
+        ("artifact", "image marked artifact made decorative"),
+        ("graphics_converted", "PDF or EPS image made SVG"))
+        if counts.get(k)]
+    if counts.get("macros_file"):
+        changed.append(f"the definitions in {LATEX_MACROS} read after the "
+                       "preamble")
+    if changed:
+        say("Read from a copy of the LaTeX: " + "; ".join(changed) + ".")
+    if counts.get("ifthenelse_left"):
+        say(f"WARNING: {counts['ifthenelse_left']} \\ifthenelse with a "
+            "condition other than a boolean, which Pandoc drops, both "
+            "branches with it.")
+    out = os.path.join(work, "latex-book.json")
+    run(["pandoc", "-f", "latex", "-t", "json",
+         os.path.relpath(prep["master"], prep["copy"]), "-o", out,
+         "--lua-filter=" + LATEX_FILTER], env=env, cwd=prep["copy"])
+    with open(out, encoding="utf-8") as fh:
+        doc = json.load(fh)
+    meta = doc.get("meta", {})
+    master_stem = safe_stem(os.path.splitext(master)[0])
+    pages = latexsource.cut_pages(doc, prep["order"], master_stem,
+                                  prep["front_role"])
+    stems, order = [], []
+    for stem, role, blocks in pages:
+        stem = safe_stem(stem)
+        page_meta = {}
+        if stem == master_stem and meta.get("title"):
+            page_meta["title"] = meta["title"]
+        with open(os.path.join(base, stem + ".json"), "w",
+                  encoding="utf-8") as fh:
+            json.dump({"pandoc-api-version": doc["pandoc-api-version"],
+                       "meta": page_meta, "blocks": blocks}, fh)
+        stems.append(stem)
+        order.append({"page": stem, "role": role} if role != "main"
+                     else stem)
+    header = {}
+    if meta.get("title"):
+        header["title"] = latexsource.stringify(meta["title"]["c"])
+    authors = meta.get("author")
+    if authors:
+        items = authors["c"] if authors.get("t") == "MetaList" else [authors]
+        header["authors"] = [latexsource.stringify(a.get("c", []))
+                             for a in items]
+    language = latexsource.preamble_language(prep["preamble"])
+    if language:
+        header["language"] = language
+    say(f"{master} is the book: {len(stems)} page(s), one for each file "
+        "it \\include-s" + (", and one for what it holds itself"
+                            if stems and stems[0] == master_stem else "")
+        + ".")
+    return stems, order, header
 
 
 def asciidoc_sources(base):
@@ -702,7 +804,7 @@ def read_asciidoc_to_json(base, docs, env, imagesdir=""):
     return stems
 
 
-def resolve_asciidoc_xrefs(base, stems):
+def resolve_asciidoc_xrefs(base, stems, kind="AsciiDoc"):
     """Cross-references between the chapters of an AsciiDoc book, which
     were one document when Asciidoctor built it and are pages here.
 
@@ -774,23 +876,24 @@ def resolve_asciidoc_xrefs(base, stems):
                       encoding="utf-8") as fh:
                 json.dump(doc, fh)
     if resolved:
-        say(f"{resolved} AsciiDoc cross-reference(s) resolved to the "
+        say(f"{resolved} {kind} cross-reference(s) resolved to the "
             "section or id they name.")
     return resolved
 
 
-def write_order_sample(order, header=None):
+def write_order_sample(order, header=None, kind="AsciiDoc"):
     """What a master AsciiDoc file says about the book, in the shape
     project.yaml takes: its title, authors, and language, and as
     contents the order it includes its chapters in. Not applied: the
     project is the author's, and a run with none declared goes on as it
     always has (an EPUB called "Untitled") until it is."""
     import yaml
-    stems = [safe_stem(os.path.splitext(n)[0]) for n in order]
+    stems = [n if isinstance(n, dict) else safe_stem(os.path.splitext(n)[0])
+             for n in order]
     project = dict(header or {})
     project["contents"] = stems
     with open(CONTENTS_SAMPLE, "w", encoding="utf-8") as fh:
-        fh.write("# Written by convert.py from the master AsciiDoc file: the "
+        fh.write(f"# Written by convert.py from the master {kind} file: the "
                  "book's title,\n# authors, and language, and the order it "
                  "includes its chapters in.\n# Copy them into project.yaml "
                  "to use them.\n" + yaml.safe_dump(
@@ -2728,8 +2831,10 @@ def main():
         target.variants = variant_sources(base, target.name)
     language = project["language"]
     first = targets[0]        # sidecars and reports are book-level settings,
-    global WORD_HEADINGS, WORD_DELETIONS
+    global WORD_HEADINGS, WORD_DELETIONS, LATEX_MAIN, LATEX_MACROS
     WORD_HEADINGS = str(first["word.headings"] or "keep")
+    LATEX_MAIN = str(first["latex.main"] or "").strip()
+    LATEX_MACROS = str(first["latex.macros"] or "").strip()
     WORD_DELETIONS = str(first["word.tracked_deletions"] or "accept")
     #                           which the configuration keeps out of targets
     # Two source targets write the same copies unless they differ in the one
@@ -2808,6 +2913,7 @@ def main():
         # two that would be one page stop the run before either is.
         markdown = markdown_sources(base, fragment_files)
         adoc, adoc_order, imagesdir, adoc_header = asciidoc_sources(base)
+        master = latex_master(base)
         named = {page_name_of(n) for n in list(docs) + markdown + adoc}
         hand = hand_pages(base, named)
         web = html_sources(base, named, set(hand))
@@ -2820,6 +2926,15 @@ def main():
         stems += adoc_stems
         if adoc_order and not project.get("contents"):
             write_order_sample(adoc_order, adoc_header)
+        if master:
+            tex_stems, tex_order, tex_header = read_latex_to_json(
+                base, master, env, work)
+            check_page_names([docs, markdown, adoc,
+                              [s + ".tex" for s in tex_stems]])
+            resolve_asciidoc_xrefs(base, tex_stems, "LaTeX")
+            stems += tex_stems
+            if not project.get("contents"):
+                write_order_sample(tex_order, tex_header, "LaTeX")
         for target in targets:
             if web and target.format == "html" and os.path.abspath(
                     target.output_dir) == os.path.abspath(base):
@@ -2865,7 +2980,7 @@ def main():
                    "--resolved", env["TABLE_HEADERS_RESOLVED"],
                    "--resolved-html", os.path.join(work, "table-headers-html.json")], cwd=base)
         if not stems:
-            die("No .docx, .md, .adoc, or .html files here, so there is "
+            die("No .docx, .md, .adoc, .html, or LaTeX files here, so there is "
                 "nothing to convert.")
         warn_about_leftovers(base, stems, fragment_files, web)
 

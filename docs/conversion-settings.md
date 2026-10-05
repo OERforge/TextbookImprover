@@ -222,6 +222,20 @@ What becomes of text deleted with Word's tracked changes. accept drops it, as Wo
 
 Which paragraph styles are headings, for a book whose top level is styled Title, or otherwise not Heading 1 to 9, which is all Pandoc reads as headings. keep leaves the styles as they are; from-toc takes the levels each file's own table-of-contents field declares; or a map of style ids, FROM=TO,..., applied all at once (Title=Heading1,Heading1=Heading2). A file the setting can't apply to, with no TOC field, or not defining a style the map needs, is left as it is and named.
 
+## latex
+
+A LaTeX book, read through its master file: the one in the book's directory with \documentclass and \begin{document}, which \include-s the chapters, each a page.
+
+*Book level:* set these under `defaults:`, never in a target, since the whole book shares them; in a target they stop the run.
+
+**`latex.main`**—`string`; default `""` (empty)
+
+The master file, when more than one file in the book's directory is a whole document, as when one set of chapters makes a textbook, a workbook, and a solutions manual (GIAM.tex). Blank takes the only one, and stops the run when there are several.
+
+**`latex.macros`**—`string`; default `latex-macros.tex`
+
+A file of LaTeX definitions read after the book's own preamble, for reading only: the book's PDF never sees them. For a macro that draws what it means, where only a person can say what that is: \renewcommand{\suchthat}{\mid} for a bar drawn with \rule. Read when it's there.
+
 ## sidecars
 
 CSV files holding decisions a person made about the source. These describe the book rather than one rendering, so a target should rarely override them. These files are read, never written, and hold work no script can reproduce. A bare name resolves against the content directory, which is convenient but leaves them among the generated HTML, the extracted media, and the disposable reports: the directory you would delete to rebuild, and the one replaced wholesale when the publisher reissues the source. An absolute path, or one relative to the content directory such as "../corrections/ibs2e/table-captions.csv", keeps them somewhere you can put under version control. A path set here that doesn't exist stops the run, because the alternative is converting the whole book while silently discarding every correction in it.

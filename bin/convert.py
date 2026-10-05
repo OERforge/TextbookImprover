@@ -76,6 +76,7 @@ try:
     import docxremediate
     import htmlremediate
     import mdremediate
+    import texremediate
     import docxtarget
     import htmlrepair
     import mathjax
@@ -2037,7 +2038,7 @@ def warn_math_keep(sidecar, kept_file):
 
 
 def remediate_sources(target, base, docs, paths, env, html_stems=(), language=None,
-                      work=None, markdown=()):
+                      work=None, markdown=(), latex=None):
     """A target with format source: the book's own files, remediated, one
     copy each in the target's folder under the source's name. A Word file
     gets what a person decided in the sidecars written into it, and nothing
@@ -2045,8 +2046,9 @@ def remediate_sources(target, base, docs, paths, env, html_stems=(), language=No
     in the file it would read back as the author's own. An HTML page gets
     the same (lib/htmlremediate.py), and lang when it has none; a Markdown
     file the same, edited where each element is and confirmed against
-    Pandoc's reading (lib/mdremediate.py). AsciiDoc sources aren't written
-    yet."""
+    Pandoc's reading (lib/mdremediate.py); a LaTeX book's files the alt
+    text, as keys LaTeX's tagging reads (lib/texremediate.py). AsciiDoc
+    sources aren't written yet."""
     os.makedirs(target.output_dir, exist_ok=True)
     resolved = {}
     if env.get("TABLE_HEADERS_RESOLVED") and os.path.exists(env["TABLE_HEADERS_RESOLVED"]):
@@ -2105,6 +2107,21 @@ def remediate_sources(target, base, docs, paths, env, html_stems=(), language=No
             totals[key] = totals.get(key, 0) + n
         written.append(os.path.join(target.output_dir, name))
         md_files += 1
+    if latex:
+        import latexsource
+        master = latex
+        files, _ = latexsource.reached(base, master)
+        counts = texremediate.remediate(base, target.output_dir, master, files, page_alts)
+        say(f"{target.name}: {counts['files']} LaTeX file(s) written, "
+            f"{counts['changed']} of them changed: {counts.get('described', 0)} "
+            f"image(s) and drawing(s) given alt text and {counts.get('decorative', 0)} "
+            "marked artifact, as keys LaTeX's tagging reads."
+            + (f" {counts['generated']} of them are in files the book's own build "
+               "makes (beside an xfig source); building it again writes over them."
+               if counts.get("generated") else "")
+            + (f" {counts['pspicture']} pspicture(s) have no key for alt text and "
+               "were left alone." if counts.get("pspicture") else ""))
+        written.extend(os.path.join(target.output_dir, f) for f in files)
     others = sorted(f for f in os.listdir(base) if f.endswith(".adoc") and not f.startswith("."))
     say(f"{target.name}: {len(docs)} Word file(s), {pages} HTML page(s), and "
         f"{md_files} Markdown file(s) remediated: "
@@ -3078,7 +3095,8 @@ def main():
             if target.format == "source":
                 written[target.name] = remediate_sources(
                     target, base, docs, paths, env, html_stems,
-                    language if LANGUAGE_DECLARED else None, work, markdown)
+                    language if LANGUAGE_DECLARED else None, work, markdown,
+                    latex_master(base, quiet=True))
             if target.format in SOURCE_TARGETS or target.format == "docx":
                 written[target.name] = render_markdown(
                     target, [p for p in pages_by_dir[target.pages_dir]

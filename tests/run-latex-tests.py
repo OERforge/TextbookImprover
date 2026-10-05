@@ -265,10 +265,14 @@ def write_book(work, macros=False, second_master=False, readme=True,
                     if epub else ""))
 
 
-def fingerprint(work):
-    """The author's files, by content: everything but what a run writes."""
+def fingerprint(work, skip_dirs=()):
+    """The author's files, by content: everything but what a run writes,
+    and the folders named in skip_dirs."""
     found = {}
     for top, _, names in os.walk(work):
+        rel = os.path.relpath(top, work).split(os.sep)
+        if rel[0] in skip_dirs:
+            continue
         for name in names:
             path = os.path.join(top, name)
             if name.endswith((".tex", ".png", ".pdf", ".md")) and \
@@ -536,8 +540,81 @@ def case_unbuilt(work):
     ]
 
 
+FIG2DEV_PAIR = ("\\begin{picture}(0,0)%\n\\includegraphics{figures/f.png}%\n"
+                "\\end{picture}%\n\\setlength{\\unitlength}{3947sp}%\n"
+                "\\begin{picture}(600,300)(0,0)\n\\put(0,0){label}\n\\end{picture}%\n")
+
+
+def case_source(work):
+    """The source target: alt text from the sidecar written into the
+    author's own files, as keys LaTeX's tagging reads."""
+    os.makedirs(os.path.join(work, "figures"))
+    png(os.path.join(work, "sq.png"), (128, 128, 128))
+    png(os.path.join(work, "figures", "f.png"), (0, 0, 0))
+    with open(os.path.join(work, "figures", "f.fig"), "w") as fh:
+        fh.write("#FIG 3.2\n")
+    with open(os.path.join(work, "figures", "f.tex"), "w") as fh:
+        fh.write(FIG2DEV_PAIR)
+    source = ("\\documentclass{article}\n\\usepackage{graphicx}\n\\begin{document}\n"
+              "A square: \\includegraphics[width=1cm]{sq}.\n\n"
+              "\\begin{picture}(40,20)\\put(0,0){\\framebox(40,20){two}}\\end{picture}\n\n"
+              "A rule: \\includegraphics[height=2pt]{figures/f.png}\n\n"
+              "\\begin{figure}\\input{figures/f.tex}\\caption{F}\\end{figure}\n"
+              "% \\includegraphics{sq} in a comment\n"
+              "\\end{document}\n")
+    with open(os.path.join(work, "notes.tex"), "w", encoding="utf-8") as fh:
+        fh.write(source)
+    with open(os.path.join(work, "image-alt.csv"), "w", encoding="utf-8") as fh:
+        fh.write("Image,Alt\nsq.png,A gray square: 50% shaded\n"
+                 "rendered/notes-1.svg,Two boxes\nfigures/f.png,[decorative]\n"
+                 "rendered/figures/f.svg,A figure from xfig\n")
+    with open(os.path.join(work, "conversion.yaml"), "w") as fh:
+        fh.write("targets:\n  html:\n    format: html\n  fixed:\n    format: source\n")
+    before = fingerprint(work)
+    result = convert(work)
+    said = result.stdout + result.stderr
+    fixed = os.path.join(work, "fixed")
+    notes = read(work, "fixed", "notes.tex") \
+        if os.path.exists(os.path.join(fixed, "notes.tex")) else ""
+    pair = read(work, "fixed", "figures", "f.tex") \
+        if os.path.exists(os.path.join(fixed, "figures", "f.tex")) else ""
+
+    def builds():
+        engine = shutil.which("pdflatex")
+        if not engine:
+            return skip("no pdflatex to build the remediated copy")
+        build = os.path.join(work, "build")
+        shutil.copytree(work, build, ignore=shutil.ignore_patterns(
+            "fixed", "html", "build", "rendered"))
+        shutil.copytree(fixed, build, dirs_exist_ok=True)
+        done = subprocess.run([engine, "-interaction=nonstopmode", "notes.tex"],
+                              cwd=build, capture_output=True, text=True, timeout=120)
+        return done.returncode == 0
+    return [
+        ("an image's alt text joins its own keys, escaped",
+         lambda: "\\includegraphics[alt={A gray square: 50\\% shaded},width=1cm]{sq}"
+         in notes),
+        ("a drawing in the text gets its alt text",
+         lambda: "\\begin{picture}[alt={Two boxes}](40,20)" in notes),
+        ("decorative is the artifact key",
+         lambda: "\\includegraphics[artifact,height=2pt]{figures/f.png}" in notes),
+        ("fig2dev's pair: alt text on the first picture, the labels an artifact",
+         lambda: pair.startswith("\\begin{picture}[alt={A figure from xfig}](0,0)")
+         and "\\begin{picture}[artifact](600,300)" in pair
+         and "\\includegraphics{figures/f.png}" in pair),
+        ("a comment is left alone",
+         lambda: "% \\includegraphics{sq} in a comment" in notes),
+        ("the run says which are in files the book's own build makes",
+         lambda: "own build" in said and "writes over them" in said),
+        ("the author's files are untouched by the source target",
+         lambda: fingerprint(work, skip_dirs=("fixed", "build")) == before),
+        ("the remediated copy builds with pdfLaTeX, as the author's does", builds),
+    ]
+
+
 CASES = [("a LaTeX book", case_book), ("two masters", case_masters),
-         ("one file", case_single), ("an unbuilt book", case_unbuilt)]
+         ("one file", case_single), ("an unbuilt book", case_unbuilt),
+         ("the source target", case_source)]
 
 
 def main():

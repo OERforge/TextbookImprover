@@ -119,6 +119,17 @@ $a\hspace{10mm}b$, and $a \weird b$.
 \item An item with a formula:
 \[ x^2 + 1 \]
 and more after it.
+\item An item with a table:
+
+\begin{tabular}{cc}
+p & q \\
+\end{tabular}
+
+and text after it.
+\item A blank to fill in:
+
+\hrule
+
 \item The next item.
 \end{enumerate}
 
@@ -226,7 +237,8 @@ def fingerprint(work):
             path = os.path.join(top, name)
             if name.endswith((".tex", ".png", ".pdf", ".md")) and \
                     not name.endswith("-sample.tex") and \
-                    "rendered" not in path and "html" not in path:
+                    "rendered" not in path and "html" not in path \
+                    and os.sep + "back" + os.sep not in path:
                 with open(path, "rb") as fh:
                     found[os.path.relpath(path, work)] = \
                         hashlib.sha256(fh.read()).hexdigest()
@@ -257,6 +269,22 @@ def epub_links_resolve(work):
     for text in texts:
         targets.update(re.findall(r'href="[^"#]*#([^"]+)"', text))
     return "page-one" in ids and targets and targets <= ids
+
+
+def word_list_reads_back(work):
+    """one.docx, read back as a source, gives the list whole: the table
+    and the rule inside their items, and every item in one list."""
+    back = os.path.join(work, "back")
+    os.makedirs(back, exist_ok=True)
+    shutil.copy(os.path.join(work, "word", "one.docx"), back)
+    with open(os.path.join(back, "conversion.yaml"), "w") as fh:
+        fh.write("targets:\n  html:\n    format: html\n")
+    convert(back)
+    page = read(back, "html", "one.html")
+    lists = re.findall(r"<ol[^>]*>(.*?)</ol>", page, re.S)
+    whole = [l for l in lists if "An item with a formula" in l]
+    return whole and "The next item" in whole[0] and "<table" in whole[0] \
+        and "<hr" in whole[0] and "and text after it" in whole[0]
 
 
 def word_math_in_list(work):
@@ -375,6 +403,8 @@ def case_book(work):
          lambda: epub_links_resolve(work)),
         ("in Word, a formula inside a list item stays in the item",
          lambda: word_math_in_list(work)),
+        ("read back from Word, a list with a formula, a table, and a rule in its items is whole",
+         lambda: word_list_reads_back(work)),
         ("the author's files are untouched",
          lambda: fingerprint(work) == before),
     ]

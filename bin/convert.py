@@ -1183,6 +1183,7 @@ def read_to_json(base, docs, env, work):
         docxrepair.apply_definition_terms(os.path.join(base, stem + ".json"))
         # Ids Pandoc's writer hashed, named again from the file's own map.
         docxrepair.apply_id_map(repaired, os.path.join(base, stem + ".json"))
+        docxrepair.apply_list_tables(repaired, os.path.join(base, stem + ".json"))
         # Numbered code a Word target wrote, numbered again.
         docxrepair.apply_number_lines(repaired, os.path.join(base, stem + ".json"))
         if tips and TRACE:
@@ -1321,6 +1322,8 @@ def read_variants(base, target, work, env):
                                               if not os.path.isabs(out) else out)
             docxrepair.apply_id_map(repaired, os.path.join(base, out)
                                     if not os.path.isabs(out) else out)
+            docxrepair.apply_list_tables(repaired, os.path.join(base, out)
+                                         if not os.path.isabs(out) else out)
             docxrepair.apply_number_lines(repaired, os.path.join(base, out)
                                           if not os.path.isabs(out) else out)
         elif name.endswith((".adoc", ".asciidoc")):

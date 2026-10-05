@@ -244,6 +244,16 @@ CODE_MARK = "tiqLang"
 # the list's depth, which becomes the paragraph's numbering level.
 MATH_MARK = "tiqMath"
 BASE_LIST_ID = 1000          # Pandoc's numbering with no marker (baseListId)
+# A table or a horizontal rule inside an item of a list that isn't itself
+# in a list. Word can't put a table in a numbered paragraph, and Pandoc's
+# reader takes its own rule only from a paragraph with no properties, so
+# with no numbering (Readers/Docx/Parse.hs); either way the reader ends the
+# list there (Readers/Docx/Lists.hs folds only paragraphs into an item),
+# so the file
+# says which of its tables belong to an item, with how many blocks of the
+# item follow it and whether the list goes on after the item, in the same
+# part as the id map; docxrepair.apply_list_tables puts them back.
+ITEM_TABLE_MARK = "tiqItemTable"
 NUMBER_CLASSES = ("numberLines", "number-lines")
 # A code block's language, the class Pandoc highlights by, has nowhere to
 # go in Word either. It goes in a hidden bookmark (a name starting with an
@@ -355,6 +365,8 @@ def mark_blocks(doc):
 
 
 def _display_math_para(block):
+    """A paragraph Pandoc's writer gives no numbering in a list item: one
+    holding only a display formula."""
     return block.get("t") == "Para" and len(block["c"]) == 1 \
         and block["c"][0].get("t") == "Math" \
         and block["c"][0]["c"][0].get("t") == "DisplayMath"
@@ -405,6 +417,58 @@ def _mark_item(blocks, depth, counter, opens_item):
             _mark_item(inner["c"][1], depth, counter, opens_item and i == 0)
 
 
+def _held(block):
+    """"t" for a table, "r" for a horizontal rule, or a div holding nothing
+    but one, at any depth; None otherwise."""
+    while block.get("t") == "Div" and len(block["c"][1]) == 1:
+        block = block["c"][1][0]
+    return {"Table": "t", "HorizontalRule": "r"}.get(block.get("t"))
+
+
+def _mark_item_tables(item, counter, continues):
+    """Mark each table after the first block of a top-level list item with
+    how many of the item's blocks follow it and whether the list goes on."""
+    for i in range(len(item) - 1, 0, -1):
+        kind = _held(item[i])
+        if kind:
+            counter[0] += 1
+            item[i] = {"t": "Div", "c": [["%s%dk%sf%dc%d" % (
+                ITEM_TABLE_MARK, counter[0], kind, len(item) - i - 1,
+                int(continues)), [], []], [item[i]]]}
+
+
+def item_tables(xml):
+    """[(kind, ordinal, follow, continues)] for each table ("t") or rule
+    ("r") mark_blocks marked as in a list item, the ordinal counting the
+    body's tables, or its rules, outside tables, from 0. The marks are
+    then removed. Returns (xml, found)."""
+    pattern = re.compile(r'<w:bookmarkStart w:id="(\d+)" w:name="_?%s\d+k([tr])f(\d+)c(\d)"\s*/>'
+                         % ITEM_TABLE_MARK)
+    found = []
+    while True:
+        m = pattern.search(xml)
+        if not m:
+            break
+        kind = m.group(2)
+        target = "<w:tbl>" if kind == "t" else 'o:hr="t"'
+        at = xml.find(target, m.end())
+        if at >= 0:
+            depth, ordinal = 0, 0
+            for tag in re.finditer(r'<w:tbl>|</w:tbl>|o:hr="t"', xml[:at]):
+                if tag.group(0) == "<w:tbl>":
+                    if depth == 0 and kind == "t":
+                        ordinal += 1
+                    depth += 1
+                elif tag.group(0) == "</w:tbl>":
+                    depth -= 1
+                elif depth == 0 and kind == "r":
+                    ordinal += 1
+            found.append((kind, ordinal, int(m.group(3)), int(m.group(4))))
+        xml = xml[:m.start()] + xml[m.end():]
+        xml = re.sub(r'<w:bookmarkEnd w:id="%s"\s*/>' % m.group(1), "", xml, count=1)
+    return xml, found
+
+
 def _mark_list_math(blocks, depth, counter=None):
     """Mark each display-formula paragraph that follows the first block of
     a list item, with the item's depth (MATH_MARK). Returns how many."""
@@ -419,11 +483,13 @@ def _mark_list_math(blocks, depth, counter=None):
     for block in blocks:
         items = items_of(block) if isinstance(block, dict) else None
         if items is not None:
-            for item in items:
+            for j, item in enumerate(items):
                 # The writer cuts a paragraph holding a display formula and
                 # text into paragraphs (fixDisplayMath, Writers/Shared.hs);
                 # cut here the same way, so the formula's own is marked.
                 _mark_item(item, depth + 1, counter, True)
+                if depth == -1:
+                    _mark_item_tables(item, counter, j < len(items) - 1)
                 _mark_list_math(item, depth + 1, counter)
         elif isinstance(block, dict) and block.get("t") in ("Div", "BlockQuote"):
             inner = block["c"][1] if block["t"] == "Div" else block["c"]
@@ -449,8 +515,7 @@ def list_math(xml):
             if para >= 0 else None
         numbering = ('<w:numPr><w:ilvl w:val="%s" /><w:numId w:val="%d" /></w:numPr>'
                      % (level, BASE_LIST_ID))
-        if para >= 0 and "oMath" in xml[para:xml.find("</w:p>", para)] \
-                and not (props and "<w:numPr>" in props.group(1)):
+        if para >= 0 and not (props and "<w:numPr>" in props.group(1)):
             if props:
                 inner = props.group(1)
                 style = re.match(r"\s*<w:pStyle [^>]*/>", inner)
@@ -974,10 +1039,12 @@ def id_map(doc):
     return found
 
 
-def _id_map_xml(mapping):
+def _id_map_xml(mapping, listed_tables=()):
     rows = "".join('<id bookmark="%s" name="%s"/>' % (html.escape(b, quote=True),
                                                      html.escape(n, quote=True))
                    for b, n in sorted(mapping.items()))
+    rows += "".join('<listBlock kind="%s" n="%d" follow="%d" continues="%d"/>' % row
+                    for row in sorted(listed_tables))
     return ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
             '<ids xmlns="%s">%s</ids>' % (ID_MAP_NS, rows))
 
@@ -1068,6 +1135,7 @@ def finish(path, doc, keep=None):
         new = compat_mode(text("word/settings.xml"))
         counts["compat"] = int(new != text("word/settings.xml"))
         parts["word/settings.xml"] = new.encode("utf-8")
+    listed_tables = []
     for part, rels, facts in (
             ("word/document.xml", "word/_rels/document.xml.rels", body),
             ("word/footnotes.xml", "word/_rels/footnotes.xml.rels", notes)):
@@ -1081,6 +1149,8 @@ def finish(path, doc, keep=None):
             counts[key] += n
         xml, n = list_math(xml)
         counts["list_math"] = counts.get("list_math", 0) + n
+        if part == "word/document.xml":
+            xml, listed_tables = item_tables(xml)
         numbering = text("word/numbering.xml") if "word/numbering.xml" in parts else ""
         xml, n, items = indent_quotes(xml, level_indents(numbering) if numbering else None,
                                       level_indents(numbering, blank=True) if numbering else None)
@@ -1111,8 +1181,8 @@ def finish(path, doc, keep=None):
         parts["word/styles.xml"] = text("word/styles.xml").replace(
             "</w:styles>", LINE_NUMBER_STYLE + "</w:styles>", 1).encode("utf-8")
     mapping = id_map(doc)
-    if mapping and ID_MAP_PART not in parts:
-        parts[ID_MAP_PART] = _id_map_xml(mapping).encode("utf-8")
+    if (mapping or listed_tables) and ID_MAP_PART not in parts:
+        parts[ID_MAP_PART] = _id_map_xml(mapping, listed_tables).encode("utf-8")
         names.append(ID_MAP_PART)
         infos[ID_MAP_PART] = zipfile.ZipInfo(ID_MAP_PART)
         rels = "word/_rels/document.xml.rels"

@@ -792,6 +792,84 @@ def id_map(docx_path):
     return {}
 
 
+def list_tables(docx_path):
+    """[(kind, ordinal, follow, continues)] for each table ("t") or rule
+    ("r") the Word target wrote in a top-level list item
+    (docxtarget.ITEM_TABLE_MARK), from
+    the same part as the id map, or [] for any other file."""
+    with zipfile.ZipFile(docx_path) as z:
+        for name in z.namelist():
+            if name.startswith("customXml/") and name.endswith(".xml"):
+                data = z.read(name).decode("utf-8", "replace")
+                if "OERforge/TextbookImprover/ids" in data:
+                    return [(k, int(n), int(f), int(c)) for k, n, f, c in re.findall(
+                        r'<listBlock kind="([tr])" n="(\d+)" follow="(\d+)" continues="(\d)"\s*/>',
+                        data)]
+    return []
+
+
+def apply_list_tables(docx_path, json_path):
+    """Each table the Word target wrote inside a list item, and the item's
+    blocks after it, put back in the item, and the list the reader began
+    again after them joined to the first. Pandoc's reader ends a list at a
+    table (it folds only paragraphs into an item), so these come back as a
+    list, a table, paragraphs, and a second list. Returns how many."""
+    import json
+    marks = list_tables(docx_path)
+    if not marks:
+        return 0
+    with open(json_path, encoding="utf-8") as fh:
+        doc = json.load(fh)
+    places = {"t": [], "r": []}  # (blocks, index) of each table and rule, in order
+
+    def walk(blocks):
+        for i, block in enumerate(blocks):
+            if not isinstance(block, dict):
+                continue
+            kind = block.get("t")
+            if kind == "Table":
+                places["t"].append((blocks, i, len(places["t"]) + len(places["r"])))
+            elif kind == "HorizontalRule":
+                places["r"].append((blocks, i, len(places["t"]) + len(places["r"])))
+            elif kind in ("Div", "BlockQuote"):
+                walk(block["c"][1] if kind == "Div" else block["c"])
+            elif kind == "OrderedList":
+                for item in block["c"][1]:
+                    walk(item)
+            elif kind == "BulletList":
+                for item in block["c"]:
+                    walk(item)
+    walk(doc["blocks"])
+    lists = ("OrderedList", "BulletList")
+
+    def items(block):
+        return block["c"][1] if block["t"] == "OrderedList" else block["c"]
+    moved = 0
+    # Last first, so a move never shifts a place still to come.
+    order = sorted(marks, key=lambda m: places[m[0]][m[1]][2]
+                   if m[1] < len(places[m[0]]) else -1, reverse=True)
+    for kind, ordinal, follow, continues in order:
+        if ordinal >= len(places[kind]):
+            continue
+        blocks, i, _ = places[kind][ordinal]
+        if i == 0 or not isinstance(blocks[i - 1], dict) \
+                or blocks[i - 1].get("t") not in lists:
+            continue
+        owner = blocks[i - 1]
+        taken = blocks[i:i + 1 + follow]
+        del blocks[i:i + 1 + follow]
+        items(owner)[-1].extend(taken)
+        if continues and i < len(blocks) and isinstance(blocks[i], dict) \
+                and blocks[i].get("t") == owner["t"]:
+            items(owner).extend(items(blocks[i]))
+            del blocks[i]
+        moved += 1
+    if moved:
+        with open(json_path, "w", encoding="utf-8") as fh:
+            json.dump(doc, fh)
+    return moved
+
+
 def apply_id_map(docx_path, json_path):
     """The page's ids, and its links to them, renamed from the bookmark
     names Pandoc's writer hashed back to what they were. Returns how many

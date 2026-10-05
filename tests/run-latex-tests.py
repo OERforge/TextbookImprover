@@ -130,6 +130,14 @@ and text after it.
 
 \hrule
 
+\item Nested:
+\begin{enumerate}
+\item A nested blank:
+
+\hrule
+
+\item Another nested item.
+\end{enumerate}
 \item The next item.
 \end{enumerate}
 
@@ -295,8 +303,13 @@ def word_list_reads_back(work):
     page = read(back, "html", "one.html")
     lists = re.findall(r"<ol[^>]*>(.*?)</ol>", page, re.S)
     whole = [l for l in lists if "An item with a formula" in l]
-    return whole and "The next item" in whole[0] and "<table" in whole[0] \
-        and "<hr" in whole[0] and "and text after it" in whole[0]
+    outer = page[page.find("An item with a formula"):]
+    outer = outer[:outer.find("The next item") + 1]
+    return whole and "The next item" in page and "<table" in outer \
+        and outer.count("<hr") >= 2 and "and text after it" in outer \
+        and "Another nested item" in outer \
+        and len(re.findall(r"<ol", page[page.find("An item with a formula"):
+                                       page.find("The next item")])) == 1
 
 
 def word_quote_reads_back(work):

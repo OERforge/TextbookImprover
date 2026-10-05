@@ -802,8 +802,8 @@ def list_tables(docx_path):
             if name.startswith("customXml/") and name.endswith(".xml"):
                 data = z.read(name).decode("utf-8", "replace")
                 if "OERforge/TextbookImprover/ids" in data:
-                    return [(k, int(n), int(f), int(c)) for k, n, f, c in re.findall(
-                        r'<listBlock kind="([trq])" n="(\d+)" follow="(\d+)" continues="(\d)"\s*/>',
+                    return [(k, int(n), int(f), c) for k, n, f, c in re.findall(
+                        r'<listBlock kind="([trq])" n="(\d+)" follow="(\d+)" continues="(\d+)"\s*/>',
                         data)]
     return []
 
@@ -861,7 +861,7 @@ def apply_list_tables(docx_path, json_path):
                 continue
             quote = blocks[i - 1]
             quote["c"].append(blocks.pop(i))
-            if continues and i < len(blocks) and isinstance(blocks[i], dict) \
+            if continues == "1" and i < len(blocks) and isinstance(blocks[i], dict) \
                     and blocks[i].get("t") == "BlockQuote":
                 quote["c"].extend(blocks.pop(i)["c"])
             moved += 1
@@ -869,14 +869,28 @@ def apply_list_tables(docx_path, json_path):
         if i == 0 or not isinstance(blocks[i - 1], dict) \
                 or blocks[i - 1].get("t") not in lists:
             continue
-        owner = blocks[i - 1]
+        # The lists from the outermost to the item's own, each the last
+        # block of the last item of the one before.
+        chain = [blocks[i - 1]]
+        for _ in continues[1:]:
+            last = items(chain[-1])[-1] if items(chain[-1]) else []
+            if not last or not isinstance(last[-1], dict) \
+                    or last[-1].get("t") not in lists:
+                break
+            chain.append(last[-1])
+        if len(chain) != len(continues):
+            continue
         taken = blocks[i:i + 1 + follow]
         del blocks[i:i + 1 + follow]
-        items(owner)[-1].extend(taken)
-        if continues and i < len(blocks) and isinstance(blocks[i], dict) \
-                and blocks[i].get("t") == owner["t"]:
-            items(owner).extend(items(blocks[i]))
-            del blocks[i]
+        items(chain[-1])[-1].extend(taken)
+        # The reader begins each list that went on again after the table
+        # or rule, the innermost first; each joins its own.
+        for level in range(len(chain) - 1, -1, -1):
+            if continues[level] == "1" and i < len(blocks) \
+                    and isinstance(blocks[i], dict) \
+                    and blocks[i].get("t") == chain[level]["t"]:
+                items(chain[level]).extend(items(blocks[i]))
+                del blocks[i]
         moved += 1
     if moved:
         with open(json_path, "w", encoding="utf-8") as fh:

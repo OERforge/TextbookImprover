@@ -426,16 +426,18 @@ def _held(block):
     return {"Table": "t", "HorizontalRule": "r"}.get(block.get("t"))
 
 
-def _mark_item_tables(item, counter, continues):
-    """Mark each table after the first block of a top-level list item with
-    how many of the item's blocks follow it and whether the list goes on."""
+def _mark_item_tables(item, counter, chain):
+    """Mark each table or rule after the first block of a list item with
+    how many of the item's blocks follow it and, for each list from the
+    outermost to the item's own, whether it goes on (a digit each)."""
+    bits = "".join(str(int(b)) for b in chain)
     for i in range(len(item) - 1, 0, -1):
         kind = _held(item[i])
         if kind:
             counter[0] += 1
-            item[i] = {"t": "Div", "c": [["%s%dk%sf%dc%d" % (
-                ITEM_TABLE_MARK, counter[0], kind, len(item) - i - 1,
-                int(continues)), [], []], [item[i]]]}
+            item[i] = {"t": "Div", "c": [["%s%dk%sf%dc%s" % (
+                ITEM_TABLE_MARK, counter[0], kind, len(item) - i - 1, bits),
+                [], []], [item[i]]]}
 
 
 def _table_end(xml, start):
@@ -476,7 +478,7 @@ def item_tables(xml):
     ("r") mark_blocks marked as in a list item, the ordinal counting the
     body's tables, or its rules, outside tables, from 0. The marks are
     then removed. Returns (xml, found)."""
-    pattern = re.compile(r'<w:bookmarkStart w:id="(\d+)" w:name="_?%sQ?\d+k([trq])f(\d+)c(\d)"\s*/>'
+    pattern = re.compile(r'<w:bookmarkStart w:id="(\d+)" w:name="_?%sQ?\d+k([trq])f(\d+)c(\d+)"\s*/>'
                          % ITEM_TABLE_MARK)
     found = []
     while True:
@@ -503,15 +505,18 @@ def item_tables(xml):
                     depth -= 1
                 elif depth == 0 and kind == "r":
                     ordinal += 1
-            found.append((kind, ordinal, int(m.group(3)), int(m.group(4))))
+            found.append((kind, ordinal, int(m.group(3)), m.group(4)))
         xml = xml[:m.start()] + xml[m.end():]
         xml = re.sub(r'<w:bookmarkEnd w:id="%s"\s*/>' % m.group(1), "", xml, count=1)
     return xml, found
 
 
-def _mark_list_math(blocks, depth, counter=None):
+def _mark_list_math(blocks, depth, counter=None, chain=(), tables=True):
     """Mark each display-formula paragraph that follows the first block of
-    a list item, with the item's depth (MATH_MARK). Returns how many."""
+    a list item, with the item's depth (MATH_MARK), and each table or rule
+    after an item's first block (ITEM_TABLE_MARK) with whether each list
+    from the outermost to its own goes on after it: chain. Not in a
+    quotation, which the reader takes apart differently. Returns how many."""
     counter = counter if counter is not None else [0]
 
     def items_of(block):
@@ -528,12 +533,14 @@ def _mark_list_math(blocks, depth, counter=None):
                 # text into paragraphs (fixDisplayMath, Writers/Shared.hs);
                 # cut here the same way, so the formula's own is marked.
                 _mark_item(item, depth + 1, counter, True)
-                if depth == -1:
-                    _mark_item_tables(item, counter, j < len(items) - 1)
-                _mark_list_math(item, depth + 1, counter)
+                here = chain + (j < len(items) - 1,)
+                if tables:
+                    _mark_item_tables(item, counter, here)
+                _mark_list_math(item, depth + 1, counter, here, tables)
         elif isinstance(block, dict) and block.get("t") in ("Div", "BlockQuote"):
             inner = block["c"][1] if block["t"] == "Div" else block["c"]
-            _mark_list_math(inner, depth, counter)
+            _mark_list_math(inner, depth, counter, chain,
+                            tables and block["t"] == "Div")
     return counter[0]
 
 
@@ -1083,7 +1090,7 @@ def _id_map_xml(mapping, listed_tables=()):
     rows = "".join('<id bookmark="%s" name="%s"/>' % (html.escape(b, quote=True),
                                                      html.escape(n, quote=True))
                    for b, n in sorted(mapping.items()))
-    rows += "".join('<listBlock kind="%s" n="%d" follow="%d" continues="%d"/>' % row
+    rows += "".join('<listBlock kind="%s" n="%d" follow="%d" continues="%s"/>' % row
                     for row in sorted(listed_tables))
     return ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
             '<ids xmlns="%s">%s</ids>' % (ID_MAP_NS, rows))

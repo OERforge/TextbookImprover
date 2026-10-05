@@ -60,6 +60,7 @@ UK = re.compile(
 ALLOWED = {
     (None, "aria-labelledby"), (None, "labelledby"),
     (None, "Licence"),                      # "Notice and Licence", IMS
+    ("docs/examples.md", "flavour"),        # veraPDF's own --flavour option
     ("lib/bookcontents.py", "unrecognised_roles"),
     ("CHANGELOG.md", "unrecognised_roles"),     # the entries announcing
     ("CHANGELOG.md", "normalise"),              # the renames name the old

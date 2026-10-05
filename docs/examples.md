@@ -432,7 +432,7 @@ GIAM draws "such that" and a function's restriction as bars made of rules, which
 \renewcommand{\nrelR}{\mathrel{\not R}}
 ```
 
-The file is read after the book's preamble, by the conversion only; the book's own PDF never sees it.
+The file is read after the book's preamble, so its definitions win over the book's. The book's own files are never changed; a `source` target, in step 6, writes them into its copy.
 
 ### 5. Name the book, and an EPUB
 

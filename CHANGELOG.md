@@ -13,6 +13,7 @@ Versions are two-part and pre-1.0: breaking changes may land in any of them unti
 ### Fixed
 
 - **A link to a chapter's own heading in an EPUB or a PDF.** The chapter's heading takes the page's id in a book, and a link to the id it had, a LaTeX chapter's `\label` say, went nowhere: epubcheck's RSC-012 on GIAM. Such links now go to the chapter.
+- **A display formula in a list item, in a Word file.** Pandoc's writer gives such a formula's paragraph no numbering (jgm/pandoc#6638), so reading the file ended the list there and the rest of the item came back as new lists and indented paragraphs. On GIAM, read back from Word, lists differed from the HTML on 7 of 10 pages; with this, on 5, the rest from tables inside list items. The formula's paragraph now takes the item's level with no marker, as the item's other paragraphs do, and the list reads back whole.
 - **A table inside a table cell in a PDF.** Pandoc's LaTeX writer made each a longtable and LaTeX stopped on the inner one; the inner table is now written as lines of text, one a row, and the run says so.
 
 ## [0.8] - 2026-10-03

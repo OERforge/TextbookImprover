@@ -138,6 +138,8 @@ What Pandoc does, as read from its source or established by test, for the questi
 
 **The DOCX writer flattens a table's bodies into one.** A body's head row becomes an ordinary row, and a head row that is one cell spanning the table becomes a merged cell (`w:gridSpan`): Word's own form for a band. Read back, it's one body with that row as a spanning `<td>`, which is the shape the header pre-pass infers bands from. So a grouped table survives a trip through Word in meaning, not in markup. Measured.
 
+**A display formula in a list item ends the list on reading.** `getParaProps` (`Writers/Docx/OpenXML.hs`, 3.12) writes no `w:numPr` at all for a paragraph whose one inline is display math (`not displayMathPara`), where the item's other continuation paragraphs get `w:numId` 1000, the numbering with no marker (`baseListId`); a paragraph mixing text and display formulas is first cut into paragraphs by `fixDisplayMath` (`Writers/Shared.hs`), so a formula in the middle of an item's text is affected too. The reader then ends the list at the formula, and the rest of the item and the list come back as new lists or indented paragraphs. Measured on GIAM's exercises and a one-item case. Filed long ago as #6638 (open, 2020); #11900 (closed 2026-09-25) changed the indent of such continuations, not this. The Word target marks each such formula and gives its paragraph the item's level and numbering 1000 (`docxtarget.list_math`).
+
 ## The Markdown reader and writer
 
 **The reader keeps duplicate ids and warns.** `[WARNING] Duplicate identifier 'x' at file.md line N` on stderr; both elements keep the id. Measured on a merged file with 733 of them. Relevant because Pandoc's HTML writer then emits invalid HTML without complaint.

@@ -505,18 +505,17 @@ python3 $T/bin/convert.py
 tagged: 154 LaTeX file(s) written, 3 of them changed: 0 image(s) and drawing(s) given alt text and 0 marked artifact, as keys LaTeX's tagging reads. 3 definition(s) from latex-conversion-macros.tex written after the preamble, as the conversion reads them. Made to build with LaTeX's tagging, with LuaLaTeX: \DocumentMetadata added, 2 pdftex option(s) and 1 pdfTeX setting(s) taken out, 2 starred theorem(s) defined only when tagging hasn't, \centerline on a line of its own made a centered paragraph, and 1 formula(s) opening a center environment given \leavevmode.
 ```
 
-`tagged/` holds every file the master reaches, at the same paths. Lay it over a clean copy of the repository and build it as the Makefile builds the book, with LuaLaTeX in place of pdfLaTeX, which runs out of memory on a tagged book this size:
+`tagged/` holds every file the master reaches, at the same paths. Lay it over a clean copy of the repository and build it with LuaLaTeX in place of the Makefile's pdfLaTeX, which runs out of memory on a tagged book this size. `latexmk`, which comes with TeX Live, runs BibTeX, makeindex, and as many LuaLaTeX passes as the book needs:
 
 ```bash
 git clone . ../giam-tagged
 cp -r tagged/. ../giam-tagged/
 cd ../giam-tagged
 (cd figures && make)
-lualatex GIAM && bibtex GIAM && makeindex GIAM
-lualatex GIAM && lualatex GIAM && lualatex GIAM
+latexmk -lualatex GIAM
 ```
 
-Tagging numbers every element of the structure, and a link to a figure or a table points at its number, so it takes one LuaLaTeX pass more than the Makefile's for those to settle; until then the log warns that some links' destinations have no structure. Settled, the PDF has 434 pages and no error, and its only tagging warnings are one for each of its 195 figures, for the alt text the book doesn't have yet. The definitions are in it too: `\suchthat` is the relation `\mid`, not a bar drawn with a rule. [veraPDF](https://verapdf.org/) passes it as PDF/UA-2:
+That's four LuaLaTeX passes, in about four minutes, as many as GIAM's own Makefile makes with pdfLaTeX. Tagging's references settle over them too: a link to a figure or a table points at the number tagging gave its structure on the pass before, and until the numbers settle the log warns that some links' destinations have no structure. Settled, the PDF has 434 pages and no error, and its only tagging warnings are one for each of its 195 figures, for the alt text the book doesn't have yet. The definitions are in it too: `\suchthat` is the relation `\mid`, not a bar drawn with a rule. [veraPDF](https://verapdf.org/) passes it as PDF/UA-2:
 
 ```bash
 verapdf --flavour ua2 --format text GIAM.pdf

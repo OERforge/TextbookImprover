@@ -3,7 +3,7 @@
 -- target-blocks.lua; the header it relies on (\OERLinkContents, the
 -- artifact key) is written by build-pdf.py too.
 --
--- Three things, each because the writer has no way to express it
+-- Four things, each because the writer has no way to express it
 -- (read in Pandoc 3.11's Writers/LaTeX.hs and Writers/LaTeX/Table.hs):
 --
 -- 1. Row headers. The writer folds a body's row-head cells into its
@@ -30,6 +30,11 @@
 --    what is seen; LaTeX's own default is the address, or "Go to
 --    destination" and an id, which is what Acrobat would read out.
 --
+-- 4. A table inside a table's cell. The writer makes each a longtable,
+--    and LaTeX stops on a longtable inside another ("Extra alignment tab";
+--    jgm/pandoc#3586). The inner table is written as its rows, one line
+--    each, its cells' text side by side: GIAM's long division, a layout,
+--    is the case this was measured on.
 --
 -- Copyright 2026 Robert Szarka
 --
@@ -98,7 +103,58 @@ local function unquote_cells(rows)
   end
 end
 
+local nested_seen = false
+
+local function rows_of(tbl)
+  local rows = {}
+  for _, row in ipairs(tbl.head.rows) do rows[#rows + 1] = row end
+  for _, body in ipairs(tbl.bodies) do
+    for _, row in ipairs(body.head) do rows[#rows + 1] = row end
+    for _, row in ipairs(body.body) do rows[#rows + 1] = row end
+  end
+  for _, row in ipairs(tbl.foot.rows) do rows[#rows + 1] = row end
+  return rows
+end
+
+local function as_lines(inner)
+  local lines = pandoc.Inlines{}
+  for _, row in ipairs(rows_of(inner)) do
+    local first = true
+    for _, cell in ipairs(row.cells) do
+      local text = pandoc.utils.blocks_to_inlines(cell.contents)
+      if #text > 0 then
+        if first and #lines > 0 then
+          lines:insert(pandoc.LineBreak())
+        elseif not first then
+          lines:insert(pandoc.Space())
+        end
+        lines:extend(text)
+        first = false
+      end
+    end
+  end
+  return pandoc.Plain(lines)
+end
+
+local function flatten_nested(tbl)
+  for _, row in ipairs(rows_of(tbl)) do
+    for _, cell in ipairs(row.cells) do
+      cell.contents = cell.contents:walk({
+        Table = function(inner)
+          if not nested_seen then
+            nested_seen = true
+            io.stderr:write('[pdf-target] a table inside a table cell is '
+              .. 'written as lines of text; LaTeX cannot nest longtables\n')
+          end
+          return as_lines(inner)
+        end
+      })
+    end
+  end
+end
+
 function Table(tbl)
+  flatten_nested(tbl)
   unquote_cells(tbl.head.rows)
   for _, body in ipairs(tbl.bodies) do
     unquote_cells(body.head)

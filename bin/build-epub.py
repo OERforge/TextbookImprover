@@ -402,6 +402,7 @@ def build(base, name, resolved, keep, intermediates=None):
         assembly.add_single_page(tree[0][1], tree[0][2])
     else:
         assembly.add_tree(tree)
+    assembly.finish()
     title_page = wants_title_page(str(resolved["title_page"]), tree, assembly)
     numbering = str(resolved["notes.numbering"])
     placement = str(resolved["notes.placement"])

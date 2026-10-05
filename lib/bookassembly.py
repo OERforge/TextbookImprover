@@ -290,6 +290,7 @@ class Assembly:
         self.groups = {}             # page stem -> (group key, group title)
         self.notes_placed = False    # the Notes chapter, where contents put it
         self.title_preceded = False  # a one-page book's title heading had something before it
+        self.aliases = {}            # a page heading's own id -> the page's id
 
     def add_tree(self, tree, depth=1):
         for index, entry in enumerate(tree):
@@ -369,6 +370,9 @@ class Assembly:
         if not heading:
             pass                    # the group's heading stands for it
         elif opens_with_h1(doc["blocks"]):
+            # The heading takes the page's id; a link to the id it had (a
+            # LaTeX chapter's \label, say) is sent to the page by finish().
+            self.alias("", blocks[0]["c"][1][0], stem)
             blocks[0]["c"][1][0] = page_id(stem)
             blocks[0]["c"][2] = inlines(title) if (title_override or number) \
                 else blocks[0]["c"][2]
@@ -376,6 +380,7 @@ class Assembly:
             # The page's own title heading, as it said itself ("1.1 ..."),
             # unless the contents renames or numbers it.
             own = title_heading_inlines(doc)
+            self.alias(prefix, meta_text(doc.get("meta", {}), "title-id"), stem)
             blocks.insert(0, header(depth, own if own is not None and not
                                     (title_override or number) else inlines(title),
                                     page_id(stem)))
@@ -383,6 +388,37 @@ class Assembly:
         self.depth = max(self.depth, depth)
         self.pages.append((stem, title, depth))
         self.blocks.extend(blocks)
+
+    def alias(self, prefix, own_id, stem):
+        """Record that the page heading whose id was own_id (prefix + own_id
+        once the page's ids are prefixed) now has the page's id."""
+        if own_id and prefix + own_id != page_id(stem):
+            self.aliases[prefix + own_id] = page_id(stem)
+
+    def finish(self):
+        """Links to a page heading's own id, which the heading gave up for
+        the page's (add_page), pointed at the page. Run once every page is
+        in, since a link can come before the page it points at."""
+        if not self.aliases:
+            return 0
+        moved = 0
+
+        def walk(node):
+            nonlocal moved
+            if isinstance(node, dict):
+                if node.get("t") == "Link":
+                    target = node["c"][2]
+                    if target[0].startswith("#") and \
+                            target[0][1:] in self.aliases:
+                        target[0] = "#" + self.aliases[target[0][1:]]
+                        moved += 1
+                for value in node.values():
+                    walk(value)
+            elif isinstance(node, list):
+                for value in node:
+                    walk(value)
+        walk(self.blocks)
+        return moved
 
     def add_single_page(self, stem, title_override):
         """A contents tree that is one page is the book itself: its title
@@ -397,6 +433,8 @@ class Assembly:
         # gets it back, as every page of a longer book does in add_page.
         own = title_heading_inlines(doc)
         if own is not None and not opens_with_h1(blocks):
+            self.alias(page_id(stem) + "--",
+                       meta_text(doc.get("meta", {}), "title-id"), stem)
             blocks.insert(0, header(1, inlines(title) if title_override else own,
                                     page_id(stem)))
             try:

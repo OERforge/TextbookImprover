@@ -18,6 +18,7 @@ Every source format the pipeline reads, the ways a book in that format can arriv
 | Markdown (`.md`) | TESTED | TESTED | TESTED | TESTED | TESTED | TESTED | TESTED |
 | HTML (`.html`) | TESTED | TESTED | TESTED | TESTED | NEEDS MORE TESTING | TESTED | TESTED |
 | AsciiDoc (`.adoc`) | TESTED | TESTED | TESTED | TESTED | TESTED | TESTED | TESTED |
+| LaTeX (`.tex`) | NEEDS MORE TESTING | NEEDS MORE TESTING | NOT TESTED | NOT TESTED | NEEDS MORE TESTING | NOT TESTED | Not available |
 
 [PDF output](#pdf) is new, and has been measured on a book from each input: the statistics book (Word), the economics book (Markdown), DCIC (HTML), and the security textbook (AsciiDoc). PDF is read only by [the audit](auditing.md), which reports on a Word, Markdown, HTML, EPUB, or PDF file without converting it.
 
@@ -103,6 +104,20 @@ Pages are parsed with html5lib, or with lxml where html5lib isn't installed; DCI
 - **Word: TESTED**, on the security textbook: 14 files, valid against Word's schema. Read back, 12 of 14 pages give the same HTML, with no dead links; the other two have tables with merged cells, or figures holding more than one block, which Pandoc's writer lays out as a table.
 - **PDF: TESTED**, by the suite and on the security textbook: 161 pages, passing veraPDF, its SVG diagrams converted with their alt text kept, and its code callouts drawn with the DejaVu Sans fallback. Its 22 images have no alt text in the source, which the output check reports for the PDF as for the HTML ([PDF](#pdf)).
 - **AsciiDoc: TESTED.** The security textbook goes to AsciiDoc and back with all 14 pages identical, and the suite round-trips a chapter holding every case the target writes itself ([AsciiDoc as a target](asciidoc.md#asciidoc-as-a-target)). Writing it again gives the same files.
+
+## LaTeX
+
+**How it can arrive**
+
+- A master file in the book's directory, with `\documentclass` and `\begin{document}`, that `\include`s the chapters; `latex.main` names it when there are several ([LaTeX sources](latex.md)).
+
+**What it becomes**
+
+- **HTML: NEEDS MORE TESTING**, on the suite's book and on GIAM: 10 pages, its 93 xfig drawings rendered by LaTeX, its 19 references between chapters resolved, all but 6 of about 4,500 formulas made MathML, and the Nu checker finding nothing the book doesn't lack itself (alt text, table descriptions).
+- **EPUB: NEEDS MORE TESTING**, on GIAM: epubcheck passes, with the same findings as the HTML.
+- **PDF: NEEDS MORE TESTING.** Through Pandoc, as for any source. GIAM's long division, a table inside a table, stopped LaTeX until the PDF target wrote a nested table as lines of text. The book's own PDF, made by LaTeX from its own source with tagging on, is next on the [roadmap](../ROADMAP.md).
+- **Markdown, AsciiDoc, Word: NOT TESTED.**
+- **A round trip to itself: Not available.** There is no LaTeX target yet.
 
 ## The outputs, and how each is packaged
 

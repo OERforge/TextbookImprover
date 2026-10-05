@@ -1,6 +1,6 @@
 # TextbookImprover
 
-Converts a book's sources (Word, Markdown, AsciiDoc, or HTML, or a book saved from the web, an EPUB, or a course cartridge) into more-accessible HTML pages, an EPUB, a tagged PDF, Word files, or Markdown or AsciiDoc source, and packages the pages as an IMS Common Cartridge for import into Brightspace or another LMS.
+Converts a book's sources (Word, Markdown, AsciiDoc, HTML, or LaTeX, or a book saved from the web, an EPUB, or a course cartridge) into more-accessible HTML pages, an EPUB, a tagged PDF, Word files, or Markdown or AsciiDoc source, and packages the pages as an IMS Common Cartridge for import into Brightspace or another LMS.
 
 Licensed GPL 3.0. See `LICENSE` for more info.
 
@@ -8,7 +8,7 @@ The initial release of these scripts was created by Robert Szarka and supported 
 
 ## What it does
 
-Reads a book's sources, one file per page (Word, Markdown, AsciiDoc, or HTML), into one intermediate per page, after unpacking any that arrive another way (an EPUB, a site saved from the web or captured in a WARC or WACZ, a Jekyll site, a Common Cartridge), makes each page more accessible on the way, and writes every output the configuration asks for from the same intermediates: HTML pages, an EPUB, a tagged PDF, Markdown or AsciiDoc source, Word files, and a Common Cartridge for import into an LMS. The book's structure, declared once as `contents` or guessed from the files and the publisher's PDF, is the cartridge's module tree, the EPUB's table of contents, and the generated contents page alike.
+Reads a book's sources, one file per page (Word, Markdown, AsciiDoc, or HTML, or a LaTeX book through its master file), into one intermediate per page, after unpacking any that arrive another way (an EPUB, a site saved from the web or captured in a WARC or WACZ, a Jekyll site, a Common Cartridge), makes each page more accessible on the way, and writes every output the configuration asks for from the same intermediates: HTML pages, an EPUB, a tagged PDF, Markdown or AsciiDoc source, Word files, and a Common Cartridge for import into an LMS. The book's structure, declared once as `contents` or guessed from the files and the publisher's PDF, is the cartridge's module tree, the EPUB's table of contents, and the generated contents page alike.
 
 **Conversion** runs each source through Pandoc and a Lua filter that makes the page more accessible: figures get real captions tied to their images, data tables get captions, header cells, and a focusable scroll region, images get their alt text checked and their layout spacers marked, equations stay equations, and cross-references that Word's export left dangling land. Where the source doesn't say something a screen reader needs, the run reports it, and a sidecar file holds what you decide; after a Markdown round trip, the decisions are in the source itself.
 
@@ -72,6 +72,7 @@ Each target writes into a directory of its own; the content directory keeps the 
 | [Auditing](docs/auditing.md) | `audit.py`: what is wrong with a Word, Markdown, HTML, EPUB, or PDF file, without converting it; the findings format every check shares |
 | [HTML sources](docs/html.md) | Every `.html` beside the sources is a source, and a finished page goes in `_pt/`: what is read from it, what isn't, and why converting this pipeline's own pages changes nothing |
 | [A book saved from the web](docs/site-input.md) | `unpack-site.py`: browser saves or `.mhtml` into pages whose every reference is local, the generator recognized, the order read from the site's own menus |
+| [LaTeX sources](docs/latex.md) | A LaTeX book read through its master file, a page per `\include`; what is put right on a copy before Pandoc reads it, drawings rendered by LaTeX, and `latex-macros.tex` for what only a person can name |
 | [AsciiDoc sources](docs/asciidoc.md) | The AsciiDoc target, and `.adoc` chapters as sources, a master file that includes them as the book's order, and what is done on reading that the reader leaves undone |
 | [Adopting pages as sources](docs/splitting.md#adopting-the-pages-as-sources) | `adopt-pages.py`: a split book's pages renamed without `--`, links rewritten, as the sources of a new book |
 | [A site's own source](docs/site-input.md#a-sites-own-source) | `unpack-jekyll.py`: a Jekyll site's Markdown (just-the-docs) into a book directory, contents from its front matter, code left alone |

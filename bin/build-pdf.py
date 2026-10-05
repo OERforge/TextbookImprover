@@ -590,6 +590,7 @@ def build(base, name, resolved, keep, intermediates=None, latex_only=False):
         assembly.add_single_page(tree[0][1], tree[0][2])
     else:
         assembly.add_tree(tree)
+    assembly.finish()
     # Pandoc turns an SVG into a PDF with rsvg-convert before LaTeX sees
     # it (convertImage in PDF.hs), and the image keeps its alt text; without
     # rsvg-convert the LaTeX writer falls back to \\includesvg, which needs

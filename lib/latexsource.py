@@ -18,6 +18,8 @@ measured (PANDOC-NOTES.md, "The LaTeX reader"):
   stops on it.
 - \\centerline is defined as a center environment; the reader takes its
   argument as inline text and stops on a table inside it.
+- \\cline{2-3} and \\cmidrule{2-3} become whole rules; the reader leaves
+  their column range in the next cell as text.
 - a drawing (a picture, tikzpicture, or pspicture environment), which
   the reader drops whole, is rendered by LaTeX with the book's own
   preamble, one page each, and each page made an SVG the copy includes
@@ -291,6 +293,7 @@ BOOLEAN_NEW = re.compile(r"\\newboolean\s*\{\s*([A-Za-z@]+)\s*\}")
 BOOLEAN_SET = re.compile(r"\\setboolean\s*\{\s*([A-Za-z@]+)\s*\}\s*"
                          r"\{\s*(true|false)\s*\}")
 ANY_IFTHENELSE = re.compile(r"\\ifthenelse\b")
+PARTIAL_RULE = re.compile(r"\\(cline|cmidrule)\s*(?:\([^)]*\))?\s*\{[^}]*\}")
 GRAPHICS = re.compile(r"\\includegraphics\s*(\*)?\s*(\[([^]]*)\])?\s*\{")
 
 
@@ -323,6 +326,12 @@ def repair_text(text, counter):
     text = substitute(UNBRACED_INPUT, text,
                       lambda m: "\\input{%s}" % m.group(1), counter,
                       "unbraced_input")
+    # The reader takes \cline and \cmidrule as rules but leaves their
+    # column range ({2-2}) in the next cell as text. A rule draws nothing
+    # a page keeps, so a whole one stands for them.
+    text = substitute(PARTIAL_RULE, text, lambda m: "\\" + (
+        "midrule" if m.group(1) == "cmidrule" else "hline"), counter,
+        "partial_rule")
 
     def graphics(m):
         options = m.group(3) or ""

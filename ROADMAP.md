@@ -19,7 +19,7 @@ After the numbered items come five for later, three of them after 1.0: PDF as in
 
 ## 2. LaTeX, as output and as input
 
-LaTeX as a target first, since it is mostly the PDF build stopping before LuaLaTeX, then as a source.
+LaTeX as a source came first after all, since the test case is a LaTeX book (*A Gentle Introduction to the Art of Mathematics*, GIAM) and a pull request to its own repository is source work; the book is read and every target made from it ([LaTeX sources](docs/latex.md)). What's left: the book's own PDF, made by LaTeX from its source with tagging on; a `source` target writing the run's decisions into the author's LaTeX; and the `latex` target.
 
 - **A `latex` target**, as `markdown` and `asciidoc` are: the book as LaTeX an author can go on working in, a file per chapter that a master file `\include`s, whose preamble is the PDF target's own (`\DocumentMetadata`, the tagging setup, the fonts the `pdf.metadata` file chooses). The decisions the run makes go where LaTeX's tagging reads them: alt text on each `\includegraphics`, `artifact` for a decorative image, the header declarations around each table and `table/multirow` in a cell spanning rows. The PDF target writes all of this already, as one temporary file.
 - **Its round trip**, the test the Markdown and AsciiDoc targets pass: read back, the book gives the same pages. What Pandoc's LaTeX reader makes of the tagging keys is the first thing to find out.

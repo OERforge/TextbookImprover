@@ -6,6 +6,15 @@ Versions are two-part and pre-1.0: breaking changes may land in any of them unti
 
 ## [Unreleased]
 
+### Added
+
+- **LaTeX as a source.** A book's master file, the one with `\documentclass` and `\begin{document}`, is read whole by Pandoc and cut into a page per `\include`-d file, so the preamble's macros apply throughout and a reference into another chapter resolves; `latex.main` names the master when there are several, as with a textbook and a workbook made from the same chapters. With no `contents`, `contents-sample.yaml` gives the master's order with the roles its division commands give, and the title, authors, and language from its preamble. What Pandoc's reader (3.12) can't take is put right on a copy first, never in the author's files: ifthen's booleans, `\input` without braces, a table inside `\centerline`, `\cline`'s column range, an image named without its extension, alt text holding LaTeX, the `artifact` key, and formulas texmath stops on (a size or text command inside `\mbox`, a rule with no width or height). A drawing (`picture`, `tikzpicture`, `pspicture`) is rendered by LaTeX with the book's own preamble and becomes an SVG in `rendered/`, keeping its figure's caption, and a PDF or EPS image becomes an SVG; both need a LaTeX engine and `pdftocairo`. `latex-macros.tex` holds definitions for reading only, for a macro that draws what only a person can name. Tested on the suite's book and on *A Gentle Introduction to the Art of Mathematics*. [LaTeX sources](docs/latex.md).
+
+### Fixed
+
+- **A link to a chapter's own heading in an EPUB or a PDF.** The chapter's heading takes the page's id in a book, and a link to the id it had, a LaTeX chapter's `\label` say, went nowhere: epubcheck's RSC-012 on GIAM. Such links now go to the chapter.
+- **A table inside a table cell in a PDF.** Pandoc's LaTeX writer made each a longtable and LaTeX stopped on the inner one; the inner table is now written as lines of text, one a row, and the run says so.
+
 ## [0.8] - 2026-10-03
 
 PDF and Word, mostly. A book can now be written as one tagged PDF, claiming PDF/UA-2 and Well-Tagged PDF (or PDF/UA-1, for checkers that know only that) and checked by veraPDF, and as Word files that Word's Accessibility Checker will run on and that read back as a source with what Pandoc alone would lose put back. A `source` target writes the run's decisions into an author's own Word or Markdown files. Math Word's editor got wrong is repaired, and math typed as text becomes equations. A page's title is now its own H1 in every output, and a title the source declares stands. The sidecars record who drafted each value and whether a person has reviewed it.

@@ -677,6 +677,7 @@ def read_latex_to_json(base, master, env, work):
     changed = [f"{counts[k]} {what}" for k, what in (
         ("ifthenelse", "\\ifthenelse on a boolean read as a toggle"),
         ("unbraced_input", "\\input without braces braced"),
+        ("partial_rule", "\\cline or \\cmidrule read as a whole rule"),
         ("artifact", "image marked artifact made decorative"),
         ("graphics_converted", "PDF or EPS image made SVG"))
         if counts.get(k)]

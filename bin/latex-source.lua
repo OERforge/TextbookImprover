@@ -74,8 +74,8 @@ function Math(m)
   -- or without its optional raise.
   text = text:gsub('\\rule%s*%b[]%s*{%s*0[%a]*%s*}%s*%b{}', '')
   text = text:gsub('\\rule%s*{%s*0[%a]*%s*}%s*%b{}', '')
-  text = text:gsub('\\rule%s*%b[]%s*%b{}%s*{%s*0[%a]*%s*}', '\\quad ')
-  text = text:gsub('\\rule%s*%b{}%s*{%s*0[%a]*%s*}', '\\quad ')
+  text = text:gsub('\\rule%s*%b[]%s*%b{}%s*{%s*0[%a]*%s*}', '\\ ')
+  text = text:gsub('\\rule%s*%b{}%s*{%s*0[%a]*%s*}', '\\ ')
   -- texmath reads \mbox's argument as plain text, so a text command
   -- inside it, \mbox{\textsf R} or \mbox{{\bf c}}, stops it; the
   -- command alone says the same and texmath reads it.

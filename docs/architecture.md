@@ -24,6 +24,7 @@ on another `bin/` script.
 | `safe-media.lua` | Rewrites a page's local media references at render time to names that need no encoding in a link, matching what `convert.py` copies beside the page. |
 | `math-repair.lua` | At the filter stage, after `figures-and-tables.lua`: equations Word's editor wrote in the wrong characters repaired, and math typed as text made equations, with `math-keep.csv` to leave any as it was; where each repair was, recorded so a `source` target can write it into the author's Word file. |
 | `target-blocks.lua` | At render time, keeps a passage marked for some targets and drops it for the rest, and applies `title_block`. |
+| `latex-source.lua` | When a LaTeX source is read: an image's alt text as LaTeX gives it (none for Pandoc's "image", decorative for `artifact`), and a formula as texmath can read it. |
 | `asciidoc-source.lua` | When an AsciiDoc source is read: `imagesdir` applied, sections moved below the title, Asciidoctor's own settings dropped from the metadata. |
 | `markdown-html.lua` | When a Markdown source is read: raw HTML reassembled a tag with its match, read as HTML, and cleaned by `html-raw.lua` and `html-source.lua`, loaded from their files. |
 | `html-source.lua` | When an HTML source is read: what the page says about its tables becomes a declaration, and what an earlier run derived (the title block, a table's scroll wrapper) is taken out. |
@@ -38,6 +39,7 @@ on another `bin/` script.
 | `lib/htmlparse.py` | Parsing and serializing HTML with html5lib, or lxml when that's all there is, behind one interface. |
 | `lib/unpacking.py` | What both unpackers write: `project.yaml` and `unpack-report.csv`. |
 | `lib/epubsource.py` | The package document, the spine, the navigation, and the rewriting of a page's references, for the unpacker. Parses no content document. |
+| `lib/latexsource.py` | A LaTeX book read through its master: the files it reaches, a copy put right where Pandoc's reader can't take it, its drawings rendered by LaTeX, and the whole book cut into a page per `\include`. |
 | `lib/htmlrepair.py` | What an HTML source needs done to it before Pandoc reads it, on a copy: an id on a paragraph, a list item, a cell, or an inline mark moves onto an anchor the reader keeps. |
 | `lib/docxrepair.py` | What a `.docx` needs done to it before Pandoc reads it, on a copy: bookmarks moved to where the reader keeps them, invisible links so bookmarks only other files point at survive, an item's second paragraph kept in its list, and, in a file a `docx` target wrote, the lists, paragraphs, and code in quotations marked with their depth. After Pandoc reads the copy, what its reader drops or misreads is put back: ScreenTips as link titles, Word's decorative mark, terms with no definition, quotations nested and joined, the ids Pandoc renamed, code's numbering and language. |
 | `lib/wordrepairs.py` | The repairs that change what reading a Word file means, `word.headings` and `word.tracked_deletions`, applied alike to the copy Pandoc reads and to a `source` target's copy. |
@@ -57,7 +59,7 @@ on another `bin/` script.
 | `check-output.py` | Checks the pages, EPUBs, and PDFs a run wrote for dead links, missing alt text, skipped headings, and the like; the command line over `lib/outputcheck.py`. |
 | `build-epub.py` | Assembles the filtered intermediates into one EPUB3, ordered by `project.contents`, with accessibility claims computed from the build. |
 | `build-pdf.py` | Assembles the same way into one tagged PDF through Pandoc's LaTeX writer and LuaLaTeX: roles as division commands, the metadata file's YAML for the writer, and the macros `pdf-target.lua` uses. |
-| `pdf-target.lua` | What the LaTeX writer can't be told: a declared header column as row headers, a decorative image as an artifact, each link's `/Contents`, a cell spanning rows as `table/multirow`, and a quotation in a table cell unwrapped. |
+| `pdf-target.lua` | What the LaTeX writer can't be told: a declared header column as row headers, a decorative image as an artifact, each link's `/Contents`, a cell spanning rows as `table/multirow`, a quotation in a table cell unwrapped, and a table in a table cell written as lines. |
 | `schema-conversion.yaml` | Declares every conversion setting, its type, default, and meaning. |
 
 **`bin/` — auditing**

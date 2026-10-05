@@ -59,6 +59,7 @@ Put that `export` line in `~/.bashrc` (see [below](#optional-the-full-validators
 | `lxml` | Optional. Full schema validation of the manifest; without it a smaller set of checks runs. | `sudo apt install python3-lxml` |
 | `pypdf` | `--toc` with a PDF, and checking a PDF the run builds or the audit reads; an EPUB needs nothing | `sudo apt install python3-pypdf` |
 | LuaLaTeX | A `pdf` target only; see [below](#for-a-pdf-target-lualatex) | TeX Live 2026 |
+| pdfLaTeX or LuaLaTeX, and `pdftocairo` | A LaTeX source with drawings or PDF images, which become SVG ([LaTeX sources](latex.md)); without them they're left out of the pages | TeX Live; `sudo apt install poppler-utils` |
 | `zip` | Only if you package with the printed command instead of `--zip` | `sudo apt install zip` |
 
 **Pandoc has to come from Pandoc.** `sudo apt install pandoc` on Ubuntu 24.04 gives 3.1.3, which this project refuses to run with: Pandoc 3.6 and older write tables without cell spans, so a table with merged cells loses them silently, and several things the filter relies on arrived later. Install the `.deb` from [Pandoc's releases](https://github.com/jgm/pandoc/releases) instead:

@@ -115,6 +115,13 @@ and \includegraphics{img/square} and
 Sets: $\Znoneg$ and $a \relR b$ and $\{x \suchthat x > 0\}$, and
 $a\hspace{10mm}b$, and $a \weird b$.
 
+\begin{enumerate}
+\item An item with a formula:
+\[ x^2 + 1 \]
+and more after it.
+\item The next item.
+\end{enumerate}
+
 \tagpdfsetup{table/header-rows={1}}
 \begin{tabular}{cc}
 Head one & Head two \\
@@ -207,7 +214,8 @@ def write_book(work, macros=False, second_master=False, readme=True,
     pdf(os.path.join(work, "img", "diagram.pdf"))
     with open(os.path.join(work, "conversion.yaml"), "w") as fh:
         fh.write("targets:\n  html:\n    format: html\n"
-                 + ("  epub:\n    format: epub3\n" if epub else ""))
+                 + ("  epub:\n    format: epub3\n  word:\n    format: docx\n"
+                    if epub else ""))
 
 
 def fingerprint(work):
@@ -249,6 +257,18 @@ def epub_links_resolve(work):
     for text in texts:
         targets.update(re.findall(r'href="[^"#]*#([^"]+)"', text))
     return "page-one" in ids and targets and targets <= ids
+
+
+def word_math_in_list(work):
+    """The Word file's display formula in a list item is numbered as the
+    item's other paragraphs are, so reading it keeps the item whole."""
+    import zipfile
+    with zipfile.ZipFile(os.path.join(work, "word", "one.docx")) as z:
+        xml = z.read("word/document.xml").decode("utf-8")
+    paragraphs = re.findall(r"<w:p>.*?</w:p>", xml, re.S)
+    formula = [p for p in paragraphs if "oMathPara" in p and "x" in p]
+    return formula and all('<w:numId w:val="1000"' in p for p in formula) \
+        and "tiqMath" not in xml
 
 
 def can_draw():
@@ -353,6 +373,8 @@ def case_book(work):
          lambda: re.search(r'href="one.html#sec:first"[^>]*>1\.1<', two)),
         ("in the EPUB, a \\ref to a chapter's own \\label goes to the chapter",
          lambda: epub_links_resolve(work)),
+        ("in Word, a formula inside a list item stays in the item",
+         lambda: word_math_in_list(work)),
         ("the author's files are untouched",
          lambda: fingerprint(work) == before),
     ]

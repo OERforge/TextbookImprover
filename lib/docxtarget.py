@@ -236,6 +236,14 @@ TABLE_MARK = "tiqTable"
 DECORATIVE_MARK = "tiqDecorative"
 LINES_MARK = "tiqLines"
 CODE_MARK = "tiqLang"
+# A paragraph holding only a display formula, after the first block of a
+# list item. Pandoc's writer gives such a paragraph no numbering at all
+# (getParaProps's displayMathPara, Writers/Docx/OpenXML.hs, 3.12), where
+# the item's other paragraphs get its no-marker numbering; so the item,
+# and the list, end at the formula when the file is read. The mark carries
+# the list's depth, which becomes the paragraph's numbering level.
+MATH_MARK = "tiqMath"
+BASE_LIST_ID = 1000          # Pandoc's numbering with no marker (baseListId)
 NUMBER_CLASSES = ("numberLines", "number-lines")
 # A code block's language, the class Pandoc highlights by, has nowhere to
 # go in Word either. It goes in a hidden bookmark (a name starting with an
@@ -342,7 +350,120 @@ def mark_blocks(doc):
         return out
 
     doc["blocks"] = visit(doc.get("blocks", []))
+    counts["math"] = _mark_list_math(doc["blocks"], -1)
     return doc, sum(counts.values())
+
+
+def _display_math_para(block):
+    return block.get("t") == "Para" and len(block["c"]) == 1 \
+        and block["c"][0].get("t") == "Math" \
+        and block["c"][0]["c"][0].get("t") == "DisplayMath"
+
+
+def _split_display(block):
+    """A paragraph holding display formulas among other inlines, as
+    Pandoc's writer will write it: each run of formulas and each run of
+    the rest its own paragraph, spaces at their edges dropped."""
+    if block.get("t") != "Para":
+        return [block]
+    inlines = block["c"]
+    shown = [i.get("t") == "Math" and i["c"][0].get("t") == "DisplayMath"
+             for i in inlines]
+    if not any(shown) or all(shown):
+        return [block]
+    groups, current, kind = [], [], None
+    for inline, display in zip(inlines, shown):
+        if current and display != kind:
+            groups.append(current)
+            current = []
+        current.append(inline)
+        kind = display
+    groups.append(current)
+    space = ("Space", "SoftBreak", "LineBreak")
+    out = []
+    for group in groups:
+        while group and group[0].get("t") in space:
+            group = group[1:]
+        while group and group[-1].get("t") in space:
+            group = group[:-1]
+        if group:
+            out.append({"t": "Para", "c": group})
+    return out
+
+
+def _mark_item(blocks, depth, counter, opens_item):
+    """Within a list item's blocks, and the divs among them: each
+    paragraph of display formulas cut out, and each one but the item's
+    very first block marked with the item's depth."""
+    blocks[:] = [piece for inner in blocks for piece in _split_display(inner)]
+    for i, inner in enumerate(blocks):
+        if _display_math_para(inner) and not (opens_item and i == 0):
+            counter[0] += 1
+            blocks[i] = {"t": "Div", "c": [["%s%dd%d" % (
+                MATH_MARK, counter[0], depth), [], []], [inner]]}
+        elif inner.get("t") == "Div":
+            _mark_item(inner["c"][1], depth, counter, opens_item and i == 0)
+
+
+def _mark_list_math(blocks, depth, counter=None):
+    """Mark each display-formula paragraph that follows the first block of
+    a list item, with the item's depth (MATH_MARK). Returns how many."""
+    counter = counter if counter is not None else [0]
+
+    def items_of(block):
+        if block.get("t") == "OrderedList":
+            return block["c"][1]
+        if block.get("t") == "BulletList":
+            return block["c"]
+        return None
+    for block in blocks:
+        items = items_of(block) if isinstance(block, dict) else None
+        if items is not None:
+            for item in items:
+                # The writer cuts a paragraph holding a display formula and
+                # text into paragraphs (fixDisplayMath, Writers/Shared.hs);
+                # cut here the same way, so the formula's own is marked.
+                _mark_item(item, depth + 1, counter, True)
+                _mark_list_math(item, depth + 1, counter)
+        elif isinstance(block, dict) and block.get("t") in ("Div", "BlockQuote"):
+            inner = block["c"][1] if block["t"] == "Div" else block["c"]
+            _mark_list_math(inner, depth, counter)
+    return counter[0]
+
+
+def list_math(xml):
+    """Each paragraph mark_blocks marked as a display formula in a list
+    item numbered as the item's other paragraphs are: the item's level,
+    with no marker. The marks are then removed. Returns (xml, count)."""
+    pattern = re.compile(r'<w:bookmarkStart w:id="(\d+)" w:name="_?%s(\d+)d(\d+)"\s*/>'
+                         % MATH_MARK)
+    count = 0
+    while True:
+        m = pattern.search(xml)
+        if not m:
+            break
+        ident, level = m.group(1), m.group(3)
+        end = re.compile(r'<w:bookmarkEnd w:id="%s"\s*/>' % ident)
+        para = xml.find("<w:p>", m.end())
+        props = re.compile(r"<w:pPr>(.*?)</w:pPr>", re.S).match(xml, para + len("<w:p>")) \
+            if para >= 0 else None
+        numbering = ('<w:numPr><w:ilvl w:val="%s" /><w:numId w:val="%d" /></w:numPr>'
+                     % (level, BASE_LIST_ID))
+        if para >= 0 and "oMath" in xml[para:xml.find("</w:p>", para)] \
+                and not (props and "<w:numPr>" in props.group(1)):
+            if props:
+                inner = props.group(1)
+                style = re.match(r"\s*<w:pStyle [^>]*/>", inner)
+                at = props.start(1) + (style.end() if style else 0)
+                xml = xml[:at] + numbering + xml[at:]
+            else:
+                at = para + len("<w:p>")
+                xml = xml[:at] + "<w:pPr>" + numbering + "</w:pPr>" + xml[at:]
+            count += 1
+        # The mark itself goes, start and end.
+        xml = xml[:m.start()] + xml[m.end():]
+        xml = end.sub("", xml, count=1)
+    return xml, count
 
 
 def _edge(block, first):
@@ -958,6 +1079,8 @@ def finish(path, doc, keep=None):
         xml, found = apply_markers(xml, tables, lines, codes)
         for key, n in found.items():
             counts[key] += n
+        xml, n = list_math(xml)
+        counts["list_math"] = counts.get("list_math", 0) + n
         numbering = text("word/numbering.xml") if "word/numbering.xml" in parts else ""
         xml, n, items = indent_quotes(xml, level_indents(numbering) if numbering else None,
                                       level_indents(numbering, blank=True) if numbering else None)

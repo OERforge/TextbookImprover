@@ -540,7 +540,7 @@ TARGET_NAMES = set()
 # The book's word.headings and word.tracked_deletions, read once.
 WORD_HEADINGS, WORD_DELETIONS = "keep", "accept"
 LATEX_MAIN = ""
-LATEX_MACROS = "latex-macros.tex"
+LATEX_MACROS = "latex-conversion-macros.tex"
 LANGUAGE_DECLARED = False
 
 
@@ -678,6 +678,7 @@ def read_latex_to_json(base, master, env, work):
         ("ifthenelse", "\\ifthenelse on a boolean read as a toggle"),
         ("unbraced_input", "\\input without braces braced"),
         ("partial_rule", "\\cline or \\cmidrule read as a whole rule"),
+        ("header_declared", "table header declaration for tagging read as the pipeline's"),
         ("artifact", "image marked artifact made decorative"),
         ("graphics_converted", "PDF or EPS image made SVG"))
         if counts.get(k)]
@@ -686,6 +687,11 @@ def read_latex_to_json(base, master, env, work):
                        "preamble")
     if changed:
         say("Read from a copy of the LaTeX: " + "; ".join(changed) + ".")
+    if counts.get("header_other"):
+        say(f"WARNING: {counts['header_other']} table header declaration(s) "
+            "for tagging name rows or columns past the first, which the "
+            "pipeline's declarations can't say; table-headers.csv can "
+            "declare those tables.")
     if counts.get("ifthenelse_left"):
         say(f"WARNING: {counts['ifthenelse_left']} \\ifthenelse with a "
             "condition other than a boolean, which Pandoc drops, both "
@@ -724,10 +730,13 @@ def read_latex_to_json(base, master, env, work):
     language = latexsource.preamble_language(prep["preamble"])
     if language:
         header["language"] = language
-    say(f"{master} is the book: {len(stems)} page(s), one for each file "
-        "it \\include-s" + (", and one for what it holds itself"
-                            if stems and stems[0] == master_stem else "")
-        + ".")
+    if not prep["order"]:
+        say(f"{master} is the book, one page: it \\include-s no chapters.")
+    else:
+        say(f"{master} is the book: {len(stems)} page(s), one for each file "
+            "it \\include-s" + (", and one for what it holds itself"
+                                if stems and stems[0] == master_stem else "")
+            + ".")
     return stems, order, header
 
 

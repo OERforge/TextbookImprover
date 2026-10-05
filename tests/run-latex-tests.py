@@ -61,6 +61,7 @@ MASTER = r"""\documentclass{book}
 \usepackage{ifthen}
 \usepackage{graphicx}
 \usepackage{amssymb}
+\usepackage{tikz}
 \newboolean{Solutions}
 \setboolean{Solutions}{false}
 \newcommand{\Znoneg}{{\mathbb Z}^{\mbox{\tiny noneg}}}
@@ -69,6 +70,8 @@ MASTER = r"""\documentclass{book}
 \title{A Test Book}
 \author{A. Author}
 \begin{document}
+\AddToShipoutPictureBG{\begin{tikzpicture}[remember picture,overlay]
+\draw (0,0) -- (1,1);\end{tikzpicture}}
 \maketitle
 \frontmatter
 Copyright 2026 A. Author. This front matter is the master's own.
@@ -108,7 +111,14 @@ and \includegraphics{img/square} and
 \includegraphics[artifact]{img/rule.png} and
 \includegraphics{img/diagram.pdf}.
 
-Sets: $\Znoneg$ and $a \relR b$ and $\{x \suchthat x > 0\}$.
+Sets: $\Znoneg$ and $a \relR b$ and $\{x \suchthat x > 0\}$, and
+$a\hspace{10mm}b$.
+
+\tagpdfsetup{table/header-rows={1}}
+\begin{tabular}{cc}
+Head one & Head two \\
+x & y \\
+\end{tabular}
 % \input{ch1/never}
 \begin{verbatim}
 \input ch1/never
@@ -122,6 +132,8 @@ gamma & delta \\
 """
 
 TWO = r"""\chapter{Two}
+\begin{picture}(10,10)\undefinedcommandhere\end{picture}
+
 See Section~\ref{sec:first} and Figure~\ref{fig:line}, in
 Chapter~\ref{ch:one}.
 """
@@ -181,7 +193,7 @@ def write_book(work, macros=False, second_master=False, readme=True,
              "ch1/table.tex": TABLE, "ch2/two.tex": TWO,
              "answers.tex": ANSWERS}
     if macros:
-        files["latex-macros.tex"] = MACROS
+        files["latex-conversion-macros.tex"] = MACROS
     if second_master:
         files["workbook.tex"] = MASTER.replace("{false}", "{true}")
     if readme:
@@ -291,7 +303,8 @@ def case_book(work):
         ("\\cline's column range is a rule, not a cell's text",
          lambda: "delta" in one and "2-2" not in one),
         ("an \\input in a comment or verbatim is left alone",
-         lambda: "ch1/never" in one and "never.tex" not in log),
+         lambda: "\\input ch1/never" in one
+         and "reaches ch1/never" not in log),
         ("alt text holding LaTeX is read as LaTeX",
          lambda: 'alt="50% shaded"' in one),
         ("an image named without its extension is found",
@@ -301,6 +314,10 @@ def case_book(work):
         ("an artifact is decorative",
          lambda: re.search(r'<img src="img/rule\.png"[^>]*alt=""', one)
          and 'aria-hidden="true"' in one),
+        ("a drawing LaTeX can't make costs only itself",
+         lambda: "1 of the book's 2 drawing(s)" in log
+         and os.path.exists(os.path.join(work, "rendered", "ch1", "one-1.svg"))
+         if can_draw() else skip("no LaTeX or pdftocairo: drawings not rendered")),
         ("a drawing is rendered whole and keeps its figure's caption",
          lambda: re.search(r'<figure[^>]*>\s*<img src="rendered/ch1/one-1\.svg"',
                            one) and "A line" in one
@@ -311,7 +328,14 @@ def case_book(work):
         ("\\mbox{\\tiny ...} and \\mbox{\\textsf R} reach MathML",
          lambda: "Could not convert TeX math" not in log
          and "noneg" in one and "<math" in one),
-        ("latex-macros.tex is read after the preamble: \\suchthat as \\mid",
+        ("a length in mm inside a formula reaches MathML",
+         lambda: "10mm" not in one),
+        ("the author's tagging header declaration is the table's",
+         lambda: re.search(r'<th[^>]*scope="col"[^>]*>Head one', one)),
+        ("an overlay drawn on every page isn't a drawing of the text",
+         lambda: not os.path.exists(os.path.join(work, "rendered", "book.svg"))
+         and not os.path.exists(os.path.join(work, "rendered", "book-1.svg"))),
+        ("latex-conversion-macros.tex is read after the preamble: \\suchthat as \\mid",
          lambda: "∣" in one or "&#x2223;" in one or "|</mo>" in one),
         ("a \\ref into another chapter goes to the page the label is on",
          lambda: 'href="one.html#sec:first"' in two
@@ -346,7 +370,27 @@ def case_masters(work):
     ]
 
 
-CASES = [("a LaTeX book", case_book), ("two masters", case_masters)]
+def case_single(work):
+    """A document that \\include-s nothing is one page."""
+    os.makedirs(work)
+    with open(os.path.join(work, "notes.tex"), "w", encoding="utf-8") as fh:
+        fh.write("\\documentclass{article}\n\\begin{document}\n"
+                 "\\section*{1.0 Review}\nText.\n\\section*{1.1 Parts}\n"
+                 "More.\n\\end{document}\n")
+    with open(os.path.join(work, "conversion.yaml"), "w") as fh:
+        fh.write("targets:\n  html:\n    format: html\n")
+    result = convert(work)
+    page = os.path.join(work, "html", "notes.html")
+    return [
+        ("a document that includes nothing is one page, its sections in it",
+         lambda: os.path.exists(page) and "1.1 Parts" in read(work, "html",
+                                                               "notes.html")
+         and "one page" in result.stdout + result.stderr),
+    ]
+
+
+CASES = [("a LaTeX book", case_book), ("two masters", case_masters),
+         ("one file", case_single)]
 
 
 def main():

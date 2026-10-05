@@ -18,7 +18,7 @@
 -- as its TeX. A size changes nothing a screen reader says, and a rule of
 -- no width is a strut and one of no height a space, so all three go;
 -- a rule that shows is left, since only
--- a person can say what it means (latex-macros.tex can).
+-- a person can say what it means (latex-conversion-macros.tex can).
 --
 -- Copyright 2026 Robert Szarka
 --
@@ -76,6 +76,13 @@ function Math(m)
   text = text:gsub('\\rule%s*{%s*0[%a]*%s*}%s*%b{}', '')
   text = text:gsub('\\rule%s*%b[]%s*%b{}%s*{%s*0[%a]*%s*}', '\\ ')
   text = text:gsub('\\rule%s*%b{}%s*{%s*0[%a]*%s*}', '\\ ')
+  -- texmath knows em, pt, in, and cm, not mm; and a length set inside a
+  -- formula (\setlength\tabcolsep in an array) lays out nothing a
+  -- screen reader says.
+  text = text:gsub('(\\hspace%*?%s*{%s*)([%d.]+)%s*mm(%s*})', function(head, n, tail)
+    return head .. string.format('%g', tonumber(n) / 10) .. 'cm' .. tail
+  end)
+  text = text:gsub('\\setlength%s*{?%s*\\%a+%s*}?%s*%b{}', '')
   -- texmath reads \mbox's argument as plain text, so a text command
   -- inside it, \mbox{\textsf R} or \mbox{{\bf c}}, stops it; the
   -- command alone says the same and texmath reads it.
@@ -92,4 +99,27 @@ function Math(m)
   return nil
 end
 
-return { { Image = Image, Math = Math } }
+-- A table's header declaration for LaTeX's tagging, which latexsource.py
+-- turned into an environment the reader keeps as a div: the pipeline's
+-- own declaration, set on the table as a Markdown source's marker sets
+-- it (figures-and-tables.lua's data-th-marker), and the div gone.
+local DECLARED = { TextbookImproverHeadersFirstRow = 'first-row',
+  TextbookImproverHeadersFirstColumn = 'first-column',
+  TextbookImproverHeadersBoth = 'both' }
+
+function Div(div)
+  for _, class in ipairs(div.classes) do
+    local declaration = DECLARED[class]
+    if declaration then
+      for _, block in ipairs(div.content) do
+        if block.t == 'Table' then
+          block.attr.attributes['data-th-marker'] = declaration
+        end
+      end
+      return div.content
+    end
+  end
+  return nil
+end
+
+return { { Image = Image, Math = Math, Div = Div } }

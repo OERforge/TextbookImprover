@@ -232,7 +232,7 @@ A LaTeX book, read through its master file: the one in the book's directory with
 
 The master file, when more than one file in the book's directory is a whole document, as when one set of chapters makes a textbook, a workbook, and a solutions manual (GIAM.tex). Blank takes the only one, and stops the run when there are several.
 
-**`latex.macros`**—`string`; default `latex-macros.tex`
+**`latex.macros`**—`string`; default `latex-conversion-macros.tex`
 
 A file of LaTeX definitions read after the book's own preamble, for reading only: the book's PDF never sees them. For a macro that draws what it means, where only a person can say what that is: \renewcommand{\suchthat}{\mid} for a bar drawn with \rule. Read when it's there.
 

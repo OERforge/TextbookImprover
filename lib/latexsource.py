@@ -20,6 +20,10 @@ measured (PANDOC-NOTES.md, "The LaTeX reader"):
   argument as inline text and stops on a table inside it.
 - \\cline{2-3} and \\cmidrule{2-3} become whole rules; the reader leaves
   their column range in the next cell as text.
+- a table's header declaration for LaTeX's tagging,
+  \\tagpdfsetup{table/header-rows={1}} or table/header-columns={1} just
+  before it, becomes the pipeline's own (latex-source.lua sets it on the
+  table); the reader drops \\tagpdfsetup.
 - a drawing (a picture, tikzpicture, or pspicture environment), which
   the reader drops whole, is rendered by LaTeX with the book's own
   preamble, one page each, and each page made an SVG the copy includes
@@ -312,6 +316,46 @@ def substitute(pattern, text, replace, counter, key):
     return "".join(out)
 
 
+HEADER_SETUP = re.compile(r"\\tagpdfsetup\s*\{([^{}]*(?:\{[^{}]*\}[^{}]*)*)\}"
+                          r"((?:\s|%[^\n]*\n)*)\\begin\s*\{(tabular\*?|tabularx|"
+                          r"longtable|array)\}")
+DECLARATIONS = {(True, False): "FirstRow", (False, True): "FirstColumn",
+                (True, True): "Both"}
+
+
+def declare_headers(text, counter):
+    """A table preceded by its tagging's header declaration, wrapped in an
+    environment the reader keeps as a div naming the declaration. Only a
+    first row, a first column, or both: what the pipeline's declarations
+    say (table-headers.csv's first-row, first-column, both)."""
+    spans = skip_spans(text)
+    out, last = [], 0
+    for m in HEADER_SETUP.finditer(text):
+        if in_spans(m.start(), spans) or m.start() < last:
+            continue
+        keys = m.group(1)
+        rows = re.search(r"table/header-rows\s*=\s*\{?\s*([\d,\s]*)\}?", keys)
+        cols = re.search(r"table/header-columns\s*=\s*\{?\s*([\d,\s]*)\}?",
+                         keys)
+        key = (bool(rows and rows.group(1).strip() == "1"),
+               bool(cols and cols.group(1).strip() == "1"))
+        if key not in DECLARATIONS:
+            if rows or cols:
+                counter["header_other"] = counter.get("header_other", 0) + 1
+            continue
+        begin = text.rfind("\\begin", m.start(), m.start(3))
+        end = environment_end(text, m.group(3), begin)
+        if end < 0:
+            continue
+        name = "TextbookImproverHeaders" + DECLARATIONS[key]
+        out.append(text[last:m.start()] + m.group(2) + "\\begin{%s}" % name
+                   + text[begin:end] + "\\end{%s}" % name)
+        last = end
+        counter["header_declared"] = counter.get("header_declared", 0) + 1
+    out.append(text[last:])
+    return "".join(out)
+
+
 def repair_text(text, counter):
     """The rewrites every file of the copy gets: booleans as toggles,
     \\input braced, artifact images marked."""
@@ -329,6 +373,7 @@ def repair_text(text, counter):
     # The reader takes \cline and \cmidrule as rules but leaves their
     # column range ({2-2}) in the next cell as text. A rule draws nothing
     # a page keeps, so a whole one stands for them.
+    text = declare_headers(text, counter)
     text = substitute(PARTIAL_RULE, text, lambda m: "\\" + (
         "midrule" if m.group(1) == "cmidrule" else "hline"), counter,
         "partial_rule")
@@ -397,6 +442,11 @@ def drawings(text):
             break
         alt = None
         options = re.match(r"\s*\[([^]]*)\]", text[m.end():])
+        if options and re.search(r"\boverlay\b", options.group(1)):
+            # Drawn on the page, not in the text: a rule down every page
+            # from \AddToShipoutPictureBG, say.
+            pos = end
+            continue
         if options:
             a = re.search(r"\balt\s*=\s*\{([^}]*)\}", options.group(1))
             alt = a.group(1) if a else None
@@ -459,34 +509,57 @@ def render(base, work, preamble, items, say):
             "they're left out of the pages.")
         return done
     head, _, _ = preamble.rpartition("\\begin")
-    body = "".join("\\begin{preview}%s\\end{preview}\n\\clearpage\n" % s
-                   for _, s in todo)
-    document = (head + "\\usepackage[active,tightpage]{preview}\n"
-                "\\begin{document}\n" + body + "\\end{document}\n")
     rdir = os.path.join(work, "render")
     os.makedirs(rdir, exist_ok=True)
-    write_text(os.path.join(rdir, "drawings.tex"), document)
-    result = subprocess.run(
-        [engine, "-interaction=nonstopmode", "-halt-on-error",
-         "-output-directory", rdir, os.path.join(rdir, "drawings.tex")],
-        cwd=base, capture_output=True, text=True, errors="replace",
-        stdin=subprocess.DEVNULL)
-    pdf = os.path.join(rdir, "drawings.pdf")
-    if result.returncode != 0 or not os.path.isfile(pdf):
-        log = result.stdout[-1500:]
-        say(f"WARNING: {engine} couldn't render the book's {len(todo)} "
-            "drawing(s) with its own preamble, so they're left out of the "
-            "pages. The end of its output:\n" + log)
-        return done
-    for page, (name, source) in enumerate(todo, start=1):
-        out = os.path.join(base, name)
-        os.makedirs(os.path.dirname(out), exist_ok=True)
-        made = subprocess.run(["pdftocairo", "-svg", "-f", str(page), "-l",
-                               str(page), pdf, out], capture_output=True,
-                              text=True)
-        if made.returncode == 0 and os.path.isfile(out):
-            record[name] = key(source)
-            done.append(name)
+
+    def run_latex(batch, job):
+        """The batch's drawings as pages of job.pdf, or None."""
+        body = "".join("\\begin{preview}%s\\end{preview}\n\\clearpage\n" % s
+                       for _, s in batch)
+        write_text(os.path.join(rdir, job + ".tex"),
+                   head + "\\usepackage[active,tightpage]{preview}\n"
+                   "\\begin{document}\n" + body + "\\end{document}\n")
+        result = subprocess.run(
+            [engine, "-interaction=nonstopmode", "-halt-on-error",
+             "-output-directory", rdir, os.path.join(rdir, job + ".tex")],
+            cwd=base, capture_output=True, text=True, errors="replace",
+            stdin=subprocess.DEVNULL)
+        pdf = os.path.join(rdir, job + ".pdf")
+        if result.returncode != 0 or not os.path.isfile(pdf):
+            return None, result.stdout[-800:]
+        return pdf, ""
+
+    def split(batch, pdf):
+        for page, (name, source) in enumerate(batch, start=1):
+            out = os.path.join(base, name)
+            os.makedirs(os.path.dirname(out), exist_ok=True)
+            made = subprocess.run(["pdftocairo", "-svg", "-f", str(page), "-l",
+                                   str(page), pdf, out], capture_output=True,
+                                  text=True)
+            if made.returncode == 0 and os.path.isfile(out):
+                record[name] = key(source)
+                done.append(name)
+
+    # All at once; when that fails, one at a time, so a drawing LaTeX
+    # can't make costs only itself.
+    pdf, log = run_latex(todo, "drawings")
+    if pdf:
+        split(todo, pdf)
+    else:
+        failed = []
+        for index, item in enumerate(todo):
+            one, why = run_latex([item], "drawing-%d" % index)
+            if one:
+                split([item], one)
+            else:
+                failed.append(item[0])
+                log = why
+        if failed:
+            say(f"WARNING: {engine} couldn't render {len(failed)} of the "
+                f"book's {len(todo)} drawing(s) with its own preamble, so "
+                "they're left out of the pages: " + ", ".join(failed[:5])
+                + (", ..." if len(failed) > 5 else "")
+                + ". The end of its output for the last:\n" + log)
     write_text(record_path, json.dumps(record, indent=1, sort_keys=True))
     return done
 
@@ -603,10 +676,14 @@ def prepare(base, work, master, say, macros=""):
     # Drawings, all rendered in one LaTeX run.
     places, items = {}, []
     for name in files:
-        if name == master:
-            continue
         text = texts[name]
-        found = drawings(text)
+        offset = 0
+        if name == master:
+            # The master's drawings are in its body; the preamble defines.
+            begin = code_matches(BEGIN_DOCUMENT, text)
+            offset = begin[0].end() if begin else len(text)
+        found = [(s + offset, e + offset, a)
+                 for s, e, a in drawings(text[offset:])]
         for index, (start, end, alt) in enumerate(found, start=1):
             whole = len(found) == 1 and not re.sub(
                 r"%[^\n]*", "", text[:start] + text[end:]).strip()
@@ -642,7 +719,9 @@ def prepare(base, work, master, say, macros=""):
         write_text(record_path, json.dumps(record, indent=1, sort_keys=True))
 
     # The master: \centerline as a center environment, and a marker
-    # before each \include.
+    # before each \include. Split again, since its drawings and images
+    # may have been replaced.
+    _, body, rest = split_master(texts[master])
     spans = skip_spans(body)
     pieces, last, index = [], 0, 0
     for m in INCLUDE.finditer(body):

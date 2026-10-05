@@ -64,6 +64,12 @@
 #                          against four small .docx fixtures. Needs
 #                          Pandoc.
 #
+#   run-latex-tests.py     a LaTeX book the script writes, through
+#                          convert.py: the pages, the repairs on the
+#                          copy Pandoc reads, the drawings rendered.
+#                          Needs Pandoc; the drawings need a LaTeX
+#                          engine and pdftocairo, and skip without them.
+#
 # Copyright 2026 Robert Szarka
 #
 # This program is free software: you can redistribute it and/or modify
@@ -146,7 +152,7 @@ run run-mathjax-tests.py
 # is reported rather than silent: a suite that quietly does not run is
 # worse than one that fails.
 if ! command -v pandoc >/dev/null 2>&1; then
-  skipped="run-filter-tests.py, run-epub-tests.py, run-pdf-tests.py, run-split-tests.py and run-audit-tests.py (pandoc not found)"
+  skipped="run-filter-tests.py, run-epub-tests.py, run-pdf-tests.py, run-split-tests.py, run-audit-tests.py and run-latex-tests.py (pandoc not found)"
 elif [ "$(printf '%s\n3.9\n' \
           "$(pandoc --version | head -1 | awk '{print $2}')" \
           | sort -V | head -1)" != "3.9" ]; then
@@ -159,6 +165,7 @@ else
   run run-pdf-tests.py
   run run-split-tests.py
   run run-audit-tests.py
+  run run-latex-tests.py
 fi
 
 printf '\n'

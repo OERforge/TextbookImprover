@@ -72,7 +72,7 @@ Each target writes into a directory of its own; the content directory keeps the 
 | [Auditing](docs/auditing.md) | `audit.py`: what is wrong with a Word, Markdown, HTML, EPUB, or PDF file, without converting it; the findings format every check shares |
 | [HTML sources](docs/html.md) | Every `.html` beside the sources is a source, and a finished page goes in `_pt/`: what is read from it, what isn't, and why converting this pipeline's own pages changes nothing |
 | [A book saved from the web](docs/site-input.md) | `unpack-site.py`: browser saves or `.mhtml` into pages whose every reference is local, the generator recognized, the order read from the site's own menus |
-| [LaTeX sources](docs/latex.md) | A LaTeX book read through its master file, a page per `\include`; what is put right on a copy before Pandoc reads it, drawings rendered by LaTeX, and `latex-macros.tex` for what only a person can name |
+| [LaTeX sources](docs/latex.md) | A LaTeX book read through its master file, a page per `\include`; what is put right on a copy before Pandoc reads it, drawings rendered by LaTeX, and `latex-conversion-macros.tex` for what only a person can name |
 | [AsciiDoc sources](docs/asciidoc.md) | The AsciiDoc target, and `.adoc` chapters as sources, a master file that includes them as the book's order, and what is done on reading that the reader leaves undone |
 | [Adopting pages as sources](docs/splitting.md#adopting-the-pages-as-sources) | `adopt-pages.py`: a split book's pages renamed without `--`, links rewritten, as the sources of a new book |
 | [A site's own source](docs/site-input.md#a-sites-own-source) | `unpack-jekyll.py`: a Jekyll site's Markdown (just-the-docs) into a book directory, contents from its front matter, code left alone |

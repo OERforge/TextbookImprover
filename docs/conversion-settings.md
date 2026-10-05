@@ -24,6 +24,10 @@ Whether every page of an HTML target carries the book's contents as a menu at it
 
 For a target with format source: whether a remediated Word file keeps the compatibility mode its author's file has, or is set to 15, which guides for Word say its Accessibility Checker needs. Kept by default, since the file is the author's.
 
+**`latex_definitions`**—one of `on`, `off`; default `on`
+
+For a target with format source on a LaTeX book: whether the copy gets the definitions in the book's latex.macros file (latex-conversion-macros.tex), written after its preamble as the conversion reads them, so they replace the book's own there too. A person writes that file to say what the book's macros mean, a bar drawn with \rule as \mid, say, which is what a reader of the PDF needs as much as one of the pages. On by default; off keeps them to the conversion, for a file that only helps Pandoc read the book.
+
 **`tagging`**—one of `off`, `on`; default `off`
 
 For a target with format source on a LaTeX book: whether the copy is made to build with LaTeX's own tagging, for an accessible PDF: \DocumentMetadata before \documentclass, pdfTeX-only options and settings taken out, and the constructs tagging can't take yet put the way it can. A tagged book is built with LuaLaTeX (pdfLaTeX runs out of memory on a book), so this changes the author's build. Off by default; the alt text is written either way.
@@ -238,7 +242,7 @@ The master file, when more than one file in the book's directory is a whole docu
 
 **`latex.macros`**—`string`; default `latex-conversion-macros.tex`
 
-A file of LaTeX definitions read after the book's own preamble, for reading only: the book's PDF never sees them. For a macro that draws what it means, where only a person can say what that is: \renewcommand{\suchthat}{\mid} for a bar drawn with \rule. Read when it's there.
+A file of LaTeX definitions read after the book's own preamble, so they win over the book's: for a macro that draws what it means, where only a person can say what that is: \renewcommand{\suchthat}{\mid} for a bar drawn with \rule. Read when it's there. The book's own files are never changed; a source target writes the definitions into its copy unless its latex_definitions is off.
 
 ## sidecars
 

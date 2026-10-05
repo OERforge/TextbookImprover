@@ -162,8 +162,14 @@ def remediate_file(base, name, text, alts, dirs, is_master=False):
     return text, counts
 
 
+DEFINITIONS_NOTE = (
+    "%% The definitions in %s, which a person wrote to say what\n"
+    "%% the book's macros mean, so they replace the book's own here.\n")
+DEFINES = re.compile(r"\\(?:(?:re|provide)?newcommand\*?|def)\b")
+
+
 def remediate(base, out_dir, master, files, alts, tagging=False, language=None,
-              headers=None):
+              headers=None, definitions=None, definitions_name=""):
     """Write a remediated copy of each file in files (relative to base) to
     out_dir at the same relative path. alts: {key: alt, or None for
     decorative} (htmlremediate.alt_rows); tagging: made to build with
@@ -187,6 +193,17 @@ def remediate(base, out_dir, master, files, alts, tagging=False, language=None,
         totals.update(declare(texts, files, headers))
     elif headers:
         totals["headers_untagged"] = len(headers)
+    if definitions:
+        # After the book's preamble, as the conversion reads them.
+        text = texts[master]
+        begin = latexsource.code_matches(latexsource.BEGIN_DOCUMENT, text)
+        if begin:
+            at = begin[0].start()
+            block = DEFINITIONS_NOTE % definitions_name + definitions.rstrip("\n") + "\n"
+            texts[master] = text[:at] + block + text[at:]
+            spans = latexsource.skip_spans(definitions)
+            totals["definitions"] = sum(1 for m in DEFINES.finditer(definitions)
+                                        if not latexsource.in_spans(m.start(), spans))
     if tagging:
         if not language:
             language = latexsource.preamble_language(

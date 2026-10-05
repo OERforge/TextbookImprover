@@ -565,8 +565,10 @@ def case_source(work):
     source = ("\\documentclass[pdftex,12pt]{article}\n\\usepackage{graphicx}\n"
               "\\usepackage{amsthm}\n\\usepackage[english]{babel}\n\\pdfcompresslevel=9\n"
               "\\newtheorem{thm}{Theorem}\n\\newtheorem*{thm*}{Theorem}\n"
+              "\\newcommand{\\suchthat}{\\; \\rule[-3pt]{.5pt}{13pt} \\;}\n"
               "\\begin{document}\n"
               "\\begin{thm*} Unnumbered. \\end{thm*}\n\n"
+              "The set $\\{ x \\suchthat x > 0 \\}$.\n\n"
               "\\centerline{\\begin{tabular}{c} a \\\\ \\end{tabular}}\n\n"
               "Inline \\centerline{x} \\newline more.\n\n"
               "\\begin{center}\n\\[ 1! = 1 \\]\net cetera\n\\end{center}\n\n"
@@ -586,7 +588,10 @@ def case_source(work):
                  "rendered/figures/f.svg,A figure from xfig\n")
     with open(os.path.join(work, "conversion.yaml"), "w") as fh:
         fh.write("targets:\n  html:\n    format: html\n  fixed:\n    format: source\n"
-                 "  tagged:\n    format: source\n    tagging: \"on\"\n")
+                 "  tagged:\n    format: source\n    tagging: \"on\"\n"
+                 "  kept:\n    format: source\n    latex_definitions: \"off\"\n")
+    with open(os.path.join(work, "latex-conversion-macros.tex"), "w", encoding="utf-8") as fh:
+        fh.write("% For reading.\n\\renewcommand{\\suchthat}{\\mid}\n")
     before = fingerprint(work)
     convert(work)
     # A person's header decision for the table, from the census's row.
@@ -595,7 +600,7 @@ def case_source(work):
     with open(os.path.join(work, "table-headers.csv"), "w", encoding="utf-8") as fh:
         fh.write("key,headers\n" + "".join("%s,first-row\n" % r["key"] for r in rows
                                             if "Name" in r.get("preview", "")))
-    before = fingerprint(work, skip_dirs=("fixed", "tagged", "build"))
+    before = fingerprint(work, skip_dirs=("fixed", "tagged", "kept", "build"))
     result = convert(work)
     said = result.stdout + result.stderr
     fixed = os.path.join(work, "fixed")
@@ -612,7 +617,7 @@ def case_source(work):
         if given), built with engine: (exit status, log)."""
         build = os.path.join(work, "build-" + os.path.basename(tree) + "-" + engine)
         shutil.copytree(work, build, ignore=shutil.ignore_patterns(
-            "fixed", "tagged", "html", "build*", "rendered"))
+            "fixed", "tagged", "kept", "html", "build*", "rendered"))
         shutil.copytree(tree, build, dirs_exist_ok=True)
         if text is not None:
             with open(os.path.join(build, "notes.tex"), "w", encoding="utf-8") as fh:
@@ -663,7 +668,7 @@ def case_source(work):
         ("the run says which are in files the book's own build makes",
          lambda: "own build" in said and "writes over them" in said),
         ("the author's files are untouched by the source target",
-         lambda: fingerprint(work, skip_dirs=("fixed", "tagged", "build")) == before),
+         lambda: fingerprint(work, skip_dirs=("fixed", "tagged", "kept", "build")) == before),
         ("the remediated copy builds with pdfLaTeX, as the author's does", builds),
         ("tagging: \\DocumentMetadata, the book's language, pdfTeX's option and setting out",
          lambda: tagged.startswith("\\DocumentMetadata{lang=en, pdfstandard=ua-2, tagging=on}\n"
@@ -679,6 +684,14 @@ def case_source(work):
          "\\begin{tabular}{cc}" in tagged and tagged.count("\\tagpdfsetup{") == 1),
         ("untagged, the decision isn't written, and the run says why",
          lambda: "\\tagpdfsetup" not in notes and "need" in said and "tagging" in said),
+        ("the definitions file is written after the copy's preamble, as it's read",
+         lambda: re.search(r"latex-conversion-macros\.tex, which a person wrote.*\n.*\n"
+                           r"% For reading\.\n\\renewcommand\{\\suchthat\}\{\\mid\}\n"
+                           r"(?:.*\n)*?\\begin\{document\}", notes) is not None
+         and "definition(s) from latex-conversion-macros.tex" in said),
+        ("latex_definitions off keeps them to the conversion",
+         lambda: os.path.exists(os.path.join(work, "kept", "notes.tex"))
+         and "\\mid" not in read(work, "kept", "notes.tex")),
         ("tagging off leaves the book's build alone",
          lambda: "\\DocumentMetadata" not in notes and "pdftex" in notes),
         ("the tagged copy builds with LuaLaTeX, no tagging error or warning", builds_tagged),

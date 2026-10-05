@@ -2116,13 +2116,20 @@ def remediate_sources(target, base, docs, paths, env, html_stems=(), language=No
         # table's place in its files (latexsource.table_place).
         decisions = {e["latex"]: e["headers"] for entries in resolved_html.values()
                      for e in entries if e.get("latex") and e.get("supplier") == "sidecar"}
+        definitions = None
+        macros_path = os.path.join(base, LATEX_MACROS) if LATEX_MACROS else ""
+        if str(target["latex_definitions"]) == "on" and os.path.isfile(macros_path):
+            definitions = latexsource.read_text(macros_path)
         counts = texremediate.remediate(base, target.output_dir, master, files, page_alts,
                                         tagging=tagging, language=language,
-                                        headers=decisions)
+                                        headers=decisions, definitions=definitions,
+                                        definitions_name=LATEX_MACROS)
         say(f"{target.name}: {counts['files']} LaTeX file(s) written, "
             f"{counts['changed']} of them changed: {counts.get('described', 0)} "
             f"image(s) and drawing(s) given alt text and {counts.get('decorative', 0)} "
             "marked artifact, as keys LaTeX's tagging reads."
+            + (f" {counts['definitions']} definition(s) from {LATEX_MACROS} written after "
+               "the preamble, as the conversion reads them." if counts.get("definitions") else "")
             + (f" {counts.get('header_rows', 0)} table(s) declared with a header row and "
                f"{counts.get('header_columns', 0)} with a header column, from the sidecar."
                if counts.get("header_rows") or counts.get("header_columns") else "")

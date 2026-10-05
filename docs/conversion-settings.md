@@ -24,6 +24,10 @@ Whether every page of an HTML target carries the book's contents as a menu at it
 
 For a target with format source: whether a remediated Word file keeps the compatibility mode its author's file has, or is set to 15, which guides for Word say its Accessibility Checker needs. Kept by default, since the file is the author's.
 
+**`tagging`**—one of `off`, `on`; default `off`
+
+For a target with format source on a LaTeX book: whether the copy is made to build with LaTeX's own tagging, for an accessible PDF: \DocumentMetadata before \documentclass, pdfTeX-only options and settings taken out, and the constructs tagging can't take yet put the way it can. A tagged book is built with LuaLaTeX (pdfLaTeX runs out of memory on a book), so this changes the author's build. Off by default; the alt text is written either way.
+
 **`title_page`**—one of `auto`, `on`, `off`; default `auto`
 
 For a target with format epub3 or pdf: whether the book opens with a title page, its title and authors. auto goes by the book's structure, not its number of files: a title page when the book has more than one top-level entry (chapters, parts), or is one page with more than one top-level heading, or has something before its title heading (a byline, a subtitle); none for a document whose one top-level heading is its title, which then appears once, as that heading, and in the file's metadata.

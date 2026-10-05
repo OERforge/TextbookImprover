@@ -271,7 +271,7 @@ def fingerprint(work, skip_dirs=()):
     found = {}
     for top, _, names in os.walk(work):
         rel = os.path.relpath(top, work).split(os.sep)
-        if rel[0] in skip_dirs:
+        if any(rel[0].startswith(d) for d in skip_dirs):
             continue
         for name in names:
             path = os.path.join(top, name)
@@ -555,7 +555,14 @@ def case_source(work):
         fh.write("#FIG 3.2\n")
     with open(os.path.join(work, "figures", "f.tex"), "w") as fh:
         fh.write(FIG2DEV_PAIR)
-    source = ("\\documentclass{article}\n\\usepackage{graphicx}\n\\begin{document}\n"
+    source = ("\\documentclass[pdftex,12pt]{article}\n\\usepackage{graphicx}\n"
+              "\\usepackage{amsthm}\n\\usepackage[english]{babel}\n\\pdfcompresslevel=9\n"
+              "\\newtheorem{thm}{Theorem}\n\\newtheorem*{thm*}{Theorem}\n"
+              "\\begin{document}\n"
+              "\\begin{thm*} Unnumbered. \\end{thm*}\n\n"
+              "\\centerline{\\begin{tabular}{c} a \\\\ \\end{tabular}}\n\n"
+              "Inline \\centerline{x} \\newline more.\n\n"
+              "\\begin{center}\n\\[ 1! = 1 \\]\net cetera\n\\end{center}\n\n"
               "A square: \\includegraphics[width=1cm]{sq}.\n\n"
               "\\begin{picture}(40,20)\\put(0,0){\\framebox(40,20){two}}\\end{picture}\n\n"
               "A rule: \\includegraphics[height=2pt]{figures/f.png}\n\n"
@@ -569,7 +576,8 @@ def case_source(work):
                  "rendered/notes-1.svg,Two boxes\nfigures/f.png,[decorative]\n"
                  "rendered/figures/f.svg,A figure from xfig\n")
     with open(os.path.join(work, "conversion.yaml"), "w") as fh:
-        fh.write("targets:\n  html:\n    format: html\n  fixed:\n    format: source\n")
+        fh.write("targets:\n  html:\n    format: html\n  fixed:\n    format: source\n"
+                 "  tagged:\n    format: source\n    tagging: \"on\"\n")
     before = fingerprint(work)
     result = convert(work)
     said = result.stdout + result.stderr
@@ -578,6 +586,37 @@ def case_source(work):
         if os.path.exists(os.path.join(fixed, "notes.tex")) else ""
     pair = read(work, "fixed", "figures", "f.tex") \
         if os.path.exists(os.path.join(fixed, "figures", "f.tex")) else ""
+
+    tagged = read(work, "tagged", "notes.tex") \
+        if os.path.exists(os.path.join(work, "tagged", "notes.tex")) else ""
+
+    def build(tree, engine, text=None):
+        """The author's tree with tree laid over it (and notes.tex as text,
+        if given), built with engine: (exit status, log)."""
+        build = os.path.join(work, "build-" + os.path.basename(tree) + "-" + engine)
+        shutil.copytree(work, build, ignore=shutil.ignore_patterns(
+            "fixed", "tagged", "html", "build*", "rendered"))
+        shutil.copytree(tree, build, dirs_exist_ok=True)
+        if text is not None:
+            with open(os.path.join(build, "notes.tex"), "w", encoding="utf-8") as fh:
+                fh.write(text)
+        done = subprocess.run([engine, "-interaction=nonstopmode", "notes.tex"],
+                              cwd=build, capture_output=True, text=True, timeout=300)
+        return done.returncode, done.stdout
+
+    def builds_tagged():
+        if not shutil.which("lualatex"):
+            return skip("no lualatex to build the tagged copy")
+        status, log = build(os.path.join(work, "tagged"), "lualatex")
+        return status == 0 and "para hooks differ" not in log \
+            and "Parent-Child" not in log and "already defined" not in log
+
+    def builds_untagged():
+        if not shutil.which("pdflatex"):
+            return skip("no pdflatex to build the tagged copy untagged")
+        status, _ = build(os.path.join(work, "tagged"), "pdflatex",
+                          re.sub(r"\\DocumentMetadata\{[^}]*\}\n", "", tagged))
+        return status == 0
 
     def builds():
         engine = shutil.which("pdflatex")
@@ -607,8 +646,21 @@ def case_source(work):
         ("the run says which are in files the book's own build makes",
          lambda: "own build" in said and "writes over them" in said),
         ("the author's files are untouched by the source target",
-         lambda: fingerprint(work, skip_dirs=("fixed", "build")) == before),
+         lambda: fingerprint(work, skip_dirs=("fixed", "tagged", "build")) == before),
         ("the remediated copy builds with pdfLaTeX, as the author's does", builds),
+        ("tagging: \\DocumentMetadata, the book's language, pdfTeX's option and setting out",
+         lambda: tagged.startswith("\\DocumentMetadata{lang=en, pdfstandard=ua-2, tagging=on}\n"
+                                   "\\documentclass[12pt]{article}")
+         and "\\pdfcompresslevel" not in tagged),
+        ("tagging: the starred theorem defined only when tagging hasn't",
+         lambda: "\\ifcsname thm*\\endcsname\\else\\newtheorem*{thm*}{Theorem}\\fi" in tagged),
+        ("tagging: \\centerline redefined, and \\leavevmode before the formula",
+         lambda: "\\renewcommand{\\centerline}" in tagged
+         and "\\begin{center}\n\\leavevmode\\[" in tagged),
+        ("tagging off leaves the book's build alone",
+         lambda: "\\DocumentMetadata" not in notes and "pdftex" in notes),
+        ("the tagged copy builds with LuaLaTeX, no tagging error or warning", builds_tagged),
+        ("and without \\DocumentMetadata it builds with pdfLaTeX", builds_untagged),
     ]
 
 

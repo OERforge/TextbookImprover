@@ -88,6 +88,20 @@ keys:
       guides for Word say its Accessibility Checker needs. Kept by default,
       since the file is the author's.
 
+  tagging:
+    type: enum
+    values: ["off", "on"]
+    default: "off"
+    stage: render
+    description: >
+      For a target with format source on a LaTeX book: whether the copy is
+      made to build with LaTeX's own tagging, for an accessible PDF:
+      \DocumentMetadata before \documentclass, pdfTeX-only options and
+      settings taken out, and the constructs tagging can't take yet put
+      the way it can. A tagged book is built with LuaLaTeX (pdfLaTeX runs
+      out of memory on a book), so this changes the author's build. Off by
+      default; the alt text is written either way.
+
   title_page:
     type: enum
     values: ["auto", "on", "off"]

@@ -162,23 +162,132 @@ def remediate_file(base, name, text, alts, dirs, is_master=False):
     return text, counts
 
 
-def remediate(base, out_dir, master, files, alts):
+def remediate(base, out_dir, master, files, alts, tagging=False, language=None):
     """Write a remediated copy of each file in files (relative to base) to
     out_dir at the same relative path. alts: {key: alt, or None for
-    decorative} (htmlremediate.alt_rows). Returns a dict of counts."""
+    decorative} (htmlremediate.alt_rows); tagging: made to build with
+    LaTeX's tagging (tag), the book's language its lang. Returns a dict
+    of counts."""
     master_text = latexsource.read_text(os.path.join(base, master))
     dirs = latexsource.graphics_paths(latexsource.split_master(master_text)[0])
     totals = {"files": 0, "changed": 0}
+    originals, texts = {}, {}
     for name in files:
-        path = os.path.join(base, name)
-        text = latexsource.read_text(path)
-        new, counts = remediate_file(base, name, text, alts, dirs, name == master)
+        originals[name] = latexsource.read_text(os.path.join(base, name))
+        texts[name], counts = remediate_file(base, name, originals[name], alts, dirs,
+                                             name == master)
         for key, n in counts.items():
             totals[key] = totals.get(key, 0) + n
+    if tagging:
+        if not language:
+            language = latexsource.preamble_language(
+                latexsource.split_master(originals[master])[0])
+        for key, n in tag(texts, master, language).items():
+            totals["tag_" + key] = n
+    for name in files:
         out = os.path.join(out_dir, name)
         os.makedirs(os.path.dirname(out) or out_dir, exist_ok=True)
         with open(out, "w", encoding="utf-8", newline="") as fh:
-            fh.write(new)
+            fh.write(texts[name])
         totals["files"] += 1
-        totals["changed"] += int(new != text)
+        totals["changed"] += int(texts[name] != originals[name])
     return totals
+
+
+# --------------------------------------------------------------------------
+# tagging: the copy made to build with LaTeX's own tagging (tagging: on)
+# --------------------------------------------------------------------------
+
+DOCUMENTCLASS = re.compile(r"\\documentclass\b")
+DOCUMENT_METADATA = re.compile(r"\\DocumentMetadata\b")
+OPTIONED = re.compile(r"(\\(?:documentclass|usepackage|RequirePackage)\s*)\[([^]]*)\]")
+PDFTEX_SETTING = re.compile(
+    r"\\pdf(?:compresslevel|objcompresslevel|minorversion|output)\s*=?\s*\d+[ \t]*\n?")
+NEWTHEOREM = re.compile(r"\\newtheorem\s*\{(\w+)\}")
+STARRED_THEOREM = re.compile(r"\\newtheorem\*\s*\{(\w+)\*\}\s*\{[^}]*\}")
+CENTERLINE = re.compile(r"\\centerline(?![A-Za-z@])")
+BLOCK_FORMULA = re.compile(r"(\\begin\s*\{(?:center|flushleft|flushright)\}\s*)(?=\\\[)")
+CENTERLINE_DEFINITION = (
+    "% Written for LaTeX's tagging: \\centerline on a line of its own is a\n"
+    "% centered paragraph, which tagging takes; in a paragraph it's as before.\n"
+    "\\let\\TIQcenterline\\centerline\n"
+    "\\renewcommand{\\centerline}[1]{\\ifvmode{\\centering #1\\par}"
+    "\\else\\TIQcenterline{#1}\\fi}\n")
+
+
+def _code_subn(pattern, text, replace):
+    """re.subn on text, matches in comments and verbatim left alone."""
+    spans = latexsource.skip_spans(text)
+    count = [0]
+
+    def one(m):
+        if latexsource.in_spans(m.start(), spans):
+            return m.group(0)
+        count[0] += 1
+        return replace(m)
+    return pattern.sub(one, text), count[0]
+
+
+def _without_pdftex(m):
+    options = [o for o in m.group(2).split(",") if o.strip() != "pdftex"]
+    if len(options) == len(m.group(2).split(",")):
+        return m.group(0)
+    return m.group(1) + ("[%s]" % ",".join(options) if any(o.strip() for o in options) else "")
+
+
+def tag(texts, master, language):
+    """texts: {name: text}, changed in place to build with LaTeX's tagging
+    on LuaLaTeX, each change measured on GIAM, where it was needed:
+    \\DocumentMetadata before \\documentclass (pdfstandard ua-2), the
+    pdftex option and pdfTeX's own settings taken out, a starred theorem
+    the book defines beside its numbered one defined only when tagging
+    hasn't (tagging's \\newtheorem defines thm* with thm), \\centerline on
+    a line of its own made a centered paragraph, and \\leavevmode put
+    before a display formula opening a center environment, which leaves
+    a paragraph open in LaTeX 2026-06-01. Returns counts."""
+    counts = {"metadata": 0, "pdftex_options": 0, "pdftex_settings": 0,
+              "theorems": 0, "centerline": 0, "formulas": 0}
+    numbered = set()
+    for text in texts.values():
+        spans = latexsource.skip_spans(text)
+        numbered.update(m.group(1) for m in NEWTHEOREM.finditer(text)
+                        if not latexsource.in_spans(m.start(), spans))
+    uses_centerline = False
+    for name, text in list(texts.items()):
+        def options(m):
+            new = _without_pdftex(m)
+            counts["pdftex_options"] += int(new != m.group(0))
+            return new
+        text, _ = _code_subn(OPTIONED, text, options)
+        text, n = _code_subn(PDFTEX_SETTING, text, lambda m: "")
+        counts["pdftex_settings"] += n
+
+        def theorem(m):
+            if m.group(1) not in numbered:
+                return m.group(0)
+            counts["theorems"] += 1
+            return "\\ifcsname %s*\\endcsname\\else%s\\fi" % (m.group(1), m.group(0))
+        text, _ = _code_subn(STARRED_THEOREM, text, theorem)
+        text, n = _code_subn(BLOCK_FORMULA, text, lambda m: m.group(1) + "\\leavevmode")
+        counts["formulas"] += n
+        spans = latexsource.skip_spans(text)
+        if any(not latexsource.in_spans(m.start(), spans)
+               for m in CENTERLINE.finditer(text)):
+            uses_centerline = True
+        texts[name] = text
+    text = texts[master]
+    if uses_centerline:
+        begin = latexsource.code_matches(latexsource.BEGIN_DOCUMENT, text)
+        if begin:
+            at = begin[0].start()
+            text = text[:at] + CENTERLINE_DEFINITION + text[at:]
+            counts["centerline"] = 1
+    if not latexsource.code_matches(DOCUMENT_METADATA, text):
+        found = latexsource.code_matches(DOCUMENTCLASS, text)
+        if found:
+            at = text.rfind("\n", 0, found[0].start()) + 1
+            text = text[:at] + "\\DocumentMetadata{%spdfstandard=ua-2, tagging=on}\n" % (
+                "lang=%s, " % language if language else "") + text[at:]
+            counts["metadata"] = 1
+    texts[master] = text
+    return counts

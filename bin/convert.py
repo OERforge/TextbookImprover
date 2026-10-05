@@ -2111,11 +2111,24 @@ def remediate_sources(target, base, docs, paths, env, html_stems=(), language=No
         import latexsource
         master = latex
         files, _ = latexsource.reached(base, master)
-        counts = texremediate.remediate(base, target.output_dir, master, files, page_alts)
+        tagging = str(target["tagging"]) == "on"
+        counts = texremediate.remediate(base, target.output_dir, master, files, page_alts,
+                                        tagging=tagging, language=language)
         say(f"{target.name}: {counts['files']} LaTeX file(s) written, "
             f"{counts['changed']} of them changed: {counts.get('described', 0)} "
             f"image(s) and drawing(s) given alt text and {counts.get('decorative', 0)} "
             "marked artifact, as keys LaTeX's tagging reads."
+            + (" Made to build with LaTeX's tagging, with LuaLaTeX: "
+               + ("\\DocumentMetadata added" if counts.get("tag_metadata")
+                  else "its own \\DocumentMetadata kept")
+               + f", {counts.get('tag_pdftex_options', 0)} pdftex option(s) and "
+               f"{counts.get('tag_pdftex_settings', 0)} pdfTeX setting(s) taken out, "
+               f"{counts.get('tag_theorems', 0)} starred theorem(s) defined only "
+               "when tagging hasn't, "
+               + ("\\centerline on a line of its own made a centered paragraph, "
+                  if counts.get("tag_centerline") else "")
+               + f"and {counts.get('tag_formulas', 0)} formula(s) opening a center "
+               "environment given \\leavevmode." if tagging else "")
             + (f" {counts['generated']} of them are in files the book's own build "
                "makes (beside an xfig source); building it again writes over them."
                if counts.get("generated") else "")
@@ -2123,27 +2136,28 @@ def remediate_sources(target, base, docs, paths, env, html_stems=(), language=No
                "were left alone." if counts.get("pspicture") else ""))
         written.extend(os.path.join(target.output_dir, f) for f in files)
     others = sorted(f for f in os.listdir(base) if f.endswith(".adoc") and not f.startswith("."))
-    say(f"{target.name}: {len(docs)} Word file(s), {pages} HTML page(s), and "
-        f"{md_files} Markdown file(s) remediated: "
-        f"{totals.get('header_rows', 0)} table(s) given header rows and "
-        f"{totals.get('header_columns', 0)} a header column from the sidecar, "
-        f"{totals.get('captions', 0)} caption(s) added and "
-        f"{totals.get('labels_joined', 0)} description(s) joined to a label, "
-        f"{totals.get('described', 0)} image(s) described, "
-        f"{totals.get('decorative', 0)} marked decorative, "
-        f"{totals.get('links', 0)} link title(s), "
-        f"{totals.get('replaced', 0)} link(s) given their replacement address, "
-        f"the language set in {totals.get('language', 0)}"
-        + (f", {totals['equations_repaired']} Word equation(s) given the "
-           f"characters they mean ({totals['equation_characters']} change(s))"
-           if totals.get("equations_repaired") else "")
-        + (f", {totals['text_equations']} equation(s) made of math typed as text"
-           if totals.get("text_equations") else "")
-        + (f", {totals['equations_kept']} equation(s) kept as they were by the "
-           "math-keep sidecar" if totals.get("equations_kept") else "")
-        + (f"; {totals['skipped']} table(s) skipped as changed since the pre-pass"
-           if totals.get("skipped") else "")
-        + ".")
+    if docs or pages or md_files or not latex:
+        say(f"{target.name}: {len(docs)} Word file(s), {pages} HTML page(s), and "
+            f"{md_files} Markdown file(s) remediated: "
+            f"{totals.get('header_rows', 0)} table(s) given header rows and "
+            f"{totals.get('header_columns', 0)} a header column from the sidecar, "
+            f"{totals.get('captions', 0)} caption(s) added and "
+            f"{totals.get('labels_joined', 0)} description(s) joined to a label, "
+            f"{totals.get('described', 0)} image(s) described, "
+            f"{totals.get('decorative', 0)} marked decorative, "
+            f"{totals.get('links', 0)} link title(s), "
+            f"{totals.get('replaced', 0)} link(s) given their replacement address, "
+            f"the language set in {totals.get('language', 0)}"
+            + (f", {totals['equations_repaired']} Word equation(s) given the "
+               f"characters they mean ({totals['equation_characters']} change(s))"
+               if totals.get("equations_repaired") else "")
+            + (f", {totals['text_equations']} equation(s) made of math typed as text"
+               if totals.get("text_equations") else "")
+            + (f", {totals['equations_kept']} equation(s) kept as they were by the "
+               "math-keep sidecar" if totals.get("equations_kept") else "")
+            + (f"; {totals['skipped']} table(s) skipped as changed since the pre-pass"
+               if totals.get("skipped") else "")
+            + ".")
     if totals.get("text_equations_left"):
         say(f"{target.name}: {totals['text_equations_left']} equation(s) the pages make of "
             "math typed as text not written into the Word file: its runs there aren't "

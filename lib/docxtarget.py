@@ -416,6 +416,10 @@ def _mark_item(blocks, depth, counter, opens_item):
                 MATH_MARK, counter[0], depth), [], []], [inner]]}
         elif inner.get("t") == "Div":
             _mark_item(inner["c"][1], depth, counter, opens_item and i == 0)
+        elif inner.get("t") == "BlockQuote":
+            # A quotation in an item is numbered with the item, its formula
+            # too (the Word target's quotations in lists, indent_quotes).
+            _mark_item(inner["c"], depth, counter, False)
 
 
 def _held(block):

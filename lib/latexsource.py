@@ -356,6 +356,21 @@ def declare_headers(text, counter):
     return "".join(out)
 
 
+RULE_ANY = re.compile(r"\\rule\s*(?:\[[^]]*\])?\s*\{([^}]*)\}\s*\{([^}]*)\}")
+
+
+def invisible_rule(m):
+    """A rule with no height is a space, and one with no width a strut;
+    the reader takes any rule with a width for a horizontal rule, a line
+    across the page (rule, Readers/LaTeX.hs)."""
+    width, height = points(m.group(1)), points(m.group(2))
+    if width == 0:
+        return ""
+    if height == 0 and width is not None:
+        return "\\hspace{%s}" % m.group(1).strip()
+    return m.group(0)
+
+
 def repair_text(text, counter):
     """The rewrites every file of the copy gets: booleans as toggles,
     \\input braced, artifact images marked."""
@@ -374,6 +389,7 @@ def repair_text(text, counter):
     # column range ({2-2}) in the next cell as text. A rule draws nothing
     # a page keeps, so a whole one stands for them.
     text = declare_headers(text, counter)
+    text = substitute(RULE_ANY, text, invisible_rule, counter, "rule_seen")
     text = substitute(PARTIAL_RULE, text, lambda m: "\\" + (
         "midrule" if m.group(1) == "cmidrule" else "hline"), counter,
         "partial_rule")

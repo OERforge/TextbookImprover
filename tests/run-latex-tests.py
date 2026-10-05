@@ -133,6 +133,18 @@ and text after it.
 \item The next item.
 \end{enumerate}
 
+\begin{quote}
+Proof: a table follows.
+
+\begin{tabular}{ccl}
+ & $A \cup B$ & \rule{36pt}{0pt} Given \\
+$=$ & $U \cap (A \cup B)$ & Identity law \\
+ & \begin{minipage}{2in}A boxed aside.\end{minipage} & \\
+\end{tabular}
+
+Q.E.D.
+\end{quote}
+
 \tagpdfsetup{table/header-rows={1}}
 \begin{tabular}{cc}
 Head one & Head two \\
@@ -287,6 +299,18 @@ def word_list_reads_back(work):
         and "<hr" in whole[0] and "and text after it" in whole[0]
 
 
+def word_quote_reads_back(work):
+    """The quotation holding a table, read back from one.docx (which
+    word_list_reads_back converted), is one quotation with the table in it,
+    and no cell is a quotation."""
+    page = read(work, "back", "html", "one.html")
+    quotes = re.findall(r"<blockquote>(.*?)</blockquote>", page, re.S)
+    proof = [q for q in quotes if "Proof: a table follows" in q]
+    return proof and "<table" in proof[0] and "Q.E.D." in proof[0] \
+        and not any(("Given" in q or "boxed aside" in q) and "<table" not in q
+                    for q in quotes)
+
+
 def word_math_in_list(work):
     """The Word file's display formula in a list item is numbered as the
     item's other paragraphs are, so reading it keeps the item whole."""
@@ -355,6 +379,8 @@ def case_book(work):
          lambda: "<table" in one and "delta" in one),
         ("\\cline's column range is a rule, not a cell's text",
          lambda: "delta" in one and "2-2" not in one),
+        ("a rule with no height is a space, not a line across the page",
+         lambda: "<hr" not in re.sub(r"(?s)A blank to fill in.*?The next item", "", one)),
         ("an \\input in a comment or verbatim is left alone",
          lambda: "\\input ch1/never" in one
          and "reaches ch1/never" not in log),
@@ -405,6 +431,8 @@ def case_book(work):
          lambda: word_math_in_list(work)),
         ("read back from Word, a list with a formula, a table, and a rule in its items is whole",
          lambda: word_list_reads_back(work)),
+        ("read back from Word, a quotation holding a table is whole, its cells not quotations",
+         lambda: word_quote_reads_back(work)),
         ("the author's files are untouched",
          lambda: fingerprint(work) == before),
     ]

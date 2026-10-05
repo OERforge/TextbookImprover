@@ -361,6 +361,7 @@ def mark_blocks(doc):
 
     doc["blocks"] = visit(doc.get("blocks", []))
     counts["math"] = _mark_list_math(doc["blocks"], -1)
+    counts["quote_tables"] = _mark_quote_tables(doc["blocks"])
     return doc, sum(counts.values())
 
 
@@ -437,12 +438,45 @@ def _mark_item_tables(item, counter, continues):
                 int(continues)), [], []], [item[i]]]}
 
 
+def _table_end(xml, start):
+    """The index just past the w:tbl that opens at start, nested ones
+    counted."""
+    depth = 0
+    for tag in re.finditer(r"<w:tbl>|</w:tbl>", xml[start:]):
+        depth += 1 if tag.group(0) == "<w:tbl>" else -1
+        if depth == 0:
+            return start + tag.end()
+    return len(xml)
+
+
+def _mark_quote_tables(blocks):
+    """Mark each table after the first block of a quotation that isn't
+    itself inside one ("q"), with whether the quotation goes on after it.
+    Returns how many."""
+    count = 0
+    for block in blocks:
+        if not isinstance(block, dict) or block.get("t") != "BlockQuote":
+            continue
+        inner = block["c"]
+        # mark_blocks wraps a quotation's content in a marked div.
+        if len(inner) == 1 and inner[0].get("t") == "Div" \
+                and inner[0]["c"][0][0].startswith(QUOTE_MARK):
+            inner = inner[0]["c"][1]
+        for i in range(len(inner) - 1, 0, -1):
+            if _held(inner[i]) == "t":
+                count += 1
+                inner[i] = {"t": "Div", "c": [["%sQ%dkqf0c%d" % (
+                    ITEM_TABLE_MARK, count, int(i < len(inner) - 1)),
+                    [], []], [inner[i]]]}
+    return count
+
+
 def item_tables(xml):
     """[(kind, ordinal, follow, continues)] for each table ("t") or rule
     ("r") mark_blocks marked as in a list item, the ordinal counting the
     body's tables, or its rules, outside tables, from 0. The marks are
     then removed. Returns (xml, found)."""
-    pattern = re.compile(r'<w:bookmarkStart w:id="(\d+)" w:name="_?%s\d+k([tr])f(\d+)c(\d)"\s*/>'
+    pattern = re.compile(r'<w:bookmarkStart w:id="(\d+)" w:name="_?%sQ?\d+k([trq])f(\d+)c(\d)"\s*/>'
                          % ITEM_TABLE_MARK)
     found = []
     while True:
@@ -450,13 +484,19 @@ def item_tables(xml):
         if not m:
             break
         kind = m.group(2)
-        target = "<w:tbl>" if kind == "t" else 'o:hr="t"'
+        target = 'o:hr="t"' if kind == "r" else "<w:tbl>"
         at = xml.find(target, m.end())
+        if at >= 0 and kind == "q":
+            # The writer gives a quotation's table cells the quotation's
+            # style, and each cell reads back as a quotation of its own.
+            end = _table_end(xml, at)
+            xml = xml[:at] + xml[at:end].replace(
+                '<w:pStyle w:val="BlockText" />', '<w:pStyle w:val="Compact" />') + xml[end:]
         if at >= 0:
             depth, ordinal = 0, 0
             for tag in re.finditer(r'<w:tbl>|</w:tbl>|o:hr="t"', xml[:at]):
                 if tag.group(0) == "<w:tbl>":
-                    if depth == 0 and kind == "t":
+                    if depth == 0 and kind in "tq":
                         ordinal += 1
                     depth += 1
                 elif tag.group(0) == "</w:tbl>":

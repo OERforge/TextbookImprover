@@ -803,7 +803,7 @@ def list_tables(docx_path):
                 data = z.read(name).decode("utf-8", "replace")
                 if "OERforge/TextbookImprover/ids" in data:
                     return [(k, int(n), int(f), int(c)) for k, n, f, c in re.findall(
-                        r'<listBlock kind="([tr])" n="(\d+)" follow="(\d+)" continues="(\d)"\s*/>',
+                        r'<listBlock kind="([trq])" n="(\d+)" follow="(\d+)" continues="(\d)"\s*/>',
                         data)]
     return []
 
@@ -846,12 +846,26 @@ def apply_list_tables(docx_path, json_path):
         return block["c"][1] if block["t"] == "OrderedList" else block["c"]
     moved = 0
     # Last first, so a move never shifts a place still to come.
+    places["q"] = places["t"]    # a quotation's table is counted with the tables
     order = sorted(marks, key=lambda m: places[m[0]][m[1]][2]
                    if m[1] < len(places[m[0]]) else -1, reverse=True)
     for kind, ordinal, follow, continues in order:
         if ordinal >= len(places[kind]):
             continue
         blocks, i, _ = places[kind][ordinal]
+        if kind == "q":
+            # Back into the quotation before it, and the quotation the
+            # reader began again after it joined to that one.
+            if i == 0 or not isinstance(blocks[i - 1], dict) \
+                    or blocks[i - 1].get("t") != "BlockQuote":
+                continue
+            quote = blocks[i - 1]
+            quote["c"].append(blocks.pop(i))
+            if continues and i < len(blocks) and isinstance(blocks[i], dict) \
+                    and blocks[i].get("t") == "BlockQuote":
+                quote["c"].extend(blocks.pop(i)["c"])
+            moved += 1
+            continue
         if i == 0 or not isinstance(blocks[i - 1], dict) \
                 or blocks[i - 1].get("t") not in lists:
             continue

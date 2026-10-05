@@ -324,6 +324,56 @@ DECLARATIONS = {(True, False): "FirstRow", (False, True): "FirstColumn",
                 (True, True): "Both"}
 
 
+def longtable_heads(text, counter):
+    """A longtable whose head is one row, the rows before \\endhead or
+    \\endfirsthead, wrapped as a table declared to have a header row: the
+    head is the author's own declaration, which Pandoc's LaTeX writer makes
+    for a table with a header and the census would otherwise guess at. One
+    the author declared for tagging already is left as declared."""
+    spans = skip_spans(text)
+    out, last = [], 0
+    for m in re.finditer(r"\\begin\s*\{longtable\}", text):
+        if in_spans(m.start(), spans) or m.start() < last \
+                or re.search(r"\\begin\{TextbookImproverHeaders\w+\}\s*$", text[:m.start()]):
+            continue
+        end = environment_end(text, "longtable", m.start())
+        if end < 0:
+            continue
+        body = text[m.start():end]
+        head = re.search(r"\\end(?:first)?head\b", body)
+        if not head:
+            continue
+        rows = len(re.findall(r"\\\\", re.sub(r"%[^\n]*", "", body[:head.start()])))
+        if rows != 1:
+            counter["header_other"] = counter.get("header_other", 0) + 1
+            continue
+        out.append(text[last:m.start()] + "\\begin{TextbookImproverHeadersFirstRow}"
+                   + body + "\\end{TextbookImproverHeadersFirstRow}")
+        last = end
+        counter["longtable_head"] = counter.get("longtable_head", 0) + 1
+    out.append(text[last:])
+    return "".join(out)
+
+
+def unwrap(text, command, counter, key):
+    """\\command{X} as X, in code: for a wrapper the reader doesn't know
+    and drops with what it holds, as Pandoc's LaTeX writer's
+    \\pandocbounded around an image is."""
+    spans = skip_spans(text)
+    pattern = re.compile(r"\\%s\s*\{" % re.escape(command))
+    while True:
+        found = [m for m in pattern.finditer(text) if not in_spans(m.start(), spans)]
+        if not found:
+            return text
+        m = found[-1]
+        close = matching_brace(text, m.end() - 1)
+        if close < 0:
+            return text
+        text = text[:m.start()] + text[m.end():close - 1] + text[close:]
+        counter[key] = counter.get(key, 0) + 1
+        spans = skip_spans(text)
+
+
 def declare_headers(text, counter):
     """A table preceded by its tagging's header declaration, wrapped in an
     environment the reader keeps as a div naming the declaration. Only a
@@ -391,6 +441,8 @@ def repair_text(text, counter):
     # column range ({2-2}) in the next cell as text. A rule draws nothing
     # a page keeps, so a whole one stands for them.
     text = declare_headers(text, counter)
+    text = longtable_heads(text, counter)
+    text = unwrap(text, "pandocbounded", counter, "bounded")
     text = substitute(RULE_ANY, text, invisible_rule, counter, "rule_seen")
     text = substitute(PARTIAL_RULE, text, lambda m: "\\" + (
         "midrule" if m.group(1) == "cmidrule" else "hline"), counter,

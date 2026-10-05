@@ -30,7 +30,7 @@ keys:
 
   format:
     type: enum
-    values: [html, epub3, pdf, docx, markdown, asciidoc, source]
+    values: [html, epub3, pdf, latex, docx, markdown, asciidoc, source]
     default: html
     target_only: true
     stage: render
@@ -40,7 +40,9 @@ keys:
       book. docx writes Word files from the same pages, in compatibility
       mode 15 with ScreenTips and Word's decorative marker. pdf writes one
       tagged PDF of the whole book through LaTeX, which needs LuaLaTeX
-      (see the installation page).
+      (see the installation page). latex writes the LaTeX the pdf target
+      builds from, as a master file that \include-s a file per chapter,
+      with its images beside them, for an author to go on working in.
 
   output_dir:
     type: path

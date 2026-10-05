@@ -4,9 +4,9 @@ Settings that describe one rendering of the book, under `conversion:` in `packag
 
 How the book is rendered into one output format.
 
-**`format`**—one of `html`, `epub3`, `pdf`, `docx`, `markdown`, `asciidoc`, `source`; default `html`; *target only*
+**`format`**—one of `html`, `epub3`, `pdf`, `latex`, `docx`, `markdown`, `asciidoc`, `source`; default `html`; *target only*
 
-What this target produces. markdown and asciidoc write source again: what the author decided, which the pipeline reads back to the same book. docx writes Word files from the same pages, in compatibility mode 15 with ScreenTips and Word's decorative marker. pdf writes one tagged PDF of the whole book through LaTeX, which needs LuaLaTeX (see the installation page).
+What this target produces. markdown and asciidoc write source again: what the author decided, which the pipeline reads back to the same book. docx writes Word files from the same pages, in compatibility mode 15 with ScreenTips and Word's decorative marker. pdf writes one tagged PDF of the whole book through LaTeX, which needs LuaLaTeX (see the installation page). latex writes the LaTeX the pdf target builds from, as a master file that \include-s a file per chapter, with its images beside them, for an author to go on working in.
 
 **`output_dir`**—`path`; default `""` (empty); *target only*
 

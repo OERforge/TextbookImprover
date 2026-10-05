@@ -62,7 +62,7 @@ from bookassembly import (  # noqa: E402
     INTERMEDIATE, Assembly, load_documents, targets_of, plan_book, load_page,
     page_title, stringify, wants_title_page,
 )
-from bookcontents import is_generated  # noqa: E402
+from bookcontents import flatten_pages, is_generated  # noqa: E402
 import pdfparagraphs  # noqa: E402
 import pdfretag  # noqa: E402
 from names import safe_stem  # noqa: E402
@@ -305,6 +305,96 @@ def raw_latex(text):
     return {"t": "RawBlock", "c": ["latex", text]}
 
 
+# Where a file of the latex target begins, in the LaTeX the writer gives:
+# a name, or none for what the master keeps.
+FILE_MARK = "%%TextbookImproverFile:%s"
+FILE_MARK_LINE = re.compile(r"^%TextbookImproverFile:(\S*)\n", re.M)
+
+
+def split_book(text):
+    """The writer's one file as a master and a file per top-level entry:
+    (master, {name: body}). The master keeps the preamble, what stands
+    between the entries (division commands, the contents), and an
+    \\include for each file, in its place."""
+    files, master, last, current = {}, [], 0, None
+    for m in FILE_MARK_LINE.finditer(text):
+        piece = text[last:m.start()]
+        if current:
+            files[current] = files.get(current, "") + piece
+        else:
+            master.append(piece)
+        current = m.group(1) or None
+        if current:
+            master.append("\\include{%s}\n" % current)
+        last = m.end()
+    end = text.rfind("\\end{document}")
+    if current and end > last:
+        files[current] = files.get(current, "") + text[last:end]
+        master.append(text[end:])
+    else:
+        master.append(text[last:])
+    return "".join(master), files
+
+
+def svg_to_pdf(blocks, base, out_dir):
+    """Each SVG image made a PDF beside where it goes in out_dir, with
+    rsvg-convert as Pandoc's own PDF route does, and the image pointed at
+    it: the LaTeX writer gives an SVG \\includesvg, which needs Inkscape
+    and takes no alt text. Returns how many, and the SVGs it couldn't."""
+    made, failed = [0], []
+
+    def walk(value):
+        if isinstance(value, dict):
+            if value.get("t") == "Image":
+                target = value["c"][2]
+                src = target[0]
+                if src.lower().endswith(".svg") and "://" not in src:
+                    pdf = os.path.splitext(src)[0] + ".pdf"
+                    out = os.path.join(out_dir, pdf)
+                    os.makedirs(os.path.dirname(out) or out_dir, exist_ok=True)
+                    done = subprocess.run(["rsvg-convert", "-f", "pdf", "-o", out,
+                                           os.path.join(base, src)],
+                                          capture_output=True) \
+                        if shutil.which("rsvg-convert") else None
+                    if done is not None and done.returncode == 0:
+                        target[0] = pdf
+                        made[0] += 1
+                    else:
+                        failed.append(src)
+            for v in value.values():
+                walk(v)
+        elif isinstance(value, list):
+            for v in value:
+                walk(v)
+    walk(blocks)
+    return made[0], failed
+
+
+def copy_images(blocks, base, out_dir):
+    """Every local image the book shows, copied to out_dir at its own
+    relative path, so the folder builds on its own. Returns how many."""
+    count = [0]
+
+    def walk(value):
+        if isinstance(value, dict):
+            if value.get("t") == "Image":
+                src = value["c"][2][0]
+                source = os.path.join(base, src)
+                out = os.path.join(out_dir, src)
+                if "://" not in src and os.path.isfile(source) \
+                        and not os.path.exists(out):
+                    os.makedirs(os.path.dirname(out) or out_dir, exist_ok=True)
+                    shutil.copy(source, out)
+                    count[0] += 1
+            for v in value.values():
+                walk(v)
+        elif isinstance(value, list):
+            for v in value:
+                walk(v)
+    walk(blocks)
+    return count[0]
+
+
 def is_division(block):
     return (block.get("t") == "RawBlock"
             and block["c"][0] in ("latex", "tex")
@@ -316,7 +406,7 @@ class PdfAssembly(Assembly):
     and a role is a division command."""
 
     def __init__(self, *args, title_page=None, book_title="",
-                 divisions=True, toc_depth=2, **kwargs):
+                 divisions=True, toc_depth=2, mark_files=False, **kwargs):
         super().__init__(*args, **kwargs)
         # The book opens in the front matter (OPEN_FRONT): its title
         # page, and the contents when the template places them.
@@ -330,6 +420,8 @@ class PdfAssembly(Assembly):
         # a lone heading promoted to the title -- keeps it.
         self.title_page = title_page
         self.book_title = book_title
+        self.mark_files = mark_files
+        self.file_names = set()
 
     def add_page(self, stem, title_override, depth, heading=True,
                  number=None):
@@ -346,6 +438,29 @@ class PdfAssembly(Assembly):
                                if not is_division(b)]
 
     def before_entry(self, entry, depth):
+        # For the latex target, each top-level entry is a file of its own,
+        # and what comes between them (a division command, the contents)
+        # stays in the master; marks say which is which.
+        if depth == 1 and self.mark_files:
+            self.blocks.append(raw_latex(FILE_MARK % ""))
+        self._division(entry, depth)
+        if depth == 1 and self.mark_files and not is_generated(entry):
+            self.blocks.append(raw_latex(FILE_MARK % self.file_name(entry)))
+
+    def file_name(self, entry):
+        """A top-level entry's file, without .tex: a page's own stem, a
+        group's first page's, or its title's; never two the same."""
+        kind, a, b = entry
+        stem = a if kind == "page" else next(
+            (s for s in flatten_pages([entry]) if s), safe_stem(a) or "part")
+        stem = safe_stem(stem) or "part"
+        name, n = stem, 2
+        while name in self.file_names:
+            name, n = f"{stem}-{n}", n + 1
+        self.file_names.add(name)
+        return name
+
+    def _division(self, entry, depth):
         # A generated contents page belongs to whatever division it sits
         # in; it has no role of its own to change it.
         if depth != 1 or is_generated(entry):
@@ -557,7 +672,8 @@ def pdf_targets(schema, project_schema, documents, requested, allow_unknown):
 
 # --------------------------------------------------------------------------
 
-def build(base, name, resolved, keep, intermediates=None, latex_only=False):
+def build(base, name, resolved, keep, intermediates=None, latex_only=False,
+          as_latex=False):
     project = resolved.project
     for warning in resolved.warnings:
         print(f"WARNING: {warning}", file=sys.stderr)
@@ -581,7 +697,7 @@ def build(base, name, resolved, keep, intermediates=None, latex_only=False):
         pages_dir, placed, tree, titles, title_page=title_page,
         book_title=meta_plain(meta.get("title")),
         divisions=document_class(meta) in FRONTMATTER_CLASSES,
-        toc_depth=toc_depth)
+        toc_depth=toc_depth, mark_files=as_latex)
     if len(tree) == 1 and tree[0][0] == "page":
         # The divisions are written where the role changes, between entries,
         # so a book of one page never reached its main matter: numbered i in
@@ -604,7 +720,7 @@ def build(base, name, resolved, keep, intermediates=None, latex_only=False):
               + (" and as Microsoft Office's attribute" if str(resolved["pdf.ua1_math"]) == "office"
                  else "") + ". PDF/UA-2 tags MathML properly.", file=sys.stderr)
     svgs = svg_images(assembly.blocks)
-    if svgs and not latex_only and shutil.which("rsvg-convert") is None:
+    if svgs and not latex_only and shutil.which("rsvg-convert") is None and not as_latex:
         sys.exit(f"The book has {len(svgs)} SVG image(s) ({svgs[0]} first), and a PDF "
                  "needs rsvg-convert to turn them into PDF: sudo apt install "
                  "librsvg2-bin (see docs/installation.md).")
@@ -629,6 +745,8 @@ def build(base, name, resolved, keep, intermediates=None, latex_only=False):
     out_dir = os.path.join(base, str(resolved["output_dir"] or name))
     os.makedirs(out_dir, exist_ok=True)
     out_path = os.path.join(out_dir, output_name(resolved, project, name))
+    if as_latex:
+        return write_latex(base, name, resolved, project, document, out_dir)
 
     work = tempfile.mkdtemp(prefix="build-pdf-")
     try:
@@ -711,6 +829,46 @@ def build(base, name, resolved, keep, intermediates=None, latex_only=False):
     return 0
 
 
+def write_latex(base, name, resolved, project, document, out_dir):
+    """The latex target: the LaTeX the PDF target builds from, as a master
+    file that \\include-s a file per top-level entry, with the images it
+    shows beside them, SVGs made PDFs. Prints the master's path."""
+    svgs, failed = svg_to_pdf(document["blocks"], base, out_dir)
+    copied = copy_images(document["blocks"], base, out_dir)
+    work = tempfile.mkdtemp(prefix="build-latex-")
+    try:
+        book_json = os.path.join(work, "book.json")
+        with open(book_json, "w", encoding="utf-8") as fh:
+            json.dump(document, fh)
+        filters = ["--lua-filter", os.path.join(HERE, "target-blocks.lua"),
+                   "--lua-filter", os.path.join(HERE, "pdf-target.lua")]
+        environment = dict(os.environ, TARGET_NAME=name,
+                           TITLE_BLOCK=str(resolved["title_block"]))
+        done = subprocess.run(["pandoc", "-f", "json", "-t", "latex", "-s", book_json],
+                              cwd=base, env=environment, capture_output=True, text=True)
+        sys.stderr.write(done.stderr)
+        if done.returncode:
+            return done.returncode
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+    master, files = split_book(done.stdout)
+    master_name = os.path.splitext(output_name(resolved, project, name))[0] + ".tex"
+    for stem, body in files.items():
+        with open(os.path.join(out_dir, stem + ".tex"), "w", encoding="utf-8") as fh:
+            fh.write(body.strip("\n") + "\n")
+    with open(os.path.join(out_dir, master_name), "w", encoding="utf-8") as fh:
+        fh.write(master)
+    print(f"{name}: {master_name} and {len(files)} file(s) it \\include-s, "
+          f"{copied} image(s) beside them" + (f", {svgs} SVG(s) made PDF" if svgs else "")
+          + ". Build it with latexmk -lualatex.", file=sys.stderr)
+    if failed:
+        print(f"WARNING: {len(failed)} SVG image(s) weren't made PDF ({failed[0]} first): "
+              "rsvg-convert is needed (sudo apt install librsvg2-bin); LaTeX's \\includesvg "
+              "is left, which needs Inkscape and takes no alt text.", file=sys.stderr)
+    print(os.path.abspath(os.path.join(out_dir, master_name)))
+    return 0
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Assemble the filtered intermediates into a tagged PDF.")
@@ -728,16 +886,19 @@ def main():
     parser.add_argument("--latex-only", action="store_true",
                         help="write book.json and book.tex beside where the "
                              "PDF would go, and don't run LaTeX")
+    parser.add_argument("--latex-target", action="store_true",
+                        help="build the latex targets (format: latex): the "
+                             "book's LaTeX as a master and a file per chapter")
     parser.add_argument("--allow-unknown-keys", action="store_true",
                         help="report settings this version does not know "
                              "about instead of refusing them")
     args = parser.parse_args()
 
-    for program in ("pandoc",) if args.latex_only else ("pandoc", ENGINE):
+    for program in ("pandoc",) if args.latex_only or args.latex_target else ("pandoc", ENGINE):
         if shutil.which(program) is None:
             sys.exit(f"{program} is not on the path; a pdf target needs it "
                      "(see docs/installation.md).")
-    if not args.latex_only:
+    if not args.latex_only and not args.latex_target:
         problem = latex_problem()
         if problem:
             sys.exit(problem)
@@ -745,8 +906,9 @@ def main():
     try:
         schema, project_schema, documents = load_documents(
             args.dir, args.allow_unknown_keys)
-        targets = pdf_targets(schema, project_schema, documents,
-                              args.target, args.allow_unknown_keys)
+        targets = targets_of(schema, project_schema, documents, args.target,
+                             args.allow_unknown_keys,
+                             "latex" if args.latex_target else "pdf")
     except oerconfig.ConfigError as exc:
         sys.exit(str(exc))
 
@@ -761,7 +923,8 @@ def main():
     status = 0
     for name, resolved in targets:
         status = build(args.dir, name, resolved, args.keep,
-                       args.intermediates, args.latex_only) or status
+                       args.intermediates, args.latex_only,
+                       as_latex=args.latex_target) or status
     return status
 
 

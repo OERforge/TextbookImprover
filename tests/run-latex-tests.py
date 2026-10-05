@@ -699,9 +699,86 @@ def case_source(work):
     ]
 
 
+def case_latex_target(work):
+    """The latex target: a Markdown book written as LaTeX, a master and a
+    file per chapter, read back as a LaTeX source to the same pages."""
+    os.makedirs(os.path.join(work, "img"))
+    png(os.path.join(work, "img", "square.png"), (90, 90, 90))
+    with open(os.path.join(work, "img", "circle.svg"), "w") as fh:
+        fh.write('<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40">'
+                 '<circle cx="20" cy="20" r="15" fill="black"/></svg>\n')
+    with open(os.path.join(work, "one.md"), "w", encoding="utf-8") as fh:
+        fh.write("# Shapes\n\nA square:\n\n![A gray square.](img/square.png)\n\n"
+                 "The area is $s^2$, and the next chapter has [circles](two.md#circles).\n\n"
+                 "| Shape | Sides |\n|---|---|\n| Square | 4 |\n| Triangle | 3 |\n")
+    with open(os.path.join(work, "two.md"), "w", encoding="utf-8") as fh:
+        fh.write("# Circles {#circles}\n\n![A black circle.](img/circle.svg)\n\n"
+                 "Its area is $\\pi r^2$.\n\n1. Draw it.\n2. Measure it.\n")
+    with open(os.path.join(work, "project.yaml"), "w") as fh:
+        fh.write("project:\n  identifier: shapes\n  title: Shapes\n  language: en\n"
+                 "  contents:\n  - one\n  - two\n")
+    with open(os.path.join(work, "conversion.yaml"), "w") as fh:
+        fh.write("targets:\n  html:\n    format: html\n  latex:\n    format: latex\n")
+    result = convert(work)
+    said = result.stdout + result.stderr
+    out = os.path.join(work, "latex")
+    master = read(work, "latex", "shapes.tex") \
+        if os.path.exists(os.path.join(out, "shapes.tex")) else ""
+    one = read(work, "latex", "one.tex") if os.path.exists(os.path.join(out, "one.tex")) else ""
+    two = read(work, "latex", "two.tex") if os.path.exists(os.path.join(out, "two.tex")) else ""
+
+    def round_trip():
+        back = os.path.join(work, "back")
+        shutil.copytree(out, back)
+        with open(os.path.join(back, "conversion.yaml"), "w") as fh:
+            fh.write("defaults:\n  latex:\n    main: shapes.tex\n"
+                     "targets:\n  html:\n    format: html\n")
+        convert(back)
+        compare = os.path.join(HERE, "..", "util", "compare-output.py")
+        same = []
+        for stem in ("one", "two"):
+            a, b = os.path.join(work, "cmp-a-" + stem), os.path.join(work, "cmp-b-" + stem)
+            os.makedirs(a)
+            os.makedirs(b)
+            shutil.copy(os.path.join(work, "html", stem + ".html"), a)
+            if not os.path.exists(os.path.join(back, "html", stem + ".html")):
+                return False
+            shutil.copy(os.path.join(back, "html", stem + ".html"), b)
+            done = subprocess.run([sys.executable, compare, a, b],
+                                  capture_output=True, text=True)
+            same.append("1 identical" in done.stdout)
+        return all(same)
+
+    def builds():
+        engine = shutil.which("latexmk")
+        if not engine or not shutil.which("lualatex"):
+            return skip("no latexmk and lualatex to build the latex target")
+        done = subprocess.run([engine, "-lualatex", "-interaction=nonstopmode",
+                               "shapes.tex"], cwd=out, capture_output=True,
+                              text=True, timeout=600)
+        return done.returncode == 0 and os.path.exists(os.path.join(out, "shapes.pdf"))
+    return [
+        ("the master starts with \\DocumentMetadata and \\include-s each chapter",
+         lambda: master.startswith("\\DocumentMetadata")
+         and "\\include{one}" in master and "\\include{two}" in master
+         and master.index("\\include{one}") < master.index("\\include{two}")),
+        ("each chapter is a file of its own, the master's division commands not in it",
+         lambda: "Shapes" in one and "Circles" in two and "\\mainmatter" not in one
+         and "\\begin{document}" not in one + two),
+        ("the images are beside them, the SVG made PDF, each with its alt text",
+         lambda: os.path.exists(os.path.join(out, "img", "square.png"))
+         and os.path.exists(os.path.join(out, "img", "circle.pdf"))
+         and "alt={A gray square.}" in one and "alt={A black circle.}" in two
+         and "includesvg" not in two),
+        ("the run says what it wrote", lambda: "shapes.tex and 2 file(s)" in said),
+        ("read back as a LaTeX source, each chapter gives the same page", round_trip),
+        ("it builds with latexmk and LuaLaTeX", builds),
+    ]
+
+
 CASES = [("a LaTeX book", case_book), ("two masters", case_masters),
          ("one file", case_single), ("an unbuilt book", case_unbuilt),
-         ("the source target", case_source)]
+         ("the source target", case_source), ("the latex target", case_latex_target)]
 
 
 def main():

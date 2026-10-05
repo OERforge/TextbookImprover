@@ -695,6 +695,8 @@ def read_latex_to_json(base, master, env, work):
         ("unbraced_input", "\\input without braces braced"),
         ("partial_rule", "\\cline or \\cmidrule read as a whole rule"),
         ("header_declared", "table header declaration for tagging read as the pipeline's"),
+        ("longtable_head", "longtable's head of one row read as its header row"),
+        ("bounded", "\\pandocbounded image read as the image it holds"),
         ("artifact", "image marked artifact made decorative"),
         ("graphics_converted", "PDF or EPS image made SVG"))
         if counts.get(k)]
@@ -3230,6 +3232,18 @@ def main():
                 die(f"The PDF for target {target.name} wasn't built.")
             pdfs += [line for line in result.stdout.split("\n")
                      if line.strip()]
+        # ---- 5.65 LaTeX, per latex target: the PDF target's own LaTeX,
+        # a master and a file per chapter, for an author to go on with.
+        for target in targets:
+            if target.format != "latex":
+                continue
+            result = run(["python3", PDF_TOOL, "-d", base, "--latex-target",
+                          "--target", target.name,
+                          "--intermediates", target.pages_dir],
+                         capture=True, check=False)
+            sys.stderr.write(result.stderr)
+            if result.returncode:
+                die(f"The LaTeX for target {target.name} wasn't written.")
         # After the EPUBs, which report their losses as they're built.
         write_fidelity(losses, reports["fidelity"])
 

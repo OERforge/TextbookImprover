@@ -412,6 +412,8 @@ Read at the 3.11 tag, and measured where it says so, with LaTeX 2026-06-01 (Tiny
 
 **Partials** (`Templates.hs`, `getTemplate`): a partial is looked for beside the template, then in the user data directory's `templates/`, then among the built-in files. So a one-line wrapper, `$default.latex()$`, is Pandoc's default template unless a file of a partial's name sits beside it or in the user data directory.
 
+**How many LaTeX runs `-t pdf` makes.** `makePDF` (`src/Text/Pandoc/PDF.hs`, 3.12 and main at 8f949db) runs the engine again while the log has a line holding both `Warning:` and `Rerun`, or a `.toc` file exists, and at most four times. A book with a table of contents is therefore always run four times, though the comment above the check says three (#10308). A warning without the word, as tagpdf's "Destination ... has no related structure" is, never asks for another run by itself. `latexmk` decides differently: it runs again while a file the last run wrote and the next reads (`.aux`, `.toc`, `.idx`, `.bbl`) changed, at most five times (`$max_repeat`), and runs BibTeX and makeindex when their inputs change. Read from both sources, 2026-10-05; on GIAM's tagged copy, latexmk ran LuaLaTeX four times.
+
 ## Possible Pandoc enhancements
 
 Not workarounds the pipeline carries: losses it reports (`fidelity.csv`) and doesn't repair, where a change in Pandoc would let a Word file carry more.

@@ -32,7 +32,11 @@ Pandoc's LaTeX reader (3.12) can't take some of what plain LaTeX books do, so th
 
 The rendered images go in `rendered/` in the book's directory, at the path of the file they came from (`figures/Venn.tex` is `rendered/figures/Venn.svg`; a drawing in a chapter is `rendered/sets/sets-3.svg`). `rendered/.rendered.json` records what each was made from, so an unchanged drawing isn't made again. An image's alt text comes from `image-alt.csv` by that path, like any image's.
 
-Drawings and PDF images need a LaTeX engine and `pdftocairo` (`sudo apt install poppler-utils`). Without them the run says so, and they're left out of the pages. A figure the book's own build makes (xfig through fig2dev, say) has to be made first; the run names any file the master reaches that isn't there.
+Drawings and PDF images need a LaTeX engine and `pdftocairo` (`sudo apt install poppler-utils`). Without them the run says so, and they're left out of the pages. When LaTeX can't make one drawing, the others are made one at a time, so it costs only itself.
+
+## A book with a build of its own
+
+Some books make part of their LaTeX with another program first: GIAM draws its figures in xfig, and its Makefile has fig2dev write each as a `.tex` file and a PDF. The conversion reads LaTeX, so that build runs first, and what it makes is the conversion's input. When the master reaches a file that isn't there, the run stops before converting anything, names the files, and points at any `Makefile` beside the master or the missing files.
 
 ## Definitions for reading: `latex-conversion-macros.tex`
 
@@ -48,6 +52,8 @@ The book's own definitions are always read, and this file never replaces them in
 ```
 
 The file's name is the `latex.macros` setting.
+
+**The run writes a starting point**, `latex-conversion-macros-sample.tex`, whenever any of the book's macros (defined with `\newcommand` and its kin, and used in a formula) still gives a formula texmath can't make MathML of, once the repairs above and the definitions file are applied. Each is listed with how often formulas use it and the book's own definition. Where its drawing has one reading, the sample suggests a definition, kept only if texmath then reads it: a thin tall rule is a vertical bar (`\mid` when only spacing surrounds it, so GIAM's `\suchthat`), and flat rules with nothing but ticks and spacing beside them are a blank to fill in (`\underline{\quad}`). The rest are left as a commented-out `\renewcommand` for a person to fill in, as GIAM's `\nrelR`, an R struck through with a raised `\not`, is. Check the sample, then save it as `latex-conversion-macros.tex` or merge it into yours; it's never read as it stands. With nothing left to list, a stale sample is removed.
 
 ## What is lost
 

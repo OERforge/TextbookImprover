@@ -201,6 +201,8 @@ For a Markdown file, the same decisions are written into the text where each ele
 
 On the author's own Pandoc Markdown book, 34 chapters, with a bare-links sidecar built by pairing its links with the version the author had already fixed by other means: all 30 bare links in the copy match that version, 19 of them with a shortDOI, every changed line is a link or an image, and every image, bare link, and table in the book (50, 30, and 21, 8 of the tables in the author's own marker divs) can be found.
 
+For a LaTeX book, every `.tex` file the master reaches is written at the same path under the target's folder, ready to lay over the author's tree, and each image and drawing gets its alt text from the image-alt sidecar as the `alt` key LaTeX's own tagging reads: `\includegraphics[alt={...}]`, `\begin{picture}[alt={...}]`, `\begin{tikzpicture}[alt={...}]`, beside the author's own keys, and `artifact` for `[decorative]`. The rest is written as the author wrote it ([LaTeX sources](latex.md#the-source-target)). The book's language and table headers aren't written yet.
+
 A copy gets the book's language only when the book declares one (`project.language`), for Word, HTML, and Markdown alike: the default isn't anyone's decision.
 
 AsciiDoc sources aren't written yet; the run names them as left out. The `markdown` and `asciidoc` targets are close for a Markdown or AsciiDoc source, since they write back what the sidecars decided, but they write the book's pages, not its files, and Pandoc's writer re-serializes the rest, so line wrapping and markup choices change.

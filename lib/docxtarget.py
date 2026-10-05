@@ -808,6 +808,7 @@ def keep_captions(xml):
 # What a page has that a Word file can't carry, known before writing.
 LOSSES = {
     "uncaptioned-figure": "a figure with no caption comes back as an image",
+    "figure-table": "a figure holding a table comes back as the table, its caption the table's description",
     "code-language": "a code block's language (its highlighting) is lost; "
                      "only letters and digits fit in the bookmark that carries one",
     "layout-table": "a layout table comes back as a data table",
@@ -858,6 +859,9 @@ def losses(doc):
                 alts = []
                 walk_alts(c[2], alts)
                 found.append(("uncaptioned-figure", alts[0] if alts else ""))
+            elif t == "Figure" and any(_held(b) == "t" for b in c[2]):
+                found.append(("figure-table", words(
+                    [i for b in c[1][1] for i in (b.get("c") or [])])))
             elif t == "Table":
                 attr = dict(c[0][2])
                 if attr.get("role") == "presentation":

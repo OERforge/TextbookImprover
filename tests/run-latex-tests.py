@@ -150,6 +150,13 @@ for some integer $k$.
 \item The next item.
 \end{enumerate}
 
+\begin{figure}
+\begin{tabular}{cc}
+1 & 2 \\
+\end{tabular}
+\caption{A table set as a figure}
+\end{figure}
+
 \begin{quote}
 Proof: a table follows.
 
@@ -455,6 +462,9 @@ def case_book(work):
          lambda: word_list_reads_back(work)),
         ("read back from Word, a quotation holding a table is whole, its cells not quotations",
          lambda: word_quote_reads_back(work)),
+        ("a figure holding a table is reported as a Word loss",
+         lambda: "figure-table" in (read(work, "fidelity.csv")
+                                    if os.path.exists(os.path.join(work, "fidelity.csv")) else "")),
         ("the author's files are untouched",
          lambda: fingerprint(work) == before),
     ]

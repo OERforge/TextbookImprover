@@ -181,6 +181,7 @@ The post-processing finds what it changes by marks the target puts on the elemen
 | Loss | What happens |
 |---|---|
 | `uncaptioned-figure` | A figure with no caption comes back as an image. |
+| `figure-table` | A figure holding a table comes back as the table, the figure's caption as the table's description. |
 | `code-language` | A code block's language, and so its highlighting, is lost, when its name holds more than letters and digits. |
 | `layout-table` | A layout table comes back as a data table, since Word keeps no mark of one. |
 | `frame` | A frame, a video say, becomes a link to what it shows. |

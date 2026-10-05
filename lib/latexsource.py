@@ -1011,8 +1011,9 @@ def macro_sample(base, prep, filter_path, macros_file, say):
         "% Written by convert.py: the book's macros whose formulas texmath",
         "% can't make MathML of, so they reach the pages as TeX. Check it,",
         "% then save it as " + macros_file + " (or merge it into yours).",
-        "% Definitions there are read after the book's own, by the",
-        "% conversion only; the book itself never changes.", ""]
+        "% Definitions there are read after the book's preamble, so they",
+        "% win; the book's own files never change, and a source target",
+        "% writes them into its copy unless its latex_definitions is off.", ""]
     for name in sorted(failing):
         args, body, written = defined[name]
         lines.append("%% \\%s is used in %d formula(s). The book has:" % (

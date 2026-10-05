@@ -264,3 +264,16 @@ targets:
 Measured on Pandoc 3.11, LaTeX 2026-06-01, and veraPDF 1.30.2: the suite's book, and the whole Markdown economics textbook (431 pages, 1,141 formulas, 50 figures, 21 tables), pass PDF/UA-2 with Tagged PDF, PDF/A-4f, and both WTPDF 1.0 profiles with no rule failed. Under Pandoc 3.12, the Word statistics textbook (948 pages, 3,609 formulas, 342 tables), with its math repaired, passes the profiles veraPDF chooses for its PDF/UA-2 claim with nothing found. The economics book rebuilt under Pandoc 3.12 has the same structure, element for element. The economics book's PDF has the same structure as the one its author builds with his own Pandoc command (the same chapters, sections, contents entries, formulas, figures, and table cells), with a `/Contents` on every external link, and without the second run of roman page numbers that command's front matter produced.
 
 A book whose `contents` isn't declared gets the filename guess. For the economics book, one file per chapter, the guess gives the same structure as its author's build: each file a chapter, the preamble front matter, the appendices after `\appendix`, and the glossary in the back matter.
+
+
+### LaTeX
+
+The LaTeX the [PDF](#pdf) is built from, for an author to go on working in: a master file named for the book's identifier, which `\include`s a file per entry at the top of `project.contents` (a chapter's page, or a group under its first page's name), with the images they show beside them at their own paths. What stands between chapters stays in the master: the preamble, with `\DocumentMetadata` and the tagging setup the PDF target writes, the division commands, and the contents.
+
+```yaml
+targets:
+  latex:
+    format: latex
+```
+
+The run's decisions are where LaTeX's tagging reads them, as in the PDF: alt text on each `\includegraphics`, `artifact` for a decorative image, a table's header columns declared around it, and header rows in `longtable`'s head. An SVG image is made a PDF beside it with `rsvg-convert`, as Pandoc's own PDF route does, since the writer would give it `\includesvg`, which needs Inkscape and takes no alt text. Nothing is built; `latexmk -lualatex <identifier>.tex` in the folder builds it, running LuaLaTeX, BibTeX, and makeindex as many times as the book needs. Read back as a [LaTeX source](latex.md), each chapter gives the same page it was written from (the suite's book, by `util/compare-output.py`); the master's own content, the title and contents, becomes a page of its own.

@@ -371,6 +371,13 @@ def longtable_heads(text, counter):
     return "".join(out)
 
 
+# A \\multicolumn whose column spec holds @{...}, as Pandoc's writer gives
+# the last cell of a row that spans columns, to match the table's edges:
+# the reader can't parse it, and the whole table is lost (read as a div of
+# text). The edge spacing goes; the span stays.
+MULTICOLUMN_EDGE = re.compile(r"(\\multicolumn\s*\{\d+\}\s*\{)([^{}]*@\{[^{}]*\}[^{}]*)\}")
+
+
 def drop(text, command, counter, key):
     """\\command{...} taken out, in code: the PDF target's own commands
     for a link's /Contents, which a reader that doesn't know
@@ -481,6 +488,9 @@ def repair_text(text, counter):
     text = declare_headers(text, counter)
     text = longtable_heads(text, counter)
     text = unwrap(text, "pandocbounded", counter, "bounded")
+    text = substitute(MULTICOLUMN_EDGE, text,
+                      lambda m: m.group(1) + re.sub(r"@\{[^{}]*\}", "", m.group(2)) + "}",
+                      counter, "multicolumn_edge")
     text = drop(text, "OERLinkContents", counter, "link_contents")
     text = drop(text, "OERLinkContentsReset", counter, "link_contents_reset")
     text = substitute(RULE_ANY, text, invisible_rule, counter, "rule_seen")

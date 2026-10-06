@@ -718,7 +718,9 @@ def case_latex_target(work):
                  "<tbody><tr><td>A and B</td><td><table><thead><tr><th>A</th><th>B</th>"
                  "<th>A and B</th></tr></thead><tbody><tr><td>T</td><td>T</td><td>T</td>"
                  "</tr><tr><td>T</td><td>F</td><td>F</td></tr></tbody></table></td></tr>"
-                 "</tbody></table>\n")
+                 "</tbody></table>\n\n"
+                 "<table><thead><tr><th>Name</th><th colspan=\"2\">Values</th></tr></thead>"
+                 "<tbody><tr><td>a</td><td>1</td><td>2</td></tr></tbody></table>\n")
     with open(os.path.join(work, "project.yaml"), "w") as fh:
         fh.write("project:\n  identifier: shapes\n  title: Shapes\n  language: en\n"
                  "  contents:\n  - one\n  - two\n")
@@ -776,6 +778,8 @@ def case_latex_target(work):
          and "alt={A gray square.}" in one and "alt={A black circle.}" in two
          and "includesvg" not in two),
         ("the run says what it wrote", lambda: "shapes.tex and 2 file(s)" in said),
+        ("the writer's \\multicolumn at a table's edge is there to read back",
+         lambda: re.search(r"\\multicolumn\{2\}\{[^}]*@\{\}\}", two) is not None),
         ("a table in a table's cell is a tabular, its head declared for tagging and ruled off",
          lambda: "{\\tagpdfsetup{table/header-rows={1}}\\begin{tabular}[t]{" in two
          and "A & B & A and B \\\\\n\\hline\n" in two and "T & F & F \\\\" in two),

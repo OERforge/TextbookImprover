@@ -717,6 +717,29 @@ function Link(link)
     anchors:insert(rest or link)
     return anchors
   end
+  -- A bracket in a link's text: the writer escapes it as ++[++, which the
+  -- reader takes for a span's role and the link's text is lost; \] it
+  -- reads as a backslash and the end of the text. A character reference
+  -- reads back as the bracket (measured, Pandoc 3.12): a \ref to an item
+  -- with no number gives "[compare]", as GIAM's do.
+  if ADOC then
+    local bracketed = false
+    link.content = link.content:walk({
+      Str = function(s)
+        if not s.text:find('[%[%]]') then return nil end
+        bracketed = true
+        local out = pandoc.Inlines({})
+        for piece, bracket in s.text:gmatch('([^%[%]]*)([%[%]]?)') do
+          if piece ~= '' then out:insert(pandoc.Str(piece)) end
+          if bracket ~= '' then
+            out:insert(pandoc.RawInline('asciidoc', bracket == '[' and '&#91;' or '&#93;'))
+          end
+        end
+        return out
+      end
+    })
+    if bracketed then unwrapped = true end
+  end
   -- A linked image: the image macro's link attribute, which the reader
   -- reads; it drops an image written inside a link's text.
   if ADOC and #link.content == 1 and link.content[1].t == 'RawInline'

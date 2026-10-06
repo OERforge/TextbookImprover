@@ -774,7 +774,7 @@ def case_latex_target(work):
         fh.write("# Circles {#circles}\n\n![A black circle.](img/circle.svg)\n\n"
                  "Its area is $\\pi r^2$.\n\n1. Draw it.\n2. Measure it.\n\n"
                  "So $$A = \\pi r^2.$$\\\nQ.E.D.\n\n"
-                 "**Theorem.** *$$C = 2 \\pi r$$*\n\n"
+                 "**Theorem.** *$$C = 2 \\pi r$$*\n\nCompare [[compare]](#circles).\n\n"
                  "<table><tbody><tr><td><p>Outer</p><p>cell</p></td><td><table><thead><tr>"
                  "<th>Rule</th></tr></thead><tbody><tr><td>x</td></tr></tbody><tbody><tr>"
                  "<td>zeta</td></tr></tbody></table></td></tr></tbody></table>\n\n"
@@ -854,6 +854,9 @@ def case_latex_target(work):
          and "alt={A gray square.}" in one and "alt={A black circle.}" in two
          and "includesvg" not in two),
         ("the run says what it wrote", lambda: "shapes.tex and 3 file(s)" in said),
+        ("in AsciiDoc, a bracket in a link's text is a character reference the reader takes",
+         lambda: "[&#91;compare&#93;]" in (read(work, "adoc", "two.adoc")
+                                           if os.path.exists(os.path.join(work, "adoc", "two.adoc")) else "")),
         ("in AsciiDoc, a table written as HTML inside another keeps its cells",
          lambda: "<td>zeta</td>" in (read(work, "adoc", "two.adoc")
                                      if os.path.exists(os.path.join(work, "adoc", "two.adoc")) else "")),

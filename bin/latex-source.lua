@@ -164,12 +164,39 @@ end
 -- A table with a head and nothing in its body: the reader gives the
 -- body one row of empty cells, which no table had (a longtable whose
 -- rows are all head, as Pandoc's writer gives a table of one row).
+-- The reader gives a longtable's caption to every table in its cells too,
+-- its caption state not cleared for them: an inner table whose caption is
+-- its container's has none of its own.
+local function clear_inherited(tbl)
+  local own = pandoc.utils.stringify(tbl.caption.long)
+  if own == '' then return end
+  local function clear(cell)
+    cell.contents = cell.contents:walk({
+      Table = function(inner)
+        if pandoc.utils.stringify(inner.caption.long) == own then
+          inner.caption = pandoc.Caption()
+          return inner
+        end
+      end
+    })
+  end
+  for _, row in ipairs(tbl.head.rows) do
+    for _, cell in ipairs(row.cells) do clear(cell) end
+  end
+  for _, body in ipairs(tbl.bodies) do
+    for _, row in ipairs(body.body) do
+      for _, cell in ipairs(row.cells) do clear(cell) end
+    end
+  end
+end
+
 function Table(tbl)
-  if #tbl.head.rows == 0 or #tbl.bodies ~= 1 then return nil end
+  clear_inherited(tbl)
+  if #tbl.head.rows == 0 or #tbl.bodies ~= 1 then return tbl end
   local body = tbl.bodies[1]
-  if #body.head ~= 0 or #body.body ~= 1 then return nil end
+  if #body.head ~= 0 or #body.body ~= 1 then return tbl end
   for _, cell in ipairs(body.body[1].cells) do
-    if #cell.contents > 0 then return nil end
+    if #cell.contents > 0 then return tbl end
   end
   body.body = {}
   return tbl

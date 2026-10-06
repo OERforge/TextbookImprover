@@ -15,6 +15,15 @@ the conversion, so a decision reaches the element it was made about.
   drawing: the alt text goes on the first, and the second, its labels, is
   marked `artifact` so it isn't a figure of its own. A `pspicture` has no
   key for it and is counted.
+- **Images behind the author's macros.** A macro the book defines whose
+  body holds one `\\includegraphics`, its file made from an argument
+  (`\\newcommand{\\fig}[2]{\\includegraphics[width=#2]{#1}}`), is followed
+  to each call: the call is wrapped in a group that sets the key first,
+  `{\\setkeys{Gin}{alt={...}}\\fig{sq}{1cm}}`, so the macro is left as the
+  author wrote it; a macro whose own alt key takes an argument gets the
+  text in that argument. A decision the copy can't write, for an image
+  reached some other way, is counted against what the conversion's
+  pages showed, so the run can name it.
 - **Files a build makes.** A file beside a same-named xfig source (`.fig`)
   is fig2dev's, and running the book's build again would write over what's
   written into it; such files are counted, so the run can say so.
@@ -100,10 +109,42 @@ def _image_key(base, name, path, dirs):
     return stem
 
 
-def remediate_file(base, name, text, alts, dirs, is_master=False):
-    """The file's text with alt text written in. Returns (text, counts)."""
-    counts = {"described": 0, "decorative": 0, "pspicture": 0, "generated": 0}
-    edits = []                         # (start, end, replacement)
+# --------------------------------------------------------------------------
+# images behind an author's macro: found as latexsource finds them
+# --------------------------------------------------------------------------
+
+# Arguments written to a file and read back (a caption to the list of
+# figures, a heading to the contents), where \setkeys would be expanded
+# and break.
+MOVING = re.compile(r"\\(?:caption|chapter|section|subsection|subsubsection|paragraph"
+                    r"|subparagraph|part|markboth|markright|addcontentsline)\*?\s*"
+                    r"(?:\[[^]]*\]\s*)?\{")
+
+
+def _moving_spans(text, skip):
+    spans = []
+    for m in MOVING.finditer(text):
+        if latexsource.in_spans(m.start(), skip):
+            continue
+        close = latexsource.matching_brace(text, m.end() - 1)
+        if close > 0:
+            spans.append((m.end(), close))
+    return spans
+
+
+def remediate_file(base, name, text, alts, dirs, is_master=False, macros=None,
+                   definitions=(), accounted=None, unplaced=None):
+    """The file's text with alt text written in. Returns (text, counts).
+    macros: image_macros' macros, followed to each call here outside
+    definitions, the spans of the file's own definitions. accounted and
+    unplaced, sets if given, get the key of each image or drawing with a
+    decision: accounted when it's written, or counted as a pspicture;
+    unplaced when it's found and can't be written."""
+    accounted = set() if accounted is None else accounted
+    unplaced = set() if unplaced is None else unplaced
+    counts = {"described": 0, "decorative": 0, "pspicture": 0, "generated": 0,
+              "macro_calls": 0}
+    edits = []                         # (start, end, replacement, closes)
     offset = 0
     if is_master:
         begin = latexsource.code_matches(latexsource.BEGIN_DOCUMENT, text)
@@ -130,15 +171,17 @@ def remediate_file(base, name, text, alts, dirs, is_master=False):
             env = m.group(1)
             if env == "pspicture":
                 counts["pspicture"] += 1
+                accounted.add(key)
                 first = False
                 continue
             options = re.match(r"\s*\[[^]]*\]", text[m.end():])
             had = options.group(0).strip() if options else None
             stop = m.end() + (options.end() if options else 0)
             key_here = _key(alt) if first else "artifact"
-            edits.append((m.end(), stop, with_key(had, key_here)))
+            edits.append((m.end(), stop, with_key(had, key_here), False))
             if first:
                 counts["decorative" if alt is None else "described"] += 1
+                accounted.add(key)
             first = False
         if generated(base, name):
             counts["generated"] += 1
@@ -153,11 +196,56 @@ def remediate_file(base, name, text, alts, dirs, is_master=False):
         alt = alts[key]
         options = with_key(m.group(1), _key(alt))
         edits.append((m.start(), m.end(),
-                      "\\includegraphics%s{%s}" % (options, m.group(2))))
+                      "\\includegraphics%s{%s}" % (options, m.group(2)), False))
         counts["decorative" if alt is None else "described"] += 1
+        accounted.add(key)
         if generated(base, name):
             counts["generated"] += 1
-    for start, stop, new in sorted(edits, reverse=True):
+    moving = None
+    for start, end, macro_name, args in latexsource.macro_calls(
+            text, macros or {}, sorted(spans + list(definitions))):
+        if any(s <= start < e for s, e in inside):
+            continue
+        macro = macros[macro_name]
+        index = int(re.search(r"#(\d)", macro["file"]).group(1))
+        path = re.sub(r"#\d", lambda _: args[index - 1][0].strip(), macro["file"])
+        if "\\" in path or "#" in path:
+            continue
+        key = _image_key(base, name, path, dirs)
+        if key is None or key not in alts:
+            continue
+        alt = alts[key]
+        if moving is None:
+            moving = _moving_spans(text, spans)
+        if macro["keyed"] or any(s <= start < e for s, e in moving) or (
+                macro["alt"] is not None and alt is None):
+            # The body's own key wins over one set before the call; a
+            # moving argument would expand \setkeys; an alt argument
+            # can't say artifact.
+            unplaced.add(key)
+            continue
+        if macro["alt"] is not None:
+            _, at, stop = args[macro["alt"] - 1]
+            if at is None:              # an optional argument not given
+                at = stop = start + 1 + len(macro_name)
+                edits.append((at, stop, "[{%s}]" % escape(alt), False))
+            elif text[at - 1] == "[":   # braced, so a ] in it doesn't end it
+                edits.append((at, stop, "{%s}" % escape(alt), False))
+            else:
+                edits.append((at, stop, escape(alt), False))
+        else:
+            edits.append((end, end, "}", True))
+            edits.append((start, start, "{\\setkeys{Gin}{%s}" % _key(alt), False))
+        counts["decorative" if alt is None else "described"] += 1
+        counts["macro_calls"] += 1
+        accounted.add(key)
+        if generated(base, name):
+            counts["generated"] += 1
+    # From the end back, so each place is still where it was found; where
+    # one call ends and the next begins, the next one's opening goes in
+    # first and the first one's closing in front of it.
+    for start, stop, new, _ in sorted(edits, key=lambda e: (e[0], e[1], not e[3]),
+                                      reverse=True):
         text = text[:start] + new + text[stop:]
     return text, counts
 
@@ -169,25 +257,40 @@ DEFINES = re.compile(r"\\(?:(?:re|provide)?newcommand\*?|def)\b")
 
 
 def remediate(base, out_dir, master, files, alts, tagging=False, language=None,
-              headers=None, definitions=None, definitions_name=""):
+              headers=None, definitions=None, definitions_name="", seen=None):
     """Write a remediated copy of each file in files (relative to base) to
     out_dir at the same relative path. alts: {key: alt, or None for
     decorative} (htmlremediate.alt_rows); tagging: made to build with
     LaTeX's tagging (tag), the book's language its lang; headers:
     {place: headers}, a person's table-header decisions, declared for
     tagging when the copy is tagged (declare), since without tagging
-    \\tagpdfsetup isn't defined and the build stops. Returns a dict of
-    counts."""
+    \\tagpdfsetup isn't defined and the build stops; seen: the keys of
+    the images and drawings on the conversion's pages, against which a
+    decision the copy couldn't write is counted. Returns a dict of
+    counts, and in unplaced_keys the keys of those decisions."""
     master_text = latexsource.read_text(os.path.join(base, master))
     dirs = latexsource.graphics_paths(latexsource.split_master(master_text)[0])
     totals = {"files": 0, "changed": 0}
     originals, texts = {}, {}
     for name in files:
         originals[name] = latexsource.read_text(os.path.join(base, name))
-        texts[name], counts = remediate_file(base, name, originals[name], alts, dirs,
-                                             name == master)
+    # The macros the conversion follows, so a call is found as it was read
+    # (latexsource.expand_image_macros).
+    macros, definition_spans = latexsource.image_macros(
+        [(name, originals[name]) for name in files])
+    accounted, unplaced = set(), set()
+    for name in files:
+        texts[name], counts = remediate_file(
+            base, name, originals[name], alts, dirs, name == master, macros,
+            definition_spans.get(name, ()), accounted, unplaced)
         for key, n in counts.items():
             totals[key] = totals.get(key, 0) + n
+    # A decision the pages show but the copy didn't write: the image is
+    # reached some way the copy doesn't follow, or the copy found it and
+    # couldn't write it there.
+    missing = {key for key in (seen or ()) if key in alts} - accounted
+    totals["unplaced_keys"] = sorted(unplaced | missing)
+    totals["unplaced"] = len(totals["unplaced_keys"])
     tagged = tagging or bool(latexsource.code_matches(DOCUMENT_METADATA, originals[master]))
     if headers and tagged:
         totals.update(declare(texts, files, headers))
@@ -358,12 +461,14 @@ def declare(texts, files, decisions):
                          r"\s*(?:%[^\n]*\n\s*)*$", before):
                 counts["declared_already"] += 1
                 continue
-            edits.append((end, "}"))
+            edits.append((end, "}", True))
             edits.append((start, "{\\ifdefined\\tagpdfsetup\\tagpdfsetup{%s}\\fi"
-                          % HEADER_KEYS[headers]))
+                          % HEADER_KEYS[headers], False))
             counts["header_rows"] += int(headers in ("first-row", "both"))
             counts["header_columns"] += int(headers in ("first-column", "both"))
-        for at, piece in sorted(edits, key=lambda e: e[0], reverse=True):
+        # As in remediate_file: where one table ends and the next begins,
+        # the first one's closing goes in front of the next one's opening.
+        for at, piece, _ in sorted(edits, key=lambda e: (e[0], not e[2]), reverse=True):
             text = text[:at] + piece + text[at:]
         texts[name] = text
     return counts

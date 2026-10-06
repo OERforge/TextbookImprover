@@ -729,6 +729,8 @@ def read_latex_to_json(base, master, env, work):
         ("minipage_breaks", "line break in a minipage read as \\newline"),
         ("multicolumn_edge", "\\multicolumn's edge spacing (@{...}) left out, so its table is read"),
         ("artifact", "image marked artifact made decorative"),
+        ("image_macro_calls", "call of the book's own macro for an image written out, "
+         "so its file is found"),
         ("graphics_converted", "PDF or EPS image made SVG"))
         if counts.get(k)]
     if counts.get("macros_file"):
@@ -2088,7 +2090,7 @@ def warn_math_keep(sidecar, kept_file):
 
 
 def remediate_sources(target, base, docs, paths, env, html_stems=(), language=None,
-                      work=None, markdown=(), latex=None):
+                      work=None, markdown=(), latex=None, latex_stems=()):
     """A target with format source: the book's own files, remediated, one
     copy each in the target's folder under the source's name. A Word file
     gets what a person decided in the sidecars written into it, and nothing
@@ -2170,10 +2172,17 @@ def remediate_sources(target, base, docs, paths, env, html_stems=(), language=No
         macros_path = os.path.join(base, LATEX_MACROS) if LATEX_MACROS else ""
         if str(target["latex_definitions"]) == "on" and os.path.isfile(macros_path):
             definitions = latexsource.read_text(macros_path)
+        # The images and drawings the pages show, by the sidecar's key, so
+        # a decision the copy couldn't write is counted, not lost.
+        seen = set()
+        for stem in latex_stems:
+            page = os.path.join(base, stem + ".json")
+            if os.path.exists(page):
+                seen.update(os.path.splitext(ref)[0] for ref in media_references(page))
         counts = texremediate.remediate(base, target.output_dir, master, files, page_alts,
                                         tagging=tagging, language=language,
                                         headers=decisions, definitions=definitions,
-                                        definitions_name=LATEX_MACROS)
+                                        definitions_name=LATEX_MACROS, seen=seen)
         # A copy built with LaTeX's tagging, by this target or by the
         # book's own \DocumentMetadata, is where a package's tagging
         # status matters: advice from the tagging project's list.
@@ -2186,6 +2195,9 @@ def remediate_sources(target, base, docs, paths, env, html_stems=(), language=No
             f"{counts['changed']} of them changed: {counts.get('described', 0)} "
             f"image(s) and drawing(s) given alt text and {counts.get('decorative', 0)} "
             "marked artifact, as keys LaTeX's tagging reads."
+            + (f" {counts['macro_calls']} of them are calls of the book's own macros for an "
+               "image, each given its key at the call, the macros left as they are."
+               if counts.get("macro_calls") else "")
             + (f" {counts['definitions']} definition(s) from {LATEX_MACROS} written after "
                "the preamble, as the conversion reads them." if counts.get("definitions") else "")
             + (f" {counts.get('header_rows', 0)} table(s) declared with a header row and "
@@ -2212,6 +2224,17 @@ def remediate_sources(target, base, docs, paths, env, html_stems=(), language=No
                if counts.get("generated") else "")
             + (f" {counts['pspicture']} pspicture(s) have no key for alt text and "
                "were left alone." if counts.get("pspicture") else ""))
+        if counts.get("unplaced"):
+            keys = counts["unplaced_keys"]
+            say(f"WARNING: {target.name}: {counts['unplaced']} image(s) and drawing(s) with "
+                f"alt text in {os.path.basename(paths['image_alt'] or 'image-alt.csv')} didn't get it in the "
+                "copy: " + ", ".join(keys[:5]) + (", ..." if len(keys) > 5 else "")
+                + ". The copy writes alt text at each \\includegraphics, drawing, and call "
+                "of a macro the book defines around one image; these are reached another "
+                "way (a macro it can't follow), are in a caption or heading, which LaTeX "
+                "writes to a file and reads back, or come through a macro that sets alt "
+                "text of its own. The pages have their alt text; the LaTeX needs it "
+                "written in by hand.")
         written.extend(os.path.join(target.output_dir, f) for f in files)
     others = sorted(f for f in os.listdir(base) if f.endswith(".adoc") and not f.startswith("."))
     if docs or pages or md_files or not latex:
@@ -3190,7 +3213,7 @@ def main():
                 written[target.name] = remediate_sources(
                     target, base, docs, paths, env, html_stems,
                     language if LANGUAGE_DECLARED else None, work, markdown,
-                    latex_master(base, quiet=True))
+                    latex_master(base, quiet=True), tex_stems if master else ())
             if target.format in SOURCE_TARGETS or target.format == "docx":
                 written[target.name] = render_markdown(
                     target, [p for p in pages_by_dir[target.pages_dir]

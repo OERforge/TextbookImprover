@@ -307,10 +307,26 @@ def fingerprint(work, skip_dirs=()):
     return found
 
 
-def convert(work):
+def convert(work, env=None):
     return subprocess.run(
         ["python3", os.path.join(BIN, "convert.py"), "--quiet"], cwd=work,
-        capture_output=True, text=True, stdin=subprocess.DEVNULL)
+        capture_output=True, text=True, stdin=subprocess.DEVNULL, env=env)
+
+
+def without_tagging_status(work):
+    """The environment with kpsewhich unable to find LaTeX's tagging status
+    data, installed or not: a kpsewhich ahead of the real one on PATH that
+    finds nothing for that file and passes everything else on. LaTeX
+    itself looks files up without the program, so its runs are as before."""
+    real = shutil.which("kpsewhich")
+    shim = os.path.join(work, "..", os.path.basename(work) + "-kpsewhich")
+    os.makedirs(shim, exist_ok=True)
+    with open(os.path.join(shim, "kpsewhich"), "w") as fh:
+        fh.write("#!/bin/sh\n"
+                 "case \"$1\" in latex-tagging-status.ltx) exit 1;; esac\n"
+                 "exec %s \"$@\"\n" % (real or "false"))
+    os.chmod(os.path.join(shim, "kpsewhich"), 0o755)
+    return dict(os.environ, PATH=os.path.abspath(shim) + os.pathsep + os.environ["PATH"])
 
 
 def read(work, *parts):
@@ -620,6 +636,14 @@ def case_unbuilt(work):
     ]
 
 
+# An author's macros for an image: one the copy can give a key at each
+# call, one whose own alt text would win over a key set before it, one
+# that calls the first, which the copy doesn't follow, and one whose alt
+# text is its optional argument.
+IMAGE_MACROS = ("\\newcommand{\\fig}[2]{\\includegraphics[width=#2]{#1}}\n"
+                "\\newcommand{\\figkeyed}[1]{\\includegraphics[width=1cm,alt={Fixed}]{#1}}\n"
+                "\\newcommand{\\twofigs}[2]{\\fig{#1}{2mm}\\fig{#2}{2mm}}\n"
+                "\\newcommand{\\figalt}[2][]{\\includegraphics[alt={#1},width=1cm]{#2}}\n")
 FIG2DEV_PAIR = ("\\begin{picture}(0,0)%\n\\includegraphics{figures/f.png}%\n"
                 "\\end{picture}%\n\\setlength{\\unitlength}{3947sp}%\n"
                 "\\begin{picture}(600,300)(0,0)\n\\put(0,0){label}\n\\end{picture}%\n")
@@ -630,6 +654,10 @@ def case_source(work):
     author's own files, as keys LaTeX's tagging reads."""
     os.makedirs(os.path.join(work, "figures"))
     png(os.path.join(work, "sq.png"), (128, 128, 128))
+    png(os.path.join(work, "sq2.png"), (64, 64, 64))
+    png(os.path.join(work, "sq3.png"), (32, 32, 32))
+    png(os.path.join(work, "sq4.png"), (16, 16, 16))
+    png(os.path.join(work, "sq5.png"), (8, 8, 8))
     png(os.path.join(work, "figures", "f.png"), (0, 0, 0))
     with open(os.path.join(work, "figures", "f.fig"), "w") as fh:
         fh.write("#FIG 3.2\n")
@@ -639,6 +667,7 @@ def case_source(work):
               "\\usepackage{amsthm}\n\\usepackage[english]{babel}\n\\pdfcompresslevel=9\n"
               "\\newtheorem{thm}{Theorem}\n\\newtheorem*{thm*}{Theorem}\n"
               "\\newcommand{\\suchthat}{\\; \\rule[-3pt]{.5pt}{13pt} \\;}\n"
+              + IMAGE_MACROS +
               "\\begin{document}\n"
               "\\begin{thm*} Unnumbered. \\end{thm*}\n\n"
               "The set $\\{ x \\suchthat x > 0 \\}$.\n\n"
@@ -646,6 +675,12 @@ def case_source(work):
               "Inline \\centerline{x} \\newline more.\n\n"
               "\\begin{center}\n\\[ 1! = 1 \\]\net cetera\n\\end{center}\n\n"
               "A square: \\includegraphics[width=1cm]{sq}.\n\n"
+              "Behind the book's macro: \\fig{sq2}{1cm}\\fig{sq2}{5mm}.\n\n"
+              "Behind one with its own alt text: \\figkeyed{sq3}.\n\n"
+              "Behind a macro that calls the macro: \\twofigs{sq4.png}{sq4.png}.\n\n"
+              "Behind one whose alt text is an argument: \\figalt[Old alt]{sq5} "
+              "and \\figalt{sq5}.\n\n"
+              "\\begin{figure}\\fig{sq2}{1cm}\\caption{Small: \\fig{sq2}{2mm}}\\end{figure}\n\n"
               "\\begin{picture}(40,20)\\put(0,0){\\framebox(40,20){two}}\\end{picture}\n\n"
               "A rule: \\includegraphics[height=2pt]{figures/f.png}\n\n"
               "\\begin{figure}\\input{figures/f.tex}\\caption{F}\\end{figure}\n"
@@ -658,7 +693,9 @@ def case_source(work):
     with open(os.path.join(work, "image-alt.csv"), "w", encoding="utf-8") as fh:
         fh.write("Image,Alt\nsq.png,A gray square: 50% shaded\n"
                  "rendered/notes-1.svg,Two boxes\nfigures/f.png,[decorative]\n"
-                 "rendered/figures/f.svg,A figure from xfig\n")
+                 "rendered/figures/f.svg,A figure from xfig\n"
+                 "sq2.png,A darker square\nsq3.png,A third square\n"
+                 "sq4.png,A fourth square\nsq5.png,A fifth [square]\n")
     with open(os.path.join(work, "conversion.yaml"), "w") as fh:
         fh.write("targets:\n  html:\n    format: html\n  fixed:\n    format: source\n"
                  "  tagged:\n    format: source\n    tagging: \"on\"\n"
@@ -666,7 +703,7 @@ def case_source(work):
     with open(os.path.join(work, "latex-conversion-macros.tex"), "w", encoding="utf-8") as fh:
         fh.write("% For reading.\n\\renewcommand{\\suchthat}{\\mid}\n")
     before = fingerprint(work)
-    first = convert(work)
+    first = convert(work, without_tagging_status(work))
     first_said = first.stdout + first.stderr
     # LaTeX's tagging status data, as the distribution's package has it,
     # beside the book, where kpsewhich looks first: dated before any LaTeX
@@ -716,6 +753,30 @@ def case_source(work):
         return status == 0 and "para hooks differ" not in log \
             and "Parent-Child" not in log and "already defined" not in log
 
+    def alt_in_tagged_pdf():
+        """The tagged build's figures carry the macro's image's alt text."""
+        try:
+            import pikepdf
+        except ImportError:
+            return skip("no pikepdf to read the tagged PDF's structure")
+        path = os.path.join(work, "build-tagged-lualatex", "notes.pdf")
+        if not os.path.exists(path):
+            return False
+        alts = []
+
+        def walk(node):
+            if isinstance(node, pikepdf.Dictionary):
+                if str(node.get("/S", "")) == "/Figure":
+                    alts.append(str(node.get("/Alt", "")))
+                kids = node.get("/K")
+                if kids is not None:
+                    for kid in (kids if isinstance(kids, pikepdf.Array) else [kids]):
+                        walk(kid)
+        with pikepdf.open(path) as pdf:
+            walk(pdf.Root.StructTreeRoot)
+        return alts.count("A darker square") == 3 and "Fixed" in alts \
+            and alts.count("A fifth [square]") == 2
+
     def builds_untagged():
         if not shutil.which("pdflatex"):
             return skip("no pdflatex to build the tagged copy untagged")
@@ -746,6 +807,22 @@ def case_source(work):
          lambda: pair.startswith("\\begin{picture}[alt={A figure from xfig}](0,0)")
          and "\\begin{picture}[artifact](600,300)" in pair
          and "\\includegraphics{figures/f.png}" in pair),
+        ("the read writes out the book's macro for an image, so the page has its file",
+         lambda: len(re.findall(r'<img\s+src="sq2\.png"[^>]*alt="A darker square"',
+                                read(work, "html", "notes.html"))) == 4
+         and "macro for an image written out" in said),
+        ("an image behind the book's own macro gets its key at each call, the macro left",
+         lambda: "{\\setkeys{Gin}{alt={A darker square}}\\fig{sq2}{1cm}}"
+         "{\\setkeys{Gin}{alt={A darker square}}\\fig{sq2}{5mm}}" in notes
+         and IMAGE_MACROS in notes and "own macros for an image" in said),
+        ("a macro whose alt text is an argument gets it there, braced, given or not",
+         lambda: "\\figalt[{A fifth [square]}]{sq5} and \\figalt[{A fifth [square]}]{sq5}."
+         in notes),
+        ("decisions the copy can't write are named: in a caption, behind a macro "
+         "with its own alt text, behind one it doesn't follow",
+         lambda: "didn't get it in the copy: sq2, sq3, sq4." in said
+         and "\\caption{Small: \\fig{sq2}{2mm}}" in notes
+         and "\\figkeyed{sq3}" in notes and "\\twofigs{sq4.png}{sq4.png}" in notes),
         ("a comment is left alone",
          lambda: "% \\includegraphics{sq} in a comment" in notes),
         ("the run says which are in files the book's own build makes",
@@ -783,6 +860,7 @@ def case_source(work):
         ("tagging off leaves the book's build alone",
          lambda: "\\DocumentMetadata" not in notes and "pdftex" in notes),
         ("the tagged copy builds with LuaLaTeX, no tagging error or warning", builds_tagged),
+        ("and the image behind the macro has its alt text in the PDF", alt_in_tagged_pdf),
         ("and without \\DocumentMetadata it builds with pdfLaTeX", builds_untagged),
     ]
 
@@ -973,13 +1051,18 @@ def main():
         description="Check LaTeX as a source, end to end.")
     parser.add_argument("--keep", action="store_true",
                         help="leave the built output in place")
+    parser.add_argument("--case", action="append", default=[],
+                        help="run only the cases whose label holds this "
+                        "(\"source target\", say); may be given again")
     arguments = parser.parse_args()
+    cases = [(label, case) for label, case in CASES
+             if not arguments.case or any(c in label for c in arguments.case)]
     if shutil.which("pandoc") is None:
         sys.exit("pandoc is not on the path.")
     work = tempfile.mkdtemp(prefix="latex-tests-")
     failed = 0
     try:
-        for label, case in CASES:
+        for label, case in cases:
             directory = os.path.join(work, re.sub(r"[^\w-]+", "-", label))
             try:
                 checks = case(directory)
@@ -999,7 +1082,7 @@ def main():
             print(f"\nOutput left in {work}")
         else:
             shutil.rmtree(work, ignore_errors=True)
-    print(f"\n{failed} check(s) failed across {len(CASES)} case(s)"
+    print(f"\n{failed} check(s) failed across {len(cases)} case(s)"
           if failed else "\nall LaTeX checks passed")
     return 1 if failed else 0
 

@@ -836,6 +836,192 @@ def repair_graphics(base, work, text, dirs, record, counter, say):
 
 
 # --------------------------------------------------------------------------
+# images behind the book's own macros
+# --------------------------------------------------------------------------
+
+MACRO_DEFINITION = re.compile(
+    r"\\(?:re|provide)?newcommand\*?\s*(?:\{\s*\\([A-Za-z@]+)\s*\}|\\([A-Za-z@]+))"
+    r"\s*(?:\[\s*(\d)\s*\])?\s*")
+PLAIN_DEFINITION = re.compile(r"\\[gex]?def\s*\\([A-Za-z@]+)\s*((?:#\d\s*)*)\{")
+BODY_GRAPHICS = re.compile(r"\\includegraphics\s*(\*)?\s*(\[[^]]*\])?\s*\{")
+ALT_ARGUMENT = re.compile(r"(?:^\[|,)\s*alt\s*=\s*(?:\{\s*#(\d)\s*\}|#(\d))\s*(?=[,\]])")
+OWN_KEY = re.compile(r"(?:^\[|,)\s*(?:alt\s*=|artifact\s*(?:=|(?=[,\]])))")
+TABLE_OR_DRAWING = re.compile(r"\\begin\s*\{(?:tabular\*?|tabularx|longtable|picture"
+                              r"|tikzpicture|pspicture)\}")
+
+
+def closing_bracket(text, start):
+    """The index of the ] closing the [ at text[start], braces kept whole."""
+    depth, i = 0, start + 1
+    while i < len(text):
+        c = text[i]
+        if c == "\\":
+            i += 2
+            continue
+        if c == "{":
+            depth += 1
+        elif c == "}":
+            depth -= 1
+        elif c == "]" and depth == 0:
+            return i
+        i += 1
+    return -1
+
+
+def image_macro(body, arguments, default):
+    """The macro, as image_macros describes one, if body holds one
+    \\includegraphics whose file is made from one argument; else None."""
+    if "##" in body:
+        return None
+    found = list(BODY_GRAPHICS.finditer(body))
+    if len(found) != 1:
+        return None
+    m = found[0]
+    close = matching_brace(body, m.end() - 1)
+    if close < 0:
+        return None
+    path = body[m.end():close - 1]
+    used = set(re.findall(r"#(\d)", path))
+    if len(used) != 1 or int(next(iter(used))) > arguments:
+        return None
+    options = m.group(2) or ""
+    alt = ALT_ARGUMENT.search(options)
+    return {"arguments": arguments, "default": default, "file": path, "body": body,
+            "alt": int(alt.group(1) or alt.group(2)) if alt else None,
+            "keyed": bool(OWN_KEY.search(options)) and not alt}
+
+
+def image_macros(texts):
+    """({name: macro}, {text's name: [(start, end)]}): each macro the book
+    defines, with \\newcommand and its kin or \\def with plain arguments,
+    whose body holds one \\includegraphics with its file made from one of
+    its arguments, and the span of every definition in each text. A macro
+    is a dict: arguments, how many; default, the first one's when it's
+    optional, else None; file, the file as the body writes it, #1 and
+    all; body, the whole body; alt, the argument the body's own alt key
+    takes, or None; keyed, whether the body gives alt text or artifact of
+    its own. texts is
+    [(name, text)] in the order LaTeX reads them, so a later definition
+    replaces an earlier one."""
+    macros, spans_by_text = {}, {}
+    for name, text in texts:
+        skip = skip_spans(text)
+        here = []
+        for m in MACRO_DEFINITION.finditer(text):
+            if in_spans(m.start(), skip):
+                continue
+            pos, default = m.end(), None
+            if text.startswith("[", pos):
+                close = closing_bracket(text, pos)
+                if close < 0:
+                    continue
+                default = text[pos + 1:close]
+                pos = close + 1
+                while pos < len(text) and text[pos].isspace():
+                    pos += 1
+            if not text.startswith("{", pos):
+                continue
+            close = matching_brace(text, pos)
+            if close < 0:
+                continue
+            here.append((m.start(), close))
+            found = m.group(1) or m.group(2)
+            macro = image_macro(text[pos + 1:close - 1], int(m.group(3) or 0), default)
+            if macro:
+                macros[found] = macro
+            else:
+                macros.pop(found, None)
+        for m in PLAIN_DEFINITION.finditer(text):
+            if in_spans(m.start(), skip):
+                continue
+            close = matching_brace(text, m.end() - 1)
+            if close < 0:
+                continue
+            here.append((m.start(), close))
+            macro = image_macro(text[m.end():close - 1],
+                                 len(re.findall(r"#\d", m.group(2))), None)
+            if macro:
+                macros[m.group(1)] = macro
+            else:
+                macros.pop(m.group(1), None)
+        spans_by_text[name] = here
+    return macros, spans_by_text
+
+
+def argument_space(text, pos):
+    """Past the spaces TeX skips before an argument: blanks and at most
+    one line end, since a blank line is a paragraph."""
+    return re.compile(r"[ \t]*(?:\n[ \t]*)?").match(text, pos).end()
+
+
+def macro_calls(text, macros, skip):
+    """(start, end, name, arguments) for each call in text of one of
+    macros, outside the spans in skip; each argument (text, start, end)
+    as written, an optional one not given its default with no place. A
+    call whose arguments aren't each braced is left out."""
+    if not macros:
+        return []
+    pattern = re.compile(r"\\(" + "|".join(
+        re.escape(n) for n in sorted(macros, key=len, reverse=True)) + r")(?![A-Za-z@])")
+    calls = []
+    for m in pattern.finditer(text):
+        if in_spans(m.start(), skip):
+            continue
+        macro, pos, args = macros[m.group(1)], m.end(), []
+        if macro["default"] is not None:
+            p = argument_space(text, pos)
+            if text.startswith("[", p):
+                close = closing_bracket(text, p)
+                if close < 0:
+                    continue
+                args.append((text[p + 1:close], p + 1, close))
+                pos = close + 1
+            else:
+                args.append((macro["default"], None, None))
+        while len(args) < macro["arguments"]:
+            p = argument_space(text, pos)
+            if not text.startswith("{", p):
+                break
+            close = matching_brace(text, p)
+            if close < 0:
+                break
+            args.append((text[p + 1:close - 1], p + 1, close - 1))
+            pos = close
+        if len(args) == macro["arguments"]:
+            calls.append((m.start(), pos, m.group(1), args))
+    return calls
+
+
+def expand_image_macros(texts, files, counter):
+    """Each call of one of the book's macros for an image, outside any
+    definition, replaced in the reading copy by the macro's body with its
+    arguments, as Pandoc expands it, so the \\includegraphics in it is
+    there for repair_graphics to point at a file a browser shows. A body
+    holding a table or a drawing is left as it is, since its file's tables
+    and drawings are counted in the author's text. texts: {name: text},
+    changed in place."""
+    macros, definitions = image_macros([(name, texts[name]) for name in files])
+    macros = {n: m for n, m in macros.items() if not TABLE_OR_DRAWING.search(m["body"])}
+    if not macros:
+        return
+    for name in files:
+        text = texts[name]
+        calls = macro_calls(text, macros, sorted(skip_spans(text) + definitions.get(name, [])))
+        last = len(text) + 1
+        for start, end, macro_name, args in reversed(calls):
+            if end > last:              # one call inside another's arguments
+                continue
+            expanded = re.sub(
+                r"#(\d)", lambda m: args[int(m.group(1)) - 1][0]
+                if int(m.group(1)) <= len(args) else m.group(0),
+                macros[macro_name]["body"])
+            text = text[:start] + expanded + text[end:]
+            last = start
+            counter["image_macro_calls"] = counter.get("image_macro_calls", 0) + 1
+        texts[name] = text
+
+
+# --------------------------------------------------------------------------
 # the copy, the reading, and the pages
 # --------------------------------------------------------------------------
 
@@ -886,7 +1072,9 @@ def prepare(base, work, master, say, macros=""):
                 + text[end:]
         texts[name] = text
 
-    # Images: the extension written in, PDF and EPS made SVG.
+    # Images behind the book's own macros, written out, then all of them
+    # given the extension, PDF and EPS made SVG.
+    expand_image_macros(texts, files, counts)
     record_path = os.path.join(base, RENDERED, ".rendered.json")
     try:
         with open(record_path, encoding="utf-8") as fh:

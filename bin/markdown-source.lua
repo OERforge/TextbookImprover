@@ -318,6 +318,18 @@ local function adoc_html_table(tbl)
   -- nowhere to keep it in AsciiDoc, and would come back a data table.
   local role = tbl.attr.attributes.role ~= nil
   if not (grouped or role or has_row_spans(tbl) or complex_cells(tbl)) then return nil end
+  -- A table in this one's cells already written as HTML is a raw
+  -- AsciiDoc passthrough, which the HTML writer drops: its HTML goes
+  -- into this one's as it stands (GIAM's tables of counting rules,
+  -- inside a table, came out as empty cells).
+  tbl = tbl:walk({
+    RawBlock = function(raw)
+      if raw.format == 'asciidoc' then
+        local html = raw.text:match('^%+%+%+%+\n(.*)\n%+%+%+%+%s*$')
+        if html then return pandoc.RawBlock('html', html) end
+      end
+    end
+  })
   return passthrough(pandoc.write(pandoc.Pandoc({ clean_table(tbl) }), 'html',
                                   { html_math_method = 'mathml' }))
 end

@@ -769,6 +769,9 @@ def case_latex_target(work):
                  "Its area is $\\pi r^2$.\n\n1. Draw it.\n2. Measure it.\n\n"
                  "So $$A = \\pi r^2.$$\\\nQ.E.D.\n\n"
                  "**Theorem.** *$$C = 2 \\pi r$$*\n\n"
+                 "<table><tbody><tr><td><p>Outer</p><p>cell</p></td><td><table><thead><tr>"
+                 "<th>Rule</th></tr></thead><tbody><tr><td>x</td></tr></tbody><tbody><tr>"
+                 "<td>zeta</td></tr></tbody></table></td></tr></tbody></table>\n\n"
                  "<table><caption>Two statements</caption>"
                  "<thead><tr><th>Statement</th><th>Truth table</th></tr></thead>"
                  "<tbody><tr><td>A and B</td><td><table><thead><tr><th>A</th><th>B</th>"
@@ -789,7 +792,8 @@ def case_latex_target(work):
         fh.write("project:\n  identifier: shapes\n  title: Shapes\n  language: en\n"
                  "  contents:\n  - one\n  - two\n  - three\n")
     with open(os.path.join(work, "conversion.yaml"), "w") as fh:
-        fh.write("targets:\n  html:\n    format: html\n  latex:\n    format: latex\n")
+        fh.write("targets:\n  html:\n    format: html\n  latex:\n    format: latex\n"
+                 "  adoc:\n    format: asciidoc\n")
     result = convert(work)
     said = result.stdout + result.stderr
     out = os.path.join(work, "latex")
@@ -844,6 +848,9 @@ def case_latex_target(work):
          and "alt={A gray square.}" in one and "alt={A black circle.}" in two
          and "includesvg" not in two),
         ("the run says what it wrote", lambda: "shapes.tex and 3 file(s)" in said),
+        ("in AsciiDoc, a table written as HTML inside another keeps its cells",
+         lambda: "<td>zeta</td>" in (read(work, "adoc", "two.adoc")
+                                     if os.path.exists(os.path.join(work, "adoc", "two.adoc")) else "")),
         ("a figure holding only a table: its caption is the table's, not lost",
          lambda: "\\caption{The first rows of Pascal" in three
          and three.count("\\begin{longtable}") == 1),

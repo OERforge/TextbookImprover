@@ -914,9 +914,43 @@ def case_latex_target(work):
     ]
 
 
+def case_capacity(work):
+    """A book that outgrows one of TeX's tables, and one whose macro calls
+    itself without end: the PDF target names each for what it is."""
+    if not shutil.which("lualatex"):
+        return [("a book too big for TeX's tables is named as that",
+                 lambda: skip("no lualatex for the PDF target"))]
+    said = {}
+    for name, tex in (
+            # A million and more names: LuaTeX's strings, a table of fixed
+            # size, fill in a few seconds.
+            ("strings", "\\newcount\\n \\loop \\expandafter\\def\\csname x\\the\\n"
+                        "\\endcsname{} \\advance\\n1 \\ifnum\\n<3000000 \\repeat"),
+            # Each \a leaves a \relax to come back to: the input stack.
+            ("recursion", "\\def\\a{\\a\\relax}\\a")):
+        book = os.path.join(work, name)
+        os.makedirs(book, exist_ok=True)
+        with open(os.path.join(book, "page.md"), "w", encoding="utf-8") as fh:
+            fh.write("# Page\n\nText.\n\n```{=latex}\n" + tex + "\n```\n")
+        with open(os.path.join(book, "conversion.yaml"), "w") as fh:
+            fh.write("targets:\n  pdf:\n    format: pdf\n")
+        result = convert(book)
+        said[name] = result.stdout + result.stderr
+    return [
+        ("a book too big for TeX's tables is named as that, with the way to raise them",
+         lambda: "LaTeX ran out of number of strings" in said["strings"]
+         and "max_strings" in said["strings"]),
+        ("a macro that calls itself without end is named as that, not as size",
+         lambda: "LaTeX ran out of input stack size" in said["recursion"]
+         and "calls itself without end" in said["recursion"]
+         and "max_strings" not in said["recursion"]),
+    ]
+
+
 CASES = [("a LaTeX book", case_book), ("two masters", case_masters),
          ("one file", case_single), ("an unbuilt book", case_unbuilt),
-         ("the source target", case_source), ("the latex target", case_latex_target)]
+         ("the source target", case_source), ("the latex target", case_latex_target),
+         ("a book too big for TeX", case_capacity)]
 
 
 def main():

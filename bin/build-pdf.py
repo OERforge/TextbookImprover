@@ -817,6 +817,27 @@ def build(base, name, resolved, keep, intermediates=None, latex_only=False,
                       "installs that. For a distribution's texlive packages, "
                       "its package manager does (`apt-file search "
                       f"{name}` on Debian and Ubuntu).", file=sys.stderr)
+            # A tagged book can outgrow TeX's tables: tagging keeps every
+            # structure element, and a large book runs out of strings, hash,
+            # or memory (Prescott, TUGboat 47:2; pdfLaTeX on GIAM's tagged
+            # copy ran out of main memory). A stack that overflows is
+            # usually a macro that calls itself without end instead.
+            capacity = re.search(r"TeX capacity exceeded, sorry \[([^\]=]+)",
+                                 result.stderr)
+            if capacity:
+                table = capacity.group(1).strip()
+                if re.search(r"stack|grouping levels|nest|input levels", table):
+                    print(f"LaTeX ran out of {table}, which usually means a macro "
+                          "that calls itself without end: the log above names "
+                          "the line it was on.", file=sys.stderr)
+                else:
+                    print(f"LaTeX ran out of {table}: the book is bigger than TeX's "
+                          "default limits allow, as a tagged book can be. Raise the "
+                          "limit in texmf.cnf, or with the variable of the same name "
+                          "in the environment (max_strings for strings, hash_extra "
+                          "for the hash, extra_mem_top and extra_mem_bot for "
+                          "pdfTeX's main memory), and run again "
+                          "(https://tex.stackexchange.com/a/741777/).", file=sys.stderr)
             sys.exit(f"pandoc failed building {out_path}.")
     finally:
         shutil.rmtree(work, ignore_errors=True)

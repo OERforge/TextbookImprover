@@ -700,6 +700,8 @@ def read_latex_to_json(base, master, env, work):
         ("longtable_head_rows", "longtable's head of more than one row left to the census"),
         ("bounded", "\\pandocbounded image read as the image it holds"),
         ("link_contents", "link's /Contents for the PDF left out"),
+        ("stacked_lines", "table cell's lines stacked in \\vtop read as lines"),
+        ("minipage_breaks", "line break in a minipage read as \\newline"),
         ("multicolumn_edge", "\\multicolumn's edge spacing (@{...}) left out, so its table is read"),
         ("artifact", "image marked artifact made decorative"),
         ("graphics_converted", "PDF or EPS image made SVG"))

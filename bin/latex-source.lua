@@ -161,4 +161,18 @@ function Div(div)
   return nil
 end
 
-return { { Image = Image, Math = Math, Div = Div } }
+-- A table with a head and nothing in its body: the reader gives the
+-- body one row of empty cells, which no table had (a longtable whose
+-- rows are all head, as Pandoc's writer gives a table of one row).
+function Table(tbl)
+  if #tbl.head.rows == 0 or #tbl.bodies ~= 1 then return nil end
+  local body = tbl.bodies[1]
+  if #body.head ~= 0 or #body.body ~= 1 then return nil end
+  for _, cell in ipairs(body.body[1].cells) do
+    if #cell.contents > 0 then return nil end
+  end
+  body.body = {}
+  return tbl
+end
+
+return { { Image = Image, Math = Math, Div = Div, Table = Table } }

@@ -378,6 +378,66 @@ def longtable_heads(text, counter):
 MULTICOLUMN_EDGE = re.compile(r"(\\multicolumn\s*\{\d+\}\s*\{)([^{}]*@\{[^{}]*\}[^{}]*)\}")
 
 
+def stacked_lines(text, counter):
+    """\\vtop{\\hbox{\\strut A}\\hbox{\\strut B}}, which Pandoc's LaTeX writer
+    gives a table cell's line breaks, as A\\newline B: the reader drops
+    the boxes and every line in them (formulas too)."""
+    spans = skip_spans(text)
+    pattern = re.compile(r"\\vtop\s*\{")
+    for m in reversed(list(pattern.finditer(text))):
+        if in_spans(m.start(), spans):
+            continue
+        close = matching_brace(text, m.end() - 1)
+        if close < 0:
+            continue
+        inner, lines, at = text[m.end():close - 1], [], 0
+        while True:
+            box = re.compile(r"\s*\\hbox\s*\{").match(inner, at)
+            if not box:
+                break
+            end = matching_brace(inner, box.end() - 1)
+            if end < 0:
+                break
+            lines.append(re.sub(r"^\s*\\strut\b\s*", "", inner[box.end():end - 1]))
+            at = end
+        if not lines or inner[at:].strip():
+            continue
+        text = text[:m.start()] + " \\newline ".join(lines) + text[close:]
+        counter["stacked_lines"] = counter.get("stacked_lines", 0) + 1
+    return text
+
+
+def minipage_breaks(text, counter):
+    """\\\\ in a minipage, not in an environment inside it, as \\newline,
+    which in a minipage it is: Pandoc's LaTeX writer breaks a table cell's
+    lines that way, and in a cell the reader takes \\\\ for the row's end."""
+    spans = skip_spans(text)
+    edits = []
+    for m in re.finditer(r"\\begin\s*\{minipage\}", text):
+        if in_spans(m.start(), spans):
+            continue
+        end = environment_end(text, "minipage", m.start())
+        if end < 0:
+            continue
+        depth = 0
+        for tok in re.finditer(r"\\begin\s*\{[^}]*\}|\\end\s*\{[^}]*\}|\\\\(?!\[)",
+                               text[m.end():end - len("\\end{minipage}")]):
+            word = tok.group(0)
+            if word.startswith("\\begin"):
+                depth += 1
+            elif word.startswith("\\end"):
+                depth -= 1
+            elif depth == 0:
+                at = m.end() + tok.start()
+                if not in_spans(at, spans):
+                    edits.append(at)
+    for at in sorted(edits, reverse=True):
+        text = text[:at] + "\\newline " + text[at + 2:]
+    if edits:
+        counter["minipage_breaks"] = counter.get("minipage_breaks", 0) + len(edits)
+    return text
+
+
 def drop(text, command, counter, key):
     """\\command{...} taken out, in code: the PDF target's own commands
     for a link's /Contents, which a reader that doesn't know
@@ -492,6 +552,8 @@ def repair_text(text, counter):
                       lambda m: m.group(1) + re.sub(r"@\{[^{}]*\}", "", m.group(2)) + "}",
                       counter, "multicolumn_edge")
     text = drop(text, "OERLinkContents", counter, "link_contents")
+    text = stacked_lines(text, counter)
+    text = minipage_breaks(text, counter)
     text = drop(text, "OERLinkContentsReset", counter, "link_contents_reset")
     text = substitute(RULE_ANY, text, invisible_rule, counter, "rule_seen")
     text = substitute(PARTIAL_RULE, text, lambda m: "\\" + (

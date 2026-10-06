@@ -114,6 +114,7 @@ and \includegraphics{img/square} and
 
 Sets: $\Znoneg$ and $a \relR b$ and $\{x \suchthat x > 0\}$, and
 $a\hspace{10mm}b$, and $a \weird b$.
+Stacked: \vtop{\hbox{\strut First line}\hbox{\strut Second $y$}} done.
 Laws: $A \cong A \mbox{\hspace{12pt} and\hspace{4pt}also \hspace{12pt}} A \lor c$;
 a blank: $2, 9, \rule{12pt}{.5pt}, 37$; raised: $x = \mbox{\raisebox{-2pt}{$\emptyset$}}$.
 
@@ -451,6 +452,8 @@ def case_book(work):
                          if "Could not convert TeX math" in line
                          for s in ("and \\hspace", "rule{12pt}", "emptyset"))
          and "<munder>" in one),
+        ("lines stacked in \\vtop, as the writer stacks a table cell's, are read as lines",
+         lambda: re.search(r"First line\s*<br\s*/?>\s*Second", one) is not None),
         ("a length in mm inside a formula reaches MathML",
          lambda: "10mm" not in one),
         ("the author's tagging header declaration is the table's",
@@ -720,7 +723,9 @@ def case_latex_target(work):
                  "</tr><tr><td>T</td><td>F</td><td>F</td></tr></tbody></table></td></tr>"
                  "</tbody></table>\n\n"
                  "<table><thead><tr><th>Name</th><th colspan=\"2\">Values</th></tr></thead>"
-                 "<tbody><tr><td>a</td><td>1</td><td>2</td></tr></tbody></table>\n")
+                 "<tbody><tr><td>a</td><td>1</td><td>2</td></tr></tbody></table>\n\n"
+                 "<table><thead><tr><th>Proof: first,<br>then second.<br>Q.E.D.</th></tr>"
+                 "</thead></table>\n")
     with open(os.path.join(work, "project.yaml"), "w") as fh:
         fh.write("project:\n  identifier: shapes\n  title: Shapes\n  language: en\n"
                  "  contents:\n  - one\n  - two\n")
@@ -778,6 +783,8 @@ def case_latex_target(work):
          and "alt={A gray square.}" in one and "alt={A black circle.}" in two
          and "includesvg" not in two),
         ("the run says what it wrote", lambda: "shapes.tex and 2 file(s)" in said),
+        ("a head cell's lines are broken in a minipage, as the writer breaks them",
+         lambda: "\\begin{minipage}[b]{\\linewidth}\\raggedright\nProof: first,\\\\\n" in two),
         ("the writer's \\multicolumn at a table's edge is there to read back",
          lambda: re.search(r"\\multicolumn\{2\}\{[^}]*@\{\}\}", two) is not None),
         ("a table in a table's cell is a tabular, its head declared for tagging and ruled off",

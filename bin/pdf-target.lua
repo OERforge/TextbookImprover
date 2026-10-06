@@ -301,7 +301,7 @@ end
 -- Figures the writer can't make one LaTeX figure of (Writers/LaTeX.hs,
 -- 3.12). A figure inside a figure is written as the inner one's content
 -- with an empty \caption{} of its own before the outer one's, so the PDF
--- numbers and tags two captions (veraPDF's "Aside with 2 captions"): the
+-- numbers two captions in one figure: the
 -- inner figure's content stands in the outer one, and its caption, if it
 -- had one, as a paragraph under it. A figure holding only a table is
 -- written as the table, which can't float, and the figure's caption is

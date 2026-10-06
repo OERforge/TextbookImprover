@@ -777,6 +777,8 @@ def case_latex_target(work):
                  "So $$A = \\pi r^2.$$\\\nQ.E.D.\n\n"
                  "**Theorem.** *$$C = 2 \\pi r$$*\n\nCompare [[compare]](#circles).\n\n"
                  "A sum: ![A plus.](img/a+b.png)\n\n"
+                 "*A rule for $x$ with a note[^euler] and more.*\n\n"
+                 "[^euler]: *Euler's $f(x)$.*\n\n"
                  "<table><tbody><tr><td><p>Outer</p><p>cell</p></td><td><table><thead><tr>"
                  "<th>Rule</th></tr></thead><tbody><tr><td>x</td></tr></tbody><tbody><tr>"
                  "<td>zeta</td></tr></tbody></table></td></tr></tbody></table>\n\n"
@@ -857,6 +859,10 @@ def case_latex_target(work):
          and "alt={A gray square.}" in one and "alt={A black circle.}" in two
          and "includesvg" not in two),
         ("the run says what it wrote", lambda: "shapes.tex and 3 file(s)" in said),
+        ("in AsciiDoc, italics close before a footnote, whose own italics then can't end them",
+         lambda: re.search(r"__footnote:\[__Euler", read(work, "adoc", "two.adoc")
+                           if os.path.exists(os.path.join(work, "adoc", "two.adoc")) else "")
+         is not None),
         ("in AsciiDoc, a + in an image's name is percent-encoded, which the reader takes",
          lambda: "image:img/a%2Bb.png[" in (read(work, "adoc", "two.adoc")
                                             if os.path.exists(os.path.join(work, "adoc", "two.adoc")) else "")),

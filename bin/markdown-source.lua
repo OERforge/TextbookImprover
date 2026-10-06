@@ -660,14 +660,44 @@ end
 -- Italics holding a formula: the reader drops latexmath:[...] inside
 -- constrained _..._, which the writer uses, and keeps it inside the
 -- unconstrained __...__.
-function Emph(emph)
-  if not ADOC then return nil end
+local function emph_piece(content)
   local math = false
-  emph.content:walk({ Math = function() math = true end })
+  content:walk({ Math = function() math = true end })
   if not math then return nil end
   local out = pandoc.Inlines({ pandoc.RawInline('asciidoc', '__') })
-  out:extend(emph.content)
+  out:extend(content)
   out:insert(pandoc.RawInline('asciidoc', '__'))
+  return out
+end
+
+-- A footnote in italics comes out of them: the note's own text, which a
+-- LaTeX source gives the italics too (a theorem's body), opens __ inside
+-- the __ around it, and the reader ends the outer italics there and
+-- loses the footnote (GIAM's note on Euler's notation). The italics
+-- close before the footnote and open again after it.
+function Emph(emph)
+  if not ADOC then return nil end
+  local has_note = false
+  for _, inline in ipairs(emph.content) do
+    if inline.t == 'Note' then has_note = true break end
+  end
+  if not has_note then return emph_piece(emph.content) end
+  local out, part = pandoc.Inlines({}), pandoc.Inlines({})
+  local function flush()
+    if #part > 0 then
+      out:extend(emph_piece(part) or { pandoc.Emph(part) })
+      part = pandoc.Inlines({})
+    end
+  end
+  for _, inline in ipairs(emph.content) do
+    if inline.t == 'Note' then
+      flush()
+      out:insert(inline)
+    else
+      part:insert(inline)
+    end
+  end
+  flush()
   return out
 end
 

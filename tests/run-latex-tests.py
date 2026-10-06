@@ -726,9 +726,15 @@ def case_latex_target(work):
                  "<tbody><tr><td>a</td><td>1</td><td>2</td></tr></tbody></table>\n\n"
                  "<table><thead><tr><th>Proof: first,<br>then second.<br>Q.E.D.</th></tr>"
                  "</thead></table>\n")
+    with open(os.path.join(work, "three.md"), "w", encoding="utf-8") as fh:
+        fh.write("# Figures\n\n<figure><table><tbody><tr><td>1</td></tr><tr><td>1</td>"
+                 "<td>1</td></tr></tbody></table><figcaption>The first rows of Pascal's "
+                 "triangle</figcaption></figure>\n\n<figure id=\"outer\"><figure>"
+                 "<img src=\"img/square.png\" alt=\"A flowchart.\"></figure>"
+                 "<figcaption>A small example</figcaption></figure>\n")
     with open(os.path.join(work, "project.yaml"), "w") as fh:
         fh.write("project:\n  identifier: shapes\n  title: Shapes\n  language: en\n"
-                 "  contents:\n  - one\n  - two\n")
+                 "  contents:\n  - one\n  - two\n  - three\n")
     with open(os.path.join(work, "conversion.yaml"), "w") as fh:
         fh.write("targets:\n  html:\n    format: html\n  latex:\n    format: latex\n")
     result = convert(work)
@@ -738,6 +744,8 @@ def case_latex_target(work):
         if os.path.exists(os.path.join(out, "shapes.tex")) else ""
     one = read(work, "latex", "one.tex") if os.path.exists(os.path.join(out, "one.tex")) else ""
     two = read(work, "latex", "two.tex") if os.path.exists(os.path.join(out, "two.tex")) else ""
+    three = read(work, "latex", "three.tex") \
+        if os.path.exists(os.path.join(out, "three.tex")) else ""
 
     def round_trip():
         back = os.path.join(work, "back")
@@ -782,7 +790,13 @@ def case_latex_target(work):
          and os.path.exists(os.path.join(out, "img", "circle.pdf"))
          and "alt={A gray square.}" in one and "alt={A black circle.}" in two
          and "includesvg" not in two),
-        ("the run says what it wrote", lambda: "shapes.tex and 2 file(s)" in said),
+        ("the run says what it wrote", lambda: "shapes.tex and 3 file(s)" in said),
+        ("a figure holding only a table: its caption is the table's, not lost",
+         lambda: "\\caption{The first rows of Pascal" in three
+         and three.count("\\begin{longtable}") == 1),
+        ("a figure in a figure: one figure, one caption",
+         lambda: three.count("\\begin{figure}") == 1
+         and three.count("\\caption{A small example}") == 1 and "\\caption{}" not in three),
         ("a head cell's lines are broken in a minipage, as the writer breaks them",
          lambda: "\\begin{minipage}[b]{\\linewidth}\\raggedright\nProof: first,\\\\\n" in two),
         ("the writer's \\multicolumn at a table's edge is there to read back",

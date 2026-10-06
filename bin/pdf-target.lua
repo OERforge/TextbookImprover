@@ -298,6 +298,64 @@ function Link(link)
   }
 end
 
+-- Figures the writer can't make one LaTeX figure of (Writers/LaTeX.hs,
+-- 3.12). A figure inside a figure is written as the inner one's content
+-- with an empty \caption{} of its own before the outer one's, so the PDF
+-- numbers and tags two captions (veraPDF's "Aside with 2 captions"): the
+-- inner figure's content stands in the outer one, and its caption, if it
+-- had one, as a paragraph under it. A figure holding only a table is
+-- written as the table, which can't float, and the figure's caption is
+-- dropped: the caption becomes the table's, when the table has none.
+local function caption_blocks(caption)
+  return caption and caption.long or pandoc.Blocks{}
+end
+
+local function unnest(fig)
+  local content = pandoc.Blocks{}
+  for _, block in ipairs(fig.content) do
+    if block.t == 'Figure' then
+      content:extend(block.content)
+      local long = caption_blocks(block.caption)
+      if #long > 0 then
+        content:extend(long)
+      end
+    else
+      content:insert(block)
+    end
+  end
+  fig.content = content
+  return fig
+end
+
+local function only_table(fig)
+  local tables, other = {}, 0
+  for _, block in ipairs(fig.content) do
+    -- The table-wrapper div the HTML gets, or any div holding one block.
+    while block.t == 'Div' and #block.content == 1 do
+      block = block.content[1]
+    end
+    if block.t == 'Table' then
+      tables[#tables + 1] = block
+    elseif not (block.t == 'Plain' and #block.content == 0) then
+      other = other + 1
+    end
+  end
+  if #tables ~= 1 or other > 0 then return nil end
+  return tables[1]
+end
+
+function Figure(fig)
+  fig = unnest(fig)
+  local tbl = only_table(fig)
+  if tbl and #caption_blocks(tbl.caption) == 0 and #caption_blocks(fig.caption) > 0 then
+    tbl.caption = fig.caption
+    if tbl.identifier == '' then tbl.identifier = fig.identifier end
+    return tbl
+  end
+  return fig
+end
+
 return {
+  { Figure = Figure },
   { Table = Table, Image = Image, Link = Link },
 }

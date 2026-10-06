@@ -119,6 +119,16 @@ $a\hspace{10mm}b$, and $a \weird b$.
 Stacked: \vtop{\hbox{\strut First line}\hbox{\strut Second $y$}} done.
 Over a line: $p +
 q$ ends. Pseudocode: \texttt{Let }$q = 0$\texttt{.}
+
+\begin{tabular}{cc}
+\begin{minipage}{3cm}Converses.
+
+Inverses.\end{minipage} & \begin{tabular}{ccc}
+ & & \\
+ & $A \implies B$ & \\
+ & & $B \implies A$ \\
+\end{tabular} \\
+\end{tabular}
 Laws: $A \cong A \mbox{\hspace{12pt} and\hspace{4pt}also \hspace{12pt}} A \lor c$;
 a blank: $2, 9, \rule{12pt}{.5pt}, 37$; raised: $x = \mbox{\raisebox{-2pt}{$\emptyset$}}$.
 
@@ -515,6 +525,10 @@ def case_book(work):
                            read(work, "adoc", "one.adoc")
                            if os.path.exists(os.path.join(work, "adoc", "one.adoc")) else "")
          is not None and asciidoc_math_reads_back(work)),
+        ("read back from AsciiDoc, a table in a table keeps every cell, formulas in them too",
+         lambda: asciidoc_math_reads_back(work)
+         and len(re.findall(r"<t[dh]\b", read(work, "html", "one.html"))) ==
+         len(re.findall(r"<t[dh]\b", read(work, "adoc-back", "html", "one.html")))),
         ("read back from AsciiDoc, the rules stay in their list items, the lists whole",
          lambda: asciidoc_math_reads_back(work)
          and read(work, "html", "one.html").count("<ol") ==

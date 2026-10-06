@@ -99,10 +99,12 @@ ONE = r"""\chapter{One}
 \input ch1/table
 
 \begin{figure}
+\begin{center}
 \begin{picture}(40,20)
 \put(0,0){\line(1,0){40}}
 \put(5,5){$x$}
 \end{picture}
+\end{center}
 \caption{A line}
 \label{fig:line}
 \end{figure}
@@ -265,6 +267,7 @@ def write_book(work, macros=False, second_master=False, readme=True,
     with open(os.path.join(work, "conversion.yaml"), "w") as fh:
         fh.write("targets:\n  html:\n    format: html\n"
                  + ("  epub:\n    format: epub3\n  word:\n    format: docx\n"
+                    "  md:\n    format: markdown\n"
                     if epub else ""))
 
 
@@ -281,7 +284,9 @@ def fingerprint(work, skip_dirs=()):
             if name.endswith((".tex", ".png", ".pdf", ".md")) and \
                     not name.endswith("-sample.tex") and \
                     "rendered" not in path and "html" not in path \
-                    and os.sep + "back" + os.sep not in path:
+                    and os.sep + "back" + os.sep not in path \
+                    and os.sep + "md-back" + os.sep not in path \
+                    and os.sep + "md" + os.sep not in path:
                 with open(path, "rb") as fh:
                     found[os.path.relpath(path, work)] = \
                         hashlib.sha256(fh.read()).hexdigest()
@@ -345,6 +350,23 @@ def word_quote_reads_back(work):
     return proof and "<table" in proof[0] and "Q.E.D." in proof[0] \
         and not any(("Given" in q or "boxed aside" in q) and "<table" not in q
                     for q in quotes)
+
+
+def markdown_reads_back(work):
+    """md/, the Markdown target, read back as a source: one.html has the
+    same figures, a centered drawing's figure among them."""
+    back = os.path.join(work, "md-back")
+    shutil.copytree(os.path.join(work, "md"), back)
+    with open(os.path.join(back, "conversion.yaml"), "w") as fh:
+        fh.write("targets:\n  html:\n    format: html\n")
+    convert(back)
+    def figures(page):
+        return [" ".join(re.sub(r"<[^>]+>", " ", c).split())
+                for c in re.findall(r"<figcaption>(.*?)</figcaption>", page, re.S)]
+    before = figures(read(work, "html", "one.html"))
+    after = figures(read(back, "html", "one.html")) \
+        if os.path.exists(os.path.join(back, "html", "one.html")) else []
+    return before and before == after
 
 
 def word_math_in_list(work):
@@ -434,8 +456,8 @@ def case_book(work):
          and os.path.exists(os.path.join(work, "rendered", "ch1", "one-1.svg"))
          if can_draw() else skip("no LaTeX or pdftocairo: drawings not rendered")),
         ("a drawing is rendered whole and keeps its figure's caption",
-         lambda: re.search(r'<figure[^>]*>\s*<img src="rendered/ch1/one-1\.svg"',
-                           one) and "A line" in one
+         lambda: re.search(r'<figure[^>]*>\s*(<div class="center">\s*)?'
+                           r'<img src="rendered/ch1/one-1\.svg"', one) and "A line" in one
          if can_draw() else skip("no LaTeX or pdftocairo: drawings not rendered")),
         ("a PDF image is made an SVG",
          lambda: 'src="rendered/img/diagram.svg"' in one
@@ -470,6 +492,8 @@ def case_book(work):
          lambda: re.search(r'href="one.html#sec:first"[^>]*>1\.1<', two)),
         ("in the EPUB, a \\ref to a chapter's own \\label goes to the chapter",
          lambda: epub_links_resolve(work)),
+        ("read back from Markdown, every figure is a figure, a centered drawing's too",
+         lambda: markdown_reads_back(work)),
         ("in Word, a formula inside a list item stays in the item",
          lambda: word_math_in_list(work)),
         ("read back from Word, a list with a formula, a table, and a rule in its items is whole",

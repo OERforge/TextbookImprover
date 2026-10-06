@@ -2425,12 +2425,17 @@ local function figure_div(div)
   if not div.classes:includes('figure') then return nil end
   local image, caption = nil, nil
   for _, block in ipairs(div.content) do
-    if block.t == 'Figure' and image == nil then
-      image = block.content
-    elseif (block.t == 'Para' or block.t == 'Plain') and image == nil then
-      image = { block }
-    elseif block.t == 'Div' and block.classes:includes('caption') then
+    if block.t == 'Div' and block.classes:includes('caption') then
       caption = block.content
+    elseif block.t == 'Figure' and image == nil then
+      image = block.content
+    elseif image == nil then
+      -- An image in a paragraph, or whatever else the figure held: a
+      -- centered div around the image, as a LaTeX source's \centering
+      -- or center environment gives.
+      image = { block }
+    else
+      table.insert(image, block)
     end
   end
   if image == nil then return nil end

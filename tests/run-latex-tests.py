@@ -741,6 +741,7 @@ def case_latex_target(work):
     with open(os.path.join(work, "two.md"), "w", encoding="utf-8") as fh:
         fh.write("# Circles {#circles}\n\n![A black circle.](img/circle.svg)\n\n"
                  "Its area is $\\pi r^2$.\n\n1. Draw it.\n2. Measure it.\n\n"
+                 "So $$A = \\pi r^2.$$\\\nQ.E.D.\n\n"
                  "<table><caption>Two statements</caption>"
                  "<thead><tr><th>Statement</th><th>Truth table</th></tr></thead>"
                  "<tbody><tr><td>A and B</td><td><table><thead><tr><th>A</th><th>B</th>"

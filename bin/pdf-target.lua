@@ -355,7 +355,46 @@ function Figure(fig)
   return fig
 end
 
+-- A line break with no line before it to end: at the start of a
+-- paragraph, or right after a display formula, which ends its own line.
+-- LaTeX stops on either ("There's no line here to end"); the page loses
+-- nothing without it. GIAM ends every proof with one after its last
+-- formula (\newline before "Q.E.D." in its proof environment).
+local function no_line_to_end(inlines)
+  local out, removed = pandoc.Inlines{}, false
+  local after_line = false        -- something before on this line
+  for _, inline in ipairs(inlines) do
+    if inline.t == 'LineBreak' then
+      if after_line then
+        out:insert(inline)
+        after_line = false
+      else
+        removed = true
+      end
+    elseif inline.t == 'Math' and inline.mathtype == 'DisplayMath' then
+      out:insert(inline)
+      after_line = false
+    elseif inline.t == 'Space' or inline.t == 'SoftBreak' then
+      out:insert(inline)
+    else
+      out:insert(inline)
+      after_line = true
+    end
+  end
+  return removed and out or nil
+end
+
+local function line_breaks(block)
+  local inlines = no_line_to_end(block.content)
+  if inlines then
+    block.content = inlines
+    return block
+  end
+  return nil
+end
+
 return {
   { Figure = Figure },
+  { Para = line_breaks, Plain = line_breaks },
   { Table = Table, Image = Image, Link = Link },
 }

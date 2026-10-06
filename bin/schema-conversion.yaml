@@ -114,10 +114,27 @@ keys:
       For a target with format source on a LaTeX book: whether the copy is
       made to build with LaTeX's own tagging, for an accessible PDF:
       \DocumentMetadata before \documentclass, pdfTeX-only options and
-      settings taken out, and the constructs tagging can't take yet put
-      the way it can. A tagged book is built with LuaLaTeX (pdfLaTeX runs
-      out of memory on a book), so this changes the author's build. Off by
-      default; the alt text is written either way.
+      settings taken out, the constructs tagging can't take yet put the
+      way it can, each figure's and table's tags where the text has it,
+      and unicode-math for the formulas' MathML (latex_mathml). A tagged
+      book is built with LuaLaTeX (pdfLaTeX runs out of memory on a book),
+      so this changes the author's build. Off by default; the alt text is
+      written either way.
+
+  latex_mathml:
+    type: enum
+    values: ["on", "off"]
+    default: "on"
+    stage: render
+    description: >
+      For a target with format source and tagging on, on a LaTeX book:
+      whether the copy loads unicode-math, so each formula carries its
+      MathML, which LaTeX makes only from an OpenType math font. Its Latin
+      Modern fonts are TeX's own design, but their metrics differ a
+      little, so pages can break differently: the calculus notes take 84
+      pages instead of 85, while GIAM keeps its 434. Off keeps the book's
+      fonts, and its formulas get no MathML. A book that sets its fonts
+      with a package of its own (mathptmx, fontspec) keeps them either way.
 
   title_page:
     type: enum

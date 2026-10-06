@@ -2182,7 +2182,8 @@ def remediate_sources(target, base, docs, paths, env, html_stems=(), language=No
         counts = texremediate.remediate(base, target.output_dir, master, files, page_alts,
                                         tagging=tagging, language=language,
                                         headers=decisions, definitions=definitions,
-                                        definitions_name=LATEX_MACROS, seen=seen)
+                                        definitions_name=LATEX_MACROS, seen=seen,
+                                        mathml=str(target["latex_mathml"]) == "on")
         # A copy built with LaTeX's tagging, by this target or by the
         # book's own \DocumentMetadata, is where a package's tagging
         # status matters: advice from the tagging project's list.
@@ -2217,8 +2218,22 @@ def remediate_sources(target, base, docs, paths, env, html_stems=(), language=No
                "when tagging hasn't, "
                + ("\\centerline on a line of its own made a centered paragraph, "
                   if counts.get("tag_centerline") else "")
+               + ("unicode-math loaded, so each formula carries its MathML, with the "
+                  "OpenType Latin Modern fonts (TeX's own design) and a fallback for "
+                  "characters they lack, "
+                  if counts.get("tag_math") else "")
+               + ("MathML set up for the book's unicode-math, "
+                  if counts.get("tag_math_setup") else "")
+               + (f"{counts['tag_floats']} figure(s) and table(s) tagged where the text has "
+                  "them, not gathered at the end of the document, "
+                  if counts.get("tag_floats") else "")
                + f"and {counts.get('tag_formulas', 0)} formula(s) opening a center "
                "environment given \\leavevmode." if tagging else "")
+            + (f" The formulas get no MathML: the book sets its fonts or symbols with "
+               f"{counts['tag_math_kept']}, which unicode-math, which LaTeX makes MathML "
+               "with, would replace." if tagging and counts.get("tag_math_kept") else "")
+            + (" The formulas get no MathML, since latex_mathml is \"off\"."
+               if tagging and counts.get("tag_math_off") else "")
             + (f" {counts['generated']} of them are in files the book's own build "
                "makes (beside an xfig source); building it again writes over them."
                if counts.get("generated") else "")

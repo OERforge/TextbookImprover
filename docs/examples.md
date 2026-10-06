@@ -502,7 +502,7 @@ python3 $T/bin/convert.py
 ```
 
 ```
-tagged: 154 LaTeX file(s) written, 3 of them changed: 0 image(s) and drawing(s) given alt text and 0 marked artifact, as keys LaTeX's tagging reads. 3 definition(s) from latex-conversion-macros.tex written after the preamble, as the conversion reads them. Made to build with LaTeX's tagging, with LuaLaTeX: \DocumentMetadata added, 2 pdftex option(s) and 1 pdfTeX setting(s) taken out, 2 starred theorem(s) defined only when tagging hasn't, \centerline on a line of its own made a centered paragraph, and 1 formula(s) opening a center environment given \leavevmode.
+tagged: 154 LaTeX file(s) written, 3 of them changed: 0 image(s) and drawing(s) given alt text and 0 marked artifact, as keys LaTeX's tagging reads. 3 definition(s) from latex-conversion-macros.tex written after the preamble, as the conversion reads them. Made to build with LaTeX's tagging, with LuaLaTeX: \DocumentMetadata added, 2 pdftex option(s) and 1 pdfTeX setting(s) taken out, 2 starred theorem(s) defined only when tagging hasn't, \centerline on a line of its own made a centered paragraph, unicode-math loaded, so each formula carries its MathML, with the OpenType Latin Modern fonts (TeX's own design) and a fallback for characters they lack, 51 figure(s) and table(s) tagged where the text has them, not gathered at the end of the document, and 1 formula(s) opening a center environment given \leavevmode.
 ```
 
 The run also checks GIAM's class and packages against the LaTeX tagging project's status list, from TeX's `latex-tagging-status` package. TinyTeX doesn't install it, and then the run says how (`tlmgr install latex-tagging-status`); with it, the run says:
@@ -523,7 +523,7 @@ cd ../giam-tagged
 latexmk -lualatex GIAM
 ```
 
-That's four LuaLaTeX passes, in about four minutes, as many as GIAM's own Makefile makes with pdfLaTeX. Tagging's references settle over them too: a link to a figure or a table points at the number tagging gave its structure on the pass before, and until the numbers settle the log warns that some links' destinations have no structure. Settled, the PDF has 434 pages and no error, and its only tagging warnings are one for each of its 195 figures, for the alt text the book doesn't have yet. The definitions are in it too: `\suchthat` is the relation `\mid`, not a bar drawn with a rule. [veraPDF](https://verapdf.org/) passes it as PDF/UA-2:
+That's four LuaLaTeX passes, as many as GIAM's own Makefile makes with pdfLaTeX, in about eight minutes; without the MathML it takes four. Tagging's references settle over them too: a link to a figure or a table points at the number tagging gave its structure on the pass before, and until the numbers settle the log warns that some links' destinations have no structure. Settled, the PDF has 434 pages and no error, and its only tagging warnings are one for each of its 195 figures, for the alt text the book doesn't have yet. Each of its 4,521 formulas carries its MathML, both as structure a screen reader can walk and as an attached file, made from unicode-math's fonts, which have GIAM's look. Each figure's tags are where the text has the figure, so a screen reader meets it there, not at the end of the book. The definitions are in it too: `\suchthat` is the relation `\mid`, not a bar drawn with a rule. [veraPDF](https://verapdf.org/) passes it as PDF/UA-2:
 
 ```bash
 verapdf --flavour ua2 --format text GIAM.pdf

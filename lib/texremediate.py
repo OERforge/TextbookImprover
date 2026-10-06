@@ -257,7 +257,8 @@ DEFINES = re.compile(r"\\(?:(?:re|provide)?newcommand\*?|def)\b")
 
 
 def remediate(base, out_dir, master, files, alts, tagging=False, language=None,
-              headers=None, definitions=None, definitions_name="", seen=None):
+              headers=None, definitions=None, definitions_name="", seen=None,
+              mathml=True):
     """Write a remediated copy of each file in files (relative to base) to
     out_dir at the same relative path. alts: {key: alt, or None for
     decorative} (htmlremediate.alt_rows); tagging: made to build with
@@ -266,7 +267,8 @@ def remediate(base, out_dir, master, files, alts, tagging=False, language=None,
     tagging when the copy is tagged (declare), since without tagging
     \\tagpdfsetup isn't defined and the build stops; seen: the keys of
     the images and drawings on the conversion's pages, against which a
-    decision the copy couldn't write is counted. Returns a dict of
+    decision the copy couldn't write is counted; mathml: whether a tagged
+    copy loads unicode-math for its formulas' MathML. Returns a dict of
     counts, and in unplaced_keys the keys of those decisions."""
     master_text = latexsource.read_text(os.path.join(base, master))
     dirs = latexsource.graphics_paths(latexsource.split_master(master_text)[0])
@@ -311,7 +313,7 @@ def remediate(base, out_dir, master, files, alts, tagging=False, language=None,
         if not language:
             language = latexsource.preamble_language(
                 latexsource.split_master(originals[master])[0])
-        for key, n in tag(texts, master, language).items():
+        for key, n in tag(texts, master, language, mathml).items():
             totals["tag_" + key] = n
     for name in files:
         out = os.path.join(out_dir, name)
@@ -342,6 +344,97 @@ CENTERLINE_DEFINITION = (
     "\\let\\TIQcenterline\\centerline\n"
     "\\renewcommand{\\centerline}[1]{\\ifvmode{\\centering #1\\par}"
     "\\else\\TIQcenterline{#1}\\fi}\n")
+# Each formula's MathML, which luamml makes only from an OpenType math font:
+# with TeX's own fonts it isn't made at all, and when it's forced, a symbol
+# TeX builds from pieces comes out as the pieces (\implies as "=" and "⇒",
+# \neq as "=" and a combining stroke, \cong as nothing), and the AMS fonts'
+# letters as plain ones (ℕ as "N"), 536 of GIAM's 4,521 formulas against
+# unicode-math's. unicode-math's Latin Modern is TeX's own design; the
+# fallback gives a character the fonts lack a glyph (GIAM's \vdots in a
+# typewriter label), which PDF/UA-2 requires (.notdef, 8.4.5.9).
+PACKAGE = re.compile(r"\\(?:usepackage|RequirePackage)\s*(?:\[[^]]*\])?\s*\{([^}]*)\}")
+PREAMBLE_INPUT = re.compile(r"\\input\s*\{\s*([^}]+?)\s*\}")
+MATH_SETUP_KEY = re.compile(r"math/setup")
+UNICODE_MATH = ("unicode-math", "lua-unicode-math")
+# Packages that set the book's fonts, or math symbols unicode-math clashes
+# with: such a book keeps its own, and its formulas get no MathML here.
+OWN_FONTS = frozenset("""
+    times mathptmx mathptm txfonts pxfonts newtxtext newtxmath newtxsf newpxtext
+    newpxmath mathpazo palatino palatcm helvet courier bookman newcent charter utopia
+    fourier fouriernc kpfonts libertine libertinus libertinust1math mathdesign eulervm
+    euler ccfonts concmath cmbright arev lucidabr lucimatx mtpro2 MinionPro mathastext
+    sansmath sfmath stix stix2 XCharter tgtermes tgpagella tgheros tgcursor tgbonum
+    tgschola tgadventor tgchorus gentium ebgaramond garamondx baskervald Baskervaldx
+    crimson cochineus erewhon heuristica iwona kurier anttor mlmodern fontspec wasysym
+    esint stmaryrd mathabx MnSymbol fdsymbol boisik isomath""".split())
+MATH_SETUP_LINE = "  \\ifdefined\\tagpdfsetup\\tagpdfsetup{math/setup={mathml-SE,mathml-AF}}\\fi\n"
+# A float's tags: LaTeX's tagging gathers every figure's and table's at the
+# end of the document unless told otherwise (latex-lab-testphase-float),
+# where a screen reader reaches them after everything else; the 91 of
+# GIAM's 195 figures in floats were there. float/here tags each where the text has it; where
+# it's printed doesn't change.
+FLOAT = re.compile(r"\\begin\s*\{(?:figure|table)\*?\}")
+FLOAT_KEY = re.compile(r"\\tagpdfsetup\s*\{[^}]*float/")
+FLOATS_HERE = (
+    "% Written for LaTeX's tagging: a figure's or table's tags where the text\n"
+    "% has it, not gathered at the end of the document; it's printed where it was.\n"
+    "\\ifdefined\\tagpdfsetup\\tagpdfsetup{float/here}\\fi\n")
+MATH_FONTS = (
+    "% Written for LaTeX's tagging: each formula's MathML, which LaTeX makes\n"
+    "% from an OpenType math font (unicode-math's Latin Modern Math, the design\n"
+    "% of TeX's own), with a fallback for a character the fonts lack, which\n"
+    "% would otherwise have no glyph. With LuaLaTeX; pdfLaTeX builds as before.\n"
+    "\\ifdefined\\directlua\n"
+    "  \\usepackage{unicode-math}\n"
+    "  \\IfFontExistsTF{DejaVu Sans}\n"
+    "    {\\directlua{luaotfload.add_fallback(\"textbookimprover\",\n"
+    "      {\"Latin Modern Math:mode=harf;\", \"DejaVu Sans:mode=harf;\"})}}\n"
+    "    {\\directlua{luaotfload.add_fallback(\"textbookimprover\",\n"
+    "      {\"Latin Modern Math:mode=harf;\"})}}\n"
+    "  \\setmainfont{Latin Modern Roman}[RawFeature={fallback=textbookimprover}]\n"
+    "  \\setsansfont{Latin Modern Sans}[RawFeature={fallback=textbookimprover}]\n"
+    "  \\setmonofont{Latin Modern Mono}[RawFeature={fallback=textbookimprover}]\n")
+
+
+def preamble_packages(texts, master):
+    """(packages, preamble pieces): the names the master's preamble loads,
+    with each file of texts it \\input-s there, and those pieces of text."""
+    preamble = latexsource.split_master(texts[master])[0]
+    pieces = [preamble]
+    for m in latexsource.code_matches(PREAMBLE_INPUT, preamble):
+        name = m.group(1)
+        for candidate in (name, name + ".tex"):
+            path = os.path.normpath(os.path.join(os.path.dirname(master), candidate))
+            if path in texts:
+                pieces.append(texts[path])
+                break
+    names = set()
+    for piece in pieces:
+        for m in latexsource.code_matches(PACKAGE, piece):
+            names.update(n.strip() for n in m.group(1).split(",") if n.strip())
+    return names, pieces
+
+
+def math_block(texts, master):
+    """(block, counts): what the master gets before \\begin{document} for
+    its formulas' MathML, and what was decided. A book with no formula
+    gets nothing; one that loads unicode-math gets the MathML forms
+    named, unless it names them itself; one whose fonts are its own keeps
+    them, and the packages are named."""
+    if not any(latexsource.code_matches(latexsource.MATH_SPANS, t) for t in texts.values()):
+        return "", {}
+    names, pieces = preamble_packages(texts, master)
+    own_setup = any(latexsource.code_matches(MATH_SETUP_KEY, piece) for piece in pieces)
+    setup = "" if own_setup else MATH_SETUP_LINE
+    if names & set(UNICODE_MATH):
+        if not setup:
+            return "", {}
+        return ("% Written for LaTeX's tagging: each formula's MathML, both forms.\n"
+                + setup.lstrip()), {"math_setup": 1}
+    kept = sorted(names & OWN_FONTS)
+    if kept:
+        return "", {"math_kept": ", ".join(kept)}
+    return MATH_FONTS + setup + "\\fi\n", {"math": 1}
 
 
 def _code_subn(pattern, text, replace):
@@ -364,18 +457,32 @@ def _without_pdftex(m):
     return m.group(1) + ("[%s]" % ",".join(options) if any(o.strip() for o in options) else "")
 
 
-def tag(texts, master, language):
+def tag(texts, master, language, mathml=True):
     """texts: {name: text}, changed in place to build with LaTeX's tagging
     on LuaLaTeX, each change measured on GIAM, where it was needed:
     \\DocumentMetadata before \\documentclass (pdfstandard ua-2), the
     pdftex option and pdfTeX's own settings taken out, a starred theorem
     the book defines beside its numbered one defined only when tagging
     hasn't (tagging's \\newtheorem defines thm* with thm), \\centerline on
-    a line of its own made a centered paragraph, and \\leavevmode put
-    before a display formula opening a center environment, which leaves
-    a paragraph open in LaTeX 2026-06-01. Returns counts."""
+    a line of its own made a centered paragraph, \\leavevmode put before
+    a display formula opening a center environment, which leaves a
+    paragraph open in LaTeX 2026-06-01, each float's tags where the text
+    has it (FLOATS_HERE), and, unless mathml is false, unicode-math for
+    the formulas' MathML (math_block). Returns counts."""
     counts = {"metadata": 0, "pdftex_options": 0, "pdftex_settings": 0,
-              "theorems": 0, "centerline": 0, "formulas": 0}
+              "theorems": 0, "centerline": 0, "formulas": 0, "floats": 0}
+    if mathml:
+        block, decided = math_block(texts, master)
+        counts.update(decided)
+    else:
+        block = ""
+        counts["math_off"] = int(any(latexsource.code_matches(latexsource.MATH_SPANS, t)
+                                     for t in texts.values()))
+    floats = sum(len(latexsource.code_matches(FLOAT, t)) for t in texts.values())
+    if floats and not any(latexsource.code_matches(FLOAT_KEY, piece)
+                          for piece in preamble_packages(texts, master)[1]):
+        block += FLOATS_HERE
+        counts["floats"] = floats
     numbered = set()
     for text in texts.values():
         spans = latexsource.skip_spans(text)
@@ -405,6 +512,11 @@ def tag(texts, master, language):
             uses_centerline = True
         texts[name] = text
     text = texts[master]
+    if block:
+        begin = latexsource.code_matches(latexsource.BEGIN_DOCUMENT, text)
+        if begin:
+            at = begin[0].start()
+            text = text[:at] + block + text[at:]
     if uses_centerline:
         begin = latexsource.code_matches(latexsource.BEGIN_DOCUMENT, text)
         if begin:

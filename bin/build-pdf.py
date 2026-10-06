@@ -63,19 +63,12 @@ from bookassembly import (  # noqa: E402
     page_title, stringify, wants_title_page,
 )
 from bookcontents import flatten_pages, is_generated  # noqa: E402
+import latexbuild  # noqa: E402
+from latexbuild import ENGINE  # noqa: E402
 import pdfparagraphs  # noqa: E402
 import pdfretag  # noqa: E402
 from names import safe_stem  # noqa: E402
 
-ENGINE = "lualatex"
-# The LaTeX release the tagging project describes as usable in production
-# for documents that keep to packages supporting it. Older releases load
-# pdfmanagement-testphase.sty for \DocumentMetadata, where current ones
-# load pdfmanagement-init (documentmetadata-support.ltx), and Ubuntu 24.04's
-# texlive packages (LaTeX 2023-11-01) stop on that file not found; they
-# would tag less if it were there. Verified here: 2026-06-01.
-MINIMUM_LATEX = "2025-11-01"
-MISSING_FILE = re.compile(r"File `([^']+)' not found")
 DIVISIONS = {"front": "\\frontmatter", "main": "\\mainmatter",
              "appendix": "\\appendix", "back": "\\backmatter"}
 # The classes Pandoc's LaTeX writer knows to have \frontmatter and its
@@ -112,7 +105,6 @@ FALLBACK = ("\\IfFontExistsTF{DejaVu Sans}\n"
 FAMILIES = (("mainfont", "\\setmainfont{Latin Modern Roman}"),
             ("sansfont", "\\setsansfont{Latin Modern Sans}"),
             ("monofont", "\\setmonofont{Latin Modern Mono}"))
-MISSING = re.compile(r"Missing character: There is no (\S+)")
 
 # Where figures go (pdf.figures). LaTeX's tagging gathers the tags of a
 # figure that floats into one place: at the end of the document unless
@@ -250,24 +242,6 @@ HEADER = r"""\ExplSyntaxOn
 """
 
 
-def latex_release():
-    """The LaTeX release LuaLaTeX runs, as its \\fmtversion gives it
-    ("2026-06-01"), or None when it can't be read."""
-    work = tempfile.mkdtemp(prefix="build-pdf-probe-")
-    try:
-        result = subprocess.run(
-            [ENGINE, "-interaction=nonstopmode", "-halt-on-error",
-             "\\typeout{OERFMT:\\fmtversion}\\stop"],
-            cwd=work, capture_output=True, text=True, errors="replace",
-            stdin=subprocess.DEVNULL, timeout=300)
-    except (OSError, subprocess.TimeoutExpired):
-        return None
-    finally:
-        shutil.rmtree(work, ignore_errors=True)
-    m = re.search(r"OERFMT:(\d{4}-\d{2}-\d{2})", result.stdout)
-    return m.group(1) if m else None
-
-
 def svg_images(blocks):
     """The SVG images the book holds."""
     found = []
@@ -287,18 +261,7 @@ def svg_images(blocks):
 
 def latex_problem():
     """Why the LuaLaTeX on the path can't tag a PDF, or None."""
-    release = latex_release()
-    if release is None:
-        print(f"WARNING: couldn't tell which LaTeX release {ENGINE} runs; "
-              f"a tagged PDF needs {MINIMUM_LATEX} or later.",
-              file=sys.stderr)
-        return None
-    if release < MINIMUM_LATEX:
-        return (f"{ENGINE} runs the LaTeX release of {release}, and a tagged "
-                f"PDF needs {MINIMUM_LATEX} or later (TeX Live 2026). "
-                "Distribution packages are often older; docs/installation.md "
-                "says how to install a current TeX Live.")
-    return None
+    return latexbuild.latex_problem(lambda m: print(m, file=sys.stderr))
 
 
 def raw_latex(text):
@@ -776,23 +739,14 @@ def build(base, name, resolved, keep, intermediates=None, latex_only=False,
         # are relative to it.
         result = subprocess.run(command, cwd=base, capture_output=True,
                                 text=True, env=environment)
-        missing, others = {}, []
-        for line in result.stderr.splitlines():
-            m = MISSING.search(line)
-            if m:
-                missing[m.group(1)] = missing.get(m.group(1), 0) + 1
-            elif line.strip():
-                others.append(line)
+        missing, others = latexbuild.missing_characters(result.stderr.splitlines())
         if others:
             print("\n".join(others), file=sys.stderr)
         if missing:
             # One line, not Pandoc's one warning per occurrence.
-            print(f"WARNING: {sum(missing.values())} character(s) the "
-                  "fonts don't have are missing from the PDF: "
-                  + ", ".join(f"{c} (U+{ord(c[0]):04X}) x{n}" for c, n in
-                              sorted(missing.items(), key=lambda i: -i[1]))
-                  + ". Choose a font that has them in the pdf.metadata "
-                  "file (mainfont).", file=sys.stderr)
+            print(latexbuild.missing_warning(
+                missing, "Choose a font that has them in the pdf.metadata file "
+                "(mainfont)."), file=sys.stderr)
         repairs = result.returncode == 0 and (
             resolved["pdf.repair_captions"] or resolved["pdf.remove_empty_paragraphs"])
         if repairs and pdfretag.pikepdf is None:
@@ -806,38 +760,8 @@ def build(base, name, resolved, keep, intermediates=None, latex_only=False,
             if resolved["pdf.remove_empty_paragraphs"]:
                 remove_empty_paragraphs(os.path.abspath(out_path))
         if result.returncode != 0:
-            # tlmgr only manages a TeX Live installed from tug.org or as
-            # TinyTeX; Debian's and Ubuntu's texlive packages come with a
-            # tlmgr that runs in an uninitialized user mode and installs
-            # nothing, so both routes are named.
-            for name in dict.fromkeys(MISSING_FILE.findall(result.stderr)):
-                print(f"LaTeX can't find {name}. For TinyTeX or TeX Live "
-                      f"from tug.org, `tlmgr search --global --file /{name}` "
-                      "names the package that has it, and `tlmgr install` "
-                      "installs that. For a distribution's texlive packages, "
-                      "its package manager does (`apt-file search "
-                      f"{name}` on Debian and Ubuntu).", file=sys.stderr)
-            # A tagged book can outgrow TeX's tables: tagging keeps every
-            # structure element, and a large book runs out of strings, hash,
-            # or memory (Prescott, TUGboat 47:2; pdfLaTeX on GIAM's tagged
-            # copy ran out of main memory). A stack that overflows is
-            # usually a macro that calls itself without end instead.
-            capacity = re.search(r"TeX capacity exceeded, sorry \[([^\]=]+)",
-                                 result.stderr)
-            if capacity:
-                table = capacity.group(1).strip()
-                if re.search(r"stack|grouping levels|nest|input levels", table):
-                    print(f"LaTeX ran out of {table}, which usually means a macro "
-                          "that calls itself without end: the log above names "
-                          "the line it was on.", file=sys.stderr)
-                else:
-                    print(f"LaTeX ran out of {table}: the book is bigger than TeX's "
-                          "default limits allow, as a tagged book can be. Raise the "
-                          "limit in texmf.cnf, or with the variable of the same name "
-                          "in the environment (max_strings for strings, hash_extra "
-                          "for the hash, extra_mem_top and extra_mem_bot for "
-                          "pdfTeX's main memory), and run again "
-                          "(https://tex.stackexchange.com/a/741777/).", file=sys.stderr)
+            for advice in latexbuild.failure_advice(result.stderr):
+                print(advice, file=sys.stderr)
             sys.exit(f"pandoc failed building {out_path}.")
     finally:
         shutil.rmtree(work, ignore_errors=True)

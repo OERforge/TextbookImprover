@@ -699,7 +699,9 @@ def case_source(work):
     with open(os.path.join(work, "conversion.yaml"), "w") as fh:
         fh.write("targets:\n  html:\n    format: html\n  fixed:\n    format: source\n"
                  "  tagged:\n    format: source\n    tagging: \"on\"\n"
-                 "  kept:\n    format: source\n    latex_definitions: \"off\"\n")
+                 "  kept:\n    format: source\n    latex_definitions: \"off\"\n"
+                 "  plainmath:\n    format: source\n    tagging: \"on\"\n"
+                 "    latex_mathml: \"off\"\n")
     with open(os.path.join(work, "latex-conversion-macros.tex"), "w", encoding="utf-8") as fh:
         fh.write("% For reading.\n\\renewcommand{\\suchthat}{\\mid}\n")
     before = fingerprint(work)
@@ -720,7 +722,7 @@ def case_source(work):
     with open(os.path.join(work, "table-headers.csv"), "w", encoding="utf-8") as fh:
         fh.write("key,headers\n" + "".join("%s,first-row\n" % r["key"] for r in rows
                                             if "Name" in r.get("preview", "")))
-    before = fingerprint(work, skip_dirs=("fixed", "tagged", "kept", "build"))
+    before = fingerprint(work, skip_dirs=("fixed", "tagged", "kept", "plainmath", "build"))
     result = convert(work)
     said = result.stdout + result.stderr
     fixed = os.path.join(work, "fixed")
@@ -732,24 +734,27 @@ def case_source(work):
     tagged = read(work, "tagged", "notes.tex") \
         if os.path.exists(os.path.join(work, "tagged", "notes.tex")) else ""
 
-    def build(tree, engine, text=None):
+    def build(tree, engine, text=None, passes=1):
         """The author's tree with tree laid over it (and notes.tex as text,
-        if given), built with engine: (exit status, log)."""
+        if given), built with engine, passes times: (exit status, log) of
+        the last. A formula's MathML is attached on the pass after the one
+        that makes it."""
         build = os.path.join(work, "build-" + os.path.basename(tree) + "-" + engine)
         shutil.copytree(work, build, ignore=shutil.ignore_patterns(
-            "fixed", "tagged", "kept", "html", "build*", "rendered"))
+            "fixed", "tagged", "kept", "plainmath", "html", "build*", "rendered"))
         shutil.copytree(tree, build, dirs_exist_ok=True)
         if text is not None:
             with open(os.path.join(build, "notes.tex"), "w", encoding="utf-8") as fh:
                 fh.write(text)
-        done = subprocess.run([engine, "-interaction=nonstopmode", "notes.tex"],
-                              cwd=build, capture_output=True, text=True, timeout=300)
+        for _ in range(passes):
+            done = subprocess.run([engine, "-interaction=nonstopmode", "notes.tex"],
+                                  cwd=build, capture_output=True, text=True, timeout=300)
         return done.returncode, done.stdout
 
     def builds_tagged():
         if not shutil.which("lualatex"):
             return skip("no lualatex to build the tagged copy")
-        status, log = build(os.path.join(work, "tagged"), "lualatex")
+        status, log = build(os.path.join(work, "tagged"), "lualatex", passes=2)
         return status == 0 and "para hooks differ" not in log \
             and "Parent-Child" not in log and "already defined" not in log
 
@@ -776,6 +781,56 @@ def case_source(work):
             walk(pdf.Root.StructTreeRoot)
         return alts.count("A darker square") == 3 and "Fixed" in alts \
             and alts.count("A fifth [square]") == 2
+
+    def mathml_in_tagged_pdf():
+        """The tagged build's formula carries its MathML, from unicode-math:
+        the set-builder bar the definitions file makes \\mid is U+2223."""
+        try:
+            import pikepdf
+        except ImportError:
+            return skip("no pikepdf to read the tagged PDF's structure")
+        path = os.path.join(work, "build-tagged-lualatex", "notes.pdf")
+        if not os.path.exists(path):
+            return False
+        found = []
+
+        def walk(node):
+            if isinstance(node, pikepdf.Dictionary):
+                if str(node.get("/S", "")) == "/Formula" and "/AF" in node:
+                    files = node.AF if isinstance(node.AF, pikepdf.Array) else [node.AF]
+                    for f in files:
+                        if str(f.get("/AFRelationship")) == "/Supplement":
+                            found.append(f.EF.F.read_bytes().decode("utf-8"))
+                kids = node.get("/K")
+                if kids is not None:
+                    for kid in (kids if isinstance(kids, pikepdf.Array) else [kids]):
+                        walk(kid)
+        with pikepdf.open(path) as pdf:
+            walk(pdf.Root.StructTreeRoot)
+        return any("\u2223" in m and "<math" in m for m in found)
+
+    def figure_in_place():
+        """The tagged build's figure is tagged where the text has it, not in
+        the container tagging gathers floats into at the document's end."""
+        try:
+            import pikepdf
+        except ImportError:
+            return skip("no pikepdf to read the tagged PDF's structure")
+        path = os.path.join(work, "build-tagged-lualatex", "notes.pdf")
+        if not os.path.exists(path):
+            return False
+        names = []
+
+        def walk(node):
+            if isinstance(node, pikepdf.Dictionary):
+                names.append(str(node.get("/S", "")))
+                kids = node.get("/K")
+                if kids is not None:
+                    for kid in (kids if isinstance(kids, pikepdf.Array) else [kids]):
+                        walk(kid)
+        with pikepdf.open(path) as pdf:
+            walk(pdf.Root.StructTreeRoot)
+        return "/Figure" in names and "/figures" not in names
 
     def builds_untagged():
         if not shutil.which("pdflatex"):
@@ -828,7 +883,7 @@ def case_source(work):
         ("the run says which are in files the book's own build makes",
          lambda: "own build" in said and "writes over them" in said),
         ("the author's files are untouched by the source target",
-         lambda: fingerprint(work, skip_dirs=("fixed", "tagged", "kept", "build")) == before),
+         lambda: fingerprint(work, skip_dirs=("fixed", "tagged", "kept", "plainmath", "build")) == before),
         ("the remediated copy builds with pdfLaTeX, as the author's does", builds),
         ("tagging: \\DocumentMetadata, the book's language, pdfTeX's option and setting out",
          lambda: tagged.startswith("\\DocumentMetadata{lang=en, pdfstandard=ua-2, tagging=on}\n"
@@ -841,7 +896,7 @@ def case_source(work):
          and "\\begin{center}\n\\leavevmode\\[" in tagged),
         ("tagging: a person's header row declared for the table, in a group of its own",
          lambda: "{\\ifdefined\\tagpdfsetup\\tagpdfsetup{table/header-rows={1}}\\fi"
-         "\\begin{tabular}{cc}" in tagged and tagged.count("\\tagpdfsetup{") == 1),
+         "\\begin{tabular}{cc}" in tagged and tagged.count("\\tagpdfsetup{table/") == 1),
         ("untagged, the decision isn't written, and the run says why",
          lambda: "\\tagpdfsetup" not in notes and "need" in said and "tagging" in said),
         ("the definitions file is written after the copy's preamble, as it's read",
@@ -861,7 +916,45 @@ def case_source(work):
          lambda: "\\DocumentMetadata" not in notes and "pdftex" in notes),
         ("the tagged copy builds with LuaLaTeX, no tagging error or warning", builds_tagged),
         ("and the image behind the macro has its alt text in the PDF", alt_in_tagged_pdf),
+        ("tagging: unicode-math for the formulas' MathML, LuaLaTeX only, with a fallback font",
+         lambda: re.search(r"\\ifdefined\\directlua\n  \\usepackage\{unicode-math\}\n"
+                           r"(?:.*\n)*?.*RawFeature=\{fallback=textbookimprover\}(?:.*\n)*?"
+                           r".*math/setup=\{mathml-SE,mathml-AF\}(?:.*\n)*?\\fi\n", tagged)
+         is not None and "unicode-math loaded" in said),
+        ("and the tagged PDF's formula carries its MathML", mathml_in_tagged_pdf),
+        ("tagging: floats tagged where the text has them, not gathered at the end",
+         lambda: "\\ifdefined\\tagpdfsetup\\tagpdfsetup{float/here}\\fi" in tagged
+         and "tagged where the text has them" in said),
+        ("and the tagged PDF's figure is where the text has it", figure_in_place),
+        ("latex_mathml off: tagged, the book's fonts kept, and the run says so",
+         lambda: os.path.exists(os.path.join(work, "plainmath", "notes.tex"))
+         and "\\DocumentMetadata" in read(work, "plainmath", "notes.tex")
+         and "unicode-math" not in read(work, "plainmath", "notes.tex")
+         and "latex_mathml is \"off\"" in said),
         ("and without \\DocumentMetadata it builds with pdfLaTeX", builds_untagged),
+    ]
+
+
+def case_own_fonts(work):
+    """A tagged copy of a book whose fonts are its own: they're kept, and
+    the run says its formulas get no MathML, which unicode-math would."""
+    os.makedirs(work)
+    with open(os.path.join(work, "notes.tex"), "w", encoding="utf-8") as fh:
+        fh.write("\\documentclass{article}\n\\input{fonts}\n\\begin{document}\n"
+                 "A formula: $x^2 + 1$.\n\\end{document}\n")
+    # In a file the preamble inputs, as GIAM keeps its definitions.
+    with open(os.path.join(work, "fonts.tex"), "w", encoding="utf-8") as fh:
+        fh.write("\\usepackage{mathptmx}\n")
+    with open(os.path.join(work, "conversion.yaml"), "w") as fh:
+        fh.write("targets:\n  tagged:\n    format: source\n    tagging: \"on\"\n")
+    result = convert(work)
+    said = result.stdout + result.stderr
+    copy = os.path.join(work, "tagged", "notes.tex")
+    return [
+        ("a book whose fonts are its own keeps them, and the run says its formulas get no MathML",
+         lambda: os.path.exists(copy) and "unicode-math" not in read(work, "tagged", "notes.tex")
+         and "\\input{fonts}" in read(work, "tagged", "notes.tex")
+         and "get no MathML" in said and "with mathptmx" in said),
     ]
 
 
@@ -1042,7 +1135,8 @@ def case_capacity(work):
 
 CASES = [("a LaTeX book", case_book), ("two masters", case_masters),
          ("one file", case_single), ("an unbuilt book", case_unbuilt),
-         ("the source target", case_source), ("the latex target", case_latex_target),
+         ("the source target", case_source), ("a book with fonts of its own", case_own_fonts),
+         ("the latex target", case_latex_target),
          ("a book too big for TeX", case_capacity)]
 
 

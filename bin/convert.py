@@ -2174,6 +2174,14 @@ def remediate_sources(target, base, docs, paths, env, html_stems=(), language=No
                                         tagging=tagging, language=language,
                                         headers=decisions, definitions=definitions,
                                         definitions_name=LATEX_MACROS)
+        # A copy built with LaTeX's tagging, by this target or by the
+        # book's own \DocumentMetadata, is where a package's tagging
+        # status matters: advice from the tagging project's list.
+        if tagging or latexsource.code_matches(
+                texremediate.DOCUMENT_METADATA,
+                latexsource.read_text(os.path.join(base, master))):
+            import taggingstatus
+            taggingstatus.check(base, master, say)
         say(f"{target.name}: {counts['files']} LaTeX file(s) written, "
             f"{counts['changed']} of them changed: {counts.get('described', 0)} "
             f"image(s) and drawing(s) given alt text and {counts.get('decorative', 0)} "

@@ -666,7 +666,17 @@ def case_source(work):
     with open(os.path.join(work, "latex-conversion-macros.tex"), "w", encoding="utf-8") as fh:
         fh.write("% For reading.\n\\renewcommand{\\suchthat}{\\mid}\n")
     before = fingerprint(work)
-    convert(work)
+    first = convert(work)
+    first_said = first.stdout + first.stderr
+    # LaTeX's tagging status data, as the distribution's package has it,
+    # beside the book, where kpsewhich looks first: dated before any LaTeX
+    # this runs on, amsthm rated currently incompatible, babel unchecked,
+    # and graphicx not in it.
+    with open(os.path.join(work, "latex-tagging-status.ltx"), "w") as fh:
+        fh.write("\\ProvidesFile{latex-tagging-status.ltx}[2020-01-01]\n"
+                 "\\@kernel@tagging@status{article}{cls}{4}\n"
+                 "\\@kernel@tagging@status{amsthm}{sty}{2}\n"
+                 "\\@kernel@tagging@status{babel}{sty}{0}\n")
     # A person's header decision for the table, from the census's row.
     new = os.path.join(work, "table-headers-new.csv")
     rows = list(csv.DictReader(open(new, encoding="utf-8-sig"))) if os.path.exists(new) else []
@@ -765,6 +775,11 @@ def case_source(work):
         ("latex_definitions off keeps them to the conversion",
          lambda: os.path.exists(os.path.join(work, "kept", "notes.tex"))
          and "\\mid" not in read(work, "kept", "notes.tex")),
+        ("without the tagging status data, the run says how to install it",
+         lambda: "tlmgr install latex-tagging-status" in first_said),
+        ("with it, the book's packages are named by status, and the list's age",
+         lambda: "currently incompatible: amsthm" in said and "unchecked: babel" in said
+         and "not in the list: graphicx" in said and "older than the LaTeX it checks" in said),
         ("tagging off leaves the book's build alone",
          lambda: "\\DocumentMetadata" not in notes and "pdftex" in notes),
         ("the tagged copy builds with LuaLaTeX, no tagging error or warning", builds_tagged),

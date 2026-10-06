@@ -742,6 +742,7 @@ def case_latex_target(work):
         fh.write("# Circles {#circles}\n\n![A black circle.](img/circle.svg)\n\n"
                  "Its area is $\\pi r^2$.\n\n1. Draw it.\n2. Measure it.\n\n"
                  "So $$A = \\pi r^2.$$\\\nQ.E.D.\n\n"
+                 "**Theorem.** *$$C = 2 \\pi r$$*\n\n"
                  "<table><caption>Two statements</caption>"
                  "<thead><tr><th>Statement</th><th>Truth table</th></tr></thead>"
                  "<tbody><tr><td>A and B</td><td><table><thead><tr><th>A</th><th>B</th>"
@@ -827,6 +828,8 @@ def case_latex_target(work):
          lambda: "\\begin{minipage}[b]{\\linewidth}\\raggedright\nProof: first,\\\\\n" in two),
         ("the writer's \\multicolumn at a table's edge is there to read back",
          lambda: re.search(r"\\multicolumn\{2\}\{[^}]*@\{\}\}", two) is not None),
+        ("a display formula comes out of the emphasis around it, which tagging can't take",
+         lambda: "C = 2 \\pi r" in two and "\\emph{\\[" not in two),
         ("a table in a table's cell is a tabular, its head declared for tagging and ruled off",
          lambda: "{\\tagpdfsetup{table/header-rows={1}}\\begin{tabular}[t]{" in two
          and "A & B & A and B \\\\\n\\hline\n" in two and "T & F & F \\\\" in two),

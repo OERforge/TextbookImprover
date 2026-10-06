@@ -393,7 +393,56 @@ local function line_breaks(block)
   return nil
 end
 
+-- A display formula inside emphasis or another inline wrapper, which a
+-- LaTeX source gives as \emph{\[ ... \]} (GIAM states every theorem so):
+-- tagging leaves the paragraph's content in the section's structure
+-- itself, and veraPDF's PDF/UA-2 profile fails "Sect shall not contain
+-- content items" (measured: two lines in a section are enough). The
+-- formula comes out of the wrapper, which keeps what's on either side.
+local WRAPPERS = { Emph = true, Strong = true, Underline = true,
+  Strikeout = true, SmallCaps = true, Span = true }
+
+local function lift_display(inlines)
+  local out, changed = pandoc.Inlines{}, false
+  for _, inline in ipairs(inlines) do
+    local holds = false
+    if WRAPPERS[inline.t] then
+      for _, inner in ipairs(inline.content) do
+        if inner.t == 'Math' and inner.mathtype == 'DisplayMath' then
+          holds = true
+          break
+        end
+      end
+    end
+    if holds then
+      changed = true
+      local part = pandoc.Inlines{}
+      local function flush()
+        if #part > 0 then
+          local copy = inline:clone()
+          copy.content = part
+          out:insert(copy)
+          part = pandoc.Inlines{}
+        end
+      end
+      for _, inner in ipairs(inline.content) do
+        if inner.t == 'Math' and inner.mathtype == 'DisplayMath' then
+          flush()
+          out:insert(inner)
+        else
+          part:insert(inner)
+        end
+      end
+      flush()
+    else
+      out:insert(inline)
+    end
+  end
+  return changed and out or nil
+end
+
 return {
+  { Inlines = lift_display },
   { Figure = Figure },
   { Para = line_breaks, Plain = line_breaks },
   { Table = Table, Image = Image, Link = Link },

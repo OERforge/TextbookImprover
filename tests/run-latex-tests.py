@@ -958,6 +958,141 @@ def case_own_fonts(work):
     ]
 
 
+BOOK_MASTER = ("\\documentclass{book}\n\\usepackage{graphicx}\n\\usepackage{amsmath,amssymb}\n"
+               "\\usepackage{makeidx}\n\\makeindex\n\\title{A Small Book}\n\\author{An Author}\n"
+               "\\begin{document}\n\\maketitle\n\\include{one}\n\\printindex\n\\end{document}\n")
+BOOK_CHAPTER = ("\\chapter{One}\nSome text about sets\\index{sets}, where "
+                "$\\mathbb{N} \\subseteq \\mathbb{Z}$ and $x \\neq y$.\n"
+                "\\begin{figure}[t]\\centering\\includegraphics[width=2cm]{sq}"
+                "\\caption{A square}\\label{fig:sq}\\end{figure}\n"
+                "After the figure in the source, Figure~\\ref{fig:sq}.\n\n"
+                "\\begin{tabular}{cc}\nName & Value \\\\\na & 1 \\\\\nb & 2 \\\\\n"
+                "\\end{tabular}\n\n"
+                "\\[ \\sum_{i=1}^n i = \\frac{n(n+1)}{2} \\]\n\n"
+                "A drawing with no description: "
+                "\\begin{picture}(20,10)\\put(0,0){x}\\end{picture}\n")
+
+
+def case_book_pdf(work):
+    """A LaTeX book's PDF, built from the book's own LaTeX (pdf.from: book):
+    its index, which the pages don't have, its figure's alt text from the
+    sidecar, its formulas' MathML, and its figure tagged in place; built
+    from the pages instead with pdf.from: pages; and a book that won't
+    build with tagging stops the run with LaTeX's error and the way out."""
+    if not shutil.which("lualatex") or not shutil.which("latexmk"):
+        return [("a LaTeX book's PDF is built from its own LaTeX",
+                 lambda: skip("no lualatex or latexmk for the PDF target"))]
+    books = {}
+    for name, extra, targets in (
+            ("book", "", "  pdf:\n    format: pdf\n"),
+            ("pages", "", "  pdf:\n    format: pdf\n    pdf:\n      from: pages\n"),
+            # Builds with pdfLaTeX, as the conversion reads it, and stops
+            # with LuaLaTeX, as the PDF target builds it.
+            ("broken", "\\ifdefined\\directlua\\TIQundefined\\fi\n", "  pdf:\n    format: pdf\n")):
+        book = os.path.join(work, name)
+        os.makedirs(book)
+        png(os.path.join(book, "sq.png"), (128, 128, 128))
+        with open(os.path.join(book, "book.tex"), "w", encoding="utf-8") as fh:
+            fh.write(BOOK_MASTER.replace("\\begin{document}", extra + "\\begin{document}"))
+        with open(os.path.join(book, "one.tex"), "w", encoding="utf-8") as fh:
+            fh.write(BOOK_CHAPTER)
+        with open(os.path.join(book, "image-alt.csv"), "w", encoding="utf-8") as fh:
+            fh.write("Image,Alt\nsq.png,A gray square\n")
+        with open(os.path.join(book, "conversion.yaml"), "w") as fh:
+            fh.write("targets:\n" + targets)
+        result = convert(book)
+        books[name] = (book, result.returncode, result.stdout + result.stderr)
+
+    def text(name):
+        path = os.path.join(books[name][0], "pdf", "book.pdf")
+        if not os.path.exists(path) or not shutil.which("pdftotext"):
+            return None
+        return subprocess.run(["pdftotext", path, "-"], capture_output=True,
+                              text=True).stdout
+
+    def structure():
+        """(figure alt texts, formula MathML count, gathered-float containers,
+        header cells)."""
+        import pikepdf
+        alts, mathml, containers, heads = [], 0, 0, 0
+        path = os.path.join(books["book"][0], "pdf", "book.pdf")
+
+        def walk(node):
+            nonlocal mathml, containers, heads
+            if isinstance(node, pikepdf.Dictionary):
+                kind = str(node.get("/S", ""))
+                heads += kind == "/TH"
+                if kind == "/Figure":
+                    alts.append(str(node.get("/Alt", "")))
+                if kind in ("/figures", "/tables"):
+                    containers += 1
+                if kind == "/Formula" and "/AF" in node:
+                    files = node.AF if isinstance(node.AF, pikepdf.Array) else [node.AF]
+                    mathml += any(str(f.get("/AFRelationship")) == "/Supplement" for f in files)
+                kids = node.get("/K")
+                if kids is not None:
+                    for kid in (kids if isinstance(kids, pikepdf.Array) else [kids]):
+                        walk(kid)
+        with pikepdf.open(path) as pdf:
+            walk(pdf.Root.StructTreeRoot)
+        return alts, mathml, containers, heads
+
+    def built_from_book():
+        found = text("book")
+        if found is None:
+            return skip("no pdftotext to read the PDF")
+        return "built by LaTeX from the book's own files" in books["book"][2] \
+            and "Index" in found and "sets, " in found
+
+    def tagged_from_book():
+        try:
+            import pikepdf  # noqa: F401
+        except ImportError:
+            return skip("no pikepdf to read the PDF's structure")
+        alts, mathml, containers, heads = structure()
+        return alts[:1] == ["A gray square"] and mathml >= 3 and containers == 0 and heads >= 2
+
+    def placeholder_reported():
+        """The drawing with no description has LaTeX's placeholder, which a
+        validator accepts and the output check reports."""
+        report = os.path.join(books["book"][0], "output-check.csv")
+        if not os.path.exists(report):
+            return False
+        with open(report, encoding="utf-8") as fh:
+            rows = list(csv.reader(fh))
+        return any(len(r) > 2 and r[1] == "pdf-figure-alt-is-placeholder"
+                   and r[2] == "picture environment" for r in rows)
+
+    def passes_ua2():
+        verapdf = os.environ.get("VERAPDF") or shutil.which("verapdf")
+        if not verapdf:
+            return skip("no veraPDF to check the PDF")
+        done = subprocess.run([verapdf, "-f", "ua2", "--format", "text",
+                               os.path.join(books["book"][0], "pdf", "book.pdf")],
+                              capture_output=True, text=True)
+        return done.stdout.strip().startswith("PASS")
+
+    def built_from_pages():
+        found = text("pages")
+        if found is None:
+            return skip("no pdftotext to read the PDF")
+        return books["pages"][1] == 0 and "built by LaTeX from the book's own files" \
+            not in books["pages"][2] and "sets" in found and "Index" not in found
+    return [
+        ("a LaTeX book's PDF is built from its own LaTeX: its index is there", built_from_book),
+        ("its figure has the sidecar's alt text, its formulas MathML, its figure in place, "
+         "its table the census's header row",
+         tagged_from_book),
+        ("and it passes veraPDF's PDF/UA-2 profile", passes_ua2),
+        ("the output check reports LaTeX's placeholder alt text for a drawing with none",
+         placeholder_reported),
+        ("pdf.from: pages builds it from the pages, which have no index", built_from_pages),
+        ("a book that won't build with tagging stops the run, with LaTeX's error and the way out",
+         lambda: books["broken"][1] != 0 and "TIQundefined" in books["broken"][2]
+         and "wasn't built" in books["broken"][2] and "pdf.from: pages" in books["broken"][2]),
+    ]
+
+
 def case_latex_target(work):
     """The latex target: a Markdown book written as LaTeX, a master and a
     file per chapter, read back as a LaTeX source to the same pages."""
@@ -1136,6 +1271,7 @@ def case_capacity(work):
 CASES = [("a LaTeX book", case_book), ("two masters", case_masters),
          ("one file", case_single), ("an unbuilt book", case_unbuilt),
          ("the source target", case_source), ("a book with fonts of its own", case_own_fonts),
+         ("a LaTeX book's PDF, from its own LaTeX", case_book_pdf),
          ("the latex target", case_latex_target),
          ("a book too big for TeX", case_capacity)]
 

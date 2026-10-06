@@ -137,6 +137,8 @@ def first_errors(log, limit=3):
     lines = log.splitlines()
     found = []
     for i, line in enumerate(lines):
+        if "==> Fatal error occurred" in line:
+            continue
         if line.startswith("! ") or re.match(r"^[^:\s]+\.\w+:\d+: ", line):
             piece = [line]
             for follow in lines[i + 1:i + 8]:

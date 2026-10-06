@@ -219,10 +219,14 @@ def inspect(path):
     facts["tag-total-capped"] = facts["tag-total"] >= WALK_LIMIT
     # LaTeX's tagging code gives an image with no alt text its file name
     # as /Alt (latex-lab-testphase-graphic.sty, the alt-text-missing
-    # warning), which a validator accepts and which describes nothing.
+    # warning), which a validator accepts and which describes nothing, and
+    # a drawing with none a placeholder of its own.
     for alt in alts:
         if alt is not None and FILE_NAME.search(alt.strip()):
             out.append(Finding(name, "pdf-figure-alt-is-file-name", alt,
+                               file=name, kind="pdf"))
+        elif alt is not None and alt.strip() in LATEX_PLACEHOLDERS:
+            out.append(Finding(name, "pdf-figure-alt-is-placeholder", alt,
                                file=name, kind="pdf"))
     try:
         depth, count = _outline_depth(reader.outline)
@@ -359,6 +363,10 @@ def facts_lines(facts):
     return lines
 
 
+# What LaTeX's tagging writes as a drawing's alt text when it has none: a
+# picture environment's (latex-lab-testphase-graphic.sty) and a
+# tikzpicture's (latex-lab-testphase-tikz.sty), LaTeX 2026-06-01.
+LATEX_PLACEHOLDERS = ("picture environment", "Alternative text missing!")
 FILE_NAME = re.compile(r"(^|[/\\])[^/\\\s]+\.(png|jpe?g|gif|svg|pdf|eps|"
                        r"tiff?|webp|bmp)$", re.I)
 

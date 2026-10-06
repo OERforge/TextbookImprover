@@ -170,7 +170,11 @@ The sentence or two a reading system shows a reader about the book's accessibili
 
 ## pdf
 
-Settings read only by a pdf target. One PDF holds the whole book, assembled from the pages the way the EPUB is, and written by Pandoc's LaTeX writer and LuaLaTeX with LaTeX's tagging on, so the file carries its structure, its images' alternative text, its tables' header cells, and its equations as MathML.
+Settings read only by a pdf target. One PDF holds the whole book, assembled from the pages the way the EPUB is, and written by Pandoc's LaTeX writer and LuaLaTeX with LaTeX's tagging on, so the file carries its structure, its images' alternative text, its tables' header cells, and its equations as MathML. A LaTeX book's PDF is built from the book's own LaTeX instead, unless from says pages.
+
+**`pdf.from`**—one of `book`, `pages`; default `book`
+
+What a LaTeX book's PDF is built from. book builds the book's own LaTeX with latexmk and LuaLaTeX, from a copy of its folder with the book's files as a source target with tagging on writes them (alt text, header declarations, the definitions file, MathML), the census's header guesses declared too, as the pages have them: the author's pages, index, and bibliography, as their LaTeX makes them. It needs latexmk, and a book that builds with LaTeX's tagging; the PDF claims PDF/UA-2, and the settings below that shape Pandoc's LaTeX (metadata, figures, repair_captions, remove_empty_paragraphs, ua1_math, toc_depth) don't apply. pages builds from the converted pages through Pandoc's LaTeX writer, as for any other source. A book from any other source is built from its pages either way.
 
 **`pdf.standard`**—`list`; default `[ua-2]`
 

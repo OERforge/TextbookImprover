@@ -20,7 +20,7 @@ Every source format the pipeline reads, the ways a book in that format can arriv
 | AsciiDoc (`.adoc`) | TESTED | TESTED | TESTED | TESTED | TESTED | TESTED | NOT TESTED | TESTED |
 | LaTeX (`.tex`) | TESTED | TESTED | NEEDS MORE TESTING | TESTED, with losses (see [AsciiDoc](asciidoc.md#asciidoc-as-a-target)) | TESTED | TESTED, with losses (see [Word output](#word-output)) | TESTED, with losses (see [LaTeX](#latex)) | TESTED, through the `latex` target, with losses (see [LaTeX](#latex)) |
 
-LaTeX as an input is measured on *A Gentle Introduction to the Art of Mathematics* (GIAM) and a set of calculus notes ([LaTeX sources](latex.md)). Both PDFs pass veraPDF's PDF/UA-2 profile, GIAM's with the placeholder alt text LaTeX gives a figure until its image-alt sidecar is filled in, which the output check reports (`pdf-figure-alt-is-file-name`). Written out and read back, GIAM's 10 chapters give 9 identical pages through Markdown (one table's row headers come back as a header row), 8 through LaTeX (two figures holding a table come back as captioned tables), and 7 through AsciiDoc; the rest differ by design, two figures holding a table coming back as captioned tables, as through LaTeX, and the title from `project.yaml`. [PDF output](#pdf) is new, and has been measured on a book from each input: the statistics book (Word), the economics book (Markdown), DCIC (HTML), and the security textbook (AsciiDoc). PDF is read only by [the audit](auditing.md), which reports on a Word, Markdown, HTML, EPUB, or PDF file without converting it.
+LaTeX as an input is measured on *A Gentle Introduction to the Art of Mathematics* (GIAM) and a set of calculus notes ([LaTeX sources](latex.md)). Both PDFs, built by LaTeX from each book's own files, pass veraPDF's PDF/UA-2 profile with MathML for every formula, GIAM's with the placeholder alt text LaTeX gives a figure until its image-alt sidecar is filled in, which the output check reports (`pdf-figure-alt-is-file-name`). Written out and read back, GIAM's 10 chapters give 9 identical pages through Markdown (one table's row headers come back as a header row), 8 through LaTeX (two figures holding a table come back as captioned tables), and 7 through AsciiDoc; the rest differ by design, two figures holding a table coming back as captioned tables, as through LaTeX, and the title from `project.yaml`. [PDF output](#pdf) is new, and has been measured on a book from each input: the statistics book (Word), the economics book (Markdown), DCIC (HTML), and the security textbook (AsciiDoc). PDF is read only by [the audit](auditing.md), which reports on a Word, Markdown, HTML, EPUB, or PDF file without converting it.
 
 ## Word
 
@@ -113,11 +113,14 @@ Pages are parsed with html5lib, or with lxml where html5lib isn't installed; DCI
 
 **What it becomes**
 
-- **HTML: NEEDS MORE TESTING**, on the suite's book and on GIAM: 10 pages, its 93 xfig drawings rendered by LaTeX, its 19 references between chapters resolved, all but 6 of about 4,500 formulas made MathML, and the Nu checker finding nothing the book doesn't lack itself (alt text, table descriptions).
-- **EPUB: NEEDS MORE TESTING**, on GIAM: epubcheck passes, with the same findings as the HTML.
-- **PDF: NEEDS MORE TESTING.** Through Pandoc, as for any source. GIAM's long division, a table inside a table, stopped LaTeX until the PDF target wrote a nested table as lines of text. The book's own PDF, made by LaTeX from its own source with tagging on, is next on the [roadmap](../ROADMAP.md).
-- **Markdown, AsciiDoc, Word: NOT TESTED.**
-- **A round trip to itself: Not available.** There is no LaTeX target yet.
+- **HTML: TESTED**, on the suite's book and on GIAM: 10 pages, its 93 xfig drawings rendered by LaTeX, its 19 references between chapters resolved, every formula made MathML once `latex-conversion-macros.tex` says what three of the book's macros mean, and the Nu checker finding nothing the book doesn't lack itself (alt text, table descriptions).
+- **EPUB: TESTED**, on GIAM: epubcheck passes, with the same findings as the HTML.
+- **PDF: TESTED.** Built by LaTeX from the book's own files (`pdf.from: book`, the default), made to build with LaTeX's tagging as a `source` target with `tagging: "on"` writes them: GIAM's 434 pages, index and bibliography included, pass veraPDF's PDF/UA-2 profile with MathML for each of its 4,521 formulas, and so do the calculus notes' 84. Through Pandoc (`pdf.from: pages`), as for any source, without the index or bibliography ([LaTeX sources](latex.md#the-pdf-target)).
+- **Word: TESTED, with losses**, on GIAM: read back, its lists and quotations are whole ([Word output](#word-output)).
+- **Markdown: NEEDS MORE TESTING**, on GIAM: written out and read back, 9 of its 10 chapters give identical pages.
+- **AsciiDoc: TESTED, with losses**, on GIAM: 7 of 10, the rest by design ([AsciiDoc as a target](asciidoc.md#asciidoc-as-a-target)).
+- **LaTeX: TESTED, with losses**, through the `latex` target: written out and read back, 8 of GIAM's 10 chapters give identical pages, the other two by design ([the `latex` target](#latex-1)).
+- **A round trip to itself: TESTED, through the `latex` target, with losses** (the line above).
 
 ## The outputs, and how each is packaged
 

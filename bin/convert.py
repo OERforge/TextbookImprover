@@ -2239,17 +2239,7 @@ def remediate_sources(target, base, docs, paths, env, html_stems=(), language=No
                if counts.get("generated") else "")
             + (f" {counts['pspicture']} pspicture(s) have no key for alt text and "
                "were left alone." if counts.get("pspicture") else ""))
-        if counts.get("unplaced"):
-            keys = counts["unplaced_keys"]
-            say(f"WARNING: {target.name}: {counts['unplaced']} image(s) and drawing(s) with "
-                f"alt text in {os.path.basename(paths['image_alt'] or 'image-alt.csv')} didn't get it in the "
-                "copy: " + ", ".join(keys[:5]) + (", ..." if len(keys) > 5 else "")
-                + ". The copy writes alt text at each \\includegraphics, drawing, and call "
-                "of a macro the book defines around one image; these are reached another "
-                "way (a macro it can't follow), are in a caption or heading, which LaTeX "
-                "writes to a file and reads back, or come through a macro that sets alt "
-                "text of its own. The pages have their alt text; the LaTeX needs it "
-                "written in by hand.")
+        unplaced_warning(target.name, counts, paths, "the copy")
         written.extend(os.path.join(target.output_dir, f) for f in files)
     others = sorted(f for f in os.listdir(base) if f.endswith(".adoc") and not f.startswith("."))
     if docs or pages or md_files or not latex:
@@ -2295,6 +2285,138 @@ def remediate_sources(target, base, docs, paths, env, html_stems=(), language=No
             "text doesn't hold them as many times as Pandoc reads them, as when the same "
             "syntax also appears inside code.")
     return written
+
+
+def unplaced_warning(name, counts, paths, where):
+    """The alt text decisions a LaTeX copy couldn't write, named
+    (texremediate.remediate's unplaced_keys); where says what lacks them:
+    the copy, or the PDF built from it."""
+    if not counts.get("unplaced"):
+        return
+    keys = counts["unplaced_keys"]
+    say(f"WARNING: {name}: {counts['unplaced']} image(s) and drawing(s) with alt text in "
+        f"{os.path.basename(paths['image_alt'] or 'image-alt.csv')} didn't get it in "
+        f"{where}: " + ", ".join(keys[:5]) + (", ..." if len(keys) > 5 else "")
+        + ". The copy writes alt text at each \\includegraphics, drawing, and call "
+        "of a macro the book defines around one image; these are reached another "
+        "way (a macro it can't follow), are in a caption or heading, which LaTeX "
+        "writes to a file and reads back, or come through a macro that sets alt "
+        "text of its own. The pages have their alt text; the LaTeX needs it "
+        "written in by hand.")
+
+
+def latex_book_pdf(target, base, master, latex_stems, paths, work, language, project,
+                   targets):
+    """A LaTeX book's PDF, built by LaTeX from the book's own files
+    (pdf.from: book): the book's folder copied, the files its master
+    reaches written over the copy as a source target with tagging on
+    writes them, with the census's header guesses declared beside a
+    person's decisions, as the pages have them, and latexmk run with
+    LuaLaTeX. Returns the PDF's path; a failed build stops the run, with
+    LaTeX's first errors."""
+    import latexbuild
+    import latexsource
+    standards = [str(s).strip().lower() for s in (target["pdf.standard"] or []) if str(s).strip()]
+    if "ua-2" not in standards or any(s.startswith("ua-1") for s in standards):
+        die(f"The PDF for target {target.name} is built from the book's own LaTeX "
+            "(pdf.from: book), which claims PDF/UA-2, and pdf.standard asks for "
+            f"{', '.join(standards) or 'none'}. pdf.from: pages builds it from the "
+            "converted pages, which can claim the others.")
+    for program in ("latexmk", latexbuild.ENGINE):
+        if shutil.which(program) is None:
+            die(f"{program} is not on the path, and the PDF for target {target.name} "
+                "is built from the book's own LaTeX with it (pdf.from: book; see "
+                "docs/installation.md). pdf.from: pages builds it from the converted "
+                "pages instead.")
+    problem = latexbuild.latex_problem(say)
+    if problem:
+        die(problem)
+
+    # The book's folder, but not what this run writes into it.
+    build = os.path.join(work, f"pdf-{target.name}")
+    if os.path.isdir(build):
+        shutil.rmtree(build)
+    outputs = {os.path.abspath(t.output_dir) for t in targets} | {
+        os.path.abspath(os.path.join(base, latexsource.RENDERED))}
+
+    def leave_out(directory, names):
+        return [n for n in names if n.startswith(".")
+                or os.path.abspath(os.path.join(directory, n)) in outputs]
+    shutil.copytree(base, build, ignore=leave_out, symlinks=True)
+
+    files, _ = latexsource.reached(base, master)
+    resolved_html = {}
+    html_json = os.path.join(work, "table-headers-html.json")
+    if os.path.exists(html_json):
+        with open(html_json, encoding="utf-8") as fh:
+            resolved_html = json.load(fh)
+    # What the pages have: a person's header decision, or the census's guess.
+    headers = {e["latex"]: e["headers"] for entries in resolved_html.values()
+               for e in entries if e.get("latex") and e.get("headers")}
+    definitions = None
+    macros_path = os.path.join(base, LATEX_MACROS) if LATEX_MACROS else ""
+    if os.path.isfile(macros_path):
+        definitions = latexsource.read_text(macros_path)
+    seen = set()
+    for stem in latex_stems:
+        page = os.path.join(base, stem + ".json")
+        if os.path.exists(page):
+            seen.update(os.path.splitext(ref)[0] for ref in media_references(page))
+    counts = texremediate.remediate(base, build, master, files,
+                                    htmlremediate.alt_rows(paths["image_alt"]),
+                                    tagging=True, language=language, headers=headers,
+                                    definitions=definitions, definitions_name=LATEX_MACROS,
+                                    seen=seen, standard=standards)
+
+    folder = os.path.join(build, os.path.dirname(master))
+    stem = os.path.splitext(os.path.basename(master))[0]
+    command = ["latexmk", "-lualatex", "-interaction=nonstopmode", "-halt-on-error",
+               "-file-line-error", os.path.basename(master)]
+    if TRACE:
+        say("+ (in a copy of the book) " + " ".join(shell_quote(c) for c in command))
+    result = subprocess.run(command, cwd=folder, capture_output=True, text=True,
+                            errors="replace", stdin=subprocess.DEVNULL)
+    log_path = os.path.join(folder, stem + ".log")
+    log = latexsource.read_text(log_path) if os.path.exists(log_path) else ""
+    pdf = os.path.join(folder, stem + ".pdf")
+    if result.returncode != 0 or not os.path.exists(pdf):
+        for error in latexbuild.first_errors(log or result.stdout):
+            say(error)
+        for advice in latexbuild.failure_advice(log or result.stdout):
+            say(advice)
+        die(f"The PDF for target {target.name} wasn't built: LaTeX stopped on the "
+            "book's own files, made to build with LaTeX's tagging. A book can need "
+            "changes of its own to build that way (docs/latex.md says which the copy "
+            "makes); pdf.from: pages builds the PDF from the converted pages instead.")
+    missing, _ = latexbuild.missing_characters(log.splitlines())
+    if missing:
+        say(latexbuild.missing_warning(
+            missing, "A font that has them, chosen in the book's preamble, would "
+            "draw them."))
+    os.makedirs(target.output_dir, exist_ok=True)
+    name = str(target["filename"] or "").strip() or \
+        str(project.get("identifier") or target.name)
+    if not name.lower().endswith(".pdf"):
+        name += ".pdf"
+    out_path = os.path.join(target.output_dir, name)
+    shutil.copyfile(pdf, out_path)
+    pages = re.search(r"Output written on .*?\((\d+) pages?", log)
+    unnamed = log.count("Alternative text for graphic is missing")
+    say(f"Wrote {out_path}: {pages.group(1) + ' page(s), ' if pages else ''}built by "
+        "LaTeX from the book's own files, made to build with LaTeX's tagging as a "
+        f"source target would make them: {counts.get('described', 0)} image(s) and "
+        f"drawing(s) with alt text and {counts.get('decorative', 0)} marked artifact, "
+        f"{counts.get('header_rows', 0)} table(s) with a header row and "
+        f"{counts.get('header_columns', 0)} with a header column declared, a person's "
+        "or the census's, "
+        + ("each formula with its MathML, " if counts.get("tag_math") or
+           counts.get("tag_math_setup") else "")
+        + ("its figures and tables tagged where the text has them, "
+           if counts.get("tag_floats") else "")
+        + f"and {unnamed} figure(s) LaTeX gave a placeholder for alt text, which "
+        "image-alt.csv can describe.")
+    unplaced_warning(target.name, counts, paths, "the PDF")
+    return out_path
 
 
 def render_markdown(target, pages, base, work, project, env, losses=None):
@@ -3318,6 +3440,11 @@ def main():
         pdfs = []
         for target in targets:
             if target.format != "pdf":
+                continue
+            if master and str(target["pdf.from"]) == "book":
+                pdfs.append(latex_book_pdf(target, base, master, tex_stems, paths, work,
+                                           language if LANGUAGE_DECLARED else None,
+                                           project, targets))
                 continue
             result = run(["python3", PDF_TOOL, "-d", base,
                           "--target", target.name,

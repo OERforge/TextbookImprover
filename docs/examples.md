@@ -329,7 +329,7 @@ All 80 pages are identical, and all 228 links between them resolve. So the pages
 
 ## A LaTeX book, from its repository to a tagged PDF
 
-Joseph E. Fields's [*A Gentle Introduction to the Art of Mathematics*](https://github.com/osj1961/giam) (GIAM) is an open textbook kept as LaTeX on GitHub under the GFDL: nine chapters, each a file the master `\include`-s, with figures drawn in xfig that the book's own Makefile turns into LaTeX. This example converts it to HTML and an EPUB, then writes a copy of its LaTeX that builds a tagged PDF. Besides LaTeX itself, it needs `pdftocairo` for the drawings ([Installation](installation.md)) and, for the book's own build, `fig2dev` (`sudo apt install fig2dev`). The output below is from commit 167696e, with paths shortened to the file's name.
+Joseph E. Fields's [*A Gentle Introduction to the Art of Mathematics*](https://github.com/osj1961/giam) (GIAM) is an open textbook kept as LaTeX on GitHub under the GFDL: nine chapters, each a file the master `\include`-s, with figures drawn in xfig that the book's own Makefile turns into LaTeX. This example converts it to HTML and an EPUB, then writes a copy of its LaTeX that builds a tagged PDF, and has the run make that PDF itself. Besides LaTeX itself, it needs `pdftocairo` for the drawings ([Installation](installation.md)) and, for the book's own build, `fig2dev` (`sudo apt install fig2dev`). The output below is from commit 167696e, with paths shortened to the file's name.
 
 ### Getting the files
 
@@ -534,3 +534,24 @@ PASS GIAM.pdf ua2
 ```
 
 That pass says less than it seems. With nothing in `image-alt.csv`, LaTeX gives each figure a placeholder for its alt text, `picture environment` or the image's file name, and veraPDF can't tell a placeholder from a description. Once the image-alt sidecar has the book's descriptions, the next run writes each into the copy, as `\begin{picture}[alt={...}]` or `\includegraphics[alt={...}]`, and the PDF built from it carries them. 93 of the drawings are in the files fig2dev writes, so their descriptions go into the copy's versions of those files, and running `make` in the copy again would write over them; the run says so. [LaTeX sources](latex.md#the-source-target) says what the copy changes and why.
+
+### 7. The PDF, made by the run
+
+A `pdf` target makes the same PDF in the run, from a copy of the book's folder that the run makes itself, and the output check runs on it with the pages:
+
+```bash
+cat >> conversion.yaml <<'END'
+  pdf:
+    format: pdf
+END
+python3 $T/bin/convert.py
+```
+
+```
+Wrote pdf/giam-3.2.pdf: 434 page(s), built by LaTeX from the book's own files, made to build with LaTeX's tagging as a source target would make them: 0 image(s) and drawing(s) with alt text and 0 marked artifact, 57 table(s) with a header row and 13 with a header column declared, a person's or the census's, each formula with its MathML, its figures and tables tagged where the text has them, and 195 figure(s) LaTeX gave a placeholder for alt text, which image-alt.csv can describe.
+...
+    186  pdf-figure-alt-is-placeholder: a figure's alternative text in the PDF is the placeholder LaTeX writes for a drawing that has none
+      9  pdf-figure-alt-is-file-name: a figure's alternative text in the PDF is a file name, which is what LaTeX writes when an image has none
+```
+
+It differs from the `tagged` copy in one way: every table's headers are declared as the pages have them, the census's guesses included, where the copy, which goes back to the author, declares only what a person decided. The run with the HTML takes about eight minutes. The output check finds what veraPDF can't, the placeholders LaTeX gave the 195 figures, so the PDF is done when `image-alt.csv` is. With `pdf.from: pages` the PDF is made from the pages through Pandoc instead, as for a book from any other source: 279 pages, also passing PDF/UA-2, without the index or the bibliography ([LaTeX sources](latex.md#the-pdf-target)).

@@ -258,7 +258,7 @@ DEFINES = re.compile(r"\\(?:(?:re|provide)?newcommand\*?|def)\b")
 
 def remediate(base, out_dir, master, files, alts, tagging=False, language=None,
               headers=None, definitions=None, definitions_name="", seen=None,
-              mathml=True):
+              mathml=True, standard=("ua-2",)):
     """Write a remediated copy of each file in files (relative to base) to
     out_dir at the same relative path. alts: {key: alt, or None for
     decorative} (htmlremediate.alt_rows); tagging: made to build with
@@ -268,8 +268,9 @@ def remediate(base, out_dir, master, files, alts, tagging=False, language=None,
     \\tagpdfsetup isn't defined and the build stops; seen: the keys of
     the images and drawings on the conversion's pages, against which a
     decision the copy couldn't write is counted; mathml: whether a tagged
-    copy loads unicode-math for its formulas' MathML. Returns a dict of
-    counts, and in unplaced_keys the keys of those decisions."""
+    copy loads unicode-math for its formulas' MathML; standard: the PDF
+    standards a tagged copy's \\DocumentMetadata claims. Returns a dict
+    of counts, and in unplaced_keys the keys of those decisions."""
     master_text = latexsource.read_text(os.path.join(base, master))
     dirs = latexsource.graphics_paths(latexsource.split_master(master_text)[0])
     totals = {"files": 0, "changed": 0}
@@ -313,7 +314,7 @@ def remediate(base, out_dir, master, files, alts, tagging=False, language=None,
         if not language:
             language = latexsource.preamble_language(
                 latexsource.split_master(originals[master])[0])
-        for key, n in tag(texts, master, language, mathml).items():
+        for key, n in tag(texts, master, language, mathml, standard).items():
             totals["tag_" + key] = n
     for name in files:
         out = os.path.join(out_dir, name)
@@ -457,18 +458,19 @@ def _without_pdftex(m):
     return m.group(1) + ("[%s]" % ",".join(options) if any(o.strip() for o in options) else "")
 
 
-def tag(texts, master, language, mathml=True):
+def tag(texts, master, language, mathml=True, standard=("ua-2",)):
     """texts: {name: text}, changed in place to build with LaTeX's tagging
     on LuaLaTeX, each change measured on GIAM, where it was needed:
-    \\DocumentMetadata before \\documentclass (pdfstandard ua-2), the
-    pdftex option and pdfTeX's own settings taken out, a starred theorem
-    the book defines beside its numbered one defined only when tagging
-    hasn't (tagging's \\newtheorem defines thm* with thm), \\centerline on
-    a line of its own made a centered paragraph, \\leavevmode put before
-    a display formula opening a center environment, which leaves a
-    paragraph open in LaTeX 2026-06-01, each float's tags where the text
-    has it (FLOATS_HERE), and, unless mathml is false, unicode-math for
-    the formulas' MathML (math_block). Returns counts."""
+    \\DocumentMetadata before \\documentclass (the standards given, ua-2 by
+    default), the pdftex option and pdfTeX's own settings taken out, a
+    starred theorem the book defines beside its numbered one defined only
+    when tagging hasn't (tagging's \\newtheorem defines thm* with thm),
+    \\centerline on a line of its own made a centered paragraph,
+    \\leavevmode put before a display formula opening a center
+    environment, which leaves a paragraph open in LaTeX 2026-06-01, each
+    float's tags where the text has it (FLOATS_HERE), and, unless mathml
+    is false, unicode-math for the formulas' MathML (math_block).
+    Returns counts."""
     counts = {"metadata": 0, "pdftex_options": 0, "pdftex_settings": 0,
               "theorems": 0, "centerline": 0, "formulas": 0, "floats": 0}
     if mathml:
@@ -527,8 +529,10 @@ def tag(texts, master, language, mathml=True):
         found = latexsource.code_matches(DOCUMENTCLASS, text)
         if found:
             at = text.rfind("\n", 0, found[0].start()) + 1
-            text = text[:at] + "\\DocumentMetadata{%spdfstandard=ua-2, tagging=on}\n" % (
-                "lang=%s, " % language if language else "") + text[at:]
+            claimed = list(standard) or ["ua-2"]
+            text = text[:at] + "\\DocumentMetadata{%spdfstandard=%s, tagging=on}\n" % (
+                "lang=%s, " % language if language else "",
+                claimed[0] if len(claimed) == 1 else "{%s}" % ",".join(claimed)) + text[at:]
             counts["metadata"] = 1
     texts[master] = text
     return counts

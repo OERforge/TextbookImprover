@@ -713,7 +713,12 @@ def case_latex_target(work):
                  "| Shape | Sides |\n|---|---|\n| Square | 4 |\n| Triangle | 3 |\n")
     with open(os.path.join(work, "two.md"), "w", encoding="utf-8") as fh:
         fh.write("# Circles {#circles}\n\n![A black circle.](img/circle.svg)\n\n"
-                 "Its area is $\\pi r^2$.\n\n1. Draw it.\n2. Measure it.\n")
+                 "Its area is $\\pi r^2$.\n\n1. Draw it.\n2. Measure it.\n\n"
+                 "<table><thead><tr><th>Statement</th><th>Truth table</th></tr></thead>"
+                 "<tbody><tr><td>A and B</td><td><table><thead><tr><th>A</th><th>B</th>"
+                 "<th>A and B</th></tr></thead><tbody><tr><td>T</td><td>T</td><td>T</td>"
+                 "</tr><tr><td>T</td><td>F</td><td>F</td></tr></tbody></table></td></tr>"
+                 "</tbody></table>\n")
     with open(os.path.join(work, "project.yaml"), "w") as fh:
         fh.write("project:\n  identifier: shapes\n  title: Shapes\n  language: en\n"
                  "  contents:\n  - one\n  - two\n")
@@ -771,6 +776,9 @@ def case_latex_target(work):
          and "alt={A gray square.}" in one and "alt={A black circle.}" in two
          and "includesvg" not in two),
         ("the run says what it wrote", lambda: "shapes.tex and 2 file(s)" in said),
+        ("a table in a table's cell is a tabular, its head declared for tagging and ruled off",
+         lambda: "{\\tagpdfsetup{table/header-rows={1}}\\begin{tabular}[t]{" in two
+         and "A & B & A and B \\\\\n\\hline\n" in two and "T & F & F \\\\" in two),
         ("what the PDF target's filter writes is there too: a link's /Contents",
          lambda: "\\OERLinkContents{" in one and "\\OERLinkContents" in master),
         ("read back as a LaTeX source, each chapter gives the same page", round_trip),

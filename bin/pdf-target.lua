@@ -136,15 +136,87 @@ local function as_lines(inner)
   return pandoc.Plain(lines)
 end
 
+-- A table inside a table's cell as a tabular, which LaTeX nests where it
+-- can't nest a longtable, with its head declared for tagging (a header
+-- row, and a column where the pre-pass gave one) in a group of its own,
+-- since \tagpdfsetup holds until it's changed. Tagging makes it a Table
+-- inside the cell's TD, which veraPDF passes (measured, LaTeX 2026-06-01).
+-- A cell spanning rows needs multirow, which isn't loaded: such a table
+-- is written as lines of text, as every inner table once was.
+local ALIGN = { AlignLeft = 'l', AlignCenter = 'c', AlignRight = 'r' }
+
+local function cell_latex(cell)
+  local text = pandoc.write(pandoc.Pandoc(cell.contents), 'latex')
+  text = text:gsub('%s+$', ''):gsub('^%s+', ''):gsub('\n%s*\n', ' ')
+  if cell.col_span > 1 then
+    text = '\\multicolumn{' .. cell.col_span .. '}{c}{' .. text .. '}'
+  end
+  return text
+end
+
+local function as_tabular(inner)
+  local head_rows = #inner.head.rows
+  local head_columns = 0
+  for _, body in ipairs(inner.bodies) do
+    if body.row_head_columns > head_columns then
+      head_columns = body.row_head_columns
+    end
+  end
+  for _, row in ipairs(rows_of(inner)) do
+    for _, cell in ipairs(row.cells) do
+      if cell.row_span > 1 then
+        return nil
+      end
+    end
+  end
+  local spec = {}
+  for _, colspec in ipairs(inner.colspecs) do
+    spec[#spec + 1] = ALIGN[colspec[1]] or 'l'
+  end
+  local lines = {}
+  for i, row in ipairs(rows_of(inner)) do
+    local cells = {}
+    for _, cell in ipairs(row.cells) do
+      cells[#cells + 1] = cell_latex(cell)
+    end
+    lines[#lines + 1] = table.concat(cells, ' & ') .. ' \\\\'
+    if i == head_rows then
+      lines[#lines + 1] = '\\hline'
+    end
+  end
+  local keys = {}
+  if head_rows > 0 then
+    local list = {}
+    for i = 1, head_rows do list[#list + 1] = tostring(i) end
+    keys[#keys + 1] = 'table/header-rows={' .. table.concat(list, ',') .. '}'
+  end
+  if head_columns > 0 then
+    local list = {}
+    for i = 1, head_columns do list[#list + 1] = tostring(i) end
+    keys[#keys + 1] = 'table/header-columns={' .. table.concat(list, ',') .. '}'
+  end
+  return pandoc.RawBlock('latex',
+    '{' .. (#keys > 0 and ('\\tagpdfsetup{' .. table.concat(keys, ',') .. '}') or '')
+    .. '\\begin{tabular}[t]{' .. table.concat(spec) .. '}\n'
+    .. table.concat(lines, '\n') .. '\n\\end{tabular}}')
+end
+
 local function flatten_nested(tbl)
   for _, row in ipairs(rows_of(tbl)) do
     for _, cell in ipairs(row.cells) do
       cell.contents = cell.contents:walk({
         Table = function(inner)
+          -- The innermost first: a table in this one's cells is written
+          -- before this one is.
+          flatten_nested(inner)
+          local tabular = as_tabular(inner)
+          if tabular then
+            return tabular
+          end
           if not nested_seen then
             nested_seen = true
-            io.stderr:write('[pdf-target] a table inside a table cell is '
-              .. 'written as lines of text; LaTeX cannot nest longtables\n')
+            io.stderr:write('[pdf-target] a table inside a table cell with a '
+              .. 'cell spanning rows is written as lines of text\n')
           end
           return as_lines(inner)
         end

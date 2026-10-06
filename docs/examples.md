@@ -505,6 +505,14 @@ python3 $T/bin/convert.py
 tagged: 154 LaTeX file(s) written, 3 of them changed: 0 image(s) and drawing(s) given alt text and 0 marked artifact, as keys LaTeX's tagging reads. 3 definition(s) from latex-conversion-macros.tex written after the preamble, as the conversion reads them. Made to build with LaTeX's tagging, with LuaLaTeX: \DocumentMetadata added, 2 pdftex option(s) and 1 pdfTeX setting(s) taken out, 2 starred theorem(s) defined only when tagging hasn't, \centerline on a line of its own made a centered paragraph, and 1 formula(s) opening a center environment given \leavevmode.
 ```
 
+The run also checks GIAM's class and packages against the LaTeX tagging project's status list, from TeX's `latex-tagging-status` package. TinyTeX doesn't install it, and then the run says how (`tlmgr install latex-tagging-status`); with it, the run says:
+
+```
+Tagging status of the book's class and packages (2026-09-27): partially compatible: hyperref, amssymb, amsmath, amsthm; unchecked: babel. The list only advises; https://latex3.github.io/tagging-project/tagging-status/ says why, and what to use instead where there's a replacement.
+```
+
+None of GIAM's is rated incompatible, and the copy builds clean below.
+
 `tagged/` holds every file the master reaches, at the same paths. Lay it over a clean copy of the repository and build it with LuaLaTeX in place of the Makefile's pdfLaTeX, which runs out of memory on a tagged book this size. `latexmk`, which comes with TeX Live, runs BibTeX, makeindex, and as many LuaLaTeX passes as the book needs:
 
 ```bash

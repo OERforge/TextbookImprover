@@ -659,6 +659,31 @@ def latex_master(base, quiet=False):
     return found[0] if found else None
 
 
+LATEXMATH = re.compile(r"latexmath:\[((?:\\.|[^\]\\])*)\]")
+
+
+def adoc_root_index_text(path):
+    """The text of an AsciiDoc file with each latexmath:[...] that holds an
+    escaped bracket, \\], given its brackets as character references, or
+    None when there's none. A root's index in brackets, \\sqrt[3]{2}, is
+    written \\sqrt[3\\]{2}, as Asciidoctor reads it (markdown-source.lua);
+    Pandoc's reader ends the macro at that \\], and in a footnote loses the
+    whole footnote (GIAM's). With &#91; and &#93; it reads to the end, and
+    asciidoc-source.lua turns them back into the brackets."""
+    with open(path, encoding="utf-8") as fh:
+        text = fh.read()
+    if "\\]" not in text:
+        return None
+
+    def fix(m):
+        tex = m.group(1)
+        if "\\]" not in tex:
+            return m.group(0)
+        return "latexmath:[" + tex.replace("\\]", "&#93;").replace("[", "&#91;") + "]"
+    fixed = LATEXMATH.sub(fix, text)
+    return fixed if fixed != text else None
+
+
 def read_latex_to_json(base, master, env, work):
     """A LaTeX book, read whole through its master by Pandoc, from a copy
     put right where Pandoc's reader can't take it (lib/latexsource.py),
@@ -836,10 +861,27 @@ def read_asciidoc_to_json(base, docs, env, imagesdir=""):
     env = dict(env, ASCIIDOC_IMAGESDIR=imagesdir)
     for name in docs:
         stem = safe_stem(os.path.splitext(name)[0])
-        run(["pandoc", "-f", "asciidoc", "-t", "json", name,
-             "-o", stem + ".json", "--lua-filter=" + MARKDOWN_HTML_FILTER,
-             "--lua-filter=" + ASCIIDOC_FILTER,
-             "--lua-filter=" + MEDIA_FILTER], env=env, cwd=base)
+        fixed = adoc_root_index_text(os.path.join(base, name))
+        if fixed is None:
+            run(["pandoc", "-f", "asciidoc", "-t", "json", name,
+                 "-o", stem + ".json", "--lua-filter=" + MARKDOWN_HTML_FILTER,
+                 "--lua-filter=" + ASCIIDOC_FILTER,
+                 "--lua-filter=" + MEDIA_FILTER], env=env, cwd=base)
+        else:
+            # The text given on stdin, read from the file's own directory,
+            # where its includes are found as they would be from the file.
+            folder = os.path.join(base, os.path.dirname(name))
+            done = subprocess.run(
+                ["pandoc", "-f", "asciidoc", "-t", "json",
+                 "-o", os.path.join(base, stem + ".json"),
+                 "--lua-filter=" + MARKDOWN_HTML_FILTER,
+                 "--lua-filter=" + ASCIIDOC_FILTER,
+                 "--lua-filter=" + MEDIA_FILTER],
+                input=fixed, text=True, env=env, cwd=folder,
+                capture_output=True)
+            sys.stderr.write(done.stderr)
+            if done.returncode:
+                die(f"pandoc couldn't read {name}.")
         portable_media_paths(os.path.join(base, stem + ".json"), base, name)
         stems.append(stem)
     return stems

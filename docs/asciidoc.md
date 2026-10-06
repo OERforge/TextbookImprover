@@ -40,7 +40,7 @@ Some things have no form that reads back, and the target changes them and says s
 - An alt text containing double quotes is written with typographic ones.
 - A footnote of several paragraphs becomes one, and a list or a quotation inside one keeps its words and loses its structure: an AsciiDoc footnote is one paragraph.
 - Display math inside a definition list is written inline: Pandoc's writer indents the math block's delimiters there, which breaks the list.
-- A root with an index (`\sqrt[3]{x}`) is written as Asciidoctor reads it, and Pandoc's reader cuts the formula short.
+- A root with an index (`\sqrt[3]{x}`) is written as Asciidoctor reads it, `\sqrt[3\]{x}`. Pandoc's reader ends the formula at that `\]`, and in a footnote loses the whole footnote, so reading an AsciiDoc source gives such a formula's brackets as character references first, which the reading filter turns back: the pipeline reads its own files back whole.
 - A span inside another span is merged into it, the outer taking the inner's classes, since both would be written `##…##`. Only layout spans nest this way in practice (Scribble's margin notes); the text stays.
 - A list with no items at all is dropped.
 

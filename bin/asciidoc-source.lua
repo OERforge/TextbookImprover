@@ -235,6 +235,14 @@ function Pandoc(doc)
     end,
     Figure = layout,
     Link = fix_link,
+    -- A root's index, whose brackets convert.py gave as character
+    -- references so the reader reads the macro to its end.
+    Math = function(math)
+      if math.text:find('&#9[13];') then
+        math.text = math.text:gsub('&#91;', '['):gsub('&#93;', ']')
+        return math
+      end
+    end,
   })
   -- The blocks before and after a page, as the AsciiDoc target writes
   -- them: open blocks named for them, which go back into metadata.

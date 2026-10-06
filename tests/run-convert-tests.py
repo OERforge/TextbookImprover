@@ -2455,6 +2455,19 @@ def case_markdown_source(work):
     ]
 
 
+def adoc_root_reads_back(work):
+    """adoc/ch.adoc read back as a source gives the cube root as written:
+    the index in brackets, which Pandoc's reader alone loses."""
+    back = os.path.join(work, "adoc-back")
+    shutil.copytree(os.path.join(work, "adoc"), back)
+    with open(os.path.join(back, "conversion.yaml"), "w", encoding="utf-8") as fh:
+        fh.write("targets:\n  html:\n    format: html\n")
+    subprocess.run([sys.executable, "-B", os.path.join(BIN, "convert.py")],
+                   cwd=back, capture_output=True, text=True)
+    page = os.path.join(back, "html", "ch.html")
+    return os.path.exists(page) and "<mroot>" in open(page, encoding="utf-8").read()
+
+
 def case_fidelity_writers(work):
     """fidelity.csv for markdown and asciidoc targets: what the writing
     changes, as each run also says on the terminal."""
@@ -2470,11 +2483,10 @@ def case_fidelity_writers(work):
     return [
         ("a Markdown target reports an example list, which comes back a numbered list",
          lambda: "md,ch,example-list,An example." in report),
-        ("an AsciiDoc target reports a root with an index, which Pandoc's reader cuts short",
-         lambda: "adoc,ch,root-index," in report),
-        ("and each target says so on the terminal",
-         lambda: "md: 1 thing(s) its files can't carry" in run.stderr
-         and "adoc: 1 thing(s) its files can't carry" in run.stderr),
+        ("an AsciiDoc target's root with an index isn't a loss: read back, it's there",
+         lambda: "root-index" not in report and adoc_root_reads_back(work)),
+        ("and the Markdown target says so on the terminal",
+         lambda: "md: 1 thing(s) its files can't carry" in run.stderr),
     ]
 
 

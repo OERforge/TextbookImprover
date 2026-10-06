@@ -923,9 +923,9 @@ function inline_tex(text)
   if text:match('\\$') then text = text .. ' ' end
   if not text:find('[%[%]]') then return text end
   if text:find('\\sqrt%s*%[') then
-    lost('root-index', text)
-    io.stderr:write(('markdown-source: a root index in brackets is written '
-      .. 'for Asciidoctor, not Pandoc\'s reader: %s\n'):format(text))
+    -- Escaped as Asciidoctor reads it; Pandoc's reader ends the macro at
+    -- the \], so reading an AsciiDoc source gives these brackets as
+    -- character references first (convert.py, adoc_root_index_text).
     return (text:gsub('%]', '\\]'))
   end
   return (text:gsub('%[', '\\lbrack '):gsub('%]', '\\rbrack '))

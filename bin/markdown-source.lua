@@ -1020,6 +1020,17 @@ function OrderedList(list)
   end
 end
 
+-- Inline code in AsciiDoc, in the unconstrained form ``+...+``: the
+-- writer's constrained `+...+` ends only before a character that isn't a
+-- word character, so beside a formula macro (`+Let +`latexmath:[q = 0])
+-- the reader takes none of it, and the formulas go too (GIAM's
+-- pseudocode). Code holding + or a backtick is left to the writer, whose
+-- forms for those the reader takes back (measured, Pandoc 3.12).
+local function Code(code)
+  if not ADOC or code.text:find('[+`]') or code.text == '' then return nil end
+  return pandoc.RawInline('asciidoc', '``+' .. code.text .. '+``')
+end
+
 -- For AsciiDoc, two passes: the tables that go as HTML, from the text as
 -- it stands, then everything else. A file that returns filters runs no
 -- global function, so every handler is named.
@@ -1030,6 +1041,6 @@ if ADOC then
       Math = Math, Header = Header, Meta = Meta, Span = Span,
       Inlines = Inlines, RawBlock = RawBlock, Figure = Figure, Link = Link,
       Note = Note, Emph = Emph, DefinitionList = DefinitionList,
-      BlockQuote = BlockQuote, Pandoc = Pandoc },
+      BlockQuote = BlockQuote, Pandoc = Pandoc, Code = Code },
   }
 end

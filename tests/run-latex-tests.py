@@ -118,7 +118,7 @@ Sets: $\Znoneg$ and $a \relR b$ and $\{x \suchthat x > 0\}$, and
 $a\hspace{10mm}b$, and $a \weird b$.
 Stacked: \vtop{\hbox{\strut First line}\hbox{\strut Second $y$}} done.
 Over a line: $p +
-q$ ends.
+q$ ends. Pseudocode: \texttt{Let }$q = 0$\texttt{.}
 Laws: $A \cong A \mbox{\hspace{12pt} and\hspace{4pt}also \hspace{12pt}} A \lor c$;
 a blank: $2, 9, \rule{12pt}{.5pt}, 37$; raised: $x = \mbox{\raisebox{-2pt}{$\emptyset$}}$.
 
@@ -289,7 +289,8 @@ def fingerprint(work, skip_dirs=()):
                     and os.sep + "back" + os.sep not in path \
                     and os.sep + "md-back" + os.sep not in path \
                     and os.sep + "md" + os.sep not in path \
-                    and os.sep + "adoc" + os.sep not in path:
+                    and os.sep + "adoc" + os.sep not in path \
+                    and os.sep + "adoc-back" + os.sep not in path:
                 with open(path, "rb") as fh:
                     found[os.path.relpath(path, work)] = \
                         hashlib.sha256(fh.read()).hexdigest()
@@ -353,6 +354,20 @@ def word_quote_reads_back(work):
     return proof and "<table" in proof[0] and "Q.E.D." in proof[0] \
         and not any(("Given" in q or "boxed aside" in q) and "<table" not in q
                     for q in quotes)
+
+
+def asciidoc_math_reads_back(work):
+    """adoc/, the AsciiDoc target, read back as a source: one.html has
+    as many formulas as the page it was written from."""
+    back = os.path.join(work, "adoc-back")
+    if not os.path.exists(back):
+        shutil.copytree(os.path.join(work, "adoc"), back)
+        with open(os.path.join(back, "conversion.yaml"), "w") as fh:
+            fh.write("targets:\n  html:\n    format: html\n")
+        convert(back)
+    page = os.path.join(back, "html", "one.html")
+    return os.path.exists(page) and \
+        read(work, "html", "one.html").count("<math") == read(back, "html", "one.html").count("<math")
 
 
 def markdown_reads_back(work):
@@ -495,6 +510,11 @@ def case_book(work):
          lambda: re.search(r'href="one.html#sec:first"[^>]*>1\.1<', two)),
         ("in the EPUB, a \\ref to a chapter's own \\label goes to the chapter",
          lambda: epub_links_resolve(work)),
+        ("in AsciiDoc, code beside a formula is unconstrained, so the reader takes both",
+         lambda: re.search(r"``\+Let ?\+``latexmath:\[q = 0\]",
+                           read(work, "adoc", "one.adoc")
+                           if os.path.exists(os.path.join(work, "adoc", "one.adoc")) else "")
+         is not None and asciidoc_math_reads_back(work)),
         ("in AsciiDoc, a formula that ran over a line is on one, where the reader takes it",
          lambda: "latexmath:[p + q]" in (read(work, "adoc", "one.adoc")
                                          if os.path.exists(os.path.join(work, "adoc", "one.adoc")) else "")),

@@ -12,15 +12,15 @@ Every source format the pipeline reads, the ways a book in that format can arriv
 
 ## At a glance
 
-| Input | HTML | EPUB | Markdown | AsciiDoc | PDF | Word | Round trip to itself |
-|---|---|---|---|---|---|---|---|
-| Word (`.docx`) | TESTED | TESTED | TESTED | TESTED | TESTED | TESTED | TESTED, with losses (see [Word output](#word-output)) |
-| Markdown (`.md`) | TESTED | TESTED | TESTED | TESTED | TESTED | TESTED | TESTED |
-| HTML (`.html`) | TESTED | TESTED | TESTED | TESTED | NEEDS MORE TESTING | TESTED | TESTED |
-| AsciiDoc (`.adoc`) | TESTED | TESTED | TESTED | TESTED | TESTED | TESTED | TESTED |
-| LaTeX (`.tex`) | NEEDS MORE TESTING | NEEDS MORE TESTING | NOT TESTED | NOT TESTED | NEEDS MORE TESTING | NOT TESTED | Not available |
+| Input | HTML | EPUB | Markdown | AsciiDoc | PDF | Word | LaTeX | Round trip to itself |
+|---|---|---|---|---|---|---|---|---|
+| Word (`.docx`) | TESTED | TESTED | TESTED | TESTED | TESTED | TESTED | NOT TESTED | TESTED, with losses (see [Word output](#word-output)) |
+| Markdown (`.md`) | TESTED | TESTED | TESTED | TESTED | TESTED | TESTED | NEEDS MORE TESTING | TESTED |
+| HTML (`.html`) | TESTED | TESTED | TESTED | TESTED | NEEDS MORE TESTING | TESTED | NOT TESTED | TESTED |
+| AsciiDoc (`.adoc`) | TESTED | TESTED | TESTED | TESTED | TESTED | TESTED | NOT TESTED | TESTED |
+| LaTeX (`.tex`) | TESTED | TESTED | NEEDS MORE TESTING | NEEDS MORE TESTING | NEEDS MORE TESTING | TESTED, with losses (see [Word output](#word-output)) | TESTED, with losses (see [LaTeX](#latex)) | TESTED, through the `latex` target, with losses (see [LaTeX](#latex)) |
 
-[PDF output](#pdf) is new, and has been measured on a book from each input: the statistics book (Word), the economics book (Markdown), DCIC (HTML), and the security textbook (AsciiDoc). PDF is read only by [the audit](auditing.md), which reports on a Word, Markdown, HTML, EPUB, or PDF file without converting it.
+LaTeX as an input is measured on *A Gentle Introduction to the Art of Mathematics* (GIAM) and a set of calculus notes ([LaTeX sources](latex.md)). Written out and read back, GIAM's 10 chapters give 9 identical pages through Markdown (one table's row headers come back as a header row), 8 through LaTeX (two figures holding a table come back as captioned tables), and 2 through AsciiDoc (tables and some formulas, 29 of 568 on one page, still lost). [PDF output](#pdf) is new, and has been measured on a book from each input: the statistics book (Word), the economics book (Markdown), DCIC (HTML), and the security textbook (AsciiDoc). PDF is read only by [the audit](auditing.md), which reports on a Word, Markdown, HTML, EPUB, or PDF file without converting it.
 
 ## Word
 

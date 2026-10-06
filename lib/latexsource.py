@@ -333,26 +333,52 @@ def longtable_heads(text, counter):
     spans = skip_spans(text)
     out, last = [], 0
     for m in re.finditer(r"\\begin\s*\{longtable\}", text):
-        if in_spans(m.start(), spans) or m.start() < last \
-                or re.search(r"\\begin\{TextbookImproverHeaders\w+\}\s*$", text[:m.start()]):
+        if in_spans(m.start(), spans) or m.start() < last:
             continue
         end = environment_end(text, "longtable", m.start())
         if end < 0:
             continue
         body = text[m.start():end]
+        # The head repeated on each later page, between \\endfirsthead and
+        # \\endhead, which the reader takes for a row of the body (it
+        # reads both commands as rules, Readers/LaTeX/Table.hs).
+        repeated = re.search(r"\\endfirsthead\b(.*?)\\endhead\b", body, re.S)
+        if repeated:
+            body = body[:repeated.start(1)] + body[repeated.end(1) + len("\\endhead"):]
+            counter["repeated_head"] = counter.get("repeated_head", 0) + 1
         head = re.search(r"\\end(?:first)?head\b", body)
-        if not head:
-            continue
-        rows = len(re.findall(r"\\\\", re.sub(r"%[^\n]*", "", body[:head.start()])))
-        if rows != 1:
-            counter["header_other"] = counter.get("header_other", 0) + 1
-            continue
-        out.append(text[last:m.start()] + "\\begin{TextbookImproverHeadersFirstRow}"
-                   + body + "\\end{TextbookImproverHeadersFirstRow}")
+        declared = re.search(r"\\begin\{TextbookImproverHeaders\w+\}\s*$", text[:m.start()])
+        rows = len(re.findall(r"\\\\", re.sub(r"%[^\n]*", "", body[:head.start()]))) \
+            if head else 0
+        if head and rows == 1 and not declared:
+            body = ("\\begin{TextbookImproverHeadersFirstRow}" + body
+                    + "\\end{TextbookImproverHeadersFirstRow}")
+            counter["longtable_head"] = counter.get("longtable_head", 0) + 1
+        elif head and rows > 1 and not declared:
+            counter["longtable_head_rows"] = counter.get("longtable_head_rows", 0) + 1
+        out.append(text[last:m.start()] + body)
         last = end
-        counter["longtable_head"] = counter.get("longtable_head", 0) + 1
     out.append(text[last:])
     return "".join(out)
+
+
+def drop(text, command, counter, key):
+    """\\command{...} taken out, in code: the PDF target's own commands
+    for a link's /Contents, which a reader that doesn't know
+    \\NewDocumentCommand would print as text; the link holds its text."""
+    spans = skip_spans(text)
+    pattern = re.compile(r"\\%s(?![A-Za-z@])\s*\{" % re.escape(command))
+    while True:
+        found = [m for m in pattern.finditer(text) if not in_spans(m.start(), spans)]
+        if not found:
+            return text
+        m = found[-1]
+        close = matching_brace(text, m.end() - 1)
+        if close < 0:
+            return text
+        text = text[:m.start()] + text[close:]
+        counter[key] = counter.get(key, 0) + 1
+        spans = skip_spans(text)
 
 
 def unwrap(text, command, counter, key):
@@ -443,6 +469,8 @@ def repair_text(text, counter):
     text = declare_headers(text, counter)
     text = longtable_heads(text, counter)
     text = unwrap(text, "pandocbounded", counter, "bounded")
+    text = drop(text, "OERLinkContents", counter, "link_contents")
+    text = drop(text, "OERLinkContentsReset", counter, "link_contents_reset")
     text = substitute(RULE_ANY, text, invisible_rule, counter, "rule_seen")
     text = substitute(PARTIAL_RULE, text, lambda m: "\\" + (
         "midrule" if m.group(1) == "cmidrule" else "hline"), counter,

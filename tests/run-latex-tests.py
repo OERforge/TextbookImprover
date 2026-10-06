@@ -771,6 +771,8 @@ def case_latex_target(work):
          and "alt={A gray square.}" in one and "alt={A black circle.}" in two
          and "includesvg" not in two),
         ("the run says what it wrote", lambda: "shapes.tex and 2 file(s)" in said),
+        ("what the PDF target's filter writes is there too: a link's /Contents",
+         lambda: "\\OERLinkContents{" in one and "\\OERLinkContents" in master),
         ("read back as a LaTeX source, each chapter gives the same page", round_trip),
         ("it builds with latexmk and LuaLaTeX", builds),
     ]

@@ -696,7 +696,10 @@ def read_latex_to_json(base, master, env, work):
         ("partial_rule", "\\cline or \\cmidrule read as a whole rule"),
         ("header_declared", "table header declaration for tagging read as the pipeline's"),
         ("longtable_head", "longtable's head of one row read as its header row"),
+        ("repeated_head", "longtable's head repeated for later pages read once"),
+        ("longtable_head_rows", "longtable's head of more than one row left to the census"),
         ("bounded", "\\pandocbounded image read as the image it holds"),
+        ("link_contents", "link's /Contents for the PDF left out"),
         ("artifact", "image marked artifact made decorative"),
         ("graphics_converted", "PDF or EPS image made SVG"))
         if counts.get(k)]

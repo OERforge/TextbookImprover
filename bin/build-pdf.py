@@ -844,8 +844,9 @@ def write_latex(base, name, resolved, project, document, out_dir):
                    "--lua-filter", os.path.join(HERE, "pdf-target.lua")]
         environment = dict(os.environ, TARGET_NAME=name,
                            TITLE_BLOCK=str(resolved["title_block"]))
-        done = subprocess.run(["pandoc", "-f", "json", "-t", "latex", "-s", book_json],
-                              cwd=base, env=environment, capture_output=True, text=True)
+        done = subprocess.run(["pandoc", "-f", "json", "-t", "latex", "-s", book_json]
+                              + filters, cwd=base, env=environment,
+                              capture_output=True, text=True)
         sys.stderr.write(done.stderr)
         if done.returncode:
             return done.returncode

@@ -823,7 +823,18 @@ end
 -- can't be written, and is written as a typographic one. A decorative
 -- image says so with a role. Element functions run before the inline
 -- pass, so the alt here is the author's text, unescaped.
+-- An image's target as the macro takes it: Pandoc's reader won't take
+-- one with a +, and leaves the whole macro as text (GIAM's
+-- dist_2x3+4.svg); percent-encoded it reads, and Asciidoctor's page asks
+-- for the same file (measured, Pandoc 3.12). Reading decodes it again
+-- (media-extensions.lua).
+local function image_target(src)
+  if src:find('://', 1, true) then return src end
+  return (src:gsub('%+', '%%2B'))
+end
+
 function adoc_image(img)
+  img.src = image_target(img.src)
   if img.classes:includes('decorative') then
     return pandoc.RawInline('asciidoc', 'image:' .. img.src .. '[role=decorative]')
   end

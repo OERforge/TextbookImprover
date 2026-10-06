@@ -318,10 +318,19 @@ def substitute(pattern, text, replace, counter, key):
 
 HEADER_SETUP = re.compile(r"(?:\\ifdefined\s*\\tagpdfsetup\s*)?"
                           r"\\tagpdfsetup\s*\{([^{}]*(?:\{[^{}]*\}[^{}]*)*)\}"
-                          r"((?:\s|%[^\n]*\n|\\fi\b)*)\\begin\s*\{(tabular\*?|tabularx|"
+                          r"((?:\s|%[^\n]*\n|\\fi\b|\{\\def\\LTcaptype\{none\})*)"
+                          r"\\begin\s*\{(tabular\*?|tabularx|"
                           r"longtable|array)\}")
 DECLARATIONS = {(True, False): "FirstRow", (False, True): "FirstColumn",
                 (True, True): "Both"}
+
+
+def one_row_head(body):
+    """Whether a longtable's head, the rows before \\endhead or
+    \\endfirsthead, is one row."""
+    head = re.search(r"\\end(?:first)?head\b", body)
+    return bool(head) and len(re.findall(
+        r"\\\\", re.sub(r"%[^\n]*", "", body[:head.start()]))) == 1
 
 
 def longtable_heads(text, counter):
@@ -414,15 +423,18 @@ def declare_headers(text, counter):
         rows = re.search(r"table/header-rows\s*=\s*\{?\s*([\d,\s]*)\}?", keys)
         cols = re.search(r"table/header-columns\s*=\s*\{?\s*([\d,\s]*)\}?",
                          keys)
-        key = (bool(rows and rows.group(1).strip() == "1"),
-               bool(cols and cols.group(1).strip() == "1"))
-        if key not in DECLARATIONS:
-            if rows or cols:
-                counter["header_other"] = counter.get("header_other", 0) + 1
-            continue
         begin = text.rfind("\\begin", m.start(), m.start(3))
         end = environment_end(text, m.group(3), begin)
         if end < 0:
+            continue
+        # A longtable's head of one row is a header row of its own; the
+        # declaration may add the column (the PDF target writes only that).
+        head_row = m.group(3) == "longtable" and one_row_head(text[begin:end])
+        key = (bool(rows and rows.group(1).strip() == "1") or head_row,
+               bool(cols and cols.group(1).strip() == "1"))
+        if key not in DECLARATIONS:
+            if (rows and rows.group(1).strip()) or (cols and cols.group(1).strip()):
+                counter["header_other"] = counter.get("header_other", 0) + 1
             continue
         name = "TextbookImproverHeaders" + DECLARATIONS[key]
         out.append(text[last:m.start()] + re.sub(r"\\fi\b", "", m.group(2))

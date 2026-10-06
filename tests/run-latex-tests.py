@@ -515,6 +515,12 @@ def case_book(work):
                            read(work, "adoc", "one.adoc")
                            if os.path.exists(os.path.join(work, "adoc", "one.adoc")) else "")
          is not None and asciidoc_math_reads_back(work)),
+        ("read back from AsciiDoc, the rules stay in their list items, the lists whole",
+         lambda: asciidoc_math_reads_back(work)
+         and read(work, "html", "one.html").count("<ol") ==
+         read(work, "adoc-back", "html", "one.html").count("<ol")
+         and read(work, "html", "one.html").count("<hr") ==
+         read(work, "adoc-back", "html", "one.html").count("<hr")),
         ("in AsciiDoc, a formula that ran over a line is on one, where the reader takes it",
          lambda: "latexmath:[p + q]" in (read(work, "adoc", "one.adoc")
                                          if os.path.exists(os.path.join(work, "adoc", "one.adoc")) else "")),

@@ -1043,6 +1043,18 @@ local function Code(code)
   return pandoc.RawInline('asciidoc', '``+' .. code.text .. '+``')
 end
 
+-- A rule in AsciiDoc as three single quotes, AsciiDoc's own thematic
+-- break, written raw: Pandoc's writer gives five, which its reader takes
+-- for a paragraph of closing quotes, and puts a blank line between a list
+-- item's + and the rule, which ends the list there (GIAM's blanks to fill
+-- in, nested in its exercise lists). Measured on Pandoc 3.12.
+local function HorizontalRule()
+  if not ADOC then return nil end
+  -- Pandoc writes a raw block as it stands: it ends with its own blank
+  -- line, as passthrough's do.
+  return pandoc.RawBlock('asciidoc', "'''\n\n")
+end
+
 -- For AsciiDoc, two passes: the tables that go as HTML, from the text as
 -- it stands, then everything else. A file that returns filters runs no
 -- global function, so every handler is named.
@@ -1053,6 +1065,7 @@ if ADOC then
       Math = Math, Header = Header, Meta = Meta, Span = Span,
       Inlines = Inlines, RawBlock = RawBlock, Figure = Figure, Link = Link,
       Note = Note, Emph = Emph, DefinitionList = DefinitionList,
-      BlockQuote = BlockQuote, Pandoc = Pandoc, Code = Code },
+      BlockQuote = BlockQuote, Pandoc = Pandoc, Code = Code,
+      HorizontalRule = HorizontalRule },
   }
 end

@@ -2819,6 +2819,8 @@ def write_report(rows_file, report, header, noun, sidecar=None, hint=None):
 SOURCE_TARGET_LOSSES = {
     "example-list": "an example list is written as a numbered list: read back, "
                     "its numbering no longer runs on through the document",
+    "figure-table": "a figure holding only a table is written as the table, the "
+                    "figure's caption and id its own: read back, it's a table",
     "header-column-dropped": "a table's header column is written without it: "
                              "no marker class is set for this combination",
     "footnote-paragraphs": "a footnote of several paragraphs becomes one "

@@ -789,7 +789,8 @@ def case_latex_target(work):
                  "<table><thead><tr><th>Proof: first,<br>then second.<br>Q.E.D.</th></tr>"
                  "</thead></table>\n")
     with open(os.path.join(work, "three.md"), "w", encoding="utf-8") as fh:
-        fh.write("# Figures\n\n<figure><table><tbody><tr><td>1</td></tr><tr><td>1</td>"
+        fh.write("# Figures\n\nSee [the triangle](#pascal).\n\n"
+                 "<figure id=\"pascal\"><table><tbody><tr><td>1</td></tr><tr><td>1</td>"
                  "<td>1</td></tr></tbody></table><figcaption>The first rows of Pascal's "
                  "triangle</figcaption></figure>\n\n<figure id=\"outer\"><figure>"
                  "<img src=\"img/square.png\" alt=\"A flowchart.\"></figure>"
@@ -863,6 +864,12 @@ def case_latex_target(work):
         ("a figure holding only a table: its caption is the table's, not lost",
          lambda: "\\caption{The first rows of Pascal" in three
          and three.count("\\begin{longtable}") == 1),
+        ("in AsciiDoc, a figure holding only a table gives the table its caption and id",
+         lambda: re.search(r"\[\[pascal\]\]\n\.The first rows of Pascal",
+                           read(work, "adoc", "three.adoc")
+                           if os.path.exists(os.path.join(work, "adoc", "three.adoc")) else "")
+         is not None and "adoc,three,figure-table," in (read(work, "fidelity.csv")
+                         if os.path.exists(os.path.join(work, "fidelity.csv")) else "")),
         ("a figure in a figure: one figure, one caption",
          lambda: three.count("\\begin{figure}") == 1
          and three.count("\\caption{A small example}") == 1 and "\\caption{}" not in three),

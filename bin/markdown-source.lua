@@ -856,8 +856,41 @@ end
 
 -- A figure, written as its id, its caption as the block title, and its
 -- image as a block macro.
+-- A figure holding only a table, in AsciiDoc: the writer writes the
+-- table and drops the figure, caption, id and all, so a link to it
+-- dangles (GIAM's Pascal's triangle). The caption and id become the
+-- table's, as for a PDF, and it's reported: it reads back as a table.
+local function figure_table(fig)
+  local found, other = nil, 0
+  for _, block in ipairs(fig.content) do
+    local inner = block
+    while inner.t == 'Div' and #inner.content == 1 do inner = inner.content[1] end
+    if inner.t == 'Table' then
+      if found then return nil end
+      found = inner
+    elseif not ((block.t == 'Plain' or block.t == 'Para') and #block.content == 0) then
+      other = other + 1
+    end
+  end
+  if not found or other > 0 then return nil end
+  if #found.caption.long == 0 and #fig.caption.long > 0 then
+    found.caption = fig.caption
+  end
+  lost('figure-table', pandoc.utils.stringify(fig.caption.long))
+  local id = found.identifier ~= '' and found.identifier or fig.identifier
+  if id == '' then return found end
+  -- The writer gives a table no id: a block anchor on the line before it
+  -- does, which the reader puts on the table.
+  found.identifier = ''
+  local text = pandoc.write(pandoc.Pandoc({ found }), 'asciidoc',
+                            { wrap_text = 'none' }):gsub('%s+$', '')
+  return pandoc.RawBlock('asciidoc', '[[' .. id .. ']]\n' .. text .. '\n\n')
+end
+
 function Figure(fig)
   if not ADOC then return nil end
+  local as_table = figure_table(fig)
+  if as_table then return as_table end
   local body = fig.content
   if #body ~= 1 or (body[1].t ~= 'Plain' and body[1].t ~= 'Para')
       or #body[1].content ~= 1 or body[1].content[1].t ~= 'RawInline'

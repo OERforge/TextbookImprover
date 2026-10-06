@@ -117,6 +117,8 @@ and \includegraphics{img/square} and
 Sets: $\Znoneg$ and $a \relR b$ and $\{x \suchthat x > 0\}$, and
 $a\hspace{10mm}b$, and $a \weird b$.
 Stacked: \vtop{\hbox{\strut First line}\hbox{\strut Second $y$}} done.
+Over a line: $p +
+q$ ends.
 Laws: $A \cong A \mbox{\hspace{12pt} and\hspace{4pt}also \hspace{12pt}} A \lor c$;
 a blank: $2, 9, \rule{12pt}{.5pt}, 37$; raised: $x = \mbox{\raisebox{-2pt}{$\emptyset$}}$.
 
@@ -267,7 +269,7 @@ def write_book(work, macros=False, second_master=False, readme=True,
     with open(os.path.join(work, "conversion.yaml"), "w") as fh:
         fh.write("targets:\n  html:\n    format: html\n"
                  + ("  epub:\n    format: epub3\n  word:\n    format: docx\n"
-                    "  md:\n    format: markdown\n"
+                    "  md:\n    format: markdown\n  adoc:\n    format: asciidoc\n"
                     if epub else ""))
 
 
@@ -286,7 +288,8 @@ def fingerprint(work, skip_dirs=()):
                     "rendered" not in path and "html" not in path \
                     and os.sep + "back" + os.sep not in path \
                     and os.sep + "md-back" + os.sep not in path \
-                    and os.sep + "md" + os.sep not in path:
+                    and os.sep + "md" + os.sep not in path \
+                    and os.sep + "adoc" + os.sep not in path:
                 with open(path, "rb") as fh:
                     found[os.path.relpath(path, work)] = \
                         hashlib.sha256(fh.read()).hexdigest()
@@ -492,6 +495,9 @@ def case_book(work):
          lambda: re.search(r'href="one.html#sec:first"[^>]*>1\.1<', two)),
         ("in the EPUB, a \\ref to a chapter's own \\label goes to the chapter",
          lambda: epub_links_resolve(work)),
+        ("in AsciiDoc, a formula that ran over a line is on one, where the reader takes it",
+         lambda: "latexmath:[p + q]" in (read(work, "adoc", "one.adoc")
+                                         if os.path.exists(os.path.join(work, "adoc", "one.adoc")) else "")),
         ("read back from Markdown, every figure is a figure, a centered drawing's too",
          lambda: markdown_reads_back(work)),
         ("in Word, a formula inside a list item stays in the item",

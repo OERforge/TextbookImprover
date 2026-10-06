@@ -881,6 +881,10 @@ function inline_tex(text)
   -- Word's thin space at the end, "\\ ", goes as it does for Markdown;
   -- a backslash left last would escape the macro's closing bracket.
   text = text:gsub('%s*\\%s+$', ''):gsub('^%s+', ''):gsub('%s+$', '')
+  -- A line break in the formula's TeX, as a LaTeX source has wherever a
+  -- formula ran over a line, would end the macro: the reader takes
+  -- latexmath:[...] on one line only, and drops the formula.
+  text = text:gsub('%s*\n%s*', ' ')
   if text:match('\\$') then text = text .. ' ' end
   if not text:find('[%[%]]') then return text end
   if text:find('\\sqrt%s*%[') then

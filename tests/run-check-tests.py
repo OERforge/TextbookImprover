@@ -88,6 +88,15 @@ def main():
                 fh.write(markup)
         good = outputcheck.check_html_files(
             [os.path.join(work, "good.html"), os.path.join(work, "other.html")])
+        # Pages titled with their files' names, and one whose title is its
+        # name as a word, which is no file's name.
+        named = {"ch_intro_to_data.html": "ch_intro_to_data", "tTable.html": "tTable",
+                 "preface.html": "preface", "Intro.html": "Intro"}
+        for name, title in named.items():
+            with open(os.path.join(work, name), "w", encoding="utf-8") as fh:
+                fh.write(OTHER.replace("<title>Other</title>", f"<title>{title}</title>")
+                         .replace('id="there"', 'id="t-%s"' % name[:2]))
+        titled = outputcheck.check_html_files([os.path.join(work, n) for n in named])
         bad = outputcheck.check_html_files(
             [os.path.join(work, "bad.html"), os.path.join(work, "other.html")])
         cases = [
@@ -105,6 +114,10 @@ def main():
                  "table-not-in-scroll-region",
                  "link-to-missing-fragment", "link-to-missing-file",
                  "link-to-missing-fragment"])),
+            ("a page titled with its file's name is found, one whose name is a word isn't",
+             lambda: sorted((os.path.basename(f.where), f.check) for f in titled) == [
+                 ("ch_intro_to_data.html", "title-is-file-name"),
+                 ("tTable.html", "title-is-file-name")]),
             ("a finding says where and what",
              lambda: any(f.where == "bad.html" and f.detail == "gone.html"
                          for f in bad)),

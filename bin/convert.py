@@ -196,6 +196,26 @@ def pass_on(run):
             say(line)
 
 
+LATEX_MAIN_SET = re.compile(
+    r"^([ \t]*)latex:[ \t]*\n(?:\1[ \t]+[^\n]*\n|[ \t]*\n)*?\1[ \t]+main:", re.M)
+
+
+def latex_book_here(base):
+    """Whether base holds a LaTeX book: a master file at its top, or a
+    conversion.yaml that names one (latex.main)."""
+    import latexsource
+    try:
+        if latexsource.masters(base):
+            return True
+    except OSError:
+        pass
+    path = os.path.join(base, "conversion.yaml")
+    if os.path.isfile(path):
+        with open(path, encoding="utf-8", errors="replace") as fh:
+            return bool(LATEX_MAIN_SET.search(fh.read()))
+    return False
+
+
 def unpack_archives(base, check_only=False, linked_documents=False):
     """A web archive -- a WARC, compressed or not, or a WACZ, recognized
     by its first bytes -- or a Common Cartridge, recognized by its
@@ -230,9 +250,11 @@ def unpack_archives(base, check_only=False, linked_documents=False):
         return
     # A directory with sources is a book already: nothing in it is read,
     # however many archives sit there (a cartridge --zip built, say, beside
-    # the download it came from).
+    # the download it came from). A LaTeX book's are its masters, here or
+    # where latex.main names them (FINC 308's src/), whose own cartridge,
+    # built beside them, was taken for a book to unpack.
     if any(p.lower().endswith(SOURCE_EXTENSIONS)
-           for p in glob.glob(os.path.join(base, "*"))):
+           for p in glob.glob(os.path.join(base, "*"))) or latex_book_here(base):
         found = cartridges + zips + archives
         say(", ".join(os.path.basename(p) for p in found)
             + ": not read, since this directory has sources, which are the "
@@ -259,16 +281,6 @@ def unpack_archives(base, check_only=False, linked_documents=False):
         say(unused + ("a zip's files are the book as they are." if zips
                       else "a web archive's pages keep their links to files."))
     names = ", ".join(os.path.basename(p) for p in archives)
-    if any(p.lower().endswith(SOURCE_EXTENSIONS)
-           for p in glob.glob(os.path.join(base, "*"))):
-        say(f"{names}: not read, since this directory has sources, which "
-            "are the book once an archive is unpacked. To unpack it afresh, "
-            + ("extract it into a new directory." if tool == "zip" else
-               f"use {tool} into a new directory."))
-        if linked_documents:
-            say(unused + "the pages here are the book already, and "
-                "unpacking again into a new directory is how to change that.")
-        return
     if check_only:
         say(f"{names} would be unpacked here and its pages converted.")
         return
@@ -322,15 +334,22 @@ def unpack_archives(base, check_only=False, linked_documents=False):
             pass_on(run)
         kept = {"project.yaml": "project-unpacked.yaml",
                 "conversion.yaml": "conversion-unpacked.yaml"}
+        # Every name is checked before anything moves, so a clash leaves
+        # the directory as it was, not half unpacked.
+        moves = []
         for name in sorted(os.listdir(work)):
             target = os.path.join(base, name)
             if name in kept and os.path.exists(target):
                 target = os.path.join(base, kept[name])
+            if os.path.exists(target):
+                die(f"{os.path.basename(target)} is already here; unpacking "
+                    f"{names} would overwrite it. Unpack it into a new "
+                    "directory instead.")
+            moves.append((name, target))
+        for name, target in moves:
+            if name in kept and os.path.basename(target) == kept[name]:
                 say(f"{name} was already here and is kept; the archive's is "
                     f"{kept[name]}.")
-            if os.path.exists(target):
-                die(f"{name} is already here; unpacking {names} would "
-                    "overwrite it. Unpack it into a new directory instead.")
             shutil.move(os.path.join(work, name), target)
     finally:
         shutil.rmtree(work, ignore_errors=True)
@@ -790,7 +809,13 @@ LATEX_READ_CHANGES = (
     ("label_keys", "label or reference with whitespace in its key written without"),
     ("counter_keys", "label or reference whose key LaTeX makes of its counters "
      "(\\arabic{chapter}) written as LaTeX makes it"),
-    ("counter_values", "reference or counter given the value LaTeX gives it"))
+    ("counter_values", "reference or counter given the value LaTeX gives it"),
+    ("equation_numbers", "display formula numbered as LaTeX numbers it, its labels "
+     "anchors a reference finds"),
+    ("headings_hoisted", "heading set inside a box or another environment taken out "
+     "to the page's level, where its title and sections are found"),
+    ("headings_raised", "page continuing a chapter, its headings below the top level, "
+     "given its first heading as its H1 and title"))
 
 
 def read_latex_to_json(base, masters, env, work):
@@ -849,7 +874,8 @@ def read_latex_to_json(base, masters, env, work):
                 + " Nothing was converted.")
         with open(out, encoding="utf-8") as fh:
             doc = json.load(fh)
-        keys, values = latexsource.resolve_counters(doc["blocks"], prep["counters"])
+        keys, values = latexsource.resolve_counters(doc["blocks"], prep["counters"],
+                                                     counts)
         counts["counter_keys"] = counts.get("counter_keys", 0) + keys
         counts["counter_values"] = counts.get("counter_values", 0) + values
         recolored = latexsource.color_spans(doc["blocks"],
@@ -866,6 +892,9 @@ def read_latex_to_json(base, masters, env, work):
         own, empty = [], []
         for stem, role, blocks in pages:
             stem = safe_stem(stem)
+            blocks, hoisted = latexsource.hoist_headings(blocks)
+            if hoisted:
+                counts["headings_hoisted"] = counts.get("headings_hoisted", 0) + hoisted
             # An unnumbered heading with nothing in it and no label, which a
             # book sets to start a page (OpenIntro's copyright page opens
             # with \chapter*{}), and a file with nothing to read once it's
@@ -888,6 +917,8 @@ def read_latex_to_json(base, masters, env, work):
                 blocks, _ = latexsource.title_heading(blocks)
                 if meta.get("title"):
                     page_meta["title"] = meta["title"]
+            elif latexsource.promote_headings(blocks):
+                counts["headings_raised"] = counts.get("headings_raised", 0) + 1
             with open(os.path.join(base, stem + ".json"), "w",
                       encoding="utf-8") as fh:
                 json.dump({"pandoc-api-version": doc["pandoc-api-version"],
@@ -2550,6 +2581,10 @@ def remediate_sources(target, base, docs, paths, env, html_stems=(), language=No
                + (f"the book's bold ({counts['tag_math_bold']}) made unicode-math's bold "
                   "italic, whose letters the fonts have, "
                   if counts.get("tag_math_bold") else "")
+               + (f"the PostScript font families the book names ({counts['tag_gyre']}) set "
+                  "in TeX Gyre's OpenType clones, where installed, which the OpenType fonts' "
+                  "encoding has, "
+                  if counts.get("tag_gyre") else "")
                + ("MathML set up for the book's unicode-math, "
                   if counts.get("tag_math_setup") else "")
                + (f"{counts['tag_floats']} figure(s) and table(s) tagged where the text has "
@@ -3815,7 +3850,24 @@ def main():
         if master:
             tex_stems, tex_order, tex_header, latex_parts = read_latex_to_json(
                 base, latex_main, env, work)
-            check_page_names([docs, markdown, adoc,
+            # An .html file with the name of one of the book's pages is one
+            # an earlier run wrote beside it, as html_sources takes one named
+            # after a Word file; read, it would replace the page it came
+            # from (FINC 308's cartridge's pages, which an unpacking that
+            # stopped halfway left beside its masters).
+            beside = [n for n in web if n[:-5] in tex_stems
+                      or safe_stem(n[:-5]) in tex_stems]
+            if beside:
+                say(f"{len(beside)} .html file(s) here have the names of the "
+                    "LaTeX book's pages (" + ", ".join(beside[:3])
+                    + (", ..." if len(beside) > 3 else "") + "), so they're "
+                    "taken as pages an earlier run wrote beside it, and not read.")
+                web = [n for n in web if n not in beside]
+            if web and not named:
+                say(f"Reading {len(web)} .html file(s) as sources alongside "
+                    f"the LaTeX book. A page finished by hand belongs in "
+                    f"{PASSTHROUGH}/, which is copied as it stands.")
+            check_page_names([docs, markdown, adoc, web,
                               [s + ".tex" for s in tex_stems]])
             fill_namerefs(base, tex_stems)
             resolve_asciidoc_xrefs(base, tex_stems, "LaTeX")

@@ -26,6 +26,7 @@ The checks are the class of defect that has reached this project's output before
 | `table-not-in-scroll-region` | A data table on an HTML page outside the focusable wrapper the filter puts around every data table (WCAG 1.4.10). The filter's own invariant, checked on the output. |
 | `table-without-headers-or-caption` | A table with no `th` and no `caption`, and not marked `role="presentation"`. A data grid with no relationships to encode conforms with a caption alone; without one it's unidentifiable. |
 | `no-lang`, `no-title` | The `html` element declares no language, or the page has no title. |
+| `title-is-file-name` | The page's title is its file's name (`ch_intro_to_data`), as a page with no heading of its own gets: a name with an underscore, a hyphen, a dot, or a capital inside a word. |
 | `not-well-formed` | An EPUB content document that isn't XML. |
 
 For an EPUB it also checks the container: `mimetype` first and uncompressed, a package document the container points at, every manifest item present in the archive and every file in the archive present in the manifest, spine entries that exist, a navigation document, the `dc:title`, `dc:identifier`, and `dc:language` every EPUB needs, and the accessibility metadata this project writes.

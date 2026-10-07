@@ -304,6 +304,41 @@ def _separator(prefix, n):
                                {"t": "Span", "c": [[prefix + str(n), [], []], []]}]}
 
 
+def _unwrap_equations(inlines):
+    """A numbered display formula from a LaTeX book, which the pages set
+    in a span with its anchors and number (latexsource.resolve_counters),
+    as the writer makes a display formula of: alone, or in a span alone
+    (isDisplayMath, Writers/Shared.hs); in that span it was set in the
+    line, as Word sets a formula among a paragraph's words. Its anchors
+    stay before it, and its number follows it, on a line of its own when
+    text follows."""
+    if not any(isinstance(i, dict) and i.get("t") == "Span"
+               and "equation" in i["c"][0][1] for i in inlines):
+        return inlines
+    out = []
+    for index, item in enumerate(inlines):
+        if not (isinstance(item, dict) and item.get("t") == "Span"
+                and "equation" in item["c"][0][1]):
+            out.append(item)
+            continue
+        number = []
+        for inner in item["c"][1]:
+            if inner.get("t") == "Span" and "equation-number" in inner["c"][0][1]:
+                # A row's number after the row before's, a space apart.
+                for i in inner["c"][1]:
+                    if i.get("t") != "LineBreak":
+                        number.append(i)
+                    elif number and number[-1].get("t") != "Space":
+                        number.append({"t": "Space"})
+            else:
+                out.append(inner)
+        out.extend(number)
+        if number and any(i.get("t") not in ("Space", "SoftBreak", "LineBreak")
+                          for i in inlines[index + 1:]):
+            out.append({"t": "LineBreak"})
+    return out
+
+
 def mark_blocks(doc):
     """The page's AST with what the post-processing needs marked on the
     elements themselves, never counted: each block quote's content in a
@@ -314,7 +349,8 @@ def mark_blocks(doc):
     a marked Div, since a figure holding more than an image is written as
     a table. Matching by position went wrong on Pandoc's own output: a
     figure holding two images is a w:tbl too. Returns (doc, marks)."""
-    counts = {"quote": 0, "sep": 0, "table": 0, "decorative": 0, "lines": 0, "code": 0}
+    counts = {"quote": 0, "sep": 0, "table": 0, "decorative": 0, "lines": 0, "code": 0,
+              "equations": 0}
 
     def marked(prefix, kind, inner, block):
         counts[kind] += 1
@@ -332,6 +368,10 @@ def mark_blocks(doc):
             return value
         if not _elements(value):
             return [visit(v) for v in value]
+        unwrapped = _unwrap_equations(value)
+        if unwrapped is not value:
+            counts["equations"] += 1
+            value = unwrapped
         out = []
         for item in value:
             t = item.get("t")

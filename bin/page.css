@@ -60,6 +60,21 @@ table caption {
   margin: 1em 0;
 }
 
+/* A display formula a LaTeX book numbers: its number at the right, as
+   LaTeX sets it, and a formula's rows' numbers one under another. The
+   anchors before the formula are empty, so the space is the number's own
+   margin, not a gap between them all. */
+.equation {
+  display: flex;
+  align-items: center;
+  margin: 0.5em 0;
+}
+.equation > math { flex: 1 1 auto; }
+.equation-number {
+  flex: none;
+  margin-left: 1em;
+}
+
 figure { margin: 1.5em 0; }
 figure img { height: auto; }
 figcaption {

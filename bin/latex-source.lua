@@ -201,6 +201,12 @@ function Math(m)
   text = text:gsub('\\hfill%f[^%a]', '\\quad')
   text = text:gsub('\\vspace%*?%s*%b{}', '')
   text = text:gsub('\\index%s*%b{}', '')
+  -- A group LaTeX's own commands open and close, which texmath stops on
+  -- ("unexpected control sequence \\begingroup"), as the braces it reads:
+  -- a book's macro a formula uses can hold one, which the copy leaves as
+  -- the book wrote it, for LaTeX.
+  text = text:gsub('\\begingroup%f[^%a]%s*', '{'):gsub('\\endgroup%f[^%a]', '}')
+  text = text:gsub('\\bgroup%f[^%a]%s*', '{'):gsub('\\egroup%f[^%a]', '}')
   if text ~= m.text then
     -- A line all a removal left, blank, would end LaTeX's paragraph inside
     -- an align* in a PDF ("Paragraph ended before \environment align* was

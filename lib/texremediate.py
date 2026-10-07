@@ -732,8 +732,20 @@ SHIMS = {
     \providecommand \filouter { }
     \providecommand \chaptertitlename { \chaptername }
     % titlesec's page styles (\newpagestyle, \sethead) are titleps's, which
-    % LaTeX's tagging takes; titlesec loads it for them itself.
+    % LaTeX's tagging takes, loaded when the first is defined, as titlesec
+    % does: loaded at once, it clashed with fancyhdr's \headrule
+    % (OpenIntro Statistics, which uses fancyhdr's styles and no others).
+    \cs_gset_protected:Npn \newpagestyle { \__oer_titleps:N \newpagestyle }
+    \cs_gset_protected:Npn \renewpagestyle { \__oer_titleps:N \renewpagestyle }
+    \cs_gset_protected:Npn \widenhead { \__oer_titleps:N \widenhead }
+  }
+\cs_new_protected:Npn \__oer_titleps:N #1
+  {
+    \cs_undefine:N \newpagestyle
+    \cs_undefine:N \renewpagestyle
+    \cs_undefine:N \widenhead
     \RequirePackage { titleps }
+    #1
   }
 """, "headings are set as the class sets them, without the fonts, rules, spacing, and "
          "labels titlesec gave them, and a heading level titlesec made is the class's "
@@ -1128,6 +1140,32 @@ TEXT_FONTS = MATH_FONTS.replace(
     "  \\usepackage{unicode-math}\n", "  \\usepackage{fontspec}\n")
 
 
+# A PostScript font's NFSS family the book names itself (OpenIntro's
+# headings ask for \fontfamily{phv}), which the OpenType fonts' encoding,
+# TU, doesn't have: LuaLaTeX set its text in Latin Modern, with a warning
+# each time (425 in OpenIntro). TeX Gyre's OpenType fonts are their clones,
+# declared under the family's own name where the font is installed.
+GYRE = {"phv": "TeX Gyre Heros", "ptm": "TeX Gyre Termes", "pcr": "TeX Gyre Cursor",
+        "ppl": "TeX Gyre Pagella", "pbk": "TeX Gyre Bonum", "pnc": "TeX Gyre Schola",
+        "pag": "TeX Gyre Adventor", "pzc": "TeX Gyre Chorus"}
+FAMILY_USE = re.compile(r"\\(?:fontfamily\s*\{\s*|usefont\s*\{[^{}]*\}\s*\{\s*"
+                        r"|(?:renewcommand|def)\s*\{?\s*\\(?:rm|sf|tt|family)default\s*\}?\s*\{\s*)"
+                        r"(%s)\s*\}" % "|".join(GYRE))
+
+
+def gyre_families(texts):
+    """(lines, families): each PostScript family the book's files name,
+    declared as its TeX Gyre clone for the OpenType fonts, if installed."""
+    used = sorted({m.group(1) for t in texts.values()
+                   for m in latexsource.code_matches(FAMILY_USE, t)})
+    if not used:
+        return "", []
+    return ("  % The PostScript fonts the book names, as TeX Gyre's clones.\n"
+            + "".join("  \\IfFontExistsTF{%s}{\\newfontfamily\\oergyre%s{%s}[NFSSFamily=%s,\n"
+                      "    RawFeature={fallback=textbookimprover}]}{}\n"
+                      % (GYRE[f], f, GYRE[f], f) for f in used)), used
+
+
 CLASS = re.compile(r"\\documentclass\s*(?:\[[^]]*\])?\s*\{([^}]*)\}")
 LOAD_CLASS = re.compile(r"\\LoadClass(?:WithOptions)?\s*(?:\[[^]]*\])?\s*\{([^}]*)\}")
 
@@ -1192,14 +1230,21 @@ def math_block(texts, master, base=None):
     symbols then need the OpenType fonts and their fallback (TEXT_FONTS);
     one that loads unicode-math gets the MathML forms named, unless it
     names them itself; one whose fonts are its own keeps them, and the
-    packages are named."""
+    packages are named. A PostScript family the book names (\\fontfamily
+    {phv}) is declared as its TeX Gyre clone with the OpenType fonts, and
+    a book with no formula gets those for it too."""
+    families, gyre = gyre_families(texts)
     if not any(latexsource.code_matches(latexsource.MATH_SPANS, t) for t in texts.values()):
         names, _ = preamble_packages(texts, master, base)
         stand_in = names & STAND_IN_FONTS
-        if stand_in and not names & (OWN_FONTS - STAND_IN_FONTS) \
+        if (stand_in or gyre) and not names & (OWN_FONTS - STAND_IN_FONTS) \
                 and not names & set(UNICODE_MATH):
-            return TEXT_FONTS + "\\fi\n", {"math_stand_in": ", ".join(sorted(stand_in)),
-                                          "text_fonts": 1}
+            counts = {"text_fonts": 1}
+            if stand_in:
+                counts["math_stand_in"] = ", ".join(sorted(stand_in))
+            if gyre:
+                counts["gyre"] = ", ".join(gyre)
+            return TEXT_FONTS + families + "\\fi\n", counts
         return "", {}
     names, pieces = preamble_packages(texts, master, base)
     own_setup = any(latexsource.code_matches(MATH_SETUP_KEY, piece) for piece in pieces)
@@ -1229,7 +1274,9 @@ def math_block(texts, master, base=None):
                 + ("  \\AtBeginDocument{\\renewcommand{\\pmb}[1]{\\symbfit{#1}}}\n"
                    if "\\pmb" in used else ""))
         counts["math_bold"] = ", ".join(used)
-    return MATH_FONTS + setup + bold + latexbuild.UM_ALIASES + "\\fi\n", counts
+    if gyre:
+        counts["gyre"] = ", ".join(gyre)
+    return MATH_FONTS + families + setup + bold + latexbuild.UM_ALIASES + "\\fi\n", counts
 
 
 def _code_subn(pattern, text, replace):

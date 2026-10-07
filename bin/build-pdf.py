@@ -619,8 +619,13 @@ def layout_words(layout):
         words.append(f"{layout['papersize']} paper")
     if layout.get("geometry"):
         words.append("geometry's " + ", ".join(layout["geometry"]))
-    if layout.get("classoption"):
-        words.append(", ".join(layout["classoption"]))
+    options = layout.get("classoption") or []
+    sides = [o for o in options if o not in ("dvipsnames", "svgnames", "x11names")]
+    if sides:
+        words.append(", ".join(sides))
+    if len(sides) < len(options):
+        words.append("xcolor's " + ", ".join(o for o in options if o not in sides)
+                     + " colors")
     if layout.get("linestretch"):
         words.append(f"line spacing {layout['linestretch']}")
     if layout.get("indent"):

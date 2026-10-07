@@ -1830,6 +1830,30 @@ def case_documents(work):
         fh.write("defaults:\n  latex:\n    main: src/*.tex\n"
                  "targets:\n  docx:\n    format: docx\n    merge: groups\n")
     merged = convert(work)
+    # The book's own cartridge, built beside it, with no master at the top
+    # (the binder gone): latex.main says it's a book, and the cartridge
+    # isn't taken for one to unpack.
+    import zipfile
+    os.remove(os.path.join(work, "Combined.tex"))
+    with zipfile.ZipFile(os.path.join(work, "org.example.course.imscc"), "w") as z:
+        z.writestr("imsmanifest.xml", '<?xml version="1.0"?><manifest identifier="m" '
+                   'xmlns="http://www.imsglobal.org/xsd/imsccv1p1/imscp_v1p1"/>')
+    rerun = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quiet",
+                            "--check-only"], cwd=work, capture_output=True, text=True,
+                           stdin=subprocess.DEVNULL)
+    rerun_said = rerun.stdout + rerun.stderr
+    # A page of the book's, as HTML, beside its masters (as that cartridge
+    # unpacked halfway left FINC 308's): an earlier run's, not a source, so
+    # the page is still the document's.
+    with open(os.path.join(work, "Topic-A-One.html"), "w", encoding="utf-8") as fh:
+        fh.write("<html><head><title>Old</title></head><body><h1>Old</h1>"
+                 "<p>AN OLD PAGE WRITTEN BESIDE THE BOOK.</p></body></html>")
+    with open(os.path.join(work, "conversion.yaml"), "w") as fh:
+        fh.write("defaults:\n  latex:\n    main: src/*.tex\n"
+                 "targets:\n  html:\n    format: html\n")
+    beside = convert(work)
+    beside_said = beside.stdout + beside.stderr
+    beside_page = page("Topic-A-One.html")
 
     def word_headings():
         import zipfile
@@ -1926,6 +1950,15 @@ def case_documents(work):
         ("the PDF target builds a PDF of each, named as its page is, its title the "
          "document's", pdfs_titled),
         ("and each passes veraPDF's PDF/UA-2 profile", pdfs_pass),
+        ("the book's own cartridge beside its documents isn't taken for a book to unpack, "
+         "with latex.main naming them and no master at the top",
+         lambda: rerun.returncode == 0
+         and "org.example.course.imscc: not read, since this directory has sources" in rerun_said),
+        ("an .html file named as one of the book's pages is an earlier run's, not read, "
+         "so the page is still the document's",
+         lambda: beside.returncode == 0 and "Topic A: The First Topic" in beside_page
+         and "AN OLD PAGE" not in beside_page
+         and "have the names of the LaTeX book's pages (Topic-A-One.html)" in beside_said),
     ]
 
 
@@ -2033,6 +2066,16 @@ def case_pieces(work):
              {"t": "Span", "c": [["", [], [["style", "color: red"]]], []]}]
     recolored = latexsource.color_spans(
         [{"t": "Para", "c": spans}], latexsource.color_values(color_order))
+    # Colors CSS can't read as the book writes them: a \\colorlet, a mix, a
+    # name xcolor's dvipsnames has and CSS hasn't, a [named] definition; one
+    # \\providecolor doesn't change, a name CSS has, and one nothing defines.
+    mixed_values = latexsource.color_values([
+        "\\definecolor{oiB}{rgb}{.337,.608,.741}", "\\colorlet{light}{oiB!50}",
+        "\\definecolor[named]{named}{HTML}{FF0000}", "\\providecolor{oiB}{rgb}{0,0,0}"])
+    mixed = [{"t": "Span", "c": [["", [], [["style", "color: " + c]]], []]}
+             for c in ("light", "red!50!black", "BrickRed", "named", "oiB", "Orchid", "nosuch")]
+    remixed = latexsource.color_spans([{"t": "Para", "c": mixed}], mixed_values)
+    mixed_styles = [dict(map(tuple, p["c"][0][2])).get("style") for p in mixed]
     # Label keys with whitespace and a macro's {} in them, read and written
     # as ids, a reference through the book's own macro matched first.
     keyed_doc = json.loads(subprocess.run(
@@ -2159,11 +2202,107 @@ def case_pieces(work):
             return False
         image = list(PdfReader(dest).pages[0]["/Resources"]["/XObject"].values())[0].get_object()
         return str(image.get("/Filter")) == "/FlateDecode" and image.get_data() == raw
+    def titlesec_with_fancyhdr():
+        """titlesec's stand-in beside fancyhdr's page styles builds tagged:
+        titleps, loaded for titlesec's own styles, clashed with fancyhdr's
+        \\headrule when it was loaded at once (OpenIntro Statistics)."""
+        if not shutil.which("lualatex"):
+            return skip("no lualatex for the copies' builds")
+        folder = os.path.join(work, "fancy")
+        os.makedirs(folder, exist_ok=True)
+        texts = {"f.tex": "\\documentclass{book}\n\\usepackage{fancyhdr}\n"
+                          "\\usepackage[explicit]{titlesec}\n\\pagestyle{fancy}\n"
+                          "\\fancyhead[L]{Left}\n\\titleformat{\\section}{\\bfseries}"
+                          "{\\thesection\\quad #1}{1em}{}\n\\begin{document}\n"
+                          "\\chapter{One}\n\\section{A}\nText.\n\\end{document}\n"}
+        texremediate.tag(texts, "f.tex", "en", True, ("ua-2",), None)
+        with open(os.path.join(folder, "f.tex"), "w", encoding="utf-8") as fh:
+            fh.write(texts["f.tex"])
+        done = subprocess.run(["lualatex", "-interaction=nonstopmode", "-halt-on-error",
+                               "f.tex"], cwd=folder, capture_output=True, text=True,
+                              stdin=subprocess.DEVNULL)
+        return done.returncode == 0
+    # Display formulas' rows, as LaTeX numbers them: a last \\\\ makes a row, a
+    # length after one is no row's, a nested environment's and a group's
+    # rows aren't the formula's, alignat's columns aren't text, multline is
+    # numbered once.
+    rows = []
+    for tex in ("\\begin{align} a &= b \\\\ c &= d \\\\ \\end{align}",
+                "\\begin{gather} p \\\\[2pt] [q] \\end{gather}",
+                "\\begin{align} \\begin{cases} a \\\\ b \\end{cases} \\\\ {x \\\\ y} "
+                "\\label{k} \\end{align}",
+                "\\begin{alignat}{2} a &= b \\nonumber \\end{alignat}",
+                "\\begin{multline*} m \\\\ n \\tag{q} \\end{multline*}"):
+        is_starred, row_spans = latexsource.display_rows(tex)
+        rows.append((is_starred, [(tex[a:b].strip(), [c[:2] for c in latexsource.row_commands(
+            tex, a, b)]) for a, b in row_spans]))
+    # The counting on its own: a chapter's align, its first row numbered and
+    # tagged, its second not, and \\eqref's number in parentheses.
+    eq_doc = json.loads(subprocess.run(
+        ["pandoc", "-f", "latex", "-t", "json"], capture_output=True, text=True,
+        input="\\documentclass{book}\n\\begin{document}\n\\chapter{A}\n\\begin{align}\n"
+              "a \\label{p}\\\\\nb \\nonumber\n\\end{align}\nSee \\eqref{p}.\n"
+              "\\end{document}\n").stdout)
+    eq_book = "\\documentclass{book}\n\\begin{document}\n\\chapter{A}\n\\end{document}\n"
+    eq_counts = {}
+    latexsource.resolve_counters(eq_doc["blocks"],
+                                 latexsource.book_counters([("m.tex", eq_book)], eq_book),
+                                 eq_counts)
+    eq_text = json.dumps(eq_doc)
+
+    def elements(node, kind):
+        found = [node] if isinstance(node, dict) and node.get("t") == kind else []
+        for value in (node.values() if isinstance(node, dict) else
+                      node if isinstance(node, list) else []):
+            found += elements(value, kind)
+        return found
+    eq_links = [link["c"][1] for link in elements(eq_doc["blocks"], "Link")]
+    # The PDF filter on such a formula: its number set by LaTeX, by the tag,
+    # its label the anchor before it, none left in its TeX nor a blank line
+    # where one was; what subequations held put back in it.
+    eq_spans = []
+    for classes, tex in ((["equation"], "\\begin{equation}\n\\label{x}\nE\n \\tag{1.1}"
+                                        "\\end{equation}"),
+                         (["equation", "subequations"], "\\label{s}\n\\begin{align}\nu "
+                          "\\label{s-a} \\tag{1.2a}\n\\end{align}\n")):
+        anchors = [{"t": "Span", "c": [[k, [], [["label", k]]], []]}
+                   for k in re.findall(r"\\label\{([^}]*)\}", tex)]
+        eq_spans.append({"t": "Span", "c": [["", classes, []], anchors + [
+            {"t": "Math", "c": [{"t": "DisplayMath"}, tex]},
+            {"t": "Span", "c": [["", ["equation-number"], []], [{"t": "Str", "c": "(9.9)"}]]}]]})
+    eq_latex = subprocess.run(
+        ["pandoc", "-f", "json", "-t", "latex", "--lua-filter",
+         os.path.join(BIN, "pdf-target.lua")], capture_output=True, text=True,
+        input=json.dumps({"pandoc-api-version": eq_doc["pandoc-api-version"], "meta": {},
+                          "blocks": [{"t": "Para", "c": eq_spans}]})).stdout
     commented_alt, _ = texremediate.remediate_file(
         "/nonexistent", "a.tex", "\\fig[A first. % to reword\n\nA second.]{sq}\n", {}, [],
         macros={"fig": {"file": "#2", "arguments": 2, "default": "", "alt": 1,
                         "keyed": False, "options": None}})
     return [
+        ("the PDF filter leaves a numbered formula's number to LaTeX and its labels to the "
+         "anchors before it, with no blank line where one was, and puts back the "
+         "subequations a formula was in",
+         lambda: "\\begin{equation}\nE\n \\tag{1.1}\\end{equation}" in eq_latex
+         and "\\label{x}" in eq_latex and "\\label{s-a}" in eq_latex
+         and eq_latex.count("\\label{") == 3 and "(9.9)" not in eq_latex
+         and "\\begin{subequations}\n\\begin{align}" in eq_latex),
+        ("the counting numbers a formula's rows as LaTeX does, writes each number as the "
+         "row's \\tag, and gives \\eqref the number in parentheses",
+         lambda: "a \\\\label{p} \\\\tag{1.1}\\\\\\\\" in eq_text
+         and "\\\\tag{1.2}" not in eq_text and eq_links == [[{"t": "Str", "c": "(1.1)"}]]
+         and eq_counts == {"equation_numbers": 1}),
+        ("a display formula's rows are as LaTeX numbers them: a last \\\\ makes one, a "
+         "length after one is no row, though a bracket after it is, a nested "
+         "environment's rows and a group's aren't "
+         "the formula's, alignat's columns aren't its text, and multline is one",
+         lambda: rows == [
+             (False, [("a &= b", []), ("c &= d", []), ("", [])]),
+             (False, [("p", []), ("[q]", [])]),
+             (False, [("\\begin{cases} a \\\\ b \\end{cases}", []),
+                      ("{x \\\\ y} \\label{k}", [("label", "k")])]),
+             (False, [("a &= b \\nonumber", [("nonumber", None)])]),
+             (True, [("m \\\\ n \\tag{q}", [("tag", "q")])])]),
         ("a preamble's layout is Pandoc's variables: its class's type size and paper, the "
          "sides it chooses, geometry's options, its line spacing, and indented paragraphs "
          "unless parskip or a \\parindent of zero says otherwise; an option's comment is "
@@ -2186,6 +2325,7 @@ def case_pieces(work):
          and with_math.get("math_stand_in") == "wasysym" and with_math.get("math") == 1
          and "\\usepackage{unicode-math}" in math_block),
         ("a figure's lossless raster stays lossless when its fonts are embedded", lossless),
+        ("titlesec's stand-in builds beside fancyhdr's page styles", titlesec_with_fancyhdr),
         ("a package tagging can't take is replaced, the one another's stand-in serves too, "
          "each load made to define its commands",
          lambda: shims == ["titlesec", "enumerate", "soulutf8"]
@@ -2260,6 +2400,13 @@ def case_pieces(work):
                              "\\definecolor{oiB}{rgb}{0,0,0}"]
          and recolored == 2 and [p["c"][0][2][0][1] for p in spans]
          == ["color: rgb(0, 0, 0)", "background-color: rgb(0, 0, 0)", "color: red"]),
+        ("a color CSS can't read as the book writes it is CSS: a \\colorlet's, a mix, a "
+         "name of dvipsnames's, and a [named] definition; \\providecolor changes nothing "
+         "defined, a name CSS has is left, and a color nothing defines is taken out",
+         lambda: mixed_styles == ["color: rgb(170, 205, 222)", "color: rgb(128, 0, 0)",
+                                  "color: rgb(184, 20, 11)", "color: rgb(255, 0, 0)",
+                                  "color: rgb(86, 155, 189)", "color: Orchid", None]
+         and remixed == 6),
         ("the sample's probe finds each macro's formula by its mark, past one whose "
          "expansion breaks its paragraph", lambda: probed == {"worse"}),
         ("a counter stepped, set, or shown is marked where the reader keeps it, but not in "
@@ -2351,7 +2498,7 @@ CUSTOM_FILES = {
     "main.tex": r"""\documentclass[11pt]{book}
 \usepackage[margin=1in]{geometry}
 \usepackage{graphicx}
-\usepackage{xcolor}
+\usepackage[dvipsnames]{xcolor}
 \usepackage{
   amsmath,
   %tocloft,
@@ -2369,6 +2516,7 @@ Bo Chen \\
 \include{style/headers}
 \includechapter{1}{ch_one}
 \includechapter{2}{ch_two}
+\include{ch_two/TeX/more}
 \endgroup
 \include{front/solutions}
 \end{document}
@@ -2393,6 +2541,7 @@ Bo Chen \\
 \newcommand{\highlightwith}[2]{\definecolor{hl}{rgb}{#1}\textcolor{hl}{#2}}
 \newcommand{\hlx}[1]{\textcolor{oiB}{#1}}
 \newcommand{\gap}[1]{#1\hspace{1em}{}}
+\newcommand{\grp}[1]{\begingroup #1\endgroup}
 \newcommand{\secref}[1]{Section~\ref{#1}}
 \newcounter{eoce}[chapter]
 \renewcommand{\theeoce}
@@ -2477,6 +2626,9 @@ y = 2
 %z = 3
 \index{y}
 \end{align*}
+A formula the next chapter numbers: \eqref{eq:energy}.
+A \colorbox{oiB!20}{tinted} word, a \textcolor{BrickRed}{brick red} one, and a formula
+in it: ${\color{BrickRed} z}$. A group in a formula's macro: $\grp{x} + 1$.
 """,
     "ch_one/TeX/extra.tex": "\\begin{parts}\n\\item An extra part\n\\end{parts}\n",
     "ch_one/TeX/review.tex": "\\section{Review}\nThe review of chapter one.\n\n"
@@ -2488,13 +2640,29 @@ y = 2
                              "\\eoce{The first exercise.}\n\n\\eoce{The second exercise.}\n",
     # An alt text too long for the pages' liking, of two paragraphs, as
     # OpenIntro writes some.
-    "ch_two/TeX/ch_two.tex": "\\chapter{Second chapter}\n\\renewcommand{\\chapterfolder}{ch_two}\n"
+    # Its chapter's title set in a framed box, as OpenIntro sets each.
+    "ch_two/TeX/ch_two.tex": "\\begin{mdframed}\n\\chapter{Second chapter}\nIn a frame.\n"
+                             "\\end{mdframed}\n\\renewcommand{\\chapterfolder}{ch_two}\n"
                              "\\Figure[A gray star in chapter two, drawn with five points of equal "
                              "length.\n\nIts center filled, the one sample this chapter comes "
                              "back to]{0.5}{star}\n\n"
                              "\\Figuress[A purple hexagon with six equal sides]{2cm}{hexagon}{hexagon}\n\n"
                              "\\includegraphics[alt={The hexagon again, named in capitals}]"
-                             "{ch_two/figures/hexagon/HEXAGON.png}\n",
+                             "{ch_two/figures/hexagon/HEXAGON.png}\n\n"
+                             # Formulas LaTeX numbers, and references to them.
+                             "Energy:\n\\begin{equation}\\label{eq:energy}\nE = mc^2\n"
+                             "\\end{equation}\nthree rows, the second unnumbered:\n"
+                             "\\begin{align}\na &= b \\label{eq:row-one}\\\\\n"
+                             "c &= d \\nonumber \\\\\ne &= f \\label{eq:row-three}\n"
+                             "\\end{align}\none starred:\n\\begin{equation*}\nx = 0\n"
+                             "\\end{equation*}\none tagged:\n\\begin{equation}\n"
+                             "y = 1 \\tag{$\\star$}\\label{eq:star}\n\\end{equation}\n"
+                             "and a system:\n\\begin{subequations}\\label{eq:system}\n"
+                             "\\begin{align}\nu &= v \\label{eq:system-a}\\\\\n"
+                             "w &= z \\label{eq:system-b}\n\\end{align}\n\\end{subequations}\n"
+                             "See \\eqref{eq:energy}, row \\ref{eq:row-three}, "
+                             "\\eqref{eq:star}, the system \\eqref{eq:system}, and its "
+                             "second line \\ref{eq:system-b}.\n",
     "ch_two/TeX/review.tex": "\\section{Review two}\nAs \\nameref{ch_one} said, and Figure~"
                              "\\ref{fig:panels} there shows.\n\n\\section{The $t$ distribution}\n"
                              "A heading with a formula in it. See \\nameref{sec:named}, "
@@ -2505,6 +2673,10 @@ y = 2
                              "is \\arabic{alwaysTwo}:\n\n"
                              "\\resizebox{0.5\\textwidth}{!}{\\begin{tabular}{|l|l|}\\hline "
                              "Fitted & Cells \\\\ \\hline\\end{tabular}}\n",
+    # A file continuing chapter two, as OpenIntro's t-table continues its
+    # tables' chapter: a section with no chapter of its own.
+    "ch_two/TeX/more.tex": "\\section{More of chapter two}\nMore.\n\n\\subsection{A part of it}\n"
+                           "Its part.\n",
     "front/solutions.tex": "\\chapter*{Solutions}\n\\eocesolch{First chapter}\n\n"
                            "\\eocesolution{The first exercise's solution.}\n\n"
                            "\\eocesolch{Second chapter}\n\n"
@@ -2515,13 +2687,49 @@ y = 2
 }
 
 
+def word_formulas(path):
+    """In the customized book's Word file, each of chapter two's numbered
+    formulas is a paragraph of its own, a display formula, and the next
+    paragraph begins with its number."""
+    import zipfile
+    if not os.path.exists(path):
+        return False
+    with zipfile.ZipFile(path) as z:
+        xml = z.read("word/document.xml").decode("utf-8")
+    paragraphs = [(p, "".join(re.findall(r"<(?:w|m):t[^>]*>([^<]*)</(?:w|m):t>", p)))
+                  for p in re.findall(r"<w:p[ >].*?</w:p>", xml, re.S)]
+    formulas = [i for i, (p, _) in enumerate(paragraphs) if "<m:oMathPara" in p]
+    after = [paragraphs[i + 1][1] for i in formulas if i + 1 < len(paragraphs)]
+    return len(formulas) >= 5 and all(not re.search(r"<w:r>|<w:r ", paragraphs[i][0])
+                                      for i in formulas) \
+        and any(a.startswith("(2.1)") for a in after) \
+        and any(a.startswith("(2.2) (2.3)") for a in after) \
+        and any(a.startswith("(2.4a) (2.4b)") for a in after)
+
+
+def pdf_numbers(work, said):
+    """The customized book's PDF from the pages sets the numbers the pages
+    give its formulas, by their \\tag, subequations' rows by letter, and
+    the references' text, each label found."""
+    try:
+        import pypdf
+    except ImportError:
+        return skip("no pypdf to read the PDF")
+    text = " ".join(" ".join((p.extract_text() or "").split()) for p in pypdf.PdfReader(
+        os.path.join(work, "pdf", "org.example.custom.pdf")).pages)
+    return all(n in text for n in ("(2.1)", "(2.2)", "(2.3)", "(2.4a)", "(2.4b)")) \
+        and re.search(r"See \(2\.1\), row 2\.3, \(.{1,3}\), the system \(2\.4\), and its "
+                      r"second line 2\.4b", text) and "multiply defined" not in said \
+        and "Hyper reference" not in said
+
+
 def page_layout_kept(work, said):
     """The PDF from the pages has the 11pt type and inch margins the
     customized book's preamble gives, its paragraphs indented: the run says
     so, and a paragraph's words are drawn at 11pt's 10.95pt (10.91 of the
     PDF's points), beginning an inch from the edge."""
     if "The LaTeX book's own layout, from its preamble: 11pt type; geometry's " \
-            "margin=1in; indented paragraphs." not in said:
+            "margin=1in; xcolor's dvipsnames colors; indented paragraphs." not in said:
         return False
     try:
         import pypdf
@@ -2582,7 +2790,7 @@ def case_customized(work):
     with open(os.path.join(work, "conversion.yaml"), "w") as fh:
         fh.write("targets:\n  html:\n    format: html\n"
                  "  tagged:\n    format: source\n    tagging: \"on\"\n"
-                 + "  epub:\n    format: epub3\n"
+                 + "  epub:\n    format: epub3\n  docx:\n    format: docx\n"
                  + ("  pdf:\n    format: pdf\n    pdf:\n      from: pages\n" if pdf else ""))
     second = convert(work)
     said = second.stdout + second.stderr
@@ -2674,8 +2882,11 @@ def case_customized(work):
          "text, and \\begingroup after a size command is a group",
          lambda: "An introduction to the first chapter." in one
          and "0pt" not in one + page("headers.html") and "Chapter~" not in one),
-        ("a color the book defines is CSS",
-         lambda: re.search(r'<span\s+style="color: rgb\(86, 155, 189\)"><strong>A\s+question', one)),
+        ("a color the book defines is CSS, and so are a mix and a name of dvipsnames's",
+         lambda: re.search(r'<span\s+style="color: rgb\(86, 155, 189\)"><strong>A\s+question', one)
+         and re.search(r'<span\s+style="background-color: rgb\(221, 235, 242\)">tinted</span>',
+                       one)
+         and re.search(r'<span\s+style="color: rgb\(184, 20, 11\)">brick\s+red</span>', one)),
         ("\\nameref is a link to the label, its text the section's title, on another page "
          "too", lambda: re.search(r'<a\s+href="#sec:data"[^>]*>Data\s+basics</a>', one)
          and re.search(r'<a\s+href="ch_one\.html#ch_one"[^>]*>First\s+chapter</a>', two)),
@@ -2767,6 +2978,9 @@ def case_customized(work):
          and len(re.findall(r'href="#US-Airports"[^>]*>1\.1\.1</a>', one)) == 2),
         ("a formula's macro is as the book defines it, so texmath reads it",
          lambda: "x\\hspace{1em}{} = 1</annotation>" in one),
+        ("a group a formula's macro opens with \\begingroup is braces, which texmath reads",
+         lambda: re.search(r"<math[^>]*>(?:(?!</math>).)*<annotation[^>]*>\{x\} \+ 1</annotation>",
+                           one, re.S) and "\\begingroup x" not in one),
         ("the contents sample names the authors, not the affiliations under each name",
          lambda: __import__("yaml").safe_load(contents_sample or "{}").get(
              "project", {}).get("authors") == ["Ann Lee", "Bo Chen"]),
@@ -2778,6 +2992,37 @@ def case_customized(work):
         ("a brace a style file never closes stops the run, which names the file and line",
          lambda: stopped.returncode != 0
          and "style/style.tex:2 (a { that nothing in the file closes)" in told),
+        ("a display formula LaTeX numbers is numbered beside it, each row its own, a tag "
+         "as tagged, and subequations' rows by letter; each label is an anchor, and a "
+         "reference to it, on its page or another, its number, \\eqref's in parentheses",
+         lambda: re.search(r'<span\s+class="equation"><span\s+id="eq:energy"[^>]*></span>\s*'
+                           r'<math(?:(?!</math>).)*</math>\s*<span\s+class="equation-number">'
+                           r'\(2\.1\)</span></span>', two, re.S)
+         and re.search(r'class="equation-number">\(2\.2\)<br />\s*<br />\s*\(2\.3\)</span>',
+                       two)
+         and re.search(r'class="equation-number">\(<math', two)
+         and re.search(r'class="equation-number">\(2\.4a\)<br />\s*\(2\.4b\)</span>', two)
+         and re.search(r'href="#eq:energy"[^>]*>\(2\.1\)</a>', two)
+         and re.search(r'href="#eq:row-three"[^>]*>2\.3</a>', two)
+         and re.search(r'href="#eq:system"[^>]*>\(2\.4\)</a>', two)
+         and re.search(r'href="#eq:system-b"[^>]*>2\.4b</a>', two)
+         and re.search(r'href="ch_two\.html#eq:energy"[^>]*>\(2\.1\)</a>', one)
+         and "[eq:" not in one + two and "4 display formula numbered" in said),
+        ("and the PDF from the pages numbers them as the pages do, its references to them "
+         "found", lambda: pdf_numbers(work, said) if pdf else skip("no lualatex for the PDF")),
+        ("and the Word file sets each as a display formula of its own, its number after it",
+         lambda: word_formulas(os.path.join(work, "docx", "ch_two.docx"))),
+        ("a chapter's title in a framed box is the page's H1 and title, out of the box, "
+         "the box's text after it",
+         lambda: "<title>Second chapter</title>" in two
+         and re.search(r'<h1[^>]*>Second chapter</h1>\s*<div class="mdframed">\s*<p>In a frame',
+                       two) and "<h2" not in two.split("<h1")[0]),
+        ("a file continuing a chapter, a section with no chapter of its own, has its "
+         "headings raised, its section its H1 and title",
+         lambda: "<title>More of chapter two</title>" in page("more.html")
+         and re.search(r"<h1[^>]*>More of chapter two</h1>", page("more.html"))
+         and re.search(r"<h2[^>]*>A part of it</h2>", page("more.html"))
+         and "1 heading set inside a box" in said and "1 page continuing a chapter" in said),
     ]
 
 
@@ -2866,6 +3111,8 @@ Some \hl{highlighted words}, \ul{underlined words}, \st{struck words}, and \sout
 \begin{itemize}
 \item \myul{a style of its own}
 \end{itemize}
+
+{\fontfamily{phv}\selectfont A line set in Helvetica.}
 
 A filled circle, \CIRCLE, and a formula with wasysym's triangle: $x \lhd y$, and
 amssymb's squares, $\square$ and $\blacksquare$, and its own lozenge, $\lozenge$.
@@ -2963,7 +3210,7 @@ def case_unsupported(work):
             "(b) Second part", "(i) One step", "Task aa Mixed counters",
             "i. A part from the style file", "Figure 1.1: A plot", "Words beside the plot",
             "Figure 1.2: In a minipage", "Words in a minipage", "A filled circle, ●,", "⊲",
-            "squares, □ and ■,", "its own lozenge, ⋄.")
+            "squares, □ and ■,", "its own lozenge, ⋄.", "A line set in Helvetica.")
             if phrase not in found]
         if missing:
             print("    missing from the PDF:", missing)
@@ -2976,6 +3223,16 @@ def case_unsupported(work):
         done = subprocess.run([verapdf, "-f", "ua2", "--format", "text", built],
                               capture_output=True, text=True)
         return done.stdout.strip().startswith("PASS")
+
+    def helvetica():
+        """The line the book sets in Helvetica by its NFSS family is in TeX
+        Gyre Heros, its clone, not Latin Modern."""
+        if not shutil.which("pdffonts"):
+            return skip("no pdffonts to read the PDF's fonts")
+        fonts = subprocess.run(["pdffonts", built], capture_output=True,
+                               text=True).stdout if os.path.exists(built) else ""
+        return "TeXGyreHeros" in fonts and "the PostScript font families the book names " \
+            "(phv)" in said
 
     def figure_embedded():
         try:
@@ -3021,6 +3278,8 @@ def case_unsupported(work):
         ("its figures written with their fonts embedded, in the copy and in the build, one "
          "in a folder the book links to as well, the book's own left as they were",
          figure_embedded),
+        ("a line the book sets in Helvetica by its NFSS family is in TeX Gyre Heros, its "
+         "clone, and the run says so", helvetica),
         ("and it passes veraPDF's PDF/UA-2 profile", passes_ua2),
     ]
 

@@ -68,6 +68,8 @@ CHECKS = OrderedDict([
     ("no-lang", ("the html element declares no language", "error",
                  "WCAG 2.0 SC 3.1.1 (A)", "source")),
     ("no-title", ("the page has no title", "error", "WCAG 2.0 SC 2.4.2 (A)", "source")),
+    ("title-is-file-name", ("the page's title is its file's name, which says nothing of "
+                            "what it's about", "warning", "WCAG 2.0 SC 2.4.2 (A)", "source")),
     ("duplicate-id", ("an id used more than once in one document", "error",
                       "HTML Living Standard", "tool")),
     ("invalid-id", ("an id containing whitespace, which no id may", "error",

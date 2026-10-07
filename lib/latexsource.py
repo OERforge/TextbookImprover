@@ -458,6 +458,7 @@ LAYOUT_COMMAND = re.compile(
     r"\{\s*(?P<cls>[^}]*?)\s*\}"
     r"|\\usepackage(?:\s|%[^\n]*)*(?:\[(?P<package_options>[^]]*)\])?(?:\s|%[^\n]*)*"
     r"\{(?P<packages>[^}]*)\}"
+    r"|\\PassOptionsToPackage\s*\{(?P<passed>[^{}]*)\}\s*\{\s*xcolor\s*\}"
     r"|\\geometry\s*\{(?P<geometry>(?:[^{}]|\{[^{}]*\})*)\}"
     r"|\\(?:setstretch|linespread)\s*\{\s*(?P<stretch>\d*\.?\d+)\s*\}"
     r"|\\(?P<spacing>singlespacing|onehalfspacing|doublespacing)(?![A-Za-z@])"
@@ -467,6 +468,10 @@ SIZE_OPTION = re.compile(r"(?:fontsize=)?(1[012])pt")
 PAPER_OPTION = re.compile(r"(?:(a[3-6]|b[4-6]|letter|legal|executive)paper"
                           r"|paper=(a[3-6]|b[4-6]|letter|legal|executive))")
 SIDE_OPTIONS = ("oneside", "twoside", "openany", "openright")
+# xcolor's sets of named colors, which a book's formulas can name and the
+# PDF from its pages loads only when told: given as class options, which
+# xcolor takes as its own (a starred set, defined as used, given whole).
+XCOLOR_NAMES = ("dvipsnames", "svgnames", "x11names")
 # setspace's spacing at 10pt, which \setstretch takes as Pandoc writes it.
 SPACING = {"singlespacing": "1", "onehalfspacing": "1.25", "doublespacing": "1.667"}
 ZERO_LENGTH = re.compile(r"\\z@|[+-]?0*\.?0*\s*(?:pt|em|ex|mm|cm|in|bp|pc|sp|dd|cc)?")
@@ -540,7 +545,8 @@ def page_layout(texts, includes=None):
     and papersize from the class's options, the sides and chapter openings
     they choose (classoption), geometry's options, linestretch, and indent
     when the book's paragraphs are indented, as LaTeX's are unless the
-    parskip package or a \\parindent of zero says otherwise. For a PDF
+    parskip package or a \\parindent of zero says otherwise, and xcolor's
+    sets of named colors the book loads, as class options. For a PDF
     built from the pages, which would otherwise have Pandoc's 10pt type,
     its book class's margins, and parskip's spacing: FINC 308's 11pt and
     inch margins came out as 10pt in a narrower block. texts is [(name,
@@ -572,13 +578,20 @@ def page_layout(texts, includes=None):
                     layout["fontsize"] = size.group(1) + "pt"
                 elif paper:
                     layout["papersize"] = paper.group(1) or paper.group(2)
-                elif option in SIDE_OPTIONS and option not in layout.get("classoption", []):
-                    layout.setdefault("classoption", []).append(option)
+                elif option.rstrip("*") in SIDE_OPTIONS + XCOLOR_NAMES \
+                        and option.rstrip("*") not in layout.get("classoption", []):
+                    layout.setdefault("classoption", []).append(option.rstrip("*"))
                 elif option.startswith("parskip"):
                     # A KOMA class's own paragraph spacing.
                     indent = option in ("parskip=false", "parskip=off")
-        elif m.group("packages") is not None:
-            names = package_names(m.group("packages"))
+        elif m.group("packages") is not None or m.group("passed") is not None:
+            names = package_names(m.group("packages")) if m.group("packages") is not None \
+                else ["xcolor"]
+            if "xcolor" in names:
+                for option in option_list(m.group("package_options") or m.group("passed") or ""):
+                    option = option.replace(" ", "").rstrip("*")
+                    if option in XCOLOR_NAMES and option not in layout.get("classoption", []):
+                        layout.setdefault("classoption", []).append(option)
             if "geometry" in names:
                 geometry += option_list(m.group("package_options") or "")
             if "parskip" in names:
@@ -2206,34 +2219,142 @@ def environment_definitions(texts, files, counter):
         texts[name] = text
 
 
-DEFINECOLOR = re.compile(r"\\definecolor\s*\{\s*([^{}]+?)\s*\}\s*\{\s*([A-Za-z]+)\s*\}"
-                         r"\s*\{\s*([^{}]*?)\s*\}")
+DEFINECOLOR = re.compile(r"\\(definecolor|providecolor)\s*(?:\[[^]]*\])?\s*\{\s*([^{}]+?)\s*\}"
+                         r"\s*\{\s*([A-Za-z]+)\s*\}\s*\{\s*([^{}]*?)\s*\}")
+COLORLET = re.compile(r"\\colorlet\s*(?:\[[^]]*\])?\s*\{\s*([^{}]+?)\s*\}\s*(?:\[[^]]*\])?"
+                      r"\s*\{\s*([^{}]*?)\s*\}")
+COLOR_STATEMENT = re.compile("(?:%s)|(?:%s)" % (DEFINECOLOR.pattern, COLORLET.pattern))
 COLOR_USE = re.compile(r"\\(textcolor|colorbox)\s*(?:\[\s*([A-Za-z]+)\s*\])?\s*\{\s*([^{}]*?)\s*\}")
+# The colors xcolor defines itself, as it defines them (rgb), and the set
+# its dvipsnames option loads (dvipsnam.def, in cmyk), for a color a book
+# mixes (red!50!black) or names that CSS doesn't have (BrickRed): CSS knows
+# some of the names, with values of its own, and none of the mixes.
+XCOLOR_BASE = {"red": (1, 0, 0), "green": (0, 1, 0), "blue": (0, 0, 1), "cyan": (0, 1, 1),
+               "magenta": (1, 0, 1), "yellow": (1, 1, 0), "black": (0, 0, 0),
+               "white": (1, 1, 1), "gray": (.5, .5, .5), "darkgray": (.25, .25, .25),
+               "lightgray": (.75, .75, .75), "brown": (.75, .5, .25), "lime": (.75, 1, 0),
+               "olive": (.5, .5, 0), "orange": (1, .5, 0), "pink": (1, .75, .75),
+               "purple": (.75, 0, .25), "teal": (0, .5, .5), "violet": (.5, 0, .5)}
+DVIPSNAMES = {
+    "GreenYellow": "0.15,0,0.69,0", "Yellow": "0,0,1,0", "Goldenrod": "0,0.10,0.84,0",
+    "Dandelion": "0,0.29,0.84,0", "Apricot": "0,0.32,0.52,0", "Peach": "0,0.50,0.70,0",
+    "Melon": "0,0.46,0.50,0", "YellowOrange": "0,0.42,1,0", "Orange": "0,0.61,0.87,0",
+    "BurntOrange": "0,0.51,1,0", "Bittersweet": "0,0.75,1,0.24",
+    "RedOrange": "0,0.77,0.87,0", "Mahogany": "0,0.85,0.87,0.35",
+    "Maroon": "0,0.87,0.68,0.32", "BrickRed": "0,0.89,0.94,0.28", "Red": "0,1,1,0",
+    "OrangeRed": "0,1,0.50,0", "RubineRed": "0,1,0.13,0",
+    "WildStrawberry": "0,0.96,0.39,0", "Salmon": "0,0.53,0.38,0",
+    "CarnationPink": "0,0.63,0,0", "Magenta": "0,1,0,0", "VioletRed": "0,0.81,0,0",
+    "Rhodamine": "0,0.82,0,0", "Mulberry": "0.34,0.90,0,0.02",
+    "RedViolet": "0.07,0.90,0,0.34", "Fuchsia": "0.47,0.91,0,0.08",
+    "Lavender": "0,0.48,0,0", "Thistle": "0.12,0.59,0,0", "Orchid": "0.32,0.64,0,0",
+    "DarkOrchid": "0.40,0.80,0.20,0", "Purple": "0.45,0.86,0,0", "Plum": "0.50,1,0,0",
+    "Violet": "0.79,0.88,0,0", "RoyalPurple": "0.75,0.90,0,0",
+    "BlueViolet": "0.86,0.91,0,0.04", "Periwinkle": "0.57,0.55,0,0",
+    "CadetBlue": "0.62,0.57,0.23,0", "CornflowerBlue": "0.65,0.13,0,0",
+    "MidnightBlue": "0.98,0.13,0,0.43", "NavyBlue": "0.94,0.54,0,0",
+    "RoyalBlue": "1,0.50,0,0", "Blue": "1,1,0,0", "Cerulean": "0.94,0.11,0,0",
+    "Cyan": "1,0,0,0", "ProcessBlue": "0.96,0,0,0", "SkyBlue": "0.62,0,0.12,0",
+    "Turquoise": "0.85,0,0.20,0", "TealBlue": "0.86,0,0.34,0.02",
+    "Aquamarine": "0.82,0,0.30,0", "BlueGreen": "0.85,0,0.33,0", "Emerald": "1,0,0.50,0",
+    "JungleGreen": "0.99,0,0.52,0", "SeaGreen": "0.69,0,0.50,0", "Green": "1,0,1,0",
+    "ForestGreen": "0.91,0,0.88,0.12", "PineGreen": "0.92,0,0.59,0.25",
+    "LimeGreen": "0.50,0,1,0", "YellowGreen": "0.44,0,0.74,0",
+    "SpringGreen": "0.26,0,0.76,0", "OliveGreen": "0.64,0,0.95,0.40",
+    "RawSienna": "0,0.72,1,0.45", "Sepia": "0,0.83,1,0.70", "Brown": "0,0.81,1,0.60",
+    "Tan": "0.14,0.42,0.56,0", "Gray": "0,0,0,0.50", "Black": "0,0,0,1",
+    "White": "0,0,0,0"}
+# CSS's color keywords (CSS Color 4), which a page may name as they are.
+CSS_COLORS = frozenset("""
+    aliceblue antiquewhite aqua aquamarine azure beige bisque black blanchedalmond blue
+    blueviolet brown burlywood cadetblue chartreuse chocolate coral cornflowerblue cornsilk
+    crimson cyan darkblue darkcyan darkgoldenrod darkgray darkgreen darkgrey darkkhaki
+    darkmagenta darkolivegreen darkorange darkorchid darkred darksalmon darkseagreen
+    darkslateblue darkslategray darkslategrey darkturquoise darkviolet deeppink deepskyblue
+    dimgray dimgrey dodgerblue firebrick floralwhite forestgreen fuchsia gainsboro ghostwhite
+    gold goldenrod gray grey green greenyellow honeydew hotpink indianred indigo ivory khaki
+    lavender lavenderblush lawngreen lemonchiffon lightblue lightcoral lightcyan
+    lightgoldenrodyellow lightgray lightgreen lightgrey lightpink lightsalmon lightseagreen
+    lightskyblue lightslategray lightslategrey lightsteelblue lightyellow lime limegreen
+    linen magenta maroon mediumaquamarine mediumblue mediumorchid mediumpurple
+    mediumseagreen mediumslateblue mediumspringgreen mediumturquoise mediumvioletred
+    midnightblue mintcream mistyrose moccasin navajowhite navy oldlace olive olivedrab
+    orange orangered orchid palegoldenrod palegreen paleturquoise palevioletred papayawhip
+    peachpuff peru pink plum powderblue purple rebeccapurple red rosybrown royalblue
+    saddlebrown salmon sandybrown seagreen seashell sienna silver skyblue slateblue
+    slategray slategrey snow springgreen steelblue tan teal thistle tomato turquoise violet
+    wheat white whitesmoke yellow yellowgreen transparent currentcolor""".split())
 
 
-def css_color(model, spec):
-    """A color as xcolor gives it, in one of its models, as CSS: rgb(...),
-    or None for a model or value this doesn't take."""
+def rgb_color(model, spec):
+    """A color as xcolor gives it, in one of its models, as (r, g, b) from
+    0 to 1, or None for a model or value this doesn't take."""
     parts = [p.strip() for p in spec.split(",")]
     try:
         if model == "rgb":
-            rgb = [round(float(p) * 255) for p in parts]
+            rgb = [float(p) for p in parts]
         elif model == "RGB":
-            rgb = [round(float(p)) for p in parts]
+            rgb = [float(p) / 255 for p in parts]
         elif model == "HTML" and re.fullmatch(r"[0-9A-Fa-f]{6}", spec):
-            rgb = [int(spec[i:i + 2], 16) for i in (0, 2, 4)]
+            rgb = [int(spec[i:i + 2], 16) / 255 for i in (0, 2, 4)]
         elif model == "gray" and len(parts) == 1:
-            rgb = [round(float(parts[0]) * 255)] * 3
+            rgb = [float(parts[0])] * 3
         elif model == "cmyk" and len(parts) == 4:
             c, m, y, k = (float(p) for p in parts)
-            rgb = [round(255 * (1 - v) * (1 - k)) for v in (c, m, y)]
+            rgb = [(1 - v) * (1 - k) for v in (c, m, y)]
         else:
             return None
     except ValueError:
         return None
     if len(rgb) != 3:
         return None
-    return "rgb(%d, %d, %d)" % tuple(max(0, min(255, v)) for v in rgb)
+    return tuple(max(0.0, min(1.0, v)) for v in rgb)
+
+
+def css_rgb(rgb):
+    return "rgb(%d, %d, %d)" % tuple(round(v * 255) for v in rgb)
+
+
+def css_color(model, spec):
+    """A color as xcolor gives it, in one of its models, as CSS: rgb(...),
+    or None for a model or value this doesn't take."""
+    rgb = rgb_color(model, spec)
+    return css_rgb(rgb) if rgb else None
+
+
+def color_rgb(expression, colors):
+    """A color as xcolor reads one, (r, g, b) or None: a name the book
+    defines (colors, color_values's), xcolor's own, dvipsnames's, or CSS's
+    by an SVG name xcolor's svgnames shares; a mix, red!30 (with white),
+    red!70!black, and on (oiB!50!white!80); and a complement, -red."""
+    expression = expression.strip()
+    complement = expression.startswith("-")
+    parts = expression.lstrip("-").split("!")
+
+    def named(name):
+        name = name.strip()
+        if name in colors:
+            return colors[name]
+        if name in XCOLOR_BASE:
+            return XCOLOR_BASE[name]
+        if name in DVIPSNAMES:
+            return rgb_color("cmyk", DVIPSNAMES[name])
+        return None
+    current = named(parts[0])
+    index = 1
+    while current is not None and index < len(parts):
+        try:
+            share = float(parts[index]) / 100
+        except ValueError:
+            return None
+        other = named(parts[index + 1]) if index + 1 < len(parts) else (1, 1, 1)
+        if other is None:
+            return None
+        current = tuple(share * a + (1 - share) * b for a, b in zip(current, other))
+        index += 2
+    if current is None:
+        return None
+    return tuple(1 - v for v in current) if complement else current
 
 
 def environment_spans(text, names, spans=None):
@@ -2257,13 +2378,14 @@ def environment_spans(text, names, spans=None):
 
 
 def book_colors(texts, includes=None):
-    """The book's \\definecolor statements, as matches, in the order LaTeX
+    """The book's \\definecolor, \\providecolor, and \\colorlet statements,
+    as matches, in the order LaTeX
     reads them (reading_order, which takes texts and includes), so a later
     one replaces an earlier, as OpenIntro's main.tex would set its blue to
     black after the file of colors it \\include-s. One in a definition
     defines nothing until the definition is used, and its #1 is nothing
     outside it."""
-    return [m for kind, _, m in reading_order(texts, includes, watch=DEFINECOLOR)
+    return [m for kind, _, m in reading_order(texts, includes, watch=COLOR_STATEMENT)
             if kind == "match" and "#" not in m.group(0)]
 
 
@@ -2294,19 +2416,28 @@ def resolve_colors(texts, files, counter):
 
 
 def color_values(statements):
-    """{name: CSS} for the book's \\definecolor statements, in the order
-    LaTeX reads them (book_colors), the last of a name's winning; a name
-    whose last definition CSS can't take has none."""
+    """{name: (r, g, b)} for the book's color statements, in the order LaTeX
+    reads them (book_colors), the last of a name's winning, as xcolor
+    defines them: \\colorlet's from the colors defined before it, and
+    \\providecolor's only for a name not yet defined; a name whose last
+    definition this can't read has none."""
     values = {}
     for statement in statements:
         m = DEFINECOLOR.match(statement)
-        if not m:
-            continue
-        css = css_color(m.group(2), m.group(3))
-        if css:
-            values[m.group(1)] = css
+        if m:
+            if m.group(1) == "providecolor" and m.group(2) in values:
+                continue
+            rgb = rgb_color(m.group(3), m.group(4))
+            name = m.group(2)
         else:
-            values.pop(m.group(1), None)
+            m = COLORLET.match(statement)
+            if not m:
+                continue
+            rgb, name = color_rgb(m.group(2), values), m.group(1)
+        if rgb:
+            values[name] = rgb
+        else:
+            values.pop(name, None)
     return values
 
 
@@ -2314,23 +2445,32 @@ COLOR_STYLE = re.compile(r"^((?:background-)?color): (.*)$", re.S)
 
 
 def color_spans(node, values):
-    """Each span the reader made of \\textcolor or \\colorbox in a color the
-    book defines given the color as CSS, in place: the reader writes the
-    name as it is, and a name only the book's preamble defines isn't a CSS
-    color (the Nu checker found 785 on OpenIntro Statistics's pages: "oiB"
-    is not a color value). A name CSS knows (red, black) is left, as one
-    the book doesn't define. Returns how many."""
+    """Each span the reader made of \\textcolor, \\colorbox, or \\color given
+    its color as CSS, in place, when CSS can't read it as it is: a name the
+    book defines (the Nu checker found 785 on OpenIntro Statistics's pages:
+    "oiB" is not a color value), a mix (red!50!black), and a name of
+    xcolor's that CSS lacks (BrickRed). A name CSS has (red, black) is left,
+    and a color none of these is is taken out, since a browser ignores it
+    anyway. values: color_values's. Returns how many changed."""
     changed = 0
     if isinstance(node, list):
         for item in node:
             changed += color_spans(item, values)
     elif isinstance(node, dict):
         if node.get("t") == "Span":
+            kept = []
             for pair in node["c"][0][2]:
                 m = COLOR_STYLE.match(pair[1]) if pair[0] == "style" else None
-                if m and m.group(2).strip() in values:
-                    pair[1] = "%s: %s" % (m.group(1), values[m.group(2).strip()])
-                    changed += 1
+                color = m.group(2).strip() if m else ""
+                if not m or color.startswith(("rgb(", "#")) or (
+                        color.lower() in CSS_COLORS and color not in values):
+                    kept.append(pair)
+                    continue
+                rgb = color_rgb(color, values)
+                if rgb:
+                    kept.append([pair[0], "%s: %s" % (m.group(1), css_rgb(rgb))])
+                changed += 1
+            node["c"][0][2] = kept
         if "c" in node:
             changed += color_spans(node["c"], values)
     return changed
@@ -2592,6 +2732,7 @@ COUNTER_WITHIN = re.compile(r"\\(counterwithin|numberwithin|counterwithout)\*?\s
                             r"([A-Za-z@]+)\s*\}\s*\{\s*([A-Za-z@]+)\s*\}")
 THE_DEFINITION = re.compile(r"\\(?:(?:re)?newcommand\*?\s*\{?\s*|def\s*)\\the([A-Za-z@]+)\s*\}?\s*\{")
 NEWTHEOREM = re.compile(r"\\newtheorem\*?\s*\{\s*([A-Za-z@]+)\s*\}")
+SUBEQUATIONS = re.compile(r"\\begin\s*\{subequations\}")
 SECTION_LEVELS = (("part", -1), ("chapter", 0), ("section", 1), ("subsection", 2),
                   ("subsubsection", 3), ("paragraph", 4), ("subparagraph", 5))
 # LaTeX's own counters a book may show, and what the standard classes make
@@ -2665,6 +2806,11 @@ def counter_marks(text, counter, math_macros=(), counters=()):
     for m in MATTER_COMMAND.finditer(text):
         if not in_spans(m.start(), keep) and not escaped(text, m.start()):
             edits.append((m.end(), m.end(), counter_mark("division", m.group(1))))
+    # The reader keeps only what subequations holds, which numbers its
+    # rows 2.4a, 2.4b; the mark says the formula after it is that.
+    for m in SUBEQUATIONS.finditer(text):
+        if not in_spans(m.start(), keep) and not escaped(text, m.start()):
+            edits.append((m.start(), m.start(), counter_mark("subequations")))
     for m in COUNTER_SHOW.finditer(text):
         if in_spans(m.start(), keep) or escaped(text, m.start()):
             continue
@@ -2774,7 +2920,93 @@ def counter_style(style, n):
     return str(n)
 
 
-def resolve_counters(blocks, setup):
+# A display formula's number. The reader keeps a numbered environment's
+# TeX whole, starred or not (Readers/LaTeX/Math.hs, mathEnvWith), and
+# texmath leaves its \label, \tag, and \nonumber out of the MathML: on the
+# pages a formula had no number, and a reference to it read [key]. These
+# are the environments LaTeX numbers once, and those numbering each row.
+DISPLAY_NUMBERED = {"equation": False, "multline": False, "dmath": False,
+                    "align": True, "gather": True, "eqnarray": True,
+                    "alignat": True, "flalign": True}
+DISPLAY_BEGIN = re.compile(r"\\begin\s*\{(%s)(\*?)\}" % "|".join(DISPLAY_NUMBERED))
+ANY_EDGE = re.compile(r"\\(begin|end)\s*\{[^{}]*\}")
+ROW_COMMAND = re.compile(r"\\(nonumber|notag|tag\*?|label)(?![A-Za-z@])")
+DISPLAY_ROW_END = re.compile(r"\*?\s*(?:\[[^]]*\])?")
+
+
+def display_rows(tex, at=0):
+    """The numbered environment that begins at at in a display formula's
+    TeX, read as LaTeX numbers it: (starred, rows), each row (start, end)
+    in tex, an environment numbered once one row; or None. A row ends at
+    \\\\ outside braces and the environments inside, with its * and
+    [length]; one after a last \\\\ is a row, as LaTeX numbers it."""
+    m = DISPLAY_BEGIN.match(tex, at)
+    if not m:
+        return None
+    name, starred = m.group(1), bool(m.group(2))
+    start = i = m.end()
+    if name == "alignat":
+        columns = re.compile(r"\s*\{[^{}]*\}").match(tex, start)
+        if columns:
+            start = i = columns.end()
+    rows, row_start, depth, n = [], start, 0, len(tex)
+    while i < n:
+        ch = tex[i]
+        if ch == "%":
+            line = tex.find("\n", i)
+            i = n if line < 0 else line + 1
+        elif ch == "\\":
+            edge = ANY_EDGE.match(tex, i)
+            if edge and edge.group(1) == "end" and depth == 0:
+                rows.append((row_start, i))
+                return starred, rows if DISPLAY_NUMBERED[name] else [(start, i)]
+            if edge:
+                depth += 1 if edge.group(1) == "begin" else -1
+                i = edge.end()
+            elif tex.startswith("\\\\", i) and depth == 0:
+                rows.append((row_start, i))
+                i = row_start = DISPLAY_ROW_END.match(tex, i + 2).end()
+            else:
+                i += 2
+        else:
+            depth += 1 if ch == "{" else -1 if ch == "}" else 0
+            i += 1
+    return None
+
+
+def row_commands(tex, start, end):
+    """What tex[start:end], a row of a display formula, says of its number:
+    [(command, argument, start, end)] for \\nonumber, \\notag, \\tag,
+    \\tag*, and \\label, outside comments, an argument's span its braces'."""
+    found, spans = [], skip_spans(tex[start:end])
+    for m in ROW_COMMAND.finditer(tex, start, end):
+        if in_spans(m.start() - start, spans) or escaped(tex, m.start()):
+            continue
+        name, argument, stop = m.group(1), None, m.end()
+        if name not in ("nonumber", "notag"):
+            at = argument_space(tex, m.end())
+            close = matching_brace(tex, at) if tex.startswith("{", at) else -1
+            if close < 0 or close > end:
+                continue
+            argument, stop = tex[at + 1:close - 1], close
+        found.append((name, argument, m.start(), stop))
+    return found
+
+
+def tag_inlines(text):
+    """A number or tag as inlines: its $...$ a formula, the rest words."""
+    out = []
+    for index, part in enumerate(re.split(r"(?<!\\)\$(.*?)(?<!\\)\$", text)):
+        if index % 2:
+            out.append({"t": "Math", "c": [{"t": "InlineMath"}, part]})
+            continue
+        for word in re.split(r"(\s+)", part):
+            if word:
+                out.append({"t": "Space"} if word.isspace() else {"t": "Str", "c": word})
+    return out
+
+
+def resolve_counters(blocks, setup, counts=None):
     """The marks counter_marks made, counted in the document's order as
     LaTeX counts, in place: a numbered heading steps its counter and the
     ones within it; \\refstepcounter makes its counter's value the one a
@@ -2783,14 +3015,19 @@ def resolve_counters(blocks, setup):
     label's and reference's key made of counters (\\arabic{chapter}) is
     written as LaTeX makes it, and a reference the reader couldn't
     resolve, to a label in running text, which it shows as [key], gets
-    the value the label recorded. The marks go. setup: book_counters's.
-    Returns (keys, values): how many keys were written, and references
-    and counters given a value."""
+    the value the label recorded. A display formula LaTeX numbers is
+    numbered, its number shown beside it and its labels anchors before
+    it, and each numbered row given its number as a \\tag, so a PDF from
+    the pages numbers it so too; \\eqref's number is in parentheses. The
+    marks go. setup: book_counters's. Returns (keys, values): how many
+    keys were written, and references and counters given a value;
+    counts, if given, gets equation_numbers, the formulas numbered."""
     counters = dict(setup["initial"])
     formats, resets = dict(setup["formats"]), setup["resets"]
     levels, theorems = setup["levels"], set(setup["theorems"])
     state = {"current": None, "numbered": True}
     labels, refs, written = {}, [], [0]
+    numbered = [0]
 
     def reset(name):
         for child, parent in resets.items():
@@ -2831,6 +3068,69 @@ def resolve_counters(blocks, setup):
             written[0] += 1
         return new
 
+    def equation(node):
+        """A display formula numbered as LaTeX numbers it, in place: each
+        numbered row without a \\tag of its own given one, each label
+        recording its row's number (written as key_id has it, as the
+        references will be), and node["equation"] noting the labels and
+        what each row shows, for unmark. A formula subequations held, as
+        the mark before it says, is numbered once, and its rows by
+        letter."""
+        tex = node["c"][1]
+        sub = state.pop("subequations", False)
+        inner = DISPLAY_BEGIN.search(tex) if sub else re.compile(r"\s*").match(tex)
+        at = (inner.start() if sub else inner.end()) if inner else len(tex)
+        found = display_rows(tex, at)
+        if not found and not sub:
+            return
+        edits, keys, shown = [], [], []
+        last = [state["current"]]
+
+        def label(argument, start, stop, number):
+            new = key(argument)
+            labels[new] = number if number is not None else last[0]
+            keys.append(new)
+            if key_id(new) != argument:
+                edits.append((start, stop, "\\label{%s}" % key_id(new)))
+        if sub:
+            step("equation")
+            parent = last[0] = the("equation")
+            for name, argument, start, stop in row_commands(tex, 0, at):
+                if name == "label":
+                    label(argument, start, stop, parent)
+        starred, rows = found or (True, [])
+        letters = 0
+        for start, stop in rows:
+            commands = row_commands(tex, start, stop)
+            names = [c[0] for c in commands]
+            tag = next((c for c in commands if c[0].startswith("tag")), None)
+            if tag:
+                number = tag[1]
+                shown.append(number if tag[0] == "tag*" else "(%s)" % number)
+            elif starred or "nonumber" in names or "notag" in names:
+                number = None
+                shown.append(None)
+            else:
+                if sub:
+                    letters += 1
+                    number = parent + counter_style("alph", letters)
+                else:
+                    step("equation")
+                    number = the("equation")
+                shown.append("(%s)" % number)
+                edits.append((stop, stop, " \\tag{%s}" % number))
+            if number is not None:
+                last[0] = number
+            for name, argument, cstart, cstop in commands:
+                if name == "label":
+                    label(argument, cstart, cstop, number)
+        for start, stop, replacement in sorted(edits, reverse=True):
+            tex = tex[:start] + replacement + tex[stop:]
+        node["c"][1] = tex
+        if keys or any(s is not None for s in shown) or sub:
+            node["equation"] = {"labels": keys, "shown": shown, "sub": sub}
+            numbered[0] += 1
+
     def walk(node):
         if isinstance(node, list):
             for item in node:
@@ -2865,8 +3165,12 @@ def resolve_counters(blocks, setup):
                 node["shown"] = counter_style(parts[1], counters.get(parts[2], 0))
             elif op == "the" and len(parts) > 1:
                 node["shown"] = the(parts[1])
+            elif op == "subequations":
+                state["subequations"] = True
             node["mark"] = True
             return
+        elif kind == "Math" and c[0].get("t") == "DisplayMath":
+            equation(node)
         elif kind == "Span" and any(k == "label" for k, _ in c[0][2]):
             new = key(c[0][0])
             c[0][0] = new
@@ -2898,7 +3202,13 @@ def resolve_counters(blocks, setup):
             node["c"][2][0] = "#" + new
         placeholder = [{"t": "Str", "c": "[%s]" % reference}]
         if node["c"][1] == placeholder and labels.get(new):
-            node["c"][1] = [{"t": "Str", "c": labels[new]}]
+            # \eqref, amsmath's, sets the number in parentheses, whatever
+            # the label numbers; a \tag's text may hold a formula.
+            shown = labels[new]
+            if dict((k, v) for k, v in attrs).get("reference-type") == "eqref":
+                shown = "(%s)" % shown
+            node["c"][1] = tag_inlines(shown) if "$" in shown \
+                else [{"t": "Str", "c": shown}]
             given += 1
 
     def unmark(node):
@@ -2910,6 +3220,30 @@ def resolve_counters(blocks, setup):
                     if item.get("shown"):
                         out.append({"t": "Str", "c": item["shown"]})
                         given += 1
+                    continue
+                if isinstance(item, dict) and item.get("equation"):
+                    # The labels' anchors, the formula, and its numbers, a
+                    # row's under the row before's, in a span the pages'
+                    # style sets the numbers at the right of.
+                    info = item.pop("equation")
+                    inner = [{"t": "Span", "c": [[k, [], [["label", k]]], []]}
+                             for k in info["labels"]]
+                    inner.append(item)
+                    shown = list(info["shown"])
+                    while shown and shown[-1] is None:
+                        shown.pop()
+                    if shown:
+                        numbers = []
+                        for index, number in enumerate(shown):
+                            if index:
+                                numbers.append({"t": "LineBreak"})
+                            if number is not None:
+                                numbers.extend(tag_inlines(number))
+                        inner.append({"t": "Span", "c": [["", ["equation-number"], []],
+                                                         numbers]})
+                    out.append({"t": "Span", "c": [
+                        ["", ["equation"] + (["subequations"] if info["sub"] else []), []],
+                        inner]})
                     continue
                 marked = isinstance(item, dict) and item.get("t") in ("Para", "Plain") \
                     and any(isinstance(i, dict) and i.get("mark") for i in item["c"])
@@ -2923,6 +3257,8 @@ def resolve_counters(blocks, setup):
         elif isinstance(node, dict) and node.get("c") is not None:
             unmark(node["c"])
     unmark(blocks)
+    if counts is not None and numbered[0]:
+        counts["equation_numbers"] = counts.get("equation_numbers", 0) + numbered[0]
     return written[0], given
 
 
@@ -3305,6 +3641,76 @@ def cut_pages(doc, order, master_stem, front_role):
     if not pages[0][2]:
         pages.pop(0)
     return [tuple(p) for p in pages]
+
+
+def hoist_headings(blocks):
+    """Each heading inside a division taken out to the page's own level,
+    the division split around it, its id kept by its first part: a page's
+    title and its sections are found only there. OpenIntro Statistics sets
+    each chapter's title in a framed box (its chapterpage, mdframed in a
+    minipage), which the reader gives as two divisions with the heading
+    inside, and every chapter's page was titled with its file's name, its
+    EPUB chapter cut before the heading, and its sections out of the
+    chapter's nesting. Returns (blocks, the headings taken out)."""
+    moved = [0]
+
+    def split(div, depth):
+        attr, content = div["c"]
+        out, current, first = [], [], True
+
+        def part():
+            nonlocal first
+            if current or (first and attr[0]):
+                out.append({"t": "Div", "c": [[attr[0] if first else "", attr[1], attr[2]],
+                                              list(current)]})
+                first = False
+            current.clear()
+        for block in content:
+            for item in split(block, depth + 1) if block.get("t") == "Div" else [block]:
+                if item.get("t") == "Header":
+                    part()
+                    out.append(item)
+                    if depth == 0:
+                        moved[0] += 1
+                else:
+                    current.append(item)
+        part()
+        return out
+    out = []
+    for block in blocks:
+        if block.get("t") == "Div" and any(b.get("t") == "Header" for b in split(block, 1)):
+            out.extend(split(block, 0))
+        else:
+            out.append(block)
+    return out, moved[0]
+
+
+def promote_headings(blocks):
+    """A page whose headings all sit below the top level, one of the files
+    that continue a chapter (OpenIntro Statistics's t-table and chi-square
+    table, each a section of its distribution tables' chapter), has them
+    raised until its first is H1, its title: it had none, and its title
+    was its file's name. Returns the levels raised, 0 when none."""
+    levels = []
+
+    def walk(node, change=0):
+        if isinstance(node, list):
+            for item in node:
+                walk(item, change)
+        elif isinstance(node, dict):
+            if node.get("t") == "Header":
+                if change:
+                    node["c"][0] -= change
+                else:
+                    levels.append(node["c"][0])
+            elif node.get("c") is not None and node.get("t") not in (
+                    "Math", "Code", "CodeBlock", "RawInline", "RawBlock", "Str"):
+                walk(node["c"], change)
+    walk(blocks)
+    if not levels or min(levels) <= 1:
+        return 0
+    walk(blocks, min(levels) - 1)
+    return min(levels) - 1
 
 
 # --------------------------------------------------------------------------

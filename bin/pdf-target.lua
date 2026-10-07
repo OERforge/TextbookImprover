@@ -524,7 +524,49 @@ local function heading(header)
   end
 end
 
+-- A display formula a LaTeX book numbers (latexsource.resolve_counters):
+-- its TeX holds each row's number as a \tag, which LaTeX sets, so the
+-- numbers set beside it for the pages go. Its labels go from its TeX, the
+-- anchors before it standing for them, since the assembly gives those its
+-- page's prefix (page-two--eq:energy), as it gives each link to them. What
+-- subequations held is put back in it: the reader keeps only its content,
+-- which the writer wraps in \[ \] unless it begins with an environment the
+-- writer knows (isMathEnv, Writers/LaTeX.hs, 3.12), and amsmath stopped on
+-- an align inside that ("Erroneous nesting of equation structures").
+local function equation(span)
+  if not span.classes:includes('equation') then
+    return nil
+  end
+  local out = pandoc.Inlines{}
+  for _, inner in ipairs(span.content) do
+    if inner.t == 'Span' and inner.classes:includes('equation-number') then
+      -- set by LaTeX
+    elseif inner.t == 'Math' then
+      -- A label on a line of its own leaves the line blank, which ends
+      -- the paragraph inside the environment ("Paragraph ended before
+      -- \environment equation was complete"); one line end is kept, which
+      -- a comment before it needs.
+      local text, n = inner.text:gsub('\\label%s*(%b{})', '')
+      repeat
+        text, n = text:gsub('\n[ \t]*\n', '\n')
+      until n == 0
+      if span.classes:includes('subequations') then
+        text = text:gsub('\\pmb%f[^%a]', '\\symbfit')
+        out:insert(pandoc.RawInline('latex', '\\begin{subequations}' .. text
+          .. '\\end{subequations}'))
+      else
+        inner.text = text
+        out:insert(inner)
+      end
+    else
+      out:insert(inner)
+    end
+  end
+  return out
+end
+
 return {
+  { Span = equation },
   { Inlines = lift_display, Header = heading },
   { Figure = Figure },
   { Para = line_breaks, Plain = line_breaks },

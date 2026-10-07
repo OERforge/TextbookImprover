@@ -966,6 +966,12 @@ def case_warc_direct(work):
     checked = work + "-checked"
     fresh(checked)
     check = run(checked, "--check-only")
+    # Both names an unpacked project.yaml could take are here: the run
+    # stops, and stops before moving anything, the pages included.
+    clash = work + "-clash"
+    fresh(clash, {"project.yaml": "project:\n  title: Mine\n",
+                  "project-unpacked.yaml": "project:\n  title: Older\n"})
+    clashed = run(clash)
     return [
         ("a directory holding only a WARC is unpacked into it, project.yaml "
          "and all", lambda: len(pages) == 2 and os.path.isfile(
@@ -979,6 +985,14 @@ def case_warc_direct(work):
          and os.path.isfile(os.path.join(kept, "project-unpacked.yaml"))),
         ("--check-only unpacks nothing",
          lambda: not [n for n in os.listdir(checked) if n.endswith(".html")]),
+        ("a name the archive's files would take, here already, stops the "
+         "run before anything is moved",
+         lambda: clashed.returncode != 0
+         and "project-unpacked.yaml is already here" in clashed.stderr
+         + clashed.stdout
+         and not [n for n in os.listdir(clash) if n.endswith(".html")]
+         and "Older" in open(os.path.join(clash,
+                                          "project-unpacked.yaml")).read()),
     ]
 
 

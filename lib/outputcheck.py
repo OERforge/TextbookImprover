@@ -34,6 +34,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 import json
 import os
 import posixpath
+import re
 import shutil
 import subprocess
 import tempfile
@@ -232,6 +233,14 @@ def check_page(page, findings):
                                 "the html element declares no language"))
     if not page.title:
         findings.append(Finding(where, "no-title", "the page has no title"))
+    # A title that is the page's file name, as one with no heading of its
+    # own gets: OpenIntro Statistics's chapters were titled ch_intro_to_data
+    # while their headings sat inside a box. Only a name that reads as one,
+    # with an underscore, a hyphen, a dot, or a capital inside a word.
+    stem = os.path.splitext(os.path.basename(where))[0]
+    if page.title and page.title == stem and " " not in stem \
+            and re.search(r"[_.\-]|[a-z][A-Z]", stem):
+        findings.append(Finding(where, "title-is-file-name", page.title))
     seen = set()
     for identifier in page.ids:
         if identifier in seen:
@@ -488,6 +497,7 @@ DESCRIPTIONS = {
         "a data table outside the focusable scroll wrapper (HTML pages)",
     "no-lang": "the html element declares no language",
     "no-title": "no title element, or an empty one",
+    "title-is-file-name": "the page's title is its file's name",
     "not-well-formed": "the document could not be parsed",
 }
 

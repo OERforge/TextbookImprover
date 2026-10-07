@@ -568,7 +568,9 @@ def book_metadata(project, resolved, base, numbered):
     # stops on a color nothing defines (OpenIntro Statistics).
     colors = os.environ.get("BOOK_LATEX_COLORS", "").strip()
     if colors:
-        ours += "\\RequirePackage{xcolor}\n" + colors + "\n"
+        ours += ("\\RequirePackage{xcolor}\n\\makeatletter\n"
+                 + "\n".join(guarded_color(c) for c in colors.splitlines())
+                 + "\n\\makeatother\n")
     unchosen = [command for field, command in FAMILIES if field not in meta]
     if unchosen:
         ours += FALLBACK + "".join(
@@ -589,6 +591,25 @@ def book_metadata(project, resolved, base, numbered):
     includes["c"].append({"t": "MetaBlocks", "c": [raw_latex(ours)]})
     meta["header-includes"] = includes
     return meta
+
+
+COLORLET = re.compile(r"\\colorlet\s*(?:\[[^]]*\])?\s*\{[^{}]*\}\s*(?:\[[^]]*\])?"
+                      r"\s*\{([^{}]*)\}")
+
+
+def guarded_color(statement):
+    """A book's color statement for the PDF from its pages, a \\colorlet
+    made only when each color it's made of is defined: one a book defines
+    in a style file of its own isn't among the statements convert.py
+    passes on, and xcolor stopped on it ("Undefined color `brand'") where
+    the book itself builds."""
+    m = COLORLET.match(statement.strip())
+    if not m:
+        return statement
+    names = [p.strip().lstrip("-") for p in m.group(1).split("!")]
+    for name in reversed([n for n in names if n and not re.fullmatch(r"[\d.]+", n)]):
+        statement = "\\@ifundefinedcolor{%s}{}{%s}" % (name, statement)
+    return statement
 
 
 def meta_value(value):

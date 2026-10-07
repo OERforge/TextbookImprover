@@ -2210,6 +2210,20 @@ local function says_title(declared, h1)
     or declared:find(h1, 1, true) ~= nil
 end
 
+-- A title's formulas as text: a page's <title>, its entry in the contents,
+-- and a cartridge's name for it hold no MathML, and Pandoc's writers give a
+-- formula there as its TeX ("\pmb{t}-Probability Table", OpenIntro
+-- Statistics's t-table). Pandoc's plain writer sets one in Unicode where it
+-- can (t, x²); the heading on the page keeps its formula.
+local function plain_formulas(inlines)
+  return inlines:walk({
+    Math = function(math)
+      local text = pandoc.write(pandoc.Pandoc({ pandoc.Plain({ math }) }), 'plain')
+      return pandoc.Str((text:gsub('%s+$', '')))
+    end,
+  })
+end
+
 local function should_promote_h1(doc, index)
   if PROMOTE_H1_TO_TITLE == 'never' or index == nil then return false end
   if doc.meta.title == nil then return true end
@@ -2275,7 +2289,7 @@ function Pandoc(doc)
       or (PROMOTE_H1_TO_TITLE == 'shorter' and #h1 < #declared
           and declared:find(h1, 1, true) ~= nil)
     if h1_wins then
-      doc.meta.title = pandoc.MetaInlines(heading.content)
+      doc.meta.title = pandoc.MetaInlines(plain_formulas(heading.content))
     elseif folded(h1):match('^[%d%.]+%s') and folded(h1):find(folded(declared), 1, true) then
       -- The title stands without the number its heading puts before it;
       -- convert.py says so once, since a cartridge names pages by it.

@@ -892,7 +892,8 @@ def read_latex_to_json(base, masters, env, work):
         own, empty = [], []
         for stem, role, blocks in pages:
             stem = safe_stem(stem)
-            blocks, hoisted = latexsource.hoist_headings(blocks)
+            blocks, hoisted = latexsource.hoist_headings(
+                blocks, set(prep["counters"]["theorems"]) | {"proof"})
             if hoisted:
                 counts["headings_hoisted"] = counts.get("headings_hoisted", 0) + hoisted
             # An unnumbered heading with nothing in it and no label, which a
@@ -2801,7 +2802,8 @@ def pdf_env():
         return None
     env = dict(os.environ)
     if LATEX_COLORS:
-        env["BOOK_LATEX_COLORS"] = "\n".join(LATEX_COLORS)
+        # A statement a line, as build-pdf.py reads them.
+        env["BOOK_LATEX_COLORS"] = "\n".join(" ".join(c.split()) for c in LATEX_COLORS)
     if LATEX_LAYOUT:
         env["BOOK_LATEX_LAYOUT"] = json.dumps(LATEX_LAYOUT)
     return env

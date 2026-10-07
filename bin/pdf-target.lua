@@ -526,36 +526,38 @@ end
 
 -- A display formula a LaTeX book numbers (latexsource.resolve_counters):
 -- its TeX holds each row's number as a \tag, which LaTeX sets, so the
--- numbers set beside it for the pages go. Its labels go from its TeX, the
--- anchors before it standing for them, since the assembly gives those its
--- page's prefix (page-two--eq:energy), as it gives each link to them. What
--- subequations held is put back in it: the reader keeps only its content,
--- which the writer wraps in \[ \] unless it begins with an environment the
--- writer knows (isMathEnv, Writers/LaTeX.hs, 3.12), and amsmath stopped on
--- an align inside that ("Erroneous nesting of equation structures").
+-- numbers set beside it for the pages go. Its labels stay in its TeX, for a
+-- reference inside a formula (\text{by \eqref{eq:def}}), whose key the
+-- assembly doesn't prefix; the anchors before it, which it does, are the
+-- targets of the links. What subequations held is put back in it, as a
+-- formula still, so a theorem's emphasis gives it up as it gives up any
+-- display formula (lift_display): the reader keeps only its content, which
+-- the writer wraps in \[ \] unless it begins with an environment the writer
+-- knows (isMathEnv, Writers/LaTeX.hs, 3.12), and amsmath stopped on an align
+-- inside that ("Erroneous nesting of equation structures"). An eqnarray
+-- takes no \tag ("\tag not allowed here"), so its count is set before it,
+-- with the number's form, as the pages count, and the form put back after.
 local function equation(span)
   if not span.classes:includes('equation') then
     return nil
   end
+  local counter = span.attributes['eqnarray-counter']
+  local prefix = span.attributes['eqnarray-prefix']
   local out = pandoc.Inlines{}
   for _, inner in ipairs(span.content) do
     if inner.t == 'Span' and inner.classes:includes('equation-number') then
       -- set by LaTeX
     elseif inner.t == 'Math' then
-      -- A label on a line of its own leaves the line blank, which ends
-      -- the paragraph inside the environment ("Paragraph ended before
-      -- \environment equation was complete"); one line end is kept, which
-      -- a comment before it needs.
-      local text, n = inner.text:gsub('\\label%s*(%b{})', '')
-      repeat
-        text, n = text:gsub('\n[ \t]*\n', '\n')
-      until n == 0
       if span.classes:includes('subequations') then
-        text = text:gsub('\\pmb%f[^%a]', '\\symbfit')
-        out:insert(pandoc.RawInline('latex', '\\begin{subequations}' .. text
-          .. '\\end{subequations}'))
+        inner.text = '\\begin{subequations}' .. inner.text .. '\\end{subequations}'
+      end
+      if counter and prefix and counter:match('^%d+$') and prefix:match('^[%w.%-]*$') then
+        out:insert(pandoc.RawInline('latex', '\\global\\let\\oerTheEquation\\theequation'
+          .. '\\gdef\\theequation{' .. prefix .. '\\arabic{equation}}'
+          .. '\\setcounter{equation}{' .. counter .. '}'))
+        out:insert(inner)
+        out:insert(pandoc.RawInline('latex', '\\global\\let\\theequation\\oerTheEquation{}'))
       else
-        inner.text = text
         out:insert(inner)
       end
     else

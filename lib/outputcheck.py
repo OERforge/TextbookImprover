@@ -236,10 +236,12 @@ def check_page(page, findings):
     # A title that is the page's file name, as one with no heading of its
     # own gets: OpenIntro Statistics's chapters were titled ch_intro_to_data
     # while their headings sat inside a box. Only a name that reads as one,
-    # with an underscore, a hyphen, a dot, or a capital inside a word.
+    # with an underscore, a hyphen, a dot, or a capital inside a word, and
+    # that no H1 says, as a page named for its heading does (Self-Assessment).
     stem = os.path.splitext(os.path.basename(where))[0]
     if page.title and page.title == stem and " " not in stem \
-            and re.search(r"[_.\-]|[a-z][A-Z]", stem):
+            and re.search(r"[_.\-]|[a-z][A-Z]", stem) \
+            and not any(level == 1 and text == page.title for level, text in page.headings):
         findings.append(Finding(where, "title-is-file-name", page.title))
     seen = set()
     for identifier in page.ids:

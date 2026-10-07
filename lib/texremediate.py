@@ -511,6 +511,16 @@ CENTERLINE_DEFINITION = (
 # fallback gives a character the fonts lack a glyph (GIAM's \vdots in a
 # typewriter label), which PDF/UA-2 requires (.notdef, 8.4.5.9).
 PACKAGE = re.compile(r"\\(?:usepackage|RequirePackage)\s*(?:\[[^]]*\])?\s*\{([^}]*)\}")
+PACKAGE_OPTIONS = re.compile(r"\\(?:usepackage|RequirePackage)\s*(?:\[([^]]*)\])?\s*\{([^}]*)\}")
+
+
+def package_options(pieces, name):
+    """The options the preamble's pieces (preamble_packages's) load the
+    package name with, a list."""
+    return [o.strip() for piece in pieces
+            for m in latexsource.code_matches(PACKAGE_OPTIONS, piece)
+            if name in latexsource.package_names(m.group(2))
+            for o in (m.group(1) or "").split(",") if o.strip()]
 PREAMBLE_INPUT = re.compile(r"\\input\s*\{\s*([^}]+?)\s*\}")
 MATH_SETUP_KEY = re.compile(r"math/setup")
 UNICODE_MATH = ("unicode-math", "lua-unicode-math")
@@ -738,7 +748,11 @@ SHIMS = {
     \cs_gset_protected:Npn \newpagestyle { \__oer_titleps:N \newpagestyle }
     \cs_gset_protected:Npn \renewpagestyle { \__oer_titleps:N \renewpagestyle }
     \cs_gset_protected:Npn \widenhead { \__oer_titleps:N \widenhead }
+    % Loaded at once with titlesec's pagestyles option, as titlesec loads it.
+    \bool_if:NT \g__oer_titlesec_pagestyles_bool { \__oer_titleps:N \scan_stop: }
   }
+\bool_if_exist:NF \g__oer_titlesec_pagestyles_bool
+  { \bool_new:N \g__oer_titlesec_pagestyles_bool }
 \cs_new_protected:Npn \__oer_titleps:N #1
   {
     \cs_undefine:N \newpagestyle
@@ -1084,10 +1098,11 @@ def shimmed_packages(packages, base=None):
     return [name for name in found if statuses.get((name, "sty")) not in (3, 4)]
 
 
-def shim_block(names, stand_ins=()):
+def shim_block(names, stand_ins=(), pagestyles=False):
     """What goes before the class for the packages names, which the copy
     replaces, and stand_ins, which math_block stands in for: the
-    definitions, and each package's load made to run them."""
+    definitions, and each package's load made to run them. pagestyles:
+    the book loads titlesec with that option, which loads titleps."""
     if not names and not stand_ins:
         return ""
     every = list(names) + [n for n in stand_ins if n not in names]
@@ -1096,7 +1111,10 @@ def shim_block(names, stand_ins=()):
     if stand_ins:
         note += STAND_IN_NOTE.format(", ".join(stand_ins))
     return (note + "\\makeatletter\n\\ExplSyntaxOn\n" + SHIM_COMMON
-            + "".join(SHIMS[s][0] for s in shims) + "\\ExplSyntaxOff\n"
+            + "".join(SHIMS[s][0] for s in shims)
+            + ("\\bool_gset_true:N \\g__oer_titlesec_pagestyles_bool\n"
+               if pagestyles and "titlesec" in shims else "")
+            + "\\ExplSyntaxOff\n"
             + "".join(("\\ifdefined\\directlua\\disable@package@load{%s}{\\csname "
                        "__oer_shim_%s:\\endcsname}\\fi\n" if n in SHIM_LUATEX else
                        "\\disable@package@load{%s}{\\csname __oer_shim_%s:\\endcsname}\n")
@@ -1450,7 +1468,9 @@ def tag(texts, master, language, mathml=True, standard=("ua-2",), base=None):
         text = text[:after] + LUATEX85 + text[after:]
     if (shimmed or stand_ins) and after is not None:
         # Before the class, which may load one of them itself.
-        text = text[:after] + shim_block(shimmed, stand_ins) + text[after:]
+        text = text[:after] + shim_block(
+            shimmed, stand_ins, "pagestyles" in package_options(pieces, "titlesec")) \
+            + text[after:]
         if shimmed:
             counts["shims"] = ", ".join(shimmed)
     texts[master] = text

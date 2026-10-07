@@ -261,10 +261,15 @@ def retitle_chapters(path):
                 text = data.decode("utf-8")
                 found = heading.search(text)
                 if found:
-                    plain = " ".join(re.sub(r"<[^>]+>", "", found.group(1))
-                                     .split())
+                    # A formula's TeX, kept in its MathML as an annotation,
+                    # is no part of the title's text; and the title is put in
+                    # as it is, not as a pattern's template, where a
+                    # backslash in it (\pmb) was an escape.
+                    words = re.sub(r"<annotation\b.*?</annotation>", "",
+                                   found.group(1), flags=re.S)
+                    plain = " ".join(re.sub(r"<[^>]+>", "", words).split())
                     if plain:
-                        text = title.sub("<title>" + plain + "</title>",
+                        text = title.sub(lambda m: "<title>" + plain + "</title>",
                                          text, count=1)
                         retitled += 1
                 text, _ = number_notes(text)

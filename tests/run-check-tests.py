@@ -91,11 +91,15 @@ def main():
         # Pages titled with their files' names, and one whose title is its
         # name as a word, which is no file's name.
         named = {"ch_intro_to_data.html": "ch_intro_to_data", "tTable.html": "tTable",
-                 "preface.html": "preface", "Intro.html": "Intro"}
+                 "preface.html": "preface", "Intro.html": "Intro",
+                 "Self-Assessment.html": "Self-Assessment"}
         for name, title in named.items():
+            markup = OTHER.replace("<title>Other</title>", f"<title>{title}</title>") \
+                .replace('id="there"', 'id="t-%s"' % name[:2])
+            if name == "Self-Assessment.html":
+                markup = markup.replace(">There</h1>", ">Self-Assessment</h1>")
             with open(os.path.join(work, name), "w", encoding="utf-8") as fh:
-                fh.write(OTHER.replace("<title>Other</title>", f"<title>{title}</title>")
-                         .replace('id="there"', 'id="t-%s"' % name[:2]))
+                fh.write(markup)
         titled = outputcheck.check_html_files([os.path.join(work, n) for n in named])
         bad = outputcheck.check_html_files(
             [os.path.join(work, "bad.html"), os.path.join(work, "other.html")])
@@ -114,7 +118,8 @@ def main():
                  "table-not-in-scroll-region",
                  "link-to-missing-fragment", "link-to-missing-file",
                  "link-to-missing-fragment"])),
-            ("a page titled with its file's name is found, one whose name is a word isn't",
+            ("a page titled with its file's name is found, one whose name is a word isn't, "
+             "nor one named for its H1",
              lambda: sorted((os.path.basename(f.where), f.check) for f in titled) == [
                  ("ch_intro_to_data.html", "title-is-file-name"),
                  ("tTable.html", "title-is-file-name")]),

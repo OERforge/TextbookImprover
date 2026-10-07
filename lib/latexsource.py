@@ -410,13 +410,17 @@ def book_outline(body):
     for m in code_matches(re.compile(r"\\(frontmatter|mainmatter|appendix|"
                                      r"backmatter)\b"), body, spans):
         events.append((m.start(), "division", DIVISIONS[m.group(1)]))
+    # The appendix package's environment, its files appendices.
+    for m in code_matches(re.compile(r"\\(begin|end)\s*\{appendices\}"), body, spans):
+        events.append((m.start(), "division", "appendix" if m.group(1) == "begin" else None))
     for m in code_matches(INCLUDE, body, spans):
         events.append((m.start(), "include", m.group(1)))
     events.sort()
-    role, front_role, order = "main", None, []
+    role, front_role, order, before = "main", None, [], "main"
     for _, kind, value in events:
         if kind == "division":
-            role = value
+            # \\end{appendices} gives back the role before it.
+            before, role = (role, value) if value else (before, before)
         else:
             if front_role is None:
                 front_role = role
@@ -2324,9 +2328,10 @@ def css_color(model, spec):
 
 def color_rgb(expression, colors):
     """A color as xcolor reads one, (r, g, b) or None: a name the book
-    defines (colors, color_values's), xcolor's own, dvipsnames's, or CSS's
-    by an SVG name xcolor's svgnames shares; a mix, red!30 (with white),
-    red!70!black, and on (oiB!50!white!80); and a complement, -red."""
+    defines (colors, color_values's), xcolor's own, or dvipsnames's; a mix,
+    red!30 (with white), red!70!black, and on (oiB!50!white!80); and a
+    complement, -red. A name of svgnames's or x11names's isn't known here,
+    so a mix with one is None."""
     expression = expression.strip()
     complement = expression.startswith("-")
     parts = expression.lstrip("-").split("!")
@@ -2445,8 +2450,9 @@ COLOR_STYLE = re.compile(r"^((?:background-)?color): (.*)$", re.S)
 
 
 def color_spans(node, values):
-    """Each span the reader made of \\textcolor, \\colorbox, or \\color given
-    its color as CSS, in place, when CSS can't read it as it is: a name the
+    """Each span or division the reader made of \\textcolor or \\colorbox
+    (a division when it held paragraphs) given its color as CSS, in place,
+    when CSS can't read it as it is: a name the
     book defines (the Nu checker found 785 on OpenIntro Statistics's pages:
     "oiB" is not a color value), a mix (red!50!black), and a name of
     xcolor's that CSS lacks (BrickRed). A name CSS has (red, black) is left,
@@ -2457,7 +2463,7 @@ def color_spans(node, values):
         for item in node:
             changed += color_spans(item, values)
     elif isinstance(node, dict):
-        if node.get("t") == "Span":
+        if node.get("t") in ("Span", "Div"):
             kept = []
             for pair in node["c"][0][2]:
                 m = COLOR_STYLE.match(pair[1]) if pair[0] == "style" else None
@@ -2732,7 +2738,10 @@ COUNTER_WITHIN = re.compile(r"\\(counterwithin|numberwithin|counterwithout)\*?\s
                             r"([A-Za-z@]+)\s*\}\s*\{\s*([A-Za-z@]+)\s*\}")
 THE_DEFINITION = re.compile(r"\\(?:(?:re)?newcommand\*?\s*\{?\s*|def\s*)\\the([A-Za-z@]+)\s*\}?\s*\{")
 NEWTHEOREM = re.compile(r"\\newtheorem\*?\s*\{\s*([A-Za-z@]+)\s*\}")
-SUBEQUATIONS = re.compile(r"\\begin\s*\{subequations\}")
+# What the reader keeps only the content of: subequations, and breqn's
+# dmath (numbered; dmath* isn't).
+SUBEQUATIONS = re.compile(r"\\begin\s*\{(subequations|dmath)\}")
+APPENDICES = re.compile(r"\\begin\s*\{appendices\}")
 SECTION_LEVELS = (("part", -1), ("chapter", 0), ("section", 1), ("subsection", 2),
                   ("subsubsection", 3), ("paragraph", 4), ("subparagraph", 5))
 # LaTeX's own counters a book may show, and what the standard classes make
@@ -2810,7 +2819,12 @@ def counter_marks(text, counter, math_macros=(), counters=()):
     # rows 2.4a, 2.4b; the mark says the formula after it is that.
     for m in SUBEQUATIONS.finditer(text):
         if not in_spans(m.start(), keep) and not escaped(text, m.start()):
-            edits.append((m.start(), m.start(), counter_mark("subequations")))
+            edits.append((m.start(), m.start(), counter_mark(m.group(1))))
+    # The appendix package's environment begins the appendices as
+    # \\appendix does.
+    for m in APPENDICES.finditer(text):
+        if not in_spans(m.start(), keep) and not escaped(text, m.start()):
+            edits.append((m.end(), m.end(), counter_mark("division", "appendix")))
     for m in COUNTER_SHOW.finditer(text):
         if in_spans(m.start(), keep) or escaped(text, m.start()):
             continue
@@ -2932,14 +2946,16 @@ DISPLAY_BEGIN = re.compile(r"\\begin\s*\{(%s)(\*?)\}" % "|".join(DISPLAY_NUMBERE
 ANY_EDGE = re.compile(r"\\(begin|end)\s*\{[^{}]*\}")
 ROW_COMMAND = re.compile(r"\\(nonumber|notag|tag\*?|label)(?![A-Za-z@])")
 DISPLAY_ROW_END = re.compile(r"\*?\s*(?:\[[^]]*\])?")
+MATH_REF = re.compile(r"\\(eqref|ref|autoref|cref|Cref)\*?\s*\{([^{}]*)\}")
 
 
 def display_rows(tex, at=0):
     """The numbered environment that begins at at in a display formula's
-    TeX, read as LaTeX numbers it: (starred, rows), each row (start, end)
-    in tex, an environment numbered once one row; or None. A row ends at
-    \\\\ outside braces and the environments inside, with its * and
-    [length]; one after a last \\\\ is a row, as LaTeX numbers it."""
+    TeX, read as LaTeX numbers it: (name, starred, rows, end), each row
+    (start, end) in tex, an environment numbered once one row, end where
+    its \\end ends; or None. A row ends at \\\\ outside braces and the
+    environments inside, with its * and [length]; one after a last \\\\
+    is a row, as LaTeX numbers it."""
     m = DISPLAY_BEGIN.match(tex, at)
     if not m:
         return None
@@ -2959,7 +2975,8 @@ def display_rows(tex, at=0):
             edge = ANY_EDGE.match(tex, i)
             if edge and edge.group(1) == "end" and depth == 0:
                 rows.append((row_start, i))
-                return starred, rows if DISPLAY_NUMBERED[name] else [(start, i)]
+                return (name, starred, rows if DISPLAY_NUMBERED[name] else [(start, i)],
+                        edge.end())
             if edge:
                 depth += 1 if edge.group(1) == "begin" else -1
                 i = edge.end()
@@ -3073,18 +3090,19 @@ def resolve_counters(blocks, setup, counts=None):
         numbered row without a \\tag of its own given one, each label
         recording its row's number (written as key_id has it, as the
         references will be), and node["equation"] noting the labels and
-        what each row shows, for unmark. A formula subequations held, as
-        the mark before it says, is numbered once, and its rows by
-        letter."""
+        what each row shows, for unmark. What subequations held, as the
+        mark before it says, is numbered once, and each row of every
+        environment in it by letter; breqn's dmath, whose environment the
+        reader drops, once, as its mark says; and a display formula with a
+        \\tag (\\[ x \\tag{1} \\]) by its tag. An eqnarray takes no \\tag
+        ("\\tag not allowed here"), so the count before it and the number's
+        form are noted instead, for a PDF built from the pages to set."""
         tex = node["c"][1]
         sub = state.pop("subequations", False)
-        inner = DISPLAY_BEGIN.search(tex) if sub else re.compile(r"\s*").match(tex)
-        at = (inner.start() if sub else inner.end()) if inner else len(tex)
-        found = display_rows(tex, at)
-        if not found and not sub:
-            return
-        edits, keys, shown = [], [], []
+        breqn = state.pop("dmath", False)
+        edits, keys, shown, eqnarray = [], [], [], [None]
         last = [state["current"]]
+        letters = [0]
 
         def label(argument, start, stop, number):
             new = key(argument)
@@ -3092,43 +3110,71 @@ def resolve_counters(blocks, setup, counts=None):
             keys.append(new)
             if key_id(new) != argument:
                 edits.append((start, stop, "\\label{%s}" % key_id(new)))
+
+        def number_rows(name, starred, rows, parent=None):
+            for start, stop in rows:
+                commands = row_commands(tex, start, stop)
+                names = [c[0] for c in commands]
+                tag = next((c for c in commands if c[0].startswith("tag")), None)
+                if tag:
+                    number = tag[1]
+                    shown.append(number if tag[0] == "tag*" else "(%s)" % number)
+                elif starred or "nonumber" in names or "notag" in names:
+                    number = None
+                    shown.append(None)
+                else:
+                    if parent is not None:
+                        letters[0] += 1
+                        number = parent + counter_style("alph", letters[0])
+                    else:
+                        before = counters.get("equation", 0)
+                        step("equation")
+                        number = the("equation")
+                    shown.append("(%s)" % number)
+                    if name != "eqnarray":
+                        edits.append((stop, stop, " \\tag{%s}" % number))
+                    elif parent is None and eqnarray[0] is None:
+                        form = re.fullmatch(r"([A-Za-z0-9.\-]*?)(\d+)", number)
+                        if form and int(form.group(2)) == before + 1:
+                            eqnarray[0] = (before, form.group(1))
+                if number is not None:
+                    last[0] = number
+                for command, argument, cstart, cstop in commands:
+                    if command == "label":
+                        label(argument, cstart, cstop, number)
         if sub:
             step("equation")
             parent = last[0] = the("equation")
-            for name, argument, start, stop in row_commands(tex, 0, at):
-                if name == "label":
-                    label(argument, start, stop, parent)
-        starred, rows = found or (True, [])
-        letters = 0
-        for start, stop in rows:
-            commands = row_commands(tex, start, stop)
-            names = [c[0] for c in commands]
-            tag = next((c for c in commands if c[0].startswith("tag")), None)
-            if tag:
-                number = tag[1]
-                shown.append(number if tag[0] == "tag*" else "(%s)" % number)
-            elif starred or "nonumber" in names or "notag" in names:
-                number = None
-                shown.append(None)
+            outside, pos = [], 0
+            while True:
+                inner = DISPLAY_BEGIN.search(tex, pos)
+                found = display_rows(tex, inner.start()) if inner else None
+                if not found:
+                    outside.append((pos, len(tex)))
+                    break
+                outside.append((pos, inner.start()))
+                number_rows(found[0], found[1], found[2], parent)
+                pos = found[3]
+            for start, stop in outside:
+                for command, argument, cstart, cstop in row_commands(tex, start, stop):
+                    if command == "label":
+                        label(argument, cstart, cstop, parent)
+        elif breqn:
+            number_rows("dmath", False, [(0, len(tex))])
+        else:
+            found = display_rows(tex, re.compile(r"\s*").match(tex).end())
+            if found:
+                number_rows(found[0], found[1], found[2])
+            elif any(c[0].startswith("tag") for c in row_commands(tex, 0, len(tex))):
+                number_rows(None, True, [(0, len(tex))])
             else:
-                if sub:
-                    letters += 1
-                    number = parent + counter_style("alph", letters)
-                else:
-                    step("equation")
-                    number = the("equation")
-                shown.append("(%s)" % number)
-                edits.append((stop, stop, " \\tag{%s}" % number))
-            if number is not None:
-                last[0] = number
-            for name, argument, cstart, cstop in commands:
-                if name == "label":
-                    label(argument, cstart, cstop, number)
+                return
         for start, stop, replacement in sorted(edits, reverse=True):
             tex = tex[:start] + replacement + tex[stop:]
         node["c"][1] = tex
         if keys or any(s is not None for s in shown) or sub:
-            node["equation"] = {"labels": keys, "shown": shown, "sub": sub}
+            node["equation"] = {"labels": keys, "shown": shown, "sub": sub,
+                                "eqnarray": eqnarray[0]}
             numbered[0] += 1
 
     def walk(node):
@@ -3165,8 +3211,8 @@ def resolve_counters(blocks, setup, counts=None):
                 node["shown"] = counter_style(parts[1], counters.get(parts[2], 0))
             elif op == "the" and len(parts) > 1:
                 node["shown"] = the(parts[1])
-            elif op == "subequations":
-                state["subequations"] = True
+            elif op in ("subequations", "dmath"):
+                state[op] = True
             node["mark"] = True
             return
         elif kind == "Math" and c[0].get("t") == "DisplayMath":
@@ -3211,6 +3257,29 @@ def resolve_counters(blocks, setup, counts=None):
                 else [{"t": "Str", "c": shown}]
             given += 1
 
+    def math_refs(node):
+        """A reference inside a formula, \\text{by \\eqref{eq:def}}, written as
+        the number its label recorded: texmath stops on \\eqref, and the
+        formula was left as TeX."""
+        nonlocal given
+        if isinstance(node, list):
+            for item in node:
+                math_refs(item)
+        elif isinstance(node, dict):
+            if node.get("t") == "Math":
+                def one(m):
+                    found = labels.get(expand(m.group(2)) if "\\" in m.group(2) else m.group(2))
+                    if not found or "$" in found:
+                        return m.group(0)
+                    return "(%s)" % found if m.group(1) == "eqref" else found
+                new = MATH_REF.sub(one, node["c"][1])
+                if new != node["c"][1]:
+                    node["c"][1] = new
+                    given += 1
+            elif node.get("c") is not None:
+                math_refs(node["c"])
+    math_refs(blocks)
+
     def unmark(node):
         nonlocal given
         if isinstance(node, list):
@@ -3241,8 +3310,12 @@ def resolve_counters(blocks, setup, counts=None):
                                 numbers.extend(tag_inlines(number))
                         inner.append({"t": "Span", "c": [["", ["equation-number"], []],
                                                          numbers]})
+                    # An eqnarray's count and form, for a PDF from the pages.
+                    count = [["eqnarray-counter", str(info["eqnarray"][0])],
+                             ["eqnarray-prefix", info["eqnarray"][1]]] \
+                        if info["eqnarray"] else []
                     out.append({"t": "Span", "c": [
-                        ["", ["equation"] + (["subequations"] if info["sub"] else []), []],
+                        ["", ["equation"] + (["subequations"] if info["sub"] else []), count],
                         inner]})
                     continue
                 marked = isinstance(item, dict) and item.get("t") in ("Para", "Plain") \
@@ -3623,12 +3696,37 @@ def author_names(inlines):
     return [stringify(l) for l in lines if apart(l) == first]
 
 
+def _is_marker(block):
+    return block.get("t") == "Para" and len(block["c"]) == 1 \
+        and block["c"][0].get("t") == "Str" and MARKER_TEXT.match(block["c"][0]["c"])
+
+
+def _holds_marker(blocks):
+    return any(_is_marker(b) or (b.get("t") == "Div" and _holds_marker(b["c"][1]))
+               for b in blocks)
+
+
+def lift_markers(blocks):
+    """A division holding a page's marker given up, its blocks in its place:
+    an \\include inside an environment the reader keeps as a division (the
+    appendix package's appendices) put the marker inside it, where the cut
+    didn't find it, so the file's page was the page before's, the marker's
+    text shown in it."""
+    out = []
+    for block in blocks:
+        if block.get("t") == "Div" and _holds_marker(block["c"][1]):
+            out.extend(lift_markers(block["c"][1]))
+        else:
+            out.append(block)
+    return out
+
+
 def cut_pages(doc, order, master_stem, front_role):
     """The whole book's document cut into pages at the markers: a list of
     (stem, role, blocks). What comes before the first marker is the
     master's own page, named for it, when it holds anything."""
     pages = [[master_stem, front_role, []]]
-    for block in doc["blocks"]:
+    for block in lift_markers(doc["blocks"]):
         if block.get("t") == "Para" and len(block["c"]) == 1 \
                 and block["c"][0].get("t") == "Str":
             m = MARKER_TEXT.match(block["c"][0]["c"])
@@ -3643,7 +3741,7 @@ def cut_pages(doc, order, master_stem, front_role):
     return [tuple(p) for p in pages]
 
 
-def hoist_headings(blocks):
+def hoist_headings(blocks, keep=()):
     """Each heading inside a division taken out to the page's own level,
     the division split around it, its id kept by its first part: a page's
     title and its sections are found only there. OpenIntro Statistics sets
@@ -3651,11 +3749,19 @@ def hoist_headings(blocks):
     minipage), which the reader gives as two divisions with the heading
     inside, and every chapter's page was titled with its file's name, its
     EPUB chapter cut before the heading, and its sections out of the
-    chapter's nesting. Returns (blocks, the headings taken out)."""
+    chapter's nesting. A heading taken out of a division in another
+    language (babel's otherlanguage) takes its lang and dir with it; one in
+    a division of keep's classes, a theorem's or a proof's (an example's
+    \\paragraph{Solution.}), stays there. Returns (blocks, the headings
+    taken out)."""
     moved = [0]
+    keep = set(keep)
 
     def split(div, depth):
         attr, content = div["c"]
+        if keep & set(attr[1]):
+            return [div]
+        language = [[k, v] for k, v in attr[2] if k in ("lang", "dir")]
         out, current, first = [], [], True
 
         def part():
@@ -3669,6 +3775,8 @@ def hoist_headings(blocks):
             for item in split(block, depth + 1) if block.get("t") == "Div" else [block]:
                 if item.get("t") == "Header":
                     part()
+                    own = {k for k, _ in item["c"][1][2]}
+                    item["c"][1][2].extend(pair for pair in language if pair[0] not in own)
                     out.append(item)
                     if depth == 0:
                         moved[0] += 1
@@ -3678,7 +3786,8 @@ def hoist_headings(blocks):
         return out
     out = []
     for block in blocks:
-        if block.get("t") == "Div" and any(b.get("t") == "Header" for b in split(block, 1)):
+        if block.get("t") == "Div" and any(b.get("t") == "Header" for b in split(
+                json.loads(json.dumps(block)), 1)):
             out.extend(split(block, 0))
         else:
             out.append(block)

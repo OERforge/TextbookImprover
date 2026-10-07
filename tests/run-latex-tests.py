@@ -2074,6 +2074,8 @@ def case_pieces(work):
         "\\definecolor[named]{named}{HTML}{FF0000}", "\\providecolor{oiB}{rgb}{0,0,0}"])
     mixed = [{"t": "Span", "c": [["", [], [["style", "color: " + c]]], []]}
              for c in ("light", "red!50!black", "BrickRed", "named", "oiB", "Orchid", "nosuch")]
+    # \\textcolor around paragraphs is a division.
+    mixed.append({"t": "Div", "c": [["", [], [["style", "color: light"]]], []]})
     remixed = latexsource.color_spans([{"t": "Para", "c": mixed}], mixed_values)
     mixed_styles = [dict(map(tuple, p["c"][0][2])).get("style") for p in mixed]
     # Label keys with whitespace and a macro's {} in them, read and written
@@ -2233,7 +2235,7 @@ def case_pieces(work):
                 "\\label{k} \\end{align}",
                 "\\begin{alignat}{2} a &= b \\nonumber \\end{alignat}",
                 "\\begin{multline*} m \\\\ n \\tag{q} \\end{multline*}"):
-        is_starred, row_spans = latexsource.display_rows(tex)
+        _, is_starred, row_spans, _ = latexsource.display_rows(tex)
         rows.append((is_starred, [(tex[a:b].strip(), [c[:2] for c in latexsource.row_commands(
             tex, a, b)]) for a, b in row_spans]))
     # The counting on its own: a chapter's align, its first row numbered and
@@ -2249,6 +2251,33 @@ def case_pieces(work):
                                  latexsource.book_counters([("m.tex", eq_book)], eq_book),
                                  eq_counts)
     eq_text = json.dumps(eq_doc)
+    # An EPUB chapter titled by a heading with a backslash in its text and a
+    # formula, its TeX in the MathML's annotation.
+    import importlib.util
+    import zipfile
+    epub_spec = importlib.util.spec_from_file_location("build_epub", os.path.join(BIN, "build-epub.py"))
+    build_epub = importlib.util.module_from_spec(epub_spec)
+    epub_spec.loader.exec_module(build_epub)
+    titled_epub = os.path.join(work, "titled.epub")
+    with zipfile.ZipFile(titled_epub, "w") as z:
+        z.writestr("mimetype", "application/epub+zip")
+        z.writestr("EPUB/text/ch001.xhtml", "<html><head><title>ch001</title></head><body>"
+                   "<h1>The \\pmb key and <math><semantics><mi>t</mi><annotation encoding="
+                   "\"application/x-tex\">\\pmb{t}</annotation></semantics></math></h1>"
+                   "</body></html>")
+    build_epub.retitle_chapters(titled_epub)
+    with zipfile.ZipFile(titled_epub) as z:
+        epub_title = re.search(r"<title>(.*?)</title>",
+                               z.read("EPUB/text/ch001.xhtml").decode("utf-8")).group(1)
+    # Headings out of divisions: one in another language takes the language
+    # with it; one in a theorem's division stays.
+    hoisted, hoisted_count = latexsource.hoist_headings([
+        {"t": "Div", "c": [["", [], [["lang", "fr"]]], [
+            {"t": "Header", "c": [2, ["resume", [], []], [{"t": "Str", "c": "Le"}]]},
+            {"t": "Para", "c": [{"t": "Str", "c": "Un"}]}]]},
+        {"t": "Div", "c": [["ex", ["example"], []], [
+            {"t": "Header", "c": [5, ["setup", [], []], [{"t": "Str", "c": "Setup."}]]},
+            {"t": "Para", "c": [{"t": "Str", "c": "x"}]}]]}], {"example"})
 
     def elements(node, kind):
         found = [node] if isinstance(node, dict) and node.get("t") == kind else []
@@ -2261,13 +2290,15 @@ def case_pieces(work):
     # its label the anchor before it, none left in its TeX nor a blank line
     # where one was; what subequations held put back in it.
     eq_spans = []
-    for classes, tex in ((["equation"], "\\begin{equation}\n\\label{x}\nE\n \\tag{1.1}"
-                                        "\\end{equation}"),
-                         (["equation", "subequations"], "\\label{s}\n\\begin{align}\nu "
-                          "\\label{s-a} \\tag{1.2a}\n\\end{align}\n")):
+    for classes, tex, attributes in (
+            (["equation"], "\\begin{equation}\n\\label{x}\nE\n \\tag{1.1}\\end{equation}", []),
+            (["equation", "subequations"], "\\label{s}\n\\begin{align}\nu \\label{s-a} "
+             "\\tag{1.2a}\n\\end{align}\n", []),
+            (["equation"], "\\begin{eqnarray}\na &=& b \\label{e}\n\\end{eqnarray}",
+             [["eqnarray-counter", "4"], ["eqnarray-prefix", "2."]])):
         anchors = [{"t": "Span", "c": [[k, [], [["label", k]]], []]}
                    for k in re.findall(r"\\label\{([^}]*)\}", tex)]
-        eq_spans.append({"t": "Span", "c": [["", classes, []], anchors + [
+        eq_spans.append({"t": "Span", "c": [["", classes, attributes], anchors + [
             {"t": "Math", "c": [{"t": "DisplayMath"}, tex]},
             {"t": "Span", "c": [["", ["equation-number"], []], [{"t": "Str", "c": "(9.9)"}]]}]]})
     eq_latex = subprocess.run(
@@ -2275,18 +2306,49 @@ def case_pieces(work):
          os.path.join(BIN, "pdf-target.lua")], capture_output=True, text=True,
         input=json.dumps({"pandoc-api-version": eq_doc["pandoc-api-version"], "meta": {},
                           "blocks": [{"t": "Para", "c": eq_spans}]})).stdout
+    def titlesec_pagestyles():
+        """titlesec's pagestyles option loads titleps at once, as titlesec
+        does, so a command of titleps's the preamble uses before its first
+        page style (\\settitlemarks) is defined in the copy too."""
+        if not shutil.which("lualatex"):
+            return skip("no lualatex for the copies' builds")
+        folder = os.path.join(work, "pagestyles")
+        os.makedirs(folder, exist_ok=True)
+        texts = {"p.tex": "\\documentclass{book}\n\\usepackage[pagestyles]{titlesec}\n"
+                          "\\settitlemarks{chapter,section}\n"
+                          "\\newpagestyle{main}{\\sethead{}{\\chaptertitle}{}}\n"
+                          "\\pagestyle{main}\n\\begin{document}\n\\chapter{One}\nText.\n"
+                          "\\end{document}\n"}
+        texremediate.tag(texts, "p.tex", "en", True, ("ua-2",), None)
+        with open(os.path.join(folder, "p.tex"), "w", encoding="utf-8") as fh:
+            fh.write(texts["p.tex"])
+        done = subprocess.run(["lualatex", "-interaction=nonstopmode", "-halt-on-error",
+                               "p.tex"], cwd=folder, capture_output=True, text=True,
+                              stdin=subprocess.DEVNULL)
+        return done.returncode == 0 and "\\bool_gset_true:N \\g__oer_titlesec_pagestyles_bool" \
+            in texts["p.tex"]
     commented_alt, _ = texremediate.remediate_file(
         "/nonexistent", "a.tex", "\\fig[A first. % to reword\n\nA second.]{sq}\n", {}, [],
         macros={"fig": {"file": "#2", "arguments": 2, "default": "", "alt": 1,
                         "keyed": False, "options": None}})
     return [
-        ("the PDF filter leaves a numbered formula's number to LaTeX and its labels to the "
-         "anchors before it, with no blank line where one was, and puts back the "
-         "subequations a formula was in",
-         lambda: "\\begin{equation}\nE\n \\tag{1.1}\\end{equation}" in eq_latex
-         and "\\label{x}" in eq_latex and "\\label{s-a}" in eq_latex
-         and eq_latex.count("\\label{") == 3 and "(9.9)" not in eq_latex
-         and "\\begin{subequations}\n\\begin{align}" in eq_latex),
+        ("the PDF filter leaves a numbered formula's number to LaTeX, its labels in its TeX "
+         "for a reference in a formula and before it for the links, puts back the "
+         "subequations a formula was in, and sets an eqnarray's count and form before it",
+         lambda: "\\begin{equation}\n\\label{x}\nE\n \\tag{1.1}\\end{equation}" in eq_latex
+         and eq_latex.count("\\label{x}") == 2 and "(9.9)" not in eq_latex
+         and "\\begin{subequations}\\label{s}\n\\begin{align}" in eq_latex
+         and "\\gdef\\theequation{2.\\arabic{equation}}\\setcounter{equation}{4}"
+             "\\begin{eqnarray}" in eq_latex
+         and "\\end{eqnarray}\\global\\let\\theequation\\oerTheEquation" in eq_latex),
+        ("an EPUB chapter's title is its heading's text, a backslash in it as it is and a "
+         "formula without its TeX", lambda: epub_title == "The \\pmb key and t"),
+        ("a heading out of a division in another language takes its language; one in a "
+         "theorem's division stays there",
+         lambda: hoisted_count == 1 and [b["t"] for b in hoisted] == ["Header", "Div", "Div"]
+         and hoisted[0]["c"][1][2] == [["lang", "fr"]]
+         and hoisted[1]["c"][0][2] == [["lang", "fr"]]
+         and hoisted[2]["c"][1][0]["t"] == "Header"),
         ("the counting numbers a formula's rows as LaTeX does, writes each number as the "
          "row's \\tag, and gives \\eqref the number in parentheses",
          lambda: "a \\\\label{p} \\\\tag{1.1}\\\\\\\\" in eq_text
@@ -2326,6 +2388,8 @@ def case_pieces(work):
          and "\\usepackage{unicode-math}" in math_block),
         ("a figure's lossless raster stays lossless when its fonts are embedded", lossless),
         ("titlesec's stand-in builds beside fancyhdr's page styles", titlesec_with_fancyhdr),
+        ("and with titlesec's pagestyles option, titleps is loaded at once, as titlesec "
+         "loads it", titlesec_pagestyles),
         ("a package tagging can't take is replaced, the one another's stand-in serves too, "
          "each load made to define its commands",
          lambda: shims == ["titlesec", "enumerate", "soulutf8"]
@@ -2405,8 +2469,9 @@ def case_pieces(work):
          "defined, a name CSS has is left, and a color nothing defines is taken out",
          lambda: mixed_styles == ["color: rgb(170, 205, 222)", "color: rgb(128, 0, 0)",
                                   "color: rgb(184, 20, 11)", "color: rgb(255, 0, 0)",
-                                  "color: rgb(86, 155, 189)", "color: Orchid", None]
-         and remixed == 6),
+                                  "color: rgb(86, 155, 189)", "color: Orchid", None,
+                                  "color: rgb(170, 205, 222)"]
+         and remixed == 7),
         ("the sample's probe finds each macro's formula by its mark, past one whose "
          "expansion breaks its paragraph", lambda: probed == {"worse"}),
         ("a counter stepped, set, or shown is marked where the reader keeps it, but not in "
@@ -2499,6 +2564,7 @@ CUSTOM_FILES = {
 \usepackage[margin=1in]{geometry}
 \usepackage{graphicx}
 \usepackage[dvipsnames]{xcolor}
+\usepackage{bookcolors}
 \usepackage{
   amsmath,
   %tocloft,
@@ -2519,6 +2585,9 @@ Bo Chen \\
 \include{ch_two/TeX/more}
 \endgroup
 \include{front/solutions}
+\begin{appendices}
+\include{front/tables}
+\end{appendices}
 \end{document}
 """,
     "style/style.tex": r"""\definecolor{oiB}{rgb}{.337,.608,.741}
@@ -2542,6 +2611,7 @@ Bo Chen \\
 \newcommand{\hlx}[1]{\textcolor{oiB}{#1}}
 \newcommand{\gap}[1]{#1\hspace{1em}{}}
 \newcommand{\grp}[1]{\begingroup #1\endgroup}
+\colorlet{brandlight}{brand!20}
 \newcommand{\secref}[1]{Section~\ref{#1}}
 \newcounter{eoce}[chapter]
 \renewcommand{\theeoce}
@@ -2662,7 +2732,25 @@ in it: ${\color{BrickRed} z}$. A group in a formula's macro: $\grp{x} + 1$.
                              "w &= z \\label{eq:system-b}\n\\end{align}\n\\end{subequations}\n"
                              "See \\eqref{eq:energy}, row \\ref{eq:row-three}, "
                              "\\eqref{eq:star}, the system \\eqref{eq:system}, and its "
-                             "second line \\ref{eq:system-b}.\n",
+                             "second line \\ref{eq:system-b}.\n\n"
+                             # An eqnarray, which takes no \\tag; subequations holding two
+                             # environments and a label after them; breqn's dmath, whose
+                             # environment the reader drops; a display formula with a tag;
+                             # and a reference inside a formula.
+                             "Rows of an eqnarray:\n\\begin{eqnarray}\na &=& b \\label{eq:ea}"
+                             "\\\\\nc &=& d \\nonumber\\\\\ne &=& f \\label{eq:ef}\n"
+                             "\\end{eqnarray}\nTwo in a system:\n\\begin{subequations}"
+                             "\\label{eq:pair}\n\\begin{equation} p = q \\label{eq:pair-a}"
+                             "\\end{equation}\nand\n\\begin{equation} r = s \\label{eq:pair-b}"
+                             "\\end{equation}\\label{eq:pair-after}\n\\end{subequations}\n"
+                             "A long one:\n\\begin{dmath}\\label{eq:long} y = mx + b"
+                             "\\end{dmath}\nTagged alone: \\[ w = 1 \\tag{$\\dagger$}"
+                             "\\label{eq:dagger} \\]\nIn a formula: $\\text{by \\eqref{eq:energy}}$.\n"
+                             "See \\eqref{eq:ea}, \\eqref{eq:ef}, \\eqref{eq:pair-b}, "
+                             "\\eqref{eq:pair-after}, \\eqref{eq:long}, \\eqref{eq:dagger}, and "
+                             "\\eqref{eq:app}.\n\n"
+                             # A color made from one a style file of the book's own defines.
+                             "A \\textcolor{brandlight}{branded} word.\n",
     "ch_two/TeX/review.tex": "\\section{Review two}\nAs \\nameref{ch_one} said, and Figure~"
                              "\\ref{fig:panels} there shows.\n\n\\section{The $t$ distribution}\n"
                              "A heading with a formula in it. See \\nameref{sec:named}, "
@@ -2681,6 +2769,9 @@ in it: ${\color{BrickRed} z}$. A group in a formula's macro: $\grp{x} + 1$.
                            "\\eocesolution{The first exercise's solution.}\n\n"
                            "\\eocesolch{Second chapter}\n\n"
                            "\\eocesolution{Chapter two's exercise's solution.}\n",
+    "front/tables.tex": "\\chapter{Tables of $\\pmb{t}$}\n\\begin{equation}\\label{eq:app} t = 1"
+                        "\\end{equation}\n",
+    "bookcolors.sty": "\\ProvidesPackage{bookcolors}\n\\definecolor{brand}{rgb}{.1,.3,.6}\n",
     "LICENSE.md": "# License\n\nCC BY-SA 3.0.\n",
     "project.yaml": "project:\n  identifier: org.example.custom\n  title: A Custom Book\n",
     "conversion.yaml": "targets:\n  html:\n    format: html\n",
@@ -2717,7 +2808,11 @@ def pdf_numbers(work, said):
         return skip("no pypdf to read the PDF")
     text = " ".join(" ".join((p.extract_text() or "").split()) for p in pypdf.PdfReader(
         os.path.join(work, "pdf", "org.example.custom.pdf")).pages)
-    return all(n in text for n in ("(2.1)", "(2.2)", "(2.3)", "(2.4a)", "(2.4b)")) \
+    # An eqnarray's numbers twice: beside its rows, and in the references to
+    # them, which alone would hold them whatever LaTeX numbered the rows.
+    return all(n in text for n in ("(2.1)", "(2.2)", "(2.3)", "(2.4a)", "(2.4b)", "(2.5)",
+                                   "(2.6)", "(2.7a)", "(2.7b)", "(2.8)", "(A.1)", "by (2.1)")) \
+        and text.count("(2.5)") >= 2 and text.count("(2.6)") >= 2 \
         and re.search(r"See \(2\.1\), row 2\.3, \(.{1,3}\), the system \(2\.4\), and its "
                       r"second line 2\.4b", text) and "multiply defined" not in said \
         and "Hyper reference" not in said
@@ -2832,6 +2927,20 @@ def case_customized(work):
         return holder and linking and all(
             re.search(r'href="%s#page-ch_one--fig:panels"' % re.escape(os.path.basename(holder[0])), t)
             for t in linking) and re.search(r'properties="nav mathml"', opf)
+
+    def epub_titles():
+        """Each of the EPUB's chapter files is titled by its heading's text, a
+        formula's as text, not its TeX (the appendix's title holds one)."""
+        import zipfile
+        path = os.path.join(work, "epub", "org.example.custom.epub")
+        if not os.path.exists(path):
+            return False
+        with zipfile.ZipFile(path) as z:
+            titles = [m.group(1) for n in z.namelist() if n.endswith(".xhtml")
+                      for m in re.finditer(r"<title>(.*?)</title>", z.read(n).decode("utf-8"),
+                                           re.S)]
+        return any(t.startswith("Tables of") for t in titles) \
+            and not any("\\" in t for t in titles)
 
     def ids_valid():
         ids = re.findall(r'\sid="([^"]*)"', one)
@@ -2989,6 +3098,7 @@ def case_customized(work):
          if pdf else skip("no lualatex for the PDF")),
         ("in the EPUB, a link to a figure in another chapter's file names the file, and "
          "a formula in a heading has the navigation document declare MathML", epub_links),
+        ("and each chapter file's title is its heading's text, a formula's as text", epub_titles),
         ("a brace a style file never closes stops the run, which names the file and line",
          lambda: stopped.returncode != 0
          and "style/style.tex:2 (a { that nothing in the file closes)" in told),
@@ -3007,7 +3117,25 @@ def case_customized(work):
          and re.search(r'href="#eq:system"[^>]*>\(2\.4\)</a>', two)
          and re.search(r'href="#eq:system-b"[^>]*>2\.4b</a>', two)
          and re.search(r'href="ch_two\.html#eq:energy"[^>]*>\(2\.1\)</a>', one)
-         and "[eq:" not in one + two and "4 display formula numbered" in said),
+         and "[eq:" not in one + two and "9 display formula numbered" in said),
+        ("an eqnarray, every environment subequations holds and a label after them, breqn's "
+         "dmath, a display formula with a tag, and a reference inside a formula are numbered "
+         "as LaTeX numbers them, an appendix's by its letter",
+         lambda: re.search(r'class="equation-number">\(2\.5\)<br />\s*<br />\s*\(2\.6\)</span>', two)
+         and re.search(r'class="equation-number">\(2\.7a\)<br />\s*\(2\.7b\)</span>', two)
+         and re.search(r'class="equation-number">\(2\.8\)</span>', two)
+         and re.search(r'class="equation-number">\(<math', two.split("Tagged alone")[1])
+         and all(re.search(r'data-reference="%s">%s</a>' % (k, re.escape(v)), two) for k, v in (
+             ("eq:ea", "(2.5)"), ("eq:ef", "(2.6)"), ("eq:pair-b", "(2.7b)"),
+             ("eq:pair-after", "(2.7)"), ("eq:long", "(2.8)"), ("eq:app", "(A.1)")))
+         and "\\text{by (2.1)}</annotation>" in two
+         and re.search(r'class="equation-number">\(A\.1\)</span>', page("tables.html"))),
+        ("a file the appendix package's environment \\include-s is a page of its own, an "
+         "appendix, no marker of the cut left on the page before, its title's formula as text",
+         lambda: re.search(r"<title>Tables of [^<\\\\$]{1,3}</title>", page("tables.html"))
+         and "TextbookImproverPageMarker" not in page("solutions.html") + page("tables.html")
+         and "role: appendix" in re.sub(r"\s+", " ", contents_sample).split("tables")[-1][:40]
+         if contents_sample else False),
         ("and the PDF from the pages numbers them as the pages do, its references to them "
          "found", lambda: pdf_numbers(work, said) if pdf else skip("no lualatex for the PDF")),
         ("and the Word file sets each as a display formula of its own, its number after it",

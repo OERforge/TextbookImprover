@@ -3821,6 +3821,18 @@ BIB_FILES = {
                          "\\printbibliography\n\\end{document}\n",
     "biblatex/one.tex": "\\chapter{One}\nAs \\textcite{knuth} says, and \\parencite{lamport}.\n",
     "biblatex/refs.bib": REFS_BIB,
+    # biblatex's full citations, a macro of the book's own in its database,
+    # as OpenIntro gives its data sets' sources.
+    "fullcite/book.tex": "\\documentclass{book}\n\\usepackage[style=authortitle,backend=bibtex]"
+                         "{biblatex}\n\\usepackage{hyperref}\n\\newcommand{\\oiSite}[2]{\\href{"
+                         "https://example.org/#1}{#2}}\n\\addbibresource{data.bib}\n"
+                         "\\begin{document}\n\\chapter{One}\nHeights.\\footfullcite{heights} "
+                         "Weights.\\footfullcite[see][5]{heights,survey} As \\fullcite{survey} "
+                         "has it.\n\\end{document}\n",
+    "fullcite/data.bib": "@misc{heights,\n  note = {Source: \\oiSite{heights}{Heights Data Set}},"
+                         "\n}\n@article{survey,\n  author = {Ada Lovelace},\n  title = {A Survey of "
+                         "the \\oiSite{tug}{TeX Users Group}},\n  journal = {Journal},\n"
+                         "  year = 2001,\n}\n",
     # A bibliography the paper writes itself, alpha's labels.
     "own/paper.tex": "\\documentclass{article}\n\\begin{document}\n\\section{Intro}\n"
                      "See \\cite{Str87} and \\cite{Knu84}.\n\\begin{thebibliography}{Str87}\n"
@@ -3833,14 +3845,14 @@ BIB_FILES = {
 def case_bibliography(work):
     """A book's citations and its bibliography: BibTeX's, in the book's own
     style, its citations each the label LaTeX prints linked to its entry;
-    natbib's author and year; a bibliography the book writes itself; and
-    biblatex's, made by Pandoc's citeproc."""
+    natbib's author and year; a bibliography the book writes itself;
+    biblatex's, made by Pandoc's citeproc; and biblatex's full citations."""
     said = {}
     for name, text in BIB_FILES.items():
         os.makedirs(os.path.join(work, os.path.dirname(name)), exist_ok=True)
         with open(os.path.join(work, name), "w", encoding="utf-8") as fh:
             fh.write(text)
-    for book in ("plain", "natbib", "biblatex", "own"):
+    for book in ("plain", "natbib", "biblatex", "own", "fullcite"):
         with open(os.path.join(work, book, "conversion.yaml"), "w") as fh:
             fh.write("targets:\n  html:\n    format: html\n")
         done = convert(os.path.join(work, book))
@@ -3890,6 +3902,18 @@ def case_bibliography(work):
          and has("biblatex", "book-1", "Bibliography Knuth, Donald E. 1984.")
          and re.search(r'href="book-1\.html#ref-knuth"', page("biblatex", "one"))
          and "Pandoc's own style" in said["biblatex"]),
+        ("biblatex's full citations are their entries in full, a footnote's ended with a "
+         "period, several joined by semicolons, notes before and after, a page's number with "
+         "its prefix, a macro of the book's own in the database made as the book makes it, "
+         "and a title's case as the database gives it",
+         lambda: has("fullcite", "book", "Source: Heights Data Set.")
+         and has("fullcite", "book", "see Source: Heights Data Set; Ada Lovelace. A Survey of "
+                 "the TeX Users Group. Journal, 2001, p. 5.")
+         and has("fullcite", "book", "As Ada Lovelace. A Survey of the TeX Users Group. "
+                 "Journal, 2001 has it.")
+         and 'href="https://example.org/tug"' in page("fullcite", "book")
+         and "full citation" in said["fullcite"]
+         if bibtex else skip("no BibTeX to write out a full citation")),
     ]
 
 

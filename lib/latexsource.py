@@ -4310,6 +4310,128 @@ def resolve_citations(blocks, setup):
 BIB_MARKER = "TextbookImproverBibliography"
 ADDBIBRESOURCE = re.compile(r"\\addbibresource\s*(?:\[[^]]*\])?\s*\{\s*([^}]*?)\s*\}")
 PRINTBIBLIOGRAPHY = re.compile(r"\\printbibliography(?![A-Za-z@])\s*(?:\[[^]]*\])?")
+# biblatex's full citations, which Pandoc's reader drops with their keys:
+# OpenIntro gives each data set's source so, 111 times.
+FULLCITE = re.compile(r"\\((?:foot)?fullcite)(\*?)(?![A-Za-z@])")
+FULL_STYLE = "textbookimprover-plain"
+
+
+def database_paths(base, master, resources):
+    """The files of a book's bibliography databases, each as given or with
+    .bib, beside the book or its master; one not found (a remote resource)
+    is left out."""
+    found = []
+    for resource in resources:
+        for candidate in (resource, resource + ".bib",
+                          os.path.join(os.path.dirname(master), resource),
+                          os.path.join(os.path.dirname(master), resource + ".bib")):
+            if os.path.isfile(os.path.join(base, candidate)):
+                found.append(os.path.join(base, candidate))
+                break
+    return found
+
+
+def full_style(where):
+    """plain.bst without its change of a title's case, written in where as
+    FULL_STYLE (its license asks a changed copy be renamed): biblatex prints
+    a title as the database gives it, and plain's lowercasing changes a
+    macro in one (\\oiRedirect, OpenIntro's, to \\oiredirect). Returns the
+    style's name, or plain's when there's no plain.bst to copy."""
+    try:
+        done = subprocess.run(["kpsewhich", "plain.bst"], capture_output=True, text=True,
+                              stdin=subprocess.DEVNULL)
+    except OSError:
+        return "plain"
+    path = done.stdout.strip()
+    if done.returncode or not os.path.isfile(path):
+        return "plain"
+    text = read_text(path)
+    if '{ title "t" change.case$ }' not in text:
+        return "plain"
+    os.makedirs(where, exist_ok=True)
+    write_text(os.path.join(where, FULL_STYLE + ".bst"),
+               text.replace('{ title "t" change.case$ }', "{ title }"))
+    return FULL_STYLE
+
+
+def full_citations(base, work, texts, files, master, originals, resources, counts, say,
+                   printed=False):
+    """biblatex's \\fullcite and \\footfullcite in texts written out as the
+    entry in full, which the reader drops, keys and all: from BibTeX's .bbl
+    in plain's style, which is close to biblatex's standard one, a title's
+    case as the database gives it; \\footfullcite a footnote, ended with a
+    period as biblatex ends one, several entries joined by semicolons, a
+    note before and after (a page's number, p. 5) as biblatex sets them.
+    The entry is read with the book's macros, so one of the book's own in a
+    database is what the book makes it. printed: the book prints its
+    bibliography (\\printbibliography), which lists them, so each is also a
+    \\nocite for citeproc. Without BibTeX, each is a \\cite or \\footcite,
+    for Pandoc's citeproc. Returns how many were written."""
+    keys = []
+    for _, _, item in reading_order(originals, watch=FULLCITE):
+        if isinstance(item, re.Match):
+            cited = citation_at(item.string, item)
+            if cited:
+                keys += [k for k in cited[3] if k not in keys]
+    if not keys:
+        return 0
+    databases = [re.sub(r"\.bib$", "", r) for r in resources
+                 if database_paths(base, master, [r])]
+    where = os.path.join(work, "bibtex")
+    bbl = run_bibtex(base, work, os.path.dirname(master), keys, full_style(where),
+                     databases) if databases else None
+    entries = {key: words for _, key, words in bbl_entries(bbl)} if bbl else None
+    written, missing = 0, []
+
+    def note(post):
+        """A postnote as biblatex sets it: a page's number or range with its
+        prefix."""
+        if re.fullmatch(r"\d+", post.strip()):
+            return "p.~" + post.strip()
+        if re.fullmatch(r"\d+\s*(?:-{1,2}|–)\s*\d+", post.strip()):
+            return "pp.~" + post.strip()
+        return post
+    for name in files:
+        text = texts[name]
+        spans = skip_spans(text)
+        skip = sorted(spans + [(d[0], d[1]) for d in definitions_in(text, spans)])
+        edits = []
+        for m in FULLCITE.finditer(text):
+            if in_spans(m.start(), skip) or escaped(text, m.start()):
+                continue
+            cited = citation_at(text, m)
+            if not cited:
+                continue
+            command, _, options, cited_keys, end = cited
+            footnote = command == "footfullcite"
+            if entries is None:
+                edits.append((m.start(), m.end(), "\\footcite" if footnote else "\\cite"))
+                continue
+            pre, post = options if len(options) == 2 else ("", options[0]) if options \
+                else ("", "")
+            missing += [k for k in cited_keys if k not in entries and k not in missing]
+            words = "; ".join(re.sub(r"\.\s*$", "", entries.get(k, k)) for k in cited_keys)
+            words = (pre + " " if pre else "") + words + (", " + note(post) if post else "")
+            if footnote:
+                words = "\\footnote{%s%s}" % (words, "" if words.rstrip().endswith(".") else ".")
+            if printed:
+                words += "\\nocite{%s}" % ",".join(cited_keys)
+            edits.append((m.start(), end, words))
+            written += 1
+        for start, stop, words in reversed(edits):
+            text = text[:start] + words + text[stop:]
+        texts[name] = text
+    if entries is None:
+        say("No BibTeX here to write out biblatex's full citations (\\fullcite, "
+            "\\footfullcite), so each is a citation of Pandoc's citeproc, in its style, "
+            "not the entry in full.")
+    elif missing:
+        say(f"{len(missing)} key(s) of biblatex's full citations have no entry in "
+            + ", ".join(databases) + ", so each is its key, as biblatex prints it: "
+            + ", ".join(missing[:10]) + ".")
+    if written:
+        counts["full_citations"] = counts.get("full_citations", 0) + written
+    return written
 
 
 def bibliographies(base, work, texts, files, master, originals, counts, say):
@@ -4338,14 +4460,7 @@ def bibliographies(base, work, texts, files, master, originals, counts, say):
 
     def citeproc(place, resources):
         """A marker for the bibliography where place is, for citeproc."""
-        found_paths = []
-        for resource in resources:
-            for candidate in (resource, resource + ".bib",
-                              os.path.join(os.path.dirname(master), resource),
-                              os.path.join(os.path.dirname(master), resource + ".bib")):
-                if os.path.isfile(os.path.join(base, candidate)):
-                    found_paths.append(os.path.join(base, candidate))
-                    break
+        found_paths = database_paths(base, master, resources)
         if place:
             name, m = place
             texts[name] = texts[name][:m.start()] + "\n\n%s\n\n%s\n\n" % (heading, BIB_MARKER) \
@@ -4355,6 +4470,8 @@ def bibliographies(base, work, texts, files, master, originals, counts, say):
         resources = [r for m in code_matches(ADDBIBRESOURCE, joined) for r in [m.group(1)]]
         resources += [d.strip() for m in code_matches(BIBLIOGRAPHY, joined)
                       for d in m.group(1).split(",") if d.strip()]
+        full_citations(base, work, texts, files, master, originals, resources, counts, say,
+                       first(PRINTBIBLIOGRAPHY) is not None)
         if not resources or not code_matches(re.compile(
                 r"\\[A-Za-z]*cite[a-z]*\*?\s*[\[{]"), "\n".join(texts.values())):
             return None
@@ -4411,7 +4528,7 @@ def bibliographies(base, work, texts, files, master, originals, counts, say):
                 f"build left, {os.path.relpath(built, base)}.")
         if bbl is None:
             setup = citeproc(place, databases)
-            say(f"No BibTeX here to make the bibliography, nor a .bbl a build of the book "
+            say("No BibTeX here to make the bibliography, nor a .bbl a build of the book "
                 "left, so " + ("Pandoc's citeproc makes it, in its own style (author and "
                                "date), not the book's." if setup else
                                f"its {len(keys)} citation(s) are empty: its database, "

@@ -819,6 +819,8 @@ LATEX_READ_CHANGES = (
     ("bibliography_own", "bibliography entry the book writes itself (thebibliography) "
      "written out as LaTeX sets it"),
     ("citations", "citation written as the label LaTeX prints, linked to its entry"),
+    ("full_citations", "biblatex full citation (\\fullcite, \\footfullcite) written out as "
+     "its entry, from BibTeX's .bbl in plain's style, where the reader dropped it"),
     ("label_keys", "label or reference with whitespace in its key written without"),
     ("counter_keys", "label or reference whose key LaTeX makes of its counters "
      "(\\arabic{chapter}) written as LaTeX makes it"),

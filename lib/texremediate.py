@@ -171,6 +171,10 @@ def _moving_spans(text, skip):
     return spans
 
 
+# A paragraph break in an argument: a blank line, or \par.
+PARAGRAPH_BREAK = re.compile(r"[ \t]*\n[ \t]*\n\s*|\s*\\par(?![A-Za-z@])\s*")
+
+
 def remediate_file(base, name, text, alts, dirs, is_master=False, macros=None,
                    definitions=(), accounted=None, unplaced=None, values=None):
     """The file's text with alt text written in. Returns (text, counts).
@@ -243,11 +247,20 @@ def remediate_file(base, name, text, alts, dirs, is_master=False, macros=None,
         if generated(base, name):
             counts["generated"] += 1
     moving = None
+    flat = {}
     for start, end, macro_name, args in latexsource.macro_calls(
             text, macros or {}, sorted(spans + list(definitions))):
         if any(s <= start < e for s, e in inside):
             continue
         macro = macros[macro_name]
+        if macro["alt"] is not None and macro["alt"] <= len(args):
+            # An alt-text argument of paragraphs, as OpenIntro's authors
+            # write some, which \includegraphics can't take ("Paragraph
+            # ended before \Gin@ii was complete"): its paragraphs run on,
+            # unless a decision replaces it below.
+            given_alt, at, stop = args[macro["alt"] - 1]
+            if at is not None and PARAGRAPH_BREAK.search(given_alt):
+                flat[(at, stop)] = PARAGRAPH_BREAK.sub(" ", text[at:stop])
         # The file as the call makes it: its arguments, and a macro without
         # arguments as it's defined there (\chapterfolder, set at each
         # chapter's start).
@@ -313,6 +326,10 @@ def remediate_file(base, name, text, alts, dirs, is_master=False, macros=None,
         accounted.add(key)
         if generated(base, name):
             counts["generated"] += 1
+    for (at, stop), joined in flat.items():
+        if not any(e[0] < stop and at < e[1] for e in edits):
+            edits.append((at, stop, joined, False))
+            counts["alt_paragraphs"] = counts.get("alt_paragraphs", 0) + 1
     # From the end back, so each place is still where it was found; where
     # one call ends and the next begins, the next one's opening goes in
     # first and the first one's closing in front of it.
@@ -587,12 +604,6 @@ BOXES_NOTE = (
     "% Written for LaTeX's tagging: a table of one column of prose, a box around\n"
     "% a passage, is tagged as a division of paragraphs, not a table, by\n"
     "% {\\tagpdfsetup{table/tagging=div} before it and } after.\n")
-# titlesec, which LaTeX's tagging can't build with ("No format for this
-# command" at the first \section, its status currently incompatible), taken
-# out when the book uses none of its commands, as FINC 308's topics load it.
-TITLESEC_USE = re.compile(r"\\(?:titleformat|titlespacing|titlelabel|titleclass|"
-                          r"assignpagestyle|(?:part|chapter|(?:sub)*section|(?:sub)?paragraph)"
-                          r"break)(?![A-Za-z@])")
 # The PDF's title (dc:title), which PDF/UA-2 requires: LaTeX's tagging takes
 # it from \title, which nothing prints without \maketitle. A document that
 # names none, by \title or hyperref's pdftitle, gets the title its large type
@@ -653,6 +664,403 @@ def enumitem_settings(texts):
                         or name in ("resume", "resume*"):
                     found[name] = found.get(name, 0) + 1
     return found
+
+
+# Packages LaTeX's tagging can't build a tagged PDF with, or whose output it
+# can't tag (the tagging project's status list rates titlesec, framed, soul,
+# ulem, tabto, and wrapfig currently incompatible, and mdframed and soulutf8
+# never to be supported): the copy loads none of them, by LaTeX's own way of
+# skipping a package (\disable@package@load), and defines their commands
+# where the book would have loaded it, so what the book says is kept and
+# how they made it look isn't. titlesec stopped the build ("No format for
+# this command"), at OpenIntro Statistics' first heading. Each was built
+# tagged with what it's written with in the book, the text checked, and
+# veraPDF's PDF/UA-2 profile passed. A package the installed status list
+# rates compatible, or partially, is loaded as the book has it.
+#
+# The definitions are written in expl3 under internal names, and the
+# command each package's load runs makes them the package's own; a
+# parameter inside the command that does is doubled (##1), and one inside
+# a definition made in a loop there doubled again.
+SHIM_COMMON = r"""\cs_new_protected:Npn \__oer_block_begin:n #1
+  {
+    \par \addvspace { \medskipamount }
+    \tl_if_blank:nF {#1} { \noindent { \bfseries #1 } \par }
+  }
+\cs_new_protected:Npn \__oer_block_end:
+  { \par \addvspace { \medskipamount } }
+"""
+SHIMS = {
+    "titlesec": (r"""\NewDocumentCommand \__oer_titleformat:w { +m +o +m +m +m +m +o } { }
+\cs_new_protected:Npn \__oer_titleclass:Nn #1#2
+  {
+    \cs_if_exist:NF #1
+      {
+        \str_case_e:nnF { \tl_if_novalue:nF {#2} { \cs_to_str:N #2 } }
+          {
+            { part } { \cs_if_exist:NTF \chapter { \cs_gset_eq:NN #1 \chapter } { \cs_gset_eq:NN #1 \section } }
+            { chapter } { \cs_gset_eq:NN #1 \section }
+            { section } { \cs_gset_eq:NN #1 \subsection }
+            { subsection } { \cs_gset_eq:NN #1 \subsubsection }
+            { paragraph } { \cs_gset_eq:NN #1 \subparagraph }
+          }
+          { \cs_gset_eq:NN #1 \paragraph }
+      }
+  }
+\cs_new_protected:Npn \__oer_shim_titlesec:
+  {
+    \cs_gset_eq:NN \__oer_shim_titlesec: \prg_do_nothing:
+    \DeclareDocumentCommand \titleformat { s }
+      { \IfBooleanTF {##1} { \use_none:nn } { \__oer_titleformat:w } }
+    \DeclareDocumentCommand \titlespacing { s +m +m +m +m +o } { }
+    \DeclareDocumentCommand \titlelabel { +m } { }
+    \DeclareDocumentCommand \titleclass { m o m o } { \__oer_titleclass:Nn ##1 {##4} }
+    \DeclareDocumentCommand \assignpagestyle { m m } { }
+    \DeclareDocumentCommand \titlerule { s o }
+      {
+        \IfBooleanTF {##1} { \use_none:n }
+          { \leavevmode \leaders \hrule height \IfValueTF {##2} {##2} { 0.4pt } \hfill \kern 0pt \relax }
+      }
+    \providecommand \filcenter { \leftskip = 0pt plus 1fil \rightskip = 0pt plus 1fil \parfillskip = 0pt }
+    \providecommand \filleft { \leftskip = 0pt plus 1fil \rightskip = 0pt \parfillskip = 0pt }
+    \providecommand \filright { \leftskip = 0pt \rightskip = 0pt plus 1fil }
+    \providecommand \fillast { }
+    \providecommand \filinner { }
+    \providecommand \filouter { }
+    \providecommand \chaptertitlename { \chaptername }
+  }
+""", "headings are set as the class sets them, without the fonts, rules, spacing, and "
+         "labels titlesec gave them, and a heading level titlesec made is the class's "
+         "next level down"),
+    "mdframed": (r"""\tl_new:N \l__oer_mdf_title_tl
+\tl_new:N \g__oer_mdf_setup_tl
+\keys_define:nn { oer / mdframed }
+  {
+    frametitle .tl_set:N = \l__oer_mdf_title_tl ,
+    style .code:n =
+      { \tl_if_exist:cT { g__oer_mdf_style_#1_tl } { \keys_set:nv { oer / mdframed } { g__oer_mdf_style_#1_tl } } } ,
+    unknown .code:n = { }
+  }
+\cs_new_protected:Npn \__oer_mdf_begin:n #1
+  {
+    \tl_clear:N \l__oer_mdf_title_tl
+    \keys_set:nV { oer / mdframed } \g__oer_mdf_setup_tl
+    \keys_set:nn { oer / mdframed } {#1}
+    \exp_args:NV \__oer_block_begin:n \l__oer_mdf_title_tl
+  }
+\cs_new_protected:Npn \__oer_shim_mdframed:
+  {
+    \cs_gset_eq:NN \__oer_shim_mdframed: \prg_do_nothing:
+    \DeclareDocumentEnvironment { mdframed } { O{} } { \__oer_mdf_begin:n {##1} } { \__oer_block_end: }
+    \DeclareDocumentCommand \newmdenv { O{} m }
+      { \NewDocumentEnvironment {##2} { O{} } { \__oer_mdf_begin:n { ##1 , ####1 } } { \__oer_block_end: } }
+    \DeclareDocumentCommand \renewmdenv { O{} m }
+      { \RenewDocumentEnvironment {##2} { O{} } { \__oer_mdf_begin:n { ##1 , ####1 } } { \__oer_block_end: } }
+    \DeclareDocumentCommand \surroundwithmdframed { O{} m }
+      {
+        \AddToHook { env / ##2 / before } { \__oer_mdf_begin:n {##1} }
+        \AddToHook { env / ##2 / after } { \__oer_block_end: }
+      }
+    \DeclareDocumentCommand \mdfsetup { m } { \tl_gput_right:Nn \g__oer_mdf_setup_tl { , ##1 } }
+    \DeclareDocumentCommand \mdfdefinestyle { m m }
+      { \tl_gclear_new:c { g__oer_mdf_style_##1_tl } \tl_gset:cn { g__oer_mdf_style_##1_tl } {##2} }
+    \DeclareDocumentCommand \mdfapptodefinestyle { m m }
+      {
+        \tl_if_exist:cF { g__oer_mdf_style_##1_tl } { \tl_new:c { g__oer_mdf_style_##1_tl } }
+        \tl_gput_right:cn { g__oer_mdf_style_##1_tl } { , ##2 }
+      }
+    \DeclareDocumentCommand \newmdtheoremenv { O{} m o m o }
+      {
+        \IfValueTF {##3} { \newtheorem {##2} [##3] {##4} }
+          { \IfValueTF {##5} { \newtheorem {##2} {##4} [##5] } { \newtheorem {##2} {##4} } }
+        \surroundwithmdframed [##1] {##2}
+      }
+    \DeclareDocumentCommand \mdfsubtitle { O{} m } { \par \noindent { \bfseries ##2 } \par }
+  }
+""", "a framed passage is set as the text around it is, without its frame or background, "
+         "its frame title a line in bold"),
+    "framed": (r"""\cs_new_protected:Npn \__oer_shim_framed:
+  {
+    \cs_gset_eq:NN \__oer_shim_framed: \prg_do_nothing:
+    \clist_map_inline:nn { framed , oframed , shaded , shaded* , snugshade , snugshade* , leftbar }
+      { \DeclareDocumentEnvironment {##1} { } { \__oer_block_begin:n { } } { \__oer_block_end: } }
+    \DeclareDocumentEnvironment { titled-frame } { +m } { \__oer_block_begin:n {##1} } { \__oer_block_end: }
+    \DeclareDocumentEnvironment { MakeFramed } { +m } { \__oer_block_begin:n { } } { \__oer_block_end: }
+    \cs_if_exist:NF \FrameRule { \newdimen \FrameRule \FrameRule = 0.4pt }
+    \cs_if_exist:NF \FrameSep { \newdimen \FrameSep \FrameSep = 3pt }
+    \cs_if_exist:NF \OuterFrameSep { \newskip \OuterFrameSep }
+    \providecommand \FrameCommand { }
+    \providecommand \FirstFrameCommand { }
+    \providecommand \MidFrameCommand { }
+    \providecommand \LastFrameCommand { }
+    \providecommand \FrameHeightAdjust { 0.6em }
+    \providecommand \FrameRestore { }
+    \providecommand \TitleBarFrame { }
+  }
+""", "a framed, shaded, or barred passage is set as the text around it is, without its "
+         "frame, shading, or bar, a titled frame's title a line in bold"),
+    "soul": (r"""\cs_new_protected:Npn \__oer_shim_soul:
+  {
+    \cs_gset_eq:NN \__oer_shim_soul: \prg_do_nothing:
+    \DeclareDocumentCommand \so { +m } {##1}
+    \DeclareDocumentCommand \textso { +m } {##1}
+    \DeclareDocumentCommand \caps { +m } { \textsc {##1} }
+    \DeclareDocumentCommand \textcaps { +m } { \textsc {##1} }
+    \DeclareDocumentCommand \ul { +m } { \emph {##1} }
+    \DeclareDocumentCommand \textul { +m } { \emph {##1} }
+    \DeclareDocumentCommand \st { +m } {##1}
+    \DeclareDocumentCommand \textst { +m } {##1}
+    \DeclareDocumentCommand \hl { +m } { \emph {##1} }
+    \DeclareDocumentCommand \texthl { +m } { \emph {##1} }
+    \clist_map_inline:nn { sethlcolor , setulcolor , setstcolor , setuldepth , sloppyword , soulomit , setuloverlap , soulaccent , capssave , capsselect }
+      { \exp_args:Nc \DeclareDocumentCommand {##1} { +m } { } }
+    \clist_map_inline:nn { setul , soulregister , soulfont , capsdef }
+      { \exp_args:Nc \DeclareDocumentCommand {##1} { m m } { } }
+    \DeclareDocumentCommand \sodef { m m m m m } { }
+    \clist_map_inline:nn { resetul , resetso , capsreset }
+      { \exp_args:Nc \DeclareDocumentCommand {##1} { } { } }
+  }
+""", "letter-spaced and struck-out text is set plain, underlined and highlighted text "
+         "emphasized (italic), small capitals kept"),
+    "ulem": (r"""\cs_new_protected:Npn \__oer_shim_ulem:
+  {
+    \cs_gset_eq:NN \__oer_shim_ulem: \prg_do_nothing:
+    \clist_map_inline:nn { uline , uuline , uwave , dashuline , dotuline }
+      { \exp_args:Nc \DeclareDocumentCommand {##1} { +m } { \emph {####1} } }
+    \clist_map_inline:nn { sout , xout }
+      { \exp_args:Nc \DeclareDocumentCommand {##1} { +m } {####1} }
+    \DeclareDocumentCommand \markoverwith { +m } { }
+    \clist_map_inline:nn { ULon , normalem , ULforem }
+      { \exp_args:Nc \DeclareDocumentCommand {##1} { } { } }
+    \DeclareDocumentCommand \useunder { m m m } { }
+    \cs_if_exist:NF \ULdepth { \newdimen \ULdepth }
+    \providecommand \ULthickness { 0.4pt }
+  }
+""", "underlined text is emphasized (italic), and struck-out text set plain"),
+    "tabto": (r"""\cs_new_protected:Npn \__oer_shim_tabto:
+  {
+    \cs_gset_eq:NN \__oer_shim_tabto: \prg_do_nothing:
+    \DeclareDocumentCommand \tabto { s m } { \unskip \quad \ignorespaces }
+    \DeclareDocumentCommand \tab { } { \unskip \quad \ignorespaces }
+    \DeclareDocumentCommand \TabPositions { m } { }
+    \DeclareDocumentCommand \NumTabs { m } { }
+    \cs_if_exist:NF \CurrentLineWidth { \newdimen \CurrentLineWidth }
+    \cs_if_exist:NF \TabPrevPos { \newdimen \TabPrevPos }
+  }
+""", "a tab stop is a space"),
+    "wrapfig": (r"""\cs_new_protected:Npn \__oer_shim_wrapfig:
+  {
+    \cs_gset_eq:NN \__oer_shim_wrapfig: \prg_do_nothing:
+    \DeclareDocumentEnvironment { wrapfigure } { o m o m } { \begin {figure} [h] \centering } { \end {figure} }
+    \DeclareDocumentEnvironment { wraptable } { o m o m } { \begin {table} [h] \centering } { \end {table} }
+    \DeclareDocumentEnvironment { wrapfloat } { m o m o m } { \begin {##1} [h] \centering } { \end {##1} }
+    \cs_if_exist:NF \wrapoverhang { \newdimen \wrapoverhang }
+    \providecommand \WFclear { }
+  }
+""", "a figure or table the text wrapped around is set in the column on its own"),
+    # The enumerate package's label patterns, \begin{enumerate}[(a)], are
+    # written as the keys LaTeX's tagging's lists take (enumerate_labels);
+    # its own definitions would be replaced by those lists' anyway.
+    "enumerate": (r"""\cs_new_protected:Npn \__oer_shim_enumerate: { }
+""", "a list's label pattern, (a) or i., is written as LaTeX's tagging takes it "
+         "(label=(\\alph*)), so the labels are as they were"),
+    # wasysym's symbols, drawn from its own font, which has no Unicode for
+    # them (veraPDF: 8.4.5.8; \Box read as "2"), so a book that loads it
+    # kept TeX's fonts and its formulas had no MathML (OWN_FONTS). As the
+    # Unicode characters they are, from the OpenType fonts and their
+    # fallback, unicode-math can be loaded; the few no font here has are
+    # the nearest that is (APL's), or named in brackets. With LuaLaTeX
+    # only, as unicode-math is (math_block). The integrals are left to
+    # amsmath, which unicode-math loads after, and stopped on one already
+    # defined (\iint), and which gives them as Unicode's.
+    "wasysym": (r"""\cs_new_protected:Npn \__oer_wasy_char:nn #1#2
+  { \exp_args:Nc \DeclareRobustCommand {#1} { \Uchar "#2 \scan_stop: } }
+\cs_new_protected:Npn \__oer_wasy_pair:w #1/#2 \q_stop { \__oer_wasy_char:nn {#1} {#2} }
+\cs_new_protected:Npn \__oer_wasy_word:nn #1#2
+  { \exp_args:Nc \DeclareRobustCommand {#1} { \mbox { [#2] } } }
+\cs_new_protected:Npn \__oer_shim_wasysym:
+  {
+    \cs_gset_eq:NN \__oer_shim_wasysym: \prg_do_nothing:
+    \clist_map_inline:nn
+      {
+      AC/223F, APLbox/25A1, APLcirc/2218, APLcomment/2229, APLdown/2207,
+      APLdownarrowbox/2193, APLinput/25A1, APLinv/00F7, APLleftarrowbox/2190,
+      APLlog/229B, APLminus/00AF, APLnot/223C, APLrightarrowbox/2192, APLstar/22C6,
+      APLup/2206, APLuparrowbox/2191, APLvert/2223, Bowtie/22C8, Box/25A1,
+      CIRCLE/25CF, CheckedBox/2611, Circle/25CB, DOWNarrow/25BC, Diamond/25C7,
+      HF/2248, Join/22C8, LEFTCIRCLE/25D6, LEFTarrow/25C0, LEFTcircle/25D0,
+      LHD/25C0, Leftcircle/25D6, RHD/25B6, RIGHTCIRCLE/25D7, RIGHTarrow/25B6,
+      RIGHTcircle/25D1, Rightcircle/25D7, Square/2610, Thorn/00DE, UParrow/25B2,
+      VHF/224B, XBox/2612, agemO/2127, apprge/2273, apprle/2272, aquarius/2652,
+      ascnode/260A, astrosun/2609, ataribox/25A3, blacksmiley/263B,
+      brokenvert/00A6, cancer/264B, capricornus/2651, cent/00A2, checked/2713,
+      conjunction/260C, currency/00A4, davidsstar/2721, descnode/260B,
+      diameter/2300, earth/2641, eighthnote/266A, female/2640, frownie/2639,
+      gemini/264A, hexagon/2B21, hexstar/2721,
+      invdiameter/2300, inve/0259, invneg/2310, jupiter/2643, kreuz/2720,
+      leadsto/21DD, leftmoon/263E, leftturn/21BA, lhd/22B2, libra/264E,
+      lightning/2607, male/2642, mars/2642, mercury/263F, mho/2127, neptune/2646,
+      notbackslash/2216, notslash/002F, ocircle/25CB,
+      openo/0254, opposition/260D, pentagon/2B20, permil/2030, phone/260E,
+      photon/223F, pisces/2653, pluto/2647, pointer/261E, quarternote/2669,
+      rhd/22B3, rightmoon/263D, rightturn/21BB, sagittarius/2650, saturn/2644,
+      scorpio/264F, smiley/263A, sqsubset/228F, sqsupset/2290, sun/263C,
+      taurus/2649, thorn/00FE, twonotes/266B, unlhd/22B4, unrhd/22B5, uranus/2645,
+      varangle/2222, varhexagon/2B22, varhexstar/2736, venus/2640, vernal/2648,
+      virgo/264D, wasylozenge/2311, wasypropto/221D, wasytherefore/2234,
+      varint/222B, varoint/222E, wasyeuro/20AC, wasyparagraph/00B6, Paragraph/00B6,
+      wasycmd/2318, applecmd/2318, longs/017F, roundz/007A
+      }
+      { \__oer_wasy_pair:w ##1 \q_stop }
+    \__oer_wasy_word:nn { bell } { bell }
+    \__oer_wasy_word:nn { clock } { clock }
+    \__oer_wasy_word:nn { recorder } { recorder }
+    \__oer_wasy_word:nn { fullnote } { whole~note }
+    \__oer_wasy_word:nn { halfnote } { half~note }
+    \__oer_wasy_word:nn { gluon } { gluon }
+    \__oer_wasy_word:nn { octagon } { octagon }
+    \cs_if_exist:NF \euro { \cs_gset_eq:NN \euro \wasyeuro }
+    \DeclareRobustCommand \textwasy [1] {##1}
+    \providecommand \wasyfamily { }
+    \providecommand \wasy { }
+  }
+""", "its symbols are drawn as the Unicode characters they are, from the OpenType "
+            "fonts, so its formulas get their MathML; a few no font here has are the "
+            "nearest one (APL's), or named in brackets ([bell])"),
+}
+# A package that loads as another's stand-in does.
+SHIM_ALIASES = {"soulutf8": "soul"}
+# A stand-in that needs LuaLaTeX, whose \Uchar it uses; under pdfLaTeX the
+# package loads as the book has it.
+SHIM_LUATEX = {"wasysym"}
+# Packages math_block can stand in for (SHIMS) and load unicode-math for
+# the formulas' MathML, where the rest of OWN_FONTS keep TeX's fonts.
+STAND_IN_FONTS = frozenset({"wasysym"})
+STAND_IN_NOTE = (
+    "% Written for the formulas' MathML, which unicode-math makes: {}, whose\n"
+    "% symbols its own font gives no Unicode, isn't loaded with LuaLaTeX; its\n"
+    "% commands are the Unicode characters they draw, defined as below.\n")
+SHIM_NOTE = (
+    "% Written for LaTeX's tagging, which can't build a tagged PDF with these\n"
+    "% packages or can't tag what they make (the tagging project's status list):\n"
+    "% {}. None is loaded; where the book loads one, its commands are\n"
+    "% defined as below instead, to keep what the book says, not how it looks.\n")
+
+
+ENUMERATE_BEGIN = re.compile(r"\\begin\s*\{enumerate\}\s*\[")
+ENUMERATE_COUNTERS = {"A": "\\Alph*", "a": "\\alph*", "I": "\\Roman*", "i": "\\roman*",
+                      "1": "\\arabic*"}
+
+
+def enumerate_label(pattern):
+    """The enumerate package's label pattern as enumitem's label, which
+    LaTeX's tagging's lists take: the first A, a, I, i, or 1 outside braces
+    and commands the counter (\\Alph*, \\alph*, \\Roman*, \\roman*,
+    \\arabic*), the rest as written; one with none is every item's label,
+    as the package makes it."""
+    out, i, found = [], 0, False
+    while i < len(pattern):
+        ch = pattern[i]
+        if ch == "\\":
+            m = re.match(r"\\(?:[A-Za-z@]+|.)", pattern[i:])
+            out.append(m.group(0))
+            i += len(m.group(0))
+        elif ch == "{":
+            end = latexsource.matching_brace(pattern, i)
+            end = len(pattern) if end < 0 else end
+            out.append(pattern[i:end])
+            i = end
+        elif not found and ch in ENUMERATE_COUNTERS:
+            out.append(ENUMERATE_COUNTERS[ch])
+            found = True
+            i += 1
+        else:
+            out.append(ch)
+            i += 1
+    return "".join(out)
+
+
+def enumerate_labels(text):
+    """(text, count): each \\begin{enumerate}[pattern] in code with the
+    enumerate package's pattern, (a) or i., written [label={...}]: LaTeX's
+    tagging lists take its argument as keys, and stopped on "(a)" ("Some
+    keys specified on the enumerate environment are unknown", OpenIntro
+    Statistics' parts of an exercise). An argument that is already keys
+    is left."""
+    spans = latexsource.skip_spans(text)
+    edits = []
+    for m in ENUMERATE_BEGIN.finditer(text):
+        if latexsource.in_spans(m.start(), spans):
+            continue
+        close = _closing_bracket(text, m.end())
+        if close is None:
+            continue
+        pattern = text[m.end():close]
+        if any("=" in item for item in _split(pattern)):
+            continue
+        edits.append((m.end(), close, "label={%s}" % enumerate_label(pattern.strip())))
+    for start, end, new in reversed(edits):
+        text = text[:start] + new + text[end:]
+    return text, len(edits)
+
+
+def _closing_bracket(text, start):
+    """The index of the ] that closes an optional argument opened just
+    before start, braces respected, or None."""
+    depth = 0
+    for i in range(start, len(text)):
+        ch = text[i]
+        if ch == "\\":
+            continue
+        if ch == "{" and (i == 0 or text[i - 1] != "\\"):
+            depth += 1
+        elif ch == "}" and depth and text[i - 1] != "\\":
+            depth -= 1
+        elif ch == "]" and not depth:
+            return i
+    return None
+
+
+def shimmed_packages(packages, base=None):
+    """The packages among packages the copy replaces (SHIMS, SHIM_ALIASES),
+    in SHIMS' order: each one the tagging status list installed with TeX
+    doesn't rate compatible or partially compatible, or every one, when
+    the list isn't installed."""
+    statuses = {}
+    if base:
+        import taggingstatus
+        path = taggingstatus.kpsewhich(taggingstatus.DATA, base)
+        if path:
+            statuses = taggingstatus.load(path)[1]
+    found = [name for name in list(SHIMS) + list(SHIM_ALIASES)
+             if name in packages and name not in STAND_IN_FONTS]
+    return [name for name in found if statuses.get((name, "sty")) not in (3, 4)]
+
+
+def shim_block(names, stand_ins=()):
+    """What goes before the class for the packages names, which the copy
+    replaces, and stand_ins, which math_block stands in for: the
+    definitions, and each package's load made to run them."""
+    if not names and not stand_ins:
+        return ""
+    every = list(names) + [n for n in stand_ins if n not in names]
+    shims = list(dict.fromkeys(SHIM_ALIASES.get(n, n) for n in every))
+    note = SHIM_NOTE.format(", ".join(names)) if names else ""
+    if stand_ins:
+        note += STAND_IN_NOTE.format(", ".join(stand_ins))
+    return (note + "\\makeatletter\n\\ExplSyntaxOn\n" + SHIM_COMMON
+            + "".join(SHIMS[s][0] for s in shims) + "\\ExplSyntaxOff\n"
+            + "".join(("\\ifdefined\\directlua\\disable@package@load{%s}{\\csname "
+                       "__oer_shim_%s:\\endcsname}\\fi\n" if n in SHIM_LUATEX else
+                       "\\disable@package@load{%s}{\\csname __oer_shim_%s:\\endcsname}\n")
+                      % (n, SHIM_ALIASES.get(n, n)) for n in every)
+            + "\\makeatother\n")
+
+
+def shim_changes(names):
+    """What replacing names changes in the book's look, in words."""
+    shims = list(dict.fromkeys(SHIM_ALIASES.get(n, n) for n in names))
+    return "; ".join(f"{s}: {SHIMS[s][1]}" for s in shims)
 
 
 MATH_FONTS = (
@@ -745,10 +1153,12 @@ def math_block(texts, master, base=None):
             return "", {}
         return ("% Written for LaTeX's tagging: each formula's MathML, both forms.\n"
                 + setup.lstrip()), {"math_setup": 1}
-    kept = sorted(names & OWN_FONTS)
+    kept = sorted(names & (OWN_FONTS - STAND_IN_FONTS))
     if kept:
         return "", {"math_kept": ", ".join(kept)}
     bold, counts = "", {"math": 1}
+    if names & STAND_IN_FONTS:
+        counts["math_stand_in"] = ", ".join(sorted(names & STAND_IN_FONTS))
     used = [n for n, found in (("bm", "bm" in names), ("\\boldsymbol", any(
         latexsource.code_matches(BOLD_MATH, t) for t in texts.values())), ("\\pmb", any(
         latexsource.code_matches(POOR_BOLD, t) for t in texts.values()))) if found]
@@ -777,19 +1187,6 @@ def _code_subn(pattern, text, replace):
         count[0] += 1
         return replace(m)
     return pattern.sub(one, text), count[0]
-
-
-def _without_titlesec(m):
-    """A \\usepackage without titlesec: the whole command a comment when
-    it loads nothing else."""
-    names = latexsource.package_names(m.group(1))
-    if "titlesec" not in names:
-        return m.group(0)
-    kept = [n for n in names if n and n != "titlesec"]
-    if not kept:
-        return ("% Taken out for LaTeX's tagging, which can't build with titlesec; the\n"
-                "% book uses none of its commands: " + m.group(0))
-    return m.group(0).replace("{" + m.group(1) + "}", "{" + ",".join(kept) + "}")
 
 
 def _without_pdftex(m):
@@ -829,9 +1226,10 @@ def tag(texts, master, language, mathml=True, standard=("ua-2",), base=None):
     \\centerline on a line of its own made a centered paragraph,
     \\leavevmode put before a display formula opening a paragraph in a
     center environment, which leaves one open in LaTeX 2026-06-01, each
-    float's tags where the text has it (FLOATS_HERE), and, unless mathml
-    is false, unicode-math for the formulas' MathML (math_block).
-    Returns counts."""
+    float's tags where the text has it (FLOATS_HERE), the packages
+    tagging can't build or tag with replaced by definitions that keep the
+    text (SHIMS), and, unless mathml is false, unicode-math for the
+    formulas' MathML (math_block). Returns counts."""
     counts = {"metadata": 0, "pdftex_options": 0, "pdftex_settings": 0,
               "theorems": 0, "centerline": 0, "formulas": 0, "floats": 0}
     if mathml:
@@ -849,13 +1247,9 @@ def tag(texts, master, language, mathml=True, standard=("ua-2",), base=None):
     if "enumitem" in packages:
         block += ENUMITEM_KEYS
         counts["enumitem"] = enumitem_settings(texts)
-    if "titlesec" in packages and not any(latexsource.code_matches(TITLESEC_USE, t)
-                                          for t in texts.values()):
-        for name, text in list(texts.items()):
-            text, n = _code_subn(PACKAGE, text, _without_titlesec)
-            if n and text != texts[name]:
-                counts["titlesec"] = 1
-            texts[name] = text
+    shimmed = shimmed_packages(packages, base)
+    # A package math_block stands in for, so unicode-math loads.
+    stand_ins = [n for n in (counts.get("math_stand_in") or "").split(", ") if n]
     numbered = set()
     for text in texts.values():
         spans = latexsource.skip_spans(text)
@@ -951,7 +1345,16 @@ def tag(texts, master, language, mathml=True, standard=("ua-2",), base=None):
             counts["metadata_added"] = ", ".join(added)
     if counts.get("luatex85") and after is not None:
         text = text[:after] + LUATEX85 + text[after:]
+    if (shimmed or stand_ins) and after is not None:
+        # Before the class, which may load one of them itself.
+        text = text[:after] + shim_block(shimmed, stand_ins) + text[after:]
+        if shimmed:
+            counts["shims"] = ", ".join(shimmed)
     texts[master] = text
+    if "enumerate" in shimmed and after is not None:
+        for name in list(texts):
+            texts[name], n = enumerate_labels(texts[name])
+            counts["enumerate_labels"] = counts.get("enumerate_labels", 0) + n
     return counts
 
 

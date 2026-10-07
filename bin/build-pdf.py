@@ -188,6 +188,37 @@ def is_ua1(standards):
         not any(s.lower().startswith("ua-2") for s in standards)
 
 
+# A running head no wider than the line leaves beside the page number: the
+# book class sets a chapter's or section's title there in one line, however
+# long, and FINC 308's longest titles ran into the number and off the
+# page's edge. A longer one is scaled down to fit. Wrapped around the
+# kernel's mark commands, which every chapter and section mark goes
+# through, whatever the class; a copy (\NewCommandCopy), since they're
+# robust. An empty mark stays empty, as the kernel tells them apart
+# (2e-right-nonempty). The head is an artifact, so its text is the
+# reader's no matter its size.
+RUNNING_HEADS = r"""\RequirePackage{graphicx}
+\makeatletter
+\newsavebox\oer@headbox
+\DeclareRobustCommand\oerfithead[1]{%
+  \sbox\oer@headbox{#1}%
+  \ifdim\wd\oer@headbox>\dimexpr\textwidth-3em\relax
+    \resizebox{\dimexpr\textwidth-3em\relax}{!}{\usebox\oer@headbox}%
+  \else\usebox\oer@headbox\fi}
+\NewCommandCopy\oer@markboth\markboth
+\NewCommandCopy\oer@markright\markright
+\ExplSyntaxOn
+\cs_new:Npn \__oer_fit_mark:n #1
+  { \tl_if_blank:nF {#1} { \exp_not:n { \oerfithead {#1} } } }
+\DeclareRobustCommand*\markboth[2]
+  { \exp_args:Nee \oer@markboth { \__oer_fit_mark:n {#1} } { \__oer_fit_mark:n {#2} } }
+\DeclareRobustCommand*\markright[1]
+  { \exp_args:Ne \oer@markright { \__oer_fit_mark:n {#1} } }
+\ExplSyntaxOff
+\makeatother
+"""
+
+
 # Written into the preamble after the metadata file's own header-includes.
 # math/setup names both forms of MathML luamml makes (it needs
 # unicode-math, which Pandoc's template loads under LuaLaTeX): structure
@@ -499,6 +530,13 @@ def book_metadata(project, resolved, base, numbered):
     meta["numbersections"] = meta_bool(numbered)
     meta["toc"] = meta_bool(True)
     meta["toc-depth"] = meta_string(int(resolved["pdf.toc_depth"]))
+    # A LaTeX book's own layout, as its preamble gives it (convert.py
+    # passes it on): its type size, paper, margins, line spacing, and
+    # paragraph indents, where Pandoc's defaults would have 10pt type in
+    # the book class's margins. The metadata file still wins.
+    layout = book_layout()
+    for key, value in layout.items():
+        meta[key] = meta_value(value)
     setting = str(resolved["pdf.metadata"] or "").strip()
     if setting:
         meta.update(metadata_file(base, setting))
@@ -521,6 +559,7 @@ def book_metadata(project, resolved, base, numbered):
         # isn't made a link. (The template loads hyperref after this.)
         ours += "\\PassOptionsToPackage{hyperfootnotes=false}{hyperref}\n" + UA1_LINKS
     ours += FIGURE_PLACEMENT[str(resolved["pdf.figures"])]
+    ours += RUNNING_HEADS
     # A LaTeX book's own colors, which convert.py passes on: a formula keeps
     # its TeX as the book wrote it, \color{redcards} and all, and LaTeX
     # stops on a color nothing defines (OpenIntro Statistics).
@@ -547,6 +586,43 @@ def book_metadata(project, resolved, base, numbered):
     includes["c"].append({"t": "MetaBlocks", "c": [raw_latex(ours)]})
     meta["header-includes"] = includes
     return meta
+
+
+def meta_value(value):
+    """A JSON value as Pandoc's metadata: a list, a flag, or a string."""
+    if isinstance(value, list):
+        return {"t": "MetaList", "c": [meta_value(v) for v in value]}
+    if isinstance(value, bool):
+        return meta_bool(value)
+    return meta_string(value)
+
+
+def book_layout():
+    """The layout a LaTeX book's preamble gives its pages, as Pandoc's
+    variables (BOOK_LATEX_LAYOUT, which convert.py sets), or {}."""
+    try:
+        layout = json.loads(os.environ.get("BOOK_LATEX_LAYOUT", "") or "{}")
+    except ValueError:
+        return {}
+    return layout if isinstance(layout, dict) else {}
+
+
+def layout_words(layout):
+    """What a book's layout carries over, in words, for the log."""
+    words = []
+    if layout.get("fontsize"):
+        words.append(f"{layout['fontsize']} type")
+    if layout.get("papersize"):
+        words.append(f"{layout['papersize']} paper")
+    if layout.get("geometry"):
+        words.append("geometry's " + ", ".join(layout["geometry"]))
+    if layout.get("classoption"):
+        words.append(", ".join(layout["classoption"]))
+    if layout.get("linestretch"):
+        words.append(f"line spacing {layout['linestretch']}")
+    if layout.get("indent"):
+        words.append("indented paragraphs")
+    return words
 
 
 def meta_plain(value):
@@ -655,6 +731,11 @@ def build(base, name, resolved, keep, intermediates=None, latex_only=False,
     title_page = safe_stem(os.path.splitext(os.path.basename(setting))[0]) \
         if setting else None
     meta = book_metadata(project, resolved, base, numbered)
+    carried = layout_words({k: v for k, v in book_layout().items()
+                            if meta.get(k) == meta_value(v)})
+    if carried:
+        print("The LaTeX book's own layout, from its preamble: "
+              + "; ".join(carried) + ".", file=sys.stderr)
     claimed = meta.get("pdfstandard")
     claimed = [meta_plain(c) for c in claimed["c"]] if claimed and claimed.get("t") == "MetaList" \
         else ([meta_plain(claimed)] if claimed else [])

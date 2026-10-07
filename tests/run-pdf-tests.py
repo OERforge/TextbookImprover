@@ -170,6 +170,32 @@ Table: Price by year
 
 A heading below a subsection is run in to the text after it, and two of
 them followed by a section had left LaTeX's paragraph tagging one short.
+
+## A section whose title runs longer than the line a running head has beside the page number, as a topic's can
+
+Words that fill the pages under a long title, so that its running head is set on a page of its own, beside the page's number, where the book class would set it in one line however long it is. Words that fill the pages under a long title, so that its running head is set on a page of its own, beside the page's number, where the book class would set it in one line however long it is. Words that fill the pages under a long title, so that its running head is set on a page of its own, beside the page's number, where the book class would set it in one line however long it is. Words that fill the pages under a long title, so that its running head is set on a page of its own, beside the page's number, where the book class would set it in one line however long it is.
+
+Words that fill the pages under a long title, so that its running head is set on a page of its own, beside the page's number, where the book class would set it in one line however long it is. Words that fill the pages under a long title, so that its running head is set on a page of its own, beside the page's number, where the book class would set it in one line however long it is. Words that fill the pages under a long title, so that its running head is set on a page of its own, beside the page's number, where the book class would set it in one line however long it is. Words that fill the pages under a long title, so that its running head is set on a page of its own, beside the page's number, where the book class would set it in one line however long it is.
+
+Words that fill the pages under a long title, so that its running head is set on a page of its own, beside the page's number, where the book class would set it in one line however long it is. Words that fill the pages under a long title, so that its running head is set on a page of its own, beside the page's number, where the book class would set it in one line however long it is. Words that fill the pages under a long title, so that its running head is set on a page of its own, beside the page's number, where the book class would set it in one line however long it is. Words that fill the pages under a long title, so that its running head is set on a page of its own, beside the page's number, where the book class would set it in one line however long it is.
+
+Words that fill the pages under a long title, so that its running head is set on a page of its own, beside the page's number, where the book class would set it in one line however long it is. Words that fill the pages under a long title, so that its running head is set on a page of its own, beside the page's number, where the book class would set it in one line however long it is. Words that fill the pages under a long title, so that its running head is set on a page of its own, beside the page's number, where the book class would set it in one line however long it is. Words that fill the pages under a long title, so that its running head is set on a page of its own, beside the page's number, where the book class would set it in one line however long it is.
+
+Words that fill the pages under a long title, so that its running head is set on a page of its own, beside the page's number, where the book class would set it in one line however long it is. Words that fill the pages under a long title, so that its running head is set on a page of its own, beside the page's number, where the book class would set it in one line however long it is. Words that fill the pages under a long title, so that its running head is set on a page of its own, beside the page's number, where the book class would set it in one line however long it is. Words that fill the pages under a long title, so that its running head is set on a page of its own, beside the page's number, where the book class would set it in one line however long it is.
+
+Words that fill the pages under a long title, so that its running head is set on a page of its own, beside the page's number, where the book class would set it in one line however long it is. Words that fill the pages under a long title, so that its running head is set on a page of its own, beside the page's number, where the book class would set it in one line however long it is. Words that fill the pages under a long title, so that its running head is set on a page of its own, beside the page's number, where the book class would set it in one line however long it is. Words that fill the pages under a long title, so that its running head is set on a page of its own, beside the page's number, where the book class would set it in one line however long it is.
+
+Words that fill the pages under a long title, so that its running head is set on a page of its own, beside the page's number, where the book class would set it in one line however long it is. Words that fill the pages under a long title, so that its running head is set on a page of its own, beside the page's number, where the book class would set it in one line however long it is. Words that fill the pages under a long title, so that its running head is set on a page of its own, beside the page's number, where the book class would set it in one line however long it is. Words that fill the pages under a long title, so that its running head is set on a page of its own, beside the page's number, where the book class would set it in one line however long it is.
+
+Words that fill the pages under a long title, so that its running head is set on a page of its own, beside the page's number, where the book class would set it in one line however long it is. Words that fill the pages under a long title, so that its running head is set on a page of its own, beside the page's number, where the book class would set it in one line however long it is. Words that fill the pages under a long title, so that its running head is set on a page of its own, beside the page's number, where the book class would set it in one line however long it is. Words that fill the pages under a long title, so that its running head is set on a page of its own, beside the page's number, where the book class would set it in one line however long it is.
+
+Words that fill the pages under a long title, so that its running head is set on a page of its own, beside the page's number, where the book class would set it in one line however long it is. Words that fill the pages under a long title, so that its running head is set on a page of its own, beside the page's number, where the book class would set it in one line however long it is. Words that fill the pages under a long title, so that its running head is set on a page of its own, beside the page's number, where the book class would set it in one line however long it is. Words that fill the pages under a long title, so that its running head is set on a page of its own, beside the page's number, where the book class would set it in one line however long it is.
+
+Words that fill the pages under a long title, so that its running head is set on a page of its own, beside the page's number, where the book class would set it in one line however long it is. Words that fill the pages under a long title, so that its running head is set on a page of its own, beside the page's number, where the book class would set it in one line however long it is. Words that fill the pages under a long title, so that its running head is set on a page of its own, beside the page's number, where the book class would set it in one line however long it is. Words that fill the pages under a long title, so that its running head is set on a page of its own, beside the page's number, where the book class would set it in one line however long it is.
+
+Words that fill the pages under a long title, so that its running head is set on a page of its own, beside the page's number, where the book class would set it in one line however long it is. Words that fill the pages under a long title, so that its running head is set on a page of its own, beside the page's number, where the book class would set it in one line however long it is. Words that fill the pages under a long title, so that its running head is set on a page of its own, beside the page's number, where the book class would set it in one line however long it is. Words that fill the pages under a long title, so that its running head is set on a page of its own, beside the page's number, where the book class would set it in one line however long it is.
+
+Words that fill the pages under a long title, so that its running head is set on a page of its own, beside the page's number, where the book class would set it in one line however long it is. Words that fill the pages under a long title, so that its running head is set on a page of its own, beside the page's number, where the book class would set it in one line however long it is. Words that fill the pages under a long title, so that its running head is set on a page of its own, beside the page's number, where the book class would set it in one line however long it is. Words that fill the pages under a long title, so that its running head is set on a page of its own, beside the page's number, where the book class would set it in one line however long it is.
 """
 
 APPENDIX = r"""\appendix
@@ -433,6 +459,19 @@ def links(reader):
     return out
 
 
+def head_sizes(reader, words):
+    """The size each page's running head holding words is drawn at, its
+    font's size as the page scales it."""
+    import math
+    sizes = []
+    for page in reader.pages:
+        def visit(text, cm, tm, font, size):
+            if words in text:
+                sizes.append(size * math.hypot(tm[0], tm[1]) * math.hypot(cm[0], cm[1]))
+        page.extract_text(visitor_text=visit)
+    return sizes
+
+
 def outline_titles(reader):
     titles = []
 
@@ -527,6 +566,10 @@ def checks(work):
          lambda: "/StructTreeRoot" in root
          and bool(resolve(root["/MarkInfo"])["/Marked"])
          and str(root["/Lang"]) == "en"),
+        ("a section's title too long for the running head beside the page number is "
+         "scaled to fit there, not run past the margin",
+         lambda: head_sizes(reader, "SECTION WHOSE TITLE RUNS")
+         and all(size < 9.5 for size in head_sizes(reader, "SECTION WHOSE TITLE RUNS"))),
         ("it claims PDF/UA-2 in its metadata",
          lambda: re.search(r"pdfuaid:part[^0-9]{1,5}2",
                            resolve(root["/Metadata"]).get_data().decode(

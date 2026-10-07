@@ -551,6 +551,12 @@ LANGUAGE_DECLARED = False
 # A LaTeX book's own \definecolor statements, for a PDF built from its
 # pages, where a formula can still name one (\color{redcards}).
 LATEX_COLORS = []
+# The first master's page layout (latexsource.page_layout), for a PDF
+# built from the pages.
+LATEX_LAYOUT = {}
+# A PDF figure written with its fonts embedded (latexbuild.embed_figure_fonts),
+# by its path in the book, for the next copy that needs it.
+EMBEDDED_FIGURES = {}
 
 
 def variant_sources(base, target_name):
@@ -822,6 +828,8 @@ def read_latex_to_json(base, masters, env, work):
                                    if len(masters) > 1 else work, master, say, LATEX_MACROS)
         preps.append(prep)
         LATEX_COLORS.extend(c for c in prep["colors"] if c not in LATEX_COLORS)
+        if not LATEX_LAYOUT:
+            LATEX_LAYOUT.update(prep["layout"])
         for key, n in prep["counts"].items():
             counts[key] = counts.get(key, 0) + n
         out = os.path.join(work, f"latex-book-{index}.json")
@@ -2359,7 +2367,7 @@ def warn_math_keep(sidecar, kept_file):
 
 
 def remediate_sources(target, base, docs, paths, env, html_stems=(), language=None,
-                      work=None, markdown=(), latex_parts=()):
+                      work=None, markdown=(), latex_parts=(), outputs=()):
     """A target with format source: the book's own files, remediated, one
     copy each in the target's folder under the source's name. A Word file
     gets what a person decided in the sidecars written into it, and nothing
@@ -2369,7 +2377,8 @@ def remediate_sources(target, base, docs, paths, env, html_stems=(), language=No
     file the same, edited where each element is and confirmed against
     Pandoc's reading (lib/mdremediate.py); a LaTeX book's files the alt
     text, as keys LaTeX's tagging reads (lib/texremediate.py). AsciiDoc
-    sources aren't written yet."""
+    sources aren't written yet. outputs: the targets' folders, which hold
+    no file of the book's."""
     os.makedirs(target.output_dir, exist_ok=True)
     resolved = {}
     if env.get("TABLE_HEADERS_RESOLVED") and os.path.exists(env["TABLE_HEADERS_RESOLVED"]):
@@ -2533,6 +2542,9 @@ def remediate_sources(target, base, docs, paths, env, html_stems=(), language=No
                   "OpenType Latin Modern fonts (TeX's own design) and a fallback for "
                   "characters they lack, "
                   if counts.get("tag_math") else "")
+               + (f"{counts['tag_math_stand_in']}'s symbols drawn as the Unicode characters "
+                  "they are, which its own font doesn't give them, so unicode-math could be "
+                  "loaded, " if counts.get("tag_math_stand_in") else "")
                + (f"the book's bold ({counts['tag_math_bold']}) made unicode-math's bold "
                   "italic, whose letters the fonts have, "
                   if counts.get("tag_math_bold") else "")
@@ -2545,9 +2557,6 @@ def remediate_sources(target, base, docs, paths, env, html_stems=(), language=No
                   "passage, tagged as a division, not a table, "
                   if counts.get("tag_boxes") else "")
                + enumitem_message(counts.get("tag_enumitem"))
-               + (f"titlesec taken out of {counts['tag_titlesec']} document(s) that use "
-                  "none of its commands, since tagging can't build with it, "
-                  if counts.get("tag_titlesec") else "")
                + (f"a \\title for the PDF's title given {counts['tag_title']} document(s) "
                   "that name none"
                   + (f", {counts['tag_title_visual']} of them from the title their large "
@@ -2568,6 +2577,18 @@ def remediate_sources(target, base, docs, paths, env, html_stems=(), language=No
                if counts.get("generated") else "")
             + (f" {counts['pspicture']} pspicture(s) have no key for alt text and "
                "were left alone." if counts.get("pspicture") else ""))
+        shimmed = [n.strip() for n in (counts.get("tag_shims") or "").split(",") if n.strip()]
+        for _, _, c in others:
+            shimmed += [n.strip() for n in (c.get("tag_shims") or "").split(",")
+                        if n.strip() and n.strip() not in shimmed]
+        if shimmed:
+            say(f"WARNING: {target.name}: the copy loads none of "
+                + ", ".join(shimmed) + ", since LaTeX's tagging can't build a tagged PDF "
+                "with them or can't tag what they make (the tagging project's status list "
+                "rates each currently incompatible or never to be supported). Their commands "
+                "are defined in the copy instead, to keep what the book says, not how it "
+                "looks, so its PDF looks different from the book's own: "
+                + texremediate.shim_changes(shimmed) + ".")
         if others:
             say(f"{target.name}: the book's other master(s) written too, "
                 + "; ".join(f"{name}" + (f" with {only} file(s) only it reaches" if only
@@ -2584,6 +2605,10 @@ def remediate_sources(target, base, docs, paths, env, html_stems=(), language=No
                    if tagging else "") + ".")
         unplaced_warning(target.name, counts, paths, "the copy")
         written.extend(os.path.join(target.output_dir, f) for f in files)
+        if tagging:
+            written.extend(embed_figures(
+                target, base, target.output_dir,
+                list(outputs) + [os.path.join(base, latexsource.RENDERED)], "the copy"))
     others = sorted(f for f in os.listdir(base) if f.endswith(".adoc") and not f.startswith("."))
     if docs or pages or md_files or not latex_parts:
         say(f"{target.name}: {len(docs)} Word file(s), {pages} HTML page(s), and "
@@ -2628,6 +2653,38 @@ def remediate_sources(target, base, docs, paths, env, html_stems=(), language=No
             "text doesn't hold them as many times as Pandoc reads them, as when the same "
             "syntax also appears inside code.")
     return written
+
+
+def embed_figures(target, root, out_root, skip, where):
+    """The book's PDF figures under root that don't embed their fonts,
+    written to out_root with them embedded (latexbuild.embed_figure_fonts),
+    and said; skip: folders that aren't the book's. Returns the paths
+    written."""
+    import latexbuild
+    names = latexbuild.figure_pdfs(root, skip)
+    if not names:
+        return []
+    try:
+        import pypdf  # noqa: F401
+    except ImportError:
+        say(f"{target.name}: pypdf isn't installed, so the book's {len(names)} PDF file(s) "
+            "weren't checked for fonts they don't embed, which PDF/UA requires.")
+        return []
+    written, failed, tool = latexbuild.embed_figure_fonts(root, out_root, names,
+                                                          EMBEDDED_FIGURES)
+    if written:
+        say(f"{target.name}: {len(written)} of the book's PDF figures written in {where} "
+            "with their fonts embedded ("
+            + ("Ghostscript" if tool == "gs" else "poppler's pdftocairo")
+            + "), which PDF/UA requires; they drew text with fonts they didn't embed, "
+            "as R's pdf() device leaves out Helvetica.")
+    if failed:
+        say(f"WARNING: {target.name}: {len(failed)} PDF figure(s) draw text with fonts they "
+            "don't embed, which PDF/UA requires, and "
+            + ("neither Ghostscript nor poppler's pdftocairo is installed to embed them"
+               if tool is None else "couldn't be written with them embedded")
+            + ": " + ", ".join(failed[:5]) + (", ..." if len(failed) > 5 else "") + ".")
+    return [os.path.join(out_root, n) for n in written]
 
 
 def merge_counts(totals, counts):
@@ -2694,9 +2751,17 @@ UNDEFINED = re.compile(r"(Reference|Citation) `([^']+)' on page \d+ undefined")
 
 def pdf_env():
     """The environment build-pdf.py runs in: this one, and a LaTeX book's
-    own colors, which its formulas can name (BOOK_LATEX_COLORS)."""
-    return dict(os.environ, BOOK_LATEX_COLORS="\n".join(LATEX_COLORS)) \
-        if LATEX_COLORS else None
+    own colors, which its formulas can name (BOOK_LATEX_COLORS), and the
+    layout its preamble gives its pages, as Pandoc's variables
+    (BOOK_LATEX_LAYOUT, JSON)."""
+    if not LATEX_COLORS and not LATEX_LAYOUT:
+        return None
+    env = dict(os.environ)
+    if LATEX_COLORS:
+        env["BOOK_LATEX_COLORS"] = "\n".join(LATEX_COLORS)
+    if LATEX_LAYOUT:
+        env["BOOK_LATEX_LAYOUT"] = json.dumps(LATEX_LAYOUT)
+    return env
 
 
 def latex_book_pdf(target, base, latex_parts, paths, work, language, project, targets):
@@ -2787,6 +2852,9 @@ def latex_book_pdf(target, base, latex_parts, paths, work, language, project, ta
             seen=seen, standard=standards, written=written_files))
         written_files.update(files)
     counts["unplaced"] = len(counts.get("unplaced_keys", []))
+    # The book's PDF figures with their fonts embedded, in the copy LaTeX
+    # builds, where the output folders aren't.
+    embed_figures(target, build, build, (), "the copy LaTeX builds")
 
     def one(master):
         folder = os.path.join(build, os.path.dirname(master))
@@ -3865,7 +3933,7 @@ def main():
                 written[target.name] = remediate_sources(
                     target, base, docs, paths, env, html_stems,
                     language if LANGUAGE_DECLARED else None, work, markdown,
-                    latex_parts)
+                    latex_parts, [t.output_dir for t in targets])
             if target.format in SOURCE_TARGETS or target.format == "docx":
                 written[target.name] = render_markdown(
                     target, [p for p in pages_by_dir[target.pages_dir]

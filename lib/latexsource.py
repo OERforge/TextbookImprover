@@ -453,6 +453,106 @@ def preamble_language(preamble):
     return ""
 
 
+LAYOUT_COMMAND = re.compile(
+    r"\\documentclass(?:\s|%[^\n]*)*(?:\[(?P<class_options>[^]]*)\])?(?:\s|%[^\n]*)*"
+    r"\{\s*(?P<cls>[^}]*?)\s*\}"
+    r"|\\usepackage(?:\s|%[^\n]*)*(?:\[(?P<package_options>[^]]*)\])?(?:\s|%[^\n]*)*"
+    r"\{(?P<packages>[^}]*)\}"
+    r"|\\geometry\s*\{(?P<geometry>(?:[^{}]|\{[^{}]*\})*)\}"
+    r"|\\(?:setstretch|linespread)\s*\{\s*(?P<stretch>\d*\.?\d+)\s*\}"
+    r"|\\(?P<spacing>singlespacing|onehalfspacing|doublespacing)(?![A-Za-z@])"
+    r"|\\setlength\s*\{?\s*\\parindent\s*\}?\s*\{\s*(?P<parindent>[^{}]*?)\s*\}"
+    r"|\\parindent\s*=?\s*(?P<assigned>\\z@|[+-]?\d*\.?\d+\s*(?:pt|em|ex|mm|cm|in|bp|pc|sp|dd|cc))")
+SIZE_OPTION = re.compile(r"(?:fontsize=)?(1[012])pt")
+PAPER_OPTION = re.compile(r"(?:(a[3-6]|b[4-6]|letter|legal|executive)paper"
+                          r"|paper=(a[3-6]|b[4-6]|letter|legal|executive))")
+SIDE_OPTIONS = ("oneside", "twoside", "openany", "openright")
+# setspace's spacing at 10pt, which \setstretch takes as Pandoc writes it.
+SPACING = {"singlespacing": "1", "onehalfspacing": "1.25", "doublespacing": "1.667"}
+ZERO_LENGTH = re.compile(r"\\z@|[+-]?0*\.?0*\s*(?:pt|em|ex|mm|cm|in|bp|pc|sp|dd|cc)?")
+
+
+def option_list(value):
+    """A comma list's items, split at the commas outside braces."""
+    items, depth, current = [], 0, ""
+    for ch in value:
+        depth += (ch == "{") - (ch == "}")
+        if ch == "," and depth == 0:
+            items.append(current)
+            current = ""
+        else:
+            current += ch
+    items.append(current)
+    return [" ".join(i.split()) for i in items if i.strip()]
+
+
+def page_layout(texts, includes=None):
+    """What the book's preamble says of its pages that Pandoc's LaTeX
+    writer has a variable for, under the names Pandoc gives them: fontsize
+    and papersize from the class's options, the sides and chapter openings
+    they choose (classoption), geometry's options, linestretch, and indent
+    when the book's paragraphs are indented, as LaTeX's are unless the
+    parskip package or a \\parindent of zero says otherwise. For a PDF
+    built from the pages, which would otherwise have Pandoc's 10pt type,
+    its book class's margins, and parskip's spacing: FINC 308's 11pt and
+    inch margins came out as 10pt in a narrower block. texts is [(name,
+    text)], the master first; read in LaTeX's order (reading_order) up to
+    the master's \\begin{document}, so a style file it \\input-s counts."""
+    if not texts:
+        return {}
+    master, text = texts[0]
+    begin = code_matches(BEGIN_DOCUMENT, text)
+    if not begin:
+        return {}
+    layout, geometry, indent = {}, [], True
+    for kind, _, value in reading_order(texts, includes, at={master: [begin[0].start()]},
+                                        watch=LAYOUT_COMMAND):
+        if kind == "at":
+            break
+        if kind != "match":
+            continue
+        m = value
+        if m.group("cls") is not None:
+            for option in option_list(m.group("class_options") or ""):
+                option = option.replace(" ", "")
+                size, paper = SIZE_OPTION.fullmatch(option), PAPER_OPTION.fullmatch(option)
+                if size:
+                    layout["fontsize"] = size.group(1) + "pt"
+                elif paper:
+                    layout["papersize"] = paper.group(1) or paper.group(2)
+                elif option in SIDE_OPTIONS and option not in layout.get("classoption", []):
+                    layout.setdefault("classoption", []).append(option)
+                elif option.startswith("parskip"):
+                    # A KOMA class's own paragraph spacing.
+                    indent = option in ("parskip=false", "parskip=off")
+        elif m.group("packages") is not None:
+            names = package_names(m.group("packages"))
+            if "geometry" in names:
+                geometry += option_list(m.group("package_options") or "")
+            if "parskip" in names:
+                indent = False
+        elif m.group("geometry") is not None:
+            geometry += option_list(m.group("geometry"))
+        elif m.group("stretch") is not None:
+            layout["linestretch"] = m.group("stretch")
+        elif m.group("spacing") is not None:
+            layout["linestretch"] = SPACING[m.group("spacing")]
+        elif m.group("parindent") is not None or m.group("assigned") is not None:
+            indent = not ZERO_LENGTH.fullmatch(m.group("parindent")
+                                               if m.group("parindent") is not None
+                                               else m.group("assigned"))
+    # An option LaTeX's own commands would have to expand, which Pandoc's
+    # writer would pass on as text, is left to the class's default.
+    geometry = [o for o in geometry if "\\" not in o]
+    if geometry:
+        layout["geometry"] = geometry
+    if layout.get("linestretch") in ("1", "1.0"):
+        del layout["linestretch"]
+    if indent:
+        layout["indent"] = True
+    return layout
+
+
 # --------------------------------------------------------------------------
 # what the copy changes
 # --------------------------------------------------------------------------
@@ -2778,7 +2878,7 @@ def prepare(base, work, master, say, macros=""):
     """The book copied into work/latex with what Pandoc can't read put
     right, its drawings rendered into base/rendered/. Returns a dict:
     master (the copy's path), order, front_role, files, missing,
-    counts, preamble."""
+    counts, preamble, copy, colors, counters, and layout (page_layout)."""
     copy = os.path.join(work, "latex")
     if os.path.isdir(copy):
         shutil.rmtree(copy)
@@ -2903,7 +3003,8 @@ def prepare(base, work, master, say, macros=""):
     return {"master": os.path.join(copy, master), "order": order,
             "front_role": front_role, "files": files, "missing": missing,
             "counts": counts, "preamble": preamble, "copy": copy, "colors": colors,
-            "counters": counting}
+            "counters": counting,
+            "layout": page_layout(originals, include_macros(originals))}
 
 
 TABLE_BEGIN = re.compile(r"\\begin\s*\{(tabular\*?|tabularx|longtable)\}")

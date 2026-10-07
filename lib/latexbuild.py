@@ -19,6 +19,7 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
+import os
 import re
 import shutil
 import subprocess
@@ -71,6 +72,146 @@ def latex_problem(warn):
     return None
 
 
+# A PDF figure that draws its text with fonts it doesn't embed, as R's pdf()
+# device does with Helvetica, Symbol, and ZapfDingbats (548 of OpenIntro
+# Statistics' 563 figures): PDF/UA requires every font embedded (8.4.5.5.1
+# in PDF/UA-2) and each glyph mapped to Unicode (8.4.5.8), and veraPDF
+# fails the book's PDF on both, the figures being part of its pages. Each
+# is written again with its fonts embedded: by Ghostscript, with its list
+# of fonts never to embed emptied (base-14 fonts are on it by default), its
+# images passed through and its pages unrotated; or by poppler's
+# pdftocairo, which embeds what it draws, when Ghostscript isn't installed.
+# Both checked: veraPDF passes a tagged document holding the figure.
+EMBED_GS = ["gs", "-q", "-dSAFER", "-dBATCH", "-dNOPAUSE", "-sDEVICE=pdfwrite",
+            "-dEmbedAllFonts=true", "-dSubsetFonts=true", "-dAutoRotatePages=/None",
+            "-dPassThroughJPEGImages=true", "-dPassThroughJPXImages=true",
+            "-dDownsampleColorImages=false", "-dDownsampleGrayImages=false",
+            "-dDownsampleMonoImages=false"]
+# A figure, not a document: a PDF of more pages than this is left as it is.
+FIGURE_PAGES = 3
+
+
+def unembedded_fonts(path):
+    """The names of the fonts a PDF's pages draw with, form XObjects too,
+    that it doesn't embed; None when it can't be read (or pypdf isn't
+    installed), or has more pages than a figure (FIGURE_PAGES)."""
+    try:
+        import logging
+        from pypdf import PdfReader
+        # A figure's broken cross-reference table, which pypdf repairs and
+        # says so, one line each, is no news here.
+        logging.getLogger("pypdf").setLevel(logging.ERROR)
+        reader = PdfReader(path)
+        if len(reader.pages) > FIGURE_PAGES:
+            return None
+        names, seen = set(), set()
+
+        def walk(resources):
+            if resources is None:
+                return
+            resources = resources.get_object()
+            for ref in (resources.get("/Font") or {}).values():
+                font = ref.get_object()
+                if id(font) in seen:
+                    continue
+                seen.add(id(font))
+                if font.get("/Subtype") == "/Type3":
+                    continue
+                described = font
+                if font.get("/Subtype") == "/Type0":
+                    described = font["/DescendantFonts"][0].get_object()
+                descriptor = described.get("/FontDescriptor")
+                descriptor = descriptor.get_object() if descriptor is not None else {}
+                if not any(k in descriptor for k in ("/FontFile", "/FontFile2", "/FontFile3")):
+                    names.add(str(font.get("/BaseFont", "")).lstrip("/"))
+            for ref in (resources.get("/XObject") or {}).values():
+                xobject = ref.get_object()
+                if xobject.get("/Subtype") == "/Form" and id(xobject) not in seen:
+                    seen.add(id(xobject))
+                    walk(xobject.get("/Resources"))
+        for page in reader.pages:
+            walk(page.get("/Resources"))
+        return names
+    except Exception:  # noqa: BLE001 -- a PDF pypdf can't read is left alone
+        return None
+
+
+def embedding_tool():
+    """The program that embeds a figure's fonts here, or None."""
+    if shutil.which("gs"):
+        return "gs"
+    if shutil.which("pdftocairo"):
+        return "pdftocairo"
+    return None
+
+
+def embed_fonts(source, dest, tool):
+    """source written to dest with its fonts embedded, by tool
+    (embedding_tool). Returns whether it was."""
+    if tool == "gs":
+        command = EMBED_GS + ["-o", dest, "-c", "<</NeverEmbed [ ]>> setdistillerparams",
+                              "-f", source]
+    else:
+        command = ["pdftocairo", "-pdf", source, dest]
+    try:
+        done = subprocess.run(command, capture_output=True, text=True, errors="replace",
+                              stdin=subprocess.DEVNULL, timeout=300)
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return done.returncode == 0 and os.path.isfile(dest) and unembedded_fonts(dest) == set()
+
+
+def figure_pdfs(root, skip=()):
+    """The PDFs under root, relative to it, outside the folders skip names
+    (absolute paths) and a version control folder: a book's figures, and
+    whatever else it keeps as PDF, which unembedded_fonts tells apart."""
+    found = []
+    skip = {os.path.abspath(s) for s in skip}
+    for folder, dirs, files in os.walk(root):
+        dirs[:] = [d for d in dirs if d not in (".git", ".hg", ".svn")
+                   and os.path.abspath(os.path.join(folder, d)) not in skip]
+        for name in files:
+            if name.lower().endswith(".pdf"):
+                found.append(os.path.relpath(os.path.join(folder, name), root))
+    return sorted(found)
+
+
+def embed_figure_fonts(root, out_root, names, done=None, workers=4):
+    """Each PDF of names (relative to root) whose fonts aren't all embedded,
+    written to out_root at the same path with them embedded. done, a dict
+    if given, maps a name to the file already written for it, which is
+    copied, and gets each one written here. Returns (written, failed,
+    tool): the names written, those that couldn't be, and the program used
+    (None when neither is installed, and nothing is written)."""
+    import concurrent.futures
+    done = {} if done is None else done
+    wanted = [name for name in names if unembedded_fonts(os.path.join(root, name))]
+    tool = embedding_tool()
+    if not wanted or tool is None:
+        return [], wanted, tool
+
+    def one(name):
+        dest = os.path.join(out_root, name)
+        os.makedirs(os.path.dirname(dest) or out_root, exist_ok=True)
+        if name in done and os.path.isfile(done[name]):
+            if os.path.abspath(done[name]) != os.path.abspath(dest):
+                shutil.copyfile(done[name], dest)
+            return name, True
+        work = dest + ".embedding.pdf"
+        ok = embed_fonts(os.path.join(root, name), work, tool)
+        if ok:
+            os.replace(work, dest)
+        elif os.path.exists(work):
+            os.remove(work)
+        return name, ok
+    with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
+        results = list(pool.map(one, wanted))
+    written = [n for n, ok in results if ok]
+    for name in written:
+        done.setdefault(name, os.path.join(out_root, name))
+    return written, [n for n, ok in results if not ok], tool
+
+
 def missing_characters(lines):
     """{character: times} LaTeX's log says a font didn't have, and the
     lines that aren't about that."""
@@ -114,12 +255,15 @@ def failure_advice(log):
     # main memory). A stack that overflows is usually a macro that calls
     # itself without end instead.
     # titlesec's \titleformat, which LaTeX's tagging can't build with; a
-    # copy takes titlesec out only when the book uses none of its commands.
+    # tagged copy loads it only when the tagging status list rates it
+    # compatible, and defines its commands otherwise (texremediate.SHIMS).
     if "Package titlesec Error: No format for this command" in log:
         said.append("titlesec can't build with LaTeX's tagging (the tagging project "
-                    "rates it currently incompatible), and the book sets its headings "
+                    "rated it currently incompatible), and the book sets its headings "
                     "with it: without its \\titleformat settings, and the package, "
-                    "LaTeX's own headings would build.")
+                    "LaTeX's own headings would build. A source target with tagging on "
+                    "writes a copy that doesn't load it, unless the status list "
+                    "installed with TeX rates it compatible.")
     capacity = CAPACITY.search(log)
     if capacity:
         table = capacity.group(1).strip()

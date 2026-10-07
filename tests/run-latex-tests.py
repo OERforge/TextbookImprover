@@ -235,15 +235,24 @@ def png(path, rgb):
                  + chunk(b"IEND", b""))
 
 
-def pdf(path):
-    """A one-page PDF holding a blue rectangle, written by hand."""
+def pdf(path, word=None):
+    """A one-page PDF holding a blue rectangle, written by hand; with word,
+    the word drawn beside it in Helvetica, which the PDF doesn't embed, as
+    R's pdf() device writes a plot's labels."""
     stream = b"0 0 1 rg 5 5 30 10 re f\n"
+    resources = b""
+    if word:
+        stream += b"0 g BT /F1 8 Tf 2 2 Td (%s) Tj ET\n" % word.encode("ascii")
+        resources = b" /Resources << /Font << /F1 5 0 R >> >>"
     objects = [b"<< /Type /Catalog /Pages 2 0 R >>",
                b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
                b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 40 20] "
-               b"/Contents 4 0 R >>",
+               b"/Contents 4 0 R" + resources + b" >>",
                b"<< /Length %d >>\nstream\n" % len(stream) + stream
                + b"endstream"]
+    if word:
+        objects.append(b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica "
+                       b"/Encoding /WinAnsiEncoding >>")
     out, offsets = b"%PDF-1.4\n", []
     for number, body in enumerate(objects, start=1):
         offsets.append(len(out))
@@ -2060,7 +2069,62 @@ def case_pieces(work):
         {"a": "\\begin{itemize}[leftmargin=*,labelindent=0pt]\n\\item x\n\\end{itemize}\n"
               "\\begin{enumerate}[resume,label={(\\alph*)}]\n\\item y\n\\end{enumerate}\n"
               "\\setlist[itemize]{leftmargin=*}\n"})
+    # The layout a preamble gives its pages, as Pandoc's variables: FINC
+    # 308's, OpenIntro's class line with a comment in it, parskip and a
+    # \parindent of zero, a KOMA class's own keys, and geometry's braces.
+    layouts = [latexsource.page_layout([("m.tex", text)]) for text in (
+        "\\documentclass[11pt]{article}\n\\usepackage[margin=1in]{geometry}\n"
+        "\\usepackage{parskip}\n\\setstretch{1}\n\\begin{document}\nx\n\\end{document}\n",
+        "\\documentclass[10pt,openany]%,oneside]\n{book}\n\\begin{document}\nx\n"
+        "\\end{document}\n",
+        "\\documentclass[fontsize=12pt,paper=a4,parskip=half]{scrbook}\n"
+        "\\usepackage{geometry}\n\\geometry{total={6in,8in}, top=1in}\n\\onehalfspacing\n"
+        "\\begin{document}\n\\geometry{left=2in}\nx\n\\end{document}\n",
+        "\\documentclass[a4paper,twoside]{report}\n\\setlength{\\parindent}{0pt}\n"
+        "% \\usepackage[margin=3in]{geometry}\n\\begin{document}\nx\n\\end{document}\n")]
+    labels = [texremediate.enumerate_label(p) for p in
+              ("(a)", "i.", "{Part} A:", "\\bfseries 1.", "{Step}")]
+    relabeled = texremediate.enumerate_labels(
+        "\\begin{enumerate}[(a)]\\item x\\end{enumerate}"
+        "\\begin{enumerate} [label=(\\alph*)]\\item y\\end{enumerate}"
+        "% \\begin{enumerate}[(i)]\n\\begin{enumerate}\\item z\\end{enumerate}")
+    shims = texremediate.shimmed_packages({"titlesec", "soulutf8", "amsmath", "enumerate"})
+    shim_block = texremediate.shim_block(shims)
+    flat_alt, flat_counts = texremediate.remediate_file(
+        "/nonexistent", "a.tex",
+        "\\fig[A first paragraph.\n\nA second one,\\par a third]{sq}\\fig[One]{sq}\n", {},
+        [], macros={"fig": {"file": "#2", "arguments": 2, "default": "", "alt": 1,
+                            "keyed": False, "options": None}})
     return [
+        ("a preamble's layout is Pandoc's variables: its class's type size and paper, the "
+         "sides it chooses, geometry's options, its line spacing, and indented paragraphs "
+         "unless parskip or a \\parindent of zero says otherwise",
+         lambda: layouts == [
+             {"fontsize": "11pt", "geometry": ["margin=1in"]},
+             {"fontsize": "10pt", "classoption": ["openany"], "indent": True},
+             {"fontsize": "12pt", "papersize": "a4", "geometry": ["total={6in,8in}", "top=1in"],
+              "linestretch": "1.25"},
+             {"papersize": "a4", "classoption": ["twoside"]}]),
+        ("the enumerate package's label patterns are written as the keys LaTeX's "
+         "tagging's lists take, the first counter letter outside braces and commands the "
+         "counter; keys and a comment are left",
+         lambda: labels == ["(\\alph*)", "\\roman*.", "{Part} \\Alph*:", "\\bfseries \\arabic*.",
+                            "{Step}"]
+         and relabeled == ("\\begin{enumerate}[label={(\\alph*)}]\\item x\\end{enumerate}"
+                           "\\begin{enumerate} [label=(\\alph*)]\\item y\\end{enumerate}"
+                           "% \\begin{enumerate}[(i)]\n\\begin{enumerate}\\item z\\end{enumerate}",
+                           1)),
+        ("a package tagging can't take is replaced, the one another's stand-in serves too, "
+         "each load made to define its commands",
+         lambda: shims == ["titlesec", "enumerate", "soulutf8"]
+         and "\\disable@package@load{titlesec}{\\csname __oer_shim_titlesec:\\endcsname}" in shim_block
+         and "\\disable@package@load{soulutf8}{\\csname __oer_shim_soul:\\endcsname}" in shim_block
+         and shim_block.count("\\cs_new_protected:Npn \\__oer_shim_soul:") == 1
+         and "mdframed" not in shim_block and "% titlesec, enumerate, soulutf8. None is" in shim_block),
+        ("an image macro's alt-text argument of paragraphs runs them on, which "
+         "\\includegraphics can take; one paragraph is left",
+         lambda: flat_alt == "\\fig[A first paragraph. A second one, a third]{sq}\\fig[One]{sq}\n"
+         and flat_counts.get("alt_paragraphs") == 1),
         ("LaTeX's first error is found when its file's name has spaces",
          lambda: latexbuild.first_errors(log)
          and "titlesec Error" in latexbuild.first_errors(log)[0]
@@ -2210,7 +2274,8 @@ def case_pieces(work):
 # its own; \nameref; \subfigure; a label with a space; a definitions-only
 # file \include-d in the body; an empty \chapter*{} to start a page.
 CUSTOM_FILES = {
-    "main.tex": r"""\documentclass{book}
+    "main.tex": r"""\documentclass[11pt]{book}
+\usepackage[margin=1in]{geometry}
 \usepackage{graphicx}
 \usepackage{xcolor}
 \usepackage{
@@ -2376,6 +2441,30 @@ y = 2
 }
 
 
+def page_layout_kept(work, said):
+    """The PDF from the pages has the 11pt type and inch margins the
+    customized book's preamble gives, its paragraphs indented: the run says
+    so, and a paragraph's words are drawn at 11pt's 10.95pt (10.91 of the
+    PDF's points), beginning an inch from the edge."""
+    if "The LaTeX book's own layout, from its preamble: 11pt type; geometry's " \
+            "margin=1in; indented paragraphs." not in said:
+        return False
+    try:
+        import pypdf
+    except ImportError:
+        return skip("no pypdf to read the PDF")
+    import math
+    found = []
+    for page in pypdf.PdfReader(os.path.join(work, "pdf", "org.example.custom.pdf")).pages:
+        def visit(text, cm, tm, font, size):
+            if "The spread" in text:
+                found.append((size * math.hypot(tm[0], tm[1]) * math.hypot(cm[0], cm[1]),
+                              tm[4] * cm[0] + cm[4]))
+        page.extract_text(visitor_text=visit)
+    return bool(found) and all(abs(size - 10.91) < 0.05 and abs(x - 72) < 1
+                               for size, x in found)
+
+
 def case_customized(work):
     """A book made its own way, as OpenIntro Statistics is: read whole, a
     page per chapter, its images found and its constructs read; the sample
@@ -2539,6 +2628,13 @@ def case_customized(work):
          "in a color the book defines",
          lambda: os.path.exists(os.path.join(work, "pdf", "org.example.custom.pdf"))
          if pdf else skip("no lualatex for the PDF")),
+        ("and the type size and margins the book's preamble gives, not Pandoc's 10pt in "
+         "the book class's margins", lambda: page_layout_kept(work, said)
+         if pdf else skip("no lualatex for the PDF")),
+        ("the copy runs on the paragraphs of an alt-text argument, which "
+         "\\includegraphics can't take", lambda: "\\Figure[A gray star in chapter two, drawn "
+         "with five points of equal length. Its center filled," in read(
+             work, "tagged", "ch_two", "TeX", "ch_two.tex")),
         ("a group after a command the reader takes whole is read: \\begingroup after "
          "\\noindent, in a macro and in the text, and an exercise solution's number and "
          "text after \\hypersetup's argument and \\hspace's, as OpenIntro sets them",
@@ -2644,6 +2740,149 @@ def case_capacity(work):
     ]
 
 
+# A book set with packages LaTeX's tagging can't build or tag with: its
+# headings by titlesec, framed passages by mdframed and framed, marked
+# words by soul and ulem, a tab stop by tabto, a figure beside the text by
+# wrapfig, a list labeled by the enumerate package's pattern; its figure a
+# PDF whose word is drawn in Helvetica, not embedded.
+UNSUPPORTED_MASTER = r"""\documentclass[11pt]{book}
+\usepackage[margin=1in]{geometry}
+\usepackage{graphicx}
+\usepackage[explicit]{titlesec}
+\usepackage{mdframed,framed,soul,tabto,wrapfig,enumerate,wasysym}
+\usepackage[normalem]{ulem}
+\titleformat{\section}{\bfseries\Large}{\thesection\quad #1}{1em}{}
+\titlespacing*{\section}{0pt}{2ex}{1ex}
+\newmdenv[frametitle={Key idea}]{keyidea}
+\title{Shapes Set Their Own Way}
+\begin{document}
+\maketitle
+\chapter{Shapes}
+\section{Squares}
+A square has four sides.\tabto{3cm}Tabbed words.
+
+\begin{mdframed}[frametitle={Definition}]
+A square is a rectangle with equal sides.
+\end{mdframed}
+
+\begin{keyidea}
+Every square is a rhombus.
+\end{keyidea}
+
+\begin{framed}
+A framed remark.
+\end{framed}
+
+Some \hl{highlighted words}, \ul{underlined words}, \st{struck words}, and \sout{struck out}.
+
+A filled circle, \CIRCLE, and a formula with wasysym's triangle: $x \lhd y$.
+
+\begin{enumerate}[(a)]
+\item First part
+\item Second part
+\end{enumerate}
+
+\begin{wrapfigure}{r}{0.4\textwidth}
+\centering
+\includegraphics[width=0.3\textwidth]{plot.pdf}
+\caption{A plot}
+\end{wrapfigure}
+Words beside the plot.
+\end{document}
+"""
+
+
+def case_unsupported(work):
+    """A book set with packages LaTeX's tagging can't take: the copy loads
+    none of them and defines their commands, the run says what that
+    changes, and the PDF from the book's own LaTeX builds tagged with every
+    word, its figure's font embedded, and passes PDF/UA-2."""
+    if not shutil.which("lualatex") or not shutil.which("latexmk"):
+        return [("a book set with packages tagging can't take builds tagged",
+                 lambda: skip("no lualatex or latexmk for the PDF target"))]
+    os.makedirs(work)
+    with open(os.path.join(work, "book.tex"), "w", encoding="utf-8") as fh:
+        fh.write(UNSUPPORTED_MASTER)
+    pdf(os.path.join(work, "plot.pdf"), word="Plot")
+    with open(os.path.join(work, "image-alt.csv"), "w", encoding="utf-8") as fh:
+        fh.write("Image,Alt\nrendered/plot.svg,A blue bar labeled Plot\n")
+    with open(os.path.join(work, "conversion.yaml"), "w") as fh:
+        fh.write("targets:\n  html:\n    format: html\n"
+                 "  tagged:\n    format: source\n    tagging: \"on\"\n"
+                 "  pdf:\n    format: pdf\n")
+    with open(os.path.join(work, "plot.pdf"), "rb") as fh:
+        original = fh.read()
+    result = convert(work)
+    said = result.stdout + result.stderr
+    built = os.path.join(work, "pdf", "book.pdf")
+    copy = read(work, "tagged", "book.tex") \
+        if os.path.exists(os.path.join(work, "tagged", "book.tex")) else ""
+    sys.path.insert(0, os.path.join(ROOT, "lib"))
+    import latexbuild
+
+    def every_word():
+        if not shutil.which("pdftotext"):
+            return skip("no pdftotext to read the PDF")
+        found = subprocess.run(["pdftotext", built, "-"], capture_output=True,
+                               text=True).stdout if os.path.exists(built) else ""
+        found = " ".join(found.split())
+        return all(phrase in found for phrase in (
+            "1.1 Squares", "Tabbed words", "Definition", "A square is a rectangle with equal sides",
+            "Key idea", "Every square is a rhombus", "A framed remark", "highlighted words",
+            "underlined words", "struck words", "struck out", "(a) First part",
+            "(b) Second part", "Figure 1.1: A plot", "Words beside the plot",
+            "A filled circle, ●,", "⊲"))
+
+    def passes_ua2():
+        verapdf = os.environ.get("VERAPDF") or shutil.which("verapdf")
+        if not verapdf:
+            return skip("no veraPDF to check the PDF")
+        done = subprocess.run([verapdf, "-f", "ua2", "--format", "text", built],
+                              capture_output=True, text=True)
+        return done.stdout.strip().startswith("PASS")
+
+    def figure_embedded():
+        try:
+            import pypdf  # noqa: F401
+        except ImportError:
+            return skip("no pypdf to read the figure's fonts")
+        fixed = os.path.join(work, "tagged", "plot.pdf")
+        with open(os.path.join(work, "plot.pdf"), "rb") as fh:
+            unchanged = fh.read() == original
+        return latexbuild.unembedded_fonts(os.path.join(work, "plot.pdf")) == {"Helvetica"} \
+            and os.path.exists(fixed) and latexbuild.unembedded_fonts(fixed) == set() \
+            and unchanged \
+            and "1 of the book's PDF figures written in the copy with their fonts embedded" \
+            in said and "written in the copy LaTeX builds with their fonts embedded" in said
+    return [
+        ("the run says the copy loads none of the packages tagging can't take, and what "
+         "replacing each changes",
+         lambda: "WARNING: tagged: the copy loads none of titlesec, mdframed, framed, soul, "
+         "ulem, tabto, wrapfig, enumerate," in said
+         and "titlesec: headings are set as the class sets them" in said
+         and "enumerate: a list's label pattern" in said),
+        ("wasysym's symbols are the Unicode characters they draw, so unicode-math gives "
+         "the formulas MathML, and the run says so",
+         lambda: "wasysym's symbols drawn as the Unicode characters they are" in said
+         and "unicode-math loaded" in said
+         and "\\ifdefined\\directlua\\disable@package@load{wasysym}" in copy
+         and "wasysym" not in said.split("the copy loads none of", 1)[-1].split(".")[0]),
+        ("the copy disables each before the class and defines its commands, and writes "
+         "the enumerate package's pattern as tagging's lists take it",
+         lambda: copy.index("\\disable@package@load{titlesec}") < copy.index("\\documentclass")
+         and "\\disable@package@load{wrapfig}{\\csname __oer_shim_wrapfig:\\endcsname}" in copy
+         and "\\begin{enumerate}[label={(\\alph*)}]" in copy
+         and "\\usepackage[explicit]{titlesec}" in copy),
+        ("the PDF from the book's own LaTeX builds tagged", lambda: os.path.exists(built)
+         and "built by LaTeX from the book's own files" in said),
+        ("with every word the packages set, the frames' titles and the list's labels too",
+         every_word),
+        ("its figure written with its font embedded, in the copy and in the build, the "
+         "book's own left as it was", figure_embedded),
+        ("and it passes veraPDF's PDF/UA-2 profile", passes_ua2),
+    ]
+
+
 CASES = [("a LaTeX book", case_book), ("two masters", case_masters),
          ("one file", case_single), ("an unbuilt book", case_unbuilt),
          ("the source target", case_source), ("a book with fonts of its own", case_own_fonts),
@@ -2656,6 +2895,7 @@ CASES = [("a LaTeX book", case_book), ("two masters", case_masters),
          ("a book of documents built on their own", case_documents),
          ("the pieces the copies take", case_pieces),
          ("a book made its own way, as OpenIntro is", case_customized),
+         ("a book set with packages tagging can't take", case_unsupported),
          ("a book too big for TeX", case_capacity)]
 
 

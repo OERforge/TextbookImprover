@@ -375,6 +375,19 @@ def pieces_by_source(stems, parts=None):
     return plain, ordered
 
 
+def declared_titles(nodes):
+    """{page: title} for each page the contents give a title of their own."""
+    found = {}
+    for node in nodes or []:
+        if isinstance(node, dict):
+            if "items" in node:
+                found.update(declared_titles(node["items"]))
+            elif node.get("page") and node.get("title"):
+                page = str(node["page"]).strip()
+                found[page[:-5] if page.endswith(".html") else page] = str(node["title"])
+    return found
+
+
 def declared_pages(nodes):
     found = set()
     for node in nodes or []:

@@ -62,10 +62,17 @@ import shutil
 import subprocess
 
 # A page marker, a paragraph of its own the reader keeps as text, put
-# before each \include in the copy and cut at afterwards.
+# before each \include in the copy and cut at afterwards; and one after
+# each, where the master's own text begins again.
 MARKER = "TextbookImproverPageMarker"
 MARKER_LINE = MARKER + "%04d"
-MARKER_TEXT = re.compile(r"^" + MARKER + r"(\d{4})$")
+END_MARKER = "TextbookImproverPageEnd"
+END_MARKER_LINE = END_MARKER + "%04d"
+MARKER_TEXT = re.compile(r"^(%s|%s)(\d{4})$" % (MARKER, END_MARKER))
+# Where the book's division commands stood (\frontmatter, \appendix, the
+# appendix package's appendices), kept by the counting as an empty span
+# for the cut, which takes them out.
+DIVISION_CLASS = "textbookimprover-division"
 ARTIFACT = "TextbookImproverArtifact"
 DRAWINGS = ("picture", "tikzpicture", "pspicture")
 VERBATIM = ("verbatim", "verbatim*", "Verbatim", "lstlisting", "minted",
@@ -868,14 +875,15 @@ def normalize_keys(node):
     return changed
 
 
-SUBFIGURE_COMMAND = re.compile(r"\\subfigure(?![A-Za-z@])")
+SUBFIGURE_COMMAND = re.compile(r"\\(?:subfigure|subfloat)(?![A-Za-z@])")
 
 
 def subfigures(text, counter):
-    """The obsolete subfigure package's \\subfigure[caption]{...}, which
-    Pandoc's reader doesn't know: its caption is dropped and the \\label in
-    it is lost, so a reference to it goes nowhere (25 in OpenIntro
-    Statistics). Written as subcaption's subfigure environment, which the
+    """The obsolete subfigure package's \\subfigure[caption]{...}, and
+    subfig's \\subfloat, which Pandoc's reader doesn't know: its caption is
+    dropped and the \\label in it is lost, so a reference to it goes
+    nowhere (25 in OpenIntro Statistics), and a \\subfloat loses what it
+    holds too. Written as subcaption's subfigure environment, which the
     reader makes a figure of its own, the label its id and the caption,
     when there is one, its caption."""
     spans = skip_spans(text)
@@ -906,6 +914,282 @@ def subfigures(text, counter):
         text = text[:start] + replacement + text[end:]
         counter["subfigures"] = counter.get("subfigures", 0) + 1
     return text
+
+
+WRAP_EDGE = re.compile(r"\\(begin|end)\s*\{(wrapfigure|wraptable)\}")
+
+
+def wrapped_floats(text, counter):
+    """wrapfig's wrapfigure and wraptable, which the reader keeps as a
+    division with their arguments shown as text ("r 0.4") and the caption
+    and label dropped: written as a figure and a table, which the reader
+    takes whole. That the text flows around it is the page's layout."""
+    spans = skip_spans(text)
+    edits = []
+    for m in WRAP_EDGE.finditer(text):
+        if in_spans(m.start(), spans):
+            continue
+        kind = "figure" if m.group(2) == "wrapfigure" else "table"
+        if m.group(1) == "end":
+            edits.append((m.start(), m.end(), "\\end{%s}" % kind))
+            continue
+        # [lines]{placement}[overhang]{width}
+        pos = m.end()
+        for opener in "[{[{":
+            at = argument_space(text, pos)
+            if not text.startswith(opener, at):
+                if opener == "{":
+                    break
+                continue
+            close = closing_bracket(text, at) + 1 if opener == "[" else matching_brace(text, at)
+            if close <= 0:
+                break
+            pos = close
+        edits.append((m.start(), pos, "\\begin{%s}" % kind))
+        counter["wrapped_floats"] = counter.get("wrapped_floats", 0) + 1
+    for start, end, replacement in reversed(edits):
+        text = text[:start] + replacement + text[end:]
+    return text
+
+
+TABLE_FLOAT = re.compile(r"\\begin\s*\{(table\*?)\}")
+HOLDS_TABLE = re.compile(r"\\(?:begin\s*\{(?:tabular\*?|tabularx|tabulary|longtable|supertabular"
+                         r"|array|tabu|NiceTabular|tblr|longtblr)\}|input|include|import)"
+                         r"(?![A-Za-z@])")
+HOLDS_IMAGE = re.compile(r"\\(?:includegraphics|begin\s*\{(?:picture|tikzpicture)\})")
+
+
+def image_tables(text, counter):
+    """A table float that holds an image and no table (a table set as a
+    picture of one), whose caption the reader drops, since it gives it only
+    to a table: written as a figure, with a mark that the counting numbers
+    it as the table it is."""
+    spans = skip_spans(text)
+    edits = []
+    for m in TABLE_FLOAT.finditer(text):
+        if in_spans(m.start(), spans):
+            continue
+        end = environment_end(text, m.group(1), m.start())
+        if end < 0:
+            continue
+        body = text[m.end():end]
+        if HOLDS_TABLE.search(body) or not HOLDS_IMAGE.search(body) \
+                or not re.search(r"\\caption(?![A-Za-z@])", body):
+            continue
+        close = re.compile(r"\\end\s*\{" + re.escape(m.group(1)) + r"\}\Z").search(
+            text, m.end(), end)
+        if not close:
+            continue
+        # The mark after the placement, which the reader takes only first.
+        at = argument_space(text, m.end())
+        bracket = closing_bracket(text, at) if text.startswith("[", at) else -1
+        after = bracket + 1 if bracket > 0 else m.end()
+        edits.append((close.start(), end, "\\end{figure}"))
+        edits.append((after, after, counter_mark("tablefloat")))
+        edits.append((m.start(), m.end(), "\\begin{figure}"))
+    for start, stop, replacement in sorted(edits, reverse=True):
+        text = text[:start] + replacement + text[stop:]
+    if edits:
+        counter["image_tables"] = counter.get("image_tables", 0) + len(edits) // 3
+    return text
+
+
+CAPTIONOF = re.compile(r"\\captionof\s*(\*?)\s*\{\s*(figure|table)\s*\}")
+ANY_ENVIRONMENT_EDGE = re.compile(r"\\(begin|end)\s*\{\s*([A-Za-z@*]+)\s*\}")
+PARAGRAPH_BREAK = re.compile(r"\n[ \t]*\n")
+
+
+def captionof_floats(text, counter):
+    """\\captionof{figure}{...}, a caption outside a float, which the reader
+    drops with its text and label (a reference to it reads [key]):
+    \\caption, and what it captions, the environment it's in (a minipage, a
+    center) or else its paragraph, set in a figure or a table, as LaTeX
+    numbers and labels it."""
+    spans = skip_spans(text)
+    found = [m for m in CAPTIONOF.finditer(text) if not in_spans(m.start(), spans)]
+    if not found:
+        return text
+    edges = [e for e in ANY_ENVIRONMENT_EDGE.finditer(text) if not in_spans(e.start(), spans)]
+
+    def paragraph(m):
+        """The paragraph m is in, to the first environment after it."""
+        breaks = [b.end() for b in PARAGRAPH_BREAK.finditer(text, 0, m.start())]
+        after = PARAGRAPH_BREAK.search(text, m.end())
+        end = after.start() if after else len(text)
+        edge = next((e.start() for e in edges if e.start() >= m.end()), end)
+        return (breaks[-1] if breaks else 0), min(end, edge)
+
+    def own(m):
+        """The caption alone, with a \\label after it."""
+        at = m.end()
+        for opener in "[{":
+            pos = argument_space(text, at)
+            if text.startswith(opener, pos):
+                close = closing_bracket(text, pos) + 1 if opener == "[" \
+                    else matching_brace(text, pos)
+                if close > 0:
+                    at = close
+        label = re.compile(r"\s*\\label\s*\{[^{}]*\}").match(text, at)
+        return m.start(), label.end() if label else at
+    places, edits = {}, []
+    for m in found:
+        stack = []
+        for e in edges:
+            if e.start() >= m.start():
+                break
+            if e.group(1) == "begin":
+                stack.append(e)
+            elif stack and stack[-1].group(2) == e.group(2):
+                stack.pop()
+        env = stack[-1] if stack else None
+        if env is not None and env.group(2) in ("figure", "figure*", "table", "table*"):
+            # In a float already: its caption.
+            edits.append((m.start(), m.end(), 1, "\\caption" + m.group(1)))
+            continue
+        if env is None or env.group(2) == "document":
+            place = paragraph(m)
+        else:
+            end = environment_end(text, env.group(2), env.start())
+            if end < 0:
+                continue
+            place = (env.start(), end)
+        places.setdefault(place, []).append(m)
+
+    def wrap(start, end, m):
+        # Ranked so that where one float ends and the next begins, the
+        # end comes first.
+        edits.extend([(start, start, 2, "\\begin{%s}" % m.group(2)),
+                      (m.start(), m.end(), 1, "\\caption" + m.group(1)),
+                      (end, end, 0, "\\end{%s}" % m.group(2))])
+    for (start, end), held in places.items():
+        if len(held) > 1:
+            # Two captions in one environment: each a figure of its own,
+            # what it captions left before it.
+            for m in held:
+                wrap(*own(m), m)
+        else:
+            wrap(start, end, held[0])
+    for start, end, _, replacement in sorted(edits, reverse=True):
+        text = text[:start] + replacement + text[end:]
+    counter["captionof"] = counter.get("captionof", 0) + len(found)
+    return text
+
+
+# hyperref's \autoref and cleveref's commands, which print a name before
+# the number (Figure 1.2, fig. 1.2, figs. 1.1 to 1.3): the reader reads
+# \autoref and \cref alike, as the number alone, \cref{a,b} as one link to
+# a label named "a,b", and drops \crefrange and \namecref, text and all.
+# Each is written as a \ref with the command in its key, which the
+# counting reads and gives LaTeX's text.
+REF_PREFIX = "TEXTBOOKIMPROVERREF"
+REFERENCE_COMMAND = re.compile(r"\\(autoref|cref|Cref|crefrange|Crefrange|labelcref"
+                               r"|namecref|nameCref|lcnamecref)\*?\s*\{")
+
+
+def reference_commands(text, counter):
+    # One in a formula is the counting's math_refs's, which texmath reads.
+    spans = skip_spans(text)
+    spans = sorted(spans + math_spans(text, spans))
+    edits = []
+    for m in REFERENCE_COMMAND.finditer(text):
+        if in_spans(m.start(), spans) or escaped(text, m.start()):
+            continue
+        close = matching_brace(text, m.end() - 1)
+        if close < 0:
+            continue
+        keys, end = text[m.end():close - 1], close
+        if m.group(1) in ("crefrange", "Crefrange"):
+            at = argument_space(text, close)
+            second = matching_brace(text, at) if text.startswith("{", at) else -1
+            if second < 0:
+                continue
+            keys, end = keys + "," + text[at + 1:second - 1], second
+        edits.append((m.start(), end, "\\ref{%s:%s:%s}" % (REF_PREFIX, m.group(1), keys)))
+    for start, end, replacement in reversed(edits):
+        text = text[:start] + replacement + text[end:]
+    if edits:
+        counter["named_refs"] = counter.get("named_refs", 0) + len(edits)
+    return text
+
+
+# The names hyperref's \autoref (English) and cleveref (English, abbrev
+# on, capitalise off) print, by the counter or type a label is of, as
+# measured with LaTeX 2026-06-01; and the types cleveref reads as another.
+AUTOREF_NAMES = {"equation": "Equation", "footnote": "footnote", "item": "item",
+                 "figure": "Figure", "subfigure": "Figure", "table": "Table",
+                 "subtable": "Table", "part": "Part", "appendix": "Appendix",
+                 "chapter": "chapter", "section": "section", "subsection": "subsection",
+                 "subsubsection": "subsubsection", "paragraph": "paragraph",
+                 "subparagraph": "subparagraph", "theorem": "Theorem", "page": "page",
+                 "enumi": "item", "enumii": "item", "enumiii": "item", "enumiv": "item"}
+CREF_NAMES = {"figure": ("fig.", "figs."), "equation": ("eq.", "eqs."),
+              "table": ("table", "tables"), "page": ("page", "pages"),
+              "part": ("part", "parts"), "chapter": ("chapter", "chapters"),
+              "section": ("section", "sections"), "appendix": ("appendix", "appendices"),
+              "enumi": ("item", "items"), "footnote": ("footnote", "footnotes"),
+              "theorem": ("theorem", "theorems"), "lemma": ("lemma", "lemmas"),
+              "corollary": ("corollary", "corollaries"),
+              "proposition": ("proposition", "propositions"),
+              "definition": ("definition", "definitions"), "result": ("result", "results"),
+              "example": ("example", "examples"), "remark": ("remark", "remarks"),
+              "note": ("note", "notes"), "algorithm": ("algorithm", "algorithms"),
+              "listing": ("listing", "listings"), "line": ("line", "lines")}
+CREF_FULL = {"figure": ("figure", "figures"), "equation": ("equation", "equations")}
+CREF_ALIASES = {"subsection": "section", "subsubsection": "section", "subfigure": "figure",
+                "subtable": "table", "enumii": "enumi", "enumiii": "enumi", "enumiv": "enumi"}
+CREFNAME = re.compile(r"\\(c|C)refname\s*\{\s*([A-Za-z@*]+)\s*\}\s*\{([^{}]*)\}\s*\{([^{}]*)\}")
+
+
+def _upper_first(words):
+    return words[:1].upper() + words[1:]
+
+
+def _lower_first(words):
+    return words[:1].lower() + words[1:]
+
+
+def reference_name(names, command, kind, plural=False):
+    """The name a reference command prints before a label's number, or
+    None: kind is (what the label is of, whether it's in the appendices,
+    the counter a theorem counts with), names book_counters's ref_names."""
+    what, appendix, counter = kind
+    if command == "autoref":
+        kind_name = counter or what
+        if appendix in ("top", "second"):
+            kind_name = "appendix"
+        name = names.get("autoref", {}).get(kind_name)
+        if name is None and kind_name not in AUTOREF_NAMES:
+            name = names.get("name", {}).get(kind_name)
+        if name is None:
+            name = AUTOREF_NAMES.get(kind_name)
+        return name
+    kind_name = CREF_ALIASES.get(what, what)
+    capitalise = names.get("capitalise")
+    own, own_capital = names.get("cref", {}).get(kind_name), names.get("Cref", {}).get(kind_name)
+    if command in ("Cref", "Crefrange", "nameCref"):
+        if own_capital:
+            pair = own_capital
+        elif own:
+            pair = tuple(_upper_first(w) for w in own)
+        elif kind_name in CREF_NAMES:
+            pair = tuple(_upper_first(w) for w in CREF_FULL.get(kind_name, CREF_NAMES[kind_name]))
+        else:
+            return None
+    else:
+        if own:
+            pair = own
+        elif own_capital:
+            pair = own_capital if capitalise else tuple(_lower_first(w) for w in own_capital)
+        elif kind_name in CREF_NAMES:
+            pair = (CREF_FULL if names.get("noabbrev") else {}).get(kind_name,
+                                                                   CREF_NAMES[kind_name])
+            if capitalise:
+                pair = tuple(_upper_first(w) for w in pair)
+        else:
+            return None
+        if command == "lcnamecref":
+            pair = tuple(_lower_first(w) for w in pair)
+    return pair[1] if plural else pair[0]
 
 
 # \nameref, which prints the title of the section a label is in and which
@@ -1244,6 +1528,12 @@ def repair_text(text, counter, math_macros=(), counters=()):
     text = drop(text, "OERLinkContentsReset", counter, "link_contents_reset")
     for command, signature in TITLESEC_COMMANDS:
         text = drop_command(text, command, signature, counter, "titlesec")
+    # Floats whose captions the reader drops, before the counting marks
+    # what numbers them.
+    text = wrapped_floats(text, counter)
+    text = captionof_floats(text, counter)
+    text = image_tables(text, counter)
+    text = reference_commands(text, counter)
     text = unwrap_boxes(text, counter, math_macros)
     text = group_commands(text, counter, math_macros)
     text = counter_marks(text, counter, math_macros, counters)
@@ -1394,9 +1684,11 @@ def item_labels(text):
     return found
 
 
-def write_out_item_refs(texts, counter):
+def write_out_item_refs(texts, counter, names=None):
     """texts ({name: text}) with each \\ref to an enumerated item's label
-    written as the number LaTeX gives it."""
+    written as the number LaTeX gives it, and an \\autoref's or cleveref's
+    (as reference_commands wrote it) with the name it prints, item 1:
+    names, book_counters's ref_names."""
     labels = {}
     for text in texts.values():
         labels.update(item_labels(text))
@@ -1407,10 +1699,29 @@ def write_out_item_refs(texts, counter):
         count = [0]
 
         def one(m):
-            if in_spans(m.start(), spans) or m.group(1).strip() not in labels:
+            key = m.group(1).strip()
+            if in_spans(m.start(), spans):
+                return m.group(0)
+            if key.startswith(REF_PREFIX + ":"):
+                _, command, keys = key.split(":", 2)
+                keys = [k.strip() for k in keys.split(",") if k.strip()]
+                if not keys or not all(k in labels for k in keys):
+                    return m.group(0)
+                count[0] += 1
+                numbers = [labels[k] for k in keys]
+                if command in ("crefrange", "Crefrange") and len(numbers) == 2:
+                    numbers = ["%s to~%s" % tuple(numbers)]
+                joined = numbers[0] if len(numbers) == 1 else \
+                    ", ".join(numbers[:-1]) + " and~" + numbers[-1]
+                word = reference_name(names or {}, command, ("enumi", None, None),
+                                      plural=len(keys) > 1)
+                if command in ("namecref", "nameCref", "lcnamecref"):
+                    return word or joined
+                return "%s~%s" % (word, joined) if word and command != "labelcref" else joined
+            if key not in labels:
                 return m.group(0)
             count[0] += 1
-            return labels[m.group(1).strip()]
+            return labels[key]
         texts[name] = ITEM_REF.sub(one, text)
         counter["item_refs"] = counter.get("item_refs", 0) + count[0]
     return texts
@@ -2326,12 +2637,53 @@ def css_color(model, spec):
     return css_rgb(rgb) if rgb else None
 
 
-def color_rgb(expression, colors):
+XCOLOR_SET_FILES = {"svgnames": "svgnam.def", "x11names": "x11nam.def"}
+_XCOLOR_SETS = {}
+
+
+def xcolor_sets(options):
+    """{name: (r, g, b)} of xcolor's dvipsnames, svgnames, and x11names
+    among options (the ones a book loads, page_layout's classoption), the
+    last loaded winning a name two sets have (NavyBlue), as xcolor loads
+    them in the order its options are given. svgnames's 151 and x11names's
+    317 are read from the installed xcolor's own files, svgnam.def and
+    x11nam.def, where kpsewhich finds them, too many to copy here as
+    dvipsnames's 68 are; without TeX, those two are {}."""
+    found = {}
+    for option in options:
+        if option == "dvipsnames":
+            found.update((name, rgb_color("cmyk", spec)) for name, spec in DVIPSNAMES.items())
+            continue
+        file = XCOLOR_SET_FILES.get(option)
+        if not file:
+            continue
+        if file not in _XCOLOR_SETS:
+            values = {}
+            try:
+                path = subprocess.run(["kpsewhich", file], capture_output=True, text=True,
+                                      stdin=subprocess.DEVNULL).stdout.strip()
+                text = read_text(path) if path else ""
+            except OSError:
+                text = ""
+            body = re.search(r"\\preparecolorset\s*\{(\w+)\}\s*\{[^}]*\}\s*\{[^}]*\}\s*\{"
+                             r"([^}]*)\}", text)
+            if body:
+                for entry in re.sub(r"%[^\n]*", "", body.group(2)).split(";"):
+                    name, _, spec = entry.strip().partition(",")
+                    rgb = rgb_color(body.group(1), spec) if name else None
+                    if rgb:
+                        values[name] = rgb
+            _XCOLOR_SETS[file] = values
+        found.update(_XCOLOR_SETS[file])
+    return found
+
+
+def color_rgb(expression, colors, sets=None):
     """A color as xcolor reads one, (r, g, b) or None: a name the book
-    defines (colors, color_values's), xcolor's own, or dvipsnames's; a mix,
+    defines (colors, color_values's), xcolor's own, dvipsnames's, or one of
+    sets's (xcolor_sets's, the svgnames and x11names a book loads); a mix,
     red!30 (with white), red!70!black, and on (oiB!50!white!80); and a
-    complement, -red. A name of svgnames's or x11names's isn't known here,
-    so a mix with one is None."""
+    complement, -red."""
     expression = expression.strip()
     complement = expression.startswith("-")
     parts = expression.lstrip("-").split("!")
@@ -2342,6 +2694,8 @@ def color_rgb(expression, colors):
             return colors[name]
         if name in XCOLOR_BASE:
             return XCOLOR_BASE[name]
+        if sets and name in sets:
+            return sets[name]
         if name in DVIPSNAMES:
             return rgb_color("cmyk", DVIPSNAMES[name])
         return None
@@ -2420,12 +2774,12 @@ def resolve_colors(texts, files, counter):
         texts[name] = substitute(COLOR_USE, text, write, {}, "colors")
 
 
-def color_values(statements):
+def color_values(statements, sets=None):
     """{name: (r, g, b)} for the book's color statements, in the order LaTeX
     reads them (book_colors), the last of a name's winning, as xcolor
-    defines them: \\colorlet's from the colors defined before it, and
-    \\providecolor's only for a name not yet defined; a name whose last
-    definition this can't read has none."""
+    defines them: \\colorlet's from the colors defined before it (or
+    sets's, xcolor_sets's), and \\providecolor's only for a name not yet
+    defined; a name whose last definition this can't read has none."""
     values = {}
     for statement in statements:
         m = DEFINECOLOR.match(statement)
@@ -2438,7 +2792,7 @@ def color_values(statements):
             m = COLORLET.match(statement)
             if not m:
                 continue
-            rgb, name = color_rgb(m.group(2), values), m.group(1)
+            rgb, name = color_rgb(m.group(2), values, sets), m.group(1)
         if rgb:
             values[name] = rgb
         else:
@@ -2449,7 +2803,7 @@ def color_values(statements):
 COLOR_STYLE = re.compile(r"^((?:background-)?color): (.*)$", re.S)
 
 
-def color_spans(node, values):
+def color_spans(node, values, sets=None):
     """Each span or division the reader made of \\textcolor or \\colorbox
     (a division when it held paragraphs) given its color as CSS, in place,
     when CSS can't read it as it is: a name the
@@ -2457,11 +2811,12 @@ def color_spans(node, values):
     "oiB" is not a color value), a mix (red!50!black), and a name of
     xcolor's that CSS lacks (BrickRed). A name CSS has (red, black) is left,
     and a color none of these is is taken out, since a browser ignores it
-    anyway. values: color_values's. Returns how many changed."""
+    anyway. values: color_values's; sets: xcolor_sets's, the svgnames and
+    x11names the book loads. Returns how many changed."""
     changed = 0
     if isinstance(node, list):
         for item in node:
-            changed += color_spans(item, values)
+            changed += color_spans(item, values, sets)
     elif isinstance(node, dict):
         if node.get("t") in ("Span", "Div"):
             kept = []
@@ -2472,13 +2827,13 @@ def color_spans(node, values):
                         color.lower() in CSS_COLORS and color not in values):
                     kept.append(pair)
                     continue
-                rgb = color_rgb(color, values)
+                rgb = color_rgb(color, values, sets)
                 if rgb:
                     kept.append([pair[0], "%s: %s" % (m.group(1), css_rgb(rgb))])
                 changed += 1
             node["c"][0][2] = kept
         if "c" in node:
-            changed += color_spans(node["c"], values)
+            changed += color_spans(node["c"], values, sets)
     return changed
 
 
@@ -2682,6 +3037,11 @@ def _headers(blocks):
     return found
 
 
+def has_heading(blocks):
+    """Whether blocks hold a heading anywhere."""
+    return bool(_headers(blocks))
+
+
 def title_heading(blocks):
     """A page's blocks with the title mark_title marked made its only
     heading at level 1, the page's title, as the pipeline takes one: the
@@ -2737,13 +3097,50 @@ NEWCOUNTER = re.compile(r"\\newcounter\s*\{\s*([A-Za-z@]+)\s*\}(?:\s*\[\s*([A-Za
 COUNTER_WITHIN = re.compile(r"\\(counterwithin|numberwithin|counterwithout)\*?\s*\{\s*"
                             r"([A-Za-z@]+)\s*\}\s*\{\s*([A-Za-z@]+)\s*\}")
 THE_DEFINITION = re.compile(r"\\(?:(?:re)?newcommand\*?\s*\{?\s*|def\s*)\\the([A-Za-z@]+)\s*\}?\s*\{")
-NEWTHEOREM = re.compile(r"\\newtheorem\*?\s*\{\s*([A-Za-z@]+)\s*\}")
+NEWTHEOREM = re.compile(r"\\newtheorem(\*?)\s*\{\s*([A-Za-z@*]+)\s*\}")
+# What \thefigure, \thetable, and \theequation begin with in the book and
+# report classes: the chapter's number and a dot, inside a chapter.
+CHAPTER_DOT = r"\TextbookImproverChapterDot"
+
+
+def theorem_specs(text, spans=None):
+    """Each \\newtheorem in text, as (name, starred, shared, within):
+    \\newtheorem{lem}[thm]{Lemma} counts with thm's counter, and
+    \\newtheorem{thm}{Theorem}[section] within the section's;
+    \\newtheorem* numbers nothing."""
+    found = []
+    for m in code_matches(NEWTHEOREM, text, spans):
+        starred, name, pos = m.group(1) == "*", m.group(2), m.end()
+        shared = within = None
+        at = argument_space(text, pos)
+        if not starred and text.startswith("[", at):
+            close = closing_bracket(text, at)
+            if close < 0:
+                continue
+            shared, pos = text[at + 1:close].strip(), close + 1
+        at = argument_space(text, pos)
+        if text.startswith("{", at):
+            close = matching_brace(text, at)
+            if close < 0:
+                continue
+            pos = close
+        at = argument_space(text, pos)
+        if not starred and not shared and text.startswith("[", at):
+            close = closing_bracket(text, at)
+            if close > 0:
+                within = text[at + 1:close].strip()
+        found.append((name, starred, shared, within))
+    return found
 # What the reader keeps only the content of: subequations, and breqn's
 # dmath (numbered; dmath* isn't).
 SUBEQUATIONS = re.compile(r"\\begin\s*\{(subequations|dmath)\}")
-APPENDICES = re.compile(r"\\begin\s*\{appendices\}")
+APPENDICES = re.compile(r"\\(begin|end)\s*\{appendices\}")
+FLOAT_EDGE = re.compile(r"\\(begin|end)\s*\{\s*(figure\*?|table\*?|subfigure|subtable"
+                        r"|longtable\*?)\s*\}")
+CAPTION_STAR = re.compile(r"\\caption\s*\*")
 SECTION_LEVELS = (("part", -1), ("chapter", 0), ("section", 1), ("subsection", 2),
                   ("subsubsection", 3), ("paragraph", 4), ("subparagraph", 5))
+DEPTHS = dict(SECTION_LEVELS)
 # LaTeX's own counters a book may show, and what the standard classes make
 # of them; a class with chapters numbers sections, floats, equations, and
 # footnotes within them.
@@ -2820,11 +3217,36 @@ def counter_marks(text, counter, math_macros=(), counters=()):
     for m in SUBEQUATIONS.finditer(text):
         if not in_spans(m.start(), keep) and not escaped(text, m.start()):
             edits.append((m.start(), m.start(), counter_mark(m.group(1))))
+    # \\caption*, which numbers nothing, and the reader can't tell from
+    # \\caption: a mark in the figure it's in, or before the table, where
+    # the counting finds it before it counts the table.
+    stack = []
+    for m in sorted(list(FLOAT_EDGE.finditer(text)) + list(CAPTION_STAR.finditer(text)),
+                    key=lambda m: m.start()):
+        if in_spans(m.start(), keep) or escaped(text, m.start()):
+            continue
+        if m.re is FLOAT_EDGE:
+            if m.group(1) == "begin":
+                stack.append(m)
+            elif stack:
+                stack.pop()
+        elif stack:
+            env = stack[-1]
+            if env.group(2).startswith("longtable"):
+                at = env.start()
+            elif env.group(2).startswith("table"):
+                at = argument_space(text, env.end())
+                close = closing_bracket(text, at) if text.startswith("[", at) else -1
+                at = close + 1 if close > 0 else env.end()
+            else:
+                at = m.start()
+            edits.append((at, at, counter_mark("unnumbered")))
     # The appendix package's environment begins the appendices as
-    # \\appendix does.
+    # \\appendix does, and its end gives back the numbering before them.
     for m in APPENDICES.finditer(text):
         if not in_spans(m.start(), keep) and not escaped(text, m.start()):
-            edits.append((m.end(), m.end(), counter_mark("division", "appendix")))
+            edits.append((m.end(), m.end(), counter_mark(
+                "division", "appendices" if m.group(1) == "begin" else "endappendices")))
     for m in COUNTER_SHOW.finditer(text):
         if in_spans(m.start(), keep) or escaped(text, m.start()):
             continue
@@ -2849,17 +3271,23 @@ def book_counters(texts, master_text):
     its theorems, whether it has chapters and parts, and each counter's
     value at \\begin{document}."""
     code = [t for _, t in texts]
-    chapters = any(code_matches(re.compile(r"\\chapter(?![A-Za-z@])"), t) for t in code)
-    parts = any(code_matches(re.compile(r"\\part(?![A-Za-z@])"), t) for t in code)
+    # A division command with its title, as the reader reads one: a
+    # setting for how it looks (\titleformat{\part}) isn't one.
+    chapters = any(code_matches(re.compile(r"\\chapter\s*\*?\s*[\[{]"), t) for t in code)
+    parts = any(code_matches(re.compile(r"\\part\s*\*?\s*[\[{]"), t) for t in code)
     if chapters:
         resets = {"section": "chapter", "subsection": "section", "subsubsection": "subsection",
                   "paragraph": "subsubsection", "subparagraph": "paragraph",
                   "figure": "chapter", "table": "chapter", "equation": "chapter",
                   "footnote": "chapter", "enumii": "enumi", "enumiii": "enumii",
                   "enumiv": "enumiii"}
+        # The book and report classes number a float or an equation
+        # outside every chapter (in the front matter) without one:
+        # \ifnum \c@chapter>\z@ \thechapter.\fi.
         formats = {"chapter": r"\arabic{chapter}", "section": r"\thechapter.\arabic{section}",
-                   "figure": r"\thechapter.\arabic{figure}", "table": r"\thechapter.\arabic{table}",
-                   "equation": r"\thechapter.\arabic{equation}"}
+                   "figure": CHAPTER_DOT + r"\arabic{figure}",
+                   "table": CHAPTER_DOT + r"\arabic{table}",
+                   "equation": CHAPTER_DOT + r"\arabic{equation}"}
     else:
         resets = {"subsection": "section", "subsubsection": "subsection",
                   "paragraph": "subsubsection", "subparagraph": "paragraph",
@@ -2870,27 +3298,60 @@ def book_counters(texts, master_text):
                     "footnote": r"\arabic{footnote}", "enumi": r"\arabic{enumi}",
                     "enumii": r"\alph{enumii}", "enumiii": r"\roman{enumiii}",
                     "enumiv": r"\Alph{enumiv}"})
-    defined, theorems = set(STANDARD_COUNTERS), set()
+    # A subfigure counts within its figure (subcaption's and subfig's
+    # 1.2a; the obsolete subfigure package's 1.2(a)).
+    resets.update({"subfigure": "figure", "subtable": "table"})
+    defined, theorems, theorem_counters = set(STANDARD_COUNTERS), set(), {}
     for t in code:
         spans = skip_spans(t)
         for m in code_matches(NEWCOUNTER, t, spans):
             defined.add(m.group(1))
             if m.group(2):
                 resets[m.group(1)] = m.group(2)
-        for m in code_matches(NEWTHEOREM, t, spans):
-            theorems.add(m.group(1))
+        for name, starred, shared, within in theorem_specs(t, spans):
+            theorems.add(name)
+            if starred:
+                theorem_counters[name] = None
+            elif shared:
+                theorem_counters[name] = theorem_counters.get(shared) or shared
+            else:
+                theorem_counters[name] = name
+                defined.add(name)
+                if within:
+                    resets[name] = within
+                    formats[name] = r"\the%s.\arabic{%s}" % (within, name)
+    subfigure_package = any(code_matches(re.compile(
+        r"\\usepackage\s*(?:\[[^]]*\])?\s*\{[^}]*\bsubfigure\b[^}]*\}"), t) for t in code)
     # Within, without, and \the definitions in LaTeX's order, the last
     # winning; and the values the preamble sets.
     begin = code_matches(BEGIN_DOCUMENT, master_text)
     at = {texts[0][0]: [begin[0].start()]} if begin and texts else {}
     pattern = re.compile("(?:%s)|(?:%s)" % (COUNTER_WITHIN.pattern, COUNTER_COMMAND.pattern))
     initial, in_body = {}, False
+    # The names \autoref and cleveref print, as the book sets them.
+    ref_names = {"autoref": {}, "name": {}, "cref": {}, "Cref": {}}
+    for t in code:
+        for m in code_matches(CREFNAME, t):
+            ref_names["cref" if m.group(1) == "c" else "Cref"][m.group(2)] = (
+                m.group(3).strip(), m.group(4).strip())
+        for m in code_matches(re.compile(r"\\usepackage\s*\[([^]]*)\]\s*\{[^}]*\bcleveref\b"), t):
+            options = option_list(m.group(1))
+            ref_names["capitalise"] = ref_names.get("capitalise") or bool(
+                {"capitalise", "capitalize"} & set(options))
+            ref_names["noabbrev"] = ref_names.get("noabbrev") or "noabbrev" in options
     for kind, _, item in reading_order(texts, at=at, watch=pattern):
         if kind == "at":
             in_body = True
         elif kind == "define":
             if item[2].startswith("the") and len(item[2]) > 3 and item[3] == 0:
                 formats[item[2][3:]] = item[5].strip()
+            words = re.sub(r"\\S(?![A-Za-z@])\s*", "\u00a7", item[5]).replace("~", "\u00a0")
+            words = re.sub(r"[{}]", "", words).strip()
+            if item[3] == 0 and "\\" not in words and words:
+                if item[2].endswith("autorefname") and len(item[2]) > 11:
+                    ref_names["autoref"][item[2][:-11]] = words
+                elif item[2].endswith("name") and len(item[2]) > 4:
+                    ref_names["name"][item[2][:-4]] = words
         elif kind == "match":
             text = item.string
             within = COUNTER_WITHIN.match(text, item.start())
@@ -2914,7 +3375,8 @@ def book_counters(texts, master_text):
     levels = {depth + shift: name for name, depth in SECTION_LEVELS}
     return {"resets": resets, "formats": formats, "counters": sorted(defined),
             "theorems": sorted(theorems), "levels": levels, "initial": initial,
-            "chapters": chapters}
+            "chapters": chapters, "theorem_counters": theorem_counters,
+            "subfigure_parens": subfigure_package, "ref_names": ref_names}
 
 
 def counter_style(style, n):
@@ -3023,6 +3485,24 @@ def tag_inlines(text):
     return out
 
 
+def link_text(inlines):
+    """A title's inlines as a link's text, a copy: no note, no link in the
+    link, and a label's empty span left out."""
+    out = []
+    for i in inlines:
+        kind = i.get("t")
+        if kind == "Note" or (kind == "Span" and not i["c"][1]):
+            continue
+        if kind == "Link":
+            out.extend(link_text(i["c"][1]))
+        elif kind == "Span":
+            out.append({"t": "Span", "c": [["", i["c"][0][1], i["c"][0][2]],
+                                           link_text(i["c"][1])]})
+        else:
+            out.append(json.loads(json.dumps(i)))
+    return out
+
+
 def resolve_counters(blocks, setup, counts=None):
     """The marks counter_marks made, counted in the document's order as
     LaTeX counts, in place: a numbered heading steps its counter and the
@@ -3035,15 +3515,31 @@ def resolve_counters(blocks, setup, counts=None):
     the value the label recorded. A display formula LaTeX numbers is
     numbered, its number shown beside it and its labels anchors before
     it, and each numbered row given its number as a \\tag, so a PDF from
-    the pages numbers it so too; \\eqref's number is in parentheses. The
-    marks go. setup: book_counters's. Returns (keys, values): how many
-    keys were written, and references and counters given a value;
-    counts, if given, gets equation_numbers, the formulas numbered."""
+    the pages numbers it so too; \\eqref's number is in parentheses.
+
+    The reader numbers what a \\ref names itself, and not as LaTeX does: a
+    \\chapter in the front matter counts, \\appendix doesn't letter, each
+    \\part starts the chapters again and a reference to one is empty, a
+    figure or table without a label isn't counted, a subfigure counts as a
+    figure, and a theorem is numbered in its chapter whatever the book
+    says (GIAM's Theorem 1.4.1 was 1.1). So each heading, figure, table,
+    and theorem is counted here too, a theorem's own title given its
+    number, and every reference to one of their labels, or to a formula's
+    or a \\label's, gets LaTeX's number. The marks go; a division
+    command's stays as a span for cut_pages. setup: book_counters's.
+    Returns (keys, values): how many keys were written, and references and
+    counters given a value; counts, if given, gets equation_numbers, the
+    formulas numbered."""
     counters = dict(setup["initial"])
     formats, resets = dict(setup["formats"]), setup["resets"]
     levels, theorems = setup["levels"], set(setup["theorems"])
-    state = {"current": None, "numbered": True}
+    theorem_counters = setup.get("theorem_counters", {})
+    state = {"current": None, "numbered": True, "kind": None}
     labels, refs, written = {}, [], [0]
+    # Each label numbered here, by what it's the label of: a heading's
+    # level, figure, subfigure, table, equation, a theorem's environment;
+    # and a heading's that LaTeX gives no number, with its title.
+    ours, untitled = {}, {}
     numbered = [0]
 
     def reset(name):
@@ -3056,7 +3552,14 @@ def resolve_counters(blocks, setup, counts=None):
         counters[name] = counters.get(name, 0) + 1
         reset(name)
 
+    def record(label, number, kind, appendix=None, counter=None):
+        labels[label] = number
+        ours[label] = (kind, appendix, counter)
+
     def expand(text, depth=0):
+        if CHAPTER_DOT in text:
+            text = text.replace(CHAPTER_DOT, the("chapter", depth + 1) + "."
+                                if counters.get("chapter", 0) > 0 else "")
         text = re.sub(r"\\value\s*\{\s*([A-Za-z@]+)\s*\}",
                       lambda m: str(counters.get(m.group(1), 0)), text)
         text = re.sub(r"\\(arabic|roman|Roman|alph|Alph)\s*\{\s*([A-Za-z@]+)\s*\}",
@@ -3106,7 +3609,7 @@ def resolve_counters(blocks, setup, counts=None):
 
         def label(argument, start, stop, number):
             new = key(argument)
-            labels[new] = number if number is not None else last[0]
+            record(new, number if number is not None else last[0], "equation")
             keys.append(new)
             if key_id(new) != argument:
                 edits.append((start, stop, "\\label{%s}" % key_id(new)))
@@ -3177,6 +3680,32 @@ def resolve_counters(blocks, setup, counts=None):
                                 "eqnarray": eqnarray[0]}
             numbered[0] += 1
 
+    top = "chapter" if setup["chapters"] else "section"
+
+    def has_mark(node, op):
+        """Whether node holds a mark for op, outside a figure inside it."""
+        if isinstance(node, list):
+            return any(has_mark(item, op) for item in node)
+        if isinstance(node, dict):
+            if node.get("t") == "Link" and node["c"][2][0] == "#%s:%s" % (COUNTER_MARK, op):
+                return True
+            if node.get("t") == "Figure" or not isinstance(node.get("c"), list):
+                return False
+            return has_mark(node["c"], op)
+        return False
+
+    def retitle(content, number):
+        """A theorem's title as the reader writes it, **Theorem 1.1.**,
+        given LaTeX's number."""
+        first = content[0] if content else None
+        if not first or first.get("t") not in ("Para", "Plain") or not first["c"] \
+                or first["c"][0].get("t") not in ("Strong", "Emph"):
+            return
+        title = first["c"][0]["c"]
+        if len(title) >= 2 and title[-2].get("t") == "Space" and title[-1].get("t") == "Str" \
+                and re.fullmatch(r"\d+(?:\.\d+)*", title[-1]["c"]):
+            title[-1:] = tag_inlines(number)
+
     def walk(node):
         if isinstance(node, list):
             for item in node:
@@ -3185,10 +3714,32 @@ def resolve_counters(blocks, setup, counts=None):
         if not isinstance(node, dict):
             return
         kind, c = node.get("t"), node.get("c")
-        if kind == "Header" and "unnumbered" not in c[1][1] and state["numbered"] \
-                and levels.get(c[0]):
-            step(levels[c[0]])
-            state["current"] = the(levels[c[0]])
+        saved = state["current"], state["kind"]
+        inside = None               # (number, kind) a float or theorem numbers
+        if kind == "Header":
+            name = levels.get(c[0])
+            # A level below secnumdepth isn't numbered (the book class's
+            # subsubsection), and its \label records the level above's.
+            if "unnumbered" not in c[1][1] and state["numbered"] and name \
+                    and DEPTHS[name] <= counters.get("secnumdepth",
+                                                     2 if setup["chapters"] else 3):
+                step(name)
+                state["current"] = the(name)
+                state["kind"] = name
+                # hyperref names a chapter and a book's section in the
+                # appendices Appendix, an article's section too.
+                state["appendix"] = state.get("appendix") and (
+                    "top" if name == top else "second"
+                    if setup["chapters"] and name == "section" else "deep")
+            # Its label records what LaTeX's would: its number, or the
+            # last one set when it has none. With nothing set yet (a
+            # chapter in the front matter), LaTeX prints nothing, and a
+            # reference to it is its title, as \nameref would print it.
+            if c[1][0] and state["current"] is not None:
+                record(c[1][0], state["current"], state["kind"],
+                       state.get("appendix") if state["kind"] in DEPTHS else None)
+            elif c[1][0]:
+                untitled[c[1][0]] = c[2]
         elif kind == "Link" and c[2][0].startswith("#%s:" % COUNTER_MARK):
             parts = c[2][0][len(COUNTER_MARK) + 2:].split(":")
             op = parts[0]
@@ -3196,17 +3747,39 @@ def resolve_counters(blocks, setup, counts=None):
                 step(parts[1])
                 if op == "refstepcounter":
                     state["current"] = the(parts[1])
+                    state["kind"] = parts[1]
+            elif op == "unnumbered":
+                # \caption* in the float that follows, or that this is in.
+                state["unnumbered"] = True
             elif op in ("setcounter", "addtocounter") and len(parts) > 2:
                 number = value(":".join(parts[2:]))
                 if number is not None:
                     counters[parts[1]] = number + (
                         counters.get(parts[1], 0) if op == "addtocounter" else 0)
             elif op == "division" and len(parts) > 1:
-                state["numbered"] = parts[1] in ("mainmatter", "appendix")
-                if parts[1] == "appendix":
-                    top = "chapter" if setup["chapters"] else "section"
-                    counters[top] = 0
-                    formats[top] = r"\Alph{%s}" % top
+                name = parts[1]
+                if name == "endappendices":
+                    # The appendix package gives back the count and the
+                    # numbers' form it found.
+                    saved = state.pop("appendices", None)
+                    if saved:
+                        state["numbered"], counters[top] = saved[0], saved[1]
+                        if saved[2] is None:
+                            formats.pop(top, None)
+                        else:
+                            formats[top] = saved[2]
+                else:
+                    if name == "appendices":
+                        state["appendices"] = (state["numbered"], counters.get(top, 0),
+                                               formats.get(top))
+                    state["numbered"] = name in ("mainmatter", "appendix", "appendices")
+                    if name in ("appendix", "appendices"):
+                        counters[top] = 0
+                        formats[top] = r"\Alph{%s}" % top
+                state["appendix"] = name in ("appendix", "appendices") or (
+                    state.get("appendix") and name not in ("endappendices", "mainmatter"))
+                # Kept where it stood, for the cut.
+                node["division"] = name
             elif op == "show" and len(parts) > 2:
                 node["shown"] = counter_style(parts[1], counters.get(parts[2], 0))
             elif op == "the" and len(parts) > 1:
@@ -3224,38 +3797,190 @@ def resolve_counters(blocks, setup, counts=None):
                 if pair[0] == "label":
                     pair[1] = new
             labels[new] = state["current"]
+            if state["current"] is not None:
+                ours[new] = (state["kind"], state.get("appendix")
+                             if state["kind"] in DEPTHS else None,
+                             theorem_counters.get(state["kind"]))
         elif kind == "Link" and any(k == "reference" for k, _ in c[0][2]):
             reference = dict((k, v) for k, v in c[0][2])["reference"]
-            refs.append((node, reference, key(reference)))
-        saved = state["current"]
-        if kind in ("OrderedList", "Note") or (kind == "Div" and set(c[0][1]) & theorems):
-            # An item's, a note's, and a theorem's own counters aren't
-            # counted here: a label in one records nothing.
-            state["current"] = None
+            # \autoref's and cleveref's command, which the copy wrote in
+            # the key.
+            command = None
+            if reference.startswith(REF_PREFIX + ":"):
+                _, command, reference = reference.split(":", 2)
+            # A key made of counters is what they are here.
+            news = [key(k.strip()) for k in reference.split(",") if k.strip()] \
+                if command else [key(reference)]
+            refs.append((node, reference, command, news))
+        elif kind == "Figure":
+            # A figure with a caption counts, a subfigure within the figure
+            # it's in, whose number is stepped first, as LaTeX shows it.
+            unnumbered = state.pop("unnumbered", False) or has_mark(c[2], "unnumbered")
+            if c[1][1] and not unnumbered:
+                parent = state.get("figure")
+                if has_mark(c[2], "tablefloat"):
+                    # A table set as an image, a figure to the reader.
+                    step("table")
+                    inside = (the("table"), "table")
+                elif parent is not None:
+                    step("subfigure")
+                    letter = counter_style("alph", counters["subfigure"])
+                    inside = (parent + ("(%s)" % letter if setup.get("subfigure_parens")
+                                        else letter), "subfigure")
+                else:
+                    step("figure")
+                    inside = (the("figure"), "figure")
+                if c[0][0]:
+                    record(c[0][0], *inside)
+        elif kind == "Table":
+            if c[1][1] and not state.pop("unnumbered", False):
+                step("table")
+                inside = (the("table"), "table")
+                if c[0][0]:
+                    record(c[0][0], *inside)
+        elif kind == "Div" and set(c[0][1]) & theorems:
+            name = next(n for n in c[0][1] if n in theorems)
+            counter = theorem_counters.get(name)
+            if counter:
+                step(counter)
+                inside = (the(counter), name)
+                retitle(c[1], inside[0])
+                if c[0][0]:
+                    record(c[0][0], inside[0], name, None, counter)
+        if kind in ("OrderedList", "Note"):
+            # An item's and a note's own counters aren't counted here: a
+            # label in one records nothing.
+            state["current"], state["kind"] = None, None
+        elif inside:
+            state["current"], state["kind"] = inside
+        figure = state.get("figure")
+        if kind == "Figure" and inside and inside[1] == "figure":
+            state["figure"] = inside[0]
         if c is not None and kind not in ("Math", "Code", "CodeBlock", "RawInline", "RawBlock"):
             walk(c)
-        if kind in ("OrderedList", "Note", "Div"):
-            state["current"] = saved
+        if kind == "Figure":
+            state["figure"] = figure
+            state.pop("unnumbered", None)
+        if kind in ("OrderedList", "Note", "Div", "Figure", "Table"):
+            # What a float, an environment, or a list sets is its own.
+            state["current"], state["kind"] = saved
 
     walk(blocks)
     given = 0
-    for node, reference, new in refs:
+    names = setup.get("ref_names", {})
+
+    def words(text):
+        return [{"t": "Space"} if w == " " else {"t": "Str", "c": w}
+                for w in re.split(r"( )", text) if w]
+
+    def number_inlines(new, parens=False):
+        """A label's number as inlines, or its key in brackets, as the
+        reader shows a label it has no number for."""
+        number = labels.get(new)
+        if not number:
+            return [{"t": "Str", "c": "[%s]" % new}]
+        number = "(%s)" % number if parens else number
+        return tag_inlines(number) if "$" in number else [{"t": "Str", "c": number}]
+
+    def ref_link(new, inlines):
+        return {"t": "Link", "c": [["", [], [["reference-type", "ref"], ["reference", new]]],
+                                   inlines, ["#" + new, ""]]}
+
+    def sort_key(new):
+        parts = re.split(r"[.\-]", labels.get(new) or "")
+        return [int(p) for p in parts] if all(p.isdigit() for p in parts) else None
+
+    def named(command, news):
+        """What \\autoref and cleveref's commands print: the
+        name in the link, for \\autoref; for cleveref, outside it, each
+        type's labels in order, a run of three or more a range, and an
+        equation's number in parentheses."""
+        kind = {new: ours.get(new, (None, None, None)) for new in news}
+        if command == "autoref":
+            name = reference_name(names, command, kind[news[0]])
+            return [ref_link(news[0], ([{"t": "Str", "c": name + "\u00a0"}] if name else [])
+                             + number_inlines(news[0]))]
+        if command in ("namecref", "nameCref", "lcnamecref"):
+            name = reference_name(names, command, kind[news[0]])
+            return [{"t": "Str", "c": name}] if name else number_inlines(news[0])
+        groups = []
+        for new in news:
+            what = CREF_ALIASES.get(kind[new][0], kind[new][0])
+            group = next((g for g in groups if g[0] == what and what is not None), None)
+            if group is None:
+                group = [what, []]
+                groups.append(group)
+            group[1].append(new)
+        out = []
+        for index, (what, members) in enumerate(groups):
+            if command in ("crefrange", "Crefrange") and len(news) == 2 and len(groups) == 1:
+                segments = [tuple(news)]
+            else:
+                if all(sort_key(m) is not None for m in members):
+                    members = sorted(members, key=sort_key)
+                runs = []
+                for m in members:
+                    now = sort_key(m)
+                    last = sort_key(runs[-1][-1]) if runs else None
+                    if now and last and len(now) == len(last) and now[:-1] == last[:-1] \
+                            and now[-1] == last[-1] + 1:
+                        runs[-1].append(m)
+                    else:
+                        runs.append([m])
+                segments = [s for run in runs for s in (
+                    [(run[0], run[-1])] if len(run) >= 3 else [(r,) for r in run])]
+            if index:
+                out += words(" and\u00a0" if len(groups) == 2 else ", and\u00a0"
+                             if index == len(groups) - 1 else ", ")
+            name = None if command == "labelcref" else reference_name(
+                names, command, kind[members[0]],
+                plural=len(segments) > 1 or len(segments[0]) > 1)
+            if name:
+                out.append({"t": "Str", "c": name + "\u00a0"})
+            parens = what == "equation"
+            for at, segment in enumerate(segments):
+                if at:
+                    out += words(" and\u00a0" if at == len(segments) - 1 else ", ")
+                out.append(ref_link(segment[0], number_inlines(segment[0], parens)))
+                if len(segment) > 1:
+                    out += words(" to\u00a0")
+                    out.append(ref_link(segment[1], number_inlines(segment[1], parens)))
+        return out
+
+    for node, reference, command, news in refs:
+        if command:
+            if not news:
+                continue
+            inlines = named(command, news)
+            if len(inlines) == 1 and inlines[0]["t"] == "Link":
+                node["c"] = inlines[0]["c"]
+            else:
+                node["t"], node["c"] = "Span", [["", [], []], inlines]
+            given += 1
+            continue
+        new = news[0]
         attrs = node["c"][0][2]
         for pair in attrs:
             if pair[0] == "reference":
                 pair[1] = new
         if node["c"][2][0] == "#" + reference:
             node["c"][2][0] = "#" + new
-        placeholder = [{"t": "Str", "c": "[%s]" % reference}]
-        if node["c"][1] == placeholder and labels.get(new):
+        # The reader's text, its own number or [key] when it had none.
+        text = node["c"][1]
+        if not labels.get(new) and new in untitled and len(text) == 1 \
+                and text[0].get("t") == "Str":
+            node["c"][1] = link_text(untitled[new])
+            given += 1
+        elif labels.get(new) and len(text) == 1 and text[0].get("t") == "Str":
             # \eqref, amsmath's, sets the number in parentheses, whatever
             # the label numbers; a \tag's text may hold a formula.
             shown = labels[new]
             if dict((k, v) for k, v in attrs).get("reference-type") == "eqref":
                 shown = "(%s)" % shown
-            node["c"][1] = tag_inlines(shown) if "$" in shown \
-                else [{"t": "Str", "c": shown}]
-            given += 1
+            shown = tag_inlines(shown) if "$" in shown else [{"t": "Str", "c": shown}]
+            if shown != text:
+                node["c"][1] = shown
+                given += 1
 
     def math_refs(node):
         """A reference inside a formula, \\text{by \\eqref{eq:def}}, written as
@@ -3289,6 +4014,9 @@ def resolve_counters(blocks, setup, counts=None):
                     if item.get("shown"):
                         out.append({"t": "Str", "c": item["shown"]})
                         given += 1
+                    elif item.get("division"):
+                        out.append({"t": "Span", "c": [
+                            ["", [DIVISION_CLASS], [["division", item["division"]]]], []]})
                     continue
                 if isinstance(item, dict) and item.get("equation"):
                     # The labels' anchors, the formula, and its numbers, a
@@ -3335,11 +4063,443 @@ def resolve_counters(blocks, setup, counts=None):
     return written[0], given
 
 
+# --------------------------------------------------------------------------
+# the bibliography: BibTeX's, written out, and the citations to it
+# --------------------------------------------------------------------------
+
+# The reader keeps a \cite as a citation whose text is the raw command,
+# which no writer but LaTeX's prints, so each was empty on the pages
+# (GIAM's 16, "projective plane of order 10[10]" read "order 10"); it
+# drops \bibliography, and runs a thebibliography's entries together in
+# one paragraph, their \bibitem-s and some of their text lost. So the copy
+# has the bibliography written out as LaTeX sets it, from BibTeX's .bbl
+# with the book's own style, and each citation as the label it prints,
+# linked to its entry.
+BIBLIOGRAPHY = re.compile(r"\\bibliography\s*\{([^}]*)\}")
+BIBLIOGRAPHYSTYLE = re.compile(r"\\bibliographystyle\s*\{\s*([^}]*?)\s*\}")
+THEBIBLIOGRAPHY = re.compile(r"\\begin\s*\{thebibliography\}\s*\{[^{}]*\}")
+CITE_COMMAND = re.compile(r"\\(cite|citep|citet|Citet|Citep|citealt|citealp|citeauthor|"
+                          r"Citeauthor|citeyear|citeyearpar|citenum|nocite)(\*?)(?![A-Za-z@])")
+BIBITEM = re.compile(r"\\bibitem(?![A-Za-z@])\s*")
+BIBLATEX = re.compile(r"\\usepackage\s*(?:\[[^]]*\])?\s*\{[^}]*\bbiblatex\b")
+NATBIB = re.compile(r"\\usepackage\s*(?:\[([^]]*)\])?\s*\{[^}]*\bnatbib\b")
+BIB_ID = "bib-"
+AUTHOR_YEAR = re.compile(r"^\{?(?P<short>.*?)\((?P<year>[^()]*)\)(?P<long>.*?)\}?$", re.S)
+
+
+def citation_at(text, m):
+    """The \\cite-like command at m: (command, star, options, keys, end),
+    its optional arguments as given, or None when it has no key."""
+    pos, options = m.end(), []
+    while len(options) < 2:
+        at = argument_space(text, pos)
+        if not text.startswith("[", at):
+            break
+        close = closing_bracket(text, at)
+        if close < 0:
+            return None
+        options.append(text[at + 1:close])
+        pos = close + 1
+    at = argument_space(text, pos)
+    if not text.startswith("{", at):
+        return None
+    close = matching_brace(text, at)
+    if close < 0:
+        return None
+    keys = [k.strip() for k in text[at + 1:close - 1].split(",") if k.strip()]
+    return m.group(1), m.group(2), options, keys, close
+
+
+def bbl_entries(text):
+    """A thebibliography's entries, [(label, key, text)], label the one
+    \\bibitem gives ([Str87], natbib's {Lam(1989)}), or None."""
+    begin = THEBIBLIOGRAPHY.search(text)
+    if not begin:
+        return []
+    end = re.search(r"\\end\s*\{thebibliography\}", text[begin.end():])
+    body = text[begin.end():begin.end() + end.start()] if end else text[begin.end():]
+    entries = []
+    starts = [m for m in BIBITEM.finditer(body)]
+    for index, m in enumerate(starts):
+        stop = starts[index + 1].start() if index + 1 < len(starts) else len(body)
+        pos, label = m.end(), None
+        if body.startswith("[", pos):
+            close = closing_bracket(body, pos)
+            if close < 0:
+                continue
+            label, pos = body[pos + 1:close], close + 1
+            pos = argument_space(body, pos)
+        if not body.startswith("{", pos):
+            continue
+        close = matching_brace(body, pos)
+        if close < 0:
+            continue
+        # A comment ends at its line's end, before the lines are run
+        # together, as TeX reads it; \protect, which a database puts before
+        # a brace (\protect{G}oldbach), is no command to the reader.
+        words = re.sub(r"(?<!\\)%[^\n]*(?:\n[ \t]*)?", "", body[close:stop])
+        words = re.sub(r"\\protect(?![A-Za-z@])\s*", "", words)
+        words = re.sub(r"\\newblock(?![A-Za-z@])\s*", " ", words)
+        entries.append((label, body[pos + 1:close - 1].strip(), " ".join(words.split())))
+    return entries
+
+
+def run_bibtex(base, work, folder, keys, style, databases):
+    """BibTeX's .bbl for keys with style and databases, from an .aux written
+    for it in work/bibtex, or None when there's no BibTeX or it fails."""
+    where = os.path.join(work, "bibtex")
+    os.makedirs(where, exist_ok=True)
+    lines = ["\\citation{%s}" % k for k in keys] + [
+        "\\bibstyle{%s}" % style, "\\bibdata{%s}" % ",".join(databases)]
+    write_text(os.path.join(where, "book.aux"), "\n".join(lines) + "\n")
+    paths = os.pathsep.join(os.path.abspath(p) for p in (base, os.path.join(base, folder))) \
+        + os.pathsep
+    # Lines broken at 79 characters, as TeX Live's and MiKTeX's BibTeX
+    # break them by default (TinyTeX sets 10000): where a database ends a
+    # line with a comment, what follows it is printed only when the line
+    # breaks there (GIAM's Wikipedia entries' URLs).
+    env = dict(os.environ, BIBINPUTS=paths, BSTINPUTS=paths, max_print_line="79")
+    try:
+        done = subprocess.run(["bibtex", "-terse", "book"], cwd=where, env=env,
+                              capture_output=True, text=True, stdin=subprocess.DEVNULL)
+    except OSError:
+        return None
+    bbl = os.path.join(where, "book.bbl")
+    if done.returncode > 1 or not os.path.exists(bbl):
+        return None
+    return read_text(bbl)
+
+
+def bibliography_block(entries, author_year, heading):
+    """The written-out bibliography: its heading as LaTeX sets one, and its
+    entries as a list, each with its label (a numeric or alpha style's) and
+    an anchor its citations link to."""
+    if author_year:
+        items = ["\\item \\label{%s%s}%s" % (BIB_ID, key, text) for _, key, text in entries]
+        body = "\\begin{itemize}\n" + "\n".join(items) + "\n\\end{itemize}"
+    else:
+        items = ["\\item[{[%s]}] \\label{%s%s}%s" % (label, BIB_ID, key, text)
+                 for label, key, text in entries]
+        body = "\\begin{description}\n" + "\n".join(items) + "\n\\end{description}"
+    return "\n\n%s\n\n%s\n\n" % (heading, body)
+
+
+NATBIB_PUNCT = {"open": "[", "close": "]", "sep": ",", "between": ","}
+
+
+def citation_pieces(command, star, options, keys, found, author_year, natbib_numbers,
+                    punct=None):
+    """What a citation prints, as [(words, key)], key the entry the words
+    link to or None: numeric, [1, 7, 9] (a style's own label, alpha's
+    [Str87], as it gives it), or natbib's author and year, Lam [1989] and
+    [Lam, 1989], in its brackets and with its separators, punct
+    (NATBIB_PUNCT's, as natbib sets them by default, unless the book says
+    otherwise); a key with no entry is itself."""
+    punct = punct or NATBIB_PUNCT
+    opening, closing = punct["open"], punct["close"]
+    sep, between = punct["sep"] + " ", punct["between"] + " "
+    out = []
+
+    def add(words, key=None):
+        out.append((words, key if key in found else None))
+
+    def join(parts, glue):
+        for index, part in enumerate(parts):
+            if index:
+                add(glue)
+            part()
+    pre, post = (options + ["", ""])[:2] if len(options) == 2 else ("", options[0]) \
+        if options else ("", "")
+    note = ", " + post if post else ""
+    if command == "nocite":
+        return out
+    if author_year and not natbib_numbers:
+        def one(key):
+            label = found.get(key, (None, key, "", key))
+            name, year = (label[3] if star and label[3] else label[1]), label[2]
+            last = key == keys[-1]
+
+            def piece():
+                if command in ("citeauthor", "Citeauthor"):
+                    add(name, key)
+                elif command in ("citeyear", "citeyearpar"):
+                    add(year, key)
+                elif command in ("citep", "Citep", "citealp"):
+                    add(name + between + year, key)
+                elif command == "citealt":
+                    add("%s %s" % (name, year), key)
+                else:
+                    add("%s %s%s%s%s" % (name, opening, year, note if last else "", closing),
+                        key)
+            return piece
+        if command in ("citep", "Citep", "citeyearpar"):
+            add(opening + (pre + " " if pre else ""))
+        join([one(k) for k in keys], sep)
+        if command in ("citep", "Citep", "citeyearpar"):
+            add(note + closing)
+        elif command in ("citealp", "citealt"):
+            add(note)
+        return [piece for piece in out if piece[0]]
+    numbers = [(lambda k: lambda: add(found[k][0] if k in found else k, k))(k) for k in keys]
+    if command in ("citealp", "citenum"):
+        join(numbers, sep)
+        add(note)
+    elif command in ("citeauthor", "Citeauthor"):
+        add(sep.join(found[k][1] if k in found else k for k in keys))
+    elif command in ("citet", "Citet") and author_year:
+        join([(lambda k: lambda: (add(found[k][1] + " " + opening), add(found[k][0], k),
+                                  add(closing)))(k) for k in keys], sep)
+    else:
+        add(opening + (pre + " " if pre else ""))
+        join(numbers, sep)
+        add(note + closing)
+    return [piece for piece in out if piece[0]]
+
+
+def citation_latex(pieces):
+    """A citation's pieces as LaTeX the reader reads: a bracket braced, so it
+    ends no optional argument the citation is in, and each label a link."""
+    return "".join("\\hyperref[%s%s]{%s}" % (BIB_ID, key, words) if key
+                   else words.replace("[", "{[}").replace("]", "{]}") for words, key in pieces)
+
+
+def citation_inlines(pieces):
+    """A citation's pieces as inlines, for one the book's own macro made,
+    which the reader keeps as a citation: each label a link."""
+    out = []
+    for words, key in pieces:
+        words = re.sub(r"[{}]|\\[A-Za-z@]+\s*", "", words)
+        inlines = [{"t": "Space"} if w == " " else {"t": "Str", "c": w}
+                   for w in re.split(r"( )", words) if w]
+        out += [{"t": "Link", "c": [["", [], []], inlines, ["#" + BIB_ID + key, ""]]}] \
+            if key else inlines
+    return out
+
+
+def resolve_citations(blocks, setup):
+    """Each citation the reader kept, which a macro of the book's own made
+    after the copy wrote out the book's own (\\newcommand{\\see}[1]{\\cite{#1}}),
+    written as the label LaTeX prints, in place, from its raw command; the
+    reader's citation has nothing a writer but LaTeX's prints. setup:
+    bibliographies's. Returns how many."""
+    if not setup:
+        return 0
+    done = [0]
+
+    def walk(node):
+        if isinstance(node, list):
+            for index, item in enumerate(node):
+                if isinstance(item, dict) and item.get("t") == "Cite":
+                    raw = "".join(i["c"][1] for i in item["c"][1]
+                                  if i.get("t") == "RawInline" and i["c"][0] == "latex")
+                    m = CITE_COMMAND.match(raw)
+                    cited = citation_at(raw, m) if m else None
+                    if cited:
+                        node[index] = {"t": "Span", "c": [["", ["citation"], []], citation_inlines(
+                            citation_pieces(*cited[:4], setup["found"], setup["author_year"],
+                                            setup["natbib_numbers"], setup.get("punct")))]}
+                        done[0] += 1
+                        continue
+                walk(item)
+        elif isinstance(node, dict) and isinstance(node.get("c"), list):
+            walk(node["c"])
+    walk(blocks)
+    return done[0]
+
+
+BIB_MARKER = "TextbookImproverBibliography"
+ADDBIBRESOURCE = re.compile(r"\\addbibresource\s*(?:\[[^]]*\])?\s*\{\s*([^}]*?)\s*\}")
+PRINTBIBLIOGRAPHY = re.compile(r"\\printbibliography(?![A-Za-z@])\s*(?:\[[^]]*\])?")
+
+
+def bibliographies(base, work, texts, files, master, originals, counts, say):
+    """texts ({name: text}) with the book's bibliography written out where
+    \\bibliography stands, from BibTeX's .bbl with the book's style (BibTeX
+    run on the book's citations, else the .bbl a build of the book left), or
+    where a thebibliography the book writes itself stands, and each citation
+    as the label it prints, linked to its entry. A book under biblatex, or
+    with no BibTeX here and no .bbl, has a marker where its bibliography
+    goes, and its citations are left to Pandoc's citeproc, after the
+    reading (cite_with_citeproc). Returns what resolve_citations or
+    cite_with_citeproc needs, or None when there's no bibliography."""
+    joined = "\n".join(t for _, t in originals)
+    chapters = any(code_matches(re.compile(r"\\chapter\s*\*?\s*[\[{]"), t) for _, t in originals)
+    heading = "\\chapter*{Bibliography}" if chapters else "\\section*{References}"
+    begin = code_matches(BEGIN_DOCUMENT, texts[master])
+    body_start = {master: begin[0].end() if begin else 0}
+
+    def first(pattern):
+        for name in files:
+            text = texts[name]
+            for m in code_matches(pattern, text, skip_spans(text)):
+                if m.start() >= body_start.get(name, 0):
+                    return name, m
+        return None
+
+    def citeproc(place, resources):
+        """A marker for the bibliography where place is, for citeproc."""
+        found_paths = []
+        for resource in resources:
+            for candidate in (resource, resource + ".bib",
+                              os.path.join(os.path.dirname(master), resource),
+                              os.path.join(os.path.dirname(master), resource + ".bib")):
+                if os.path.isfile(os.path.join(base, candidate)):
+                    found_paths.append(os.path.join(base, candidate))
+                    break
+        if place:
+            name, m = place
+            texts[name] = texts[name][:m.start()] + "\n\n%s\n\n%s\n\n" % (heading, BIB_MARKER) \
+                + texts[name][m.end():]
+        return {"citeproc": found_paths, "printed": place is not None} if found_paths else None
+    if code_matches(BIBLATEX, joined):
+        resources = [r for m in code_matches(ADDBIBRESOURCE, joined) for r in [m.group(1)]]
+        resources += [d.strip() for m in code_matches(BIBLIOGRAPHY, joined)
+                      for d in m.group(1).split(",") if d.strip()]
+        if not resources or not code_matches(re.compile(
+                r"\\[A-Za-z]*cite[a-z]*\*?\s*[\[{]"), "\n".join(texts.values())):
+            return None
+        setup = citeproc(first(PRINTBIBLIOGRAPHY), resources)
+        if setup:
+            say("The book cites with biblatex, which Pandoc's citeproc reads from its "
+                "databases: its citations and bibliography are in Pandoc's own style (author "
+                "and date), not the book's.")
+        return setup
+    natbib = code_matches(NATBIB, joined)
+    natbib_options = option_list(natbib[0].group(1) or "") if natbib else []
+    for m in code_matches(re.compile(r"\\setcitestyle\s*\{([^}]*)\}"), joined):
+        natbib_options += option_list(m.group(1))
+    natbib_numbers = bool(natbib) and "numbers" in natbib_options
+    # natbib's brackets and separators, square and commas by default.
+    punct = dict(NATBIB_PUNCT)
+    for option in natbib_options:
+        option = option.replace(" ", "")
+        brackets = {"round": "()", "square": "[]", "curly": "{}", "angle": "<>"}.get(option)
+        if brackets:
+            punct["open"], punct["close"] = brackets
+        elif option in ("semicolon", "comma"):
+            punct["sep"] = ";" if option == "semicolon" else ","
+    for m in code_matches(re.compile(r"\\bibpunct\s*(?:\[[^]]*\]\s*)?\{([^{}]*)\}\s*\{"
+                                     r"([^{}]*)\}\s*\{([^{}]*)\}\s*\{[^{}]*\}\s*\{([^{}]*)\}"),
+                          joined):
+        punct.update(open=m.group(1), close=m.group(2), sep=m.group(3), between=m.group(4))
+    place, own = first(BIBLIOGRAPHY), first(THEBIBLIOGRAPHY)
+    if place is None and own is None:
+        return None
+    keys = []
+    for _, _, item in reading_order(originals, watch=CITE_COMMAND):
+        if isinstance(item, re.Match):
+            cited = citation_at(item.string, item)
+            if cited:
+                keys += [k for k in cited[3] if k not in keys]
+    styles = [m.group(1) for m in code_matches(BIBLIOGRAPHYSTYLE, joined)]
+    if own is not None:
+        name, m = own
+        text = texts[name]
+        end = re.search(r"\\end\s*\{thebibliography\}", text[m.end():])
+        stop = m.end() + end.end() if end else len(text)
+        entries = bbl_entries(text[m.start():stop])
+        span = (m.start(), stop)
+    else:
+        name, m = place
+        databases = [d.strip() for d in m.group(1).split(",") if d.strip()]
+        bbl = run_bibtex(base, work, os.path.dirname(master), keys or ["*"],
+                         styles[-1] if styles else "plain", databases)
+        built = os.path.join(base, os.path.splitext(master)[0] + ".bbl")
+        if bbl is None and os.path.exists(built):
+            bbl = read_text(built)
+            say(f"No BibTeX here to make the bibliography, so it's the one the book's own "
+                f"build left, {os.path.relpath(built, base)}.")
+        if bbl is None:
+            setup = citeproc(place, databases)
+            say(f"No BibTeX here to make the bibliography, nor a .bbl a build of the book "
+                "left, so " + ("Pandoc's citeproc makes it, in its own style (author and "
+                               "date), not the book's." if setup else
+                               f"its {len(keys)} citation(s) are empty: its database, "
+                               + ", ".join(databases) + ", isn't here either."))
+            return setup
+        entries = bbl_entries(bbl)
+        span = (m.start(), m.end())
+    # Each entry's label: its number, the one BibTeX's style gives
+    # (alpha's Str87), or natbib's author and year, (number, author, year,
+    # all the authors).
+    parsed = [AUTHOR_YEAR.match(label or "") for label, _, _ in entries]
+    author_year = bool(entries) and all(p and p.group("year").strip() for p in parsed)
+    found = {}
+    for index, ((label, key, _), p) in enumerate(zip(entries, parsed), start=1):
+        if author_year:
+            found[key] = (str(index), p.group("short").strip("{} "), p.group("year").strip(),
+                          p.group("long").strip("{} "))
+        else:
+            found[key] = (label.strip() if label else str(index), key, "", "")
+    labeled = [(found[key][0], key, words) for _, key, words in entries]
+    block = bibliography_block(labeled, author_year and not natbib_numbers, heading) \
+        if entries else ""
+    text = texts[name]
+    texts[name] = text[:span[0]] + block + text[span[1]:]
+    written = 0
+    for name in files:
+        text = texts[name]
+        spans = skip_spans(text)
+        # A citation in a definition is the reader's, which resolve_citations
+        # writes once the macro's made it.
+        skip = sorted(spans + [(d[0], d[1]) for d in definitions_in(text, spans)])
+        edits = []
+        for m in CITE_COMMAND.finditer(text):
+            if in_spans(m.start(), skip) or escaped(text, m.start()):
+                continue
+            cited = citation_at(text, m)
+            if not cited:
+                continue
+            edits.append((m.start(), cited[4], citation_latex(citation_pieces(
+                *cited[:4], found, author_year, natbib_numbers, punct))))
+            written += cited[0] != "nocite"
+        for start, end, words in reversed(edits):
+            text = text[:start] + words + text[end:]
+        texts[name] = text
+    if written:
+        counts["citations"] = counts.get("citations", 0) + written
+    if entries:
+        which = "bibliography_own" if own is not None else "bibliography"
+        counts[which] = counts.get(which, 0) + len(entries)
+    return {"found": found, "author_year": author_year, "natbib_numbers": natbib_numbers,
+            "punct": punct}
+
+
+def cite_with_citeproc(doc_path, setup, env, cwd):
+    """The book's citations made by Pandoc's citeproc from its databases,
+    its bibliography where the marker bibliographies left is, or none when
+    the book prints none (biblatex without \\printbibliography): the JSON at
+    doc_path rewritten. Returns whether citeproc ran."""
+    with open(doc_path, encoding="utf-8") as fh:
+        doc = json.load(fh)
+    changed = [False]
+
+    def place(blocks):
+        for index, block in enumerate(blocks):
+            if block.get("t") == "Para" and block["c"] == [{"t": "Str", "c": BIB_MARKER}]:
+                blocks[index] = {"t": "Div", "c": [["refs", [], []], []]}
+                changed[0] = True
+            elif block.get("t") == "Div":
+                place(block["c"][1])
+    place(doc["blocks"])
+    with open(doc_path, "w", encoding="utf-8") as fh:
+        json.dump(doc, fh)
+    command = ["pandoc", "-f", "json", "-t", "json", "--citeproc", doc_path, "-o", doc_path,
+               "-M", "link-citations=true"] + [x for path in setup["citeproc"]
+                                                for x in ("--bibliography", path)]
+    if not changed[0]:
+        command += ["-M", "suppress-bibliography=true"]
+    done = subprocess.run(command, env=env, cwd=cwd, capture_output=True, text=True,
+                          stdin=subprocess.DEVNULL)
+    return done.returncode == 0
+
+
 def prepare(base, work, master, say, macros=""):
     """The book copied into work/latex with what Pandoc can't read put
     right, its drawings rendered into base/rendered/. Returns a dict:
     master (the copy's path), order, front_role, files, missing,
-    counts, preamble, copy, colors, counters, and layout (page_layout)."""
+    counts, preamble, copy, colors, counters, citations (bibliographies's),
+    and layout (page_layout)."""
     copy = os.path.join(work, "latex")
     if os.path.isdir(copy):
         shutil.rmtree(copy)
@@ -3359,7 +4519,8 @@ def prepare(base, work, master, say, macros=""):
     environment_definitions(texts, files, counts)
     resolve_colors(texts, files, counts)
     write_out_columns(texts, counts)
-    write_out_item_refs(texts, counts)
+    write_out_item_refs(texts, counts, counting["ref_names"])
+    citations = bibliographies(base, work, texts, files, master, originals, counts, say)
     folder = os.path.dirname(master)
     if folder:
         # A master below the book's directory is built from its own
@@ -3432,8 +4593,8 @@ def prepare(base, work, master, say, macros=""):
         texts[name] = read_boxes(texts[name], counts)
 
     # The master: \centerline as a center environment, and a marker
-    # before each \include. Split again, since its drawings and images
-    # may have been replaced.
+    # before each \include and after it. Split again, since its drawings
+    # and images may have been replaced.
     _, body, rest = split_master(texts[master])
     spans = skip_spans(body)
     pieces, last, index = [], 0, 0
@@ -3441,7 +4602,8 @@ def prepare(base, work, master, say, macros=""):
         if in_spans(m.start(), spans):
             continue
         pieces.append(body[last:m.start()])
-        pieces.append("\n\n" + MARKER_LINE % index + "\n\n" + m.group(0))
+        pieces.append("\n\n" + MARKER_LINE % index + "\n\n" + m.group(0)
+                      + "\n\n" + END_MARKER_LINE % index + "\n\n")
         last = m.end()
         index += 1
     pieces.append(body[last:])
@@ -3464,7 +4626,7 @@ def prepare(base, work, master, say, macros=""):
     return {"master": os.path.join(copy, master), "order": order,
             "front_role": front_role, "files": files, "missing": missing,
             "counts": counts, "preamble": preamble, "copy": copy, "colors": colors,
-            "counters": counting,
+            "counters": counting, "citations": citations,
             "layout": page_layout(originals, include_macros(originals))}
 
 
@@ -3721,24 +4883,104 @@ def lift_markers(blocks):
     return out
 
 
-def cut_pages(doc, order, master_stem, front_role):
+ROLES_AT = {"frontmatter": "front", "mainmatter": "main", "appendix": "appendix",
+            "appendices": "appendix", "backmatter": "back"}
+
+
+def _holds_split(blocks, levels):
+    return any((b.get("t") == "Header" and b["c"][0] in levels)
+               or (b.get("t") == "Div" and _holds_split(b["c"][1], levels)) for b in blocks)
+
+
+GONE = object()
+
+
+def take_divisions(node, found):
+    """node with the spans the counting left where a division command
+    stood taken out, wherever they are, each one's name appended to found
+    in the document's order. Returns node, or GONE for a paragraph that
+    held nothing else."""
+    if isinstance(node, list):
+        out = []
+        for item in node:
+            if isinstance(item, dict) and item.get("t") == "Span" \
+                    and DIVISION_CLASS in item["c"][0][1]:
+                found.append(dict(item["c"][0][2]).get("division"))
+                continue
+            kept = take_divisions(item, found)
+            if kept is not GONE:
+                out.append(kept)
+        node[:] = out
+        return node
+    if isinstance(node, dict) and node.get("c") is not None and node.get("t") not in (
+            "Math", "Code", "CodeBlock", "RawInline", "RawBlock", "Str"):
+        before = len(found)
+        take_divisions(node["c"], found)
+        if len(found) > before and node.get("t") in ("Para", "Plain") and not [
+                i for i in node["c"] if i.get("t") not in ("Space", "SoftBreak", "LineBreak")]:
+            return GONE
+    return node
+
+
+def cut_pages(doc, order, master_stem, front_role, split_levels=()):
     """The whole book's document cut into pages at the markers: a list of
-    (stem, role, blocks). What comes before the first marker is the
-    master's own page, named for it, when it holds anything."""
-    pages = [[master_stem, front_role, []]]
-    for block in lift_markers(doc["blocks"]):
+    (stem, role, blocks, own), own true for a page of the master's own
+    text. What comes before the first \\include is the master's own page,
+    named for it, when it holds anything. Where the master's text begins
+    again after an \\include, it goes on with that file's page (the review
+    exercises OpenIntro Statistics \\input-s after each chapter), until a
+    heading at one of split_levels, a part's or a chapter's: from there
+    it's a page of its own, named for the master and numbered (book-1),
+    with the role the division commands before it give it. A \\part set
+    between two \\include-s had landed at the end of the chapter before,
+    and titled its page. A master that \\include-s nothing is one page."""
+    taken = {master_stem} | {os.path.splitext(os.path.basename(p))[0] for p, _ in order}
+    pages = [[master_stem, front_role, [], True]]
+    role, before_appendices, own, count = "main", "main", True, 0
+    queue, at = lift_markers(doc["blocks"]), 0
+    while at < len(queue):
+        block = queue[at]
+        at += 1
+        if own and order and block.get("t") == "Div" and _holds_split(block["c"][1],
+                                                                      split_levels):
+            # A part or a chapter the master sets inside an environment
+            # the reader keeps as a division (the appendix package's
+            # appendices): the division given up, its blocks in its place.
+            queue[at:at] = block["c"][1]
+            continue
+        found = []
+        block = take_divisions(block, found)
+        for name in found:
+            if name == "endappendices":
+                role = before_appendices
+            elif name in ROLES_AT:
+                if name == "appendices":
+                    before_appendices = role
+                role = ROLES_AT[name]
+        if block is GONE:
+            continue
         if block.get("t") == "Para" and len(block["c"]) == 1 \
                 and block["c"][0].get("t") == "Str":
             m = MARKER_TEXT.match(block["c"][0]["c"])
             if m:
-                path, role = order[int(m.group(1))]
-                stem = os.path.splitext(os.path.basename(path))[0]
-                pages.append([stem, role, []])
+                if m.group(1) == MARKER:
+                    path, file_role = order[int(m.group(2))]
+                    stem = os.path.splitext(os.path.basename(path))[0]
+                    pages.append([stem, file_role, [], False])
+                    own = False
+                else:
+                    own = True
                 continue
+        if own and order and block.get("t") == "Header" and block["c"][0] in split_levels:
+            while True:
+                count += 1
+                name = "%s-%d" % (master_stem, count)
+                if name not in taken:
+                    break
+            taken.add(name)
+            pages.append([name, role, [], True])
         pages[-1][2].append(block)
-    if not pages[0][2]:
-        pages.pop(0)
-    return [tuple(p) for p in pages]
+    return [tuple(p) for p in pages if p[2] or not p[3]]
 
 
 def hoist_headings(blocks, keep=()):

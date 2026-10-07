@@ -43,6 +43,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 import argparse
 import csv
 import hashlib
+import html as html_module
 import json
 import os
 import re
@@ -2327,11 +2328,182 @@ def case_pieces(work):
                               stdin=subprocess.DEVNULL)
         return done.returncode == 0 and "\\bool_gset_true:N \\g__oer_titlesec_pagestyles_bool" \
             in texts["p.tex"]
+    # The cut: what the master sets itself after an \include goes on with
+    # that file's page until a part's or a chapter's heading, which begins
+    # a page of its own with the role the division commands before it give,
+    # one inside appendices too; a page name an \include-d file has is
+    # skipped; a figure's empty short caption is kept.
+    def cut_heading(level, words):
+        return {"t": "Header", "c": [level, ["", [], []], [{"t": "Str", "c": words}]]}
+
+    def cut_para(words):
+        return {"t": "Para", "c": [{"t": "Str", "c": words}]}
+
+    def cut_division(name):
+        return {"t": "Para", "c": [{"t": "Span", "c": [
+            ["", [latexsource.DIVISION_CLASS], [["division", name]]], []]}]}
+    cut_figure = {"t": "Figure", "c": [["f", [], []], [None, [cut_para("Cap")]], []]}
+    cut = latexsource.cut_pages({"blocks": [
+        cut_division("frontmatter"), cut_heading(2, "Preface"), cut_para("Front."),
+        cut_para(latexsource.MARKER_LINE % 0), cut_heading(2, "One"), cut_figure,
+        cut_para(latexsource.END_MARKER_LINE % 0), cut_division("mainmatter"),
+        cut_heading(1, "Part A"), cut_para("Intro."),
+        cut_para(latexsource.MARKER_LINE % 1), cut_heading(2, "Two"),
+        cut_para(latexsource.END_MARKER_LINE % 1), cut_para("Exercises after two."),
+        {"t": "Div", "c": [["", ["appendices"], []], [
+            cut_division("appendices"), cut_heading(2, "Inline appendix"), cut_para("A.")]]},
+        cut_division("endappendices"), cut_heading(2, "Back in the main matter")]},
+        [("one.tex", "front"), ("ch/book-1.tex", "main")], "book", "main", {1, 2})
+    cut_shape = [(stem, role, own, [b["c"][2][0]["c"] if b["t"] == "Header" else b["t"]
+                                    for b in blocks]) for stem, role, blocks, own in cut]
+    # Floats whose captions the reader drops, as the copy writes them.
+    captioned = latexsource.captionof_floats(
+        "\\begin{minipage}{2in}\\includegraphics{a}\\captionof{figure}{A}\\label{a}"
+        "\\end{minipage}\\begin{minipage}{2in}\\includegraphics{b}\\captionof{figure}{B}"
+        "\\end{minipage}\n\nText \\captionof{table}{C}\n\n\\begin{center}X "
+        "\\captionof{figure}{D}\n\nY \\captionof{figure}{E}\\label{e}\\end{center}\n"
+        "\\begin{figure}\\captionof{figure}{F}\\end{figure}\n", {})
+    wrapped = latexsource.wrapped_floats(
+        "\\begin{wrapfigure}[10]{r}[2pt]{0.4\\textwidth}X\\caption{W}\\end{wrapfigure} "
+        "\\begin{wraptable}{l}{3cm}T\\end{wraptable}", {})
+    image_tables = latexsource.image_tables(
+        "\\begin{table}[h]\\includegraphics{t}\\caption{T}\\end{table} \\begin{table}"
+        "\\caption{U}\\input{u}\\end{table}", {})
+    # The counting on its own: the appendix package's appendices lettered
+    # and given back, a subfigure by the obsolete subfigure package's
+    # 1.1(a), a theorem retitled.
+    def count_mark(*parts):
+        return {"t": "Para", "c": [{"t": "Link", "c": [["", [], []], [], [
+            "#%s:%s" % (latexsource.COUNTER_MARK, ":".join(parts)), ""]]}]}
+
+    def count_ref(key):
+        return {"t": "Link", "c": [["", [], [["reference-type", "ref"], ["reference", key]]],
+                                   [{"t": "Str", "c": "[%s]" % key}], ["#" + key, ""]]}
+    count_setup = latexsource.book_counters(
+        [("m.tex", "\\documentclass{book}\n\\usepackage{subfigure}\n\\newtheorem{thm}{Theorem}\n"
+                   "\\begin{document}\n\\chapter{A}\n\\end{document}\n")],
+        "\\documentclass{book}\n\\begin{document}\n")
+    count_blocks = [
+        {"t": "Header", "c": [1, ["ch1", [], []], [{"t": "Str", "c": "One"}]]},
+        {"t": "Figure", "c": [["whole", [], []], [None, [cut_para("Whole")]], [
+            {"t": "Figure", "c": [["part", [], []], [None, [cut_para("Part")]], []]}]]},
+        {"t": "Div", "c": [["thm", ["thm"], []], [{"t": "Para", "c": [
+            {"t": "Strong", "c": [{"t": "Str", "c": "Theorem"}, {"t": "Space"},
+                                  {"t": "Str", "c": "9.9"}]}, {"t": "Str", "c": "."}]}]]},
+        count_mark("division", "appendices"),
+        {"t": "Header", "c": [1, ["app", [], []], [{"t": "Str", "c": "App"}]]},
+        {"t": "Header", "c": [1, ["app2", [], []], [{"t": "Str", "c": "App two"}]]},
+        count_mark("division", "endappendices"),
+        {"t": "Header", "c": [1, ["ch2", [], []], [{"t": "Str", "c": "Two"}]]},
+        {"t": "Para", "c": [count_ref("ch1"), count_ref("part"), count_ref("app"),
+                            count_ref("ch2")]}]
+    latexsource.resolve_counters(count_blocks, count_setup)
+    counted = [i["c"][1][0]["c"] for i in count_blocks[-1]["c"]]
+    theorem_title = count_blocks[2]["c"][1][0]["c"][0]["c"][-1]["c"]
+    subfloat = latexsource.subfigures("\\subfloat[Cap]{X\\label{a}}", {})
+    # The names \autoref and cleveref print, the book's own and options too.
+    own_names = {"cref": {"thm": ("thm.", "thms.")}, "Cref": {"lem": ("Lemma", "Lemmata")},
+                 "capitalise": True, "noabbrev": True, "autoref": {"section": "Section"},
+                 "name": {"thm": "Thm"}}
+    name = latexsource.reference_name
+    names_given = [
+        name(own_names, "cref", ("figure", None, None)), name(own_names, "cref", ("thm", None, None)),
+        name(own_names, "Cref", ("thm", None, None)), name(own_names, "cref", ("lem", None, None)),
+        name(own_names, "cref", ("lem", None, None), plural=True),
+        name({}, "cref", ("subsection", None, None)), name({}, "cref", ("equation", None, None), True),
+        name(own_names, "autoref", ("section", None, None)),
+        name(own_names, "autoref", ("thm", None, "thm")),
+        name({}, "autoref", ("section", "second", None)),
+        name({}, "autoref", ("subsection", "deep", None)), name({}, "autoref", ("lem", None, "thm"))]
+    commands = latexsource.reference_commands(
+        "\\cref{a, b} \\crefrange{c}{d} $\\cref{e}$ % \\cref{f}\n", {})
+    # xcolor's svgnames and x11names in a mix, the last set loaded winning
+    # a name two have, as xcolor has it.
+    set_mixes = [tuple(round(v, 3) for v in latexsource.color_rgb(
+        color, {}, latexsource.xcolor_sets(options)) or ())
+        for color, options in (("NavyBlue!50", ["dvipsnames", "svgnames"]),
+                               ("NavyBlue!50", ["svgnames", "dvipsnames"]),
+                               ("AntiqueWhite1!50!black", ["x11names"]))] \
+        if shutil.which("kpsewhich") else None
+    book_names = latexsource.book_counters(
+        [("m.tex", "\\documentclass{book}\n\\usepackage[capitalise,noabbrev]{cleveref}\n"
+                   "\\crefname{thm}{thm.}{thms.}\n\\Crefname{lem}{Lemma}{Lemmata}\n"
+                   "\\renewcommand{\\sectionautorefname}{\\S}\n\\def\\thmname{Thm}\n"
+                   "\\begin{document}\n\\end{document}\n")],
+        "\\documentclass{book}\n\\begin{document}\n")["ref_names"]
+    theorem_setup = latexsource.book_counters(
+        [("m.tex", "\\documentclass{article}\n\\titleformat{\\chapter}{}{}{}{}\n"
+                   "\\newtheorem{thm}{Theorem}[section]\n\\newtheorem{lem}[thm]{Lemma}\n"
+                   "\\newtheorem*{rem}{Remark}\n\\begin{document}\n\\section{A}\n"
+                   "\\end{document}\n")], "\\documentclass{article}\n\\begin{document}\n")
     commented_alt, _ = texremediate.remediate_file(
         "/nonexistent", "a.tex", "\\fig[A first. % to reword\n\nA second.]{sq}\n", {}, [],
         macros={"fig": {"file": "#2", "arguments": 2, "default": "", "alt": 1,
                         "keyed": False, "options": None}})
     return [
+        ("the cut gives a part or a chapter the master sets itself a page of its own, with "
+         "the role before it, one in appendices too, skipping a file's name, the master's "
+         "text after an \\include going on with that file's page",
+         lambda: cut_shape == [
+             ("book-2", "front", True, ["Preface", "Para"]),
+             ("one", "front", False, ["One", "Figure"]),
+             ("book-3", "main", True, ["Part A", "Para"]),
+             ("book-1", "main", False, ["Two", "Para"]),
+             ("book-4", "appendix", True, ["Inline appendix", "Para"]),
+             ("book-5", "main", True, ["Back in the main matter"])]),
+        ("and keeps a caption's empty short form, which the division spans' removal took "
+         "for an emptied paragraph",
+         lambda: cut[1][2][1]["c"][1][0] is None and len(cut[1][2][1]["c"][1]) == 2),
+        ("\\captionof's environment, or its paragraph, is a figure or a table, two in one "
+         "environment each their own, one in a float only its caption, one float's end "
+         "before the next one's beginning",
+         lambda: captioned == (
+             "\\begin{figure}\\begin{minipage}{2in}\\includegraphics{a}\\caption{A}\\label{a}"
+             "\\end{minipage}\\end{figure}\\begin{figure}\\begin{minipage}{2in}"
+             "\\includegraphics{b}\\caption{B}\\end{minipage}\\end{figure}\n\n"
+             "\\begin{table}Text \\caption{C}\\end{table}\n\n\\begin{center}X "
+             "\\begin{figure}\\caption{D}\\end{figure}\n\nY \\begin{figure}\\caption{E}"
+             "\\label{e}\\end{figure}\\end{center}\n\\begin{figure}\\caption{F}\\end{figure}\n")),
+        ("wrapfig's floats are a figure and a table, their arguments gone",
+         lambda: wrapped == "\\begin{figure}X\\caption{W}\\end{figure} \\begin{table}T"
+                            "\\end{table}"),
+        ("a table float holding an image and no table is a figure marked a table, after "
+         "its placement; one that \\input-s its table is left",
+         lambda: image_tables.startswith(
+             "\\begin{figure}[h]\\hyperref[TEXTBOOKIMPROVERCOUNTER:tablefloat]{}"
+             "\\includegraphics{t}\\caption{T}\\end{figure}")
+         and "\\begin{table}\\caption{U}\\input{u}\\end{table}" in image_tables),
+        ("the counting letters the appendix package's appendices and gives the numbers back "
+         "after them, numbers a subfigure the obsolete subfigure package's way, and gives "
+         "a theorem's title its number",
+         lambda: counted == ["1", "1.1(a)", "A", "2"] and theorem_title == "1"),
+        ("subfig's \\subfloat is a subfigure, its caption kept",
+         lambda: subfloat == "\\begin{subfigure}{\\linewidth}X\\label{a}\\caption{Cap}"
+                             "\\end{subfigure}"),
+        ("a reference command's name is cleveref's or hyperref's, the book's own and "
+         "cleveref's options first, a name hyperref falls back to too, and an appendix's",
+         lambda: names_given == ["Figure", "thm.", "Thm.", "Lemma", "Lemmata", "section",
+                                 "eqs.", "Section", "Thm", "Appendix", "subsection", None]),
+        ("a mix of a color of xcolor's svgnames or x11names is read, xcolor's own files "
+         "giving the values, the last set the book loads winning a name two sets have",
+         lambda: set_mixes == [(0.5, 0.5, 0.75), (0.53, 0.73, 1.0), (0.5, 0.468, 0.43)]
+         if set_mixes is not None else skip("no kpsewhich to find xcolor's files")),
+        ("the names a book sets are read: cleveref's options, \\crefname and \\Crefname, "
+         "an \\autoref name, \\S as the character, and a name hyperref falls back to",
+         lambda: book_names.get("capitalise") and book_names.get("noabbrev")
+         and book_names["cref"] == {"thm": ("thm.", "thms.")}
+         and book_names["Cref"] == {"lem": ("Lemma", "Lemmata")}
+         and book_names["autoref"] == {"section": "\u00a7"}
+         and book_names["name"].get("thm") == "Thm"),
+        ("\\autoref and cleveref's commands are \\ref-s with the command in the key, outside "
+         "formulas and comments, \\crefrange's two keys as one list",
+         lambda: commands == "\\ref{TEXTBOOKIMPROVERREF:cref:a, b} "
+         "\\ref{TEXTBOOKIMPROVERREF:crefrange:c,d} $\\cref{e}$ % \\cref{f}\n"),
+        ("a theorem counts with the counter \\newtheorem gives it, within a section or a "
+         "shared one, a starred one with none; a chapter's look isn't a chapter",
+         lambda: theorem_setup["theorem_counters"] == {"thm": "thm", "lem": "thm", "rem": None}
+         and theorem_setup["formats"]["thm"] == "\\thesection.\\arabic{thm}"
+         and theorem_setup["resets"]["thm"] == "section" and not theorem_setup["chapters"]),
         ("the PDF filter leaves a numbered formula's number to LaTeX, its labels in its TeX "
          "for a reference in a formula and before it for the links, puts back the "
          "subequations a formula was in, and sets an eqnarray's count and form before it",
@@ -3015,6 +3187,11 @@ def case_customized(work):
         ("an empty \\chapter*{} starting a page is left out",
          lambda: copyright_page and "Copyright 2026" in copyright_page
          and not re.search(r"<h1[^>]*>\s*</h1>", copyright_page)),
+        ("and the page, with no heading of its own, is titled by its file's name as words, "
+         "its title and its H1, and the run says so",
+         lambda: "<title>Copyright</title>" in copyright_page
+         and re.search(r"<h1[^>]*>Copyright</h1>", copyright_page)
+         and 'copyright as "Copyright"' in said),
         ("a LICENSE.md beside a LaTeX book isn't a page, and a comment in a package list "
          "isn't a package", lambda: not os.path.exists(os.path.join(work, "html", "LICENSE.html"))
          and "%tocloft" not in said),
@@ -3412,6 +3589,310 @@ def case_unsupported(work):
     ]
 
 
+PARTS_FILES = {
+    # Parts set between the \include-s, a chapter in the front matter and
+    # one in the back matter set in the master itself, an appendix; and
+    # what the reader numbers its own way or drops, each number checked
+    # against LaTeX's own build of it.
+    "book.tex": r"""\documentclass{book}
+\usepackage{amsmath}
+\usepackage{amsthm}
+\usepackage{graphicx}
+\usepackage{caption}
+\usepackage{subcaption}
+\usepackage{wrapfig}
+\usepackage{hyperref}
+\usepackage{cleveref}
+\crefname{thm}{theorem}{theorems}
+\renewcommand{\sectionautorefname}{Section}
+\newtheorem{thm}{Theorem}[section]
+\newtheorem{lem}[thm]{Lemma}
+\newtheorem{cor}{Corollary}
+\title{A Book in Parts}
+\author{A. Author}
+\begin{document}
+\maketitle
+\frontmatter
+\chapter{Preface}\label{ch:pref}
+A preface the master sets itself.
+\begin{figure}\centering\includegraphics{sq.png}\caption{A figure before the chapters}\label{fig:front}\end{figure}
+\mainmatter
+\part{Foundations}\label{part:found}
+Words introducing the first part.
+\include{one}
+\include{two}
+\part{Applications}
+\include{three}
+\appendix
+\include{answers}
+\backmatter
+\chapter{Afterword}\label{ch:after}
+Words after: Part~\ref{part:found}, Chapter~\ref{ch:three}, Appendix~\ref{app:ans}, and the \ref{ch:pref}.
+\end{document}
+""",
+    "one.tex": r"""\chapter{One}\label{ch:one}
+\section{First}\label{sec:first}
+\begin{thm}\label{thm:a} A theorem.\end{thm}
+\begin{lem}\label{lem:b} A lemma.\end{lem}
+\begin{cor}\label{cor:c} A corollary.\end{cor}
+\begin{equation}x = 1\label{eq:x}\end{equation}
+\subsection{Sub}\label{sec:sub}
+\subsubsection{Deep}\label{sec:deep}
+\begin{figure}\centering\includegraphics{sq.png}\caption{Unlabeled}\end{figure}
+\begin{figure}\centering\includegraphics{sq.png}\caption{Labeled}\label{fig:b}\end{figure}
+\begin{figure}\centering\includegraphics{sq.png}\caption*{Not numbered}\end{figure}
+\begin{figure}
+\begin{subfigure}{0.4\textwidth}\includegraphics{sq.png}\caption{Left}\label{fig:sa}\end{subfigure}
+\begin{subfigure}{0.4\textwidth}\includegraphics{sq.png}\caption{Right}\label{fig:sb}\end{subfigure}
+\caption{Both}\label{fig:both}
+\end{figure}
+\begin{minipage}{0.45\textwidth}\centering\includegraphics{sq.png}\captionof{figure}{Set in a minipage}\label{fig:mini}\end{minipage}
+
+\begin{wrapfigure}{r}{0.4\textwidth}\centering\includegraphics{sq.png}\caption{Wrapped}\label{fig:wrap}\end{wrapfigure}
+Text beside it.
+
+\begin{table}\centering\caption*{Not numbered either}\begin{tabular}{l}a\\\end{tabular}\end{table}
+\begin{table}\centering\begin{tabular}{l}b\\\end{tabular}\caption{A table}\label{tab:a}\end{table}
+\begin{table}\centering\includegraphics{sq.png}\caption{A table as an image}\label{tab:img}\end{table}
+""",
+    "two.tex": r"""\chapter{Two}
+\section{Second}
+See Theorem~\ref{thm:a}, Lemma~\ref{lem:b}, Corollary~\ref{cor:c}, Section~\ref{sec:sub}, \ref{sec:deep}, Figures~\ref{fig:b}, \ref{fig:sa}, \ref{fig:sb}, \ref{fig:both}, \ref{fig:mini}, \ref{fig:wrap}, Tables~\ref{tab:a} and \ref{tab:img}, and Figure~\ref{fig:front}.
+""",
+    "three.tex": r"""\chapter{Three}\label{ch:three}
+\section{Third}\label{sec:third}
+\begin{thm}\label{thm:d} Another.\end{thm}
+See Theorem~\ref{thm:d}.
+\begin{enumerate}\item First\label{it:first}\end{enumerate}
+Names: \autoref{fig:b}; \autoref{sec:first}; \autoref{ch:one}; \autoref{thm:a}; \cref{fig:b}; \Cref{eq:x}; \cref{thm:a}; \cref{fig:b,fig:both,fig:mini,fig:wrap}; \cref{fig:b,tab:a}; \crefrange{fig:b}{fig:wrap}; \namecref{tab:a}; \labelcref{eq:x}; \cref{it:first}; \autoref{app:ans}.
+""",
+    "answers.tex": r"""\chapter{Answers}\label{app:ans}
+\section{More}\label{sec:more}
+\begin{figure}\centering\includegraphics{sq.png}\caption{In the appendix}\label{fig:app}\end{figure}
+See Section~\ref{sec:more} and Figure~\ref{fig:app}.
+""",
+    "conversion.yaml": "targets:\n  html:\n    format: html\n",
+}
+
+
+def case_parts(work):
+    """A book in parts: each part the master sets between its \\include-s a
+    page of its own, as is a chapter it sets itself, its chapters grouped
+    under it in the contents; and every reference given LaTeX's number,
+    where the reader numbers its own way, with the captions it drops."""
+    for name, text in PARTS_FILES.items():
+        os.makedirs(os.path.join(work, os.path.dirname(name)), exist_ok=True)
+        with open(os.path.join(work, name), "w", encoding="utf-8") as fh:
+            fh.write(text)
+    png(os.path.join(work, "sq.png"), (90, 90, 90))
+    result = convert(work)
+    said = result.stdout + result.stderr
+    import yaml
+    sample = yaml.safe_load(read(work, "contents-sample.yaml")) \
+        if os.path.exists(os.path.join(work, "contents-sample.yaml")) else {}
+    contents = ((sample or {}).get("project") or {}).get("contents")
+
+    def page(name):
+        path = os.path.join(work, "html", name + ".html")
+        return read(work, "html", name + ".html") if os.path.exists(path) else ""
+
+    def text(name):
+        return " ".join(html_module.unescape(re.sub(r"<[^>]+>", " ", page(name).split(
+            "<body", 1)[-1])).split())
+
+    def title(name):
+        found = re.search(r"<title>(.*?)</title>", page(name))
+        return found.group(1) if found else None
+    captions = re.findall(r"<figcaption>(.*?)</figcaption>", page("one"), re.S)
+
+    def epub_nested():
+        """With the sample's contents adopted, the EPUB's contents hold each
+        part's chapters under it, the part's page opening it once."""
+        import zipfile
+        with open(os.path.join(work, "project.yaml"), "w") as fh:
+            yaml.safe_dump({"project": sample["project"]}, fh)
+        with open(os.path.join(work, "conversion.yaml"), "w") as fh:
+            fh.write("targets:\n  epub:\n    format: epub3\n")
+        convert(work)
+        path = os.path.join(work, "epub", "book.epub")
+        if not os.path.exists(path):
+            return False
+        with zipfile.ZipFile(path) as z:
+            names = z.namelist()
+            nav = next(z.read(n).decode("utf-8") for n in names if n.endswith("nav.xhtml"))
+            chapters = [z.read(n).decode("utf-8") for n in names
+                        if n.endswith(".xhtml") and not n.endswith("nav.xhtml")]
+        return re.search(r'<a[^>]*>Foundations</a>\s*<ol[^>]*>\s*<li[^>]*><a[^>]*>One</a>',
+                         nav) is not None \
+            and sum(len(re.findall(r">Foundations</h\d>", c)) for c in chapters) == 1
+    return [
+        ("a part the master sets between two \\include-s is a page of its own, titled by it, "
+         "where it had ended the chapter before and titled its page",
+         lambda: title("book-2") == "Foundations" and title("book-3") == "Applications"
+         and "Foundations" not in text("one") and "Applications" not in text("two")
+         and title("two") == "Two" and "Words introducing the first part." in text("book-2")),
+        ("a chapter the master sets itself is a page of its own too, in the front or back "
+         "matter as the division commands before it say, and the run counts them",
+         lambda: title("book-1") == "Preface" and title("book-4") == "Afterword"
+         and "4 for what it holds itself" in said),
+        ("a chapter's page in a book with parts opens a level down, which isn't reported as "
+         "a page continuing a chapter", lambda: "Read from a copy of the LaTeX" in said
+         and "page continuing a chapter" not in said and title("one") == "One"),
+        ("the contents sample groups each part's chapters under it, its page first",
+         lambda: contents == [{"page": "book-1", "role": "front"},
+                              {"title": "Foundations", "items": ["book-2", "one", "two"]},
+                              {"title": "Applications", "items": ["book-3", "three"]},
+                              {"page": "answers", "role": "appendix"},
+                              {"page": "book-4", "role": "back"}]),
+        ("a reference to a part, to a chapter after one, and to an appendix has LaTeX's "
+         "number, and one to a front-matter chapter, which LaTeX numbers nothing, its title",
+         lambda: "Words after: Part I , Chapter 3 , Appendix A , and the Preface ." in
+         text("book-4")),
+        ("a theorem is numbered as the book defines it, within its section, a lemma with "
+         "the theorem's counter, a corollary on its own, in its title and its references",
+         lambda: re.search(r"<strong>Theorem 1\.1\.1</strong>", page("one"))
+         and re.search(r"<strong>Lemma 1\.1\.2</strong>", page("one"))
+         and re.search(r"<strong>Corollary 1</strong>", page("one"))
+         and re.search(r"<strong>Theorem 3\.1\.1</strong>", page("three"))
+         and "See Theorem 3.1.1 ." in text("three")),
+        ("figures and tables are numbered as LaTeX numbers them: one without a label counted, "
+         "\\caption* not, subfigures by letter, \\captionof, a wrapped figure, a table set "
+         "as an image, a figure in the front matter, and a subsubsection by its subsection",
+         lambda: "See Theorem 1.1.1 , Lemma 1.1.2 , Corollary 1 , Section 1.1.1 , 1.1.1 , "
+         "Figures 1.2 , 1.3a , 1.3b , 1.3 , 1.4 , 1.5 , Tables 1.1 and 1.2 , and Figure 1 ."
+         in text("two")),
+        ("and lettered in an appendix",
+         lambda: "See Section A.1 and Figure A.1 ." in text("answers")),
+        ("\\autoref and cleveref's references have the names LaTeX prints, the book's own "
+         "among them, \\autoref's in its link and cleveref's before it, several labels a "
+         "range or each its link, an item's too",
+         lambda: "Names: Figure 1.2 ; Section 1.1 ; chapter 1 ; 1.1.1 ; fig. 1.2 ; "
+         "Equation (1.1) ; theorem 1.1.1 ; figs. 1.2 to 1.5 ; fig. 1.2 and table 1.1 ; "
+         "figs. 1.2 to 1.5 ; table ; (1.1) ; item 1; Appendix A ." in text("three")
+         and re.search(r'<a\s+href="one\.html#fig:b"[^>]*>Figure&#xA0;1\.2</a>', page("three"))
+         and re.search(r'figs\.&#xA0;<a\s+href="one\.html#fig:b"[^>]*>1\.2</a>\s+to&#xA0;'
+                       r'<a\s+href="one\.html#fig:wrap"[^>]*>1\.5</a>', page("three"))),
+        ("\\captionof's caption, a wrapped figure's, and a table set as an image's are kept, "
+         "and wrapfig's arguments aren't text",
+         lambda: "Set in a minipage" in captions and "Wrapped" in captions
+         and "A table as an image" in captions and "0.4" not in text("one")
+         and "Text beside it." in text("one")),
+        ("in the EPUB, each part's chapters are under it in the contents", epub_nested),
+    ]
+
+
+REFS_BIB = r"""@book{knuth,
+  author = "Donald E. Knuth",
+  title = "The \protect{T}eXbook",
+  publisher = "Addison-Wesley",
+  year = 1984,
+}
+@book{lamport,
+  author = "Leslie Lamport",
+  title = "{\LaTeX}: A Document Preparation System",
+  publisher = "Addison-Wesley",
+  year = 1994,
+  note = "Second edition. %
+\url{https://www.latex-project.org/a/long/path/that/runs/past/the/end/of/the/line}",
+}
+@misc{unused,
+  author = "Nobody",
+  title = "Never cited",
+  year = 2000,
+}
+"""
+BIB_FILES = {
+    # BibTeX's plain style, a citation a macro of the book's own makes.
+    "plain/book.tex": "\\documentclass{book}\n\\newcommand{\\see}[1]{see \\cite{#1}}\n"
+                      "\\begin{document}\n\\include{one}\n\\bibliographystyle{plain}\n"
+                      "\\bibliography{refs}\n\\end{document}\n",
+    "plain/one.tex": "\\chapter{One}\nAs \\cite{lamport} says, and \\cite[p. 3]{knuth,lamport}, "
+                     "and \\see{knuth}.\n",
+    "plain/refs.bib": REFS_BIB,
+    # natbib's author and year, in its square brackets.
+    "natbib/book.tex": "\\documentclass{book}\n\\usepackage{natbib}\n\\begin{document}\n"
+                       "\\chapter{One}\nAs \\citet{knuth} says, and \\citep{knuth,lamport}, and "
+                       "\\citep[see][p. 3]{lamport}.\n\\bibliographystyle{plainnat}\n"
+                       "\\bibliography{refs}\n\\end{document}\n",
+    "natbib/refs.bib": REFS_BIB,
+    # biblatex, which Pandoc's citeproc reads.
+    "biblatex/book.tex": "\\documentclass{book}\n\\usepackage[style=authoryear]{biblatex}\n"
+                         "\\addbibresource{refs.bib}\n\\begin{document}\n\\include{one}\n"
+                         "\\printbibliography\n\\end{document}\n",
+    "biblatex/one.tex": "\\chapter{One}\nAs \\textcite{knuth} says, and \\parencite{lamport}.\n",
+    "biblatex/refs.bib": REFS_BIB,
+    # A bibliography the paper writes itself, alpha's labels.
+    "own/paper.tex": "\\documentclass{article}\n\\begin{document}\n\\section{Intro}\n"
+                     "See \\cite{Str87} and \\cite{Knu84}.\n\\begin{thebibliography}{Str87}\n"
+                     "\\bibitem[Knu84]{Knu84} D. Knuth. \\newblock \\emph{The TeXbook}. "
+                     "\\newblock 1984.\n\\bibitem[Str87]{Str87} D. Struik. \\newblock History. "
+                     "% a comment\n\\newblock 1987.\n\\end{thebibliography}\n\\end{document}\n",
+}
+
+
+def case_bibliography(work):
+    """A book's citations and its bibliography: BibTeX's, in the book's own
+    style, its citations each the label LaTeX prints linked to its entry;
+    natbib's author and year; a bibliography the book writes itself; and
+    biblatex's, made by Pandoc's citeproc."""
+    said = {}
+    for name, text in BIB_FILES.items():
+        os.makedirs(os.path.join(work, os.path.dirname(name)), exist_ok=True)
+        with open(os.path.join(work, name), "w", encoding="utf-8") as fh:
+            fh.write(text)
+    for book in ("plain", "natbib", "biblatex", "own"):
+        with open(os.path.join(work, book, "conversion.yaml"), "w") as fh:
+            fh.write("targets:\n  html:\n    format: html\n")
+        done = convert(os.path.join(work, book))
+        said[book] = done.stdout + done.stderr
+
+    def page(book, name):
+        path = os.path.join(work, book, "html", name + ".html")
+        return read(work, book, "html", name + ".html") if os.path.exists(path) else ""
+
+    def flat(book, name):
+        """A page's text with no tags and no space, a citation's brackets
+        beside its link's label."""
+        body = page(book, name).split("<body", 1)[-1]
+        return re.sub(r"\s+", "", html_module.unescape(re.sub(r"<[^>]+>", "", body)))
+
+    def has(book, name, words):
+        return re.sub(r"\s+", "", words) in flat(book, name)
+    bibtex = bool(shutil.which("bibtex"))
+    return [
+        ("BibTeX makes the bibliography in the book's own style, a page of its own where "
+         "\\bibliography stands, the entries cited and no others, a database's \\protect "
+         "no command and a URL after a comment printed where BibTeX breaks the line before it",
+         lambda: has("plain", "book-1", "Bibliography [1] Donald E. Knuth. The TeXbook. "
+                     "Addison-Wesley, 1984. [2] Leslie Lamport.")
+         and "https://www.latex-project.org/a/long/path" in flat("plain", "book-1")
+         and "Never cited" not in flat("plain", "book-1")
+         and "<title>Bibliography</title>" in page("plain", "book-1")
+         if bibtex else skip("no BibTeX to make a bibliography")),
+        ("each citation is the label LaTeX prints, linked to its entry, a note after it, "
+         "and one a macro of the book's own makes too",
+         lambda: has("plain", "one", "As [2] says, and [1, 2, p. 3], and see [1].")
+         and re.search(r'<a\s+href="book-1\.html#bib-lamport"[^>]*>2</a>', page("plain", "one"))
+         if bibtex else skip("no BibTeX to make a bibliography")),
+        ("natbib's author and year, in its square brackets and with its commas",
+         lambda: has("natbib", "book", "As Knuth [1984] says, and [Knuth, 1984, Lamport, "
+                     "1994], and [see Lamport, 1994, p. 3].")
+         if bibtex else skip("no BibTeX to make a bibliography")),
+        ("a bibliography the book writes itself is its entries, with their labels, and its "
+         "citations link to them; a comment in an entry ends at its line",
+         lambda: has("own", "paper", "See [Str87] and [Knu84].")
+         and has("own", "paper", "References [Knu84] D. Knuth. The TeXbook. 1984. "
+                 "[Str87] D. Struik. History. 1987.")
+         and re.search(r'<a\s+href="#bib-Str87"[^>]*>Str87</a>', page("own", "paper"))),
+        ("biblatex's citations and bibliography are Pandoc's citeproc's, in its own style, "
+         "and the run says so",
+         lambda: has("biblatex", "one", "As Knuth (1984) says, and (Lamport 1994).")
+         and has("biblatex", "book-1", "Bibliography Knuth, Donald E. 1984.")
+         and re.search(r'href="book-1\.html#ref-knuth"', page("biblatex", "one"))
+         and "Pandoc's own style" in said["biblatex"]),
+    ]
+
+
 CASES = [("a LaTeX book", case_book), ("two masters", case_masters),
          ("one file", case_single), ("an unbuilt book", case_unbuilt),
          ("the source target", case_source), ("a book with fonts of its own", case_own_fonts),
@@ -3424,6 +3905,8 @@ CASES = [("a LaTeX book", case_book), ("two masters", case_masters),
          ("a book of documents built on their own", case_documents),
          ("the pieces the copies take", case_pieces),
          ("a book made its own way, as OpenIntro is", case_customized),
+         ("a book in parts, numbered as LaTeX numbers it", case_parts),
+         ("a book's citations and its bibliography", case_bibliography),
          ("a book set with packages tagging can't take", case_unsupported),
          ("a book too big for TeX", case_capacity)]
 

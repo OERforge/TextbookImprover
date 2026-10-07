@@ -83,7 +83,7 @@ try:
     import notes as notes_lib
     import oerconfig
     from bookcontents import (guess_contents, walk_contents, number_tree,
-                              is_generated, toc_blocks,
+                              is_generated, toc_blocks, stem_title, declared_titles,
                               expand_split_sources, contents_from_tree)
     from names import safe_path, safe_stem, is_safe
 except ImportError:
@@ -804,8 +804,21 @@ LATEX_READ_CHANGES = (
     ("titlesec", "titlesec setting for how a heading looks left out"),
     ("colors", "color the book defines written as CSS"),
     ("nameref", "\\nameref read as a link to the label, its text the section's title"),
-    ("subfigures", "\\subfigure read as a subfigure environment, so its label and "
-     "caption are kept"),
+    ("subfigures", "\\subfigure or \\subfloat read as a subfigure environment, so its "
+     "label and caption are kept"),
+    ("wrapped_floats", "wrapfigure or wraptable read as a figure or a table, so its "
+     "caption is kept"),
+    ("captionof", "\\captionof read as the caption of a figure or a table around what "
+     "it captions, so it's kept"),
+    ("image_tables", "table float holding an image and no table read as a figure, "
+     "numbered as a table, so its caption is kept"),
+    ("named_refs", "\\autoref or cleveref's reference read with the name LaTeX prints "
+     "before its number (Figure 1.2, figs. 1.1 to 1.3)"),
+    ("bibliography", "bibliography entry written out from BibTeX's .bbl, in the book's "
+     "style, where the bibliography is"),
+    ("bibliography_own", "bibliography entry the book writes itself (thebibliography) "
+     "written out as LaTeX sets it"),
+    ("citations", "citation written as the label LaTeX prints, linked to its entry"),
     ("label_keys", "label or reference with whitespace in its key written without"),
     ("counter_keys", "label or reference whose key LaTeX makes of its counters "
      "(\\arabic{chapter}) written as LaTeX makes it"),
@@ -818,18 +831,20 @@ LATEX_READ_CHANGES = (
      "given its first heading as its H1 and title"))
 
 
-def read_latex_to_json(base, masters, env, work):
+def read_latex_to_json(base, masters, env, work, titles=None):
     """A LaTeX book, read whole through each of its masters by Pandoc,
     from a copy put right where Pandoc's reader can't take it
     (lib/latexsource.py), and cut into a page per \\include-d file; a
-    master that \\include-s nothing is one page. Returns (stems, order,
-    header, parts): the pages, the book's order as contents entries, what
-    the first preamble to say so says about the book, and [(master, its
-    pages)], each master's in latex.main's order."""
+    master that \\include-s nothing is one page. titles: {page: title}, the
+    ones project.yaml's contents give, for a page with no heading of its
+    own. Returns (stems, order, header, parts): the pages, the book's order
+    as contents entries, what the first preamble to say so says about the
+    book, and [(master, its pages)], each master's in latex.main's order."""
     import latexsource
     if isinstance(masters, str):
         masters = [masters]
     stems, order, header, parts, preps, counts = [], [], {}, [], [], {}
+    untitled = []
     for index, master in enumerate(masters):
         _, missing = latexsource.reached(base, master)
         if missing:
@@ -872,14 +887,29 @@ def read_latex_to_json(base, masters, env, work):
                    "(\"Loading a class or package in a group\"). Match it in the "
                    "book's file, and run again." if braces else "")
                 + " Nothing was converted.")
+        # A book's citations Pandoc's citeproc makes: one under biblatex, or
+        # with no BibTeX here to make its bibliography as it does.
+        citations = prep["citations"] or {}
+        if citations.get("citeproc"):
+            with open(out, encoding="utf-8") as fh:
+                cites = '"t":"Cite"' in fh.read().replace(" ", "")
+            if cites and latexsource.cite_with_citeproc(out, citations, env, prep["copy"]):
+                counts["citeproc"] = counts.get("citeproc", 0) + 1
         with open(out, encoding="utf-8") as fh:
             doc = json.load(fh)
+        if citations.get("found") is not None:
+            made = latexsource.resolve_citations(doc["blocks"], citations)
+            if made:
+                counts["citations"] = counts.get("citations", 0) + made
         keys, values = latexsource.resolve_counters(doc["blocks"], prep["counters"],
                                                      counts)
         counts["counter_keys"] = counts.get("counter_keys", 0) + keys
         counts["counter_values"] = counts.get("counter_values", 0) + values
-        recolored = latexsource.color_spans(doc["blocks"],
-                                            latexsource.color_values(prep["colors"]))
+        # xcolor's svgnames and x11names, when the book loads them, for a
+        # mix that names one.
+        sets = latexsource.xcolor_sets(prep["layout"].get("classoption", []))
+        recolored = latexsource.color_spans(
+            doc["blocks"], latexsource.color_values(prep["colors"], sets), sets)
         if recolored:
             counts["colors"] = counts.get("colors", 0) + recolored
         keyed = latexsource.normalize_keys(doc["blocks"])
@@ -887,10 +917,17 @@ def read_latex_to_json(base, masters, env, work):
             counts["label_keys"] = counts.get("label_keys", 0) + keyed
         meta = doc.get("meta", {})
         master_stem = safe_stem(os.path.splitext(os.path.basename(master))[0])
+        # The levels the reader gives a part and a chapter: one the master
+        # sets between its \include-s begins a page of its own.
+        levels = prep["counters"]["levels"]
+        part_levels = {level for level, name in levels.items() if name == "part"}
+        chapter_level = next((level for level, name in levels.items()
+                              if name == "chapter"), None)
         pages = latexsource.cut_pages(doc, prep["order"], master_stem,
-                                      prep["front_role"])
-        own, empty = [], []
-        for stem, role, blocks in pages:
+                                      prep["front_role"],
+                                      part_levels | {chapter_level})
+        own, empty, held, group = [], [], [], None
+        for stem, role, blocks, master_own in pages:
             stem = safe_stem(stem)
             blocks, hoisted = latexsource.hoist_headings(
                 blocks, set(prep["counters"]["theorems"]) | {"proof"})
@@ -904,8 +941,9 @@ def read_latex_to_json(base, masters, env, work):
             blocks = [b for b in blocks if not (
                 b.get("t") == "Header" and not b["c"][2] and "unnumbered" in b["c"][1][1]
                 and re.fullmatch(r"section(-\d+)?", b["c"][1][0]))]
-            if not blocks and stem != master_stem:
-                empty.append(stem)
+            if not blocks:
+                if not master_own:
+                    empty.append(stem)
                 continue
             if stem in stems:
                 first = next(m for m, s in parts if stem in s)
@@ -913,20 +951,51 @@ def read_latex_to_json(base, masters, env, work):
                     "page, so the documents latex.main names can't share one. Name "
                     "only one of them, or documents that don't share chapters. "
                     "Nothing was converted.")
+            # A part's page, which a \part the master sets begins, or a file
+            # opening with one: the contents sample groups the pages after it
+            # under it, until the next part or another part of the book.
+            opens_part = blocks[0].get("t") == "Header" and blocks[0]["c"][0] in part_levels
             page_meta = {}
             if stem == master_stem:
                 blocks, _ = latexsource.title_heading(blocks)
                 if meta.get("title"):
                     page_meta["title"] = meta["title"]
-            elif latexsource.promote_headings(blocks):
-                counts["headings_raised"] = counts.get("headings_raised", 0) + 1
+            else:
+                raised = latexsource.promote_headings(blocks)
+                # A chapter's page in a book with parts opens a level down,
+                # by design; one continuing a chapter is worth saying.
+                if raised and not (chapter_level and raised == chapter_level - 1):
+                    counts["headings_raised"] = counts.get("headings_raised", 0) + 1
+                # A page with no heading at all (OpenIntro's copyright page,
+                # whose \chapter*{} holds nothing): titled as project.yaml's
+                # contents say, or by its file's name written as words, which
+                # is its title and its H1 everywhere, where the HTML's had been
+                # the bare name.
+                if not latexsource.has_heading(blocks):
+                    title = (titles or {}).get(stem) or stem_title(stem)
+                    page_meta["title"] = {"t": "MetaInlines",
+                                          "c": latexsource.tag_inlines(title)}
+                    untitled.append((stem, title, stem in (titles or {})))
             with open(os.path.join(base, stem + ".json"), "w",
                       encoding="utf-8") as fh:
                 json.dump({"pandoc-api-version": doc["pandoc-api-version"],
                            "meta": page_meta, "blocks": blocks}, fh)
             own.append(stem)
-            order.append({"page": stem, "role": role} if role != "main"
-                         else stem)
+            if master_own:
+                held.append(stem)
+            entry = {"page": stem, "role": role} if role != "main" else stem
+            if opens_part:
+                group = {"title": latexsource.stringify(blocks[0]["c"][2])}
+                if role != "main":
+                    group["role"] = role
+                group["items"] = [stem]
+                group_role = role
+                order.append(group)
+            elif group is not None and role == group_role:
+                group["items"].append(stem)
+            else:
+                group = None
+                order.append(entry)
         stems += own
         parts.append((master, own))
         if meta.get("title") and "title" not in header:
@@ -944,8 +1013,11 @@ def read_latex_to_json(base, masters, env, work):
                 say(f"{master} is the book, one page: it \\include-s no chapters.")
             else:
                 say(f"{master} is the book: {len(own)} page(s), one for each file "
-                    "it \\include-s" + (", and one for what it holds itself"
-                                        if own and own[0] == master_stem else "")
+                    "it \\include-s"
+                    + ("" if not held else ", and one for what it holds itself"
+                       if len(held) == 1 else
+                       f", and {len(held)} for what it holds itself, each part or "
+                       "chapter it sets between them a page of its own")
                     + (f"; {len(empty)} file(s) it \\include-s have nothing to read, "
                        "definitions or an index, and aren't pages: " + ", ".join(empty)
                        if empty else "") + ".")
@@ -957,6 +1029,17 @@ def read_latex_to_json(base, masters, env, work):
                f", {whole} document(s) a page each and the others a page for each "
                "file they \\include")
             + ".")
+    guessed = [(s, t) for s, t, declared in untitled if not declared]
+    if guessed:
+        say(f"{len(guessed)} page(s) have no heading of their own, so each is titled by "
+            "its file's name, as words: " + ", ".join(
+                f"{s} as \"{t}\"" for s, t in guessed[:5])
+            + (", ..." if len(guessed) > 5 else "")
+            + ". A heading in the LaTeX, or a title for the page in project.yaml's "
+            "contents, says it better.")
+    if len(guessed) < len(untitled):
+        say(f"{len(untitled) - len(guessed)} page(s) with no heading of their own titled "
+            "as project.yaml's contents say.")
     if counts.get("drawings"):
         say(f"{counts.get('drawings_made', 0)} of {counts['drawings']} "
             "drawing(s) made images by LaTeX, in "
@@ -3851,7 +3934,7 @@ def main():
         latex_parts = []
         if master:
             tex_stems, tex_order, tex_header, latex_parts = read_latex_to_json(
-                base, latex_main, env, work)
+                base, latex_main, env, work, declared_titles(project.get("contents")))
             # An .html file with the name of one of the book's pages is one
             # an earlier run wrote beside it, as html_sources takes one named
             # after a Word file; read, it would replace the page it came

@@ -36,6 +36,12 @@
 --    each, its cells' text side by side: GIAM's long division, a layout,
 --    is the case this was measured on.
 --
+-- 5. An eqnarray* formula, which the writer wraps in \[ \] where it writes
+--    an eqnarray as it is, and LaTeX stops on: written as it is. And \pmb,
+--    on which LuaTeX stopped while the formula was tagged.
+--
+-- 6. A heading's label and links (below).
+--
 -- Copyright 2026 Robert Szarka
 --
 -- This program is free software: you can redistribute it and/or modify
@@ -260,6 +266,25 @@ local function decorative(img)
 end
 
 function Image(img)
+  -- An alt text with a line end in it: the reader keeps an alt key's raw
+  -- text in one Str, line ends and all, and the writer writes it as it is,
+  -- so a blank line in it ended the paragraph inside \pandocbounded, where
+  -- LaTeX stopped ("Paragraph ended before \pandocbounded was complete":
+  -- OpenIntro's descriptions of two paragraphs). Its spaces made single.
+  local changed = false
+  if img.attributes["alt"] and img.attributes["alt"]:find("\n") then
+    img.attributes["alt"] = squash(img.attributes["alt"])
+    changed = true
+  end
+  local caption = pandoc.Inlines{}
+  for _, inline in ipairs(img.caption) do
+    if inline.t == "Str" and inline.text:find("\n") then
+      inline = pandoc.Str(squash(inline.text))
+      changed = true
+    end
+    caption:insert(inline)
+  end
+  img.caption = caption
   if decorative(img) and stringify(img.caption) == "" then
     -- The filter writes alt="" for HTML, and the writer passes an alt
     -- attribute on as the alt key, even empty; alt={} after the artifact
@@ -271,6 +296,9 @@ function Image(img)
       img,
       pandoc.RawInline("latex", "}"),
     }
+  end
+  if changed then
+    return img
   end
 end
 
@@ -441,9 +469,64 @@ local function lift_display(inlines)
   return changed and out or nil
 end
 
+-- A display formula that is a math environment of its own the writer
+-- doesn't know is one: it writes an align or an eqnarray as it is, and
+-- wraps anything else in \[ \] (isMathEnv, Writers/LaTeX.hs, 3.12), and
+-- eqnarray* isn't in its list, so LaTeX stopped on \[\begin{eqnarray*}
+-- ("Missing \endgroup inserted"; OpenIntro Statistics). Written as it is.
+--
+-- And amsbsy's \pmb, the poor man's bold, as unicode-math's bold italic,
+-- \symbfit, whose letters the fonts have: \pmb{\hat{p}_1 - b} stopped
+-- LuaTeX while LaTeX's tagging took the formula's MathML ("(nodes):
+-- trying to set an attribute fails, case 2"; OpenIntro Statistics's
+-- headings of its boxes), where \pmb{\hat{p}_1} and \pmb{p_1 - b} didn't.
+local function Math(math)
+  local text = math.text:gsub('\\pmb%f[^%a]', '\\symbfit')
+  if math.mathtype == 'DisplayMath' and text:match('^%s*\\begin%s*{eqnarray%*}') then
+    return pandoc.RawInline('latex', text)
+  end
+  if text ~= math.text then
+    math.text = text
+    return math
+  end
+end
+
+-- What a LaTeX book's headings hold. A label in a heading's own braces,
+-- \subsection{Spread\label{sec:spread}}, is an empty span in it, which the
+-- writer writes as \hypertarget, a moving argument's anchor, where its own
+-- internal links are \hyperref, which finds only a \label (Writers/LaTeX.hs,
+-- 3.12): "Hyper reference undefined", and a link to it that goes nowhere.
+-- The span goes after the heading, which the writer writes as a \label. And
+-- a link in a heading, \section{\nameref{...}} (OpenIntro Statistics's
+-- appendix of data sets), goes with the heading's text to the running head,
+-- which the book class sets in capitals, \MakeUppercase taking the link's
+-- label with it ("PAGE-CH_DISTRIBUTIONS--CH_DISTRIBUTIONS undefined"), and to
+-- the contents: the heading keeps the link's text.
+local function heading(header)
+  local labels, links = pandoc.Inlines{}, false
+  header.content = header.content:walk({
+    Span = function(span)
+      if span.identifier ~= "" and #span.content == 0 then
+        labels:insert(pandoc.Span({}, {id = span.identifier}))
+        return {}
+      end
+    end,
+    Link = function(link)
+      links = true
+      return link.content
+    end,
+  })
+  if #labels > 0 then
+    return {header, pandoc.Plain(labels)}
+  end
+  if links then
+    return header
+  end
+end
+
 return {
-  { Inlines = lift_display },
+  { Inlines = lift_display, Header = heading },
   { Figure = Figure },
   { Para = line_breaks, Plain = line_breaks },
-  { Table = Table, Image = Image, Link = Link },
+  { Table = Table, Image = Image, Link = Link, Math = Math },
 }

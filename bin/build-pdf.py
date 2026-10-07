@@ -521,6 +521,12 @@ def book_metadata(project, resolved, base, numbered):
         # isn't made a link. (The template loads hyperref after this.)
         ours += "\\PassOptionsToPackage{hyperfootnotes=false}{hyperref}\n" + UA1_LINKS
     ours += FIGURE_PLACEMENT[str(resolved["pdf.figures"])]
+    # A LaTeX book's own colors, which convert.py passes on: a formula keeps
+    # its TeX as the book wrote it, \color{redcards} and all, and LaTeX
+    # stops on a color nothing defines (OpenIntro Statistics).
+    colors = os.environ.get("BOOK_LATEX_COLORS", "").strip()
+    if colors:
+        ours += "\\RequirePackage{xcolor}\n" + colors + "\n"
     unchosen = [command for field, command in FAMILIES if field not in meta]
     if unchosen:
         ours += FALLBACK + "".join(

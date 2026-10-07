@@ -141,6 +141,77 @@ def code_matches(pattern, text, spans=None):
     return [m for m in pattern.finditer(text) if not in_spans(m.start(), spans)]
 
 
+def math_spans(text, spans=None):
+    """The (start, end) of each formula in text's code, as MATH_SPANS finds
+    them once comments and verbatim text are blanked, so a $ in a comment
+    pairs with nothing."""
+    spans = skip_spans(text) if spans is None else spans
+    pieces, last = [], 0
+    for start, end in spans:
+        pieces.append(text[last:start])
+        pieces.append(" " * (end - start))
+        last = end
+    pieces.append(text[last:])
+    return [(m.start(), m.end()) for m in MATH_SPANS.finditer("".join(pieces))]
+
+
+def escaped(text, pos):
+    """Whether the character at pos follows an odd run of backslashes:
+    \\\\noindent is a line break and a word, not \\noindent."""
+    run = 0
+    while pos - run - 1 >= 0 and text[pos - run - 1] == "\\":
+        run += 1
+    return run % 2 == 1
+
+
+def unbalanced_braces(text):
+    """(opened, closed): the position of each { in text's code that no }
+    closes, and of each } that closes nothing, outside comments and
+    verbatim text, \\{ and \\} not counted."""
+    spans = skip_spans(text)
+    opened, closed, i, s = [], [], 0, 0
+    while i < len(text):
+        while s < len(spans) and spans[s][1] <= i:
+            s += 1
+        if s < len(spans) and spans[s][0] <= i:
+            i = spans[s][1]
+            continue
+        c = text[i]
+        if c == "\\":
+            i += 2
+            continue
+        if c == "{":
+            opened.append(i)
+        elif c == "}":
+            if opened:
+                opened.pop()
+            else:
+                closed.append(i)
+        i += 1
+    return opened, closed
+
+
+def brace_problems(base, files):
+    """["file:line", ...]: where a file the master reaches opens a { that
+    it never closes, or closes a } it never opened, each file's first."""
+    found = []
+    for name in files:
+        text = read_text(os.path.join(base, name))
+        opened, closed = unbalanced_braces(text)
+        for kind, at in (("a { that nothing in the file closes", opened[:1]),
+                         ("a } that closes nothing", closed[:1])):
+            for pos in at:
+                found.append(f"{name}:{text.count(chr(10), 0, pos) + 1} ({kind})")
+    return found
+
+
+def package_names(value):
+    """The names a \\usepackage{...} or \\RequirePackage{...} loads, its
+    braces' content split at commas, a comment in it left out (OpenIntro's
+    list of packages has a %tocloft, in it)."""
+    return [n.strip() for n in re.sub(r"%[^\n]*", "", value).split(",") if n.strip()]
+
+
 def matching_brace(text, start):
     """The index just past the group that opens at text[start] == '{'."""
     depth, i = 0, start
@@ -260,24 +331,41 @@ def resolve(base, name, folder=""):
 
 def reached(base, master):
     """(files, missing): every .tex file the master reaches through
-    \\input, \\include, and \\subfile, in the order first reached, and
-    the names it gives that aren't there."""
-    files, missing, queue = [], [], [master]
+    \\input, \\include, and \\subfile, and through a call of one of the
+    book's macros that does (include_macros), in the order first reached,
+    and the names it gives that aren't there. A name inside a macro's
+    definition made from its arguments (#2/TeX/#2) is the call's to make."""
+    files, missing, texts, queue = [], [], {}, [master]
     folder = os.path.dirname(master)
+
+    def add(target, waiting):
+        path = resolve(base, target, folder)
+        if path is None:
+            if target not in missing:
+                missing.append(target)
+        elif path not in files and path not in waiting:
+            waiting.append(path)
     while queue:
-        name = queue.pop(0)
-        if name in files:
-            continue
-        files.append(name)
-        text = read_text(os.path.join(base, name))
-        for m in code_matches(INPUT, text):
-            target = m.group(2) or m.group(3)
-            path = resolve(base, target, folder)
-            if path is None:
-                if target not in missing:
-                    missing.append(target)
-            elif path not in files and path not in queue:
-                queue.append(path)
+        while queue:
+            name = queue.pop(0)
+            if name in files:
+                continue
+            files.append(name)
+            text = texts[name] = read_text(os.path.join(base, name))
+            for m in code_matches(INPUT, text):
+                target = m.group(2) or m.group(3)
+                if not re.search(r"#\d", target):
+                    add(target, queue)
+        # The files the book's own macros reach, once their definitions
+        # are read: OpenIntro's \includechapter{1}{ch_intro_to_data} in the
+        # master, defined in a file the master \include-s later.
+        macros = include_macros([(name, texts[name]) for name in files])
+        for name in files:
+            skip = sorted(skip_spans(texts[name])
+                          + [(d[0], d[1]) for d in definitions_in(texts[name], ())])
+            for _, _, targets in include_calls(texts[name], macros, skip):
+                for target in targets:
+                    add(target, queue)
     return files, missing
 
 
@@ -535,6 +623,300 @@ def drop(text, command, counter, key):
         spans = skip_spans(text)
 
 
+def drop_command(text, command, signature, counter, key):
+    """\\command taken out with its arguments, in code: signature gives
+    them in order, o optional and m mandatory, each found as LaTeX finds
+    it, past spaces, a comment, and one line end. For a layout command
+    whose arguments the reader would print: Pandoc takes titlesec's
+    \\titleformat only with its arguments on one line (getRawCommand's
+    count 4 braced, Readers/LaTeX/Parsing.hs) and stops otherwise, and an
+    unknown command's arguments on the next line become text."""
+    pattern = re.compile(r"\\%s(?![A-Za-z@])\*?" % re.escape(command))
+    spans = skip_spans(text)
+    edits = []
+    for m in pattern.finditer(text):
+        if in_spans(m.start(), spans):
+            continue
+        pos = m.end()
+        for kind in signature:
+            at = argument_space(text, pos)
+            if kind == "o":
+                if text.startswith("[", at):
+                    close = closing_bracket(text, at)
+                    if close < 0:
+                        break
+                    pos = close + 1
+                continue
+            if not text.startswith("{", at):
+                break
+            close = matching_brace(text, at)
+            if close < 0:
+                break
+            pos = close
+        else:
+            edits.append((m.start(), pos))
+    for start, end in reversed(edits):
+        text = text[:start] + text[end:]
+        counter[key] = counter.get(key, 0) + 1
+    return text
+
+
+def key_id(key):
+    """A label's key as an id: no whitespace in it, and no {} a macro's end
+    left in it."""
+    return "-".join(key.replace("{}", "").split())
+
+
+def normalize_keys(node):
+    """Each id, link target, and reference the reader made of a label's key
+    written as key_id has it, in place: LaTeX takes any text for a key
+    (OpenIntro's \\label{US Airports}), and a macro in it expands
+    (\\label{edwardSatBelow\\edwardsat{}}), but an id can't hold whitespace,
+    nor a link's fragment a brace. After the reading, so a reference
+    through the book's own macro, \\secref{US Airports} for Section~\\ref{#1},
+    has been matched to its label, and numbered, as LaTeX matches it. A
+    label with nothing in it is no id. Returns how many changed."""
+    changed = 0
+    if isinstance(node, list):
+        for item in node:
+            changed += normalize_keys(item)
+    elif isinstance(node, dict):
+        kind, c = node.get("t"), node.get("c")
+        attr = c[1] if kind == "Header" else c[0] if kind in (
+            "Div", "Span", "Figure", "Table", "CodeBlock", "Code", "Link", "Image") else None
+        if attr is not None:
+            if attr[0] != key_id(attr[0]):
+                attr[0] = key_id(attr[0])
+                changed += 1
+            for pair in attr[2]:
+                if pair[0] in ("label", "reference"):
+                    pair[1] = key_id(pair[1])
+        if kind == "Link" and c[2][0].startswith("#") and c[2][0] != "#" + key_id(c[2][0][1:]):
+            c[2][0] = "#" + key_id(c[2][0][1:])
+            changed += 1
+        if c is not None:
+            changed += normalize_keys(c)
+    return changed
+
+
+SUBFIGURE_COMMAND = re.compile(r"\\subfigure(?![A-Za-z@])")
+
+
+def subfigures(text, counter):
+    """The obsolete subfigure package's \\subfigure[caption]{...}, which
+    Pandoc's reader doesn't know: its caption is dropped and the \\label in
+    it is lost, so a reference to it goes nowhere (25 in OpenIntro
+    Statistics). Written as subcaption's subfigure environment, which the
+    reader makes a figure of its own, the label its id and the caption,
+    when there is one, its caption."""
+    spans = skip_spans(text)
+    edits = []
+    for m in SUBFIGURE_COMMAND.finditer(text):
+        if in_spans(m.start(), spans) or (edits and m.start() < edits[-1][1]):
+            continue
+        pos, options = m.end(), []
+        while len(options) < 2:
+            at = argument_space(text, pos)
+            if not text.startswith("[", at):
+                break
+            close = closing_bracket(text, at)
+            if close < 0:
+                break
+            options.append(text[at + 1:close])
+            pos = close + 1
+        at = argument_space(text, pos)
+        if not text.startswith("{", at):
+            continue
+        close = matching_brace(text, at)
+        if close < 0:
+            continue
+        caption = options[-1].strip() if options else ""
+        edits.append((m.start(), close, "\\begin{subfigure}{\\linewidth}%s%s\\end{subfigure}" % (
+            text[at + 1:close - 1], "\\caption{%s}" % caption if caption else "")))
+    for start, end, replacement in reversed(edits):
+        text = text[:start] + replacement + text[end:]
+        counter["subfigures"] = counter.get("subfigures", 0) + 1
+    return text
+
+
+# \nameref, which prints the title of the section a label is in and which
+# Pandoc's reader drops, text and all: a link to the label with this for
+# its text, which convert.py's fill_namerefs gives the title once the pages
+# are read.
+NAMEREF = re.compile(r"\\[nN]ameref\*?\s*\{([^{}]*)\}")
+NAMEREF_MARK = "TEXTBOOKIMPROVERNAMEREF"
+GROUP_COMMAND = re.compile(r"\\(begingroup|endgroup)(?![A-Za-z@])")
+
+
+def math_definitions(text, spans, names):
+    """The (start, end) of each definition in text of a macro in names."""
+    return [(d[0], d[1]) for d in definitions_in(text, spans) if d[2] in names]
+
+
+def group_commands(text, counter, math_macros=()):
+    """Each \\begingroup and the \\endgroup that closes it at the same
+    depth of braces, written as \\/{ and }, outside formulas. Pandoc's
+    reader takes \\endgroup for a }, but \\begingroup only where a group
+    opens, at a group's start or in a paragraph; elsewhere it drops it as a
+    command it doesn't know, so the \\endgroup closes the group around it
+    (OpenIntro's chapter openings: {\\Large \\begingroup ... \\par
+    \\endgroup} stops the reader). The \\/, an italic correction, which
+    the reader reads as nothing, keeps the brace from a command before it:
+    the reader takes every braced group after one it doesn't know as its
+    arguments (keep_groups), so \\noindent{ lost the group's text. One left
+    open, in a macro that another closes, is left as it is, and so is one
+    in the definition of a macro in math_macros, which a formula uses."""
+    spans = skip_spans(text)
+    found = [m for m in GROUP_COMMAND.finditer(text) if not in_spans(m.start(), spans)]
+    if not found:
+        return text
+    # The brace group each is in, by where it opens (-1 for none): a pair
+    # must share one, not only a depth, or \begingroup in one macro's body
+    # would pair with \endgroup in the next's.
+    group_at, opened, s, i = {}, [-1], 0, 0
+    marks = {m.start() for m in found}
+    while i < len(text):
+        while s < len(spans) and spans[s][1] <= i:
+            s += 1
+        if s < len(spans) and spans[s][0] <= i:
+            i = spans[s][1]
+            continue
+        c = text[i]
+        if i in marks:
+            group_at[i] = opened[-1]
+        if c == "\\":
+            i += 2
+            continue
+        if c == "{":
+            opened.append(i)
+        elif c == "}" and len(opened) > 1:
+            opened.pop()
+        i += 1
+    # One the walk stepped over follows a backslash (\\begingroup is a
+    # line break and a word); one in a formula is texmath's, which doesn't
+    # read \/.
+    math = sorted(math_spans(text, spans) + math_definitions(text, spans, math_macros))
+    found = [m for m in found if m.start() in group_at and not in_spans(m.start(), math)]
+    pairs, stack = [], []
+    for m in found:
+        if m.group(1) == "begingroup":
+            stack.append(m)
+        elif stack and group_at[stack[-1].start()] == group_at[m.start()]:
+            pairs.append((stack.pop(), m))
+        else:
+            stack = []
+    edits = sorted([(o.start(), o.end(), "\\/{") for o, _ in pairs]
+                   + [(c.start(), c.end(), "}") for _, c in pairs], reverse=True)
+    for start, end, brace in edits:
+        text = text[:start] + brace + text[end:]
+    if pairs:
+        counter["group_commands"] = counter.get("group_commands", 0) + len(pairs)
+    return text
+
+
+# Commands Pandoc's reader (3.12) doesn't know, or knows only to skip, and
+# so takes with every braced group after them (getRawCommand's many
+# braced, Readers/LaTeX/Parsing.hs), each with its arguments as LaTeX
+# takes them: s a star, o an optional argument, m a mandatory one. Each was
+# measured losing a group after its arguments.
+RAW_COMMANDS = {
+    "hspace": "sm", "vspace": "sm", "addvspace": "m", "enlargethispage": "sm",
+    "noindent": "", "indent": "", "centering": "", "raggedleft": "", "RaggedRight": "",
+    "bigskip": "", "medskip": "", "smallskip": "", "clearpage": "", "cleardoublepage": "",
+    "newpage": "", "pagebreak": "o", "nopagebreak": "o", "linebreak": "o",
+    "nolinebreak": "o", "selectfont": "", "normalfont": "", "fontfamily": "m",
+    "fontseries": "m", "fontshape": "m", "fontsize": "mm", "usefont": "mmmm",
+    "setlength": "mm", "addtolength": "mm", "settowidth": "mm", "setcounter": "mm",
+    "addtocounter": "mm", "stepcounter": "m", "refstepcounter": "m", "index": "om",
+    "glossary": "m", "pagestyle": "m", "thispagestyle": "m", "phantomsection": "",
+    "leavevmode": "", "protect": "", "nointerlineskip": "", "relax": "", "null": "",
+    "ignorespaces": "", "unskip": "", "sloppy": "", "fussy": "", "frenchspacing": "",
+    "justifying": "", "onehalfspacing": "", "doublespacing": "", "singlespacing": "",
+    "setstretch": "m", "hypersetup": "m", "pdfbookmark": "omm", "markboth": "mm",
+    "markright": "m", "addcontentsline": "mmm", "tableofcontents": "",
+    "captionsetup": "om", "color": "om", "definecolor": "ommm", "colorlet": "omm",
+    "pageref": "sm", "makebox": "oom", "raisebox": "moom", "smash": "om",
+    "phantom": "m", "hphantom": "m", "vphantom": "m",
+}
+RAW_COMMAND = re.compile(r"\\(%s)(?![A-Za-z@])" % "|".join(
+    re.escape(n) for n in sorted(RAW_COMMANDS, key=len, reverse=True)))
+# What the reader takes for a dimension after such a command before any
+# braced group (dimenarg, Readers/LaTeX/Parsing.hs): past spaces, comments,
+# and one line end, a number, a unit or not.
+NUMBER_AFTER = re.compile(r"(?:[ \t]|%[^\n]*)*(?:\n(?![ \t]*\n)(?:[ \t]|%[^\n]*)*)?"
+                          r"(?==?-?(?:\d|\.\d))")
+
+
+def keep_groups(text, counter, math_macros=()):
+    """A \\/ before a group that follows one of RAW_COMMANDS's arguments,
+    and before a number that follows one with no argument, outside
+    formulas, so the reader reads them. It takes every braced group after
+    such a command as the command's and drops them, and a number right
+    after it as its dimension, where LaTeX takes only the command's own
+    arguments. OpenIntro Statistics's exercise solutions are
+    \\hspace{2mm}{\\small#1}, after \\hypersetup{linkcolor=oiB}{...} around
+    {\\fontfamily{phv}\\selectfont 1.1}, and its appendix of solutions came
+    out with neither the solutions nor their numbers. The \\/, an italic
+    correction, is nothing to the reader and ends the command's arguments.
+    A command's own spaces, before a group, are its own to TeX and to the
+    reader alike; a space after an argument ends them. Nothing goes in
+    the definition of a macro in math_macros, which texmath reads in a
+    formula, and it doesn't read \\/."""
+    spans = skip_spans(text)
+    math = sorted(math_spans(text, spans) + math_definitions(text, spans, math_macros))
+    inserts = []
+    for m in RAW_COMMAND.finditer(text):
+        if in_spans(m.start(), spans) or in_spans(m.start(), math) \
+                or escaped(text, m.start()):
+            continue
+        pos, took = m.end(), False
+        for kind in RAW_COMMANDS[m.group(1)]:
+            if kind == "s":
+                star = re.compile(r"[ \t]*\*").match(text, pos)
+                if star:
+                    pos = star.end()
+                continue
+            at = argument_space(text, pos)
+            if kind == "o":
+                if text.startswith("[", at):
+                    close = closing_bracket(text, at)
+                    if close < 0:
+                        break
+                    pos, took = close + 1, True
+                continue
+            if not text.startswith("{", at):
+                break
+            close = matching_brace(text, at)
+            if close < 0:
+                break
+            pos, took = close, True
+        else:
+            if took:
+                if text.startswith("{", pos):
+                    inserts.append(pos)
+                continue
+            at = re.compile(r"[ \t]*").match(text, pos).end()
+            if text.startswith("{", at):
+                inserts.append(at)
+                continue
+            number = NUMBER_AFTER.match(text, pos)
+            if number:
+                inserts.append(number.end())
+    for at in reversed(inserts):
+        text = text[:at] + "\\/" + text[at:]
+    if inserts:
+        counter["kept_groups"] = counter.get("kept_groups", 0) + len(inserts)
+    return text
+
+
+# titlesec's commands, which say how headings look, with their arguments.
+# The starred \titleformat, titlesec's easy form, takes only the
+# command and its format, and goes first, before the full form's optional
+# star would take it.
+TITLESEC_COMMANDS = (("titleformat*", "mm"), ("titleformat", "mommmmo"),
+                     ("titlespacing", "mmmmo"), ("titlelabel", "m"))
+
+
 def unwrap(text, command, counter, key):
     """\\command{X} as X, in code: for a wrapper the reader doesn't know
     and drops with what it holds, as Pandoc's LaTeX writer's
@@ -606,9 +988,10 @@ def invisible_rule(m):
     return m.group(0)
 
 
-def repair_text(text, counter):
+def repair_text(text, counter, math_macros=()):
     """The rewrites every file of the copy gets: booleans as toggles,
-    \\input braced, artifact images marked."""
+    \\input braced, artifact images marked, and the rest. math_macros: the
+    names of the macros formulas use (math_macros)."""
     text = substitute(BOOLEAN_IF, text, lambda m: "\\iftoggle{%s}" % m.group(1),
                       counter, "ifthenelse")
     text = substitute(BOOLEAN_NEW, text, lambda m: "\\newtoggle{%s}" % m.group(1),
@@ -633,6 +1016,13 @@ def repair_text(text, counter):
     text = stacked_lines(text, counter)
     text = minipage_breaks(text, counter)
     text = drop(text, "OERLinkContentsReset", counter, "link_contents_reset")
+    for command, signature in TITLESEC_COMMANDS:
+        text = drop_command(text, command, signature, counter, "titlesec")
+    text = group_commands(text, counter, math_macros)
+    text = keep_groups(text, counter, math_macros)
+    text = substitute(NAMEREF, text, lambda m: "\\hyperref[%s]{%s}" % (
+        m.group(1).strip(), NAMEREF_MARK), counter, "nameref")
+    text = subfigures(text, counter)
     text = substitute(RULE_ANY, text, invisible_rule, counter, "rule_seen")
     text = substitute(PARTIAL_RULE, text, lambda m: "\\" + (
         "midrule" if m.group(1) == "cmidrule" else "hline"), counter,
@@ -1105,16 +1495,50 @@ def graphics_paths(preamble):
     return [d for d in re.findall(r"\{([^}]*)\}", m.group(1))] if m else []
 
 
-def resolve_graphic(base, name, dirs):
+def case_match(base, path):
+    """path, relative to base, found as a file system that ignores case
+    finds it, a part at a time, where exactly one entry matches each
+    part; or None."""
+    found, current = [], base
+    for part in os.path.normpath(path).split(os.sep):
+        if part in ("", "."):
+            continue
+        if part != "..":
+            try:
+                entries = os.listdir(current)
+            except OSError:
+                return None
+            if part not in entries:
+                matches = [e for e in entries if e.lower() == part.lower()]
+                if len(matches) != 1:
+                    return None
+                part = matches[0]
+        found.append(part)
+        current = os.path.join(current, part)
+    return os.path.join(*found) if found and os.path.isfile(current) else None
+
+
+def resolve_graphic(base, name, dirs, counter=None):
     """The file graphicx would include for name, relative to base, or
-    None."""
+    None. A name that differs from its file only in case is the file, as
+    macOS and Windows find it, where the book was likely built (OpenIntro
+    Statistics's solutions name GRE_intro.pdf, and the file is
+    gre_intro.pdf); LaTeX on Linux doesn't find it, so it's counted."""
     name = name.strip()
-    for d in [""] + dirs:
-        for ext in ("",) + GRAPHICS_EXTENSIONS:
-            candidate = os.path.normpath(os.path.join(d, name + ext))
-            if os.path.isfile(os.path.join(base, candidate)) and (
-                    ext or os.path.splitext(name)[1]):
-                return candidate
+    for exact in (True, False):
+        for d in [""] + dirs:
+            for ext in ("",) + GRAPHICS_EXTENSIONS:
+                candidate = os.path.normpath(os.path.join(d, name + ext))
+                if not (ext or os.path.splitext(name)[1]):
+                    continue
+                if exact and os.path.isfile(os.path.join(base, candidate)):
+                    return candidate
+                if not exact:
+                    found = case_match(base, candidate)
+                    if found:
+                        if counter is not None:
+                            counter["graphics_case"] = counter.get("graphics_case", 0) + 1
+                        return found
     return None
 
 
@@ -1160,7 +1584,7 @@ def repair_graphics(base, work, text, dirs, record, counter, say):
         if close < 0:
             continue
         name = text[m.end():close - 1]
-        path = resolve_graphic(base, name, dirs)
+        path = resolve_graphic(base, name, dirs, counter)
         if path is None:
             continue
         if path.lower().endswith(CONVERT):
@@ -1211,7 +1635,9 @@ def closing_bracket(text, start):
 
 def image_macro(body, arguments, default):
     """The macro, as image_macros describes one, if body holds one
-    \\includegraphics whose file is made from one argument; else None."""
+    \\includegraphics whose file is made from its arguments (one or more:
+    OpenIntro's \\Figures puts a folder and a file in
+    \\chapterfolder/figures/#3/#4); else None."""
     if "##" in body:
         return None
     found = list(BODY_GRAPHICS.finditer(body))
@@ -1222,8 +1648,8 @@ def image_macro(body, arguments, default):
     if close < 0:
         return None
     path = body[m.end():close - 1]
-    used = set(re.findall(r"#(\d)", path))
-    if len(used) != 1 or int(next(iter(used))) > arguments:
+    used = {int(n) for n in re.findall(r"#(\d)", path)}
+    if not used or max(used) > arguments:
         return None
     options = m.group(2) or ""
     alt = ALT_ARGUMENT.search(options)
@@ -1243,7 +1669,142 @@ def image_macro(body, arguments, default):
             "keyed": bool(OWN_KEY.search(options)) and not alt}
 
 
-def image_macros(texts):
+def definitions_in(text, skip):
+    """Each definition in text outside the spans in skip, \\newcommand and
+    its kin or \\def with plain arguments, in order: (start, end, name,
+    arguments, default, body, provide), end just past the body's closing
+    brace, default the first argument's when it's optional, else None, and
+    provide whether it's \\providecommand."""
+    found = []
+    for m in MACRO_DEFINITION.finditer(text):
+        if in_spans(m.start(), skip):
+            continue
+        pos, default = m.end(), None
+        if text.startswith("[", pos):
+            close = closing_bracket(text, pos)
+            if close < 0:
+                continue
+            default = text[pos + 1:close]
+            pos = close + 1
+            while pos < len(text) and text[pos].isspace():
+                pos += 1
+        if not text.startswith("{", pos):
+            continue
+        close = matching_brace(text, pos)
+        if close < 0:
+            continue
+        found.append((m.start(), close, m.group(1) or m.group(2), int(m.group(3) or 0),
+                      default, text[pos + 1:close - 1],
+                      text.startswith("\\providecommand", m.start())))
+    for m in PLAIN_DEFINITION.finditer(text):
+        if in_spans(m.start(), skip):
+            continue
+        close = matching_brace(text, m.end() - 1)
+        if close < 0:
+            continue
+        found.append((m.start(), close, m.group(1), len(re.findall(r"#\d", m.group(2))),
+                      None, text[m.end():close - 1], False))
+    return sorted(found)
+
+
+def _input_target(by_name, name, target):
+    """The text in by_name a file name's \\input of target reads, or None."""
+    target = target.strip().strip('"')
+    folder = os.path.dirname(name)
+    for candidate in (os.path.join(folder, target), os.path.join(folder, target + ".tex"),
+                      target, target + ".tex"):
+        if os.path.normpath(candidate) in by_name:
+            return os.path.normpath(candidate)
+    return None
+
+
+def reading_order(texts, includes=None, after_preamble=None, at=None, watch=None):
+    """What LaTeX meets in the book's files, in the order it reads them:
+    texts is [(name, text)], the master first, and each file is read where
+    it's \\input or \\include-d, or where a call of one of includes
+    (include_macros) puts it; after_preamble, a name in texts, is read at
+    the master's \\begin{document}, as a person's definitions file is.
+    Yields (kind, text's name, item): "spans" once for each text, with the
+    (start, end) of every definition in it; "define", definitions_in's
+    tuple; "at", for each position at gives the text, the position; and
+    "match", each of watch's matches in code outside a definition."""
+    by_name = dict(texts)
+    master = texts[0][0] if texts else None
+    visited = set()
+
+    def walk(name):
+        if name in visited or name not in by_name:
+            return
+        visited.add(name)
+        text = by_name[name]
+        skip = skip_spans(text)
+        found = definitions_in(text, skip)
+        yield "spans", name, [(d[0], d[1]) for d in found]
+        inside = sorted(skip + [(d[0], d[1]) for d in found])
+        events = [(d[0], 1, "define", d) for d in found]
+        events += [(m.start(), 0, "input", m.group(2) or m.group(3) or "")
+                   for m in INPUT.finditer(text) if not in_spans(m.start(), inside)]
+        for start, _, targets in include_calls(text, includes or {}, inside):
+            events += [(start, 0, "input", target) for target in targets]
+        if name == master and after_preamble:
+            begin = code_matches(BEGIN_DOCUMENT, text, skip)
+            if begin:
+                events.append((begin[0].start(), 0, "after preamble", after_preamble))
+        events += [(pos, 2, "at", pos) for pos in (at or {}).get(name, ())]
+        if watch is not None:
+            events += [(m.start(), 1, "match", m) for m in watch.finditer(text)
+                       if not in_spans(m.start(), inside)]
+        for _, _, kind, value in sorted(events, key=lambda e: (e[0], e[1])):
+            if kind == "input":
+                target = _input_target(by_name, name, value)
+                if target:
+                    yield from walk(target)
+            elif kind == "after preamble":
+                yield from walk(value)
+            else:
+                yield kind, name, value
+    for name, _ in texts:
+        yield from walk(name)
+
+
+def macro_walk(texts, describe, includes=None, after_preamble=None, at=None):
+    """The book's definitions, read as LaTeX reads them (reading_order, which
+    takes texts, includes, after_preamble, and at), so a later definition
+    replaces an earlier one, and \\providecommand defines only a name
+    nothing has defined yet. describe(body, arguments, default) is what a
+    definition makes of its macro, or None for one of no interest.
+
+    Returns (macros, spans, values): {name: description}; {text's name:
+    [(start, end)]}, the span of every definition in each text; and for
+    each (text's name, position) in at, a list of positions by text, the
+    value there of each macro defined without arguments, {name: body}, as
+    \\chapterfolder is set at each chapter's start (OpenIntro Statistics)."""
+    macros, defined, values, spans_by_text, snapshots = {}, set(), {}, {}, {}
+
+    def define(found, arguments, default, body, provide):
+        if provide and found in defined:
+            return
+        defined.add(found)
+        macro = describe(body, arguments, default)
+        if macro:
+            macros[found] = macro
+        else:
+            macros.pop(found, None)
+        if arguments == 0 and default is None:
+            values[found] = body
+        else:
+            values.pop(found, None)
+    for kind, name, value in reading_order(texts, includes, after_preamble, at):
+        if kind == "spans":
+            spans_by_text[name] = value
+        elif kind == "define":
+            define(*value[2:])
+        elif kind == "at":
+            snapshots[(name, value)] = dict(values)
+    return macros, spans_by_text, snapshots
+
+
+def image_macros(texts, includes=None, after_preamble=None):
     """({name: macro}, {text's name: [(start, end)]}): each macro the book
     defines, with \\newcommand and its kin or \\def with plain arguments,
     whose body holds one \\includegraphics with its file made from one of
@@ -1252,78 +1813,57 @@ def image_macros(texts):
     optional, else None; file, the file as the body writes it, #1 and
     all; body, the whole body; alt, the argument the body's own alt key
     takes, or None; keyed, whether the body gives alt text or artifact of
-    its own. texts is [(name, text)], the master first: the definitions
-    are read in the order LaTeX reads them, each file where it's \\input,
-    so a later definition replaces an earlier one, and \\providecommand
-    defines only a name nothing has defined yet."""
-    by_name = dict(texts)
-    macros, defined, spans_by_text, visited = {}, set(), {}, set()
+    its own. texts, includes, and after_preamble are as macro_walk reads
+    them."""
+    return macro_walk(texts, image_macro, includes, after_preamble)[:2]
 
-    def define(found, macro, provide=False):
-        if provide and found in defined:
-            return
-        defined.add(found)
-        if macro:
-            macros[found] = macro
-        else:
-            macros.pop(found, None)
 
-    def walk(name):
-        if name in visited or name not in by_name:
-            return
-        visited.add(name)
-        text = by_name[name]
-        skip = skip_spans(text)
-        here, events = [], []
-        for kind, pattern in (("new", MACRO_DEFINITION), ("plain", PLAIN_DEFINITION),
-                              ("input", INPUT)):
-            events += [(m.start(), kind, m) for m in pattern.finditer(text)
-                       if not in_spans(m.start(), skip)]
-        for _, kind, m in sorted(events, key=lambda e: e[0]):
-            if kind == "input":
-                target = (m.group(2) or m.group(3) or "").strip().strip('"')
-                folder = os.path.dirname(name)
-                for candidate in (os.path.join(folder, target), os.path.join(folder, target + ".tex"),
-                                  target, target + ".tex"):
-                    if os.path.normpath(candidate) in by_name:
-                        walk(os.path.normpath(candidate))
-                        break
-            elif kind == "new":
-                pos, default = m.end(), None
-                if text.startswith("[", pos):
-                    close = closing_bracket(text, pos)
-                    if close < 0:
-                        continue
-                    default = text[pos + 1:close]
-                    pos = close + 1
-                    while pos < len(text) and text[pos].isspace():
-                        pos += 1
-                if not text.startswith("{", pos):
-                    continue
-                close = matching_brace(text, pos)
-                if close < 0:
-                    continue
-                here.append((m.start(), close))
-                define(m.group(1) or m.group(2),
-                       image_macro(text[pos + 1:close - 1], int(m.group(3) or 0), default),
-                       provide=text.startswith("\\providecommand", m.start()))
-            else:
-                close = matching_brace(text, m.end() - 1)
-                if close < 0:
-                    continue
-                here.append((m.start(), close))
-                define(m.group(1), image_macro(text[m.end():close - 1],
-                                               len(re.findall(r"#\d", m.group(2))), None))
-        spans_by_text[name] = sorted(here)
-    for name, _ in texts:
-        walk(name)
-    return macros, spans_by_text
+def include_macro(body, arguments, default):
+    """The macro, if its body \\include-s or \\input-s a file whose name
+    is made from one of its arguments, as OpenIntro Statistics's
+    \\includechapter{1}{ch_intro_to_data} \\include-s
+    ch_intro_to_data/TeX/ch_intro_to_data: a dict of arguments, default
+    (as image_macros has them), body, and targets, the names as the body
+    writes them, #2 and all. Else None."""
+    if "##" in body:
+        return None
+    skip = skip_spans(body)
+    targets = [m.group(2) or m.group(3) for m in INPUT.finditer(body)
+               if not in_spans(m.start(), skip)]
+    if not any(re.search(r"#\d", t) for t in targets):
+        return None
+    return {"arguments": arguments, "default": default, "body": body, "targets": targets}
+
+
+def include_macros(texts):
+    """{name: macro}: each macro the book defines that \\include-s or
+    \\input-s a file named by its arguments (include_macro). texts is as
+    macro_walk reads it."""
+    return macro_walk(texts, include_macro)[0]
+
+
+def with_arguments(body, args):
+    """body with each #n the call's nth argument, as TeX expands it."""
+    return re.sub(r"#(\d)", lambda m: args[int(m.group(1)) - 1][0]
+                  if int(m.group(1)) <= len(args) else m.group(0), body)
+
+
+def include_calls(text, macros, skip):
+    """(start, end, targets) for each call in text, outside skip, of one
+    of macros (include_macros): the names the call \\include-s or
+    \\input-s, as it makes them."""
+    return [(start, end, [with_arguments(t, args).strip() for t in macros[name]["targets"]])
+            for start, end, name, args in macro_calls(text, macros, skip)]
+
+
+ARGUMENT_SPACE = re.compile(r"(?:[ \t]*%[^\n]*\n)*[ \t]*(?:\n(?:[ \t]*%[^\n]*\n)*[ \t]*)?")
 
 
 def argument_space(text, pos):
-    """Past the spaces TeX skips before an argument: blanks and at most
-    one line end, since a blank line is a paragraph."""
-    return re.compile(r"[ \t]*(?:\n[ \t]*)?").match(text, pos).end()
+    """Past the spaces TeX skips before an argument: blanks, comments
+    with the line end they take, and at most one line end of its own,
+    since a blank line is a paragraph."""
+    return ARGUMENT_SPACE.match(text, pos).end()
 
 
 def macro_calls(text, macros, skip):
@@ -1364,30 +1904,306 @@ def macro_calls(text, macros, skip):
     return calls
 
 
-def expand_image_macros(texts, files, counter):
-    """Each call of one of the book's macros for an image, outside any
-    definition, replaced in the reading copy by the macro's body with its
-    arguments, as Pandoc expands it, so the \\includegraphics in it is
-    there for repair_graphics to point at a file a browser shows. A body
-    holding a table or a drawing is left as it is, since its file's tables
-    and drawings are counted in the author's text. texts: {name: text},
+NEWENVIRONMENT = re.compile(r"\\(re)?newenvironment\s*\{\s*([A-Za-z@]+)\s*\}")
+ENVIRONMENT_EDGE = re.compile(r"\\(begin|end)\s*\{\s*([A-Za-z@]+)\s*\}")
+
+
+def environment_definitions_in(text, spans=None):
+    """(start, stop, renew, name, spec, bodies) for each \\newenvironment and
+    \\renewenvironment in text's code whose codes are both braced, spec its
+    [n][default] as written and bodies its two codes, braces and all, and
+    none made inside another's codes."""
+    spans = skip_spans(text) if spans is None else spans
+    found = []
+    for m in NEWENVIRONMENT.finditer(text):
+        if in_spans(m.start(), spans):
+            continue
+        pos, spec = m.end(), ""
+        for _ in range(2):          # [n] and [default]
+            at = argument_space(text, pos)
+            if not text.startswith("[", at):
+                break
+            close = closing_bracket(text, at)
+            if close < 0:
+                break
+            spec += text[at:close + 1]
+            pos = close + 1
+        bodies = []
+        for _ in range(2):          # {opening} and {closing}
+            at = argument_space(text, pos)
+            if not text.startswith("{", at):
+                break
+            close = matching_brace(text, at)
+            if close < 0:
+                break
+            bodies.append(text[at:close])
+            pos = close
+        if len(bodies) == 2:
+            found.append((m.start(), pos, bool(m.group(1)), m.group(2), spec, bodies))
+    return [d for d in found if not any(o[0] < d[0] < o[1] for o in found)]
+
+
+def environment_definitions(texts, files, counter):
+    """Each environment the book defines with \\newenvironment written, in
+    the reading copy, as LaTeX defines it: a command \\name for its opening
+    code and \\endname for its closing, each \\begin{name} and \\end{name}
+    as those commands. Pandoc's reader puts a group around the codes
+    (Readers/LaTeX/Macro.hs, the \\bgroup newenvironment prepends), and
+    stops where that group meets the book's own: on the opening command
+    called alone, \\var{x}, as LaTeX allows and OpenIntro Statistics does
+    about 1,700 times (\\var, \\resp, \\data, \\eoce), since nothing closes
+    the group; and on {\\raggedright\\begin{parts}...\\end{parts}}, where
+    the group's \\bgroup, after a command, is dropped as one the reader
+    doesn't know and its \\egroup closes the braces (Readers/LaTeX.hs,
+    blockCommand). Without the group the reader reads them as LaTeX does;
+    a definition made inside the environment holds after it. One defined
+    in another's codes, and LaTeX's own that the book redefines with
+    \\renewenvironment (enumerate), are left to the reader: the commands
+    would hold from the start of the book, where LaTeX's definitions do
+    until the book's are made. texts: {name: text}, changed in place."""
+    defined = set()
+    for name in files:
+        for d in environment_definitions_in(texts[name]):
+            if not d[2]:
+                defined.add(d[3])
+    if not defined:
+        return
+    for name in files:
+        text = texts[name]
+        # \begin{name} and \end{name} first, in the definitions' codes too.
+        spans = skip_spans(text)
+        edges = []
+        for m in ENVIRONMENT_EDGE.finditer(text):
+            if m.group(2) in defined and not in_spans(m.start(), spans):
+                # A space ends the command's name, as TeX takes it, so the
+                # next letters aren't read as more of it.
+                edges.append((m.start(), m.end(), "\\%s%s " % (
+                    "" if m.group(1) == "begin" else "end", m.group(2))))
+        for start, stop, replacement in reversed(edges):
+            text = text[:start] + replacement + text[stop:]
+        edits = []                      # (start, stop, replacement)
+        for start, stop, renew, env, spec, bodies in environment_definitions_in(text):
+            if env not in defined:
+                continue
+            command = "\\%snewcommand" % ("re" if renew else "")
+            edits.append((start, stop, "%s{\\%s}%s%s%s{\\end%s}%s" % (
+                command, env, spec, bodies[0], command, env, bodies[1])))
+            counter["environment_definitions"] = counter.get("environment_definitions", 0) + 1
+        for start, stop, replacement in reversed(edits):
+            text = text[:start] + replacement + text[stop:]
+        counter["environment_edges"] = counter.get("environment_edges", 0) + len(edges)
+        texts[name] = text
+
+
+DEFINECOLOR = re.compile(r"\\definecolor\s*\{\s*([^{}]+?)\s*\}\s*\{\s*([A-Za-z]+)\s*\}"
+                         r"\s*\{\s*([^{}]*?)\s*\}")
+COLOR_USE = re.compile(r"\\(textcolor|colorbox)\s*(?:\[\s*([A-Za-z]+)\s*\])?\s*\{\s*([^{}]*?)\s*\}")
+
+
+def css_color(model, spec):
+    """A color as xcolor gives it, in one of its models, as CSS: rgb(...),
+    or None for a model or value this doesn't take."""
+    parts = [p.strip() for p in spec.split(",")]
+    try:
+        if model == "rgb":
+            rgb = [round(float(p) * 255) for p in parts]
+        elif model == "RGB":
+            rgb = [round(float(p)) for p in parts]
+        elif model == "HTML" and re.fullmatch(r"[0-9A-Fa-f]{6}", spec):
+            rgb = [int(spec[i:i + 2], 16) for i in (0, 2, 4)]
+        elif model == "gray" and len(parts) == 1:
+            rgb = [round(float(parts[0]) * 255)] * 3
+        elif model == "cmyk" and len(parts) == 4:
+            c, m, y, k = (float(p) for p in parts)
+            rgb = [round(255 * (1 - v) * (1 - k)) for v in (c, m, y)]
+        else:
+            return None
+    except ValueError:
+        return None
+    if len(rgb) != 3:
+        return None
+    return "rgb(%d, %d, %d)" % tuple(max(0, min(255, v)) for v in rgb)
+
+
+def environment_spans(text, names, spans=None):
+    """The (start, end) of each environment of names in text's code."""
+    spans = skip_spans(text) if spans is None else spans
+    begin = re.compile(r"\\begin\s*\{(" + "|".join(map(re.escape, names)) + r")\}")
+    found, pos = [], 0
+    while True:
+        m = begin.search(text, pos)
+        if not m:
+            break
+        if in_spans(m.start(), spans):
+            pos = m.end()
+            continue
+        end = environment_end(text, m.group(1), m.start())
+        if end < 0:
+            break
+        found.append((m.start(), end))
+        pos = end
+    return found
+
+
+def book_colors(texts, includes=None):
+    """The book's \\definecolor statements, as matches, in the order LaTeX
+    reads them (reading_order, which takes texts and includes), so a later
+    one replaces an earlier, as OpenIntro's main.tex would set its blue to
+    black after the file of colors it \\include-s. One in a definition
+    defines nothing until the definition is used, and its #1 is nothing
+    outside it."""
+    return [m for kind, _, m in reading_order(texts, includes, watch=DEFINECOLOR)
+            if kind == "match" and "#" not in m.group(0)]
+
+
+def resolve_colors(texts, files, counter):
+    """Each \\textcolor and \\colorbox given its color in one of xcolor's
+    models ([rgb]{.5,.5,.5}) written with the color as CSS, rgb(...), outside
+    formulas, drawings, and definitions, all of which LaTeX may read: the
+    reader drops the model and writes the values as the span's CSS color
+    (coloredInline, Readers/LaTeX.hs). A color the book names is made CSS
+    after the reading (color_spans), so a formula, a drawing, or a macro
+    either uses still names it, for LaTeX to draw. texts: {name: text},
     changed in place."""
-    macros, definitions = image_macros([(name, texts[name]) for name in files])
-    macros = {n: m for n, m in macros.items() if not TABLE_OR_DRAWING.search(m["body"])}
+    for name in files:
+        text = texts[name]
+        spans = skip_spans(text)
+        latex = sorted(math_spans(text, spans) + environment_spans(text, DRAWINGS, spans)
+                       + [(d[0], d[1]) for d in definitions_in(text, spans)])
+
+        def write(m):
+            if not m.group(2) or in_spans(m.start(), latex):
+                return m.group(0)
+            css = css_color(m.group(2), m.group(3))
+            if not css:
+                return m.group(0)
+            counter["colors"] = counter.get("colors", 0) + 1
+            return "\\%s{%s}" % (m.group(1), css)
+        texts[name] = substitute(COLOR_USE, text, write, {}, "colors")
+
+
+def color_values(statements):
+    """{name: CSS} for the book's \\definecolor statements, in the order
+    LaTeX reads them (book_colors), the last of a name's winning; a name
+    whose last definition CSS can't take has none."""
+    values = {}
+    for statement in statements:
+        m = DEFINECOLOR.match(statement)
+        if not m:
+            continue
+        css = css_color(m.group(2), m.group(3))
+        if css:
+            values[m.group(1)] = css
+        else:
+            values.pop(m.group(1), None)
+    return values
+
+
+COLOR_STYLE = re.compile(r"^((?:background-)?color): (.*)$", re.S)
+
+
+def color_spans(node, values):
+    """Each span the reader made of \\textcolor or \\colorbox in a color the
+    book defines given the color as CSS, in place: the reader writes the
+    name as it is, and a name only the book's preamble defines isn't a CSS
+    color (the Nu checker found 785 on OpenIntro Statistics's pages: "oiB"
+    is not a color value). A name CSS knows (red, black) is left, as one
+    the book doesn't define. Returns how many."""
+    changed = 0
+    if isinstance(node, list):
+        for item in node:
+            changed += color_spans(item, values)
+    elif isinstance(node, dict):
+        if node.get("t") == "Span":
+            for pair in node["c"][0][2]:
+                m = COLOR_STYLE.match(pair[1]) if pair[0] == "style" else None
+                if m and m.group(2).strip() in values:
+                    pair[1] = "%s: %s" % (m.group(1), values[m.group(2).strip()])
+                    changed += 1
+        if "c" in node:
+            changed += color_spans(node["c"], values)
+    return changed
+
+
+def expand_include_macros(texts, files, counter):
+    """Each call of one of the book's macros that \\include-s a file
+    (include_macros), outside any definition, replaced in the reading copy
+    by the macro's body with its arguments, as Pandoc expands it, so the
+    \\include in it is where the pages are cut and the book's order read.
+    texts: {name: text}, changed in place."""
+    macros = include_macros([(name, texts[name]) for name in files])
     if not macros:
         return
     for name in files:
         text = texts[name]
-        calls = macro_calls(text, macros, sorted(skip_spans(text) + definitions.get(name, [])))
+        skip = sorted(skip_spans(text) + [(d[0], d[1]) for d in definitions_in(text, ())])
+        for start, end, macro_name, args in reversed(macro_calls(text, macros, skip)):
+            text = text[:start] + with_arguments(macros[macro_name]["body"], args) + text[end:]
+            counter["include_macro_calls"] = counter.get("include_macro_calls", 0) + 1
+        texts[name] = text
+
+
+SIMPLE_VALUE = re.compile(r"[^\\#{}%]*")
+
+
+def with_values(text, values):
+    """text with each macro of values, the book's macros without arguments
+    as they're defined there (macro_walk), written as its value, when that
+    is plain text: \\chapterfolder/figures/#3/#3 as
+    ch_intro_to_data/figures/#3/#3."""
+    def value(m):
+        found = values.get(m.group(1))
+        if found is not None and SIMPLE_VALUE.fullmatch(found):
+            return found.strip()
+        return m.group(0)
+    for _ in range(3):
+        changed = re.sub(r"\\([A-Za-z@]+)(?![A-Za-z@])(?:\{\})?", value, text)
+        if changed == text:
+            break
+        text = changed
+    return text
+
+
+def expand_image_macros(texts, files, counter, definitions_file=None):
+    """Each call of one of the book's macros for an image, outside any
+    definition, replaced in the reading copy by the macro's body with its
+    arguments, as Pandoc expands it, so the \\includegraphics in it is
+    there for repair_graphics to point at a file a browser shows; a macro
+    without arguments in the file's name is written as its value at the
+    call (with_values). A body holding a table or a drawing is left as it
+    is, since its file's tables and drawings are counted in the author's
+    text. texts: {name: text}, changed in place; definitions_file, (name,
+    text) of a person's definitions, read after the preamble, so they win
+    over the book's (macro_walk's after_preamble)."""
+    order = [(name, texts[name]) for name in files]
+    after = None
+    if definitions_file:
+        order.append(definitions_file)
+        after = definitions_file[0]
+    macros, spans = image_macros(order, after_preamble=after)
+    macros = {n: m for n, m in macros.items() if not TABLE_OR_DRAWING.search(m["body"])}
+    if not macros:
+        return
+    calls = {name: macro_calls(texts[name], macros,
+                               sorted(skip_spans(texts[name]) + spans.get(name, [])))
+             for name in files}
+    values = macro_walk(order, lambda *_: None, after_preamble=after,
+                        at={name: [c[0] for c in found] for name, found in calls.items()})[2]
+    for name in files:
+        text = texts[name]
         last = len(text) + 1
-        for start, end, macro_name, args in reversed(calls):
+        for start, end, macro_name, args in reversed(calls[name]):
             if end > last:              # one call inside another's arguments
                 continue
-            expanded = re.sub(
-                r"#(\d)", lambda m: args[int(m.group(1)) - 1][0]
-                if int(m.group(1)) <= len(args) else m.group(0),
-                macros[macro_name]["body"])
-            text = text[:start] + expanded + text[end:]
+            macro = macros[macro_name]
+            body = macro["body"]
+            # The file's name with the values its macros have at the call.
+            m = BODY_GRAPHICS.search(body)
+            close = matching_brace(body, m.end() - 1)
+            body = (body[:m.end()] + with_values(body[m.end():close - 1],
+                                                 values.get((name, start), {}))
+                    + body[close - 1:])
+            text = text[:start] + with_arguments(body, args) + text[end:]
             last = start
             counter["image_macro_calls"] = counter.get("image_macro_calls", 0) + 1
         texts[name] = text
@@ -1547,8 +2363,16 @@ def prepare(base, work, master, say, macros=""):
     files, missing = reached(base, master)
     counts = {}
     texts = {}
+    in_math = math_macros([read_text(os.path.join(base, name)) for name in files])
     for name in files:
-        texts[name] = repair_text(read_text(os.path.join(base, name)), counts)
+        texts[name] = repair_text(read_text(os.path.join(base, name)), counts, in_math)
+    # A chapter \include-d by the book's own macro, written out, so the
+    # pages are cut where it begins; the book's environments as the
+    # commands LaTeX makes of them, which Pandoc's reader can balance; its
+    # colors as CSS.
+    expand_include_macros(texts, files, counts)
+    environment_definitions(texts, files, counts)
+    resolve_colors(texts, files, counts)
     write_out_columns(texts, counts)
     write_out_item_refs(texts, counts)
     folder = os.path.dirname(master)
@@ -1596,8 +2420,12 @@ def prepare(base, work, master, say, macros=""):
         texts[name] = text
 
     # Images behind the book's own macros, written out, then all of them
-    # given the extension, PDF and EPS made SVG.
-    expand_image_macros(texts, files, counts)
+    # given the extension, PDF and EPS made SVG. A person's definitions
+    # win over the book's, as they do in the reading.
+    definitions_file = None
+    if macros and os.path.isfile(os.path.join(base, macros)):
+        definitions_file = (macros, read_text(os.path.join(base, macros)))
+    expand_image_macros(texts, files, counts, definitions_file)
     record_path = os.path.join(base, RENDERED, ".rendered.json")
     try:
         with open(record_path, encoding="utf-8") as fh:
@@ -1645,9 +2473,13 @@ def prepare(base, work, master, say, macros=""):
     texts[master] = preamble_copy + "".join(pieces) + rest
     for name, text in texts.items():
         write_text(os.path.join(copy, name), text)
+    # The book's colors, for a PDF built from its pages, whose formulas
+    # can still name one: the reader keeps a formula's TeX as written.
+    originals = [(name, read_text(os.path.join(base, name))) for name in files]
+    colors = [m.group(0) for m in book_colors(originals, include_macros(originals))]
     return {"master": os.path.join(copy, master), "order": order,
             "front_role": front_role, "files": files, "missing": missing,
-            "counts": counts, "preamble": preamble, "copy": copy}
+            "counts": counts, "preamble": preamble, "copy": copy, "colors": colors}
 
 
 TABLE_BEGIN = re.compile(r"\\begin\s*\{(tabular\*?|tabularx|longtable)\}")
@@ -1825,6 +2657,7 @@ def mark_tables(text, file_index):
 
 
 def stringify(inlines):
+    """The text of a title or a name, without a \\thanks's note."""
     out = []
 
     def walk(node):
@@ -1836,6 +2669,8 @@ def stringify(inlines):
                 out.append(" ")
             elif kind == "Math":
                 out.append(node["c"][1])
+            elif kind == "Note":
+                return
             elif "c" in node:
                 walk(node["c"])
         elif isinstance(node, list):
@@ -1843,6 +2678,36 @@ def stringify(inlines):
                 walk(item)
     walk(inlines)
     return " ".join("".join(out).split())
+
+
+SET_APART = {"Emph", "Strong", "SmallCaps", "Underline", "Span"}
+
+
+def author_names(inlines):
+    """The names in one \\author, as Pandoc reads it, its lines split at
+    \\\\: a line set as the first line is (plain, or all in italics, say)
+    is a name, and one set differently is the affiliation under a name.
+    OpenIntro Statistics names three authors in one \\author with no
+    \\and, each with an employer in italics beneath; read whole, they
+    were one author of 20 words. With every line set alike, each is
+    given, an affiliation as a name, so no author is left out."""
+    lines, line = [], []
+    for node in inlines:
+        if node.get("t") == "LineBreak":
+            lines.append(line)
+            line = []
+        else:
+            line.append(node)
+    lines.append(line)
+    lines = [l for l in lines if stringify(l)]
+
+    def apart(l):
+        return all(n.get("t") in SET_APART for n in l
+                   if n.get("t") not in ("Space", "SoftBreak", "Note"))
+    if not lines:
+        return []
+    first = apart(lines[0])
+    return [stringify(l) for l in lines if apart(l) == first]
 
 
 def cut_pages(doc, order, master_stem, front_role):
@@ -1908,11 +2773,29 @@ def definitions(texts):
     return found
 
 
+def math_macros(texts):
+    """The names of the book's macros a formula uses, and of those their
+    bodies use in turn: texmath reads each body there, as Pandoc expands
+    it, so a rewrite for the reader of text mustn't touch them."""
+    found_defs = definitions(texts)
+    uses = math_uses(texts, sorted(found_defs))
+    found = {n for n, k in uses.items() if k}
+    queue = sorted(found)
+    while queue:
+        for m in re.finditer(r"\\([A-Za-z@]+)", found_defs[queue.pop()][1]):
+            if m.group(1) in found_defs and m.group(1) not in found:
+                found.add(m.group(1))
+                queue.append(m.group(1))
+    return found
+
+
 def math_uses(texts, names):
     """How often each macro is used inside a formula, in code."""
     uses = dict.fromkeys(names, 0)
+    if not names:
+        return uses
     pattern = re.compile(r"\\(" + "|".join(re.escape(n) for n in names)
-                         + r")(?![A-Za-z@])") if names else None
+                         + r")(?![A-Za-z@])")
     for text in texts:
         spans = skip_spans(text)
         for m in MATH_SPANS.finditer(text):
@@ -1959,6 +2842,9 @@ def suggest(body):
     return None
 
 
+PROBE_MARK = "TEXTBOOKIMPROVERPROBE"
+
+
 def probe(copy, preamble, macros, filter_path, extra=""):
     """Which of macros [(name, arguments)] give a formula texmath can't
     make MathML of, read with the book's preamble (and extra definitions)
@@ -1966,8 +2852,11 @@ def probe(copy, preamble, macros, filter_path, extra=""):
     if not macros:
         return set()
     head, _, _ = preamble.rpartition("\\begin")
-    body = "".join("\n\n$\\%s%s$\n" % (n, "".join("{x}" for _ in range(a)))
-                   for n, a in macros)
+    # Each formula after a mark of its own: a macro whose expansion ends a
+    # paragraph, or makes a block, would otherwise put every formula after
+    # it against the wrong macro.
+    body = "".join("\n\n%s%d $\\%s%s$\n" % (PROBE_MARK, i, n, "".join("{x}" for _ in range(a)))
+                   for i, (n, a) in enumerate(macros))
     path = os.path.join(copy, "TextbookImproverProbe.tex")
     write_text(path, head + extra + "\n\\begin{document}\n" + body
                + "\n\\end{document}\n")
@@ -1977,38 +2866,98 @@ def probe(copy, preamble, macros, filter_path, extra=""):
                           cwd=copy, capture_output=True, text=True)
     if read.returncode != 0:
         return set()
-    doc = json.loads(read.stdout)
     html = subprocess.run(["pandoc", "-f", "json", "-t", "html",
                            "--math-method=mathml"], input=read.stdout,
                           capture_output=True, text=True).stdout
-    paragraphs = re.findall(r"<p>(.*?)</p>", html, re.S)
-    failing = set()
-    formulas = [b for b in doc["blocks"] if b.get("t") == "Para"]
-    for (name, _), block, para in zip(macros, formulas, paragraphs):
-        if "<math" not in para:
-            failing.add(name)
-    return failing
+    parts = re.split(PROBE_MARK + r"(\d+)", html)
+    after = {int(parts[k]): parts[k + 1] for k in range(1, len(parts) - 1, 2)}
+    return {name for i, (name, _) in enumerate(macros) if "<math" not in after.get(i, "")}
+
+
+def alt_arguments(texts, definitions_text=""):
+    """[(name, argument, given, calls, example, definition)]: each of the
+    book's macros for an image (image_macros) taking an argument its body
+    never uses, which at least half of its calls give a phrase in, as an
+    author writes alt text there for another build: OpenIntro Statistics's
+    \\Figure[alt]{width}{name}, whose first argument reaches only its
+    screen-reader build (style_simple.tex, as \\pdftooltip's text), in 293
+    of its 318 calls. definition passes the argument on as the image's alt
+    text; it's a person's to adopt, since only a person can say that the
+    phrase is that. A macro definitions_text, a person's definitions file,
+    redefines already is left out."""
+    macros, spans = image_macros(texts)
+    found = []
+    for name, macro in sorted(macros.items()):
+        if macro["alt"] is not None or macro["keyed"] or re.search(
+                r"\\renewcommand\s*\{?\s*\\%s(?![A-Za-z@])" % re.escape(name), definitions_text):
+            continue
+        body = macro["body"]
+        unused = [k for k in range(1, macro["arguments"] + 1)
+                  if not re.search(r"#%d(?!\d)" % k, body)]
+        calls = []
+        for text_name, text in texts if unused else ():
+            calls += macro_calls(text, {name: macro},
+                                 sorted(skip_spans(text) + spans.get(text_name, [])))
+        for k in unused if calls else ():
+            given = [args[k - 1][0].strip() for _, _, _, args in calls
+                     if args[k - 1][1] is not None and len(args[k - 1][0].strip()) >= 10
+                     and " " in args[k - 1][0].strip()]
+            if len(given) * 2 < len(calls):
+                continue
+            m = BODY_GRAPHICS.search(body)
+            if m.group(2):
+                passed = body[:m.start(2) + 1] + "alt={#%d}," % k + body[m.start(2) + 1:]
+            else:
+                passed = body[:m.end() - 1] + "[alt={#%d}]" % k + body[m.end() - 1:]
+            spec = ("[%d]" % macro["arguments"] if macro["arguments"] else "") + (
+                "[%s]" % macro["default"] if macro["default"] is not None else "")
+            found.append((name, k, len(given), len(calls), given[0],
+                          "\\renewcommand{\\%s}%s{%s}" % (name, spec, passed)))
+            break
+    return found
 
 
 def macro_sample(base, preps, filter_path, macros_file, say):
     """Write latex-conversion-macros-sample.tex: the book's macros whose
     formulas texmath still can't read, a definition for each whose drawing
-    has one reading, and the rest as written, for a person to define.
+    has one reading, and the rest as written, for a person to define; and
+    the book's macros for an image with an argument that may be alt text
+    (alt_arguments), each with the definition that would pass it on.
     preps: what prepare returned, for each of the book's documents, each
-    probed with its own preamble. Returns (suggested, left)."""
+    probed with its own preamble. Returns (suggested, left, alt), alt the
+    names of those image macros."""
     if isinstance(preps, dict):
         preps = [preps]
     defined, uses, failing, suggestions = {}, {}, set(), {}
+    person = read_text(os.path.join(base, macros_file)) \
+        if macros_file and os.path.isfile(os.path.join(base, macros_file)) else ""
+    alt = {}
+    for prep in preps:
+        for found in alt_arguments([(n, read_text(os.path.join(base, n)))
+                                    for n in prep["files"]], person):
+            alt.setdefault(found[0], found)
     for prep in preps:
         copy = prep["copy"]
         texts = [read_text(os.path.join(copy, n)) for n in prep["files"]]
-        own = definitions(texts)
+        originals = [read_text(os.path.join(base, n)) for n in prep["files"]]
+        # The commands the reading copy makes of the book's environments
+        # are the copy's, not the book's macros, and a person's definition
+        # goes by the book's own text, not the copy's.
+        environments = {d[3] for t in originals for d in environment_definitions_in(t)}
+        made = environments | {"end" + e for e in environments}
+        own = {n: d for n, d in definitions(texts).items() if n not in made}
+        authors = definitions(originals)
         own_uses = math_uses(texts, sorted(own))
         used = [(n, own[n][0]) for n in sorted(own) if own_uses[n]]
         copy_preamble = split_master(read_text(prep["master"]))[0]
-        own_failing = probe(copy, copy_preamble, used, filter_path)
+        # A macro the book defines in its text, where it's used (OpenIntro
+        # sets \actmean to 21 in the section that uses it): the probe, which
+        # has only the preamble, gets the definition too, or its formula
+        # would fail for the macro being unknown.
+        in_text = "".join(own[n][2] + "\n" for n, _ in used if own[n][2] not in copy_preamble)
+        own_failing = probe(copy, copy_preamble, used, filter_path, in_text)
         for name in own_failing:
-            defined.setdefault(name, own[name])
+            defined.setdefault(name, own[name][:2] + (authors.get(name, own[name])[2],))
             uses[name] = uses.get(name, 0) + own_uses[name]
         failing |= own_failing
         own_suggestions = {}
@@ -2021,22 +2970,35 @@ def macro_sample(base, preps, filter_path, macros_file, say):
             n, "[%d]" % own[n][0] if own[n][0] else "", s)
             for n, s in own_suggestions.items())
         still = probe(copy, copy_preamble, [(n, own[n][0]) for n in own_suggestions],
-                      filter_path, extra) if own_suggestions else set()
+                      filter_path, in_text + extra) if own_suggestions else set()
         for name, s in own_suggestions.items():
             if name not in still:
                 suggestions.setdefault(name, s)
     sample = os.path.join(base, SAMPLE)
-    if not failing:
+    if not failing and not alt:
         if os.path.exists(sample):
             os.remove(sample)
-        return 0, 0
+        return 0, 0, []
     lines = [
         "% Written by convert.py: the book's macros whose formulas texmath",
-        "% can't make MathML of, so they reach the pages as TeX. Check it,",
-        "% then save it as " + macros_file + " (or merge it into yours).",
+        "% can't make MathML of, so they reach the pages as TeX, and its",
+        "% macros for an image with an argument that may be alt text. Check",
+        "% it, then save it as " + macros_file + " (or merge it into yours).",
         "% Definitions there are read after the book's preamble, so they",
         "% win; the book's own files never change, and a source target",
         "% writes them into its copy unless its latex_definitions is off.", ""]
+    for name, k, given, calls, example, definition in (alt[n] for n in sorted(alt)):
+        shown = re.sub(r"\s+", " ", example)
+        lines.append("%% \\%s is the book's macro for an image, and it doesn't use its "
+                     "argument %d," % (name, k))
+        lines.append("%% which %d of its %d calls give a phrase in, as alt text might be:"
+                     % (given, calls))
+        lines.append("%%   \"%s\"" % (shown if len(shown) <= 70 else shown[:67] + "..."))
+        lines.append("% If that is each image's alt text, this passes it on, to the pages")
+        lines.append("% and to a source target's copy, and so to its PDF; a call that")
+        lines.append("% gives none leaves its image without, as before:")
+        lines.extend("% " + line for line in definition.splitlines())
+        lines.append("")
     for name in sorted(failing):
         args, body, written = defined[name]
         lines.append("%% \\%s is used in %d formula(s). The book has:" % (
@@ -2053,4 +3015,4 @@ def macro_sample(base, preps, filter_path, macros_file, say):
                 name, "[%d]" % args if args else ""))
         lines.append("")
     write_text(sample, "\n".join(lines))
-    return len(suggestions), len(failing) - len(suggestions)
+    return len(suggestions), len(failing) - len(suggestions), sorted(alt)

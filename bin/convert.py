@@ -107,6 +107,11 @@ HTML_SOURCE_FILTER = os.path.join(HERE, "html-source.lua")
 HTML_RAW_FILTER = os.path.join(HERE, "html-raw.lua")
 ASCIIDOC_FILTER = os.path.join(HERE, "asciidoc-source.lua")
 LATEX_FILTER = os.path.join(HERE, "latex-source.lua")
+# Markdown files a LaTeX book's repository holds about itself (GitHub's
+# community health files), which aren't pages of the book: OpenIntro
+# Statistics has a LICENSE.md beside its master.
+REPOSITORY_FILES = ("readme.md", "license.md", "contributing.md", "changelog.md",
+                    "code_of_conduct.md", "security.md")
 INCLUDE = re.compile(r"^include::([^\[\s]+\.(?:adoc|asciidoc|asc))\[", re.M)
 SOURCE_EXTENSIONS = (".docx", ".md", ".html", ".adoc", ".asciidoc")
 PAGE_CSS = os.path.join(HERE, "page.css")
@@ -543,6 +548,9 @@ WORD_HEADINGS, WORD_DELETIONS = "keep", "accept"
 LATEX_MAIN = []
 LATEX_MACROS = "latex-conversion-macros.tex"
 LANGUAGE_DECLARED = False
+# A LaTeX book's own \definecolor statements, for a PDF built from its
+# pages, where a formula can still name one (\color{redcards}).
+LATEX_COLORS = []
 
 
 def variant_sources(base, target_name):
@@ -596,7 +604,8 @@ def markdown_sources(base, fragments):
             continue
         if os.path.exists(os.path.join(base, name[:-3] + ".docx")):
             continue
-        if name.lower() == "readme.md" and latex_master(base, quiet=True):
+        # A LaTeX book's repository files, which aren't the book's pages.
+        if name.lower() in REPOSITORY_FILES and latex_master(base, quiet=True):
             continue
         found.append(name)
     return found
@@ -749,13 +758,28 @@ LATEX_READ_CHANGES = (
     ("image_macro_calls", "call of the book's own macro for an image written out, "
      "so its file is found"),
     ("graphics_converted", "PDF or EPS image made SVG"),
+    ("graphics_case", "image named in a different case from its file found as macOS and "
+     "Windows find it (LaTeX on Linux doesn't)"),
     ("visual_title", "title set as large type read as the page's title, its "
      "sections under it"),
     ("boxes", "table of one column of prose, a box around a passage, read as a "
      "division, not a table"),
     ("column_types", "table's column type defined with \\newcolumntype "
      "written out"),
-    ("item_refs", "\\ref to an enumerated item written as the item's number"))
+    ("item_refs", "\\ref to an enumerated item written as the item's number"),
+    ("include_macro_calls", "call of the book's own macro that \\include-s a file "
+     "written out, so the page begins where its file does"),
+    ("environment_definitions", "environment the book defines written as the commands "
+     "LaTeX makes of it, so the reader can balance its groups"),
+    ("group_commands", "\\begingroup and \\endgroup read as braces"),
+    ("kept_groups", "group or number after a command the reader takes whole kept "
+     "apart from it, so it's read"),
+    ("titlesec", "titlesec setting for how a heading looks left out"),
+    ("colors", "color the book defines written as CSS"),
+    ("nameref", "\\nameref read as a link to the label, its text the section's title"),
+    ("subfigures", "\\subfigure read as a subfigure environment, so its label and "
+     "caption are kept"),
+    ("label_keys", "label or reference with whitespace in its key written without"))
 
 
 def read_latex_to_json(base, masters, env, work):
@@ -792,21 +816,51 @@ def read_latex_to_json(base, masters, env, work):
         prep = latexsource.prepare(base, os.path.join(work, f"latex-{index}")
                                    if len(masters) > 1 else work, master, say, LATEX_MACROS)
         preps.append(prep)
+        LATEX_COLORS.extend(c for c in prep["colors"] if c not in LATEX_COLORS)
         for key, n in prep["counts"].items():
             counts[key] = counts.get(key, 0) + n
         out = os.path.join(work, f"latex-book-{index}.json")
-        run(["pandoc", "-f", "latex", "-t", "json",
-             os.path.relpath(prep["master"], prep["copy"]), "-o", out,
-             "--lua-filter=" + LATEX_FILTER], env=env, cwd=prep["copy"])
+        done = run(["pandoc", "-f", "latex", "-t", "json",
+                    os.path.relpath(prep["master"], prep["copy"]), "-o", out,
+                    "--lua-filter=" + LATEX_FILTER], env=env, cwd=prep["copy"], check=False)
+        if done.returncode:
+            # A brace the book never closes reads to the end of the book:
+            # Pandoc says only "unexpected end of input".
+            braces = latexsource.brace_problems(base, prep["files"])
+            die(f"pandoc failed with exit code {done.returncode}, reading {master}."
+                + (" A brace isn't matched in the book's files, which Pandoc reads "
+                   "to the end of the book: " + "; ".join(braces[:5])
+                   + ". LaTeX can't build it as it is either, if it's in the preamble "
+                   "(\"Loading a class or package in a group\"). Match it in the "
+                   "book's file, and run again." if braces else "")
+                + " Nothing was converted.")
         with open(out, encoding="utf-8") as fh:
             doc = json.load(fh)
+        recolored = latexsource.color_spans(doc["blocks"],
+                                            latexsource.color_values(prep["colors"]))
+        if recolored:
+            counts["colors"] = counts.get("colors", 0) + recolored
+        keyed = latexsource.normalize_keys(doc["blocks"])
+        if keyed:
+            counts["label_keys"] = counts.get("label_keys", 0) + keyed
         meta = doc.get("meta", {})
         master_stem = safe_stem(os.path.splitext(os.path.basename(master))[0])
         pages = latexsource.cut_pages(doc, prep["order"], master_stem,
                                       prep["front_role"])
-        own = []
+        own, empty = [], []
         for stem, role, blocks in pages:
             stem = safe_stem(stem)
+            # An unnumbered heading with nothing in it and no label, which a
+            # book sets to start a page (OpenIntro's copyright page opens
+            # with \chapter*{}), and a file with nothing to read once it's
+            # gone: one the master \include-s for its definitions
+            # (OpenIntro's headers.tex), or for an index the pages don't have.
+            blocks = [b for b in blocks if not (
+                b.get("t") == "Header" and not b["c"][2] and "unnumbered" in b["c"][1][1]
+                and re.fullmatch(r"section(-\d+)?", b["c"][1][0]))]
+            if not blocks and stem != master_stem:
+                empty.append(stem)
+                continue
             if stem in stems:
                 first = next(m for m, s in parts if stem in s)
                 die(f"{master} and {first} both have a page {stem}: each file is a "
@@ -832,8 +886,8 @@ def read_latex_to_json(base, masters, env, work):
         authors = meta.get("author")
         if authors and "authors" not in header:
             items = authors["c"] if authors.get("t") == "MetaList" else [authors]
-            header["authors"] = [latexsource.stringify(a.get("c", []))
-                                 for a in items]
+            header["authors"] = [name for a in items
+                                 for name in latexsource.author_names(a.get("c", []))]
         language = latexsource.preamble_language(prep["preamble"])
         if language and "language" not in header:
             header["language"] = language
@@ -844,7 +898,9 @@ def read_latex_to_json(base, masters, env, work):
                 say(f"{master} is the book: {len(own)} page(s), one for each file "
                     "it \\include-s" + (", and one for what it holds itself"
                                         if own and own[0] == master_stem else "")
-                    + ".")
+                    + (f"; {len(empty)} file(s) it \\include-s have nothing to read, "
+                       "definitions or an index, and aren't pages: " + ", ".join(empty)
+                       if empty else "") + ".")
     if len(masters) > 1:
         whole = sum(1 for (_, own), prep in zip(parts, preps) if not prep["order"])
         say(f"{len(masters)} LaTeX documents are the book, in the order latex.main "
@@ -872,13 +928,19 @@ def read_latex_to_json(base, masters, env, work):
         say(f"WARNING: {counts['ifthenelse_left']} \\ifthenelse with a "
             "condition other than a boolean, which Pandoc drops, both "
             "branches with it.")
-    suggested, left = latexsource.macro_sample(base, preps, LATEX_FILTER,
-                                               LATEX_MACROS, say)
-    if suggested or left:
-        say(f"Wrote {latexsource.SAMPLE}: {suggested + left} macro(s) whose "
-            "formulas texmath can't make MathML of, with a definition "
-            f"suggested for {suggested} and {left} for a person to define. "
-            f"Check it, then save it as {LATEX_MACROS}.")
+    suggested, left, alt = latexsource.macro_sample(base, preps, LATEX_FILTER,
+                                                    LATEX_MACROS, say)
+    if suggested or left or alt:
+        say(f"Wrote {latexsource.SAMPLE}: "
+            + (f"{suggested + left} macro(s) whose formulas texmath can't make "
+               f"MathML of, with a definition suggested for {suggested} and {left} "
+               "for a person to define" if suggested or left else "")
+            + ("; " if (suggested or left) and alt else "")
+            + (f"{len(alt)} of the book's macros for an image ("
+               + ", ".join("\\" + n for n in alt) + ") with an argument they don't "
+               "use, which most calls give a phrase in, as alt text might be, and the "
+               "definition that would pass it on" if alt else "")
+            + f". Check it, then save it as {LATEX_MACROS}.")
     return stems, order, header, parts
 
 
@@ -971,6 +1033,117 @@ def read_asciidoc_to_json(base, docs, env, imagesdir=""):
         portable_media_paths(os.path.join(base, stem + ".json"), base, name)
         stems.append(stem)
     return stems
+
+
+def fill_namerefs(base, stems):
+    """Each \\nameref in a LaTeX book's pages, which the copy Pandoc reads
+    wrote as a link to the label with latexsource.NAMEREF_MARK for its
+    text (Pandoc's reader drops \\nameref, and the text with it: OpenIntro
+    Statistics's data appendix titles its sections \\section{\\nameref{...}},
+    nine headings with nothing in them), given what LaTeX prints, on
+    whichever page the label is: a figure's or a table's caption for its
+    label, a heading's title for one in or after it, and otherwise the
+    title of the section the label is in. Returns the number filled."""
+    import latexsource
+    docs, titles = {}, {}
+
+    def caption(c):
+        """A caption's inlines: its short form, or its first paragraph."""
+        short, long = c
+        if short:
+            return short
+        return next((b["c"] for b in long if b.get("t") in ("Plain", "Para")), [])
+
+    def collect(node, current):
+        """The title in force after node, each id's recorded on the way."""
+        if isinstance(node, dict):
+            kind, c = node.get("t"), node.get("c")
+            if kind == "Header":
+                current = c[2]
+                for ident in [c[1][0]] + [s["c"][0][0] for s in c[2]
+                                          if s.get("t") == "Span" and s["c"][0][0]]:
+                    if ident:
+                        titles.setdefault(ident, current)
+                return current
+            if kind in ("Figure", "Table") and c[0][0]:
+                titles.setdefault(c[0][0], caption(c[1]) or current)
+            elif kind in ("Div", "Span", "CodeBlock", "Code", "Link", "Image") \
+                    and c and c[0][0]:
+                titles.setdefault(c[0][0], current)
+            for value in node.values():
+                current = collect(value, current)
+            return current
+        if isinstance(node, list):
+            for value in node:
+                current = collect(value, current)
+        return current
+    for stem in stems:
+        with open(os.path.join(base, stem + ".json"), encoding="utf-8") as fh:
+            docs[stem] = json.load(fh)
+        collect(docs[stem]["blocks"], [])
+
+    def plain(inlines):
+        """A title's inlines as a link's text: no link in a link, no note,
+        and no id, which the title keeps: a label's empty span is left out,
+        and another span keeps its text."""
+        out = []
+        for i in inlines:
+            kind = i.get("t")
+            if kind == "Note":
+                continue
+            if kind == "Link":
+                out.extend(plain(i["c"][1]))
+            elif kind == "Span":
+                if i["c"][1]:
+                    out.append({"t": "Span", "c": [["", i["c"][0][1], i["c"][0][2]],
+                                                   plain(i["c"][1])]})
+            else:
+                out.append(i)
+        return out
+    filled, unknown = 0, []
+
+    def title_of(label, seen):
+        """The label's title as a link's text, any \\nameref in it filled
+        first (a heading that is itself \\section{\\nameref{...}}), or None."""
+        if label in seen or not titles.get(label):
+            return None
+        title = json.loads(json.dumps(titles[label]))
+        fill(title, seen | {label}, count=False)
+        return plain(title) or None
+
+    def fill(node, seen=frozenset(), count=True):
+        nonlocal filled
+        if isinstance(node, dict):
+            if node.get("t") == "Link" and node["c"][1] == [
+                    {"t": "Str", "c": latexsource.NAMEREF_MARK}]:
+                label = node["c"][2][0][1:]
+                title = title_of(label, seen)
+                if title:
+                    node["c"][1] = title
+                    filled += count
+                else:
+                    node["c"][1] = [{"t": "Str", "c": label}]
+                    if count:
+                        unknown.append(label)
+                return
+            for value in node.values():
+                fill(value, seen, count)
+        elif isinstance(node, list):
+            for value in node:
+                fill(value, seen, count)
+    for stem, doc in docs.items():
+        before = filled + len(unknown)
+        fill(doc["blocks"])
+        if filled + len(unknown) != before:
+            with open(os.path.join(base, stem + ".json"), "w", encoding="utf-8") as fh:
+                json.dump(doc, fh)
+    if filled:
+        say(f"{filled} \\nameref given the title of the section, or the caption, its "
+            "label is in.")
+    if unknown:
+        say(f"WARNING: {len(unknown)} \\nameref name a label in no section of the book, "
+            "and show the label: " + ", ".join(sorted(set(unknown))[:8]) + ".")
+    return filled
 
 
 def resolve_asciidoc_xrefs(base, stems, kind="AsciiDoc"):
@@ -2511,6 +2684,13 @@ def unplaced_warning(name, counts, paths, where):
 UNDEFINED = re.compile(r"(Reference|Citation) `([^']+)' on page \d+ undefined")
 
 
+def pdf_env():
+    """The environment build-pdf.py runs in: this one, and a LaTeX book's
+    own colors, which its formulas can name (BOOK_LATEX_COLORS)."""
+    return dict(os.environ, BOOK_LATEX_COLORS="\n".join(LATEX_COLORS)) \
+        if LATEX_COLORS else None
+
+
 def latex_book_pdf(target, base, latex_parts, paths, work, language, project, targets):
     """A LaTeX book's PDF, built by LaTeX from the book's own files
     (pdf.from: book): the book's folder copied, the files its master
@@ -3272,15 +3452,18 @@ def write_report(rows_file, report, header, noun, sidecar=None, hint=None):
     is the signal that there is work to do."""
     rows = []
     if os.path.exists(rows_file):
-        with open(rows_file, encoding="utf-8") as fh:
-            rows = sorted({line.rstrip("\n") for line in fh
-                           if line.strip()})
+        # Rows, not lines: a field can hold a line end (an image's current
+        # alt text, as OpenIntro writes its descriptions over several lines),
+        # and sorting the lines took such a row apart.
+        with open(rows_file, encoding="utf-8", newline="") as fh:
+            rows = sorted({tuple(row) for row in csv.reader(fh) if any(row)})
     if not rows:
         if os.path.exists(report):
             os.remove(report)
         return rows
-    with open(report, "w", encoding="utf-8") as fh:
-        fh.write(header + "\n" + "\n".join(rows) + "\n")
+    with open(report, "w", encoding="utf-8", newline="") as fh:
+        fh.write(header + "\n")
+        csv.writer(fh, lineterminator="\n").writerows(rows)
     say(f"Wrote {report} ({len(rows)} {noun}).")
     if sidecar:
         say(f"Fill in the second column, then append the rows to {sidecar}.")
@@ -3549,6 +3732,7 @@ def main():
                 base, latex_main, env, work)
             check_page_names([docs, markdown, adoc,
                               [s + ".tex" for s in tex_stems]])
+            fill_namerefs(base, tex_stems)
             resolve_asciidoc_xrefs(base, tex_stems, "LaTeX")
             stems += tex_stems
             if not project.get("contents"):
@@ -3729,7 +3913,7 @@ def main():
                      "and math.from_text turn them off.")
         write_report(collected["spacers"], reports["spacer_images"],
                      "Image,Source,Width,Action", "spacer image(s) handled")
-        labels = {row.split(",")[0] for row in missing}
+        labels = {row[0] for row in missing}
         if missing and len(labels) < len(missing):
             # The sidecar is keyed on the label alone, so one description
             # would be applied to every table sharing that label.
@@ -3772,7 +3956,7 @@ def main():
             result = run(["python3", PDF_TOOL, "-d", base,
                           "--target", target.name,
                           "--intermediates", target.pages_dir],
-                         capture=True, check=False)
+                         env=pdf_env(), capture=True, check=False)
             sys.stderr.write(result.stderr)
             if result.returncode:
                 die(f"The PDF for target {target.name} wasn't built.")
@@ -3786,7 +3970,7 @@ def main():
             result = run(["python3", PDF_TOOL, "-d", base, "--latex-target",
                           "--target", target.name,
                           "--intermediates", target.pages_dir],
-                         capture=True, check=False)
+                         env=pdf_env(), capture=True, check=False)
             sys.stderr.write(result.stderr)
             if result.returncode:
                 die(f"The LaTeX for target {target.name} wasn't written.")

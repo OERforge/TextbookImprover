@@ -172,10 +172,12 @@ def _moving_spans(text, skip):
 
 
 def remediate_file(base, name, text, alts, dirs, is_master=False, macros=None,
-                   definitions=(), accounted=None, unplaced=None):
+                   definitions=(), accounted=None, unplaced=None, values=None):
     """The file's text with alt text written in. Returns (text, counts).
     macros: image_macros' macros, followed to each call here outside
-    definitions, the spans of the file's own definitions. accounted and
+    definitions, the spans of the file's own definitions; values: {call's
+    position: {macro: value}}, the book's macros without arguments as
+    they're defined at each call (latexsource.macro_walk). accounted and
     unplaced, sets if given, get the key of each image or drawing with a
     decision: accounted when it's written, or counted as a pspicture;
     unplaced when it's found and can't be written."""
@@ -246,8 +248,12 @@ def remediate_file(base, name, text, alts, dirs, is_master=False, macros=None,
         if any(s <= start < e for s, e in inside):
             continue
         macro = macros[macro_name]
-        index = int(re.search(r"#(\d)", macro["file"]).group(1))
-        path = re.sub(r"#\d", lambda _: args[index - 1][0].strip(), macro["file"])
+        # The file as the call makes it: its arguments, and a macro without
+        # arguments as it's defined there (\chapterfolder, set at each
+        # chapter's start).
+        path = latexsource.with_arguments(
+            latexsource.with_values(macro["file"], (values or {}).get(start, {})),
+            [(a[0].strip(),) for a in args])
         if "\\" in path or "#" in path:
             continue
         key = _image_key(base, name, path, dirs)
@@ -351,14 +357,28 @@ def remediate(base, out_dir, master, files, alts, tagging=False, language=None,
     for name in files:
         originals[name] = latexsource.read_text(os.path.join(base, name))
     # The macros the conversion follows, so a call is found as it was read
-    # (latexsource.expand_image_macros).
-    macros, definition_spans = latexsource.image_macros(
-        [(name, originals[name]) for name in files])
+    # (latexsource.expand_image_macros): the book's definitions in the order
+    # LaTeX reads them, a chapter where the book's own macro \include-s it,
+    # and a person's definitions after the preamble, which the copy holds.
+    order = [(name, originals[name]) for name in files]
+    after = None
+    if definitions:
+        after = definitions_name or "definitions"
+        order.append((after, definitions))
+    includes = latexsource.include_macros(order)
+    macros, definition_spans = latexsource.image_macros(order, includes, after)
+    calls = {name: [c[0] for c in latexsource.macro_calls(
+        originals[name], macros, sorted(latexsource.skip_spans(originals[name])
+                                        + definition_spans.get(name, [])))]
+        for name in files}
+    values = latexsource.macro_walk(order, lambda *_: None, includes, after, calls)[2] \
+        if macros else {}
     accounted, unplaced = set(), set()
     for name in files:
         texts[name], counts = remediate_file(
             base, name, originals[name], alts, dirs, name == master, macros,
-            definition_spans.get(name, ()), accounted, unplaced)
+            definition_spans.get(name, ()), accounted, unplaced,
+            {pos: found for (text, pos), found in values.items() if text == name})
         if name in written:             # counted where it was written
             continue
         for key, n in counts.items():
@@ -675,8 +695,8 @@ def preamble_packages(texts, master, base=None):
     folder = os.path.dirname(master)
     while queue:
         piece = queue.pop(0)
-        loaded = [n.strip() for m in latexsource.code_matches(PACKAGE, piece)
-                  for n in m.group(1).split(",") if n.strip()]
+        loaded = [n for m in latexsource.code_matches(PACKAGE, piece)
+                  for n in latexsource.package_names(m.group(1))]
         names.update(loaded)
         wanted = [(n, ".sty") for n in loaded]
         for pattern in (CLASS, LOAD_CLASS):
@@ -703,6 +723,10 @@ def preamble_packages(texts, master, base=None):
 # PDF/UA-2 fails), or puts a formula inside the formula's MathML text
 # (\boldsymbol). unicode-math's bold italic is the same letters, bold.
 BOLD_MATH = re.compile(r"\\boldsymbol(?![A-Za-z@])")
+# amsbsy's \pmb, the poor man's bold, on which LuaTeX stopped while
+# LaTeX's tagging took the formula's MathML (\pmb{\hat{p}_1 - b}: "(nodes):
+# trying to set an attribute fails, case 2").
+POOR_BOLD = re.compile(r"\\pmb(?![A-Za-z@])")
 
 
 def math_block(texts, master, base=None):
@@ -726,14 +750,18 @@ def math_block(texts, master, base=None):
         return "", {"math_kept": ", ".join(kept)}
     bold, counts = "", {"math": 1}
     used = [n for n, found in (("bm", "bm" in names), ("\\boldsymbol", any(
-        latexsource.code_matches(BOLD_MATH, t) for t in texts.values()))) if found]
+        latexsource.code_matches(BOLD_MATH, t) for t in texts.values())), ("\\pmb", any(
+        latexsource.code_matches(POOR_BOLD, t) for t in texts.values()))) if found]
     if used:
-        bold = ("  % bm's and amsmath's bold as unicode-math's bold italic, whose letters\n"
-                "  % the fonts have; TeX's own, which they'd use, lack them.\n"
+        bold = ("  % bm's, amsmath's, and amsbsy's bold as unicode-math's bold italic, whose\n"
+                "  % letters the fonts have; TeX's own, which they'd use, lack them, and\n"
+                "  % LuaTeX stopped on \\pmb's overprinting while tagging.\n"
                 + ("  \\AtBeginDocument{\\renewcommand{\\bm}[1]{\\symbfit{#1}}}\n"
                    if "bm" in used else "")
                 + ("  \\AtBeginDocument{\\renewcommand{\\boldsymbol}[1]{\\symbfit{#1}}}\n"
-                   if "\\boldsymbol" in used else ""))
+                   if "\\boldsymbol" in used else "")
+                + ("  \\AtBeginDocument{\\renewcommand{\\pmb}[1]{\\symbfit{#1}}}\n"
+                   if "\\pmb" in used else ""))
         counts["math_bold"] = ", ".join(used)
     return MATH_FONTS + setup + bold + "\\fi\n", counts
 
@@ -754,7 +782,7 @@ def _code_subn(pattern, text, replace):
 def _without_titlesec(m):
     """A \\usepackage without titlesec: the whole command a comment when
     it loads nothing else."""
-    names = [n.strip() for n in m.group(1).split(",")]
+    names = latexsource.package_names(m.group(1))
     if "titlesec" not in names:
         return m.group(0)
     kept = [n for n in names if n and n != "titlesec"]

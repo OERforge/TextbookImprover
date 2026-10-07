@@ -18,7 +18,9 @@
 -- as its TeX. A size changes nothing a screen reader says, and a rule of
 -- no width is a strut and one of no height a space, so all three go;
 -- a rule that shows is left, since only
--- a person can say what it means (latex-conversion-macros.tex can).
+-- a person can say what it means (latex-conversion-macros.tex can). It
+-- stops as well on a text command inside \text, on space inside a text
+-- command, and on \hfill, \vspace, and \index (below).
 --
 -- Copyright 2026 Robert Szarka
 --
@@ -64,6 +66,56 @@ local SIZES = { 'tiny', 'scriptsize', 'footnotesize', 'small',
 
 local OLD_FONTS = { bf = 'textbf', it = 'textit', sf = 'textsf',
   tt = 'texttt', rm = 'textrm', sl = 'textsl', em = 'emph' }
+
+-- Text commands texmath reads in a formula, though not inside \text, each
+-- as the one it reads.
+local TEXT_STYLES = { texttt = 'texttt', textbf = 'textbf', textit = 'textit',
+  textrm = 'textrm', textsf = 'textsf', textsl = 'textit', textup = 'textrm',
+  textnormal = 'textrm', emph = 'textit' }
+local TEXT_COMMANDS = { 'text', 'textrm', 'texttt', 'textit', 'textbf',
+  'textsf', 'textsl', 'textup', 'textnormal', 'emph' }
+
+-- \text{rolling a \texttt{1}} as \text{rolling a }\texttt{1}: texmath
+-- (Pandoc 3.12) stops on a text command inside \text, and reads each
+-- alone. OpenIntro Statistics writes 58 of its formulas so.
+local split_text
+function split_text(arg)
+  local inner = arg:sub(2, -2)
+  local pieces, plain, pos = {}, '', 1
+  local function flush()
+    if plain ~= '' then
+      table.insert(pieces, '\\text{' .. plain .. '}')
+    end
+    plain = ''
+  end
+  while true do
+    local s, e, cmd, group = inner:find('\\(%a+)%s*(%b{})', pos)
+    if not s then break end
+    plain = plain .. inner:sub(pos, s - 1)
+    if TEXT_STYLES[cmd] then
+      flush()
+      table.insert(pieces, '\\' .. TEXT_STYLES[cmd] .. group)
+    elseif cmd == 'underline' then
+      flush()
+      table.insert(pieces, '\\underline{' .. (split_text(group) or '\\text' .. group) .. '}')
+    elseif cmd == 'color' then
+      -- The rest of the text in the color, which texmath reads outside it.
+      flush()
+      local rest = '{' .. inner:sub(e + 1) .. '}'
+      table.insert(pieces, '{\\color' .. group .. '{' .. (split_text(rest) or '\\text' .. rest) .. '}}')
+      return table.concat(pieces)
+    else
+      plain = plain .. inner:sub(s, e)
+    end
+    pos = e + 1
+  end
+  plain = plain .. inner:sub(pos)
+  if #pieces == 0 then
+    return nil
+  end
+  flush()
+  return table.concat(pieces)
+end
 
 function Math(m)
   local text = m.text
@@ -120,7 +172,37 @@ function Math(m)
     text = text:gsub('\\mbox%s*{%s*{%s*\\' .. old .. '%f[^%a]%s*([^{}]*)}%s*}',
       '\\' .. new .. '{%1}')
   end
+  -- Space inside a text command's argument stops texmath as inside \mbox:
+  -- OpenIntro writes an underscore in a variable's name with a sliver of
+  -- space after it, \texttt{income\_\hspace{0.03cm}{}ver}, 34 formulas'
+  -- worth. Inside a name it goes; elsewhere it's a space, as \hfill is.
+  for _, cmd in ipairs(TEXT_COMMANDS) do
+    text = text:gsub('\\' .. cmd .. '%s*(%b{})', function(arg)
+      local inner = arg:gsub('\\hspace%*?%s*%b{}%s*{}', '')
+      inner = inner:gsub('\\hspace%*?%s*%b{}', ' ')
+      inner = inner:gsub('\\hfill%f[^%a]%s*', ' ')
+      if inner == arg then return nil end
+      return '\\' .. cmd .. inner
+    end)
+  end
+  text = text:gsub('\\text%s*(%b{})', split_text)
+  -- \textcolor, which texmath stops on, as \color, which it reads (and
+  -- whose color MathML doesn't keep either).
+  text = text:gsub('\\textcolor%s*(%b{})%s*(%b{})', '{\\color%1%2}')
+  -- Space between a formula's parts, an entry for the index, and space
+  -- below it: \hfill as a quad, which texmath reads, and the others gone,
+  -- since none is something a screen reader says.
+  text = text:gsub('\\hfill%f[^%a]', '\\quad')
+  text = text:gsub('\\vspace%*?%s*%b{}', '')
+  text = text:gsub('\\index%s*%b{}', '')
   if text ~= m.text then
+    -- A line all a removal left, blank, would end LaTeX's paragraph inside
+    -- an align* in a PDF ("Paragraph ended before \environment align* was
+    -- complete").
+    local n
+    repeat
+      text, n = text:gsub('\n[ \t]*\n', '\n')
+    until n == 0
     m.text = text
     return m
   end

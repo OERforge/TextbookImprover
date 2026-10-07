@@ -97,6 +97,14 @@ Inline math $x^2 + y^2 = z^2$, and a display:
 
 $$\frac{a}{b}$$
 
+And an eqnarray*, which the writer would wrap in display math:
+
+$$\begin{eqnarray*}
+a &=& b + c
+\end{eqnarray*}$$
+
+And a poor man's bold, as a LaTeX book writes one: $\pmb{\hat{p}_1 - b}$.
+
 ::: matrix
 |      | Left | Right |
 |------|------|-------|
@@ -628,8 +636,12 @@ def checks(work):
          == [line for line in log.splitlines() if "U+6F22" in line]
          and log.count("missing from the PDF") == 1
          and "Missing character" not in log),
-        ("every formula has MathML structure elements and a MathML file",
-         lambda: len(formulas) == 2
+        # An eqnarray* among them, which the writer wrapped in \[ \] and
+        # LaTeX stopped on, before pdf-target.lua wrote it as it is; and a
+        # \pmb, on which LuaTeX's tagging of the formula stopped.
+        ("every formula, an eqnarray* and a \\pmb among them, has MathML structure "
+         "elements and a MathML file",
+         lambda: len(formulas) == 4
          and all("/AF" in f for f in formulas)
          and "/math" in kinds),
         # Once each in the whole file: the template's own are switched

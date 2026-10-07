@@ -3328,6 +3328,38 @@ def case_notes(work):
                 nav = z.read("EPUB/nav.xhtml").decode("utf-8")
         return d, r, nav
 
+    def epub_links_land(d):
+        """Every #fragment link in the EPUB goes to a file with the id (the
+        one it names, or its own), and every note it goes to links back to
+        the reference: two chapter files may each have an fn1."""
+        import posixpath
+        e = os.path.join(d, "epub", "org.example.fixtures.epub")
+        if not os.path.exists(e):
+            return False
+        with zipfile.ZipFile(e) as z:
+            texts = {n: z.read(n).decode("utf-8") for n in z.namelist()
+                     if n.endswith(".xhtml")}
+
+        def resolve(name, f):
+            return posixpath.normpath(posixpath.join(posixpath.dirname(name), f)) \
+                if f else name
+        ids = {n: set(re.findall(r'\sid="([^"]+)"', t)) for n, t in texts.items()}
+        links = [(resolve(n, f), i) for n, t in texts.items()
+                 for f, i in re.findall(r'href="([^"#:]*)#([^"]+)"', t)]
+        refs = [(n, resolve(n, f), note, ref) for n, t in texts.items()
+                for f, note, ref in re.findall(
+                    r'href="([^"#:]*)#([^"]+)" class="footnote-ref" id="([^"]+)"', t)]
+
+        def back(name, target, note, ref):
+            aside = re.search(r'<(aside|li)\b[^>]*\bid="%s"[^>]*>(.*?)</\1>'
+                              % re.escape(note), texts.get(target, ""), re.S)
+            return aside is not None and any(
+                resolve(target, f) == name
+                for f in re.findall(r'href="([^"#]*)#%s"' % re.escape(ref),
+                                    aside.group(2)))
+        return links and refs and all(i in ids.get(t, ()) for t, i in links) \
+            and all(back(*r) for r in refs)
+
     gp, r1, _ = build("group-page", "group", "page")
     gg, r2, _ = build("group-group", "group", "group")
     gb, r3, nav = build("group-book", "group", "book")
@@ -3360,6 +3392,8 @@ def case_notes(work):
         ("no reference or return link is left dangling in any of them",
          lambda: not any(re.search(r"link-to-missing|duplicate-id",
                                    r.stderr) for r in (r1, r2, r3))),
+        ("in the EPUBs, every note's link goes to the file its note is in",
+         lambda: all(epub_links_land(d) for d in (gp, gg, gb))),
     ]
 
 
@@ -3676,10 +3710,16 @@ CASES = [
 def main():
     if shutil.which("pandoc") is None:
         sys.exit("pandoc is not on the path.")
+    # --case LABEL (repeatable) runs only those cases.
+    chosen = [sys.argv[i + 1] for i, a in enumerate(sys.argv[:-1]) if a == "--case"]
+    cases = [c for c in CASES if not chosen or c[0] in chosen]
+    if chosen and len(cases) != len(set(chosen)):
+        sys.exit("no case is called " + ", ".join(
+            repr(c) for c in chosen if c not in {label for label, _ in CASES}))
     work = tempfile.mkdtemp(prefix="convert-tests-")
     failed = 0
     try:
-        for label, case in CASES:
+        for label, case in cases:
             directory = os.path.join(work, re.sub(r"[^\w-]+", "-", label))
             try:
                 checks = case(directory)
@@ -3696,7 +3736,7 @@ def main():
                 failed += not ok
     finally:
         shutil.rmtree(work, ignore_errors=True)
-    print(f"\n{failed} check(s) failed across {len(CASES)} case(s)"
+    print(f"\n{failed} check(s) failed across {len(cases)} case(s)"
           if failed else "\nall convert checks passed")
     return 1 if failed else 0
 

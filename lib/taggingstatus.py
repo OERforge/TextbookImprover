@@ -96,9 +96,8 @@ def used(base, master):
         for m in PACKAGE.finditer(text):
             if latexsource.in_spans(m.start(), spans):
                 continue
-            for name in m.group(1).split(","):
-                name = name.strip()
-                if name and (name, "sty") not in found:
+            for name in latexsource.package_names(m.group(1)):
+                if (name, "sty") not in found:
                     found.append((name, "sty"))
     return found
 

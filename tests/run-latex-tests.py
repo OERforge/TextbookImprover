@@ -43,6 +43,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 import argparse
 import csv
 import hashlib
+import json
 import os
 import re
 import shutil
@@ -329,24 +330,32 @@ def without_tagging_status(work):
     return dict(os.environ, PATH=os.path.abspath(shim) + os.pathsep + os.environ["PATH"])
 
 
+def latexsource_mark():
+    """The text the reading copy gives a \\nameref until it's filled."""
+    sys.path.insert(0, os.path.join(ROOT, "lib"))
+    import latexsource
+    return latexsource.NAMEREF_MARK
+
+
 def read(work, *parts):
     with open(os.path.join(work, *parts), encoding="utf-8") as fh:
         return fh.read()
 
 
 def epub_links_resolve(work):
-    """Every #fragment link in the EPUB names an id one of its files has."""
+    """Every #fragment link in the EPUB goes to a file that has the id:
+    the file it names, or its own when it names none."""
+    import posixpath
     import zipfile
     with zipfile.ZipFile(os.path.join(work, "epub", "book.epub")) as z:
-        texts = [z.read(n).decode("utf-8") for n in z.namelist()
-                 if n.endswith(".xhtml")]
-    ids = set()
-    for text in texts:
-        ids.update(re.findall(r'\sid="([^"]+)"', text))
-    targets = set()
-    for text in texts:
-        targets.update(re.findall(r'href="[^"#]*#([^"]+)"', text))
-    return "page-one" in ids and targets and targets <= ids
+        texts = {n: z.read(n).decode("utf-8") for n in z.namelist()
+                 if n.endswith(".xhtml")}
+    ids = {n: set(re.findall(r'\sid="([^"]+)"', t)) for n, t in texts.items()}
+    links = [(n, posixpath.normpath(posixpath.join(posixpath.dirname(n), f)) if f else n, i)
+             for n, t in texts.items()
+             for f, i in re.findall(r'href="([^"#]*)#([^"]+)"', t)]
+    return any("page-one" in held for held in ids.values()) and links \
+        and all(i in ids.get(target, ()) for _, target, i in links)
 
 
 def word_list_reads_back(work):
@@ -970,7 +979,8 @@ def case_own_fonts(work):
     os.makedirs(bold)
     with open(os.path.join(bold, "notes.tex"), "w", encoding="utf-8") as fh:
         fh.write("\\documentclass{article}\n\\usepackage{amsmath}\n\\usepackage{bm}\n"
-                 "\\begin{document}\nBold: $\\bm{x} + \\boldsymbol{\\alpha}$.\n\\end{document}\n")
+                 "\\begin{document}\nBold: $\\bm{x} + \\boldsymbol{\\alpha}$, and a poor man's: "
+                 "$\\pmb{\\hat{p}_1 - b}$.\n\\end{document}\n")
     with open(os.path.join(bold, "conversion.yaml"), "w") as fh:
         fh.write("targets:\n  tagged:\n    format: source\n    tagging: \"on\"\n")
     bold_said = convert(bold)
@@ -997,11 +1007,12 @@ def case_own_fonts(work):
          lambda: os.path.exists(styled_copy)
          and "unicode-math" not in read(styled, "tagged", "notes.tex")
          and "with newtxmath, newtxtext" in styled_said),
-        ("bm's and \\boldsymbol's bold is unicode-math's bold italic, and the copy builds "
-         "with no glyph missing",
+        ("bm's, \\boldsymbol's, and \\pmb's bold is unicode-math's bold italic, and the copy "
+         "builds with no glyph missing",
          lambda: os.path.exists(bold_copy)
          and "\\renewcommand{\\bm}[1]{\\symbfit{#1}}" in read(bold, "tagged", "notes.tex")
          and "\\renewcommand{\\boldsymbol}[1]{\\symbfit{#1}}" in read(bold, "tagged", "notes.tex")
+         and "\\renewcommand{\\pmb}[1]{\\symbfit{#1}}" in read(bold, "tagged", "notes.tex")
          and "bold italic" in bold_said and bold_builds()),
     ]
 
@@ -1932,6 +1943,110 @@ def case_pieces(work):
                       "\\begin{tabular}{lr}\nA & B \\\\\n1 & 2 \\\\\n\\end{tabular}}\n"
                       "\\end{tabular}\n\\end{document}\n"}
     texremediate.tag(boxed, "b.tex", "en", mathml=False)
+    # What the reading copy makes of a book made its own way (OpenIntro).
+    envs = {"a.tex": "\\newenvironment{var}[1]{\\texttt{#1}}{}\n"
+                     "\\begin{var}{x}\\end{var} and \\var{y}.\n"}
+    latexsource.environment_definitions(envs, ["a.tex"], {})
+    grouped = latexsource.group_commands(
+        "{\\Large \\begingroup A\\par \\endgroup}\n"
+        "\\newcommand{\\s}{\\begingroup}\\newcommand{\\e}{\\endgroup}\n"
+        "$\\begingroup x\\endgroup$ A\\\\begingroup B \\endgroup", {})
+    # A group or a number after a command the reader takes whole, with its
+    # arguments as LaTeX takes them; in a formula, a comment, or after \\
+    # (a line break), and after a space that follows an argument, nothing.
+    kept = latexsource.keep_groups(
+        "\\noindent {A}\\hspace*{1em}{B}\\raisebox{1pt}[2pt]{R}{C}\\selectfont 1.1 "
+        "\\noindent\n42 \\vspace{1em} {D} $\\hspace{1em}{x}$ \\\\noindent{E} % \\noindent{F}\n"
+        "\\noindent\n\n7", {})
+    titled = latexsource.drop_command(
+        "A\\titleformat{\\chapter}\n  {}\n  {Chapter}% #1}\n  {1em}\n  {}\n  []\nB", "titleformat",
+        "mommmmo", {}, "titlesec")
+    # An environment defined in another's codes, and LaTeX's own redefined:
+    # the reader's to read; the book's own, redefined, is a command still.
+    nested_envs = {"a.tex": "\\newenvironment{exercises}{\\par\\newenvironment{hint}{(Hint: }{)}"
+                       "\\begin{enumerate}}{\\end{enumerate}}\n"
+                       "\\renewenvironment{enumerate}{\\begin{itemize}}{\\end{itemize}}\n"
+                       "\\newenvironment{var}[1]{\\texttt{#1}}{}\n"
+                       "\\renewenvironment{var}[1]{\\textbf{#1}}{}\n"
+                       "\\begin{exercises}\\item Do it. \\begin{hint}think\\end{hint}"
+                       "\\end{exercises}\n\\begin{enumerate}\\item x\\end{enumerate}\n\\var{y}\n"}
+    latexsource.environment_definitions(nested_envs, ["a.tex"], {})
+    nested_read = subprocess.run(
+        ["pandoc", "-f", "latex", "-t", "plain"], capture_output=True, text=True,
+        input="\\documentclass{book}\n\\begin{document}\n" + nested_envs["a.tex"]
+        + "\\end{document}\n").stdout
+    colored = {"main.tex": "\\documentclass{book}\n\\input{colors}\n\\definecolor{oiB}{rgb}{0,0,0}\n"
+                           "\\newcommand{\\hl}[2]{\\definecolor{hl}{rgb}{#1}\\textcolor{hl}{#2}}\n"
+                           "\\newcommand{\\blue}[1]{\\textcolor[rgb]{0,0,1}{#1}}\n"
+                           "\\begin{document}\n\\textcolor{oiB}{A} \\textcolor[rgb]{0,0,1}{M} "
+                           "$\\textcolor[rgb]{0,0,1}{x}$ \\begin{tikzpicture}\\node "
+                           "{\\textcolor[rgb]{0,0,1}{G}};\\end{tikzpicture}\n\\end{document}\n",
+               "colors.tex": "\\definecolor{oiB}{rgb}{.337,.608,.741}\n"}
+    latexsource.resolve_colors(colored, ["main.tex", "colors.tex"], {})
+    color_order = [m.group(0) for m in latexsource.book_colors(
+        [("main.tex", colored["main.tex"]), ("colors.tex", colored["colors.tex"])])]
+    spans = [{"t": "Span", "c": [["", [], [["style", "color: oiB"]]], []]},
+             {"t": "Span", "c": [["", [], [["style", "background-color: oiB"]]], []]},
+             {"t": "Span", "c": [["", [], [["style", "color: red"]]], []]}]
+    recolored = latexsource.color_spans(
+        [{"t": "Para", "c": spans}], latexsource.color_values(color_order))
+    # Label keys with whitespace and a macro's {} in them, read and written
+    # as ids, a reference through the book's own macro matched first.
+    keyed_doc = json.loads(subprocess.run(
+        ["pandoc", "-f", "latex", "-t", "json"], capture_output=True, text=True,
+        input="\\documentclass{book}\n\\newcommand{\\secref}[1]{Section~\\ref{#1}}\n"
+        "\\newcommand{\\edwardsat}{1300}\n\\begin{document}\n\\section{Airports}\\label{US Airports}\n"
+        "See \\ref{US Airports}, \\secref{US Airports}, \\ref{edwardSatBelow\\edwardsat{}}.\n\n"
+        "Below\\label{edwardSatBelow\\edwardsat{}} and\\label{\n}.\n\\end{document}\n").stdout)
+    latexsource.normalize_keys(keyed_doc["blocks"])
+    keyed_links, keyed_ids = [], []
+
+    def keyed_walk(node):
+        if isinstance(node, dict):
+            if node.get("t") == "Link":
+                keyed_links.append(node)
+            if node.get("t") == "Span" and any(k == "label" for k, _ in node["c"][0][2]):
+                keyed_ids.append(node["c"][0][0])
+            if node.get("t") == "Header":
+                keyed_ids.insert(0, node["c"][1][0])
+            for v in node.values():
+                keyed_walk(v)
+        elif isinstance(node, list):
+            for v in node:
+                keyed_walk(v)
+    keyed_walk(keyed_doc["blocks"])
+    keyed_read = [link["c"][2][0] for link in keyed_links]
+    keyed_numbers = [latexsource.stringify(link["c"][1]) for link in keyed_links[:2]]
+    # The sample's probe, each formula found by its mark: a macro whose
+    # expansion breaks its paragraph doesn't shift the rest onto the wrong
+    # macros.
+    probe_dir = os.path.join(work, "probe")
+    os.makedirs(probe_dir, exist_ok=True)
+    probed = latexsource.probe(
+        probe_dir, "\\documentclass{article}\n\\newcommand{\\bad}{a$\\par$b}\n"
+        "\\newcommand{\\good}{x}\n\\newcommand{\\worse}{\\leavevmode}\n\\begin{document}\n",
+        [("bad", 0), ("good", 0), ("worse", 0)], os.path.join(ROOT, "bin", "latex-source.lua"))
+    in_math = ("\\newcommand{\\grp}[1]{\\begingroup #1\\endgroup}\n"
+               "\\newcommand{\\hl}[1]{\\grp{#1}\\hspace{1em}{z}}\n"
+               "\\newcommand{\\remark}[1]{\\noindent\\begingroup #1\\endgroup}\n"
+               "Text $\\hl{x}$ and \\remark{y}.\n")
+    math_kept = latexsource.repair_text(in_math, {}, latexsource.math_macros([in_math]))
+    no_macros = latexsource.math_macros(["A formula: $x + 1$, and no macro.\n"])
+    starred = "A\\titleformat*{\\section}{\\bfseries}B\\titlespacing*{\\section}{0pt}{1em}{1em}C"
+    for command, signature in latexsource.TITLESEC_COMMANDS:
+        starred = latexsource.drop_command(starred, command, signature, {}, "titlesec")
+    commented = latexsource.macro_calls("\\two{a}% between\n{b}",
+                                        {"two": {"arguments": 2, "default": None}}, [])
+    alt_calls = {"s.tex": "\\newcommand{\\fig}[2][]{\\includegraphics{#2}}\n"
+                          "\\fig[A phrase that may be alt text]{a}\\fig{b}\\fig[x]{c}\n"}
+    def authors(source):
+        """The names the contents sample gives for an \\author."""
+        out = subprocess.run(["pandoc", "-f", "latex", "-t", "json"], capture_output=True,
+                             text=True, input="\\documentclass{book}\n\\author{%s}\n"
+                             "\\begin{document}\nx\n\\end{document}\n" % source).stdout
+        meta = json.loads(out)["meta"].get("author", {})
+        items = meta.get("c", []) if meta.get("t") == "MetaList" else [meta]
+        return [n for a in items for n in latexsource.author_names(a.get("c", []))]
     settings = texremediate.enumitem_settings(
         {"a": "\\begin{itemize}[leftmargin=*,labelindent=0pt]\n\\item x\n\\end{itemize}\n"
               "\\begin{enumerate}[resume,label={(\\alph*)}]\n\\item y\n\\end{enumerate}\n"
@@ -1966,10 +2081,454 @@ def case_pieces(work):
          "not its type, and a caption's short form",
          lambda: [moving[a:b] for a, b in texremediate._moving_spans(moving, [])]
          == ["Short", "Long", "T", "i"]),
+        ("an environment the book defines is the commands LaTeX makes of it, called "
+         "alone as LaTeX allows", lambda: envs["a.tex"].startswith(
+             "\\newcommand{\\var}[1]{\\texttt{#1}}\\newcommand{\\endvar}{}")
+         and "\\var {x}\\endvar  and \\var{y}." in envs["a.tex"]),
+        ("\\begingroup and the \\endgroup at its depth are braces, after an italic "
+         "correction; a pair macros split, one in a formula, and one after \\\\ are left",
+         lambda: grouped.startswith("{\\Large \\/{ A\\par }}")
+         and grouped.endswith("{\\begingroup}\\newcommand{\\e}{\\endgroup}\n"
+                              "$\\begingroup x\\endgroup$ A\\\\begingroup B \\endgroup")),
+        ("a group or a number after a command the reader takes whole is kept apart from "
+         "it, and nothing in a formula, a comment, or after a line break or a space",
+         lambda: kept == "\\noindent \\/{A}\\hspace*{1em}\\/{B}\\raisebox{1pt}[2pt]{R}\\/{C}"
+         "\\selectfont \\/1.1 \\noindent\n\\/42 \\vspace{1em} {D} $\\hspace{1em}{x}$ "
+         "\\\\noindent{E} % \\noindent{F}\n\\noindent\n\n7"),
+        ("titlesec's \\titleformat over several lines, a comment among them, is left out "
+         "whole", lambda: titled == "A\nB"),
+        ("an environment defined in another's codes, and LaTeX's own the book redefines, "
+         "are left as they are, and read; the book's own redefined is a command",
+         lambda: "\\begin{hint}think\\end{hint}\\endexercises" in nested_envs["a.tex"]
+         and "\\begin{enumerate}\\item x\\end{enumerate}" in nested_envs["a.tex"]
+         and "\\renewcommand{\\var}[1]{\\textbf{#1}}\\renewcommand{\\endvar}{}" in nested_envs["a.tex"]
+         and re.search(r"Do it\. \(Hint: think\)\s+- x\s+y", nested_read) is not None),
+        ("the book's colors are read in LaTeX's order, the last definition winning, one "
+         "in a macro's body not at all, and its spans given them as CSS; a color in a "
+         "model is CSS in the copy, but in a formula, a drawing, or a definition",
+         lambda: "\\textcolor{oiB}{A} \\textcolor{rgb(0, 0, 255)}{M} $\\textcolor[rgb]{0,0,1}{x}$ "
+         "\\begin{tikzpicture}\\node {\\textcolor[rgb]{0,0,1}{G}};" in colored["main.tex"]
+         and "\\newcommand{\\blue}[1]{\\textcolor[rgb]{0,0,1}{#1}}" in colored["main.tex"]
+         and color_order == ["\\definecolor{oiB}{rgb}{.337,.608,.741}",
+                             "\\definecolor{oiB}{rgb}{0,0,0}"]
+         and recolored == 2 and [p["c"][0][2][0][1] for p in spans]
+         == ["color: rgb(0, 0, 0)", "background-color: rgb(0, 0, 0)", "color: red"]),
+        ("the sample's probe finds each macro's formula by its mark, past one whose "
+         "expansion breaks its paragraph", lambda: probed == {"worse"}),
+        ("a book with formulas and no macro of its own has none a formula uses",
+         lambda: no_macros == set()),
+        ("a definition a formula uses is left as it is, and those its body uses: texmath "
+         "reads them; one only text uses gets the groups' repairs",
+         lambda: math_kept.startswith("\\newcommand{\\grp}[1]{\\begingroup #1\\endgroup}\n"
+                                      "\\newcommand{\\hl}[1]{\\grp{#1}\\hspace{1em}{z}}\n"
+                                      "\\newcommand{\\remark}[1]{\\noindent\\/{ #1}}")),
+        ("titlesec's starred forms are left out with their own arguments",
+         lambda: starred == "ABC"),
+        ("a call's arguments are found past a comment between them, as TeX finds them",
+         lambda: [a[0] for a in commented[0][3]] == ["a", "b"] if commented else False),
+        ("a color in each of xcolor's models is CSS",
+         lambda: latexsource.css_color("rgb", ".5,.5,.5") == "rgb(128, 128, 128)"
+         and latexsource.css_color("HTML", "1E5F8C") == "rgb(30, 95, 140)"
+         and latexsource.css_color("gray", "0") == "rgb(0, 0, 0)"
+         and latexsource.css_color("cmyk", "0,1,1,0") == "rgb(255, 0, 0)"
+         and latexsource.css_color("named", "x") is None),
+        ("a key with a space, or a macro's {} in it, is an id without, read through the "
+         "book's own macro too, numbered and linked; an empty label is no id",
+         lambda: keyed_read == ["#US-Airports", "#US-Airports", "#edwardSatBelow1300"]
+         and keyed_ids == ["US-Airports", "edwardSatBelow1300", ""]
+         and keyed_numbers == ["1", "1"]),
+        ("\\subfigure is subcaption's environment, its caption the environment's",
+         lambda: latexsource.subfigures("\\subfigure[Left]{X\\label{a}}", {})
+         == "\\begin{subfigure}{\\linewidth}X\\label{a}\\caption{Left}\\end{subfigure}"),
+        ("an \\author's names: a line set apart under a name is its affiliation, a "
+         "\\thanks no part of it, and with every line set alike each is given",
+         lambda: authors("David Diez \\\\ \\small\\emph{Data Scientist} \\\\[6mm]\n"
+                         "Mine Rundel \\\\ \\small\\emph{Duke University} \\\\")
+         == ["David Diez", "Mine Rundel"]
+         and authors("A \\and B") == ["A", "B"]
+         and authors("\\textbf{Ann Lee} \\\\ State University") == ["Ann Lee"]
+         and authors("Ann Lee\\thanks{Funded by a grant.} \\\\ State University")
+         == ["Ann Lee", "State University"]),
+        ("a brace nothing closes, and one that closes nothing, are found, a \\{ and a "
+         "comment's not counted", lambda: latexsource.unbalanced_braces("a{b}{c \\{ % {\n} }")
+         == ([], [16]) and latexsource.unbalanced_braces("x{ {y}") == ([1], [])),
+        ("a macro without arguments in a file's name is its value at the call, when that "
+         "is plain text", lambda: latexsource.with_values(
+             "\\chapterfolder/figures/#3", {"chapterfolder": "ch_one"}) == "ch_one/figures/#3"
+         and latexsource.with_values("\\d/x", {"d": "\\textbf{y}"}) == "\\d/x"),
+        ("an unused argument fewer than half the calls give a phrase in isn't offered as "
+         "alt text", lambda: latexsource.alt_arguments(list(alt_calls.items())) == []),
+        ("a comment in a package list isn't a package",
+         lambda: latexsource.package_names("amsmath,\n %tocloft,\n hyperref")
+         == ["amsmath", "hyperref"]),
         ("a data table in a box is set back to a table before its header declaration",
          lambda: texremediate.DATA_OPEN + "{\\ifdefined\\tagpdfsetup\\tagpdfsetup{table/"
          "header-rows={1}}\\fi\\begin{tabular}{lr}" in boxed["b.tex"]
          and "\\end{tabular}}}\n\\end{tabular}}" in boxed["b.tex"]),
+    ]
+
+
+# A book made the way OpenIntro Statistics is: its chapters \include-d by a
+# macro of its own, defined in a style file the preamble \include-s after
+# the master calls it; its images behind macros whose file is
+# \chapterfolder/figures/#3/#3, \chapterfolder set at each chapter's start,
+# and whose first argument, which the macros don't use, is the alt text;
+# environments called as commands and wrapping a list in braces; titlesec's
+# settings over several lines; \begingroup after a size command; a color of
+# its own; \nameref; \subfigure; a label with a space; a definitions-only
+# file \include-d in the body; an empty \chapter*{} to start a page.
+CUSTOM_FILES = {
+    "main.tex": r"""\documentclass{book}
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage{
+  amsmath,
+  %tocloft,
+  hyperref}
+\include{style/style}
+\author{Ann Lee \\
+\small\emph{Statistician}\\
+\small\emph{A College} \\[6mm]
+Bo Chen \\
+\small\emph{A University} \\
+}
+\begin{document}
+\include{front/copyright}
+\begingroup
+\include{style/headers}
+\includechapter{1}{ch_one}
+\includechapter{2}{ch_two}
+\endgroup
+\end{document}
+""",
+    "style/style.tex": r"""\definecolor{oiB}{rgb}{.337,.608,.741}
+\newcommand\includechapter[2]{
+  \setcounter{chapter}{#1}
+  \addtocounter{chapter}{-1}
+  \include{#2/TeX/#2}
+  \newpage\input{#2/TeX/review}
+  }
+\newcommand{\Figure}[3][]{\includegraphics[width=#2\textwidth]{\chapterfolder/figures/#3/#3}}
+\newcommand{\Figures}[4][]{\includegraphics[width=#2\textwidth]{\chapterfolder/figures/#3/#4}}
+\newcommand{\chapterfolder}{}
+\newenvironment{var}[1]{\texttt{#1}}{}
+\newenvironment{parts}{
+\begin{enumerate}
+\setlength{\itemsep}{0mm}}
+{\end{enumerate}}
+\newcommand{\qt}[1]{\textcolor{oiB}{\textbf{#1}}}
+\newcommand{\remark}[1]{\par\noindent\begingroup\small\textbf{Remark.} #1\endgroup\par}
+\newcommand{\highlightwith}[2]{\definecolor{hl}{rgb}{#1}\textcolor{hl}{#2}}
+\newcommand{\hlx}[1]{\textcolor{oiB}{#1}}
+\newcommand{\gap}[1]{#1\hspace{1em}{}}
+\newcommand{\secref}[1]{Section~\ref{#1}}
+\newcommand{\strutx}[1]{\rule{0pt}{2ex}#1\leavevmode}
+\newenvironment{wrap}{\leavevmode}{\leavevmode}
+\newcommand{\Figuress}[4][]{%
+  \includegraphics[width=#2]{\chapterfolder/figures/#3/#4}%
+}
+\newcommand{\eocesol}[1]{\noindent\textbf{\color{oiB}{\hypersetup{linkcolor=oiB}{\fontfamily{phv}\selectfont 1.1}}}\hspace{2mm}{\small#1}}
+""",
+    "style/headers.tex": r"""\titleformat{\chapter}
+    {}
+    {Chapter~\thechapter}% \quad #1}
+    {1em}
+    {}
+    []
+\titlespacing{\chapter}
+   {0pt}% left
+   {0pt}% before sep
+   {\baselineskip}% after sep
+\newcommand{\chapterintro}[1]{
+  {\Large
+  \begingroup
+  \noindent #1\vspace{7mm}\par
+  \endgroup}}
+""",
+    "front/copyright.tex": "\\chapter*{}\nCopyright 2026, the authors.\n",
+    "ch_one/TeX/ch_one.tex": r"""\chapter{First chapter}\label{ch_one}
+\renewcommand{\chapterfolder}{ch_one}
+\chapterintro{An introduction to the first chapter.}
+\section{Data basics}\label{sec:data}
+A variable \var{height} is measured. \qt{A question}.
+
+\subsection{Spread\label{sec:spread}}
+The spread.
+
+\Figure[A red square standing for the data]{0.5}{square}
+
+\begin{figure}
+\subfigure[]{\Figures[A blue circle, the first panel]{0.4}{panels}{circle}
+\label{panel_a}}
+\caption{Panels}\label{fig:panels}
+\end{figure}
+See Figure~\ref{panel_a} and Section~\nameref{sec:data}.
+
+\noindent\begin{minipage}{0.4\textwidth}
+{\raggedright\begin{parts}
+\item The first part
+\end{parts}\vspace{7mm}}
+\end{minipage}
+
+
+{\input{ch_one/TeX/extra.tex}}
+
+The airports\label{US Airports} are in Section~\ref{US Airports}, as \secref{US Airports} says.
+\newcommand{\actmean}{21}
+The mean is $\actmean$, and a formula in the book's color: ${\color{oiB} x + y}$,
+and another: $\textcolor{oiB}{\bar{x}} = 21$, one by a macro: $\hlx{y} = 2$, and a
+formula whose macro a repair for text mustn't touch: $\gap{x} = 1$. A strut texmath
+can't read: $\strutx{z}$, and an environment in a formula: $\begin{wrap}w\end{wrap}$.
+Formulas as OpenIntro writes them: $P(\text{rolling a \texttt{1}})$,
+$\texttt{income\_\hspace{0.03cm}{}ver}_{\texttt{verified}}$,
+$P(\text{\underline{\color{black}mammogram$^+$} and has BC})$,
+$s = 5.5 \hfill R^2 = 70\%$, and
+\begin{align*}
+x = 1 \index{x}\vspace{2mm}
+\end{align*}
+and one whose index entry has a line of its own, after a comment, which a PDF
+mustn't take for a paragraph's end once the entry's gone:
+\begin{align*}
+y = 2
+%z = 3
+\index{y}
+\end{align*}
+""",
+    "ch_one/TeX/extra.tex": "\\begin{parts}\n\\item An extra part\n\\end{parts}\n",
+    "ch_one/TeX/review.tex": "\\section{Review}\nThe review of chapter one.\n\n"
+                             "\\Figure[A green triangle for the review]{0.3}{triangle}\n\n"
+                             "\\remark{The variance is never negative.}\n"
+                             "\\centering \\begingroup\\itshape A centered italic line.\\endgroup\n\n"
+                             "\\eocesol{The solution to the first exercise.}\n",
+    # An alt text too long for the pages' liking, of two paragraphs, as
+    # OpenIntro writes some.
+    "ch_two/TeX/ch_two.tex": "\\chapter{Second chapter}\n\\renewcommand{\\chapterfolder}{ch_two}\n"
+                             "\\Figure[A gray star in chapter two, drawn with five points of equal "
+                             "length.\n\nIts center filled, the one sample this chapter comes "
+                             "back to]{0.5}{star}\n\n"
+                             "\\Figuress[A purple hexagon with six equal sides]{2cm}{hexagon}{hexagon}\n\n"
+                             "\\includegraphics[alt={The hexagon again, named in capitals}]"
+                             "{ch_two/figures/hexagon/HEXAGON.png}\n",
+    "ch_two/TeX/review.tex": "\\section{Review two}\nAs \\nameref{ch_one} said, and Figure~"
+                             "\\ref{fig:panels} there shows.\n\n\\section{The $t$ distribution}\n"
+                             "A heading with a formula in it. See \\nameref{sec:named}, "
+                             "\\nameref{fig:panels}, and \\nameref{sec:spread}.\n\n"
+                             "\\section{\\nameref{sec:data}}\\label{sec:named}\nNamed.\n",
+    "LICENSE.md": "# License\n\nCC BY-SA 3.0.\n",
+    "project.yaml": "project:\n  identifier: org.example.custom\n  title: A Custom Book\n",
+    "conversion.yaml": "targets:\n  html:\n    format: html\n",
+}
+
+
+def case_customized(work):
+    """A book made its own way, as OpenIntro Statistics is: read whole, a
+    page per chapter, its images found and its constructs read; the sample
+    suggesting its alt-text argument be passed on, and, adopted, the pages
+    and the source target's copy carrying it; a stray brace named."""
+    for name, text in CUSTOM_FILES.items():
+        os.makedirs(os.path.join(work, os.path.dirname(name)), exist_ok=True)
+        with open(os.path.join(work, name), "w", encoding="utf-8") as fh:
+            fh.write(text)
+    for path, rgb in (("ch_one/figures/square/square.png", (200, 0, 0)),
+                      ("ch_one/figures/panels/circle.png", (0, 0, 200)),
+                      ("ch_one/figures/triangle/triangle.png", (0, 150, 0)),
+                      ("ch_two/figures/star/star.png", (90, 90, 90)),
+                      ("ch_two/figures/hexagon/hexagon.png", (120, 0, 120))):
+        os.makedirs(os.path.dirname(os.path.join(work, path)), exist_ok=True)
+        png(os.path.join(work, path), rgb)
+    first = convert(work)
+    first_said = first.stdout + first.stderr
+    contents_sample = read(work, "contents-sample.yaml") \
+        if os.path.exists(os.path.join(work, "contents-sample.yaml")) else ""
+    sample_path = os.path.join(work, "latex-conversion-macros-sample.tex")
+    sample = read(work, "latex-conversion-macros-sample.tex") \
+        if os.path.exists(sample_path) else ""
+    first_one = read(work, "html", "ch_one.html") \
+        if os.path.exists(os.path.join(work, "html", "ch_one.html")) else ""
+    # The sample's definitions adopted, as a person would, a decision made
+    # for the review's image, and a source target with tagging on.
+    adopted, taking = [], False
+    for line in sample.splitlines():
+        taking = taking or line.startswith("% \\renewcommand{\\Figure")
+        if taking and not line.strip():
+            taking = False
+        elif taking:
+            adopted.append(line[2:])
+    adopted = "\n".join(adopted)
+    with open(os.path.join(work, "latex-conversion-macros.tex"), "w") as fh:
+        fh.write(adopted + "\n")
+    with open(os.path.join(work, "image-alt.csv"), "w", encoding="utf-8") as fh:
+        fh.write("Image,Alt\nch_one/figures/triangle/triangle.png,\"A triangle, from the sidecar\"\n")
+    pdf = bool(shutil.which("lualatex"))
+    with open(os.path.join(work, "conversion.yaml"), "w") as fh:
+        fh.write("targets:\n  html:\n    format: html\n"
+                 "  tagged:\n    format: source\n    tagging: \"on\"\n"
+                 + "  epub:\n    format: epub3\n"
+                 + ("  pdf:\n    format: pdf\n    pdf:\n      from: pages\n" if pdf else ""))
+    second = convert(work)
+    said = second.stdout + second.stderr
+
+    def page(name):
+        path = os.path.join(work, "html", name)
+        return read(work, "html", name) if os.path.exists(path) else ""
+    one, two = page("ch_one.html"), page("ch_two.html")
+    copyright_page = page("copyright.html")
+    copy_path = os.path.join(work, "tagged", "ch_one", "TeX", "review.tex")
+    review_copy = read(work, "tagged", "ch_one", "TeX", "review.tex") \
+        if os.path.exists(copy_path) else ""
+    main_copy = read(work, "tagged", "main.tex") \
+        if os.path.exists(os.path.join(work, "tagged", "main.tex")) else ""
+    # A brace the book never closes, in a style file the preamble reads.
+    broken = os.path.join(work, "..", os.path.basename(work) + "-brace")
+    os.makedirs(os.path.join(broken, "style"))
+    with open(os.path.join(broken, "main.tex"), "w") as fh:
+        fh.write("\\documentclass{book}\n\\input{style/style}\n\\begin{document}\n"
+                 "Text.\n\\end{document}\n")
+    with open(os.path.join(broken, "style", "style.tex"), "w") as fh:
+        fh.write("\\newcommand{\\a}{A}\n{\n\\newcommand{\\b}{B}\n")
+    with open(os.path.join(broken, "conversion.yaml"), "w") as fh:
+        fh.write("targets:\n  html:\n    format: html\n")
+    stopped = convert(broken)
+    told = stopped.stdout + stopped.stderr
+
+    def epub_links():
+        import zipfile
+        path = os.path.join(work, "epub", "org.example.custom.epub")
+        if not os.path.exists(path):
+            return False
+        with zipfile.ZipFile(path) as z:
+            texts = {n: z.read(n).decode("utf-8") for n in z.namelist()
+                     if n.endswith((".xhtml", ".opf"))}
+        holder = [n for n, t in texts.items() if '<figure id="page-ch_one--fig:panels"' in t]
+        linking = [t for n, t in texts.items() if "fig:panels" in t and n not in holder]
+        opf = next((t for n, t in texts.items() if n.endswith(".opf")), "")
+        return holder and linking and all(
+            re.search(r'href="%s#page-ch_one--fig:panels"' % re.escape(os.path.basename(holder[0])), t)
+            for t in linking) and re.search(r'properties="nav mathml"', opf)
+
+    def ids_valid():
+        ids = re.findall(r'\sid="([^"]*)"', one)
+        return ids and all(i and not re.search(r"[\s{}]", i) for i in ids) \
+            and 'id="US-Airports"' in one
+    return [
+        ("chapters \\include-d by the book's own macro are pages, each with its review, "
+         "and a file of definitions \\include-d in the body is none",
+         lambda: "The review of chapter one." in one and "Review two" in two
+         and not os.path.exists(os.path.join(work, "html", "headers.html"))
+         and "have nothing to read" in said and "headers" in said),
+        ("an image behind a macro whose file is \\chapterfolder/figures/#3/#3, the folder "
+         "set at each chapter's start, or made of two arguments, is found",
+         lambda: first.returncode == 0
+         and re.search(r'<img[^>]*src="ch_one/figures/square/square\.png"', first_one)
+         and re.search(r'<img[^>]*src="ch_one/figures/panels/circle\.png"', first_one)
+         and re.search(r'<img[^>]*src="ch_one/figures/triangle/triangle\.png"', first_one)
+         and re.search(r'<img[^>]*src="ch_two/figures/star/star\.png"', two)),
+        ("the sample suggests passing on the argument the image macros don't use, which "
+         "their calls give a phrase in",
+         lambda: "% \\renewcommand{\\Figure}[3][]{\\includegraphics[alt={#1},width=#2\\textwidth]"
+         "{\\chapterfolder/figures/#3/#3}}" in sample
+         and "% \\renewcommand{\\Figures}[4][]" in sample
+         and "as alt text might be" in first_said),
+        ("a macro the book defines in its text, a formula uses, and texmath reads isn't in "
+         "the sample", lambda: sample and "\\actmean" not in sample),
+        ("adopted, each image has its alt text on the pages",
+         lambda: re.search(r'<img[^>]*alt="A red square standing for the data"', one)
+         and re.search(r'<img[^>]*alt="A blue circle, the first panel"', one)
+         and re.search(r'<img[^>]*alt="A gray star in chapter two, drawn', two)),
+        ("a row of the alt text report whose current alt text has a line end in it is "
+         "one row, its image named, and every row names an image", lambda: (lambda rows: any(
+             row.get("Image") == "ch_two/figures/star/star.png"
+             and row.get("Reason", "").startswith("too long") and "\n" in row.get("CurrentAlt", "")
+             for row in rows) and all(re.search(r"\.(png|jpe?g|svg|pdf)$", row.get("Image") or "")
+                                      for row in rows))(
+             list(csv.DictReader(open(os.path.join(work, "image-alt-missing.csv"),
+                                      encoding="utf-8", newline=""))))),
+        ("and the source target's copy writes a decision in the argument the adopted "
+         "definition passes on, and the definitions after the preamble",
+         lambda: "\\Figure[{A triangle, from the sidecar}]{0.3}{triangle}" in review_copy
+         and "\\renewcommand{\\Figure}[3][]{\\includegraphics[alt={#1}," in main_copy),
+        ("an environment called as a command, and one wrapping a list in braces or an "
+         "\\input-ed file in braces, are read",
+         lambda: re.search(r"<code>height</code>", one)
+         and "The first part" in one and "An extra part" in one),
+        ("titlesec's settings over several lines are left out, nothing of them read as "
+         "text, and \\begingroup after a size command is a group",
+         lambda: "An introduction to the first chapter." in one
+         and "0pt" not in one + page("headers.html") and "Chapter~" not in one),
+        ("a color the book defines is CSS",
+         lambda: re.search(r'<span\s+style="color: rgb\(86, 155, 189\)"><strong>A\s+question', one)),
+        ("\\nameref is a link to the label, its text the section's title, on another page "
+         "too", lambda: re.search(r'<a\s+href="#sec:data"[^>]*>Data\s+basics</a>', one)
+         and re.search(r'<a\s+href="ch_one\.html#ch_one"[^>]*>First\s+chapter</a>', two)),
+        ("\\nameref to a figure's label is its caption, to one in a heading's braces the "
+         "heading's title, its id not repeated, and to a heading that is itself a \\nameref, "
+         "that heading's title, before the heading too",
+         lambda: re.search(r'<a\s+href="#sec:named"[^>]*>Data\s+basics</a>', two)
+         and re.search(r'<a\s+href="ch_one\.html#fig:panels"[^>]*>Panels</a>', two)
+         and re.search(r'<a\s+href="ch_one\.html#sec:spread"[^>]*>Spread</a>', two)
+         and latexsource_mark() not in two and one.count('id="sec:spread"') == 1),
+        ("a \\subfigure is a figure of its own, its label in it, so a reference to it goes "
+         "there", lambda: re.search(r'<figure\s+id="panel_a(-1)?"', one)
+         and re.search(r'\sid="panel_a"', one) and 'href="#panel_a"' in one),
+        ("a label with a space in it is an id without one", ids_valid),
+        ("and a reference to it through the book's own macro is matched, as LaTeX matches it",
+         lambda: len(re.findall(r'href="#US-Airports"', one)) == 2),
+        ("an empty \\chapter*{} starting a page is left out",
+         lambda: copyright_page and "Copyright 2026" in copyright_page
+         and not re.search(r"<h1[^>]*>\s*</h1>", copyright_page)),
+        ("a LICENSE.md beside a LaTeX book isn't a page, and a comment in a package list "
+         "isn't a package", lambda: not os.path.exists(os.path.join(work, "html", "LICENSE.html"))
+         and "%tocloft" not in said),
+        ("the PDF built from the pages takes an alt text of two paragraphs, and a formula "
+         "in a color the book defines",
+         lambda: os.path.exists(os.path.join(work, "pdf", "org.example.custom.pdf"))
+         if pdf else skip("no lualatex for the PDF")),
+        ("a group after a command the reader takes whole is read: \\begingroup after "
+         "\\noindent, in a macro and in the text, and an exercise solution's number and "
+         "text after \\hypersetup's argument and \\hspace's, as OpenIntro sets them",
+         lambda: re.search(r"Remark\.</strong>\s*The variance is never\s+negative", one)
+         and re.search(r"<em>\s*A\s+centered\s+italic\s+line\.\s*</em>", one)
+         and re.search(r"1\.1</span>.*?The\s+solution\s+to\s+the\s+first\s+exercise\.",
+                       one, re.S)),
+        ("an image named in a different case from its file is the file, as macOS finds it, "
+         "and the run says so",
+         lambda: re.search(r'src="ch_two/figures/hexagon/hexagon\.png"[^>]*\s+alt="The hexagon '
+                           r'again, named in capitals"', two)
+         and "image named in a different case from its file" in said),
+        ("the sample's definition of a macro over several lines is a comment, every line "
+         "of it; adopted, its image has its alt text",
+         lambda: "% \\renewcommand{\\Figuress}[4][]{%\n%   \\includegraphics[alt={#1},width=#2]"
+         in sample and all(not l.strip() or l.startswith(("%", "\\renewcommand"))
+                           for l in sample.splitlines())
+         and 'alt="A purple hexagon with six equal sides"' in two),
+        ("the sample lists no command the copy makes of an environment, and shows a macro "
+         "as the book defines it, not as the copy has it",
+         lambda: "\\wrap" not in sample and "\\endwrap" not in sample
+         and "%   \\newcommand{\\strutx}[1]{\\rule{0pt}{2ex}#1\\leavevmode}" in sample),
+        ("a text command inside \\text, a sliver of space in a name, a color and an "
+         "underline in text, \\textcolor, \\hfill, \\index, and \\vspace in a formula are put "
+         "so texmath reads it, as OpenIntro writes them",
+         lambda: all(a + "</annotation>" in one for a in (
+             "P(\\text{rolling a }\\texttt{1})",
+             "\\texttt{income\\_ver}_{\\texttt{verified}}",
+             "P(\\underline{{\\color{black}{\\text{mammogram$^+$}}}}\\text{ and has BC})",
+             "s = 5.5 \\quad R^2 = 70\\%", "{\\color{oiB}{\\bar{x}}} = 21"))
+         and re.search(r'<math display="block"[^>]*>(?:(?!</math>).)*<annotation '
+                       r'encoding="application/x-tex">\\begin\{align\*\}\s*x = 1\s*'
+                       r'\\end\{align\*\}</annotation>', one, re.S)),
+        ("a formula's macro is as the book defines it, so texmath reads it",
+         lambda: "x\\hspace{1em}{} = 1</annotation>" in one),
+        ("the contents sample names the authors, not the affiliations under each name",
+         lambda: __import__("yaml").safe_load(contents_sample or "{}").get(
+             "project", {}).get("authors") == ["Ann Lee", "Bo Chen"]),
+        ("and every link in it has its target: a label in a heading's braces is a label "
+         "LaTeX finds", lambda: "Hyper reference" not in said
+         if pdf else skip("no lualatex for the PDF")),
+        ("in the EPUB, a link to a figure in another chapter's file names the file, and "
+         "a formula in a heading has the navigation document declare MathML", epub_links),
+        ("a brace a style file never closes stops the run, which names the file and line",
+         lambda: stopped.returncode != 0
+         and "style/style.tex:2 (a { that nothing in the file closes)" in told),
     ]
 
 
@@ -2017,6 +2576,7 @@ CASES = [("a LaTeX book", case_book), ("two masters", case_masters),
          ("the latex target", case_latex_target),
          ("a book of documents built on their own", case_documents),
          ("the pieces the copies take", case_pieces),
+         ("a book made its own way, as OpenIntro is", case_customized),
          ("a book too big for TeX", case_capacity)]
 
 

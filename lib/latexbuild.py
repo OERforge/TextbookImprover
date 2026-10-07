@@ -113,6 +113,13 @@ def failure_advice(log):
     # (Prescott, TUGboat 47:2; pdfLaTeX on GIAM's tagged copy ran out of
     # main memory). A stack that overflows is usually a macro that calls
     # itself without end instead.
+    # titlesec's \titleformat, which LaTeX's tagging can't build with; a
+    # copy takes titlesec out only when the book uses none of its commands.
+    if "Package titlesec Error: No format for this command" in log:
+        said.append("titlesec can't build with LaTeX's tagging (the tagging project "
+                    "rates it currently incompatible), and the book sets its headings "
+                    "with it: without its \\titleformat settings, and the package, "
+                    "LaTeX's own headings would build.")
     capacity = CAPACITY.search(log)
     if capacity:
         table = capacity.group(1).strip()
@@ -131,15 +138,20 @@ def failure_advice(log):
     return said
 
 
+FILE_LINE_ERROR = re.compile(r"^[^:\n]+\.\w+:\d+: ")
+
+
 def first_errors(log, limit=3):
     """The first errors in a LaTeX log, each with the lines that follow it
-    up to the one naming where it was (l.123)."""
+    up to the one naming where it was (l.123). With -file-line-error an
+    error opens with its file and line, and a file's name can have spaces
+    (FINC 308's "Topic 03 Financial Statements and Net Worth.tex:45: ")."""
     lines = log.splitlines()
     found = []
     for i, line in enumerate(lines):
         if "==> Fatal error occurred" in line:
             continue
-        if line.startswith("! ") or re.match(r"^[^:\s]+\.\w+:\d+: ", line):
+        if line.startswith("! ") or FILE_LINE_ERROR.match(line):
             piece = [line]
             for follow in lines[i + 1:i + 8]:
                 piece.append(follow)

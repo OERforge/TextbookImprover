@@ -136,6 +136,12 @@ local DECLARED = { TextbookImproverHeadersFirstRow = 'first-row',
   TextbookImproverHeadersBoth = 'both' }
 
 function Div(div)
+  -- A box, a tabular of one paragraph column holding prose, which
+  -- latexsource.py made an environment of its rows: a div of class box.
+  if div.classes[1] == 'TextbookImproverBox' then
+    div.classes = { 'box' }
+    return div
+  end
   -- A table's place in the book's files, which latexsource.py wrapped it
   -- in: kept on the table, for the header pre-pass and a remediated copy.
   local place = div.classes[1] and div.classes[1]:match('^TextbookImproverTable(F%d+N%d+)$')

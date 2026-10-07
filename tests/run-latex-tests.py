@@ -1323,6 +1323,330 @@ def case_latex_target(work):
     ]
 
 
+# A course's notes, a document per topic, each built on its own (FINC 308's
+# layout): a title set as large type under the course's name, a table whose
+# column type the document defines, a box (a table of one paragraph column)
+# holding a display formula, an answer key of \ref-s to enumerated items,
+# enumitem's leftmargin=*, an unused titlesec, and an \appendix before its
+# last section. A binder gathers the topics' PDFs with \includepdf.
+TOPIC_A = r"""\documentclass[11pt]{article}
+\usepackage{amsmath}
+\usepackage{enumitem}
+\usepackage{titlesec}
+\usepackage{booktabs}
+\usepackage{array}
+\newcolumntype{R}[1]{>{\raggedleft\arraybackslash}p{#1}}
+\begin{document}
+\begin{center}
+    {\large \textrm{COURSE 101: Testing}}
+
+    \vspace{0.3cm}
+    {\LARGE \textrm{Topic A: The First Topic}}
+\end{center}
+
+Opening words.
+
+\section*{Learning Objectives}
+\begin{itemize}[leftmargin=*]
+    \item Learn the first thing
+\end{itemize}
+
+\section{Balances}
+\begin{center}
+\begin{tabular}{p{2in}R{1in}}
+\toprule
+\textbf{Item} & \textbf{Amount}\\
+\midrule
+Cash & \$5\\
+Loans & \$2\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\begin{center}
+\begin{tabular}{p{4in}}
+\toprule
+\multicolumn{1}{c}{\textbf{Example: A Boxed Passage}}\\
+
+A box is a frame around a passage of prose that runs on for a sentence or two.
+
+\[
+x = 1 + 2
+\]
+And the passage closes here.\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\section{Practice Questions}
+\begin{enumerate}[leftmargin=18pt]
+    \item Which comes first?
+    \begin{enumerate}
+        \item The second
+        \item\label{QA1} The first
+    \end{enumerate}
+\end{enumerate}
+
+\section{Answer Key}
+\ref{QA1}
+
+\appendix
+\section{More Practice}
+Extra work.
+\end{document}
+"""
+TOPIC_B = r"""\documentclass[11pt]{article}
+\usepackage{graphicx}
+\begin{document}
+\begin{center}
+    {\large COURSE 101: Testing}
+
+    {\LARGE Topic B: The Second Topic}
+\end{center}
+
+\section{Only}
+Second words.
+\input{shared/note}
+
+\includegraphics[width=1cm]{img/dot}
+\end{document}
+"""
+BINDER = r"""\documentclass{article}
+\usepackage{pdfpages}
+\begin{document}
+\tableofcontents
+\section{Topic A}
+\includepdf[pages=-]{Topic A One/Topic A One.pdf}
+\section{Topic B}
+\includepdf[pages=-]{Topic B Two/Topic B Two.pdf}
+\section{Topic C}
+\includepdf[pages=-]{Topic C Three/Topic C Three.pdf}
+\end{document}
+"""
+
+
+def case_documents(work):
+    """A book of documents each built on its own: a binder that only
+    gathers their PDFs stops the run, naming them; latex.main lists them,
+    each a page in the order given, its large-type title the page's; the
+    copy writes each, made to build with tagging; the PDF target builds a
+    PDF of each."""
+    os.makedirs(os.path.join(work, "src"))
+    # Topic B reaches a file and an image from its own folder, src/, as its
+    # author builds it there.
+    os.makedirs(os.path.join(work, "src", "shared"))
+    os.makedirs(os.path.join(work, "src", "img"))
+    png(os.path.join(work, "src", "img", "dot.png"), (0, 0, 0))
+    for name, text in (("src/Topic A One.tex", TOPIC_A), ("src/Topic B Two.tex", TOPIC_B),
+                       ("src/shared/note.tex", "A NOTE FROM ITS FOLDER.\n"),
+                       ("Combined.tex", BINDER)):
+        with open(os.path.join(work, name), "w", encoding="utf-8") as fh:
+            fh.write(text)
+    with open(os.path.join(work, "image-alt.csv"), "w", encoding="utf-8") as fh:
+        fh.write("Image,Alt\nsrc/img/dot.png,A black dot\n")
+    with open(os.path.join(work, "project.yaml"), "w") as fh:
+        fh.write("project:\n  identifier: org.example.course\n  title: Course 101\n")
+    with open(os.path.join(work, "conversion.yaml"), "w") as fh:
+        fh.write("targets:\n  html:\n    format: html\n")
+    stopped = convert(work)
+    told = stopped.stdout + stopped.stderr
+    pdf = bool(shutil.which("lualatex") and shutil.which("latexmk"))
+    with open(os.path.join(work, "conversion.yaml"), "w") as fh:
+        fh.write("defaults:\n  latex:\n    main:\n      - src/Topic B Two.tex\n"
+                 "      - src/Topic A One.tex\n"
+                 "targets:\n  html:\n    format: html\n"
+                 "  tagged:\n    format: source\n    tagging: \"on\"\n"
+                 + ("  pdf:\n    format: pdf\n" if pdf else ""))
+    listed = convert(work)
+    said = listed.stdout + listed.stderr
+
+    def page(name):
+        path = os.path.join(work, "html", name)
+        return read(work, "html", name) if os.path.exists(path) else ""
+
+    def copy(name):
+        path = os.path.join(work, "tagged", "src", name)
+        return read(work, "tagged", "src", name) if os.path.exists(path) else ""
+    a, b = page("Topic-A-One.html"), page("Topic-B-Two.html")
+    sample = read(work, "contents-sample.yaml") \
+        if os.path.exists(os.path.join(work, "contents-sample.yaml")) else ""
+    tagged = copy("Topic A One.tex")
+    # A pattern names them too, in sorted order.
+    with open(os.path.join(work, "conversion.yaml"), "w") as fh:
+        fh.write("defaults:\n  latex:\n    main: src/*.tex\n"
+                 "targets:\n  html:\n    format: html\n")
+    pattern = convert(work)
+    sorted_sample = read(work, "contents-sample.yaml") \
+        if os.path.exists(os.path.join(work, "contents-sample.yaml")) else ""
+    # The documents grouped under one entry, and a Word target merging the
+    # group: one file, opening at the group's Heading 1, each document a
+    # Heading 2 titled as its page is, its title's \textrm and all.
+    with open(os.path.join(work, "project.yaml"), "w") as fh:
+        fh.write("project:\n  identifier: org.example.course\n  title: Course 101\n"
+                 "  contents:\n  - title: The Topics\n    items:\n    - Topic-A-One\n"
+                 "    - Topic-B-Two\n")
+    with open(os.path.join(work, "conversion.yaml"), "w") as fh:
+        fh.write("defaults:\n  latex:\n    main: src/*.tex\n"
+                 "targets:\n  docx:\n    format: docx\n    merge: groups\n")
+    merged = convert(work)
+
+    def word_headings():
+        import zipfile
+        path = os.path.join(work, "docx", "The-Topics.docx")
+        if not os.path.exists(path):
+            return []
+        with zipfile.ZipFile(path) as z:
+            xml = z.read("word/document.xml").decode("utf-8")
+        found = []
+        for p in re.findall(r"<w:p[ >].*?</w:p>", xml, re.S):
+            style = re.search(r'<w:pStyle w:val="([^"]+)"', p)
+            if style and style.group(1).startswith(("Heading", "Title")):
+                found.append((style.group(1), "".join(re.findall(r"<w:t[^>]*>([^<]*)</w:t>", p))))
+        return found
+
+    def pdfs_titled():
+        if not pdf:
+            return skip("no lualatex or latexmk for the PDF target")
+        try:
+            import pikepdf
+        except ImportError:
+            return skip("no pikepdf to read the PDFs")
+        titles = []
+        for name in ("Topic-A-One.pdf", "Topic-B-Two.pdf"):
+            path = os.path.join(work, "pdf", name)
+            if not os.path.exists(path):
+                return False
+            with pikepdf.open(path) as found, found.open_metadata() as meta:
+                titles.append(meta.get("dc:title"))
+        return titles == ["Topic A: The First Topic", "Topic B: The Second Topic"]
+
+    def pdfs_pass():
+        if not pdf:
+            return skip("no lualatex or latexmk for the PDF target")
+        verapdf = os.environ.get("VERAPDF") or shutil.which("verapdf")
+        if not verapdf:
+            return skip("no veraPDF to check the PDFs")
+        for name in ("Topic-A-One.pdf", "Topic-B-Two.pdf"):
+            done = subprocess.run([verapdf, "-f", "ua2", "--format", "text",
+                                   os.path.join(work, "pdf", name)],
+                                  capture_output=True, text=True)
+            if not done.stdout.strip().startswith("PASS"):
+                return False
+        return True
+    return [
+        ("a binder that only gathers PDFs stops the run, naming the documents of "
+         "their names in its order, and the one with none",
+         lambda: stopped.returncode != 0 and "\\includepdf" in told
+         and 0 < told.find('- "src/Topic A One.tex"') < told.find('- "src/Topic B Two.tex"')
+         and "defaults:" in told and "Topic C Three.pdf" in told
+         and "Nothing was converted" in told),
+        ("latex.main lists the documents, each a page, in the order it gives",
+         lambda: listed.returncode == 0 and a and b
+         and "2 LaTeX documents are the book" in said
+         and 0 < sample.find("Topic-B-Two") < sample.find("Topic-A-One")),
+        ("a document below the book's directory reaches a file and an image from its "
+         "own folder, as its author builds it there",
+         lambda: "A NOTE FROM ITS FOLDER." in b and re.search(r'<img[^>]*alt="A black dot"', b)
+         and os.path.exists(os.path.join(work, "tagged", "src", "shared", "note.tex"))
+         and "\\includegraphics[alt={A black dot},width=1cm]{img/dot}" in copy("Topic B Two.tex")),
+        ("a pattern in latex.main names them in sorted order",
+         lambda: pattern.returncode == 0
+         and 0 < sorted_sample.find("Topic-A-One") < sorted_sample.find("Topic-B-Two")),
+        ("a title set as large type is the page's title, its sections under it, the "
+         "course's name kept",
+         lambda: "<title>Topic A: The First Topic</title>" in a and a.count("<h1") == 1
+         and re.search(r"<h2[^>]*>Balances</h2>", a) and "COURSE 101: Testing" in a
+         and "<title>Topic B: The Second Topic</title>" in b),
+        ("an \\appendix before a document's last section doesn't make the page an appendix",
+         lambda: sample and "appendix" not in sample and 'name="page-role"' not in a),
+        ("a \\ref to an enumerated item is the item's number, as LaTeX gives it",
+         lambda: re.search(r"<p>1b</p>", a) and "[QA1]" not in a),
+        ("a table whose column type the document defines is read as a table",
+         lambda: re.search(r"<th[^>]*>(<strong>)?Item", a) and "2inR" not in a),
+        ("a table of one paragraph column holding prose is a box, not a table",
+         lambda: re.search(r'<div class="box">\s*<p><strong>Example: A Boxed Passage', a)
+         and "A box is a frame" in a and "<td" not in a.split("Example: A Boxed")[1][:400]),
+        ("the copy writes each document, made to build with tagging: its title for the "
+         "PDF's, hyperref for its bookmarks, the unused titlesec out, enumitem's settings "
+         "taken, the box a division, and \\leavevmode before its formula",
+         lambda: "\\DocumentMetadata" in copy("Topic B Two.tex")
+         and "\\title{\\textrm{Topic A: The First Topic}}" in tagged
+         and "\\usepackage[hidelinks]{hyperref}" in tagged
+         and "% book uses none of its commands: \\usepackage{titlesec}" in tagged
+         and "ver@latex-lab-enumitem.sty" in tagged
+         and "{\\ifdefined\\tagpdfsetup\\tagpdfsetup{table/tagging=div}\\fi\\begin{tabular}{p{4in}}"
+         in tagged and "\\leavevmode\\[" in tagged
+         and "\\begin{tabular}{p{2in}R{1in}}" in tagged),
+        ("a Word file merging the documents' group opens at the group's Heading 1, each "
+         "document a Heading 2 titled as its page is",
+         lambda: merged.returncode == 0 and word_headings()[:3] == [
+             ("Heading1", "The Topics"), ("Heading2", "Topic A: The First Topic"),
+             ("Heading3", "Learning Objectives")]),
+        ("the PDF target builds a PDF of each, named as its page is, its title the "
+         "document's", pdfs_titled),
+        ("and each passes veraPDF's PDF/UA-2 profile", pdfs_pass),
+    ]
+
+
+def case_pieces(work):
+    """The pieces the LaTeX copies take, each on its own."""
+    sys.path.insert(0, os.path.join(ROOT, "lib"))
+    import latexbuild
+    import latexsource
+    import texremediate
+    log = ("(./Topic 03 Financial Statements.tex\n"
+           "./Topic 03 Financial Statements.tex:65: Package titlesec Error: No format for "
+           "this command.\n\nSee the titlesec package documentation.\n l.65 \\section*{Goals}\n")
+    nested = r"""
+\begin{enumerate}
+\item A \label{a}
+\item B
+  \begin{enumerate}
+  \item x
+  \item y \label{b}
+    \begin{enumerate}
+    \item p
+    \item q
+    \item r \label{c}
+    \end{enumerate}
+  \end{enumerate}
+\end{enumerate}
+\begin{enumerate}[label=(\alph*)]
+\item one
+\item two \label{d}
+\end{enumerate}
+\begin{enumerate}[resume]
+\item three \label{e}
+\end{enumerate}
+\begin{enumerate}[label=\Roman*.,start=4]
+\item \label{f} four
+\end{enumerate}
+\section{X}\label{g}
+"""
+    types = {"R": (1, ">{\\raggedleft\\arraybackslash}p{#1}"), "Y": (0, "R{1cm}")}
+    settings = texremediate.enumitem_settings(
+        {"a": "\\begin{itemize}[leftmargin=*,labelindent=0pt]\n\\item x\n\\end{itemize}\n"
+              "\\begin{enumerate}[resume,label={(\\alph*)}]\n\\item y\n\\end{enumerate}\n"
+              "\\setlist[itemize]{leftmargin=*}\n"})
+    return [
+        ("LaTeX's first error is found when its file's name has spaces",
+         lambda: latexbuild.first_errors(log)
+         and "titlesec Error" in latexbuild.first_errors(log)[0]
+         and "titlesec can't build" in " ".join(latexbuild.failure_advice(log))),
+        ("an enumerated item's number is worked out as LaTeX would",
+         lambda: latexsource.item_labels(nested) == {
+             "a": "1", "b": "2b", "c": "2(b)iii", "d": "(b)", "e": "3", "f": "IV."}),
+        ("a column type is written out, inside a repeat and inside another type",
+         lambda: latexsource.expand_columns("lY*{2}{R{1in}}", types)
+         == "l>{\\raggedleft\\arraybackslash}p{1cm}*{2}{>{\\raggedleft\\arraybackslash}p{1in}}"),
+        ("enumitem's settings the emulation lacks are counted",
+         lambda: settings == {"leftmargin=*": 2, "labelindent": 1, "resume": 1}),
+        ("a document that includes nothing opens in the main matter, whatever follows",
+         lambda: latexsource.book_outline("Text.\n\\appendix\n\\section{A}")[1] == "main"
+         and latexsource.book_outline("\\appendix\n\\section{A}")[1] == "appendix"),
+    ]
+
+
 def case_capacity(work):
     """A book that outgrows one of TeX's tables, and one whose macro calls
     itself without end: the PDF target names each for what it is."""
@@ -1362,6 +1686,8 @@ CASES = [("a LaTeX book", case_book), ("two masters", case_masters),
          ("a LaTeX book's PDF, from its own LaTeX", case_book_pdf),
          ("the book's other masters", case_other_masters),
          ("the latex target", case_latex_target),
+         ("a book of documents built on their own", case_documents),
+         ("the pieces the copies take", case_pieces),
          ("a book too big for TeX", case_capacity)]
 
 

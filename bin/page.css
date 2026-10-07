@@ -52,6 +52,14 @@ table caption {
   text-align: left;
 }
 
+/* A box around a passage, which a LaTeX book draws as a table of one
+   column (an example set off between rules); a div here, not a table. */
+.box {
+  border: 1px solid currentColor;
+  padding: 0 1em;
+  margin: 1em 0;
+}
+
 figure { margin: 1.5em 0; }
 figure img { height: auto; }
 figcaption {

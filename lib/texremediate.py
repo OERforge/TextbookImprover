@@ -275,6 +275,11 @@ def remediate(base, out_dir, master, files, alts, tagging=False, language=None,
     counts, and in unplaced_keys the keys of those decisions."""
     master_text = latexsource.read_text(os.path.join(base, master))
     dirs = latexsource.graphics_paths(latexsource.split_master(master_text)[0])
+    folder = os.path.dirname(master)
+    if folder:
+        # A master below the book's directory finds its images from its
+        # own folder, as the read does (latexsource.prepare).
+        dirs = [folder] + [os.path.join(folder, d) for d in dirs] + dirs
     totals = {"files": 0, "changed": 0}
     originals, texts = {}, {}
     for name in files:
@@ -325,7 +330,9 @@ def remediate(base, out_dir, master, files, alts, tagging=False, language=None,
             continue
         out = os.path.join(out_dir, name)
         os.makedirs(os.path.dirname(out) or out_dir, exist_ok=True)
-        with open(out, "w", encoding="utf-8", newline="") as fh:
+        # As read (latexsource.read_text): a byte that isn't UTF-8, in a file
+        # in Latin-1, say, is written back as it was.
+        with open(out, "w", encoding="utf-8", errors="surrogateescape", newline="") as fh:
             fh.write(texts[name])
         totals["files"] += 1
         totals["changed"] += int(texts[name] != originals[name])
@@ -349,7 +356,16 @@ PDFOUTPUT_REPLACEMENT = "\\ifnum0\\ifx\\pdfoutput\\undefined\\ifx\\directlua\\un
 NEWTHEOREM = re.compile(r"\\newtheorem\s*\{(\w+)\}")
 STARRED_THEOREM = re.compile(r"\\newtheorem\*\s*\{(\w+)\*\}\s*\{[^}]*\}")
 CENTERLINE = re.compile(r"\\centerline(?![A-Za-z@])")
-BLOCK_FORMULA = re.compile(r"(\\begin\s*\{(?:center|flushleft|flushright)\}\s*)(?=\\\[)")
+# A display formula that opens a paragraph in a center, flushleft, or
+# flushright environment: right after its \begin (GIAM's), or after a blank
+# line, as in a paragraph column of a table there (FINC 308's boxes), where
+# LaTeX 2026-06-01's tagging leaves a paragraph open; \leavevmode before it
+# opens the paragraph first.
+CENTERED = re.compile(r"\\begin\s*\{(center|flushleft|flushright)\}")
+BLOCK_FORMULA = re.compile(
+    r"(\\begin\s*\{(?:center|flushleft|flushright)\}\s*|\n[ \t]*\n\s*)"
+    r"(?=\\\[|\\begin\s*\{(?:equation|align|alignat|flalign|gather|multline"
+    r"|displaymath|eqnarray)\*?\})")
 CENTERLINE_DEFINITION = (
     "% Written for LaTeX's tagging: \\centerline on a line of its own is a\n"
     "% centered paragraph, which tagging takes; in a paragraph it's as before.\n"
@@ -391,6 +407,139 @@ FLOATS_HERE = (
     "% Written for LaTeX's tagging: a figure's or table's tags where the text\n"
     "% has it, not gathered at the end of the document; it's printed where it was.\n"
     "\\ifdefined\\tagpdfsetup\\tagpdfsetup{float/here}\\fi\n")
+# enumitem's settings for a list, which LaTeX's tagging replaces with an
+# emulation of its own (latex-lab-enumitem, loaded by latex-lab-testphase-
+# block in place of enumitem.sty, LaTeX 2026-06-01). The emulation stops on
+# the settings it lacks ("Some keys specified on the itemize environment
+# are unused") and on * and ! for a computed width ("Missing number",
+# FINC 308's 101 lists with leftmargin=*), so each is taken here: a width
+# to compute or a label's indent is left to the emulation's defaults, resume
+# continues the numbering, nolistsep is nosep, and the rest -- code to run
+# around a list, a nested label, \ref's form, a description's style -- is
+# left out. Checked key by key against the emulation; with enumitem itself
+# (no tagging), the block does nothing.
+ENUMITEM_KEYS = r"""% Written for LaTeX's tagging, which lays out lists with an emulation of
+% enumitem: the settings it lacks are taken, so the lists build. A width to
+% compute (leftmargin=*) or a label's indent is left to its defaults, resume
+% continues the numbering, and code around a list (before, after), a nested
+% label (label*), and ref are left out. With enumitem itself, nothing changes.
+\ExplSyntaxOn
+\cs_if_exist:cT { ver@latex-lab-enumitem.sty }
+  {
+    \keys_define:nn { template / block / std }
+      {
+        leftmargin .code:n =
+          { \str_case:nnF {#1} { {*} { } {!} { } }
+              { \keys_set:nn { template / block / std } { left-margin = {#1} } } } ,
+        labelindent .code:n = { } , labelindent* .code:n = { } ,
+        widest .code:n = { } , widest* .code:n = { } , left .code:n = { } ,
+        ref .code:n = { } , label* .code:n = { } , series .code:n = { } ,
+        before .code:n = { } , before* .code:n = { } ,
+        after .code:n = { } , after* .code:n = { } ,
+        first .code:n = { } , first* .code:n = { } , style .code:n = { } ,
+        itemjoin .code:n = { } , itemjoin* .code:n = { } ,
+        afterlabel .code:n = { } , mode .code:n = { } , fullwidth .code:n = { }
+      }
+    \keys_define:nn { template / blockenv / std }
+      { nolistsep .meta:n = { nosep } }
+    \keys_define:nn { template / list / std }
+      {
+        labelwidth .code:n =
+          { \str_case:nnF {#1} { {*} { } {!} { } }
+              { \keys_set:nn { template / list / std } { label-width = {#1} } } } ,
+        resume .code:n =
+          { \tl_if_empty:NF \l__block_counter_tl
+              { \keys_set:ne { template / list / std }
+                  { start = \int_eval:n { \value { \l__block_counter_tl } + 1 } } } } ,
+        resume* .code:n = { \keys_set:nn { template / list / std } { resume } }
+      }
+  }
+\ExplSyntaxOff
+"""
+# A box (latexsource.box_tables), a table of one paragraph column holding
+# prose, which the pages make a div: tagged as a division of paragraphs, not
+# a table (table/tagging=div, latex-lab-testphase-table), the setting kept
+# to its table by a group. Checked: veraPDF passes it, and the next table is
+# a table again.
+BOX_OPEN = "{\\ifdefined\\tagpdfsetup\\tagpdfsetup{table/tagging=div}\\fi"
+# A table in a box is a table: tagging set back for it, the setting and the
+# two plugs table/tagging=on leaves as div set them (checked: a Table, with
+# no presentation role, and veraPDF passes).
+DATA_OPEN = ("{\\ifdefined\\tagpdfsetup\\tagpdfsetup{table/tagging=on}"
+             "\\AssignTaggingSocketPlug{tbl/hmode/begin}{Table}"
+             "\\AssignTaggingSocketPlug{tbl/vmode/begin}{Table}\\fi")
+BOXES_NOTE = (
+    "% Written for LaTeX's tagging: a table of one column of prose, a box around\n"
+    "% a passage, is tagged as a division of paragraphs, not a table, by\n"
+    "% {\\tagpdfsetup{table/tagging=div} before it and } after.\n")
+# titlesec, which LaTeX's tagging can't build with ("No format for this
+# command" at the first \section, its status currently incompatible), taken
+# out when the book uses none of its commands, as FINC 308's topics load it.
+TITLESEC_USE = re.compile(r"\\(?:titleformat|titlespacing|titlelabel|titleclass|"
+                          r"assignpagestyle|(?:part|chapter|(?:sub)*section|(?:sub)?paragraph)"
+                          r"break)(?![A-Za-z@])")
+# The PDF's title (dc:title), which PDF/UA-2 requires: LaTeX's tagging takes
+# it from \title, which nothing prints without \maketitle. A document that
+# names none, by \title or hyperref's pdftitle, gets the title its large type
+# gives it (latexsource.visual_title), or its file's name.
+TITLE_SET = re.compile(r"\\title\s*[\[{]|pdftitle\s*=")
+MAKETITLE = re.compile(r"\\maketitle(?![A-Za-z@])")
+TITLE_NOTE = (
+    "% Written for LaTeX's tagging: the document's title, for the PDF's title,\n"
+    "% which PDF/UA-2 requires; nothing prints it without \\maketitle.\n")
+# The PDF's bookmarks, which hyperref makes from the headings (PDF/UA-1
+# 7.17 recommends them), its links as the book had them (hidelinks): for a
+# book that loads neither hyperref nor a package that must come after it.
+HYPERREF_AFTER = frozenset("cleveref glossaries glossaries-extra hypcap bookmark".split())
+HYPERREF_NOTE = (
+    "% Written for LaTeX's tagging: hyperref, for the PDF's bookmarks, with its\n"
+    "% links drawn as the text around them (hidelinks).\n"
+    "\\usepackage[hidelinks]{hyperref}\n")
+LIST_OPTIONS = re.compile(r"\\begin\s*\{(?:itemize|enumerate|description)\*?\}\s*\[|"
+                          r"\\setlist\*?\s*(?:\[[^]]*\])?\s*\{")
+# The settings the emulation lacks, as the run names them: laid out by its
+# defaults, numbering continued, or left out.
+ENUMITEM_DEFAULTS = ("leftmargin=*", "leftmargin=!", "labelwidth=*", "labelwidth=!",
+                     "labelindent", "labelindent*", "widest", "widest*", "left", "style",
+                     "mode", "fullwidth", "nolistsep")
+ENUMITEM_LEFT_OUT = ("ref", "label*", "series", "before", "before*", "after", "after*",
+                     "first", "first*", "itemjoin", "itemjoin*", "afterlabel")
+
+
+def enumitem_settings(texts):
+    """{setting: times} for the enumitem settings in texts' lists and
+    \\setlist commands that LaTeX's tagging's emulation lacks: a key, or
+    key=* and key=! for a width to compute, and resume, resume*."""
+    found = {}
+    for text in texts.values():
+        spans = latexsource.skip_spans(text)
+        for m in LIST_OPTIONS.finditer(text):
+            if latexsource.in_spans(m.start(), spans):
+                continue
+            close = "]" if m.group(0).endswith("[") else "}"
+            depth, end = 0, None
+            for i in range(m.end(), len(text)):
+                ch = text[i]
+                if ch == "{":
+                    depth += 1
+                elif ch == "}" and depth:
+                    depth -= 1
+                elif ch == close and not depth:
+                    end = i
+                    break
+            if end is None:
+                continue
+            for item in _split(text[m.end():end]):
+                key, _, value = item.partition("=")
+                key, value = key.strip(), value.strip()
+                name = f"{key}={value}" if key in ("leftmargin", "labelwidth") \
+                    and value in ("*", "!") else key
+                if name in ENUMITEM_DEFAULTS or name in ENUMITEM_LEFT_OUT \
+                        or name in ("resume", "resume*"):
+                    found[name] = found.get(name, 0) + 1
+    return found
+
+
 MATH_FONTS = (
     "% Written for LaTeX's tagging: each formula's MathML, which LaTeX makes\n"
     "% from an OpenType math font (unicode-math's Latin Modern Math, the design\n"
@@ -462,11 +611,44 @@ def _code_subn(pattern, text, replace):
     return pattern.sub(one, text), count[0]
 
 
+def _without_titlesec(m):
+    """A \\usepackage without titlesec: the whole command a comment when
+    it loads nothing else."""
+    names = [n.strip() for n in m.group(1).split(",")]
+    if "titlesec" not in names:
+        return m.group(0)
+    kept = [n for n in names if n and n != "titlesec"]
+    if not kept:
+        return ("% Taken out for LaTeX's tagging, which can't build with titlesec; the\n"
+                "% book uses none of its commands: " + m.group(0))
+    return m.group(0).replace("{" + m.group(1) + "}", "{" + ",".join(kept) + "}")
+
+
 def _without_pdftex(m):
     options = [o for o in m.group(2).split(",") if o.strip() != "pdftex"]
     if len(options) == len(m.group(2).split(",")):
         return m.group(0)
     return m.group(1) + ("[%s]" % ",".join(options) if any(o.strip() for o in options) else "")
+
+
+def _opening_formulas(text):
+    """(text, count): \\leavevmode before each display formula that opens
+    a paragraph inside a center, flushleft, or flushright environment
+    (BLOCK_FORMULA), in code."""
+    skip = latexsource.skip_spans(text)
+    inside = []
+    for m in CENTERED.finditer(text):
+        if latexsource.in_spans(m.start(), skip) or any(s <= m.start() < e for s, e in inside):
+            continue
+        end = latexsource.environment_end(text, m.group(1), m.start())
+        if end > 0:
+            inside.append((m.start(), end))
+    at = [m.end(1) for m in BLOCK_FORMULA.finditer(text)
+          if not latexsource.in_spans(m.start(), skip)
+          and any(s <= m.start() < e for s, e in inside)]
+    for pos in reversed(at):
+        text = text[:pos] + "\\leavevmode" + text[pos:]
+    return text, len(at)
 
 
 def tag(texts, master, language, mathml=True, standard=("ua-2",)):
@@ -477,8 +659,8 @@ def tag(texts, master, language, mathml=True, standard=("ua-2",)):
     starred theorem the book defines beside its numbered one defined only
     when tagging hasn't (tagging's \\newtheorem defines thm* with thm),
     \\centerline on a line of its own made a centered paragraph,
-    \\leavevmode put before a display formula opening a center
-    environment, which leaves a paragraph open in LaTeX 2026-06-01, each
+    \\leavevmode put before a display formula opening a paragraph in a
+    center environment, which leaves one open in LaTeX 2026-06-01, each
     float's tags where the text has it (FLOATS_HERE), and, unless mathml
     is false, unicode-math for the formulas' MathML (math_block).
     Returns counts."""
@@ -492,10 +674,20 @@ def tag(texts, master, language, mathml=True, standard=("ua-2",)):
         counts["math_off"] = int(any(latexsource.code_matches(latexsource.MATH_SPANS, t)
                                      for t in texts.values()))
     floats = sum(len(latexsource.code_matches(FLOAT, t)) for t in texts.values())
-    if floats and not any(latexsource.code_matches(FLOAT_KEY, piece)
-                          for piece in preamble_packages(texts, master)[1]):
+    packages, pieces = preamble_packages(texts, master)
+    if floats and not any(latexsource.code_matches(FLOAT_KEY, piece) for piece in pieces):
         block += FLOATS_HERE
         counts["floats"] = floats
+    if "enumitem" in packages:
+        block += ENUMITEM_KEYS
+        counts["enumitem"] = enumitem_settings(texts)
+    if "titlesec" in packages and not any(latexsource.code_matches(TITLESEC_USE, t)
+                                          for t in texts.values()):
+        for name, text in list(texts.items()):
+            text, n = _code_subn(PACKAGE, text, _without_titlesec)
+            if n and text != texts[name]:
+                counts["titlesec"] = 1
+            texts[name] = text
     numbered = set()
     for text in texts.values():
         spans = latexsource.skip_spans(text)
@@ -519,14 +711,38 @@ def tag(texts, master, language, mathml=True, standard=("ua-2",)):
             counts["theorems"] += 1
             return "\\ifcsname %s*\\endcsname\\else%s\\fi" % (m.group(1), m.group(0))
         text, _ = _code_subn(STARRED_THEOREM, text, theorem)
-        text, n = _code_subn(BLOCK_FORMULA, text, lambda m: m.group(1) + "\\leavevmode")
+        text, n = _opening_formulas(text)
         counts["formulas"] += n
+        boxes = latexsource.box_tables(text)
+        edits = []
+        for start, end in boxes:
+            edits += [(start, 1, BOX_OPEN), (end, 0, "}")]
+        for start, end in latexsource.table_spans(text):
+            if any(s < start and end <= e for s, e in boxes):
+                edits += [(start, 1, DATA_OPEN), (end, 0, "}")]
+        # From the end; where one table ends as the next begins, the
+        # closing brace goes before the opening one.
+        for at, _, piece in sorted(edits, key=lambda e: (e[0], e[1]), reverse=True):
+            text = text[:at] + piece + text[at:]
+        counts["boxes"] = counts.get("boxes", 0) + len(boxes)
         spans = latexsource.skip_spans(text)
         if any(not latexsource.in_spans(m.start(), spans)
                for m in CENTERLINE.finditer(text)):
             uses_centerline = True
         texts[name] = text
     text = texts[master]
+    if counts.get("boxes"):
+        block += BOXES_NOTE
+    if "hyperref" not in packages and not packages & HYPERREF_AFTER:
+        block += HYPERREF_NOTE
+        counts["hyperref"] = 1
+    if not any(latexsource.code_matches(TITLE_SET, piece) for piece in pieces) \
+            and not any(latexsource.code_matches(MAKETITLE, t) for t in texts.values()):
+        found = latexsource.visual_title(texts[master])
+        title = found[4] if found else escape(os.path.splitext(os.path.basename(master))[0])
+        block += TITLE_NOTE + "\\title{%s}\n" % title
+        counts["title"] = 1
+        counts["title_visual"] = int(bool(found))
     if block:
         begin = latexsource.code_matches(latexsource.BEGIN_DOCUMENT, text)
         if begin:

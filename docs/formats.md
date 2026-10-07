@@ -109,7 +109,7 @@ Pages are parsed with html5lib, or with lxml where html5lib isn't installed; DCI
 
 **How it can arrive**
 
-- A master file in the book's directory, with `\documentclass` and `\begin{document}`, that `\include`s the chapters; `latex.main` names it when there are several ([LaTeX sources](latex.md)).
+- A master file in the book's directory, with `\documentclass` and `\begin{document}`, that `\include`s the chapters; `latex.main` names it when there are several, or lists them all when the book is a set of documents each built on its own ([LaTeX sources](latex.md)).
 
 **What it becomes**
 

@@ -200,14 +200,61 @@ def masters(base):
     return found
 
 
-def resolve(base, name):
+INCLUDEPDF = re.compile(r"\\includepdf\s*(?:\[[^]]*\])?\s*\{\s*([^}]+?)\s*\}")
+
+
+def binder(base, master):
+    """The PDFs a master only gathers with \\includepdf, as the names it
+    gives them, when it reaches no other LaTeX file: a binder of documents
+    built on their own (FINC 308's "Combined" file, a PDF per topic), with
+    nothing of its own to convert. [] for any other master."""
+    text = read_text(os.path.join(base, master))
+    if not is_master(text):
+        return []
+    found = [m.group(1) for m in code_matches(INCLUDEPDF, split_master(text)[1])]
+    if not found or len(reached(base, master)[0]) > 1:
+        return []
+    return found
+
+
+def binder_sources(base, pdfs, skip=()):
+    """(found, missing): the whole LaTeX document named as each PDF a
+    binder gathers is, anywhere in the book's directory but the folders in
+    skip (absolute paths, a run's output), as paths relative to base in
+    the binder's order; and the PDFs with none."""
+    candidates = {}
+    skip = {os.path.abspath(s) for s in skip}
+    for folder, dirs, names in os.walk(base):
+        dirs[:] = sorted(d for d in dirs if not d.startswith(".") and d != RENDERED
+                         and os.path.abspath(os.path.join(folder, d)) not in skip)
+        for name in sorted(names):
+            if name.endswith(".tex"):
+                candidates.setdefault(name[:-4], []).append(
+                    os.path.relpath(os.path.join(folder, name), base))
+    found, missing = [], []
+    for pdf in pdfs:
+        stem = os.path.splitext(os.path.basename(pdf.strip().strip('"')))[0]
+        paths = [p for p in candidates.get(stem, [])
+                 if is_master(read_text(os.path.join(base, p)))]
+        if not paths:
+            missing.append(pdf)
+        elif paths[0] not in found:
+            found.append(paths[0])
+    return found, missing
+
+
+def resolve(base, name, folder=""):
     """A name \\input or \\include gives, as a path relative to base, or
     None when no such file is there. TeX tries the name as written and
-    with .tex added."""
+    with .tex added, from the folder it runs in: a master's own (folder,
+    relative to base, for one below the book's directory), then the
+    book's."""
     name = name.strip().strip('"')
-    for candidate in (name, name + ".tex"):
-        if os.path.isfile(os.path.join(base, candidate)):
-            return os.path.normpath(candidate)
+    for where in dict.fromkeys((folder, "")):
+        for candidate in (name, name + ".tex"):
+            path = os.path.normpath(os.path.join(where, candidate))
+            if os.path.isfile(os.path.join(base, path)):
+                return path
     return None
 
 
@@ -216,6 +263,7 @@ def reached(base, master):
     \\input, \\include, and \\subfile, in the order first reached, and
     the names it gives that aren't there."""
     files, missing, queue = [], [], [master]
+    folder = os.path.dirname(master)
     while queue:
         name = queue.pop(0)
         if name in files:
@@ -224,13 +272,34 @@ def reached(base, master):
         text = read_text(os.path.join(base, name))
         for m in code_matches(INPUT, text):
             target = m.group(2) or m.group(3)
-            path = resolve(base, target)
+            path = resolve(base, target, folder)
             if path is None:
                 if target not in missing:
                     missing.append(target)
             elif path not in files and path not in queue:
                 queue.append(path)
     return files, missing
+
+
+def inputs_from(base, text, folder, counter):
+    """text with each \\input and \\include a master in folder reaches
+    from there named from the book's directory, where the reader runs."""
+    spans = skip_spans(text)
+    out, last = [], 0
+    for m in INPUT.finditer(text):
+        if in_spans(m.start(), spans) or not m.group(2):
+            continue
+        target = m.group(2)
+        path = resolve(base, target, folder)
+        if path is None or path in (os.path.normpath(target),
+                                    os.path.normpath(target + ".tex")):
+            continue
+        start, end = m.span(2)
+        out.append(text[last:start] + path.replace(os.sep, "/"))
+        last = end
+        counter["inputs_from_folder"] = counter.get("inputs_from_folder", 0) + 1
+    out.append(text[last:])
+    return "".join(out)
 
 
 def split_master(text):
@@ -264,6 +333,15 @@ def book_outline(body):
             if front_role is None:
                 front_role = role
             order.append((value, role))
+    if not order:
+        # A master that \include-s nothing is one page, whose role is the
+        # one it opens in: a division after its first words (FINC 308's
+        # \appendix before its practice problems) is a part of the page.
+        first = next((at for at, kind, _ in events if kind == "division"), None)
+        text = re.sub(r"%[^\n]*", "", body[:first]) if first is not None else ""
+        opening = first is not None and not re.sub(
+            r"\\(?:maketitle|tableofcontents|clearpage|newpage)\b|\s", "", text)
+        return order, events[0][2] if opening else "main"
     return order, front_role or role
 
 
@@ -579,6 +657,269 @@ def repair_text(text, counter):
         last = m.end()
     out.append(text[last:])
     return "".join(out)
+
+
+# A \ref to a label on an enumerated item, which the reader can't resolve:
+# it writes the label's name in brackets ("[Topic2Q1]"), where LaTeX writes
+# the item's number ("1b": FINC 308's answer keys, 70 of them). The number
+# is worked out as LaTeX would: article's \theenumi..iv (arabic, alph,
+# roman, Alph) after the \p@ prefixes (1, 1b, 1(b)iii, 1(b)iiiA), or a
+# label enumitem sets (label=, ref=), which LaTeX's \ref gives without them.
+LIST_TOKEN = re.compile(
+    r"\\begin\s*\{(enumerate|itemize|description)\}(\s*\[(?:[^][]|\[[^]]*\])*\])?"
+    r"|\\end\s*\{(enumerate|itemize|description)\}"
+    r"|\\item(?![A-Za-z@])(\s*\[)?"
+    r"|\\label\s*\{([^}]*)\}"
+    r"|\\(?:part|chapter|section|subsection|subsubsection|paragraph|caption)\*?(?![A-Za-z@])"
+    r"|\\begin\s*\{(?:equation|align|gather|multline|figure|table)\*?\}")
+COUNTER_MACRO = re.compile(r"\\(arabic|alph|Alph|roman|Roman)\*")
+ITEM_REF = re.compile(r"\\ref\*?\s*\{([^}]*)\}")
+
+
+def counter_text(style, n):
+    """n as LaTeX's \\arabic, \\alph, \\Alph, \\roman, or \\Roman writes it."""
+    if style == "arabic" or n < 1:
+        return str(n)
+    if style in ("alph", "Alph"):
+        text = chr(ord("a") + (n - 1) % 26) if n <= 26 else str(n)
+        return text.upper() if style == "Alph" else text
+    numerals = [(1000, "m"), (900, "cm"), (500, "d"), (400, "cd"), (100, "c"), (90, "xc"),
+                (50, "l"), (40, "xl"), (10, "x"), (9, "ix"), (5, "v"), (4, "iv"), (1, "i")]
+    out = ""
+    for value, numeral in numerals:
+        while n >= value:
+            out += numeral
+            n -= value
+    return out.upper() if style == "Roman" else out
+
+
+def list_format(options, key):
+    """The format an enumitem key (label or ref) gives a list, or None."""
+    for item in re.split(r",(?![^{]*\})", options or ""):
+        name, _, value = item.partition("=")
+        if name.strip() == key and COUNTER_MACRO.search(value):
+            value = value.strip()
+            if value.startswith("{") and value.endswith("}"):
+                value = value[1:-1]
+            return value
+    return None
+
+
+def formatted(fmt, n):
+    """A label format with its counter written in, and the font commands
+    and braces around it left out."""
+    text = COUNTER_MACRO.sub(lambda m: counter_text(m.group(1), n), fmt)
+    text = re.sub(r"\\[A-Za-z@]+\s*", "", text)
+    return text.replace("{", "").replace("}", "").strip()
+
+
+def item_labels(text):
+    """{label: what \\ref gives} for each \\label on an enumerated item in
+    text, in code."""
+    styles = ["arabic", "alph", "roman", "Alph"]
+    stack, found, last_closed = [], {}, {}
+    spans = skip_spans(text)
+    for m in LIST_TOKEN.finditer(text):
+        if in_spans(m.start(), spans):
+            continue
+        token = m.group(0)
+        if m.group(1):
+            options = (m.group(2) or "").strip()[1:-1] if m.group(2) else ""
+            depth = sum(1 for e in stack if e["kind"] == "enumerate") + 1
+            entry = {"kind": m.group(1), "value": 0, "item": False, "depth": depth,
+                     "label": list_format(options, "label"), "ref": list_format(options, "ref")}
+            if m.group(1) == "enumerate":
+                start = re.search(r"(?:^|,)\s*start\s*=\s*(\d+)", options)
+                if start:
+                    entry["value"] = int(start.group(1)) - 1
+                elif re.search(r"(?:^|,)\s*resume\*?\s*(?:,|$)", options):
+                    entry["value"] = last_closed.get(depth, 0)
+            stack.append(entry)
+        elif m.group(3):
+            if stack:
+                closed = stack.pop()
+                if closed["kind"] == "enumerate":
+                    last_closed[closed["depth"]] = closed["value"]
+        elif token.startswith("\\item"):
+            if stack:
+                top = stack[-1]
+                if m.group(4):            # \item[...]: no number
+                    top["item"] = False
+                else:
+                    top["value"] += 1
+                    top["item"] = True
+        elif m.group(5) is not None:
+            if not stack or stack[-1]["kind"] != "enumerate" or not stack[-1]["item"]:
+                continue
+            levels = [e for e in stack if e["kind"] == "enumerate"]
+            top = levels[-1]
+            if top["ref"]:
+                found[m.group(5).strip()] = formatted(top["ref"], top["value"])
+                continue
+            if top["label"]:
+                found[m.group(5).strip()] = formatted(top["label"], top["value"])
+                continue
+            parts = []
+            for level, e in enumerate(levels[:4]):
+                the = formatted(e["label"], e["value"]) if e["label"] \
+                    else counter_text(styles[level], e["value"])
+                parts.append(the)
+            # \p@enumiii is \theenumi(\theenumii), so the third level's
+            # reference has the second in parentheses.
+            if len(parts) >= 3:
+                parts[1] = "(" + parts[1] + ")"
+            found[m.group(5).strip()] = "".join(parts)
+        elif stack:
+            # A heading, caption, or numbered display takes the label
+            # after it, not the item before.
+            stack[-1]["item"] = False
+    return found
+
+
+def write_out_item_refs(texts, counter):
+    """texts ({name: text}) with each \\ref to an enumerated item's label
+    written as the number LaTeX gives it."""
+    labels = {}
+    for text in texts.values():
+        labels.update(item_labels(text))
+    if not labels:
+        return texts
+    for name, text in texts.items():
+        spans = skip_spans(text)
+        count = [0]
+
+        def one(m):
+            if in_spans(m.start(), spans) or m.group(1).strip() not in labels:
+                return m.group(0)
+            count[0] += 1
+            return labels[m.group(1).strip()]
+        texts[name] = ITEM_REF.sub(one, text)
+        counter["item_refs"] = counter.get("item_refs", 0) + count[0]
+    return texts
+
+
+# A column type the book defines with array's \newcolumntype, which the
+# reader doesn't know: it takes the table's column specification as text
+# and the table falls apart (FINC 308's R{2.3in}, a right-aligned p
+# column), and it stops on a \newcolumntype in the body ("unexpected #1").
+NEWCOLUMNTYPE = re.compile(r"\\newcolumntype\s*\{\s*(\S)\s*\}\s*(?:\[(\d)\])?\s*\{")
+SPEC_BEGIN = re.compile(r"\\begin\s*\{(tabular\*?|tabularx|longtable|array)\}\s*(?:\[[^]]*\]\s*)?")
+
+
+def column_types(texts):
+    """{letter: (arguments, definition)} for each \\newcolumntype in texts,
+    and {text index: [(start, end)]} of the definitions."""
+    found, places = {}, {}
+    for index, text in enumerate(texts):
+        spans = skip_spans(text)
+        for m in NEWCOLUMNTYPE.finditer(text):
+            if in_spans(m.start(), spans):
+                continue
+            close = matching_brace(text, m.end() - 1)
+            if close < 0:
+                continue
+            found[m.group(1)] = (int(m.group(2) or 0), text[m.end():close - 1])
+            places.setdefault(index, []).append((m.start(), close))
+    return found, places
+
+
+def expand_columns(spec, types):
+    """A column specification with each column type in types written out,
+    its arguments in place of #1..#9; a definition may use another."""
+    for _ in range(10):
+        out, i, changed = [], 0, False
+        while i < len(spec):
+            c = spec[i]
+            if c == "\\":
+                out.append(spec[i:i + 2])
+                i += 2
+            elif c == "{":
+                close = matching_brace(spec, i)
+                if close < 0:
+                    out.append(spec[i:])
+                    break
+                out.append(spec[i:close])
+                i = close
+            elif c == "*":
+                # *{3}{R{1in}}: the repeated columns written out too.
+                m = re.compile(r"\*\s*\{[^}]*\}\s*\{").match(spec, i)
+                close = matching_brace(spec, m.end() - 1) if m else -1
+                if close < 0:
+                    out.append(c)
+                    i += 1
+                    continue
+                inner = expand_columns(spec[m.end():close - 1], types)
+                changed |= inner != spec[m.end():close - 1]
+                out.append(spec[i:m.end()] + inner + "}")
+                i = close
+            elif c in types:
+                count, body = types[c]
+                args, j = [], i + 1
+                for _ in range(count):
+                    while j < len(spec) and spec[j].isspace():
+                        j += 1
+                    if j >= len(spec) or spec[j] != "{":
+                        break
+                    close = matching_brace(spec, j)
+                    if close < 0:
+                        break
+                    args.append(spec[j + 1:close - 1])
+                    j = close
+                if len(args) != count:
+                    out.append(c)
+                    i += 1
+                    continue
+                for number, arg in enumerate(args, start=1):
+                    body = body.replace("#%d" % number, arg)
+                out.append(body)
+                i = j
+                changed = True
+            else:
+                out.append(c)
+                i += 1
+        spec = "".join(out)
+        if not changed:
+            break
+    return spec
+
+
+def write_out_columns(texts, counter):
+    """texts ({name: text}) with each column type the book defines written
+    out where a table uses it, and the definitions taken out."""
+    names = list(texts)
+    types, places = column_types([texts[n] for n in names])
+    if not types:
+        return texts
+    for index, name in enumerate(names):
+        text = texts[name]
+        for start, end in reversed(places.get(index, [])):
+            text = text[:start] + text[end:]
+        spans = skip_spans(text)
+        edits = []
+        for m in SPEC_BEGIN.finditer(text):
+            if in_spans(m.start(), spans):
+                continue
+            pos = m.end()
+            if m.group(1) in ("tabular*", "tabularx"):
+                if text[pos:pos + 1] != "{":
+                    continue
+                pos = matching_brace(text, pos)
+                while 0 < pos < len(text) and text[pos].isspace():
+                    pos += 1
+            if pos <= 0 or text[pos:pos + 1] != "{":
+                continue
+            close = matching_brace(text, pos)
+            if close < 0:
+                continue
+            spec = text[pos + 1:close - 1]
+            expanded = expand_columns(spec, types)
+            if expanded != spec:
+                edits.append((pos + 1, close - 1, expanded))
+        for start, end, new in reversed(edits):
+            text = text[:start] + new + text[end:]
+        counter["column_types"] = counter.get("column_types", 0) + len(edits)
+        texts[name] = text
+    return texts
 
 
 # --------------------------------------------------------------------------
@@ -1025,6 +1366,145 @@ def expand_image_macros(texts, files, counter):
 # the copy, the reading, and the pages
 # --------------------------------------------------------------------------
 
+# A standalone document's title set as large type, not with \title.
+SIZES = ("tiny", "scriptsize", "footnotesize", "small", "normalsize",
+         "large", "Large", "LARGE", "huge", "Huge")
+TITLE_COMMAND = re.compile(r"\\title\s*[\[{]")
+DIVISION_COMMAND = re.compile(r"\\(?:part|chapter)\*?(?![A-Za-z@])")
+TITLE_BLOCK = re.compile(r"\\begin\s*\{(center|titlepage)\}")
+BEFORE_TITLE = re.compile(
+    r"(?:\s+|%[^\n]*|\\(?:vspace|hspace)\*?\s*\{[^}]*\}"
+    r"|\\(?:thispagestyle|pagestyle)\s*\{[^}]*\}"
+    r"|\\(?:noindent|bigskip|medskip|smallskip|par|null|centering)(?![A-Za-z@]))*")
+FONT_SWITCH = re.compile(r"\\(" + "|".join(SIZES) + r"|bfseries|mdseries|itshape|scshape"
+                         r"|upshape|slshape|sffamily|rmfamily|ttfamily|normalfont|centering)"
+                         r"(?![A-Za-z@])\s*")
+TITLE_MARKER = "TextbookImproverPageTitle"
+
+
+def visual_title(text):
+    """A whole document's title set as large type rather than with \\title:
+    the brace group in a center (or titlepage) environment opening its
+    body, set larger than any other group there and at \\large or more
+    ({\\LARGE Topic 1: ...} under {\\large FINC 308: ...}, as each of
+    FINC 308's topics has it). Returns (start, end, environment, before,
+    title, after) -- the environment's span in text, its content before
+    and after the group, and the group's without its size and font
+    switches -- or None: for a document with \\title or a \\chapter, one
+    whose body opens with anything else, or two groups the same size."""
+    spans = skip_spans(text)
+    if code_matches(TITLE_COMMAND, text, spans) or code_matches(DIVISION_COMMAND, text, spans):
+        return None
+    begin = code_matches(BEGIN_DOCUMENT, text, spans)
+    if not begin:
+        return None
+    opening = TITLE_BLOCK.match(text, BEFORE_TITLE.match(text, begin[0].end()).end())
+    if not opening:
+        return None
+    end = environment_end(text, opening.group(1), opening.start())
+    if end < 0:
+        return None
+    inner = text[opening.end():text.rfind("\\end", opening.end(), end)]
+    groups, i = [], 0
+    while i < len(inner):
+        c = inner[i]
+        if c == "\\":
+            i += 2
+        elif c == "%":
+            line_end = inner.find("\n", i)
+            i = len(inner) if line_end < 0 else line_end
+        elif c == "{":
+            stop = matching_brace(inner, i)
+            if stop < 0:
+                return None
+            content, pos, rank = inner[i + 1:stop - 1], 0, -1
+            while True:
+                switch = FONT_SWITCH.match(content, pos)
+                if not switch:
+                    break
+                if switch.group(1) in SIZES:
+                    rank = max(rank, SIZES.index(switch.group(1)))
+                pos = switch.end()
+            groups.append((i, stop, rank, content[pos:].strip()))
+            i = stop
+        else:
+            i += 1
+    if not groups:
+        return None
+    top = max(g[2] for g in groups)
+    largest = [g for g in groups if g[2] == top]
+    if top < SIZES.index("large") or len(largest) != 1 or not largest[0][3]:
+        return None
+    start, stop, _, title = largest[0]
+    # A command the group is the argument of (\textbf{\Large ...}) goes with it.
+    before = re.sub(r"\\[A-Za-z@]+\s*$", "", inner[:start])
+    return opening.start(), end, opening.group(1), before, title, inner[stop:]
+
+
+def mark_title(text, counts):
+    """text, a master's, with the title visual_title finds made a heading
+    the reader keeps -- \\section*, after a marker paragraph that
+    title_heading finds -- and what came before and after it in its
+    environment left there."""
+    found = visual_title(text)
+    if not found:
+        return text
+    start, end, environment, before, title, after = found
+    pieces = []
+    if before.strip():
+        pieces.append("\\begin{%s}%s\n\\end{%s}" % (environment, before, environment))
+    pieces.append("\n\n%s\n\n\\section*{%s}\n\n" % (TITLE_MARKER, title))
+    if after.strip():
+        pieces.append("\\begin{%s}%s\\end{%s}" % (environment, after, environment))
+    counts["visual_title"] = counts.get("visual_title", 0) + 1
+    return text[:start] + "".join(pieces) + text[end:]
+
+
+def _headers(blocks):
+    """Every Header in blocks, nested ones too."""
+    found = []
+
+    def walk(node):
+        if isinstance(node, dict):
+            if node.get("t") == "Header":
+                found.append(node)
+            for value in node.values():
+                if isinstance(value, (list, dict)):
+                    walk(value)
+        elif isinstance(node, list):
+            for item in node:
+                walk(item)
+    walk(blocks)
+    return found
+
+
+def title_heading(blocks):
+    """A page's blocks with the title mark_title marked made its only
+    heading at level 1, the page's title, as the pipeline takes one: the
+    marker out, the heading numbered like any title, and every other
+    heading moved down so the highest is at level 2, under it. Returns
+    (blocks, whether there was one)."""
+    for index, block in enumerate(blocks):
+        if block.get("t") == "Para" and len(block["c"]) == 1 \
+                and block["c"][0].get("t") == "Str" and block["c"][0]["c"] == TITLE_MARKER:
+            break
+    else:
+        return blocks, False
+    blocks = blocks[:index] + blocks[index + 1:]
+    if index >= len(blocks) or blocks[index].get("t") != "Header":
+        return blocks, False
+    heading = blocks[index]
+    heading["c"][0] = 1
+    heading["c"][1][1] = [c for c in heading["c"][1][1] if c != "unnumbered"]
+    others = [h for h in _headers(blocks) if h is not heading]
+    if others:
+        shift = 2 - min(h["c"][0] for h in others)
+        if shift > 0:
+            for h in others:
+                h["c"][0] = min(h["c"][0] + shift, 6)
+    return blocks, True
+
+
 def prepare(base, work, master, say, macros=""):
     """The book copied into work/latex with what Pandoc can't read put
     right, its drawings rendered into base/rendered/. Returns a dict:
@@ -1038,8 +1518,20 @@ def prepare(base, work, master, say, macros=""):
     texts = {}
     for name in files:
         texts[name] = repair_text(read_text(os.path.join(base, name)), counts)
+    write_out_columns(texts, counts)
+    write_out_item_refs(texts, counts)
+    folder = os.path.dirname(master)
+    if folder:
+        # A master below the book's directory is built from its own
+        # folder; the reader runs from the book's, as the pages' paths are.
+        for name in files:
+            texts[name] = inputs_from(base, texts[name], folder, counts)
     preamble, body, rest = split_master(texts[master])
     order, front_role = book_outline(body)
+    # A document that is one page, its title set as large type: the title
+    # made its heading.
+    if not order:
+        texts[master] = mark_title(texts[master], counts)
 
     # Drawings, all rendered in one LaTeX run.
     places, items = {}, []
@@ -1082,6 +1574,8 @@ def prepare(base, work, master, say, macros=""):
     except (OSError, ValueError):
         record = {}
     dirs = graphics_paths(preamble)
+    if folder:
+        dirs = [folder] + [os.path.join(folder, d) for d in dirs] + dirs
     for name in files:
         texts[name] = repair_graphics(base, work, texts[name], dirs, record,
                                       counts, say)
@@ -1089,6 +1583,9 @@ def prepare(base, work, master, say, macros=""):
         write_text(record_path, json.dumps(record, indent=1, sort_keys=True))
     for index, name in enumerate(files):
         texts[name] = mark_tables(texts[name], index)
+        # After the places are marked, so a box keeps its number among the
+        # file's tables, as a remediated copy counts them.
+        texts[name] = read_boxes(texts[name], counts)
 
     # The master: \centerline as a center environment, and a marker
     # before each \include. Split again, since its drawings and images
@@ -1143,6 +1640,140 @@ def table_spans(text):
 
 def table_place(file_index, ordinal):
     return "F%dN%d" % (file_index, ordinal)
+
+
+# A box: a tabular of one paragraph column whose cells are prose, an
+# author's frame around a passage (FINC 308's 30 "Example" boxes, a bold
+# title row over a paragraph between booktabs rules), which a reader
+# would hear announced as a table of one column.
+BOX_WORDS = 12
+RULES = re.compile(r"\\(?:toprule|midrule|bottomrule|hline|addlinespace|morecmidrules)"
+                   r"(?![A-Za-z@])\s*(?:\[[^]]*\])?|\\(?:cmidrule|cline)\s*(?:\([^)]*\))?"
+                   r"\s*\{[^}]*\}|\\specialrule\s*\{[^}]*\}\s*\{[^}]*\}\s*\{[^}]*\}")
+ROW_END = re.compile(r"\\\\\*?\s*(?:\[[^]]*\])?|\\tabularnewline(?![A-Za-z@])")
+
+
+def column_spec(text, start):
+    """(spec, end): a tabular's column specification, the group after
+    \\begin{tabular} at start (after its width, for tabular* and
+    tabularx), and the index past it; None for longtable and the rest."""
+    m = re.compile(r"\\begin\s*\{(tabular\*?|tabularx)\}\s*(?:\[[^]]*\]\s*)?").match(text, start)
+    if not m:
+        return None
+    pos = m.end()
+    if m.group(1) in ("tabular*", "tabularx"):
+        if pos >= len(text) or text[pos] != "{":
+            return None
+        pos = matching_brace(text, pos)
+        while pos > 0 and pos < len(text) and text[pos].isspace():
+            pos += 1
+    if pos <= 0 or pos >= len(text) or text[pos] != "{":
+        return None
+    end = matching_brace(text, pos)
+    return (text[pos + 1:end - 1], end) if end > 0 else None
+
+
+def one_paragraph_column(spec):
+    """Whether a column specification is one paragraph column, p{}, m{},
+    b{}, or X, with nothing around it but rules and decorations."""
+    rest, i = spec, 0
+    columns = []
+    while i < len(rest):
+        c = rest[i]
+        if c.isspace() or c == "|":
+            i += 1
+        elif c in "@!<>" and rest[i + 1:i + 2] == "{":
+            i = matching_brace(rest, i + 1)
+            if i < 0:
+                return False
+        elif c in "pmb" and rest[i + 1:i + 2] == "{":
+            columns.append(c)
+            i = matching_brace(rest, i + 1)
+            if i < 0:
+                return False
+        elif c == "X":
+            columns.append(c)
+            i += 1
+        else:
+            return False
+    return len(columns) == 1
+
+
+BEGIN_ANY = re.compile(r"\\begin\s*\{([^}]+)\}")
+
+
+def box_rows(body):
+    """A box's rows, each its text without rules, \\multicolumn{1}'s
+    wrapper, and the space put before a title to center it; a table in
+    one is part of its row."""
+    rows, depth, last, i = [], 0, 0, 0
+    while i < len(body):
+        c = body[i]
+        if c == "\\":
+            m = ROW_END.match(body, i)
+            if m and depth == 0:
+                rows.append(body[last:i])
+                last = i = m.end()
+                continue
+            begin = BEGIN_ANY.match(body, i)
+            if begin and depth == 0:
+                end = environment_end(body, begin.group(1), i)
+                if end > 0:
+                    i = end
+                    continue
+            i += 2
+            continue
+        if c == "{":
+            depth += 1
+        elif c == "}":
+            depth -= 1
+        i += 1
+    rows.append(body[last:])
+    out = []
+    for row in rows:
+        row = RULES.sub("", row)
+        m = re.match(r"\s*\\multicolumn\s*\{\s*1\s*\}\s*\{[^}]*\}\s*\{", row)
+        if m:
+            close = matching_brace(row, m.end() - 1)
+            if close > 0:
+                row = row[m.end():close - 1] + row[close:]
+        row = re.sub(r"^\s*\\hspace\*?\s*\{[^}]*\}", "", row)
+        if row.strip():
+            out.append(row.strip())
+    return out
+
+
+def box_tables(text):
+    """(start, end) of each table in text that is a box: a tabular of one
+    paragraph column, with a cell of BOX_WORDS words or more, and no table
+    around it. A table in a box is a table of its own."""
+    spans = table_spans(text)
+    found = []
+    for start, end in spans:
+        if any(s < start and end <= e for s, e in spans):
+            continue
+        spec = column_spec(text, start)
+        if not spec or not one_paragraph_column(spec[0]):
+            continue
+        close = text.rfind("\\end", start, end)
+        rows = box_rows(text[spec[1]:close])
+        words = [len(re.sub(r"\\[A-Za-z@]+|[{}$&]", " ", row).split()) for row in rows]
+        if words and max(words) >= BOX_WORDS:
+            found.append((start, end))
+    return found
+
+
+def read_boxes(text, counts):
+    """text with each box (box_tables) made an environment the reader
+    keeps as a div of its rows' paragraphs, which latex-source.lua names
+    box: a passage, not a table."""
+    for start, end in reversed(box_tables(text)):
+        spec = column_spec(text, start)
+        rows = box_rows(text[spec[1]:text.rfind("\\end", start, end)])
+        text = (text[:start] + "\\begin{TextbookImproverBox}\n" + "\n\n".join(rows)
+                + "\n\\end{TextbookImproverBox}" + text[end:])
+        counts["boxes"] = counts.get("boxes", 0) + 1
+    return text
 
 
 def mark_tables(text, file_index):
@@ -1328,37 +1959,46 @@ def probe(copy, preamble, macros, filter_path, extra=""):
     return failing
 
 
-def macro_sample(base, prep, filter_path, macros_file, say):
+def macro_sample(base, preps, filter_path, macros_file, say):
     """Write latex-conversion-macros-sample.tex: the book's macros whose
     formulas texmath still can't read, a definition for each whose drawing
     has one reading, and the rest as written, for a person to define.
-    Returns (suggested, left)."""
-    copy = prep["copy"]
-    texts = [read_text(os.path.join(copy, n)) for n in prep["files"]]
-    defined = definitions(texts)
-    uses = math_uses(texts, sorted(defined))
-    used = [(n, defined[n][0]) for n in sorted(defined) if uses[n]]
-    copy_preamble = split_master(read_text(prep["master"]))[0]
-    failing = probe(copy, copy_preamble, used, filter_path)
+    preps: what prepare returned, for each of the book's documents, each
+    probed with its own preamble. Returns (suggested, left)."""
+    if isinstance(preps, dict):
+        preps = [preps]
+    defined, uses, failing, suggestions = {}, {}, set(), {}
+    for prep in preps:
+        copy = prep["copy"]
+        texts = [read_text(os.path.join(copy, n)) for n in prep["files"]]
+        own = definitions(texts)
+        own_uses = math_uses(texts, sorted(own))
+        used = [(n, own[n][0]) for n in sorted(own) if own_uses[n]]
+        copy_preamble = split_master(read_text(prep["master"]))[0]
+        own_failing = probe(copy, copy_preamble, used, filter_path)
+        for name in own_failing:
+            defined.setdefault(name, own[name])
+            uses[name] = uses.get(name, 0) + own_uses[name]
+        failing |= own_failing
+        own_suggestions = {}
+        for name in sorted(own_failing):
+            s = suggest(own[name][1])
+            if s is not None:
+                own_suggestions[name] = s
+        # Keep a suggestion only when texmath reads what it makes.
+        extra = "".join("\\renewcommand{\\%s}%s{%s}\n" % (
+            n, "[%d]" % own[n][0] if own[n][0] else "", s)
+            for n, s in own_suggestions.items())
+        still = probe(copy, copy_preamble, [(n, own[n][0]) for n in own_suggestions],
+                      filter_path, extra) if own_suggestions else set()
+        for name, s in own_suggestions.items():
+            if name not in still:
+                suggestions.setdefault(name, s)
     sample = os.path.join(base, SAMPLE)
     if not failing:
         if os.path.exists(sample):
             os.remove(sample)
         return 0, 0
-    suggestions = {}
-    for name in sorted(failing):
-        args, body, _ = defined[name]
-        s = suggest(body)
-        if s is not None:
-            suggestions[name] = s
-    # Keep a suggestion only when texmath reads what it makes.
-    extra = "".join("\\renewcommand{\\%s}%s{%s}\n" % (
-        n, "[%d]" % defined[n][0] if defined[n][0] else "", s)
-        for n, s in suggestions.items())
-    still = probe(copy, copy_preamble, [(n, defined[n][0]) for n in suggestions],
-                  filter_path, extra) if suggestions else set()
-    for name in still:
-        suggestions.pop(name, None)
     lines = [
         "% Written by convert.py: the book's macros whose formulas texmath",
         "% can't make MathML of, so they reach the pages as TeX. Check it,",

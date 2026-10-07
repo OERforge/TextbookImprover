@@ -105,8 +105,10 @@ def used(base, master):
 
 def check(base, master, say):
     """Say what the status list has to say about the book's class and
-    packages, when any of them isn't rated compatible. Returns the counts,
-    or None when the data file isn't installed."""
+    packages, when any of them isn't rated compatible; master can be a
+    list, for a book of several documents, and each class and package is
+    named once. Returns the counts, or None when the data file isn't
+    installed."""
     path = kpsewhich(DATA, base)
     if not path:
         say("The tagging status check needs TeX's latex-tagging-status package, "
@@ -122,7 +124,10 @@ def check(base, master, say):
             f"checks ({kernel}): `tlmgr update latex-tagging-status` brings it up "
             "to date.")
     groups, counts = {}, {}
-    for name, ext in used(base, master):
+    loaded = []
+    for one in ([master] if isinstance(master, str) else master):
+        loaded += [item for item in used(base, one) if item not in loaded]
+    for name, ext in loaded:
         code = statuses.get((name, ext))
         if code == 100 or code == 4:
             counts["compatible"] = counts.get("compatible", 0) + 1

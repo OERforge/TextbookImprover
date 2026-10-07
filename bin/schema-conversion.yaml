@@ -683,13 +683,22 @@ keys:
       \include-s the chapters, each a page.
     keys:
       main:
-        type: string
-        default: ""
+        type: list
+        item: string
+        default: []
         description: >
           The master file, when more than one file in the book's directory
           is a whole document, as when one set of chapters makes a
-          textbook, a workbook, and a solutions manual (GIAM.tex). Blank
-          takes the only one, and stops the run when there are several.
+          textbook, a workbook, and a solutions manual (GIAM.tex). Or a
+          list, when the book is a set of documents each built on its own,
+          a course's notes a topic at a time: each is read in the order
+          given, a page each (or a page for each file it \include-s), and
+          the PDF target's book route builds a PDF of each. A name can be
+          a path below the book's directory (src/Topic 01.tex) or a
+          pattern (src/*.tex, in sorted order). Blank takes the only one,
+          and stops the run when there are several; a master that only
+          gathers PDFs with \includepdf stops it too, naming the documents
+          of the same names to list here.
       macros:
         type: string
         default: latex-conversion-macros.tex

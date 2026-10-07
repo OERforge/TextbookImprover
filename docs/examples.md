@@ -502,7 +502,8 @@ python3 $T/bin/convert.py
 ```
 
 ```
-tagged: 154 LaTeX file(s) written, 3 of them changed: 0 image(s) and drawing(s) given alt text and 0 marked artifact, as keys LaTeX's tagging reads. 3 definition(s) from latex-conversion-macros.tex written after the preamble, as the conversion reads them. Made to build with LaTeX's tagging, with LuaLaTeX: \DocumentMetadata added, 2 pdftex option(s) and 1 pdfTeX setting(s) taken out, 2 starred theorem(s) defined only when tagging hasn't, \centerline on a line of its own made a centered paragraph, unicode-math loaded, so each formula carries its MathML, with the OpenType Latin Modern fonts (TeX's own design) and a fallback for characters they lack, 51 figure(s) and table(s) tagged where the text has them, not gathered at the end of the document, and 1 formula(s) opening a center environment given \leavevmode.
+tagged: 154 LaTeX file(s) written, 4 of them changed: 0 image(s) and drawing(s) given alt text and 0 marked artifact, as keys LaTeX's tagging reads. 3 definition(s) from latex-conversion-macros.tex written after the preamble, as the conversion reads them. Made to build with LaTeX's tagging, with LuaLaTeX: \DocumentMetadata added, 2 pdftex option(s) and 1 pdfTeX setting(s) taken out, 2 test(s) for pdfTeX (\ifx\pdfoutput\undefined) made to take LuaLaTeX for pdfTeX too, 2 starred theorem(s) defined only when tagging hasn't, \centerline on a line of its own made a centered paragraph, unicode-math loaded, so each formula carries its MathML, with the OpenType Latin Modern fonts (TeX's own design) and a fallback for characters they lack, 51 figure(s) and table(s) tagged where the text has them, not gathered at the end of the document, and 1 formula(s) opening a center environment given \leavevmode.
+tagged: the book's other master(s) written too, GIAM-hw.tex with 9 file(s) only it reaches, 0 image(s) and drawing(s) given alt text and 0 marked artifact; GIAM-solutions_manual.tex, which reaches no file the others don't, 0 image(s) and drawing(s) given alt text and 0 marked artifact, each made to build with LaTeX's tagging as the book's is; GIAM-hw.tex's test for pdfTeX (\ifx\pdfoutput\undefined) made to take LuaLaTeX for pdfTeX, GIAM-solutions_manual.tex's test for pdfTeX (\ifx\pdfoutput\undefined) made to take LuaLaTeX for pdfTeX.
 ```
 
 The run also checks GIAM's class and packages against the LaTeX tagging project's status list, from TeX's `latex-tagging-status` package. TinyTeX doesn't install it, and then the run says how (`tlmgr install latex-tagging-status`); with it, the run says:
@@ -513,7 +514,7 @@ Tagging status of the book's class and packages (2026-09-27): partially compatib
 
 None of GIAM's is rated incompatible, and the copy builds clean below.
 
-`tagged/` holds every file the master reaches, at the same paths. Lay it over a clean copy of the repository and build it with LuaLaTeX in place of the Makefile's pdfLaTeX, which runs out of memory on a tagged book this size. `latexmk`, which comes with TeX Live, runs BibTeX, makeindex, and as many LuaLaTeX passes as the book needs:
+`tagged/` holds every file the master reaches, at the same paths, and the book's two other masters, the workbook and the solutions manual, with the exercise files only the workbook reaches. Both choose their class options with an old test for pdfTeX that LuaLaTeX fails, since LuaTeX has no `\pdfoutput`, and so would take LaTeX with dvips; the copy makes the test take LuaLaTeX for pdfTeX, as it does where one of the chapters uses it to choose `.pdf` figures over `.eps`. Lay it over a clean copy of the repository and build it with LuaLaTeX in place of the Makefile's pdfLaTeX, which runs out of memory on a tagged book this size. `latexmk`, which comes with TeX Live, runs BibTeX, makeindex, and as many LuaLaTeX passes as the book needs:
 
 ```bash
 git clone . ../giam-tagged
@@ -532,6 +533,8 @@ verapdf --flavour ua2 --format text GIAM.pdf
 ```
 PASS GIAM.pdf ua2
 ```
+
+The workbook and the solutions manual build the same way after it, `latexmk -lualatex GIAM-hw` and `latexmk -lualatex GIAM-solutions_manual`, since they take their references to the textbook from its `.aux` (the `xr` package). They have 197 and 160 pages, as many as with pdfLaTeX, and both pass too.
 
 That pass says less than it seems. With nothing in `image-alt.csv`, LaTeX gives each figure a placeholder for its alt text, `picture environment` or the image's file name, and veraPDF can't tell a placeholder from a description. Once the image-alt sidecar has the book's descriptions, the next run writes each into the copy, as `\begin{picture}[alt={...}]` or `\includegraphics[alt={...}]`, and the PDF built from it carries them. 93 of the drawings are in the files fig2dev writes, so their descriptions go into the copy's versions of those files, and running `make` in the copy again would write over them; the run says so. [LaTeX sources](latex.md#the-source-target) says what the copy changes and why.
 

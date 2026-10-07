@@ -1093,6 +1093,94 @@ def case_book_pdf(work):
     ]
 
 
+def case_other_masters(work):
+    """The book's other masters go into the copy too: each with the files
+    only it reaches, and, tagged, made to build with LuaLaTeX, an old test
+    for pdfTeX (\\ifx\\pdfoutput\\undefined, which LuaTeX doesn't define)
+    made to take it for pdfTeX."""
+    os.makedirs(work)
+    png(os.path.join(work, "sq.png"), (128, 128, 128))
+    png(os.path.join(work, "sq2.png"), (64, 64, 64))
+    files = {
+        "book.tex": "\\documentclass{article}\n\\usepackage{graphicx}\n\\begin{document}\n"
+                    "\\input{shared}\n\\end{document}\n",
+        "workbook.tex": "\\ifx\\pdfoutput\\undefined % not pdfTeX\n"
+                        "\\documentclass[dvips]{article}\n\\else\n"
+                        "\\documentclass[pdftex]{article}\n\\fi\n\\usepackage{graphicx}\n"
+                        "\\begin{document}\n\\input{shared}\n\\input{only}\n\\end{document}\n",
+        "shared.tex": "Shared text: \\includegraphics[width=1cm]{sq}\n",
+        "only.tex": "Only the workbook's: \\includegraphics[width=1cm]{sq2}\n",
+        "image-alt.csv": "Image,Alt\nsq.png,A square\nsq2.png,Another square\n",
+        "conversion.yaml": "defaults:\n  latex:\n    main: book.tex\n"
+                           "targets:\n  tagged:\n    format: source\n    tagging: \"on\"\n",
+    }
+    for name, text in files.items():
+        with open(os.path.join(work, name), "w", encoding="utf-8") as fh:
+            fh.write(text)
+    result = convert(work)
+    said = result.stdout + result.stderr
+    tagged = os.path.join(work, "tagged")
+
+    def copied(name):
+        path = os.path.join(tagged, name)
+        return read(work, "tagged", name) if os.path.exists(path) else ""
+
+    def build(engine, metadata=True):
+        """The tree with the copy laid over it, the workbook built with engine."""
+        tree = os.path.join(work, "build-" + engine)
+        shutil.copytree(work, tree, ignore=shutil.ignore_patterns("tagged", "build-*"))
+        shutil.copytree(tagged, tree, dirs_exist_ok=True)
+        if not metadata:
+            path = os.path.join(tree, "workbook.tex")
+            text = read(tree, "workbook.tex")
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write(re.sub(r"\\DocumentMetadata\{[^}]*\}\n", "", text))
+        done = subprocess.run([engine, "-interaction=nonstopmode", "workbook.tex"],
+                              cwd=tree, capture_output=True, text=True, timeout=300)
+        return done.returncode, os.path.join(tree, "workbook.pdf")
+
+    def builds_tagged():
+        if not shutil.which("lualatex"):
+            return skip("no lualatex to build the workbook")
+        status, pdf = build("lualatex")
+        if status != 0 or not os.path.exists(pdf):
+            return False
+        try:
+            import pikepdf
+        except ImportError:
+            return skip("no pikepdf to read the workbook's structure")
+        alts = []
+
+        def walk(node):
+            if isinstance(node, pikepdf.Dictionary):
+                if str(node.get("/S", "")) == "/Figure":
+                    alts.append(str(node.get("/Alt", "")))
+                kids = node.get("/K")
+                if kids is not None:
+                    for kid in (kids if isinstance(kids, pikepdf.Array) else [kids]):
+                        walk(kid)
+        with pikepdf.open(pdf) as doc:
+            walk(doc.Root.StructTreeRoot)
+        return alts == ["A square", "Another square"]
+
+    def builds_untagged():
+        if not shutil.which("pdflatex"):
+            return skip("no pdflatex to build the workbook untagged")
+        status, pdf = build("pdflatex", metadata=False)
+        return status == 0 and os.path.exists(pdf)
+    return [
+        ("the other master and the file only it reaches are in the copy, with alt text",
+         lambda: copied("workbook.tex") != "" and "alt={Another square}" in copied("only.tex")
+         and "workbook.tex with 1 file(s) only it reaches" in said),
+        ("tagged, the other master gets \\DocumentMetadata first, and its pdfTeX test LuaLaTeX",
+         lambda: copied("workbook.tex").startswith("\\DocumentMetadata{")
+         and "\\ifnum0\\ifx\\pdfoutput\\undefined\\ifx\\directlua\\undefined1\\fi\\fi=1"
+         in copied("workbook.tex")),
+        ("it builds with LuaLaTeX, tagged, its figures with their alt text", builds_tagged),
+        ("and without \\DocumentMetadata it builds with pdfLaTeX", builds_untagged),
+    ]
+
+
 def case_latex_target(work):
     """The latex target: a Markdown book written as LaTeX, a master and a
     file per chapter, read back as a LaTeX source to the same pages."""
@@ -1272,6 +1360,7 @@ CASES = [("a LaTeX book", case_book), ("two masters", case_masters),
          ("one file", case_single), ("an unbuilt book", case_unbuilt),
          ("the source target", case_source), ("a book with fonts of its own", case_own_fonts),
          ("a LaTeX book's PDF, from its own LaTeX", case_book_pdf),
+         ("the book's other masters", case_other_masters),
          ("the latex target", case_latex_target),
          ("a book too big for TeX", case_capacity)]
 

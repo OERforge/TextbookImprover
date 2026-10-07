@@ -2184,6 +2184,31 @@ def remediate_sources(target, base, docs, paths, env, html_stems=(), language=No
                                         headers=decisions, definitions=definitions,
                                         definitions_name=LATEX_MACROS, seen=seen,
                                         mathml=str(target["latex_mathml"]) == "on")
+        # The book's other masters (GIAM's workbook and solutions manual),
+        # since the copy is laid over the whole tree: each written with the
+        # files only it reaches, alt text by key, and the same tagging setup.
+        # A file the main master reaches is as the main copy wrote it.
+        written_files, others = set(files), []
+        for other in latexsource.masters(os.path.dirname(os.path.join(base, master)) or base):
+            other = os.path.normpath(os.path.join(os.path.dirname(master), other))
+            if other == master:
+                continue
+            other_files, other_missing = latexsource.reached(base, other)
+            if other_missing:
+                say(f"{target.name}: {other}, another master here, wasn't written: it "
+                    f"reaches {len(other_missing)} file(s) that aren't here "
+                    f"({', '.join(other_missing[:3])}), which its own build makes.")
+                continue
+            other_counts = texremediate.remediate(
+                base, target.output_dir, other, other_files, page_alts, tagging=tagging,
+                language=language, definitions=definitions,
+                definitions_name=LATEX_MACROS, mathml=str(target["latex_mathml"]) == "on",
+                written=written_files)
+            others.append((other, len([f for f in other_files
+                                       if f not in written_files and f != other]),
+                           other_counts))
+            written_files.update(other_files)
+            files = files + [f for f in other_files if f not in files]
         # A copy built with LaTeX's tagging, by this target or by the
         # book's own \DocumentMetadata, is where a package's tagging
         # status matters: advice from the tagging project's list.
@@ -2214,7 +2239,10 @@ def remediate_sources(target, base, docs, paths, env, html_stems=(), language=No
                   else "its own \\DocumentMetadata kept")
                + f", {counts.get('tag_pdftex_options', 0)} pdftex option(s) and "
                f"{counts.get('tag_pdftex_settings', 0)} pdfTeX setting(s) taken out, "
-               f"{counts.get('tag_theorems', 0)} starred theorem(s) defined only "
+               + (f"{counts['tag_pdfoutput_tests']} test(s) for pdfTeX (\\ifx\\pdfoutput"
+                  "\\undefined) made to take LuaLaTeX for pdfTeX too, "
+                  if counts.get("tag_pdfoutput_tests") else "")
+               + f"{counts.get('tag_theorems', 0)} starred theorem(s) defined only "
                "when tagging hasn't, "
                + ("\\centerline on a line of its own made a centered paragraph, "
                   if counts.get("tag_centerline") else "")
@@ -2239,6 +2267,19 @@ def remediate_sources(target, base, docs, paths, env, html_stems=(), language=No
                if counts.get("generated") else "")
             + (f" {counts['pspicture']} pspicture(s) have no key for alt text and "
                "were left alone." if counts.get("pspicture") else ""))
+        if others:
+            say(f"{target.name}: the book's other master(s) written too, "
+                + "; ".join(f"{name}" + (f" with {only} file(s) only it reaches" if only
+                                         else ", which reaches no file the others don't")
+                            + f", {c.get('described', 0)} image(s) and drawing(s) given alt "
+                            f"text and {c.get('decorative', 0)} marked artifact"
+                            for name, only, c in others)
+                + (", each made to build with LaTeX's tagging as the book's is"
+                   + ("; " + ", ".join(f"{name}'s test for pdfTeX (\\ifx\\pdfoutput"
+                                       "\\undefined) made to take LuaLaTeX for pdfTeX"
+                                       for name, _, c in others if c.get("tag_pdfoutput_tests"))
+                      if any(c.get("tag_pdfoutput_tests") for _, _, c in others) else "")
+                   if tagging else "") + ".")
         unplaced_warning(target.name, counts, paths, "the copy")
         written.extend(os.path.join(target.output_dir, f) for f in files)
     others = sorted(f for f in os.listdir(base) if f.endswith(".adoc") and not f.startswith("."))

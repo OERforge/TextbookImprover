@@ -258,7 +258,7 @@ DEFINES = re.compile(r"\\(?:(?:re|provide)?newcommand\*?|def)\b")
 
 def remediate(base, out_dir, master, files, alts, tagging=False, language=None,
               headers=None, definitions=None, definitions_name="", seen=None,
-              mathml=True, standard=("ua-2",)):
+              mathml=True, standard=("ua-2",), written=()):
     """Write a remediated copy of each file in files (relative to base) to
     out_dir at the same relative path. alts: {key: alt, or None for
     decorative} (htmlremediate.alt_rows); tagging: made to build with
@@ -269,8 +269,10 @@ def remediate(base, out_dir, master, files, alts, tagging=False, language=None,
     the images and drawings on the conversion's pages, against which a
     decision the copy couldn't write is counted; mathml: whether a tagged
     copy loads unicode-math for its formulas' MathML; standard: the PDF
-    standards a tagged copy's \\DocumentMetadata claims. Returns a dict
-    of counts, and in unplaced_keys the keys of those decisions."""
+    standards a tagged copy's \\DocumentMetadata claims; written: files
+    another master's copy has written already, read here and not written
+    again, as when a book's masters share chapters. Returns a dict of
+    counts, and in unplaced_keys the keys of those decisions."""
     master_text = latexsource.read_text(os.path.join(base, master))
     dirs = latexsource.graphics_paths(latexsource.split_master(master_text)[0])
     totals = {"files": 0, "changed": 0}
@@ -286,6 +288,8 @@ def remediate(base, out_dir, master, files, alts, tagging=False, language=None,
         texts[name], counts = remediate_file(
             base, name, originals[name], alts, dirs, name == master, macros,
             definition_spans.get(name, ()), accounted, unplaced)
+        if name in written:             # counted where it was written
+            continue
         for key, n in counts.items():
             totals[key] = totals.get(key, 0) + n
     # A decision the pages show but the copy didn't write: the image is
@@ -317,6 +321,8 @@ def remediate(base, out_dir, master, files, alts, tagging=False, language=None,
         for key, n in tag(texts, master, language, mathml, standard).items():
             totals["tag_" + key] = n
     for name in files:
+        if name in written:
+            continue
         out = os.path.join(out_dir, name)
         os.makedirs(os.path.dirname(out) or out_dir, exist_ok=True)
         with open(out, "w", encoding="utf-8", newline="") as fh:
@@ -335,6 +341,11 @@ DOCUMENT_METADATA = re.compile(r"\\DocumentMetadata\b")
 OPTIONED = re.compile(r"(\\(?:documentclass|usepackage|RequirePackage)\s*)\[([^]]*)\]")
 PDFTEX_SETTING = re.compile(
     r"\\pdf(?:compresslevel|objcompresslevel|minorversion|output)\s*=?\s*\d+[ \t]*\n?")
+# An old way of telling pdfLaTeX from LaTeX with dvips, which takes LuaLaTeX
+# for the second, since LuaTeX has no \pdfoutput (GIAM's workbook and
+# solutions manual choose their class options with it).
+PDFOUTPUT_TEST = re.compile(r"\\ifx\s*\\pdfoutput\s*\\undefined(?![A-Za-z@])")
+PDFOUTPUT_REPLACEMENT = "\\ifnum0\\ifx\\pdfoutput\\undefined\\ifx\\directlua\\undefined1\\fi\\fi=1 "
 NEWTHEOREM = re.compile(r"\\newtheorem\s*\{(\w+)\}")
 STARRED_THEOREM = re.compile(r"\\newtheorem\*\s*\{(\w+)\*\}\s*\{[^}]*\}")
 CENTERLINE = re.compile(r"\\centerline(?![A-Za-z@])")
@@ -499,6 +510,8 @@ def tag(texts, master, language, mathml=True, standard=("ua-2",)):
         text, _ = _code_subn(OPTIONED, text, options)
         text, n = _code_subn(PDFTEX_SETTING, text, lambda m: "")
         counts["pdftex_settings"] += n
+        text, n = _code_subn(PDFOUTPUT_TEST, text, lambda m: PDFOUTPUT_REPLACEMENT)
+        counts["pdfoutput_tests"] = counts.get("pdfoutput_tests", 0) + n
 
         def theorem(m):
             if m.group(1) not in numbered:
@@ -528,7 +541,12 @@ def tag(texts, master, language, mathml=True, standard=("ua-2",)):
     if not latexsource.code_matches(DOCUMENT_METADATA, text):
         found = latexsource.code_matches(DOCUMENTCLASS, text)
         if found:
-            at = text.rfind("\n", 0, found[0].start()) + 1
+            # First, before any code: a class chosen inside a conditional
+            # (\ifx\pdfoutput...) is still after it.
+            spans = latexsource.skip_spans(text)
+            first = next((m.start() for m in re.finditer(r"\S", text)
+                          if not latexsource.in_spans(m.start(), spans)), found[0].start())
+            at = text.rfind("\n", 0, min(first, found[0].start())) + 1
             claimed = list(standard) or ["ua-2"]
             text = text[:at] + "\\DocumentMetadata{%spdfstandard=%s, tagging=on}\n" % (
                 "lang=%s, " % language if language else "",

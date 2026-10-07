@@ -18,22 +18,27 @@ the conversion, so a decision reaches the element it was made about.
 - **Images behind the author's macros.** A macro the book defines whose
   body holds one `\\includegraphics`, its file made from an argument
   (`\\newcommand{\\fig}[2]{\\includegraphics[width=#2]{#1}}`), is followed
-  to each call: the call is wrapped in a group that sets the key first,
-  `{\\setkeys{Gin}{alt={...}}\\fig{sq}{1cm}}`, so the macro is left as the
-  author wrote it; a macro whose own alt key takes an argument gets the
-  text in that argument. A decision the copy can't write, for an image
-  reached some other way, is counted against what the conversion's
-  pages showed, so the run can name it.
+  to each call: the key is set just before the call and set back just
+  after it, `\\setkeys{Gin}{alt={...}}\\fig{sq}{1cm}\\setkeys{Gin}{alt={}}`,
+  so the macro is left as the author wrote it; a macro whose own alt key
+  takes an argument gets the text in that argument, and one that passes
+  an argument to \\includegraphics as keys gets alt among the call's. A
+  decision the copy can't write (a call in a moving argument, a macro
+  with alt text of its own), or for an image reached some other way, is
+  counted against what the conversion's pages showed, so the run can
+  name it.
 - **Files a build makes.** A file beside a same-named xfig source (`.fig`)
   is fig2dev's, and running the book's build again would write over what's
   written into it; such files are counted, so the run can say so.
 
 The copy holds every .tex file the master reaches, at the same relative
-paths, ready to be laid over the author's tree.
+paths and with the same file modes, ready to be laid over the author's
+tree.
 """
 
 import os
 import re
+import shutil
 
 import latexsource
 
@@ -116,19 +121,53 @@ def _image_key(base, name, path, dirs):
 # Arguments written to a file and read back (a caption to the list of
 # figures, a heading to the contents), where \setkeys would be expanded
 # and break.
-MOVING = re.compile(r"\\(?:caption|chapter|section|subsection|subsubsection|paragraph"
-                    r"|subparagraph|part|markboth|markright|addcontentsline)\*?\s*"
-                    r"(?:\[[^]]*\]\s*)?\{")
+# Arguments LaTeX writes to a file and reads back, or keeps to typeset
+# elsewhere (a heading's in the contents and running heads, a caption's in
+# the list of figures, an index entry, a title's \thanks), where \setkeys
+# would be expanded and stop the build: each command's arguments in order,
+# o optional and m mandatory, and which of them move.
+MOVING = {
+    "caption": ("om", {0, 1}), "subcaption": ("om", {0, 1}),
+    "captionof": ("mom", {1, 2}), "subcaptionbox": ("om", {0, 1}),
+    "part": ("om", {0, 1}), "chapter": ("om", {0, 1}), "section": ("om", {0, 1}),
+    "subsection": ("om", {0, 1}), "subsubsection": ("om", {0, 1}),
+    "paragraph": ("om", {0, 1}), "subparagraph": ("om", {0, 1}),
+    "markboth": ("mm", {0, 1}), "markright": ("m", {0}),
+    "addcontentsline": ("mmm", {2}), "index": ("m", {0}), "thanks": ("m", {0}),
+    "title": ("om", {0, 1}), "author": ("om", {0, 1}),
+}
+MOVING_COMMAND = re.compile(r"\\(" + "|".join(sorted(MOVING, key=len, reverse=True))
+                            + r")(?![A-Za-z@])\*?")
 
 
 def _moving_spans(text, skip):
+    """(start, end) of each moving argument in text, in code (MOVING)."""
     spans = []
-    for m in MOVING.finditer(text):
+    for m in MOVING_COMMAND.finditer(text):
         if latexsource.in_spans(m.start(), skip):
             continue
-        close = latexsource.matching_brace(text, m.end() - 1)
-        if close > 0:
-            spans.append((m.end(), close))
+        signature, moving = MOVING[m.group(1)]
+        pos = m.end()
+        for index, kind in enumerate(signature):
+            at = latexsource.argument_space(text, pos)
+            if kind == "o":
+                if not text.startswith("[", at):
+                    continue
+                close = latexsource.closing_bracket(text, at)
+                if close < 0:
+                    break
+                if index in moving:
+                    spans.append((at + 1, close))
+                pos = close + 1
+            else:
+                if not text.startswith("{", at):
+                    break
+                close = latexsource.matching_brace(text, at)
+                if close < 0:
+                    break
+                if index in moving:
+                    spans.append((at + 1, close - 1))
+                pos = close
     return spans
 
 
@@ -218,24 +257,51 @@ def remediate_file(base, name, text, alts, dirs, is_master=False, macros=None,
         if moving is None:
             moving = _moving_spans(text, spans)
         if macro["keyed"] or any(s <= start < e for s, e in moving) or (
-                macro["alt"] is not None and alt is None):
+                macro["alt"] is not None and (alt is None or macro.get("alt_shared"))):
             # The body's own key wins over one set before the call; a
             # moving argument would expand \setkeys; an alt argument
-            # can't say artifact.
+            # can't say artifact, and one the body also uses elsewhere (a
+            # caption) would change that too.
             unplaced.add(key)
             continue
+        options_arg = macro.get("options")
+        given = args[options_arg - 1] if options_arg else None
         if macro["alt"] is not None:
             _, at, stop = args[macro["alt"] - 1]
+            # Braced once more for alt=#3, which takes the argument bare,
+            # so a comma in it doesn't end the key; an optional argument
+            # loses its outer braces, so it's braced again to keep them.
+            written = escape(alt) if macro.get("alt_braced") else "{%s}" % escape(alt)
             if at is None:              # an optional argument not given
                 at = stop = start + 1 + len(macro_name)
-                edits.append((at, stop, "[{%s}]" % escape(alt), False))
+                edits.append((at, stop, "[{%s}]" % written, False))
             elif text[at - 1] == "[":   # braced, so a ] in it doesn't end it
-                edits.append((at, stop, "{%s}" % escape(alt), False))
+                edits.append((at, stop, "{%s}" % written, False))
             else:
-                edits.append((at, stop, escape(alt), False))
+                edits.append((at, stop, written, False))
+        elif given and given[1] is not None:
+            # The call's own keys, which an alt among them would make win:
+            # the description goes in with them (\fig[width=2cm,alt={...}]{sq}).
+            _, at, stop = given
+            edits.append((at, stop, with_key("[" + given[0] + "]", _key(alt))[1:-1], False))
+        elif given and macro["default"] is not None and options_arg == 1 and (
+                not macro["default"].strip()
+                or latexsource.OWN_KEY.search("[" + macro["default"] + "]")):
+            # The call's keys not given, and nothing in their place, or a
+            # default with alt text of its own, which would win over a key
+            # set before: given, the description among them.
+            at = start + 1 + len(macro_name)
+            default = macro["default"].strip()
+            edits.append((at, at, with_key("[%s]" % default if default else None,
+                                           _key(alt)), False))
         else:
-            edits.append((end, end, "}", True))
-            edits.append((start, start, "{\\setkeys{Gin}{%s}" % _key(alt), False))
+            # Set before the call and set back after it, with no group
+            # around it: a group would undo the call's paragraph settings
+            # (\centering) before its paragraph ends, and the label its
+            # \caption sets before a \label after it. alt={} is the state a
+            # graphic starts in: no description, LaTeX's tagging warning.
+            edits.append((end, end, "\\setkeys{Gin}{alt={}}", True))
+            edits.append((start, start, "\\setkeys{Gin}{%s}" % _key(alt), False))
         counts["decorative" if alt is None else "described"] += 1
         counts["macro_calls"] += 1
         accounted.add(key)
@@ -253,7 +319,7 @@ def remediate_file(base, name, text, alts, dirs, is_master=False, macros=None,
 DEFINITIONS_NOTE = (
     "%% The definitions in %s, which a person wrote to say what\n"
     "%% the book's macros mean, so they replace the book's own here.\n")
-DEFINES = re.compile(r"\\(?:(?:re|provide)?newcommand\*?|def)\b")
+DEFINES = re.compile(r"\\(?:(?:(?:re)?newcommand|providecommand)\*?|def)\b")
 
 
 def remediate(base, out_dir, master, files, alts, tagging=False, language=None,
@@ -323,7 +389,7 @@ def remediate(base, out_dir, master, files, alts, tagging=False, language=None,
         if not language:
             language = latexsource.preamble_language(
                 latexsource.split_master(originals[master])[0])
-        for key, n in tag(texts, master, language, mathml, standard).items():
+        for key, n in tag(texts, master, language, mathml, standard, base).items():
             totals["tag_" + key] = n
     for name in files:
         if name in written:
@@ -334,6 +400,10 @@ def remediate(base, out_dir, master, files, alts, tagging=False, language=None,
         # in Latin-1, say, is written back as it was.
         with open(out, "w", encoding="utf-8", errors="surrogateescape", newline="") as fh:
             fh.write(texts[name])
+        # The author's file mode, so the copy laid over the tree changes
+        # only what it says: 65 of the 165 files GIAM's copy writes are
+        # executable, and each written as 644 was a change in git's diff.
+        shutil.copymode(os.path.join(base, name), out)
         totals["files"] += 1
         totals["changed"] += int(texts[name] != originals[name])
     return totals
@@ -348,11 +418,31 @@ DOCUMENT_METADATA = re.compile(r"\\DocumentMetadata\b")
 OPTIONED = re.compile(r"(\\(?:documentclass|usepackage|RequirePackage)\s*)\[([^]]*)\]")
 PDFTEX_SETTING = re.compile(
     r"\\pdf(?:compresslevel|objcompresslevel|minorversion|output)\s*=?\s*\d+[ \t]*\n?")
-# An old way of telling pdfLaTeX from LaTeX with dvips, which takes LuaLaTeX
-# for the second, since LuaTeX has no \pdfoutput (GIAM's workbook and
-# solutions manual choose their class options with it).
-PDFOUTPUT_TEST = re.compile(r"\\ifx\s*\\pdfoutput\s*\\undefined(?![A-Za-z@])")
-PDFOUTPUT_REPLACEMENT = "\\ifnum0\\ifx\\pdfoutput\\undefined\\ifx\\directlua\\undefined1\\fi\\fi=1 "
+# pdfTeX's own commands, which LuaTeX doesn't have, and \pdfoutput, by whose
+# absence an old test tells LaTeX with dvips from pdfLaTeX, and so takes
+# LuaLaTeX for the first (GIAM's workbook and solutions manual choose their
+# class options with \ifx\pdfoutput\undefined). luatex85 gives LuaTeX each
+# of them, as the LaTeX team's package for legacy documents, so the pdfTeX
+# branch is taken and what's in it works: \ifnum\pdfoutput>0, \pdfinfo,
+# \pdfcatalog (checked tagged, veraPDF passing). Rewriting the test instead
+# sent LuaLaTeX into a branch whose pdfTeX commands it lacks.
+PDFTEX_COMMANDS = re.compile(
+    r"\\pdf(?:output|info|catalog|names|trailer|pagewidth|pageheight|pageattr|pagesattr"
+    r"|pageresources|pagebox|literal|obj|lastobj|refobj|xform|lastxform|refxform|ximage"
+    r"|lastximage|refximage|lastximagepages|xformname|xformattr|xformresources|annot"
+    r"|lastannot|startlink|endlink|lastlink|dest|outline|thread|startthread|endthread"
+    r"|save|restore|setmatrix|colorstack|colorstackinit|adjustspacing|protrudechars"
+    r"|noligatures|fontexpand|copyfont|fontattr|fontname|fontobjnum|fontsize|includechars"
+    r"|draftmode|horigin|vorigin|pxdimen|insertht|savepos|lastxpos|lastypos|pageref"
+    r"|normaldeviate|uniformdeviate|setrandomseed|randomseed|primitive|creationdate"
+    r"|decimaldigits|gamma|imageresolution|pkresolution|pkmode|mapfile|mapline"
+    r"|gentounicode|glyphtounicode|uniqueresname|retval|texversion|texrevision"
+    r"|destmargin|linkmargin|threadmargin|compresslevel|objcompresslevel|minorversion)"
+    r"(?![A-Za-z@])")
+LUATEX85 = ("% Written for LaTeX's tagging, built with LuaLaTeX: pdfTeX's commands, which\n"
+            "% LuaTeX lacks, and \\pdfoutput, which a test for pdfTeX looks for, as the\n"
+            "% luatex85 package gives them to LuaTeX. pdfLaTeX builds as before.\n"
+            "\\ifdefined\\directlua\\RequirePackage{luatex85}\\fi\n")
 NEWTHEOREM = re.compile(r"\\newtheorem\s*\{(\w+)\}")
 STARRED_THEOREM = re.compile(r"\\newtheorem\*\s*\{(\w+)\*\}\s*\{[^}]*\}")
 CENTERLINE = re.compile(r"\\centerline(?![A-Za-z@])")
@@ -403,10 +493,13 @@ MATH_SETUP_LINE = "  \\ifdefined\\tagpdfsetup\\tagpdfsetup{math/setup={mathml-SE
 # it's printed doesn't change.
 FLOAT = re.compile(r"\\begin\s*\{(?:figure|table)\*?\}")
 FLOAT_KEY = re.compile(r"\\tagpdfsetup\s*\{[^}]*float/")
+# The key came in latex-lab-float 0.81m (2025-12-04), after LaTeX 2025-11-01,
+# the oldest release a tagged build is taken to; there it's skipped.
 FLOATS_HERE = (
     "% Written for LaTeX's tagging: a figure's or table's tags where the text\n"
     "% has it, not gathered at the end of the document; it's printed where it was.\n"
-    "\\ifdefined\\tagpdfsetup\\tagpdfsetup{float/here}\\fi\n")
+    "\\ExplSyntaxOn\\keys_if_exist:nnT {__tag/setup} {float/here}\n"
+    "  {\\tagpdfsetup{float/here}}\\ExplSyntaxOff\n")
 # enumitem's settings for a list, which LaTeX's tagging replaces with an
 # emulation of its own (latex-lab-enumitem, loaded by latex-lab-testphase-
 # block in place of enumitem.sty, LaTeX 2026-06-01). The emulation stops on
@@ -468,6 +561,8 @@ BOX_OPEN = "{\\ifdefined\\tagpdfsetup\\tagpdfsetup{table/tagging=div}\\fi"
 DATA_OPEN = ("{\\ifdefined\\tagpdfsetup\\tagpdfsetup{table/tagging=on}"
              "\\AssignTaggingSocketPlug{tbl/hmode/begin}{Table}"
              "\\AssignTaggingSocketPlug{tbl/vmode/begin}{Table}\\fi")
+DECLARED_BEFORE = re.compile(r"\{\\ifdefined\\tagpdfsetup\\tagpdfsetup"
+                             r"\{table/header-(?:[^{}]|\{[^{}]*\})*\}\\fi$")
 BOXES_NOTE = (
     "% Written for LaTeX's tagging: a table of one column of prose, a box around\n"
     "% a passage, is tagged as a division of paragraphs, not a table, by\n"
@@ -557,9 +652,16 @@ MATH_FONTS = (
     "  \\setmonofont{Latin Modern Mono}[RawFeature={fallback=textbookimprover}]\n")
 
 
-def preamble_packages(texts, master):
+CLASS = re.compile(r"\\documentclass\s*(?:\[[^]]*\])?\s*\{([^}]*)\}")
+LOAD_CLASS = re.compile(r"\\LoadClass(?:WithOptions)?\s*(?:\[[^]]*\])?\s*\{([^}]*)\}")
+
+
+def preamble_packages(texts, master, base=None):
     """(packages, preamble pieces): the names the master's preamble loads,
-    with each file of texts it \\input-s there, and those pieces of text."""
+    with each file of texts it \\input-s there, and those pieces of text;
+    with base, the package and class files beside the book that it loads
+    too, and what they load, as a book sets its fonts in a style of its own
+    (bookstyle.sty loading newtxmath)."""
     preamble = latexsource.split_master(texts[master])[0]
     pieces = [preamble]
     for m in latexsource.code_matches(PREAMBLE_INPUT, preamble):
@@ -569,14 +671,41 @@ def preamble_packages(texts, master):
             if path in texts:
                 pieces.append(texts[path])
                 break
-    names = set()
-    for piece in pieces:
-        for m in latexsource.code_matches(PACKAGE, piece):
-            names.update(n.strip() for n in m.group(1).split(",") if n.strip())
+    names, classes, read, queue = set(), set(), set(), list(pieces)
+    folder = os.path.dirname(master)
+    while queue:
+        piece = queue.pop(0)
+        loaded = [n.strip() for m in latexsource.code_matches(PACKAGE, piece)
+                  for n in m.group(1).split(",") if n.strip()]
+        names.update(loaded)
+        wanted = [(n, ".sty") for n in loaded]
+        for pattern in (CLASS, LOAD_CLASS):
+            for m in latexsource.code_matches(pattern, piece):
+                classes.add(m.group(1).strip())
+                wanted.append((m.group(1).strip(), ".cls"))
+        if not base:
+            continue
+        for name, ext in wanted:
+            for where in dict.fromkeys((folder, "")):
+                path = os.path.join(base, where, name + ext)
+                if path not in read and os.path.isfile(path):
+                    read.add(path)
+                    text = latexsource.read_text(path)
+                    pieces.append(text)
+                    queue.append(text)
+                    break
     return names, pieces
 
 
-def math_block(texts, master):
+# A bold the book takes from bm or amsmath's \boldsymbol, which under
+# unicode-math draws a formula's letters from TeX's own fonts, where they
+# aren't (bm: "There is no 𝑥 (U+1D465) in font rm-lmbx10", a missing glyph
+# PDF/UA-2 fails), or puts a formula inside the formula's MathML text
+# (\boldsymbol). unicode-math's bold italic is the same letters, bold.
+BOLD_MATH = re.compile(r"\\boldsymbol(?![A-Za-z@])")
+
+
+def math_block(texts, master, base=None):
     """(block, counts): what the master gets before \\begin{document} for
     its formulas' MathML, and what was decided. A book with no formula
     gets nothing; one that loads unicode-math gets the MathML forms
@@ -584,7 +713,7 @@ def math_block(texts, master):
     them, and the packages are named."""
     if not any(latexsource.code_matches(latexsource.MATH_SPANS, t) for t in texts.values()):
         return "", {}
-    names, pieces = preamble_packages(texts, master)
+    names, pieces = preamble_packages(texts, master, base)
     own_setup = any(latexsource.code_matches(MATH_SETUP_KEY, piece) for piece in pieces)
     setup = "" if own_setup else MATH_SETUP_LINE
     if names & set(UNICODE_MATH):
@@ -595,7 +724,18 @@ def math_block(texts, master):
     kept = sorted(names & OWN_FONTS)
     if kept:
         return "", {"math_kept": ", ".join(kept)}
-    return MATH_FONTS + setup + "\\fi\n", {"math": 1}
+    bold, counts = "", {"math": 1}
+    used = [n for n, found in (("bm", "bm" in names), ("\\boldsymbol", any(
+        latexsource.code_matches(BOLD_MATH, t) for t in texts.values()))) if found]
+    if used:
+        bold = ("  % bm's and amsmath's bold as unicode-math's bold italic, whose letters\n"
+                "  % the fonts have; TeX's own, which they'd use, lack them.\n"
+                + ("  \\AtBeginDocument{\\renewcommand{\\bm}[1]{\\symbfit{#1}}}\n"
+                   if "bm" in used else "")
+                + ("  \\AtBeginDocument{\\renewcommand{\\boldsymbol}[1]{\\symbfit{#1}}}\n"
+                   if "\\boldsymbol" in used else ""))
+        counts["math_bold"] = ", ".join(used)
+    return MATH_FONTS + setup + bold + "\\fi\n", counts
 
 
 def _code_subn(pattern, text, replace):
@@ -651,7 +791,7 @@ def _opening_formulas(text):
     return text, len(at)
 
 
-def tag(texts, master, language, mathml=True, standard=("ua-2",)):
+def tag(texts, master, language, mathml=True, standard=("ua-2",), base=None):
     """texts: {name: text}, changed in place to build with LaTeX's tagging
     on LuaLaTeX, each change measured on GIAM, where it was needed:
     \\DocumentMetadata before \\documentclass (the standards given, ua-2 by
@@ -667,14 +807,14 @@ def tag(texts, master, language, mathml=True, standard=("ua-2",)):
     counts = {"metadata": 0, "pdftex_options": 0, "pdftex_settings": 0,
               "theorems": 0, "centerline": 0, "formulas": 0, "floats": 0}
     if mathml:
-        block, decided = math_block(texts, master)
+        block, decided = math_block(texts, master, base)
         counts.update(decided)
     else:
         block = ""
         counts["math_off"] = int(any(latexsource.code_matches(latexsource.MATH_SPANS, t)
                                      for t in texts.values()))
     floats = sum(len(latexsource.code_matches(FLOAT, t)) for t in texts.values())
-    packages, pieces = preamble_packages(texts, master)
+    packages, pieces = preamble_packages(texts, master, base)
     if floats and not any(latexsource.code_matches(FLOAT_KEY, piece) for piece in pieces):
         block += FLOATS_HERE
         counts["floats"] = floats
@@ -702,8 +842,8 @@ def tag(texts, master, language, mathml=True, standard=("ua-2",)):
         text, _ = _code_subn(OPTIONED, text, options)
         text, n = _code_subn(PDFTEX_SETTING, text, lambda m: "")
         counts["pdftex_settings"] += n
-        text, n = _code_subn(PDFOUTPUT_TEST, text, lambda m: PDFOUTPUT_REPLACEMENT)
-        counts["pdfoutput_tests"] = counts.get("pdfoutput_tests", 0) + n
+        if latexsource.code_matches(PDFTEX_COMMANDS, text):
+            counts["luatex85"] = 1
 
         def theorem(m):
             if m.group(1) not in numbered:
@@ -719,6 +859,11 @@ def tag(texts, master, language, mathml=True, standard=("ua-2",)):
             edits += [(start, 1, BOX_OPEN), (end, 0, "}")]
         for start, end in latexsource.table_spans(text):
             if any(s < start and end <= e for s, e in boxes):
+                # Around a header declaration the table has (declare), so
+                # it's set after tagging is set back, as it reads.
+                declared = DECLARED_BEFORE.search(text, 0, start)
+                if declared and declared.end() == start and text[end:end + 1] == "}":
+                    start, end = declared.start(), end + 1
                 edits += [(start, 1, DATA_OPEN), (end, 0, "}")]
         # From the end; where one table ends as the next begins, the
         # closing brace goes before the opening one.
@@ -754,7 +899,11 @@ def tag(texts, master, language, mathml=True, standard=("ua-2",)):
             at = begin[0].start()
             text = text[:at] + CENTERLINE_DEFINITION + text[at:]
             counts["centerline"] = 1
-    if not latexsource.code_matches(DOCUMENT_METADATA, text):
+    claimed = list(standard) or ["ua-2"]
+    claim = claimed[0] if len(claimed) == 1 else "{%s}" % ",".join(claimed)
+    after = None                        # where what must follow it goes
+    own = latexsource.code_matches(DOCUMENT_METADATA, text)
+    if not own:
         found = latexsource.code_matches(DOCUMENTCLASS, text)
         if found:
             # First, before any code: a class chosen inside a conditional
@@ -763,13 +912,55 @@ def tag(texts, master, language, mathml=True, standard=("ua-2",)):
             first = next((m.start() for m in re.finditer(r"\S", text)
                           if not latexsource.in_spans(m.start(), spans)), found[0].start())
             at = text.rfind("\n", 0, min(first, found[0].start())) + 1
-            claimed = list(standard) or ["ua-2"]
-            text = text[:at] + "\\DocumentMetadata{%spdfstandard=%s, tagging=on}\n" % (
-                "lang=%s, " % language if language else "",
-                claimed[0] if len(claimed) == 1 else "{%s}" % ",".join(claimed)) + text[at:]
+            line = "\\DocumentMetadata{%spdfstandard=%s, tagging=on}\n" % (
+                "lang=%s, " % language if language else "", claim)
+            text = text[:at] + line + text[at:]
             counts["metadata"] = 1
+            after = at + len(line)
+    else:
+        text, after, added = _complete_metadata(text, own[0], language, claim)
+        if added:
+            counts["metadata_added"] = ", ".join(added)
+    if counts.get("luatex85") and after is not None:
+        text = text[:after] + LUATEX85 + text[after:]
     texts[master] = text
     return counts
+
+
+def _complete_metadata(text, m, language, claim):
+    """(text, where the line after it begins, keys added): the book's own
+    \\DocumentMetadata with tagging=on, and its language and the claimed
+    standard when it names none, so a copy made for tagging is tagged: one
+    that only sets the PDF's version builds untagged."""
+    open_at = m.end()
+    while open_at < len(text) and text[open_at].isspace():
+        open_at += 1
+    if text[open_at:open_at + 1] != "{":
+        return text, None, []
+    close = latexsource.matching_brace(text, open_at)
+    if close < 0:
+        return text, None, []
+    parts = [p for p in _split(text[open_at + 1:close - 1]) if p.strip()]
+    names = {p.partition("=")[0].strip(): i for i, p in enumerate(parts)}
+    added = []
+    if "tagging" not in names:
+        parts.append("tagging=on")
+        added.append("tagging=on")
+    elif parts[names["tagging"]].partition("=")[2].strip().strip("{}") != "on":
+        parts[names["tagging"]] = "tagging=on"
+        added.append("tagging=on")
+    if "lang" not in names and language:
+        parts.append("lang=%s" % language)
+        added.append("lang=%s" % language)
+    if "pdfstandard" not in names:
+        parts.append("pdfstandard=%s" % claim)
+        added.append("pdfstandard=%s" % claim)
+    if added:
+        new = "{" + ", ".join(p.strip() for p in parts) + "}"
+        text = text[:open_at] + new + text[close:]
+        close = open_at + len(new)
+    line_end = text.find("\n", close)
+    return text, (len(text) if line_end < 0 else line_end + 1), added
 
 
 # --------------------------------------------------------------------------

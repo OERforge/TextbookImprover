@@ -127,7 +127,7 @@ A book with SVG images needs `rsvg-convert` for its PDF (`sudo apt install librs
 
 For the PDF's table captions and empty paragraph elements, `pikepdf` too (`pip install pikepdf`, or `sudo apt install python3-pikepdf`); without it the run says so and leaves both as LaTeX tags them, and the PDF suite skips. `pdf.figures: section` needs `placeins` (`tlmgr install placeins`). `multirow` is for a table with a cell spanning rows, which Pandoc's template loads only when a book has one; the PDF suite's book does.
 
-A LaTeX book's PDF is built from the book's own LaTeX ([LaTeX sources](latex.md#the-pdf-target)), by `latexmk`, which TinyTeX and TeX Live include, and with the packages the book itself loads, which `tlmgr` installs as below. The copy loads `unicode-math` for its formulas' MathML, which TinyTeX has.
+A LaTeX book's PDF is built from the book's own LaTeX ([LaTeX sources](latex.md#the-pdf-target)), by `latexmk`, which TinyTeX and TeX Live include, and with the packages the book itself loads, which `tlmgr` installs as below. The copy loads `unicode-math` for its formulas' MathML, which TinyTeX has, and, for a book that uses pdfTeX's own commands or tests for pdfTeX by `\pdfoutput`, `luatex85`, which TinyTeX lacks (`tlmgr install luatex85`).
 
 Two more kinds of package, depending on the book. A book with passages in another language needs that language's `babel-` and `hyphen-` packages (`tlmgr install babel-german hyphen-german` for German), or LuaLaTeX stops with babel's `Unknown option`. And whatever a `pdf.metadata` file's `header-includes` loads has to be installed too (`hanging`, say). When LuaLaTeX stops on `File 'something.sty' not found`, `tlmgr search --global --file /something.sty` names the package to install.
 

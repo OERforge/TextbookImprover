@@ -867,8 +867,8 @@ def case_source(work):
                                 read(work, "html", "notes.html"))) == 4
          and "macro for an image written out" in said),
         ("an image behind the book's own macro gets its key at each call, the macro left",
-         lambda: "{\\setkeys{Gin}{alt={A darker square}}\\fig{sq2}{1cm}}"
-         "{\\setkeys{Gin}{alt={A darker square}}\\fig{sq2}{5mm}}" in notes
+         lambda: "\\setkeys{Gin}{alt={A darker square}}\\fig{sq2}{1cm}\\setkeys{Gin}{alt={}}"
+         "\\setkeys{Gin}{alt={A darker square}}\\fig{sq2}{5mm}\\setkeys{Gin}{alt={}}" in notes
          and IMAGE_MACROS in notes and "own macros for an image" in said),
         ("a macro whose alt text is an argument gets it there, braced, given or not",
          lambda: "\\figalt[{A fifth [square]}]{sq5} and \\figalt[{A fifth [square]}]{sq5}."
@@ -923,7 +923,8 @@ def case_source(work):
          is not None and "unicode-math loaded" in said),
         ("and the tagged PDF's formula carries its MathML", mathml_in_tagged_pdf),
         ("tagging: floats tagged where the text has them, not gathered at the end",
-         lambda: "\\ifdefined\\tagpdfsetup\\tagpdfsetup{float/here}\\fi" in tagged
+         lambda: "\\keys_if_exist:nnT {__tag/setup} {float/here}\n  {\\tagpdfsetup{float/here}}"
+         in tagged
          and "tagged where the text has them" in said),
         ("and the tagged PDF's figure is where the text has it", figure_in_place),
         ("latex_mathml off: tagged, the book's fonts kept, and the run says so",
@@ -950,11 +951,58 @@ def case_own_fonts(work):
     result = convert(work)
     said = result.stdout + result.stderr
     copy = os.path.join(work, "tagged", "notes.tex")
+    # Fonts set in a style of the book's own, beside it: the same.
+    styled = os.path.join(work, "styled")
+    os.makedirs(styled)
+    with open(os.path.join(styled, "notes.tex"), "w", encoding="utf-8") as fh:
+        fh.write("\\documentclass{article}\n\\usepackage{bookstyle}\n\\begin{document}\n"
+                 "A formula: $x^2 + 1$.\n\\end{document}\n")
+    with open(os.path.join(styled, "bookstyle.sty"), "w", encoding="utf-8") as fh:
+        fh.write("\\ProvidesPackage{bookstyle}\n\\RequirePackage{newtxtext}\n"
+                 "\\RequirePackage{newtxmath}\n")
+    with open(os.path.join(styled, "conversion.yaml"), "w") as fh:
+        fh.write("targets:\n  tagged:\n    format: source\n    tagging: \"on\"\n")
+    styled_said = convert(styled)
+    styled_said = styled_said.stdout + styled_said.stderr
+    styled_copy = os.path.join(styled, "tagged", "notes.tex")
+    # bm's bold, whose letters TeX's own fonts lack under unicode-math.
+    bold = os.path.join(work, "bold")
+    os.makedirs(bold)
+    with open(os.path.join(bold, "notes.tex"), "w", encoding="utf-8") as fh:
+        fh.write("\\documentclass{article}\n\\usepackage{amsmath}\n\\usepackage{bm}\n"
+                 "\\begin{document}\nBold: $\\bm{x} + \\boldsymbol{\\alpha}$.\n\\end{document}\n")
+    with open(os.path.join(bold, "conversion.yaml"), "w") as fh:
+        fh.write("targets:\n  tagged:\n    format: source\n    tagging: \"on\"\n")
+    bold_said = convert(bold)
+    bold_said = bold_said.stdout + bold_said.stderr
+    bold_copy = os.path.join(bold, "tagged", "notes.tex")
+
+    def bold_builds():
+        if not shutil.which("lualatex"):
+            return skip("no lualatex to build the copy")
+        tree = os.path.join(bold, "build")
+        os.makedirs(tree)
+        shutil.copy(bold_copy, os.path.join(tree, "notes.tex"))
+        done = subprocess.run(["lualatex", "-interaction=nonstopmode", "-halt-on-error",
+                               "notes.tex"], cwd=tree, capture_output=True, text=True,
+                              timeout=300)
+        log = read(tree, "notes.log") if os.path.exists(os.path.join(tree, "notes.log")) else ""
+        return done.returncode == 0 and "Missing character" not in log
     return [
         ("a book whose fonts are its own keeps them, and the run says its formulas get no MathML",
          lambda: os.path.exists(copy) and "unicode-math" not in read(work, "tagged", "notes.tex")
          and "\\input{fonts}" in read(work, "tagged", "notes.tex")
          and "get no MathML" in said and "with mathptmx" in said),
+        ("so does one that sets them in a style file of its own, beside it",
+         lambda: os.path.exists(styled_copy)
+         and "unicode-math" not in read(styled, "tagged", "notes.tex")
+         and "with newtxmath, newtxtext" in styled_said),
+        ("bm's and \\boldsymbol's bold is unicode-math's bold italic, and the copy builds "
+         "with no glyph missing",
+         lambda: os.path.exists(bold_copy)
+         and "\\renewcommand{\\bm}[1]{\\symbfit{#1}}" in read(bold, "tagged", "notes.tex")
+         and "\\renewcommand{\\boldsymbol}[1]{\\symbfit{#1}}" in read(bold, "tagged", "notes.tex")
+         and "bold italic" in bold_said and bold_builds()),
     ]
 
 
@@ -1093,21 +1141,92 @@ def case_book_pdf(work):
     ]
 
 
+def case_pdf_copy(work):
+    """The PDF target's copy of the book's folder: a link the book makes
+    to a folder beside it still finds it, the book's .latexmkrc is kept
+    and doesn't move the PDF, and what LaTeX couldn't resolve is named."""
+    if not shutil.which("lualatex") or not shutil.which("latexmk"):
+        return [("the PDF build's copy of the book keeps its links and .latexmkrc",
+                 lambda: skip("no lualatex or latexmk for the PDF target"))]
+    book = os.path.join(work, "book")
+    os.makedirs(os.path.join(work, "shared", "figs"))
+    os.makedirs(book)
+    png(os.path.join(work, "shared", "figs", "a.png"), (0, 0, 128))
+    os.symlink(os.path.join("..", "shared", "figs"), os.path.join(book, "figs"))
+    # A package of the book's own in a folder its .latexmkrc adds to
+    # TEXINPUTS, so the book builds only with its .latexmkrc.
+    os.makedirs(os.path.join(book, "tex"))
+    with open(os.path.join(book, "tex", "notestyle.sty"), "w") as fh:
+        fh.write("\\ProvidesPackage{notestyle}\n\\newcommand{\\notemark}{FROM THE STYLE}\n")
+    with open(os.path.join(book, "notes.tex"), "w", encoding="utf-8") as fh:
+        fh.write("\\documentclass{article}\n\\usepackage{graphicx}\n\\usepackage{notestyle}\n"
+                 "\\title{Notes}\n\\begin{document}\n\\notemark. A linked figure: "
+                 "\\includegraphics[width=1cm]{figs/a}.\n"
+                 "See \\ref{nope} and \\cite{nobody}.\n\\end{document}\n")
+    with open(os.path.join(book, ".latexmkrc"), "w") as fh:
+        fh.write("$out_dir = 'elsewhere';\n$pdf_mode = 1;\nensure_path('TEXINPUTS', './tex//');\n")
+    with open(os.path.join(book, "image-alt.csv"), "w", encoding="utf-8") as fh:
+        fh.write("Image,Alt\nfigs/a.png,A blue square\n")
+    with open(os.path.join(book, "conversion.yaml"), "w") as fh:
+        fh.write("targets:\n  pdf:\n    format: pdf\n")
+    result = convert(book)
+    said = result.stdout + result.stderr
+    pdf = os.path.join(book, "pdf", "book.pdf")
+
+    def figure():
+        try:
+            import pikepdf
+        except ImportError:
+            return skip("no pikepdf to read the PDF")
+        if not os.path.exists(pdf):
+            return False
+        alts = []
+
+        def walk(node):
+            if isinstance(node, pikepdf.Dictionary):
+                if str(node.get("/S", "")) == "/Figure":
+                    alts.append(str(node.get("/Alt", "")))
+                kids = node.get("/K")
+                if kids is not None:
+                    for kid in (kids if isinstance(kids, pikepdf.Array) else [kids]):
+                        walk(kid)
+        with pikepdf.open(pdf) as doc:
+            walk(doc.Root.StructTreeRoot)
+        return alts == ["A blue square"]
+    return [
+        ("the book's .latexmkrc is kept, and the PDF is built where it's looked for, "
+         "whatever that says",
+         lambda: result.returncode == 0 and os.path.exists(pdf)
+         and (not shutil.which("pdftotext") or "FROM THE STYLE" in subprocess.run(
+             ["pdftotext", pdf, "-"], capture_output=True, text=True).stdout)),
+        ("a link the book makes to a folder beside it finds it from the copy",
+         figure),
+        ("what LaTeX couldn't resolve is named",
+         lambda: "couldn't resolve 1 reference(s) and 1 citation(s)" in said
+         and "nope" in said and "cited nobody" in said),
+    ]
+
+
 def case_other_masters(work):
     """The book's other masters go into the copy too: each with the files
-    only it reaches, and, tagged, made to build with LuaLaTeX, an old test
-    for pdfTeX (\\ifx\\pdfoutput\\undefined, which LuaTeX doesn't define)
-    made to take it for pdfTeX."""
+    only it reaches, and, tagged, made to build with LuaLaTeX: luatex85
+    loaded, so an old test for pdfTeX (\\ifx\\pdfoutput\\undefined, which
+    LuaTeX doesn't define) takes it for pdfTeX, and the pdfTeX commands in
+    that branch (\\ifnum\\pdfoutput, \\pdfinfo) work."""
     os.makedirs(work)
     png(os.path.join(work, "sq.png"), (128, 128, 128))
     png(os.path.join(work, "sq2.png"), (64, 64, 64))
     files = {
         "book.tex": "\\documentclass{article}\n\\usepackage{graphicx}\n\\begin{document}\n"
                     "\\input{shared}\n\\end{document}\n",
-        "workbook.tex": "\\ifx\\pdfoutput\\undefined % not pdfTeX\n"
+        "workbook.tex": "\\newif\\ifpdf\n\\ifx\\pdfoutput\\undefined\\pdffalse\\else\n"
+                        "  \\ifnum\\pdfoutput>0 \\pdftrue\\else\\pdffalse\\fi\n\\fi\n"
+                        "\\ifx\\pdfoutput\\undefined % not pdfTeX\n"
                         "\\documentclass[dvips]{article}\n\\else\n"
-                        "\\documentclass[pdftex]{article}\n\\fi\n\\usepackage{graphicx}\n"
-                        "\\begin{document}\n\\input{shared}\n\\input{only}\n\\end{document}\n",
+                        "\\documentclass[pdftex]{article}\n\\pdfinfo{/Author (Someone)}\n"
+                        "\\fi\n\\usepackage{graphicx}\n"
+                        "\\begin{document}\n\\ifpdf PDF MODE\\else DVI MODE\\fi\n"
+                        "\\input{shared}\n\\input{only}\n\\end{document}\n",
         "shared.tex": "Shared text: \\includegraphics[width=1cm]{sq}\n",
         "only.tex": "Only the workbook's: \\includegraphics[width=1cm]{sq2}\n",
         "image-alt.csv": "Image,Alt\nsq.png,A square\nsq2.png,Another square\n",
@@ -1117,6 +1236,8 @@ def case_other_masters(work):
     for name, text in files.items():
         with open(os.path.join(work, name), "w", encoding="utf-8") as fh:
             fh.write(text)
+    # Executable, as many of GIAM's files are: the copy keeps the mode.
+    os.chmod(os.path.join(work, "only.tex"), 0o755)
     result = convert(work)
     said = result.stdout + result.stderr
     tagged = os.path.join(work, "tagged")
@@ -1161,7 +1282,11 @@ def case_other_masters(work):
                         walk(kid)
         with pikepdf.open(pdf) as doc:
             walk(doc.Root.StructTreeRoot)
-        return alts == ["A square", "Another square"]
+            author = str(doc.docinfo.get("/Author", ""))
+        text = subprocess.run(["pdftotext", pdf, "-"], capture_output=True,
+                              text=True).stdout if shutil.which("pdftotext") else "PDF MODE"
+        return alts == ["A square", "Another square"] and "PDF MODE" in text \
+            and author == "Someone"
 
     def builds_untagged():
         if not shutil.which("pdflatex"):
@@ -1172,12 +1297,174 @@ def case_other_masters(work):
         ("the other master and the file only it reaches are in the copy, with alt text",
          lambda: copied("workbook.tex") != "" and "alt={Another square}" in copied("only.tex")
          and "workbook.tex with 1 file(s) only it reaches" in said),
-        ("tagged, the other master gets \\DocumentMetadata first, and its pdfTeX test LuaLaTeX",
+        ("a file written into the copy keeps the author's mode",
+         lambda: os.path.exists(os.path.join(tagged, "only.tex"))
+         and os.stat(os.path.join(tagged, "only.tex")).st_mode & 0o777 == 0o755
+         and os.stat(os.path.join(tagged, "shared.tex")).st_mode & 0o777
+         == os.stat(os.path.join(work, "shared.tex")).st_mode & 0o777),
+        ("tagged, the other master gets \\DocumentMetadata first, then luatex85 for its "
+         "pdfTeX test, which is left as it was",
          lambda: copied("workbook.tex").startswith("\\DocumentMetadata{")
-         and "\\ifnum0\\ifx\\pdfoutput\\undefined\\ifx\\directlua\\undefined1\\fi\\fi=1"
-         in copied("workbook.tex")),
-        ("it builds with LuaLaTeX, tagged, its figures with their alt text", builds_tagged),
+         and 0 < copied("workbook.tex").find("\\ifdefined\\directlua\\RequirePackage{luatex85}\\fi")
+         < copied("workbook.tex").find("\\newif\\ifpdf")
+         and copied("workbook.tex").count("\\ifx\\pdfoutput\\undefined") == 2),
+        ("it builds with LuaLaTeX, tagged, its figures with their alt text, the pdfTeX "
+         "branch taken and its \\pdfinfo written", builds_tagged),
         ("and without \\DocumentMetadata it builds with pdfLaTeX", builds_untagged),
+    ]
+
+
+# Calls of the book's macros for an image, as a review found them going
+# wrong: a body holding \caption, whose label a group around the call
+# undid, and one holding \centering, whose paragraph it undid; alt=#3 bare,
+# which a comma in the text ended; a call whose own keys hold alt, which
+# won over one set before it; an alt argument the body also uses as the
+# caption; a call in \captionof's caption, which LaTeX writes to a file.
+REVIEW_MACROS = r"""\DocumentMetadata{lang=en, pdfstandard=ua-2, tagging=on}
+\documentclass{article}
+\usepackage{graphicx}
+\usepackage{caption}
+\newcommand{\fig}[2]{\includegraphics[width=#2]{#1}}
+\newcommand{\figa}[3]{\includegraphics[width=#2,alt=#3]{#1}}
+\newcommand{\figc}[2]{\includegraphics[width=2cm]{#1}\caption{#2}}
+\newcommand{\figd}[1]{\centering\includegraphics[width=2cm]{#1}}
+\newcommand{\figo}[2][]{\includegraphics[#1]{#2}}
+\newcommand{\figcap}[2]{\includegraphics[width=1cm,alt={#2}]{#1}\caption{#2}}
+\newcommand{\figk}[2][alt={Default text}]{\includegraphics[#1]{#2}}
+\newcommand{\figw}[2][width=1cm]{\includegraphics[#1]{#2}}
+\title{Macros}
+\begin{document}
+\section{One}
+\section{Two}
+\fig{sq}{2cm}
+
+\figa{circ}{2cm}{Old alt}
+
+\figo[width=2cm,alt={Old keys}]{tri}
+
+\figo{bare} \figk{key} \figw{wide}
+
+\begin{figure}[h]
+\figc{star}{A star}\label{fig:star}
+\end{figure}
+See Figure~\ref{fig:star}.
+
+\begin{figure}[h]
+\figd{dot}
+\caption{Centered}
+\end{figure}
+
+\begin{figure}[h]
+\figcap{mark}{The caption}
+\end{figure}
+
+\begin{minipage}{\linewidth}
+\captionof{figure}{An icon \fig{icon}{1em} inline}
+\end{minipage}
+
+\includegraphics[width=1cm]{plain}
+\end{document}
+"""
+
+
+def case_review_macros(work):
+    """Calls of the book's macros for an image, each written so the call
+    does what it did: no group around it, a bare alt argument braced, a
+    call's own keys holding the description, and what can't be written
+    without changing something else named."""
+    os.makedirs(work)
+    for name, rgb in (("sq", (128, 0, 0)), ("circ", (0, 0, 128)), ("tri", (0, 128, 0)),
+                      ("star", (128, 128, 0)), ("dot", (0, 0, 0)), ("mark", (64, 64, 64)),
+                      ("icon", (32, 32, 32)), ("plain", (200, 200, 200)),
+                      ("bare", (16, 16, 16)), ("key", (48, 48, 48)), ("wide", (96, 96, 96))):
+        png(os.path.join(work, name + ".png"), rgb)
+    with open(os.path.join(work, "book.tex"), "w", encoding="utf-8") as fh:
+        fh.write(REVIEW_MACROS)
+    with open(os.path.join(work, "image-alt.csv"), "w", encoding="utf-8") as fh:
+        fh.write("Image,Alt\nsq.png,\"A square, red\"\ncirc.png,\"A circle, blue\"\n"
+                 "tri.png,A triangle from the sidecar\nstar.png,A star\n"
+                 "dot.png,A centered dot\nmark.png,A mark\nicon.png,An icon\n"
+                 "bare.png,A bare one\nkey.png,A key\nwide.png,A wide one\n")
+    with open(os.path.join(work, "conversion.yaml"), "w") as fh:
+        fh.write("targets:\n  tagged:\n    format: source\n")
+    result = convert(work)
+    said = result.stdout + result.stderr
+    path = os.path.join(work, "tagged", "book.tex")
+    copy = read(work, "tagged", "book.tex") if os.path.exists(path) else ""
+
+    def built():
+        """(figures' alt texts in order, the text) of the copy built with
+        LuaLaTeX, tagged, or None."""
+        if not shutil.which("lualatex"):
+            return None
+        tree = os.path.join(work, "build")
+        shutil.copytree(work, tree, ignore=shutil.ignore_patterns("tagged", "build"))
+        shutil.copy(path, os.path.join(tree, "book.tex"))
+        for _ in range(2):
+            done = subprocess.run(["lualatex", "-interaction=nonstopmode", "-halt-on-error",
+                                   "book.tex"], cwd=tree, capture_output=True, text=True,
+                                  timeout=300)
+        if done.returncode != 0:
+            return [], ""
+        import pikepdf
+        alts = []
+
+        def walk(node):
+            if isinstance(node, pikepdf.Dictionary):
+                if str(node.get("/S", "")) == "/Figure":
+                    alts.append(str(node.get("/Alt", "")))
+                kids = node.get("/K")
+                if kids is not None:
+                    for kid in (kids if isinstance(kids, pikepdf.Array) else [kids]):
+                        walk(kid)
+        with pikepdf.open(os.path.join(tree, "book.pdf")) as doc:
+            walk(doc.Root.StructTreeRoot)
+        text = subprocess.run(["pdftotext", os.path.join(tree, "book.pdf"), "-"],
+                              capture_output=True, text=True).stdout \
+            if shutil.which("pdftotext") else "See Figure 1."
+        return alts, text
+    found = {}
+
+    def build():
+        if "result" not in found:
+            found["result"] = built()
+        return found["result"]
+
+    def as_built(check):
+        def run():
+            result = build()
+            if result is None:
+                return skip("no lualatex to build the copy")
+            return check(*result)
+        return run
+    return [
+        ("a call gets its key before it and alt={} after it, no group around it, so a "
+         "\\caption's label and a \\centering keep",
+         lambda: "\\setkeys{Gin}{alt={A star}}\\figc{star}{A star}\\setkeys{Gin}{alt={}}"
+         "\\label{fig:star}" in copy
+         and "\\setkeys{Gin}{alt={A centered dot}}\\figd{dot}\\setkeys{Gin}{alt={}}" in copy
+         and "{\\setkeys" not in copy),
+        ("a bare alt=#3 argument is braced, so its comma stays in the text",
+         lambda: "\\figa{circ}{2cm}{{A circle, blue}}" in copy),
+        ("a call whose own keys hold alt gets the description among them",
+         lambda: "\\figo[alt={A triangle from the sidecar},width=2cm]{tri}" in copy),
+        ("a call without its keys gets them when the default is empty or has alt "
+         "text of its own, and a key before it otherwise",
+         lambda: "\\figo[alt={A bare one}]{bare}" in copy
+         and "\\figk[alt={A key}]{key}" in copy
+         and "\\setkeys{Gin}{alt={A wide one}}\\figw{wide}\\setkeys{Gin}{alt={}}" in copy),
+        ("an alt argument the body also uses as the caption, and a call in \\captionof's "
+         "caption, are named, not written",
+         lambda: "\\figcap{mark}{The caption}" in copy
+         and "\\captionof{figure}{An icon \\fig{icon}{1em} inline}" in copy
+         and re.search(r"didn't get it in the copy: icon, mark\.", said)),
+        ("built tagged, each figure has its own description, the label its figure's "
+         "number, and the image after them none of theirs",
+         as_built(lambda alts, text: "See Figure 1." in text
+                  and alts[:3] == ["A square, red", "A circle, blue", "A triangle from the sidecar"]
+                  and "A star" in alts and "A centered dot" in alts
+                  and all(a in alts for a in ("A bare one", "A key", "A wide one"))
+                  and "Default text" not in alts and "plain.png" in alts)),
     ]
 
 
@@ -1624,6 +1911,27 @@ def case_pieces(work):
 \section{X}\label{g}
 """
     types = {"R": (1, ">{\\raggedleft\\arraybackslash}p{#1}"), "Y": (0, "R{1cm}")}
+    ordered = ("\\newcommand{\\fig}[1]{\\includegraphics{#1}}\n\\input{defs}\n"
+               "\\renewcommand{\\fig}[3]{\\includegraphics[width=#2]{#1}}\n"
+               "\\def\\pic#1{\\includegraphics{#1}}\n"
+               "\\renewcommand{\\pic}[1]{\\textbf{no image}}\n"
+               "\\providecommand{\\fig}[1]{\\textbf{not taken}}\n"
+               "\\providecommand{\\newfig}[1]{\\includegraphics[width=1cm]{#1}}\n")
+    metadata = {"o.tex": "\\DocumentMetadata{pdfversion=2.0, lang=en}\n\\documentclass{article}\n"
+                         "\\begin{document}\nx\n\\end{document}\n"}
+    texremediate.tag(metadata, "o.tex", "en", mathml=False)
+    own_metadata = metadata["o.tex"]
+    moving = ("\\captionof{figure}[Short]{Long} \\addcontentsline{toc}{section}{T} "
+              "\\index{i}")
+    # A data table in a box, its header declaration before it: tagging set
+    # back to a table before the declaration, so it reads as it applies.
+    boxed = {"b.tex": "\\documentclass{article}\n\\begin{document}\n\\begin{tabular}{p{4in}}\n"
+                      "\\textbf{Example: A box.} A box is a frame around a passage of prose, "
+                      "which runs on for a while here.\n\n"
+                      "{\\ifdefined\\tagpdfsetup\\tagpdfsetup{table/header-rows={1}}\\fi"
+                      "\\begin{tabular}{lr}\nA & B \\\\\n1 & 2 \\\\\n\\end{tabular}}\n"
+                      "\\end{tabular}\n\\end{document}\n"}
+    texremediate.tag(boxed, "b.tex", "en", mathml=False)
     settings = texremediate.enumitem_settings(
         {"a": "\\begin{itemize}[leftmargin=*,labelindent=0pt]\n\\item x\n\\end{itemize}\n"
               "\\begin{enumerate}[resume,label={(\\alph*)}]\n\\item y\n\\end{enumerate}\n"
@@ -1644,6 +1952,24 @@ def case_pieces(work):
         ("a document that includes nothing opens in the main matter, whatever follows",
          lambda: latexsource.book_outline("Text.\n\\appendix\n\\section{A}")[1] == "main"
          and latexsource.book_outline("\\appendix\n\\section{A}")[1] == "appendix"),
+        ("the book's definitions are read in LaTeX's order: a file where it's \\input, "
+         "\\def and \\newcommand as they come, \\providecommand only for a name not "
+         "yet defined",
+         lambda: {n: m["arguments"] for n, m in latexsource.image_macros(
+             [("m.tex", ordered), ("defs.tex", "\\renewcommand{\\fig}[2]{\\includegraphics"
+                                              "[width=#2]{#1}}\n")])[0].items()}
+         == {"fig": 3, "newfig": 1}),
+        ("a book's own \\DocumentMetadata without tagging gets it, and the standard",
+         lambda: own_metadata.startswith("\\DocumentMetadata{pdfversion=2.0, lang=en, "
+                                         "tagging=on, pdfstandard=ua-2}\n")),
+        ("a moving argument is found by each command's arguments: \\captionof's caption, "
+         "not its type, and a caption's short form",
+         lambda: [moving[a:b] for a, b in texremediate._moving_spans(moving, [])]
+         == ["Short", "Long", "T", "i"]),
+        ("a data table in a box is set back to a table before its header declaration",
+         lambda: texremediate.DATA_OPEN + "{\\ifdefined\\tagpdfsetup\\tagpdfsetup{table/"
+         "header-rows={1}}\\fi\\begin{tabular}{lr}" in boxed["b.tex"]
+         and "\\end{tabular}}}\n\\end{tabular}}" in boxed["b.tex"]),
     ]
 
 
@@ -1684,7 +2010,10 @@ CASES = [("a LaTeX book", case_book), ("two masters", case_masters),
          ("one file", case_single), ("an unbuilt book", case_unbuilt),
          ("the source target", case_source), ("a book with fonts of its own", case_own_fonts),
          ("a LaTeX book's PDF, from its own LaTeX", case_book_pdf),
+         ("the PDF build's copy of the book", case_pdf_copy),
          ("the book's other masters", case_other_masters),
+         ("calls of the book's macros for an image, as the review found them",
+          case_review_macros),
          ("the latex target", case_latex_target),
          ("a book of documents built on their own", case_documents),
          ("the pieces the copies take", case_pieces),

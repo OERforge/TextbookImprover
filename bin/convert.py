@@ -2335,12 +2335,15 @@ def remediate_sources(target, base, docs, paths, env, html_stems=(), language=No
                "(tagging: \"on\")." if counts.get("headers_untagged") else "")
             + (" Made to build with LaTeX's tagging, with LuaLaTeX: "
                + ("\\DocumentMetadata added" if counts.get("tag_metadata")
+                  else f"its own \\DocumentMetadata given {counts['tag_metadata_added']}"
+                  if counts.get("tag_metadata_added")
                   else "its own \\DocumentMetadata kept")
                + f", {counts.get('tag_pdftex_options', 0)} pdftex option(s) and "
                f"{counts.get('tag_pdftex_settings', 0)} pdfTeX setting(s) taken out, "
-               + (f"{counts['tag_pdfoutput_tests']} test(s) for pdfTeX (\\ifx\\pdfoutput"
-                  "\\undefined) made to take LuaLaTeX for pdfTeX too, "
-                  if counts.get("tag_pdfoutput_tests") else "")
+               + ("luatex85 loaded for LuaLaTeX"
+                  + (f" in {counts['tag_luatex85']} of the documents" if documents > 1 else "")
+                  + ", so a test for pdfTeX (\\ifx\\pdfoutput\\undefined) takes it for "
+                  "pdfTeX and pdfTeX's commands work, " if counts.get("tag_luatex85") else "")
                + f"{counts.get('tag_theorems', 0)} starred theorem(s) defined only "
                "when tagging hasn't, "
                + ("\\centerline on a line of its own made a centered paragraph, "
@@ -2349,6 +2352,9 @@ def remediate_sources(target, base, docs, paths, env, html_stems=(), language=No
                   "OpenType Latin Modern fonts (TeX's own design) and a fallback for "
                   "characters they lack, "
                   if counts.get("tag_math") else "")
+               + (f"the book's bold ({counts['tag_math_bold']}) made unicode-math's bold "
+                  "italic, whose letters the fonts have, "
+                  if counts.get("tag_math_bold") else "")
                + ("MathML set up for the book's unicode-math, "
                   if counts.get("tag_math_setup") else "")
                + (f"{counts['tag_floats']} figure(s) and table(s) tagged where the text has "
@@ -2389,10 +2395,11 @@ def remediate_sources(target, base, docs, paths, env, html_stems=(), language=No
                             f"text and {c.get('decorative', 0)} marked artifact"
                             for name, only, c in others)
                 + (", each made to build with LaTeX's tagging as the book's is"
-                   + ("; " + ", ".join(f"{name}'s test for pdfTeX (\\ifx\\pdfoutput"
-                                       "\\undefined) made to take LuaLaTeX for pdfTeX"
-                                       for name, _, c in others if c.get("tag_pdfoutput_tests"))
-                      if any(c.get("tag_pdfoutput_tests") for _, _, c in others) else "")
+                   + ("; luatex85 loaded for LuaLaTeX in "
+                      + ", ".join(name for name, _, c in others if c.get("tag_luatex85"))
+                      + ", for a test for pdfTeX (\\ifx\\pdfoutput\\undefined) and "
+                      "pdfTeX's commands"
+                      if any(c.get("tag_luatex85") for _, _, c in others) else "")
                    if tagging else "") + ".")
         unplaced_warning(target.name, counts, paths, "the copy")
         written.extend(os.path.join(target.output_dir, f) for f in files)
@@ -2501,6 +2508,9 @@ def unplaced_warning(name, counts, paths, where):
         "written in by hand.")
 
 
+UNDEFINED = re.compile(r"(Reference|Citation) `([^']+)' on page \d+ undefined")
+
+
 def latex_book_pdf(target, base, latex_parts, paths, work, language, project, targets):
     """A LaTeX book's PDF, built by LaTeX from the book's own files
     (pdf.from: book): the book's folder copied, the files its master
@@ -2538,10 +2548,29 @@ def latex_book_pdf(target, base, latex_parts, paths, work, language, project, ta
     outputs = {os.path.abspath(t.output_dir) for t in targets} | {
         os.path.abspath(os.path.join(base, latexsource.RENDERED))}
 
+    # A version control folder and an operating system's own files aren't
+    # the book's; a .latexmkrc is, with what the book's build needs.
     def leave_out(directory, names):
-        return [n for n in names if n.startswith(".")
+        return [n for n in names if n in (".git", ".hg", ".svn", ".DS_Store", "__MACOSX")
                 or os.path.abspath(os.path.join(directory, n)) in outputs]
     shutil.copytree(base, build, ignore=leave_out, symlinks=True)
+    # A link the book makes to something beside it (figs -> ../shared/figs)
+    # would point beside the copy, where nothing is: it points where the
+    # book's did. A link inside the book still finds its copy.
+    root = os.path.abspath(base)
+    for folder, dirs, names in os.walk(build):
+        for name in dirs + names:
+            link = os.path.join(folder, name)
+            if not os.path.islink(link):
+                continue
+            pointed = os.readlink(link)
+            if os.path.isabs(pointed):
+                continue
+            original = os.path.join(root, os.path.relpath(folder, build))
+            resolved = os.path.normpath(os.path.join(original, pointed))
+            if resolved != root and not resolved.startswith(root + os.sep):
+                os.remove(link)
+                os.symlink(resolved, link)
 
     resolved_html = {}
     html_json = os.path.join(work, "table-headers-html.json")
@@ -2573,8 +2602,11 @@ def latex_book_pdf(target, base, latex_parts, paths, work, language, project, ta
 
     def one(master):
         folder = os.path.join(build, os.path.dirname(master))
-        command = ["latexmk", "-lualatex", "-interaction=nonstopmode", "-halt-on-error",
-                   "-file-line-error", os.path.basename(master)]
+        # The PDF and the log where they're looked for, whatever the book's
+        # .latexmkrc says ($out_dir); the command line wins over it.
+        command = ["latexmk", "-lualatex", "-outdir=.", "-auxdir=.",
+                   "-interaction=nonstopmode", "-halt-on-error", "-file-line-error",
+                   os.path.basename(master)]
         if TRACE:
             say("+ (in a copy of the book) " + " ".join(shell_quote(c) for c in command))
         result = subprocess.run(command, cwd=folder, capture_output=True, text=True,
@@ -2600,10 +2632,14 @@ def latex_book_pdf(target, base, latex_parts, paths, work, language, project, ta
             say(advice)
 
     os.makedirs(target.output_dir, exist_ok=True)
-    written, pages, unnamed, missing = [], 0, 0, {}
+    written, pages, unnamed, missing, unresolved = [], 0, 0, {}, {"reference": [], "citation": []}
     for master, ok, pdf, log in results:
         if not ok:
             continue
+        # What LaTeX couldn't resolve, which the PDF prints as ?? or [?].
+        for kind, name in UNDEFINED.findall(log):
+            if name not in unresolved[kind.lower()]:
+                unresolved[kind.lower()].append(name)
         if len(masters) == 1:
             name = str(target["filename"] or "").strip() or \
                 str(project.get("identifier") or target.name)
@@ -2623,6 +2659,16 @@ def latex_book_pdf(target, base, latex_parts, paths, work, language, project, ta
         say(latexbuild.missing_warning(
             missing, "A font that has them, chosen in the book's preamble, would "
             "draw them."))
+    if unresolved["reference"] or unresolved["citation"]:
+        refs, cites = unresolved["reference"], unresolved["citation"]
+        say(f"WARNING: LaTeX couldn't resolve {len(refs)} reference(s) and {len(cites)} "
+            "citation(s), which the PDF prints as ?? and [?]: "
+            + "; ".join(part for part in (
+                ", ".join(refs[:5]) + (", ..." if len(refs) > 5 else "") if refs else "",
+                "cited " + ", ".join(cites[:5]) + (", ..." if len(cites) > 5 else "")
+                if cites else "") if part)
+            + ". A label the book doesn't define, or a bibliography file that isn't "
+            "beside it, would; the book's own build prints them the same way.")
     if written:
         say((f"Wrote {written[0]}: " if len(masters) == 1 else
              f"Wrote {len(written)} PDF(s) in {target.output_dir}, one for each of the "

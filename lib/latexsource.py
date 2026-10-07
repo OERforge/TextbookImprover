@@ -1181,7 +1181,7 @@ def repair_graphics(base, work, text, dirs, record, counter, say):
 # --------------------------------------------------------------------------
 
 MACRO_DEFINITION = re.compile(
-    r"\\(?:re|provide)?newcommand\*?\s*(?:\{\s*\\([A-Za-z@]+)\s*\}|\\([A-Za-z@]+))"
+    r"\\(?:(?:re)?newcommand|providecommand)\*?\s*(?:\{\s*\\([A-Za-z@]+)\s*\}|\\([A-Za-z@]+))"
     r"\s*(?:\[\s*(\d)\s*\])?\s*")
 PLAIN_DEFINITION = re.compile(r"\\[gex]?def\s*\\([A-Za-z@]+)\s*((?:#\d\s*)*)\{")
 BODY_GRAPHICS = re.compile(r"\\includegraphics\s*(\*)?\s*(\[[^]]*\])?\s*\{")
@@ -1227,8 +1227,19 @@ def image_macro(body, arguments, default):
         return None
     options = m.group(2) or ""
     alt = ALT_ARGUMENT.search(options)
+    number = int(alt.group(1) or alt.group(2)) if alt else None
+    # An argument that is a whole entry of the key list ([#1], [width=1cm,#1]):
+    # a call's own keys, an alt among them, which win over one set before.
+    entries = [e.strip() for e in re.split(r",(?![^{]*\})", options[1:-1])] if options else []
+    whole = [int(e[1]) for e in entries if re.fullmatch(r"#\d", e)]
     return {"arguments": arguments, "default": default, "file": path, "body": body,
-            "alt": int(alt.group(1) or alt.group(2)) if alt else None,
+            "alt": number,
+            # alt=#3, unbraced, takes a comma in the text for the next key.
+            "alt_braced": bool(alt and alt.group(1)),
+            # The alt argument used elsewhere too (\caption{#3}), so writing
+            # the description there would change that.
+            "alt_shared": bool(alt) and len(re.findall(r"#%d(?!\d)" % number, body)) > 1,
+            "options": whole[0] if whole else None,
             "keyed": bool(OWN_KEY.search(options)) and not alt}
 
 
@@ -1241,51 +1252,71 @@ def image_macros(texts):
     optional, else None; file, the file as the body writes it, #1 and
     all; body, the whole body; alt, the argument the body's own alt key
     takes, or None; keyed, whether the body gives alt text or artifact of
-    its own. texts is
-    [(name, text)] in the order LaTeX reads them, so a later definition
-    replaces an earlier one."""
-    macros, spans_by_text = {}, {}
-    for name, text in texts:
+    its own. texts is [(name, text)], the master first: the definitions
+    are read in the order LaTeX reads them, each file where it's \\input,
+    so a later definition replaces an earlier one, and \\providecommand
+    defines only a name nothing has defined yet."""
+    by_name = dict(texts)
+    macros, defined, spans_by_text, visited = {}, set(), {}, set()
+
+    def define(found, macro, provide=False):
+        if provide and found in defined:
+            return
+        defined.add(found)
+        if macro:
+            macros[found] = macro
+        else:
+            macros.pop(found, None)
+
+    def walk(name):
+        if name in visited or name not in by_name:
+            return
+        visited.add(name)
+        text = by_name[name]
         skip = skip_spans(text)
-        here = []
-        for m in MACRO_DEFINITION.finditer(text):
-            if in_spans(m.start(), skip):
-                continue
-            pos, default = m.end(), None
-            if text.startswith("[", pos):
-                close = closing_bracket(text, pos)
+        here, events = [], []
+        for kind, pattern in (("new", MACRO_DEFINITION), ("plain", PLAIN_DEFINITION),
+                              ("input", INPUT)):
+            events += [(m.start(), kind, m) for m in pattern.finditer(text)
+                       if not in_spans(m.start(), skip)]
+        for _, kind, m in sorted(events, key=lambda e: e[0]):
+            if kind == "input":
+                target = (m.group(2) or m.group(3) or "").strip().strip('"')
+                folder = os.path.dirname(name)
+                for candidate in (os.path.join(folder, target), os.path.join(folder, target + ".tex"),
+                                  target, target + ".tex"):
+                    if os.path.normpath(candidate) in by_name:
+                        walk(os.path.normpath(candidate))
+                        break
+            elif kind == "new":
+                pos, default = m.end(), None
+                if text.startswith("[", pos):
+                    close = closing_bracket(text, pos)
+                    if close < 0:
+                        continue
+                    default = text[pos + 1:close]
+                    pos = close + 1
+                    while pos < len(text) and text[pos].isspace():
+                        pos += 1
+                if not text.startswith("{", pos):
+                    continue
+                close = matching_brace(text, pos)
                 if close < 0:
                     continue
-                default = text[pos + 1:close]
-                pos = close + 1
-                while pos < len(text) and text[pos].isspace():
-                    pos += 1
-            if not text.startswith("{", pos):
-                continue
-            close = matching_brace(text, pos)
-            if close < 0:
-                continue
-            here.append((m.start(), close))
-            found = m.group(1) or m.group(2)
-            macro = image_macro(text[pos + 1:close - 1], int(m.group(3) or 0), default)
-            if macro:
-                macros[found] = macro
+                here.append((m.start(), close))
+                define(m.group(1) or m.group(2),
+                       image_macro(text[pos + 1:close - 1], int(m.group(3) or 0), default),
+                       provide=text.startswith("\\providecommand", m.start()))
             else:
-                macros.pop(found, None)
-        for m in PLAIN_DEFINITION.finditer(text):
-            if in_spans(m.start(), skip):
-                continue
-            close = matching_brace(text, m.end() - 1)
-            if close < 0:
-                continue
-            here.append((m.start(), close))
-            macro = image_macro(text[m.end():close - 1],
-                                 len(re.findall(r"#\d", m.group(2))), None)
-            if macro:
-                macros[m.group(1)] = macro
-            else:
-                macros.pop(m.group(1), None)
-        spans_by_text[name] = here
+                close = matching_brace(text, m.end() - 1)
+                if close < 0:
+                    continue
+                here.append((m.start(), close))
+                define(m.group(1), image_macro(text[m.end():close - 1],
+                                               len(re.findall(r"#\d", m.group(2))), None))
+        spans_by_text[name] = sorted(here)
+    for name, _ in texts:
+        walk(name)
     return macros, spans_by_text
 
 
@@ -1839,7 +1870,7 @@ def cut_pages(doc, order, master_stem, front_role):
 # --------------------------------------------------------------------------
 
 SAMPLE = "latex-conversion-macros-sample.tex"
-NEWCOMMAND = re.compile(r"\\(?:re|provide)?newcommand\*?\s*\{?\s*\\([A-Za-z@]+)"
+NEWCOMMAND = re.compile(r"\\(?:(?:re)?newcommand|providecommand)\*?\s*\{?\s*\\([A-Za-z@]+)"
                         r"\s*\}?\s*(?:\[(\d)\])?\s*(?:\[[^]]*\])?\s*\{")
 MATH_SPANS = re.compile(
     r"(?<!\\)\$\$(.+?)(?<!\\)\$\$|(?<!\\)\$(.+?)(?<!\\)\$|\\\((.+?)\\\)"

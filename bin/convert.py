@@ -774,12 +774,17 @@ LATEX_READ_CHANGES = (
     ("group_commands", "\\begingroup and \\endgroup read as braces"),
     ("kept_groups", "group or number after a command the reader takes whole kept "
      "apart from it, so it's read"),
+    ("boxes_unwrapped", "box (\\fbox, \\makebox, \\resizebox, and the like) read as "
+     "what it holds, which the reader dropped with it"),
     ("titlesec", "titlesec setting for how a heading looks left out"),
     ("colors", "color the book defines written as CSS"),
     ("nameref", "\\nameref read as a link to the label, its text the section's title"),
     ("subfigures", "\\subfigure read as a subfigure environment, so its label and "
      "caption are kept"),
-    ("label_keys", "label or reference with whitespace in its key written without"))
+    ("label_keys", "label or reference with whitespace in its key written without"),
+    ("counter_keys", "label or reference whose key LaTeX makes of its counters "
+     "(\\arabic{chapter}) written as LaTeX makes it"),
+    ("counter_values", "reference or counter given the value LaTeX gives it"))
 
 
 def read_latex_to_json(base, masters, env, work):
@@ -836,6 +841,9 @@ def read_latex_to_json(base, masters, env, work):
                 + " Nothing was converted.")
         with open(out, encoding="utf-8") as fh:
             doc = json.load(fh)
+        keys, values = latexsource.resolve_counters(doc["blocks"], prep["counters"])
+        counts["counter_keys"] = counts.get("counter_keys", 0) + keys
+        counts["counter_values"] = counts.get("counter_values", 0) + values
         recolored = latexsource.color_spans(doc["blocks"],
                                             latexsource.color_values(prep["colors"]))
         if recolored:

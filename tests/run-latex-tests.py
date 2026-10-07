@@ -2026,12 +2026,21 @@ def case_pieces(work):
         probe_dir, "\\documentclass{article}\n\\newcommand{\\bad}{a$\\par$b}\n"
         "\\newcommand{\\good}{x}\n\\newcommand{\\worse}{\\leavevmode}\n\\begin{document}\n",
         [("bad", 0), ("good", 0), ("worse", 0)], os.path.join(ROOT, "bin", "latex-source.lua"))
+    # The marks where the book steps, sets, and shows a counter: not in a
+    # key, a formula, a comment, a drawing, or a \\the definition.
+    marked = latexsource.counter_marks(
+        "\\refstepcounter{eoce}\\setcounter{chapter}{#1}\\addtocounter{x}{\\value{y}}"
+        "\\setcounter{z}{\\numexpr1}\\label{e_\\arabic{eoce}} \\thesection\\thepage "
+        "\\arabic{x}$\\arabic{x}$ % \\arabic{x}\n\\begin{tikzpicture}\\stepcounter{x}"
+        "\\end{tikzpicture}\\renewcommand{\\theeoce}{\\arabic{eoce}}\\appendix", {}, (),
+        ("section", "eoce"))
     in_math = ("\\newcommand{\\grp}[1]{\\begingroup #1\\endgroup}\n"
                "\\newcommand{\\hl}[1]{\\grp{#1}\\hspace{1em}{z}}\n"
                "\\newcommand{\\remark}[1]{\\noindent\\begingroup #1\\endgroup}\n"
                "Text $\\hl{x}$ and \\remark{y}.\n")
     math_kept = latexsource.repair_text(in_math, {}, latexsource.math_macros([in_math]))
     no_macros = latexsource.math_macros(["A formula: $x + 1$, and no macro.\n"])
+    line_break = "A\\\\[6mm] B \\[ y \\] C"
     starred = "A\\titleformat*{\\section}{\\bfseries}B\\titlespacing*{\\section}{0pt}{1em}{1em}C"
     for command, signature in latexsource.TITLESEC_COMMANDS:
         starred = latexsource.drop_command(starred, command, signature, {}, "titlesec")
@@ -2115,6 +2124,29 @@ def case_pieces(work):
          == ["color: rgb(0, 0, 0)", "background-color: rgb(0, 0, 0)", "color: red"]),
         ("the sample's probe finds each macro's formula by its mark, past one whose "
          "expansion breaks its paragraph", lambda: probed == {"worse"}),
+        ("a counter stepped, set, or shown is marked where the reader keeps it, but not in "
+         "a key, a formula, a comment, a drawing, or a \\the definition, nor a value it "
+         "can't follow; and each style shows a counter as LaTeX does",
+         lambda: marked == (
+             "\\refstepcounter{eoce}\\hyperref[TEXTBOOKIMPROVERCOUNTER:refstepcounter:eoce]{}"
+             "\\setcounter{chapter}{#1}\\hyperref[TEXTBOOKIMPROVERCOUNTER:setcounter:chapter:#1]{}"
+             "\\addtocounter{x}{\\value{y}}"
+             "\\hyperref[TEXTBOOKIMPROVERCOUNTER:addtocounter:x:\\value{y}]{}"
+             "\\setcounter{z}{\\numexpr1}\\label{e_\\arabic{eoce}} "
+             "\\hyperref[TEXTBOOKIMPROVERCOUNTER:the:section]{}\\thepage "
+             "\\hyperref[TEXTBOOKIMPROVERCOUNTER:show:arabic:x]{}$\\arabic{x}$ % \\arabic{x}\n"
+             "\\begin{tikzpicture}\\stepcounter{x}\\end{tikzpicture}"
+             "\\renewcommand{\\theeoce}{\\arabic{eoce}}\\appendix"
+             "\\hyperref[TEXTBOOKIMPROVERCOUNTER:division:appendix]{}")
+         and [latexsource.counter_style(st, 14) for st in ("arabic", "roman", "Roman", "alph",
+                                                            "Alph")]
+         == ["14", "xiv", "XIV", "n", "N"]),
+        ("a $ in a comment pairs with nothing, so a macro after it isn't counted as a "
+         "formula's", lambda: latexsource.math_uses(
+             ["Cost % 5$ more\n\\section{A} and $x$.\n"], ["section"]) == {"section": 0}),
+        ("a line break with its space, \\\\[6mm], isn't taken for a display formula",
+         lambda: [line_break[a:b] for a, b in latexsource.math_spans(line_break)]
+         == ["\\[ y \\]"]),
         ("a book with formulas and no macro of its own has none a formula uses",
          lambda: no_macros == set()),
         ("a definition a formula uses is left as it is, and those its body uses: texmath "
@@ -2199,6 +2231,7 @@ Bo Chen \\
 \includechapter{1}{ch_one}
 \includechapter{2}{ch_two}
 \endgroup
+\include{front/solutions}
 \end{document}
 """,
     "style/style.tex": r"""\definecolor{oiB}{rgb}{.337,.608,.741}
@@ -2222,6 +2255,18 @@ Bo Chen \\
 \newcommand{\hlx}[1]{\textcolor{oiB}{#1}}
 \newcommand{\gap}[1]{#1\hspace{1em}{}}
 \newcommand{\secref}[1]{Section~\ref{#1}}
+\newcounter{eoce}[chapter]
+\renewcommand{\theeoce}
+    {\arabic{chapter}.\arabic{eoce}}
+\newcounter{alwaysTwo}
+\setcounter{alwaysTwo}{2}
+\newcounter{eocesolch}
+\setcounter{eocesolch}{0}
+\newcounter{eocesol}[eocesolch]
+\renewcommand{\theeocesol}{\arabic{eocesolch}.\arabic{eocesol}}
+\newcommand{\eoce}[1]{\refstepcounter{eoce}\noindent\textbf{\ref{eoce_sol_\arabic{chapter}_\arabic{eoce}}\label{eoce_\arabic{chapter}_\arabic{eoce}}}\hspace{2mm}#1}
+\newcommand{\eocesolch}[1]{\refstepcounter{eocesolch}\noindent\textbf{\arabic{eocesolch}\hspace{2mm}#1}}
+\newcommand{\eocesolution}[1]{\refstepcounter{eocesol}\noindent\textbf{\ref{eoce_\arabic{eocesolch}_\arabic{eocesol}}\label{eoce_sol_\arabic{eocesolch}_\arabic{eocesol}}}\hspace{2mm}{\small#1}\makebox[0pt]{\refstepcounter{eocesol}\label{eoce_sol_\arabic{eocesolch}_\arabic{eocesol}}}}
 \newcommand{\strutx}[1]{\rule{0pt}{2ex}#1\leavevmode}
 \newenvironment{wrap}{\leavevmode}{\leavevmode}
 \newcommand{\Figuress}[4][]{%
@@ -2282,7 +2327,7 @@ can't read: $\strutx{z}$, and an environment in a formula: $\begin{wrap}w\end{wr
 Formulas as OpenIntro writes them: $P(\text{rolling a \texttt{1}})$,
 $\texttt{income\_\hspace{0.03cm}{}ver}_{\texttt{verified}}$,
 $P(\text{\underline{\color{black}mammogram$^+$} and has BC})$,
-$s = 5.5 \hfill R^2 = 70\%$, and
+$s = 5.5 \hfill R^2 = 70\%$, $\pmb{\MakeLowercase{t}}$, and
 \begin{align*}
 x = 1 \index{x}\vspace{2mm}
 \end{align*}
@@ -2299,7 +2344,9 @@ y = 2
                              "\\Figure[A green triangle for the review]{0.3}{triangle}\n\n"
                              "\\remark{The variance is never negative.}\n"
                              "\\centering \\begingroup\\itshape A centered italic line.\\endgroup\n\n"
-                             "\\eocesol{The solution to the first exercise.}\n",
+                             "\\eocesol{The solution to the first exercise.}\n\n"
+                             "\\noindent{\\large \\bf Exercises --- \\thesection\\ }\n\n"
+                             "\\eoce{The first exercise.}\n\n\\eoce{The second exercise.}\n",
     # An alt text too long for the pages' liking, of two paragraphs, as
     # OpenIntro writes some.
     "ch_two/TeX/ch_two.tex": "\\chapter{Second chapter}\n\\renewcommand{\\chapterfolder}{ch_two}\n"
@@ -2313,7 +2360,16 @@ y = 2
                              "\\ref{fig:panels} there shows.\n\n\\section{The $t$ distribution}\n"
                              "A heading with a formula in it. See \\nameref{sec:named}, "
                              "\\nameref{fig:panels}, and \\nameref{sec:spread}.\n\n"
-                             "\\section{\\nameref{sec:data}}\\label{sec:named}\nNamed.\n",
+                             "\\section{\\nameref{sec:data}}\\label{sec:named}\nNamed.\n\n"
+                             "\\eoce{An exercise of chapter two.}\n\n"
+                             "A \\fbox{framed phrase} and a table sized to fit, and two "
+                             "is \\arabic{alwaysTwo}:\n\n"
+                             "\\resizebox{0.5\\textwidth}{!}{\\begin{tabular}{|l|l|}\\hline "
+                             "Fitted & Cells \\\\ \\hline\\end{tabular}}\n",
+    "front/solutions.tex": "\\chapter*{Solutions}\n\\eocesolch{First chapter}\n\n"
+                           "\\eocesolution{The first exercise's solution.}\n\n"
+                           "\\eocesolch{Second chapter}\n\n"
+                           "\\eocesolution{Chapter two's exercise's solution.}\n",
     "LICENSE.md": "# License\n\nCC BY-SA 3.0.\n",
     "project.yaml": "project:\n  identifier: org.example.custom\n  title: A Custom Book\n",
     "conversion.yaml": "targets:\n  html:\n    format: html\n",
@@ -2506,16 +2562,39 @@ def case_customized(work):
          lambda: "\\wrap" not in sample and "\\endwrap" not in sample
          and "%   \\newcommand{\\strutx}[1]{\\rule{0pt}{2ex}#1\\leavevmode}" in sample),
         ("a text command inside \\text, a sliver of space in a name, a color and an "
-         "underline in text, \\textcolor, \\hfill, \\index, and \\vspace in a formula are put "
-         "so texmath reads it, as OpenIntro writes them",
+         "underline in text, \\textcolor, \\MakeLowercase, \\hfill, \\index, and \\vspace in a "
+         "formula are put so texmath reads it, as OpenIntro writes them",
          lambda: all(a + "</annotation>" in one for a in (
              "P(\\text{rolling a }\\texttt{1})",
              "\\texttt{income\\_ver}_{\\texttt{verified}}",
              "P(\\underline{{\\color{black}{\\text{mammogram$^+$}}}}\\text{ and has BC})",
-             "s = 5.5 \\quad R^2 = 70\\%", "{\\color{oiB}{\\bar{x}}} = 21"))
+             "s = 5.5 \\quad R^2 = 70\\%", "{\\color{oiB}{\\bar{x}}} = 21", "\\pmb{{t}}"))
          and re.search(r'<math display="block"[^>]*>(?:(?!</math>).)*<annotation '
                        r'encoding="application/x-tex">\\begin\{align\*\}\s*x = 1\s*'
                        r'\\end\{align\*\}</annotation>', one, re.S)),
+        ("a label and a reference whose key LaTeX makes of its counters, as OpenIntro links "
+         "each exercise and its solution, are counted as LaTeX counts: each exercise is "
+         "numbered and links to its solution, and each solution back",
+         lambda: re.search(r'<a\s+href="solutions\.html#eoce_sol_1_1"[^>]*>1\.1</a>', one)
+         and re.search(r'<a\s+href="solutions\.html#eoce_sol_1_2"[^>]*>1\.2</a>', one)
+         and 'id="eoce_1_2"' in one
+         and re.search(r'<a\s+href="solutions\.html#eoce_sol_2_1"[^>]*>2\.1</a>', two)
+         and re.search(r'<a\s+href="ch_one\.html#eoce_1_1"[^>]*>1\.1</a>',
+                       page("solutions.html"))
+         and re.search(r'<a\s+href="ch_two\.html#eoce_2_1"[^>]*>2\.1</a>',
+                       page("solutions.html"))
+         and re.search(r">\s*2\s*Second\s+chapter", page("solutions.html"))
+         and "\\arabic" not in one + two + page("solutions.html")),
+        ("a box the reader drops whole is read as what it holds: a framed phrase, and a "
+         "table sized to fit the page",
+         lambda: "framed phrase" in two and re.search(r"<t[dh][^>]*>\s*Fitted\s*</t[dh]>", two)),
+        ("a counter the text shows is its value, the preamble's setting counted, and a "
+         "reference to a label in running text the section's number LaTeX gives it; the "
+         "marks leave no paragraph of their own",
+         lambda: re.search(r"Exercises\s+&#x2014;\s+1\.2", one)
+         and re.search(r"two\s+is\s+2:", two)
+         and not re.search(r"<p>\s*</p>", one + two + page("solutions.html"))
+         and len(re.findall(r'href="#US-Airports"[^>]*>1\.1\.1</a>', one)) == 2),
         ("a formula's macro is as the book defines it, so texmath reads it",
          lambda: "x\\hspace{1em}{} = 1</annotation>" in one),
         ("the contents sample names the authors, not the affiliations under each name",

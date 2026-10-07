@@ -20,7 +20,8 @@
 -- a rule that shows is left, since only
 -- a person can say what it means (latex-conversion-macros.tex can). It
 -- stops as well on a text command inside \text, on space inside a text
--- command, and on \hfill, \vspace, and \index (below).
+-- command, on \MakeLowercase and \copyright, and on \hfill, \vspace,
+-- and \index (below).
 --
 -- Copyright 2026 Robert Szarka
 --
@@ -192,6 +193,11 @@ function Math(m)
   -- Space between a formula's parts, an entry for the index, and space
   -- below it: \hfill as a quad, which texmath reads, and the others gone,
   -- since none is something a screen reader says.
+  -- A formula kept in lowercase inside a heading set in capitals
+  -- (OpenIntro's boxes: \pmb{\MakeLowercase{t}}) is as it's written;
+  -- and \copyright is its sign.
+  text = text:gsub('\\MakeLowercase%s*(%b{})', '%1')
+  text = text:gsub('\\copyright%f[^%a]%s*', '\\text{\u{A9}}')
   text = text:gsub('\\hfill%f[^%a]', '\\quad')
   text = text:gsub('\\vspace%*?%s*%b{}', '')
   text = text:gsub('\\index%s*%b{}', '')

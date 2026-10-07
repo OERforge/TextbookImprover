@@ -814,6 +814,62 @@ def group_commands(text, counter, math_macros=()):
     return text
 
 
+# Boxes Pandoc's reader (3.12) drops with all they hold, as commands it
+# doesn't know (measured): each with its arguments as LaTeX takes them, the
+# last mandatory one what the box holds. A table in \resizebox, which a
+# book sets to fit the page, was lost whole.
+BOXES = {"makebox": "oom", "framebox": "oom", "fbox": "m", "raisebox": "moom",
+         "smash": "om", "fcolorbox": "ommm", "scalebox": "mom", "resizebox": "smmm",
+         "rotatebox": "omm", "boxed": "m", "shadowbox": "m", "ovalbox": "m",
+         "Ovalbox": "m", "doublebox": "m", "text": "m", "adjustbox": "mm"}
+BOX = re.compile(r"\\(%s)(?![A-Za-z@])" % "|".join(
+    re.escape(n) for n in sorted(BOXES, key=len, reverse=True)))
+
+
+def unwrap_boxes(text, counter, math_macros=()):
+    """Each of BOXES outside formulas, and the definitions of macros
+    formulas use, written as a group of what it holds, which the reader
+    reads; the box itself, a frame or a size, is the page's layout. The
+    innermost first, so a box in a box is read too."""
+    while True:
+        spans = skip_spans(text)
+        math = sorted(math_spans(text, spans) + math_definitions(text, spans, math_macros))
+        found = None
+        for m in BOX.finditer(text):
+            if in_spans(m.start(), spans) or in_spans(m.start(), math) \
+                    or escaped(text, m.start()):
+                continue
+            pos, content = m.end(), None
+            for kind in BOXES[m.group(1)]:
+                if kind == "s":
+                    star = re.compile(r"[ \t]*\*").match(text, pos)
+                    if star:
+                        pos = star.end()
+                    continue
+                at = argument_space(text, pos)
+                if kind == "o":
+                    if text.startswith("[", at):
+                        close = closing_bracket(text, at)
+                        if close < 0:
+                            break
+                        pos = close + 1
+                    continue
+                if not text.startswith("{", at):
+                    break
+                close = matching_brace(text, at)
+                if close < 0:
+                    break
+                content, pos = (at, close), close
+            else:
+                if content:
+                    found = (m.start(), pos, content)
+        if not found:
+            return text
+        start, end, (at, close) = found
+        text = text[:start] + text[at:close] + text[end:]
+        counter["boxes_unwrapped"] = counter.get("boxes_unwrapped", 0) + 1
+
+
 # Commands Pandoc's reader (3.12) doesn't know, or knows only to skip, and
 # so takes with every braced group after them (getRawCommand's many
 # braced, Readers/LaTeX/Parsing.hs), each with its arguments as LaTeX
@@ -988,10 +1044,11 @@ def invisible_rule(m):
     return m.group(0)
 
 
-def repair_text(text, counter, math_macros=()):
+def repair_text(text, counter, math_macros=(), counters=()):
     """The rewrites every file of the copy gets: booleans as toggles,
     \\input braced, artifact images marked, and the rest. math_macros: the
-    names of the macros formulas use (math_macros)."""
+    names of the macros formulas use (math_macros); counters, the book's
+    counters' names (book_counters)."""
     text = substitute(BOOLEAN_IF, text, lambda m: "\\iftoggle{%s}" % m.group(1),
                       counter, "ifthenelse")
     text = substitute(BOOLEAN_NEW, text, lambda m: "\\newtoggle{%s}" % m.group(1),
@@ -1018,7 +1075,9 @@ def repair_text(text, counter, math_macros=()):
     text = drop(text, "OERLinkContentsReset", counter, "link_contents_reset")
     for command, signature in TITLESEC_COMMANDS:
         text = drop_command(text, command, signature, counter, "titlesec")
+    text = unwrap_boxes(text, counter, math_macros)
     text = group_commands(text, counter, math_macros)
+    text = counter_marks(text, counter, math_macros, counters)
     text = keep_groups(text, counter, math_macros)
     text = substitute(NAMEREF, text, lambda m: "\\hyperref[%s]{%s}" % (
         m.group(1).strip(), NAMEREF_MARK), counter, "nameref")
@@ -2352,6 +2411,369 @@ def title_heading(blocks):
     return blocks, True
 
 
+# --------------------------------------------------------------------------
+# LaTeX's counters, as the book steps them
+# --------------------------------------------------------------------------
+
+# A label or reference whose key LaTeX makes from counters, as OpenIntro
+# Statistics links each exercise and its solution, \label{eoce_\arabic{
+# chapter}_\arabic{eoce}}, and a counter the text shows (\thesection) are
+# LaTeX's work at the moment it gets there, which the reader doesn't do:
+# it keeps the key as written, every exercise's the same, and drops the
+# rest. So the reading copy marks where the book's text steps, sets, and
+# shows a counter, with a link the reader keeps in its place, through
+# the book's macros as it expands them; and after the reading the marks
+# are counted in the document's order, as LaTeX counts, and each such key
+# and counter written as LaTeX would have it.
+COUNTER_MARK = "TEXTBOOKIMPROVERCOUNTER"
+COUNTER_COMMAND = re.compile(
+    r"\\(refstepcounter|stepcounter|setcounter|addtocounter)\s*\{\s*([A-Za-z@]+)\s*\}")
+COUNTER_SHOW = re.compile(r"\\(arabic|roman|Roman|alph|Alph)\s*\{\s*([A-Za-z@]+)\s*\}"
+                          r"|\\the([A-Za-z@]+)(?![A-Za-z@])")
+MATTER_COMMAND = re.compile(r"\\(appendix|frontmatter|mainmatter|backmatter)(?![A-Za-z@])")
+KEY_COMMAND = re.compile(r"\\(?:label|ref|pageref|eqref|autoref|cref|Cref|nameref|Nameref"
+                         r"|vref|hyperref|hyperlink|hypertarget|newcounter|counterwithin"
+                         r"|counterwithout|numberwithin)\*?\s*[\[{]")
+COUNTER_VALUE = re.compile(r"-?\d+|#\d|\\value\s*\{\s*[A-Za-z@]+\s*\}")
+NEWCOUNTER = re.compile(r"\\newcounter\s*\{\s*([A-Za-z@]+)\s*\}(?:\s*\[\s*([A-Za-z@]+)\s*\])?")
+COUNTER_WITHIN = re.compile(r"\\(counterwithin|numberwithin|counterwithout)\*?\s*\{\s*"
+                            r"([A-Za-z@]+)\s*\}\s*\{\s*([A-Za-z@]+)\s*\}")
+THE_DEFINITION = re.compile(r"\\(?:(?:re)?newcommand\*?\s*\{?\s*|def\s*)\\the([A-Za-z@]+)\s*\}?\s*\{")
+NEWTHEOREM = re.compile(r"\\newtheorem\*?\s*\{\s*([A-Za-z@]+)\s*\}")
+SECTION_LEVELS = (("part", -1), ("chapter", 0), ("section", 1), ("subsection", 2),
+                  ("subsubsection", 3), ("paragraph", 4), ("subparagraph", 5))
+# LaTeX's own counters a book may show, and what the standard classes make
+# of them; a class with chapters numbers sections, floats, equations, and
+# footnotes within them.
+STANDARD_COUNTERS = ("part", "chapter", "section", "subsection", "subsubsection",
+                     "paragraph", "subparagraph", "figure", "table", "equation",
+                     "footnote", "enumi", "enumii", "enumiii", "enumiv")
+
+
+def _arguments_span(text, start):
+    """The end of the [optional] and {mandatory} arguments that begin at
+    start, as far as they go."""
+    pos = start
+    while True:
+        at = argument_space(text, pos)
+        if text.startswith("[", at):
+            close = closing_bracket(text, at)
+            if close < 0:
+                return pos
+            pos = close + 1
+        elif text.startswith("{", at):
+            close = matching_brace(text, at)
+            if close < 0:
+                return pos
+            pos = close
+        else:
+            return pos
+
+
+def counter_mark(*parts):
+    """The link the reader keeps where the book steps, sets, or shows a
+    counter: \\hyperref with the operation as its target and no text."""
+    return "\\hyperref[%s:%s]{}" % (COUNTER_MARK, ":".join(parts))
+
+
+def counter_marks(text, counter, math_macros=(), counters=()):
+    """The marks counter_mark makes, outside formulas, drawings, comments,
+    verbatim text, and the definitions of macros formulas use: after each
+    \\refstepcounter, \\stepcounter, \\setcounter, and \\addtocounter (a
+    value it can follow: a number, a macro's argument, or \\value), and
+    after \\appendix and the other division commands; and in place of
+    \\arabic{x} and its kin, and \\thex for x among counters, outside a
+    label's or a reference's key, which is counted as written, after the
+    reading."""
+    spans = skip_spans(text)
+    keep = sorted(spans + math_spans(text, spans) + math_definitions(text, spans, math_macros)
+                  + environment_spans(text, DRAWINGS, spans)
+                  + [(m.start(), _arguments_span(text, m.end() - 1))
+                     for m in KEY_COMMAND.finditer(text)]
+                  + [(m.start(), _arguments_span(text, m.end())) for m in
+                     re.finditer(r"\\(?:(?:re)?newcommand\*?\s*\{?\s*|def\s*)\\the[A-Za-z@]+"
+                                 r"\s*\}?", text)])
+    edits = []                          # (start, end, replacement)
+    for m in COUNTER_COMMAND.finditer(text):
+        if in_spans(m.start(), keep) or escaped(text, m.start()):
+            continue
+        op, name, end = m.group(1), m.group(2), m.end()
+        parts = [op, name]
+        if op in ("setcounter", "addtocounter"):
+            at = argument_space(text, end)
+            if not text.startswith("{", at):
+                continue
+            close = matching_brace(text, at)
+            value = text[at + 1:close - 1].strip() if close > 0 else ""
+            if not COUNTER_VALUE.fullmatch(value):
+                continue
+            parts.append(re.sub(r"\s+", "", value))
+            end = close
+        edits.append((end, end, counter_mark(*parts)))
+    for m in MATTER_COMMAND.finditer(text):
+        if not in_spans(m.start(), keep) and not escaped(text, m.start()):
+            edits.append((m.end(), m.end(), counter_mark("division", m.group(1))))
+    for m in COUNTER_SHOW.finditer(text):
+        if in_spans(m.start(), keep) or escaped(text, m.start()):
+            continue
+        if m.group(3) is not None:
+            if m.group(3) not in counters:
+                continue
+            edits.append((m.start(), m.end(), counter_mark("the", m.group(3))))
+        else:
+            edits.append((m.start(), m.end(), counter_mark("show", m.group(1), m.group(2))))
+    for start, end, replacement in sorted(edits, reverse=True):
+        text = text[:start] + replacement + text[end:]
+    if edits:
+        counter["counter_marks"] = counter.get("counter_marks", 0) + len(edits)
+    return text
+
+
+def book_counters(texts, master_text):
+    """What the counting after the reading needs to know of the book, from
+    its files in LaTeX's order, [(name, text)], the master first: the
+    counters it defines and the counters each is numbered within, how it
+    shows each (\\renewcommand{\\theeoce}{\\arabic{chapter}.\\arabic{eoce}}),
+    its theorems, whether it has chapters and parts, and each counter's
+    value at \\begin{document}."""
+    code = [t for _, t in texts]
+    chapters = any(code_matches(re.compile(r"\\chapter(?![A-Za-z@])"), t) for t in code)
+    parts = any(code_matches(re.compile(r"\\part(?![A-Za-z@])"), t) for t in code)
+    if chapters:
+        resets = {"section": "chapter", "subsection": "section", "subsubsection": "subsection",
+                  "paragraph": "subsubsection", "subparagraph": "paragraph",
+                  "figure": "chapter", "table": "chapter", "equation": "chapter",
+                  "footnote": "chapter", "enumii": "enumi", "enumiii": "enumii",
+                  "enumiv": "enumiii"}
+        formats = {"chapter": r"\arabic{chapter}", "section": r"\thechapter.\arabic{section}",
+                   "figure": r"\thechapter.\arabic{figure}", "table": r"\thechapter.\arabic{table}",
+                   "equation": r"\thechapter.\arabic{equation}"}
+    else:
+        resets = {"subsection": "section", "subsubsection": "subsection",
+                  "paragraph": "subsubsection", "subparagraph": "paragraph",
+                  "enumii": "enumi", "enumiii": "enumii", "enumiv": "enumiii"}
+        formats = {"section": r"\arabic{section}"}
+    formats.update({"part": r"\Roman{part}", "subsection": r"\thesection.\arabic{subsection}",
+                    "subsubsection": r"\thesubsection.\arabic{subsubsection}",
+                    "footnote": r"\arabic{footnote}", "enumi": r"\arabic{enumi}",
+                    "enumii": r"\alph{enumii}", "enumiii": r"\roman{enumiii}",
+                    "enumiv": r"\Alph{enumiv}"})
+    defined, theorems = set(STANDARD_COUNTERS), set()
+    for t in code:
+        spans = skip_spans(t)
+        for m in code_matches(NEWCOUNTER, t, spans):
+            defined.add(m.group(1))
+            if m.group(2):
+                resets[m.group(1)] = m.group(2)
+        for m in code_matches(NEWTHEOREM, t, spans):
+            theorems.add(m.group(1))
+    # Within, without, and \the definitions in LaTeX's order, the last
+    # winning; and the values the preamble sets.
+    begin = code_matches(BEGIN_DOCUMENT, master_text)
+    at = {texts[0][0]: [begin[0].start()]} if begin and texts else {}
+    pattern = re.compile("(?:%s)|(?:%s)" % (COUNTER_WITHIN.pattern, COUNTER_COMMAND.pattern))
+    initial, in_body = {}, False
+    for kind, _, item in reading_order(texts, at=at, watch=pattern):
+        if kind == "at":
+            in_body = True
+        elif kind == "define":
+            if item[2].startswith("the") and len(item[2]) > 3 and item[3] == 0:
+                formats[item[2][3:]] = item[5].strip()
+        elif kind == "match":
+            text = item.string
+            within = COUNTER_WITHIN.match(text, item.start())
+            step = COUNTER_COMMAND.match(text, item.start())
+            if within:
+                child, parent = within.group(2), within.group(3)
+                if within.group(1) == "counterwithout":
+                    resets.pop(child, None)
+                    formats[child] = r"\arabic{%s}" % child
+                else:
+                    resets[child] = parent
+                    formats[child] = r"\the%s.\arabic{%s}" % (parent, child)
+            elif step and not in_body and step.group(1) in ("setcounter", "addtocounter"):
+                at_value = argument_space(text, step.end())
+                close = matching_brace(text, at_value) if text.startswith("{", at_value) else -1
+                value = text[at_value + 1:close - 1].strip() if close > 0 else ""
+                if re.fullmatch(r"-?\d+", value):
+                    initial[step.group(2)] = int(value) + (
+                        initial.get(step.group(2), 0) if step.group(1) == "addtocounter" else 0)
+    shift = 1 - (-1 if parts else 0 if chapters else 1)
+    levels = {depth + shift: name for name, depth in SECTION_LEVELS}
+    return {"resets": resets, "formats": formats, "counters": sorted(defined),
+            "theorems": sorted(theorems), "levels": levels, "initial": initial,
+            "chapters": chapters}
+
+
+def counter_style(style, n):
+    """n as \\arabic, \\roman, \\Roman, \\alph, or \\Alph shows it."""
+    if style in ("roman", "Roman"):
+        out = ""
+        for value, numeral in ((1000, "m"), (900, "cm"), (500, "d"), (400, "cd"), (100, "c"),
+                               (90, "xc"), (50, "l"), (40, "xl"), (10, "x"), (9, "ix"),
+                               (5, "v"), (4, "iv"), (1, "i")):
+            while n >= value:
+                out += numeral
+                n -= value
+        return out.upper() if style == "Roman" else out
+    if style in ("alph", "Alph"):
+        letter = chr(ord("a") + n - 1) if 1 <= n <= 26 else str(n)
+        return letter.upper() if style == "Alph" else letter
+    return str(n)
+
+
+def resolve_counters(blocks, setup):
+    """The marks counter_marks made, counted in the document's order as
+    LaTeX counts, in place: a numbered heading steps its counter and the
+    ones within it; \\refstepcounter makes its counter's value the one a
+    \\label after it records, as a heading does; a counter shown is its
+    value as the book shows it (\\thesection, \\arabic{eocesolch}). Each
+    label's and reference's key made of counters (\\arabic{chapter}) is
+    written as LaTeX makes it, and a reference the reader couldn't
+    resolve, to a label in running text, which it shows as [key], gets
+    the value the label recorded. The marks go. setup: book_counters's.
+    Returns (keys, values): how many keys were written, and references
+    and counters given a value."""
+    counters = dict(setup["initial"])
+    formats, resets = dict(setup["formats"]), setup["resets"]
+    levels, theorems = setup["levels"], set(setup["theorems"])
+    state = {"current": None, "numbered": True}
+    labels, refs, written = {}, [], [0]
+
+    def reset(name):
+        for child, parent in resets.items():
+            if parent == name:
+                counters[child] = 0
+                reset(child)
+
+    def step(name):
+        counters[name] = counters.get(name, 0) + 1
+        reset(name)
+
+    def expand(text, depth=0):
+        text = re.sub(r"\\value\s*\{\s*([A-Za-z@]+)\s*\}",
+                      lambda m: str(counters.get(m.group(1), 0)), text)
+        text = re.sub(r"\\(arabic|roman|Roman|alph|Alph)\s*\{\s*([A-Za-z@]+)\s*\}",
+                      lambda m: counter_style(m.group(1), counters.get(m.group(2), 0)), text)
+        if depth < 8:
+            text = re.sub(r"\\the([A-Za-z@]+)(?![A-Za-z@])",
+                          lambda m: the(m.group(1), depth + 1) if m.group(1) in counters
+                          or m.group(1) in formats else m.group(0), text)
+        return text.replace("{}", "")
+
+    def the(name, depth=0):
+        return expand(formats.get(name, r"\arabic{%s}" % name), depth)
+
+    def value(text):
+        """A value counter_marks kept, as a number, or None."""
+        try:
+            return int(expand(text))
+        except ValueError:
+            return None
+
+    def key(text):
+        if "\\" not in text:
+            return text
+        new = expand(text)
+        if new != text:
+            written[0] += 1
+        return new
+
+    def walk(node):
+        if isinstance(node, list):
+            for item in node:
+                walk(item)
+            return
+        if not isinstance(node, dict):
+            return
+        kind, c = node.get("t"), node.get("c")
+        if kind == "Header" and "unnumbered" not in c[1][1] and state["numbered"] \
+                and levels.get(c[0]):
+            step(levels[c[0]])
+            state["current"] = the(levels[c[0]])
+        elif kind == "Link" and c[2][0].startswith("#%s:" % COUNTER_MARK):
+            parts = c[2][0][len(COUNTER_MARK) + 2:].split(":")
+            op = parts[0]
+            if op in ("refstepcounter", "stepcounter") and len(parts) > 1:
+                step(parts[1])
+                if op == "refstepcounter":
+                    state["current"] = the(parts[1])
+            elif op in ("setcounter", "addtocounter") and len(parts) > 2:
+                number = value(":".join(parts[2:]))
+                if number is not None:
+                    counters[parts[1]] = number + (
+                        counters.get(parts[1], 0) if op == "addtocounter" else 0)
+            elif op == "division" and len(parts) > 1:
+                state["numbered"] = parts[1] in ("mainmatter", "appendix")
+                if parts[1] == "appendix":
+                    top = "chapter" if setup["chapters"] else "section"
+                    counters[top] = 0
+                    formats[top] = r"\Alph{%s}" % top
+            elif op == "show" and len(parts) > 2:
+                node["shown"] = counter_style(parts[1], counters.get(parts[2], 0))
+            elif op == "the" and len(parts) > 1:
+                node["shown"] = the(parts[1])
+            node["mark"] = True
+            return
+        elif kind == "Span" and any(k == "label" for k, _ in c[0][2]):
+            new = key(c[0][0])
+            c[0][0] = new
+            for pair in c[0][2]:
+                if pair[0] == "label":
+                    pair[1] = new
+            labels[new] = state["current"]
+        elif kind == "Link" and any(k == "reference" for k, _ in c[0][2]):
+            reference = dict((k, v) for k, v in c[0][2])["reference"]
+            refs.append((node, reference, key(reference)))
+        saved = state["current"]
+        if kind in ("OrderedList", "Note") or (kind == "Div" and set(c[0][1]) & theorems):
+            # An item's, a note's, and a theorem's own counters aren't
+            # counted here: a label in one records nothing.
+            state["current"] = None
+        if c is not None and kind not in ("Math", "Code", "CodeBlock", "RawInline", "RawBlock"):
+            walk(c)
+        if kind in ("OrderedList", "Note", "Div"):
+            state["current"] = saved
+
+    walk(blocks)
+    given = 0
+    for node, reference, new in refs:
+        attrs = node["c"][0][2]
+        for pair in attrs:
+            if pair[0] == "reference":
+                pair[1] = new
+        if node["c"][2][0] == "#" + reference:
+            node["c"][2][0] = "#" + new
+        placeholder = [{"t": "Str", "c": "[%s]" % reference}]
+        if node["c"][1] == placeholder and labels.get(new):
+            node["c"][1] = [{"t": "Str", "c": labels[new]}]
+            given += 1
+
+    def unmark(node):
+        nonlocal given
+        if isinstance(node, list):
+            out = []
+            for item in node:
+                if isinstance(item, dict) and item.get("mark"):
+                    if item.get("shown"):
+                        out.append({"t": "Str", "c": item["shown"]})
+                        given += 1
+                    continue
+                marked = isinstance(item, dict) and item.get("t") in ("Para", "Plain") \
+                    and any(isinstance(i, dict) and i.get("mark") for i in item["c"])
+                unmark(item)
+                # A paragraph that held only marks goes with them.
+                if marked and not [i for i in item["c"] if i.get("t") not in (
+                        "Space", "SoftBreak", "LineBreak")]:
+                    continue
+                out.append(item)
+            node[:] = out
+        elif isinstance(node, dict) and node.get("c") is not None:
+            unmark(node["c"])
+    unmark(blocks)
+    return written[0], given
+
+
 def prepare(base, work, master, say, macros=""):
     """The book copied into work/latex with what Pandoc can't read put
     right, its drawings rendered into base/rendered/. Returns a dict:
@@ -2363,9 +2785,11 @@ def prepare(base, work, master, say, macros=""):
     files, missing = reached(base, master)
     counts = {}
     texts = {}
-    in_math = math_macros([read_text(os.path.join(base, name)) for name in files])
-    for name in files:
-        texts[name] = repair_text(read_text(os.path.join(base, name)), counts, in_math)
+    originals = [(name, read_text(os.path.join(base, name))) for name in files]
+    in_math = math_macros([t for _, t in originals])
+    counting = book_counters(originals, originals[0][1] if originals else "")
+    for name, text in originals:
+        texts[name] = repair_text(text, counts, in_math, counting["counters"])
     # A chapter \include-d by the book's own macro, written out, so the
     # pages are cut where it begins; the book's environments as the
     # commands LaTeX makes of them, which Pandoc's reader can balance; its
@@ -2475,11 +2899,11 @@ def prepare(base, work, master, say, macros=""):
         write_text(os.path.join(copy, name), text)
     # The book's colors, for a PDF built from its pages, whose formulas
     # can still name one: the reader keeps a formula's TeX as written.
-    originals = [(name, read_text(os.path.join(base, name))) for name in files]
     colors = [m.group(0) for m in book_colors(originals, include_macros(originals))]
     return {"master": os.path.join(copy, master), "order": order,
             "front_role": front_role, "files": files, "missing": missing,
-            "counts": counts, "preamble": preamble, "copy": copy, "colors": colors}
+            "counts": counts, "preamble": preamble, "copy": copy, "colors": colors,
+            "counters": counting}
 
 
 TABLE_BEGIN = re.compile(r"\\begin\s*\{(tabular\*?|tabularx|longtable)\}")
@@ -2737,10 +3161,11 @@ def cut_pages(doc, order, master_stem, front_role):
 SAMPLE = "latex-conversion-macros-sample.tex"
 NEWCOMMAND = re.compile(r"\\(?:(?:re)?newcommand|providecommand)\*?\s*\{?\s*\\([A-Za-z@]+)"
                         r"\s*\}?\s*(?:\[(\d)\])?\s*(?:\[[^]]*\])?\s*\{")
+# A formula's delimiters; \\[6mm], a line break with its space, isn't \[.
 MATH_SPANS = re.compile(
-    r"(?<!\\)\$\$(.+?)(?<!\\)\$\$|(?<!\\)\$(.+?)(?<!\\)\$|\\\((.+?)\\\)"
-    r"|\\\[(.+?)\\\]|\\begin\{(equation|align|gather|multline|eqnarray|"
-    r"displaymath|math)(\*?)\}(.+?)\\end\{\5\6\}", re.S)
+    r"(?<!\\)\$\$(.+?)(?<!\\)\$\$|(?<!\\)\$(.+?)(?<!\\)\$|(?<!\\)\\\((.+?)\\\)"
+    r"|(?<!\\)\\\[(.+?)\\\]|\\begin\{(equation|align|alignat|flalign|gather|multline"
+    r"|eqnarray|displaymath|math)(\*?)\}(.+?)\\end\{\5\6\}", re.S)
 RULE = re.compile(r"\\rule\s*(?:\[[^]]*\])?\s*\{([^}]*)\}\s*\{([^}]*)\}")
 POINTS = {"pt": 1.0, "bp": 1.00375, "mm": 2.845, "cm": 28.45, "in": 72.27,
           "em": 10.0, "ex": 4.3, "pc": 12.0, "sp": 1 / 65536}
@@ -2797,11 +3222,10 @@ def math_uses(texts, names):
     pattern = re.compile(r"\\(" + "|".join(re.escape(n) for n in names)
                          + r")(?![A-Za-z@])")
     for text in texts:
-        spans = skip_spans(text)
-        for m in MATH_SPANS.finditer(text):
-            if in_spans(m.start(), spans):
-                continue
-            for u in pattern.finditer(m.group(0)):
+        # math_spans, so a $ in a comment pairs with nothing: OpenIntro's
+        # sample listed \section and three others as used in formulas.
+        for start, end in math_spans(text):
+            for u in pattern.finditer(text, start, end):
                 uses[u.group(1)] += 1
     return uses
 

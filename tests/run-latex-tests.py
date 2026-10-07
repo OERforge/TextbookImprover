@@ -266,6 +266,40 @@ def pdf(path, word=None):
         fh.write(out)
 
 
+def raster_pdf(path, word="Map", size=128):
+    """A one-page PDF holding a smooth raster of size by size pixels, stored
+    losslessly (Flate), and a word drawn in Helvetica, which the PDF
+    doesn't embed: a heat map R draws. Returns the raster's bytes."""
+    import math
+    raw = bytes(int(255 * ((math.sin(x / 9.0) * math.cos(y / 7.0) + 1) / 2) ** (1 + c))
+                for y in range(size) for x in range(size) for c in range(3))
+    data = zlib.compress(raw)
+    stream = b"q 32 0 0 32 4 4 cm /Im1 Do Q 0 g BT /F1 8 Tf 2 38 Td (%s) Tj ET\n" % (
+        word.encode("ascii"))
+    objects = [b"<< /Type /Catalog /Pages 2 0 R >>",
+               b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+               b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 40 48] /Contents 4 0 R "
+               b"/Resources << /Font << /F1 5 0 R >> /XObject << /Im1 6 0 R >> >> >>",
+               b"<< /Length %d >>\nstream\n" % len(stream) + stream + b"endstream",
+               b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica "
+               b"/Encoding /WinAnsiEncoding >>",
+               b"<< /Type /XObject /Subtype /Image /Width %d /Height %d /ColorSpace /DeviceRGB "
+               b"/BitsPerComponent 8 /Filter /FlateDecode /Length %d >>\nstream\n"
+               % (size, size, len(data)) + data + b"\nendstream"]
+    out, offsets = b"%PDF-1.4\n", []
+    for number, body in enumerate(objects, start=1):
+        offsets.append(len(out))
+        out += b"%d 0 obj\n" % number + body + b"\nendobj\n"
+    xref = len(out)
+    out += b"xref\n0 %d\n0000000000 65535 f \n" % (len(objects) + 1)
+    out += b"".join(b"%010d 00000 n \n" % o for o in offsets)
+    out += b"trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n" % (
+        len(objects) + 1, xref)
+    with open(path, "wb") as fh:
+        fh.write(out)
+    return raw
+
+
 def write_book(work, macros=False, second_master=False, readme=True,
                epub=False):
     os.makedirs(os.path.join(work, "ch1"))
@@ -1874,12 +1908,12 @@ def case_documents(work):
          lambda: re.search(r'<div class="box">\s*<p><strong>Example: A Boxed Passage', a)
          and "A box is a frame" in a and "<td" not in a.split("Example: A Boxed")[1][:400]),
         ("the copy writes each document, made to build with tagging: its title for the "
-         "PDF's, hyperref for its bookmarks, the unused titlesec out, enumitem's settings "
+         "PDF's, hyperref for its bookmarks, titlesec not loaded, enumitem's settings "
          "taken, the box a division, and \\leavevmode before its formula",
          lambda: "\\DocumentMetadata" in copy("Topic B Two.tex")
          and "\\title{\\textrm{Topic A: The First Topic}}" in tagged
          and "\\usepackage[hidelinks]{hyperref}" in tagged
-         and "% book uses none of its commands: \\usepackage{titlesec}" in tagged
+         and "\\disable@package@load{titlesec}" in tagged
          and "ver@latex-lab-enumitem.sty" in tagged
          and "{\\ifdefined\\tagpdfsetup\\tagpdfsetup{table/tagging=div}\\fi\\begin{tabular}{p{4in}}"
          in tagged and "\\leavevmode\\[" in tagged
@@ -2081,13 +2115,26 @@ def case_pieces(work):
         "\\usepackage{geometry}\n\\geometry{total={6in,8in}, top=1in}\n\\onehalfspacing\n"
         "\\begin{document}\n\\geometry{left=2in}\nx\n\\end{document}\n",
         "\\documentclass[a4paper,twoside]{report}\n\\setlength{\\parindent}{0pt}\n"
-        "% \\usepackage[margin=3in]{geometry}\n\\begin{document}\nx\n\\end{document}\n")]
-    labels = [texremediate.enumerate_label(p) for p in
-              ("(a)", "i.", "{Part} A:", "\\bfseries 1.", "{Step}")]
-    relabeled = texremediate.enumerate_labels(
-        "\\begin{enumerate}[(a)]\\item x\\end{enumerate}"
-        "\\begin{enumerate} [label=(\\alph*)]\\item y\\end{enumerate}"
-        "% \\begin{enumerate}[(i)]\n\\begin{enumerate}\\item z\\end{enumerate}")
+        "% \\usepackage[margin=3in]{geometry}\n\\begin{document}\nx\n\\end{document}\n",
+        # Options a line each, with their notes; settings an environment or a
+        # command makes, and one a hook makes at \begin{document}.
+        "\\documentclass[%\n  12pt, % type size\n  twoside]{book}\n"
+        "\\usepackage[left=1in, % inner\n  right=1in]{geometry}\n\\onehalfspacing\n"
+        "\\newenvironment{code}{\\singlespacing\\setlength{\\parindent}{0pt}}{}\n"
+        "\\AddToHook{env/quote/begin}{\\setlength{\\parindent}{0pt}}\n"
+        "\\newcommand\\tight{\\setstretch{0.9}}\n\\begin{document}\nx\n\\end{document}\n",
+        "\\documentclass{article}\n\\AtBeginDocument{\\setlength{\\parindent}{0pt}}\n"
+        "\\begin{document}\nx\n\\end{document}\n",
+        "\\documentclass{article}\n\\AddToHook{begindocument}{\\setlength{\\parindent}{0pt}}\n"
+        "\\begin{document}\nx\n\\end{document}\n")]
+    # wasysym in a book with no formula: its symbols as Unicode all the same,
+    # with the fonts and fallback that draw them; with formulas, unicode-math.
+    no_math_block, no_math = texremediate.math_block(
+        {"m.tex": "\\documentclass{article}\n\\usepackage{wasysym}\n\\begin{document}\n"
+                  "\\Square\\ unchecked\n\\end{document}\n"}, "m.tex")
+    math_block, with_math = texremediate.math_block(
+        {"m.tex": "\\documentclass{article}\n\\usepackage{amsmath,wasysym}\n"
+                  "\\begin{document}\n$x \\lhd y$\n\\end{document}\n"}, "m.tex")
     shims = texremediate.shimmed_packages({"titlesec", "soulutf8", "amsmath", "enumerate"})
     shim_block = texremediate.shim_block(shims)
     flat_alt, flat_counts = texremediate.remediate_file(
@@ -2095,25 +2142,50 @@ def case_pieces(work):
         "\\fig[A first paragraph.\n\nA second one,\\par a third]{sq}\\fig[One]{sq}\n", {},
         [], macros={"fig": {"file": "#2", "arguments": 2, "default": "", "alt": 1,
                             "keyed": False, "options": None}})
+    def lossless():
+        """A raster stored losslessly stays so when its figure's fonts are
+        embedded, where Ghostscript's own choice made it JPEG."""
+        import latexbuild
+        if latexbuild.embedding_tool() != "gs":
+            return skip("no Ghostscript to embed a figure's fonts")
+        try:
+            from pypdf import PdfReader
+        except ImportError:
+            return skip("no pypdf to read the figure")
+        source, dest = os.path.join(work, "heat.pdf"), os.path.join(work, "heat-embedded.pdf")
+        os.makedirs(work, exist_ok=True)
+        raw = raster_pdf(source)
+        if not latexbuild.embed_fonts(source, dest, "gs"):
+            return False
+        image = list(PdfReader(dest).pages[0]["/Resources"]["/XObject"].values())[0].get_object()
+        return str(image.get("/Filter")) == "/FlateDecode" and image.get_data() == raw
+    commented_alt, _ = texremediate.remediate_file(
+        "/nonexistent", "a.tex", "\\fig[A first. % to reword\n\nA second.]{sq}\n", {}, [],
+        macros={"fig": {"file": "#2", "arguments": 2, "default": "", "alt": 1,
+                        "keyed": False, "options": None}})
     return [
         ("a preamble's layout is Pandoc's variables: its class's type size and paper, the "
          "sides it chooses, geometry's options, its line spacing, and indented paragraphs "
-         "unless parskip or a \\parindent of zero says otherwise",
+         "unless parskip or a \\parindent of zero says otherwise; an option's comment is "
+         "no part of it, and a setting an environment, a command, or a hook makes isn't the "
+         "page's, but one at \\begin{document} is",
          lambda: layouts == [
              {"fontsize": "11pt", "geometry": ["margin=1in"]},
              {"fontsize": "10pt", "classoption": ["openany"], "indent": True},
              {"fontsize": "12pt", "papersize": "a4", "geometry": ["total={6in,8in}", "top=1in"],
               "linestretch": "1.25"},
-             {"papersize": "a4", "classoption": ["twoside"]}]),
-        ("the enumerate package's label patterns are written as the keys LaTeX's "
-         "tagging's lists take, the first counter letter outside braces and commands the "
-         "counter; keys and a comment are left",
-         lambda: labels == ["(\\alph*)", "\\roman*.", "{Part} \\Alph*:", "\\bfseries \\arabic*.",
-                            "{Step}"]
-         and relabeled == ("\\begin{enumerate}[label={(\\alph*)}]\\item x\\end{enumerate}"
-                           "\\begin{enumerate} [label=(\\alph*)]\\item y\\end{enumerate}"
-                           "% \\begin{enumerate}[(i)]\n\\begin{enumerate}\\item z\\end{enumerate}",
-                           1)),
+             {"papersize": "a4", "classoption": ["twoside"]},
+             {"fontsize": "12pt", "classoption": ["twoside"], "geometry": ["left=1in", "right=1in"],
+              "linestretch": "1.25", "indent": True},
+             {}, {}]),
+        ("wasysym's symbols are Unicode in a book with no formula too, drawn by the "
+         "OpenType fonts and their fallback; with formulas, unicode-math is loaded",
+         lambda: no_math == {"math_stand_in": "wasysym", "text_fonts": 1}
+         and "\\usepackage{fontspec}" in no_math_block
+         and "unicode-math" not in no_math_block and "fallback" in no_math_block
+         and with_math.get("math_stand_in") == "wasysym" and with_math.get("math") == 1
+         and "\\usepackage{unicode-math}" in math_block),
+        ("a figure's lossless raster stays lossless when its fonts are embedded", lossless),
         ("a package tagging can't take is replaced, the one another's stand-in serves too, "
          "each load made to define its commands",
          lambda: shims == ["titlesec", "enumerate", "soulutf8"]
@@ -2122,8 +2194,10 @@ def case_pieces(work):
          and shim_block.count("\\cs_new_protected:Npn \\__oer_shim_soul:") == 1
          and "mdframed" not in shim_block and "% titlesec, enumerate, soulutf8. None is" in shim_block),
         ("an image macro's alt-text argument of paragraphs runs them on, which "
-         "\\includegraphics can take; one paragraph is left",
-         lambda: flat_alt == "\\fig[A first paragraph. A second one, a third]{sq}\\fig[One]{sq}\n"
+         "\\includegraphics can take, a comment before a break ending where it did; one "
+         "paragraph is left",
+         lambda: flat_alt == "\\fig[A first paragraph.\nA second one,\na third]{sq}\\fig[One]{sq}\n"
+         and commented_alt == "\\fig[A first. % to reword\nA second.]{sq}\n"
          and flat_counts.get("alt_paragraphs") == 1),
         ("LaTeX's first error is found when its file's name has spaces",
          lambda: latexbuild.first_errors(log)
@@ -2633,7 +2707,7 @@ def case_customized(work):
          if pdf else skip("no lualatex for the PDF")),
         ("the copy runs on the paragraphs of an alt-text argument, which "
          "\\includegraphics can't take", lambda: "\\Figure[A gray star in chapter two, drawn "
-         "with five points of equal length. Its center filled," in read(
+         "with five points of equal length.\nIts center filled," in read(
              work, "tagged", "ch_two", "TeX", "ch_two.tex")),
         ("a group after a command the reader takes whole is read: \\begingroup after "
          "\\noindent, in a macro and in the text, and an exercise solution's number and "
@@ -2747,13 +2821,21 @@ def case_capacity(work):
 # PDF whose word is drawn in Helvetica, not embedded.
 UNSUPPORTED_MASTER = r"""\documentclass[11pt]{book}
 \usepackage[margin=1in]{geometry}
-\usepackage{graphicx}
+\usepackage{graphicx,amsmath,amssymb}
+\renewcommand{\lozenge}{\ensuremath{\diamond}}
 \usepackage[explicit]{titlesec}
 \usepackage{mdframed,framed,soul,tabto,wrapfig,enumerate,wasysym}
 \usepackage[normalem]{ulem}
+\usepackage{shapestyle}
 \titleformat{\section}{\bfseries\Large}{\thesection\quad #1}{1em}{}
 \titlespacing*{\section}{0pt}{2ex}{1ex}
+\newpagestyle{shapes}{\sethead{}{Shapes}{}\setfoot{}{\thepage}{}}
+\pagestyle{shapes}
 \newmdenv[frametitle={Key idea}]{keyidea}
+\mdtheorem{prop}{Proposition}
+\newcommand\myul{\bgroup\markoverwith{\rule[-0.5ex]{2pt}{0.4pt}}\ULon}
+\capsdef{T1/ppl/m/n/}{\scshape}{.16em}{.4em}{.2em}
+\newenvironment{steps}[1][(i)]{\begin{enumerate}[#1]}{\end{enumerate}}
 \title{Shapes Set Their Own Way}
 \begin{document}
 \maketitle
@@ -2763,24 +2845,47 @@ A square has four sides.\tabto{3cm}Tabbed words.
 
 \begin{mdframed}[frametitle={Definition}]
 A square is a rectangle with equal sides.
+\mdfsubsubtitle{A small heading}
 \end{mdframed}
 
 \begin{keyidea}
 Every square is a rhombus.
 \end{keyidea}
 
+\begin{prop}
+A proposition in a frame.
+\end{prop}
+
 \begin{framed}
 A framed remark.
 \end{framed}
 
-Some \hl{highlighted words}, \ul{underlined words}, \st{struck words}, and \sout{struck out}.
+Some \hl{highlighted words}, \ul{underlined words}, \st{struck words}, and \sout{struck out},
+\so{spaced \soulomit{kept} out}, and \sloppyword{sloppy words}.
 
-A filled circle, \CIRCLE, and a formula with wasysym's triangle: $x \lhd y$.
+\begin{itemize}
+\item \myul{a style of its own}
+\end{itemize}
+
+A filled circle, \CIRCLE, and a formula with wasysym's triangle: $x \lhd y$, and
+amssymb's squares, $\square$ and $\blacksquare$, and its own lozenge, $\lozenge$.
 
 \begin{enumerate}[(a)]
 \item First part
 \item Second part
 \end{enumerate}
+
+\begin{steps}
+\item One step
+\end{steps}
+
+\begin{steps}[{Task} 1a]
+\item Mixed counters
+\end{steps}
+
+\begin{shapeparts}
+\item A part from the style file
+\end{shapeparts}
 
 \begin{wrapfigure}{r}{0.4\textwidth}
 \centering
@@ -2788,7 +2893,20 @@ A filled circle, \CIRCLE, and a formula with wasysym's triangle: $x \lhd y$.
 \caption{A plot}
 \end{wrapfigure}
 Words beside the plot.
+
+\noindent\begin{minipage}{0.6\textwidth}
+\begin{wrapfigure}{l}{0.3\textwidth}
+\includegraphics[width=0.25\textwidth]{shared/linked.pdf}
+\caption{In a minipage}
+\end{wrapfigure}
+Words in a minipage.
+\end{minipage}
 \end{document}
+"""
+# A style file of the book's own: the enumerate package, and a pattern.
+UNSUPPORTED_STYLE = r"""\ProvidesPackage{shapestyle}
+\RequirePackage{enumerate}
+\newenvironment{shapeparts}{\begin{enumerate}[i.]}{\end{enumerate}}
 """
 
 
@@ -2803,9 +2921,19 @@ def case_unsupported(work):
     os.makedirs(work)
     with open(os.path.join(work, "book.tex"), "w", encoding="utf-8") as fh:
         fh.write(UNSUPPORTED_MASTER)
+    with open(os.path.join(work, "shapestyle.sty"), "w", encoding="utf-8") as fh:
+        fh.write(UNSUPPORTED_STYLE)
     pdf(os.path.join(work, "plot.pdf"), word="Plot")
+    # A figure in a folder beside the book, which it links to.
+    shared = os.path.abspath(os.path.join(work, "..", os.path.basename(work) + "-shared"))
+    os.makedirs(shared)
+    pdf(os.path.join(shared, "linked.pdf"), word="Link")
+    os.symlink(shared, os.path.join(work, "shared"))
+    with open(os.path.join(shared, "linked.pdf"), "rb") as fh:
+        linked_original = fh.read()
     with open(os.path.join(work, "image-alt.csv"), "w", encoding="utf-8") as fh:
-        fh.write("Image,Alt\nrendered/plot.svg,A blue bar labeled Plot\n")
+        fh.write("Image,Alt\nrendered/plot.svg,A blue bar labeled Plot\n"
+                 "rendered/shared/linked.svg,A blue bar labeled Link\n")
     with open(os.path.join(work, "conversion.yaml"), "w") as fh:
         fh.write("targets:\n  html:\n    format: html\n"
                  "  tagged:\n    format: source\n    tagging: \"on\"\n"
@@ -2826,12 +2954,20 @@ def case_unsupported(work):
         found = subprocess.run(["pdftotext", built, "-"], capture_output=True,
                                text=True).stdout if os.path.exists(built) else ""
         found = " ".join(found.split())
-        return all(phrase in found for phrase in (
+        missing = [phrase for phrase in (
             "1.1 Squares", "Tabbed words", "Definition", "A square is a rectangle with equal sides",
-            "Key idea", "Every square is a rhombus", "A framed remark", "highlighted words",
-            "underlined words", "struck words", "struck out", "(a) First part",
-            "(b) Second part", "Figure 1.1: A plot", "Words beside the plot",
-            "A filled circle, ●,", "⊲"))
+            "A small heading", "Key idea", "Every square is a rhombus",
+            "Proposition 1. A proposition in a frame", "A framed remark",
+            "highlighted words", "underlined words", "struck words", "struck out",
+            "a style of its own", "spaced kept out", "sloppy words", "(a) First part",
+            "(b) Second part", "(i) One step", "Task aa Mixed counters",
+            "i. A part from the style file", "Figure 1.1: A plot", "Words beside the plot",
+            "Figure 1.2: In a minipage", "Words in a minipage", "A filled circle, ●,", "⊲",
+            "squares, □ and ■,", "its own lozenge, ⋄.")
+            if phrase not in found]
+        if missing:
+            print("    missing from the PDF:", missing)
+        return not missing
 
     def passes_ua2():
         verapdf = os.environ.get("VERAPDF") or shutil.which("verapdf")
@@ -2847,18 +2983,22 @@ def case_unsupported(work):
         except ImportError:
             return skip("no pypdf to read the figure's fonts")
         fixed = os.path.join(work, "tagged", "plot.pdf")
+        fixed_linked = os.path.join(work, "tagged", "shared", "linked.pdf")
         with open(os.path.join(work, "plot.pdf"), "rb") as fh:
             unchanged = fh.read() == original
+        with open(os.path.join(shared, "linked.pdf"), "rb") as fh:
+            unchanged = unchanged and fh.read() == linked_original
         return latexbuild.unembedded_fonts(os.path.join(work, "plot.pdf")) == {"Helvetica"} \
             and os.path.exists(fixed) and latexbuild.unembedded_fonts(fixed) == set() \
-            and unchanged \
-            and "1 of the book's PDF figures written in the copy with their fonts embedded" \
+            and latexbuild.unembedded_fonts(fixed_linked) == set() and unchanged \
+            and "2 of the book's PDF figures written in the copy with their fonts embedded" \
             in said and "written in the copy LaTeX builds with their fonts embedded" in said
     return [
         ("the run says the copy loads none of the packages tagging can't take, and what "
-         "replacing each changes",
+         "replacing each changes, for the source target and for the PDF it builds",
          lambda: "WARNING: tagged: the copy loads none of titlesec, mdframed, framed, soul, "
          "ulem, tabto, wrapfig, enumerate," in said
+         and "WARNING: pdf: the copy LaTeX builds loads none of titlesec," in said
          and "titlesec: headings are set as the class sets them" in said
          and "enumerate: a list's label pattern" in said),
         ("wasysym's symbols are the Unicode characters they draw, so unicode-math gives "
@@ -2867,18 +3007,20 @@ def case_unsupported(work):
          and "unicode-math loaded" in said
          and "\\ifdefined\\directlua\\disable@package@load{wasysym}" in copy
          and "wasysym" not in said.split("the copy loads none of", 1)[-1].split(".")[0]),
-        ("the copy disables each before the class and defines its commands, and writes "
-         "the enumerate package's pattern as tagging's lists take it",
+        ("the copy disables each before the class and defines its commands, the book's "
+         "own text as it was",
          lambda: copy.index("\\disable@package@load{titlesec}") < copy.index("\\documentclass")
          and "\\disable@package@load{wrapfig}{\\csname __oer_shim_wrapfig:\\endcsname}" in copy
-         and "\\begin{enumerate}[label={(\\alph*)}]" in copy
+         and "\\begin{enumerate}[(a)]" in copy and "\\begin{enumerate}[#1]" in copy
          and "\\usepackage[explicit]{titlesec}" in copy),
         ("the PDF from the book's own LaTeX builds tagged", lambda: os.path.exists(built)
          and "built by LaTeX from the book's own files" in said),
-        ("with every word the packages set, the frames' titles and the list's labels too",
-         every_word),
-        ("its figure written with its font embedded, in the copy and in the build, the "
-         "book's own left as it was", figure_embedded),
+        ("with every word the packages set, the frames' titles too, and each list's labels "
+         "as the enumerate package makes them, from a pattern a macro passes or a style file "
+         "holds as well; a wrapped figure in a minipage", every_word),
+        ("its figures written with their fonts embedded, in the copy and in the build, one "
+         "in a folder the book links to as well, the book's own left as they were",
+         figure_embedded),
         ("and it passes veraPDF's PDF/UA-2 profile", passes_ua2),
     ]
 

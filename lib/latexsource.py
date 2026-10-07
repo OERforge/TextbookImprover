@@ -486,6 +486,54 @@ def option_list(value):
     return [" ".join(i.split()) for i in items if i.strip()]
 
 
+# A command whose arguments hold code run somewhere else, in an
+# environment or at a command, not where it's written: a setting in it isn't
+# the book's page layout (\newenvironment{code}{\singlespacing...}). A hook
+# that runs at \begin{document} is.
+LOCAL_CODE = re.compile(
+    r"\\(?:(?:re)?newenvironment|(?:New|Renew|Provide|Declare)Document(?:Environment|Command)"
+    r"|(?:AtBegin|AtEnd|BeforeBegin|AfterEnd)Environment|AddToHook(?:Next)?|apptocmd"
+    r"|pretocmd|patchcmd|(?:re)?newcommand|providecommand|DeclareRobustCommand|[gex]?def)"
+    r"(?![A-Za-z@])\*?")
+COMMENT = re.compile(r"(?<!\\)%[^\n]*")
+
+
+def local_code_spans(text):
+    """(start, end) of each LOCAL_CODE command with its arguments, braced,
+    bracketed, or a control sequence named; a hook run at
+    \\begin{document} left out."""
+    spans = []
+    for m in LOCAL_CODE.finditer(text):
+        at, arguments, first = m.end(), 0, None
+        while at < len(text) and arguments < 8:
+            space = re.match(r"\s*", text[at:]).end()
+            ch = text[at + space:at + space + 1]
+            if ch == "{":
+                end = matching_brace(text, at + space)
+                if end < 0:
+                    break
+                if first is None:
+                    first = text[at + space + 1:end - 1].strip()
+            elif ch == "[":
+                end = text.find("]", at + space)
+                if end < 0:
+                    break
+                end += 1
+            elif ch == "\\" and arguments == 0:
+                name = re.match(r"\\(?:[A-Za-z@]+|.)", text[at + space:])
+                end = at + space + len(name.group(0))
+            elif ch == "#":
+                end = at + space + 2
+            else:
+                break
+            at, arguments = end, arguments + 1
+        if m.group(0).startswith("\\AddToHook") and first is not None \
+                and first.startswith("begindocument"):
+            continue
+        spans.append((m.start(), at))
+    return spans
+
+
 def page_layout(texts, includes=None):
     """What the book's preamble says of its pages that Pandoc's LaTeX
     writer has a variable for, under the names Pandoc gives them: fontsize
@@ -500,16 +548,20 @@ def page_layout(texts, includes=None):
     the master's \\begin{document}, so a style file it \\input-s counts."""
     if not texts:
         return {}
+    # Without comments, which may sit inside an option list (one per line,
+    # each with its note), where the options are split at commas.
+    texts = [(name, COMMENT.sub("", text)) for name, text in texts]
     master, text = texts[0]
     begin = code_matches(BEGIN_DOCUMENT, text)
     if not begin:
         return {}
+    local = {name: local_code_spans(t) for name, t in texts}
     layout, geometry, indent = {}, [], True
-    for kind, _, value in reading_order(texts, includes, at={master: [begin[0].start()]},
-                                        watch=LAYOUT_COMMAND):
+    for kind, name, value in reading_order(texts, includes, at={master: [begin[0].start()]},
+                                           watch=LAYOUT_COMMAND):
         if kind == "at":
             break
-        if kind != "match":
+        if kind != "match" or in_spans(value.start(), local.get(name, [])):
             continue
         m = value
         if m.group("cls") is not None:

@@ -105,6 +105,8 @@ a &=& b + c
 
 And a poor man's bold, as a LaTeX book writes one: $\pmb{\hat{p}_1 - b}$.
 
+And amssymb's squares, which unicode-math has no names for: $\square \blacksquare$.
+
 ::: matrix
 |      | Left | Right |
 |------|------|-------|
@@ -459,6 +461,25 @@ def links(reader):
     return out
 
 
+def font_names(reader):
+    """The base font names the PDF's pages draw with, form XObjects too."""
+    names = set()
+
+    def walk(resources):
+        if resources is None:
+            return
+        resources = resources.get_object()
+        for ref in (resources.get("/Font") or {}).values():
+            names.add(str(ref.get_object().get("/BaseFont", "")))
+        for ref in (resources.get("/XObject") or {}).values():
+            xobject = ref.get_object()
+            if xobject.get("/Subtype") == "/Form":
+                walk(xobject.get("/Resources"))
+    for page in reader.pages:
+        walk(page.get("/Resources"))
+    return names
+
+
 def head_sizes(reader, words):
     """The size each page's running head holding words is drawn at, its
     font's size as the page scales it."""
@@ -671,6 +692,14 @@ def checks(work):
         # drawn blank.
         ("Greek and symbols written as text are in the PDF's text",
          lambda: all(c in text for c in "αβγ≤≈")),
+        # pypdf reads the squares from TeX's AMS font by its glyph names; the
+        # font's ToUnicode, which a screen reader and pdftotext go by, maps
+        # them to control characters once the formula's MathML is made. So
+        # the check is that no square is drawn from that font at all.
+        ("amssymb's squares, which unicode-math has no names for, are the characters "
+         "they are, from the OpenType math font, not TeX's AMS font",
+         lambda: "□" in text and "■" in text and not any(
+             "MSAM" in name or "MSBM" in name for name in font_names(reader))),
         # The one character no fallback has is reported once, in a line
         # of its own, rather than as one warning per occurrence.
         ("a character no font has is reported in one line, with its code",
@@ -684,7 +713,7 @@ def checks(work):
         # \pmb, on which LuaTeX's tagging of the formula stopped.
         ("every formula, an eqnarray* and a \\pmb among them, has MathML structure "
          "elements and a MathML file",
-         lambda: len(formulas) == 4
+         lambda: len(formulas) == 5
          and all("/AF" in f for f in formulas)
          and "/math" in kinds),
         # Once each in the whole file: the template's own are switched

@@ -40,6 +40,7 @@ import os
 import re
 import shutil
 
+import latexbuild
 import latexsource
 
 GENERATED_FROM = (".fig", ".xfig")
@@ -260,7 +261,9 @@ def remediate_file(base, name, text, alts, dirs, is_master=False, macros=None,
             # unless a decision replaces it below.
             given_alt, at, stop = args[macro["alt"] - 1]
             if at is not None and PARAGRAPH_BREAK.search(given_alt):
-                flat[(at, stop)] = PARAGRAPH_BREAK.sub(" ", text[at:stop])
+                # A line end, not a space: a comment before the break ends
+                # where it did.
+                flat[(at, stop)] = PARAGRAPH_BREAK.sub("\n", text[at:stop])
         # The file as the call makes it: its arguments, and a macro without
         # arguments as it's defined there (\chapterfolder, set at each
         # chapter's start).
@@ -728,6 +731,9 @@ SHIMS = {
     \providecommand \filinner { }
     \providecommand \filouter { }
     \providecommand \chaptertitlename { \chaptername }
+    % titlesec's page styles (\newpagestyle, \sethead) are titleps's, which
+    % LaTeX's tagging takes; titlesec loads it for them itself.
+    \RequirePackage { titleps }
   }
 """, "headings are set as the class sets them, without the fonts, rules, spacing, and "
          "labels titlesec gave them, and a heading level titlesec made is the class's "
@@ -775,7 +781,9 @@ SHIMS = {
           { \IfValueTF {##5} { \newtheorem {##2} {##4} [##5] } { \newtheorem {##2} {##4} } }
         \surroundwithmdframed [##1] {##2}
       }
+    \cs_gset_eq:NN \mdtheorem \newmdtheoremenv
     \DeclareDocumentCommand \mdfsubtitle { O{} m } { \par \noindent { \bfseries ##2 } \par }
+    \cs_gset_eq:NN \mdfsubsubtitle \mdfsubtitle
   }
 """, "a framed passage is set as the text around it is, without its frame or background, "
          "its frame title a line in bold"),
@@ -812,10 +820,14 @@ SHIMS = {
     \DeclareDocumentCommand \textst { +m } {##1}
     \DeclareDocumentCommand \hl { +m } { \emph {##1} }
     \DeclareDocumentCommand \texthl { +m } { \emph {##1} }
-    \clist_map_inline:nn { sethlcolor , setulcolor , setstcolor , setuldepth , sloppyword , soulomit , setuloverlap , soulaccent , capssave , capsselect }
+    \clist_map_inline:nn { sethlcolor , setulcolor , setstcolor , setuldepth , setuloverlap , soulaccent , capssave , capsselect }
       { \exp_args:Nc \DeclareDocumentCommand {##1} { +m } { } }
-    \clist_map_inline:nn { setul , soulregister , soulfont , capsdef }
+    % Text soul prints as it is, without its spacing.
+    \DeclareDocumentCommand \soulomit { +m } {##1}
+    \DeclareDocumentCommand \sloppyword { +m } {##1}
+    \clist_map_inline:nn { setul , soulregister , soulfont }
       { \exp_args:Nc \DeclareDocumentCommand {##1} { m m } { } }
+    \DeclareDocumentCommand \capsdef { m m m m m } { }
     \DeclareDocumentCommand \sodef { m m m m m } { }
     \clist_map_inline:nn { resetul , resetso , capsreset }
       { \exp_args:Nc \DeclareDocumentCommand {##1} { } { } }
@@ -830,7 +842,10 @@ SHIMS = {
     \clist_map_inline:nn { sout , xout }
       { \exp_args:Nc \DeclareDocumentCommand {##1} { +m } {####1} }
     \DeclareDocumentCommand \markoverwith { +m } { }
-    \clist_map_inline:nn { ULon , normalem , ULforem }
+    % A style of the book's own is \bgroup\markoverwith{...}\ULon{text},
+    % as ulem's documentation writes one: the text, and the group closed.
+    \cs_gset_protected:Npn \ULon ##1 { ##1 \egroup }
+    \clist_map_inline:nn { normalem , ULforem }
       { \exp_args:Nc \DeclareDocumentCommand {##1} { } { } }
     \DeclareDocumentCommand \useunder { m m m } { }
     \cs_if_exist:NF \ULdepth { \newdimen \ULdepth }
@@ -848,22 +863,114 @@ SHIMS = {
     \cs_if_exist:NF \TabPrevPos { \newdimen \TabPrevPos }
   }
 """, "a tab stop is a space"),
-    "wrapfig": (r"""\cs_new_protected:Npn \__oer_shim_wrapfig:
+    "wrapfig": (r"""% A figure in the column, \caption numbering it as a figure's, as
+% \captionof does: a float (\begin{figure}) stopped the build in a minipage
+% ("Not in outer par mode") and was dropped in multicols. Tagged as LaTeX's
+% tagging tags a float, its caption a child of it: in a Div, which veraPDF
+% sees through, the caption was a child of the section, among others
+% (PDF/UA-2's 8.2.5.27).
+\cs_new_protected:Npn \__oer_inline_float:n #1
+  {
+    \__oer_block_begin:n { }
+    \tag_struct_begin:n { tag = float }
+    \tl_set:Nn \@captype {#1}
+    \centering
+  }
+\cs_new_protected:Npn \__oer_inline_float_end:
+  { \par \tag_struct_end: \__oer_block_end: }
+\cs_new_protected:Npn \__oer_shim_wrapfig:
   {
     \cs_gset_eq:NN \__oer_shim_wrapfig: \prg_do_nothing:
-    \DeclareDocumentEnvironment { wrapfigure } { o m o m } { \begin {figure} [h] \centering } { \end {figure} }
-    \DeclareDocumentEnvironment { wraptable } { o m o m } { \begin {table} [h] \centering } { \end {table} }
-    \DeclareDocumentEnvironment { wrapfloat } { m o m o m } { \begin {##1} [h] \centering } { \end {##1} }
+    \DeclareDocumentEnvironment { wrapfigure } { o m o m } { \__oer_inline_float:n { figure } } { \__oer_inline_float_end: }
+    \DeclareDocumentEnvironment { wraptable } { o m o m } { \__oer_inline_float:n { table } } { \__oer_inline_float_end: }
+    \DeclareDocumentEnvironment { wrapfloat } { m o m o m } { \__oer_inline_float:n {##1} } { \__oer_inline_float_end: }
     \cs_if_exist:NF \wrapoverhang { \newdimen \wrapoverhang }
     \providecommand \WFclear { }
   }
-""", "a figure or table the text wrapped around is set in the column on its own"),
-    # The enumerate package's label patterns, \begin{enumerate}[(a)], are
-    # written as the keys LaTeX's tagging's lists take (enumerate_labels);
-    # its own definitions would be replaced by those lists' anyway.
-    "enumerate": (r"""\cs_new_protected:Npn \__oer_shim_enumerate: { }
-""", "a list's label pattern, (a) or i., is written as LaTeX's tagging takes it "
-         "(label=(\\alph*)), so the labels are as they were"),
+""", "a figure or table the text wrapped around is set in the column on its own, where "
+         "it was, not floating"),
+    # The enumerate package's label patterns, \begin{enumerate}[(a)]: with
+    # tagging on, LaTeX's own lists take the optional argument as keys, and
+    # stopped on "(a)" ("Some keys specified on the enumerate environment
+    # are unknown", at OpenIntro's first). At \begin{document}, after the
+    # tagging code defines its lists, enumerate is a wrapper around them
+    # that reads an argument naming none of their keys as the package
+    # does, with its own loop: each A, a, I, i, or 1 outside braces the
+    # counter, styled as the last one is, the rest as written, so a
+    # pattern a macro passes (#1) or a style file holds is read too.
+    "enumerate": (r"""\ExplSyntaxOff
+\newtoks\oer@enLab
+\def\oer@enEnd{\oer@enEnd}
+\def\oer@enLabel#1#2{\def\oer@enStyle{#1*}%
+  \oer@enLab\expandafter{\the\oer@enLab\oer@enCounter}\oer@enloop}
+\def\oer@enSpace{\afterassignment\oer@enSp@ce\let\@tempa= }
+\def\oer@enSp@ce{\oer@enLab\expandafter{\the\oer@enLab\space}\oer@enloop}
+\def\oer@enGroup#1{\oer@enLab\expandafter{\the\oer@enLab{#1}}\oer@enloop}
+\def\oer@enOther#1{\oer@enLab\expandafter{\the\oer@enLab#1}\oer@enloop}
+\def\oer@enloop{\futurelet\oer@entemp\oer@enloop@}
+\def\oer@enloop@{%
+  \ifx A\oer@entemp \def\@tempa{\oer@enLabel\Alph}\else
+  \ifx a\oer@entemp \def\@tempa{\oer@enLabel\alph}\else
+  \ifx i\oer@entemp \def\@tempa{\oer@enLabel\roman}\else
+  \ifx I\oer@entemp \def\@tempa{\oer@enLabel\Roman}\else
+  \ifx 1\oer@entemp \def\@tempa{\oer@enLabel\arabic}\else
+  \ifx\@sptoken\oer@entemp \let\@tempa\oer@enSpace\else
+  \ifx\bgroup\oer@entemp \let\@tempa\oer@enGroup\else
+  \ifx\oer@enEnd\oer@entemp \let\@tempa\@gobble\else
+  \let\@tempa\oer@enOther\fi\fi\fi\fi\fi\fi\fi\fi
+  \@tempa}
+\ExplSyntaxOn
+\tl_new:N \l__oer_enum_tl
+\bool_new:N \l__oer_enum_keys_bool
+\cs_new_protected:Npn \__oer_enum_if_keys:nTF #1#2#3
+  {
+    \bool_set_true:N \l__oer_enum_keys_bool
+    \tl_if_in:nnF {#1} { = }
+      {
+        \clist_map_inline:nn {#1}
+          {
+            \bool_lazy_any:nF
+              {
+                { \keys_if_exist_p:nn { template / list / std } {##1} }
+                { \keys_if_exist_p:nn { template / block / std } {##1} }
+                { \keys_if_exist_p:nn { template / blockenv / std } {##1} }
+                { \keys_if_exist_p:nn { template / item / std } {##1} }
+              }
+              { \bool_set_false:N \l__oer_enum_keys_bool \clist_map_break: }
+          }
+      }
+    \bool_if:NTF \l__oer_enum_keys_bool {#2} {#3}
+  }
+\cs_new_protected:Npn \__oer_enum_open:n #1
+  { \begin { oer@enumerate } [ label = {#1} ] }
+\cs_new_protected:Npn \__oer_enum_begin:n #1
+  {
+    \__oer_enum_if_keys:nTF {#1}
+      { \begin { oer@enumerate } [#1] }
+      {
+        \oer@enLab { }
+        \cs_set_eq:NN \oer@enStyle \scan_stop:
+        \oer@enloop #1 \oer@enEnd
+        \tl_set:No \l__oer_enum_tl { \tex_the:D \oer@enLab }
+        \cs_if_eq:NNF \oer@enStyle \scan_stop:
+          { \exp_args:NNnV \tl_replace_all:Nnn \l__oer_enum_tl { \oer@enCounter } \oer@enStyle }
+        \exp_args:NV \__oer_enum_open:n \l__oer_enum_tl
+      }
+  }
+\cs_new_protected:Npn \__oer_enum_wrap:
+  {
+    \NewEnvironmentCopy { oer@enumerate } { enumerate }
+    \RenewDocumentEnvironment { enumerate } { o }
+      { \IfNoValueTF {##1} { \begin { oer@enumerate } } { \__oer_enum_begin:n {##1} } }
+      { \end { oer@enumerate } }
+  }
+\cs_new_protected:Npn \__oer_shim_enumerate:
+  {
+    \cs_gset_eq:NN \__oer_shim_enumerate: \prg_do_nothing:
+    \AddToHook { begindocument } { \__oer_enum_wrap: }
+  }
+""", "a list's label pattern, (a) or i., is read as the package reads it and given to "
+         "LaTeX's tagging's lists as their label key, so the labels are as they were"),
     # wasysym's symbols, drawn from its own font, which has no Unicode for
     # them (veraPDF: 8.4.5.8; \Box read as "2"), so a book that loads it
     # kept TeX's fonts and its formulas had no MathML (OWN_FONTS). As the
@@ -909,7 +1016,9 @@ SHIMS = {
       varangle/2222, varhexagon/2B22, varhexstar/2736, venus/2640, vernal/2648,
       virgo/264D, wasylozenge/2311, wasypropto/221D, wasytherefore/2234,
       varint/222B, varoint/222E, wasyeuro/20AC, wasyparagraph/00B6, Paragraph/00B6,
-      wasycmd/2318, applecmd/2318, longs/017F, roundz/007A
+      wasycmd/2318, applecmd/2318, longs/017F, roundz/007A, fullmoon/25CB,
+      newmoon/25CF, aries/2648, leo/264C, logof/229B, iintop/222C, iiintop/222D,
+      oiintop/222F
       }
       { \__oer_wasy_pair:w ##1 \q_stop }
     \__oer_wasy_word:nn { bell } { bell }
@@ -945,80 +1054,6 @@ SHIM_NOTE = (
     "% packages or can't tag what they make (the tagging project's status list):\n"
     "% {}. None is loaded; where the book loads one, its commands are\n"
     "% defined as below instead, to keep what the book says, not how it looks.\n")
-
-
-ENUMERATE_BEGIN = re.compile(r"\\begin\s*\{enumerate\}\s*\[")
-ENUMERATE_COUNTERS = {"A": "\\Alph*", "a": "\\alph*", "I": "\\Roman*", "i": "\\roman*",
-                      "1": "\\arabic*"}
-
-
-def enumerate_label(pattern):
-    """The enumerate package's label pattern as enumitem's label, which
-    LaTeX's tagging's lists take: the first A, a, I, i, or 1 outside braces
-    and commands the counter (\\Alph*, \\alph*, \\Roman*, \\roman*,
-    \\arabic*), the rest as written; one with none is every item's label,
-    as the package makes it."""
-    out, i, found = [], 0, False
-    while i < len(pattern):
-        ch = pattern[i]
-        if ch == "\\":
-            m = re.match(r"\\(?:[A-Za-z@]+|.)", pattern[i:])
-            out.append(m.group(0))
-            i += len(m.group(0))
-        elif ch == "{":
-            end = latexsource.matching_brace(pattern, i)
-            end = len(pattern) if end < 0 else end
-            out.append(pattern[i:end])
-            i = end
-        elif not found and ch in ENUMERATE_COUNTERS:
-            out.append(ENUMERATE_COUNTERS[ch])
-            found = True
-            i += 1
-        else:
-            out.append(ch)
-            i += 1
-    return "".join(out)
-
-
-def enumerate_labels(text):
-    """(text, count): each \\begin{enumerate}[pattern] in code with the
-    enumerate package's pattern, (a) or i., written [label={...}]: LaTeX's
-    tagging lists take its argument as keys, and stopped on "(a)" ("Some
-    keys specified on the enumerate environment are unknown", OpenIntro
-    Statistics' parts of an exercise). An argument that is already keys
-    is left."""
-    spans = latexsource.skip_spans(text)
-    edits = []
-    for m in ENUMERATE_BEGIN.finditer(text):
-        if latexsource.in_spans(m.start(), spans):
-            continue
-        close = _closing_bracket(text, m.end())
-        if close is None:
-            continue
-        pattern = text[m.end():close]
-        if any("=" in item for item in _split(pattern)):
-            continue
-        edits.append((m.end(), close, "label={%s}" % enumerate_label(pattern.strip())))
-    for start, end, new in reversed(edits):
-        text = text[:start] + new + text[end:]
-    return text, len(edits)
-
-
-def _closing_bracket(text, start):
-    """The index of the ] that closes an optional argument opened just
-    before start, braces respected, or None."""
-    depth = 0
-    for i in range(start, len(text)):
-        ch = text[i]
-        if ch == "\\":
-            continue
-        if ch == "{" and (i == 0 or text[i - 1] != "\\"):
-            depth += 1
-        elif ch == "}" and depth and text[i - 1] != "\\":
-            depth -= 1
-        elif ch == "]" and not depth:
-            return i
-    return None
 
 
 def shimmed_packages(packages, base=None):
@@ -1078,6 +1113,19 @@ MATH_FONTS = (
     "  \\setmainfont{Latin Modern Roman}[RawFeature={fallback=textbookimprover}]\n"
     "  \\setsansfont{Latin Modern Sans}[RawFeature={fallback=textbookimprover}]\n"
     "  \\setmonofont{Latin Modern Mono}[RawFeature={fallback=textbookimprover}]\n")
+
+
+# The same fonts and fallback without unicode-math, for a book with no
+# formula whose text has a package's symbols as Unicode (wasysym's).
+TEXT_FONTS = MATH_FONTS.replace(
+    "% Written for LaTeX's tagging: each formula's MathML, which LaTeX makes\n"
+    "% from an OpenType math font (unicode-math's Latin Modern Math, the design\n"
+    "% of TeX's own), with a fallback for a character the fonts lack, which\n"
+    "% would otherwise have no glyph. With LuaLaTeX; pdfLaTeX builds as before.\n",
+    "% Written for LaTeX's tagging: the OpenType Latin Modern fonts, with a\n"
+    "% fallback for a character they lack, which would otherwise have no glyph.\n"
+    "% With LuaLaTeX; pdfLaTeX builds as before.\n").replace(
+    "  \\usepackage{unicode-math}\n", "  \\usepackage{fontspec}\n")
 
 
 CLASS = re.compile(r"\\documentclass\s*(?:\[[^]]*\])?\s*\{([^}]*)\}")
@@ -1140,10 +1188,18 @@ POOR_BOLD = re.compile(r"\\pmb(?![A-Za-z@])")
 def math_block(texts, master, base=None):
     """(block, counts): what the master gets before \\begin{document} for
     its formulas' MathML, and what was decided. A book with no formula
-    gets nothing; one that loads unicode-math gets the MathML forms
-    named, unless it names them itself; one whose fonts are its own keeps
-    them, and the packages are named."""
+    gets nothing, unless it loads a package stood in for (wasysym), whose
+    symbols then need the OpenType fonts and their fallback (TEXT_FONTS);
+    one that loads unicode-math gets the MathML forms named, unless it
+    names them itself; one whose fonts are its own keeps them, and the
+    packages are named."""
     if not any(latexsource.code_matches(latexsource.MATH_SPANS, t) for t in texts.values()):
+        names, _ = preamble_packages(texts, master, base)
+        stand_in = names & STAND_IN_FONTS
+        if stand_in and not names & (OWN_FONTS - STAND_IN_FONTS) \
+                and not names & set(UNICODE_MATH):
+            return TEXT_FONTS + "\\fi\n", {"math_stand_in": ", ".join(sorted(stand_in)),
+                                          "text_fonts": 1}
         return "", {}
     names, pieces = preamble_packages(texts, master, base)
     own_setup = any(latexsource.code_matches(MATH_SETUP_KEY, piece) for piece in pieces)
@@ -1173,7 +1229,7 @@ def math_block(texts, master, base=None):
                 + ("  \\AtBeginDocument{\\renewcommand{\\pmb}[1]{\\symbfit{#1}}}\n"
                    if "\\pmb" in used else ""))
         counts["math_bold"] = ", ".join(used)
-    return MATH_FONTS + setup + bold + "\\fi\n", counts
+    return MATH_FONTS + setup + bold + latexbuild.UM_ALIASES + "\\fi\n", counts
 
 
 def _code_subn(pattern, text, replace):
@@ -1351,10 +1407,6 @@ def tag(texts, master, language, mathml=True, standard=("ua-2",), base=None):
         if shimmed:
             counts["shims"] = ", ".join(shimmed)
     texts[master] = text
-    if "enumerate" in shimmed and after is not None:
-        for name in list(texts):
-            texts[name], n = enumerate_labels(texts[name])
-            counts["enumerate_labels"] = counts.get("enumerate_labels", 0) + n
     return counts
 
 

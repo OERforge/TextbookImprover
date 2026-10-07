@@ -86,7 +86,11 @@ EMBED_GS = ["gs", "-q", "-dSAFER", "-dBATCH", "-dNOPAUSE", "-sDEVICE=pdfwrite",
             "-dEmbedAllFonts=true", "-dSubsetFonts=true", "-dAutoRotatePages=/None",
             "-dPassThroughJPEGImages=true", "-dPassThroughJPXImages=true",
             "-dDownsampleColorImages=false", "-dDownsampleGrayImages=false",
-            "-dDownsampleMonoImages=false"]
+            "-dDownsampleMonoImages=false",
+            # An image stored losslessly stays so: pdfwrite's automatic
+            # choice made a Flate raster JPEG (a mean error of 9 in 255).
+            "-dAutoFilterColorImages=false", "-dColorImageFilter=/FlateEncode",
+            "-dAutoFilterGrayImages=false", "-dGrayImageFilter=/FlateEncode"]
 # A figure, not a document: a PDF of more pages than this is left as it is.
 FIGURE_PAGES = 3
 
@@ -164,16 +168,47 @@ def embed_fonts(source, dest, tool):
 def figure_pdfs(root, skip=()):
     """The PDFs under root, relative to it, outside the folders skip names
     (absolute paths) and a version control folder: a book's figures, and
-    whatever else it keeps as PDF, which unembedded_fonts tells apart."""
+    whatever else it keeps as PDF, which unembedded_fonts tells apart. A
+    folder the book links to is followed, once (figs -> ../shared/figs)."""
     found = []
     skip = {os.path.abspath(s) for s in skip}
-    for folder, dirs, files in os.walk(root):
+    seen = set()
+    for folder, dirs, files in os.walk(root, followlinks=True):
+        real = os.path.realpath(folder)
+        if real in seen:
+            dirs[:] = []
+            continue
+        seen.add(real)
         dirs[:] = [d for d in dirs if d not in (".git", ".hg", ".svn")
                    and os.path.abspath(os.path.join(folder, d)) not in skip]
         for name in files:
             if name.lower().endswith(".pdf"):
                 found.append(os.path.relpath(os.path.join(folder, name), root))
     return sorted(found)
+
+
+def writable_path(out_root, name):
+    """out_root/name, made safe to write a file at without writing outside
+    out_root: a folder on the way that is a link to one outside it (a
+    copy of the book keeps its links) is made a folder of its own, of
+    links to what the linked one holds, and the file's own link, if it is
+    one, is replaced by the file, not written through."""
+    root = os.path.realpath(out_root)
+    parts = os.path.normpath(name).split(os.sep)
+    at = out_root
+    for part in parts[:-1]:
+        at = os.path.join(at, part)
+        if os.path.islink(at):
+            target = os.path.realpath(at)
+            if target == root or target.startswith(root + os.sep):
+                continue
+            os.remove(at)
+            os.makedirs(at)
+            for entry in os.listdir(target):
+                os.symlink(os.path.join(target, entry), os.path.join(at, entry))
+        elif not os.path.isdir(at):
+            os.makedirs(at, exist_ok=True)
+    return os.path.join(out_root, *parts)
 
 
 def embed_figure_fonts(root, out_root, names, done=None, workers=4):
@@ -191,14 +226,16 @@ def embed_figure_fonts(root, out_root, names, done=None, workers=4):
         return [], wanted, tool
 
     def one(name):
-        dest = os.path.join(out_root, name)
-        os.makedirs(os.path.dirname(dest) or out_root, exist_ok=True)
-        if name in done and os.path.isfile(done[name]):
-            if os.path.abspath(done[name]) != os.path.abspath(dest):
-                shutil.copyfile(done[name], dest)
-            return name, True
+        # Written beside it and moved over it, so a link there is replaced,
+        # not written through: the book's own figure stays as it is.
+        dest = writable_path(out_root, name)
         work = dest + ".embedding.pdf"
-        ok = embed_fonts(os.path.join(root, name), work, tool)
+        if name in done and os.path.isfile(done[name]) \
+                and os.path.abspath(done[name]) != os.path.abspath(dest):
+            shutil.copyfile(done[name], work)
+            ok = True
+        else:
+            ok = embed_fonts(os.path.join(root, name), work, tool)
         if ok:
             os.replace(work, dest)
         elif os.path.exists(work):
@@ -210,6 +247,90 @@ def embed_figure_fonts(root, out_root, names, done=None, workers=4):
     for name in written:
         done.setdefault(name, os.path.join(out_root, name))
     return written, [n for n, ok in results if not ok], tool
+
+
+# amssymb's and latexsym's names that unicode-math has no command for.
+# amssymb, loaded before unicode-math (by Pandoc's template, and by most
+# books), leaves them drawn from TeX's own symbol fonts, whose glyphs map
+# to control characters: GIAM's \square read as U+0003, \blacksquare U+0004,
+# \lozenge U+0006, which a screen reader can't say and veraPDF passes.
+# Each is made the character it is, from Latin Modern Math, or, for one
+# that font lacks, from the text's fonts and their fallback, set as a box
+# (\mbox); only a name that is still amssymb's (a math character, or one
+# built from its \dabar@), or the kernel's placeholder for latexsym's, so
+# a book's own definition is kept. Inside \ExplSyntaxOn, for unicode-math
+# under LuaLaTeX.
+UM_ALIASES = r"""  % amssymb's names unicode-math has no command for, which drew control
+  % characters from TeX's fonts (\square as U+0003): the characters they are.
+  \ExplSyntaxOn
+  \cs_new_protected:Npn \__oer_um_if_legacy:NT #1#2
+    {
+      \cs_if_free:NTF #1 {#2}
+        {
+          \token_if_mathchardef:NTF #1 {#2}
+            {
+              \exp_args:Ne \str_if_in:nnTF { \cs_meaning:N #1 } { not@base } {#2}
+                { \exp_args:Ne \str_if_in:nnT { \cs_meaning:N #1 } { dabar@ } {#2} }
+            }
+        }
+    }
+  \cs_new_protected:Npn \__oer_um_alias:NN #1#2
+    { \__oer_um_if_legacy:NT #1 { \cs_set_eq:NN #1 #2 } }
+  \cs_new_protected:Npn \__oer_um_text:NNn #1#2#3
+    { \__oer_um_if_legacy:NT #1 { \cs_set_protected:Npn #1 { #2 { \mbox { \Uchar "#3 } } } } }
+  \AtBeginDocument
+    {
+      \__oer_um_alias:NN \Box \mdlgwhtsquare
+      \__oer_um_alias:NN \square \mdlgwhtsquare
+      \__oer_um_alias:NN \blacksquare \mdlgblksquare
+      \__oer_um_text:NNn \Diamond \mathord { 25C7 }
+      \__oer_um_alias:NN \lozenge \mdlgwhtlozenge
+      \__oer_um_text:NNn \blacklozenge \mathord { 29EB }
+      \__oer_um_alias:NN \lhd \vartriangleleft
+      \__oer_um_alias:NN \rhd \vartriangleright
+      \__oer_um_alias:NN \unlhd \trianglelefteq
+      \__oer_um_alias:NN \unrhd \trianglerighteq
+      \__oer_um_alias:NN \leadsto \rightsquigarrow
+      \__oer_um_alias:NN \centerdot \cdotp
+      \__oer_um_alias:NN \circlearrowleft \acwopencirclearrow
+      \__oer_um_alias:NN \circlearrowright \cwopencirclearrow
+      \__oer_um_text:NNn \dashrightarrow \mathrel { 21E2 }
+      \__oer_um_text:NNn \dasharrow \mathrel { 21E2 }
+      \__oer_um_text:NNn \dashleftarrow \mathrel { 21E0 }
+      \__oer_um_alias:NN \doteqdot \Doteq
+      \__oer_um_alias:NN \doublecap \Cap
+      \__oer_um_alias:NN \doublecup \Cup
+      \__oer_um_alias:NN \gggtr \ggg
+      \__oer_um_alias:NN \llless \lll
+      \__oer_um_alias:NN \gvertneqq \gneqq
+      \__oer_um_alias:NN \lvertneqq \lneqq
+      \__oer_um_alias:NN \ngeqq \ngeq
+      \__oer_um_alias:NN \ngeqslant \ngeq
+      \__oer_um_alias:NN \nleqq \nleq
+      \__oer_um_alias:NN \nleqslant \nleq
+      \__oer_um_alias:NN \npreceq \npreccurlyeq
+      \__oer_um_alias:NN \nsucceq \nsucccurlyeq
+      \__oer_um_alias:NN \nshortmid \nmid
+      \__oer_um_alias:NN \nshortparallel \nparallel
+      \__oer_um_alias:NN \nsubseteqq \nsubseteq
+      \__oer_um_alias:NN \nsupseteqq \nsupseteq
+      \__oer_um_alias:NN \ntriangleleft \nvartriangleleft
+      \__oer_um_alias:NN \ntriangleright \nvartriangleright
+      \__oer_um_alias:NN \restriction \upharpoonright
+      \__oer_um_alias:NN \shortmid \mid
+      \__oer_um_alias:NN \shortparallel \parallel
+      \__oer_um_alias:NN \smallfrown \frown
+      \__oer_um_alias:NN \smallsmile \smile
+      \__oer_um_alias:NN \thickapprox \approx
+      \__oer_um_alias:NN \thicksim \sim
+      \__oer_um_alias:NN \varpropto \propto
+      \__oer_um_alias:NN \varsubsetneq \subsetneq
+      \__oer_um_alias:NN \varsubsetneqq \subsetneq
+      \__oer_um_alias:NN \varsupsetneq \supsetneq
+      \__oer_um_alias:NN \varsupsetneqq \supsetneq
+    }
+  \ExplSyntaxOff
+"""
 
 
 def missing_characters(lines):

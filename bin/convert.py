@@ -2543,8 +2543,10 @@ def remediate_sources(target, base, docs, paths, env, html_stems=(), language=No
                   "characters they lack, "
                   if counts.get("tag_math") else "")
                + (f"{counts['tag_math_stand_in']}'s symbols drawn as the Unicode characters "
-                  "they are, which its own font doesn't give them, so unicode-math could be "
-                  "loaded, " if counts.get("tag_math_stand_in") else "")
+                  "they are, which its own font doesn't give them, "
+                  + ("so unicode-math could be loaded, " if counts.get("tag_math") else
+                     "from the OpenType Latin Modern fonts and their fallback, ")
+                  if counts.get("tag_math_stand_in") else "")
                + (f"the book's bold ({counts['tag_math_bold']}) made unicode-math's bold "
                   "italic, whose letters the fonts have, "
                   if counts.get("tag_math_bold") else "")
@@ -2577,18 +2579,7 @@ def remediate_sources(target, base, docs, paths, env, html_stems=(), language=No
                if counts.get("generated") else "")
             + (f" {counts['pspicture']} pspicture(s) have no key for alt text and "
                "were left alone." if counts.get("pspicture") else ""))
-        shimmed = [n.strip() for n in (counts.get("tag_shims") or "").split(",") if n.strip()]
-        for _, _, c in others:
-            shimmed += [n.strip() for n in (c.get("tag_shims") or "").split(",")
-                        if n.strip() and n.strip() not in shimmed]
-        if shimmed:
-            say(f"WARNING: {target.name}: the copy loads none of "
-                + ", ".join(shimmed) + ", since LaTeX's tagging can't build a tagged PDF "
-                "with them or can't tag what they make (the tagging project's status list "
-                "rates each currently incompatible or never to be supported). Their commands "
-                "are defined in the copy instead, to keep what the book says, not how it "
-                "looks, so its PDF looks different from the book's own: "
-                + texremediate.shim_changes(shimmed) + ".")
+        warn_stand_ins(target.name, [counts] + [c for _, _, c in others], "the copy")
         if others:
             say(f"{target.name}: the book's other master(s) written too, "
                 + "; ".join(f"{name}" + (f" with {only} file(s) only it reaches" if only
@@ -2653,6 +2644,23 @@ def remediate_sources(target, base, docs, paths, env, html_stems=(), language=No
             "text doesn't hold them as many times as Pandoc reads them, as when the same "
             "syntax also appears inside code.")
     return written
+
+
+def warn_stand_ins(name, all_counts, where):
+    """The warning for the packages a tagged copy doesn't load, which
+    texremediate.tag counts as shims, from the counts of each master."""
+    shimmed = []
+    for counts in all_counts:
+        shimmed += [n.strip() for n in (counts.get("tag_shims") or "").split(",")
+                    if n.strip() and n.strip() not in shimmed]
+    if shimmed:
+        say(f"WARNING: {name}: {where} loads none of "
+            + ", ".join(shimmed) + ", since LaTeX's tagging can't build a tagged PDF "
+            "with them or can't tag what they make (the tagging project's status list "
+            "rates each currently incompatible or never to be supported). Their commands "
+            "are defined in the copy instead, to keep what the book says, not how it "
+            "looks, so its PDF looks different from the book's own: "
+            + texremediate.shim_changes(shimmed) + ".")
 
 
 def embed_figures(target, root, out_root, skip, where):
@@ -2852,6 +2860,7 @@ def latex_book_pdf(target, base, latex_parts, paths, work, language, project, ta
             seen=seen, standard=standards, written=written_files))
         written_files.update(files)
     counts["unplaced"] = len(counts.get("unplaced_keys", []))
+    warn_stand_ins(target.name, [counts], "the copy LaTeX builds")
     # The book's PDF figures with their fonts embedded, in the copy LaTeX
     # builds, where the output folders aren't.
     embed_figures(target, build, build, (), "the copy LaTeX builds")

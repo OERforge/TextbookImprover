@@ -779,6 +779,10 @@ LATEX_READ_CHANGES = (
     ("stacked_lines", "table cell's lines stacked in \\vtop read as lines"),
     ("minipage_breaks", "line break in a minipage read as \\newline"),
     ("multicolumn_edge", "\\multicolumn's edge spacing (@{...}) left out, so its table is read"),
+    ("floatrow_boxes", "floatrow box read as the figure or table it holds, with its caption, "
+     "a row of them as figures side by side"),
+    ("environment_arguments", "environment of a package the reader doesn't know begun without "
+     "the arguments it would print (multicols's column count), a preface before it"),
     ("artifact", "image marked artifact made decorative"),
     ("image_macro_calls", "call of the book's own macro for an image written out, "
      "so its file is found"),
@@ -981,7 +985,13 @@ def read_latex_to_json(base, masters, env, work, titles=None):
             # notes' 22): titled as project.yaml's contents say, by the PDF
             # title a document gives hyperref (pdftitle), or by its file's
             # name written as words, where the HTML's had been the bare name.
-            if "title" not in page_meta and not latexsource.has_title_heading(blocks):
+            first = None if "title" in page_meta or latexsource.has_title_heading(blocks) \
+                else latexsource.numbered_title(blocks)
+            if first:
+                # The one numbered heading, first at the top: the filter
+                # takes it for the title, as it takes a page's only H1.
+                page_meta["title-from"] = {"t": "MetaString", "c": first}
+            elif "title" not in page_meta and not latexsource.has_title_heading(blocks):
                 pdftitle = latexsource.pdf_title(prep["preamble"]) if stem == master_stem \
                     else None
                 title = (titles or {}).get(stem) or pdftitle or stem_title(stem)

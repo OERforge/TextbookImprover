@@ -2175,8 +2175,20 @@ end
 
 -- The page's one H1, its title. A bibliography's heading, which a LaTeX
 -- source's page gets beside its own (an article's References), doesn't
--- count, unless it's the only one: the bibliography's own page.
+-- count, unless it's the only one: the bibliography's own page. A LaTeX
+-- page with several names the one that is its title (title-from: its
+-- one numbered chapter, a \chapter* of exercises after it).
 local function title_header_index(doc)
+  local wanted = doc.meta['title-from']
+  doc.meta['title-from'] = nil
+  if wanted ~= nil then
+    wanted = pandoc.utils.stringify(wanted)
+    for index, block in ipairs(doc.blocks) do
+      if block.t == 'Header' and block.level == 1 and block.identifier == wanted then
+        return index
+      end
+    end
+  end
   local found, count, listed, listings = nil, 0, nil, 0
   for index, block in ipairs(doc.blocks) do
     if block.t == 'Header' and block.level == 1 then
@@ -2477,7 +2489,31 @@ end
 -- heading is what gets renumbered, which is the right way round: an
 -- anchor is a link target another file may name, and a heading's auto
 -- id is Pandoc's own invention.
+--
+-- A LaTeX label in a caption (\caption{A\label{a}}) is the one exception:
+-- the reader gives its name both to the figure or table and to an empty
+-- span in the caption. The float keeps it, which a reference to it means,
+-- and the span goes.
+local function caption_labels(doc)
+  local function strip(el)
+    local id = el.identifier
+    if id == nil or id == '' then return nil end
+    local changed = false
+    el.caption.long = el.caption.long:walk({
+      Span = function(span)
+        if span.identifier == id and #span.content == 0 then
+          changed = true
+          return {}
+        end
+      end
+    })
+    if changed then return el end
+  end
+  return doc:walk({ Figure = strip, Table = strip })
+end
+
 local function make_ids_unique(doc)
+  doc = caption_labels(doc)
   local seen, renamed = {}, 0
   local function fix(el)
     local id = el.identifier

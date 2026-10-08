@@ -26,15 +26,23 @@ interpreter.
 
 WHAT IT CHECKS
 
-Compiling with an older interpreter would be better, and if one is
-installed this uses it. Otherwise it falls back to scanning for the
-constructs that a newer interpreter accepts silently:
+Compiling with the oldest supported interpreter would be better, and if
+one is installed (python3.9) this uses it. Nothing newer will do: 3.11
+accepts what 3.10 and 3.11 added, so it can't vouch for 3.9. Otherwise it
+falls back to scanning for the constructs that a newer interpreter
+accepts silently:
 
   - f-string replacement fields spanning lines, reusing the delimiting
-    quote, or containing a backslash    (3.12, PEP 701)
-  - match statements                     (3.10)
-  - X | Y in annotations                 (3.10)
+    quote, or containing a backslash    (3.12, PEP 701; by the tokenizer)
+  - match statements                     (3.10; in the syntax tree)
   - str.removeprefix / removesuffix      (3.9)
+
+And always, interpreter or not, since 3.9 compiles it and fails only when
+the definition runs: X | Y in an annotation (3.10), found in the syntax
+tree, not in the text, where a pattern's alternation in a raw string
+looks like one. A module that begins with
+"from __future__ import annotations" never evaluates its annotations, and
+may write them so.
 
 The scan is a heuristic and says so. A real interpreter is the authority,
 which is why it is preferred when available.
@@ -80,14 +88,11 @@ ROOT = os.path.dirname(HERE)
 MINIMUM = (3, 9)
 
 # Constructs a newer interpreter accepts that MINIMUM does not, other than
-# the f-string rules, which need the tokenizer.
+# the f-string rules, which need the tokenizer, and those found in the
+# syntax tree (later_tree).
 LATER_SYNTAX = [
-    (re.compile(r"^\s*match\s+.*:\s*(#.*)?$", re.M),
-     "match statement", (3, 10)),
     (re.compile(r"\.removeprefix\(|\.removesuffix\("),
      "str.removeprefix / removesuffix", (3, 9)),
-    (re.compile(r"^\s*(?:def |    )\S*\s*:\s*\w+\s*\|\s*\w+\s*[,)=]", re.M),
-     "X | Y in an annotation", (3, 10)),
 ]
 
 
@@ -98,12 +103,13 @@ def sources():
 
 
 def older_interpreter():
-    """The oldest supported interpreter, if one is installed."""
-    for minor in range(MINIMUM[1], sys.version_info[1]):
-        found = shutil.which(f"python3.{minor}")
-        if found:
-            return found, f"3.{minor}"
-    return None, None
+    """The oldest supported interpreter, if one is installed: that version
+    and no other, since a newer one accepts what came after it."""
+    label = f"{MINIMUM[0]}.{MINIMUM[1]}"
+    if sys.version_info[:2] == MINIMUM:
+        return sys.executable, label
+    found = shutil.which(f"python{label}")
+    return (found, label) if found else (None, None)
 
 
 def fstring_problems(path):
@@ -172,16 +178,73 @@ def later_syntax(path):
     return found
 
 
+def syntax_tree(path):
+    """The file's syntax tree, or None and the problem when the running
+    interpreter can't parse it."""
+    with open(path, encoding="utf-8") as handle:
+        text = handle.read()
+    try:
+        return ast.parse(text, filename=path), None
+    except SyntaxError as exc:
+        return None, (exc.lineno or 0, "doesn't parse on Python "
+                      f"{sys.version_info[0]}.{sys.version_info[1]}: {exc.msg}")
+
+
+def match_statements(tree):
+    """match statements (3.10). The class exists only in a parser new
+    enough to make one, so it's looked for by name."""
+    return [(node.lineno, "match statement needs Python 3.10")
+            for node in ast.walk(tree) if type(node).__name__ == "Match"]
+
+
+def union_annotations(tree):
+    """X | Y in an annotation Python evaluates (3.10): a parameter's or a
+    return's, which are evaluated where the function is defined, and a
+    variable's at a module's or a class's top level; a function's own
+    variables' annotations are never evaluated. None in a module that
+    begins with "from __future__ import annotations"."""
+    if any(isinstance(node, ast.ImportFrom) and node.module == "__future__"
+           and any(alias.name == "annotations" for alias in node.names)
+           for node in tree.body):
+        return []
+    found = []
+
+    def check(annotation):
+        if annotation is not None and any(
+                isinstance(n, ast.BinOp) and isinstance(n.op, ast.BitOr)
+                for n in ast.walk(annotation)):
+            found.append((annotation.lineno,
+                          "X | Y in an annotation needs Python 3.10"))
+
+    def visit(node, in_function):
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                arguments = child.args
+                for argument in (arguments.posonlyargs + arguments.args
+                                 + arguments.kwonlyargs
+                                 + [arguments.vararg, arguments.kwarg]):
+                    if argument is not None:
+                        check(argument.annotation)
+                check(child.returns)
+                visit(child, True)
+            elif isinstance(child, ast.ClassDef):
+                visit(child, False)
+            else:
+                if isinstance(child, ast.AnnAssign) and not in_function:
+                    check(child.annotation)
+                visit(child, in_function)
+    visit(tree, False)
+    return found
+
+
 # Arguments a newer interpreter deprecates passing by position: the
 # number of positional arguments beyond which a call is warned about.
 POSITIONAL_LIMITS = {"split": 2, "sub": 3, "subn": 3}
 
 
-def newer_deprecations(path):
+def newer_deprecations(tree):
     """Calls Python 3.13 deprecates: re.split with maxsplit, re.sub or
     re.subn with count, given by position rather than by name."""
-    with open(path, encoding="utf-8") as handle:
-        tree = ast.parse(handle.read())
     found = []
     for node in ast.walk(tree):
         if (isinstance(node, ast.Call)
@@ -219,12 +282,16 @@ def main():
         print(f"No Python {MINIMUM[0]}.{MINIMUM[1]} interpreter installed, "
               "so scanning the source instead.")
         print("  This is a heuristic; a real interpreter is the authority.")
-        for path in files:
-            for line, what in fstring_problems(path) + later_syntax(path):
-                problems.append((path, line, what))
 
     for path in files:
-        for line, what in newer_deprecations(path):
+        tree, problem = syntax_tree(path)
+        found = [problem] if problem else (
+            union_annotations(tree) + newer_deprecations(tree))
+        if not interpreter:
+            found += fstring_problems(path) + later_syntax(path)
+            if tree is not None:
+                found += match_statements(tree)
+        for line, what in sorted(found):
             problems.append((path, line, what))
 
     for path, line, what in problems:

@@ -13,7 +13,7 @@ one failed, and exits non-zero if any did.
 | `run-config-tests.py` | Twenty-two fixtures over the configuration cascade: what a `false` override means, what an explicit `null` means, whether lists append, which identifiers are valid XML names, what happens when a setting is written twice. |
 | `run-roundtrip-test.py` | That writing a configuration and reading it back changes nothing. |
 | `run-unit-tests.py` | The small functions that decide filenames and directory names, and the places where one fact is written down twice and could drift apart. |
-| `run-portability-test.py` | That every Python file parses on Python 3.9, the oldest version supported. Uses an older interpreter if one is installed and scans the source otherwise. |
+| `run-portability-test.py` | That every Python file parses on Python 3.9, the oldest version supported. Compiles with `python3.9` if one is installed and scans the source otherwise; looks for an annotation 3.9 can't evaluate either way. |
 | `run-convert-tests.py` | `convert.py` on the fixtures: a bare directory converts into `html/`, several targets each in their own directory sharing or splitting intermediates, media copied, arguments passed through, a Markdown source, a hand-written page, two editions from one directory, footnote numbering and placement (in the EPUB too, where two chapter files can each have an `fn1` and each note's link goes to its own and back), roles and numbering with a contents page, and the Markdown round trip (read back, the HTML is the same; the second write is the fixed point). |
 | `run-filter-tests.py` | The accessibility work the Lua filters do, against six small `.docx` fixtures. Needs Pandoc 3.9; skipped with a message otherwise. |
 | `run-check-tests.py` | The output checker: a page that breaks every check and one that breaks none, and an EPUB with a link broken inside the archive by hand. |
@@ -68,8 +68,11 @@ test passes, and the file is unusable elsewhere. So that suite checks the
 source rather than the interpreter, and runs first — a file that doesn't
 parse makes every other result meaningless on someone else's machine.
 
-It compiles with an older interpreter when one is installed, which is the
-authority, and scans for the known-newer constructs otherwise.
+It compiles with Python 3.9 when one is installed, which is the
+authority, and scans for the known-newer constructs otherwise; any
+interpreter newer than 3.9 accepts some of them, so only 3.9 itself will
+do. Either way it reads each file's syntax tree for an annotation written
+`X | Y`, which 3.9 compiles and then fails on when the definition runs.
 
 ### Extending them
 

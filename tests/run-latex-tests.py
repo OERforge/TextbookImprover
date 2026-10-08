@@ -1487,9 +1487,14 @@ def case_review_macros(work):
 
     def built():
         """(figures' alt texts in order, the text) of the copy built with
-        LuaLaTeX, tagged, or None."""
+        LuaLaTeX, tagged; None without LuaLaTeX, "pikepdf" without pikepdf
+        to read it."""
         if not shutil.which("lualatex"):
             return None
+        try:
+            import pikepdf  # noqa: F401
+        except ImportError:
+            return "pikepdf"
         tree = os.path.join(work, "build")
         shutil.copytree(work, tree, ignore=shutil.ignore_patterns("tagged", "build"))
         shutil.copy(path, os.path.join(tree, "book.tex"))
@@ -1528,6 +1533,8 @@ def case_review_macros(work):
             result = build()
             if result is None:
                 return skip("no lualatex to build the copy")
+            if result == "pikepdf":
+                return skip("no pikepdf to read the tagged PDF's structure")
             return check(*result)
         return run
     return [

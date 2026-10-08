@@ -2044,6 +2044,23 @@ PNG_1PX = bytes.fromhex("89504e470d0a1a0a0000000d4948445200000001000000010806000
                         "1f15c4890000000d49444154789c6360000002000154a24f5d0000000049454e44ae426082")
 
 
+def solid_png(path, width=40, height=20, rgb=(0, 0, 128)):
+    """A PNG of one color, navy unless given, written without an imaging
+    library: Pillow isn't one of the requirements, and a machine without
+    it erred in three cases."""
+    import struct
+    import zlib
+
+    def chunk(kind, data):
+        return (struct.pack(">I", len(data)) + kind + data
+                + struct.pack(">I", zlib.crc32(kind + data) & 0xFFFFFFFF))
+    raw = b"".join(b"\x00" + bytes(rgb) * width for _ in range(height))
+    with open(path, "wb") as fh:
+        fh.write(b"\x89PNG\r\n\x1a\n"
+                 + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0))
+                 + chunk(b"IDAT", zlib.compress(raw)) + chunk(b"IEND", b""))
+
+
 def run_tool(cwd, args, util=False):
     """One of the pipeline's scripts, from bin/ or util/, run in cwd."""
     script = os.path.join(ROOT, "util" if util else "bin", args[0])
@@ -2204,9 +2221,8 @@ def case_source_target(work):
     target's folder, with only what a person decided in the sidecars, never
     a guess; the author's files untouched."""
     import zipfile, hashlib
-    from PIL import Image
     os.makedirs(os.path.join(work, "assets"), exist_ok=True)
-    Image.new("RGB", (40, 20), "navy").save(os.path.join(work, "assets", "a.png"))
+    solid_png(os.path.join(work, "assets", "a.png"))
     for n in (1, 2):
         with open(os.path.join(work, f"ch{n}.md"), "w", encoding="utf-8") as fh:
             fh.write(f"---\ntitle: Chapter {n}\nlang: en\n---\n\n# Chapter {n}\n\n"
@@ -2227,7 +2243,7 @@ def case_source_target(work):
     with open(os.path.join(work, "notes.md"), "w", encoding="utf-8") as fh:
         fh.write("---\ntitle: Notes\nlang: en\n---\n\n# Notes\n\nA Markdown chapter.\n")
     os.makedirs(os.path.join(work, "img"), exist_ok=True)
-    Image.new("RGB", (40, 20), "teal").save(os.path.join(work, "img", "bar.png"))
+    solid_png(os.path.join(work, "img", "bar.png"), rgb=(0, 128, 128))  # teal
     with open(os.path.join(work, "page.html"), "w", encoding="utf-8") as fh:
         fh.write("<!DOCTYPE html>\n<html>\n<head><meta charset=\"utf-8\"><title>Scores</title></head>\n"
                  "<body>\n<h1>Scores</h1>\n<!-- the author's comment -->\n<table>\n"
@@ -2408,10 +2424,9 @@ def case_markdown_source(work):
     where each element is, confirmed against Pandoc's reading, the rest of
     the file exactly as written."""
     import zipfile
-    from PIL import Image
     os.makedirs(os.path.join(work, "img"), exist_ok=True)
     for name in ("my chart", "rule", "code"):
-        Image.new("RGB", (40, 20), "navy").save(os.path.join(work, "img", name + ".png"))
+        solid_png(os.path.join(work, "img", name + ".png"))
     original = (
         "---\ntitle: Chapter\n---\n\nSetext Heading\n==============\n\nSome _emphasis_ kept as written.\n\n"
         "![](img/my chart.png)\n\n![Rule](img/rule.png){ width=50% }\n\n"
@@ -2536,10 +2551,9 @@ def case_remediate_docx(work):
     file, every other part left as it was (util/remediate.py)."""
     import zipfile
     import json
-    from PIL import Image
     os.makedirs(os.path.join(work, "assets"), exist_ok=True)
     for name in ("chart", "rule"):
-        Image.new("RGB", (40, 20), "navy").save(os.path.join(work, "assets", name + ".png"))
+        solid_png(os.path.join(work, "assets", name + ".png"))
     with open(os.path.join(work, "src.md"), "w", encoding="utf-8") as fh:
         fh.write("# Remediate\n\n| Name | Score |\n|------|------:|\n| Ana | 90 |\n| Ben | 85 |\n| Cy | 70 |\n\n"
                  "![](assets/chart.png)\n\nText.\n\n![](assets/rule.png){title=\"A rule\"}\n")

@@ -713,7 +713,7 @@ def case_markdown_html(work):
         ("a superscript written in HTML is a superscript",
          lambda: result.returncode in (0, 1) and "mc<sup>2</sup>" in page),
         ("an HTML image is an image: copied, and without align",
-         lambda: re.search(r'<img src="assets/Curve\.png"[^>]*alt="A curve"',
+         lambda: re.search(r'<img\s+src="assets/Curve\.png"[^>]*alt="A curve"',
                            page) and 'align="left"' not in page
          and exists(work, "html", "assets", "Curve.png")),
         ("RDFa's href leaves the span, the text stays",
@@ -2645,7 +2645,11 @@ def case_docx_target(work):
                  "<tr><td>attacker</td><td>172.20.0.7</td></tr></tbody></table>"
                  "<table><caption>Two groups</caption><tbody><tr><th colspan=\"2\">Group A</th></tr>"
                  "<tr><td>1</td><td>2</td></tr></tbody><tbody><tr><th colspan=\"2\">Group B</th></tr>"
-                 "<tr><td>3</td><td>4</td></tr></tbody></table></body></html>")
+                 "<tr><td>3</td><td>4</td></tr></tbody></table>"
+                 '<table><caption>Nested</caption><tbody><tr><td style="text-align: center">'
+                 '<table><tbody><tr><td style="text-align: right">inner right</td><td>inner plain</td></tr>'
+                 '</tbody></table></td><td style="text-align: right">outer right</td></tr></tbody></table>'
+                 "</body></html>")
     with open(os.path.join(work, "image-alt.csv"), "w", encoding="utf-8") as fh:
         fh.write("Image,Alt\nassets/rule.png,[decorative]\n")
     with open(os.path.join(work, "conversion.yaml"), "w") as fh:
@@ -2681,7 +2685,10 @@ def case_docx_target(work):
 
     def html_table_with(page, text):
         return next((t for t in re.findall(r"<table\b.*?</table>", page, re.S) if text in t), "")
-    three_back = read(back, "html", "three.html") if exists(back, "html", "three.html") else ""
+
+    def para_with(xml, text):
+        return next((p for p in re.findall(r"<w:p\b.*?</w:p>", xml, re.S) if text in p), "")
+    three_back =read(back, "html", "three.html") if exists(back, "html", "three.html") else ""
     return [
         ("a docx target writes a Word file per page, in compatibility mode 15",
          lambda: "3 Word file(s)" in run.stderr and all(
@@ -2760,6 +2767,10 @@ def case_docx_target(work):
          and re.search(r"<caption>(?:(?!</table>).)*Addresses used(?:(?!</table>).)*172\.20\.0\.5",
                        three_back, re.S)
          and not re.search(r"<caption>(?:(?!</table>).)*Layout, left", three_back, re.S)),
+        ("a cell of a table in an aligned table's cell has one alignment, its own, as the schema allows",
+         lambda: all(p.count("<w:jc ") <= 1 for p in re.findall(r"<w:pPr>.*?</w:pPr>", three, re.S))
+         and '<w:jc w:val="right" />' in para_with(three, "inner right")
+         and 'w:val="center"' not in para_with(three, "inner right")),
         ("what the Word files can't carry is reported, page by page",
          lambda: all(k in fidelity for k in ("word,three,layout-table",
                                               "word,three,uncaptioned-figure"))

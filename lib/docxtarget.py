@@ -845,6 +845,32 @@ def keep_captions(xml):
     return xml, count
 
 
+# Pandoc's writer gives a table cell's paragraphs the column's alignment,
+# and a table inside that cell its own besides: withParaProp
+# (Writers/Docx/Types.hs, 3.12 and 3.12.1) adds the inner property before
+# the outer, so a nested table's cell has two w:jc, the first its own, where
+# the schema allows one (CT_PPrBase). GIAM's tables in tables had 113. A
+# workaround pending Pandoc.
+def single_alignment(xml):
+    """Keep only the first w:jc of each paragraph's properties; returns
+    (xml, count of those taken out)."""
+    count = 0
+
+    def one(m):
+        seen = []
+
+        def jc(j):
+            nonlocal count
+            if seen:
+                count += 1
+                return ""
+            seen.append(j)
+            return j.group(0)
+        return re.sub(r"<w:jc\b[^>]*/>", jc, m.group(0))
+    xml = re.sub(r"<w:pPr>(?:(?!</?w:pPr\b).)*</w:pPr>", one, xml, flags=re.S)
+    return xml, count
+
+
 # What a page has that a Word file can't carry, known before writing.
 LOSSES = {
     "uncaptioned-figure": "a figure with no caption comes back as an image",
@@ -1220,7 +1246,8 @@ def finish(path, doc, keep=None):
     quoted_items = 0
     counts = {"compat": 0, "tooltips": 0, "decorative": 0, "first_columns": 0,
               "quotes": 0, "jaws_titles": 0, "ids": 0, "captions_kept": 0,
-              "code_lines": 0, "code_languages": 0, "bookmarks_removed": 0}
+              "code_lines": 0, "code_languages": 0, "bookmarks_removed": 0,
+              "alignments": 0}
     with zipfile.ZipFile(path) as z:
         names = z.namelist()
         parts = {n: z.read(n) for n in names}
@@ -1253,6 +1280,8 @@ def finish(path, doc, keep=None):
         quoted_items += items
         xml, n = keep_captions(xml)
         counts["captions_kept"] += n
+        xml, n = single_alignment(xml)
+        counts["alignments"] += n
         if keep is not None:
             xml, n = prune_bookmarks(xml, keep)
             counts["bookmarks_removed"] += n

@@ -1,6 +1,6 @@
 # AsciiDoc sources
 
-An `.adoc` file beside the sources is a page of the book, read with Pandoc's AsciiDoc reader into the same intermediate a `.docx` gets. Three things are done on reading that Asciidoctor would have done and the reader (Pandoc 3.11's, which is the `asciidoc` library's) doesn't:
+An `.adoc` file beside the sources is a page of the book, read with Pandoc's AsciiDoc reader into the same intermediate a `.docx` gets. Three things are done on reading that Asciidoctor would have done and the reader (Pandoc's, from 3.11 to 3.12.1, which is the `asciidoc` library's) doesn't:
 
 - **`imagesdir` is applied.** `image::hats.png[]` under `:imagesdir: images` names `images/hats.png`. A chapter that sets none takes its master file's.
 - **A chapter's `=` line is its title** and its `==` sections become `h2`, so a page has one `h1`. Asciidoctor's own settings (`:toc:`, `:icons:`, `:stylesheet:`, `:sectnums:`) are dropped from the metadata, where Pandoc's template would read `toc` as a switch.
@@ -23,14 +23,14 @@ A target with `format: asciidoc` writes the book as AsciiDoc to be read again as
 
 Pandoc's AsciiDoc writer and reader disagree with each other in many places, and with Asciidoctor in some, so much of what the target writes it writes itself. Each form below reads back to what was written, in Pandoc's reader and in Asciidoctor:
 
-- A table's header column is declared the way a Markdown target declares it: an open block whose role names the marker (`[.matrix]`, `[.row-headers]`). A table with no header row says `options="noheader"`, since Pandoc's reader otherwise takes the first row as one.
+- A table's header column is declared the way a Markdown target declares it: an open block whose role names the marker (`[.matrix]`, `[.row-headers]`). A table with no header row says `options="noheader"`, since Pandoc 3.11's reader otherwise takes the first row as one.
 - A table with a row span, grouped into bodies (a banded table), carrying a role (a layout table), or with a cell holding more than paragraphs (a listing, a list) or code containing `|`, is written as HTML in a passthrough block, as are raw HTML, a frame, and a `<details>` answer. Pandoc's reader drops row spans and flattens groups, AsciiDoc has no table role, and a `|` ends a cell even inside a listing.
 - A span is written `[.role]##…##`, which a `#` inside it (a link's fragment) can't end. A quotation's delimiter is longer than any inside it, which is how AsciiDoc nests one quotation in another. A `div` is unwrapped, as the writer would, but with its blocks kept inside a list item, and its id as an anchor.
 - A non-breaking space at the end of a stretch of text is `{nbsp}`, which the reader doesn't strip.
 - An image is written with a named alt (`alt="…"`), which keeps commas and `=`, or `role=decorative`, or no alt at all when it has none: Pandoc's writer puts the file name there. A linked image carries its `link`. A figure is its id, its caption on one line, and the image.
 - A link with a title is `link:…["its text",title="its title"]`, which reads back with both; Pandoc's writer drops every link's title. The text is quoted so a comma doesn't split it.
 - An anchor is `[[id]]`. A footnote after a word has `{empty}` before it, and a bracket inside one is `{startsb}` or `{endsb}`.
-- Text AsciiDoc would read as markup keeps its characters: a leading `.`, `=`, `//`, `NOTE:`, or `:name:`; a `::` anywhere (Pandoc's reader makes a description list of any line holding one, `std::cout` included); Asciidoctor's replacements, so an apostrophe stays straight, `--` stays two hyphens, and a choice labeled "(C)" isn't a copyright sign; a URL in plain text, which would become a link; link text that starts with a number and a period.
+- Text AsciiDoc would read as markup keeps its characters: a leading `.`, `=`, `//`, `NOTE:`, or `:name:`; a `::` anywhere (Pandoc 3.11's reader makes a description list of any line holding one, `std::cout` included); Asciidoctor's replacements, so an apostrophe stays straight, `--` stays two hyphens, and a choice labeled "(C)" isn't a copyright sign; a URL in plain text, which would become a link; link text that starts with a number and a period.
 - Inline code is literal (`` `+code+` ``), and math in italics uses `__…__`. In inline math, brackets are `\lbrack` and `\rbrack`, and in a table cell a bar is `\vert`.
 - Headings sit one level below a page's title, as AsciiDoc numbers them. A page whose headings start elsewhere, at the title's own level or a level lower than expected, says by how much (`:heading-offset: -1`), and reading puts them back; AsciiDoc can't skip a level under a title, and Pandoc's reader renumbers a first heading that does. A page's subtitle is an attribute entry, and the blocks the pipeline shows before and after its content (`include-before`, `include-after`) are open blocks of those names.
 

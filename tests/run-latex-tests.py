@@ -549,7 +549,7 @@ def case_book(work):
         ("and, with no alt key, is reported rather than described as \"image\"",
          lambda: "img/square.png" in missing_alt and 'alt="image"' not in one),
         ("an artifact is decorative",
-         lambda: re.search(r'<img src="img/rule\.png"[^>]*alt=""', one)
+         lambda: re.search(r'<img\s+src="img/rule\.png"[^>]*alt=""', one)
          and 'aria-hidden="true"' in one),
         ("a drawing LaTeX can't make costs only itself",
          lambda: "1 of the book's 2 drawing(s)" in log
@@ -557,7 +557,7 @@ def case_book(work):
          if can_draw() else skip("no LaTeX or pdftocairo: drawings not rendered")),
         ("a drawing is rendered whole and keeps its figure's caption",
          lambda: re.search(r'<figure[^>]*>\s*(<div class="center">\s*)?'
-                           r'<img src="rendered/ch1/one-1\.svg"', one) and "A line" in one
+                           r'<img\s+src="rendered/ch1/one-1\.svg"', one) and "A line" in one
          if can_draw() else skip("no LaTeX or pdftocairo: drawings not rendered")),
         ("a PDF image is made an SVG",
          lambda: 'src="rendered/img/diagram.svg"' in one
@@ -3230,10 +3230,12 @@ def case_customized(work):
          lambda: re.search(r'<img[^>]*alt="A red square standing for the data"', one)
          and re.search(r'<img[^>]*alt="A blue circle, the first panel"', one)
          and re.search(r'<img[^>]*alt="A gray star in chapter two, drawn', two)),
-        ("a row of the alt text report whose current alt text has a line end in it is "
-         "one row, its image named, and every row names an image", lambda: (lambda rows: any(
+        ("a row of the alt text report whose current alt text is two paragraphs is one "
+         "row, the paragraphs run on as LaTeX reads them, its image named, and every row "
+         "names an image", lambda: (lambda rows: any(
              row.get("Image") == "ch_two/figures/star/star.png"
-             and row.get("Reason", "").startswith("too long") and "\n" in row.get("CurrentAlt", "")
+             and row.get("Reason", "").startswith("too long")
+             and "equal length. Its center filled" in row.get("CurrentAlt", "")
              for row in rows) and all(re.search(r"\.(png|jpe?g|svg|pdf)$", row.get("Image") or "")
                                       for row in rows))(
              list(csv.DictReader(open(os.path.join(work, "image-alt-missing.csv"),

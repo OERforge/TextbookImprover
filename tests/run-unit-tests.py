@@ -45,6 +45,7 @@ import os
 import csv
 import json
 import re
+import shutil
 import tempfile
 import sys
 
@@ -642,7 +643,32 @@ def check_shortdoi():
     ]
 
 
+def check_report_rows():
+    """A report's rows are sorted whole: a field holding a line end, as an
+    image's current alt text can, stays in its row."""
+    convert = load(os.path.join(ROOT, "bin", "convert.py"), "convert")
+    convert.say = lambda text: None
+    work = tempfile.mkdtemp(prefix="report-rows-")
+    rows_file = os.path.join(work, "rows.csv")
+    report = os.path.join(work, "image-alt-missing.csv")
+    with open(rows_file, "w", encoding="utf-8", newline="") as fh:
+        csv.writer(fh, lineterminator="\n").writerows([
+            ["b.png", "too long", "Its first paragraph.\n\nIts second, after a line end"],
+            ["a.png", "missing", ""],
+            ["b.png", "too long", "Its first paragraph.\n\nIts second, after a line end"]])
+    convert.write_report(rows_file, report, "Image,Reason,CurrentAlt", "image(s)")
+    with open(report, encoding="utf-8", newline="") as fh:
+        rows = list(csv.DictReader(fh))
+    shutil.rmtree(work, ignore_errors=True)
+    return [
+        ("each row is whole, the line end in its field kept, sorted and once each",
+         lambda: [r["Image"] for r in rows] == ["a.png", "b.png"]
+         and rows[1]["CurrentAlt"] == "Its first paragraph.\n\nIts second, after a line end"),
+    ]
+
+
 GROUPS = [
+    ("a report's rows", check_report_rows),
     ("layout tables", check_layout_tables),
     ("unique ids", check_unique_ids),
     ("front and back matter by name", check_matter_by_name),

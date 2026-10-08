@@ -57,7 +57,7 @@ sudo apt update && sudo apt full-upgrade -y
 sudo do-release-upgrade
 ```
 
-It asks a few questions as it goes. Answer `y` to start the upgrade and to remove packages it no longer needs; where it asks whether to replace a settings file you changed, press Enter for the default, which keeps yours. When it asks at the end whether to restart, answer `N`: under WSL, close the terminal, run `wsl --shutdown` in PowerShell, and open Ubuntu again instead. `grep PRETTY_NAME /etc/os-release` should then say 24.04. Run `do-release-upgrade` just the once: from 24.04 it may offer the next release, which these tools haven't been tested on. The installation keeps its old name, `Ubuntu-22.04` say, which does no harm. On a Linux machine that isn't WSL, it's the same two commands, with your usual backup first and a real restart at the end.
+It asks a few questions as it goes. Answer `y` to start the upgrade and to remove packages it no longer needs; where it asks whether to replace a settings file you changed, press Enter for the default, which keeps yours. When it asks at the end whether to restart, answer `N`: under WSL, close the terminal, run `wsl --shutdown` in PowerShell, and open Ubuntu again instead. `grep PRETTY_NAME /etc/os-release` should then say 24.04. Run `do-release-upgrade` just the once: from 24.04 it may offer the next release, which these tools haven't been tested on. The installation keeps its old name, `Ubuntu-22.04` say, which does no harm: it's the same installation, so it stays your default and nothing else needs changing. On a Linux machine that isn't WSL, it's the same two commands, with your usual backup first and a real restart at the end.
 
 **2. Install 24.04 beside it** (WSL only). WSL can hold more than one Ubuntu. A new one starts empty, so you'd install the tools there from the top of this page, while the old one carries on as it was. In PowerShell:
 
@@ -66,7 +66,18 @@ wsl --list --online
 wsl --install -d Ubuntu-24.04
 ```
 
-The first command lists what can be installed; if 24.04's name there isn't `Ubuntu-24.04`, use the one it shows. The new Ubuntu asks you to choose a user name and password the first time it starts, as the first one did; after that it's in the Start menu. `wsl --set-default Ubuntu-24.04` makes it the one a plain `wsl` opens. The old installation's files stay where they were; Windows File Explorer reaches them at `\\wsl$\` followed by its name (`\\wsl$\Ubuntu-22.04`, say), so you can copy a book across.
+The first command lists what can be installed; if 24.04's name there isn't `Ubuntu-24.04`, use the one it shows. The new Ubuntu asks you to choose a user name and password the first time it starts, as the first one did; after that it's in the Start menu.
+
+Then make the new one your default. Until you do, typing `wsl`, and anything else that opens "your" Ubuntu without naming one, still opens the old 22.04, and it's easy to go on working there without noticing. In PowerShell:
+
+```powershell
+wsl --set-default Ubuntu-24.04
+wsl --list --verbose
+```
+
+In the list, the default has a `*` before its name; it should now be `Ubuntu-24.04`. Windows Terminal keeps a separate setting: each Ubuntu has its own profile there, and the one a new tab opens is chosen under Settings, Startup, Default profile. Whichever terminal you use, `grep PRETTY_NAME /etc/os-release` says which Ubuntu you're in.
+
+The old installation's files stay where they were; Windows File Explorer reaches them at `\\wsl$\` followed by its name (`\\wsl$\Ubuntu-22.04`, say), so you can copy a book across.
 
 **3. Stay on 22.04.** Everything on this page works there with one change. Ubuntu 22.04 has no `python3-pypdf` package, so `sudo apt install python3-pypdf` stops with `Unable to locate package`; install pypdf with Python's own installer instead:
 

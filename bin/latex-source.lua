@@ -59,6 +59,14 @@ function Image(img)
       return img
     end
   end
+  -- A line end in the value, as Pandoc's own writer (3.12.1) wraps a long
+  -- alt key, is kept in the text by the reader, which then reaches the
+  -- HTML's alt attribute; LaTeX reads it, and a run of spaces, as a space.
+  if alt:find('%s%s') or alt:find('[\n\r\t]') then
+    local text = (alt:gsub('%s+', ' '))
+    img.caption = pandoc.Inlines((text:gsub('^ ', ''):gsub(' $', '')))
+    return img
+  end
   return nil
 end
 

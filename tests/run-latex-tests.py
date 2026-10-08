@@ -112,6 +112,8 @@ ONE = r"""\chapter{One}
 \end{figure}
 
 Images: \includegraphics[alt={50\% shaded}]{img/square.png}
+and \includegraphics[alt={A square
+  over two lines}]{img/square.png}
 and \includegraphics{img/square} and
 \includegraphics[artifact]{img/rule.png} and
 \includegraphics{img/diagram.pdf}.
@@ -539,8 +541,9 @@ def case_book(work):
         ("an \\input in a comment or verbatim is left alone",
          lambda: "\\input ch1/never" in one
          and "reaches ch1/never" not in log),
-        ("alt text holding LaTeX is read as LaTeX",
-         lambda: 'alt="50% shaded"' in one),
+        ("alt text holding LaTeX is read as LaTeX, and one over two lines, as Pandoc's "
+         "writer wraps it (3.12.1), as one",
+         lambda: 'alt="50% shaded"' in one and 'alt="A square over two lines"' in one),
         ("an image named without its extension is found",
          lambda: 'src="img/square.png"' in one),
         ("and, with no alt key, is reported rather than described as \"image\"",
@@ -1621,7 +1624,8 @@ def case_latex_target(work):
         ("the images are beside them, the SVG made PDF, each with its alt text",
          lambda: os.path.exists(os.path.join(out, "img", "square.png"))
          and os.path.exists(os.path.join(out, "img", "circle.pdf"))
-         and "alt={A gray square.}" in one and "alt={A black circle.}" in two
+         and re.search(r"alt=\{A\s+gray\s+square\.\}", one)
+         and re.search(r"alt=\{A\s+black\s+circle\.\}", two)
          and "includesvg" not in two),
         ("the run says what it wrote", lambda: "shapes.tex and 3 file(s)" in said),
         ("in AsciiDoc, italics close before a footnote, whose own italics then can't end them",

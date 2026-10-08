@@ -34,6 +34,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 import base64
 import csv
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -349,7 +350,7 @@ def case_jekyll(work):
          and project["language"] == "en-GB"),
         ("inline $$..$$ is $..$, display math stays display",
          lambda: "$3.4 \\times 10^{38}$ addresses" in page
-         and "$$\nE = mc^2\n$$" in page),
+         and re.search(r"(?:^|\n\n)\$\$\s*E = mc\^2\s*\$\$(?:\n\n|$)", page)),
         ("an attribute list goes",
          lambda: "{: .blue}" not in page),
         ("code is left exactly as written",

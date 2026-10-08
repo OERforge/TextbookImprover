@@ -207,6 +207,18 @@ function Math(m)
   -- the book wrote it, for LaTeX.
   text = text:gsub('\\begingroup%f[^%a]%s*', '{'):gsub('\\endgroup%f[^%a]', '}')
   text = text:gsub('\\bgroup%f[^%a]%s*', '{'):gsub('\\egroup%f[^%a]', '}')
+  -- A strut, height and no width, and a phantom of height alone, which
+  -- texmath doesn't know (the calculus notes' \fbox{$\mathstrut$Ex}, 111
+  -- times, read as TeX): nothing to see or say, so gone, and a formula
+  -- that was nothing else with them; \hphantom is \phantom, whose width it
+  -- keeps, and \smash what it holds.
+  text = text:gsub('\\mathstrut%f[^%a]%s*', '{}'):gsub('\\strut%f[^%a]%s*', '{}')
+  text = text:gsub('\\vphantom%s*%b{}', '{}')
+  text = text:gsub('\\hphantom%s*(%b{})', '\\phantom%1')
+  text = text:gsub('\\smash%s*%b[]%s*(%b{})', '%1'):gsub('\\smash%s*(%b{})', '%1')
+  if text ~= m.text and text:gsub('[%s{}]', '') == '' then
+    return {}
+  end
   if text ~= m.text then
     -- A line all a removal left, blank, would end LaTeX's paragraph inside
     -- an align* in a PDF ("Paragraph ended before \environment align* was

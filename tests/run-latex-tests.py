@@ -2951,6 +2951,7 @@ y = 2
 A formula the next chapter numbers: \eqref{eq:energy}.
 A \colorbox{oiB!20}{tinted} word, a \textcolor{BrickRed}{brick red} one, and a formula
 in it: ${\color{BrickRed} z}$. A group in a formula's macro: $\grp{x} + 1$.
+Struts texmath doesn't know: \fbox{$\mathstrut$Ex} and $\vphantom{(}x\smash{y}\hphantom{z}$.
 """,
     "ch_one/TeX/extra.tex": "\\begin{parts}\n\\item An extra part\n\\end{parts}\n",
     "ch_one/TeX/review.tex": "\\section{Review}\nThe review of chapter one.\n\n"
@@ -3344,6 +3345,11 @@ def case_customized(work):
          and len(re.findall(r'href="#US-Airports"[^>]*>1\.1\.1</a>', one)) == 2),
         ("a formula's macro is as the book defines it, so texmath reads it",
          lambda: "x\\hspace{1em}{} = 1</annotation>" in one),
+        ("a strut and a phantom of height alone are gone from a formula, one that was only "
+         "a strut with it, \\hphantom is \\phantom, and \\smash what it holds",
+         lambda: "mathstrut" not in one and re.search(r">\s*Ex\b", one)
+         and '"application/x-tex">{}</annotation>' not in one
+         and "{}x{y}\\phantom{z}</annotation>" in one),
         ("a group a formula's macro opens with \\begingroup is braces, which texmath reads",
          lambda: re.search(r"<math[^>]*>(?:(?!</math>).)*<annotation[^>]*>\{x\} \+ 1</annotation>",
                            one, re.S) and "\\begingroup x" not in one),

@@ -2,7 +2,7 @@
 
 How to get the tools, what they need, and how to check the result. There's no initial configuration step for the tools themselves: `convert.py` finds its filters, schemas, and the shared library by path relative to itself, so they work from wherever you put them.
 
-v0.9 is developed and tested on Ubuntu 24.04 with Pandoc 3.12.1 and 3.12: on Windows under WSL 2, which is what the maintainer runs, and in an Ubuntu container, which is where the test suites run before a release. Nothing here is Windows-specific or WSL-specific, and the same commands work on a Linux machine or on macOS with Homebrew in place of `apt`.
+This version is developed and tested on Ubuntu 24.04 with Pandoc 3.12.1 and 3.12: on Windows under WSL 2, which is what the maintainer runs, and in an Ubuntu container, which is where the test suites run before a release. Nothing here is Windows-specific or WSL-specific, and the same commands work on a Linux machine or on macOS with Homebrew in place of `apt`.
 
 ## On Windows: WSL first
 
@@ -24,12 +24,12 @@ Two ways, and nothing to build either way. A release is a fixed set of files you
 
 ```bash
 mkdir -p ~/tools && cd ~/tools
-curl -L -o TextbookImprover-0.5.tar.gz \
-  https://github.com/OERforge/TextbookImprover/archive/refs/tags/v0.5.tar.gz
-tar xzf TextbookImprover-0.5.tar.gz        # gives ~/tools/TextbookImprover-0.5
+curl -L -o TextbookImprover-0.8.tar.gz \
+  https://github.com/OERforge/TextbookImprover/archive/refs/tags/v0.8.tar.gz
+tar xzf TextbookImprover-0.8.tar.gz        # gives ~/tools/TextbookImprover-0.8
 ```
 
-The [releases page](https://github.com/OERforge/TextbookImprover/releases) lists every version with its changelog; replace `v0.5` and `0.5` above to take a different one. A `.zip` of the same files is there too, for unpacking on the Windows side.
+The [releases page](https://github.com/OERforge/TextbookImprover/releases) lists every version with its changelog; replace `v0.8` and `0.8` above to take a different one. A `.zip` of the same files is there too, for unpacking on the Windows side.
 
 **Or a clone**, if you'd rather follow the project or send a patch:
 
@@ -41,7 +41,7 @@ git clone https://github.com/OERforge/TextbookImprover.git ~/tools/TextbookImpro
 Either way, the directory you now have is what the rest of the documentation calls `$T`, and setting that in your shell makes every command here copy-and-pasteable:
 
 ```bash
-export T=~/tools/TextbookImprover-0.5      # or ~/tools/TextbookImprover for a clone
+export T=~/tools/TextbookImprover-0.8      # or ~/tools/TextbookImprover for a clone
 python3 $T/bin/convert.py --help
 ```
 
@@ -59,7 +59,7 @@ Put that `export` line in `~/.bashrc` (see [below](#optional-the-full-validators
 | `lxml` | Optional. Full schema validation of the manifest; without it a smaller set of checks runs. | `sudo apt install python3-lxml` |
 | `pypdf` | `--toc` with a PDF, and checking a PDF the run builds or the audit reads; an EPUB needs nothing | `sudo apt install python3-pypdf` |
 | LuaLaTeX | A `pdf` target only; see [below](#for-a-pdf-target-lualatex) | TeX Live 2026 |
-| pdfLaTeX or LuaLaTeX, and `pdftocairo` | A LaTeX source with drawings or PDF images, which become SVG ([LaTeX sources](latex.md)); without them they're left out of the pages | TeX Live; `sudo apt install poppler-utils` |
+| pdfLaTeX or LuaLaTeX, LaTeX's `preview` package, and `pdftocairo` | A LaTeX source with drawings or PDF images, which become SVG ([LaTeX sources](latex.md)); without them they're left out of the pages | TeX Live (`tlmgr install preview` where it's missing); `sudo apt install poppler-utils` |
 | TeX's `latex-tagging-status` package | A LaTeX source's copy made for tagging, whose class and packages are checked against the tagging project's status list ([LaTeX sources](latex.md#the-source-target)); without it, the run says how to install it and checks nothing | `tlmgr install latex-tagging-status`; MiKTeX installs it on demand |
 | `zip` | Only if you package with the printed command instead of `--zip` | `sudo apt install zip` |
 
@@ -128,6 +128,10 @@ A book with SVG images needs `rsvg-convert` for its PDF (`sudo apt install librs
 For the PDF's table captions and empty paragraph elements, `pikepdf` too (`pip install pikepdf`, or `sudo apt install python3-pikepdf`); without it the run says so and leaves both as LaTeX tags them, and the PDF suite skips. `pdf.figures: section` needs `placeins` (`tlmgr install placeins`). `multirow` is for a table with a cell spanning rows, which Pandoc's template loads only when a book has one; the PDF suite's book does.
 
 A LaTeX book's PDF is built from the book's own LaTeX ([LaTeX sources](latex.md#the-pdf-target)), by `latexmk`, which TinyTeX and TeX Live include, and with the packages the book itself loads, which `tlmgr` installs as below. The copy loads `unicode-math` for its formulas' MathML, which TinyTeX has, and, for a book that uses pdfTeX's own commands or tests for pdfTeX by `\pdfoutput`, `luatex85`, which TinyTeX lacks (`tlmgr install luatex85`).
+
+A LaTeX book's drawings are each made a page of LaTeX's `preview` package, which the TinyTeX above has. TinyTeX-1, the smaller bundle TinyTeX's own install script installs, doesn't, and lacks much else a book is likely to load: a run without `preview` says to install it, and a build that stops names the file it couldn't find, as above.
+
+The LaTeX suite (`tests/run-latex-tests.py`) builds small books that load more than the PDF target needs, and its first check names whatever of it is missing, with the line that installs it. On the TinyTeX above, that's `tlmgr install luatex85 wasysym`; on TinyTeX-1, `tlmgr install babel-english caption fancyhdr grfext luatex85 mdframed pgf preview soul tabto-ltx tex-gyre titlesec ulem wasysym wrapfig`; and on either, `rsvg-convert` for its SVG (`sudo apt install librsvg2-bin`).
 
 Two more kinds of package, depending on the book. A book with passages in another language needs that language's `babel-` and `hyphen-` packages (`tlmgr install babel-german hyphen-german` for German), or LuaLaTeX stops with babel's `Unknown option`. And whatever a `pdf.metadata` file's `header-includes` loads has to be installed too (`hanging`, say). When LuaLaTeX stops on `File 'something.sty' not found`, `tlmgr search --global --file /something.sty` names the package to install.
 

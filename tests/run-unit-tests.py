@@ -249,11 +249,24 @@ def check_consistency():
     builtin = re.findall(
         r'"([^"]+)"',
         re.search(r"BACK_MATTER_ORDER = \[(.*?)\]", source, re.S).group(1))
-
+    # The newest release, as the changelog's first dated section, the
+    # audit's version, and the installation page's download example
+    # name it; the release commit changes all three.
+    changelog = open(os.path.join(ROOT, "CHANGELOG.md"), encoding="utf-8").read()
+    released = re.search(r"^## \[(\d+\.\d+)\] - ", changelog, re.M).group(1)
+    audit = re.search(r'^VERSION = "([^"]+)"', open(
+        os.path.join(ROOT, "bin", "audit.py"), encoding="utf-8").read(), re.M).group(1)
+    installation = open(os.path.join(ROOT, "docs", "installation.md"),
+                        encoding="utf-8").read()
+    named = set(re.findall(r"TextbookImprover-(\d+\.\d+)", installation)
+                + re.findall(r"refs/tags/v(\d+\.\d+)\.tar\.gz", installation)
+                + re.findall(r"replace `v(\d+\.\d+)`", installation))
 
     return [
         ("the schema's back-matter default matches the built-in order",
          lambda: list(declared) == builtin),
+        ("the newest release is the one the audit reports and the installation page "
+         "downloads", lambda: audit == released and named == {released}),
         ("every schema loads and declares its keys",
          lambda: all("keys" in yaml.safe_load(open(p, encoding="utf-8"))
                      for p in (
@@ -667,8 +680,53 @@ def check_report_rows():
     ]
 
 
+def check_drawings_without_preview():
+    """A LaTeX book's drawings, where LaTeX lacks the preview package each
+    is made a page of: said once, as what to install, not as LaTeX's log
+    for each; any other failure is still LaTeX's own words."""
+    import latexsource
+    work = tempfile.mkdtemp(prefix="drawings-")
+    tools = os.path.join(work, "bin")
+    os.makedirs(tools)
+    os.makedirs(os.path.join(work, "book"))
+
+    def fake(error):
+        with open(os.path.join(tools, "pdflatex"), "w") as fh:
+            fh.write("#!/bin/sh\ncat <<'END'\n%s\nEND\nexit 1\n" % error)
+        with open(os.path.join(tools, "pdftocairo"), "w") as fh:
+            fh.write("#!/bin/sh\nexit 1\n")
+        for name in ("pdflatex", "pdftocairo"):
+            os.chmod(os.path.join(tools, name), 0o755)
+
+    def said(error):
+        fake(error)
+        lines = []
+        path = os.environ.get("PATH", "")
+        os.environ["PATH"] = tools + os.pathsep + path
+        try:
+            latexsource.render(os.path.join(work, "book"), os.path.join(work, "w"),
+                               "\\documentclass{article}\n\\begin{document}",
+                               [("rendered/a.svg", "\\begin{picture}(1,1)\\end{picture}"),
+                                ("rendered/b.svg", "\\begin{picture}(2,2)\\end{picture}")],
+                               lines.append)
+        finally:
+            os.environ["PATH"] = path
+        return "\n".join(lines)
+    missing = said("! LaTeX Error: File `preview.sty' not found.")
+    other = said("! Undefined control sequence.")
+    shutil.rmtree(work, ignore_errors=True)
+    return [
+        ("without the preview package, the drawings say what to install, once",
+         lambda: "tlmgr install preview" in missing and missing.count("WARNING") == 1
+         and "The end of its output" not in missing),
+        ("and another failure is LaTeX's own words",
+         lambda: "Undefined control sequence" in other and "preview package" not in other),
+    ]
+
+
 GROUPS = [
     ("a report's rows", check_report_rows),
+    ("drawings without the preview package", check_drawings_without_preview),
     ("layout tables", check_layout_tables),
     ("unique ids", check_unique_ids),
     ("front and back matter by name", check_matter_by_name),

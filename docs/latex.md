@@ -82,7 +82,7 @@ Pandoc's LaTeX reader (3.12) can't take some of what plain LaTeX books do, so th
 
 The rendered images go in `rendered/` in the book's directory, at the path of the file they came from (`figures/Venn.tex` is `rendered/figures/Venn.svg`; a drawing in a chapter is `rendered/sets/sets-3.svg`). `rendered/.rendered.json` records what each was made from, so an unchanged drawing isn't made again. An image's alt text comes from `image-alt.csv` by that path, like any image's.
 
-Drawings and PDF images need a LaTeX engine and `pdftocairo` (`sudo apt install poppler-utils`). Without them the run says so, and they're left out of the pages. When LaTeX can't make one drawing, the others are made one at a time, so it costs only itself.
+Drawings and PDF images need a LaTeX engine and `pdftocairo` (`sudo apt install poppler-utils`), and drawings LaTeX's `preview` package, which each is made a page of (`tlmgr install preview` where it's missing). Without them the run says so, and they're left out of the pages. When LaTeX can't make one drawing, the others are made one at a time, so it costs only itself.
 
 ## A book with a build of its own
 

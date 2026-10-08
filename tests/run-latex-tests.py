@@ -485,6 +485,41 @@ def can_draw():
                 and shutil.which("pdftocairo"))
 
 
+# What the suite's books need from TeX beyond what LaTeX's tagging and
+# Pandoc's template do (docs/installation.md): each TeX Live package, by a
+# file it holds. Found on TinyTeX's smaller bundle (TinyTeX-1), from every
+# file TeX read in a run of the suite that passed (-recorder) and then by
+# what each build that still failed couldn't find; a package a copy is
+# made without, and so never reads, can still be one LaTeX needs found
+# (2026-10-08). And the one other tool the LaTeX target's SVG needs.
+SUITE_TEX = [("babel-english", "english.ldf"), ("caption", "caption.sty"),
+             ("fancyhdr", "fancyhdr.sty"), ("grfext", "grfext.sty"),
+             ("luatex85", "luatex85.sty"), ("mdframed", "mdframed.sty"),
+             ("pgf", "tikz.sty"), ("preview", "preview.sty"), ("soul", "soul.sty"),
+             ("tabto-ltx", "tabto.sty"), ("tex-gyre", "texgyreheros-regular.otf"),
+             ("titlesec", "titlesec.sty"), ("ulem", "ulem.sty"),
+             ("wasysym", "wasysym.sty"), ("wrapfig", "wrapfig.sty")]
+
+
+def tex_ready():
+    """Where there's a TeX, the packages and tools the suite's books need
+    that it lacks, as the check that names them and what installs them;
+    None where it has them all or there's no TeX, whose checks skip."""
+    if not (shutil.which("lualatex") or shutil.which("pdflatex")) \
+            or not shutil.which("kpsewhich"):
+        return None
+    missing = [package for package, name in SUITE_TEX
+               if not subprocess.run(["kpsewhich", name], capture_output=True,
+                                     text=True, stdin=subprocess.DEVNULL).stdout.strip()]
+    tools = [] if shutil.which("rsvg-convert") else ["rsvg-convert"]
+    if not missing and not tools:
+        return None
+    return ("TeX has what the suite's books load, or the checks that build them "
+            "fail: missing " + ", ".join(missing + tools) + " ("
+            + "; ".join(([f"tlmgr install {' '.join(missing)}"] if missing else [])
+                        + (["sudo apt install librsvg2-bin"] if tools else [])) + ")")
+
+
 SKIPPED = []
 
 
@@ -4629,6 +4664,10 @@ def main():
         sys.exit("pandoc is not on the path.")
     work = tempfile.mkdtemp(prefix="latex-tests-")
     failed = 0
+    lacking = tex_ready()
+    if lacking:
+        print(f"  FAIL  {lacking}")
+        failed += 1
     try:
         for label, case in cases:
             directory = os.path.join(work, re.sub(r"[^\w-]+", "-", label))

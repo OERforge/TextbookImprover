@@ -41,9 +41,11 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
 import argparse
+import contextlib
 import csv
 import hashlib
 import html as html_module
+import io
 import json
 import os
 import re
@@ -532,21 +534,27 @@ def built_or_why(ok, said):
     """ok, and when it isn't, the run's own words on why its LaTeX build
     stopped, so a failing check says what to do about it."""
     if not ok:
+        # LaTeX's error, "! ..." or, with -file-line-error, "./book.tex:518:
+        # ...", and the "l.518 ..." line that shows where.
+        error = re.compile(r"^(?:! |[^:\s][^:]*\.\w+:\d+: |l\.\d+ )")
         why = [line.strip() for line in said.splitlines()
-               if line.startswith("! ") or "can't find" in line or "wasn't built" in line]
-        for line in why[:4]:
+               if error.match(line) or "can't find" in line or "wasn't built" in line]
+        for line in why[:8]:
             print("    " + line[:300])
     return ok
 
 
 SKIPPED = []
+SKIPS = [0]
 
 
 def skip(reason):
-    """A check that can't run here: reported, and passing."""
+    """A check that can't run here: reported, and passing. The check's line
+    says skip, and the first check skipped for a reason says it."""
+    SKIPS[0] += 1
     if reason not in SKIPPED:
         SKIPPED.append(reason)
-        print(f"  skip  {reason}")
+        print(f"        {reason}")
     return True
 
 
@@ -4704,11 +4712,16 @@ def main():
                 failed += 1
                 continue
             for name, predicate in checks:
+                # What a check prints, under its own line, not the one before.
+                said, skips = io.StringIO(), SKIPS[0]
                 try:
-                    passed = bool(predicate())
+                    with contextlib.redirect_stdout(said):
+                        passed = bool(predicate())
                 except Exception as exc:
                     passed, name = False, f"{name}  ({exc})"
-                print(("  ok    " if passed else "  FAIL  ") + name)
+                print(("  FAIL  " if not passed else "  skip  " if SKIPS[0] > skips
+                       else "  ok    ") + name)
+                sys.stdout.write(said.getvalue())
                 failed += not passed
     finally:
         if arguments.keep:

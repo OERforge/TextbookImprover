@@ -136,12 +136,30 @@ def main():
     for check, count in outputcheck.summarize(findings):
         print(f"  {count:5}  {check}: "
               f"{outputcheck.DESCRIPTIONS.get(check, '')}", file=sys.stderr)
-    for finding in pdf_findings:
-        print(f"  {finding.where}: {finding.check}: {finding.detail}",
-              file=sys.stderr)
+    for line in pdf_summary(pdf_findings):
+        print(line, file=sys.stderr)
     if args.report:
         print(f"Written to {args.report}.", file=sys.stderr)
     return 0
+
+
+def pdf_summary(pdf_findings):
+    """The PDF findings' lines in the run's summary: one for each finding,
+    its detail beside it, unless a PDF has the same one more than once,
+    as every figure LaTeX gave a placeholder for alt text does (195 on
+    GIAM), which is one line with the count and what the check means.
+    The report has every one."""
+    groups = {}
+    for finding in pdf_findings:
+        groups.setdefault((finding.where, finding.check), []).append(finding)
+    lines = []
+    for (where, check), found in groups.items():
+        if len(found) == 1:
+            lines.append(f"  {where}: {check}: {found[0].detail}")
+        else:
+            lines.append(f"  {where}: {len(found)} {check}: "
+                         f"{findings_lib.describe(check)}")
+    return lines
 
 
 if __name__ == "__main__":

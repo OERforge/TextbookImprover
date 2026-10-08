@@ -680,6 +680,27 @@ def check_report_rows():
     ]
 
 
+def check_pdf_summary():
+    """The output check's summary gives a PDF's repeated finding once,
+    counted, and a single one with its detail."""
+    import findings as findings_lib
+    check_output = load(os.path.join(ROOT, "bin", "check-output.py"), "check_output")
+    found = [findings_lib.Finding("book.pdf", "pdf-figure-alt-is-placeholder",
+                                  "picture environment") for _ in range(3)]
+    found += [findings_lib.Finding("book.pdf", "pdf-figure-alt-is-file-name", "a.pdf"),
+              findings_lib.Finding("other.pdf", "pdf-figure-alt-is-placeholder",
+                                   "picture environment")]
+    lines = check_output.pdf_summary(found)
+    return [
+        ("a finding a PDF has three times is one line, counted, saying what it means",
+         lambda: lines[0] == "  book.pdf: 3 pdf-figure-alt-is-placeholder: "
+         + findings_lib.describe("pdf-figure-alt-is-placeholder")),
+        ("one found once keeps its detail, and each PDF is counted apart",
+         lambda: lines[1:] == ["  book.pdf: pdf-figure-alt-is-file-name: a.pdf",
+                               "  other.pdf: pdf-figure-alt-is-placeholder: picture environment"]),
+    ]
+
+
 def check_drawings_without_preview():
     """A LaTeX book's drawings, where LaTeX lacks the preview package each
     is made a page of: said once, as what to install, not as LaTeX's log
@@ -755,6 +776,7 @@ def check_tlmgr_command():
 
 GROUPS = [
     ("a report's rows", check_report_rows),
+    ("the PDF findings in the output check's summary", check_pdf_summary),
     ("tlmgr, with sudo where it needs it", check_tlmgr_command),
     ("drawings without the preview package", check_drawings_without_preview),
     ("layout tables", check_layout_tables),

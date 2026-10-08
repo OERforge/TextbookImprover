@@ -1,6 +1,6 @@
 # TextbookImprover
 
-Converts a book's sources (Word, Markdown, AsciiDoc, HTML, or LaTeX, or a book saved from the web, an EPUB, or a course cartridge) into more-accessible HTML pages, an EPUB, a tagged PDF, Word files, or Markdown or AsciiDoc source, and packages the pages as an IMS Common Cartridge for import into Brightspace or another LMS.
+Converts a book's sources (Word, Markdown, AsciiDoc, HTML, or LaTeX, or a book saved from the web, an EPUB, or a course cartridge) into more-accessible HTML pages, an EPUB, a tagged PDF, Word files, or Markdown, AsciiDoc, or LaTeX source, and packages the pages as an IMS Common Cartridge for import into Brightspace or another LMS.
 
 Licensed GPL 3.0. See `LICENSE` for more info.
 
@@ -8,7 +8,7 @@ The initial release of these scripts was created by Robert Szarka and supported 
 
 ## What it does
 
-Reads a book's sources, one file per page (Word, Markdown, AsciiDoc, or HTML, or a LaTeX book through its master file), into one intermediate per page, after unpacking any that arrive another way (an EPUB, a site saved from the web or captured in a WARC or WACZ, a Jekyll site, a Common Cartridge), makes each page more accessible on the way, and writes every output the configuration asks for from the same intermediates: HTML pages, an EPUB, a tagged PDF, Markdown or AsciiDoc source, Word files, and a Common Cartridge for import into an LMS. The book's structure, declared once as `contents` or guessed from the files and the publisher's PDF, is the cartridge's module tree, the EPUB's table of contents, and the generated contents page alike.
+Reads a book's sources, one file per page (Word, Markdown, AsciiDoc, or HTML, or a LaTeX book through its master file), into one intermediate per page, after unpacking any that arrive another way (an EPUB, a site saved from the web or captured in a WARC or WACZ, a Jekyll site, a Common Cartridge), makes each page more accessible on the way, and writes every output the configuration asks for from the same intermediates: HTML pages, an EPUB, a tagged PDF, Markdown, AsciiDoc, or LaTeX source, Word files, and a Common Cartridge for import into an LMS. The book's structure, declared once as `contents` or guessed from the files and the publisher's PDF, is the cartridge's module tree, the EPUB's table of contents, and the generated contents page alike.
 
 **Conversion** runs each source through Pandoc and a Lua filter that makes the page more accessible: figures get real captions tied to their images, data tables get captions, header cells, and a focusable scroll region, images get their alt text checked and their layout spacers marked, equations stay equations, and cross-references that Word's export left dangling land. Where the source doesn't say something a screen reader needs, the run reports it, and a sidecar file holds what you decide; after a Markdown round trip, the decisions are in the source itself.
 
@@ -59,7 +59,7 @@ Each target writes into a directory of its own; the content directory keeps the 
 | --- | --- |
 | [Installation](docs/installation.md) | Prerequisites and how to check them |
 | [A first run](docs/first-run.md) | Start to finish, what each run writes, exit codes |
-| [Worked examples](docs/examples.md) | Two real books from start to finish: an OpenStax book from its Word files to a course cartridge, and a book website from a WARC to an EPUB and an HTML round trip. |
+| [Worked examples](docs/examples.md) | Three real books from start to finish: an OpenStax book from its Word files to a course cartridge, a book website from a WARC to an EPUB and an HTML round trip, and a LaTeX book from its repository to a tagged PDF. |
 | [Formats and packaging](docs/formats.md) | Every input, every way it can arrive, every output, how far each path is tested and what it loses, and how the output is packaged |
 | [How it works](docs/architecture.md) | The pieces, what conversion does to a page, running the filter alone |
 | [Configuration](docs/configuration.md) | How the configuration files fit together, precedence, contents, migration from v0.1 |

@@ -40,6 +40,9 @@ on another `bin/` script.
 | `lib/unpacking.py` | What both unpackers write: `project.yaml` and `unpack-report.csv`. |
 | `lib/epubsource.py` | The package document, the spine, the navigation, and the rewriting of a page's references, for the unpacker. Parses no content document. |
 | `lib/latexsource.py` | A LaTeX book read through its master: the files it reaches, a copy put right where Pandoc's reader can't take it, its drawings rendered by LaTeX, and the whole book cut into a page per `\include`. |
+| `lib/texremediate.py` | A `source` target on a LaTeX book: the sidecars' decisions written into a copy of the author's files where each element is, and, with `tagging: "on"`, the copy made to build with LaTeX's own tagging. |
+| `lib/latexbuild.py` | What a LaTeX build of a tagged PDF needs and what its log means, for both of the PDF target's routes: LaTeX's release checked, its first errors found, and advice for a missing file or a table TeX filled. |
+| `lib/taggingstatus.py` | A LaTeX book's class and packages checked against the tagging project's status list, from TeX's `latex-tagging-status` package, as advice. |
 | `lib/htmlrepair.py` | What an HTML source needs done to it before Pandoc reads it, on a copy: an id on a paragraph, a list item, a cell, or an inline mark moves onto an anchor the reader keeps. |
 | `lib/docxrepair.py` | What a `.docx` needs done to it before Pandoc reads it, on a copy: bookmarks moved to where the reader keeps them, invisible links so bookmarks only other files point at survive, an item's second paragraph kept in its list, and, in a file a `docx` target wrote, the lists, paragraphs, and code in quotations marked with their depth. After Pandoc reads the copy, what its reader drops or misreads is put back: ScreenTips as link titles, Word's decorative mark, terms with no definition, quotations nested and joined, the ids Pandoc renamed, code's numbering and language. |
 | `lib/wordrepairs.py` | The repairs that change what reading a Word file means, `word.headings` and `word.tracked_deletions`, applied alike to the copy Pandoc reads and to a `source` target's copy. |
@@ -59,7 +62,7 @@ on another `bin/` script.
 | `check-output.py` | Checks the pages, EPUBs, and PDFs a run wrote for dead links, missing alt text, skipped headings, and the like; the command line over `lib/outputcheck.py`. |
 | `build-epub.py` | Assembles the filtered intermediates into one EPUB3, ordered by `project.contents`, with accessibility claims computed from the build. |
 | `build-pdf.py` | Assembles the same way into one tagged PDF through Pandoc's LaTeX writer and LuaLaTeX: roles as division commands, the metadata file's YAML for the writer, and the macros `pdf-target.lua` uses. |
-| `pdf-target.lua` | What the LaTeX writer can't be told: a declared header column as row headers, a decorative image as an artifact, each link's `/Contents`, a cell spanning rows as `table/multirow`, a quotation in a table cell unwrapped, and a table in a table cell written as lines. |
+| `pdf-target.lua` | What the LaTeX writer can't be told: a declared header column as row headers, a decorative image as an artifact, each link's `/Contents`, a cell spanning rows as `table/multirow`, a quotation in a table cell unwrapped, and a table in a table cell written as a `tabular` with its head declared for tagging (as lines, only when a cell spans rows). |
 | `schema-conversion.yaml` | Declares every conversion setting, its type, default, and meaning. |
 
 **`bin/` — auditing**

@@ -348,7 +348,7 @@ python3 $T/bin/convert.py
 ```
 
 ```
-3 files here are each a whole LaTeX document: GIAM-hw.tex, GIAM-solutions_manual.tex, GIAM.tex. Set latex.main to the one that is the book.
+3 files here are each a whole LaTeX document: GIAM-hw.tex, GIAM-solutions_manual.tex, GIAM.tex. Set latex.main to the one that is the book, or list them all when each is a part of it.
 ```
 
 One set of chapters makes the textbook, a workbook, and a solutions manual, each with a master file of its own. Name the textbook's:
@@ -384,22 +384,24 @@ python3 $T/bin/convert.py
 ```
 
 ```
+GIAM.tex is the book: 11 page(s), one for each file it \include-s, and 2 for what it holds itself, each part or chapter it sets between them a page of its own.
 93 of 93 drawing(s) made images by LaTeX, in rendered/.
-Read from a copy of the LaTeX: 21 \ifthenelse on a boolean read as a toggle; 1 \cline or \cmidrule read as a whole rule; 10 PDF or EPS image made SVG.
+Read from a copy of the LaTeX: 21 \ifthenelse on a boolean read as a toggle; 1 \cline or \cmidrule read as a whole rule; 50 line break in a minipage read as \newline; 1 space between words a command sets (\hspace, \quad, \hfill) kept as a space, which the reader dropped, running the words together; 10 PDF or EPS image made SVG; 8 \ref to an enumerated item written as the item's number; 847 group or number after a command the reader takes whole kept apart from it, so it's read; 755 box (\fbox, \makebox, \resizebox, and the like) read as what it holds, which the reader dropped with it; 17 bibliography entry written out from BibTeX's .bbl, in the book's style, where the bibliography is; 16 citation written as the label LaTeX prints, linked to its entry; 65 reference or counter given the value LaTeX gives it.
 Wrote latex-conversion-macros-sample.tex: 3 macro(s) whose formulas texmath can't make MathML of, with a definition suggested for 2 and 1 for a person to define. Check it, then save it as latex-conversion-macros.tex.
-GIAM.tex is the book: 10 page(s), one for each file it \include-s, and one for what it holds itself.
-19 LaTeX cross-reference(s) resolved to the section or id they name.
+37 LaTeX cross-reference(s) resolved to the section or id they name.
 No contents declared: contents-sample.yaml holds the order the master file gives, and its title and authors. Copy it into project.yaml to use it.
-table-headers: 101 data table(s): 4 needs-source, 97 new
-Wrote table-captions-missing.csv (92 table(s) needing a description).
+table-headers: 102 data table(s): 4 needs-source, 98 new
+Wrote table-captions-missing.csv (99 table(s) needing a description).
 Wrote image-alt-missing.csv (102 image(s) needing alt text).
-Wrote bare-links-new.csv (3 bare link(s) with no row in bare-links.csv).
-Output check: 10 page(s), 134 finding(s):
+Wrote bare-links-new.csv (10 bare link(s) with no row in bare-links.csv).
+Output check: 11 page(s), 141 finding(s):
     104  image-without-alt: an img element has no alt attribute
-     30  table-without-headers-or-caption: a data table with no th and no caption
+     37  table-without-headers-or-caption: a data table with no th and no caption
+...
+ERROR: packaging.yaml not found.
 ```
 
-LaTeX drew each of the 93 drawings as an SVG, and the pages are in `html/`: one for each chapter, and one for what the master holds itself (the copyright page and acknowledgments). The book was read from a copy put right for Pandoc's reader: GIAM's `\ifthenelse` chooses between the textbook and the workbook, which the reader would drop, so each is read as a toggle set as the master sets it. [LaTeX sources](latex.md) lists what is put right and why. Among these lines Pandoc warns 57 times that it couldn't make MathML of a formula and left it as TeX, as in:
+LaTeX drew each of the 93 drawings as an SVG, and the pages are in `html/`: one for each chapter, one for what the master holds before them (the copyright page and acknowledgments), and one for the bibliography BibTeX made, which comes after them, with the book's 16 citations linked to it. The run stops at packaging, as [the first example's](#1-a-directory-of-its-own-and-a-first-run) did, until step 5 names the book. The book was read from a copy put right for Pandoc's reader: GIAM's `\ifthenelse` chooses between the textbook and the workbook, which the reader would drop, so each is read as a toggle set as the master sets it. [LaTeX sources](latex.md) lists what is put right and why. Among these lines Pandoc warns 57 times that it couldn't make MathML of a formula and left it as TeX, as in:
 
 ```
 [WARNING] Could not convert TeX math \; \rule[-3pt]{.5pt}{13pt} \;, rendering as TeX:
@@ -411,7 +413,7 @@ Those formulas use three of the book's own macros, and `latex-conversion-macros-
 
 ```latex
 % \nrelR is used in 3 formula(s). The book has:
-%   \newcommand{\nrelR}{\mbox{\raisebox{1pt}{$\not$}\hspace{1pt}{\textsf R}}}
+%   \newcommand{\nrelR}{\mbox{\raisebox{1pt}{$\not$}\rule{1pt}{0pt}{\textsf R}}}
 % Only a person can say what this draws:
 % \renewcommand{\nrelR}{}
 
@@ -436,7 +438,7 @@ The file is read after the book's preamble, so its definitions win over the book
 
 ### 5. Name the book, and an EPUB
 
-`contents-sample.yaml` holds what the master says about the book. Its title reads "A Gentle Introduction to the Art of Mathematics Version 3.2 N", since GIAM's `\title` sets the version below the title, so correct it as you copy the rest into `project.yaml`, and give the book an identifier:
+`contents-sample.yaml` holds what the master says about the book, its last entry the bibliography's page, named for the master and numbered (`GIAM-1`). Its title reads "A Gentle Introduction to the Art of Mathematics Version 3.2 N", since GIAM's `\title` sets the version below the title, so correct it as you copy the rest into `project.yaml`, and give the book an identifier:
 
 ```yaml
 project:
@@ -456,6 +458,7 @@ project:
   - proof3
   - card
   - proof4
+  - GIAM-1
 ```
 
 Then name an EPUB target beside the HTML:
@@ -475,15 +478,15 @@ python3 $T/bin/convert.py
 ```
 
 ```
-Read from a copy of the LaTeX: 21 \ifthenelse on a boolean read as a toggle; 1 \cline or \cmidrule read as a whole rule; 10 PDF or EPS image made SVG; the definitions in latex-conversion-macros.tex read after the preamble.
+Read from a copy of the LaTeX: 21 \ifthenelse on a boolean read as a toggle; ...; 65 reference or counter given the value LaTeX gives it; the definitions in latex-conversion-macros.tex read after the preamble.
 ...
-Wrote epub/giam-3.2.epub: 10 page(s), 104 image(s), 104 without alternative text.
+Wrote epub/giam-3.2.epub: 11 page(s), 104 image(s), 104 without alternative text.
   Claims: accessMode textual, visual; sufficient textual,visual; features structuralNavigation, tableOfContents, readingOrder, MathML.
   epubcheck ran on 1 EPUB(s).
-Output check: 10 page(s) and 1 EPUB(s), 270 finding(s):
+Output check: 11 page(s) and 1 EPUB(s), 284 finding(s):
     104  image-empty-alt-not-decorative: alt is empty but the image is not marked aria-hidden="true"
     104  image-without-alt: an img element has no alt attribute
-     62  table-without-headers-or-caption: a data table with no th and no caption
+     76  table-without-headers-or-caption: a data table with no th and no caption
 ```
 
 No formula is left as TeX now: Pandoc warns about none, and every one in the book is MathML. The EPUB passes epubcheck. What's left is the reports: alt text for the 102 images and drawings, and headers and descriptions for the tables, worked through as in [the first example](#6-work-through-the-reports). Until then the EPUB doesn't claim `alternativeText`, and the check finds each image twice, once in the HTML and once in the EPUB.
@@ -502,8 +505,8 @@ python3 $T/bin/convert.py
 ```
 
 ```
-tagged: 154 LaTeX file(s) written, 4 of them changed: 0 image(s) and drawing(s) given alt text and 0 marked artifact, as keys LaTeX's tagging reads. 3 definition(s) from latex-conversion-macros.tex written after the preamble, as the conversion reads them. Made to build with LaTeX's tagging, with LuaLaTeX: \DocumentMetadata added, 2 pdftex option(s) and 1 pdfTeX setting(s) taken out, 2 test(s) for pdfTeX (\ifx\pdfoutput\undefined) made to take LuaLaTeX for pdfTeX too, 2 starred theorem(s) defined only when tagging hasn't, \centerline on a line of its own made a centered paragraph, unicode-math loaded, so each formula carries its MathML, with the OpenType Latin Modern fonts (TeX's own design) and a fallback for characters they lack, 51 figure(s) and table(s) tagged where the text has them, not gathered at the end of the document, and 1 formula(s) opening a center environment given \leavevmode.
-tagged: the book's other master(s) written too, GIAM-hw.tex with 9 file(s) only it reaches, 0 image(s) and drawing(s) given alt text and 0 marked artifact; GIAM-solutions_manual.tex, which reaches no file the others don't, 0 image(s) and drawing(s) given alt text and 0 marked artifact, each made to build with LaTeX's tagging as the book's is; GIAM-hw.tex's test for pdfTeX (\ifx\pdfoutput\undefined) made to take LuaLaTeX for pdfTeX, GIAM-solutions_manual.tex's test for pdfTeX (\ifx\pdfoutput\undefined) made to take LuaLaTeX for pdfTeX.
+tagged: 154 LaTeX file(s) written, 3 of them changed: 0 image(s) and drawing(s) given alt text and 0 marked artifact, as keys LaTeX's tagging reads. 3 definition(s) from latex-conversion-macros.tex written after the preamble, as the conversion reads them. Made to build with LaTeX's tagging, with LuaLaTeX: \DocumentMetadata added, 2 pdftex option(s) and 1 pdfTeX setting(s) taken out, luatex85 loaded for LuaLaTeX, so a test for pdfTeX (\ifx\pdfoutput\undefined) takes it for pdfTeX and pdfTeX's commands work, 2 starred theorem(s) defined only when tagging hasn't, \centerline on a line of its own made a centered paragraph, unicode-math loaded, so each formula carries its MathML, with the OpenType Latin Modern fonts (TeX's own design) and a fallback for characters they lack, the PostScript font families the book names (ptm) set in TeX Gyre's OpenType clones, where installed, which the OpenType fonts' encoding has, 51 figure(s) and table(s) tagged where the text has them, not gathered at the end of the document, and 1 display formula(s) opening a paragraph in a center environment given \leavevmode.
+tagged: the book's other master(s) written too, GIAM-hw.tex with 9 file(s) only it reaches, 0 image(s) and drawing(s) given alt text and 0 marked artifact; GIAM-solutions_manual.tex, which reaches no file the others don't, 0 image(s) and drawing(s) given alt text and 0 marked artifact, each made to build with LaTeX's tagging as the book's is; luatex85 loaded for LuaLaTeX in GIAM-hw.tex, GIAM-solutions_manual.tex, for a test for pdfTeX (\ifx\pdfoutput\undefined) and pdfTeX's commands.
 ```
 
 The run also checks GIAM's class and packages against the LaTeX tagging project's status list, from TeX's `latex-tagging-status` package. TinyTeX doesn't install it, and then the run says how (`tlmgr install latex-tagging-status`); with it, the run says:
@@ -514,7 +517,7 @@ Tagging status of the book's class and packages (2026-09-27): partially compatib
 
 None of GIAM's is rated incompatible, and the copy builds clean below.
 
-`tagged/` holds every file the master reaches, at the same paths, and the book's two other masters, the workbook and the solutions manual, with the exercise files only the workbook reaches. Both choose their class options with an old test for pdfTeX that LuaLaTeX fails, since LuaTeX has no `\pdfoutput`, and so would take LaTeX with dvips; the copy makes the test take LuaLaTeX for pdfTeX, as it does where one of the chapters uses it to choose `.pdf` figures over `.eps`. Lay it over a clean copy of the repository and build it with LuaLaTeX in place of the Makefile's pdfLaTeX, which runs out of memory on a tagged book this size. `latexmk`, which comes with TeX Live, runs BibTeX, makeindex, and as many LuaLaTeX passes as the book needs:
+`tagged/` holds every file the master reaches, at the same paths, and the book's two other masters, the workbook and the solutions manual, with the exercise files only the workbook reaches. Both choose their class options with an old test for pdfTeX that LuaLaTeX fails, since LuaTeX has no `\pdfoutput`, and so would take LaTeX with dvips; the copy loads `luatex85` for LuaLaTeX, which gives it pdfTeX's commands, so the test takes LuaLaTeX for pdfTeX, as it does where one of the chapters uses it to choose `.pdf` figures over `.eps`. Lay it over a clean copy of the repository and build it with LuaLaTeX in place of the Makefile's pdfLaTeX, which runs out of memory on a tagged book this size. `latexmk`, which comes with TeX Live, runs BibTeX, makeindex, and as many LuaLaTeX passes as the book needs:
 
 ```bash
 git clone . ../giam-tagged
@@ -553,8 +556,12 @@ python3 $T/bin/convert.py
 ```
 Wrote pdf/giam-3.2.pdf: 434 page(s), built by LaTeX from the book's own files, made to build with LaTeX's tagging as a source target would make them: 0 image(s) and drawing(s) with alt text and 0 marked artifact, 57 table(s) with a header row and 13 with a header column declared, a person's or the census's, each formula with its MathML, its figures and tables tagged where the text has them, and 195 figure(s) LaTeX gave a placeholder for alt text, which image-alt.csv can describe.
 ...
-    186  pdf-figure-alt-is-placeholder: a figure's alternative text in the PDF is the placeholder LaTeX writes for a drawing that has none
-      9  pdf-figure-alt-is-file-name: a figure's alternative text in the PDF is a file name, which is what LaTeX writes when an image has none
+Output check: 11 page(s), 1 EPUB(s), and 1 PDF(s), 479 finding(s):
+    104  image-empty-alt-not-decorative: alt is empty but the image is not marked aria-hidden="true"
+    104  image-without-alt: an img element has no alt attribute
+     76  table-without-headers-or-caption: a data table with no th and no caption
+  giam-3.2.pdf: 186 pdf-figure-alt-is-placeholder: a figure's alternative text in the PDF is the placeholder LaTeX writes for a drawing that has none
+  giam-3.2.pdf: 9 pdf-figure-alt-is-file-name: a figure's alternative text in the PDF is a file name, which is what LaTeX writes when an image has none
 ```
 
-It differs from the `tagged` copy in one way: every table's headers are declared as the pages have them, the census's guesses included, where the copy, which goes back to the author, declares only what a person decided. The run with the HTML takes about eight minutes. The output check finds what veraPDF can't, the placeholders LaTeX gave the 195 figures, so the PDF is done when `image-alt.csv` is. With `pdf.from: pages` the PDF is made from the pages through Pandoc instead, as for a book from any other source: 279 pages, also passing PDF/UA-2, without the index or the bibliography ([LaTeX sources](latex.md#the-pdf-target)).
+It differs from the `tagged` copy in one way: every table's headers are declared as the pages have them, the census's guesses included, where the copy, which goes back to the author, declares only what a person decided. The run with the other targets takes about nine minutes. The output check finds what veraPDF can't, the placeholders LaTeX gave the 195 figures, so the PDF is done when `image-alt.csv` is. With `pdf.from: pages` the PDF is made from the pages through Pandoc instead, as for a book from any other source: 324 pages, also passing PDF/UA-2, with the bibliography but without the index ([LaTeX sources](latex.md#the-pdf-target)).

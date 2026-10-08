@@ -18,7 +18,7 @@
 #                          override means, what an explicit null means,
 #                          whether lists append, which identifiers are
 #                          valid XML names, what happens when a setting is
-#                          written twice. Twenty-two fixtures, each
+#                          written twice. Twenty-four fixtures, each
 #                          pinning one decision.
 #
 #   run-roundtrip-test.py  that writing a configuration and reading it
@@ -61,7 +61,7 @@
 #                          html5lib or lxml, and Pandoc.
 #
 #   run-filter-tests.py    the accessibility work the Lua filters do,
-#                          against four small .docx fixtures. Needs
+#                          against six small .docx fixtures. Needs
 #                          Pandoc.
 #
 #   run-latex-tests.py     a LaTeX book the script writes, through

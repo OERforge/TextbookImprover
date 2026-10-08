@@ -3957,6 +3957,13 @@ BIB_FILES = {
     "nodb/book.tex": "\\documentclass{article}\n\\begin{document}\n\\section{One}\nA: "
                      "\\cite{k84}. Z.\n\\bibliographystyle{plain}\n\\bibliography{missing}\n"
                      "\\end{document}\n",
+    # A database with an entry twice, which BibTeX skips with an error, as
+    # LaTeX's build reads the .bbl all the same.
+    "dupkey/book.tex": "\\documentclass{article}\n\\begin{document}\n\\section{One}\nA: "
+                       "\\cite{k84}, \\cite{lamport}. Z.\n\\bibliographystyle{plain}\n"
+                       "\\bibliography{refs}\n\\end{document}\n",
+    "dupkey/refs.bib": NAT_BIB + '@book{k84, author = "Donald E. Knuth", title = "Again", '
+                                 'publisher = "AW", year = 1984}\n',
     # A master in a folder of its own, its database a folder up.
     "sub/src/topic.tex": "\\documentclass{article}\n\\begin{document}\n\\section{Topic}\nA: "
                          "\\cite{k84}. Z.\n\\bibliographystyle{plain}\n\\bibliography{../refs}\n"
@@ -4029,7 +4036,7 @@ def case_bibliography(work):
             fh.write(text)
     for book in ("plain", "natbib", "biblatex", "own", "fullcite", "natround", "natnum",
                  "harvard", "macro", "sub", "citepkg", "nodb", "natsuper", "natmiss", "natay",
-                 "citenosort", "citenocomp", "authyear"):
+                 "citenosort", "citenocomp", "authyear", "dupkey"):
         with open(os.path.join(work, book, "conversion.yaml"), "w") as fh:
             fh.write(("defaults:\n  latex:\n    main: src/topic.tex\n" if book == "sub"
                       else "") + "targets:\n  html:\n    format: html\n")
@@ -4154,6 +4161,13 @@ def case_bibliography(work):
         ("LaTeX's own \\cite prints a label of author and year as it is, without natbib",
          lambda: has("authyear", "paper", "A: As shown by [Knuth, 1984] and [Lamport, 1994, p. "
                      "2]. Z.")),
+        ("a .bbl BibTeX writes despite an error (an entry twice) is read, as LaTeX's build "
+         "reads it, and the run gives BibTeX's error, naming the book's database",
+         lambda: has("dupkey", "book", "A: [1], [2]. Z.")
+         and has("dupkey", "book", "References [1] Donald E. Knuth. The TeXbook. AW, 1984.")
+         and "Repeated entry" in said["dupkey"] and "refs.bib" in said["dupkey"]
+         and "database1" not in said["dupkey"]
+         if bibtex else skip("no BibTeX to make a bibliography")),
         ("a master in a folder of its own finds its database a folder up, as LaTeX does "
          "from the master's folder",
          lambda: has("sub", "topic", "A: [1]. Z.")

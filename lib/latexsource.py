@@ -4845,7 +4845,10 @@ def run_bibtex(base, work, folder, keys, style, databases):
     BIBTEX_PROBLEM[0]). Each database the book has, and a style of its
     own, is copied there first, since BibTeX finds a name with a folder in
     it (\\bibliography{../refs}, from a master in src/) only from where it
-    runs, as LaTeX's build does from the master's folder."""
+    runs, as LaTeX's build does from the master's folder. A .bbl with
+    entries BibTeX wrote despite an error (a repeated entry, which it
+    skips) is BibTeX's, as LaTeX's build reads it, the error in
+    BIBTEX_PROBLEM[0] all the same."""
     BIBTEX_PROBLEM[0] = None
     where = os.path.join(work, "bibtex")
     os.makedirs(where, exist_ok=True)
@@ -4889,8 +4892,14 @@ def run_bibtex(base, work, folder, keys, style, databases):
     if done.returncode > 1 or not os.path.exists(bbl):
         said = [line.strip() for line in (done.stdout + "\n" + done.stderr).splitlines()
                 if line.strip() and not line.startswith("(")]
-        BIBTEX_PROBLEM[0] = said[0] if said else "it stopped (exit %d)" % done.returncode
-        return None
+        # The databases by the names the book gives them, not the copies'.
+        problem = said[0] if said else "it stopped (exit %d)" % done.returncode
+        for index, database in enumerate(databases, start=1):
+            problem = problem.replace("database%d.bib" % index, database
+                                      + ("" if database.endswith(".bib") else ".bib"))
+        BIBTEX_PROBLEM[0] = problem
+        text = read_text(bbl) if done.returncode == 2 and os.path.exists(bbl) else None
+        return text if text and BBL_ITEM.search(text) else None
     return read_text(bbl)
 
 
@@ -5650,6 +5659,9 @@ def bibliographies(base, work, texts, files, master, originals, counts, say):
         databases = [d.strip() for d in m.group(1).split(",") if d.strip()]
         bbl = run_bibtex(base, work, os.path.dirname(master), keys or ["*"],
                          styles[-1] if styles else "plain", databases)
+        if bbl is not None and BIBTEX_PROBLEM[0]:
+            say(f"BibTeX made the bibliography with an error, as LaTeX's build would read it: "
+                f"{BIBTEX_PROBLEM[0]}.")
         built = os.path.join(base, os.path.splitext(master)[0] + ".bbl")
         cannot = ("BibTeX couldn't make the bibliography (%s)" % BIBTEX_PROBLEM[0]
                   if BIBTEX_PROBLEM[0] else "No BibTeX here to make the bibliography")

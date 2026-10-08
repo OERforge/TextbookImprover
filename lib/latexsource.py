@@ -1767,6 +1767,48 @@ def environment_arguments(text, counter):
     return text
 
 
+# Space between words a command sets, which the reader (3.12) drops in
+# text, so the words on either side run together (measured: A\hspace{1cm}B,
+# A\quad B, A\hfill B, and A\enspace B are all "AB"; the calculus notes'
+# example label, \fbox{...}\hspace{2mm} before its title, read
+# "ExCalculating" 111 times). A space before such a command keeps them
+# apart; one of less than 2pt, a sliver inside a name (OpenIntro's
+# sex\_\hspace{0.3mm}male), or less than none, is no space between words.
+WORD_SPACING = re.compile(r"\\(hspace\*?|hfill|hfil|quad|qquad|enspace|enskip)(?![A-Za-z@])")
+POINTS = {"pt": 1.0, "mm": 2.845, "cm": 28.45, "in": 72.27, "bp": 1.004, "pc": 12.0,
+          "dd": 1.07, "cc": 12.84, "em": 10.0, "ex": 4.3, "sp": 1 / 65536}
+
+
+def word_spaces(text, counter, math_macros=()):
+    """A space before each of WORD_SPACING's commands in text that sets a
+    space between words, where there's none before it, so the reader keeps
+    the words apart; not in a formula, nor in the definition of a macro a
+    formula uses (math_macros' names), which is left as the book wrote it."""
+    spans = skip_spans(text)
+    math = sorted(math_spans(text, spans) + math_definitions(text, spans, math_macros))
+    edits = []
+    for m in WORD_SPACING.finditer(text):
+        if in_spans(m.start(), spans) or in_spans(m.start(), math) or escaped(text, m.start()) \
+                or not m.start() or text[m.start() - 1].isspace():
+            continue
+        if m.group(1).startswith("hspace"):
+            at = argument_space(text, m.end())
+            close = matching_brace(text, at) if text.startswith("{", at) else -1
+            if close < 0:
+                continue
+            length = text[at + 1:close - 1].strip()
+            size = re.fullmatch(r"([0-9]*\.?[0-9]+)\s*([a-z]{2})", length)
+            if length.startswith("-") or size and float(size.group(1)) * POINTS.get(
+                    size.group(2), 0) < 2:
+                continue
+        edits.append(m.start())
+    for pos in reversed(edits):
+        text = text[:pos] + " " + text[pos:]
+    if edits:
+        counter["word_spaces"] = counter.get("word_spaces", 0) + len(edits)
+    return text
+
+
 # Boxes Pandoc's reader (3.12) drops with all they hold, as commands it
 # doesn't know (measured): each with its arguments as LaTeX takes them, the
 # last mandatory one what the box holds. A table in \resizebox, which a
@@ -2030,6 +2072,7 @@ def repair_text(text, counter, math_macros=(), counters=()):
         text = drop_command(text, command, signature, counter, "titlesec")
     text = environment_arguments(text, counter)
     text = floatrow_boxes(text, counter)
+    text = word_spaces(text, counter, math_macros)
     # Floats whose captions the reader drops, before the counting marks
     # what numbers them.
     text = wrapped_floats(text, counter)

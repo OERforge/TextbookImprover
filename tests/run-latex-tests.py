@@ -2952,6 +2952,8 @@ A formula the next chapter numbers: \eqref{eq:energy}.
 A \colorbox{oiB!20}{tinted} word, a \textcolor{BrickRed}{brick red} one, and a formula
 in it: ${\color{BrickRed} z}$. A group in a formula's macro: $\grp{x} + 1$.
 Struts texmath doesn't know: \fbox{$\mathstrut$Ex} and $\vphantom{(}x\smash{y}\hphantom{z}$.
+Space between words: \fbox{Ex}\hspace{2mm}apart, Bee\quad Cee, Dee\hfill Eee, and a
+sliver in a name, \texttt{sex\_\hspace{0.3mm}male}, and less than none: Gee\hspace{-1pt}Hee.
 """,
     "ch_one/TeX/extra.tex": "\\begin{parts}\n\\item An extra part\n\\end{parts}\n",
     "ch_one/TeX/review.tex": "\\section{Review}\nThe review of chapter one.\n\n"
@@ -3345,6 +3347,10 @@ def case_customized(work):
          and len(re.findall(r'href="#US-Airports"[^>]*>1\.1\.1</a>', one)) == 2),
         ("a formula's macro is as the book defines it, so texmath reads it",
          lambda: "x\\hspace{1em}{} = 1</annotation>" in one),
+        ("a space between words a command sets is a space, a sliver in a name and less "
+         "than none not",
+         lambda: all(w in re.sub(r"\s+", " ", re.sub(r"<[^>]+>", "", one)) for w in (
+             "Ex apart", "Bee Cee", "Dee Eee", "sex_male", "GeeHee"))),
         ("a strut and a phantom of height alone are gone from a formula, one that was only "
          "a strut with it, \\hphantom is \\phantom, and \\smash what it holds",
          lambda: "mathstrut" not in one and re.search(r">\s*Ex\b", one)

@@ -779,6 +779,8 @@ LATEX_READ_CHANGES = (
     ("stacked_lines", "table cell's lines stacked in \\vtop read as lines"),
     ("minipage_breaks", "line break in a minipage read as \\newline"),
     ("multicolumn_edge", "\\multicolumn's edge spacing (@{...}) left out, so its table is read"),
+    ("word_spaces", "space between words a command sets (\\hspace, \\quad, \\hfill) kept as a "
+     "space, which the reader dropped, running the words together"),
     ("floatrow_boxes", "floatrow box read as the figure or table it holds, with its caption, "
      "a row of them as figures side by side"),
     ("environment_arguments", "environment of a package the reader doesn't know begun without "

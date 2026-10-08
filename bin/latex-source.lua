@@ -265,8 +265,11 @@ end
 -- body one row of empty cells, which no table had (a longtable whose
 -- rows are all head, as Pandoc's writer gives a table of one row).
 -- The reader gives a longtable's caption to every table in its cells too,
--- its caption state not cleared for them: an inner table whose caption is
--- its container's has none of its own.
+-- its caption state not cleared for them, and a table float's caption and
+-- label: an inner table whose caption is its container's has none of its
+-- own, nor its container's id, which a reference to the table means (in a
+-- PDF from the pages, the inner table is a tabular with no id, and the
+-- reference went nowhere: GIAM's rules of inference).
 local function clear_inherited(tbl)
   local own = pandoc.utils.stringify(tbl.caption.long)
   if own == '' then return end
@@ -275,6 +278,9 @@ local function clear_inherited(tbl)
       Table = function(inner)
         if pandoc.utils.stringify(inner.caption.long) == own then
           inner.caption = pandoc.Caption()
+          if inner.identifier == tbl.identifier then
+            inner.identifier = ''
+          end
           return inner
         end
       end

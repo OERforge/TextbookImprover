@@ -804,14 +804,16 @@ LATEX_READ_CHANGES = (
     ("titlesec", "titlesec setting for how a heading looks left out"),
     ("colors", "color the book defines written as CSS"),
     ("nameref", "\\nameref read as a link to the label, its text the section's title"),
+    ("split_floats", "float holding two captions of its own (two figures side by side) "
+     "read as a float for each, as LaTeX numbers them"),
     ("subfigures", "\\subfigure or \\subfloat read as a subfigure environment, so its "
      "label and caption are kept"),
     ("wrapped_floats", "wrapfigure or wraptable read as a figure or a table, so its "
      "caption is kept"),
     ("captionof", "\\captionof read as the caption of a figure or a table around what "
      "it captions, so it's kept"),
-    ("image_tables", "table float holding an image and no table read as a figure, "
-     "numbered as a table, so its caption is kept"),
+    ("table_floats", "table float holding no table, two, or subtables read as a figure "
+     "numbered as a table, so its caption is kept, once, and each subtable's"),
     ("named_refs", "\\autoref or cleveref's reference read with the name LaTeX prints "
      "before its number (Figure 1.2, figs. 1.1 to 1.3)"),
     ("bibliography", "bibliography entry written out from BibTeX's .bbl, in the book's "
@@ -821,6 +823,8 @@ LATEX_READ_CHANGES = (
     ("citations", "citation written as the label LaTeX prints, linked to its entry"),
     ("full_citations", "biblatex full citation (\\fullcite, \\footfullcite) written out as "
      "its entry, from BibTeX's .bbl in plain's style, where the reader dropped it"),
+    ("cite_macro_calls", "call of a macro of the book's own that cites written out, so its "
+     "citation is among the book's for BibTeX"),
     ("label_keys", "label or reference with whitespace in its key written without"),
     ("counter_keys", "label or reference whose key LaTeX makes of its counters "
      "(\\arabic{chapter}) written as LaTeX makes it"),
@@ -897,6 +901,8 @@ def read_latex_to_json(base, masters, env, work, titles=None):
                 cites = '"t":"Cite"' in fh.read().replace(" ", "")
             if cites and latexsource.cite_with_citeproc(out, citations, env, prep["copy"]):
                 counts["citeproc"] = counts.get("citeproc", 0) + 1
+                if citations.get("said"):
+                    say(citations["said"])
         with open(out, encoding="utf-8") as fh:
             doc = json.load(fh)
         if citations.get("found") is not None:
@@ -914,6 +920,7 @@ def read_latex_to_json(base, masters, env, work, titles=None):
             doc["blocks"], latexsource.color_values(prep["colors"], sets), sets)
         if recolored:
             counts["colors"] = counts.get("colors", 0) + recolored
+        latexsource.bibliography_heading(doc["blocks"])
         keyed = latexsource.normalize_keys(doc["blocks"])
         if keyed:
             counts["label_keys"] = counts.get("label_keys", 0) + keyed
@@ -968,16 +975,20 @@ def read_latex_to_json(base, masters, env, work, titles=None):
                 # by design; one continuing a chapter is worth saying.
                 if raised and not (chapter_level and raised == chapter_level - 1):
                     counts["headings_raised"] = counts.get("headings_raised", 0) + 1
-                # A page with no heading at all (OpenIntro's copyright page,
-                # whose \chapter*{} holds nothing): titled as project.yaml's
-                # contents say, or by its file's name written as words, which
-                # is its title and its H1 everywhere, where the HTML's had been
-                # the bare name.
-                if not latexsource.has_heading(blocks):
-                    title = (titles or {}).get(stem) or stem_title(stem)
-                    page_meta["title"] = {"t": "MetaInlines",
-                                          "c": latexsource.tag_inlines(title)}
-                    untitled.append((stem, title, stem in (titles or {})))
+            # A page with no one heading at its top to be its title, none at
+            # all (OpenIntro's copyright page, whose \chapter*{} holds
+            # nothing) or several (an article's sections, the calculus
+            # notes' 22): titled as project.yaml's contents say, by the PDF
+            # title a document gives hyperref (pdftitle), or by its file's
+            # name written as words, where the HTML's had been the bare name.
+            if "title" not in page_meta and not latexsource.has_title_heading(blocks):
+                pdftitle = latexsource.pdf_title(prep["preamble"]) if stem == master_stem \
+                    else None
+                title = (titles or {}).get(stem) or pdftitle or stem_title(stem)
+                page_meta["title"] = {"t": "MetaInlines", "c": latexsource.tag_inlines(title)}
+                untitled.append((stem, title, "declared" if stem in (titles or {}) else
+                                 "pdftitle" if pdftitle else "name",
+                                 latexsource.has_heading(blocks)))
             with open(os.path.join(base, stem + ".json"), "w",
                       encoding="utf-8") as fh:
                 json.dump({"pandoc-api-version": doc["pandoc-api-version"],
@@ -1031,17 +1042,24 @@ def read_latex_to_json(base, masters, env, work, titles=None):
                f", {whole} document(s) a page each and the others a page for each "
                "file they \\include")
             + ".")
-    guessed = [(s, t) for s, t, declared in untitled if not declared]
-    if guessed:
-        say(f"{len(guessed)} page(s) have no heading of their own, so each is titled by "
-            "its file's name, as words: " + ", ".join(
-                f"{s} as \"{t}\"" for s, t in guessed[:5])
-            + (", ..." if len(guessed) > 5 else "")
-            + ". A heading in the LaTeX, or a title for the page in project.yaml's "
-            "contents, says it better.")
-    if len(guessed) < len(untitled):
-        say(f"{len(untitled) - len(guessed)} page(s) with no heading of their own titled "
-            "as project.yaml's contents say.")
+    for headed, what in ((False, "no heading of their own"),
+                         (True, "no one heading at their top level to be their title, "
+                                "but several")):
+        guessed = [(s, t) for s, t, source, h in untitled if source == "name" and h == headed]
+        if guessed:
+            say(f"{len(guessed)} page(s) have {what}, so each is titled by its file's name, "
+                "as words: " + ", ".join(f"{s} as \"{t}\"" for s, t in guessed[:5])
+                + (", ..." if len(guessed) > 5 else "")
+                + ". A heading or a \\title in the LaTeX, or a title for the page in "
+                "project.yaml's contents, says it better.")
+    for source, how in (("pdftitle", "by the PDF title the document gives hyperref "
+                                     "(pdftitle)"),
+                        ("declared", "as project.yaml's contents say")):
+        titled = [(s, t) for s, t, found, _ in untitled if found == source]
+        if titled:
+            say(f"{len(titled)} page(s) have no one heading to be their title, so each is "
+                f"titled {how}: " + ", ".join(f"{s} as \"{t}\"" for s, t in titled[:5])
+                + (", ..." if len(titled) > 5 else "") + ".")
     if counts.get("drawings"):
         say(f"{counts.get('drawings_made', 0)} of {counts['drawings']} "
             "drawing(s) made images by LaTeX, in "

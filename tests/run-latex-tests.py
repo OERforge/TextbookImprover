@@ -2366,9 +2366,17 @@ def case_pieces(work):
     wrapped = latexsource.wrapped_floats(
         "\\begin{wrapfigure}[10]{r}[2pt]{0.4\\textwidth}X\\caption{W}\\end{wrapfigure} "
         "\\begin{wraptable}{l}{3cm}T\\end{wraptable}", {})
-    image_tables = latexsource.image_tables(
+    image_tables = latexsource.table_floats(
         "\\begin{table}[h]\\includegraphics{t}\\caption{T}\\end{table} \\begin{table}"
         "\\caption{U}\\input{u}\\end{table}", {})
+    # Two tables, subtables, and a table in a table's cell, which is one.
+    table_shapes = latexsource.table_floats(
+        "\\begin{table}\\begin{tabular}{l}a\\end{tabular}\\begin{tabular}{l}b\\end{tabular}"
+        "\\caption{Two}\\end{table}\n\\begin{table}\\begin{subtable}{2in}\\begin{tabular}{l}"
+        "c\\end{tabular}\\caption{S}\\end{subtable}\\caption{Sub}\\end{table}\n\\begin{table}"
+        "\\subfloat[L]{\\begin{tabular}{l}d\\end{tabular}}\\caption{F}\\end{table}\n"
+        "\\begin{table}\\begin{tabular}{l}\\begin{tabular}{l}e\\end{tabular}\\end{tabular}"
+        "\\caption{Nested}\\end{table}\n", {})
     # The counting on its own: the appendix package's appendices lettered
     # and given back, a subfigure by the obsolete subfigure package's
     # 1.1(a), a theorem retitled.
@@ -2414,7 +2422,10 @@ def case_pieces(work):
         name(own_names, "autoref", ("section", None, None)),
         name(own_names, "autoref", ("thm", None, "thm")),
         name({}, "autoref", ("section", "second", None)),
-        name({}, "autoref", ("subsection", "deep", None)), name({}, "autoref", ("lem", None, "thm"))]
+        name({}, "autoref", ("subsection", "deep", None)), name({}, "autoref", ("lem", None, "thm")),
+        # A theorem sharing another's counter is named by its own environment.
+        name({"autoref": {"lemma": "Lemma"}}, "autoref", ("lemma", None, "theorem")),
+        name({}, "autoref", ("lemma", None, "theorem"))]
     commands = latexsource.reference_commands(
         "\\cref{a, b} \\crefrange{c}{d} $\\cref{e}$ % \\cref{f}\n", {})
     # xcolor's svgnames and x11names in a mix, the last set loaded winning
@@ -2436,11 +2447,70 @@ def case_pieces(work):
                    "\\newtheorem{thm}{Theorem}[section]\n\\newtheorem{lem}[thm]{Lemma}\n"
                    "\\newtheorem*{rem}{Remark}\n\\begin{document}\n\\section{A}\n"
                    "\\end{document}\n")], "\\documentclass{article}\n\\begin{document}\n")
+    # natbib's punctuation as natbib.sty sets it: options in its order of
+    # declaring them, the preset only when nothing else set any, \\bibpunct.
+    nat_styles = [latexsource.citation_style(code, bst) for code, bst in (
+        ("\\usepackage{natbib}", "plainnat"), ("\\usepackage[round]{natbib}", "plainnat"),
+        ("\\usepackage{natbib}", "econ"), ("\\usepackage[super]{natbib}", "plainnat"),
+        ("\\usepackage[authoryear]{natbib}", "plainnat"),
+        ("\\usepackage{natbib}\n\\bibpunct[; ]{(}{)}{,}{a}{}{,}", "plainnat"),
+        ("\\usepackage{natbib}\n\\setcitestyle{square,citesep={/}}", "plainnat"),
+        ("\\usepackage{natbib}\n\\citestyle{nature}", "plainnat"), ("", "plain"),
+        ("\\usepackage[round,super]{natbib}", "plainnat"))]
+    nat_shapes = [(n["open"], n["close"], n["sep"], n["mode"], n["aysep"], n.get("natbib"))
+                  for n in nat_styles]
+    found_nat = {"a": {"number": "1", "short": "Knuth", "year": "1984", "extra": "", "long": ""},
+                 "b": {"number": "2", "short": "Lamport", "year": "1994", "extra": "",
+                       "long": ""}}
+    nat_super = "".join(w for w, _, _ in latexsource.citation_pieces(
+        "citep", "", ["see", "p. 3"], ["a", "b"], found_nat, nat_styles[3]))
+    nat_super_marked = [sup for _, _, sup in latexsource.citation_pieces(
+        "citep", "", [], ["a", "b"], found_nat, nat_styles[3])]
+    nat_labels = [latexsource.natbib_label(label) for label in (
+        "Knuth(1986{\\natexlab{a}})", "\\protect\\citeauthoryear{Knuth and Lamport}{Knuth"
+        " et~al.}{1990}", "\\protect\\citeauthoryear{Jones}{1991b}",
+        "\\protect\\citename{Smith, }1992", "Doe, 1993", "Knu84")]
+    # A table float with no table the reader counts ends its \\caption*.
+    def float_mark(op):
+        return {"t": "Para", "c": [{"t": "Link", "c": [["", [], []], [], [
+            "#%s:%s" % (latexsource.COUNTER_MARK, op), ""]]}]}
+    float_blocks = [float_mark("unnumbered"), float_mark("floatend"),
+                    {"t": "Figure", "c": [["fig:after", [], []], [None, [{"t": "Plain", "c": [
+                        {"t": "Str", "c": "After"}]}]], []]},
+                    {"t": "Para", "c": [{"t": "Link", "c": [
+                        ["", [], [["reference-type", "ref"], ["reference", "fig:after"]]],
+                        [{"t": "Str", "c": "[fig:after]"}], ["#fig:after", ""]]}]}]
+    latexsource.resolve_counters(float_blocks, latexsource.book_counters(
+        [("m.tex", "\\documentclass{article}\n\\begin{document}\n\\end{document}\n")],
+        "\\documentclass{article}\n\\begin{document}\n"))
+    float_after = float_blocks[-1]["c"][0]["c"][1]
     commented_alt, _ = texremediate.remediate_file(
         "/nonexistent", "a.tex", "\\fig[A first. % to reword\n\nA second.]{sq}\n", {}, [],
         macros={"fig": {"file": "#2", "arguments": 2, "default": "", "alt": 1,
                         "keyed": False, "options": None}})
     return [
+        ("natbib's punctuation is natbib.sty's: plainnat's preset, its own defaults for a "
+         "style it has none for or once an option has set any, \\bibpunct, \\setcitestyle, "
+         "and \\citestyle, its options in the order it declares them; LaTeX's own \\cite "
+         "without natbib",
+         lambda: nat_shapes == [
+             ("[", "]", ",", "a", ",", True), ("(", ")", ";", "a", ",", True),
+             ("(", ")", ";", "a", ",", True), ("", "", ";", "s", ",", True),
+             ("[", "]", ",", "a", ",", True), ("(", ")", ",", "a", "", True),
+             ("[", "]", "/", "a", ",", True), ("", "", ",", "s", "", True),
+             ("[", "]", ",", "n", "", False), ("(", ")", ";", "s", ",", True)]
+         and nat_styles[5]["cmt"] == "; "),
+        ("natbib's superscripts: the numbers raised, a note before and after them in the "
+         "line",
+         lambda: nat_super == "see 1;2 p. 3" and nat_super_marked == [True, True, True]),
+        ("natbib's labels: Name(Year) with \\natexlab's letter, \\citeauthoryear's three "
+         "and two arguments, \\citename, apalike's, and alpha's, which isn't author and year",
+         lambda: nat_labels == [("Knuth", "1986", "a", ""),
+                                ("Knuth et~al.", "1990", "", "Knuth and Lamport"),
+                                ("Jones", "1991", "b", ""), ("Smith", "1992", "", ""),
+                                ("Doe", "1993", "", ""), None]),
+        ("a table float's end ends its \\caption*, so the next float is numbered",
+         lambda: float_after == [{"t": "Str", "c": "1"}]),
         ("the cut gives a part or a chapter the master sets itself a page of its own, with "
          "the role before it, one in appendices too, skipping a file's name, the master's "
          "text after an \\include going on with that file's page",
@@ -2473,6 +2543,12 @@ def case_pieces(work):
              "\\begin{figure}[h]\\hyperref[TEXTBOOKIMPROVERCOUNTER:tablefloat]{}"
              "\\includegraphics{t}\\caption{T}\\end{figure}")
          and "\\begin{table}\\caption{U}\\input{u}\\end{table}" in image_tables),
+        ("so is one holding two tables or subtables, a subtable a subfigure; one holding a "
+         "table in a table's cell is left",
+         lambda: table_shapes.count("\\begin{figure}\\hyperref[TEXTBOOKIMPROVERCOUNTER:"
+                                    "tablefloat]{}") == 3
+         and "\\begin{subfigure}{2in}" in table_shapes and "subtable" not in table_shapes
+         and "\\begin{table}\\begin{tabular}{l}\\begin{tabular}" in table_shapes),
         ("the counting letters the appendix package's appendices and gives the numbers back "
          "after them, numbers a subfigure the obsolete subfigure package's way, and gives "
          "a theorem's title its number",
@@ -2481,9 +2557,11 @@ def case_pieces(work):
          lambda: subfloat == "\\begin{subfigure}{\\linewidth}X\\label{a}\\caption{Cap}"
                              "\\end{subfigure}"),
         ("a reference command's name is cleveref's or hyperref's, the book's own and "
-         "cleveref's options first, a name hyperref falls back to too, and an appendix's",
+         "cleveref's options first, a name hyperref falls back to too, and an appendix's; "
+         "a theorem sharing another's counter has its own environment's name",
          lambda: names_given == ["Figure", "thm.", "Thm.", "Lemma", "Lemmata", "section",
-                                 "eqs.", "Section", "Thm", "Appendix", "subsection", None]),
+                                 "eqs.", "Section", "Thm", "Appendix", "subsection", None,
+                                 "Lemma", None]),
         ("a mix of a color of xcolor's svgnames or x11names is read, xcolor's own files "
          "giving the values, the last set the book loads winning a name two sets have",
          lambda: set_mixes == [(0.5, 0.5, 0.75), (0.53, 0.73, 1.0), (0.5, 0.468, 0.43)]
@@ -3801,6 +3879,14 @@ REFS_BIB = r"""@book{knuth,
   year = 2000,
 }
 """
+NAT_BIB = r"""@book{k84, author = "Donald E. Knuth", title = "The TeXbook", publisher = "AW", year = 1984}
+@book{k86, author = "Donald E. Knuth", title = "TeX: The Program", publisher = "AW", year = 1986}
+@book{k86b, author = "Donald E. Knuth", title = "METAFONT: The Program", publisher = "AW", year = 1986}
+@book{lamport, author = "Leslie Lamport", title = "LaTeX", publisher = "AW", year = 1994,
+  doi = "10.1000/xyz123"}
+@book{gms, author = "Michel Goossens and Frank Mittelbach and Alexander Samarin",
+  title = "The LaTeX Companion", publisher = "AW", year = 1994}
+"""
 BIB_FILES = {
     # BibTeX's plain style, a citation a macro of the book's own makes.
     "plain/book.tex": "\\documentclass{book}\n\\newcommand{\\see}[1]{see \\cite{#1}}\n"
@@ -3826,13 +3912,53 @@ BIB_FILES = {
     "fullcite/book.tex": "\\documentclass{book}\n\\usepackage[style=authortitle,backend=bibtex]"
                          "{biblatex}\n\\usepackage{hyperref}\n\\newcommand{\\oiSite}[2]{\\href{"
                          "https://example.org/#1}{#2}}\n\\addbibresource{data.bib}\n"
+                         "\\newcommand{\\datasource}[1]{Data from \\fullcite{#1}.}\n"
                          "\\begin{document}\n\\chapter{One}\nHeights.\\footfullcite{heights} "
                          "Weights.\\footfullcite[see][5]{heights,survey} As \\fullcite{survey} "
-                         "has it.\n\\end{document}\n",
+                         "has it. \\datasource{heights}\n\\end{document}\n",
     "fullcite/data.bib": "@misc{heights,\n  note = {Source: \\oiSite{heights}{Heights Data Set}},"
                          "\n}\n@article{survey,\n  author = {Ada Lovelace},\n  title = {A Survey of "
                          "the \\oiSite{tug}{TeX Users Group}},\n  journal = {Journal},\n"
                          "  year = 2001,\n}\n",
+    # natbib's round option, which turns its preset for plainnat off, so
+    # its default semicolon separates; year suffixes; a key with no entry.
+    "natround/book.tex": "\\documentclass{book}\n\\usepackage[round]{natbib}\n\\begin{document}\n"
+                         "\\chapter{One}\nA: \\citep{k84,lamport}. B: \\citep{k86,k86b}. C: "
+                         "\\citet{k84,k86}. D: \\citep{nokey}. Z.\n\\bibliographystyle{plainnat}\n"
+                         "\\bibliography{refs}\n\\end{document}\n",
+    "natround/refs.bib": NAT_BIB,
+    # natbib's numbers, sorted and compressed.
+    "natnum/book.tex": "\\documentclass{book}\n\\usepackage[numbers,sort&compress]{natbib}\n"
+                       "\\begin{document}\n\\chapter{One}\nA: \\citep{k86,k84,k86b}. B: "
+                       "\\citet{k84}. Z.\n\\bibliographystyle{plainnat}\n\\bibliography{refs}\n"
+                       "\\end{document}\n",
+    "natnum/refs.bib": NAT_BIB,
+    # Labels natbib reads besides Name(Year): \citeauthoryear, \harvarditem.
+    "harvard/paper.tex": "\\documentclass{article}\n\\usepackage{natbib}\n\\begin{document}\n"
+                         "\\section{Intro}\nA: \\citep{k84,lam}. Z.\n\\begin{thebibliography}{}\n"
+                         "\\bibitem[\\protect\\citeauthoryear{Knuth}{Knuth}{1984}]{k84} D. Knuth. "
+                         "\\newblock The TeXbook.\n\\harvarditem[Lamport]{Lamport, L.}{1994}{lam} "
+                         "L. Lamport. \\newblock LaTeX.\n\\end{thebibliography}\n\\end{document}\n",
+    # A citation only a macro of the book's own makes, in unsrt's order.
+    "macro/book.tex": "\\documentclass{book}\n\\newcommand{\\see}[1]{see \\cite{#1}}\n"
+                      "\\begin{document}\n\\chapter{One}\nA: \\cite{k84}, \\see{lamport}, "
+                      "\\cite{gms}. Z.\n\\bibliographystyle{unsrt}\n\\bibliography{refs}\n"
+                      "\\end{document}\n",
+    "macro/refs.bib": NAT_BIB,
+    # LaTeX's own \\cite with the cite package, sorted and compressed.
+    "citepkg/book.tex": "\\documentclass{article}\n\\usepackage{cite}\n\\begin{document}\n"
+                        "\\section{One}\nA: \\cite{k86,k84,k86b}. Z.\n\\bibliographystyle{plain}\n"
+                        "\\bibliography{refs}\n\\end{document}\n",
+    "citepkg/refs.bib": NAT_BIB,
+    # A database that isn't there, which BibTeX says.
+    "nodb/book.tex": "\\documentclass{article}\n\\begin{document}\n\\section{One}\nA: "
+                     "\\cite{k84}. Z.\n\\bibliographystyle{plain}\n\\bibliography{missing}\n"
+                     "\\end{document}\n",
+    # A master in a folder of its own, its database a folder up.
+    "sub/src/topic.tex": "\\documentclass{article}\n\\begin{document}\n\\section{Topic}\nA: "
+                         "\\cite{k84}. Z.\n\\bibliographystyle{plain}\n\\bibliography{../refs}\n"
+                         "\\end{document}\n",
+    "sub/refs.bib": NAT_BIB,
     # A bibliography the paper writes itself, alpha's labels.
     "own/paper.tex": "\\documentclass{article}\n\\begin{document}\n\\section{Intro}\n"
                      "See \\cite{Str87} and \\cite{Knu84}.\n\\begin{thebibliography}{Str87}\n"
@@ -3852,9 +3978,11 @@ def case_bibliography(work):
         os.makedirs(os.path.join(work, os.path.dirname(name)), exist_ok=True)
         with open(os.path.join(work, name), "w", encoding="utf-8") as fh:
             fh.write(text)
-    for book in ("plain", "natbib", "biblatex", "own", "fullcite"):
+    for book in ("plain", "natbib", "biblatex", "own", "fullcite", "natround", "natnum",
+                 "harvard", "macro", "sub", "citepkg", "nodb"):
         with open(os.path.join(work, book, "conversion.yaml"), "w") as fh:
-            fh.write("targets:\n  html:\n    format: html\n")
+            fh.write(("defaults:\n  latex:\n    main: src/topic.tex\n" if book == "sub"
+                      else "") + "targets:\n  html:\n    format: html\n")
         done = convert(os.path.join(work, book))
         said[book] = done.stdout + done.stderr
 
@@ -3914,6 +4042,233 @@ def case_bibliography(work):
          and 'href="https://example.org/tug"' in page("fullcite", "book")
          and "full citation" in said["fullcite"]
          if bibtex else skip("no BibTeX to write out a full citation")),
+        ("and one a macro of the book's own makes, with no word of citeproc's style, which "
+         "made nothing",
+         lambda: has("fullcite", "book", "Data from Source: Heights Data Set.")
+         and "Pandoc's own style" not in said["fullcite"]
+         if bibtex else skip("no BibTeX to write out a full citation")),
+        ("natbib's options turn its style's preset off, as natbib does: round brackets with "
+         "its own semicolon; a year twice given its letter alone, an author cited again named "
+         "once, the letter in the entry too, a DOI linked, and a key with no entry ?, which "
+         "the run names",
+         lambda: has("natround", "book", "A: (Knuth, 1984; Lamport, 1994). B: (Knuth, "
+                     "1986a,b). C: Knuth (1984, 1986a). D: (?). Z.")
+         and has("natround", "book", "TeX: The Program. AW, 1986a.")
+         and 'href="https://doi.org/10.1000/xyz123"' in page("natround", "book")
+         and "have no entry in the bibliography" in said["natround"] and "nokey" in
+         said["natround"]
+         if bibtex else skip("no BibTeX to make a bibliography")),
+        ("natbib's numbers, sorted and compressed, \\citet's with the author",
+         lambda: has("natnum", "book", "A: [1\u20133]. B: Knuth [1]. Z.")
+         if bibtex else skip("no BibTeX to make a bibliography")),
+        ("natbib reads \\citeauthoryear's and \\harvarditem's labels, and its own "
+         "punctuation without a style's preset",
+         lambda: has("harvard", "paper", "A: (Knuth, 1984; Lamport, 1994). Z.")),
+        ("a citation only a macro of the book's own makes is BibTeX's too, in LaTeX's order",
+         lambda: has("macro", "book", "A: [1], see [2], [3]. Z.")
+         and has("macro", "book", "[2] Leslie Lamport.")
+         if bibtex else skip("no BibTeX to make a bibliography")),
+        ("LaTeX's own \\cite with the cite package is sorted and compressed",
+         lambda: has("citepkg", "book", "A: [1\u20133]. Z.")
+         if bibtex else skip("no BibTeX to make a bibliography")),
+        ("when BibTeX can't make the bibliography, the run says why",
+         lambda: "BibTeX couldn't make the bibliography" in said["nodb"]
+         and "missing" in said["nodb"]
+         if bibtex else skip("no BibTeX to make a bibliography")),
+        ("a master in a folder of its own finds its database a folder up, as LaTeX does "
+         "from the master's folder",
+         lambda: has("sub", "topic", "A: [1]. Z.")
+         and has("sub", "topic", "References [1] Donald E. Knuth.")
+         and "No BibTeX here" not in said["sub"]
+         if bibtex else skip("no BibTeX to make a bibliography")),
+    ]
+
+
+FLOAT_FILES = {
+    # Floats the reader can't take as LaTeX numbers them, the front and
+    # back matter, and theorems, each number checked against LaTeX's own
+    # build of it (2026-10-07).
+    "floats/book.tex": r"""\documentclass{book}
+\usepackage{graphicx}
+\usepackage{caption}
+\usepackage{subfig}
+\usepackage{amsthm}
+\usepackage{hyperref}
+\newtheorem{theorem}{Theorem}[chapter]
+\newtheorem{lemma}[theorem]{Lemma}
+\newcommand{\lemmaautorefname}{Lemma}
+\newtheorem*{remark}{Remark}
+\begin{document}
+\frontmatter
+\chapter{Preface}
+\section{How to read it}\label{sec:how}
+\mainmatter
+\include{floats}
+\backmatter
+\chapter{Afterword}
+\section{Last words}\label{sec:last}
+Back: \ref{sec:how}, \ref{sec:last}.
+\end{document}
+""",
+    "floats/floats.tex": r"""\chapter{Floats}\label{ch:floats}
+\section{Intro}
+Text before the image.
+\includegraphics{sq.png}
+\captionof{figure}{In a paragraph}\label{fig:para}
+
+\begin{table}
+\subfloat[Left]{\begin{tabular}{l}c\end{tabular}\label{tab:left}}
+\subfloat[Right]{\begin{tabular}{l}d\end{tabular}}
+\caption{Subtables}\label{tab:sub}
+\end{table}
+\begin{table}\centering\caption*{Key to symbols}\fbox{x: a variable}\end{table}
+\begin{figure}\centering
+\begin{minipage}{0.45\textwidth}\includegraphics{sq.png}\caption{Side A}\label{fig:sa}\end{minipage}\hfill
+\begin{minipage}{0.45\textwidth}\includegraphics{sq.png}\caption{Side B}\label{fig:sb}\end{minipage}
+\end{figure}
+\begin{table}\centering\begin{tabular}{l}e\end{tabular}\begin{tabular}{l}f\end{tabular}\caption{Two in one}\label{tab:two}\end{table}
+\begin{table}\centering\caption{Above one}\label{tab:aboveone}\begin{tabular}{l}g\end{tabular}
+\caption{Above two}\label{tab:abovetwo}\begin{tabular}{l}h\end{tabular}\end{table}
+\begin{figure}\centering\includegraphics{sq.png}\caption{Last}\label{fig:last}\end{figure}
+\begin{table}\begin{center}\begin{tabular}{c|c}
+Name & Form \\ \hline
+Modus ponens & \begin{tabular}{cl} & $A$ \\ \hline $\therefore$ & $B$ \\ \end{tabular} \\
+\end{tabular}\end{center}\caption{Rules}\label{tab:rules}\end{table}
+\begin{theorem}\label{th:a}A.\end{theorem}
+\begin{lemma}\label{lem:b}B.\end{lemma}
+\begin{remark}Unnumbered.\end{remark}
+Refs: \ref{fig:para}, \ref{tab:left}, \ref{tab:sub}, \ref{fig:sa}, \ref{fig:sb}, \ref{tab:two}, \ref{tab:aboveone}, \ref{tab:abovetwo}, \ref{fig:last}, \ref{tab:rules}; \autoref{lem:b}; \autoref{th:a}.
+""",
+    # memoir numbers to the section, and nothing in the front or back
+    # matter; amsbook numbers sections, figures, and equations without the
+    # chapter's number.
+    "memoir/book.tex": r"""\documentclass{memoir}
+\begin{document}
+\frontmatter
+\chapter{Pre}
+\section{PS}\label{ps}
+\mainmatter
+\chapter{One}
+\section{S}\label{s1}
+\subsection{SS}\label{ss1}
+\backmatter
+\chapter{Back}
+\section{BS}\label{bs}
+X: ps=\ref{ps} s1=\ref{s1} ss1=\ref{ss1} bs=\ref{bs}.
+\end{document}
+""",
+    "amsbook/book.tex": r"""\documentclass{amsbook}
+\begin{document}
+\chapter{One}
+\begin{equation}x\label{e1}\end{equation}
+\begin{figure}\caption{F}\label{f1}\end{figure}
+\chapter{Two}\label{c2}
+\section{S}\label{s2}
+\begin{equation}x\label{e2}\end{equation}
+\begin{figure}\caption{F}\label{f2}\end{figure}
+\appendix
+\chapter{App}\label{a1}
+\section{AS}\label{as1}
+X: e1=\ref{e1} f1=\ref{f1} c2=\ref{c2} s2=\ref{s2} e2=\ref{e2} f2=\ref{f2} a1=\ref{a1} as1=\ref{as1}.
+\end{document}
+""",
+    # A page's title: an article whose bibliography is a second heading, a
+    # document whose sections are all at the top with a PDF title for
+    # hyperref, and one without.
+    "article/paper.tex": r"""\documentclass{article}
+\begin{document}
+\section{Topic a}
+As \cite{k} says.
+\begin{thebibliography}{1}
+\bibitem{k} D. Knuth. \newblock The TeXbook. \newblock 1984.
+\end{thebibliography}
+\end{document}
+""",
+    "notes/class-notes.tex": r"""\documentclass{article}
+\usepackage{hyperref}
+\hypersetup{pdftitle={Calculus 2 Notes}}
+\begin{document}
+\section*{1.1 Integration by Parts}
+Words.
+\section*{1.2 Trigonometric Integrals}
+Words.
+\end{document}
+""",
+    "untitled/class-notes.tex": r"""\documentclass{article}
+\begin{document}
+\section*{1.1 Integration by Parts}
+Words.
+\section*{1.2 Trigonometric Integrals}
+Words.
+\end{document}
+""",
+}
+
+
+def case_floats(work):
+    """Floats, classes, and titles: a \\captionof in a paragraph after its
+    headings, subtables, a \\caption* table with no table, two figures in
+    one float, a table float of two tables, captions above their tables, a
+    table in a table's cell, the front and back matter's sections, a starred
+    theorem, \\autoref to a theorem sharing a counter; memoir's and amsbook's
+    numbers; and a page's title with no one heading to be it."""
+    said = {}
+    for name, text in FLOAT_FILES.items():
+        os.makedirs(os.path.join(work, os.path.dirname(name)), exist_ok=True)
+        with open(os.path.join(work, name), "w", encoding="utf-8") as fh:
+            fh.write(text)
+    png(os.path.join(work, "floats", "sq.png"), (90, 90, 90))
+    for book in ("floats", "memoir", "amsbook", "article", "notes", "untitled"):
+        with open(os.path.join(work, book, "conversion.yaml"), "w") as fh:
+            fh.write("targets:\n  html:\n    format: html\n")
+        done = convert(os.path.join(work, book))
+        said[book] = done.stdout + done.stderr
+
+    def page(book, name):
+        path = os.path.join(work, book, "html", name + ".html")
+        return read(work, book, "html", name + ".html") if os.path.exists(path) else ""
+
+    def text(book, name):
+        return " ".join(html_module.unescape(re.sub(r"<[^>]+>", " ", page(book, name).split(
+            "<body", 1)[-1])).split())
+
+    def title(book, name):
+        found = re.search(r"<title>(.*?)</title>", page(book, name))
+        return found.group(1) if found else None
+    return [
+        ("a \\captionof in a paragraph after its chapter's headings captions that paragraph, "
+         "the headings left out of the figure",
+         lambda: title("floats", "floats") == "Floats"
+         and not re.search(r"<figure[^>]*>\s*<h1", page("floats", "floats"))),
+        ("subtables, a \\caption* table with no table, two figures in one float, a table "
+         "float of two tables, captions above their tables, and a table in a table's cell "
+         "are numbered as LaTeX numbers them, each caption kept once",
+         lambda: "Refs: 1.1 , 1.1a , 1.1 , 1.2 , 1.3 , 1.2 , 1.3 , 1.4 , 1.4 , 1.5 ;"
+         in text("floats", "floats")
+         and text("floats", "floats").count("Subtables") == 1
+         and "Key to symbols" in text("floats", "floats")),
+        ("a table in a table's cell doesn't take its table's id",
+         lambda: page("floats", "floats").count('id="tab:rules"') == 1
+         and re.search(r'<table[^>]*\sid="tab:rules"', page("floats", "floats"))),
+        ("a theorem sharing another's counter is named by its own environment, and a "
+         "starred one has no number",
+         lambda: "; Lemma 1.2 ; Theorem 1.1 ." in text("floats", "floats")
+         and re.search(r"<strong>Remark</strong>", page("floats", "floats"))),
+        ("a section in the front and back matter is numbered as the book class numbers it",
+         lambda: "Back: 0.1 , 1.2 ." in text("floats", "book-2")),
+        ("memoir numbers to the section and nothing in the front or back matter, and "
+         "amsbook numbers without the chapter's number",
+         lambda: "X: ps= PS s1= 1.1 ss1= 1.1 bs= 1.1 ." in text("memoir", "book")
+         and "X: e1= 1 f1= 1 c2= 2 s2= 1 e2= 2 f2= 1 a1= A as1= 1 ." in text("amsbook", "book")),
+        ("an article's bibliography, a second heading, leaves its section the page's title",
+         lambda: title("article", "paper") == "Topic a"
+         and re.search(r'<h1[^>]*class="[^"]*bibliography', page("article", "paper"))),
+        ("a page whose headings are all at the top is titled by the PDF title the document "
+         "gives hyperref, or by its file's name as words, and the run says which",
+         lambda: title("notes", "class-notes") == "Calculus 2 Notes"
+         and title("untitled", "class-notes") == "Class Notes"
+         and "titled by the PDF title" in said["notes"]
+         and 'class-notes as "Class Notes"' in said["untitled"]),
     ]
 
 
@@ -3931,6 +4286,7 @@ CASES = [("a LaTeX book", case_book), ("two masters", case_masters),
          ("a book made its own way, as OpenIntro is", case_customized),
          ("a book in parts, numbered as LaTeX numbers it", case_parts),
          ("a book's citations and its bibliography", case_bibliography),
+         ("floats, classes, and titles as LaTeX has them", case_floats),
          ("a book set with packages tagging can't take", case_unsupported),
          ("a book too big for TeX", case_capacity)]
 

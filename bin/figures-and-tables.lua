@@ -2173,15 +2173,24 @@ local function set_page_role(doc, role)
   doc.meta['header-includes'] = list
 end
 
+-- The page's one H1, its title. A bibliography's heading, which a LaTeX
+-- source's page gets beside its own (an article's References), doesn't
+-- count, unless it's the only one: the bibliography's own page.
 local function title_header_index(doc)
-  local found, count = nil, 0
+  local found, count, listed, listings = nil, 0, nil, 0
   for index, block in ipairs(doc.blocks) do
     if block.t == 'Header' and block.level == 1 then
-      count = count + 1
-      if found == nil then found = index end
+      if block.classes:includes('bibliography') then
+        listings = listings + 1
+        if listed == nil then listed = index end
+      else
+        count = count + 1
+        if found == nil then found = index end
+      end
     end
   end
   if count == 1 then return found end
+  if count == 0 and listings == 1 then return listed end
   return nil
 end
 

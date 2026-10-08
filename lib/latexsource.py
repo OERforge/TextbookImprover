@@ -953,17 +953,138 @@ def wrapped_floats(text, counter):
 
 
 TABLE_FLOAT = re.compile(r"\\begin\s*\{(table\*?)\}")
-HOLDS_TABLE = re.compile(r"\\(?:begin\s*\{(?:tabular\*?|tabularx|tabulary|longtable|supertabular"
-                         r"|array|tabu|NiceTabular|tblr|longtblr)\}|input|include|import)"
-                         r"(?![A-Za-z@])")
+TABLE_EDGE = re.compile(r"\\(begin|end)\s*\{(tabular\*?|tabularx|tabulary|longtable|supertabular"
+                        r"|array|tabu|NiceTabular|tblr|longtblr)\}")
 HOLDS_IMAGE = re.compile(r"\\(?:includegraphics|begin\s*\{(?:picture|tikzpicture)\})")
+TABLE_INPUT = re.compile(r"\\(?:input|include|import|subimport)(?![A-Za-z@])")
+# What a float holds a part of with a caption of its own: subfig's \subfloat,
+# the subfigure package's \subfigure, and subcaption's environments.
+SUBFLOAT = re.compile(r"\\(?:subfloat|subfigure)(?![A-Za-z@])|\\begin\s*\{(subtable|subfigure)\}")
+SUBTABLE_EDGE = re.compile(r"\\(begin|end)\s*\{subtable\}")
 
 
-def image_tables(text, counter):
-    """A table float that holds an image and no table (a table set as a
-    picture of one), whose caption the reader drops, since it gives it only
-    to a table: written as a figure, with a mark that the counting numbers
-    it as the table it is."""
+FLOAT_BEGIN = re.compile(r"\\begin\s*\{(figure\*?|table\*?)\}")
+CAPTION_COMMAND = re.compile(r"\\caption(?![A-Za-z@])\s*\*?")
+MINIPAGE_EDGE = re.compile(r"\\(begin|end)\s*\{minipage\}")
+SUBFLOAT_ENVIRONMENT = re.compile(r"\\begin\s*\{(subfigure|subtable)\}")
+
+
+def split_floats(text, counter):
+    """A figure or table float holding two captions or more of its own (two
+    figures side by side, each in a minipage with its caption), which LaTeX
+    numbers apart and the reader makes one float of, the last caption's
+    and label's: each caption's minipage written as a float of the
+    float's kind, or, with no minipage, the float cut after each caption
+    and the label after it. A subfigure's or a subtable's caption is the
+    float's part's, not its own."""
+    spans = skip_spans(text)
+    edits = []
+    for m in FLOAT_BEGIN.finditer(text):
+        if in_spans(m.start(), spans):
+            continue
+        kind = m.group(1)
+        end = environment_end(text, kind, m.start())
+        close = re.compile(r"\\end\s*\{" + re.escape(kind) + r"\}\Z").search(
+            text, m.end(), end) if end > 0 else None
+        if not close:
+            continue
+        # Its parts' spans: subcaption's environments, and \subfloat's and
+        # \subfigure's arguments.
+        parts = []
+        for s in SUBFLOAT_ENVIRONMENT.finditer(text, m.end(), close.start()):
+            stop = environment_end(text, s.group(1), s.start())
+            if stop > 0:
+                parts.append((s.start(), stop))
+        for s in SUBFIGURE_COMMAND.finditer(text, m.end(), close.start()):
+            parts.append((s.start(), _arguments_span(text, s.end())))
+        skip = sorted(spans + parts)
+        captions = [c for c in CAPTION_COMMAND.finditer(text, m.end(), close.start())
+                    if not in_spans(c.start(), skip)]
+        if len(captions) < 2:
+            continue
+        # Each caption's innermost minipage in the float, if any.
+        stack, holders = [], {}
+        events = sorted([(e.start(), e) for e in MINIPAGE_EDGE.finditer(text, m.end(),
+                                                                      close.start())
+                         if not in_spans(e.start(), spans)]
+                        + [(c.start(), c) for c in captions], key=lambda e: e[0])
+        for _, e in events:
+            if e.re is MINIPAGE_EDGE:
+                if e.group(1) == "begin":
+                    stack.append(e)
+                elif stack:
+                    stack.pop()
+            else:
+                holders[e.start()] = stack[-1] if stack else None
+        boxes = [holders[c.start()] for c in captions]
+        if all(boxes) and len({b.start() for b in boxes}) == len(boxes):
+            at = argument_space(text, m.end())
+            bracket = closing_bracket(text, at) if text.startswith("[", at) else -1
+            mine = [(m.start(), bracket + 1 if bracket > 0 else m.end(), ""),
+                    (close.start(), close.end(), "")]
+            for box in boxes:
+                stop = environment_end(text, "minipage", box.start())
+                inner = re.compile(r"\\end\s*\{minipage\}\Z").search(text, box.end(), stop) \
+                    if stop > 0 else None
+                # \begin{minipage}[pos][height][inner]{width}
+                pos = box.end()
+                for _ in range(3):
+                    at = argument_space(text, pos)
+                    bracket = closing_bracket(text, at) if text.startswith("[", at) else -1
+                    if bracket < 0:
+                        break
+                    pos = bracket + 1
+                at = argument_space(text, pos)
+                width = matching_brace(text, at) if text.startswith("{", at) else -1
+                if not inner or width < 0:
+                    break
+                mine += [(box.start(), width, "\\begin{%s}" % kind),
+                         (inner.start(), stop, "\\end{%s}" % kind)]
+            else:
+                edits += mine
+                counter["split_floats"] = counter.get("split_floats", 0) + 1
+        elif not any(boxes):
+            # A caption above what it captions, as a table's often is, when
+            # nothing to caption comes before the first.
+            above = not (TABLE_EDGE.search(text, m.end(), captions[0].start())
+                         or HOLDS_IMAGE.search(text, m.end(), captions[0].start()))
+            for at, c in enumerate(captions[:-1]):
+                if above:
+                    stop = captions[at + 1].start()
+                else:
+                    stop = _arguments_span(text, c.end())
+                    label = re.compile(r"\s*\\label\s*\{[^{}]*\}").match(text, stop)
+                    stop = label.end() if label else stop
+                edits.append((stop, stop, "\\end{%s}\\begin{%s}" % (kind, kind)))
+            counter["split_floats"] = counter.get("split_floats", 0) + 1
+    for start, stop, replacement in sorted(edits, reverse=True):
+        text = text[:start] + replacement + text[stop:]
+    return text
+
+
+def top_tables(body, spans=()):
+    """How many tables body holds, a table in another's cell not counted."""
+    depth = count = 0
+    for e in TABLE_EDGE.finditer(body):
+        if in_spans(e.start(), spans):
+            continue
+        if e.group(1) == "begin":
+            count += depth == 0
+            depth += 1
+        else:
+            depth = max(depth - 1, 0)
+    return count
+
+
+def table_floats(text, counter):
+    """A table float with a caption that isn't one table to the reader: one
+    holding no table (an image of one, or a box), whose caption the reader
+    drops, since it gives it only to a table; one holding two tables, each
+    of which it gives the caption and the label; and one holding subtables
+    (\\subfloat, subcaption's subtable), whose captions it gives way to the
+    float's. Written as a figure, a subtable as a subfigure, with a mark
+    that the counting numbers it as the table it is, and its subtables by
+    letter (1.2a)."""
     spans = skip_spans(text)
     edits = []
     for m in TABLE_FLOAT.finditer(text):
@@ -972,9 +1093,13 @@ def image_tables(text, counter):
         end = environment_end(text, m.group(1), m.start())
         if end < 0:
             continue
+        body_spans = [(s - m.end(), e - m.end()) for s, e in spans if m.end() <= s < end]
         body = text[m.end():end]
-        if HOLDS_TABLE.search(body) or not HOLDS_IMAGE.search(body) \
-                or not re.search(r"\\caption(?![A-Za-z@])", body):
+        if not re.search(r"\\caption(?![A-Za-z@])", body):
+            continue
+        tables = top_tables(body, body_spans)
+        subfloats = any(not in_spans(s.start(), body_spans) for s in SUBFLOAT.finditer(body))
+        if tables == 1 and not subfloats or tables == 0 and TABLE_INPUT.search(body):
             continue
         close = re.compile(r"\\end\s*\{" + re.escape(m.group(1)) + r"\}\Z").search(
             text, m.end(), end)
@@ -985,39 +1110,82 @@ def image_tables(text, counter):
         bracket = closing_bracket(text, at) if text.startswith("[", at) else -1
         after = bracket + 1 if bracket > 0 else m.end()
         edits.append((close.start(), end, "\\end{figure}"))
+        for s in SUBTABLE_EDGE.finditer(text, m.end(), close.start()):
+            if not in_spans(s.start(), spans):
+                edits.append((s.start(), s.end(), "\\%s{subfigure}" % s.group(1)))
         edits.append((after, after, counter_mark("tablefloat")))
         edits.append((m.start(), m.end(), "\\begin{figure}"))
+        counter["table_floats"] = counter.get("table_floats", 0) + 1
     for start, stop, replacement in sorted(edits, reverse=True):
         text = text[:start] + replacement + text[stop:]
-    if edits:
-        counter["image_tables"] = counter.get("image_tables", 0) + len(edits) // 3
     return text
 
 
 CAPTIONOF = re.compile(r"\\captionof\s*(\*?)\s*\{\s*(figure|table)\s*\}")
 ANY_ENVIRONMENT_EDGE = re.compile(r"\\(begin|end)\s*\{\s*([A-Za-z@*]+)\s*\}")
 PARAGRAPH_BREAK = re.compile(r"\n[ \t]*\n")
+# What a paragraph doesn't run past: a heading, \par, an \item.
+PARAGRAPH_EDGE = re.compile(r"\\(?:part|chapter|section|subsection|subsubsection|paragraph"
+                            r"|subparagraph)\*?(?![A-Za-z@*])|\\par(?![A-Za-z@])"
+                            r"|\\item(?![A-Za-z@])")
+# The environments whose whole a \captionof in them captions.
+CAPTION_BOXES = ("minipage", "center", "flushleft", "flushright", "varwidth",
+                 "boxedminipage", "tcolorbox", "mdframed", "framed")
 
 
 def captionof_floats(text, counter):
     """\\captionof{figure}{...}, a caption outside a float, which the reader
     drops with its text and label (a reference to it reads [key]):
-    \\caption, and what it captions, the environment it's in (a minipage, a
-    center) or else its paragraph, set in a figure or a table, as LaTeX
-    numbers and labels it."""
+    \\caption, and what it captions, the box it's in (a minipage, a center)
+    or else its paragraph, set in a figure or a table, as LaTeX numbers and
+    labels it. A paragraph begins after a blank line, an environment's
+    edge, \\par, an \\item, or a heading and the label after it, and ends at
+    the next of them."""
     spans = skip_spans(text)
     found = [m for m in CAPTIONOF.finditer(text) if not in_spans(m.start(), spans)]
     if not found:
         return text
-    edges = [e for e in ANY_ENVIRONMENT_EDGE.finditer(text) if not in_spans(e.start(), spans)]
+    # One in a definition is made where the macro is used.
+    skip = sorted(spans + [(d[0], d[1]) for d in definitions_in(text, spans)])
+    found = [m for m in found if not in_spans(m.start(), skip)]
+    if not found:
+        return text
+    edges = [e for e in ANY_ENVIRONMENT_EDGE.finditer(text) if not in_spans(e.start(), skip)]
+
+    def options_end(pos):
+        """Past the [options] at pos, if any."""
+        at = argument_space(text, pos)
+        while text.startswith("[", at):
+            close = closing_bracket(text, at)
+            if close < 0:
+                break
+            pos, at = close + 1, argument_space(text, close + 1)
+        return pos
+    bounds = [(e.start(), options_end(e.end()) if e.group(1) == "begin" else e.end())
+              for e in edges]
+    for e in PARAGRAPH_EDGE.finditer(text):
+        if in_spans(e.start(), skip) or escaped(text, e.start()):
+            continue
+        name = re.match(r"\\([A-Za-z]+)", e.group(0)).group(1)
+        if name == "par":
+            end = e.end()
+        elif name == "item":
+            end = options_end(e.end())
+        else:
+            end = _arguments_span(text, e.end())
+            label = re.compile(r"\s*\\label\s*\{[^{}]*\}").match(text, end)
+            end = label.end() if label else end
+        bounds.append((e.start(), end))
 
     def paragraph(m):
-        """The paragraph m is in, to the first environment after it."""
+        """The paragraph m is in."""
         breaks = [b.end() for b in PARAGRAPH_BREAK.finditer(text, 0, m.start())]
+        start = max([breaks[-1] if breaks else 0]
+                    + [stop for begin, stop in bounds if stop <= m.start()])
         after = PARAGRAPH_BREAK.search(text, m.end())
-        end = after.start() if after else len(text)
-        edge = next((e.start() for e in edges if e.start() >= m.end()), end)
-        return (breaks[-1] if breaks else 0), min(end, edge)
+        end = min([after.start() if after else len(text)]
+                  + [begin for begin, _ in bounds if begin >= m.end()])
+        return start, end
 
     def own(m):
         """The caption alone, with a \\label after it."""
@@ -1046,7 +1214,7 @@ def captionof_floats(text, counter):
             # In a float already: its caption.
             edits.append((m.start(), m.end(), 1, "\\caption" + m.group(1)))
             continue
-        if env is None or env.group(2) == "document":
+        if env is None or env.group(2) not in CAPTION_BOXES:
             place = paragraph(m)
         else:
             end = environment_end(text, env.group(2), env.start())
@@ -1151,10 +1319,14 @@ def _lower_first(words):
 def reference_name(names, command, kind, plural=False):
     """The name a reference command prints before a label's number, or
     None: kind is (what the label is of, whether it's in the appendices,
-    the counter a theorem counts with), names book_counters's ref_names."""
-    what, appendix, counter = kind
+    the counter a theorem counts with), names book_counters's ref_names.
+    hyperref names a theorem by its environment, not the counter it
+    shares (\\newtheorem{lemma}[theorem]{Lemma}: Lemma 2, by
+    \\lemmaautorefname, measured with LaTeX 2026-06-01), and one with no
+    name of its own by none."""
+    what, appendix, _ = kind
     if command == "autoref":
-        kind_name = counter or what
+        kind_name = what
         if appendix in ("top", "second"):
             kind_name = "appendix"
         name = names.get("autoref", {}).get(kind_name)
@@ -1532,7 +1704,8 @@ def repair_text(text, counter, math_macros=(), counters=()):
     # what numbers them.
     text = wrapped_floats(text, counter)
     text = captionof_floats(text, counter)
-    text = image_tables(text, counter)
+    text = split_floats(text, counter)
+    text = table_floats(text, counter)
     text = reference_commands(text, counter)
     text = unwrap_boxes(text, counter, math_macros)
     text = group_commands(text, counter, math_macros)
@@ -2855,6 +3028,37 @@ def expand_include_macros(texts, files, counter):
         texts[name] = text
 
 
+def cite_macro(body, arguments, default):
+    """The macro, if its body cites (\\cite, natbib's commands, biblatex's
+    \\fullcite): a dict of arguments, default, and body. Else None."""
+    if "##" in body:
+        return None
+    skip = skip_spans(body)
+    if any(not in_spans(m.start(), skip) for pattern in (CITE_COMMAND, FULLCITE)
+           for m in pattern.finditer(body)):
+        return {"arguments": arguments, "default": default, "body": body}
+    return None
+
+
+def expand_cite_macros(texts, files, counter):
+    """Each call of one of the book's macros that cites
+    (\\newcommand{\\see}[1]{see \\cite{#1}}), outside any definition,
+    replaced in the reading copy by the macro's body with its arguments, as
+    Pandoc expands it, so its citation is among the book's for BibTeX, in
+    LaTeX's order, and written out as the others are. texts: {name: text},
+    changed in place."""
+    macros = macro_walk([(name, texts[name]) for name in files], cite_macro)[0]
+    if not macros:
+        return
+    for name in files:
+        text = texts[name]
+        skip = sorted(skip_spans(text) + [(d[0], d[1]) for d in definitions_in(text, ())])
+        for start, end, macro_name, args in reversed(macro_calls(text, macros, skip)):
+            text = text[:start] + with_arguments(macros[macro_name]["body"], args) + text[end:]
+            counter["cite_macro_calls"] = counter.get("cite_macro_calls", 0) + 1
+        texts[name] = text
+
+
 SIMPLE_VALUE = re.compile(r"[^\\#{}%]*")
 
 
@@ -3042,6 +3246,34 @@ def has_heading(blocks):
     return bool(_headers(blocks))
 
 
+def has_title_heading(blocks):
+    """Whether a page has one heading at its top level to be its title, as
+    the filter takes one: a bibliography's heading beside another doesn't
+    count, unless it's the only one."""
+    tops = [b for b in blocks if b.get("t") == "Header" and b["c"][0] == 1]
+    own = [b for b in tops if "bibliography" not in b["c"][1][1]]
+    return len(own) == 1 or (not own and len(tops) == 1)
+
+
+PDF_TITLE_VALUE = r"(\{(?:[^{}]|\{[^{}]*\})*\}|[^,{}\]]*)"
+PDF_TITLE = re.compile(r"\\hypersetup\s*\{(?:[^{}]|\{[^{}]*\})*?\bpdftitle\s*=\s*"
+                       + PDF_TITLE_VALUE + r"|\\usepackage\s*\[[^]]*?\bpdftitle\s*=\s*"
+                       + PDF_TITLE_VALUE, re.S)
+
+
+def pdf_title(preamble):
+    """The title a preamble gives hyperref for the PDF (pdftitle, in
+    \\hypersetup or the package's options), as text, or None."""
+    found = code_matches(PDF_TITLE, preamble or "")
+    if not found:
+        return None
+    title = (found[-1].group(1) or found[-1].group(2) or "").strip()
+    if title.startswith("{"):
+        title = title[1:-1]
+    title = re.sub(r"\\[A-Za-z@]+\s*|[{}]", "", title).replace("~", " ")
+    return " ".join(title.split()) or None
+
+
 def title_heading(blocks):
     """A page's blocks with the title mark_title marked made its only
     heading at level 1, the page's title, as the pipeline takes one: the
@@ -3141,6 +3373,10 @@ CAPTION_STAR = re.compile(r"\\caption\s*\*")
 SECTION_LEVELS = (("part", -1), ("chapter", 0), ("section", 1), ("subsection", 2),
                   ("subsubsection", 3), ("paragraph", 4), ("subparagraph", 5))
 DEPTHS = dict(SECTION_LEVELS)
+DOCUMENT_CLASS = re.compile(r"\\documentclass(?:\s|%[^\n]*)*(?:\[[^]]*\])?(?:\s|%[^\n]*)*"
+                            r"\{\s*([^}\s]+)\s*\}")
+# memoir's depth, by a division's name.
+SETSECNUMDEPTH = re.compile(r"\\(?:setsecnumdepth|maxsecnumdepth)\s*\{\s*([A-Za-z]+)\s*\}")
 # LaTeX's own counters a book may show, and what the standard classes make
 # of them; a class with chapters numbers sections, floats, equations, and
 # footnotes within them.
@@ -3219,7 +3455,9 @@ def counter_marks(text, counter, math_macros=(), counters=()):
             edits.append((m.start(), m.start(), counter_mark(m.group(1))))
     # \\caption*, which numbers nothing, and the reader can't tell from
     # \\caption: a mark in the figure it's in, or before the table, where
-    # the counting finds it before it counts the table.
+    # the counting finds it before it counts the table; and one where a
+    # table float ends, for one with no table the reader counts, so the
+    # next float is numbered.
     stack = []
     for m in sorted(list(FLOAT_EDGE.finditer(text)) + list(CAPTION_STAR.finditer(text)),
                     key=lambda m: m.start()):
@@ -3227,11 +3465,16 @@ def counter_marks(text, counter, math_macros=(), counters=()):
             continue
         if m.re is FLOAT_EDGE:
             if m.group(1) == "begin":
-                stack.append(m)
+                stack.append([m, False])
             elif stack:
-                stack.pop()
+                env, starred = stack.pop()
+                if starred and env.group(2).startswith("longtable"):
+                    edits.append((m.end(), m.end(), counter_mark("floatend")))
+                elif starred and env.group(2).startswith("table"):
+                    edits.append((m.start(), m.start(), counter_mark("floatend")))
         elif stack:
-            env = stack[-1]
+            env = stack[-1][0]
+            stack[-1][1] = True
             if env.group(2).startswith("longtable"):
                 at = env.start()
             elif env.group(2).startswith("table"):
@@ -3298,6 +3541,21 @@ def book_counters(texts, master_text):
                     "footnote": r"\arabic{footnote}", "enumi": r"\arabic{enumi}",
                     "enumii": r"\alph{enumii}", "enumiii": r"\roman{enumiii}",
                     "enumiv": r"\Alph{enumiv}"})
+    # A class's own numbering, as measured with LaTeX 2026-06-01: amsbook
+    # numbers sections, figures, tables, and equations without the
+    # chapter's number (an equation not starting again in a chapter), and
+    # memoir numbers to the section, to the depth \setsecnumdepth gives.
+    found = code_matches(DOCUMENT_CLASS, master_text)
+    class_name = found[0].group(1) if found else ""
+    secnumdepth = {"memoir": 1, "amsbook": 3}.get(class_name, 2 if chapters else 3)
+    if class_name == "amsbook":
+        formats.update({"section": r"\arabic{section}", "figure": r"\arabic{figure}",
+                        "table": r"\arabic{table}", "equation": r"\arabic{equation}"})
+        resets.pop("equation", None)
+    for t in code:
+        for m in code_matches(SETSECNUMDEPTH, t):
+            secnumdepth = {"all": 50, "none": -10}.get(m.group(1), DEPTHS.get(m.group(1),
+                                                                             secnumdepth))
     # A subfigure counts within its figure (subcaption's and subfig's
     # 1.2a; the obsolete subfigure package's 1.2(a)).
     resets.update({"subfigure": "figure", "subtable": "table"})
@@ -3376,7 +3634,8 @@ def book_counters(texts, master_text):
     return {"resets": resets, "formats": formats, "counters": sorted(defined),
             "theorems": sorted(theorems), "levels": levels, "initial": initial,
             "chapters": chapters, "theorem_counters": theorem_counters,
-            "subfigure_parens": subfigure_package, "ref_names": ref_names}
+            "subfigure_parens": subfigure_package, "ref_names": ref_names,
+            "class": class_name, "secnumdepth": secnumdepth}
 
 
 def counter_style(style, n):
@@ -3696,7 +3955,7 @@ def resolve_counters(blocks, setup, counts=None):
 
     def retitle(content, number):
         """A theorem's title as the reader writes it, **Theorem 1.1.**,
-        given LaTeX's number."""
+        given LaTeX's number, or none when number is None."""
         first = content[0] if content else None
         if not first or first.get("t") not in ("Para", "Plain") or not first["c"] \
                 or first["c"][0].get("t") not in ("Strong", "Emph"):
@@ -3704,7 +3963,10 @@ def resolve_counters(blocks, setup, counts=None):
         title = first["c"][0]["c"]
         if len(title) >= 2 and title[-2].get("t") == "Space" and title[-1].get("t") == "Str" \
                 and re.fullmatch(r"\d+(?:\.\d+)*", title[-1]["c"]):
-            title[-1:] = tag_inlines(number)
+            if number is None:
+                title[-2:] = []
+            else:
+                title[-1:] = tag_inlines(number)
 
     def walk(node):
         if isinstance(node, list):
@@ -3719,10 +3981,14 @@ def resolve_counters(blocks, setup, counts=None):
         if kind == "Header":
             name = levels.get(c[0])
             # A level below secnumdepth isn't numbered (the book class's
-            # subsubsection), and its \label records the level above's.
-            if "unnumbered" not in c[1][1] and state["numbered"] and name \
-                    and DEPTHS[name] <= counters.get("secnumdepth",
-                                                     2 if setup["chapters"] else 3):
+            # subsubsection), and its \label records the level above's. The
+            # front and back matter number no chapter, but a section in
+            # them is numbered still (0.1 before the first chapter), except
+            # in memoir, which numbers nothing there.
+            if "unnumbered" not in c[1][1] and name and (
+                    state["numbered"] or name != top and setup.get("class") != "memoir") \
+                    and DEPTHS[name] <= counters.get("secnumdepth", setup.get(
+                        "secnumdepth", 2 if setup["chapters"] else 3)):
                 step(name)
                 state["current"] = the(name)
                 state["kind"] = name
@@ -3751,6 +4017,9 @@ def resolve_counters(blocks, setup, counts=None):
             elif op == "unnumbered":
                 # \caption* in the float that follows, or that this is in.
                 state["unnumbered"] = True
+            elif op == "floatend":
+                # The table float it was in ended, with no table counted.
+                state.pop("unnumbered", None)
             elif op in ("setcounter", "addtocounter") and len(parts) > 2:
                 number = value(":".join(parts[2:]))
                 if number is not None:
@@ -3819,14 +4088,17 @@ def resolve_counters(blocks, setup, counts=None):
             if c[1][1] and not unnumbered:
                 parent = state.get("figure")
                 if has_mark(c[2], "tablefloat"):
-                    # A table set as an image, a figure to the reader.
+                    # A table float the reader can't take as one table, a
+                    # figure to it.
                     step("table")
                     inside = (the("table"), "table")
                 elif parent is not None:
-                    step("subfigure")
-                    letter = counter_style("alph", counters["subfigure"])
-                    inside = (parent + ("(%s)" % letter if setup.get("subfigure_parens")
-                                        else letter), "subfigure")
+                    # A subfigure, or a subtable in a table float.
+                    sub = "subtable" if parent[1] == "table" else "subfigure"
+                    step(sub)
+                    letter = counter_style("alph", counters[sub])
+                    inside = (parent[0] + ("(%s)" % letter if setup.get("subfigure_parens")
+                                           else letter), sub)
                 else:
                     step("figure")
                     inside = (the("figure"), "figure")
@@ -3847,6 +4119,10 @@ def resolve_counters(blocks, setup, counts=None):
                 retitle(c[1], inside[0])
                 if c[0][0]:
                     record(c[0][0], inside[0], name, None, counter)
+            elif name in theorem_counters:
+                # \newtheorem*'s, which the reader numbers: it takes the
+                # star for the command's, not the theorem's.
+                retitle(c[1], None)
         if kind in ("OrderedList", "Note"):
             # An item's and a note's own counters aren't counted here: a
             # label in one records nothing.
@@ -3854,8 +4130,8 @@ def resolve_counters(blocks, setup, counts=None):
         elif inside:
             state["current"], state["kind"] = inside
         figure = state.get("figure")
-        if kind == "Figure" and inside and inside[1] == "figure":
-            state["figure"] = inside[0]
+        if kind == "Figure" and inside and inside[1] in ("figure", "table"):
+            state["figure"] = inside
         if c is not None and kind not in ("Math", "Code", "CodeBlock", "RawInline", "RawBlock"):
             walk(c)
         if kind == "Figure":
@@ -4110,48 +4386,126 @@ def citation_at(text, m):
     return m.group(1), m.group(2), options, keys, close
 
 
+# What a style's .bbl defines for its entries, which the reader doesn't
+# know: (command, arguments, what it prints), #1 and #2 its arguments.
+BBL_COMMANDS = (("natexlab", 1, "#1"), ("doi", 1, "doi: \\href{https://doi.org/#1}{#1}"),
+                ("urlprefix", 0, "URL "), ("bibinfo", 2, "#2"), ("bibfield", 2, "#2"),
+                ("bibnamefont", 1, "#1"), ("bibfnamefont", 1, "#1"),
+                ("citenamefont", 1, "#1"), ("BibitemOpen", 0, ""), ("BibitemShut", 1, ""),
+                ("mn@doi", 1, "\\href{https://doi.org/#1}{doi:#1}"),
+                ("mn@eprint", 2, "#1:#2"))
+BBL_ITEM = re.compile(r"\\(bibitem|harvarditem)(?![A-Za-z@])\s*")
+
+
+def bbl_words(words):
+    """An entry's text with what its style's .bbl defines (BBL_COMMANDS)
+    written as what it prints: natbib's \\natexlab{a} as a, \\doi{...} as
+    doi: and a link."""
+    words = re.sub(r"\{\\natexlab\s*\{([^{}]*)\}\}", r"\1", words)
+    for name, count, template in BBL_COMMANDS:
+        pattern = re.compile(r"\\" + re.escape(name) + r"(?![A-Za-z@])\s*")
+        out, pos = [], 0
+        for m in pattern.finditer(words):
+            if m.start() < pos:
+                continue
+            at, args = m.end(), []
+            if words.startswith("[", at) and name == "mn@doi":
+                close = closing_bracket(words, at)
+                at = close + 1 if close > 0 else at
+            while len(args) < count:
+                at = argument_space(words, at)
+                if not words.startswith("{", at):
+                    break
+                close = matching_brace(words, at)
+                if close < 0:
+                    break
+                args.append(words[at + 1:close - 1].strip())
+                at = close
+            if len(args) < count:
+                continue
+            out.append(words[pos:m.start()] + re.sub(
+                r"#(\d)", lambda a: args[int(a.group(1)) - 1], template))
+            pos = at
+        words = "".join(out) + words[pos:]
+    return words
+
+
 def bbl_entries(text):
     """A thebibliography's entries, [(label, key, text)], label the one
-    \\bibitem gives ([Str87], natbib's {Lam(1989)}), or None."""
+    \\bibitem gives ([Str87], natbib's {Lam(1989)}), or None; a
+    \\harvarditem[Short]{Long}{Year}{key} has natbib's Short(Year)Long."""
     begin = THEBIBLIOGRAPHY.search(text)
     if not begin:
         return []
     end = re.search(r"\\end\s*\{thebibliography\}", text[begin.end():])
     body = text[begin.end():begin.end() + end.start()] if end else text[begin.end():]
     entries = []
-    starts = [m for m in BIBITEM.finditer(body)]
+    starts = [m for m in BBL_ITEM.finditer(body)]
     for index, m in enumerate(starts):
         stop = starts[index + 1].start() if index + 1 < len(starts) else len(body)
-        pos, label = m.end(), None
+        pos, label, args = m.end(), None, []
         if body.startswith("[", pos):
             close = closing_bracket(body, pos)
             if close < 0:
                 continue
             label, pos = body[pos + 1:close], close + 1
+        for _ in range(3 if m.group(1) == "harvarditem" else 1):
             pos = argument_space(body, pos)
-        if not body.startswith("{", pos):
+            close = matching_brace(body, pos) if body.startswith("{", pos) else -1
+            if close < 0:
+                break
+            args.append(body[pos + 1:close - 1])
+            pos = close
+        if len(args) < (3 if m.group(1) == "harvarditem" else 1):
             continue
-        close = matching_brace(body, pos)
-        if close < 0:
-            continue
+        if m.group(1) == "harvarditem":
+            label = "%s(%s)%s" % (label, args[1], args[0]) if label \
+                else "%s(%s)" % (args[0], args[1])
         # A comment ends at its line's end, before the lines are run
-        # together, as TeX reads it; \protect, which a database puts before
-        # a brace (\protect{G}oldbach), is no command to the reader.
-        words = re.sub(r"(?<!\\)%[^\n]*(?:\n[ \t]*)?", "", body[close:stop])
+        # together, as TeX reads it; \\protect, which a database puts before
+        # a brace (\\protect{G}oldbach), is no command to the reader.
+        words = re.sub(r"(?<!\\)%[^\n]*(?:\n[ \t]*)?", "", body[pos:stop])
         words = re.sub(r"\\protect(?![A-Za-z@])\s*", "", words)
         words = re.sub(r"\\newblock(?![A-Za-z@])\s*", " ", words)
-        entries.append((label, body[pos + 1:close - 1].strip(), " ".join(words.split())))
+        entries.append((label, args[-1].strip(), bbl_words(" ".join(words.split()))))
     return entries
 
 
 def run_bibtex(base, work, folder, keys, style, databases):
     """BibTeX's .bbl for keys with style and databases, from an .aux written
-    for it in work/bibtex, or None when there's no BibTeX or it fails."""
+    for it in work/bibtex, or None when there's no BibTeX or it fails (why,
+    BIBTEX_PROBLEM[0]). Each database the book has, and a style of its
+    own, is copied there first, since BibTeX finds a name with a folder in
+    it (\\bibliography{../refs}, from a master in src/) only from where it
+    runs, as LaTeX's build does from the master's folder."""
+    BIBTEX_PROBLEM[0] = None
     where = os.path.join(work, "bibtex")
     os.makedirs(where, exist_ok=True)
+
+    def own(name, extension):
+        for candidate in (os.path.join(base, folder, name), os.path.join(base, name)):
+            for path in (candidate, candidate + extension):
+                if path.endswith(extension) and os.path.isfile(path):
+                    return path
+        return None
+    names = []
+    for index, database in enumerate(databases, start=1):
+        found = own(database, ".bib")
+        if found:
+            shutil.copyfile(found, os.path.join(where, "database%d.bib" % index))
+            names.append("database%d" % index)
+        else:
+            names.append(database)
+    found = own(style, ".bst")
+    if found:
+        shutil.copyfile(found, os.path.join(where, "book-style.bst"))
+        style = "book-style"
     lines = ["\\citation{%s}" % k for k in keys] + [
-        "\\bibstyle{%s}" % style, "\\bibdata{%s}" % ",".join(databases)]
+        "\\bibstyle{%s}" % style, "\\bibdata{%s}" % ",".join(names)]
     write_text(os.path.join(where, "book.aux"), "\n".join(lines) + "\n")
+    bbl = os.path.join(where, "book.bbl")
+    if os.path.exists(bbl):
+        os.remove(bbl)
     paths = os.pathsep.join(os.path.abspath(p) for p in (base, os.path.join(base, folder))) \
         + os.pathsep
     # Lines broken at 79 characters, as TeX Live's and MiKTeX's BibTeX
@@ -4164,10 +4518,16 @@ def run_bibtex(base, work, folder, keys, style, databases):
                               capture_output=True, text=True, stdin=subprocess.DEVNULL)
     except OSError:
         return None
-    bbl = os.path.join(where, "book.bbl")
     if done.returncode > 1 or not os.path.exists(bbl):
+        said = [line.strip() for line in (done.stdout + "\n" + done.stderr).splitlines()
+                if line.strip() and not line.startswith("(")]
+        BIBTEX_PROBLEM[0] = said[0] if said else "it stopped (exit %d)" % done.returncode
         return None
     return read_text(bbl)
+
+
+# Why run_bibtex last failed, with BibTeX there.
+BIBTEX_PROBLEM = [None]
 
 
 def bibliography_block(entries, author_year, heading):
@@ -4184,95 +4544,366 @@ def bibliography_block(entries, author_year, heading):
     return "\n\n%s\n\n%s\n\n" % (heading, body)
 
 
-NATBIB_PUNCT = {"open": "[", "close": "]", "sep": ",", "between": ","}
+# How citations are printed, as natbib.sty sets it: its defaults, and the
+# preset for each bibliography style it has one for (\bibstyle@plainnat and
+# the rest), which applies only when no option, \bibpunct, \setcitestyle,
+# or \citestyle has set anything: (open, close, sep, mode, aysep, yysep),
+# mode "a" author and year, "n" numbers, "s" superscript numbers. LaTeX's
+# own \cite and the cite package's, as LaTeX prints them.
+NATBIB_DEFAULT = {"open": "(", "close": ")", "sep": ";", "mode": "a", "aysep": ",",
+                  "yysep": ",", "cmt": ", ", "sort": False, "compress": False}
+NATBIB_PRESETS = {
+    "chicago": ("(", ")", ";", "a", ",", ","), "named": ("[", "]", ";", "a", ",", ","),
+    "agu": ("[", "]", ";", "a", ",", ",~"), "copernicus": ("(", ")", ";", "a", ",", ","),
+    "egu": ("(", ")", ";", "a", ",", ","), "egs": ("(", ")", ";", "a", ",", ","),
+    "agsm": ("(", ")", ",", "a", "", ","), "kluwer": ("(", ")", ",", "a", "", ","),
+    "dcu": ("(", ")", ";", "a", ";", ","), "aa": ("(", ")", ";", "a", "", ","),
+    "pass": ("(", ")", ";", "a", ",", ","), "anngeo": ("(", ")", ";", "a", ",", ","),
+    "nlinproc": ("(", ")", ";", "a", ",", ","), "cospar": ("/", "/", ",", "n", "", ""),
+    "esa": ("(Ref.~", ")", ",", "n", "", ""), "nature": ("", "", ",", "s", "", ","),
+    "plain": ("[", "]", ",", "n", "", ","), "alpha": ("[", "]", ",", "n", "", ","),
+    "abbrv": ("[", "]", ",", "n", "", ","), "unsrt": ("[", "]", ",", "n", "", ","),
+    "plainnat": ("[", "]", ",", "a", ",", ","), "abbrvnat": ("[", "]", ",", "a", ",", ","),
+    "unsrtnat": ("[", "]", ",", "a", ",", ",")}
+# natbib's options in the order it declares them, the order \ProcessOptions
+# takes them in, whatever order the book gives them.
+NATBIB_OPTIONS = ("numbers", "super", "authoryear", "round", "square", "angle", "curly",
+                  "comma", "semicolon", "colon", "nobibstyle", "bibstyle", "sort", "compress",
+                  "sort&compress")
+NATBIB_BRACKETS = {"round": ("(", ")"), "square": ("[", "]"), "angle": ("<", ">"),
+                   "curly": ("\\{", "\\}")}
+NATBIB_COMMAND = re.compile(r"\\(bibpunct|setcitestyle|citestyle)(?![A-Za-z@])")
+LATEX_CITE = {"open": "[", "close": "]", "sep": ",", "mode": "n", "aysep": "", "yysep": ",",
+              "cmt": ", ", "sort": False, "compress": False, "natbib": False}
+CITE_PACKAGE = re.compile(r"\\usepackage\s*(?:\[[^]]*\])?\s*\{[^}]*\bcite\b[^}]*\}")
+NDASH = "\u2013"
 
 
-def citation_pieces(command, star, options, keys, found, author_year, natbib_numbers,
-                    punct=None):
-    """What a citation prints, as [(words, key)], key the entry the words
-    link to or None: numeric, [1, 7, 9] (a style's own label, alpha's
-    [Str87], as it gives it), or natbib's author and year, Lam [1989] and
-    [Lam, 1989], in its brackets and with its separators, punct
-    (NATBIB_PUNCT's, as natbib sets them by default, unless the book says
-    otherwise); a key with no entry is itself."""
-    punct = punct or NATBIB_PUNCT
-    opening, closing = punct["open"], punct["close"]
-    sep, between = punct["sep"] + " ", punct["between"] + " "
+def citation_style(joined, bst):
+    """How the book prints its citations (natbib's punctuation, above), from
+    the book's code, joined, and its bibliography style, bst: LaTeX's own
+    \\cite's, the cite package's, sorted and compressed, or natbib's, from
+    its defaults, its options (and \\PassOptionsToPackage's), \\bibpunct,
+    \\setcitestyle, and \\citestyle in the book's order, and the style's
+    preset, as natbib.sty sets them."""
+    natbib = code_matches(NATBIB, joined)
+    if not natbib:
+        style = dict(LATEX_CITE)
+        if code_matches(CITE_PACKAGE, joined):
+            style.update(sort=True, compress=True)
+        return style
+    style = dict(NATBIB_DEFAULT, natbib=True)
+    preset = [True]
+    given = set()
+    for m in natbib:
+        given |= {o.replace(" ", "") for o in option_list(m.group(1) or "")}
+    for m in code_matches(re.compile(r"\\PassOptionsToPackage\s*\{([^{}]*)\}\s*\{\s*natbib\s*\}"),
+                          joined):
+        given |= {o.replace(" ", "") for o in option_list(m.group(1))}
+
+    def keyword(word):
+        if word == "numbers":
+            style.update(mode="n")
+        elif word == "super":
+            style.update(mode="s")
+        elif word == "authoryear":
+            style.update(mode="a")
+        elif word in NATBIB_BRACKETS:
+            style["open"], style["close"] = NATBIB_BRACKETS[word]
+        elif word == "comma":
+            style["sep"] = ","
+        elif word in ("semicolon", "colon"):
+            style["sep"] = ";"
+    for option in NATBIB_OPTIONS:
+        if option not in given:
+            continue
+        if option == "numbers":
+            style.update(mode="n", open="[", close="]", sep=",")
+        elif option == "super":
+            style.update(mode="s", open="", close="")
+        elif option == "authoryear":
+            style.update(mode="a", open="(", close=")", sep=";")
+        elif option in ("sort", "compress"):
+            style[option] = True
+        elif option == "sort&compress":
+            style.update(sort=True, compress=True)
+        elif option not in ("nobibstyle", "bibstyle"):
+            keyword(option)
+        preset[0] = option in ("authoryear", "bibstyle") or (
+            preset[0] and option in ("sort", "compress", "sort&compress"))
+    for m in code_matches(NATBIB_COMMAND, joined):
+        text, pos, args = m.string, m.end(), []
+        optional = None
+        at = argument_space(text, pos)
+        if m.group(1) == "bibpunct" and text.startswith("[", at):
+            close = closing_bracket(text, at)
+            if close > 0:
+                optional, pos = text[at + 1:close], close + 1
+        while len(args) < (6 if m.group(1) == "bibpunct" else 1):
+            at = argument_space(text, pos)
+            if not text.startswith("{", at):
+                break
+            close = matching_brace(text, at)
+            if close < 0:
+                break
+            args.append(text[at + 1:close - 1])
+            pos = close
+        if m.group(1) == "bibpunct" and len(args) == 6:
+            mode = {"n": "n", "s": "s"}.get(args[3].strip(), "a")
+            style.update(open=args[0], close=args[1], sep=args[2], mode=mode, aysep=args[4],
+                         yysep=args[5])
+            if optional is not None:
+                style["cmt"] = optional
+        elif m.group(1) == "setcitestyle" and args:
+            for item in option_list(args[0]):
+                name, _, value = item.partition("=")
+                name, value = name.strip(), value.strip()
+                if value.startswith("{") and value.endswith("}"):
+                    value = value[1:-1]
+                if not _:
+                    keyword(name)
+                elif name in ("open", "close", "aysep", "yysep"):
+                    style[name] = value
+                elif name == "notesep":
+                    style["cmt"] = value
+                elif name == "citesep":
+                    style["sep"] = value
+        elif m.group(1) == "citestyle" and args and args[0].strip() in NATBIB_PRESETS:
+            style.update(zip(("open", "close", "sep", "mode", "aysep", "yysep"),
+                             NATBIB_PRESETS[args[0].strip()]))
+        else:
+            continue
+        preset[0] = False
+    if preset[0] and bst in NATBIB_PRESETS:
+        style.update(zip(("open", "close", "sep", "mode", "aysep", "yysep"), NATBIB_PRESETS[bst]))
+    return style
+
+
+def natbib_label(label):
+    """A .bbl label natbib reads as author and year, as (short names, year,
+    extra letter, long names), or None (a number, alpha's Str87):
+    Short(Year)Long and Short(Year), \\citeauthoryear{Long}{Short}{Year} and
+    {Short}{Year}, \\astroncite{Short}{Year}, \\citename{Short, }Year, and
+    apalike's Short, Year; the year's extra letter natbib's \\natexlab gives
+    (1986{\\natexlab{a}}), or one after the year's digits (1986a)."""
+    if label is None:
+        return None
+    text = re.sub(r"\\protect(?![A-Za-z@])\s*", "", label).strip()
+    command = re.match(r"\\(citeauthoryear|astroncite|citename)(?![A-Za-z@])", text)
+    if command:
+        pos, args = command.end(), []
+        while True:
+            at = argument_space(text, pos)
+            if not text.startswith("{", at):
+                break
+            close = matching_brace(text, at)
+            if close < 0:
+                break
+            args.append(text[at + 1:close - 1])
+            pos = close
+        if command.group(1) == "citeauthoryear" and len(args) >= 3 and args[2].strip():
+            long, short, date = args[:3]
+        elif command.group(1) in ("citeauthoryear", "astroncite") and len(args) >= 2:
+            long, short, date = "", args[0], args[1]
+        elif command.group(1) == "citename" and args:
+            long, short, date = "", re.sub(r",\s*$", "", args[0].strip()), text[pos:]
+        else:
+            return None
+    else:
+        found = AUTHOR_YEAR.match(text)
+        if found:
+            short, date, long = found.group("short"), found.group("year"), found.group("long")
+        else:
+            # apalike's, as natbib splits it: at its commas.
+            parts = (text + ", ").split(", ")
+            if len(parts) < 3 or not parts[1].strip():
+                return None
+            long, short, date = "", parts[0], parts[1]
+    date, extra = date.strip(), ""
+    letter = re.search(r"\{?\\natexlab\s*\{([^{}]*)\}\}?", date)
+    if letter:
+        extra = letter.group(1)
+        date = (date[:letter.start()] + date[letter.end():]).strip()
+    else:
+        tail = re.fullmatch(r"(.*\d)([a-z]{1,2})", date)
+        if tail:
+            date, extra = tail.group(1), tail.group(2)
+    if not date and not extra:
+        return None
+    return short.strip(), date, extra, long.strip()
+
+
+def citation_pieces(command, star, options, keys, found, style):
+    """What a citation prints, as [(words, key, superscript)], key the entry
+    the words link to or None, as LaTeX prints it, measured with LaTeX
+    2026-06-01: LaTeX's own, [1, 2, p. 3], or a style's own labels (alpha's
+    [Str87]); the cite package's, sorted and compressed, [1–3, 5]; and
+    natbib's, in the book's punctuation (citation_style): author and year,
+    Knuth [1984] and [Knuth, 1984, 1986a,b] (an author cited again in a row
+    named once, a year again given its letter alone), the long names for a
+    starred command, \\cite as \\citet, or \\citep with a note; numbers,
+    sorted and compressed when the book says so, Knuth [2] for \\citet; and
+    superscripts. found: {key: entry}, an entry a dict of number, short,
+    year, extra, long. A key with no entry is ?, as LaTeX prints it."""
     out = []
 
-    def add(words, key=None):
-        out.append((words, key if key in found else None))
-
-    def join(parts, glue):
-        for index, part in enumerate(parts):
-            if index:
-                add(glue)
-            part()
+    def add(words, key=None, sup=False):
+        if words:
+            out.append((words, key if key in found else None, sup))
     pre, post = (options + ["", ""])[:2] if len(options) == 2 else ("", options[0]) \
         if options else ("", "")
-    note = ", " + post if post else ""
     if command == "nocite":
         return out
-    if author_year and not natbib_numbers:
-        def one(key):
-            label = found.get(key, (None, key, "", key))
-            name, year = (label[3] if star and label[3] else label[1]), label[2]
-            last = key == keys[-1]
+    natbib, mode = style.get("natbib"), style["mode"]
+    opening, closing, sep = style["open"], style["close"], style["sep"]
+    note = style["cmt"] + post if post else ""
+    base = command[:1].lower() + command[1:]
+    if natbib and base == "cite":
+        base = "citep" if options or mode != "a" else "citet"
 
-            def piece():
-                if command in ("citeauthor", "Citeauthor"):
-                    add(name, key)
-                elif command in ("citeyear", "citeyearpar"):
-                    add(year, key)
-                elif command in ("citep", "Citep", "citealp"):
-                    add(name + between + year, key)
-                elif command == "citealt":
-                    add("%s %s" % (name, year), key)
+    def name(key, first):
+        entry = found.get(key)
+        words = (entry["long"] if star and entry["long"] else entry["short"]) if entry else "?"
+        return words[:1].upper() + words[1:] if first and command[:1].isupper() else words
+
+    def number(key):
+        return found[key]["number"] if key in found else "?"
+
+    def date(key):
+        return found[key]["year"] + found[key]["extra"] if key in found else "?"
+    if base == "citeauthor":
+        for index, key in enumerate(keys):
+            add(sep + " " if index else "")
+            add(name(key, not index), key)
+        return out
+    if base in ("citeyear", "citeyearpar"):
+        add(opening + (pre + " " if pre else "") if base == "citeyearpar" else "")
+        for index, key in enumerate(keys):
+            add(sep + " " if index else "")
+            add(date(key), key)
+        add(note + (closing if base == "citeyearpar" else ""))
+        return out
+    if base == "citenum":
+        for index, key in enumerate(keys):
+            add(sep + " " if index else "")
+            add(number(key), key)
+        return out
+    if natbib and mode == "a":
+        textual = base in ("citet", "citealt")
+        brackets = base in ("citet", "citep")
+        if not textual:
+            add(opening + (pre + " " if pre else "") if brackets else (pre + " " if pre else ""))
+        last_name = last_year = None
+        # natbib's sort puts them in the bibliography's order.
+        order = sorted(keys, key=lambda k: int(found[k]["number"]) if k in found else 0) \
+            if style["sort"] else keys
+        group = False                   # \citet's bracket open
+        for index, key in enumerate(order):
+            if key not in found:
+                add((closing if group else "") + sep + " " if index else "")
+                add("?")
+                group, last_name, last_year = False, None, None
+                continue
+            who = name(key, not index)
+            year = found[key]["year"]
+            if who == last_name:
+                if year == last_year:
+                    add(style["yysep"])
+                    add(found[key]["extra"], key)
                 else:
-                    add("%s %s%s%s%s" % (name, opening, year, note if last else "", closing),
-                        key)
-            return piece
-        if command in ("citep", "Citep", "citeyearpar"):
-            add(opening + (pre + " " if pre else ""))
-        join([one(k) for k in keys], sep)
-        if command in ("citep", "Citep", "citeyearpar"):
-            add(note + closing)
-        elif command in ("citealp", "citealt"):
-            add(note)
-        return [piece for piece in out if piece[0]]
-    numbers = [(lambda k: lambda: add(found[k][0] if k in found else k, k))(k) for k in keys]
-    if command in ("citealp", "citenum"):
-        join(numbers, sep)
-        add(note)
-    elif command in ("citeauthor", "Citeauthor"):
-        add(sep.join(found[k][1] if k in found else k for k in keys))
-    elif command in ("citet", "Citet") and author_year:
-        join([(lambda k: lambda: (add(found[k][1] + " " + opening), add(found[k][0], k),
-                                  add(closing)))(k) for k in keys], sep)
+                    add(style["yysep"] + " ")
+                    add(date(key), key)
+            elif textual:
+                if index:
+                    add((closing if group else "") + sep + " ")
+                add(who + " " + ((opening + (pre + " " if pre else "")) if brackets else ""))
+                group = brackets
+                add(date(key), key)
+            else:
+                add(sep + " " if index else "")
+                add(who + style["aysep"] + " " + date(key), key)
+            last_name, last_year = who, year
+        add(note + (closing if brackets and (group or not textual) else ""))
+        return out
+    # Numbers: a style's own labels, sorted and compressed when asked.
+    order = list(keys)
+    if style["sort"]:
+        order.sort(key=lambda k: (0, int(number(k))) if str(number(k)).isdigit() else (1, 0))
+    superscript = mode == "s"
+    glue = sep if superscript else sep + " "
+    if natbib and base in ("citet", "citealt"):
+        last_name = None
+        for index, key in enumerate(order):
+            who = name(key, not index)
+            if who == last_name:
+                add(style["yysep"] if superscript else style["yysep"] + " ", None, superscript)
+            else:
+                if index:
+                    add((closing if base == "citet" else "") + sep + " ")
+                add(who + " " + (opening if base == "citet" and not superscript else ""))
+            if pre and base == "citet":
+                add(pre + " ", None, superscript)
+            add(number(key), key, superscript)
+            last_name = who
+        add(note + (closing if base == "citet" and not superscript else ""))
+        return out
+    runs = []
+    for key in order:
+        value = number(key)
+        previous = number(runs[-1][-1]) if runs else None
+        if style["compress"] and runs and str(value).isdigit() and str(previous).isdigit() \
+                and int(value) == int(previous) + 1:
+            runs[-1].append(key)
+        else:
+            runs.append([key])
+    if base == "citealp":
+        add(pre + " " if pre else "")
+    elif superscript:
+        add(pre + " " if pre else "")
     else:
         add(opening + (pre + " " if pre else ""))
-        join(numbers, sep)
-        add(note + closing)
-    return [piece for piece in out if piece[0]]
+    for index, run in enumerate(runs):
+        if index:
+            add(glue, None, superscript)
+        if len(run) >= 3:
+            add(number(run[0]), run[0], superscript)
+            add(NDASH, None, superscript)
+            add(number(run[-1]), run[-1], superscript)
+        else:
+            for at, key in enumerate(run):
+                if at:
+                    add(glue, None, superscript)
+                add(number(key), key, superscript)
+    if superscript:
+        add(" " + post if post else "")
+    else:
+        add(note + ("" if base == "citealp" else closing))
+    return out
 
 
 def citation_latex(pieces):
     """A citation's pieces as LaTeX the reader reads: a bracket braced, so it
-    ends no optional argument the citation is in, and each label a link."""
-    return "".join("\\hyperref[%s%s]{%s}" % (BIB_ID, key, words) if key
-                   else words.replace("[", "{[}").replace("]", "{]}") for words, key in pieces)
+    ends no optional argument the citation is in, each label a link, and a
+    superscript one \\textsuperscript."""
+    out = []
+    for words, key, sup in pieces:
+        words = "\\hyperref[%s%s]{%s}" % (BIB_ID, key, words) if key \
+            else words.replace("[", "{[}").replace("]", "{]}")
+        out.append("\\textsuperscript{%s}" % words if sup else words)
+    return "".join(out)
 
 
 def citation_inlines(pieces):
     """A citation's pieces as inlines, for one the book's own macro made,
     which the reader keeps as a citation: each label a link."""
     out = []
-    for words, key in pieces:
-        words = re.sub(r"[{}]|\\[A-Za-z@]+\s*", "", words)
+    for words, key, sup in pieces:
+        words = re.sub(r"[{}]|\\[A-Za-z@]+\s*", "", words).replace("~", "\u00a0")
         inlines = [{"t": "Space"} if w == " " else {"t": "Str", "c": w}
                    for w in re.split(r"( )", words) if w]
-        out += [{"t": "Link", "c": [["", [], []], inlines, ["#" + BIB_ID + key, ""]]}] \
+        inlines = [{"t": "Link", "c": [["", [], []], inlines, ["#" + BIB_ID + key, ""]]}] \
             if key else inlines
+        out += [{"t": "Superscript", "c": inlines}] if sup else inlines
     return out
 
 
@@ -4296,8 +4927,7 @@ def resolve_citations(blocks, setup):
                     cited = citation_at(raw, m) if m else None
                     if cited:
                         node[index] = {"t": "Span", "c": [["", ["citation"], []], citation_inlines(
-                            citation_pieces(*cited[:4], setup["found"], setup["author_year"],
-                                            setup["natbib_numbers"], setup.get("punct")))]}
+                            citation_pieces(*cited[:4], setup["found"], setup["style"]))]}
                         done[0] += 1
                         continue
                 walk(item)
@@ -4308,6 +4938,7 @@ def resolve_citations(blocks, setup):
 
 
 BIB_MARKER = "TextbookImproverBibliography"
+BIB_HEADING = "TEXTBOOKIMPROVERBIBLIOGRAPHY"
 ADDBIBRESOURCE = re.compile(r"\\addbibresource\s*(?:\[[^]]*\])?\s*\{\s*([^}]*?)\s*\}")
 PRINTBIBLIOGRAPHY = re.compile(r"\\printbibliography(?![A-Za-z@])\s*(?:\[[^]]*\])?")
 # biblatex's full citations, which Pandoc's reader drops with their keys:
@@ -4368,7 +4999,7 @@ def full_citations(base, work, texts, files, master, originals, resources, count
     \\nocite for citeproc. Without BibTeX, each is a \\cite or \\footcite,
     for Pandoc's citeproc. Returns how many were written."""
     keys = []
-    for _, _, item in reading_order(originals, watch=FULLCITE):
+    for _, _, item in reading_order([(n, texts[n]) for n in files], watch=FULLCITE):
         if isinstance(item, re.Match):
             cited = citation_at(item.string, item)
             if cited:
@@ -4422,9 +5053,12 @@ def full_citations(base, work, texts, files, master, originals, resources, count
             text = text[:start] + words + text[stop:]
         texts[name] = text
     if entries is None:
-        say("No BibTeX here to write out biblatex's full citations (\\fullcite, "
-            "\\footfullcite), so each is a citation of Pandoc's citeproc, in its style, "
-            "not the entry in full.")
+        say(("BibTeX couldn't write out biblatex's full citations (\\fullcite, "
+             "\\footfullcite): %s. So " % BIBTEX_PROBLEM[0] if BIBTEX_PROBLEM[0] and databases
+             else "No BibTeX here to write out biblatex's full citations (\\fullcite, "
+             "\\footfullcite), so " if databases else "biblatex's full citations (\\fullcite, "
+             "\\footfullcite) have no database here to write them out from, so ")
+            + "each is a citation of Pandoc's citeproc, in its style, not the entry in full.")
     elif missing:
         say(f"{len(missing)} key(s) of biblatex's full citations have no entry in "
             + ", ".join(databases) + ", so each is its key, as biblatex prints it: "
@@ -4446,7 +5080,8 @@ def bibliographies(base, work, texts, files, master, originals, counts, say):
     cite_with_citeproc needs, or None when there's no bibliography."""
     joined = "\n".join(t for _, t in originals)
     chapters = any(code_matches(re.compile(r"\\chapter\s*\*?\s*[\[{]"), t) for _, t in originals)
-    heading = "\\chapter*{Bibliography}" if chapters else "\\section*{References}"
+    heading = ("\\chapter*{Bibliography}" if chapters else "\\section*{References}") \
+        + "\\label{%s}" % BIB_HEADING
     begin = code_matches(BEGIN_DOCUMENT, texts[master])
     body_start = {master: begin[0].end() if begin else 0}
 
@@ -4477,33 +5112,17 @@ def bibliographies(base, work, texts, files, master, originals, counts, say):
             return None
         setup = citeproc(first(PRINTBIBLIOGRAPHY), resources)
         if setup:
-            say("The book cites with biblatex, which Pandoc's citeproc reads from its "
-                "databases: its citations and bibliography are in Pandoc's own style (author "
-                "and date), not the book's.")
+            # Said once citeproc has citations to make (a definition's may
+            # be all the book has left).
+            setup["said"] = ("The book cites with biblatex, which Pandoc's citeproc reads from "
+                             "its databases: its citations and bibliography are in Pandoc's "
+                             "own style (author and date), not the book's.")
         return setup
-    natbib = code_matches(NATBIB, joined)
-    natbib_options = option_list(natbib[0].group(1) or "") if natbib else []
-    for m in code_matches(re.compile(r"\\setcitestyle\s*\{([^}]*)\}"), joined):
-        natbib_options += option_list(m.group(1))
-    natbib_numbers = bool(natbib) and "numbers" in natbib_options
-    # natbib's brackets and separators, square and commas by default.
-    punct = dict(NATBIB_PUNCT)
-    for option in natbib_options:
-        option = option.replace(" ", "")
-        brackets = {"round": "()", "square": "[]", "curly": "{}", "angle": "<>"}.get(option)
-        if brackets:
-            punct["open"], punct["close"] = brackets
-        elif option in ("semicolon", "comma"):
-            punct["sep"] = ";" if option == "semicolon" else ","
-    for m in code_matches(re.compile(r"\\bibpunct\s*(?:\[[^]]*\]\s*)?\{([^{}]*)\}\s*\{"
-                                     r"([^{}]*)\}\s*\{([^{}]*)\}\s*\{[^{}]*\}\s*\{([^{}]*)\}"),
-                          joined):
-        punct.update(open=m.group(1), close=m.group(2), sep=m.group(3), between=m.group(4))
     place, own = first(BIBLIOGRAPHY), first(THEBIBLIOGRAPHY)
     if place is None and own is None:
         return None
     keys = []
-    for _, _, item in reading_order(originals, watch=CITE_COMMAND):
+    for _, _, item in reading_order([(n, texts[n]) for n in files], watch=CITE_COMMAND):
         if isinstance(item, re.Match):
             cited = citation_at(item.string, item)
             if cited:
@@ -4522,35 +5141,43 @@ def bibliographies(base, work, texts, files, master, originals, counts, say):
         bbl = run_bibtex(base, work, os.path.dirname(master), keys or ["*"],
                          styles[-1] if styles else "plain", databases)
         built = os.path.join(base, os.path.splitext(master)[0] + ".bbl")
+        cannot = ("BibTeX couldn't make the bibliography (%s)" % BIBTEX_PROBLEM[0]
+                  if BIBTEX_PROBLEM[0] else "No BibTeX here to make the bibliography")
         if bbl is None and os.path.exists(built):
             bbl = read_text(built)
-            say(f"No BibTeX here to make the bibliography, so it's the one the book's own "
-                f"build left, {os.path.relpath(built, base)}.")
+            say(f"{cannot}, so it's the one the book's own build left, "
+                f"{os.path.relpath(built, base)}.")
         if bbl is None:
             setup = citeproc(place, databases)
-            say("No BibTeX here to make the bibliography, nor a .bbl a build of the book "
-                "left, so " + ("Pandoc's citeproc makes it, in its own style (author and "
-                               "date), not the book's." if setup else
-                               f"its {len(keys)} citation(s) are empty: its database, "
-                               + ", ".join(databases) + ", isn't here either."))
+            say(cannot + ", and the book's own build left no .bbl, so "
+                + ("Pandoc's citeproc makes it, in its own style (author and date), not the "
+                   "book's." if setup else
+                   f"its {len(keys)} citation(s) are empty: its database, "
+                   + ", ".join(databases) + ", isn't here either."))
             return setup
         entries = bbl_entries(bbl)
         span = (m.start(), m.end())
-    # Each entry's label: its number, the one BibTeX's style gives
-    # (alpha's Str87), or natbib's author and year, (number, author, year,
-    # all the authors).
-    parsed = [AUTHOR_YEAR.match(label or "") for label, _, _ in entries]
-    author_year = bool(entries) and all(p and p.group("year").strip() for p in parsed)
+    # How the book prints a citation, and each entry's label: its number,
+    # the one BibTeX's style gives (alpha's Str87), or natbib's author and
+    # year, which natbib takes for numbers when any entry has none.
+    style = citation_style(joined, styles[-1] if styles else None)
+    parsed = [natbib_label(label) for label, _, _ in entries]
+    if style.get("natbib") and style["mode"] == "a" and not (entries and all(parsed)):
+        style["mode"] = "n"
+    author_year = style.get("natbib") and style["mode"] == "a"
     found = {}
     for index, ((label, key, _), p) in enumerate(zip(entries, parsed), start=1):
-        if author_year:
-            found[key] = (str(index), p.group("short").strip("{} "), p.group("year").strip(),
-                          p.group("long").strip("{} "))
-        else:
-            found[key] = (label.strip() if label else str(index), key, "", "")
-    labeled = [(found[key][0], key, words) for _, key, words in entries]
-    block = bibliography_block(labeled, author_year and not natbib_numbers, heading) \
-        if entries else ""
+        number = str(index) if author_year or p or not label else label.strip()
+        short, year, extra, long = p if p else ("(author?)", "(year?)", "", "")
+        found[key] = {"number": number, "short": short, "year": year, "extra": extra,
+                      "long": long}
+    labeled = [(found[key]["number"], key, words) for _, key, words in entries]
+    block = bibliography_block(labeled, author_year, heading) if entries else ""
+    missing = [k for k in keys if k not in found and k != "*"]
+    if missing and entries:
+        say(f"{len(missing)} citation key(s) have no entry in the bibliography, so each is "
+            "printed ?, as LaTeX prints it: " + ", ".join(missing[:10])
+            + (", and more" if len(missing) > 10 else "") + ".")
     text = texts[name]
     texts[name] = text[:span[0]] + block + text[span[1]:]
     written = 0
@@ -4568,7 +5195,7 @@ def bibliographies(base, work, texts, files, master, originals, counts, say):
             if not cited:
                 continue
             edits.append((m.start(), cited[4], citation_latex(citation_pieces(
-                *cited[:4], found, author_year, natbib_numbers, punct))))
+                *cited[:4], found, style))))
             written += cited[0] != "nocite"
         for start, end, words in reversed(edits):
             text = text[:start] + words + text[end:]
@@ -4578,8 +5205,45 @@ def bibliographies(base, work, texts, files, master, originals, counts, say):
     if entries:
         which = "bibliography_own" if own is not None else "bibliography"
         counts[which] = counts.get(which, 0) + len(entries)
-    return {"found": found, "author_year": author_year, "natbib_numbers": natbib_numbers,
-            "punct": punct}
+    return {"found": found, "style": style}
+
+
+def bibliography_heading(blocks):
+    """The bibliography's heading, which the copy labels, given the id the
+    reader would give it (references, bibliography, unless the book has
+    one) and the class bibliography, so a page's title isn't taken for two
+    headings when an article's References is the second. Returns whether
+    there was one."""
+    ids, found = set(), []
+
+    def walk(node):
+        if isinstance(node, list):
+            for item in node:
+                walk(item)
+        elif isinstance(node, dict):
+            kind, c = node.get("t"), node.get("c")
+            attr = c[1] if kind == "Header" else c[0] if kind in (
+                "Div", "Span", "Figure", "Table", "CodeBlock", "Code", "Link", "Image") else None
+            if attr and isinstance(attr[0], str):
+                ids.add(attr[0])
+                if kind == "Header" and attr[0] == BIB_HEADING:
+                    found.append(node)
+            if isinstance(c, list):
+                walk(c)
+    walk(blocks)
+    for header in found:
+        attr = header["c"][1]
+        stem = re.sub(r"[^a-z0-9]+", "-", stringify(header["c"][2]).lower()).strip("-") \
+            or "bibliography"
+        new, n = stem, 0
+        while new in ids:
+            n += 1
+            new = "%s-%d" % (stem, n)
+        ids.add(new)
+        attr[0] = new
+        if "bibliography" not in attr[1]:
+            attr[1].append("bibliography")
+    return bool(found)
 
 
 def cite_with_citeproc(doc_path, setup, env, cwd):
@@ -4633,6 +5297,7 @@ def prepare(base, work, master, say, macros=""):
     # commands LaTeX makes of them, which Pandoc's reader can balance; its
     # colors as CSS.
     expand_include_macros(texts, files, counts)
+    expand_cite_macros(texts, files, counts)
     environment_definitions(texts, files, counts)
     resolve_colors(texts, files, counts)
     write_out_columns(texts, counts)
@@ -4914,9 +5579,11 @@ def mark_tables(text, file_index):
     edits = []
     for ordinal, (start, end) in enumerate(table_spans(text), start=1):
         name = "TextbookImproverTable" + table_place(file_index, ordinal)
-        edits.append((end, "\\end{%s}" % name))
-        edits.append((start, "\\begin{%s}" % name))
-    for at, piece in sorted(edits, key=lambda e: e[0], reverse=True):
+        edits.append((end, 0, "\\end{%s}" % name))
+        edits.append((start, 1, "\\begin{%s}" % name))
+    # Where one table ends and the next begins (\end{tabular}\begin{tabular}),
+    # the end goes first: of two pieces put at one place, the later is first.
+    for at, _, piece in sorted(edits, key=lambda e: (e[0], e[1]), reverse=True):
         text = text[:at] + piece + text[at:]
     return text
 

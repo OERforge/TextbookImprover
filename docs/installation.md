@@ -2,11 +2,11 @@
 
 How to get the tools, what they need, and how to check the result. There's no initial configuration step for the tools themselves: `convert.py` finds its filters, schemas, and the shared library by path relative to itself, so they work from wherever you put them.
 
-This version is developed and tested on Ubuntu 24.04 with Pandoc 3.12.1 and 3.12: on Windows under WSL 2, which is what the maintainer runs, and in an Ubuntu container, which is where the test suites run before a release. Nothing here is Windows-specific or WSL-specific, and the same commands work on a Linux machine or on macOS with Homebrew in place of `apt`.
+This version is developed and tested on Ubuntu 24.04 with Pandoc 3.12.1 and 3.12: on Windows under WSL 2, which is what the maintainer runs, and in an Ubuntu container, which is where the test suites run before a release. Its suites pass too with Ubuntu 22.04's Python (3.10) and the versions of its packages that 22.04 ships, pypdf aside ([Which Ubuntu you have](#which-ubuntu-you-have)). Nothing here is Windows-specific or WSL-specific, and the same commands work on a Linux machine or on macOS with Homebrew in place of `apt`.
 
 ## On Windows: WSL first
 
-The tools are Linux command-line programs. On Windows they run under the Windows Subsystem for Linux, which gives you Ubuntu inside Windows with your Windows drives visible under `/mnt/c`. Microsoft's [Set up a WSL development environment](https://learn.microsoft.com/en-us/windows/wsl/setup/environment) covers installing it and opening a terminal; the default distribution, Ubuntu, is the one these instructions assume.
+The tools are Linux command-line programs. On Windows they run under the Windows Subsystem for Linux, which gives you Ubuntu inside Windows with your Windows drives visible under `/mnt/c`. Microsoft's [Set up a WSL development environment](https://learn.microsoft.com/en-us/windows/wsl/setup/environment) covers installing it and opening a terminal; its default distribution, Ubuntu, is the one these instructions assume.
 
 Once you have an Ubuntu terminal, bring it up to date before installing anything:
 
@@ -15,6 +15,67 @@ sudo apt update && sudo apt upgrade
 ```
 
 A book kept on the Windows side works (`cd /mnt/c/Users/you/Documents/book`), but a conversion of a large book is noticeably faster with the sources under your Linux home directory. With a terminal open, carry on below.
+
+## Which Ubuntu you have
+
+These instructions are for Ubuntu 24.04 or later. To see which you have, run this in the Ubuntu terminal:
+
+```bash
+grep PRETTY_NAME /etc/os-release
+```
+
+If it says 24.04 or later, go on to [Getting the tools](#getting-the-tools). If it says 22.04, the tools work there too, but there's a choice to make first. The three ways, best first:
+
+**1. Upgrade it to 24.04.** Everything you have comes along: your files, your settings, and what you've installed. It can take an hour or more, most of it downloading. Under WSL, make a backup first that you can go back to. Open PowerShell from the Windows Start menu (it's a Windows program, not the Ubuntu terminal) and run:
+
+```powershell
+wsl --list --verbose
+wsl --export Ubuntu-22.04 "$HOME\ubuntu-22.04-backup.tar"
+```
+
+The first command lists your Linux installations by name; if yours isn't called `Ubuntu-22.04` (it may be just `Ubuntu`), use the name it shows in the second. The backup is one file in your Windows home folder (`C:\Users\you`), as large as everything in the installation, often several gigabytes. If the upgrade goes wrong, `wsl --import` makes a working installation from it again ([Microsoft's list of WSL commands](https://learn.microsoft.com/en-us/windows/wsl/basic-commands) has both).
+
+Canonical's [instructions for upgrading Ubuntu on WSL](https://ubuntu.com/wsl/docs/stable/howto/upgrade-ubuntu/) say the upgrade needs systemd, the program that starts Linux's services. To check, in the Ubuntu terminal:
+
+```bash
+ps -p 1 -o comm=
+```
+
+If that prints `systemd`, go on. If it prints anything else, open WSL's settings file with `sudo nano /etc/wsl.conf`, add these two lines at the end, and save (Ctrl+O, then Enter, then Ctrl+X to leave):
+
+```ini
+[boot]
+systemd=true
+```
+
+Then close the Ubuntu terminal, run `wsl --shutdown` in PowerShell, and open Ubuntu again; `ps -p 1 -o comm=` should now print `systemd` ([Microsoft's page on systemd in WSL](https://learn.microsoft.com/en-us/windows/wsl/systemd)).
+
+Now the upgrade itself, in the Ubuntu terminal:
+
+```bash
+sudo apt update && sudo apt full-upgrade -y
+sudo do-release-upgrade
+```
+
+It asks a few questions as it goes. Answer `y` to start the upgrade and to remove packages it no longer needs; where it asks whether to replace a settings file you changed, press Enter for the default, which keeps yours. When it asks at the end whether to restart, answer `N`: under WSL, close the terminal, run `wsl --shutdown` in PowerShell, and open Ubuntu again instead. `grep PRETTY_NAME /etc/os-release` should then say 24.04. Run `do-release-upgrade` just the once: from 24.04 it may offer the next release, which these tools haven't been tested on. The installation keeps its old name, `Ubuntu-22.04` say, which does no harm. On a Linux machine that isn't WSL, it's the same two commands, with your usual backup first and a real restart at the end.
+
+**2. Install 24.04 beside it** (WSL only). WSL can hold more than one Ubuntu. A new one starts empty, so you'd install the tools there from the top of this page, while the old one carries on as it was. In PowerShell:
+
+```powershell
+wsl --list --online
+wsl --install -d Ubuntu-24.04
+```
+
+The first command lists what can be installed; if 24.04's name there isn't `Ubuntu-24.04`, use the one it shows. The new Ubuntu asks you to choose a user name and password the first time it starts, as the first one did; after that it's in the Start menu. `wsl --set-default Ubuntu-24.04` makes it the one a plain `wsl` opens. The old installation's files stay where they were; Windows File Explorer reaches them at `\\wsl$\` followed by its name (`\\wsl$\Ubuntu-22.04`, say), so you can copy a book across.
+
+**3. Stay on 22.04.** Everything on this page works there with one change. Ubuntu 22.04 has no `python3-pypdf` package, so `sudo apt install python3-pypdf` stops with `Unable to locate package`; install pypdf with Python's own installer instead:
+
+```bash
+sudo apt install python3-pip
+pip3 install --user pypdf
+```
+
+On 22.04 that's the right way: unlike 24.04, it lets pip install into your home folder (the `--user`), leaving Ubuntu's own Python alone. Every other package on this page comes from `apt` as written.
 
 ## Getting the tools
 
@@ -57,7 +118,7 @@ Put that `export` line in `~/.bashrc` (see [below](#optional-the-full-validators
 | `file` | Detecting real image types | present on Ubuntu |
 | `html5lib` | Recommended. Parsing pages saved from the web (`unpack-site.py`), the way a browser does; without it `lxml` is used, and without either `unpack-site.py` stops | `sudo apt install python3-html5lib` |
 | `lxml` | Optional. Full schema validation of the manifest; without it a smaller set of checks runs. | `sudo apt install python3-lxml` |
-| `pypdf` | `--toc` with a PDF, and checking a PDF the run builds or the audit reads; an EPUB needs nothing | `sudo apt install python3-pypdf` |
+| `pypdf` | `--toc` with a PDF, and checking a PDF the run builds or the audit reads; an EPUB needs nothing | `sudo apt install python3-pypdf`; on Ubuntu 22.04, `pip3 install --user pypdf` ([above](#which-ubuntu-you-have)) |
 | LuaLaTeX | A `pdf` target only; see [below](#for-a-pdf-target-lualatex) | TeX Live 2026 |
 | pdfLaTeX or LuaLaTeX, LaTeX's `preview` package, and `pdftocairo` | A LaTeX source with drawings or PDF images, which become SVG ([LaTeX sources](latex.md)); without them they're left out of the pages | TeX Live (`tlmgr install preview` where it's missing); `sudo apt install poppler-utils` |
 | TeX's `latex-tagging-status` package | A LaTeX source's copy made for tagging, whose class and packages are checked against the tagging project's status list ([LaTeX sources](latex.md#the-source-target)); without it, the run says how to install it and checks nothing | `tlmgr install latex-tagging-status`; MiKTeX installs it on demand |
@@ -73,7 +134,7 @@ pandoc --version | head -1
 
 Pandoc 3.9 is a hard requirement, checked before any work starts. Versions above it still differ in ways that show up here — newer releases read Word caption paragraphs into table captions, older ones don't — so the same document can produce different reports on different machines. Neither is wrong; the sidecar files absorb the difference.
 
-**Python packages come from `apt`, not `pip`.** Ubuntu 24.04 manages its Python installation, so `pip3 install pypdf` stops with `error: externally-managed-environment` (and on a fresh WSL install `pip3` isn't there to begin with). The `python3-*` packages in the table are the ones to use. If you need a version newer than Ubuntu ships, make a virtual environment for it (`python3 -m venv ~/venv && ~/venv/bin/pip install pypdf`) and run the tools with that interpreter.
+**Python packages come from `apt`, not `pip`.** Ubuntu 24.04 manages its Python installation, so `pip3 install pypdf` stops with `error: externally-managed-environment` (and on a fresh WSL install `pip3` isn't there to begin with). The `python3-*` packages in the table are the ones to use. Ubuntu 22.04 doesn't stop pip, and its one gap, pypdf, comes from pip there, as [above](#which-ubuntu-you-have). If you need a version newer than Ubuntu ships, make a virtual environment for it (`python3 -m venv ~/venv && ~/venv/bin/pip install pypdf`) and run the tools with that interpreter.
 
 ## Optional: the full validators
 

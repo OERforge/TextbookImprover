@@ -724,8 +724,38 @@ def check_drawings_without_preview():
     ]
 
 
+def check_tlmgr_command():
+    """A tlmgr command the run suggests has sudo before it where the TeX
+    tree isn't the user's to write (TeX Live installed for the whole
+    system), and none where it is (TinyTeX in the home folder) or where
+    there's no TeX to ask."""
+    import latexbuild
+    work = tempfile.mkdtemp(prefix="tex-root-")
+    saved_root, saved_access = list(latexbuild._TEX_ROOT), os.access
+    try:
+        latexbuild._TEX_ROOT[:] = [work]
+        own = latexbuild.tlmgr_command("install preview")
+        os.access = lambda path, mode: False
+        system = latexbuild.tlmgr_command("install preview")
+        latexbuild._TEX_ROOT[:] = [""]
+        unknown = latexbuild.tlmgr_command("install preview")
+    finally:
+        latexbuild._TEX_ROOT[:] = saved_root
+        os.access = saved_access
+        shutil.rmtree(work, ignore_errors=True)
+    return [
+        ("a TeX the user can write is managed without sudo",
+         lambda: own == "tlmgr install preview"),
+        ("one installed for the whole system with sudo",
+         lambda: system == "sudo tlmgr install preview"),
+        ("and with no TeX to ask, the plain command",
+         lambda: unknown == "tlmgr install preview"),
+    ]
+
+
 GROUPS = [
     ("a report's rows", check_report_rows),
+    ("tlmgr, with sudo where it needs it", check_tlmgr_command),
     ("drawings without the preview package", check_drawings_without_preview),
     ("layout tables", check_layout_tables),
     ("unique ids", check_unique_ids),

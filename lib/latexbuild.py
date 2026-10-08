@@ -355,6 +355,29 @@ def missing_warning(missing, advice):
             + ". " + advice)
 
 
+_TEX_ROOT = []
+
+
+def tlmgr_command(words):
+    """tlmgr and its arguments as they're to be typed here: with sudo
+    before them when the TeX tree tlmgr manages isn't the user's to write,
+    as a TeX Live installed for the whole system (/usr/local/texlive)
+    isn't, where TinyTeX, in the home folder, is."""
+    if not _TEX_ROOT:
+        root = ""
+        if shutil.which("kpsewhich"):
+            try:
+                root = subprocess.run(["kpsewhich", "-var-value=TEXMFROOT"],
+                                      capture_output=True, text=True,
+                                      stdin=subprocess.DEVNULL).stdout.strip()
+            except OSError:
+                root = ""
+        _TEX_ROOT.append(root)
+    root = _TEX_ROOT[0]
+    sudo = bool(root) and os.path.isdir(root) and not os.access(root, os.W_OK)
+    return ("sudo " if sudo else "") + "tlmgr " + words
+
+
 def failure_advice(log):
     """What to do about a failed build, from its log: a file LaTeX can't
     find, or one of TeX's tables outgrown."""
@@ -365,8 +388,8 @@ def failure_advice(log):
     # named.
     for name in dict.fromkeys(MISSING_FILE.findall(log)):
         said.append(f"LaTeX can't find {name}. For TinyTeX or TeX Live "
-                    f"from tug.org, `tlmgr search --global --file /{name}` "
-                    "names the package that has it, and `tlmgr install` "
+                    f"from tug.org, `{tlmgr_command('search --global --file /' + name)}` "
+                    f"names the package that has it, and `{tlmgr_command('install')}` "
                     "installs that. For a distribution's texlive packages, "
                     "its package manager does (`apt-file search "
                     f"{name}` on Debian and Ubuntu).")

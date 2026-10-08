@@ -22,6 +22,7 @@ import re
 import shutil
 import subprocess
 
+import latexbuild
 import latexsource
 
 DATA = "latex-tagging-status.ltx"
@@ -111,7 +112,8 @@ def check(base, master, say):
     path = kpsewhich(DATA, base)
     if not path:
         say("The tagging status check needs TeX's latex-tagging-status package, "
-            "which isn't installed: `tlmgr install latex-tagging-status` on TeX "
+            "which isn't installed: "
+            f"`{latexbuild.tlmgr_command('install latex-tagging-status')}` on TeX "
             "Live or TinyTeX, or MiKTeX's package manager. It says which of the "
             "book's packages LaTeX's tagging can't take yet; without it, nothing "
             "is checked.")
@@ -120,8 +122,8 @@ def check(base, master, say):
     kernel = kernel_date(base)
     if date and kernel and date < kernel:
         say(f"The tagging status list is dated {date}, older than the LaTeX it "
-            f"checks ({kernel}): `tlmgr update latex-tagging-status` brings it up "
-            "to date.")
+            f"checks ({kernel}): `{latexbuild.tlmgr_command('update latex-tagging-status')}` "
+            "brings it up to date.")
     groups, counts = {}, {}
     loaded = []
     for one in ([master] if isinstance(master, str) else master):

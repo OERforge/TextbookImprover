@@ -2556,10 +2556,11 @@ def render(base, work, preamble, items, say):
         # smaller bundle (TinyTeX-1) doesn't have; without it every drawing
         # fails alike, so it's said as what to install.
         if len(failed) == len(todo) and re.search(r"preview\.sty'? not found", log):
+            import latexbuild
             say(f"WARNING: the book's {len(todo)} drawing(s) need LaTeX's preview "
-                "package to become images, which isn't installed: `tlmgr install "
-                "preview` on TeX Live or TinyTeX, or MiKTeX's package manager. "
-                "They're left out of the pages.")
+                "package to become images, which isn't installed: "
+                f"`{latexbuild.tlmgr_command('install preview')}` on TeX Live or "
+                "TinyTeX, or MiKTeX's package manager. They're left out of the pages.")
         elif failed:
             say(f"WARNING: {engine} couldn't render {len(failed)} of the "
                 f"book's {len(todo)} drawing(s) with its own preamble, so "

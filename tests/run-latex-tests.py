@@ -514,9 +514,12 @@ def tex_ready():
     tools = [] if shutil.which("rsvg-convert") else ["rsvg-convert"]
     if not missing and not tools:
         return None
+    sys.path.insert(0, os.path.join(ROOT, "lib"))
+    import latexbuild
     return ("TeX has what the suite's books load, or the checks that build them "
             "fail: missing " + ", ".join(missing + tools) + " ("
-            + "; ".join(([f"tlmgr install {' '.join(missing)}"] if missing else [])
+            + "; ".join(([latexbuild.tlmgr_command("install " + " ".join(missing))]
+                         if missing else [])
                         + (["sudo apt install librsvg2-bin"] if tools else [])) + ")")
 
 

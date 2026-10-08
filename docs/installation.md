@@ -180,40 +180,83 @@ Two notes on versions. Ubuntu packages `epubcheck` as well (`sudo apt install ep
 
 ## For a PDF target: LuaLaTeX
 
-A `pdf` target writes the book through Pandoc's LaTeX writer and LuaLaTeX, with LaTeX's tagging switched on, so it needs a TeX distribution recent enough to tag. The LaTeX Project's [tagging project](https://latex3.github.io/tagging-project/) describes tagging as usable in production since the LaTeX release of 2025-11-01, for documents that keep to packages that support it, and TeX Live 2026 ships that; what's verified here is LaTeX 2026-06-01, tagpdf 1.0g, and latex-lab 2026-06-01a. **Ubuntu's `texlive` packages are TeX Live 2023 on 24.04, too old to tag a book properly**, so install TeX Live from the TeX Live project instead. A build checks the release first (`\fmtversion`, which LuaLaTeX reports) and stops on anything older than 2025-11-01, saying which release it found; without that check, Ubuntu 24.04's LaTeX (2023-11-01) stops on a missing `pdfmanagement-testphase.sty`, which older releases load for `\DocumentMetadata` and current ones have replaced. The `tlmgr` that comes with Debian's and Ubuntu's texlive packages can't add it: it runs in a user mode that isn't set up, and installs nothing into the system's TeX Live. When a TeX Live from Ubuntu and one from the TeX Live project are both installed, the one earlier on the path is the one used: `which lualatex` says which. Nothing else in the project needs TeX, and a book without a `pdf` target never looks for it.
+A `pdf` target writes the book through Pandoc's LaTeX writer and LuaLaTeX, with LaTeX's tagging switched on, so it needs a TeX distribution recent enough to tag. The LaTeX Project's [tagging project](https://latex3.github.io/tagging-project/) describes tagging as usable in production since the LaTeX release of 2025-11-01, for documents that keep to packages that support it, and TeX Live 2026 ships that; what's verified here is LaTeX 2026-06-01, tagpdf 1.0g, and latex-lab 2026-06-01a. A LaTeX source needs TeX too, for its drawings and its own PDF. Nothing else in the project does, and a book without a `pdf` target or LaTeX in it never looks for it.
 
-Verified here: [TinyTeX](https://github.com/rstudio/tinytex-releases), a small TeX Live 2026, brought up to date and given the packages the tagging code and Pandoc's template load that it lacks.
+**What you have now.** In the Ubuntu terminal:
 
 ```bash
-curl -L -o /tmp/TinyTeX.tar.xz https://github.com/rstudio/tinytex-releases/releases/download/v2026.09/TinyTeX-linux-x86_64-v2026.09.tar.xz
-tar xJf /tmp/TinyTeX.tar.xz -C ~          # gives ~/.TinyTeX
-export PATH="$HOME/.TinyTeX/bin/x86_64-linux:$PATH"    # and add this line to ~/.bashrc
-tlmgr update --self --all
-tlmgr install latex-lab tagpdf luamml luatexbase selnolig luacolor lua-ul footnotehyper xurl multirow
+which lualatex
 lualatex --version | head -1
 ```
 
-Pandoc's template loads the first five for every book; `luacolor` and `lua-ul` when the book has underlined or struck-out text (the statistics book does), and `xurl` when it's installed, which is better than not (it lets a long address break anywhere). Pandoc 3.11's template also loads `footnotehyper` when it's there; 3.12's writes notes in tables itself and doesn't.
+- Nothing found: there's no TeX yet. Install one of the two below.
+- A path under your home folder, `~/.TinyTeX/bin/...`, and TeX Live 2026: TinyTeX, as below. Go on to [`tlmgr` and `sudo`](#tlmgr-and-sudo).
+- A path under `/usr/local/texlive/`, and TeX Live 2025 or 2026: a TeX Live from its own installer, for the whole system. Go on to [`tlmgr` and `sudo`](#tlmgr-and-sudo); its `tlmgr` needs `sudo`.
+- `/usr/bin/lualatex` and "TeX Live 2023/Debian" (2021 on Ubuntu 22.04): Ubuntu's own `texlive` packages, too old to tag a book. A build stops on anything older than LaTeX 2025-11-01, saying which release it found. Install one of the two below; you can leave Ubuntu's in place, since whichever comes first on your path is the one used, and the installation steps put the new one first. The `tlmgr` that comes with Ubuntu's packages can't add to them: it runs in a user mode that isn't set up, and installs nothing.
 
-**`tlmgr` and `sudo`.** TinyTeX lives in your home folder, so its `tlmgr` needs no `sudo`, as in the commands above. A TeX Live from its own installer is usually installed for the whole system, under `/usr/local/texlive`, and there every `tlmgr install` and `tlmgr update` needs `sudo` before it: `sudo tlmgr install preview`, where this page says `tlmgr install preview`. If `sudo` then answers `tlmgr: command not found`, which happens because `sudo` uses a shorter list of folders to find programs in than you do, `sudo "$(which tlmgr)" install preview` works. The commands the run itself suggests have `sudo` in them where your TeX needs it. And when `tlmgr` says it has to be updated itself before it will install anything, as it does once TeX Live has released a new version of it, `tlmgr update --self` (again with `sudo` for a whole-system TeX Live) does that; then run the install again.
+**Installing one.** Two ways, both TeX Live 2026:
 
-A book with SVG images needs `rsvg-convert` for its PDF (`sudo apt install librsvg2-bin`); the build stops and says so if it's missing. DejaVu Sans, which most Linux desktops have already (`sudo apt install fonts-dejavu-core` if not), supplies characters Latin Modern lacks, such as the circled digits of an AsciiDoc book's code callouts.
+- **TinyTeX**, which is what's tested here: a small TeX Live in your home folder, which you add packages to as you need them, without `sudo`. Use this bundle, the one the command below downloads: TinyTeX's own install script installs a smaller one, TinyTeX-1, which lacks much a book is likely to load.
 
-For the PDF's table captions and empty paragraph elements, `pikepdf` too (`sudo apt install python3-pikepdf`); without it the run says so and leaves both as LaTeX tags them, and the PDF suite skips. `pdf.figures: section` needs `placeins` (`tlmgr install placeins`). `multirow` is for a table with a cell spanning rows, which Pandoc's template loads only when a book has one; the PDF suite's book does.
+  ```bash
+  curl -L -o /tmp/TinyTeX.tar.xz https://github.com/rstudio/tinytex-releases/releases/download/v2026.09/TinyTeX-linux-x86_64-v2026.09.tar.xz
+  tar xJf /tmp/TinyTeX.tar.xz -C ~          # gives ~/.TinyTeX
+  export PATH="$HOME/.TinyTeX/bin/x86_64-linux:$PATH"    # and add this line to ~/.bashrc
+  tlmgr update --self --all
+  lualatex --version | head -1
+  ```
 
-A LaTeX book's PDF is built from the book's own LaTeX ([LaTeX sources](latex.md#the-pdf-target)), by `latexmk`, which TinyTeX and TeX Live include, and with the packages the book itself loads, which `tlmgr` installs as below. The copy loads `unicode-math` for its formulas' MathML, which TinyTeX has, and, for a book that uses pdfTeX's own commands or tests for pdfTeX by `\pdfoutput`, `luatex85`, which TinyTeX lacks (`tlmgr install luatex85`).
+- **TeX Live 2026 from its own installer**, [as the TeX Live project describes it](https://tug.org/texlive/quickinstall.html): everything in TeX Live, several gigabytes, for the whole system, so it needs none of the packages below but its `tlmgr` needs `sudo`. The download and installation can take an hour or more.
 
-A LaTeX book's drawings are each made a page of LaTeX's `preview` package, which the TinyTeX above has. TinyTeX-1, the smaller bundle TinyTeX's own install script installs, doesn't, and lacks much else a book is likely to load: a run without `preview` says to install it, and a build that stops names the file it couldn't find, as above.
+  ```bash
+  cd /tmp
+  curl -L -o install-tl-unx.tar.gz https://mirror.ctan.org/systems/texlive/tlnet/install-tl-unx.tar.gz
+  zcat < install-tl-unx.tar.gz | tar xf -
+  cd install-tl-*
+  sudo perl ./install-tl --no-interaction
+  export PATH="/usr/local/texlive/2026/bin/x86_64-linux:$PATH"    # and add this line to ~/.bashrc
+  lualatex --version | head -1
+  ```
 
-A LaTeX book's PDF figures that don't embed their fonts, as R's plots don't, are rewritten in the copy with them embedded, which PDF/UA requires: by Ghostscript where it's installed (`sudo apt install ghostscript`), and otherwise by `pdftocairo`. The LaTeX suite has one check of Ghostscript's way, which skips without it.
+Either way, `which lualatex` should now name the one you installed, and `lualatex --version` say TeX Live 2026.
 
-The LaTeX suite (`tests/run-latex-tests.py`) builds small books that load more than the PDF target needs, and its first check names whatever of it is missing, with the line that installs it. On the TinyTeX above, that's `tlmgr install luatex85 wasysym`; on TinyTeX-1, `tlmgr install babel-english caption fancyhdr grfext luatex85 mdframed pgf preview soul tabto-ltx tex-gyre titlesec ulem wasysym wrapfig`; and on either, `rsvg-convert` for its SVG (`sudo apt install librsvg2-bin`).
+### `tlmgr` and `sudo`
 
-Two more kinds of package, depending on the book. A book with passages in another language needs that language's `babel-` and `hyphen-` packages (`tlmgr install babel-german hyphen-german` for German), or LuaLaTeX stops with babel's `Unknown option`. And whatever a `pdf.metadata` file's `header-includes` loads has to be installed too (`hanging`, say). When LuaLaTeX stops on `File 'something.sty' not found`, `tlmgr search --global --file /something.sty` names the package to install.
+`tlmgr` is TeX Live's package manager, which installs the packages below. TinyTeX lives in your home folder, so its `tlmgr` needs no `sudo`, and this page writes the commands that way. A TeX Live installed for the whole system, under `/usr/local/texlive`, needs `sudo` before every `tlmgr install` and `tlmgr update`: `sudo tlmgr install preview` where this page says `tlmgr install preview`. If `sudo` then answers `tlmgr: command not found`, which happens because `sudo` uses a shorter list of folders to find programs in than you do, `sudo "$(which tlmgr)" install preview` works. The commands the run itself suggests have `sudo` in them where your TeX needs it.
+
+Before installing anything, bring `tlmgr` itself up to date, since it refuses to install once TeX Live has released a newer version of it:
+
+```bash
+tlmgr update --self          # sudo tlmgr update --self for a whole-system TeX Live
+```
 
 `tlmgr` downloads from a CTAN mirror chosen for you. On a network that only allows named hosts, set a fixed one first, since the chooser redirects: `tlmgr option repository https://ctan.math.illinois.edu/systems/texlive/tlnet` is the one used here.
 
-A full TeX Live 2026 from the [TeX Live installer](https://tug.org/texlive/quickinstall.html) has everything above already, at several gigabytes. It hasn't been tried here.
+### Everything at once
+
+This installs every TeX package and program anything in the project uses, the test suites' books included, so nothing below has to be installed piece by piece. On a full TeX Live the `tlmgr` line finds them all there already and does nothing, which does no harm.
+
+```bash
+tlmgr install latex-lab tagpdf luamml luatexbase selnolig luacolor lua-ul footnotehyper xurl multirow \
+  luatex85 placeins latex-tagging-status preview \
+  amsfonts amsmath babel-english caption fancyhdr framed geometry grfext mdframed pgf soul \
+  tabto-ltx tex-gyre titlesec tools ulem wasysym wrapfig
+sudo apt install librsvg2-bin poppler-utils ghostscript fonts-dejavu-core python3-pikepdf
+```
+
+With `sudo tlmgr` in the first line for a whole-system TeX Live. The rest of this section says what each is for.
+
+### What each is for
+
+The first five TeX packages are the tagging code and what Pandoc's template loads for every book; `luacolor` and `lua-ul` are for underlined or struck-out text (the statistics book has some), and `xurl` lets a long address break anywhere, which the template uses when it's installed. Pandoc 3.11's template also loads `footnotehyper` when it's there; 3.12's writes notes in tables itself and doesn't. `multirow` is for a table with a cell spanning rows, which Pandoc's template loads only when a book has one; the PDF suite's book does. `pdf.figures: section` needs `placeins`.
+
+A book with SVG images needs `rsvg-convert` for its PDF (`librsvg2-bin`); the build stops and says so if it's missing. DejaVu Sans, which most Linux desktops have already (`fonts-dejavu-core`), supplies characters Latin Modern lacks, such as the circled digits of an AsciiDoc book's code callouts. For the PDF's table captions and empty paragraph elements, `pikepdf` (`python3-pikepdf`); without it the run says so and leaves both as LaTeX tags them, and the PDF suite skips.
+
+A LaTeX book's PDF is built from the book's own LaTeX ([LaTeX sources](latex.md#the-pdf-target)), by `latexmk`, which TinyTeX and TeX Live include, and with the packages the book itself loads. The copy loads `unicode-math` for its formulas' MathML, which TinyTeX has, and, for a book that uses pdfTeX's own commands or tests for pdfTeX by `\pdfoutput`, `luatex85`. A LaTeX book's drawings are each made a page of LaTeX's `preview` package, and its PDF images and drawings become SVG through `pdftocairo` (`poppler-utils`). Its PDF figures that don't embed their fonts, as R's plots don't, are rewritten in the copy with them embedded, which PDF/UA requires: by Ghostscript where it's installed, and otherwise by `pdftocairo`. `latex-tagging-status` lets the run check a book's packages against the tagging project's list of what tagging supports.
+
+The rest of the TeX packages in the line, from `amsfonts` on, are what the LaTeX suite's small books load (`tests/run-latex-tests.py`). Its first check names any of them that are missing, with the line that installs them, and `rsvg-convert` too. It has one check of Ghostscript's way of embedding fonts, which skips without Ghostscript.
+
+Two more kinds of package, depending on the book. A book with passages in another language needs that language's `babel-` and `hyphen-` packages (`tlmgr install babel-german hyphen-german` for German), or LuaLaTeX stops with babel's `Unknown option`. And whatever a `pdf.metadata` file's `header-includes` loads, and whatever else a book of your own loads, has to be installed too (`hanging`, say). When LuaLaTeX stops on `File 'something.sty' not found`, `tlmgr search --global --file /something.sty` names the package to install, and the run says so.
 
 ## Optional: veraPDF
 

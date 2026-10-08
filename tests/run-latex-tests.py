@@ -491,8 +491,13 @@ def can_draw():
 # file TeX read in a run of the suite that passed (-recorder) and then by
 # what each build that still failed couldn't find; a package a copy is
 # made without, and so never reads, can still be one LaTeX needs found
-# (2026-10-08). And the one other tool the LaTeX target's SVG needs.
-SUITE_TEX = [("babel-english", "english.ldf"), ("caption", "caption.sty"),
+# (2026-10-08). With the packages a fuller TeX Live has that its smaller
+# schemes may not, which the books load too (amsfonts to tools), named
+# after a TeX Live install lacked some. And the one other tool the LaTeX
+# target's SVG needs.
+SUITE_TEX = [("amsfonts", "amssymb.sty"), ("amsmath", "amsmath.sty"),
+             ("babel-english", "english.ldf"), ("caption", "caption.sty"),
+             ("framed", "framed.sty"), ("geometry", "geometry.sty"), ("tools", "enumerate.sty"),
              ("fancyhdr", "fancyhdr.sty"), ("grfext", "grfext.sty"),
              ("luatex85", "luatex85.sty"), ("mdframed", "mdframed.sty"),
              ("pgf", "tikz.sty"), ("preview", "preview.sty"), ("soul", "soul.sty"),
@@ -521,6 +526,17 @@ def tex_ready():
             + "; ".join(([latexbuild.tlmgr_command("install " + " ".join(missing))]
                          if missing else [])
                         + (["sudo apt install librsvg2-bin"] if tools else [])) + ")")
+
+
+def built_or_why(ok, said):
+    """ok, and when it isn't, the run's own words on why its LaTeX build
+    stopped, so a failing check says what to do about it."""
+    if not ok:
+        why = [line.strip() for line in said.splitlines()
+               if line.startswith("! ") or "can't find" in line or "wasn't built" in line]
+        for line in why[:4]:
+            print("    " + line[:300])
+    return ok
 
 
 SKIPPED = []
@@ -3661,7 +3677,7 @@ def case_unsupported(work):
             "squares, □ and ■,", "its own lozenge, ⋄.", "A line set in Helvetica.")
             if phrase not in found]
         if missing:
-            print("    missing from the PDF:", missing)
+            print("    missing from the PDF:", missing[:6], "..." if len(missing) > 6 else "")
         return not missing
 
     def passes_ua2():
@@ -3718,8 +3734,8 @@ def case_unsupported(work):
          and "\\disable@package@load{wrapfig}{\\csname __oer_shim_wrapfig:\\endcsname}" in copy
          and "\\begin{enumerate}[(a)]" in copy and "\\begin{enumerate}[#1]" in copy
          and "\\usepackage[explicit]{titlesec}" in copy),
-        ("the PDF from the book's own LaTeX builds tagged", lambda: os.path.exists(built)
-         and "built by LaTeX from the book's own files" in said),
+        ("the PDF from the book's own LaTeX builds tagged", lambda: built_or_why(
+            os.path.exists(built) and "built by LaTeX from the book's own files" in said, said)),
         ("with every word the packages set, the frames' titles too, and each list's labels "
          "as the enumerate package makes them, from a pattern a macro passes or a style file "
          "holds as well; a wrapped figure in a minipage", every_word),

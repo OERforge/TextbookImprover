@@ -556,6 +556,70 @@ def check_matter_by_name():
     ]
 
 
+
+def check_project_sample():
+    """project-sample.yaml as oerconfig writes it: every project setting
+    with its description, and read back, the values it was given; and the
+    project: block another file holds, read leniently."""
+    import yaml
+    work = tempfile.mkdtemp(prefix="project-sample-")
+    try:
+        schema = oerconfig.load_schema(os.path.join(ROOT, "lib", "schema-project.yaml"))
+        values = dict(oerconfig.resolve(schema, schema, []).project,
+                      identifier="org.example.unit", title="A Book",
+                      contents=[{"page": "preface", "type": "preface"}, "one"])
+        path = os.path.join(work, "project-sample.yaml")
+        text = oerconfig.write_project(schema, values, path, notes=["A note."])
+        back = oerconfig.load_document(path, schema).project
+        blocks = {}
+        for name, body in (("with.yaml", "project:\n  title: T\ndefaults: {}\n"),
+                           ("without.yaml", "defaults: {}\n"),
+                           ("broken.yaml", "project: [\n"),
+                           ("listed.yaml", "project:\n  - a\n")):
+            with open(os.path.join(work, name), "w", encoding="utf-8") as fh:
+                fh.write(body)
+            blocks[name] = oerconfig.inline_project(os.path.join(work, name))
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+    described = [k for k in schema.root.keys if k in yaml.safe_load(text)["project"]]
+    return [
+        ("it reads back as the values written, contents and all",
+         lambda: back == {k: v for k, v in values.items()}),
+        ("every project setting is in it, the notes at the top",
+         lambda: set(described) == set(schema.root.keys)
+         and text.startswith("# Configuration for project") and "# A note." in text),
+        ("another file's project block is found, and none in a file without "
+         "one, a broken one, or one that isn't a mapping",
+         lambda: blocks == {"with.yaml": {"title": "T"}, "without.yaml": None,
+                            "broken.yaml": None, "listed.yaml": None}),
+        ("an identifier or a title at its default isn't declared",
+         lambda: oerconfig.declared_project([
+             oerconfig.Document({"project": {"identifier": "book", "title": "T"}}, "a"),
+             oerconfig.Document({"project": {"title": "Untitled", "language": "de"}}, "b")])
+         == {"language": "de"}),
+        ("the sample takes another file's block and a master's details where "
+         "nothing declares them, and says so",
+         lambda: (lambda v: v[0]["title"] == "Its Own" and v[0]["authors"] == ["A"]
+                  and v[0]["contents"] == ["z", "a"] and v[0]["language"] == "en"
+                  and v[2] == ["authors", "contents"]
+                  and any("From conversion.yaml's block" in n for n in v[1]))(
+             oerconfig.project_sample_values(
+                 dict(values, language="en"), {"language": "en"},
+                 {"project": {"title": "Its Own"}, "project_source": "conversion.yaml's block",
+                  "title": "The Master's", "authors": ["A"], "language": "de",
+                  "contents": ["z", "a"], "source": "the master"}, ["a", "z"], True))),
+        ("a sample's inline block holds the file's own settings and no others",
+         lambda: (lambda b: "language: de" in b and "identifier:" not in b
+                  and "title:" not in b)((lambda t: t.split("\nproject:", 1)[1].split(
+                      "\ndefaults:", 1)[0])(
+             oerconfig.write_config(
+                 oerconfig.load_schema(os.path.join(ROOT, "bin", "schema-packaging.yaml")),
+                 schema, oerconfig.resolve(
+                     oerconfig.load_schema(os.path.join(ROOT, "bin", "schema-packaging.yaml")),
+                     schema, []), {}, os.path.join(tempfile.mkdtemp(), "s.yaml"),
+                 include_project={"language": "de"})))),
+    ]
+
 def check_types_by_title():
     """A page whose title names what it is gets the type in a guessed
     contents, the role the type implies dropped and one it doesn't kept."""
@@ -919,6 +983,7 @@ GROUPS = [
     ("unique ids", check_unique_ids),
     ("front and back matter by name", check_matter_by_name),
     ("types by title", check_types_by_title),
+    ("the project's sample", check_project_sample),
     ("caption contrast", check_contrast),
     ("manifest names", check_manifest_names),
     ("repairing a .docx on the way in", check_docx_repair),

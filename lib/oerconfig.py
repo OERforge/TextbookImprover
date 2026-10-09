@@ -725,7 +725,9 @@ def _wrap_comment(text, indent, width=74):
     return out
 
 
-def _write_tree(node, values, lines, depth, skip_target_only):
+def _write_tree(node, values, lines, depth, skip_target_only, only=None):
+    """Each setting of node at its value, with its description above it;
+    only: the names to write, when not all of them."""
     indent = "  " * depth
     extra = [k for k in (values or {}) if k not in node.keys]
     if extra:
@@ -741,6 +743,8 @@ def _write_tree(node, values, lines, depth, skip_target_only):
             lines += [indent + l for l in rendered.rstrip().splitlines()]
     for name, child in node.keys.items():
         if child.target_only and skip_target_only:
+            continue
+        if only is not None and name not in only:
             continue
         lines.append("")
         if child.description:
@@ -817,6 +821,102 @@ def _write_target(node, overrides, target_name, lines, depth):
         lines += _wrap_comment("Uses the defaults unchanged.", indent)
 
 
+def _sample_header(schema, notes):
+    """The comment a written configuration opens with: which file it is,
+    where its contents come from, and the run's notes."""
+    lines = [
+        f"# Configuration for {os.path.basename(schema.source)}"
+        .replace("schema-", "").replace(".yaml", ""),
+        "#",
+        "# Written from the schema, so every setting the tools read is",
+        "# below with its description. Values are your own where you set",
+        "# one and the documented default otherwise.",
+    ]
+    return lines + [f"# {note}" for note in notes]
+
+
+def write_project(project_schema, values, path, notes=()):
+    """Write a complete project.yaml: the project block alone, every
+    setting at its value with its description above it, as write_config
+    writes the other two. values: the resolved project, contents included."""
+    lines = _sample_header(project_schema, notes)
+    lines.append("")
+    lines.append("project:")
+    _write_tree(project_schema.root, values, lines, 1, skip_target_only=True)
+    text = "\n".join(lines).rstrip() + "\n"
+    with open(path, "w", encoding="utf-8") as handle:
+        handle.write(text)
+    return text
+
+
+# The two project settings with no useful default: a file that leaves one
+# at its default hasn't named the book, whatever it declares.
+UNNAMED_DEFAULTS = {"identifier": "book", "title": "Untitled"}
+
+
+def declared_project(documents):
+    """The project settings the files declare, keys to values, a later file
+    over an earlier one, without an identifier or a title left at its
+    default, which names nothing."""
+    found = {}
+    for doc in documents:
+        found.update(doc.project or {})
+    return {k: v for k, v in found.items() if UNNAMED_DEFAULTS.get(k) != v}
+
+
+def project_sample_values(project, declared, hint, contents, hint_contents,
+                          notes=()):
+    """What project-sample.yaml holds, and the notes at its top: the project
+    as settled, with these contents, and for what no file declares, what
+    the sources say about the book (hint, from convert.py: another file's
+    project: block, which that file's half alone reads, under "project";
+    a master file's title, authors, and language; its order as
+    "contents", used when hint_contents). Returns (values, notes, used)."""
+    values = dict(project)
+    values["contents"] = contents
+    extra = [n for n in notes if not n.startswith("manifest.")]
+    used = []
+    other = hint.get("project") or {}
+    for key, value in other.items():
+        if key not in declared:
+            values[key] = value
+    if other:
+        extra.append(f"From {hint.get('project_source') or 'another file'}: "
+                     + ", ".join(sorted(other)) + ".")
+    for key in ("title", "authors", "language"):
+        if hint.get(key) and key not in declared and key not in other:
+            values[key] = hint[key]
+            used.append(key)
+    if hint_contents and hint.get("contents") and "contents" not in other:
+        values["contents"] = hint["contents"]
+        used.append("contents")
+        extra = [n for n in extra if not n.startswith("contents was missing")]
+    if used:
+        extra.append(f"From {hint.get('source') or 'the sources'}: "
+                     + ", ".join(used) + ". Check them.")
+    named = {**declared, **other}
+    if any(UNNAMED_DEFAULTS.get(k) == values.get(k) or k not in named
+           for k in UNNAMED_DEFAULTS):
+        extra.append("identifier and title are the two settings with no useful "
+                     "default: set them below.")
+    return values, extra, used
+
+
+def inline_project(path):
+    """The project: block a packaging.yaml or conversion.yaml holds, or
+    None: read leniently, since it's asked only to say where the book is
+    named, and the file's own reader reports what's wrong with it."""
+    if not path or not os.path.isfile(path):
+        return None
+    try:
+        with open(path, encoding="utf-8") as handle:
+            data = yaml.safe_load(handle)
+    except (OSError, yaml.YAMLError):
+        return None
+    block = data.get("project") if isinstance(data, dict) else None
+    return block if isinstance(block, dict) and block else None
+
+
 def write_config(schema, project_schema, resolved_defaults, targets, path,
                  notes=(), include_project=True):
     """Write a complete configuration file.
@@ -830,22 +930,24 @@ def write_config(schema, project_schema, resolved_defaults, targets, path,
     Targets carry only what differs from the defaults, so the defaults
     block keeps meaning something and the file stays readable.
     """
-    lines = [
-        f"# Configuration for {os.path.basename(schema.source)}"
-        .replace("schema-", "").replace(".yaml", ""),
-        "#",
-        "# Written from the schema, so every setting the tools read is",
-        "# below with its description. Values are your own where you set",
-        "# one and the documented default otherwise.",
-    ]
-    lines += [f"# {note}" for note in notes]
+    lines = _sample_header(schema, notes)
 
-    # The project block is written inline so a directory holding only this
-    # file still stands alone. It is left out when a project.yaml is being
-    # written alongside, because two copies of the same setting means one
-    # of them is stale the moment either is edited -- and the one that
-    # wins is not the one a reader would expect.
-    if include_project:
+    # The project block is written inline only when the file being sampled
+    # already holds one, so a directory holding only this file still stands
+    # alone and renaming the sample loses nothing. Otherwise it's left to
+    # project.yaml, which both halves read: two copies of the same setting
+    # means one of them is stale the moment either is edited -- and the one
+    # that wins is not the one a reader would expect.
+    # include_project: True for every project setting at its resolved value,
+    # or the block the file holds, as a mapping, for those settings alone:
+    # a sample renamed over the file then declares what the file declared,
+    # nothing project.yaml or a default supplies besides.
+    if isinstance(include_project, dict):
+        lines.append("")
+        lines.append("project:")
+        _write_tree(project_schema.root, include_project, lines, 1,
+                    skip_target_only=True, only=set(include_project))
+    elif include_project:
         lines.append("")
         lines.append("project:")
         _write_tree(project_schema.root, resolved_defaults.project, lines, 1,
@@ -853,10 +955,9 @@ def write_config(schema, project_schema, resolved_defaults, targets, path,
     else:
         lines.append("")
         lines += _wrap_comment(
-            "The book's own details -- language, identifier, title, "
-            "contents -- are in project.yaml, which both halves read. To "
-            "use this directory on its own, copy that file's project "
-            "block in here.", "")
+            "The book's own details -- its identifier, title, language, "
+            "and contents -- are in project.yaml, which both halves read.",
+            "")
 
     lines.append("")
     lines.append("defaults:")

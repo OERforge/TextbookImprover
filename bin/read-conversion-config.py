@@ -7,10 +7,11 @@ it to convert.py as shell assignments.
     python3 bin/read-conversion-config.py -d . --init
 
 Writes OUT_DIR/settings.sh, which convert.py sources. With --init, writes
-a conversion.yaml holding every setting at its default with a line of
-documentation above it, and stops. There is no example configuration to
-copy: the schema is the only description, so the file you start from is
-generated from it and cannot be out of date.
+conversion-sample.yaml, holding every setting with its documentation
+above it, at the value conversion.yaml gives it or else its default, and
+stops; renamed to conversion.yaml, it loses nothing set there. There is
+no example configuration to copy: the schema is the only description, so
+the file you start from is generated from it and cannot be out of date.
 
 WHY THIS EXISTS SEPARATELY
 
@@ -57,6 +58,7 @@ except ImportError:
              "lib/ directory beside bin/.")
 
 CONFIG_NAME = "conversion.yaml"
+SAMPLE_NAME = "conversion-sample.yaml"
 PROJECT_NAME = "project.yaml"
 LEGACY_NAME = "imsmanifest.yaml"
 
@@ -90,8 +92,9 @@ def main():
     parser.add_argument("out_dir", nargs="?",
                         help="directory to write settings.sh into")
     parser.add_argument("--init", action="store_true",
-                        help="write a conversion.yaml of documented "
-                             "defaults and stop")
+                        help=f"write {SAMPLE_NAME}: every setting with its "
+                             f"description, at the value {CONFIG_NAME} gives "
+                             "it or its default, and stop")
     parser.add_argument("-d", "--dir", default=".",
                         help="directory holding the config (default: .)")
     parser.add_argument("--target", default=None,
@@ -132,8 +135,11 @@ def main():
     except oerconfig.ConfigError as exc:
         sys.exit(str(exc))
 
-    target = args.target
-    if target is None:
+    # --init writes the defaults as the file gives them and every target's
+    # block as its own, so it resolves with none chosen: one chosen would
+    # write its overrides as every target's defaults.
+    target = None if args.init else args.target
+    if target is None and not args.init:
         names = oerconfig.target_names(documents)
         if len(names) == 1:
             target = names[0]
@@ -174,20 +180,21 @@ def main():
         print(f"WARNING: {warning}", file=sys.stderr)
 
     if args.init:
-        out = os.path.join(base, CONFIG_NAME)
-        if os.path.exists(out):
-            sys.exit(f"{out} already exists. Move it aside first; this "
-                     "will not overwrite a config you may have edited.")
+        out = os.path.join(base, SAMPLE_NAME)
         targets = {}
         for doc in documents:
             targets.update({n: b or {} for n, b in doc.targets.items()})
         if not targets:
-            targets["html"] = {"format": "html", "output_dir": "."}
+            targets["html"] = {"format": "html"}
+        # The project block only when conversion.yaml holds one already, so
+        # renaming the sample keeps it; otherwise it's project.yaml's.
+        inline = oerconfig.inline_project(config_path)
         oerconfig.write_config(
             schema, project_schema, resolved, targets, out,
-            notes=["Written by --init. Every setting is at its default;",
-                   "delete any line you do not want to override."])
-        print(f"Wrote {out}.")
+            notes=["Written by --init."], include_project=inline or False)
+        print(f"Wrote {out}: every conversion setting with its description, "
+              f"your own where you set one. Rename it to {CONFIG_NAME} to use "
+              "it.")
         return 0
 
     os.makedirs(args.out_dir, exist_ok=True)

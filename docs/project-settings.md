@@ -1,6 +1,6 @@
 # Project settings
 
-Settings that describe the book rather than any one rendering or package of it, at the top level of `packaging.yaml`. Both halves of the pipeline read them. Generated from `lib/schema-project.yaml` by `util/settings-reference.py`; edit the schema, not this page.
+Settings that describe the book rather than any one rendering or package of it, under `project:` in `project.yaml`, which both halves of the pipeline read. A run writes `project-sample.yaml` with every one and its description when nothing names the book, and so does `python3 $T/bin/build-cartridge.py -d . --pages html --init` when nothing names the book and no run has written one: edit it and rename it to `project.yaml` (`T` is the directory you cloned the tools into). [Configuration](configuration.md#samples) has the other two samples. Generated from `lib/schema-project.yaml` by `util/settings-reference.py`; edit the schema, not this page.
 
 Facts about the book itself, true of every rendering of it.
 

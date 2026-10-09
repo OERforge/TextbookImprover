@@ -31,10 +31,10 @@ cd /path/to/your/docx/files
 python3 $T/bin/convert.py                 # 1. convert: html/, one page per source, plus reports
 ```
 
-The first run converts everything, then stops and writes `packaging-sample.yaml`, because a manifest needs two things only you can supply. Set `identifier` and `title` near the top of that file and rename it:
+The first run converts everything, then stops and writes `project-sample.yaml`, because a manifest needs two things only you can supply. Set `identifier` and `title` near the top of that file and rename it:
 
 ```bash
-mv packaging-sample.yaml packaging.yaml
+mv project-sample.yaml project.yaml
 python3 $T/bin/convert.py                 # 2. builds imsmanifest.xml
 python3 $T/bin/convert.py --zip           # 3. ... and the .imscc archive
 ```

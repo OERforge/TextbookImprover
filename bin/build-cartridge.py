@@ -6,12 +6,12 @@ optionally the .imscc archive) from a directory of HTML pages.
     build-cartridge.py                     # write imsmanifest.xml
     build-cartridge.py --check             # validate, write nothing
     build-cartridge.py --zip               # also build the archive
-    build-cartridge.py --init              # write a sample config and stop
+    build-cartridge.py --init              # write packaging-sample.yaml and stop
     build-cartridge.py --includeallhtml    # adopt unlisted pages
 
 This script is read-only with respect to page content: it never edits an
 HTML file, an image, or anything under a media directory. It writes only
-the manifest, the file list, the sample config, and the archive. That is
+the manifest, the file list, the samples, and the archive. That is
 what makes it safe to run repeatedly, and what lets it work on any tidy
 directory of HTML rather than only on output from convert.py.
 
@@ -39,6 +39,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 import argparse
 import hashlib
 import html as html_module
+import json
 import os
 import re
 import sys
@@ -56,6 +57,9 @@ except ImportError:  # pragma: no cover
 CONFIG_NAME = "packaging.yaml"
 PROJECT_NAME = "project.yaml"
 SAMPLE_NAME = "packaging-sample.yaml"
+# The book's own details -- its name, language, and contents -- written for
+# a person to finish and rename to project.yaml, which both halves read.
+PROJECT_SAMPLE_NAME = "project-sample.yaml"
 LEGACY_NAME = "imsmanifest.yaml"
 
 # The configuration library lives beside bin/. Found by path rather than
@@ -550,7 +554,7 @@ def sample_inputs(resolved, documents, target, contents):
 
 def dump_sample(config, path, notes, unknown_roles=None,
                 schema=None, project_schema=None, resolved=None,
-                targets=None):
+                targets=None, include_project=True):
     """Write a complete sample configuration.
 
     Complete is the point, and it is why this goes through the schema
@@ -568,7 +572,49 @@ def dump_sample(config, path, notes, unknown_roles=None,
                      + ", ".join(sorted(unknown_roles)) + ". They sort last "
                      "until they are listed under grouping.back_matter.")
     oerconfig.write_config(schema, project_schema, resolved, targets or {},
-                           path, notes=extra)
+                           path, notes=extra, include_project=include_project)
+
+
+def project_sample(project_schema, settled, documents, hint, contents_declared,
+                   toc, path, notes):
+    """Write project-sample.yaml: the project as settled, contents included,
+    and for what no file declares, what convert.py read about the book
+    (hint: a master file's title, authors, language, and order, or
+    conversion.yaml's project: block), since that is the book's own word on
+    it where a guess is only a guess. Returns what the hint gave."""
+    values, extra, used = oerconfig.project_sample_values(
+        settled.project, oerconfig.declared_project(documents), hint,
+        settled.project.get("contents"), not contents_declared and not toc,
+        notes)
+    oerconfig.write_project(project_schema, values, path, notes=extra)
+    return used
+
+
+def inline_sample_block(inline, contents, hint, contents_declared, toc):
+    """The project: block a packaging-sample.yaml carries for a book named
+    in packaging.yaml: the block as the file has it, with the contents the
+    run worked out (a master's order, when the hint has one and nothing
+    else orders the book) when the file declares none."""
+    block = dict(inline)
+    if not contents_declared:
+        block["contents"] = hint["contents"] if hint.get("contents") and not toc \
+            else contents
+    return block
+
+
+def sample_commands(base, pages_dir):
+    """The commands that write the packaging and conversion samples, for a
+    run that wrote only the project's."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    where = os.path.relpath(base)
+    pages = "" if os.path.abspath(pages_dir) == os.path.abspath(base) \
+        else f" --pages {os.path.relpath(pages_dir)}"
+    return [
+        f"  python3 {os.path.join(here, 'build-cartridge.py')} -d {where}{pages} --init"
+        f"    writes {SAMPLE_NAME}",
+        f"  python3 {os.path.join(here, 'read-conversion-config.py')} -d {where} --init"
+        "    writes conversion-sample.yaml",
+    ]
 
 
 def yaml_scalar(value):
@@ -907,8 +953,8 @@ def main():
     parser.add_argument("--zip", action="store_true",
                         help="also build the .imscc archive")
     parser.add_argument("--includeallhtml", action="store_true",
-                        help="append pages that the config does not list, "
-                             "and write an updated sample config")
+                        help="append pages that contents doesn't list, "
+                             f"and write {PROJECT_SAMPLE_NAME} with them")
     parser.add_argument("--toc", metavar="PDF-OR-EPUB",
                         help="take the order and the headings from this "
                              "PDF's bookmark outline or EPUB's navigation "
@@ -927,7 +973,13 @@ def main():
                              "about instead of refusing them, and keep "
                              "them if the config is rewritten")
     parser.add_argument("--init", action="store_true",
-                        help="write a sample config and stop")
+                        help=f"write {SAMPLE_NAME}, and {PROJECT_SAMPLE_NAME} "
+                             "when nothing names the book and no run has "
+                             "written one, and stop")
+    parser.add_argument("--project-hint", metavar="JSON", default=None,
+                        help="what convert.py read about the book (a master "
+                             "file's title, authors, language, and order), "
+                             f"to start {PROJECT_SAMPLE_NAME} from")
     parser.add_argument("--check", action="store_true",
                         help="validate only; write nothing")
     parser.add_argument("--emit-conversion-config", metavar="DIR",
@@ -951,9 +1003,11 @@ def main():
                  "    python3 bin/read-conversion-config.py -d . DIR")
 
     pages_dir = args.pages or base
-    stems = sorted((f[:-5] for f in os.listdir(pages_dir) if f.endswith(".html")),
+    # --init writes its samples before a first run has written any pages.
+    listed = os.listdir(pages_dir) if os.path.isdir(pages_dir) or not args.init else []
+    stems = sorted((f[:-5] for f in listed if f.endswith(".html")),
                    key=natural_key)
-    if not stems:
+    if not stems and not args.init:
         sys.exit(f"No .html files in {pages_dir}.")
 
     for stem in stems:
@@ -986,45 +1040,84 @@ def main():
             "It reports what it will do first with --dry-run, and never "
             "changes the original.")
 
-    if not args.init:
-        documents = config_documents(base, config_path)
-        if documents:
-            target = choose_target(documents, args.target)
-            try:
-                resolved = oerconfig.resolve(
-                    schema, project_schema, documents, target=target,
-                    allow_unknown=args.allow_unknown_keys)
-            except oerconfig.ConfigError as exc:
-                sys.exit(str(exc))
-            for warning in resolved.warnings:
-                print(f"WARNING: {warning}", file=sys.stderr)
-            config = legacy_view(resolved, target)
+    # Read for --init too, so that a sample keeps every value already
+    # set, as a run's does, and renaming it loses nothing.
+    documents = config_documents(base, config_path)
+    if documents:
+        # --init writes the defaults as the files give them and every
+        # package's block as its own, so it resolves with none chosen: one
+        # chosen would write its overrides as everyone's defaults.
+        target = None if args.init else choose_target(documents, args.target)
+        try:
+            resolved = oerconfig.resolve(
+                schema, project_schema, documents, target=target,
+                allow_unknown=args.allow_unknown_keys)
+        except oerconfig.ConfigError as exc:
+            sys.exit(str(exc))
+        for warning in resolved.warnings:
+            print(f"WARNING: {warning}", file=sys.stderr)
+        config = legacy_view(resolved, target)
 
-            # Two packages of the same format both derive the same
-            # filename from the identifier. Reporting it costs one loop
-            # and saves a build that silently overwrites another.
-            names = oerconfig.target_names(documents)
-            if len(names) > 1:
-                seen = {}
-                for other in names:
-                    try:
-                        settled = oerconfig.resolve(
-                            schema, project_schema, documents, target=other,
-                            allow_unknown=args.allow_unknown_keys)
-                    except oerconfig.ConfigError:
-                        continue
-                    archive = archive_name(settled.settings,
-                                           settled.project, other)
-                    if archive in seen:
-                        fatal.append(
-                            f"packages {seen[archive]} and {other} would "
-                            f"both be written to {archive}. Give at least "
-                            "one of them its own filename.")
-                    seen[archive] = other
-        else:
-            fatal.append(f"{config_path} not found.")
-    else:
+        # Two packages of the same format both derive the same
+        # filename from the identifier. Reporting it costs one loop
+        # and saves a build that silently overwrites another.
+        names = oerconfig.target_names(documents)
+        if len(names) > 1:
+            seen = {}
+            for other in names:
+                try:
+                    settled = oerconfig.resolve(
+                        schema, project_schema, documents, target=other,
+                        allow_unknown=args.allow_unknown_keys)
+                except oerconfig.ConfigError:
+                    continue
+                archive = archive_name(settled.settings,
+                                       settled.project, other)
+                if archive in seen:
+                    fatal.append(
+                        f"packages {seen[archive]} and {other} would "
+                        f"both be written to {archive}. Give at least "
+                        "one of them its own filename.")
+                seen[archive] = other
+    if args.init:
         notes.append("Generated by --init.")
+
+    # Where the book is named: project.yaml, which both halves read, or a
+    # project: block in this file, which only packaging reads. Named in
+    # neither, it has no identifier or title, and the run stops for them.
+    project_path = os.path.join(base, PROJECT_NAME)
+    inline = oerconfig.inline_project(config_path)
+    has_project_file = os.path.isfile(project_path)
+    # A book whose project is still in this file, as a first run once
+    # wrote it: it gets packaging-sample.yaml as it did, and a note.
+    inline_named = bool(inline) and not has_project_file
+    unnamed = not args.init and not has_project_file and not inline
+    hint = {}
+    if args.project_hint and os.path.isfile(args.project_hint):
+        with open(args.project_hint, encoding="utf-8") as handle:
+            hint = json.load(handle)
+    if unnamed:
+        fatal.append(f"{project_path} not found, so the book has no "
+                     "identifier or title"
+                     + (f" here: {hint['project_source']} names it for conversion "
+                        "alone." if hint.get("project_source") else "."))
+    if not args.init and inline_named:
+        print(f"NOTE: {CONFIG_NAME} holds the book's project settings in a "
+              f"project: block, which only packaging reads. Moved into "
+              f"{PROJECT_NAME}, which conversion reads too, they name an EPUB "
+              "or a PDF as well: cut the block, from project: to the line "
+              f"before defaults:, into a new {PROJECT_NAME} beside it.",
+              file=sys.stderr)
+    if not args.init and not unnamed:
+        left = [k for k in oerconfig.UNNAMED_DEFAULTS
+                if k not in oerconfig.declared_project(documents)]
+        if left:
+            where = PROJECT_NAME if has_project_file else CONFIG_NAME
+            print(f"WARNING: {where} doesn't set the book's "
+                  + " or ".join(left) + ", so the package has the default"
+                  + (f", \"{oerconfig.UNNAMED_DEFAULTS[left[0]]}\"" if len(left) == 1
+                     else "s") + ". An LMS matches a re-import on the "
+                  "identifier, so set both.", file=sys.stderr)
 
     if resolved is None:
         # Nothing to resolve, but the code below still needs the schema's
@@ -1096,10 +1189,12 @@ def main():
         print(f"WARNING: {os.path.basename(args.toc)} was not used. contents "
               "already places every page, and the outline orders only pages "
               "it does not.", file=sys.stderr)
-        print("  To order the whole book from the outline, remove the "
-              "contents block from packaging.yaml and run --toc again; the "
-              "sample it writes is the outline's order, with the book's own "
-              "chapter titles.", file=sys.stderr)
+        holder = CONFIG_NAME if inline and inline.get("contents") \
+            else PROJECT_NAME
+        print("  To order the whole book from the outline, remove contents "
+              f"from {holder} and run --toc again; the sample it writes is "
+              "the outline's order, with the book's own chapter titles.",
+              file=sys.stderr)
         notes.append(f"{os.path.basename(args.toc)} was not used: contents "
                      "already placed every page. Remove contents and run "
                      "--toc again to order from the outline.")
@@ -1222,8 +1317,8 @@ def main():
                       "chapter:", file=sys.stderr)
                 for role in unknown_roles:
                     print(f"  {role}", file=sys.stderr)
-                print(f"  A block to paste is at the end of {SAMPLE_NAME}.",
-                      file=sys.stderr)
+                print(f"  Listed under grouping.back_matter in {CONFIG_NAME}, "
+                      "they sort where the list puts them.", file=sys.stderr)
         else:
             print(f"WARNING: {len(extra)} .html file(s) are not listed in "
                   "contents and were left out:", file=sys.stderr)
@@ -1231,7 +1326,8 @@ def main():
                 print(f"  {stem}.html", file=sys.stderr)
             print("  Use --includeallhtml to append them.", file=sys.stderr)
 
-    for problem in problems:
+    # Under --init with no pages to read, contents can only fail to match.
+    for problem in problems if stems or not args.init else []:
         print(f"WARNING: {problem}", file=sys.stderr)
 
     # ---- referenced files ------------------------------------------------
@@ -1266,23 +1362,70 @@ def main():
     # ---- act on what we found -------------------------------------------
     if fatal or args.init:
         sample = dict(config)
+        declared_contents = config.get("contents")
         # The tree already holds the best order available -- the config's,
         # the outline's with leftovers appended, or the guess -- so the
         # sample says what a run would do. Building the guess afresh here
         # threw the outline away on exactly the first run --toc is for.
-        sample["contents"] = contents_from_tree(tree) if tree else \
+        # --init keeps declared contents as declared, since walked against
+        # no pages, or the wrong ones, they'd come out empty.
+        sample["contents"] = declared_contents if args.init and declared_contents \
+            else contents_from_tree(tree) if tree else \
             guess_contents(stems, back_matter, TITLES, PARTS, ROLES)
         settled, sample_targets = sample_inputs(
             resolved, documents, target, sample["contents"])
-        dump_sample(sample, sample_path, notes, unknown_roles,
-                    schema, project_schema, settled, sample_targets)
+        project_sample_path = os.path.join(base, PROJECT_SAMPLE_NAME)
         for problem in fatal:
             print(f"ERROR: {problem}", file=sys.stderr)
-        print(f"\nWrote {sample_path}.", file=sys.stderr)
-        print(f"Edit it, rename it to {CONFIG_NAME}, and run again.",
-              file=sys.stderr)
-        print("Every setting is in there with its description, so nothing "
-              "you had set is lost by renaming it.", file=sys.stderr)
+        if args.init:
+            # The project block only as packaging.yaml holds it; the
+            # project's own sample only where nothing names the book, and
+            # never over one a run wrote, which has what --init can't know:
+            # a master's order, an outline's, what you've filled in.
+            dump_sample(sample, sample_path, notes, unknown_roles,
+                        schema, project_schema, settled, sample_targets,
+                        include_project=inline or False)
+            print(f"Wrote {sample_path}: every packaging setting with its "
+                  f"description, your own where you set one. Rename it to "
+                  f"{CONFIG_NAME} to use it.")
+            if not has_project_file and not inline:
+                if os.path.exists(project_sample_path):
+                    print(f"Kept {project_sample_path}, which a run wrote: "
+                          f"edit it and rename it to {PROJECT_NAME}.")
+                else:
+                    project_sample(project_schema, settled, documents, hint,
+                                   bool(declared_contents), args.toc,
+                                   project_sample_path, notes)
+                    print(f"Wrote {project_sample_path}: the book's identifier, "
+                          "title, language, and contents, with every other "
+                          f"project setting. Edit it and rename it to "
+                          f"{PROJECT_NAME}.")
+        elif unnamed:
+            used = project_sample(project_schema, settled, documents, hint,
+                                  bool(declared_contents), args.toc,
+                                  project_sample_path, notes)
+            print(f"\nWrote {project_sample_path}"
+                  + (f", with {', '.join(used)} from {hint.get('source')}"
+                     if used else "") + ".", file=sys.stderr)
+            print(f"Edit it, rename it to {PROJECT_NAME}, and run again.",
+                  file=sys.stderr)
+            print("Every project setting is in there with its description, so "
+                  "nothing you had set is lost by renaming it. The packaging "
+                  "and conversion settings have samples of their own:",
+                  file=sys.stderr)
+            for line in sample_commands(base, pages_dir):
+                print(line, file=sys.stderr)
+        elif inline_named:
+            dump_sample(sample, sample_path, notes, unknown_roles,
+                        schema, project_schema, settled, sample_targets,
+                        include_project=inline_sample_block(
+                            inline, sample["contents"], hint,
+                            bool(declared_contents), args.toc))
+            print(f"\nWrote {sample_path}.", file=sys.stderr)
+            print(f"Edit it, rename it to {CONFIG_NAME}, and run again.",
+                  file=sys.stderr)
+            print("Every setting is in there with its description, so nothing "
+                  "you had set is lost by renaming it.", file=sys.stderr)
         return 0 if args.init else 1
 
     opener_types(tree, TITLES)
@@ -1345,9 +1488,22 @@ def main():
     if (extra and args.includeallhtml) or args.toc or guessed_contents:
         settled, sample_targets = sample_inputs(
             resolved, documents, target, contents_from_tree(tree))
-        dump_sample(config, sample_path, notes, unknown_roles,
-                    schema, project_schema, settled, sample_targets)
-        print(f"Wrote {sample_path} for review.")
+        # Contents are the project's, so they go where the book is named.
+        if inline_named:
+            dump_sample(config, sample_path, notes, unknown_roles,
+                        schema, project_schema, settled, sample_targets,
+                        include_project=inline_sample_block(
+                            inline, contents_from_tree(tree), hint,
+                            bool(config.get("contents")), args.toc))
+            print(f"Wrote {sample_path} for review.")
+        else:
+            review = os.path.join(base, PROJECT_SAMPLE_NAME)
+            used = project_sample(project_schema, settled, documents, hint,
+                                  bool(config.get("contents")), args.toc,
+                                  review, notes)
+            print(f"Wrote {review} for review"
+                  + (f", with {', '.join(used)} from {hint.get('source')}"
+                     if used else "") + ".")
 
     cartridge = os.path.join(base, config["manifest"]["cartridge"])
     if args.zip:

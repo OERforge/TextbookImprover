@@ -822,6 +822,10 @@ def main():
     parser.add_argument("--allow-unknown-keys", action="store_true",
                         help="report settings this version does not know "
                              "about instead of refusing them")
+    parser.add_argument("--title", default=None,
+                        help="the book's title when no configuration gives "
+                             "one: convert.py passes what it read from the "
+                             "sources, a master file's title, and says so")
     args = parser.parse_args()
 
     if shutil.which("pandoc") is None:
@@ -845,6 +849,8 @@ def main():
 
     status = 0
     for name, resolved in targets:
+        if args.title:
+            resolved.project["title"] = args.title
         status = build(args.dir, name, resolved, args.keep,
                        args.intermediates) or status
     return status

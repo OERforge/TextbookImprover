@@ -108,9 +108,13 @@ def case_bare(work):
         ("a bare directory converts into html/",
          lambda: all(exists(work, "html", n + ".html") for n in NEEDED)
          and not exists(work, "tables.html")),
-        ("and stops at the packager's sample, as a first run does",
+        ("and stops at the project's sample, as a first run does, with the "
+         "commands for the other two",
          lambda: result.returncode != 0
-         and exists(work, "packaging-sample.yaml")),
+         and exists(work, "project-sample.yaml")
+         and not exists(work, "packaging-sample.yaml")
+         and "--init    writes packaging-sample.yaml" in result.stderr
+         and "--init    writes conversion-sample.yaml" in result.stderr),
         ("the intermediates and the reports sit beside the sources",
          lambda: exists(work, "tables.filtered.json")
          and exists(work, "image-alt-missing.csv")
@@ -382,8 +386,9 @@ def case_asciidoc(work):
     result = convert(work, "targets:\n  html:\n    format: html\n")
     one = read(work, "html", "one.html") if exists(work, "html",
                                                     "one.html") else ""
-    sample = read(work, "contents-sample.yaml") if exists(
-        work, "contents-sample.yaml") else ""
+    import yaml
+    sample = yaml.safe_load(read(work, "project-sample.yaml"))["project"] \
+        if exists(work, "project-sample.yaml") else {}
     return [
         ("each included file is a page, and the master isn't",
          lambda: result.returncode == 0 and one
@@ -401,12 +406,13 @@ def case_asciidoc(work):
          lambda: 'href="two.html#locks-id"' in one
          and 'href="two.html"' in one
          and 'href="one.html#_keys"' in read(work, "html", "two.html")),
-        ("the master's order is offered as contents",
-         lambda: sample.index("- one") < sample.index("- two")),
-        ("and its title, authors, and language with it",
-         lambda: "title: The Book" in sample
-         and "- Ann Author" in sample and "- Bo Writer" in sample
-         and "language: en-GB" in sample),
+        ("the master's order is offered as contents in the project's sample",
+         lambda: sample.get("contents") == ["one", "two"]),
+        ("and its authors and language with it, the title project.yaml "
+         "gives kept",
+         lambda: sample.get("title") == "The Fixture Book"
+         and sample.get("authors") == ["Ann Author", "Bo Writer"]
+         and sample.get("language") == "en-GB"),
         ("a mailto: link keeps its scheme; a scheme in code is code, not a "
          "link",
          lambda: 'href="mailto:ann@example.org"' in read(work, "html",
@@ -1535,6 +1541,8 @@ def case_html_ids(work):
                  '<p>Back to <a href="a.html#section 15">fifteen</a>.</p></body></html>')
     with open(os.path.join(work, "conversion.yaml"), "w") as fh:
         fh.write("targets:\n  html:\n    format: html\n  epub:\n    format: epub3\n")
+    with open(os.path.join(work, "project.yaml"), "w") as fh:
+        fh.write("project:\n  identifier: org.example.ids\n  title: Ids\n")
     subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quiet"],
                    cwd=work, capture_output=True, text=True, stdin=subprocess.DEVNULL)
     a = read(work, "html", "a.html") if exists(work, "html", "a.html") else ""
@@ -3459,7 +3467,7 @@ def case_structure(work):
     first = convert(work, "defaults:\n  pages:\n    split_level: 2\n"
                           "targets:\n  html:\n    format: html\n"
                           "  epub:\n    format: epub3\n")
-    sample = yaml.safe_load(open(os.path.join(work, "packaging-sample.yaml"),
+    sample = yaml.safe_load(open(os.path.join(work, "project-sample.yaml"),
                                  encoding="utf-8"))["project"]["contents"]
     roles = {str(n.get("title", n.get("page"))): n.get("role")
              for n in sample if isinstance(n, dict)}
@@ -3698,8 +3706,175 @@ def case_merge(work):
     ]
 
 
+
+def case_book_name(work):
+    """Where the book is named: project.yaml for both halves. A target that
+    writes a book takes a master's title with a warning, isn't written with
+    nothing to name it, and says to move a packaging.yaml block; the first
+    run writes project-sample.yaml and the commands for the other two
+    samples, which --init writes keeping what the files set."""
+    import yaml
+    import zipfile
+
+    def book(name, files):
+        folder = os.path.join(work, name)
+        os.makedirs(folder)
+        pages = {"one.md": "---\ntitle: One\nlang: en\n---\n\n# One\n\nText.\n",
+                 "two.md": "---\ntitle: Two\nlang: en\n---\n\n# Two\n\nMore.\n"}
+        for file, text in dict(pages, **files).items():
+            with open(os.path.join(folder, file), "w", encoding="utf-8") as fh:
+                fh.write(text)
+        done = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quiet"],
+                              cwd=folder, capture_output=True, text=True,
+                              stdin=subprocess.DEVNULL)
+        return folder, done, done.stdout + done.stderr
+
+    both = "targets:\n  html:\n    format: html\n  epub:\n    format: epub3\n"
+    bare, bare_run, bare_said = book("bare", {"conversion.yaml": both})
+    moved, moved_run, moved_said = book("moved", {
+        "conversion.yaml": both,
+        "packaging.yaml": "project:\n  identifier: org.example.moved\n"
+                          "  title: The Moved Book\n"})
+    adoc, adoc_run, adoc_said = book("adoc", {
+        "conversion.yaml": both,
+        "index.adoc": "= The Master Book\nAnn Author\n:lang: en\n\n"
+                      "include::three.adoc[]\n",
+        "three.adoc": "= Three\n\nText.\n"})
+    alone, alone_run, alone_said = book("alone", {
+        "conversion.yaml": "targets:\n  epub:\n    format: epub3\n"})
+    conv, conv_run, conv_said = book("conv", {
+        "conversion.yaml": "project:\n  identifier: org.example.conv\n"
+                           "  title: The Conv Book\n  contents: [two, one]\n" + both})
+    untitled, untitled_run, untitled_said = book("untitled", {
+        "conversion.yaml": both,
+        "project.yaml": "project:\n  identifier: org.example.u\n  title: Untitled\n"})
+    lone, lone_run, lone_said = book("lone", {"conversion.yaml": both})
+    os.remove(os.path.join(lone, "two.md"))
+    lone_run = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quiet"],
+                              cwd=lone, capture_output=True, text=True,
+                              stdin=subprocess.DEVNULL)
+    lone_said = lone_run.stdout + lone_run.stderr
+    checked = os.path.join(work, "checked")
+    os.makedirs(checked)
+    for file, text in {"index.adoc": "= A Checked Book\n\ninclude::b.adoc[]\n\n"
+                                     "include::a.adoc[]\n",
+                       "a.adoc": "= A\n\nText.\n", "b.adoc": "= B\n\nText.\n"}.items():
+        with open(os.path.join(checked, file), "w", encoding="utf-8") as fh:
+            fh.write(text)
+    subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quiet", "--check-only"],
+                   cwd=checked, capture_output=True, text=True, stdin=subprocess.DEVNULL)
+    title = ""
+    epubs = glob.glob(os.path.join(adoc, "epub", "*.epub"))
+    if epubs:
+        with zipfile.ZipFile(epubs[0]) as z:
+            opf = [n for n in z.namelist() if n.endswith(".opf")]
+            title = z.read(opf[0]).decode("utf-8") if opf else ""
+    # --init: each sample keeps what its file sets, and the project block
+    # stays where it is.
+    init = subprocess.run(["python3", os.path.join(BIN, "build-cartridge.py"),
+                           "-d", moved, "--pages", os.path.join(moved, "html"),
+                           "--init"], capture_output=True, text=True)
+    with open(os.path.join(bare, "conversion.yaml"), "a", encoding="utf-8") as fh:
+        fh.write("defaults:\n  footer: Our footer.\n")
+    conversion_init = subprocess.run(
+        ["python3", os.path.join(BIN, "read-conversion-config.py"), "-d", bare,
+         "--init"], capture_output=True, text=True)
+    before_init = read(bare, "project-sample.yaml") if exists(bare, "project-sample.yaml") else ""
+    bare_init = subprocess.run(["python3", os.path.join(BIN, "build-cartridge.py"),
+                                "-d", bare, "--pages", os.path.join(bare, "html"),
+                                "--init"], capture_output=True, text=True)
+    # --init with one package chosen writes its overrides in its own block,
+    # and with no pages, a project block's contents as declared.
+    two = os.path.join(work, "two-packages")
+    os.makedirs(two)
+    with open(os.path.join(two, "packaging.yaml"), "w", encoding="utf-8") as fh:
+        fh.write("project:\n  identifier: org.example.two\n  title: Two\n"
+                 "  contents: [b, a]\ntargets:\n  cartridge:\n"
+                 "    format: common-cartridge\n    version: \"2.5\"\n"
+                 "  zipped:\n    format: zip\n")
+    two_init = subprocess.run(["python3", os.path.join(BIN, "build-cartridge.py"),
+                               "-d", two, "--init", "--target", "cartridge"],
+                              capture_output=True, text=True)
+
+    def sample(folder, name):
+        path = os.path.join(folder, name)
+        return yaml.safe_load(open(path, encoding="utf-8")) if os.path.exists(path) else {}
+    return [
+        ("with nothing naming the book, the EPUB isn't written, the pages are, "
+         "and the run says where the title goes and ends in an error",
+         lambda: bare_run.returncode != 0
+         and not glob.glob(os.path.join(bare, "epub", "*.epub"))
+         and exists(bare, "html", "one.html")
+         and "target epub needs the book's title" in bare_said),
+        ("and the first run writes project-sample.yaml, with the commands "
+         "that write the other two samples",
+         lambda: exists(bare, "project-sample.yaml")
+         and "writes packaging-sample.yaml" in bare_said
+         and "writes conversion-sample.yaml" in bare_said),
+        ("a book named only in packaging.yaml gets its cartridge, and the "
+         "run says to move the block for the EPUB, which isn't written",
+         lambda: exists(moved, "imsmanifest.xml")
+         and not glob.glob(os.path.join(moved, "epub", "*.epub"))
+         and "Move the block into project.yaml" in moved_said
+         and moved_run.returncode != 0),
+        ("an AsciiDoc master's title names the EPUB, and the run says so",
+         lambda: "The Master Book" in title
+         and "is titled \"The Master Book\", as the master AsciiDoc file says"
+         in adoc_said),
+        ("and the project's sample has the master's title and author",
+         lambda: sample(adoc, "project-sample.yaml").get("project", {}).get("title")
+         == "The Master Book"
+         and sample(adoc, "project-sample.yaml")["project"].get("authors") == ["Ann Author"]),
+        ("with no html target, the run writes the project's sample itself",
+         lambda: alone_run.returncode != 0 and exists(alone, "project-sample.yaml")),
+        ("--init writes packaging-sample.yaml with the block packaging.yaml "
+         "holds, and no project sample beside it",
+         lambda: init.returncode == 0
+         and sample(moved, "packaging-sample.yaml").get("project", {}).get("title")
+         == "The Moved Book"),
+        ("and without a block it writes none, and a project sample beside it",
+         lambda: bare_init.returncode == 0
+         and "project" not in sample(bare, "packaging-sample.yaml")
+         and exists(bare, "project-sample.yaml")),
+        ("--init keeps the project sample a run wrote",
+         lambda: "Kept" in bare_init.stdout
+         and read(bare, "project-sample.yaml") == before_init),
+        ("--init writes a chosen package's settings in its block, not as the "
+         "defaults, and declared contents with no pages as declared",
+         lambda: two_init.returncode == 0
+         and sample(two, "packaging-sample.yaml")["defaults"]["version"] != "2.5"
+         and sample(two, "packaging-sample.yaml")["targets"]["cartridge"]["version"] == "2.5"
+         and sample(two, "packaging-sample.yaml")["project"]["contents"] == ["b", "a"]),
+        ("a book named in conversion.yaml's block gets its EPUB, and the run "
+         "says to move the block, whose values the project's sample carries",
+         lambda: glob.glob(os.path.join(conv, "epub", "*.epub"))
+         and "only conversion reads" in conv_said and conv_run.returncode != 0
+         and sample(conv, "project-sample.yaml")["project"]["title"] == "The Conv Book"
+         and sample(conv, "project-sample.yaml")["project"]["contents"] == ["two", "one"]),
+        ("a title left at the default names nothing: the EPUB isn't written, "
+         "and the run says to set it in project.yaml",
+         lambda: not glob.glob(os.path.join(untitled, "epub", "*.epub"))
+         and "Set title in project.yaml" in untitled_said
+         and "doesn't set the book's title" in untitled_said),
+        ("a book of one page is titled by it, in the EPUB and the sample",
+         lambda: glob.glob(os.path.join(lone, "epub", "*.epub"))
+         and "as its one page says" in lone_said
+         and sample(lone, "project-sample.yaml")["project"]["title"] == "One"),
+        ("a master's order is written with --check-only, which packages nothing",
+         lambda: sample(checked, "project-sample.yaml").get("project", {}).get("contents")
+         == ["b", "a"]),
+        ("conversion's --init writes conversion-sample.yaml with the file's "
+         "own values, and leaves conversion.yaml as it was",
+         lambda: conversion_init.returncode == 0
+         and sample(bare, "conversion-sample.yaml")["defaults"]["footer"]
+         == "Our footer."
+         and "epub" in sample(bare, "conversion-sample.yaml")["targets"]
+         and read(bare, "conversion.yaml").endswith("footer: Our footer.\n")),
+    ]
+
 CASES = [
     ("a bare directory", case_bare),
+    ("where the book is named", case_book_name),
     ("a markdown target that merges", case_merge),
     ("a Markdown target, round trip", case_markdown_target),
     ("two editions from one directory", case_editions),

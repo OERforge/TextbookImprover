@@ -1,6 +1,6 @@
 # Conversion settings
 
-Settings that describe one rendering of the book, under `conversion:` in `packaging.yaml` and per target under `targets:`. Generated from `bin/schema-conversion.yaml` by `util/settings-reference.py`; edit the schema, not this page. A setting marked *target only* can appear only inside a target.
+Settings that describe one rendering of the book, in `conversion.yaml`: under `defaults:` for every target, and per target under `targets:`. `python3 $T/bin/read-conversion-config.py -d . --init` writes `conversion-sample.yaml` with every one and its description, at the value `conversion.yaml` gives it or else its default; rename it to `conversion.yaml` to use it (`T` is the directory you cloned the tools into). A setting marked *target only* can appear only inside a target. Generated from `bin/schema-conversion.yaml` by `util/settings-reference.py`; edit the schema, not this page.
 
 How the book is rendered into one output format.
 

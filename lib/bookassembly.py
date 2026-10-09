@@ -531,8 +531,8 @@ def plan_book(pages_dir, resolved, output):
             expand_split_sources(contents, stems, titles, parts, roles),
             available, used, problems, suffix=INTERMEDIATE)
     else:
-        problems.append("contents not specified; using guessed order. The "
-                        "packager's sample config is the place to fix it.")
+        problems.append("contents not specified; using guessed order. "
+                        "project.yaml's contents is the place to fix it.")
         tree = walk_contents(guess_contents(stems, None, titles, parts, roles),
                              available, used, problems, suffix=INTERMEDIATE)
     for problem in problems:

@@ -457,8 +457,23 @@ def load_targets(base, allow_unknown):
     declared = oerconfig.target_names(documents)
     # Whether the book declares its language: a source target writes it
     # into the author's files only then, never the schema's default.
-    global LANGUAGE_DECLARED
+    global LANGUAGE_DECLARED, TITLE_DECLARED, DECLARED_PROJECT
     LANGUAGE_DECLARED = any((doc.project or {}).get("language") for doc in documents)
+    # Whether the book is named where conversion reads: an EPUB or a PDF
+    # needs a title, and the schema's default, "Untitled", names nothing.
+    DECLARED_PROJECT = oerconfig.declared_project(documents)
+    TITLE_DECLARED = bool(DECLARED_PROJECT.get("title"))
+    # A project: block in conversion.yaml names the book for conversion
+    # alone; the packager's sample gets it, and the run says to move it.
+    own = oerconfig.inline_project(config_path)
+    if own and not os.path.isfile(project_path):
+        BOOK_HINT["project"] = own
+        BOOK_HINT["project_source"] = f"{CONFIG_NAME}'s project: block"
+        say(f"NOTE: {CONFIG_NAME} holds the book's project settings in a "
+            f"project: block, which only conversion reads. Moved into "
+            f"{PROJECT_NAME}, which packaging reads too, they name the "
+            "cartridge as well: cut the block, from project: to the line "
+            f"before defaults:, into a new {PROJECT_NAME} beside it.")
     targets = []
     try:
         for name in declared or [None]:
@@ -567,6 +582,14 @@ WORD_HEADINGS, WORD_DELETIONS = "keep", "accept"
 LATEX_MAIN = []
 LATEX_MACROS = "latex-conversion-macros.tex"
 LANGUAGE_DECLARED = False
+TITLE_DECLARED = False
+DECLARED_PROJECT = {}
+# What the sources say about the book, read from a master file: its title,
+# authors, language, and order (master_hint).
+BOOK_HINT = {}
+# The targets not written for want of the book's name: the run ends with
+# an error once everything else is written.
+UNNAMED = []
 # A LaTeX book's own \definecolor statements, for a PDF built from its
 # pages, where a formula can still name one (\color{redcards}).
 LATEX_COLORS = []
@@ -1399,32 +1422,26 @@ def resolve_asciidoc_xrefs(base, stems, kind="AsciiDoc"):
     return resolved
 
 
-def write_order_sample(order, header=None, kind="AsciiDoc", documents=False):
-    """What a master AsciiDoc file says about the book, in the shape
-    project.yaml takes: its title, authors, and language, and as
-    contents the order it includes its chapters in. Not applied: the
-    project is the author's, and a run with none declared goes on as it
-    always has (an EPUB called "Untitled") until it is. documents: the
-    order is latex.main's, a book of LaTeX documents each built on its
-    own, not one master's."""
-    import yaml
-    stems = [n if isinstance(n, dict) else safe_stem(os.path.splitext(n)[0])
-             for n in order]
-    project = dict(header or {})
-    project["contents"] = stems
-    source = ("the LaTeX documents latex.main names: the\n# book's title, authors, "
-              "and language, and the order it names them in." if documents else
-              f"the master {kind} file: the book's title,\n# authors, and language, "
-              "and the order it includes its chapters in.")
-    with open(CONTENTS_SAMPLE, "w", encoding="utf-8") as fh:
-        fh.write(f"# Written by convert.py from {source}\n# Copy them into "
-                 "project.yaml to use them.\n" + yaml.safe_dump(
-                     {"project": project}, sort_keys=False,
-                     allow_unicode=True))
-    say(f"No contents declared: {CONTENTS_SAMPLE} holds the order "
-        + ("latex.main names the documents in" if documents else "the master file gives")
-        + (", and its title and authors" if header else "") + ". Copy it into "
-        "project.yaml to use it.")
+def master_hint(order, header=None, kind="AsciiDoc", documents=False,
+                contents_declared=False):
+    """What a master file says about the book -- its title, authors, and
+    language, and as contents the order it includes its chapters in -- for
+    project-sample.yaml, which the packager writes (or this run, when
+    there's no packager), and for naming an EPUB or a PDF that nothing
+    else names. Not applied as contents: the project is the author's, and
+    a run with none declared goes on with the guess until it declares
+    them. documents: the order is latex.main's, a book of LaTeX documents
+    each built on its own, not one master's."""
+    hint = dict(header or {})
+    if documents:
+        # The first document's \title, which isn't the book's.
+        hint.pop("title", None)
+    hint["source"] = ("the LaTeX documents latex.main names" if documents
+                      else f"the master {kind} file")
+    if not contents_declared:
+        hint["contents"] = [n if isinstance(n, dict) else
+                            safe_stem(os.path.splitext(n)[0]) for n in order]
+    return hint
 
 
 def source_documents(base):
@@ -3515,32 +3532,146 @@ def book_tree(project, pages, numbered=None):
     return tree, titles, api
 
 
-CONTENTS_SAMPLE = "contents-sample.yaml"
+PROJECT_SAMPLE = "project-sample.yaml"
+
+
+def write_project_sample(project, contents, notes=(), hint_contents=False):
+    """project-sample.yaml, every project setting with its description, as
+    the packager writes it (oerconfig.project_sample_values): the project as
+    settled, with these contents, and what the sources say for what no file
+    of conversion's declares. Returns (path, what the hint gave)."""
+    project_schema = oerconfig.load_schema(
+        os.path.join(os.path.dirname(HERE), "lib", "schema-project.yaml"))
+    values, extra, used = oerconfig.project_sample_values(
+        project, DECLARED_PROJECT, BOOK_HINT, contents, hint_contents, notes)
+    path = os.path.join(os.getcwd(), PROJECT_SAMPLE)
+    oerconfig.write_project(project_schema, values, path, notes=extra)
+    return path, used
+
+
+def early_project_sample(base, project, targets, check_only):
+    """A master's order, written as project-sample.yaml as soon as it's
+    read, so a run that stops before packaging (--check-only, or a target
+    that fails) still leaves it. The packager writes the sample again at the
+    end, with an outline's order when --toc gives one. Not for a book named
+    in packaging.yaml's block, which keeps its packaging-sample.yaml."""
+    if oerconfig.inline_project(os.path.join(base, PACKAGING_NAME)) and \
+            not os.path.isfile(os.path.join(base, PROJECT_NAME)):
+        return
+    path, used = write_project_sample(project, [], hint_contents=True)
+    packaged = any(t.format == "html" for t in targets) and not check_only
+    if not packaged:
+        say(f"Wrote {path} for review, with {', '.join(used)} from "
+            f"{BOOK_HINT.get('source')}.")
+
+
+def metadata_title(base, setting):
+    """The title in the file pdf.metadata names, as build-pdf.py reads it,
+    which a PDF takes over project.yaml's."""
+    path = setting if os.path.isabs(setting) else os.path.join(base, setting)
+    if not os.path.isfile(path):
+        return ""
+    if path.lower().endswith((".yaml", ".yml")):
+        command = ["pandoc", "-f", "markdown", "-t", "json", "--metadata-file", path]
+        stdin = ""
+    else:
+        command = ["pandoc", "-f", "markdown", "-t", "json", path]
+        stdin = None
+    result = subprocess.run(command, input=stdin, capture_output=True,
+                            text=True, cwd=base)
+    if result.returncode:
+        return ""
+    return " ".join(meta_text(json.loads(result.stdout).get("meta", {}),
+                              "title").split())
+
+
+BOOK_KINDS = {"epub3": "EPUB", "pdf": "PDF", "latex": "LaTeX"}
+
+
+def one_page_title(pages):
+    """The title of a book of one page, which is the book's: a single Word
+    file or Markdown file made a book. Empty for a book of several."""
+    if len(pages) != 1:
+        return ""
+    try:
+        with open(pages[0], encoding="utf-8") as fh:
+            return meta_text(json.load(fh).get("meta", {}), "title")
+    except (OSError, ValueError):
+        return ""
+
+
+def name_book_target(target, base, pages):
+    """Whether a target that writes a book -- an EPUB, a PDF, a LaTeX
+    master -- has the book's name, and the title to give it when no
+    configuration does. pages: the target's intermediates. Returns (ok,
+    title).
+
+    project.yaml names the book for both halves. Where nothing conversion
+    reads names it, a title the sources give (a master file's, or the one
+    page's of a book of one) is used, and the run says so; packaging.yaml's project: block names it only for
+    packaging, so the run says to move it; and with nothing at all, the
+    target isn't written, and the run says where the name goes."""
+    if TITLE_DECLARED:
+        return True, None
+    kind = BOOK_KINDS[target.format]
+    has_project = os.path.isfile(os.path.join(base, PROJECT_NAME))
+    setting = str(target["pdf.metadata"] or "").strip()
+    if target.format in ("pdf", "latex") and setting and metadata_title(base, setting):
+        return True, None
+    packaged = oerconfig.inline_project(os.path.join(base, PACKAGING_NAME))
+    if packaged and packaged.get("title"):
+        move = (f"Move its title into {PROJECT_NAME}, which both halves read"
+                if has_project else
+                f"Move the block into {PROJECT_NAME}, which both halves read: "
+                "cut it, from project: to the line before defaults:, into a "
+                f"new {PROJECT_NAME} beside {PACKAGING_NAME}")
+        say(f"ERROR: target {target.name} needs the book's title, which "
+            f"{PACKAGING_NAME}'s project: block gives, but only packaging "
+            f"reads that file, so the {kind} isn't written. {move}.")
+        UNNAMED.append(target.name)
+        return False, None
+    guess, source = BOOK_HINT.get("title"), BOOK_HINT.get("source")
+    if not guess:
+        guess, source = one_page_title(pages), "its one page"
+        if guess:
+            # The sample the run writes takes it too, as the EPUB does.
+            BOOK_HINT.setdefault("source", source)
+            BOOK_HINT["title"] = guess
+    if guess:
+        say(f"WARNING: {PROJECT_NAME} doesn't name the book, so the {kind} of "
+            f"target {target.name} is titled \"{guess}\", as {source} says, "
+            "with the identifier "
+            f"\"{target.resolved.project['identifier']}\". Name it in "
+            f"{PROJECT_NAME}: its identifier and title.")
+        return True, guess
+    where = (f"Set title in {PROJECT_NAME}" if has_project else
+             f"{PROJECT_NAME} names it, with its identifier: {PROJECT_SAMPLE} "
+             "has every project setting to fill in" if not packaged else
+             f"Name it in {PROJECT_NAME}, with its identifier, and move "
+             f"{PACKAGING_NAME}'s project: block there")
+    say(f"ERROR: target {target.name} needs the book's title, and nothing "
+        f"here gives it, so the {kind} isn't written. {where}.")
+    UNNAMED.append(target.name)
+    return False, None
 
 
 def write_contents_sample(project, tree):
     """contents names a page the split cut, so it stood for its pieces.
-    What it resolved to is written out, in the shape project.yaml takes,
-    for anyone who means to arrange the pieces themselves: copied into
-    project.yaml, it names every piece, and a declared piece is left as
-    declared. Written once per run, and only when it would differ from
-    what project.yaml says; the run's own output never reads it."""
+    What it resolved to is written out as project-sample.yaml, for anyone
+    who means to arrange the pieces themselves: renamed to project.yaml, it
+    names every piece, and a declared piece is left as declared. Written
+    once per run, and only when it would differ from what project.yaml
+    says; the run's own output never reads it."""
     global CONTENTS_SAMPLE_WRITTEN
     if CONTENTS_SAMPLE_WRITTEN:
         return
     CONTENTS_SAMPLE_WRITTEN = True
-    import yaml
-    sample = contents_from_tree(tree)
-    path = os.path.join(os.getcwd(), CONTENTS_SAMPLE)
-    body = yaml.safe_dump({"project": {"contents": sample}},
-                          sort_keys=False, allow_unicode=True, width=1000)
-    with open(path, "w", encoding="utf-8") as fh:
-        fh.write("# Written by convert.py: project.yaml's contents names a "
-                 "page the split cut,\n# so the page stood for its pieces. "
-                 "This is what it resolved to. Copy\n# the contents into "
-                 "project.yaml to arrange the pieces yourself.\n" + body)
-    say(f"contents names a page the split cut; {CONTENTS_SAMPLE} lists "
-        "its pieces, to copy into project.yaml if you mean to arrange them.")
+    write_project_sample(project, contents_from_tree(tree), [
+        "contents names a page the split cut, so the page stood for its "
+        "pieces. The contents below are what it resolved to."])
+    say(f"contents names a page the split cut; {PROJECT_SAMPLE} has the "
+        "contents it resolved to, to rename to project.yaml if you mean to "
+        "arrange the pieces yourself.")
 
 
 CONTENTS_SAMPLE_WRITTEN = False
@@ -3975,8 +4106,10 @@ def main():
         adoc_stems = read_asciidoc_to_json(base, adoc, env, imagesdir)
         resolve_asciidoc_xrefs(base, adoc_stems)
         stems += adoc_stems
-        if adoc_order and not project.get("contents"):
-            write_order_sample(adoc_order, adoc_header)
+        if adoc_order:
+            BOOK_HINT.update(master_hint(
+                adoc_order, adoc_header,
+                contents_declared=bool(project.get("contents"))))
         latex_parts = []
         if master:
             tex_stems, tex_order, tex_header, latex_parts = read_latex_to_json(
@@ -4003,9 +4136,11 @@ def main():
             fill_namerefs(base, tex_stems)
             resolve_asciidoc_xrefs(base, tex_stems, "LaTeX")
             stems += tex_stems
-            if not project.get("contents"):
-                write_order_sample(tex_order, tex_header, "LaTeX",
-                                   documents=len(latex_main) > 1)
+            BOOK_HINT.update(master_hint(
+                tex_order, tex_header, "LaTeX", documents=len(latex_main) > 1,
+                contents_declared=bool(project.get("contents"))))
+        if BOOK_HINT.get("contents"):
+            early_project_sample(base, project, targets, args.check_only)
         for target in targets:
             if web and target.format == "html" and os.path.abspath(
                     target.output_dir) == os.path.abspath(base):
@@ -4197,9 +4332,14 @@ def main():
             found = os.path.join(work, f"fidelity-{target.name}.tsv")
             if os.path.exists(found):
                 os.remove(found)
+            named, title = name_book_target(target, base,
+                                            pages_by_dir[target.pages_dir])
+            if not named:
+                continue
             result = run(["python3", EPUB_TOOL, "-d", base,
                           "--target", target.name,
-                          "--intermediates", target.pages_dir],
+                          "--intermediates", target.pages_dir]
+                         + (["--title", title] if title else []),
                          env=dict(os.environ, FIDELITY_FOUND=found),
                          capture=True, check=False)
             # Its own messages first: a failure's reason is in them.
@@ -4216,14 +4356,21 @@ def main():
         for target in targets:
             if target.format != "pdf":
                 continue
-            if master and str(target["pdf.from"]) == "book":
+            # A LaTeX book's own build titles its PDF as its \title does.
+            own_build = master and str(target["pdf.from"]) == "book"
+            named, title = (True, None) if own_build else name_book_target(
+                target, base, pages_by_dir[target.pages_dir])
+            if not named:
+                continue
+            if own_build:
                 pdfs += latex_book_pdf(target, base, latex_parts, paths, work,
                                        language if LANGUAGE_DECLARED else None,
                                        project, targets)
                 continue
             result = run(["python3", PDF_TOOL, "-d", base,
                           "--target", target.name,
-                          "--intermediates", target.pages_dir],
+                          "--intermediates", target.pages_dir]
+                         + (["--title", title] if title else []),
                          env=pdf_env(), capture=True, check=False)
             sys.stderr.write(result.stderr)
             if result.returncode:
@@ -4235,9 +4382,14 @@ def main():
         for target in targets:
             if target.format != "latex":
                 continue
+            named, title = name_book_target(target, base,
+                                            pages_by_dir[target.pages_dir])
+            if not named:
+                continue
             result = run(["python3", PDF_TOOL, "-d", base, "--latex-target",
                           "--target", target.name,
-                          "--intermediates", target.pages_dir],
+                          "--intermediates", target.pages_dir]
+                         + (["--title", title] if title else []),
                          env=pdf_env(), capture=True, check=False)
             sys.stderr.write(result.stderr)
             if result.returncode:
@@ -4267,19 +4419,47 @@ def main():
     # `--zip` builds the archive too. It reads its configuration here and
     # its pages from the first html target's directory; a package whose
     # includes name another html target is a roadmap item.
-    if not os.path.isfile(CARTRIDGE_TOOL):
-        say(f"No {CARTRIDGE_TOOL}, so skipping the manifest.")
-        return 0
+    unnamed = 1 if UNNAMED else 0
     html_targets = [t for t in targets if t.format == "html"]
-    if not html_targets:
-        say("No html target, so there is nothing for the packager to read; "
+    if not os.path.isfile(CARTRIDGE_TOOL) or not html_targets:
+        say(f"No {CARTRIDGE_TOOL}, so skipping the manifest."
+            if not os.path.isfile(CARTRIDGE_TOOL) else
+            "No html target, so there is nothing for the packager to read; "
             "skipping the manifest.")
-        return 0
+        # The packager writes project-sample.yaml; with none to run, this
+        # run does, when a target needed the book's name (a master's order
+        # was written as soon as it was read).
+        unnamed_here = UNNAMED and not os.path.isfile(
+            os.path.join(base, PROJECT_NAME)) and not oerconfig.inline_project(
+                os.path.join(base, PACKAGING_NAME))
+        if unnamed_here:
+            contents = project.get("contents") or contents_from_tree(
+                book_tree(project, pages_by_dir[targets[0].pages_dir])[0])
+            path, used = write_project_sample(
+                project, contents, hint_contents=not project.get("contents"))
+            say(f"Wrote {path}" + (f", with {', '.join(used)} from "
+                                   f"{BOOK_HINT.get('source')}" if used else "")
+                + ". Edit it, rename it to project.yaml, and run again. The "
+                "conversion settings have a sample of their own: python3 "
+                f"{os.path.join(HERE, 'read-conversion-config.py')} -d . --init "
+                "writes conversion-sample.yaml.")
+        return unnamed
     command = ["python3", CARTRIDGE_TOOL, "-d", base]
     if os.path.abspath(html_targets[0].output_dir) != os.path.abspath(base):
         command += ["--pages", html_targets[0].output_dir]
-    result = run(command + passthrough, check=False)
-    return result.returncode
+    # What the sources said about the book, for the packager's sample.
+    hint = None
+    if BOOK_HINT:
+        handle, hint = tempfile.mkstemp(prefix="project-hint-", suffix=".json")
+        with os.fdopen(handle, "w", encoding="utf-8") as fh:
+            json.dump(BOOK_HINT, fh)
+        command += ["--project-hint", hint]
+    try:
+        result = run(command + passthrough, check=False)
+    finally:
+        if hint:
+            os.remove(hint)
+    return result.returncode or unnamed
 
 
 if __name__ == "__main__":

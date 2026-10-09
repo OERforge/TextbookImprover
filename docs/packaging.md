@@ -8,7 +8,7 @@
 python3 build-cartridge.py                 # write imsmanifest.xml
 python3 build-cartridge.py --check         # validate, write nothing
 python3 build-cartridge.py --zip           # also build the .imscc
-python3 build-cartridge.py --init          # write a sample config and stop
+python3 build-cartridge.py --init          # write packaging-sample.yaml and stop
 python3 build-cartridge.py --toc book.pdf  # order from the PDF's outline, or book.epub
 ```
 
@@ -31,7 +31,7 @@ at all, the outline orders everything.
 
 That last case is the one you want on a first pass, and it's easy to miss
 by doing things in the wrong order: the sample a first run writes already
-places every page in a guessed order, so a `packaging.yaml` adopted from it
+places every page in a guessed order, so a `project.yaml` adopted from it
 leaves the outline nothing to do, and `--toc` says so and changes nothing.
 
 An entry is matched to a page two ways: by the filename its heading
@@ -46,9 +46,9 @@ it, grouped under their source's title when they came from a split.
 Publishers' navigation documents are not always clean: blank entries are
 skipped, and an entry holding a page's worth of text (one in the corpus
 does) is skipped with a warning rather than matched.
-Run `--toc` before adopting the sample, or delete the `contents` block and
-run it again. The result goes to
-`packaging-sample.yaml` for review, and outline entries matching no page
+Run `--toc` before adopting the sample, or delete `contents` from
+`project.yaml` and run it again. The result goes to
+`project-sample.yaml` for review, and outline entries matching no page
 are reported.
 
 Note that it follows the book faithfully. If the PDF puts per-chapter
@@ -66,7 +66,7 @@ move them if you would rather keep them with their chapters.
 | `--includeallhtml` | off | Place pages the config doesn't list |
 | `--zip` | off | Also build the `.imscc` |
 | `--check` | off | Validate; write nothing |
-| `--init` | off | Write a sample config and stop |
+| `--init` | off | Write `packaging-sample.yaml`, and `project-sample.yaml` when nothing names the book and no run has written one, and stop |
 
 There's also `--emit-conversion-config DIR`, which `convert.py` uses to
 read header, footer and image settings out of the config without parsing
@@ -74,7 +74,7 @@ YAML in shell. It writes only into `DIR` and isn't otherwise useful.
 
 `build-cartridge.py` is **read-only with respect to page content**. It
 never edits an HTML file or anything under a media directory; it writes
-only the manifest, the file list, the sample config, and the archive. That
+only the manifest, the file list, the samples, and the archive. That
 is what makes it safe to run repeatedly, and what lets it work on any tidy
 directory of HTML rather than only on output from `convert.py`.
 
@@ -103,8 +103,8 @@ level. Naming a group that doesn't exist is a warning, not an error.
 
 On a 420-page book that leaves 34 chapter groups and 8 entries in
 `Unsorted` (appendices, preface, index, references) rather than everything
-in one pile. Move those where they belong in the sample config it writes,
-and the group disappears on the next run.
+in one pile. Move those where they belong in the `project-sample.yaml` it
+writes, and the group disappears on the next run.
 
 Without `--zip` the script prints the equivalent `zip` command. The archive
 puts `imsmanifest.xml` at the root with media directories beneath, which is

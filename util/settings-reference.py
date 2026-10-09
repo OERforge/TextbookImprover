@@ -49,32 +49,51 @@ PAGES = [
         "title": "Project settings",
         "intro": (
             "Settings that describe the book rather than any one rendering "
-            "or package of it, at the top level of `packaging.yaml`. Both "
-            "halves of the pipeline read them. Generated from "
-            "`lib/schema-project.yaml` by `util/settings-reference.py`; "
-            "edit the schema, not this page."),
+            "or package of it, under `project:` in `project.yaml`, which "
+            "both halves of the pipeline read. A run writes "
+            "`project-sample.yaml` with every one and its description when "
+            "nothing names the book, and so does `python3 "
+            "$T/bin/build-cartridge.py -d . --pages html --init` when "
+            "nothing names the book and no run has written one: edit it and "
+            "rename it to "
+            "`project.yaml` (`T` is the directory you cloned the tools into). "
+            "[Configuration](configuration.md#samples) has the other two "
+            "samples. Generated from `lib/schema-project.yaml` "
+            "by `util/settings-reference.py`; edit the schema, not this "
+            "page."),
     },
     {
         "schema": "bin/schema-conversion.yaml",
         "output": "docs/conversion-settings.md",
         "title": "Conversion settings",
         "intro": (
-            "Settings that describe one rendering of the book, under "
-            "`conversion:` in `packaging.yaml` and per target under "
-            "`targets:`. Generated from `bin/schema-conversion.yaml` by "
-            "`util/settings-reference.py`; edit the schema, not this page. "
-            "A setting marked *target only* can appear only inside a "
-            "target."),
+            "Settings that describe one rendering of the book, in "
+            "`conversion.yaml`: under `defaults:` for every target, and per "
+            "target under `targets:`. `python3 "
+            "$T/bin/read-conversion-config.py -d . --init` writes "
+            "`conversion-sample.yaml` with every one and its description, at "
+            "the value `conversion.yaml` gives it or else its default; rename "
+            "it to `conversion.yaml` to use it (`T` is the directory you cloned "
+            "the tools into). A setting marked *target only* "
+            "can appear only inside a target. Generated from "
+            "`bin/schema-conversion.yaml` by `util/settings-reference.py`; "
+            "edit the schema, not this page."),
     },
     {
         "schema": "bin/schema-packaging.yaml",
         "output": "docs/packaging-settings.md",
         "title": "Packaging settings",
         "intro": (
-            "Settings that describe one package of the book, under "
-            "`packaging:` in `packaging.yaml` and per target under "
-            "`targets:`. Generated from `bin/schema-packaging.yaml` by "
-            "`util/settings-reference.py`; edit the schema, not this page."),
+            "Settings that describe one package of the book, in "
+            "`packaging.yaml`: under `defaults:` for every package, and per "
+            "package under `targets:`. `python3 $T/bin/build-cartridge.py -d "
+            ". --init` writes `packaging-sample.yaml` with every one and its "
+            "description, at the value `packaging.yaml` gives it or else its "
+            "default; rename it to `packaging.yaml` to use it (`T` is the "
+            "directory you cloned the tools into). A setting "
+            "marked *target only* can appear only inside a target. Generated "
+            "from `bin/schema-packaging.yaml` by `util/settings-reference.py`; "
+            "edit the schema, not this page."),
     },
 ]
 

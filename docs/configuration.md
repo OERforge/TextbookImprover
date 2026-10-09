@@ -20,21 +20,54 @@ only description: the readers, the validator, the generated sample files,
 and this document all derive from it, so there's no second list to drift
 out of step with the first.
 
-To see every setting with its documentation, generate a sample:
+### Samples
 
-```bash
-python3 /path/to/tools/bin/build-cartridge.py -d . --init
-```
+Each file has a sample written from its schema: every setting with its
+description, at the value the file gives it or else the default, so a
+sample renamed over its file loses nothing set there. With `T` the
+directory the tools are in, run in the book's directory:
 
-`project.yaml` is optional. Both other files may carry a `project:` block
-inline, so a directory holding only a conversion config still stands on
-its own. Declare it in one place or the other; declaring it in both means
-one copy goes stale, and the tools warn when the two disagree.
+| Sample | Written by | Rename it to |
+|---|---|---|
+| `project-sample.yaml` | a run, when nothing names the book; and `build-cartridge.py -d . --pages html --init`, when nothing names the book and no run has written one | `project.yaml` |
+| `conversion-sample.yaml` | `python3 $T/bin/read-conversion-config.py -d . --init` | `conversion.yaml` |
+| `packaging-sample.yaml` | `python3 $T/bin/build-cartridge.py -d . --init` | `packaging.yaml` |
+
+A run also writes `project-sample.yaml` for review when it worked out the
+contents itself: guessed from the file names, taken from a master file's
+order, or read from an outline with `--toc`. `--pages` names the directory
+the pages are in, `html/` unless an HTML target says otherwise, which
+`--init` needs only for the contents it guesses into a project sample.
+[Project settings](project-settings.md), [conversion
+settings](conversion-settings.md), and [packaging
+settings](packaging-settings.md) list the same settings.
+
+### Where the book is named
+
+`project.yaml` names the book for both halves: its identifier, title,
+language, and contents. `conversion.yaml` and `packaging.yaml` may carry a
+`project:` block of their own, as a first run once wrote one into
+`packaging.yaml`, but each file is read by its own half alone. A book
+named only in `packaging.yaml` gets its cartridge but no EPUB or PDF, and
+one named only in `conversion.yaml` gets its EPUB but no cartridge; either
+way the run says to move the block into `project.yaml`. Declare the project in one place: declaring it in two
+means one copy goes stale, and the tools warn when the two disagree.
 
 ### Required settings
 
 Two have no useful default: `project.identifier` and `project.title`.
-Without them the build writes a sample and stops.
+With neither `project.yaml` nor a `project:` block in `packaging.yaml`,
+packaging writes `project-sample.yaml` and stops; a `project.yaml` that
+leaves either one at its default (`book`, `Untitled`) is warned about. A
+target that writes a book, an EPUB, a PDF, or a LaTeX master, needs the
+title too. With none configured, it takes the title a master file gives,
+an AsciiDoc master's `=` line or a LaTeX master's `\title` (not the first
+of several documents `latex.main` lists), or a book of one page takes that
+page's, and the run says so; a PDF whose `pdf.metadata` file has a title,
+and a LaTeX book's PDF from its own build (`pdf.from: book`), are titled as
+those say. With nothing to take it from, or with the title only in
+`packaging.yaml`, that target isn't written, the run says where the title
+goes, and it ends in an error once the other targets are written.
 
 `identifier` is worth care. Brightspace matches on it when re-importing,
 so changing it duplicates a course rather than updating it. Keep it stable
@@ -250,7 +283,7 @@ ones that are, and is reported rather than silently misplaced. A chapter
 that is one file (`01 BigPicture.md`, a book written a file per chapter) is
 that file, with no group heading over it, and a page read as an appendix
 keeps that role. The guess is written to
-`packaging-sample.yaml` for you to correct. It's a starting point, not a
+`project-sample.yaml` for you to correct. It's a starting point, not a
 finished book.
 
 ### Header and footer

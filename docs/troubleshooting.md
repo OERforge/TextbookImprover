@@ -50,7 +50,7 @@ genuinely malformed.
 `media-unresolved.csv`. Usually EMF/WMF.
 
 **A page appears in no report but looks wrong** — check
-`packaging-sample.yaml`. If a run worked out an ordering, the sample
+`project-sample.yaml`. If a run worked out an ordering, the sample
 holds what it decided.
 
 **Keys like `page#table-3` don't match what you see** — the number counts

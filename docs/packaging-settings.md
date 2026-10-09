@@ -1,6 +1,6 @@
 # Packaging settings
 
-Settings that describe one package of the book, under `packaging:` in `packaging.yaml` and per target under `targets:`. Generated from `bin/schema-packaging.yaml` by `util/settings-reference.py`; edit the schema, not this page.
+Settings that describe one package of the book, in `packaging.yaml`: under `defaults:` for every package, and per package under `targets:`. `python3 $T/bin/build-cartridge.py -d . --init` writes `packaging-sample.yaml` with every one and its description, at the value `packaging.yaml` gives it or else its default; rename it to `packaging.yaml` to use it (`T` is the directory you cloned the tools into). A setting marked *target only* can appear only inside a target. Generated from `bin/schema-packaging.yaml` by `util/settings-reference.py`; edit the schema, not this page.
 
 How converted files are assembled into a distributable package.
 

@@ -362,6 +362,17 @@ def convert(work, env=None):
         capture_output=True, text=True, stdin=subprocess.DEVNULL, env=env)
 
 
+
+def sample_text(work):
+    """project-sample.yaml's values as YAML, without the description above
+    each setting, which a check reading the text would otherwise see."""
+    path = os.path.join(work, "project-sample.yaml")
+    if not os.path.exists(path):
+        return ""
+    import yaml
+    return yaml.safe_dump(yaml.safe_load(read(work, "project-sample.yaml")),
+                          sort_keys=False, allow_unicode=True)
+
 def without_tagging_status(work):
     """The environment with kpsewhich unable to find LaTeX's tagging status
     data, installed or not: a kpsewhich ahead of the real one on PATH that
@@ -569,8 +580,8 @@ def case_book(work):
     two = read(work, "html", "two.html") \
         if os.path.exists(os.path.join(work, "html", "two.html")) else ""
     import yaml
-    sample = yaml.safe_load(read(work, "contents-sample.yaml")) \
-        if os.path.exists(os.path.join(work, "contents-sample.yaml")) else {}
+    sample = yaml.safe_load(read(work, "project-sample.yaml")) \
+        if os.path.exists(os.path.join(work, "project-sample.yaml")) else {}
     project = (sample or {}).get("project", {})
     sample_text = read(work, "latex-conversion-macros-sample.tex") \
         if os.path.exists(os.path.join(work,
@@ -1883,16 +1894,14 @@ def case_documents(work):
         path = os.path.join(work, "tagged", "src", name)
         return read(work, "tagged", "src", name) if os.path.exists(path) else ""
     a, b = page("Topic-A-One.html"), page("Topic-B-Two.html")
-    sample = read(work, "contents-sample.yaml") \
-        if os.path.exists(os.path.join(work, "contents-sample.yaml")) else ""
+    sample = sample_text(work)
     tagged = copy("Topic A One.tex")
     # A pattern names them too, in sorted order.
     with open(os.path.join(work, "conversion.yaml"), "w") as fh:
         fh.write("defaults:\n  latex:\n    main: src/*.tex\n"
                  "targets:\n  html:\n    format: html\n")
     pattern = convert(work)
-    sorted_sample = read(work, "contents-sample.yaml") \
-        if os.path.exists(os.path.join(work, "contents-sample.yaml")) else ""
+    sorted_sample = sample_text(work)
     # The documents grouped under one entry, and a Word target merging the
     # group: one file, opening at the group's Heading 1, each document a
     # Heading 2 titled as its page is, its title's \textrm and all.
@@ -3188,8 +3197,7 @@ def case_customized(work):
         png(os.path.join(work, path), rgb)
     first = convert(work)
     first_said = first.stdout + first.stderr
-    contents_sample = read(work, "contents-sample.yaml") \
-        if os.path.exists(os.path.join(work, "contents-sample.yaml")) else ""
+    contents_sample = sample_text(work)
     sample_path = os.path.join(work, "latex-conversion-macros-sample.tex")
     sample = read(work, "latex-conversion-macros-sample.tex") \
         if os.path.exists(sample_path) else ""
@@ -3855,8 +3863,8 @@ def case_parts(work):
     result = convert(work)
     said = result.stdout + result.stderr
     import yaml
-    sample = yaml.safe_load(read(work, "contents-sample.yaml")) \
-        if os.path.exists(os.path.join(work, "contents-sample.yaml")) else {}
+    sample = yaml.safe_load(read(work, "project-sample.yaml")) \
+        if os.path.exists(os.path.join(work, "project-sample.yaml")) else {}
     contents = ((sample or {}).get("project") or {}).get("contents")
 
     def page(name):
@@ -4129,8 +4137,8 @@ def case_bibliography_place(work):
             fh.write(text)
     convert(work)
     import yaml
-    sample = yaml.safe_load(read(work, "contents-sample.yaml")) \
-        if os.path.exists(os.path.join(work, "contents-sample.yaml")) else {}
+    sample = yaml.safe_load(read(work, "project-sample.yaml")) \
+        if os.path.exists(os.path.join(work, "project-sample.yaml")) else {}
     contents = ((sample or {}).get("project") or {}).get("contents") or []
 
     def numbered():

@@ -10,7 +10,7 @@ A cartridge needs the pages in the book's order, grouped into modules. Three sou
 2. **The filenames**, with `--includeallhtml`: a page named `3-2-something` is placed under chapter 3 without guessing. Pages with no chapter in their name are left for you to sort.
 3. **A guess**, which is what a bare first run does and says so in the sample.
 
-Whichever you use, the result goes to `packaging-sample.yaml` for review, and anything you then list under `contents` stays where you put it. [Building the cartridge](packaging.md#ordering-from-the-books-own-table-of-contents) has the detail.
+Whichever you use, the result goes to `project-sample.yaml` for review, and anything you then list under `contents` stays where you put it. [Building the cartridge](packaging.md#ordering-from-the-books-own-table-of-contents) has the detail.
 
 ## Quick start
 
@@ -33,17 +33,18 @@ python3 $T/bin/convert.py
 You get one `.html` per `.docx`, their images, and a set of `*-missing.csv`
 reports naming what still needs a person. The run then stops, because
 building a manifest needs a couple of things only you can supply, and
-writes `packaging-sample.yaml`.
+writes `project-sample.yaml`.
 
 **2. Fill in the two required settings and rename.** Open
-`packaging-sample.yaml`, set `identifier` and `title` near the top, then:
+`project-sample.yaml`, set `identifier` and `title` near the top, then:
 
 ```bash
-mv packaging-sample.yaml packaging.yaml
+mv project-sample.yaml project.yaml
 ```
 
-Every setting is in that file at its current value with a sentence
+Every project setting is in that file at its current value with a sentence
 explaining it, so this is also how you find out what can be configured.
+The run prints the commands that write the other two samples, below.
 Edit the line that's already there rather than adding another — the file
 is complete, so a second copy of a key would discard the first. (The tools
 refuse that rather than let it happen.) Delete any line you're happy to
@@ -61,32 +62,37 @@ python3 $T/bin/convert.py            # builds imsmanifest.xml
 python3 $T/bin/convert.py --zip      # ... and the .imscc archive
 ```
 
-### Changing how conversion works
+### Changing how conversion or packaging works
 
-Everything above uses the conversion defaults. To change any of them —
-the page language, an attribution footer, caption label words, the alt
-text length limit — generate a conversion config the same way:
+Everything above uses the conversion and packaging defaults. To change
+any of them (the page language, an attribution footer, caption label
+words, the alt text length limit, the cartridge's version), generate the
+file's sample:
 
 ```bash
-python3 $T/bin/read-conversion-config.py -d . --init
+python3 $T/bin/read-conversion-config.py -d . --init   # conversion-sample.yaml
+python3 $T/bin/build-cartridge.py -d . --init          # packaging-sample.yaml
 ```
 
-That writes `conversion.yaml` with every setting at its default and a line
-of documentation above each. Edit it in place; there's nothing to rename.
+Each holds every setting with a line of documentation above it, at the
+value your file already gives it or else the default. Rename it to
+`conversion.yaml` or `packaging.yaml` and edit it.
 
 ### Where settings live
 
 | File | Holds | Generate with |
 |---|---|---|
-| `packaging.yaml` | How pages become an archive. | first `convert.py` run, or `build-cartridge.py --init` |
-| `conversion.yaml` | How documents become pages. | `read-conversion-config.py --init` |
-| `project.yaml` | The book itself: language, identifier, title, structure. | optional — see below |
+| `project.yaml` | The book itself: identifier, title, language, contents. | first `convert.py` run (`project-sample.yaml`) |
+| `conversion.yaml` | How documents become pages. | `read-conversion-config.py -d . --init` (`conversion-sample.yaml`) |
+| `packaging.yaml` | How pages become an archive. | `build-cartridge.py -d . --init` (`packaging-sample.yaml`) |
 
-`project.yaml` is optional. The generated `packaging.yaml` carries the
-book's details in a `project:` block at the top, which is enough for most
-uses. Split them out only if you want conversion and packaging to read the
-same declaration from one place, and if you do, remove the inline block so
-there's only one copy. The tools warn when two disagree.
+`conversion.yaml` and `packaging.yaml` are optional: every setting in them
+has a default. `project.yaml` names the book for both halves, the
+cartridge and an EPUB or a PDF alike. A `project:` block in
+`packaging.yaml`, which a first run once wrote, still names the cartridge,
+but conversion doesn't read it, so a run with an EPUB target says to move
+it into `project.yaml`. [Configuration](configuration.md#where-the-book-is-named)
+has the detail.
 
 ### Notes
 
@@ -128,38 +134,34 @@ T=/path/to/tools
 for f in *.docx; do python3 $T/util/untrack-deletions.py "$f" --check; done \
   | grep -v ': 0 '
 
-# 2. First run. There is no config yet, so it stops with a sample.
+# 2. First run. There is no project.yaml yet, so it stops with a sample.
+#    With the book's PDF or EPUB, order the pages from it on this run:
+python3 $T/bin/convert.py --toc book.pdf
+#    Without one, the sample's order is guessed from the file names:
 python3 $T/bin/convert.py
 
-# 3. Fill in identifier and title, then rename.
-mv packaging-sample.yaml packaging.yaml
+# 3. Fill in identifier and title, correct the order, then rename. Do
+#    step 2's --toc first: --toc orders only pages the contents don't
+#    place, and the sample places every page, so once it's adopted the
+#    outline has nothing to do. (If that happens, delete contents from
+#    project.yaml and run step 2 again.)
+mv project-sample.yaml project.yaml
 
-# 4. Order the pages. With the book's PDF:
-python3 $T/bin/convert.py --toc book.pdf
-#    Without one, let it guess and correct the sample:
-python3 $T/bin/convert.py --includeallhtml
-
-# 5. Adopt the order it worked out. Do this AFTER step 4: the sample
-#    already carries a guessed order for every page, and --toc orders
-#    only pages the config does not place, so a config adopted first
-#    leaves the outline nothing to do. (If that happens, delete the
-#    contents block from packaging.yaml and run step 4 again.)
-mv packaging-sample.yaml packaging.yaml
-
-# 6. Work through the reports, appending rows to the sidecar files.
+# 4. Work through the reports, appending rows to the sidecar files.
 #    Re-run after each pass; the reports shrink.
 python3 $T/bin/convert.py
 
-# 7. When the reports you care about are gone, build the cartridge.
+# 5. When the reports you care about are gone, build the cartridge.
 python3 $T/bin/convert.py --zip
 ```
 
-Steps 6 and 7 are the loop you will spend the most time in. Everything else
-is done once per book.
+Steps 4 and 5 are the loop you will spend the most time in. Everything else
+is done once per book. A page left out of `contents` later on is placed
+in the chapter its name gives with `--includeallhtml`.
 
-The sample written in steps 2 and 4 is complete: every setting appears at
+The sample written in step 2 is complete: every project setting appears at
 its current value with a comment explaining it, so renaming it over your
-own config never loses anything you had set. That is asserted by a test,
+own `project.yaml` never loses anything you had set. That is asserted by a test,
 not by care — see [Testing](testing.md).
 
 ## What a run creates
@@ -173,7 +175,7 @@ html/chapter-7--economies-of-scale.html   a page cut from chapter-7, with pages.
 html/1-3-levels-of-measurement/media/ the images again, beside the page that uses them
 imsmanifest.xml                       the manifest
 cartridge-files.txt                   every file the archive must contain
-packaging-sample.yaml                 written when the script worked something out
+project-sample.yaml                   written when the script worked something out
 *-missing.csv                         what still needs a human
 course.imscc                          only with --zip
 epub/course.epub                      only with an epub3 target declared
@@ -217,11 +219,11 @@ won't delete files you may want.
 | Code | Meaning |
 |---|---|
 | 0 | Everything ran. Reports may still list outstanding work. |
-| 1 | The run stopped: no source present, unresolved media, a missing required config value, or a referenced file not on disk. |
+| 1 | The run stopped: no source present, unresolved media, a missing required config value, or a referenced file not on disk. Or a target that writes a book, an EPUB, a PDF, or a LaTeX master, wasn't written for want of the book's title, which the run says, while the other targets were. |
 
-A non-zero exit on a first run is normal — there's no config yet, so the
-manifest step writes a sample and stops. The HTML is already written by
-that point.
+A non-zero exit on a first run is normal — nothing names the book yet, so
+the manifest step writes `project-sample.yaml` and stops. The HTML is
+already written by that point.
 
 ## Next
 

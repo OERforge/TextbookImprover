@@ -135,7 +135,8 @@ def main():
           f"{len(findings) + len(pdf_findings)} finding(s):", file=sys.stderr)
     for check, count in outputcheck.summarize(findings):
         print(f"  {count:5}  {check}: "
-              f"{outputcheck.DESCRIPTIONS.get(check, '')}", file=sys.stderr)
+              f"{outputcheck.DESCRIPTIONS.get(check) or findings_lib.describe(check)}",
+              file=sys.stderr)
     for line in pdf_summary(pdf_findings):
         print(line, file=sys.stderr)
     if args.report:

@@ -441,6 +441,11 @@ def split_document(doc, stem, level, names, taken, problems):
         if piece != stem:               # the opening page is the document's
             for field in DOCUMENT_ONLY:
                 meta.pop(field, None)
+            # And what the source's title heading said, its id and what
+            # the page is (a glossary), is the opening page's, not a
+            # section's: each piece has a heading of its own.
+            meta.pop("title-id", None)
+            meta.pop("page-type", None)
         meta["title"] = {"t": "MetaInlines", "c": [{"t": "Str", "c": w}
                                                     if i % 2 == 0 else
                                                     {"t": "Space"}

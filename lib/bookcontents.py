@@ -138,12 +138,12 @@ def group_pieces(tree, pieces, titles, roles=None):
     headings above them."""
     out = []
     for node in tree:
-        explicit = None
+        explicit = explicit_type = None
         if isinstance(node, dict) and "items" not in node:
-            # A page entry with a role. If it is a split source, its
-            # pieces still belong under it.
+            # A page entry with a role or a type. If it is a split source,
+            # its pieces still belong under it.
             if node.get("page") in pieces:
-                explicit, node = node.get("role"), node["page"]
+                explicit, explicit_type, node = node.get("role"), node.get("type"), node["page"]
             else:
                 out.append(node)
                 continue
@@ -174,6 +174,10 @@ def group_pieces(tree, pieces, titles, roles=None):
                 or (roles or {}).get(node, "") or matter_role(node)
             if role in ("front", "appendix", "back"):
                 group["role"] = role
+            # And what it is: the group stands for the source, its own
+            # page and its pieces, as the glossary they make up.
+            if explicit_type:
+                group["type"] = explicit_type
             out.append(group)
         else:
             out.append(node)
@@ -521,6 +525,23 @@ def guess_contents(stems, back_matter=None, titles=None, parts=None,
 
 
 ROLES = ("front", "main", "appendix", "back")
+# What a page or group can say it is (type in contents, or its heading's
+# epub:type or class), as EPUB's structural semantics name it: the part of
+# the book a top-level entry with no role of its own is in, and the
+# DPUB-ARIA role its section carries. A type isn't inherited: a chapter
+# isn't a glossary because its Key Terms page is one.
+PAGE_TYPES = {
+    "preface": ("front", "doc-preface"), "foreword": ("front", "doc-foreword"),
+    "dedication": ("front", "doc-dedication"), "epigraph": ("front", "doc-epigraph"),
+    "acknowledgments": ("front", "doc-acknowledgments"),
+    "prologue": ("front", "doc-prologue"), "abstract": ("front", "doc-abstract"),
+    "introduction": ("front", "doc-introduction"), "copyright-page": ("front", None),
+    "part": ("main", "doc-part"), "chapter": ("main", "doc-chapter"),
+    "conclusion": ("main", "doc-conclusion"), "epilogue": ("main", "doc-epilogue"),
+    "afterword": ("back", "doc-afterword"), "appendix": ("appendix", "doc-appendix"),
+    "bibliography": ("back", "doc-bibliography"), "glossary": ("back", "doc-glossary"),
+    "index": ("back", "doc-index"), "colophon": ("back", "doc-colophon"),
+}
 GENERATED = {"toc": ("toc", "Contents")}       # kind -> (default name, title)
 
 
@@ -530,10 +551,11 @@ class Entry(tuple):
     number once numbering has run, and what generates it. Unpacking as
     kind, a, b still works everywhere."""
 
-    def __new__(cls, record, role=None, generate=None):
+    def __new__(cls, record, role=None, generate=None, kind=None):
         self = tuple.__new__(cls, record)
         self.role = role
         self.generate = generate
+        self.type = kind
         self.number = None
         return self
 
@@ -561,6 +583,13 @@ def walk_contents(nodes, available, used, problems, depth=0,
                             + ", ".join(ROLES))
             role = None
         role = role or inherited          # a page under a front group is front
+        kind = node.get("type")
+        if kind is not None and (not isinstance(kind, str) or kind not in PAGE_TYPES):
+            problems.append(f"type {kind!r} is not one of " + ", ".join(sorted(PAGE_TYPES)))
+            kind = None
+        if kind is not None and "generate" in node:
+            problems.append(f"a generated page takes no type: {kind!r} is ignored")
+            kind = None
         if "generate" in node:
             kind = str(node["generate"])
             if kind not in GENERATED:
@@ -584,7 +613,7 @@ def walk_contents(nodes, available, used, problems, depth=0,
                     f"group '{node.get('title', '')}' nests more than three "
                     "levels deep; some LMSs flatten this")
             out.append(Entry(("group", node.get("title", ""), children),
-                             role=role))
+                             role=role, kind=kind))
             continue
 
         stem = str(node.get("page", "")).strip()
@@ -601,14 +630,20 @@ def walk_contents(nodes, available, used, problems, depth=0,
             problems.append(f"page listed more than once: {stem}{suffix}")
             continue
         used.add(stem)
-        out.append(Entry(("page", stem, node.get("title")), role=role))
+        out.append(Entry(("page", stem, node.get("title")), role=role, kind=kind))
     return out
 
 
 
 
 def role_of(entry):
-    return getattr(entry, "role", None) or "main"
+    """The part of the book an entry is in: its role, its group's, or with
+    neither the part its type implies (a glossary the back matter), the
+    main matter otherwise. Read for top-level entries, as numbering and
+    the divisions are."""
+    kind = getattr(entry, "type", None)
+    return getattr(entry, "role", None) or (PAGE_TYPES[kind][0] if kind in PAGE_TYPES
+                                            else None) or "main"
 
 
 def is_generated(entry):
@@ -622,6 +657,26 @@ def letter(n):
         n, r = divmod(n - 1, 26)
         out = chr(65 + r) + out
     return out
+
+
+def opener_types(tree, titles=None):
+    """A group whose first page is its opening page (titled as the group
+    is, which the group's heading stands for in every output) is what
+    that page's declared type says, when the group says nothing itself:
+    `- title: Glossary` over `- page: gloss, type: glossary`. Called where
+    a tree is built, before it's numbered or assembled."""
+    titles = titles or {}
+    for entry in tree:
+        if entry[0] != "group":
+            continue
+        opener_types(entry[2], titles)
+        first = entry[2][0] if entry[2] else None
+        if first is None or first[0] != "page" or is_generated(first) \
+                or getattr(entry, "type", None) or not getattr(first, "type", None):
+            continue
+        if (first[2] or titles.get(first[1])) == entry[1]:
+            entry.type = first.type
+    return tree
 
 
 def number_tree(tree, titles=None):
@@ -751,6 +806,10 @@ def contents_from_tree(tree):
             if not isinstance(node, dict):
                 node = {"page": node}
             node["role"] = role
+        if getattr(entry, "type", None):
+            if not isinstance(node, dict):
+                node = {"page": node}
+            node["type"] = entry.type
         out.append(node)
     return out
 

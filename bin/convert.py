@@ -84,7 +84,7 @@ try:
     import oerconfig
     from bookcontents import (guess_contents, walk_contents, number_tree,
                               is_generated, toc_blocks, stem_title, declared_titles,
-                              expand_split_sources, contents_from_tree)
+                              expand_split_sources, contents_from_tree, opener_types)
     from names import safe_path, safe_stem, is_safe
 except ImportError:
     sys.exit("Cannot find the configuration library. It should be in a "
@@ -1008,7 +1008,20 @@ def read_latex_to_json(base, masters, env, work, titles=None):
             own.append(stem)
             if master_own:
                 held.append(stem)
-            entry = {"page": stem, "role": role} if role != "main" else stem
+            # A bibliography the run wrote out as a page of its own is one,
+            # which the sample says, so adopted it's back matter.
+            bibliography = bool(blocks) and blocks[0].get("t") == "Header" \
+                and "bibliography" in blocks[0]["c"][1][1]
+            entry = stem
+            if role != "main" or bibliography:
+                entry = {"page": stem}
+                # A bibliography's type places it, in the back matter at the
+                # top level, out of a part or the appendices it follows; a
+                # \frontmatter or \backmatter before it still does.
+                if role != "main" and not (bibliography and role == "appendix"):
+                    entry["role"] = role
+                if bibliography:
+                    entry["type"] = "bibliography"
             if opens_part:
                 group = {"title": latexsource.stringify(blocks[0]["c"][2])}
                 if role != "main":
@@ -1016,7 +1029,7 @@ def read_latex_to_json(base, masters, env, work, titles=None):
                 group["items"] = [stem]
                 group_role = role
                 order.append(group)
-            elif group is not None and role == group_role:
+            elif group is not None and role == group_role and not bibliography:
                 group["items"].append(stem)
             else:
                 group = None
@@ -3496,6 +3509,7 @@ def book_tree(project, pages, numbered=None):
                              available, used, problems, suffix=INTERMEDIATE)
     for problem in problems:
         say(f"WARNING: {problem}")
+    opener_types(tree, titles)
     if project.get("numbering") if numbered is None else numbered:
         number_tree(tree, titles)
     return tree, titles, api

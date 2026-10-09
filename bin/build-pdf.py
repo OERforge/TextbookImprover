@@ -62,7 +62,7 @@ from bookassembly import (  # noqa: E402
     INTERMEDIATE, Assembly, load_documents, targets_of, plan_book, load_page,
     page_title, stringify, wants_title_page,
 )
-from bookcontents import flatten_pages, is_generated  # noqa: E402
+from bookcontents import flatten_pages, is_generated, role_of  # noqa: E402
 import latexbuild  # noqa: E402
 from latexbuild import ENGINE  # noqa: E402
 import pdfparagraphs  # noqa: E402
@@ -459,7 +459,7 @@ class PdfAssembly(Assembly):
         # in; it has no role of its own to change it.
         if depth != 1 or is_generated(entry):
             return
-        role = entry.role or "main"
+        role = role_of(entry)
         if role == self.division:
             return
         if self.divisions or role == "appendix":

@@ -74,7 +74,7 @@ local function passthrough(html)
 end
 
 local PIPELINE_META = { 'source-page', 'source-title', 'page-part',
-                        'page-position', 'page-parents', 'page-role',
+                        'page-position', 'page-parents', 'page-role', 'page-type',
                         'header-includes' }
 
 local BOOKKEEPING = { 'data-th-index', 'data-cc-ordinal', 'data-th-marker' }

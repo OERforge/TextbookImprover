@@ -39,7 +39,7 @@ import sys
 import oerconfig
 from bookcontents import (
     guess_contents, walk_contents, flatten_pages, natural_key, stem_title,
-    expand_split_sources, is_generated, numbered_title, toc_blocks,
+    expand_split_sources, is_generated, numbered_title, toc_blocks, opener_types,
 )
 
 LIB = os.path.dirname(os.path.abspath(__file__))
@@ -544,6 +544,7 @@ def plan_book(pages_dir, resolved, output):
               file=sys.stderr)
         for stem in unplaced:
             print(f"  {stem}", file=sys.stderr)
+    opener_types(tree, titles)
     placed = list(flatten_pages(tree))
     if not [s for s in placed if s in available]:
         sys.exit("No page in project.contents exists on disk; nothing to "

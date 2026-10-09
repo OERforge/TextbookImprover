@@ -255,6 +255,20 @@ def case_document_meta(work):
     out = Pieces(work, split(work, [os.path.join(work, "book.filtered.json")]))
     first = out.docs.get("book--one", {})
     own = out.docs.get("book", {})
+    # A source whose title heading says what it is: its pieces aren't.
+    typed = os.path.join(work, "typed")
+    os.makedirs(typed)
+    with open(os.path.join(typed, "gloss.md"), "w", encoding="utf-8") as fh:
+        fh.write("# Glossary {.glossary}\n\nTerms.\n\n## A\n\nAbacus.\n\n## B\n\nBeam.\n")
+    run(["pandoc", "gloss.md", "-t", "json", "-o", "gloss.json"], typed)
+    run(["pandoc", "-f", "json", "-t", "json", "gloss.json", "-o", "gloss.filtered.json",
+         "--lua-filter", os.path.join(BIN, "figures-and-tables.lua")], typed,
+        dict(os.environ, PROMOTE_H1_TO_TITLE="always",
+             IMAGE_ALT_MISSING=os.path.join(typed, "alt.csv"),
+             TABLE_CAPTIONS_MISSING=os.path.join(typed, "caps.csv")))
+    pieces = Pieces(typed, split(typed, [os.path.join(typed, "gloss.filtered.json")]))
+    typed_piece = pieces.docs.get("gloss--b", {})
+    typed_own = pieces.docs.get("gloss", {})
     return [
         ("a piece carries no subtitle, date, or include-before",
          lambda: not any(k in first.get("meta", {})
@@ -264,6 +278,10 @@ def case_document_meta(work):
          and "include-before" in own.get("meta", {})),
         ("a piece keeps the language and its title",
          lambda: "title" in first["meta"]),
+        ("a piece doesn't take what the source's title heading said, its id and what the "
+         "page is, which are the source's own page's",
+         lambda: not any(k in typed_piece.get("meta", {}) for k in ("page-type", "title-id"))
+         and typed_own.get("meta", {}).get("page-type", {}).get("c") == "glossary"),
     ]
 
 

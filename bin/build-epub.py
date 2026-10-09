@@ -42,6 +42,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
 import argparse
+from html import escape as html_escape, unescape as html_unescape
 import json
 import os
 import re
@@ -60,9 +61,9 @@ try:
 except ImportError:
     sys.exit("Cannot find the configuration library. It should be in a "
              "lib/ directory beside bin/.")
-from bookcontents import number_tree  # noqa: E402
+from bookcontents import number_tree, is_generated, PAGE_TYPES  # noqa: E402
 from bookassembly import (  # noqa: E402
-    INTERMEDIATE, page_id, load_page, inlines, header, Assembly,
+    INTERMEDIATE, page_id, load_page, inlines, header, Assembly, meta_text,
     load_documents, targets_of, plan_book, wants_title_page,
     # not used here, but the EPUB tests reach them through this module
     count_images, page_title, prefix_ids, shift_headers,  # noqa: F401
@@ -342,6 +343,238 @@ def link_across_chapters(path):
     return fixed
 
 
+# A page's division, as the body of its chapter file says it (epub:type),
+# from its top-level entry's role in contents; and what a page is (its type
+# in contents, or its heading's), with the DPUB-ARIA role, which Ace
+# expects beside it (bookcontents.PAGE_TYPES). Only those types, unprefixed
+# and naming a whole section, are taken from a heading: an EPUB source's
+# headings also carry values like title or z3998:roman, which name the
+# heading, and a prefix the package would have to declare.
+MATTER = {"front": "frontmatter", "main": "bodymatter", "appendix": "backmatter",
+          "back": "backmatter"}
+# The pages the landmarks name besides the start of the body and the
+# contents, as EPUB's landmarks vocabulary has them.
+LANDMARK_TYPES = ("bibliography", "glossary", "index")
+
+
+def section_type(value):
+    """The first of a heading's epub:type values that names a section."""
+    return next((v for v in str(value or "").split() if v in PAGE_TYPES), "")
+
+
+class EpubAssembly(Assembly):
+    """The book for the EPUB: as any assembly, and recording where each
+    entry of contents starts, with the role contents gives it (its own,
+    or its group's) and its type, and what each page's heading says it
+    is."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.marks = []           # (index in blocks, depth, role, type, kind of entry)
+        self.page_types = {}      # a page's heading id -> the epub:type its heading gave
+        self.page_ids = set()     # every page's heading id
+        self.contents_id = None   # the generated contents page's heading id
+
+    def before_entry(self, entry, depth):
+        kind = "contents" if is_generated(entry) else entry[0]
+        self.marks.append((len(self.blocks), depth, getattr(entry, "role", None),
+                           getattr(entry, "type", None), kind))
+
+    def mark_notes(self):
+        """The Notes chapter, added after contents is placed: back matter."""
+        self.marks.append((len(self.blocks), 1, "back", None, "notes"))
+
+    def add_generated(self, entry, depth):
+        start = len(self.blocks)
+        super().add_generated(entry, depth)
+        if entry.generate == "toc" and len(self.blocks) > start:
+            self.contents_id = self.blocks[start]["c"][1][0]
+
+    def add_page(self, stem, title_override, depth, heading=True, number=None):
+        start = len(self.blocks)
+        super().add_page(stem, title_override, depth, heading=heading, number=number)
+        self.page_ids.add(page_id(stem))
+        doc = load_page(self.base, stem)
+        kind = section_type(meta_text(doc.get("meta", {}), "page-type"))
+        first = self.blocks[start] if len(self.blocks) > start else None
+        if not kind and heading and first and first.get("t") == "Header":
+            kind = section_type(dict(first["c"][1][2]).get("epub:type"))
+        if kind:
+            self.page_types[page_id(stem)] = kind
+
+    def divisions(self):
+        """heading id -> (body epub:type, the section's epub:type or "")
+        for each heading after the first entry starts.
+
+        The division is the top-level entry's, as numbering and the PDF
+        read it: its role, or with none the division the type contents
+        gives it implies (a book-level glossary is back matter), the
+        contents page's the entry's before it, and otherwise the main
+        matter; a type from a heading marks the section and no more. Everything
+        inside it is in that division whatever it is: a chapter's Key
+        Terms page, a glossary, is in the chapter's. An entry's type is
+        what contents says, or what its heading said, on its own heading
+        only, the first after its mark; the headings after that, the
+        page's own sections, which the writer puts in files of their own
+        when groups make the split deeper, have no type. A heading that
+        carries an epub:type itself is left as the writer made it."""
+        out, previous, division = {}, None, None
+        marks = list(self.marks)
+        current, starting = None, False
+        for index, block in enumerate(self.blocks):
+            while marks and marks[0][0] <= index:
+                _, depth, role, declared, entry_kind = marks.pop(0)
+                current, starting = (depth, role, declared, entry_kind), True
+            if current is None or block.get("t") != "Header":
+                continue
+            ident, _, attributes = block["c"][1]
+            if not ident or ident in out:
+                continue
+            if not starting:
+                if "epub:type" not in dict(attributes):
+                    out[ident] = (division, "")
+                continue
+            starting = False
+            depth, role, declared, entry_kind = current
+            kind = declared or self.page_types.get(ident, "")
+            if not kind and role == "appendix" and ident in self.page_ids:
+                kind = "appendix"
+            if depth == 1:
+                # Where the entry is in the book is contents' to say, as
+                # numbering, the PDF, and the cartridge read it: its role,
+                # or the type contents gives it, not one its heading gives.
+                if role:
+                    division = MATTER.get(role, "bodymatter")
+                elif entry_kind == "contents":
+                    # The contents, with no role of its own, is in the
+                    # division of the entry before it, or the front matter
+                    # when it's first.
+                    division = previous or "frontmatter"
+                elif ident == page_id("notes"):
+                    division = "backmatter"
+                else:
+                    division = MATTER[PAGE_TYPES.get(declared, ("main",))[0]]
+                previous = division
+            out[ident] = (division, kind)
+        return out
+
+
+SECTION = re.compile(r'<section\b[^>]*\bid="([^"]+)"[^>]*>')
+BODY = re.compile(r'<body\b[^>]*>')
+TITLE = re.compile(r"<title>(.*?)</title>", re.S)
+LANDMARKS = re.compile(r'\s*<nav epub:type="landmarks"[^>]*>.*?</nav>', re.S)
+
+
+def mark_divisions(path, divisions, contents_id):
+    """Each chapter file's body says the division its page is in, its
+    section what the page is, with the ARIA role; and the landmarks name
+    the start of the body, the contents page, and a bibliography,
+    glossary, or index. Pandoc's writer calls every chapter bodymatter
+    unless its heading has one of the epub:type values it lists, and its
+    landmarks hold only the title page and cover, and the navigation
+    document's contents when it builds them itself (--toc), which also
+    puts that document in the spine; this assembly doesn't, so a landmark
+    pointing there would name a file outside the spine (epubcheck's
+    RSC-011). Returns the number of chapter files changed."""
+    tmp = path + ".tmp"
+    marked, landmarks, nav_name = 0, [], None
+    changed = {}
+    with zipfile.ZipFile(path) as zin:
+        for name in [i.filename for i in zin.infolist()]:
+            if not name.endswith(".xhtml"):
+                continue
+            text = zin.read(name).decode("utf-8")
+            if name.endswith("nav.xhtml"):
+                nav_name = name
+                continue
+            if "/text/" not in name:
+                continue
+            section = SECTION.search(text)
+            if not section:
+                continue
+            # A file the assembly didn't start (a book of one page, a
+            # heading that has an epub:type of its own) keeps the writer's
+            # division, and gets the ARIA role its type has.
+            matter, kind = divisions.get(section.group(1), (None, ""))
+            tag = section.group(0)
+            new = text
+            if matter:
+                new = BODY.sub('<body epub:type="%s">' % matter, new, count=1)
+            own = re.search(r'\bepub:type="([^"]*)"', tag)
+            retagged = tag
+            if own and kind and kind not in own.group(1).split():
+                # What contents says the page is outranks its heading.
+                retagged = tag.replace(own.group(0), 'epub:type="%s"' % kind, 1)
+            elif own:
+                kind = section_type(own.group(1))
+            extra = ""
+            if kind and not own:
+                extra += ' epub:type="%s"' % kind
+            aria = PAGE_TYPES.get(kind, (None, None))[1] if kind else None
+            if aria and " role=" not in tag:
+                extra += ' role="%s"' % aria
+            if extra or retagged != tag:
+                new = new.replace(tag, retagged[:-1] + extra + ">", 1)
+            title = TITLE.search(new)
+            label = html_unescape(" ".join(re.sub(r"<[^>]+>", "", title.group(1)).split())) \
+                if title else ""
+            if matter:
+                landmarks.append((name, section.group(1), matter, kind, label))
+            if new != text:
+                changed[name] = new
+                marked += 1
+        nav = zin.read(nav_name).decode("utf-8") if nav_name else None
+    if nav is not None:
+        nav_dir = os.path.dirname(nav_name)
+        items = []
+        existing = LANDMARKS.search(nav)
+        if existing:
+            items = re.findall(r"<li>\s*(<a\b.*?</a>)\s*</li>", existing.group(0), re.S)
+        have = {m for item in items for m in re.findall(r'epub:type="([^"]+)"', item)}
+
+        def link(name, kind, label):
+            href = os.path.relpath(name, nav_dir).replace(os.sep, "/")
+            return '<a href="%s" epub:type="%s">%s</a>' % (
+                html_escape(href), kind, html_escape(label))
+        contents = next((entry for entry in landmarks if entry[1] == contents_id), None)
+        if contents and "toc" not in have:
+            items.append(link(contents[0], "toc", contents[4]))
+        body = next((entry for entry in landmarks if entry[2] == "bodymatter"), None)
+        if body and "bodymatter" not in have:
+            items.append(link(body[0], "bodymatter", body[4]))
+        for name, ident, matter, kind, label in landmarks:
+            # The book's glossary, not a chapter's Key Terms.
+            if kind in LANDMARK_TYPES and kind not in have and matter != "bodymatter":
+                items.append(link(name, kind, label))
+                have.add(kind)
+        if items:
+            block = ('\n<nav epub:type="landmarks" id="landmarks" hidden="hidden">\n  <ol>\n'
+                     + "".join("    <li>\n      %s\n    </li>\n" % item for item in items)
+                     + "  </ol>\n</nav>")
+            if existing:
+                new_nav = nav[:existing.start()] + block + nav[existing.end():]
+            else:
+                toc_end = re.search(r'<nav epub:type="toc".*?</nav>', nav, re.S)
+                at = toc_end.end() if toc_end else nav.index("</body>")
+                new_nav = nav[:at] + block + nav[at:]
+            if new_nav != nav:
+                changed[nav_name] = new_nav
+    if not changed:
+        return 0
+    with zipfile.ZipFile(path) as zin, \
+            zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as zout:
+        for info in zin.infolist():
+            data = zin.read(info.filename)
+            if info.filename == "mimetype":
+                zout.writestr(info, data, compress_type=zipfile.ZIP_STORED)
+                continue
+            if info.filename in changed:
+                data = changed[info.filename].encode("utf-8")
+            zout.writestr(info, data)
+    os.replace(tmp, path)
+    return marked
+
+
 def arrange_epub_notes(path, assembly, numbering, placement):
     """notes.numbering and notes.placement, applied to the chapter files.
 
@@ -465,7 +698,7 @@ def build(base, name, resolved, keep, intermediates=None):
     if numbered:
         number_tree(tree, titles)
 
-    assembly = Assembly(pages_dir, placed, tree, titles)
+    assembly = EpubAssembly(pages_dir, placed, tree, titles)
     if len(tree) == 1 and tree[0][0] == "page":
         assembly.add_single_page(tree[0][1], tree[0][2])
     else:
@@ -477,6 +710,7 @@ def build(base, name, resolved, keep, intermediates=None):
     if placement == "book" and assembly.found["notes"] \
             and not assembly.notes_placed:
         # A chapter of its own for the notes, filled after the writer runs.
+        assembly.mark_notes()
         assembly.blocks.append(header(1, inlines("Notes"), page_id("notes")))
 
     document = {
@@ -526,6 +760,7 @@ def build(base, name, resolved, keep, intermediates=None):
         if numbering != "page" or placement != "page":
             arrange_epub_notes(out_path, assembly, numbering, placement)
         link_across_chapters(out_path)
+        mark_divisions(out_path, assembly.divisions(), assembly.contents_id)
         if keep:
             shutil.copy(book_json, os.path.join(out_dir, "book.json"))
     finally:

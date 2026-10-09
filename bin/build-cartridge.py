@@ -73,7 +73,7 @@ from bookcontents import (  # noqa: E402
     guess_contents, walk_contents, flatten_pages, contents_from_tree,
     expand_split_sources, page_title, page_provenance, page_role,
     TITLE_RE, META_RE,
-    stem_title, slugify, clean_title, number_tree, numbered_title,
+    stem_title, slugify, clean_title, number_tree, numbered_title, opener_types,
 )
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -1282,6 +1282,7 @@ def main():
               "you had set is lost by renaming it.", file=sys.stderr)
         return 0 if args.init else 1
 
+    opener_types(tree, TITLES)
     if config.get("numbering"):
         number_tree(tree, TITLES)
     xml = build_manifest(config, tree, page_files, common_files)

@@ -169,6 +169,34 @@ written for a Pandoc PDF build declares its parts already, with
 `{.appendix}` on a heading, and the guess reads those, so the sample
 comes out with the roles in place.
 
+A role says where an entry sits in the book, not where it goes: the
+order is the order of `contents`, and only a top-level entry's role
+counts, for numbering, the PDF's divisions, and the EPUB's. A page inside
+a chapter is in the chapter's part of the book whatever its own role.
+
+A group or page can also carry a `type`, what it is: `preface`,
+`foreword`, `dedication`, `epigraph`, `acknowledgments`, `prologue`,
+`abstract`, `introduction`, `copyright-page`, `part`, `chapter`,
+`conclusion`, `epilogue`, `afterword`, `appendix`, `bibliography`,
+`glossary`, `index`, or `colophon`, as EPUB's structural semantics name
+them. The EPUB marks it on the entry's section with its ARIA role and
+names a book-level bibliography, glossary, or index in its landmarks
+([Building an EPUB](epub.md#what-goes-in-and-in-what-order)). A type
+isn't inherited, since a chapter isn't a glossary because its Key Terms
+page is one, and a top-level entry with no `role` is in the part of the
+book its type implies: a glossary page at the end needs `type: glossary`
+and not `role: back` too, and it's unnumbered as back matter is. A
+type on a page that a split cut into pieces, or on a group's opening
+page (titled as the group is), is the group's: the glossary its pieces
+make up. A
+Markdown heading can mark a page the same way (`# Preface
+{epub:type=preface}`, or `{.glossary}`), which the EPUB marks too, but
+where the page sits is still what `contents` says, read alike by
+numbering, the PDF, the cartridge, and the EPUB; a Word heading can't say
+it at all, which is what `type` is for, and `contents` outranks a heading.
+A LaTeX book's sample gives the bibliography page the run writes out
+`type: bibliography`, at the top level after any parts and appendices.
+
 An entry `generate: toc` is a page the run writes: the full table of
 contents as a nested list of links, numbered when the book is, placed
 wherever it sits in `contents`. It's named `toc` and titled `Contents`
@@ -188,7 +216,7 @@ contents:
     title: Math Review
     items: [A2 Math--fractions, …]
   - page: Z1 Glossary
-    role: back
+    type: glossary
 numbering: true
 ```
 

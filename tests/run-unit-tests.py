@@ -272,6 +272,15 @@ def check_consistency():
     run_all = open(os.path.join(HERE, "run-all.sh"), encoding="utf-8").read()
     pandoc_minimums.update(tuple(v.split(".")) for v in
                            re.findall(r"!= \"(\d+\.\d+)\" \]", run_all))
+    # The page types the filter reads from a heading are the ones the
+    # contents vocabulary declares (bookcontents.PAGE_TYPES), which the
+    # EPUB writes.
+    lua = open(os.path.join(ROOT, "bin", "figures-and-tables.lua"), encoding="utf-8").read()
+    lua_types = set()
+    for table in ("PAGE_TYPE_CLASSES", "PAGE_TYPE_VALUES"):
+        body = re.search(r"local %s = \{(.*?)\n\}" % table, lua, re.S).group(1)
+        lua_types.update(re.findall(r"\[?'?([a-z-]+)'?\]?\s*=\s*true", body))
+    import bookcontents as contents_lib
     pandoc_checked = {name for name in os.listdir(HERE)
                       if name.startswith("run-") and name.endswith(".py")
                       and ") < (" in open(os.path.join(HERE, name), encoding="utf-8").read()}
@@ -286,6 +295,16 @@ def check_consistency():
          and {"run-convert-tests.py", "run-latex-tests.py", "run-pdf-tests.py",
               "run-unpack-tests.py", "run-epub-tests.py", "run-split-tests.py",
               "run-filter-tests.py"} <= pandoc_checked),
+        ("the page types a heading can give are the ones contents can, a tree written back "
+         "keeps an entry's type, and a type with no role puts it where it usually is", lambda: lua_types == set(contents_lib.PAGE_TYPES)
+         and contents_lib.contents_from_tree(contents_lib.walk_contents(
+             [{"page": "a", "type": "glossary"}, {"title": "G", "type": "part", "items": ["b"]}],
+             {"a", "b"}, set(), [])) == [{"page": "a", "type": "glossary"},
+                                         {"title": "G", "items": ["b"], "type": "part"}]
+         and [contents_lib.role_of(e) for e in contents_lib.walk_contents(
+             [{"page": "a", "type": "glossary"}, {"page": "b", "type": "glossary", "role": "main"},
+              {"page": "c", "type": "appendix"}, "d"], {"a", "b", "c", "d"}, set(), [])]
+         == ["back", "main", "appendix", "main"]),
         ("every schema loads and declares its keys",
          lambda: all("keys" in yaml.safe_load(open(p, encoding="utf-8"))
                      for p in (

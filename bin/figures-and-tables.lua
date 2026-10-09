@@ -270,6 +270,22 @@ local RESPONSIVE_IMAGES =
 --   visible  keep both, which is Pandoc's own behavior
 --   drop     remove both
 local BYLINE_MODES = { meta = true, visible = true, drop = true }
+
+-- A class on a page's title heading that says what the page is, kept as
+-- its page-type for the EPUB (epub:type, with its DPUB-ARIA role), as is
+-- Pandoc's own way, {epub:type=...}.
+local PAGE_TYPE_CLASSES = {
+  preface = true, foreword = true, dedication = true, epigraph = true,
+  acknowledgments = true, prologue = true, abstract = true,
+  bibliography = true, glossary = true, index = true, colophon = true,
+}
+-- The epub:type values build-epub.py knows a section by (PAGE_TYPES), the
+-- classes above and those an author would only mean as the type.
+local PAGE_TYPE_VALUES = {
+  ['copyright-page'] = true, introduction = true, part = true, chapter = true,
+  conclusion = true, epilogue = true, afterword = true, appendix = true,
+}
+for class in pairs(PAGE_TYPE_CLASSES) do PAGE_TYPE_VALUES[class] = true end
 local AUTHOR_BYLINE = (os.getenv('AUTHOR_BYLINE') or 'meta'):lower()
 
 local PROMOTE_MODES = { always = true, ['if-absent'] = true,
@@ -2343,6 +2359,25 @@ function Pandoc(doc)
         set_page_role(doc, ({ appendix = 'appendix', frontmatter = 'front',
                               backmatter = 'back' })[class])
       end
+    end
+    -- What the page is, as an EPUB names it, from the heading too:
+    -- Pandoc's own {epub:type=preface}, or a class a source gives it, as
+    -- the LaTeX copy gives a bibliography's heading. The EPUB assembly
+    -- writes it on the page's section with its ARIA role, and in the
+    -- landmarks; a Markdown target puts it back on the heading.
+    -- Only a value naming a whole section, unprefixed: an EPUB source's
+    -- headings also say title or z3998:roman, which name the heading.
+    local page_type
+    for value in (heading.attributes['epub:type'] or ''):gmatch('%S+') do
+      if PAGE_TYPE_VALUES[value] and not page_type then page_type = value end
+    end
+    if page_type == nil then
+      for _, class in ipairs(heading.classes) do
+        if PAGE_TYPE_CLASSES[class] and not page_type then page_type = class end
+      end
+    end
+    if page_type ~= nil then
+      doc.meta['page-type'] = pandoc.MetaString(page_type)
     end
     doc.blocks:remove(title_index)
   end

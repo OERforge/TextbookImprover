@@ -4111,6 +4111,44 @@ BIB_FILES = {
 }
 
 
+def case_bibliography_place(work):
+    """The bibliography the run writes out is a page the contents sample
+    calls one, at the top level after the parts and appendices it follows,
+    so adopted it's in the back matter, unnumbered."""
+    files = {
+        "book.tex": "\\documentclass{book}\n\\begin{document}\n\\part{Foundations}\n"
+                    "\\include{one}\n\\appendix\n\\include{appa}\n"
+                    "\\begin{thebibliography}{9}\n\\bibitem{knuth} D. Knuth, \\emph{The "
+                    "TeXbook}.\n\\end{thebibliography}\n\\end{document}\n",
+        "one.tex": "\\chapter{One}\nAs Knuth says \\cite{knuth}.\n",
+        "appa.tex": "\\chapter{Answers}\nThe answers.\n",
+    }
+    os.makedirs(work)
+    for name, text in files.items():
+        with open(os.path.join(work, name), "w", encoding="utf-8") as fh:
+            fh.write(text)
+    convert(work)
+    import yaml
+    sample = yaml.safe_load(read(work, "contents-sample.yaml")) \
+        if os.path.exists(os.path.join(work, "contents-sample.yaml")) else {}
+    contents = ((sample or {}).get("project") or {}).get("contents") or []
+
+    def numbered():
+        with open(os.path.join(work, "project.yaml"), "w") as fh:
+            yaml.safe_dump({"project": dict(sample["project"], numbering=True)}, fh)
+        convert(work)
+        found = re.search(r"<title>(.*?)</title>", read(work, "html", contents[-1]["page"] + ".html")) \
+            if contents and isinstance(contents[-1], dict) else None
+        return found and found.group(1) == "Bibliography"
+    return [
+        ("the sample gives the bibliography's page type bibliography, at the top level, out "
+         "of the appendices before it", lambda: isinstance(contents[-1], dict)
+         and contents[-1].get("type") == "bibliography" and "role" not in contents[-1]
+         and any(isinstance(c, dict) and c.get("title") == "Foundations" for c in contents)),
+        ("adopted and numbered, the bibliography is unnumbered, as back matter", numbered),
+    ]
+
+
 def case_bibliography(work):
     """A book's citations and its bibliography: BibTeX's, in the book's own
     style, its citations each the label LaTeX prints linked to its entry;
@@ -4677,6 +4715,7 @@ CASES = [("a LaTeX book", case_book), ("two masters", case_masters),
          ("the pieces the copies take", case_pieces),
          ("a book made its own way, as OpenIntro is", case_customized),
          ("a book in parts, numbered as LaTeX numbers it", case_parts),
+         ("a bibliography placed by its type", case_bibliography_place),
          ("a book's citations and its bibliography", case_bibliography),
          ("floats, classes, and titles as LaTeX has them", case_floats),
          ("a book set with packages tagging can't take", case_unsupported),

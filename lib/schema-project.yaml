@@ -133,7 +133,11 @@ keys:
       organization and an EPUB table of contents are both built from it.
       A group or page may carry a role, front, main, appendix, or back,
       which says how it counts when numbering is on and where it belongs
-      in the book; the default is main. An entry "generate: toc" is a
+      in the book; the default is main. It may also carry a type, what it
+      is (preface, glossary, index, part, and the rest EPUB's structural
+      semantics name), which an EPUB marks for reading systems and screen
+      readers; a top-level entry with no role is in the part of the book
+      its type implies, and a type isn't inherited. An entry "generate: toc" is a
       page the run writes, a full table of contents with links, named
       toc unless "name" says otherwise and titled Contents unless "title"
       does.

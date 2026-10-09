@@ -521,6 +521,274 @@ def case_outline(work):
     ]
 
 
+def markdown_page(work, name, text):
+    """A page from Markdown, as convert.py leaves one: raw and filtered."""
+    environment = dict(os.environ, PROMOTE_H1_TO_TITLE="always", AUTHOR_BYLINE="meta",
+                       IMAGE_ALT_MISSING=os.path.join(work, "alt-missing.csv"),
+                       TABLE_CAPTIONS_MISSING=os.path.join(work, "caps-missing.csv"))
+    with open(os.path.join(work, name + ".md"), "w", encoding="utf-8") as fh:
+        fh.write(text)
+    run(["pandoc", "-f", "markdown", "-t", "json", name + ".md", "-o", name + ".json"],
+        work, environment)
+    run(["pandoc", "-f", "json", "-t", "json", name + ".json", "-o", name + ".filtered.json",
+         "--lua-filter", os.path.join(BIN, "figures-and-tables.lua")], work, environment)
+
+
+def case_divisions(work):
+    """Each chapter file's body says its division, from the page's role in
+    contents or, with none, from what its heading says the page is, which
+    its section carries with the ARIA role; a page's own sections, in
+    files of their own, are in its division with no type; and the
+    landmarks name the contents, the start of the body, and a glossary.
+    A book without a contents page names no contents there, which would
+    be a file outside the spine, and a book of one page is left as
+    Pandoc's writer made it."""
+    convert(work, ["metadata", "tables"])
+    markdown_page(work, "preface", "# Preface {epub:type=preface}\n\nWhy this book.[^1]\n\n"
+                                   "## Who this is for\n\nReaders.\n\n[^1]: A note.\n")
+    markdown_page(work, "roman", '# IV {epub:type="title z3998:roman"}\n\nA chapter numbered so.\n')
+    markdown_page(work, "terms", "# Terms & Symbols {.glossary}\n\nWords.\n\n## G1\n\nMore words.\n")
+    write_config(work, "    - page: preface\n      role: front\n    - generate: toc\n"
+                       "    - metadata\n    - roman\n"
+                       "    - page: terms\n      role: back\n"
+                       "    - title: Appendices\n      role: appendix\n      items:\n"
+                       "        - tables\n",
+                 extra_epub="    notes:\n      placement: book\n")
+    out = Built(work)
+
+    def chapter(ident):
+        """The chapter file whose section has this id."""
+        return next((t for n, t in sorted(out.files.items()) if "/text/" in n
+                     and re.search(r'<section\b[^>]*\bid="%s"' % re.escape(ident), t)), "")
+
+    def body(ident):
+        m = re.search(r'<body epub:type="([^"]+)"', chapter(ident))
+        return m.group(1) if m else None
+
+    def section(ident):
+        m = re.search(r'<section\b[^>]*\bid="%s"[^>]*>' % re.escape(ident), chapter(ident))
+        return m.group(0) if m else ""
+
+    def file_of(ident):
+        return next((n.split("EPUB/", 1)[1] for n, t in sorted(out.files.items())
+                     if "/text/" in n and t == chapter(ident)), None)
+
+    def sub(prefix):
+        """The id of a page's section whose id starts so."""
+        return next((i for t in out.files.values()
+                     for i in re.findall(r'<section\b[^>]*\bid="(%s[^"]+)"' % re.escape(prefix), t)),
+                    "")
+
+    def landmarks(built):
+        nav = built.files.get("EPUB/nav.xhtml", "")
+        marks = re.search(r'<nav epub:type="landmarks".*?</nav>', nav, re.S)
+        marks = marks.group(0) if marks else ""
+        return marks, dict((kind, (href, label)) for href, kind, label in re.findall(
+            r'<a href="([^"]+)" epub:type="([^"]+)">([^<]*)</a>', marks))
+    marks, named = landmarks(out)
+    written = subprocess.run(
+        ["pandoc", "-f", "json", "-t", "markdown", "preface.filtered.json",
+         "--lua-filter", os.path.join(BIN, "target-blocks.lua")], cwd=work,
+        capture_output=True, text=True, env=dict(os.environ, TITLE_WRITER="markdown"))
+
+    # The same pages with no contents page, and Pandoc's own types in a
+    # book of one page.
+    bare = os.path.join(work, "bare")
+    convert(bare, ["metadata"])
+    markdown_page(bare, "terms", "# Terms {.glossary}\n\nWords.\n")
+    write_config(bare, "    - metadata\n    - terms\n")
+    plain = Built(bare)
+    one = os.path.join(work, "one")
+    os.makedirs(one)
+    markdown_page(one, "book", "# Preface {epub:type=preface}\n\nWhy.\n\n# Chapter one\n\nText.\n\n"
+                               "# Index {epub:type=index}\n\nTerms.\n")
+    write_config(one, "    - book\n")
+    single = Built(one)
+    single_bodies = [re.search(r'<body epub:type="([^"]+)"', single.files[n]).group(1)
+                     for n in single.chapters()]
+    single_roles = [re.search(r'<section\b[^>]*>', single.files[n]).group(0)
+                    for n in single.chapters()]
+
+    epubcheck = os.environ.get("EPUBCHECK_JAR")
+
+    def passes(built_dir):
+        if not (epubcheck and os.path.exists(epubcheck) and shutil.which("java")):
+            return True
+        return subprocess.run(["java", "-jar", epubcheck, os.path.join(
+            built_dir, "epub", "org.example.fixtures.epub")], capture_output=True).returncode == 0
+    return [
+        ("a front-matter page whose heading says it's a preface is front matter, its "
+         "section a preface with its ARIA role",
+         lambda: out.status == 0 and body("page-preface") == "frontmatter"
+         and 'epub:type="preface"' in section("page-preface")
+         and 'role="doc-preface"' in section("page-preface")),
+        ("a page's own section, in a file of its own, is in the page's division with no type",
+         lambda: sub("page-preface--") and body(sub("page-preface--")) == "frontmatter"
+         and "epub:type" not in section(sub("page-preface--"))
+         and body(sub("page-terms--")) == "backmatter"
+         and "epub:type" not in section(sub("page-terms--"))),
+        ("the generated contents, with no role, is in the division of the page before it",
+         lambda: body("page-toc") == "frontmatter"),
+        ("a page in the main matter is body matter, its section left as Pandoc wrote it",
+         lambda: body("page-metadata") == "bodymatter"
+         and "epub:type" not in section("page-metadata")),
+        ("a heading's epub:type that names the heading, not the page (title z3998:roman), "
+         "isn't the page's", lambda: body("page-roman") == "bodymatter"
+         and "epub:type" not in section("page-roman")),
+        ("an appendix group and its page are back matter, the page an appendix",
+         lambda: body("group-1-appendices") == "backmatter"
+         and 'epub:type="appendix"' not in section("group-1-appendices")
+         and body("page-tables") == "backmatter"
+         and 'role="doc-appendix"' in section("page-tables")),
+        ("the Notes chapter after the appendices is back matter and no appendix",
+         lambda: body("page-notes") == "backmatter" and "epub:type" not in section("page-notes")),
+        ("a page whose heading's class says it's a glossary is one, its role from contents",
+         lambda: body("page-terms") == "backmatter"
+         and 'epub:type="glossary" role="doc-glossary"' in section("page-terms")),
+        ("the landmarks name the contents page, the start of the body, and the glossary by "
+         "its title, the title page still first",
+         lambda: marks.index('epub:type="titlepage"') < marks.index('epub:type="toc"')
+         and named.get("toc", ("",))[0] == file_of("page-toc")
+         and named.get("bodymatter", ("",))[0] == file_of("page-metadata")
+         and named.get("glossary") == (file_of("page-terms"), "Terms &amp; Symbols")),
+        ("a Markdown target puts the page's type back on its heading",
+         lambda: written.returncode == 0
+         and re.search(r'^# Preface \{[^}]*epub:type="preface"', written.stdout, re.M)),
+        ("with no contents page, the landmarks name no contents, and the start of the body",
+         lambda: plain.status == 0 and 'epub:type="toc"' not in landmarks(plain)[0]
+         and "bodymatter" in landmarks(plain)[1]),
+        ("a book of one page keeps the divisions Pandoc's writer gives its headings' types, "
+         "and each typed section gets its ARIA role",
+         lambda: single.status == 0
+         and single_bodies == ["frontmatter", "bodymatter", "backmatter"]
+         and 'role="doc-preface"' in single_roles[0] and "role=" not in single_roles[1]
+         and 'role="doc-index"' in single_roles[2]),
+        ("epubcheck passes all three", lambda: passes(work) and passes(bare) and passes(one)),
+    ]
+
+
+def case_declared_types(work):
+    """A type in contents: on a page a Word file can't type itself, on a
+    group, over what a heading says; a top-level entry with no role in
+    the division its type implies, and a page inside a chapter in the
+    chapter's, a glossary or not, and not among the book's landmarks."""
+    convert(work, ["metadata", "tables", "math"])
+    markdown_page(work, "terms", "# Key Terms {.glossary}\n\nA chapter's words.\n")
+    markdown_page(work, "words", "# Words {.glossary}\n\nThe book's words.\n")
+    markdown_page(work, "late", "# Thanks\n\nAt the end, as some books have them.\n")
+    markdown_page(work, "said", "# Sayings {.glossary}\n\nA heading's word for it.\n")
+    write_config(work, "    - page: metadata\n      type: preface\n"
+                       "    - title: Part One\n      type: part\n      items:\n"
+                       "        - title: Chapter 1\n          items:\n"
+                       "            - tables\n            - terms\n"
+                       "    - math\n    - said\n"
+                       "    - page: late\n      type: acknowledgments\n      role: back\n"
+                       "    - page: words\n      type: index\n"
+                       "    - page: ghostly\n      type: postscript\n",
+                 extra_project="  numbering: true\n")
+    out = Built(work)
+    numbered = out.nav_entries()
+    # A declared split source, and a group's opening page, each with a
+    # type: the group that stands for them is what they are.
+    cut = os.path.join(work, "cut")
+    convert(cut, ["metadata"])
+    markdown_page(cut, "key-terms", "# Key Terms\n\nIntro.\n\n## A\n\nAbacus.\n\n## B\n\nBeam.\n")
+    run(["python3", os.path.join(BIN, "split-pages.py"), "--level", "2",
+         "--sidecar", os.path.join(cut, "page-names.csv"),
+         "--new", os.path.join(cut, "page-names-new.csv"),
+         "--report", os.path.join(cut, "page-names-report.csv"),
+         os.path.join(cut, "key-terms.filtered.json")], cut)
+    write_config(cut, "    - metadata\n    - page: key-terms\n      type: glossary\n",
+                 extra_project="  numbering: true\n")
+    split_book = Built(cut)
+    opened = os.path.join(work, "opened")
+    convert(opened, ["metadata"])
+    markdown_page(opened, "gloss", "# Glossary\n\nTerms, A to M.\n")
+    markdown_page(opened, "more", "# More Terms\n\nN to Z.\n")
+    write_config(opened, "    - metadata\n    - title: Glossary\n      items:\n"
+                         "        - page: gloss\n          type: glossary\n        - more\n"
+                         "    - page: odd\n      type: [glossary]\n",
+                 extra_project="  numbering: true\n")
+    opener_book = Built(opened)
+
+    def typed_group(built, ident):
+        files = [t for n, t in sorted(built.files.items()) if "/text/" in n
+                 and re.search(r'<section\b[^>]*\bid="%s"' % re.escape(ident), t)]
+        if not files:
+            return None
+        tag = re.search(r'<section\b[^>]*\bid="%s"[^>]*>' % re.escape(ident), files[0]).group(0)
+        body_type = re.search(r'<body epub:type="([^"]+)"', files[0]).group(1)
+        marks_of = re.search(r'<nav epub:type="landmarks".*?</nav>',
+                             built.files.get("EPUB/nav.xhtml", ""), re.S)
+        return (body_type, 'epub:type="glossary" role="doc-glossary"' in tag,
+                bool(marks_of) and 'epub:type="glossary"' in marks_of.group(0),
+                [t for _, t in built.nav_entries()])
+
+    def chapter(ident):
+        return next((t for n, t in sorted(out.files.items()) if "/text/" in n
+                     and re.search(r'<section\b[^>]*\bid="%s"' % re.escape(ident), t)), "")
+
+    def body(ident):
+        m = re.search(r'<body epub:type="([^"]+)"', chapter(ident))
+        return m.group(1) if m else None
+
+    def section(ident):
+        m = re.search(r'<section\b[^>]*\bid="%s"[^>]*>' % re.escape(ident), chapter(ident))
+        return m.group(0) if m else ""
+    nav = out.files.get("EPUB/nav.xhtml", "")
+    marks = re.search(r'<nav epub:type="landmarks".*?</nav>', nav, re.S)
+    marks = marks.group(0) if marks else ""
+    return [
+        ("a Word page that contents calls a preface is one, in the front matter",
+         lambda: out.status == 0 and body("page-metadata") == "frontmatter"
+         and 'epub:type="preface" role="doc-preface"' in section("page-metadata")),
+        ("a group that contents calls a part is one, and its chapters aren't parts",
+         lambda: 'epub:type="part" role="doc-part"' in section("group-1-part-one")
+         and "epub:type" not in section("group-2-chapter-1")
+         and body("group-1-part-one") == "bodymatter"),
+        ("a chapter's own glossary is one, in the chapter's body matter, and not the book's "
+         "landmark", lambda: body("page-terms") == "bodymatter"
+         and 'epub:type="glossary" role="doc-glossary"' in section("page-terms")
+         and 'epub:type="glossary"' not in marks),
+        ("acknowledgments with role back are back matter, the role outranking the type's "
+         "front", lambda: body("page-late") == "backmatter"
+         and 'role="doc-acknowledgments"' in section("page-late")),
+        ("what contents says a page is outranks its heading, and a book-level index is a "
+         "landmark", lambda: 'epub:type="index" role="doc-index"' in section("page-words")
+         and "glossary" not in section("page-words") and body("page-words") == "backmatter"
+         and 'epub:type="index"' in marks),
+        ("a page whose heading alone says it's a glossary is marked one, in the part of the "
+         "book contents puts it", lambda: body("page-said") == "bodymatter"
+         and 'epub:type="glossary" role="doc-glossary"' in section("page-said")),
+        ("a type that isn't one is a warning naming the types",
+         lambda: "type 'postscript' is not one of" in out.stderr),
+        ("numbered, the preface and the book's index count as the front and back matter "
+         "their types put them in, and the part as a part",
+         lambda: any(t.startswith("1 Part One") for _, t in numbered)
+         and not any(re.match(r"\d+ ", t) and "Words" in t for _, t in numbered)
+         and [t for _, t in numbered][0] == "1.3 Levels of Measurement"
+         and "Words" in [t for _, t in numbered] and "2 Conditional probability"
+         in [t for _, t in numbered]),
+        ("a split source contents calls a glossary is one, the group its pieces make, in the "
+         "back matter and unnumbered, and the book's landmark",
+         lambda: split_book.status == 0 and (typed_group(split_book, "group-1-key-terms")
+                                             or typed_group(split_book, "page-key-terms"))[:3]
+         == ("backmatter", True, True)
+         and not any(re.match(r"\d", t) for t in (typed_group(split_book, "page-key-terms")
+                                                   or typed_group(split_book, "group-1-key-terms"))[3]
+                     if "Key Terms" in t)),
+        ("a group whose opening page contents calls a glossary is one, in the back matter and "
+         "unnumbered", lambda: opener_book.status == 0
+         and typed_group(opener_book, "page-gloss")[:3] == ("backmatter", True, True)
+         and "Glossary" in typed_group(opener_book, "page-gloss")[3]),
+        ("a type that isn't a word is a warning, not a crash",
+         lambda: opener_book.status == 0 and "type ['glossary'] is not one of" in opener_book.stderr),
+        ("epubcheck passes it", lambda: not (os.environ.get("EPUBCHECK_JAR") and shutil.which("java"))
+         or subprocess.run(["java", "-jar", os.environ["EPUBCHECK_JAR"], os.path.join(
+             work, "epub", "org.example.fixtures.epub")], capture_output=True).returncode == 0),
+    ]
+
+
 CASES = [
     ("the shape of the book", case_structure),
     ("the table of contents read back", case_outline),
@@ -529,6 +797,8 @@ CASES = [
     ("contents edge cases", case_contents_edges),
     ("targets and file names", case_targets),
     ("rewriting a page for the book", case_rewriting),
+    ("divisions and landmarks", case_divisions),
+    ("types declared in contents", case_declared_types),
 ]
 
 

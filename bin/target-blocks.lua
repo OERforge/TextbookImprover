@@ -165,6 +165,11 @@ local function title_heading(doc)
   local id = meta['title-id'] and pandoc.utils.stringify(meta['title-id']) or ''
   meta['title-id'] = nil
   meta['title-index'] = nil
+  -- What the page is (page-type, from the heading's epub:type or class)
+  -- goes back on the heading in Markdown, as Pandoc's own syntax for it;
+  -- an HTML page, which isn't XHTML, can't carry epub:type.
+  local page_type = meta['page-type'] and pandoc.utils.stringify(meta['page-type']) or ''
+  meta['page-type'] = nil
   if not marked or meta.title == nil or TITLE_WRITER == '' then return doc end
   if TITLE_WRITER == 'html' and TITLE_BLOCK
       and (meta.subtitle or meta.date or meta.abstract) then
@@ -174,7 +179,11 @@ local function title_heading(doc)
   if pandoc.utils.type(content) ~= 'Inlines' then
     content = pandoc.Inlines(pandoc.utils.stringify(content))
   end
-  doc.blocks:insert(1, pandoc.Header(1, content, pandoc.Attr(id)))
+  local attributes = {}
+  if TITLE_WRITER == 'markdown' and page_type ~= '' then
+    attributes = { ['epub:type'] = page_type }
+  end
+  doc.blocks:insert(1, pandoc.Header(1, content, pandoc.Attr(id, {}, attributes)))
   if TITLE_WRITER == 'html' then
     meta.pagetitle = pandoc.MetaString(pandoc.utils.stringify(meta.title))
     meta.title = nil

@@ -6,6 +6,11 @@ Versions are two-part and pre-1.0: breaking changes may land in any of them unti
 
 ## [Unreleased]
 
+### Added
+
+- **A page or group in `contents` can say what it is**: `type: glossary`, `preface`, `index`, `bibliography`, `part`, and the rest of EPUB's structural semantics, for a page whose source can't say so itself, as a Word file's preface can't. A type isn't inherited, since a chapter isn't a glossary because its Key Terms page is one, and a top-level entry with no `role` is in the part of the book its type implies: a book-level glossary is back matter, unnumbered, in the PDF and the EPUB alike. A type on a page a split cut, or on a group's opening page, is the group's. A LaTeX book's sample gives the bibliography page the run writes `type: bibliography`, at the top level after any parts and appendices. [Configuration](docs/configuration.md).
+- **An EPUB says what part of the book each page is.** Each chapter file's body is front matter, body matter, or back matter as its top-level entry's `role` in `contents` says, where Pandoc's writer had called every one body matter (all 11 of GIAM's, its copyright page and bibliography among them); a page inside a chapter is in the chapter's. A page's type, from `contents` or from its heading (Pandoc's own `{epub:type=preface}`, or a class such as `{.glossary}`), is on its section with the DPUB-ARIA role (`doc-preface`); a page in an appendix is an appendix, and a LaTeX book's bibliography a bibliography. The landmarks, which held only the title page, name the generated contents page, the start of the body matter, and the book's bibliography, glossary, or index. A Markdown target puts a page's type from its heading back on the heading. [Building an EPUB](docs/epub.md#what-goes-in-and-in-what-order).
+
 ### Fixed
 
 - **The LaTeX, convert, and PDF suites ran with a Pandoc too old for `convert.py`**, which refuses one older than 3.9, so every case failed with the reason only in the run's own output: seven of one LaTeX case's checks, run by hand with Ubuntu 24.04's Pandoc 3.1.3. Each stops first now and says so, as the filter, EPUB, and split suites did, and the unpacking suite's one case that converts skips; a unit check holds every suite that runs `convert.py` to the same minimum.

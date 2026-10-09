@@ -438,7 +438,7 @@ The file is read after the book's preamble, so its definitions win over the book
 
 ### 5. Name the book, and an EPUB
 
-`contents-sample.yaml` holds what the master says about the book, its last entry the bibliography's page, named for the master and numbered (`GIAM-1`). Its title reads "A Gentle Introduction to the Art of Mathematics Version 3.2 N", since GIAM's `\title` sets the version below the title, so correct it as you copy the rest into `project.yaml`, and give the book an identifier:
+`contents-sample.yaml` holds what the master says about the book, its last entry the bibliography's page, named for the master and numbered (`GIAM-1`), with `type: bibliography`, which puts it in the back matter and marks it as a bibliography in the EPUB. Its title reads "A Gentle Introduction to the Art of Mathematics Version 3.2 N", since GIAM's `\title` sets the version below the title, so correct it as you copy the rest into `project.yaml`, and give the book an identifier:
 
 ```yaml
 project:
@@ -458,7 +458,8 @@ project:
   - proof3
   - card
   - proof4
-  - GIAM-1
+  - page: GIAM-1
+    type: bibliography
 ```
 
 Then name an EPUB target beside the HTML:

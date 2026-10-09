@@ -1088,8 +1088,8 @@ def main():
     project_path = os.path.join(base, PROJECT_NAME)
     inline = oerconfig.inline_project(config_path)
     has_project_file = os.path.isfile(project_path)
-    # A book whose project is still in this file, as a first run once
-    # wrote it: it gets packaging-sample.yaml as it did, and a note.
+    # A book named in this file, as a book that uses packaging alone may
+    # be: its samples are packaging-sample.yaml, the block in it.
     inline_named = bool(inline) and not has_project_file
     unnamed = not args.init and not has_project_file and not inline
     hint = {}
@@ -1099,15 +1099,11 @@ def main():
     if unnamed:
         fatal.append(f"{project_path} not found, so the book has no "
                      "identifier or title"
-                     + (f" here: {hint['project_source']} names it for conversion "
-                        "alone." if hint.get("project_source") else "."))
-    if not args.init and inline_named:
-        print(f"NOTE: {CONFIG_NAME} holds the book's project settings in a "
-              f"project: block, which only packaging reads. Moved into "
-              f"{PROJECT_NAME}, which conversion reads too, they name an EPUB "
-              "or a PDF as well: cut the block, from project: to the line "
-              f"before defaults:, into a new {PROJECT_NAME} beside it.",
-              file=sys.stderr)
+                     + (f" for packaging: {hint['project_source']} names it "
+                        "for conversion alone. Name it where packaging reads "
+                        f"it too, in {PROJECT_NAME}, which both halves read, or "
+                        f"in a project: block in {CONFIG_NAME}."
+                        if hint.get("project_source") else "."))
     if not args.init and not unnamed:
         left = [k for k in oerconfig.UNNAMED_DEFAULTS
                 if k not in oerconfig.declared_project(documents)]

@@ -1,0 +1,4 @@
+# A book is one book whichever file describes it. A tool's own file and
+# the project file giving it two languages is nearly always a mistake, and
+# either answer would be wrong for someone, so it stops the run.
+error: project.language is 'en' in

@@ -89,9 +89,9 @@ value your file already gives it or else the default. Rename it to
 `conversion.yaml` and `packaging.yaml` are optional: every setting in them
 has a default. `project.yaml` names the book for both halves, the
 cartridge and an EPUB or a PDF alike. A `project:` block in
-`packaging.yaml`, which a first run once wrote, still names the cartridge,
-but conversion doesn't read it, so a run with an EPUB target says to move
-it into `project.yaml`. [Configuration](configuration.md#where-the-book-is-named)
+`packaging.yaml` or `conversion.yaml` names the book for that file's half
+alone, which is enough for a book that uses one half; files that describe
+the book differently stop the run. [Configuration](configuration.md#where-the-book-is-named)
 has the detail.
 
 ### Notes

@@ -45,13 +45,26 @@ settings](packaging-settings.md) list the same settings.
 ### Where the book is named
 
 `project.yaml` names the book for both halves: its identifier, title,
-language, and contents. `conversion.yaml` and `packaging.yaml` may carry a
-`project:` block of their own, as a first run once wrote one into
-`packaging.yaml`, but each file is read by its own half alone. A book
-named only in `packaging.yaml` gets its cartridge but no EPUB or PDF, and
-one named only in `conversion.yaml` gets its EPUB but no cartridge; either
-way the run says to move the block into `project.yaml`. Declare the project in one place: declaring it in two
-means one copy goes stale, and the tools warn when the two disagree.
+language, and contents. `conversion.yaml` and `packaging.yaml` may each
+carry a `project:` block instead, read by that file's half alone, which is
+all a book that uses one half needs:
+
+- A book named in `packaging.yaml`'s block alone gets its cartridge. An
+  EPUB, a PDF, or a LaTeX target can't see that name, so it isn't written,
+  and the run says to name the book in `project.yaml` or in
+  `conversion.yaml`'s block too.
+- A book named in `conversion.yaml`'s block alone gets its EPUB and its
+  pages. With no `packaging.yaml` either, it isn't packaged, and the run
+  says so and isn't an error; with a `packaging.yaml` that doesn't name
+  it, packaging stops, and its `project-sample.yaml` carries the block's
+  values.
+- A book named in both blocks gets everything, and the run notes that
+  `project.yaml` would say it once.
+
+However many files describe the book, they have to agree. A setting given
+two different values, in `project.yaml` and a block or in the two blocks,
+stops the run before anything is converted, naming both files; a setting
+given in one file and not another is just given.
 
 ### Required settings
 

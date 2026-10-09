@@ -36,6 +36,8 @@ web front end is written in.
 
   1. Four layers, always in this order: the schema's defaults, the
      project block, the file's defaults block, the target's own block.
+     The project block is project.yaml's and the file's own merged, and
+     where both set a key they must agree: it describes one book.
   2. The schema decides what nests. A node with `keys` is a section and
      merges key by key; anything else is a setting and is replaced whole.
   3. Lists replace. They never append, and never merge element-wise.
@@ -595,15 +597,15 @@ def resolve(schema, project_schema, documents, target=None,
 
     # ---- project layer ---------------------------------------------------
     project_raw = project_schema.defaults()
-    seen = {}
+    # The book is one book whichever file names it: two that say different
+    # things about it (two titles, two languages, two orders) stop the run,
+    # since either answer would be wrong for someone.
+    for key, sources, value, other in project_conflicts(documents):
+        problems.append(
+            f"project.{key} is {value!r} in {sources[0]} and {other!r} in "
+            f"{sources[1]}. A book is described once: give it the same value "
+            "in each, or set it in one file only.")
     for doc in documents:
-        for key, value in (doc.project or {}).items():
-            if key in seen and seen[key][1] != value and value is not None:
-                warnings.append(
-                    f"project.{key} is set to {seen[key][1]!r} in "
-                    f"{seen[key][0]} and {value!r} in {doc.source}; the "
-                    f"later file wins")
-            seen[key] = (doc.source, value)
         project_raw = _merge(project_schema.root, project_raw,
                              doc.project, doc.source, problems, soft)
 
@@ -852,6 +854,21 @@ def write_project(project_schema, values, path, notes=()):
 # The two project settings with no useful default: a file that leaves one
 # at its default hasn't named the book, whatever it declares.
 UNNAMED_DEFAULTS = {"identifier": "book", "title": "Untitled"}
+
+
+def project_conflicts(documents):
+    """Each project setting two files give different values: (key, (first
+    file, second file), first value, second value). An explicit null clears
+    a setting rather than giving it a value, so it conflicts with nothing."""
+    seen, found = {}, []
+    for doc in documents:
+        for key, value in (doc.project or {}).items():
+            if value is None:
+                continue
+            if key in seen and seen[key][1] != value:
+                found.append((key, (seen[key][0], doc.source), seen[key][1], value))
+            seen[key] = (doc.source, value)
+    return found
 
 
 def declared_project(documents):

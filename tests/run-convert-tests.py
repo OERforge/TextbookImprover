@@ -3742,9 +3742,25 @@ def case_book_name(work):
         "three.adoc": "= Three\n\nText.\n"})
     alone, alone_run, alone_said = book("alone", {
         "conversion.yaml": "targets:\n  epub:\n    format: epub3\n"})
-    conv, conv_run, conv_said = book("conv", {
-        "conversion.yaml": "project:\n  identifier: org.example.conv\n"
-                           "  title: The Conv Book\n  contents: [two, one]\n" + both})
+    named_conv = ("project:\n  identifier: org.example.conv\n"
+                  "  title: The Conv Book\n  contents: [two, one]\n")
+    conv, conv_run, conv_said = book("conv", {"conversion.yaml": named_conv + both})
+    conv2, conv2_run, conv2_said = book("conv2", {
+        "conversion.yaml": named_conv + both,
+        "packaging.yaml": "defaults:\n  version: \"2.0\"\n"})
+    agree, agree_run, agree_said = book("agree", {
+        "conversion.yaml": named_conv + both,
+        "packaging.yaml": "project:\n  identifier: org.example.conv\n"
+                          "  title: The Conv Book\n"})
+    differ, differ_run, differ_said = book("differ", {
+        "conversion.yaml": named_conv + both,
+        "packaging.yaml": "project:\n  identifier: org.example.conv\n"
+                          "  title: Another Book\n"})
+    over, over_run, over_said = book("over", {
+        "conversion.yaml": both,
+        "project.yaml": "project:\n  identifier: org.example.o\n  title: O\n"
+                        "  language: en\n",
+        "packaging.yaml": "project:\n  language: de\n"})
     untitled, untitled_run, untitled_said = book("untitled", {
         "conversion.yaml": both,
         "project.yaml": "project:\n  identifier: org.example.u\n  title: Untitled\n"})
@@ -3811,12 +3827,13 @@ def case_book_name(work):
          lambda: exists(bare, "project-sample.yaml")
          and "writes packaging-sample.yaml" in bare_said
          and "writes conversion-sample.yaml" in bare_said),
-        ("a book named only in packaging.yaml gets its cartridge, and the "
-         "run says to move the block for the EPUB, which isn't written",
+        ("a book named only in packaging.yaml gets its cartridge, with no "
+         "note, and the EPUB isn't written, the run saying where conversion "
+         "reads the name",
          lambda: exists(moved, "imsmanifest.xml")
          and not glob.glob(os.path.join(moved, "epub", "*.epub"))
-         and "Move the block into project.yaml" in moved_said
-         and moved_run.returncode != 0),
+         and "where conversion reads it too" in moved_said
+         and "NOTE" not in moved_said and moved_run.returncode != 0),
         ("an AsciiDoc master's title names the EPUB, and the run says so",
          lambda: "The Master Book" in title
          and "is titled \"The Master Book\", as the master AsciiDoc file says"
@@ -3845,12 +3862,34 @@ def case_book_name(work):
          and sample(two, "packaging-sample.yaml")["defaults"]["version"] != "2.5"
          and sample(two, "packaging-sample.yaml")["targets"]["cartridge"]["version"] == "2.5"
          and sample(two, "packaging-sample.yaml")["project"]["contents"] == ["b", "a"]),
-        ("a book named in conversion.yaml's block gets its EPUB, and the run "
-         "says to move the block, whose values the project's sample carries",
+        ("a book named in conversion.yaml's block, with no packaging.yaml, "
+         "gets its EPUB, no note, and no cartridge, and that's no error",
          lambda: glob.glob(os.path.join(conv, "epub", "*.epub"))
-         and "only conversion reads" in conv_said and conv_run.returncode != 0
-         and sample(conv, "project-sample.yaml")["project"]["title"] == "The Conv Book"
-         and sample(conv, "project-sample.yaml")["project"]["contents"] == ["two", "one"]),
+         and conv_run.returncode == 0 and "NOTE" not in conv_said
+         and "nothing is packaged" in conv_said
+         and not exists(conv, "imsmanifest.xml")),
+        ("with a packaging.yaml that doesn't name it, packaging stops, saying "
+         "conversion.yaml names it, and the project's sample carries its values",
+         lambda: conv2_run.returncode != 0
+         and "names it for conversion alone" in conv2_said
+         and sample(conv2, "project-sample.yaml")["project"]["title"] == "The Conv Book"
+         and sample(conv2, "project-sample.yaml")["project"]["contents"] == ["two", "one"]),
+        ("two blocks that agree build everything, with a note that "
+         "project.yaml would say it once",
+         lambda: agree_run.returncode == 0 and exists(agree, "imsmanifest.xml")
+         and glob.glob(os.path.join(agree, "epub", "*.epub"))
+         and "each describe the book in a project: block. They agree" in agree_said),
+        ("two that disagree stop the run before anything is converted, "
+         "naming both files",
+         lambda: differ_run.returncode != 0 and not exists(differ, "html")
+         and "'The Conv Book' in" in differ_said and "'Another Book' in" in differ_said),
+        ("and so does packaging.yaml disagreeing with project.yaml, which the "
+         "packager alone stops for too",
+         lambda: over_run.returncode != 0 and not exists(over, "html")
+         and "project.language is 'en'" in over_said
+         and "project.language is 'en'" in subprocess.run(
+             ["python3", os.path.join(BIN, "build-cartridge.py"), "-d", over, "--init"],
+             capture_output=True, text=True).stderr),
         ("a title left at the default names nothing: the EPUB isn't written, "
          "and the run says to set it in project.yaml",
          lambda: not glob.glob(os.path.join(untitled, "epub", "*.epub"))

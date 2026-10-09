@@ -463,17 +463,33 @@ def load_targets(base, allow_unknown):
     # needs a title, and the schema's default, "Untitled", names nothing.
     DECLARED_PROJECT = oerconfig.declared_project(documents)
     TITLE_DECLARED = bool(DECLARED_PROJECT.get("title"))
-    # A project: block in conversion.yaml names the book for conversion
-    # alone; the packager's sample gets it, and the run says to move it.
+    # A project: block in conversion.yaml names the book for conversion,
+    # as one in packaging.yaml does for packaging: enough for a book that
+    # uses one half. Without project.yaml, the packager's sample gets it.
     own = oerconfig.inline_project(config_path)
     if own and not os.path.isfile(project_path):
         BOOK_HINT["project"] = own
         BOOK_HINT["project_source"] = f"{CONFIG_NAME}'s project: block"
-        say(f"NOTE: {CONFIG_NAME} holds the book's project settings in a "
-            f"project: block, which only conversion reads. Moved into "
-            f"{PROJECT_NAME}, which packaging reads too, they name the "
-            "cartridge as well: cut the block, from project: to the line "
-            f"before defaults:, into a new {PROJECT_NAME} beside it.")
+    # The book is one book in every file that describes it. resolve() has
+    # held project.yaml and conversion.yaml to that; packaging.yaml's block
+    # is held to it here, before anything is converted, since the packager
+    # reads it only at the end.
+    packaging_path = os.path.join(base, PACKAGING_NAME)
+    packaged = oerconfig.inline_project(packaging_path)
+    if packaged:
+        conflicts = oerconfig.project_conflicts(
+            documents + [oerconfig.Document({"project": packaged}, packaging_path)])
+        if conflicts:
+            die("\n".join(f"project.{key} is {a!r} in {first} and {b!r} in "
+                          f"{second}." for key, (first, second), a, b in conflicts)
+                + "\n\nStopping: a book is described once. Give each setting "
+                "the same value in every file, or set it in one file only.\n"
+                "  Nothing was converted.")
+        if own:
+            say(f"NOTE: {CONFIG_NAME} and {PACKAGING_NAME} each describe the "
+                f"book in a project: block. They agree; {PROJECT_NAME}, which "
+                "both halves read, would say it once, so the two can't come "
+                "to disagree.")
     targets = []
     try:
         for name in declared or [None]:
@@ -3620,14 +3636,11 @@ def name_book_target(target, base, pages):
         return True, None
     packaged = oerconfig.inline_project(os.path.join(base, PACKAGING_NAME))
     if packaged and packaged.get("title"):
-        move = (f"Move its title into {PROJECT_NAME}, which both halves read"
-                if has_project else
-                f"Move the block into {PROJECT_NAME}, which both halves read: "
-                "cut it, from project: to the line before defaults:, into a "
-                f"new {PROJECT_NAME} beside {PACKAGING_NAME}")
         say(f"ERROR: target {target.name} needs the book's title, which "
             f"{PACKAGING_NAME}'s project: block gives, but only packaging "
-            f"reads that file, so the {kind} isn't written. {move}.")
+            f"reads that file, so the {kind} isn't written. Name the book "
+            f"where conversion reads it too: in {PROJECT_NAME}, which both "
+            f"halves read, or in a project: block in {CONFIG_NAME}.")
         UNNAMED.append(target.name)
         return False, None
     guess, source = BOOK_HINT.get("title"), BOOK_HINT.get("source")
@@ -3647,8 +3660,9 @@ def name_book_target(target, base, pages):
     where = (f"Set title in {PROJECT_NAME}" if has_project else
              f"{PROJECT_NAME} names it, with its identifier: {PROJECT_SAMPLE} "
              "has every project setting to fill in" if not packaged else
-             f"Name it in {PROJECT_NAME}, with its identifier, and move "
-             f"{PACKAGING_NAME}'s project: block there")
+             f"Set title in {PACKAGING_NAME}'s project: block and name the "
+             f"book where conversion reads it too: in {PROJECT_NAME}, which "
+             f"both halves read, or in a project: block in {CONFIG_NAME}")
     say(f"ERROR: target {target.name} needs the book's title, and nothing "
         f"here gives it, so the {kind} isn't written. {where}.")
     UNNAMED.append(target.name)
@@ -4443,6 +4457,18 @@ def main():
                 "conversion settings have a sample of their own: python3 "
                 f"{os.path.join(HERE, 'read-conversion-config.py')} -d . --init "
                 "writes conversion-sample.yaml.")
+        return unnamed
+    # A book named in conversion.yaml alone, with nothing configuring
+    # packaging, uses conversion alone: the manifest isn't asked for, so it
+    # isn't an error that the packager couldn't name it. An argument meant
+    # for the packager (--zip, --toc) asks for it.
+    conversion_names = BOOK_HINT.get("project") or {}
+    if (conversion_names.get("title") or conversion_names.get("identifier")) \
+            and not passthrough and not os.path.isfile(os.path.join(base, PACKAGING_NAME)):
+        say(f"No {PACKAGING_NAME} or {PROJECT_NAME}, and {CONFIG_NAME} names "
+            "the book for conversion, so nothing is packaged. A "
+            f"{PROJECT_NAME}, or a {PACKAGING_NAME} with a project: block, "
+            "would build the cartridge.")
         return unnamed
     command = ["python3", CARTRIDGE_TOOL, "-d", base]
     if os.path.abspath(html_targets[0].output_dir) != os.path.abspath(base):

@@ -194,8 +194,11 @@ local function report_dropped()
   for _, tag in ipairs(names) do
     parts[#parts + 1] = ('%s x%d'):format(tag, dropped[tag])
   end
+  -- The file's name, not its path: what Pandoc reads is often a repaired
+  -- copy in a temporary directory.
+  local input = PANDOC_STATE.input_files[1] or '-'
   io.stderr:write(('[html-raw] %s: raw tags dropped, their contents kept: %s\n')
-    :format(PANDOC_STATE.input_files[1] or '-', table.concat(parts, ', ')))
+    :format(input:match('[^/\\]+$') or input, table.concat(parts, ', ')))
 end
 
 

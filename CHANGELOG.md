@@ -18,6 +18,7 @@ Versions are two-part and pre-1.0: breaking changes may land in any of them unti
 - **pypdf's warnings in the middle of the output check**, as it read past a fault in a PDF's syntax: GIAM's PDF printed "Multiple definitions in dictionary … for key /Group" twice, for two figures LaTeX's graphics code gives a second `/Group`. They aren't findings, and veraPDF judges the file; the PDF check reads without them now, as the figure check did. And without pypdf, it says how to install it on Ubuntu 22.04 too.
 - **The output check's summary left the Nu checker's line undescribed** (`62  vnu:error: `, on GIAM), since its descriptions held only the checks of its own; a validator's line says what it is now ("the Nu HTML checker reported an error").
 - **An equation holding middle dots as text was shown as TeX.** The statistics book's geometric mean, `(x₁ · x₂ ··· xₙ)`, has its ellipsis in normal text, `\text{···}` to Pandoc, and the equation repair made each dot `\cdot`, which text can't hold: Pandoc couldn't convert the equation, warned on every run, and put its TeX in the page as `$r_{s} = \left( …`. Text inside an equation gets only `μ` and `Δ` now, the repairs of one character for another, and a Word source's copy leaves a `ŷ` in normal text as typed, as the page does.
+- **A page's line about the raw HTML tags its reader dropped named a temporary file** (`/tmp/convert-…/repaired-html/glossary.html`), the repaired copy Pandoc reads. It names the page's file now.
 
 ## [0.9] - 2026-10-08
 

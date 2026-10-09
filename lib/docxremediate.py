@@ -364,17 +364,19 @@ EQUATION_CHARACTERS = {"\u00b5": "\u03bc", "\u2206": "\u0394"}
 
 def _repair_run(m, counts):
     """One m:r: its characters, and y-hat as an accent over y, the run
-    split around it with its properties on each part."""
+    split around it with its properties on each part. Normal text (m:nor),
+    which is what \\text{} becomes, gets only the characters, as the filter
+    gives \\text{} only those."""
     start, props, t_open, text, t_close, end = m.groups()
+    normal = "<m:nor" in props
     fixed = text
     for old, new in EQUATION_CHARACTERS.items():
         fixed = fixed.replace(old, new)
-    # An en dash is a minus, except in normal text (m:nor), which is what
-    # \text{} becomes.
-    if "<m:nor" not in props:
+    # An en dash is a minus, except in normal text.
+    if not normal:
         fixed = fixed.replace("\u2013", "\u2212")
     counts["equation_characters"] += sum(a != b for a, b in zip(text, fixed))
-    if "\u0177" not in fixed and "\u0176" not in fixed:
+    if normal or ("\u0177" not in fixed and "\u0176" not in fixed):
         return start + props + t_open + fixed + t_close + end
     parts = []
     for piece in re.split("([\u0176\u0177])", fixed):

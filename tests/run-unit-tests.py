@@ -474,6 +474,24 @@ def check_docx_repair():
     ]
 
 
+def check_word_equation_text():
+    """Normal text in Word's equation, \\text{} in TeX, gets only the
+    characters that are characters for others, as math-repair.lua gives
+    \\text{} only those."""
+    import docxremediate
+    math = ('<m:oMath><m:r><m:t>ŷ=µ</m:t></m:r>'
+            '<m:r><m:rPr><m:nor /></m:rPr><m:t>ŷ 1–5 µ</m:t></m:r></m:oMath>')
+    fixed, counts = docxremediate.remediate_equations(math)
+    return [
+        ("a y-hat in math is a hat over y, and the micro sign mu",
+         lambda: fixed.startswith('<m:oMath><m:acc>') and "<m:t>=μ</m:t>" in fixed),
+        ("in normal text the y-hat and the en dash stay, and the micro sign is mu",
+         lambda: "<m:t>ŷ 1–5 μ</m:t>" in fixed and fixed.count("<m:acc>") == 1),
+        ("each character changed is counted",
+         lambda: counts == {"equations_repaired": 1, "equation_characters": 3}),
+    ]
+
+
 def check_manifest_names():
     """What a file name with a space does to a manifest."""
     return [
@@ -862,6 +880,7 @@ GROUPS = [
     ("caption contrast", check_contrast),
     ("manifest names", check_manifest_names),
     ("repairing a .docx on the way in", check_docx_repair),
+    ("normal text in a Word equation", check_word_equation_text),
     ("the archive's name", check_archive_name),
     ("the content prefix", check_content_prefix),
     ("the wrapper module's name", check_wrapper_title),

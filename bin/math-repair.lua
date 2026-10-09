@@ -235,29 +235,43 @@ local function replace_plain(s, old, new)
   return table.concat(out)
 end
 
--- In order: the bars first, since one of them is an en dash.
+-- In order: the bars first, since one of them is an en dash. A fix marked
+-- text is one character for another, and applies inside \text{...} too;
+-- the others write a command, which text can't hold.
 local EQUATION_FIXES = {
   {'\\overset{\u{00AF}}{', '\\bar{'},   -- a macron set over a letter
   {'\\overset{\u{2013}}{', '\\bar{'},   -- an en dash set over a letter
-  {'\u{00B5}', '\u{03BC}'},             -- micro sign for mu
-  {'\u{2206}', '\u{0394}'},             -- increment for capital Delta
+  {'\u{00B5}', '\u{03BC}', text = true}, -- micro sign for mu
+  {'\u{2206}', '\u{0394}', text = true}, -- increment for capital Delta
   {'\u{0177}', '\\hat{y}'},             -- y-hat, one character
   {'\u{0176}', '\\hat{Y}'},
   {'_{\u{00D8}}', '_{0}'},              -- H sub slashed-O for H sub zero
   {'\u{00B7}', '\\cdot '},              -- middle dot for a product
 }
 
+-- Where a \text{...} was set aside while the rest is repaired.
+local TEXT_OPEN, TEXT_CLOSE = '\u{E000}', '\u{E001}'
+
 local function repair_tex(tex)
-  local fixed = tex
+  -- \text{...} is set aside and given only the fixes marked text: its en
+  -- dashes are dashes, and its middle dots and y-hats stay characters,
+  -- since \text{\cdot} is an error and the equation would be shown as TeX.
+  local texts = {}
+  local fixed = tex:gsub('\\text(%b{})', function(body)
+    for _, pair in ipairs(EQUATION_FIXES) do
+      if pair.text then body = replace_plain(body, pair[1], pair[2]) end
+    end
+    texts[#texts + 1] = body
+    return '\\text' .. TEXT_OPEN .. #texts .. TEXT_CLOSE
+  end)
   for _, pair in ipairs(EQUATION_FIXES) do
     fixed = replace_plain(fixed, pair[1], pair[2])
   end
-  -- An en dash is a minus, except as text inside \text{...}.
-  fixed = fixed:gsub('\\text(%b{})', function(body)
-    return '\\text' .. replace_plain(body, '\u{2013}', '\0')
-  end)
+  -- An en dash is a minus.
   fixed = replace_plain(fixed, '\u{2013}', '-')
-  fixed = replace_plain(fixed, '\0', '\u{2013}')
+  fixed = fixed:gsub('\\text' .. TEXT_OPEN .. '(%d+)' .. TEXT_CLOSE, function(n)
+    return '\\text' .. texts[tonumber(n)]
+  end)
   return fixed
 end
 

@@ -596,7 +596,8 @@ The population mean μ is unknown; the parameter *p* is a proportion.
 
 Years 1773–1799, ±3%, and 3 < 5 stay text, as do *a* lot, *A* = {1, 2}, the *n*^th^ term, and a plain x = 3.
 
-Repaired: $\overset{–}{X} – µ + ŷ$ and $H_{Ø}$, but not $\text{pages 1–5}$.
+Repaired: $\overset{–}{X} – µ + ŷ$ and $H_{Ø}$, but not $\text{pages 1–5}$, and in
+text only a character for a character: $x_{2}\text{···}x_{n} + \text{µ ŷ}$.
 """
 
 
@@ -659,6 +660,9 @@ def case_math_repair(work):
         ("H sub slashed O is H sub 0", lambda: "H_{0}" in maths),
         ("an en dash in \\text stays one",
          lambda: "\\text{pages 1\u20135}" in maths),
+        ("\\text keeps its middle dots and y-hat, since a command there "
+         "is an error, and gets mu",
+         lambda: "x_{2}\\text{\u00b7\u00b7\u00b7}x_{n} + \\text{\u03bc \u0177}" in maths),
         ("a relation between a variable and a number is an equation",
          lambda: "\u03bc=34" in maths),
         ("a function's name joins its expression",
@@ -679,7 +683,7 @@ def case_math_repair(work):
         ("math.repair_equations off leaves equations as they are",
          lambda: "\\overset{\u2013}{X} \u2013 \u00b5 + \u0177" in off_eq),
         ("math.from_text off makes no equation of text",
-         lambda: len(off_text) == 3),
+         lambda: len(off_text) == 4),
         ("the keep sidecar leaves its expression and its symbol text, and "
          "its equation unrepaired",
          lambda: "\u03bc=5.51" not in kept_maths and "\u03bc" not in kept_maths

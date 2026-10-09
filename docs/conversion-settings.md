@@ -74,7 +74,7 @@ Math the source wrote in the wrong characters, or as text. Every change is a row
 
 **`math.repair_equations`**—`bool`; default `true`
 
-Give each equation the characters it means: mu for the micro sign, Delta for the increment sign, a minus for an en dash, a bar for an en dash or macron set over a letter, y with a hat for the one-character y-hat, and 0 for the slashed O of H sub 0. Word's equation editor lets an author type a character that looks right and means something else; a screen reader reads the one that's there, and a PDF's math fonts have no glyph for some of them.
+Give each equation the characters it means: mu for the micro sign, Delta for the increment sign, a minus for an en dash, a bar for an en dash or macron set over a letter, y with a hat for the one-character y-hat, a dot operator for a middle dot, and 0 for the slashed O of H sub 0. Text inside an equation gets only mu and Delta. Word's equation editor lets an author type a character that looks right and means something else; a screen reader reads the one that's there, and a PDF's math fonts have no glyph for some of them.
 
 **`math.from_text`**—`bool`; default `true`
 

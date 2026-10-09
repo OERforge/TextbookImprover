@@ -50,16 +50,20 @@ Output check: 169 page(s), nothing found.
 
 The HTML is already written, one page per Word file, in `html/`. The 1,604 links OpenStax's files make to its own website now point at pages of this book. The 1,632 math repairs are equations given the characters they mean, such as the micro sign `µ` where the Greek `μ` was meant, and math typed as text made an equation; `math-repaired.csv` lists each, in case one shouldn't have changed ([Math](configuration.md#math)). The 61 pages are the numbered sections, whose Word files are titled without the number. The output check finds nothing to report.
 
-The run stops at packaging, which needs two things only you can supply:
+The run stops at packaging, which needs two things only you can supply, the book's identifier and title:
 
 ```
 WARNING: contents not specified; using guessed order.
-ERROR: packaging.yaml not found.
+ERROR: project.yaml not found, so the book has no identifier or title.
 
-Wrote packaging-sample.yaml.
-Edit it, rename it to packaging.yaml, and run again.
-Every setting is in there with its description, so nothing you had set is lost by renaming it.
+Wrote project-sample.yaml.
+Edit it, rename it to project.yaml, and run again.
+Every project setting is in there with its description, so nothing you had set is lost by renaming it. The packaging and conversion settings have samples of their own:
+  python3 $T/bin/build-cartridge.py -d . --pages html --init    writes packaging-sample.yaml
+  python3 $T/bin/read-conversion-config.py -d . --init    writes conversion-sample.yaml
 ```
+
+`project.yaml` holds what's true of the book however it's built, its name, language, and contents, and both the conversion and the packaging read it. Nothing else needs a file yet: the conversion and the packaging run on their defaults, and the two commands write a sample of their settings for when you want to change one.
 
 ### 2. Order the pages from the book's PDF
 
@@ -74,7 +78,7 @@ python3 $T/bin/convert.py --toc introductory-business-statistics-2e_-_WEB.pdf
 Read introductory-business-statistics-2e_-_WEB.pdf: 169 of 169 unplaced page(s) ordered from the outline.
 ```
 
-The order is in `packaging-sample.yaml` under `contents` now, with the book's own chapter titles:
+The order is in `project-sample.yaml` under `contents` now, with the book's own chapter titles:
 
 ```yaml
   contents:
@@ -99,13 +103,13 @@ The order is in `packaging-sample.yaml` under `contents` now, with the book's ow
 
 A page whose title says what it is gets a `type`: each chapter's Key Terms is a glossary and its References a bibliography, which an EPUB marks for a screen reader, and the preface's type makes it front matter ([Configuration](configuration.md#contents)).
 
-Do this before the next step. `--toc` orders only the pages the contents don't place already, and the sample a first run writes places every page, by guessing. So once that sample is adopted as `packaging.yaml`, the PDF has nothing left to order, and `--toc` says so and changes nothing. (If that happens, delete the `contents` block from `packaging.yaml` and run it again.) Without a PDF, step 5 is the way to fix the order by hand.
+Do this before the next step. `--toc` orders only the pages the contents don't place already, and the sample a first run writes places every page, by guessing. So once that sample is adopted as `project.yaml`, the PDF has nothing left to order, and `--toc` says so and changes nothing. (If that happens, delete `contents` from `project.yaml` and run it again.) Without a PDF, step 5 is the way to fix the order by hand.
 
 The run still stops at packaging, as the first one did: the book needs a name.
 
 ### 3. Name the book
 
-Open `packaging-sample.yaml`, and near the top set the book's identifier and title:
+Open `project-sample.yaml`, and near the top set the book's identifier and title:
 
 ```yaml
   identifier: org.example.introductory-business-statistics
@@ -115,7 +119,7 @@ Open `packaging-sample.yaml`, and near the top set the book's identifier and tit
 The identifier is how an LMS recognizes a later import as the same course, so choose one you'll keep; [A first conversion](first-run.md) says more. Then rename the file and run again:
 
 ```bash
-mv packaging-sample.yaml packaging.yaml
+mv project-sample.yaml project.yaml
 python3 $T/bin/convert.py
 ```
 
@@ -416,19 +420,22 @@ GIAM.tex is the book: 11 page(s), one for each file it \include-s, and 2 for wha
 Read from a copy of the LaTeX: 21 \ifthenelse on a boolean read as a toggle; 1 \cline or \cmidrule read as a whole rule; 50 line break in a minipage read as \newline; 1 space between words a command sets (\hspace, \quad, \hfill) kept as a space, which the reader dropped, running the words together; 10 PDF or EPS image made SVG; 8 \ref to an enumerated item written as the item's number; 847 group or number after a command the reader takes whole kept apart from it, so it's read; 755 box (\fbox, \makebox, \resizebox, and the like) read as what it holds, which the reader dropped with it; 17 bibliography entry written out from BibTeX's .bbl, in the book's style, where the bibliography is; 16 citation written as the label LaTeX prints, linked to its entry; 65 reference or counter given the value LaTeX gives it.
 Wrote latex-conversion-macros-sample.tex: 3 macro(s) whose formulas texmath can't make MathML of, with a definition suggested for 2 and 1 for a person to define. Check it, then save it as latex-conversion-macros.tex.
 37 LaTeX cross-reference(s) resolved to the section or id they name.
-No contents declared: contents-sample.yaml holds the order the master file gives, and its title and authors. Copy it into project.yaml to use it.
 table-headers: 102 data table(s): 4 needs-source, 98 new
 Wrote table-captions-missing.csv (99 table(s) needing a description).
 Wrote image-alt-missing.csv (102 image(s) needing alt text).
 Wrote bare-links-new.csv (10 bare link(s) with no row in bare-links.csv).
-Output check: 11 page(s), 141 finding(s):
+Output check: 11 page(s), 198 finding(s):
     104  image-without-alt: an img element has no alt attribute
+     57  formula-shown-as-tex: a formula Pandoc couldn't convert, shown as its TeX
      37  table-without-headers-or-caption: a data table with no th and no caption
 ...
-ERROR: packaging.yaml not found.
+ERROR: project.yaml not found, so the book has no identifier or title.
+
+Wrote project-sample.yaml, with title, authors, language, contents from the master LaTeX file.
+...
 ```
 
-LaTeX drew each of the 93 drawings as an SVG, and the pages are in `html/`: one for each chapter, one for what the master holds before them (the copyright page and acknowledgments), and one for the bibliography BibTeX made, which comes after them, with the book's 16 citations linked to it. The run stops at packaging, as [the first example's](#1-a-directory-of-its-own-and-a-first-run) did, until step 5 names the book. The book was read from a copy put right for Pandoc's reader: GIAM's `\ifthenelse` chooses between the textbook and the workbook, which the reader would drop, so each is read as a toggle set as the master sets it. [LaTeX sources](latex.md) lists what is put right and why. Among these lines Pandoc warns 57 times that it couldn't make MathML of a formula and left it as TeX, as in:
+LaTeX drew each of the 93 drawings as an SVG, and the pages are in `html/`: one for each chapter, one for what the master holds before them (the copyright page and acknowledgments), and one for the bibliography BibTeX made, which comes after them, with the book's 16 citations linked to it. The run stops at packaging, as [the first example's](#1-a-directory-of-its-own-and-a-first-run) did, until step 5 names the book. The book was read from a copy put right for Pandoc's reader: GIAM's `\ifthenelse` chooses between the textbook and the workbook, which the reader would drop, so each is read as a toggle set as the master sets it. [LaTeX sources](latex.md) lists what is put right and why. Among these lines Pandoc warns 57 times that it couldn't make MathML of a formula and left it as TeX, and the output check finds the 57 on the pages, each by its TeX, as in Pandoc's:
 
 ```
 [WARNING] Could not convert TeX math \; \rule[-3pt]{.5pt}{13pt} \;, rendering as TeX:
@@ -465,7 +472,7 @@ The file is read after the book's preamble, so its definitions win over the book
 
 ### 5. Name the book, and an EPUB
 
-`contents-sample.yaml` holds what the master says about the book, its last entry the bibliography's page, named for the master and numbered (`GIAM-1`), with `type: bibliography`, which puts it in the back matter and marks it as a bibliography in the EPUB. Its title reads "A Gentle Introduction to the Art of Mathematics Version 3.2 N", since GIAM's `\title` sets the version below the title, so correct it as you copy the rest into `project.yaml`, and give the book an identifier:
+`project-sample.yaml` holds what the master says about the book, its contents ending with the bibliography's page, named for the master and numbered (`GIAM-1`), with `type: bibliography`, which puts it in the back matter and marks it as a bibliography in the EPUB. Its title reads "A Gentle Introduction to the Art of Mathematics Version 3.2 N", since GIAM's `\title` sets the version below the title, so correct it, give the book an identifier, and rename the file to `project.yaml`. The values that say something about this book, once edited:
 
 ```yaml
 project:

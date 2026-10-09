@@ -740,7 +740,7 @@ def case_declared_types(work):
     marks = re.search(r'<nav epub:type="landmarks".*?</nav>', nav, re.S)
     marks = marks.group(0) if marks else ""
 
-    def labelled_by(ident):
+    def labeled_by(ident):
         """The text of the heading a section's aria-labelledby names."""
         m = re.search(r'aria-labelledby="([^"]+)"', section(ident))
         if not m:
@@ -774,7 +774,7 @@ def case_declared_types(work):
          lambda: "type 'postscript' is not one of" in out.stderr),
         ("each typed section is named by its own heading, so a screen reader's list of "
          "landmarks names it, and an untyped one isn't named",
-         lambda: [labelled_by(i) for i in ("page-metadata", "group-1-part-one", "page-terms",
+         lambda: [labeled_by(i) for i in ("page-metadata", "group-1-part-one", "page-terms",
                                            "page-words")]
          == ["1.3 Levels of Measurement", "1 Part One", "Key Terms", "Words"]
          and "aria-labelledby" not in section("page-math")),

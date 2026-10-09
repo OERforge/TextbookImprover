@@ -16,7 +16,7 @@ The suites' runs of `convert.py` pass `--quick`, so the output check's validator
 
 | Suite | What it pins down |
 |---|---|
-| `run-spelling-tests.py` | US spelling in every tracked text file, prose and names alike, naming file and line; a released changelog section is history and skipped. Needs git. |
+| `run-spelling-tests.py` | US spelling in every tracked text file, prose and names alike, naming file and line, the changelog's released sections included. Needs git. |
 | `run-config-tests.py` | Twenty-seven fixtures over the configuration cascade: what a `false` override means, what an explicit `null` means, whether lists append, which identifiers are valid XML names, what happens when a setting is written twice, a sidecar or report setting inside a target, and what a retired setting or another block's says. |
 | `run-roundtrip-test.py` | That writing a configuration and reading it back changes nothing. |
 | `run-unit-tests.py` | The small functions that decide filenames and directory names, and the places where one fact is written down twice and could drift apart. |
@@ -118,7 +118,7 @@ for a pipeline change — see `util/compare-output.py`.
 
 ## House style
 
-Reminder for Claude: Prose in this repository—these pages, the README, the changelog, the roadmap, code comments, docstrings, and the descriptions in the schemas—is US English and uses contractions: *can't*, *doesn't*, *isn't*, *it's*. The expanded forms are for the rare place where the emphasis is the point, as in the roadmap's heading "What the PDF half can and cannot do". `tests/run-spelling-tests.py` holds the spelling mechanically, in prose and in the names of our own functions and settings, and says which file and line; a released changelog section, a name that isn't ours (ARIA's `aria-labelledby`), and an old name kept working until 1.0 are left alone.
+Reminder for Claude: Prose in this repository—these pages, the README, the changelog, the roadmap, code comments, docstrings, and the descriptions in the schemas—is US English and uses contractions: *can't*, *doesn't*, *isn't*, *it's*. The expanded forms are for the rare place where the emphasis is the point, as in the roadmap's heading "What the PDF half can and cannot do". `tests/run-spelling-tests.py` holds the spelling mechanically, in prose and in the names of our own functions and settings, and says which file and line; a changelog entry naming an old spelling to say what became of it, a name that isn't ours (ARIA's `aria-labelledby`), and an old name kept working until 1.0 are left alone.
 
 Two things are not prose and are left alone: anything inside a code span or a fenced block, and any string the programs print. A message a user reads on their terminal is part of the interface, and restyling one is a change to the interface rather than to the documentation.
 

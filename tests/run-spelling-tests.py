@@ -9,8 +9,9 @@ because nothing looked. This scans every tracked text file and fails on
 any, naming the file and line.
 
 Left alone, on purpose:
-  - a released section of CHANGELOG.md, which is what went into a
-    release's notes and is history;
+  - a changelog entry naming an old spelling to say what became of it,
+    which is the only UK spelling the changelog keeps, released sections
+    and all;
   - names that aren't ours: ARIA's aria-labelledby, and the title of an
     IMS document ("Notice and Licence");
   - util/contrib/, which holds scripts contributed from elsewhere, and
@@ -54,7 +55,8 @@ UK = re.compile(
     r"standardis|utilis|authoris|finalis|apologis|sanitis|tokenis|"
     r"emphasis(?:e|ed|es|ing)\b)"
     r"\w*|analys(?:e|ed|es|ing)|\w*(?:labelled|labelling|modelling|"
-    r"travelled|travelling|cancelled|cancelling|signalled|totalled))\b",
+    r"travelled|travelling|cancelled|cancelling|signalled|totalled|"
+    r"levelled|levelling)\w*)\b",
     re.I)
 
 # Names that aren't ours, or an old name kept until 1.0: (file, word).
@@ -63,11 +65,9 @@ ALLOWED = {
     (None, "Licence"),                      # "Notice and Licence", IMS
     ("docs/examples.md", "flavour"),        # veraPDF's own --flavour option
     ("lib/bookcontents.py", "unrecognised_roles"),
-    ("CHANGELOG.md", "unrecognised_roles"),     # the entries announcing
-    ("CHANGELOG.md", "normalise"),              # the renames name the old
-    ("CHANGELOG.md", "NORMALISE_MATH_ALT"),     # spellings
-    ("CHANGELOG.md", "sanitise"),               # and the one saying what
-    ("CHANGELOG.md", "tokenise"),               # this check learned
+    ("CHANGELOG.md", "unrecognised_roles"),     # the entries naming the old
+    ("CHANGELOG.md", "sanitise"),               # spellings to say what became
+    ("CHANGELOG.md", "tokenise"),               # of them
     ("tests/run-spelling-tests.py", None),  # this file names them all
 }
 
@@ -79,16 +79,6 @@ def tracked():
         return None
     return [p for p in out.stdout.split("\n")
             if p.endswith(TEXT) and not p.startswith(SKIP_DIRS)]
-
-
-def unreleased_lines(path, lines):
-    """For CHANGELOG.md, only the lines above the first released version."""
-    if path != "CHANGELOG.md":
-        return lines
-    for index, line in enumerate(lines):
-        if re.match(r"## \[\d", line):
-            return lines[:index]
-    return lines
 
 
 def allowed(path, word, line):
@@ -116,7 +106,7 @@ def main():
                 lines = fh.read().split("\n")
         except (OSError, UnicodeDecodeError):
             continue
-        for number, line in enumerate(unreleased_lines(path, lines), 1):
+        for number, line in enumerate(lines, 1):
             for m in UK.finditer(line):
                 word = m.group(1)
                 if (None, word) in ALLOWED and word != "Licence":
@@ -127,7 +117,8 @@ def main():
         ("no UK spelling in the prose or the names", not found),
         ("the checker sees a UK spelling when there is one",
          bool(UK.search("the colour was normalised"))
-         and all(UK.search(w) for w in ("sanitises", "tokenised")) and not UK.search(
+         and all(UK.search(w) for w in ("sanitises", "tokenised", "re-levelled",
+                                        "labelled_by")) and not UK.search(
              "precise, otherwise, exercise, analysis, emphasis")),
     ]
     failed = 0

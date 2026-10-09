@@ -3,7 +3,7 @@
    inheritance or the browser default and can land well under 4.5:1.
    #555 on Pandoc's #fdfdfd background measures 7.33:1, which clears AAA
    while staying visibly lighter than the #1a1a1a body text. Note that the
-   familiar "accessible grey" #767676 is only 4.47:1 here -- it is computed
+   familiar "accessible gray" #767676 is only 4.47:1 here -- it is computed
    against pure white, and Pandoc's background is not pure white.
    Pandoc 3.12's stylesheet follows the reader's dark mode, with a #1a1a1a
    background, where #555 is 2.33:1; #b6b6b6 there is 8.58:1. A browser

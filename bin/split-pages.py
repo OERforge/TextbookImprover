@@ -508,7 +508,7 @@ def main():
     taken = set(sources)
 
     # Pages the previous run cut are this run's to replace, whatever they
-    # were named: a renamed or re-levelled page would otherwise survive.
+    # were named: a renamed or re-leveled page would otherwise survive.
     if args.level > 0:
         for old in previous_pages(args.report):
             if old in sources:

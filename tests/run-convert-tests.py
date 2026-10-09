@@ -1380,6 +1380,34 @@ def case_asciidoc_layout(work):
     ]
 
 
+def case_quick(work):
+    """--quick: the output check without epubcheck, the Nu checker, and
+    veraPDF, saying so. The run without it has the validators hidden (each
+    variable naming a file that isn't there), so it asks for them and is
+    told they're missing, without starting Java."""
+    os.makedirs(work)
+    with open(os.path.join(work, "ch.md"), "w") as fh:
+        fh.write("# One\n\nText.\n")
+    with open(os.path.join(work, "conversion.yaml"), "w") as fh:
+        fh.write("targets:\n  html:\n    format: html\n")
+
+    def run(*flags, env=None):
+        result = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quiet", *flags],
+                                cwd=work, capture_output=True, text=True,
+                                stdin=subprocess.DEVNULL, env=env)
+        return result.stdout + result.stderr
+    quick = run("--quick")
+    nowhere = os.path.join(work, "no-such-validator")
+    full = run(env=dict(os.environ, EPUBCHECK_JAR=nowhere, VNU_JAR=nowhere, VERAPDF=nowhere))
+    return [
+        ("--quick checks the pages without the validators, and says so",
+         lambda: "Output check: 1 page(s)" in quick
+         and "not run (--quick)" in quick and "VNU_JAR" not in quick),
+        ("without it, the run looks for them",
+         lambda: "VNU_JAR" in full and "not run (--quick)" not in full),
+    ]
+
+
 def case_pdf_without_latex(work):
     """A pdf target on a machine without LuaLaTeX: the HTML is written,
     and the run stops saying what's missing and where to read about it,
@@ -3913,6 +3941,7 @@ def case_book_name(work):
 
 CASES = [
     ("a bare directory", case_bare),
+    ("the output check, with --quick and without", case_quick),
     ("where the book is named", case_book_name),
     ("a markdown target that merges", case_merge),
     ("a Markdown target, round trip", case_markdown_target),

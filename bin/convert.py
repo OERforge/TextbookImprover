@@ -3995,6 +3995,10 @@ def main():
     parser.add_argument("--allow-unknown-keys", action="store_true",
                         help="report settings this version does not know "
                              "about instead of refusing them")
+    parser.add_argument("--quick", action="store_true",
+                        help="check the output without epubcheck, the Nu HTML "
+                             "checker, and veraPDF, even where they're "
+                             "installed (check-output.py --quick)")
     args, passthrough = parser.parse_known_args()
     TRACE = not args.quiet
     base = os.getcwd()
@@ -4414,7 +4418,8 @@ def main():
         # ---- 5.7 check, per target -------------------------------------------
         # Findings go to one report beside the others and never stop the
         # run: the output exists, and the list is what to work through.
-        command = ["python3", CHECK_TOOL, "--report", reports["output_check"]]
+        command = ["python3", CHECK_TOOL, "--report", reports["output_check"]] \
+            + (["--quick"] if args.quick else [])
         for pages in written.values():
             command += [p for p in pages if p.endswith(".html")]
         for epub in epubs:

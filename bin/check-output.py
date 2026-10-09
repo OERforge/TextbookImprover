@@ -22,7 +22,8 @@ EPUB needs. They are not epubcheck, the Nu HTML checker, or Ace, which
 know their specifications in full. epubcheck and the Nu checker are run
 as well when they are installed -- named by EPUBCHECK_JAR and VNU_JAR,
 or as commands on the path -- and their findings go into the same
-report with the tool's own message id as the check; --quick skips them.
+report with the tool's own message id as the check; --quick skips them,
+and veraPDF, and convert.py --quick passes it on.
 
 Copyright 2026 Robert Szarka
 
@@ -89,6 +90,10 @@ def main():
     if not args.quick:
         more, notes = outputcheck.run_validators(pages, epubs)
         findings += more
+    else:
+        # Said, so a summary that found nothing isn't taken for theirs.
+        notes.append("epubcheck, the Nu HTML checker, and veraPDF not run "
+                     "(--quick).")
     # A PDF's findings are in the full format already: what the file
     # says about itself, then veraPDF's rules when it's installed.
     pdfs = [p for p in args.pdf if os.path.exists(p)]

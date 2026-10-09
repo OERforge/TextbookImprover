@@ -189,10 +189,11 @@ def main():
         else:
             print("  skip  epubcheck not installed (EPUBCHECK_JAR)")
         if have["vnu"]:
-            v_good, _ = outputcheck.run_vnu(have["vnu"],
-                                            [os.path.join(work, "good.html")])
-            v_bad, _ = outputcheck.run_vnu(have["vnu"],
-                                           [os.path.join(work, "bad.html")])
+            # One run for both pages, its findings told apart by page.
+            both, _ = outputcheck.run_vnu(have["vnu"], [os.path.join(work, "good.html"),
+                                                        os.path.join(work, "bad.html")])
+            v_good = [f for f in both if f.where == "good.html"]
+            v_bad = [f for f in both if f.where == "bad.html"]
             cases += [
                 ("the Nu checker passes the correct page",
                  lambda: expect(not [f for f in v_good
@@ -207,18 +208,29 @@ def main():
             print("  skip  the Nu HTML checker not installed (VNU_JAR)")
         # Either validator is found by its environment variable or by its
         # own name on the path, so a note about a missing one says both.
-        _, notes = outputcheck.run_validators(
-            [os.path.join(work, "good.html")], [epub])
-        missing = [(name, variable) for name, variable in
-                   (("epubcheck", "EPUBCHECK_JAR"), ("vnu", "VNU_JAR"))
-                   if not have[name]]
+        # Both are hidden here, each variable naming a file that isn't
+        # there, so the notes are checked wherever the suite runs, and
+        # neither validator starts.
+        hidden = {"EPUBCHECK_JAR": os.path.join(work, "none"),
+                  "VNU_JAR": os.path.join(work, "none")}
+        saved = {name: os.environ.get(name) for name in hidden}
+        os.environ.update(hidden)
+        try:
+            _, notes = outputcheck.run_validators(
+                [os.path.join(work, "good.html")], [os.path.join(work, "b.epub")])
+        finally:
+            for name, value in saved.items():
+                if value is None:
+                    os.environ.pop(name, None)
+                else:
+                    os.environ[name] = value
         cases += [
             ("a note about a validator that isn't here names the variable "
              "and the path",
              # expect() formats findings; a note is a plain line.
              lambda: all(any(variable in note and "on the path" in note
                              for note in notes)
-                         for _name, variable in missing)
+                         for variable in hidden)
              or fail("got: " + " | ".join(notes))),
         ]
         for label, predicate in cases:

@@ -56,6 +56,11 @@ an image ![](nothing.png) with no alt, one that is
 | x | 1 |
 | y | 2 |
 
+|   |   |
+|---|---|
+| a | 1 |
+| a | 2 |
+
 ::: row-headers
 |   |   |
 |---|---|
@@ -91,9 +96,11 @@ def case_sources():
          lambda: c.count("source-image-no-alt") == 1),
         ("a bare-URL link is found",
          lambda: "source-link-bare-url" in c),
+        # The keyed one's first column names each row once; the found
+        # one's doesn't.
         ("a headerless table is found, a marked one and a keyed one are not",
-         lambda: c.count("source-table-no-headers") == 0
-         or c.count("source-table-no-headers") == 1),
+         lambda: [f.where for f in md if f.check == "source-table-no-headers"]
+         == ["table 3"]),
         ("a skipped heading level is found",
          lambda: "source-heading-skips-level" in c),
         ("math ending in a thin space is found",
@@ -111,10 +118,12 @@ def case_agreement():
         ["pandoc", "-f", "docx", "-t", "html", docx,
          "--lua-filter", os.path.join(BIN, "figures-and-tables.lua")],
         capture_output=True, text=True)
-    filter_count = re.search(r"(\d+) image\(s\) need alt text", result.stderr)
+    # The filter says so once an image (it had said a count, which this
+    # went on looking for, and so agreed with anything).
+    filter_count = result.stderr.count("image has no alt text:")
     return [
         ("the source check and the filter agree on images needing alt text",
-         lambda: filter_count is None or ours == int(filter_count.group(1))),
+         lambda: result.returncode == 0 and ours == filter_count > 0),
     ]
 
 
@@ -143,9 +152,11 @@ def case_front_door():
          lambda: header == fl.COLUMNS),
         ("a Word source, a Markdown source, a page, an EPUB, and a PDF are "
          "each audited",
-         lambda: {"source-docx", "source-md", "html", "pdf"} <= kinds),
+         lambda: {"source-docx", "source-md", "html", "epub", "pdf"} <= kinds),
         ("the report lists every input with its hash",
-         lambda: "## Inputs" in report and report.count("SHA-256") >= 5),
+         lambda: "## Inputs" in report and sorted(re.findall(
+             r"^- `[^`]*/([^/`]+)` \u2014 [\d,]+ bytes, SHA-256 `", report, re.M))
+         == ["blank.pdf", "book.epub", "media-a.docx", "page.html", "page.md"]),
         ("and the PDF's metadata and claims",
          lambda: "metadata and claims" in report and "**Tagged:**" in report),
         ("with nothing changed, the report is left as it is and said to be "
@@ -192,6 +203,12 @@ def main():
     with open(os.path.join(WORK, "page.html"), "w", encoding="utf-8") as fh:
         fh.write(HTML)
     shutil.copy(os.path.join(FIXTURES, "media-a.docx"), WORK)
+    # An EPUB, as Pandoc writes one, which says nothing of its
+    # accessibility: one finding at least, so its kind is in the report.
+    subprocess.run(["pandoc", "-f", "markdown", "-t", "epub3", "-o",
+                    os.path.join(WORK, "book.epub"), "--metadata", "title=A Book",
+                    "--metadata", "lang=en"], input="# A Chapter\n\nText.\n",
+                   capture_output=True, text=True)
     # A minimal PDF: pypdf writes one.
     try:
         import pypdf

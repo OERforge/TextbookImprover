@@ -51,7 +51,8 @@ UK = re.compile(
     r"centre|licence|catalogue|artefact|programme)\w*|"
     r"\w*(?:recognis|organis|normalis|summaris|categoris|prioritis|"
     r"optimis|initialis|customis|minimis|maximis|serialis|visualis|"
-    r"standardis|utilis|authoris|finalis|apologis|emphasis(?:e|ed|es|ing)\b)"
+    r"standardis|utilis|authoris|finalis|apologis|sanitis|tokenis|"
+    r"emphasis(?:e|ed|es|ing)\b)"
     r"\w*|analys(?:e|ed|es|ing)|\w*(?:labelled|labelling|modelling|"
     r"travelled|travelling|cancelled|cancelling|signalled|totalled))\b",
     re.I)
@@ -65,6 +66,8 @@ ALLOWED = {
     ("CHANGELOG.md", "unrecognised_roles"),     # the entries announcing
     ("CHANGELOG.md", "normalise"),              # the renames name the old
     ("CHANGELOG.md", "NORMALISE_MATH_ALT"),     # spellings
+    ("CHANGELOG.md", "sanitise"),               # and the one saying what
+    ("CHANGELOG.md", "tokenise"),               # this check learned
     ("tests/run-spelling-tests.py", None),  # this file names them all
 }
 
@@ -123,7 +126,8 @@ def main():
     checks = [
         ("no UK spelling in the prose or the names", not found),
         ("the checker sees a UK spelling when there is one",
-         bool(UK.search("the colour was normalised")) and not UK.search(
+         bool(UK.search("the colour was normalised"))
+         and all(UK.search(w) for w in ("sanitises", "tokenised")) and not UK.search(
              "precise, otherwise, exercise, analysis, emphasis")),
     ]
     failed = 0

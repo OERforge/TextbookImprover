@@ -102,6 +102,20 @@ def sources():
         yield from sorted(glob.glob(os.path.join(ROOT, folder, "*.py")))
 
 
+# Run by the oldest interpreter on every file at once: each one that
+# doesn't compile, as path, line, and message, a tab between.
+COMPILE_ALL = """\
+import sys
+for path in sys.argv[1:]:
+    try:
+        with open(path, "rb") as handle:
+            compile(handle.read(), path, "exec", dont_inherit=True)
+    except (SyntaxError, ValueError) as exc:
+        print(path, getattr(exc, "lineno", 0) or 0, exc.msg if isinstance(exc, SyntaxError) else exc,
+              sep="\\t")
+"""
+
+
 def older_interpreter():
     """The oldest supported interpreter, if one is installed: that version
     and no other, since a newer one accepts what came after it."""
@@ -129,7 +143,7 @@ def fstring_problems(path):
         try:
             tokens = list(tokenize.tokenize(handle.readline))
         except tokenize.TokenError as exc:
-            return [(0, f"could not be tokenised: {exc}")]
+            return [(0, f"could not be tokenized: {exc}")]
 
     quote, start_row, depth, field_row = None, 0, 0, 0
     for token in tokens:
@@ -271,13 +285,17 @@ def main():
 
     if interpreter:
         print(f"Compiling {len(files)} file(s) with Python {label}.")
-        for path in files:
-            result = subprocess.run(
-                [interpreter, "-m", "py_compile", path],
-                capture_output=True, text=True, stdin=subprocess.DEVNULL)
-            if result.returncode:
-                last = [l for l in result.stderr.splitlines() if l.strip()]
-                problems.append((path, 0, last[-1] if last else "failed"))
+        # All of them in one start of the interpreter, writing no .pyc.
+        result = subprocess.run(
+            [interpreter, "-c", COMPILE_ALL] + files,
+            capture_output=True, text=True, stdin=subprocess.DEVNULL)
+        for line in result.stdout.splitlines():
+            path, number, message = line.split("\t", 2)
+            problems.append((path, int(number), message))
+        if result.returncode and not result.stdout:
+            last = [l for l in result.stderr.splitlines() if l.strip()]
+            problems.append((files[0], 0, f"Python {label} failed: "
+                             + (last[-1] if last else "no message")))
     else:
         print(f"No Python {MINIMUM[0]}.{MINIMUM[1]} interpreter installed, "
               "so scanning the source instead.")

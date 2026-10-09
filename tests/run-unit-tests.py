@@ -136,7 +136,7 @@ def check_content_prefix():
          lambda: prefix("One Title", "same-id").rsplit("-", 1)[-1]
                  == prefix("A Quite Different Title", "same-id")
                  .rsplit("-", 1)[-1]),
-        ("a title that sanitises to nothing leaves the digest alone",
+        ("a title that sanitizes to nothing leaves the digest alone",
          lambda: re.fullmatch(r"[0-9a-f]{10}", prefix("課程", "x")) is not None),
         ("punctuation and spacing are reduced, not dropped",
          lambda: prefix("A  Book: Second (Revised) Edition", "x")

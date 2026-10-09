@@ -358,7 +358,7 @@ def fingerprint(work, skip_dirs=()):
 
 def convert(work, env=None):
     return subprocess.run(
-        ["python3", os.path.join(BIN, "convert.py"), "--quiet"], cwd=work,
+        ["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"], cwd=work,
         capture_output=True, text=True, stdin=subprocess.DEVNULL, env=env)
 
 
@@ -1921,7 +1921,7 @@ def case_documents(work):
     with zipfile.ZipFile(os.path.join(work, "org.example.course.imscc"), "w") as z:
         z.writestr("imsmanifest.xml", '<?xml version="1.0"?><manifest identifier="m" '
                    'xmlns="http://www.imsglobal.org/xsd/imsccv1p1/imscp_v1p1"/>')
-    rerun = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quiet",
+    rerun = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet",
                             "--check-only"], cwd=work, capture_output=True, text=True,
                            stdin=subprocess.DEVNULL)
     rerun_said = rerun.stdout + rerun.stderr
@@ -3506,39 +3506,6 @@ def case_customized(work):
     ]
 
 
-def case_capacity(work):
-    """A book that outgrows one of TeX's tables, and one whose macro calls
-    itself without end: the PDF target names each for what it is."""
-    if not shutil.which("lualatex"):
-        return [("a book too big for TeX's tables is named as that",
-                 lambda: skip("no lualatex for the PDF target"))]
-    said = {}
-    for name, tex in (
-            # A million and more names: LuaTeX's strings, a table of fixed
-            # size, fill in a few seconds.
-            ("strings", "\\newcount\\n \\loop \\expandafter\\def\\csname x\\the\\n"
-                        "\\endcsname{} \\advance\\n1 \\ifnum\\n<3000000 \\repeat"),
-            # Each \a leaves a \relax to come back to: the input stack.
-            ("recursion", "\\def\\a{\\a\\relax}\\a")):
-        book = os.path.join(work, name)
-        os.makedirs(book, exist_ok=True)
-        with open(os.path.join(book, "page.md"), "w", encoding="utf-8") as fh:
-            fh.write("# Page\n\nText.\n\n```{=latex}\n" + tex + "\n```\n")
-        with open(os.path.join(book, "conversion.yaml"), "w") as fh:
-            fh.write("targets:\n  pdf:\n    format: pdf\n")
-        result = convert(book)
-        said[name] = result.stdout + result.stderr
-    return [
-        ("a book too big for TeX's tables is named as that, with the way to raise them",
-         lambda: "LaTeX ran out of number of strings" in said["strings"]
-         and "max_strings" in said["strings"]),
-        ("a macro that calls itself without end is named as that, not as size",
-         lambda: "LaTeX ran out of input stack size" in said["recursion"]
-         and "calls itself without end" in said["recursion"]
-         and "max_strings" not in said["recursion"]),
-    ]
-
-
 # A book set with packages LaTeX's tagging can't build or tag with: its
 # headings by titlesec, framed passages by mdframed and framed, marked
 # words by soul and ulem, a tab stop by tabto, a figure beside the text by
@@ -4726,8 +4693,7 @@ CASES = [("a LaTeX book", case_book), ("two masters", case_masters),
          ("a bibliography placed by its type", case_bibliography_place),
          ("a book's citations and its bibliography", case_bibliography),
          ("floats, classes, and titles as LaTeX has them", case_floats),
-         ("a book set with packages tagging can't take", case_unsupported),
-         ("a book too big for TeX", case_capacity)]
+         ("a book set with packages tagging can't take", case_unsupported)]
 
 
 def main():

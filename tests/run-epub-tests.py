@@ -153,7 +153,7 @@ class Built:
         if os.path.exists(path):
             with zipfile.ZipFile(path) as archive:
                 for name in archive.namelist():
-                    if name.endswith((".opf", ".xhtml")):
+                    if name.endswith((".opf", ".xhtml", ".css")):
                         self.files[name] = archive.read(name).decode("utf-8")
 
     @property
@@ -301,9 +301,8 @@ def case_tables_survive(work):
         ("the scroll wrapper and its label survive",
          lambda: 'class="table-wrapper" tabindex="0"' in body),
         ("the page stylesheet is appended to Pandoc's",
-         lambda: "page.css" in out.files.get("EPUB/styles/stylesheet1.css",
-                                              "")
-         if "EPUB/styles/stylesheet1.css" in out.files else True),
+         lambda: ".table-wrapper:focus-visible {" in out.files.get(
+             "EPUB/styles/stylesheet1.css", "")),
     ]
 
 

@@ -204,7 +204,7 @@ def case_convert(work):
         fh.write("targets:\n  html:\n    format: html\n  epub:\n"
                  "    format: epub3\n")
     # As unpacked, a page shows an error page as an image: the gate's.
-    stopped = subprocess.run(["python3", os.path.join(BIN, "convert.py"),
+    stopped = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick",
                               "--quiet"], cwd=out, capture_output=True,
                              text=True, stdin=subprocess.DEVNULL)
     gate = read(out, "media-unresolved.csv") if os.path.exists(
@@ -214,7 +214,7 @@ def case_convert(work):
         text = fh.read()
     with open(chapter, "w", encoding="utf-8") as fh:
         fh.write(text.replace('<img src="images/file1.html" alt="Lost"/>', ""))
-    result = subprocess.run(["python3", os.path.join(BIN, "convert.py"),
+    result = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick",
                              "--quiet"], cwd=out, capture_output=True,
                             text=True, stdin=subprocess.DEVNULL)
     page = read(out, "html", "chapter-1.html") if os.path.exists(

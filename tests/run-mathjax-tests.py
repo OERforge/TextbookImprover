@@ -132,7 +132,7 @@ def pipeline_checks(samples):
             fh.write("targets:\n  html:\n    format: html\n")
         run = subprocess.run([sys.executable, os.path.join(ROOT, "bin",
                                                            "convert.py"),
-                              "--quiet"], cwd=work, capture_output=True,
+                              "--quiet", "--quick"], cwd=work, capture_output=True,
                              text=True, stdin=subprocess.DEVNULL)
         page = ""
         path = os.path.join(work, "html", "saved.html")

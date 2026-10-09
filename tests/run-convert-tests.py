@@ -62,9 +62,12 @@ targets:
 """
 
 
-def convert(work, config=None, project=True, arguments=()):
+def convert(work, config=None, project=True, arguments=(), fixtures=NEEDED):
+    """convert.py in work, with the Word fixtures named (all five unless a
+    case says), the configuration given, and a project.yaml naming the
+    book unless project is false."""
     os.makedirs(work, exist_ok=True)
-    for name in NEEDED:
+    for name in fixtures:
         shutil.copy(os.path.join(FIXTURES, name + ".docx"), work)
     if config is not None:
         with open(os.path.join(work, "conversion.yaml"), "w",
@@ -76,7 +79,7 @@ def convert(work, config=None, project=True, arguments=()):
             fh.write("project:\n  identifier: org.example.fixtures\n"
                      "  title: The Fixture Book\n")
     return subprocess.run(
-        ["python3", os.path.join(BIN, "convert.py"), "--quiet"]
+        ["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"]
         + list(arguments), cwd=work, capture_output=True, text=True,
         stdin=subprocess.DEVNULL)
 
@@ -99,6 +102,19 @@ def exists(*parts):
 def read(*parts):
     with open(os.path.join(*parts), encoding="utf-8") as fh:
         return fh.read()
+
+
+def epubcheck(path):
+    """epubcheck's findings for the EPUB at path, run here, since the
+    suite's runs leave the validators out (--quick): None, and a skip
+    said, where epubcheck isn't installed or there's no EPUB."""
+    sys.path.insert(0, os.path.join(ROOT, "lib"))
+    import outputcheck
+    command = outputcheck.find_validator("epubcheck")
+    if not command:
+        print("  skip  epubcheck not installed (EPUBCHECK_JAR)")
+        return None
+    return outputcheck.run_epubcheck(command, path) if os.path.exists(path) else None
 
 
 def case_bare(work):
@@ -150,7 +166,7 @@ def case_hand_written(work):
         fh.write(ONE_PIXEL)
     result = convert(work, "targets:\n  html:\n    format: html\n"
                            "  epub:\n    format: epub3\n",
-                     arguments=["--zip"])
+                     arguments=["--zip"], fixtures=())
     import zipfile
     names = []
     if exists(work, "org.example.fixtures.imscc"):
@@ -163,6 +179,8 @@ def case_hand_written(work):
             nav = z.read("EPUB/nav.xhtml").decode("utf-8")
     return [
         ("the run succeeds", lambda: result.returncode == 0),
+        ("--zip, which the driver doesn't know, reaches the packager",
+         lambda: exists(work, "org.example.fixtures.imscc")),
         ("the page is copied into the html target byte for byte",
          lambda: read(work, "html", "frontmatter.html") == HAND),
         ("with the files it refers to",
@@ -178,13 +196,13 @@ def case_hand_written(work):
          lambda: any(n.endswith("/frontmatter.html") for n in names)
          and any(n.endswith("/front/style.css") for n in names)),
         ("and the output check looked at it",
-         lambda: "Output check: 7 page(s)" in result.stderr),
+         lambda: "Output check: 2 page(s)" in result.stderr),
     ]
 
 
 def case_targets(work):
     """Four targets: three HTML renderings and an EPUB."""
-    result = convert(work, MULTI)
+    result = convert(work, MULTI, fixtures=("tables", "media-a"))
     return [
         ("the run succeeds", lambda: result.returncode == 0),
         ("the html target writes beside the sources when told to",
@@ -213,20 +231,10 @@ def case_targets(work):
          lambda: exists(work, "image-alt-missing.csv")
          and not exists(work, "print", "image-alt-missing.csv")),
         ("the output check covers every target's pages",
-         lambda: re.search(r"Output check: 15 page\(s\) and 1 EPUB",
+         lambda: re.search(r"Output check: 6 page\(s\) and 1 EPUB",
                            result.stderr)),
         ("the packager packages the target beside the sources",
          lambda: exists(work, "imsmanifest.xml")),
-    ]
-
-
-def case_passthrough(work):
-    """Arguments the driver does not know go to the packager."""
-    result = convert(work, MULTI, arguments=["--zip"])
-    return [
-        ("--zip reaches the packager",
-         lambda: result.returncode == 0
-         and exists(work, "org.example.fixtures.imscc")),
     ]
 
 
@@ -279,21 +287,13 @@ def case_markdown(work):
         fh.write("# old\n")
     result = convert(work, "defaults:\n  pages:\n    split_level: 2\n"
                            "targets:\n  html:\n    format: html\n"
-                           "  epub:\n    format: epub3\n")
+                           "  epub:\n    format: epub3\n", fixtures=("tables",))
     # "long run.md" is the page long-run: no space reaches an href.
     page = read(work, "html", "long-run.html") if exists(
         work, "html", "long-run.html") else ""
     section = read(work, "html", "long-run--economies-of-scale.html") \
         if exists(work, "html", "long-run--economies-of-scale.html") else ""
-    epub_path = os.path.join(work, "epub", "org.example.fixtures.epub")
-    sys.path.insert(0, os.path.join(ROOT, "lib"))
-    import outputcheck
-    epubcheck = outputcheck.find_validator("epubcheck")
-    validated = None
-    if epubcheck and os.path.exists(epub_path):
-        validated = outputcheck.run_epubcheck(epubcheck, epub_path)
-    else:
-        print("  skip  epubcheck not installed (EPUBCHECK_JAR)")
+    validated = epubcheck(os.path.join(work, "epub", "org.example.fixtures.epub"))
     return [
         ("a stem with a space gives ids without one, and epubcheck agrees",
          lambda: validated == [] if validated is not None else True),
@@ -353,7 +353,7 @@ def run_in(directory, contents=None):
             fh.write("project:\n  identifier: org.example.fixtures\n"
                      "  title: The Fixture Book\n" + contents)
     return subprocess.run(
-        ["python3", os.path.join(BIN, "convert.py"), "--quiet"],
+        ["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
         cwd=directory, capture_output=True, text=True,
         stdin=subprocess.DEVNULL)
 
@@ -383,7 +383,7 @@ def case_asciidoc(work):
     for name, text in files.items():
         with open(os.path.join(work, name), "w", encoding="utf-8") as fh:
             fh.write(text)
-    result = convert(work, "targets:\n  html:\n    format: html\n")
+    result = convert(work, "targets:\n  html:\n    format: html\n", fixtures=())
     one = read(work, "html", "one.html") if exists(work, "html",
                                                     "one.html") else ""
     import yaml
@@ -423,9 +423,9 @@ def case_asciidoc(work):
 
 
 def case_stem_collisions(work):
-    """Two files that would be one page stop the run; the leftover rules
-    still hold; and an image's alt text isn't lent to a file that merely
-    shares its stem."""
+    """Two files that would be one page stop the run, and an image's alt
+    text isn't lent to a file that merely shares its stem. (An .md beside
+    its .docx, v0.1's leftover, is no clash: a Markdown source's case.)"""
     def book(name, files, config="targets:\n  html:\n    format: html\n"):
         where = os.path.join(work, name)
         for path, text in files.items():
@@ -434,7 +434,7 @@ def case_stem_collisions(work):
             mode = "wb" if isinstance(text, bytes) else "w"
             with open(os.path.join(where, path), mode) as fh:
                 fh.write(text)
-        return where, convert(where, config)
+        return where, convert(where, config, fixtures=())
     md, adoc = "# One\n\nText.\n", "= One\n\nText.\n"
     with open(os.path.join(FIXTURES, "tables.docx"), "rb") as fh:
         docx = fh.read()
@@ -445,7 +445,6 @@ def case_stem_collisions(work):
                                    "ch1.print.adoc": adoc},
                       "targets:\n  html:\n    format: html\n"
                       "  print:\n    format: html\n")
-    e, leftover = book("leftover", {"x.docx": docx, "x.md": md})
     g, _ = book("adoc-variant", {"ch1.adoc": "= One\n\nWeb text.\n",
                                  "ch1.print.adoc": "= One\n\nPrint text.\n"},
                 "targets:\n  web:\n    format: html\n"
@@ -477,8 +476,6 @@ def case_stem_collisions(work):
         ("two variants of one page for one target stop the run",
          lambda: variant.returncode != 0
          and "variant of the same page" in said(variant)),
-        ("an .md beside its .docx is still a v0.1 leftover, not a clash",
-         lambda: leftover.returncode in (0, 1) and exists(e, "html", "x.html")),
         ("an AsciiDoc variant replaces its page for its target, and isn't "
          "a page of its own",
          lambda: "Print text." in read(g, "print", "ch1.html")
@@ -509,7 +506,7 @@ def case_adopt(work):
               encoding="utf-8") as fh:
         fh.write(HAND.replace("Front Matter", "About"))
     convert(work, "defaults:\n  pages:\n    split_level: 2\n"
-                  "targets:\n  html:\n    format: html\n")
+                  "targets:\n  html:\n    format: html\n", fixtures=())
     out = work + "-adopted"
     adopted = subprocess.run(
         ["python3", os.path.join(BIN, "adopt-pages.py"),
@@ -624,7 +621,7 @@ def case_menu(work):
     result = convert(work, "defaults:\n  pages:\n    split_level: 2\n"
                            "targets:\n  html:\n    format: html\n"
                            "    menu: \"on\"\n"
-                           "  plain:\n    format: html\n")
+                           "  plain:\n    format: html\n", fixtures=())
     first = read(work, "html", "ch1--first-part.html") if exists(
         work, "html", "ch1--first-part.html") else ""
     checks = read(work, "output-check.csv") if exists(
@@ -701,7 +698,7 @@ def case_markdown_html(work):
         fh.write(RAW_MD)
     result = convert(work, "targets:\n  html:\n    format: html\n"
                            "  md:\n    format: markdown\n"
-                           "  epub:\n    format: epub3\n")
+                           "  epub:\n    format: epub3\n", fixtures=())
     page = read(work, "html", "raw.html") if exists(
         work, "html", "raw.html") else ""
     chapter, epub_text = "", ""
@@ -717,7 +714,7 @@ def case_markdown_html(work):
                               book.read(n).decode("utf-8", "replace"))
     return [
         ("a superscript written in HTML is a superscript",
-         lambda: result.returncode in (0, 1) and "mc<sup>2</sup>" in page),
+         lambda: result.returncode == 0 and "mc<sup>2</sup>" in page),
         ("an HTML image is an image: copied, and without align",
          lambda: re.search(r'<img\s+src="assets/Curve\.png"[^>]*alt="A curve"',
                            page) and 'align="left"' not in page
@@ -946,7 +943,7 @@ def case_warc_direct(work):
                 fh.write(text)
 
     def run(where, *flags):
-        return subprocess.run(["python3", os.path.join(BIN, "convert.py"),
+        return subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick",
                                "--quiet", *flags], cwd=where,
                               capture_output=True, text=True,
                               stdin=subprocess.DEVNULL)
@@ -1077,7 +1074,7 @@ def case_cartridge(work):
     with open(os.path.join(book, "conversion.yaml"), "w") as fh:
         fh.write("targets:\n  html:\n    format: html\n"
                  "  epub:\n    format: epub3\n")
-    run = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quiet"],
+    run = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
                          cwd=book, capture_output=True, text=True,
                          stdin=subprocess.DEVNULL)
     project = open(os.path.join(book, "project.yaml")).read() if exists(
@@ -1105,7 +1102,7 @@ def case_cartridge(work):
     with open(os.path.join(linked, "conversion.yaml"), "w") as fh:
         fh.write("targets:\n  html:\n    format: html\n"
                  "  epub:\n    format: epub3\n")
-    subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quiet",
+    subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet",
                     "--linked-documents"], cwd=linked, capture_output=True,
                    text=True, stdin=subprocess.DEVNULL)
     linked_project = open(os.path.join(linked, "project.yaml")).read() if exists(
@@ -1124,7 +1121,7 @@ def case_cartridge(work):
         shutil.copy(built, back)
     with open(os.path.join(back, "conversion.yaml"), "w") as fh:
         fh.write("targets:\n  html:\n    format: html\n")
-    subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quiet"],
+    subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
                    cwd=back, capture_output=True, text=True,
                    stdin=subprocess.DEVNULL)
     agree = subprocess.run(["python3", os.path.join(ROOT, "util", "compare-output.py"),
@@ -1201,7 +1198,7 @@ def case_zip(work):
         fh.write("targets:\n  html:\n    format: html\n")
 
     def run(where):
-        return subprocess.run(["python3", os.path.join(BIN, "convert.py"),
+        return subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick",
                                "--quiet"], cwd=where, capture_output=True,
                               text=True, stdin=subprocess.DEVNULL)
     first = run(book)
@@ -1306,7 +1303,7 @@ def case_mathjax2(work):
         fh.write(MATHJAX2)
     with open(os.path.join(work, "conversion.yaml"), "w") as fh:
         fh.write("targets:\n  html:\n    format: html\n  md:\n    format: markdown\n")
-    run = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quiet"],
+    run = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
                          cwd=work, capture_output=True, text=True,
                          stdin=subprocess.DEVNULL)
     page = read(work, "html", "growth.html") if exists(work, "html", "growth.html") else ""
@@ -1316,7 +1313,7 @@ def case_mathjax2(work):
         with open(os.path.join(back, "conversion.yaml"), "w") as fh:
             fh.write("targets:\n  html:\n    format: html\n")
         try:
-            subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quiet"],
+            subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
                            cwd=back, capture_output=True, text=True,
                            stdin=subprocess.DEVNULL, timeout=120)
         except subprocess.TimeoutExpired:
@@ -1354,7 +1351,7 @@ def case_asciidoc_layout(work):
         fh.write(ONE_PIXEL)
     with open(os.path.join(work, "conversion.yaml"), "w") as fh:
         fh.write("targets:\n  html:\n    format: html\n  epub:\n    format: epub3\n")
-    subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quiet"],
+    subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
                    cwd=work, capture_output=True, text=True,
                    stdin=subprocess.DEVNULL)
     page = read(work, "html", "ch.html") if exists(work, "html", "ch.html") else ""
@@ -1366,8 +1363,7 @@ def case_asciidoc_layout(work):
                 with zipfile.ZipFile(os.path.join(root_dir, name)) as z:
                     epub_text = "".join(z.read(n).decode("utf-8", "replace")
                                         for n in z.namelist() if n.endswith(".xhtml"))
-    checked = open(os.path.join(work, "output-check.csv")).read() if exists(
-        work, "output-check.csv") else ""
+    validated = epubcheck((glob.glob(os.path.join(work, "epub", "*.epub")) or [""])[0])
     bad = r"<(figure|div|pre|table)\b[^>]*\b(width|target)="
     return [
         ("no width or target on a block, in the HTML or the EPUB",
@@ -1376,7 +1372,7 @@ def case_asciidoc_layout(work):
         ("an image block's width is its image's",
          lambda: re.search(r'<img [^>]*width="300"', page)),
         ("epubcheck finds nothing to object to, where it's installed",
-         lambda: "epubcheck:RSC-005" not in checked),
+         lambda: validated == [] if validated is not None else True),
     ]
 
 
@@ -1426,7 +1422,7 @@ def case_pdf_without_latex(work):
         found = shutil.which(program)
         if found:
             os.symlink(found, os.path.join(tools, program))
-    result = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quiet"],
+    result = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
                             cwd=work, capture_output=True, text=True,
                             stdin=subprocess.DEVNULL,
                             env=dict(os.environ, PATH=tools))
@@ -1456,7 +1452,7 @@ def case_word_bookmarks(work):
     def build(setting):
         with open(os.path.join(work, "conversion.yaml"), "w") as fh:
             fh.write("targets:\n  word:\n    format: docx\n" + setting)
-        result = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quiet"],
+        result = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
                                 cwd=work, capture_output=True, text=True,
                                 stdin=subprocess.DEVNULL)
         names = {}
@@ -1509,7 +1505,7 @@ def case_pdf_svg_without_converter(work):
     with open(fake, "w") as fh:
         fh.write("#!/bin/sh\necho 'OERFMT:2026-06-01'\n")
     os.chmod(fake, 0o755)
-    result = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quiet"],
+    result = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
                             cwd=work, capture_output=True, text=True,
                             stdin=subprocess.DEVNULL,
                             env=dict(os.environ, PATH=tools))
@@ -1541,7 +1537,7 @@ def case_pdf_with_old_latex(work):
     with open(fake, "w") as fh:
         fh.write("#!/bin/sh\necho 'OERFMT:2023-11-01'\n")
     os.chmod(fake, 0o755)
-    result = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quiet"],
+    result = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
                             cwd=work, capture_output=True, text=True,
                             stdin=subprocess.DEVNULL,
                             env=dict(os.environ, PATH=tools))
@@ -1550,6 +1546,73 @@ def case_pdf_with_old_latex(work):
         ("an old LaTeX stops the PDF, naming the release found and the one needed",
          lambda: result.returncode != 0 and "2023-11-01" in said
          and "2025-11-01" in said and not exists(work, "print")),
+    ]
+
+
+# What LuaHBTeX 1.24 (TeX Live 2026) writes in its log when a book outgrows
+# one of TeX's tables: three million names fill its strings, a table of
+# fixed size; a macro that calls itself without end fills the input stack.
+CAPACITY_LOGS = {
+    "strings": "! TeX capacity exceeded, sorry [number of strings=475604].\n"
+               "\\iterate ->\\expandafter \\def \\csname x\\the \\n \n"
+               "                                              \\endcsname {} \\advance \\n 1 \\i...\n"
+               "l.4 ...name{} \\advance\\n1 \\ifnum\\n<3000000 \\repeat\n",
+    "recursion": "! TeX capacity exceeded, sorry [input stack size=10000].\n"
+                 "\\a ->\\a \n"
+                 "        \\relax \n"
+                 "l.4 \\def\\a{\\a\\relax}\\a\n",
+}
+
+
+def case_pdf_capacity(work):
+    """A book that outgrows one of TeX's tables, and one whose macro calls
+    itself without end: the PDF target names each for what it is. The
+    LuaLaTeX here answers the release probe and fails a build as LuaTeX
+    does, its log in LuaTeX's words; the real thing takes Pandoc's four
+    LaTeX runs a build (it reruns while there's a .toc, which the pages'
+    LaTeX always has, whatever the exit status), about eight seconds a run
+    for the strings."""
+    said = {}
+    for name, log in CAPACITY_LOGS.items():
+        book = os.path.join(work, name)
+        os.makedirs(book)
+        with open(os.path.join(book, "page.md"), "w") as fh:
+            fh.write("# Page\n\nText.\n")
+        with open(os.path.join(book, "conversion.yaml"), "w") as fh:
+            fh.write("targets:\n  pdf:\n    format: pdf\n")
+        tools = book + "-bin"
+        os.makedirs(tools)
+        for program in ("pandoc", "python3", "file"):
+            found = shutil.which(program)
+            if found:
+                os.symlink(found, os.path.join(tools, program))
+        # The shell's own commands only: the path holds nothing else.
+        fake = os.path.join(tools, "lualatex")
+        with open(fake, "w") as fh:
+            fh.write("#!/bin/sh\n"
+                     "case \"$*\" in *OERFMT*) echo 'OERFMT:2026-06-01'; exit 0 ;; esac\n"
+                     "out=.\n"
+                     "while [ $# -gt 1 ]; do\n"
+                     "  [ \"$1\" = -output-directory ] && out=\"$2\"\n"
+                     "  shift\n"
+                     "done\n"
+                     "name=${1##*/}\n"
+                     "printf '%s\\n' " + " ".join("'%s'" % line for line in log.splitlines())
+                     + " > \"$out/${name%.tex}.log\"\n"
+                     "exit 1\n")
+        os.chmod(fake, 0o755)
+        result = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
+                                cwd=book, capture_output=True, text=True,
+                                stdin=subprocess.DEVNULL, env=dict(os.environ, PATH=tools))
+        said[name] = result.stdout + result.stderr
+    return [
+        ("a book too big for TeX's tables is named as that, with the way to raise them",
+         lambda: "LaTeX ran out of number of strings" in said["strings"]
+         and "max_strings" in said["strings"] and "wasn't built" in said["strings"]),
+        ("a macro that calls itself without end is named as that, not as size",
+         lambda: "LaTeX ran out of input stack size" in said["recursion"]
+         and "calls itself without end" in said["recursion"]
+         and "max_strings" not in said["recursion"]),
     ]
 
 
@@ -1571,12 +1634,13 @@ def case_html_ids(work):
         fh.write("targets:\n  html:\n    format: html\n  epub:\n    format: epub3\n")
     with open(os.path.join(work, "project.yaml"), "w") as fh:
         fh.write("project:\n  identifier: org.example.ids\n  title: Ids\n")
-    subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quiet"],
+    subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
                    cwd=work, capture_output=True, text=True, stdin=subprocess.DEVNULL)
     a = read(work, "html", "a.html") if exists(work, "html", "a.html") else ""
     b = read(work, "html", "b.html") if exists(work, "html", "b.html") else ""
     checked = open(os.path.join(work, "output-check.csv")).read() if exists(
         work, "output-check.csv") else ""
+    validated = epubcheck(os.path.join(work, "epub", "org.example.ids.epub"))
     return [
         ("an id's whitespace becomes a hyphen",
          lambda: 'id="section-15"' in a and 'id="section 15"' not in a),
@@ -1584,8 +1648,8 @@ def case_html_ids(work):
          lambda: a.count('href="#section-15"') == 2
          and 'href="a.html#section-15"' in b),
         ("nothing is reported missing, and epubcheck has no complaint",
-         lambda: exists(work, "epub") and "missing-fragment" not in checked
-         and "RSC-005" not in checked),
+         lambda: exists(work, "epub", "org.example.ids.epub") and "missing-fragment" not in checked
+         and (validated == [] if validated is not None else True)),
     ]
 
 
@@ -1609,7 +1673,7 @@ def case_html_images(work):
                  'style="border: 0"></iframe></p></body></html>')
     with open(os.path.join(work, "conversion.yaml"), "w") as fh:
         fh.write("targets:\n  html:\n    format: html\n")
-    subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quiet"],
+    subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
                    cwd=work, capture_output=True, text=True, stdin=subprocess.DEVNULL)
     page = read(work, "html", "p.html") if exists(work, "html", "p.html") else ""
     images = re.findall(r"<img[^>]*>", page)
@@ -1640,14 +1704,14 @@ def case_asciidoc_markdown(work):
         fh.write(ONE_PIXEL)
     with open(os.path.join(work, "conversion.yaml"), "w") as fh:
         fh.write("targets:\n  html:\n    format: html\n  md:\n    format: markdown\n")
-    subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quiet"],
+    subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
                    cwd=work, capture_output=True, text=True, stdin=subprocess.DEVNULL)
     back = work + "-back"
     if exists(work, "md"):
         shutil.copytree(os.path.join(work, "md"), back)
         with open(os.path.join(back, "conversion.yaml"), "w") as fh:
             fh.write("targets:\n  html:\n    format: html\n")
-        subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quiet"],
+        subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
                        cwd=back, capture_output=True, text=True, stdin=subprocess.DEVNULL)
     agree = subprocess.run(["python3", os.path.join(ROOT, "util", "compare-output.py"),
                             os.path.join(work, "html"), os.path.join(back, "html")],
@@ -1790,7 +1854,7 @@ def case_asciidoc_target(work):
     def convert_in(where, config):
         with open(os.path.join(where, "conversion.yaml"), "w") as fh:
             fh.write(config)
-        subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quiet"],
+        subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
                        cwd=where, capture_output=True, text=True,
                        stdin=subprocess.DEVNULL)
 
@@ -1870,14 +1934,14 @@ def case_title_id(work):
         fh.write("---\ntitle: Sets\n---\n\n## Sets\n\nText.\n")
     with open(os.path.join(work, "conversion.yaml"), "w") as fh:
         fh.write("targets:\n  html:\n    format: html\n")
-    subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quiet"],
+    subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
                    cwd=work, capture_output=True, text=True, stdin=subprocess.DEVNULL)
     again = work + "-again"
     if exists(work, "html"):
         shutil.copytree(os.path.join(work, "html"), again)
         with open(os.path.join(again, "conversion.yaml"), "w") as fh:
             fh.write("targets:\n  html:\n    format: html\n")
-    run = subprocess.run(["python3", os.path.join(BIN, "convert.py")], cwd=again,
+    run = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick"], cwd=again,
                          capture_output=True, text=True, stdin=subprocess.DEVNULL)
     page = read(again, "html", "sets.html") if exists(again, "html", "sets.html") else ""
     return [
@@ -1932,7 +1996,7 @@ def case_link_titles(work):
     def convert_in(where, config):
         with open(os.path.join(where, "conversion.yaml"), "w") as fh:
             fh.write(config)
-        subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quiet"],
+        subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
                        cwd=where, capture_output=True, text=True, stdin=subprocess.DEVNULL)
     convert_in(work, "targets:\n  html:\n    format: html\n  md:\n    format: markdown\n"
                      "  adoc:\n    format: asciidoc\n")
@@ -1987,7 +2051,7 @@ def case_html_table_repairs(work):
                  '</body></html>')
     with open(os.path.join(work, "conversion.yaml"), "w") as fh:
         fh.write("targets:\n  html:\n    format: html\n")
-    subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quiet"],
+    subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
                    cwd=work, capture_output=True, text=True, stdin=subprocess.DEVNULL)
     page = read(work, "html", "t.html") if exists(work, "html", "t.html") else ""
     return [
@@ -2026,7 +2090,7 @@ def case_bare_links(work):
         fh.write("targets:\n  html:\n    format: html\n")
 
     def run():
-        return subprocess.run(["python3", os.path.join(BIN, "convert.py")], cwd=work,
+        return subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick"], cwd=work,
                               capture_output=True, text=True, stdin=subprocess.DEVNULL)
     first = run()
     report = []
@@ -2137,7 +2201,7 @@ def case_word_equations(work):
     def build(setting):
         with open(os.path.join(work, "conversion.yaml"), "w") as fh:
             fh.write("targets:\n  source:\n    format: source\n" + setting)
-        result = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quiet"],
+        result = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
                                 cwd=work, capture_output=True, text=True,
                                 stdin=subprocess.DEVNULL)
         back = subprocess.run(["pandoc", "-f", "docx", "-t", "json",
@@ -2216,7 +2280,7 @@ def case_word_text_math(work):
     def build(setting):
         with open(os.path.join(work, "conversion.yaml"), "w") as fh:
             fh.write("targets:\n  source:\n    format: source\n" + setting)
-        result = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quiet"],
+        result = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
                                 cwd=work, capture_output=True, text=True,
                                 stdin=subprocess.DEVNULL)
         back = subprocess.run(["pandoc", "-f", "docx", "-t", "markdown", "--wrap=none",
@@ -2298,7 +2362,7 @@ def case_source_target(work):
             fh.write("targets:\n  html:\n    format: html\n  fixed:\n    format: source\n" + extra)
 
     def run():
-        return subprocess.run([sys.executable, "-B", os.path.join(BIN, "convert.py")],
+        return subprocess.run([sys.executable, "-B", os.path.join(BIN, "convert.py"), "--quick"],
                               cwd=work, capture_output=True, text=True)
 
     def differ(n):
@@ -2417,7 +2481,7 @@ def case_word_repairs(work):
     def run(config):
         with open(os.path.join(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
             fh.write(config)
-        result = subprocess.run([sys.executable, "-B", os.path.join(BIN, "convert.py")],
+        result = subprocess.run([sys.executable, "-B", os.path.join(BIN, "convert.py"), "--quick"],
                                 cwd=work, capture_output=True, text=True)
         pages = "".join(read(work, "html", f) for f in sorted(os.listdir(os.path.join(work, "html")))
                         if f.endswith(".html")) if exists(work, "html") else ""
@@ -2477,7 +2541,7 @@ def case_markdown_source(work):
     def run():
         with open(os.path.join(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
             fh.write("targets:\n  html:\n    format: html\n  mine:\n    format: source\n")
-        return subprocess.run([sys.executable, "-B", os.path.join(BIN, "convert.py")],
+        return subprocess.run([sys.executable, "-B", os.path.join(BIN, "convert.py"), "--quick"],
                               cwd=work, capture_output=True, text=True)
 
     first = run()
@@ -2527,7 +2591,7 @@ def adoc_root_reads_back(work):
     shutil.copytree(os.path.join(work, "adoc"), back)
     with open(os.path.join(back, "conversion.yaml"), "w", encoding="utf-8") as fh:
         fh.write("targets:\n  html:\n    format: html\n")
-    subprocess.run([sys.executable, "-B", os.path.join(BIN, "convert.py")],
+    subprocess.run([sys.executable, "-B", os.path.join(BIN, "convert.py"), "--quick"],
                    cwd=back, capture_output=True, text=True)
     page = os.path.join(back, "html", "ch.html")
     return os.path.exists(page) and "<mroot>" in open(page, encoding="utf-8").read()
@@ -2542,7 +2606,7 @@ def case_fidelity_writers(work):
                  "A cube root, $\\sqrt[3]{x}$.\n")
     with open(os.path.join(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
         fh.write("targets:\n  md:\n    format: markdown\n  adoc:\n    format: asciidoc\n")
-    run = subprocess.run([sys.executable, "-B", os.path.join(BIN, "convert.py")],
+    run = subprocess.run([sys.executable, "-B", os.path.join(BIN, "convert.py"), "--quick"],
                          cwd=work, capture_output=True, text=True)
     report = read(work, "fidelity.csv") if exists(work, "fidelity.csv") else ""
     return [
@@ -2568,7 +2632,7 @@ def case_fidelity_epub(work):
                  '<p>The <a href="handout.pdf">handout</a>.</p></body></html>')
     with open(os.path.join(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
         fh.write("targets:\n  epub:\n    format: epub3\n  word:\n    format: docx\n")
-    run = subprocess.run([sys.executable, "-B", os.path.join(BIN, "convert.py")],
+    run = subprocess.run([sys.executable, "-B", os.path.join(BIN, "convert.py"), "--quick"],
                          cwd=work, capture_output=True, text=True)
     report = read(work, "fidelity.csv") if exists(work, "fidelity.csv") else ""
     return [
@@ -2704,7 +2768,7 @@ def case_docx_target(work):
         fh.write("Image,Alt\nassets/rule.png,[decorative]\n")
     with open(os.path.join(work, "conversion.yaml"), "w") as fh:
         fh.write("targets:\n  word:\n    format: docx\n")
-    run = subprocess.run(["python3", os.path.join(BIN, "convert.py")], cwd=work,
+    run = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick"], cwd=work,
                          capture_output=True, text=True, stdin=subprocess.DEVNULL)
 
     def part(name, inside):
@@ -2723,7 +2787,7 @@ def case_docx_target(work):
             shutil.copy(os.path.join(work, "word", name), back)
     with open(os.path.join(back, "conversion.yaml"), "w") as fh:
         fh.write("targets:\n  html:\n    format: html\n")
-    subprocess.run(["python3", os.path.join(BIN, "convert.py")], cwd=back,
+    subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick"], cwd=back,
                    capture_output=True, text=True, stdin=subprocess.DEVNULL)
     one_back = read(back, "html", "one.html") if exists(back, "html", "one.html") else ""
     two_back = read(back, "html", "two.html") if exists(back, "html", "two.html") else ""
@@ -2848,7 +2912,7 @@ def case_title_heading(work):
     EPUB's title page follows the book's structure (title_page: auto)."""
     said = {}
 
-    def book(name, pages, targets, extra=""):
+    def book(name, pages, targets, extra="", project=""):
         path = os.path.join(work, name)
         os.makedirs(path)
         for stem, text in pages:
@@ -2857,10 +2921,10 @@ def case_title_heading(work):
         with open(os.path.join(path, "project.yaml"), "w", encoding="utf-8") as fh:
             fh.write("project:\n  title: The Book\n  identifier: org.example.%s\n"
                      "  language: en-US\n  contents:\n" % name
-                     + "".join("    - %s\n" % stem for stem, _ in pages))
+                     + "".join("    - %s\n" % stem for stem, _ in pages) + project)
         with open(os.path.join(path, "conversion.yaml"), "w", encoding="utf-8") as fh:
             fh.write("targets:\n" + targets + extra)
-        result = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quiet"], cwd=path,
+        result = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"], cwd=path,
                                 capture_output=True, text=True, stdin=subprocess.DEVNULL)
         said[name] = result.stdout + result.stderr
         return path
@@ -2906,11 +2970,7 @@ def case_title_heading(work):
     # A numbered book whose page title is long enough for the writer to wrap.
     long_title = "A Chapter Title Long Enough That the HTML Writer Wraps It Across Two Lines"
     wrapped = book("wrapped", [("a", "# %s\n\nText.\n" % long_title), ("b", "# Beta\n\nText.\n")],
-                   "  html:\n    format: html\n")
-    with open(os.path.join(wrapped, "project.yaml"), "a", encoding="utf-8") as fh:
-        fh.write("  numbering: true\n")
-    subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quiet"], cwd=wrapped,
-                   capture_output=True, text=True, stdin=subprocess.DEVNULL)
+                   "  html:\n    format: html\n", project="  numbering: true\n")
     wrapped_html = " ".join(read(wrapped, "html", "a.html").split()) if exists(wrapped, "html", "a.html") else ""
     return [
         ("the HTML has the page's H1 in its body, with its id, and no title block",
@@ -2979,7 +3039,7 @@ def case_review_columns(work):
         fh.write("targets:\n  html:\n    format: html\n")
 
     def run():
-        return subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quiet"], cwd=work,
+        return subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"], cwd=work,
                               capture_output=True, text=True, stdin=subprocess.DEVNULL)
 
     def header(name):
@@ -3163,7 +3223,7 @@ def case_quoted_lists(work):
                      % os.path.basename(path))
         with open(os.path.join(path, "conversion.yaml"), "w", encoding="utf-8") as fh:
             fh.write("targets:\n" + targets)
-        subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quiet"], cwd=path,
+        subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"], cwd=path,
                        capture_output=True, text=True, stdin=subprocess.DEVNULL)
 
     def markdown(path, stem):
@@ -3395,7 +3455,7 @@ def case_notes(work):
         r = convert(d, "defaults:\n  pages:\n    split_level: 2\n  notes:\n"
                        f"    numbering: {numbering}\n    placement: "
                        f"{placement}\ntargets:\n  html:\n    format: html\n"
-                       "  epub:\n    format: epub3\n")
+                       "  epub:\n    format: epub3\n", fixtures=())
         nav = ""
         e = os.path.join(d, "epub", "org.example.fixtures.epub")
         if os.path.exists(e):
@@ -3456,8 +3516,7 @@ def case_notes(work):
                                                                 "ch1.html")
          and 'href="ch1.html#fnref1"' in read(gg, "html",
                                               "ch1--second-section.html")),
-        # The fixture .docx pages are in the book too and form groups of
-        # one with no notes, so two groups have headings on the page.
+        # Both chapters have notes, so each has its heading there.
         ("book placement makes a Notes page with a heading per group",
          lambda: r3.returncode == 0
          and read(gb, "html", "notes.html").count("<h2>") == 2
@@ -3494,7 +3553,7 @@ def case_structure(work):
     # First run: no contents, so the guess reads the markers.
     first = convert(work, "defaults:\n  pages:\n    split_level: 2\n"
                           "targets:\n  html:\n    format: html\n"
-                          "  epub:\n    format: epub3\n")
+                          "  epub:\n    format: epub3\n", fixtures=())
     sample = yaml.safe_load(open(os.path.join(work, "project-sample.yaml"),
                                  encoding="utf-8"))["project"]["contents"]
     roles = {str(n.get("title", n.get("page"))): n.get("role")
@@ -3510,7 +3569,7 @@ def case_structure(work):
                                     "title": "The Book", "numbering": True,
                                     "contents": sample}}, fh, sort_keys=False)
     second = subprocess.run(
-        ["python3", os.path.join(BIN, "convert.py"), "--quiet"], cwd=work,
+        ["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"], cwd=work,
         capture_output=True, text=True, stdin=subprocess.DEVNULL)
     toc = read(work, "html", "toc.html") if exists(work, "html", "toc.html") \
         else ""
@@ -3589,7 +3648,7 @@ def case_editions(work):
     result = convert(work, "targets:\n  web:\n    format: html\n"
                            "  print:\n    format: html\n"
                            "    title_block: \"off\"\n"
-                           "  epub:\n    format: epub3\n")
+                           "  epub:\n    format: epub3\n", fixtures=())
 
     def page(target, stem):
         return read(work, target, stem + ".html") if exists(
@@ -3639,7 +3698,7 @@ def case_markdown_target(work):
     for name in ("project.yaml", "conversion.yaml"):
         shutil.copy(os.path.join(first, name), os.path.join(second, name))
     again = subprocess.run(
-        ["python3", os.path.join(BIN, "convert.py"), "--quiet"], cwd=second,
+        ["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"], cwd=second,
         capture_output=True, text=True, stdin=subprocess.DEVNULL)
     compare = subprocess.run(
         ["python3", os.path.join(ROOT, "util", "compare-output.py"),
@@ -3658,7 +3717,7 @@ def case_markdown_target(work):
             shutil.copy(src, os.path.join(third, name))
     for name in ("project.yaml", "conversion.yaml"):
         shutil.copy(os.path.join(first, name), os.path.join(third, name))
-    subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quiet"],
+    subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
                    cwd=third, capture_output=True, text=True,
                    stdin=subprocess.DEVNULL)
     mds = [n for n in os.listdir(os.path.join(first, "src"))
@@ -3706,10 +3765,25 @@ def case_merge(work):
             fh.write(text)
     result = convert(work, "defaults:\n  pages:\n    split_level: 2\n"
                            "targets:\n  src:\n    format: markdown\n"
-                           "    merge: groups\n")
+                           "    merge: groups\n", fixtures=())
     one = read(work, "src", "ch1.md") if exists(work, "src", "ch1.md") else ""
     two = read(work, "src", "ch2.md") if exists(work, "src", "ch2.md") else ""
     levels = [len(m.group(1)) for m in re.finditer(r"^(#+) ", one, re.M)]
+    # Two groups whose pages are all one source's: neither file holds all
+    # of the source's pages, so neither is named for it, and both survive.
+    single = work + "-one-source"
+    os.makedirs(single)
+    with open(os.path.join(single, "book.md"), "w", encoding="utf-8") as fh:
+        fh.write("# Book\n\nIntro.\n\n## One\n\nA.\n\n## Two\n\nB.\n")
+    with open(os.path.join(single, "project.yaml"), "w", encoding="utf-8") as fh:
+        fh.write("project:\n  identifier: org.example.halves\n  title: Halves\n"
+                 "  contents:\n    - title: First Half\n      items: [book, book--one]\n"
+                 "    - title: Second Half\n      items: [book--two]\n")
+    convert(single, "defaults:\n  pages:\n    split_level: 2\n"
+                    "targets:\n  src:\n    format: markdown\n    merge: groups\n",
+            project=False, fixtures=())
+    halves = {n: read(single, "src", n) for n in os.listdir(os.path.join(single, "src"))
+              if n.endswith(".md")} if exists(single, "src") else {}
     return [
         ("the run succeeds", lambda: result.returncode == 0),
         ("a chapter's pages come back as one file",
@@ -3727,8 +3801,9 @@ def case_merge(work):
         ("a link to another file names that file, where its target went",
          lambda: "](ch2.md#ch2--only)" in one),
         ("two groups from one source get a file each, not one file",
-         lambda: len([n for n in os.listdir(os.path.join(work, "src"))
-                      if n.endswith(".md")]) >= 2),
+         lambda: len(halves) == 2 and "book.md" not in halves
+         and any("A." in t and "B." not in t for t in halves.values())
+         and any("B." in t and "A." not in t for t in halves.values())),
         ("an id two pages shared is renamed, and its page's link follows",
          lambda: one.count("#dup)") == 1 and two.count("#dup)") == 1),
     ]
@@ -3736,23 +3811,27 @@ def case_merge(work):
 
 
 def case_book_name(work):
-    """Where the book is named: project.yaml for both halves. A target that
-    writes a book takes a master's title with a warning, isn't written with
-    nothing to name it, and says to move a packaging.yaml block; the first
-    run writes project-sample.yaml and the commands for the other two
-    samples, which --init writes keeping what the files set."""
+    """Where the book is named: project.yaml for both halves, or a half's
+    own project: block, files that disagree stopping the run. A target that
+    writes a book takes a master's title with a warning and isn't written
+    with nothing to name it; the first run writes project-sample.yaml and
+    the commands for the other two samples, which --init writes keeping
+    what the files set."""
     import yaml
     import zipfile
 
     def book(name, files):
+        """A book of two pages and the files given, None leaving one out."""
         folder = os.path.join(work, name)
         os.makedirs(folder)
         pages = {"one.md": "---\ntitle: One\nlang: en\n---\n\n# One\n\nText.\n",
                  "two.md": "---\ntitle: Two\nlang: en\n---\n\n# Two\n\nMore.\n"}
         for file, text in dict(pages, **files).items():
+            if text is None:
+                continue
             with open(os.path.join(folder, file), "w", encoding="utf-8") as fh:
                 fh.write(text)
-        done = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quiet"],
+        done = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
                               cwd=folder, capture_output=True, text=True,
                               stdin=subprocess.DEVNULL)
         return folder, done, done.stdout + done.stderr
@@ -3792,12 +3871,7 @@ def case_book_name(work):
     untitled, untitled_run, untitled_said = book("untitled", {
         "conversion.yaml": both,
         "project.yaml": "project:\n  identifier: org.example.u\n  title: Untitled\n"})
-    lone, lone_run, lone_said = book("lone", {"conversion.yaml": both})
-    os.remove(os.path.join(lone, "two.md"))
-    lone_run = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quiet"],
-                              cwd=lone, capture_output=True, text=True,
-                              stdin=subprocess.DEVNULL)
-    lone_said = lone_run.stdout + lone_run.stderr
+    lone, lone_run, lone_said = book("lone", {"conversion.yaml": both, "two.md": None})
     checked = os.path.join(work, "checked")
     os.makedirs(checked)
     for file, text in {"index.adoc": "= A Checked Book\n\ninclude::b.adoc[]\n\n"
@@ -3805,7 +3879,7 @@ def case_book_name(work):
                        "a.adoc": "= A\n\nText.\n", "b.adoc": "= B\n\nText.\n"}.items():
         with open(os.path.join(checked, file), "w", encoding="utf-8") as fh:
             fh.write(text)
-    subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quiet", "--check-only"],
+    subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet", "--check-only"],
                    cwd=checked, capture_output=True, text=True, stdin=subprocess.DEVNULL)
     title = ""
     epubs = glob.glob(os.path.join(adoc, "epub", "*.epub"))
@@ -3966,6 +4040,7 @@ CASES = [
     ("a pdf target without LuaLaTeX", case_pdf_without_latex),
     ("a pdf target with a LaTeX too old to tag", case_pdf_with_old_latex),
     ("a pdf target with an SVG and no rsvg-convert", case_pdf_svg_without_converter),
+    ("a pdf target whose LaTeX runs out of room", case_pdf_capacity),
     ("a docx target's bookmarks", case_word_bookmarks),
     ("a page's title heading, and the title page", case_title_heading),
     ("who drafted a sidecar value, and whether it's reviewed", case_review_columns),
@@ -3989,7 +4064,6 @@ CASES = [
     ("fidelity.csv for an EPUB target", case_fidelity_epub),
     ("a hand-written page", case_hand_written),
     ("several targets", case_targets),
-    ("arguments passed to the packager", case_passthrough),
 ]
 
 

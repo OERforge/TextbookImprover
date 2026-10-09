@@ -1,7 +1,8 @@
 # Testing
 
 ```bash
-bash tests/run-all.sh
+bash tests/run-all.sh          # cases side by side, on half the processors
+bash tests/run-all.sh -j 1     # one at a time
 ```
 
 Eighteen suites and a check that the settings pages are current, each
@@ -9,16 +10,20 @@ independent, all runnable without network access or a corpus of real
 documents. `run-all.sh` runs every one even if an earlier
 one failed, and exits non-zero if any did.
 
+The convert, LaTeX, and EPUB suites run their cases side by side, each case a process of its own, as many at once as `-j` says (to `run-all.sh` or to the suite): by default half the processors the run may use, which leaves the rest of the machine room. A case's lines are printed whole, in the suite's order, so the output reads as it does one at a time, and `-j 1` runs them one after another in the suite's own process. The PDF suite builds its two books at once with `-j 2` or more. A LaTeX case's TeX runs can take a few hundred megabytes each, so on a machine short of memory a smaller `-j` is the way to go.
+
+The suites' runs of `convert.py` pass `--quick`, so the output check's validators start only where a check reads what they say: epubcheck and the Nu checker in the check suite, epubcheck on the EPUB suite's books and a few of the convert suite's, and veraPDF in the PDF and LaTeX suites. They had started, a Java process each, in every run, which was most of the convert suite's time.
+
 | Suite | What it pins down |
 |---|---|
 | `run-spelling-tests.py` | US spelling in every tracked text file, prose and names alike, naming file and line; a released changelog section is history and skipped. Needs git. |
 | `run-config-tests.py` | Twenty-seven fixtures over the configuration cascade: what a `false` override means, what an explicit `null` means, whether lists append, which identifiers are valid XML names, what happens when a setting is written twice, a sidecar or report setting inside a target, and what a retired setting or another block's says. |
 | `run-roundtrip-test.py` | That writing a configuration and reading it back changes nothing. |
 | `run-unit-tests.py` | The small functions that decide filenames and directory names, and the places where one fact is written down twice and could drift apart. |
-| `run-headers-tests.py` | The table-headers pre-pass end to end, on `.docx` files built as OOXML: keys, the sidecar's values and aliases, the new-rows file, the report, and the stop on a key that matches nothing. |
+| `run-headers-tests.py` | The table-headers pre-pass end to end, on `.docx` files built as OOXML: keys, the sidecar's values and aliases, the new-rows file, the report, and a key that matches nothing set aside, the run going on. |
 | `run-census-tests.py` | The sidecar guess in `lib/tablecensus.py`, against tables built as OOXML so each carries exactly the formatting signals it means to. |
 | `run-portability-test.py` | That every Python file parses on Python 3.9, the oldest version supported. Compiles with `python3.9` if one is installed and scans the source otherwise; looks for an annotation 3.9 can't evaluate either way. |
-| `run-convert-tests.py` | `convert.py` on the fixtures: a bare directory converts into `html/`, several targets each in their own directory sharing or splitting intermediates, media copied, arguments passed through, a Markdown source, a hand-written page, two editions from one directory, footnote numbering and placement (in the EPUB too, where two chapter files can each have an `fn1` and each note's link goes to its own and back), roles and numbering with a contents page, and the Markdown round trip (read back, the HTML is the same; the second write is the fixed point). |
+| `run-convert-tests.py` | `convert.py` on the fixtures: a bare directory converts into `html/`, several targets each in their own directory sharing or splitting intermediates, media copied, arguments passed through, a Markdown source, a hand-written page, a pdf target stopped by a missing LuaLaTeX, an old LaTeX, an SVG with no converter, or a build that outgrows TeX's tables (a stand-in LuaLaTeX writing LuaTeX's own log), two editions from one directory, footnote numbering and placement (in the EPUB too, where two chapter files can each have an `fn1` and each note's link goes to its own and back), roles and numbering with a contents page, and the Markdown round trip (read back, the HTML is the same; the second write is the fixed point). |
 | `run-filter-tests.py` | The accessibility work the Lua filters do, against six small `.docx` fixtures. Needs Pandoc 3.9; skipped with a message otherwise. |
 | `run-check-tests.py` | The output checker: a page that breaks every check and one that breaks none, and an EPUB with a link broken inside the archive by hand. |
 | `run-split-tests.py` | `split-pages.py` on a chapter-shaped document Pandoc builds from Markdown: what a piece is, the names sidecar, links between pieces, and that the packager and the EPUB assembler group the pieces under their source from the provenance each carries. Same Pandoc requirement. |
@@ -30,7 +35,7 @@ one failed, and exits non-zero if any did.
 | `run-audit-tests.py` | The audit on one file of each kind, the shared findings format, the cache, and that the source check and the filter agree about what an image without alt text is. Needs Pandoc. |
 | `run-epub-tests.py` | `build-epub.py` against the same fixtures: the nav mirrors `contents`, each page is its own file titled by its heading, a declared row header survives assembly, ids stay distinct across pages, and the package document claims `alternativeText` only once every image has it. Same Pandoc requirement. |
 
-`run-latex-tests.py` and `run-convert-tests.py` take `--case LABEL`, repeatable, to run only the cases with those labels, as the scripts' `CASES` lists name them.
+`run-latex-tests.py` and `run-convert-tests.py` take `--case LABEL`, repeatable, to run only the cases with those labels, as the scripts' `CASES` lists name them (the LaTeX suite takes any part of a label).
 
 `run-all.sh` ends with `All suites passed.` or with the names of the suites that failed and their `FAIL` and `ERROR` lines repeated, so the reason is at the bottom rather than somewhere in ten suites of output. A check that runs one of the full validators says what the validator returned when it fails, since the usual cause is the tool, not the page.
 

@@ -41,6 +41,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
 import argparse
+import concurrent.futures
 import csv
 import os
 import re
@@ -63,6 +64,8 @@ except ImportError:
 
 sys.path.insert(0, os.path.join(ROOT, "lib"))
 import pdfparagraphs  # noqa: E402
+sys.path.insert(0, HERE)
+import parallel  # noqa: E402
 
 FRONT = r"""---
 title: The Test Book
@@ -548,9 +551,18 @@ def build(work):
     return pypdf.PdfReader(pdf), source, rows, converted.stderr, placements
 
 
-def checks(work):
-    reader, source, rows, log, placements = build(work)
-    ua1_path, ua1_said, ua1_rows = build_ua1(work + "-ua1")
+def checks(work, jobs=1):
+    # The two books, at once when there's room: each is a LaTeX build of
+    # its own, in a directory of its own.
+    if jobs > 1:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+            book = pool.submit(build, work)
+            ua1 = pool.submit(build_ua1, work + "-ua1")
+            reader, source, rows, log, placements = book.result()
+            ua1_path, ua1_said, ua1_rows = ua1.result()
+    else:
+        reader, source, rows, log, placements = build(work)
+        ua1_path, ua1_said, ua1_rows = build_ua1(work + "-ua1")
     ua1_math, ua1_version, ua1_links = ua1_formulas(ua1_path) if os.path.exists(ua1_path) \
         else ([], "", [])
     ua1_roles = dict(f for f in ua1_math if f[0] == "roles").get("roles", [])
@@ -760,6 +772,10 @@ def main():
         description="Check the pdf target against a small Markdown book.")
     parser.add_argument("--keep", action="store_true",
                         help="leave the built output in place")
+    parser.add_argument("-j", "--jobs", type=int, default=parallel.default_jobs(),
+                        metavar="N", help="with 2 or more, build the two books at "
+                        "once (default: half the processors, "
+                        f"{parallel.default_jobs()} here)")
     arguments = parser.parse_args()
 
     if shutil.which("pandoc") is None:
@@ -795,7 +811,7 @@ def main():
     failed = 0
     try:
         try:
-            items = checks(work)
+            items = checks(work, arguments.jobs)
         except Exception as exc:
             print(f"  ERROR building the book: {exc}")
             return 1

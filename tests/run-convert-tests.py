@@ -28,6 +28,7 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
+import argparse
 import csv
 import glob
 import json
@@ -43,6 +44,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 BIN = os.path.join(ROOT, "bin")
 FIXTURES = os.path.join(HERE, "fixtures")
+sys.path.insert(0, HERE)
+import parallel  # noqa: E402
 NEEDED = ["metadata", "tables", "tables-b", "media-a", "math"]
 
 MULTI = """\
@@ -4067,20 +4070,14 @@ CASES = [
 ]
 
 
-def main():
-    if shutil.which("pandoc") is None:
-        sys.exit("pandoc is not on the path.")
-    version = subprocess.run(["pandoc", "--version"], capture_output=True,
-                             text=True).stdout.split()[1]
-    if tuple(int(p) for p in re.findall(r"\d+", version)[:3]) < (3, 9):
-        sys.exit(f"Pandoc {version} is too old; these tests need 3.9 or "
-                 "later, as convert.py does.")
-    # --case LABEL (repeatable) runs only those cases.
-    chosen = [sys.argv[i + 1] for i, a in enumerate(sys.argv[:-1]) if a == "--case"]
-    cases = [c for c in CASES if not chosen or c[0] in chosen]
-    if chosen and len(cases) != len(set(chosen)):
-        sys.exit("no case is called " + ", ".join(
-            repr(c) for c in chosen if c not in {label for label, _ in CASES}))
+# The longest cases, started first when they run side by side.
+SLOW = {"where the book is named", "an HTML source", "two files, one page",
+        "a page's title heading, and the title page", "a Common Cartridge",
+        "roles, numbering, and a contents page"}
+
+
+def run_cases(cases):
+    """The cases one after another, here: how many checks failed."""
     work = tempfile.mkdtemp(prefix="convert-tests-")
     failed = 0
     try:
@@ -4101,6 +4098,38 @@ def main():
                 failed += not ok
     finally:
         shutil.rmtree(work, ignore_errors=True)
+    return failed
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Check convert.py, the driver, on the fixtures.")
+    parser.add_argument("--case", action="append", default=[], metavar="LABEL",
+                        help="run only the case with this label, as CASES names it; "
+                             "may be given again")
+    parallel.add_options(parser)
+    arguments = parser.parse_args()
+    if shutil.which("pandoc") is None:
+        sys.exit("pandoc is not on the path.")
+    version = subprocess.run(["pandoc", "--version"], capture_output=True,
+                             text=True).stdout.split()[1]
+    if tuple(int(p) for p in re.findall(r"\d+", version)[:3]) < (3, 9):
+        sys.exit(f"Pandoc {version} is too old; these tests need 3.9 or "
+                 "later, as convert.py does.")
+    if arguments.case_index is not None:
+        # One case, for a run with them side by side: its lines, and how
+        # many failed as the exit status.
+        return min(run_cases([CASES[arguments.case_index]]), parallel.MOST)
+    chosen = arguments.case
+    cases = [c for c in CASES if not chosen or c[0] in chosen]
+    if chosen and len(cases) != len(set(chosen)):
+        sys.exit("no case is called " + ", ".join(
+            repr(c) for c in chosen if c not in {label for label, _ in CASES}))
+    if arguments.jobs > 1 and len(cases) > 1:
+        failed = parallel.run(os.path.abspath(__file__), CASES, chosen,
+                              arguments.jobs, first=SLOW)
+    else:
+        failed = run_cases(cases)
     print(f"\n{failed} check(s) failed across {len(cases)} case(s)"
           if failed else "\nall convert checks passed")
     return 1 if failed else 0

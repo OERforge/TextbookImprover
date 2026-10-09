@@ -59,6 +59,8 @@ import zlib
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 BIN = os.path.join(ROOT, "bin")
+sys.path.insert(0, HERE)
+import parallel  # noqa: E402
 
 MASTER = r"""\documentclass{book}
 \usepackage[english]{babel}
@@ -4696,30 +4698,16 @@ CASES = [("a LaTeX book", case_book), ("two masters", case_masters),
          ("a book set with packages tagging can't take", case_unsupported)]
 
 
-def main():
-    parser = argparse.ArgumentParser(
-        description="Check LaTeX as a source, end to end.")
-    parser.add_argument("--keep", action="store_true",
-                        help="leave the built output in place")
-    parser.add_argument("--case", action="append", default=[],
-                        help="run only the cases whose label holds this "
-                        "(\"source target\", say); may be given again")
-    arguments = parser.parse_args()
-    cases = [(label, case) for label, case in CASES
-             if not arguments.case or any(c in label for c in arguments.case)]
-    if shutil.which("pandoc") is None:
-        sys.exit("pandoc is not on the path.")
-    version = subprocess.run(["pandoc", "--version"], capture_output=True,
-                             text=True).stdout.split()[1]
-    if tuple(int(p) for p in re.findall(r"\d+", version)[:3]) < (3, 9):
-        sys.exit(f"Pandoc {version} is too old; these tests need 3.9 or "
-                 "later, as convert.py does.")
+# The longest cases, started first when they run side by side.
+SLOW = {"a LaTeX book's PDF, from its own LaTeX", "a book made its own way, as OpenIntro is",
+        "the latex target", "a book of documents built on their own",
+        "a book's citations and its bibliography", "a book set with packages tagging can't take"}
+
+
+def run_cases(cases, keep):
+    """The cases one after another, here: how many checks failed."""
     work = tempfile.mkdtemp(prefix="latex-tests-")
     failed = 0
-    lacking = tex_ready()
-    if lacking:
-        print(f"  FAIL  {lacking}")
-        failed += 1
     try:
         for label, case in cases:
             directory = os.path.join(work, re.sub(r"[^\w-]+", "-", label))
@@ -4742,10 +4730,47 @@ def main():
                 sys.stdout.write(said.getvalue())
                 failed += not passed
     finally:
-        if arguments.keep:
+        if keep:
             print(f"\nOutput left in {work}")
         else:
             shutil.rmtree(work, ignore_errors=True)
+    return failed
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Check LaTeX as a source, end to end.")
+    parser.add_argument("--keep", action="store_true",
+                        help="leave the built output in place")
+    parser.add_argument("--case", action="append", default=[],
+                        help="run only the cases whose label holds this "
+                        "(\"source target\", say); may be given again")
+    parallel.add_options(parser)
+    arguments = parser.parse_args()
+    if shutil.which("pandoc") is None:
+        sys.exit("pandoc is not on the path.")
+    version = subprocess.run(["pandoc", "--version"], capture_output=True,
+                             text=True).stdout.split()[1]
+    if tuple(int(p) for p in re.findall(r"\d+", version)[:3]) < (3, 9):
+        sys.exit(f"Pandoc {version} is too old; these tests need 3.9 or "
+                 "later, as convert.py does.")
+    if arguments.case_index is not None:
+        # One case, for a run with them side by side: its lines, and how
+        # many failed as the exit status.
+        return min(run_cases([CASES[arguments.case_index]], arguments.keep), parallel.MOST)
+    cases = [(label, case) for label, case in CASES
+             if not arguments.case or any(c in label for c in arguments.case)]
+    failed = 0
+    lacking = tex_ready()
+    if lacking:
+        print(f"  FAIL  {lacking}")
+        failed += 1
+    if arguments.jobs > 1 and len(cases) > 1:
+        failed += parallel.run(os.path.abspath(__file__), CASES,
+                               {label for label, _ in cases}, arguments.jobs,
+                               extra=["--keep"] if arguments.keep else [], first=SLOW)
+    else:
+        failed += run_cases(cases, arguments.keep)
     print(f"\n{failed} check(s) failed across {len(cases)} case(s)"
           if failed else "\nall LaTeX checks passed")
     return 1 if failed else 0

@@ -2,73 +2,48 @@
 #
 # run-all.sh -- run every check in this directory.
 #
-#     bash tests/run-all.sh
+#     bash tests/run-all.sh          # cases side by side, half the processors
+#     bash tests/run-all.sh -j 4     # four at a time; -j 1, one at a time
 #
 # Exits non-zero if anything failed, so it works as a pre-commit hook or a
 # CI step. Each suite is independent and runs even if an earlier one
 # failed, because knowing everything that broke is more useful than
-# knowing the first thing that broke.
+# knowing the first thing that broke. -j goes to the suites whose cases
+# can run side by side (convert, LaTeX, EPUB) and to the PDF suite, which
+# builds its two books at once; each prints its cases in its own order.
 #
-# WHAT EACH ONE COVERS
+# WHAT EACH ONE COVERS (docs/testing.md says more)
 #
-#   run-spelling-tests.py  US spelling in every tracked text file,
-#                          prose and names alike; a released
-#                          changelog section is history and skipped.
-#   run-config-tests.py    the configuration cascade: what a false
-#                          override means, what an explicit null means,
-#                          whether lists append, which identifiers are
-#                          valid XML names, what happens when a setting is
-#                          written twice. Twenty-seven fixtures, each
-#                          pinning one decision.
-#
-#   run-roundtrip-test.py  that writing a configuration and reading it
-#                          back changes nothing. The test the v0.1 sample
-#                          writer needed and did not have: it dropped
-#                          three settings from a file it called complete.
-#
-#   run-unit-tests.py      the small pure functions that decide filenames
-#                          and directory names, and the places where one
-#                          fact is written down twice and could drift.
-#
-#   run-headers-tests.py   the table-headers pre-pass end to end: keys,
-#                          the sidecar's values and aliases, the new-rows
-#                          file, the report, and the unmatched-key stop.
-#
-#   run-census-tests.py    the sidecar guess in lib/tablecensus.py,
-#                          against tables built as OOXML so each carries
-#                          exactly the formatting signals it means to.
-#
+#   run-portability-test.py  every Python file parses on Python 3.9, the
+#                          oldest supported; first, since a file that
+#                          doesn't parse makes every other result
+#                          meaningless on someone else's machine.
 #   settings-reference.py  the docs/*-settings.md pages are current with
-#                          the schemas they are written from.
+#                          the schemas they're written from.
+#   run-spelling-tests.py  US spelling in every tracked text file.
+#   run-config-tests.py    the configuration cascade, a fixture a decision.
+#   run-roundtrip-test.py  writing a configuration and reading it back
+#                          changes nothing.
+#   run-unit-tests.py      the small functions, and the places where one
+#                          fact is written down twice and could drift.
+#   run-census-tests.py    the table-header guess, on tables built as OOXML.
+#   run-check-tests.py     the output check, and the validators' findings.
+#   run-headers-tests.py   the table-headers pre-pass end to end, a key
+#                          that matches nothing set aside, the run going on.
+#   run-unpack-tests.py    unpack-epub.py and unpack-jekyll.py, and an
+#                          unpacked book converted.
+#   run-site-tests.py      unpack-site.py on saves, WARCs, and captures.
+#   run-mathjax-tests.py   formulas as MathJax 2, 3, and 4 drew them.
 #
-#   run-portability-test.py
-#                          that every Python file parses on the oldest
-#                          interpreter the project supports. A syntax
-#                          error is invisible to an interpreter new enough
-#                          to accept the syntax, so this cannot be left to
-#                          the suites themselves.
-#
-#   run-unpack-tests.py    unpack-epub.py on an EPUB built by hand in the
-#                          shape of real publishers', defects included,
-#                          and the unpacked book converted. Unpacking
-#                          needs no Pandoc; the last case skips without.
-#
-#   run-site-tests.py      unpack-site.py on saves built by hand in the
-#                          shape of real ones. Needs html5lib or lxml.
-#
-#   run-mathjax-tests.py   lib/mathjax.py on renderings MathJax 2, 3,
-#                          and 4 produced of three formulas. Needs
-#                          html5lib or lxml, and Pandoc.
-#
-#   run-filter-tests.py    the accessibility work the Lua filters do,
-#                          against six small .docx fixtures. Needs
-#                          Pandoc.
-#
-#   run-latex-tests.py     a LaTeX book the script writes, through
-#                          convert.py: the pages, the repairs on the
-#                          copy Pandoc reads, the drawings rendered.
-#                          Needs Pandoc; the drawings need a LaTeX
-#                          engine and pdftocairo, and skip without them.
+#   With Pandoc 3.9 or later:
+#   run-filter-tests.py    the Lua filters on six .docx fixtures.
+#   run-convert-tests.py   convert.py, every source and target.
+#   run-epub-tests.py      build-epub.py: the book's shape and claims.
+#   run-pdf-tests.py       the pdf target, tagged; needs LuaLaTeX.
+#   run-split-tests.py     split-pages.py, and what reads its pieces.
+#   run-audit-tests.py     the audit, and convert.py --check-only.
+#   run-latex-tests.py     LaTeX as a source, and the copies and PDFs
+#                          made from it; its drawings need a TeX.
 #
 # Copyright 2026 Robert Szarka
 #
@@ -94,6 +69,29 @@ if [ -z "${BASH_VERSION:-}" ]; then
 fi
 
 set -u
+
+usage () {
+  echo "usage: bash tests/run-all.sh [-j N]   (N cases at once; default half the processors)"
+}
+
+jobs=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -j|--jobs) [ $# -gt 1 ] || { usage >&2; exit 2; }; jobs="$2"; shift 2 ;;
+    -j*) jobs="${1#-j}"; shift ;;
+    --jobs=*) jobs="${1#--jobs=}"; shift ;;
+    -h|--help) usage; exit 0 ;;
+    *) usage >&2; exit 2 ;;
+  esac
+done
+case "$jobs" in
+  "") ;;
+  *[!0-9]*|0) echo "run-all.sh: -j wants a number of cases, 1 or more" >&2; exit 2 ;;
+esac
+# For the suites that take it; empty when -j wasn't given, so each uses
+# its own default. A number alone, so it splits into two words safely.
+side=""
+if [ -n "$jobs" ]; then side="-j $jobs"; fi
 
 here="$(cd "$(dirname "$0")" && pwd)"
 failures=0
@@ -148,24 +146,25 @@ run run-unpack-tests.py
 run run-site-tests.py
 run run-mathjax-tests.py
 
-# The filter tests convert real documents, so they need Pandoc. Skipping
-# is reported rather than silent: a suite that quietly does not run is
-# worse than one that fails.
+# These convert real documents, so they need Pandoc. Skipping is
+# reported rather than silent: a suite that quietly does not run is worse
+# than one that fails.
+needs_pandoc="run-filter-tests.py, run-convert-tests.py, run-epub-tests.py, run-pdf-tests.py, run-split-tests.py, run-audit-tests.py, and run-latex-tests.py"
 if ! command -v pandoc >/dev/null 2>&1; then
-  skipped="run-filter-tests.py, run-epub-tests.py, run-pdf-tests.py, run-split-tests.py, run-audit-tests.py and run-latex-tests.py (pandoc not found)"
+  skipped="$needs_pandoc (pandoc not found)"
 elif [ "$(printf '%s\n3.9\n' \
           "$(pandoc --version | head -1 | awk '{print $2}')" \
           | sort -V | head -1)" != "3.9" ]; then
-  skipped="run-filter-tests.py (pandoc $(pandoc --version | head -1 \
+  skipped="$needs_pandoc (pandoc $(pandoc --version | head -1 \
            | awk '{print $2}') is older than 3.9)"
 else
   run run-filter-tests.py
-  run run-convert-tests.py
-  run run-epub-tests.py
-  run run-pdf-tests.py
+  run run-convert-tests.py $side
+  run run-epub-tests.py $side
+  run run-pdf-tests.py $side
   run run-split-tests.py
   run run-audit-tests.py
-  run run-latex-tests.py
+  run run-latex-tests.py $side
 fi
 
 printf '\n'

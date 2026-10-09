@@ -56,6 +56,8 @@ ROOT = os.path.dirname(HERE)
 BIN = os.path.join(ROOT, "bin")
 FIXTURES = os.path.join(HERE, "fixtures")
 NEEDED = ["metadata", "tables", "tables-b", "media-a", "math"]
+sys.path.insert(0, HERE)
+import parallel  # noqa: E402
 
 
 def load(path, name):
@@ -818,30 +820,12 @@ CASES = [
 
 # --------------------------------------------------------------------------
 
-def main():
-    parser = argparse.ArgumentParser(
-        description="Check build-epub.py against the fixture documents.")
-    parser.add_argument("--keep", action="store_true",
-                        help="leave the built output in place")
-    arguments = parser.parse_args()
-
-    if shutil.which("pandoc") is None:
-        sys.exit("pandoc is not on the path.")
-    version = subprocess.run(["pandoc", "--version"], capture_output=True,
-                             text=True).stdout.split()[1]
-    if tuple(int(p) for p in re.findall(r"\d+", version)[:3]) < (3, 9):
-        sys.exit(f"Pandoc {version} is too old; these tests need 3.9 or "
-                 "later, as convert.py does.")
-    missing = [n for n in NEEDED
-               if not os.path.isfile(os.path.join(FIXTURES, n + ".docx"))]
-    if missing:
-        sys.exit("Missing fixtures: " + ", ".join(missing) +
-                 "\nRebuild them with tests/make-filter-fixtures.py")
-
+def run_cases(cases, keep):
+    """The cases one after another, here: how many checks failed."""
     work = tempfile.mkdtemp(prefix="epub-tests-")
     failed = 0
     try:
-        for label, case in CASES:
+        for label, case in cases:
             directory = os.path.join(work, re.sub(r"[^\w-]+", "-", label))
             try:
                 checks = case(directory)
@@ -857,11 +841,42 @@ def main():
                 print(("  ok    " if passed else "  FAIL  ") + name)
                 failed += not passed
     finally:
-        if arguments.keep:
+        if keep:
             print(f"\nOutput left in {work}")
         else:
             shutil.rmtree(work, ignore_errors=True)
+    return failed
 
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Check build-epub.py against the fixture documents.")
+    parser.add_argument("--keep", action="store_true",
+                        help="leave the built output in place")
+    parallel.add_options(parser)
+    arguments = parser.parse_args()
+
+    if shutil.which("pandoc") is None:
+        sys.exit("pandoc is not on the path.")
+    version = subprocess.run(["pandoc", "--version"], capture_output=True,
+                             text=True).stdout.split()[1]
+    if tuple(int(p) for p in re.findall(r"\d+", version)[:3]) < (3, 9):
+        sys.exit(f"Pandoc {version} is too old; these tests need 3.9 or "
+                 "later, as convert.py does.")
+    missing = [n for n in NEEDED
+               if not os.path.isfile(os.path.join(FIXTURES, n + ".docx"))]
+    if missing:
+        sys.exit("Missing fixtures: " + ", ".join(missing) +
+                 "\nRebuild them with tests/make-filter-fixtures.py")
+    if arguments.case_index is not None:
+        # One case, for a run with them side by side: its lines, and how
+        # many failed as the exit status.
+        return min(run_cases([CASES[arguments.case_index]], arguments.keep), parallel.MOST)
+    if arguments.jobs > 1:
+        failed = parallel.run(os.path.abspath(__file__), CASES, (), arguments.jobs,
+                              extra=["--keep"] if arguments.keep else [])
+    else:
+        failed = run_cases(CASES, arguments.keep)
     print(f"\n{failed} check(s) failed across {len(CASES)} case(s)"
           if failed else "\nall EPUB checks passed")
     return 1 if failed else 0

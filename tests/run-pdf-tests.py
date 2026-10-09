@@ -97,6 +97,16 @@ Inline math $x^2 + y^2 = z^2$, and a display:
 
 $$\frac{a}{b}$$
 
+And an eqnarray*, which the writer would wrap in display math:
+
+$$\begin{eqnarray*}
+a &=& b + c
+\end{eqnarray*}$$
+
+And a poor man's bold, as a LaTeX book writes one: $\pmb{\hat{p}_1 - b}$.
+
+And amssymb's squares, which unicode-math has no names for: $\square \blacksquare$.
+
 ::: matrix
 |      | Left | Right |
 |------|------|-------|
@@ -162,6 +172,32 @@ Table: Price by year
 
 A heading below a subsection is run in to the text after it, and two of
 them followed by a section had left LaTeX's paragraph tagging one short.
+
+## A section whose title runs longer than the line a running head has beside the page number, as a topic's can
+
+Words that fill the pages under a long title, so that its running head is set on a page of its own, beside the page's number, where the book class would set it in one line however long it is. Words that fill the pages under a long title, so that its running head is set on a page of its own, beside the page's number, where the book class would set it in one line however long it is. Words that fill the pages under a long title, so that its running head is set on a page of its own, beside the page's number, where the book class would set it in one line however long it is. Words that fill the pages under a long title, so that its running head is set on a page of its own, beside the page's number, where the book class would set it in one line however long it is.
+
+Words that fill the pages under a long title, so that its running head is set on a page of its own, beside the page's number, where the book class would set it in one line however long it is. Words that fill the pages under a long title, so that its running head is set on a page of its own, beside the page's number, where the book class would set it in one line however long it is. Words that fill the pages under a long title, so that its running head is set on a page of its own, beside the page's number, where the book class would set it in one line however long it is. Words that fill the pages under a long title, so that its running head is set on a page of its own, beside the page's number, where the book class would set it in one line however long it is.
+
+Words that fill the pages under a long title, so that its running head is set on a page of its own, beside the page's number, where the book class would set it in one line however long it is. Words that fill the pages under a long title, so that its running head is set on a page of its own, beside the page's number, where the book class would set it in one line however long it is. Words that fill the pages under a long title, so that its running head is set on a page of its own, beside the page's number, where the book class would set it in one line however long it is. Words that fill the pages under a long title, so that its running head is set on a page of its own, beside the page's number, where the book class would set it in one line however long it is.
+
+Words that fill the pages under a long title, so that its running head is set on a page of its own, beside the page's number, where the book class would set it in one line however long it is. Words that fill the pages under a long title, so that its running head is set on a page of its own, beside the page's number, where the book class would set it in one line however long it is. Words that fill the pages under a long title, so that its running head is set on a page of its own, beside the page's number, where the book class would set it in one line however long it is. Words that fill the pages under a long title, so that its running head is set on a page of its own, beside the page's number, where the book class would set it in one line however long it is.
+
+Words that fill the pages under a long title, so that its running head is set on a page of its own, beside the page's number, where the book class would set it in one line however long it is. Words that fill the pages under a long title, so that its running head is set on a page of its own, beside the page's number, where the book class would set it in one line however long it is. Words that fill the pages under a long title, so that its running head is set on a page of its own, beside the page's number, where the book class would set it in one line however long it is. Words that fill the pages under a long title, so that its running head is set on a page of its own, beside the page's number, where the book class would set it in one line however long it is.
+
+Words that fill the pages under a long title, so that its running head is set on a page of its own, beside the page's number, where the book class would set it in one line however long it is. Words that fill the pages under a long title, so that its running head is set on a page of its own, beside the page's number, where the book class would set it in one line however long it is. Words that fill the pages under a long title, so that its running head is set on a page of its own, beside the page's number, where the book class would set it in one line however long it is. Words that fill the pages under a long title, so that its running head is set on a page of its own, beside the page's number, where the book class would set it in one line however long it is.
+
+Words that fill the pages under a long title, so that its running head is set on a page of its own, beside the page's number, where the book class would set it in one line however long it is. Words that fill the pages under a long title, so that its running head is set on a page of its own, beside the page's number, where the book class would set it in one line however long it is. Words that fill the pages under a long title, so that its running head is set on a page of its own, beside the page's number, where the book class would set it in one line however long it is. Words that fill the pages under a long title, so that its running head is set on a page of its own, beside the page's number, where the book class would set it in one line however long it is.
+
+Words that fill the pages under a long title, so that its running head is set on a page of its own, beside the page's number, where the book class would set it in one line however long it is. Words that fill the pages under a long title, so that its running head is set on a page of its own, beside the page's number, where the book class would set it in one line however long it is. Words that fill the pages under a long title, so that its running head is set on a page of its own, beside the page's number, where the book class would set it in one line however long it is. Words that fill the pages under a long title, so that its running head is set on a page of its own, beside the page's number, where the book class would set it in one line however long it is.
+
+Words that fill the pages under a long title, so that its running head is set on a page of its own, beside the page's number, where the book class would set it in one line however long it is. Words that fill the pages under a long title, so that its running head is set on a page of its own, beside the page's number, where the book class would set it in one line however long it is. Words that fill the pages under a long title, so that its running head is set on a page of its own, beside the page's number, where the book class would set it in one line however long it is. Words that fill the pages under a long title, so that its running head is set on a page of its own, beside the page's number, where the book class would set it in one line however long it is.
+
+Words that fill the pages under a long title, so that its running head is set on a page of its own, beside the page's number, where the book class would set it in one line however long it is. Words that fill the pages under a long title, so that its running head is set on a page of its own, beside the page's number, where the book class would set it in one line however long it is. Words that fill the pages under a long title, so that its running head is set on a page of its own, beside the page's number, where the book class would set it in one line however long it is. Words that fill the pages under a long title, so that its running head is set on a page of its own, beside the page's number, where the book class would set it in one line however long it is.
+
+Words that fill the pages under a long title, so that its running head is set on a page of its own, beside the page's number, where the book class would set it in one line however long it is. Words that fill the pages under a long title, so that its running head is set on a page of its own, beside the page's number, where the book class would set it in one line however long it is. Words that fill the pages under a long title, so that its running head is set on a page of its own, beside the page's number, where the book class would set it in one line however long it is. Words that fill the pages under a long title, so that its running head is set on a page of its own, beside the page's number, where the book class would set it in one line however long it is.
+
+Words that fill the pages under a long title, so that its running head is set on a page of its own, beside the page's number, where the book class would set it in one line however long it is. Words that fill the pages under a long title, so that its running head is set on a page of its own, beside the page's number, where the book class would set it in one line however long it is. Words that fill the pages under a long title, so that its running head is set on a page of its own, beside the page's number, where the book class would set it in one line however long it is. Words that fill the pages under a long title, so that its running head is set on a page of its own, beside the page's number, where the book class would set it in one line however long it is.
 """
 
 APPENDIX = r"""\appendix
@@ -425,6 +461,38 @@ def links(reader):
     return out
 
 
+def font_names(reader):
+    """The base font names the PDF's pages draw with, form XObjects too."""
+    names = set()
+
+    def walk(resources):
+        if resources is None:
+            return
+        resources = resources.get_object()
+        for ref in (resources.get("/Font") or {}).values():
+            names.add(str(ref.get_object().get("/BaseFont", "")))
+        for ref in (resources.get("/XObject") or {}).values():
+            xobject = ref.get_object()
+            if xobject.get("/Subtype") == "/Form":
+                walk(xobject.get("/Resources"))
+    for page in reader.pages:
+        walk(page.get("/Resources"))
+    return names
+
+
+def head_sizes(reader, words):
+    """The size each page's running head holding words is drawn at, its
+    font's size as the page scales it."""
+    import math
+    sizes = []
+    for page in reader.pages:
+        def visit(text, cm, tm, font, size):
+            if words in text:
+                sizes.append(size * math.hypot(tm[0], tm[1]) * math.hypot(cm[0], cm[1]))
+        page.extract_text(visitor_text=visit)
+    return sizes
+
+
 def outline_titles(reader):
     titles = []
 
@@ -519,6 +587,10 @@ def checks(work):
          lambda: "/StructTreeRoot" in root
          and bool(resolve(root["/MarkInfo"])["/Marked"])
          and str(root["/Lang"]) == "en"),
+        ("a section's title too long for the running head beside the page number is "
+         "scaled to fit there, not run past the margin",
+         lambda: head_sizes(reader, "SECTION WHOSE TITLE RUNS")
+         and all(size < 9.5 for size in head_sizes(reader, "SECTION WHOSE TITLE RUNS"))),
         ("it claims PDF/UA-2 in its metadata",
          lambda: re.search(r"pdfuaid:part[^0-9]{1,5}2",
                            resolve(root["/Metadata"]).get_data().decode(
@@ -620,6 +692,14 @@ def checks(work):
         # drawn blank.
         ("Greek and symbols written as text are in the PDF's text",
          lambda: all(c in text for c in "αβγ≤≈")),
+        # pypdf reads the squares from TeX's AMS font by its glyph names; the
+        # font's ToUnicode, which a screen reader and pdftotext go by, maps
+        # them to control characters once the formula's MathML is made. So
+        # the check is that no square is drawn from that font at all.
+        ("amssymb's squares, which unicode-math has no names for, are the characters "
+         "they are, from the OpenType math font, not TeX's AMS font",
+         lambda: "□" in text and "■" in text and not any(
+             "MSAM" in name or "MSBM" in name for name in font_names(reader))),
         # The one character no fallback has is reported once, in a line
         # of its own, rather than as one warning per occurrence.
         ("a character no font has is reported in one line, with its code",
@@ -628,8 +708,12 @@ def checks(work):
          == [line for line in log.splitlines() if "U+6F22" in line]
          and log.count("missing from the PDF") == 1
          and "Missing character" not in log),
-        ("every formula has MathML structure elements and a MathML file",
-         lambda: len(formulas) == 2
+        # An eqnarray* among them, which the writer wrapped in \[ \] and
+        # LaTeX stopped on, before pdf-target.lua wrote it as it is; and a
+        # \pmb, on which LuaTeX's tagging of the formula stopped.
+        ("every formula, an eqnarray* and a \\pmb among them, has MathML structure "
+         "elements and a MathML file",
+         lambda: len(formulas) == 5
          and all("/AF" in f for f in formulas)
          and "/math" in kinds),
         # Once each in the whole file: the template's own are switched

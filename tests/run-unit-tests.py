@@ -45,6 +45,7 @@ import os
 import csv
 import json
 import re
+import shutil
 import tempfile
 import sys
 
@@ -248,11 +249,24 @@ def check_consistency():
     builtin = re.findall(
         r'"([^"]+)"',
         re.search(r"BACK_MATTER_ORDER = \[(.*?)\]", source, re.S).group(1))
-
+    # The newest release, as the changelog's first dated section, the
+    # audit's version, and the installation page's download example
+    # name it; the release commit changes all three.
+    changelog = open(os.path.join(ROOT, "CHANGELOG.md"), encoding="utf-8").read()
+    released = re.search(r"^## \[(\d+\.\d+)\] - ", changelog, re.M).group(1)
+    audit = re.search(r'^VERSION = "([^"]+)"', open(
+        os.path.join(ROOT, "bin", "audit.py"), encoding="utf-8").read(), re.M).group(1)
+    installation = open(os.path.join(ROOT, "docs", "installation.md"),
+                        encoding="utf-8").read()
+    named = set(re.findall(r"TextbookImprover-(\d+\.\d+)", installation)
+                + re.findall(r"refs/tags/v(\d+\.\d+)\.tar\.gz", installation)
+                + re.findall(r"replace `v(\d+\.\d+)`", installation))
 
     return [
         ("the schema's back-matter default matches the built-in order",
          lambda: list(declared) == builtin),
+        ("the newest release is the one the audit reports and the installation page "
+         "downloads", lambda: audit == released and named == {released}),
         ("every schema loads and declares its keys",
          lambda: all("keys" in yaml.safe_load(open(p, encoding="utf-8"))
                      for p in (
@@ -642,7 +656,129 @@ def check_shortdoi():
     ]
 
 
+def check_report_rows():
+    """A report's rows are sorted whole: a field holding a line end, as an
+    image's current alt text can, stays in its row."""
+    convert = load(os.path.join(ROOT, "bin", "convert.py"), "convert")
+    convert.say = lambda text: None
+    work = tempfile.mkdtemp(prefix="report-rows-")
+    rows_file = os.path.join(work, "rows.csv")
+    report = os.path.join(work, "image-alt-missing.csv")
+    with open(rows_file, "w", encoding="utf-8", newline="") as fh:
+        csv.writer(fh, lineterminator="\n").writerows([
+            ["b.png", "too long", "Its first paragraph.\n\nIts second, after a line end"],
+            ["a.png", "missing", ""],
+            ["b.png", "too long", "Its first paragraph.\n\nIts second, after a line end"]])
+    convert.write_report(rows_file, report, "Image,Reason,CurrentAlt", "image(s)")
+    with open(report, encoding="utf-8", newline="") as fh:
+        rows = list(csv.DictReader(fh))
+    shutil.rmtree(work, ignore_errors=True)
+    return [
+        ("each row is whole, the line end in its field kept, sorted and once each",
+         lambda: [r["Image"] for r in rows] == ["a.png", "b.png"]
+         and rows[1]["CurrentAlt"] == "Its first paragraph.\n\nIts second, after a line end"),
+    ]
+
+
+def check_pdf_summary():
+    """The output check's summary gives a PDF's repeated finding once,
+    counted, and a single one with its detail."""
+    import findings as findings_lib
+    check_output = load(os.path.join(ROOT, "bin", "check-output.py"), "check_output")
+    found = [findings_lib.Finding("book.pdf", "pdf-figure-alt-is-placeholder",
+                                  "picture environment") for _ in range(3)]
+    found += [findings_lib.Finding("book.pdf", "pdf-figure-alt-is-file-name", "a.pdf"),
+              findings_lib.Finding("other.pdf", "pdf-figure-alt-is-placeholder",
+                                   "picture environment")]
+    lines = check_output.pdf_summary(found)
+    return [
+        ("a finding a PDF has three times is one line, counted, saying what it means",
+         lambda: lines[0] == "  book.pdf: 3 pdf-figure-alt-is-placeholder: "
+         + findings_lib.describe("pdf-figure-alt-is-placeholder")),
+        ("one found once keeps its detail, and each PDF is counted apart",
+         lambda: lines[1:] == ["  book.pdf: pdf-figure-alt-is-file-name: a.pdf",
+                               "  other.pdf: pdf-figure-alt-is-placeholder: picture environment"]),
+    ]
+
+
+def check_drawings_without_preview():
+    """A LaTeX book's drawings, where LaTeX lacks the preview package each
+    is made a page of: said once, as what to install, not as LaTeX's log
+    for each; any other failure is still LaTeX's own words."""
+    import latexsource
+    work = tempfile.mkdtemp(prefix="drawings-")
+    tools = os.path.join(work, "bin")
+    os.makedirs(tools)
+    os.makedirs(os.path.join(work, "book"))
+
+    def fake(error):
+        with open(os.path.join(tools, "pdflatex"), "w") as fh:
+            fh.write("#!/bin/sh\ncat <<'END'\n%s\nEND\nexit 1\n" % error)
+        with open(os.path.join(tools, "pdftocairo"), "w") as fh:
+            fh.write("#!/bin/sh\nexit 1\n")
+        for name in ("pdflatex", "pdftocairo"):
+            os.chmod(os.path.join(tools, name), 0o755)
+
+    def said(error):
+        fake(error)
+        lines = []
+        path = os.environ.get("PATH", "")
+        os.environ["PATH"] = tools + os.pathsep + path
+        try:
+            latexsource.render(os.path.join(work, "book"), os.path.join(work, "w"),
+                               "\\documentclass{article}\n\\begin{document}",
+                               [("rendered/a.svg", "\\begin{picture}(1,1)\\end{picture}"),
+                                ("rendered/b.svg", "\\begin{picture}(2,2)\\end{picture}")],
+                               lines.append)
+        finally:
+            os.environ["PATH"] = path
+        return "\n".join(lines)
+    missing = said("! LaTeX Error: File `preview.sty' not found.")
+    other = said("! Undefined control sequence.")
+    shutil.rmtree(work, ignore_errors=True)
+    return [
+        ("without the preview package, the drawings say what to install, once",
+         lambda: "tlmgr install preview" in missing and missing.count("WARNING") == 1
+         and "The end of its output" not in missing),
+        ("and another failure is LaTeX's own words",
+         lambda: "Undefined control sequence" in other and "preview package" not in other),
+    ]
+
+
+def check_tlmgr_command():
+    """A tlmgr command the run suggests has sudo before it where the TeX
+    tree isn't the user's to write (TeX Live installed for the whole
+    system), and none where it is (TinyTeX in the home folder) or where
+    there's no TeX to ask."""
+    import latexbuild
+    work = tempfile.mkdtemp(prefix="tex-root-")
+    saved_root, saved_access = list(latexbuild._TEX_ROOT), os.access
+    try:
+        latexbuild._TEX_ROOT[:] = [work]
+        own = latexbuild.tlmgr_command("install preview")
+        os.access = lambda path, mode: False
+        system = latexbuild.tlmgr_command("install preview")
+        latexbuild._TEX_ROOT[:] = [""]
+        unknown = latexbuild.tlmgr_command("install preview")
+    finally:
+        latexbuild._TEX_ROOT[:] = saved_root
+        os.access = saved_access
+        shutil.rmtree(work, ignore_errors=True)
+    return [
+        ("a TeX the user can write is managed without sudo",
+         lambda: own == "tlmgr install preview"),
+        ("one installed for the whole system with sudo",
+         lambda: system == "sudo tlmgr install preview"),
+        ("and with no TeX to ask, the plain command",
+         lambda: unknown == "tlmgr install preview"),
+    ]
+
+
 GROUPS = [
+    ("a report's rows", check_report_rows),
+    ("the PDF findings in the output check's summary", check_pdf_summary),
+    ("tlmgr, with sudo where it needs it", check_tlmgr_command),
+    ("drawings without the preview package", check_drawings_without_preview),
     ("layout tables", check_layout_tables),
     ("unique ids", check_unique_ids),
     ("front and back matter by name", check_matter_by_name),

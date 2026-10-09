@@ -318,6 +318,18 @@ local function adoc_html_table(tbl)
   -- nowhere to keep it in AsciiDoc, and would come back a data table.
   local role = tbl.attr.attributes.role ~= nil
   if not (grouped or role or has_row_spans(tbl) or complex_cells(tbl)) then return nil end
+  -- A table in this one's cells already written as HTML is a raw
+  -- AsciiDoc passthrough, which the HTML writer drops: its HTML goes
+  -- into this one's as it stands (GIAM's tables of counting rules,
+  -- inside a table, came out as empty cells).
+  tbl = tbl:walk({
+    RawBlock = function(raw)
+      if raw.format == 'asciidoc' then
+        local html = raw.text:match('^%+%+%+%+\n(.*)\n%+%+%+%+%s*$')
+        if html then return pandoc.RawBlock('html', html) end
+      end
+    end
+  })
   return passthrough(pandoc.write(pandoc.Pandoc({ clean_table(tbl) }), 'html',
                                   { html_math_method = 'mathml' }))
 end
@@ -648,14 +660,44 @@ end
 -- Italics holding a formula: the reader drops latexmath:[...] inside
 -- constrained _..._, which the writer uses, and keeps it inside the
 -- unconstrained __...__.
-function Emph(emph)
-  if not ADOC then return nil end
+local function emph_piece(content)
   local math = false
-  emph.content:walk({ Math = function() math = true end })
+  content:walk({ Math = function() math = true end })
   if not math then return nil end
   local out = pandoc.Inlines({ pandoc.RawInline('asciidoc', '__') })
-  out:extend(emph.content)
+  out:extend(content)
   out:insert(pandoc.RawInline('asciidoc', '__'))
+  return out
+end
+
+-- A footnote in italics comes out of them: the note's own text, which a
+-- LaTeX source gives the italics too (a theorem's body), opens __ inside
+-- the __ around it, and the reader ends the outer italics there and
+-- loses the footnote (GIAM's note on Euler's notation). The italics
+-- close before the footnote and open again after it.
+function Emph(emph)
+  if not ADOC then return nil end
+  local has_note = false
+  for _, inline in ipairs(emph.content) do
+    if inline.t == 'Note' then has_note = true break end
+  end
+  if not has_note then return emph_piece(emph.content) end
+  local out, part = pandoc.Inlines({}), pandoc.Inlines({})
+  local function flush()
+    if #part > 0 then
+      out:extend(emph_piece(part) or { pandoc.Emph(part) })
+      part = pandoc.Inlines({})
+    end
+  end
+  for _, inline in ipairs(emph.content) do
+    if inline.t == 'Note' then
+      flush()
+      out:insert(inline)
+    else
+      part:insert(inline)
+    end
+  end
+  flush()
   return out
 end
 
@@ -704,6 +746,29 @@ function Link(link)
     local rest = Link(link)
     anchors:insert(rest or link)
     return anchors
+  end
+  -- A bracket in a link's text: the writer escapes it as ++[++, which the
+  -- reader takes for a span's role and the link's text is lost; \] it
+  -- reads as a backslash and the end of the text. A character reference
+  -- reads back as the bracket (measured, Pandoc 3.12): a \ref to an item
+  -- with no number gives "[compare]", as GIAM's do.
+  if ADOC then
+    local bracketed = false
+    link.content = link.content:walk({
+      Str = function(s)
+        if not s.text:find('[%[%]]') then return nil end
+        bracketed = true
+        local out = pandoc.Inlines({})
+        for piece, bracket in s.text:gmatch('([^%[%]]*)([%[%]]?)') do
+          if piece ~= '' then out:insert(pandoc.Str(piece)) end
+          if bracket ~= '' then
+            out:insert(pandoc.RawInline('asciidoc', bracket == '[' and '&#91;' or '&#93;'))
+          end
+        end
+        return out
+      end
+    })
+    if bracketed then unwrapped = true end
   end
   -- A linked image: the image macro's link attribute, which the reader
   -- reads; it drops an image written inside a link's text.
@@ -788,7 +853,18 @@ end
 -- can't be written, and is written as a typographic one. A decorative
 -- image says so with a role. Element functions run before the inline
 -- pass, so the alt here is the author's text, unescaped.
+-- An image's target as the macro takes it: Pandoc's reader won't take
+-- one with a +, and leaves the whole macro as text (GIAM's
+-- dist_2x3+4.svg); percent-encoded it reads, and Asciidoctor's page asks
+-- for the same file (measured, Pandoc 3.12). Reading decodes it again
+-- (media-extensions.lua).
+local function image_target(src)
+  if src:find('://', 1, true) then return src end
+  return (src:gsub('%+', '%%2B'))
+end
+
 function adoc_image(img)
+  img.src = image_target(img.src)
   if img.classes:includes('decorative') then
     return pandoc.RawInline('asciidoc', 'image:' .. img.src .. '[role=decorative]')
   end
@@ -821,8 +897,41 @@ end
 
 -- A figure, written as its id, its caption as the block title, and its
 -- image as a block macro.
+-- A figure holding only a table, in AsciiDoc: the writer writes the
+-- table and drops the figure, caption, id and all, so a link to it
+-- dangles (GIAM's Pascal's triangle). The caption and id become the
+-- table's, as for a PDF, and it's reported: it reads back as a table.
+local function figure_table(fig)
+  local found, other = nil, 0
+  for _, block in ipairs(fig.content) do
+    local inner = block
+    while inner.t == 'Div' and #inner.content == 1 do inner = inner.content[1] end
+    if inner.t == 'Table' then
+      if found then return nil end
+      found = inner
+    elseif not ((block.t == 'Plain' or block.t == 'Para') and #block.content == 0) then
+      other = other + 1
+    end
+  end
+  if not found or other > 0 then return nil end
+  if #found.caption.long == 0 and #fig.caption.long > 0 then
+    found.caption = fig.caption
+  end
+  lost('figure-table', pandoc.utils.stringify(fig.caption.long))
+  local id = found.identifier ~= '' and found.identifier or fig.identifier
+  if id == '' then return found end
+  -- The writer gives a table no id: a block anchor on the line before it
+  -- does, which the reader puts on the table.
+  found.identifier = ''
+  local text = pandoc.write(pandoc.Pandoc({ found }), 'asciidoc',
+                            { wrap_text = 'none' }):gsub('%s+$', '')
+  return pandoc.RawBlock('asciidoc', '[[' .. id .. ']]\n' .. text .. '\n\n')
+end
+
 function Figure(fig)
   if not ADOC then return nil end
+  local as_table = figure_table(fig)
+  if as_table then return as_table end
   local body = fig.content
   if #body ~= 1 or (body[1].t ~= 'Plain' and body[1].t ~= 'Para')
       or #body[1].content ~= 1 or body[1].content[1].t ~= 'RawInline'
@@ -881,12 +990,16 @@ function inline_tex(text)
   -- Word's thin space at the end, "\\ ", goes as it does for Markdown;
   -- a backslash left last would escape the macro's closing bracket.
   text = text:gsub('%s*\\%s+$', ''):gsub('^%s+', ''):gsub('%s+$', '')
+  -- A line break in the formula's TeX, as a LaTeX source has wherever a
+  -- formula ran over a line, would end the macro: the reader takes
+  -- latexmath:[...] on one line only, and drops the formula.
+  text = text:gsub('%s*\n%s*', ' ')
   if text:match('\\$') then text = text .. ' ' end
   if not text:find('[%[%]]') then return text end
   if text:find('\\sqrt%s*%[') then
-    lost('root-index', text)
-    io.stderr:write(('markdown-source: a root index in brackets is written '
-      .. 'for Asciidoctor, not Pandoc\'s reader: %s\n'):format(text))
+    -- Escaped as Asciidoctor reads it; Pandoc's reader ends the macro at
+    -- the \], so reading an AsciiDoc source gives these brackets as
+    -- character references first (convert.py, adoc_root_index_text).
     return (text:gsub('%]', '\\]'))
   end
   return (text:gsub('%[', '\\lbrack '):gsub('%]', '\\rbrack '))
@@ -1016,6 +1129,29 @@ function OrderedList(list)
   end
 end
 
+-- Inline code in AsciiDoc, in the unconstrained form ``+...+``: the
+-- writer's constrained `+...+` ends only before a character that isn't a
+-- word character, so beside a formula macro (`+Let +`latexmath:[q = 0])
+-- the reader takes none of it, and the formulas go too (GIAM's
+-- pseudocode). Code holding + or a backtick is left to the writer, whose
+-- forms for those the reader takes back (measured, Pandoc 3.12).
+local function Code(code)
+  if not ADOC or code.text:find('[+`]') or code.text == '' then return nil end
+  return pandoc.RawInline('asciidoc', '``+' .. code.text .. '+``')
+end
+
+-- A rule in AsciiDoc as three single quotes, AsciiDoc's own thematic
+-- break, written raw: Pandoc's writer gives five, which its reader takes
+-- for a paragraph of closing quotes, and puts a blank line between a list
+-- item's + and the rule, which ends the list there (GIAM's blanks to fill
+-- in, nested in its exercise lists). Measured on Pandoc 3.12.
+local function HorizontalRule()
+  if not ADOC then return nil end
+  -- Pandoc writes a raw block as it stands: it ends with its own blank
+  -- line, as passthrough's do.
+  return pandoc.RawBlock('asciidoc', "'''\n\n")
+end
+
 -- For AsciiDoc, two passes: the tables that go as HTML, from the text as
 -- it stands, then everything else. A file that returns filters runs no
 -- global function, so every handler is named.
@@ -1026,6 +1162,7 @@ if ADOC then
       Math = Math, Header = Header, Meta = Meta, Span = Span,
       Inlines = Inlines, RawBlock = RawBlock, Figure = Figure, Link = Link,
       Note = Note, Emph = Emph, DefinitionList = DefinitionList,
-      BlockQuote = BlockQuote, Pandoc = Pandoc },
+      BlockQuote = BlockQuote, Pandoc = Pandoc, Code = Code,
+      HorizontalRule = HorizontalRule },
   }
 end

@@ -30,7 +30,7 @@ keys:
 
   format:
     type: enum
-    values: [html, epub3, pdf, docx, markdown, asciidoc, source]
+    values: [html, epub3, pdf, latex, docx, markdown, asciidoc, source]
     default: html
     target_only: true
     stage: render
@@ -40,7 +40,9 @@ keys:
       book. docx writes Word files from the same pages, in compatibility
       mode 15 with ScreenTips and Word's decorative marker. pdf writes one
       tagged PDF of the whole book through LaTeX, which needs LuaLaTeX
-      (see the installation page).
+      (see the installation page). latex writes the LaTeX the pdf target
+      builds from, as a master file that \include-s a file per chapter,
+      with its images beside them, for an author to go on working in.
 
   output_dir:
     type: path
@@ -87,6 +89,52 @@ keys:
       the compatibility mode its author's file has, or is set to 15, which
       guides for Word say its Accessibility Checker needs. Kept by default,
       since the file is the author's.
+
+  latex_definitions:
+    type: enum
+    values: ["on", "off"]
+    default: "on"
+    stage: render
+    description: >
+      For a target with format source on a LaTeX book: whether the copy
+      gets the definitions in the book's latex.macros file
+      (latex-conversion-macros.tex), written after its preamble as the
+      conversion reads them, so they replace the book's own there too. A
+      person writes that file to say what the book's macros mean, a bar
+      drawn with \rule as \mid, say, which is what a reader of the PDF
+      needs as much as one of the pages. On by default; off keeps them to
+      the conversion, for a file that only helps Pandoc read the book.
+
+  tagging:
+    type: enum
+    values: ["off", "on"]
+    default: "off"
+    stage: render
+    description: >
+      For a target with format source on a LaTeX book: whether the copy is
+      made to build with LaTeX's own tagging, for an accessible PDF:
+      \DocumentMetadata before \documentclass, pdfTeX-only options and
+      settings taken out, the constructs tagging can't take yet put the
+      way it can, each figure's and table's tags where the text has it,
+      and unicode-math for the formulas' MathML (latex_mathml). A tagged
+      book is built with LuaLaTeX (pdfLaTeX runs out of memory on a book),
+      so this changes the author's build. Off by default; the alt text is
+      written either way.
+
+  latex_mathml:
+    type: enum
+    values: ["on", "off"]
+    default: "on"
+    stage: render
+    description: >
+      For a target with format source and tagging on, on a LaTeX book:
+      whether the copy loads unicode-math, so each formula carries its
+      MathML, which LaTeX makes only from an OpenType math font. Its Latin
+      Modern fonts are TeX's own design, but their metrics differ a
+      little, so pages can break differently: the calculus notes take 84
+      pages instead of 85, while GIAM keeps its 434. Off keeps the book's
+      fonts, and its formulas get no MathML. A book that sets its fonts
+      with a package of its own (mathptmx, fontspec) keeps them either way.
 
   title_page:
     type: enum
@@ -449,8 +497,29 @@ keys:
       assembled from the pages the way the EPUB is, and written by
       Pandoc's LaTeX writer and LuaLaTeX with LaTeX's tagging on, so the
       file carries its structure, its images' alternative text, its
-      tables' header cells, and its equations as MathML.
+      tables' header cells, and its equations as MathML. A LaTeX book's
+      PDF is built from the book's own LaTeX instead, unless from says
+      pages.
     keys:
+
+      from:
+        type: enum
+        values: [book, pages]
+        default: book
+        description: >
+          What a LaTeX book's PDF is built from. book builds the book's own
+          LaTeX with latexmk and LuaLaTeX, from a copy of its folder with
+          the book's files as a source target with tagging on writes them
+          (alt text, header declarations, the definitions file, MathML),
+          the census's header guesses declared too, as the pages have them:
+          the author's pages, index, and bibliography, as their LaTeX makes
+          them. It needs latexmk, and a book that builds with LaTeX's
+          tagging; the PDF claims PDF/UA-2, and the settings below that
+          shape Pandoc's LaTeX (metadata, figures, repair_captions,
+          remove_empty_paragraphs, ua1_math, toc_depth) don't apply. pages
+          builds from the converted pages through Pandoc's LaTeX writer, as
+          for any other source. A book from any other source is built from
+          its pages either way.
 
       standard:
         type: list
@@ -606,6 +675,42 @@ keys:
           to, with no TOC field, or not defining a style the map needs, is
           left as it is and named.
 
+  latex:
+    book_level: true
+    description: >
+      A LaTeX book, read through its master file: the one in the book's
+      directory with \documentclass and \begin{document}, which
+      \include-s the chapters, each a page.
+    keys:
+      main:
+        type: list
+        item: string
+        default: []
+        description: >
+          The master file, when more than one file in the book's directory
+          is a whole document, as when one set of chapters makes a
+          textbook, a workbook, and a solutions manual (GIAM.tex). Or a
+          list, when the book is a set of documents each built on its own,
+          a course's notes a topic at a time: each is read in the order
+          given, a page each (or a page for each file it \include-s), and
+          the PDF target's book route builds a PDF of each. A name can be
+          a path below the book's directory (src/Topic 01.tex) or a
+          pattern (src/*.tex, in sorted order). Blank takes the only one,
+          and stops the run when there are several; a master that only
+          gathers PDFs with \includepdf stops it too, naming the documents
+          of the same names to list here.
+      macros:
+        type: string
+        default: latex-conversion-macros.tex
+        description: >
+          A file of LaTeX definitions read after the book's own preamble,
+          so they win over the book's: for a macro that draws what it
+          means, where only a person can say what that is:
+          \renewcommand{\suchthat}{\mid} for a bar drawn with \rule.
+          Read when it's there. The book's own files are never changed; a
+          source target writes the definitions into its copy unless its
+          latex_definitions is off.
+
   sidecars:
     book_level: true
     description: >
@@ -716,7 +821,7 @@ keys:
           code block's language when its name can't go in a bookmark; for
           markdown and asciidoc targets, what the writing changes, as each
           run also says on the terminal (an example list, a footnote of
-          several paragraphs in AsciiDoc, a root with an index). Nothing to fix in
+          several paragraphs in AsciiDoc). Nothing to fix in
           the book; it says what reading the files back won't restore.
 
       bare_links_new:

@@ -713,7 +713,7 @@ def case_markdown_html(work):
         ("a superscript written in HTML is a superscript",
          lambda: result.returncode in (0, 1) and "mc<sup>2</sup>" in page),
         ("an HTML image is an image: copied, and without align",
-         lambda: re.search(r'<img src="assets/Curve\.png"[^>]*alt="A curve"',
+         lambda: re.search(r'<img\s+src="assets/Curve\.png"[^>]*alt="A curve"',
                            page) and 'align="left"' not in page
          and exists(work, "html", "assets", "Curve.png")),
         ("RDFa's href leaves the span, the text stays",
@@ -966,6 +966,12 @@ def case_warc_direct(work):
     checked = work + "-checked"
     fresh(checked)
     check = run(checked, "--check-only")
+    # Both names an unpacked project.yaml could take are here: the run
+    # stops, and stops before moving anything, the pages included.
+    clash = work + "-clash"
+    fresh(clash, {"project.yaml": "project:\n  title: Mine\n",
+                  "project-unpacked.yaml": "project:\n  title: Older\n"})
+    clashed = run(clash)
     return [
         ("a directory holding only a WARC is unpacked into it, project.yaml "
          "and all", lambda: len(pages) == 2 and os.path.isfile(
@@ -979,6 +985,14 @@ def case_warc_direct(work):
          and os.path.isfile(os.path.join(kept, "project-unpacked.yaml"))),
         ("--check-only unpacks nothing",
          lambda: not [n for n in os.listdir(checked) if n.endswith(".html")]),
+        ("a name the archive's files would take, here already, stops the "
+         "run before anything is moved",
+         lambda: clashed.returncode != 0
+         and "project-unpacked.yaml is already here" in clashed.stderr
+         + clashed.stdout
+         and not [n for n in os.listdir(clash) if n.endswith(".html")]
+         and "Older" in open(os.path.join(clash,
+                                          "project-unpacked.yaml")).read()),
     ]
 
 
@@ -2030,6 +2044,23 @@ PNG_1PX = bytes.fromhex("89504e470d0a1a0a0000000d4948445200000001000000010806000
                         "1f15c4890000000d49444154789c6360000002000154a24f5d0000000049454e44ae426082")
 
 
+def solid_png(path, width=40, height=20, rgb=(0, 0, 128)):
+    """A PNG of one color, navy unless given, written without an imaging
+    library: Pillow isn't one of the requirements, and a machine without
+    it erred in three cases."""
+    import struct
+    import zlib
+
+    def chunk(kind, data):
+        return (struct.pack(">I", len(data)) + kind + data
+                + struct.pack(">I", zlib.crc32(kind + data) & 0xFFFFFFFF))
+    raw = b"".join(b"\x00" + bytes(rgb) * width for _ in range(height))
+    with open(path, "wb") as fh:
+        fh.write(b"\x89PNG\r\n\x1a\n"
+                 + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0))
+                 + chunk(b"IDAT", zlib.compress(raw)) + chunk(b"IEND", b""))
+
+
 def run_tool(cwd, args, util=False):
     """One of the pipeline's scripts, from bin/ or util/, run in cwd."""
     script = os.path.join(ROOT, "util" if util else "bin", args[0])
@@ -2190,9 +2221,8 @@ def case_source_target(work):
     target's folder, with only what a person decided in the sidecars, never
     a guess; the author's files untouched."""
     import zipfile, hashlib
-    from PIL import Image
     os.makedirs(os.path.join(work, "assets"), exist_ok=True)
-    Image.new("RGB", (40, 20), "navy").save(os.path.join(work, "assets", "a.png"))
+    solid_png(os.path.join(work, "assets", "a.png"))
     for n in (1, 2):
         with open(os.path.join(work, f"ch{n}.md"), "w", encoding="utf-8") as fh:
             fh.write(f"---\ntitle: Chapter {n}\nlang: en\n---\n\n# Chapter {n}\n\n"
@@ -2213,7 +2243,7 @@ def case_source_target(work):
     with open(os.path.join(work, "notes.md"), "w", encoding="utf-8") as fh:
         fh.write("---\ntitle: Notes\nlang: en\n---\n\n# Notes\n\nA Markdown chapter.\n")
     os.makedirs(os.path.join(work, "img"), exist_ok=True)
-    Image.new("RGB", (40, 20), "teal").save(os.path.join(work, "img", "bar.png"))
+    solid_png(os.path.join(work, "img", "bar.png"), rgb=(0, 128, 128))  # teal
     with open(os.path.join(work, "page.html"), "w", encoding="utf-8") as fh:
         fh.write("<!DOCTYPE html>\n<html>\n<head><meta charset=\"utf-8\"><title>Scores</title></head>\n"
                  "<body>\n<h1>Scores</h1>\n<!-- the author's comment -->\n<table>\n"
@@ -2394,10 +2424,9 @@ def case_markdown_source(work):
     where each element is, confirmed against Pandoc's reading, the rest of
     the file exactly as written."""
     import zipfile
-    from PIL import Image
     os.makedirs(os.path.join(work, "img"), exist_ok=True)
     for name in ("my chart", "rule", "code"):
-        Image.new("RGB", (40, 20), "navy").save(os.path.join(work, "img", name + ".png"))
+        solid_png(os.path.join(work, "img", name + ".png"))
     original = (
         "---\ntitle: Chapter\n---\n\nSetext Heading\n==============\n\nSome _emphasis_ kept as written.\n\n"
         "![](img/my chart.png)\n\n![Rule](img/rule.png){ width=50% }\n\n"
@@ -2455,6 +2484,19 @@ def case_markdown_source(work):
     ]
 
 
+def adoc_root_reads_back(work):
+    """adoc/ch.adoc read back as a source gives the cube root as written:
+    the index in brackets, which Pandoc's reader alone loses."""
+    back = os.path.join(work, "adoc-back")
+    shutil.copytree(os.path.join(work, "adoc"), back)
+    with open(os.path.join(back, "conversion.yaml"), "w", encoding="utf-8") as fh:
+        fh.write("targets:\n  html:\n    format: html\n")
+    subprocess.run([sys.executable, "-B", os.path.join(BIN, "convert.py")],
+                   cwd=back, capture_output=True, text=True)
+    page = os.path.join(back, "html", "ch.html")
+    return os.path.exists(page) and "<mroot>" in open(page, encoding="utf-8").read()
+
+
 def case_fidelity_writers(work):
     """fidelity.csv for markdown and asciidoc targets: what the writing
     changes, as each run also says on the terminal."""
@@ -2470,11 +2512,10 @@ def case_fidelity_writers(work):
     return [
         ("a Markdown target reports an example list, which comes back a numbered list",
          lambda: "md,ch,example-list,An example." in report),
-        ("an AsciiDoc target reports a root with an index, which Pandoc's reader cuts short",
-         lambda: "adoc,ch,root-index," in report),
-        ("and each target says so on the terminal",
-         lambda: "md: 1 thing(s) its files can't carry" in run.stderr
-         and "adoc: 1 thing(s) its files can't carry" in run.stderr),
+        ("an AsciiDoc target's root with an index isn't a loss: read back, it's there",
+         lambda: "root-index" not in report and adoc_root_reads_back(work)),
+        ("and the Markdown target says so on the terminal",
+         lambda: "md: 1 thing(s) its files can't carry" in run.stderr),
     ]
 
 
@@ -2510,10 +2551,9 @@ def case_remediate_docx(work):
     file, every other part left as it was (util/remediate.py)."""
     import zipfile
     import json
-    from PIL import Image
     os.makedirs(os.path.join(work, "assets"), exist_ok=True)
     for name in ("chart", "rule"):
-        Image.new("RGB", (40, 20), "navy").save(os.path.join(work, "assets", name + ".png"))
+        solid_png(os.path.join(work, "assets", name + ".png"))
     with open(os.path.join(work, "src.md"), "w", encoding="utf-8") as fh:
         fh.write("# Remediate\n\n| Name | Score |\n|------|------:|\n| Ana | 90 |\n| Ben | 85 |\n| Cy | 70 |\n\n"
                  "![](assets/chart.png)\n\nText.\n\n![](assets/rule.png){title=\"A rule\"}\n")
@@ -2619,7 +2659,11 @@ def case_docx_target(work):
                  "<tr><td>attacker</td><td>172.20.0.7</td></tr></tbody></table>"
                  "<table><caption>Two groups</caption><tbody><tr><th colspan=\"2\">Group A</th></tr>"
                  "<tr><td>1</td><td>2</td></tr></tbody><tbody><tr><th colspan=\"2\">Group B</th></tr>"
-                 "<tr><td>3</td><td>4</td></tr></tbody></table></body></html>")
+                 "<tr><td>3</td><td>4</td></tr></tbody></table>"
+                 '<table><caption>Nested</caption><tbody><tr><td style="text-align: center">'
+                 '<table><tbody><tr><td style="text-align: right">inner right</td><td>inner plain</td></tr>'
+                 '</tbody></table></td><td style="text-align: right">outer right</td></tr></tbody></table>'
+                 "</body></html>")
     with open(os.path.join(work, "image-alt.csv"), "w", encoding="utf-8") as fh:
         fh.write("Image,Alt\nassets/rule.png,[decorative]\n")
     with open(os.path.join(work, "conversion.yaml"), "w") as fh:
@@ -2655,7 +2699,10 @@ def case_docx_target(work):
 
     def html_table_with(page, text):
         return next((t for t in re.findall(r"<table\b.*?</table>", page, re.S) if text in t), "")
-    three_back = read(back, "html", "three.html") if exists(back, "html", "three.html") else ""
+
+    def para_with(xml, text):
+        return next((p for p in re.findall(r"<w:p\b.*?</w:p>", xml, re.S) if text in p), "")
+    three_back =read(back, "html", "three.html") if exists(back, "html", "three.html") else ""
     return [
         ("a docx target writes a Word file per page, in compatibility mode 15",
          lambda: "3 Word file(s)" in run.stderr and all(
@@ -2734,6 +2781,10 @@ def case_docx_target(work):
          and re.search(r"<caption>(?:(?!</table>).)*Addresses used(?:(?!</table>).)*172\.20\.0\.5",
                        three_back, re.S)
          and not re.search(r"<caption>(?:(?!</table>).)*Layout, left", three_back, re.S)),
+        ("a cell of a table in an aligned table's cell has one alignment, its own, as the schema allows",
+         lambda: all(p.count("<w:jc ") <= 1 for p in re.findall(r"<w:pPr>.*?</w:pPr>", three, re.S))
+         and '<w:jc w:val="right" />' in para_with(three, "inner right")
+         and 'w:val="center"' not in para_with(three, "inner right")),
         ("what the Word files can't carry is reported, page by page",
          lambda: all(k in fidelity for k in ("word,three,layout-table",
                                               "word,three,uncaptioned-figure"))
@@ -3316,6 +3367,38 @@ def case_notes(work):
                 nav = z.read("EPUB/nav.xhtml").decode("utf-8")
         return d, r, nav
 
+    def epub_links_land(d):
+        """Every #fragment link in the EPUB goes to a file with the id (the
+        one it names, or its own), and every note it goes to links back to
+        the reference: two chapter files may each have an fn1."""
+        import posixpath
+        e = os.path.join(d, "epub", "org.example.fixtures.epub")
+        if not os.path.exists(e):
+            return False
+        with zipfile.ZipFile(e) as z:
+            texts = {n: z.read(n).decode("utf-8") for n in z.namelist()
+                     if n.endswith(".xhtml")}
+
+        def resolve(name, f):
+            return posixpath.normpath(posixpath.join(posixpath.dirname(name), f)) \
+                if f else name
+        ids = {n: set(re.findall(r'\sid="([^"]+)"', t)) for n, t in texts.items()}
+        links = [(resolve(n, f), i) for n, t in texts.items()
+                 for f, i in re.findall(r'href="([^"#:]*)#([^"]+)"', t)]
+        refs = [(n, resolve(n, f), note, ref) for n, t in texts.items()
+                for f, note, ref in re.findall(
+                    r'href="([^"#:]*)#([^"]+)" class="footnote-ref" id="([^"]+)"', t)]
+
+        def back(name, target, note, ref):
+            aside = re.search(r'<(aside|li)\b[^>]*\bid="%s"[^>]*>(.*?)</\1>'
+                              % re.escape(note), texts.get(target, ""), re.S)
+            return aside is not None and any(
+                resolve(target, f) == name
+                for f in re.findall(r'href="([^"#]*)#%s"' % re.escape(ref),
+                                    aside.group(2)))
+        return links and refs and all(i in ids.get(t, ()) for t, i in links) \
+            and all(back(*r) for r in refs)
+
     gp, r1, _ = build("group-page", "group", "page")
     gg, r2, _ = build("group-group", "group", "group")
     gb, r3, nav = build("group-book", "group", "book")
@@ -3348,6 +3431,8 @@ def case_notes(work):
         ("no reference or return link is left dangling in any of them",
          lambda: not any(re.search(r"link-to-missing|duplicate-id",
                                    r.stderr) for r in (r1, r2, r3))),
+        ("in the EPUBs, every note's link goes to the file its note is in",
+         lambda: all(epub_links_land(d) for d in (gp, gg, gb))),
     ]
 
 
@@ -3664,10 +3749,16 @@ CASES = [
 def main():
     if shutil.which("pandoc") is None:
         sys.exit("pandoc is not on the path.")
+    # --case LABEL (repeatable) runs only those cases.
+    chosen = [sys.argv[i + 1] for i, a in enumerate(sys.argv[:-1]) if a == "--case"]
+    cases = [c for c in CASES if not chosen or c[0] in chosen]
+    if chosen and len(cases) != len(set(chosen)):
+        sys.exit("no case is called " + ", ".join(
+            repr(c) for c in chosen if c not in {label for label, _ in CASES}))
     work = tempfile.mkdtemp(prefix="convert-tests-")
     failed = 0
     try:
-        for label, case in CASES:
+        for label, case in cases:
             directory = os.path.join(work, re.sub(r"[^\w-]+", "-", label))
             try:
                 checks = case(directory)
@@ -3684,7 +3775,7 @@ def main():
                 failed += not ok
     finally:
         shutil.rmtree(work, ignore_errors=True)
-    print(f"\n{failed} check(s) failed across {len(CASES)} case(s)"
+    print(f"\n{failed} check(s) failed across {len(cases)} case(s)"
           if failed else "\nall convert checks passed")
     return 1 if failed else 0
 

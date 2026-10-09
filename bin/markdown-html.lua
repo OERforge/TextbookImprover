@@ -139,6 +139,27 @@ local function balance(list, inline)
         end
         if j <= #list then
           local middle = {}
+          local raw_inside = false
+          for k = i + 1, j - 1 do
+            middle[#middle + 1] = list[k]
+            if is_raw(list[k]) then raw_inside = true end
+          end
+          -- A div around blocks Pandoc read itself, as a table in its
+          -- wrapper: the div from its tags alone, the blocks as they are.
+          -- Through HTML and back, a table there can lose its columns
+          -- (GIAM's table of a statement and its contrapositive, read back
+          -- from AsciiDoc: 6 columns became 2).
+          if name == 'div' and not inline and not raw_inside then
+            local shell = read_html(el.text .. list[j].text, false)
+            if shell and #shell == 1 and shell[1].t == 'Div' then
+              shell[1].content = pandoc.Blocks(middle)
+              out:insert(shell[1])
+              i, done, changed = j, true, true
+            end
+          end
+        end
+        if not done and j <= #list then
+          local middle = {}
           for k = i + 1, j - 1 do middle[#middle + 1] = list[k] end
           local html = el.text .. as_html(middle, inline) .. list[j].text
           local new = read_html(html, inline)

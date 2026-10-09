@@ -1,6 +1,6 @@
 # TextbookImprover
 
-Converts a book's sources (Word, Markdown, AsciiDoc, or HTML, or a book saved from the web, an EPUB, or a course cartridge) into more-accessible HTML pages, an EPUB, a tagged PDF, Word files, or Markdown or AsciiDoc source, and packages the pages as an IMS Common Cartridge for import into Brightspace or another LMS.
+Converts a book's sources (Word, Markdown, AsciiDoc, HTML, or LaTeX, or a book saved from the web, an EPUB, or a course cartridge) into more-accessible HTML pages, an EPUB, a tagged PDF, Word files, or Markdown, AsciiDoc, or LaTeX source, and packages the pages as an IMS Common Cartridge for import into Brightspace or another LMS.
 
 Licensed GPL 3.0. See `LICENSE` for more info.
 
@@ -8,11 +8,13 @@ The initial release of these scripts was created by Robert Szarka and supported 
 
 ## What it does
 
-Reads a book's sources, one file per page (Word, Markdown, AsciiDoc, or HTML), into one intermediate per page, after unpacking any that arrive another way (an EPUB, a site saved from the web or captured in a WARC or WACZ, a Jekyll site, a Common Cartridge), makes each page more accessible on the way, and writes every output the configuration asks for from the same intermediates: HTML pages, an EPUB, a tagged PDF, Markdown or AsciiDoc source, Word files, and a Common Cartridge for import into an LMS. The book's structure, declared once as `contents` or guessed from the files and the publisher's PDF, is the cartridge's module tree, the EPUB's table of contents, and the generated contents page alike.
+Reads a book's sources, one file per page (Word, Markdown, AsciiDoc, or HTML, or a LaTeX book through its master file), into one intermediate per page, after unpacking any that arrive another way (an EPUB, a site saved from the web or captured in a WARC or WACZ, a Jekyll site, a Common Cartridge), makes each page more accessible on the way, and writes every output the configuration asks for from the same intermediates: HTML pages, an EPUB, a tagged PDF, Markdown, AsciiDoc, or LaTeX source, Word files, and a Common Cartridge for import into an LMS. The book's structure, declared once as `contents` or guessed from the files and the publisher's PDF, is the cartridge's module tree, the EPUB's table of contents, and the generated contents page alike.
 
 **Conversion** runs each source through Pandoc and a Lua filter that makes the page more accessible: figures get real captions tied to their images, data tables get captions, header cells, and a focusable scroll region, images get their alt text checked and their layout spacers marked, equations stay equations, and cross-references that Word's export left dangling land. Where the source doesn't say something a screen reader needs, the run reports it, and a sidecar file holds what you decide; after a Markdown round trip, the decisions are in the source itself.
 
-**Packaging** turns the pages into a Common Cartridge with the book's structure as the module tree, validated against the IMS schemas, and into an EPUB 3 that validates with epubcheck and says what it can claim about itself. **The PDF** is tagged by LaTeX itself, its formulas carrying MathML, and claims PDF/UA-2 and Well-Tagged PDF, or PDF/UA-1 for checkers that know only that; veraPDF checks it. **The Word files** open out of compatibility mode, so Word's Accessibility Checker runs, with ScreenTips, decorative images marked, and table headers declared, and read back as a source with what Pandoc alone would lose put back. A `source` target writes the same remediation into the author's own Word or Markdown files.
+**Packaging** turns the pages into a Common Cartridge with the book's structure as the module tree, validated against the IMS schemas, and into an EPUB 3 that validates with epubcheck and says what it can claim about itself. **The PDF** is tagged by LaTeX itself, its formulas carrying MathML, and claims PDF/UA-2 and Well-Tagged PDF, or PDF/UA-1 for checkers that know only that; veraPDF checks it. **The Word files** open out of compatibility mode, so Word's Accessibility Checker runs, with ScreenTips, decorative images marked, and table headers declared, and read back as a source with what Pandoc alone would lose put back. A `source` target writes the same remediation into the author's own Word or Markdown files, or a copy of a LaTeX book's own files made to build with LaTeX's tagging.
+
+**LaTeX as a source is new, and needs more testing**: every path from it is rated NEEDS MORE TESTING on [the formats page](docs/formats.md#at-a-glance), since each book read so far has turned up something the others hadn't ([LaTeX sources](docs/latex.md)).
 
 **Every run checks what it wrote**: dead links and fragments, missing alt text, heading order, invalid ids, tables without headers or caption, and, when the validators are installed, epubcheck, the Nu HTML checker, and veraPDF. The same checks, plus what a Word, Markdown, or PDF file says about itself, run on any file without converting it: `audit.py` writes a findings CSV and a report.
 
@@ -57,7 +59,7 @@ Each target writes into a directory of its own; the content directory keeps the 
 | --- | --- |
 | [Installation](docs/installation.md) | Prerequisites and how to check them |
 | [A first run](docs/first-run.md) | Start to finish, what each run writes, exit codes |
-| [Worked examples](docs/examples.md) | Two real books from start to finish: an OpenStax book from its Word files to a course cartridge, and a book website from a WARC to an EPUB and an HTML round trip. |
+| [Worked examples](docs/examples.md) | Three real books from start to finish: an OpenStax book from its Word files to a course cartridge, a book website from a WARC to an EPUB and an HTML round trip, and a LaTeX book from its repository to a tagged PDF. |
 | [Formats and packaging](docs/formats.md) | Every input, every way it can arrive, every output, how far each path is tested and what it loses, and how the output is packaged |
 | [How it works](docs/architecture.md) | The pieces, what conversion does to a page, running the filter alone |
 | [Configuration](docs/configuration.md) | How the configuration files fit together, precedence, contents, migration from v0.1 |
@@ -72,6 +74,7 @@ Each target writes into a directory of its own; the content directory keeps the 
 | [Auditing](docs/auditing.md) | `audit.py`: what is wrong with a Word, Markdown, HTML, EPUB, or PDF file, without converting it; the findings format every check shares |
 | [HTML sources](docs/html.md) | Every `.html` beside the sources is a source, and a finished page goes in `_pt/`: what is read from it, what isn't, and why converting this pipeline's own pages changes nothing |
 | [A book saved from the web](docs/site-input.md) | `unpack-site.py`: browser saves or `.mhtml` into pages whose every reference is local, the generator recognized, the order read from the site's own menus |
+| [LaTeX sources](docs/latex.md) | A LaTeX book read through its master file, a page per `\include`; what is put right on a copy before Pandoc reads it, drawings rendered by LaTeX, and `latex-conversion-macros.tex` for what only a person can name |
 | [AsciiDoc sources](docs/asciidoc.md) | The AsciiDoc target, and `.adoc` chapters as sources, a master file that includes them as the book's order, and what is done on reading that the reader leaves undone |
 | [Adopting pages as sources](docs/splitting.md#adopting-the-pages-as-sources) | `adopt-pages.py`: a split book's pages renamed without `--`, links rewritten, as the sources of a new book |
 | [A site's own source](docs/site-input.md#a-sites-own-source) | `unpack-jekyll.py`: a Jekyll site's Markdown (just-the-docs) into a book directory, contents from its front matter, code left alone |

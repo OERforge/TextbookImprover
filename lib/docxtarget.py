@@ -236,6 +236,24 @@ TABLE_MARK = "tiqTable"
 DECORATIVE_MARK = "tiqDecorative"
 LINES_MARK = "tiqLines"
 CODE_MARK = "tiqLang"
+# A paragraph holding only a display formula, after the first block of a
+# list item. Pandoc's writer gives such a paragraph no numbering at all
+# (getParaProps's displayMathPara, Writers/Docx/OpenXML.hs, 3.12), where
+# the item's other paragraphs get its no-marker numbering; so the item,
+# and the list, end at the formula when the file is read. The mark carries
+# the list's depth, which becomes the paragraph's numbering level.
+MATH_MARK = "tiqMath"
+BASE_LIST_ID = 1000          # Pandoc's numbering with no marker (baseListId)
+# A table or a horizontal rule inside an item of a list that isn't itself
+# in a list. Word can't put a table in a numbered paragraph, and Pandoc's
+# reader takes its own rule only from a paragraph with no properties, so
+# with no numbering (Readers/Docx/Parse.hs); either way the reader ends the
+# list there (Readers/Docx/Lists.hs folds only paragraphs into an item),
+# so the file
+# says which of its tables belong to an item, with how many blocks of the
+# item follow it and whether the list goes on after the item, in the same
+# part as the id map; docxrepair.apply_list_tables puts them back.
+ITEM_TABLE_MARK = "tiqItemTable"
 NUMBER_CLASSES = ("numberLines", "number-lines")
 # A code block's language, the class Pandoc highlights by, has nowhere to
 # go in Word either. It goes in a hidden bookmark (a name starting with an
@@ -286,6 +304,41 @@ def _separator(prefix, n):
                                {"t": "Span", "c": [[prefix + str(n), [], []], []]}]}
 
 
+def _unwrap_equations(inlines):
+    """A numbered display formula from a LaTeX book, which the pages set
+    in a span with its anchors and number (latexsource.resolve_counters),
+    as the writer makes a display formula of: alone, or in a span alone
+    (isDisplayMath, Writers/Shared.hs); in that span it was set in the
+    line, as Word sets a formula among a paragraph's words. Its anchors
+    stay before it, and its number follows it, on a line of its own when
+    text follows."""
+    if not any(isinstance(i, dict) and i.get("t") == "Span"
+               and "equation" in i["c"][0][1] for i in inlines):
+        return inlines
+    out = []
+    for index, item in enumerate(inlines):
+        if not (isinstance(item, dict) and item.get("t") == "Span"
+                and "equation" in item["c"][0][1]):
+            out.append(item)
+            continue
+        number = []
+        for inner in item["c"][1]:
+            if inner.get("t") == "Span" and "equation-number" in inner["c"][0][1]:
+                # A row's number after the row before's, a space apart.
+                for i in inner["c"][1]:
+                    if i.get("t") != "LineBreak":
+                        number.append(i)
+                    elif number and number[-1].get("t") != "Space":
+                        number.append({"t": "Space"})
+            else:
+                out.append(inner)
+        out.extend(number)
+        if number and any(i.get("t") not in ("Space", "SoftBreak", "LineBreak")
+                          for i in inlines[index + 1:]):
+            out.append({"t": "LineBreak"})
+    return out
+
+
 def mark_blocks(doc):
     """The page's AST with what the post-processing needs marked on the
     elements themselves, never counted: each block quote's content in a
@@ -296,7 +349,8 @@ def mark_blocks(doc):
     a marked Div, since a figure holding more than an image is written as
     a table. Matching by position went wrong on Pandoc's own output: a
     figure holding two images is a w:tbl too. Returns (doc, marks)."""
-    counts = {"quote": 0, "sep": 0, "table": 0, "decorative": 0, "lines": 0, "code": 0}
+    counts = {"quote": 0, "sep": 0, "table": 0, "decorative": 0, "lines": 0, "code": 0,
+              "equations": 0}
 
     def marked(prefix, kind, inner, block):
         counts[kind] += 1
@@ -314,6 +368,10 @@ def mark_blocks(doc):
             return value
         if not _elements(value):
             return [visit(v) for v in value]
+        unwrapped = _unwrap_equations(value)
+        if unwrapped is not value:
+            counts["equations"] += 1
+            value = unwrapped
         out = []
         for item in value:
             t = item.get("t")
@@ -342,7 +400,226 @@ def mark_blocks(doc):
         return out
 
     doc["blocks"] = visit(doc.get("blocks", []))
+    counts["math"] = _mark_list_math(doc["blocks"], -1)
+    counts["quote_tables"] = _mark_quote_tables(doc["blocks"])
     return doc, sum(counts.values())
+
+
+def _display_math_para(block):
+    """A paragraph Pandoc's writer gives no numbering in a list item: one
+    holding only a display formula."""
+    return block.get("t") == "Para" and len(block["c"]) == 1 \
+        and block["c"][0].get("t") == "Math" \
+        and block["c"][0]["c"][0].get("t") == "DisplayMath"
+
+
+def _split_display(block):
+    """A paragraph holding display formulas among other inlines, as
+    Pandoc's writer will write it: each run of formulas and each run of
+    the rest its own paragraph, spaces at their edges dropped."""
+    if block.get("t") != "Para":
+        return [block]
+    inlines = block["c"]
+    shown = [i.get("t") == "Math" and i["c"][0].get("t") == "DisplayMath"
+             for i in inlines]
+    if not any(shown) or all(shown):
+        return [block]
+    groups, current, kind = [], [], None
+    for inline, display in zip(inlines, shown):
+        if current and display != kind:
+            groups.append(current)
+            current = []
+        current.append(inline)
+        kind = display
+    groups.append(current)
+    space = ("Space", "SoftBreak", "LineBreak")
+    out = []
+    for group in groups:
+        while group and group[0].get("t") in space:
+            group = group[1:]
+        while group and group[-1].get("t") in space:
+            group = group[:-1]
+        if group:
+            out.append({"t": "Para", "c": group})
+    return out
+
+
+def _mark_item(blocks, depth, counter, opens_item):
+    """Within a list item's blocks, and the divs among them: each
+    paragraph of display formulas cut out, and each one but the item's
+    very first block marked with the item's depth."""
+    blocks[:] = [piece for inner in blocks for piece in _split_display(inner)]
+    for i, inner in enumerate(blocks):
+        if _display_math_para(inner) and not (opens_item and i == 0):
+            counter[0] += 1
+            blocks[i] = {"t": "Div", "c": [["%s%dd%d" % (
+                MATH_MARK, counter[0], depth), [], []], [inner]]}
+        elif inner.get("t") == "Div":
+            _mark_item(inner["c"][1], depth, counter, opens_item and i == 0)
+        elif inner.get("t") == "BlockQuote":
+            # A quotation in an item is numbered with the item, its formula
+            # too (the Word target's quotations in lists, indent_quotes).
+            _mark_item(inner["c"], depth, counter, False)
+
+
+def _held(block):
+    """"t" for a table, "r" for a horizontal rule, or a div holding nothing
+    but one, at any depth; None otherwise."""
+    while block.get("t") == "Div" and len(block["c"][1]) == 1:
+        block = block["c"][1][0]
+    return {"Table": "t", "HorizontalRule": "r"}.get(block.get("t"))
+
+
+def _mark_item_tables(item, counter, chain):
+    """Mark each table or rule after the first block of a list item with
+    how many of the item's blocks follow it and, for each list from the
+    outermost to the item's own, whether it goes on (a digit each)."""
+    bits = "".join(str(int(b)) for b in chain)
+    for i in range(len(item) - 1, 0, -1):
+        kind = _held(item[i])
+        if kind:
+            counter[0] += 1
+            item[i] = {"t": "Div", "c": [["%s%dk%sf%dc%s" % (
+                ITEM_TABLE_MARK, counter[0], kind, len(item) - i - 1, bits),
+                [], []], [item[i]]]}
+
+
+def _table_end(xml, start):
+    """The index just past the w:tbl that opens at start, nested ones
+    counted."""
+    depth = 0
+    for tag in re.finditer(r"<w:tbl>|</w:tbl>", xml[start:]):
+        depth += 1 if tag.group(0) == "<w:tbl>" else -1
+        if depth == 0:
+            return start + tag.end()
+    return len(xml)
+
+
+def _mark_quote_tables(blocks):
+    """Mark each table after the first block of a quotation that isn't
+    itself inside one ("q"), with whether the quotation goes on after it.
+    Returns how many."""
+    count = 0
+    for block in blocks:
+        if not isinstance(block, dict) or block.get("t") != "BlockQuote":
+            continue
+        inner = block["c"]
+        # mark_blocks wraps a quotation's content in a marked div.
+        if len(inner) == 1 and inner[0].get("t") == "Div" \
+                and inner[0]["c"][0][0].startswith(QUOTE_MARK):
+            inner = inner[0]["c"][1]
+        for i in range(len(inner) - 1, 0, -1):
+            if _held(inner[i]) == "t":
+                count += 1
+                inner[i] = {"t": "Div", "c": [["%sQ%dkqf0c%d" % (
+                    ITEM_TABLE_MARK, count, int(i < len(inner) - 1)),
+                    [], []], [inner[i]]]}
+    return count
+
+
+def item_tables(xml):
+    """[(kind, ordinal, follow, continues)] for each table ("t") or rule
+    ("r") mark_blocks marked as in a list item, the ordinal counting the
+    body's tables, or its rules, outside tables, from 0. The marks are
+    then removed. Returns (xml, found)."""
+    pattern = re.compile(r'<w:bookmarkStart w:id="(\d+)" w:name="_?%sQ?\d+k([trq])f(\d+)c(\d+)"\s*/>'
+                         % ITEM_TABLE_MARK)
+    found = []
+    while True:
+        m = pattern.search(xml)
+        if not m:
+            break
+        kind = m.group(2)
+        target = 'o:hr="t"' if kind == "r" else "<w:tbl>"
+        at = xml.find(target, m.end())
+        if at >= 0 and kind == "q":
+            # The writer gives a quotation's table cells the quotation's
+            # style, and each cell reads back as a quotation of its own.
+            end = _table_end(xml, at)
+            xml = xml[:at] + xml[at:end].replace(
+                '<w:pStyle w:val="BlockText" />', '<w:pStyle w:val="Compact" />') + xml[end:]
+        if at >= 0:
+            depth, ordinal = 0, 0
+            for tag in re.finditer(r'<w:tbl>|</w:tbl>|o:hr="t"', xml[:at]):
+                if tag.group(0) == "<w:tbl>":
+                    if depth == 0 and kind in "tq":
+                        ordinal += 1
+                    depth += 1
+                elif tag.group(0) == "</w:tbl>":
+                    depth -= 1
+                elif depth == 0 and kind == "r":
+                    ordinal += 1
+            found.append((kind, ordinal, int(m.group(3)), m.group(4)))
+        xml = xml[:m.start()] + xml[m.end():]
+        xml = re.sub(r'<w:bookmarkEnd w:id="%s"\s*/>' % m.group(1), "", xml, count=1)
+    return xml, found
+
+
+def _mark_list_math(blocks, depth, counter=None, chain=(), tables=True):
+    """Mark each display-formula paragraph that follows the first block of
+    a list item, with the item's depth (MATH_MARK), and each table or rule
+    after an item's first block (ITEM_TABLE_MARK) with whether each list
+    from the outermost to its own goes on after it: chain. Not in a
+    quotation, which the reader takes apart differently. Returns how many."""
+    counter = counter if counter is not None else [0]
+
+    def items_of(block):
+        if block.get("t") == "OrderedList":
+            return block["c"][1]
+        if block.get("t") == "BulletList":
+            return block["c"]
+        return None
+    for block in blocks:
+        items = items_of(block) if isinstance(block, dict) else None
+        if items is not None:
+            for j, item in enumerate(items):
+                # The writer cuts a paragraph holding a display formula and
+                # text into paragraphs (fixDisplayMath, Writers/Shared.hs);
+                # cut here the same way, so the formula's own is marked.
+                _mark_item(item, depth + 1, counter, True)
+                here = chain + (j < len(items) - 1,)
+                if tables:
+                    _mark_item_tables(item, counter, here)
+                _mark_list_math(item, depth + 1, counter, here, tables)
+        elif isinstance(block, dict) and block.get("t") in ("Div", "BlockQuote"):
+            inner = block["c"][1] if block["t"] == "Div" else block["c"]
+            _mark_list_math(inner, depth, counter, chain,
+                            tables and block["t"] == "Div")
+    return counter[0]
+
+
+def list_math(xml):
+    """Each paragraph mark_blocks marked as a display formula in a list
+    item numbered as the item's other paragraphs are: the item's level,
+    with no marker. The marks are then removed. Returns (xml, count)."""
+    pattern = re.compile(r'<w:bookmarkStart w:id="(\d+)" w:name="_?%s(\d+)d(\d+)"\s*/>'
+                         % MATH_MARK)
+    count = 0
+    while True:
+        m = pattern.search(xml)
+        if not m:
+            break
+        ident, level = m.group(1), m.group(3)
+        end = re.compile(r'<w:bookmarkEnd w:id="%s"\s*/>' % ident)
+        para = xml.find("<w:p>", m.end())
+        props = re.compile(r"<w:pPr>(.*?)</w:pPr>", re.S).match(xml, para + len("<w:p>")) \
+            if para >= 0 else None
+        numbering = ('<w:numPr><w:ilvl w:val="%s" /><w:numId w:val="%d" /></w:numPr>'
+                     % (level, BASE_LIST_ID))
+        if para >= 0 and not (props and "<w:numPr>" in props.group(1)):
+            if props:
+                inner = props.group(1)
+                style = re.match(r"\s*<w:pStyle [^>]*/>", inner)
+                at = props.start(1) + (style.end() if style else 0)
+                xml = xml[:at] + numbering + xml[at:]
+            else:
+                at = para + len("<w:p>")
+                xml = xml[:at] + "<w:pPr>" + numbering + "</w:pPr>" + xml[at:]
+            count += 1
+        # The mark itself goes, start and end.
+        xml = xml[:m.start()] + xml[m.end():]
+        xml = end.sub("", xml, count=1)
+    return xml, count
 
 
 def _edge(block, first):
@@ -568,9 +845,36 @@ def keep_captions(xml):
     return xml, count
 
 
+# Pandoc's writer gives a table cell's paragraphs the column's alignment,
+# and a table inside that cell its own besides: withParaProp
+# (Writers/Docx/Types.hs, 3.12 and 3.12.1) adds the inner property before
+# the outer, so a nested table's cell has two w:jc, the first its own, where
+# the schema allows one (CT_PPrBase). GIAM's tables in tables had 113. A
+# workaround pending Pandoc.
+def single_alignment(xml):
+    """Keep only the first w:jc of each paragraph's properties; returns
+    (xml, count of those taken out)."""
+    count = 0
+
+    def one(m):
+        seen = []
+
+        def jc(j):
+            nonlocal count
+            if seen:
+                count += 1
+                return ""
+            seen.append(j)
+            return j.group(0)
+        return re.sub(r"<w:jc\b[^>]*/>", jc, m.group(0))
+    xml = re.sub(r"<w:pPr>(?:(?!</?w:pPr\b).)*</w:pPr>", one, xml, flags=re.S)
+    return xml, count
+
+
 # What a page has that a Word file can't carry, known before writing.
 LOSSES = {
     "uncaptioned-figure": "a figure with no caption comes back as an image",
+    "figure-table": "a figure holding a table comes back as the table, its caption the table's description",
     "code-language": "a code block's language (its highlighting) is lost; "
                      "only letters and digits fit in the bookmark that carries one",
     "layout-table": "a layout table comes back as a data table",
@@ -621,6 +925,9 @@ def losses(doc):
                 alts = []
                 walk_alts(c[2], alts)
                 found.append(("uncaptioned-figure", alts[0] if alts else ""))
+            elif t == "Figure" and any(_held(b) == "t" for b in c[2]):
+                found.append(("figure-table", words(
+                    [i for b in c[1][1] for i in (b.get("c") or [])])))
             elif t == "Table":
                 attr = dict(c[0][2])
                 if attr.get("role") == "presentation":
@@ -853,10 +1160,12 @@ def id_map(doc):
     return found
 
 
-def _id_map_xml(mapping):
+def _id_map_xml(mapping, listed_tables=()):
     rows = "".join('<id bookmark="%s" name="%s"/>' % (html.escape(b, quote=True),
                                                      html.escape(n, quote=True))
                    for b, n in sorted(mapping.items()))
+    rows += "".join('<listBlock kind="%s" n="%d" follow="%d" continues="%s"/>' % row
+                    for row in sorted(listed_tables))
     return ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
             '<ids xmlns="%s">%s</ids>' % (ID_MAP_NS, rows))
 
@@ -937,7 +1246,8 @@ def finish(path, doc, keep=None):
     quoted_items = 0
     counts = {"compat": 0, "tooltips": 0, "decorative": 0, "first_columns": 0,
               "quotes": 0, "jaws_titles": 0, "ids": 0, "captions_kept": 0,
-              "code_lines": 0, "code_languages": 0, "bookmarks_removed": 0}
+              "code_lines": 0, "code_languages": 0, "bookmarks_removed": 0,
+              "alignments": 0}
     with zipfile.ZipFile(path) as z:
         names = z.namelist()
         parts = {n: z.read(n) for n in names}
@@ -947,6 +1257,7 @@ def finish(path, doc, keep=None):
         new = compat_mode(text("word/settings.xml"))
         counts["compat"] = int(new != text("word/settings.xml"))
         parts["word/settings.xml"] = new.encode("utf-8")
+    listed_tables = []
     for part, rels, facts in (
             ("word/document.xml", "word/_rels/document.xml.rels", body),
             ("word/footnotes.xml", "word/_rels/footnotes.xml.rels", notes)):
@@ -958,6 +1269,10 @@ def finish(path, doc, keep=None):
         xml, found = apply_markers(xml, tables, lines, codes)
         for key, n in found.items():
             counts[key] += n
+        xml, n = list_math(xml)
+        counts["list_math"] = counts.get("list_math", 0) + n
+        if part == "word/document.xml":
+            xml, listed_tables = item_tables(xml)
         numbering = text("word/numbering.xml") if "word/numbering.xml" in parts else ""
         xml, n, items = indent_quotes(xml, level_indents(numbering) if numbering else None,
                                       level_indents(numbering, blank=True) if numbering else None)
@@ -965,6 +1280,8 @@ def finish(path, doc, keep=None):
         quoted_items += items
         xml, n = keep_captions(xml)
         counts["captions_kept"] += n
+        xml, n = single_alignment(xml)
+        counts["alignments"] += n
         if keep is not None:
             xml, n = prune_bookmarks(xml, keep)
             counts["bookmarks_removed"] += n
@@ -988,8 +1305,8 @@ def finish(path, doc, keep=None):
         parts["word/styles.xml"] = text("word/styles.xml").replace(
             "</w:styles>", LINE_NUMBER_STYLE + "</w:styles>", 1).encode("utf-8")
     mapping = id_map(doc)
-    if mapping and ID_MAP_PART not in parts:
-        parts[ID_MAP_PART] = _id_map_xml(mapping).encode("utf-8")
+    if (mapping or listed_tables) and ID_MAP_PART not in parts:
+        parts[ID_MAP_PART] = _id_map_xml(mapping, listed_tables).encode("utf-8")
         names.append(ID_MAP_PART)
         infos[ID_MAP_PART] = zipfile.ZipInfo(ID_MAP_PART)
         rels = "word/_rels/document.xml.rels"

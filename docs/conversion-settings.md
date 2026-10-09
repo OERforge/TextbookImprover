@@ -4,9 +4,9 @@ Settings that describe one rendering of the book, under `conversion:` in `packag
 
 How the book is rendered into one output format.
 
-**`format`**—one of `html`, `epub3`, `pdf`, `docx`, `markdown`, `asciidoc`, `source`; default `html`; *target only*
+**`format`**—one of `html`, `epub3`, `pdf`, `latex`, `docx`, `markdown`, `asciidoc`, `source`; default `html`; *target only*
 
-What this target produces. markdown and asciidoc write source again: what the author decided, which the pipeline reads back to the same book. docx writes Word files from the same pages, in compatibility mode 15 with ScreenTips and Word's decorative marker. pdf writes one tagged PDF of the whole book through LaTeX, which needs LuaLaTeX (see the installation page).
+What this target produces. markdown and asciidoc write source again: what the author decided, which the pipeline reads back to the same book. docx writes Word files from the same pages, in compatibility mode 15 with ScreenTips and Word's decorative marker. pdf writes one tagged PDF of the whole book through LaTeX, which needs LuaLaTeX (see the installation page). latex writes the LaTeX the pdf target builds from, as a master file that \include-s a file per chapter, with its images beside them, for an author to go on working in.
 
 **`output_dir`**—`path`; default `""` (empty); *target only*
 
@@ -23,6 +23,18 @@ Whether every page of an HTML target carries the book's contents as a menu at it
 **`compatibility_mode`**—one of `keep`, `15`; default `keep`
 
 For a target with format source: whether a remediated Word file keeps the compatibility mode its author's file has, or is set to 15, which guides for Word say its Accessibility Checker needs. Kept by default, since the file is the author's.
+
+**`latex_definitions`**—one of `on`, `off`; default `on`
+
+For a target with format source on a LaTeX book: whether the copy gets the definitions in the book's latex.macros file (latex-conversion-macros.tex), written after its preamble as the conversion reads them, so they replace the book's own there too. A person writes that file to say what the book's macros mean, a bar drawn with \rule as \mid, say, which is what a reader of the PDF needs as much as one of the pages. On by default; off keeps them to the conversion, for a file that only helps Pandoc read the book.
+
+**`tagging`**—one of `off`, `on`; default `off`
+
+For a target with format source on a LaTeX book: whether the copy is made to build with LaTeX's own tagging, for an accessible PDF: \DocumentMetadata before \documentclass, pdfTeX-only options and settings taken out, the constructs tagging can't take yet put the way it can, each figure's and table's tags where the text has it, and unicode-math for the formulas' MathML (latex_mathml). A tagged book is built with LuaLaTeX (pdfLaTeX runs out of memory on a book), so this changes the author's build. Off by default; the alt text is written either way.
+
+**`latex_mathml`**—one of `on`, `off`; default `on`
+
+For a target with format source and tagging on, on a LaTeX book: whether the copy loads unicode-math, so each formula carries its MathML, which LaTeX makes only from an OpenType math font. Its Latin Modern fonts are TeX's own design, but their metrics differ a little, so pages can break differently: the calculus notes take 84 pages instead of 85, while GIAM keeps its 434. Off keeps the book's fonts, and its formulas get no MathML. A book that sets its fonts with a package of its own (mathptmx, fontspec) keeps them either way.
 
 **`title_page`**—one of `auto`, `on`, `off`; default `auto`
 
@@ -158,7 +170,11 @@ The sentence or two a reading system shows a reader about the book's accessibili
 
 ## pdf
 
-Settings read only by a pdf target. One PDF holds the whole book, assembled from the pages the way the EPUB is, and written by Pandoc's LaTeX writer and LuaLaTeX with LaTeX's tagging on, so the file carries its structure, its images' alternative text, its tables' header cells, and its equations as MathML.
+Settings read only by a pdf target. One PDF holds the whole book, assembled from the pages the way the EPUB is, and written by Pandoc's LaTeX writer and LuaLaTeX with LaTeX's tagging on, so the file carries its structure, its images' alternative text, its tables' header cells, and its equations as MathML. A LaTeX book's PDF is built from the book's own LaTeX instead, unless from says pages.
+
+**`pdf.from`**—one of `book`, `pages`; default `book`
+
+What a LaTeX book's PDF is built from. book builds the book's own LaTeX with latexmk and LuaLaTeX, from a copy of its folder with the book's files as a source target with tagging on writes them (alt text, header declarations, the definitions file, MathML), the census's header guesses declared too, as the pages have them: the author's pages, index, and bibliography, as their LaTeX makes them. It needs latexmk, and a book that builds with LaTeX's tagging; the PDF claims PDF/UA-2, and the settings below that shape Pandoc's LaTeX (metadata, figures, repair_captions, remove_empty_paragraphs, ua1_math, toc_depth) don't apply. pages builds from the converted pages through Pandoc's LaTeX writer, as for any other source. A book from any other source is built from its pages either way.
 
 **`pdf.standard`**—`list`; default `[ua-2]`
 
@@ -222,6 +238,20 @@ What becomes of text deleted with Word's tracked changes. accept drops it, as Wo
 
 Which paragraph styles are headings, for a book whose top level is styled Title, or otherwise not Heading 1 to 9, which is all Pandoc reads as headings. keep leaves the styles as they are; from-toc takes the levels each file's own table-of-contents field declares; or a map of style ids, FROM=TO,..., applied all at once (Title=Heading1,Heading1=Heading2). A file the setting can't apply to, with no TOC field, or not defining a style the map needs, is left as it is and named.
 
+## latex
+
+A LaTeX book, read through its master file: the one in the book's directory with \documentclass and \begin{document}, which \include-s the chapters, each a page.
+
+*Book level:* set these under `defaults:`, never in a target, since the whole book shares them; in a target they stop the run.
+
+**`latex.main`**—`list`; default `[]`
+
+The master file, when more than one file in the book's directory is a whole document, as when one set of chapters makes a textbook, a workbook, and a solutions manual (GIAM.tex). Or a list, when the book is a set of documents each built on its own, a course's notes a topic at a time: each is read in the order given, a page each (or a page for each file it \include-s), and the PDF target's book route builds a PDF of each. A name can be a path below the book's directory (src/Topic 01.tex) or a pattern (src/*.tex, in sorted order). Blank takes the only one, and stops the run when there are several; a master that only gathers PDFs with \includepdf stops it too, naming the documents of the same names to list here.
+
+**`latex.macros`**—`string`; default `latex-conversion-macros.tex`
+
+A file of LaTeX definitions read after the book's own preamble, so they win over the book's: for a macro that draws what it means, where only a person can say what that is: \renewcommand{\suchthat}{\mid} for a bar drawn with \rule. Read when it's there. The book's own files are never changed; a source target writes the definitions into its copy unless its latex_definitions is off.
+
 ## sidecars
 
 CSV files holding decisions a person made about the source. These describe the book rather than one rendering, so a target should rarely override them. These files are read, never written, and hold work no script can reproduce. A bare name resolves against the content directory, which is convenient but leaves them among the generated HTML, the extracted media, and the disposable reports: the directory you would delete to rebuild, and the one replaced wholesale when the publisher reissues the source. An absolute path, or one relative to the content directory such as "../corrections/ibs2e/table-captions.csv", keeps them somewhere you can put under version control. A path set here that doesn't exist stops the run, because the alternative is converting the whole book while silently discarding every correction in it.
@@ -268,7 +298,7 @@ Images with no alt text, or with alt text over the length limit.
 
 **`reports.fidelity`**—`path`; default `fidelity.csv`
 
-What a target's files can't carry, one row per page and kind of loss: for a docx target, a list inside a quotation, a figure with no caption, a layout table, a table's per-cell headers, and a code block's language when its name can't go in a bookmark; for markdown and asciidoc targets, what the writing changes, as each run also says on the terminal (an example list, a footnote of several paragraphs in AsciiDoc, a root with an index). Nothing to fix in the book; it says what reading the files back won't restore.
+What a target's files can't carry, one row per page and kind of loss: for a docx target, a list inside a quotation, a figure with no caption, a layout table, a table's per-cell headers, and a code block's language when its name can't go in a bookmark; for markdown and asciidoc targets, what the writing changes, as each run also says on the terminal (an example list, a footnote of several paragraphs in AsciiDoc). Nothing to fix in the book; it says what reading the files back won't restore.
 
 **`reports.bare_links_new`**—`path`; default `bare-links-new.csv`
 

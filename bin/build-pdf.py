@@ -62,20 +62,13 @@ from bookassembly import (  # noqa: E402
     INTERMEDIATE, Assembly, load_documents, targets_of, plan_book, load_page,
     page_title, stringify, wants_title_page,
 )
-from bookcontents import is_generated  # noqa: E402
+from bookcontents import flatten_pages, is_generated  # noqa: E402
+import latexbuild  # noqa: E402
+from latexbuild import ENGINE  # noqa: E402
 import pdfparagraphs  # noqa: E402
 import pdfretag  # noqa: E402
 from names import safe_stem  # noqa: E402
 
-ENGINE = "lualatex"
-# The LaTeX release the tagging project describes as usable in production
-# for documents that keep to packages supporting it. Older releases load
-# pdfmanagement-testphase.sty for \DocumentMetadata, where current ones
-# load pdfmanagement-init (documentmetadata-support.ltx), and Ubuntu 24.04's
-# texlive packages (LaTeX 2023-11-01) stop on that file not found; they
-# would tag less if it were there. Verified here: 2026-06-01.
-MINIMUM_LATEX = "2025-11-01"
-MISSING_FILE = re.compile(r"File `([^']+)' not found")
 DIVISIONS = {"front": "\\frontmatter", "main": "\\mainmatter",
              "appendix": "\\appendix", "back": "\\backmatter"}
 # The classes Pandoc's LaTeX writer knows to have \frontmatter and its
@@ -112,7 +105,6 @@ FALLBACK = ("\\IfFontExistsTF{DejaVu Sans}\n"
 FAMILIES = (("mainfont", "\\setmainfont{Latin Modern Roman}"),
             ("sansfont", "\\setsansfont{Latin Modern Sans}"),
             ("monofont", "\\setmonofont{Latin Modern Mono}"))
-MISSING = re.compile(r"Missing character: There is no (\S+)")
 
 # Where figures go (pdf.figures). LaTeX's tagging gathers the tags of a
 # figure that floats into one place: at the end of the document unless
@@ -196,6 +188,37 @@ def is_ua1(standards):
         not any(s.lower().startswith("ua-2") for s in standards)
 
 
+# A running head no wider than the line leaves beside the page number: the
+# book class sets a chapter's or section's title there in one line, however
+# long, and FINC 308's longest titles ran into the number and off the
+# page's edge. A longer one is scaled down to fit. Wrapped around the
+# kernel's mark commands, which every chapter and section mark goes
+# through, whatever the class; a copy (\NewCommandCopy), since they're
+# robust. An empty mark stays empty, as the kernel tells them apart
+# (2e-right-nonempty). The head is an artifact, so its text is the
+# reader's no matter its size.
+RUNNING_HEADS = r"""\RequirePackage{graphicx}
+\makeatletter
+\newsavebox\oer@headbox
+\DeclareRobustCommand\oerfithead[1]{%
+  \sbox\oer@headbox{#1}%
+  \ifdim\wd\oer@headbox>\dimexpr\textwidth-3em\relax
+    \resizebox{\dimexpr\textwidth-3em\relax}{!}{\usebox\oer@headbox}%
+  \else\usebox\oer@headbox\fi}
+\NewCommandCopy\oer@markboth\markboth
+\NewCommandCopy\oer@markright\markright
+\ExplSyntaxOn
+\cs_new:Npn \__oer_fit_mark:n #1
+  { \tl_if_blank:nF {#1} { \exp_not:n { \oerfithead {#1} } } }
+\DeclareRobustCommand*\markboth[2]
+  { \exp_args:Nee \oer@markboth { \__oer_fit_mark:n {#1} } { \__oer_fit_mark:n {#2} } }
+\DeclareRobustCommand*\markright[1]
+  { \exp_args:Ne \oer@markright { \__oer_fit_mark:n {#1} } }
+\ExplSyntaxOff
+\makeatother
+"""
+
+
 # Written into the preamble after the metadata file's own header-includes.
 # math/setup names both forms of MathML luamml makes (it needs
 # unicode-math, which Pandoc's template loads under LuaLaTeX): structure
@@ -250,24 +273,6 @@ HEADER = r"""\ExplSyntaxOn
 """
 
 
-def latex_release():
-    """The LaTeX release LuaLaTeX runs, as its \\fmtversion gives it
-    ("2026-06-01"), or None when it can't be read."""
-    work = tempfile.mkdtemp(prefix="build-pdf-probe-")
-    try:
-        result = subprocess.run(
-            [ENGINE, "-interaction=nonstopmode", "-halt-on-error",
-             "\\typeout{OERFMT:\\fmtversion}\\stop"],
-            cwd=work, capture_output=True, text=True, errors="replace",
-            stdin=subprocess.DEVNULL, timeout=300)
-    except (OSError, subprocess.TimeoutExpired):
-        return None
-    finally:
-        shutil.rmtree(work, ignore_errors=True)
-    m = re.search(r"OERFMT:(\d{4}-\d{2}-\d{2})", result.stdout)
-    return m.group(1) if m else None
-
-
 def svg_images(blocks):
     """The SVG images the book holds."""
     found = []
@@ -287,22 +292,101 @@ def svg_images(blocks):
 
 def latex_problem():
     """Why the LuaLaTeX on the path can't tag a PDF, or None."""
-    release = latex_release()
-    if release is None:
-        print(f"WARNING: couldn't tell which LaTeX release {ENGINE} runs; "
-              f"a tagged PDF needs {MINIMUM_LATEX} or later.",
-              file=sys.stderr)
-        return None
-    if release < MINIMUM_LATEX:
-        return (f"{ENGINE} runs the LaTeX release of {release}, and a tagged "
-                f"PDF needs {MINIMUM_LATEX} or later (TeX Live 2026). "
-                "Distribution packages are often older; docs/installation.md "
-                "says how to install a current TeX Live.")
-    return None
+    return latexbuild.latex_problem(lambda m: print(m, file=sys.stderr))
 
 
 def raw_latex(text):
     return {"t": "RawBlock", "c": ["latex", text]}
+
+
+# Where a file of the latex target begins, in the LaTeX the writer gives:
+# a name, or none for what the master keeps.
+FILE_MARK = "%%TextbookImproverFile:%s"
+FILE_MARK_LINE = re.compile(r"^%TextbookImproverFile:(\S*)\n", re.M)
+
+
+def split_book(text):
+    """The writer's one file as a master and a file per top-level entry:
+    (master, {name: body}). The master keeps the preamble, what stands
+    between the entries (division commands, the contents), and an
+    \\include for each file, in its place."""
+    files, master, last, current = {}, [], 0, None
+    for m in FILE_MARK_LINE.finditer(text):
+        piece = text[last:m.start()]
+        if current:
+            files[current] = files.get(current, "") + piece
+        else:
+            master.append(piece)
+        current = m.group(1) or None
+        if current:
+            master.append("\\include{%s}\n" % current)
+        last = m.end()
+    end = text.rfind("\\end{document}")
+    if current and end > last:
+        files[current] = files.get(current, "") + text[last:end]
+        master.append(text[end:])
+    else:
+        master.append(text[last:])
+    return "".join(master), files
+
+
+def svg_to_pdf(blocks, base, out_dir):
+    """Each SVG image made a PDF beside where it goes in out_dir, with
+    rsvg-convert as Pandoc's own PDF route does, and the image pointed at
+    it: the LaTeX writer gives an SVG \\includesvg, which needs Inkscape
+    and takes no alt text. Returns how many, and the SVGs it couldn't."""
+    made, failed = [0], []
+
+    def walk(value):
+        if isinstance(value, dict):
+            if value.get("t") == "Image":
+                target = value["c"][2]
+                src = target[0]
+                if src.lower().endswith(".svg") and "://" not in src:
+                    pdf = os.path.splitext(src)[0] + ".pdf"
+                    out = os.path.join(out_dir, pdf)
+                    os.makedirs(os.path.dirname(out) or out_dir, exist_ok=True)
+                    done = subprocess.run(["rsvg-convert", "-f", "pdf", "-o", out,
+                                           os.path.join(base, src)],
+                                          capture_output=True) \
+                        if shutil.which("rsvg-convert") else None
+                    if done is not None and done.returncode == 0:
+                        target[0] = pdf
+                        made[0] += 1
+                    else:
+                        failed.append(src)
+            for v in value.values():
+                walk(v)
+        elif isinstance(value, list):
+            for v in value:
+                walk(v)
+    walk(blocks)
+    return made[0], failed
+
+
+def copy_images(blocks, base, out_dir):
+    """Every local image the book shows, copied to out_dir at its own
+    relative path, so the folder builds on its own. Returns how many."""
+    count = [0]
+
+    def walk(value):
+        if isinstance(value, dict):
+            if value.get("t") == "Image":
+                src = value["c"][2][0]
+                source = os.path.join(base, src)
+                out = os.path.join(out_dir, src)
+                if "://" not in src and os.path.isfile(source) \
+                        and not os.path.exists(out):
+                    os.makedirs(os.path.dirname(out) or out_dir, exist_ok=True)
+                    shutil.copy(source, out)
+                    count[0] += 1
+            for v in value.values():
+                walk(v)
+        elif isinstance(value, list):
+            for v in value:
+                walk(v)
+    walk(blocks)
+    return count[0]
 
 
 def is_division(block):
@@ -316,7 +400,7 @@ class PdfAssembly(Assembly):
     and a role is a division command."""
 
     def __init__(self, *args, title_page=None, book_title="",
-                 divisions=True, toc_depth=2, **kwargs):
+                 divisions=True, toc_depth=2, mark_files=False, **kwargs):
         super().__init__(*args, **kwargs)
         # The book opens in the front matter (OPEN_FRONT): its title
         # page, and the contents when the template places them.
@@ -330,6 +414,8 @@ class PdfAssembly(Assembly):
         # a lone heading promoted to the title -- keeps it.
         self.title_page = title_page
         self.book_title = book_title
+        self.mark_files = mark_files
+        self.file_names = set()
 
     def add_page(self, stem, title_override, depth, heading=True,
                  number=None):
@@ -346,6 +432,29 @@ class PdfAssembly(Assembly):
                                if not is_division(b)]
 
     def before_entry(self, entry, depth):
+        # For the latex target, each top-level entry is a file of its own,
+        # and what comes between them (a division command, the contents)
+        # stays in the master; marks say which is which.
+        if depth == 1 and self.mark_files:
+            self.blocks.append(raw_latex(FILE_MARK % ""))
+        self._division(entry, depth)
+        if depth == 1 and self.mark_files and not is_generated(entry):
+            self.blocks.append(raw_latex(FILE_MARK % self.file_name(entry)))
+
+    def file_name(self, entry):
+        """A top-level entry's file, without .tex: a page's own stem, a
+        group's first page's, or its title's; never two the same."""
+        kind, a, b = entry
+        stem = a if kind == "page" else next(
+            (s for s in flatten_pages([entry]) if s), safe_stem(a) or "part")
+        stem = safe_stem(stem) or "part"
+        name, n = stem, 2
+        while name in self.file_names:
+            name, n = f"{stem}-{n}", n + 1
+        self.file_names.add(name)
+        return name
+
+    def _division(self, entry, depth):
         # A generated contents page belongs to whatever division it sits
         # in; it has no role of its own to change it.
         if depth != 1 or is_generated(entry):
@@ -421,6 +530,13 @@ def book_metadata(project, resolved, base, numbered):
     meta["numbersections"] = meta_bool(numbered)
     meta["toc"] = meta_bool(True)
     meta["toc-depth"] = meta_string(int(resolved["pdf.toc_depth"]))
+    # A LaTeX book's own layout, as its preamble gives it (convert.py
+    # passes it on): its type size, paper, margins, line spacing, and
+    # paragraph indents, where Pandoc's defaults would have 10pt type in
+    # the book class's margins. The metadata file still wins.
+    layout = book_layout()
+    for key, value in layout.items():
+        meta[key] = meta_value(value)
     setting = str(resolved["pdf.metadata"] or "").strip()
     if setting:
         meta.update(metadata_file(base, setting))
@@ -443,6 +559,18 @@ def book_metadata(project, resolved, base, numbered):
         # isn't made a link. (The template loads hyperref after this.)
         ours += "\\PassOptionsToPackage{hyperfootnotes=false}{hyperref}\n" + UA1_LINKS
     ours += FIGURE_PLACEMENT[str(resolved["pdf.figures"])]
+    ours += RUNNING_HEADS
+    # The template loads amssymb before unicode-math, which leaves the
+    # names unicode-math lacks drawn as control characters.
+    ours += "\\ifdefined\\directlua\n" + latexbuild.UM_ALIASES + "\\fi\n"
+    # A LaTeX book's own colors, which convert.py passes on: a formula keeps
+    # its TeX as the book wrote it, \color{redcards} and all, and LaTeX
+    # stops on a color nothing defines (OpenIntro Statistics).
+    colors = os.environ.get("BOOK_LATEX_COLORS", "").strip()
+    if colors:
+        ours += ("\\RequirePackage{xcolor}\n\\makeatletter\n"
+                 + "\n".join(guarded_color(c) for c in colors.splitlines())
+                 + "\n\\makeatother\n")
     unchosen = [command for field, command in FAMILIES if field not in meta]
     if unchosen:
         ours += FALLBACK + "".join(
@@ -463,6 +591,67 @@ def book_metadata(project, resolved, base, numbered):
     includes["c"].append({"t": "MetaBlocks", "c": [raw_latex(ours)]})
     meta["header-includes"] = includes
     return meta
+
+
+COLORLET = re.compile(r"\\colorlet\s*(?:\[[^]]*\])?\s*\{[^{}]*\}\s*(?:\[[^]]*\])?"
+                      r"\s*\{([^{}]*)\}")
+
+
+def guarded_color(statement):
+    """A book's color statement for the PDF from its pages, a \\colorlet
+    made only when each color it's made of is defined: one a book defines
+    in a style file of its own isn't among the statements convert.py
+    passes on, and xcolor stopped on it ("Undefined color `brand'") where
+    the book itself builds."""
+    m = COLORLET.match(statement.strip())
+    if not m:
+        return statement
+    names = [p.strip().lstrip("-") for p in m.group(1).split("!")]
+    for name in reversed([n for n in names if n and not re.fullmatch(r"[\d.]+", n)]):
+        statement = "\\@ifundefinedcolor{%s}{}{%s}" % (name, statement)
+    return statement
+
+
+def meta_value(value):
+    """A JSON value as Pandoc's metadata: a list, a flag, or a string."""
+    if isinstance(value, list):
+        return {"t": "MetaList", "c": [meta_value(v) for v in value]}
+    if isinstance(value, bool):
+        return meta_bool(value)
+    return meta_string(value)
+
+
+def book_layout():
+    """The layout a LaTeX book's preamble gives its pages, as Pandoc's
+    variables (BOOK_LATEX_LAYOUT, which convert.py sets), or {}."""
+    try:
+        layout = json.loads(os.environ.get("BOOK_LATEX_LAYOUT", "") or "{}")
+    except ValueError:
+        return {}
+    return layout if isinstance(layout, dict) else {}
+
+
+def layout_words(layout):
+    """What a book's layout carries over, in words, for the log."""
+    words = []
+    if layout.get("fontsize"):
+        words.append(f"{layout['fontsize']} type")
+    if layout.get("papersize"):
+        words.append(f"{layout['papersize']} paper")
+    if layout.get("geometry"):
+        words.append("geometry's " + ", ".join(layout["geometry"]))
+    options = layout.get("classoption") or []
+    sides = [o for o in options if o not in ("dvipsnames", "svgnames", "x11names")]
+    if sides:
+        words.append(", ".join(sides))
+    if len(sides) < len(options):
+        words.append("xcolor's " + ", ".join(o for o in options if o not in sides)
+                     + " colors")
+    if layout.get("linestretch"):
+        words.append(f"line spacing {layout['linestretch']}")
+    if layout.get("indent"):
+        words.append("indented paragraphs")
+    return words
 
 
 def meta_plain(value):
@@ -557,7 +746,8 @@ def pdf_targets(schema, project_schema, documents, requested, allow_unknown):
 
 # --------------------------------------------------------------------------
 
-def build(base, name, resolved, keep, intermediates=None, latex_only=False):
+def build(base, name, resolved, keep, intermediates=None, latex_only=False,
+          as_latex=False):
     project = resolved.project
     for warning in resolved.warnings:
         print(f"WARNING: {warning}", file=sys.stderr)
@@ -570,6 +760,11 @@ def build(base, name, resolved, keep, intermediates=None, latex_only=False):
     title_page = safe_stem(os.path.splitext(os.path.basename(setting))[0]) \
         if setting else None
     meta = book_metadata(project, resolved, base, numbered)
+    carried = layout_words({k: v for k, v in book_layout().items()
+                            if meta.get(k) == meta_value(v)})
+    if carried:
+        print("The LaTeX book's own layout, from its preamble: "
+              + "; ".join(carried) + ".", file=sys.stderr)
     claimed = meta.get("pdfstandard")
     claimed = [meta_plain(c) for c in claimed["c"]] if claimed and claimed.get("t") == "MetaList" \
         else ([meta_plain(claimed)] if claimed else [])
@@ -581,7 +776,7 @@ def build(base, name, resolved, keep, intermediates=None, latex_only=False):
         pages_dir, placed, tree, titles, title_page=title_page,
         book_title=meta_plain(meta.get("title")),
         divisions=document_class(meta) in FRONTMATTER_CLASSES,
-        toc_depth=toc_depth)
+        toc_depth=toc_depth, mark_files=as_latex)
     if len(tree) == 1 and tree[0][0] == "page":
         # The divisions are written where the role changes, between entries,
         # so a book of one page never reached its main matter: numbered i in
@@ -590,6 +785,7 @@ def build(base, name, resolved, keep, intermediates=None, latex_only=False):
         assembly.add_single_page(tree[0][1], tree[0][2])
     else:
         assembly.add_tree(tree)
+    assembly.finish()
     # Pandoc turns an SVG into a PDF with rsvg-convert before LaTeX sees
     # it (convertImage in PDF.hs), and the image keeps its alt text; without
     # rsvg-convert the LaTeX writer falls back to \\includesvg, which needs
@@ -603,7 +799,7 @@ def build(base, name, resolved, keep, intermediates=None, latex_only=False):
               + (" and as Microsoft Office's attribute" if str(resolved["pdf.ua1_math"]) == "office"
                  else "") + ". PDF/UA-2 tags MathML properly.", file=sys.stderr)
     svgs = svg_images(assembly.blocks)
-    if svgs and not latex_only and shutil.which("rsvg-convert") is None:
+    if svgs and not latex_only and shutil.which("rsvg-convert") is None and not as_latex:
         sys.exit(f"The book has {len(svgs)} SVG image(s) ({svgs[0]} first), and a PDF "
                  "needs rsvg-convert to turn them into PDF: sudo apt install "
                  "librsvg2-bin (see docs/installation.md).")
@@ -628,6 +824,8 @@ def build(base, name, resolved, keep, intermediates=None, latex_only=False):
     out_dir = os.path.join(base, str(resolved["output_dir"] or name))
     os.makedirs(out_dir, exist_ok=True)
     out_path = os.path.join(out_dir, output_name(resolved, project, name))
+    if as_latex:
+        return write_latex(base, name, resolved, project, document, out_dir)
 
     work = tempfile.mkdtemp(prefix="build-pdf-")
     try:
@@ -657,23 +855,14 @@ def build(base, name, resolved, keep, intermediates=None, latex_only=False):
         # are relative to it.
         result = subprocess.run(command, cwd=base, capture_output=True,
                                 text=True, env=environment)
-        missing, others = {}, []
-        for line in result.stderr.splitlines():
-            m = MISSING.search(line)
-            if m:
-                missing[m.group(1)] = missing.get(m.group(1), 0) + 1
-            elif line.strip():
-                others.append(line)
+        missing, others = latexbuild.missing_characters(result.stderr.splitlines())
         if others:
             print("\n".join(others), file=sys.stderr)
         if missing:
             # One line, not Pandoc's one warning per occurrence.
-            print(f"WARNING: {sum(missing.values())} character(s) the "
-                  "fonts don't have are missing from the PDF: "
-                  + ", ".join(f"{c} (U+{ord(c[0]):04X}) x{n}" for c, n in
-                              sorted(missing.items(), key=lambda i: -i[1]))
-                  + ". Choose a font that has them in the pdf.metadata "
-                  "file (mainfont).", file=sys.stderr)
+            print(latexbuild.missing_warning(
+                missing, "Choose a font that has them in the pdf.metadata file "
+                "(mainfont)."), file=sys.stderr)
         repairs = result.returncode == 0 and (
             resolved["pdf.repair_captions"] or resolved["pdf.remove_empty_paragraphs"])
         if repairs and pdfretag.pikepdf is None:
@@ -687,17 +876,8 @@ def build(base, name, resolved, keep, intermediates=None, latex_only=False):
             if resolved["pdf.remove_empty_paragraphs"]:
                 remove_empty_paragraphs(os.path.abspath(out_path))
         if result.returncode != 0:
-            # tlmgr only manages a TeX Live installed from tug.org or as
-            # TinyTeX; Debian's and Ubuntu's texlive packages come with a
-            # tlmgr that runs in an uninitialized user mode and installs
-            # nothing, so both routes are named.
-            for name in dict.fromkeys(MISSING_FILE.findall(result.stderr)):
-                print(f"LaTeX can't find {name}. For TinyTeX or TeX Live "
-                      f"from tug.org, `tlmgr search --global --file /{name}` "
-                      "names the package that has it, and `tlmgr install` "
-                      "installs that. For a distribution's texlive packages, "
-                      "its package manager does (`apt-file search "
-                      f"{name}` on Debian and Ubuntu).", file=sys.stderr)
+            for advice in latexbuild.failure_advice(result.stderr):
+                print(advice, file=sys.stderr)
             sys.exit(f"pandoc failed building {out_path}.")
     finally:
         shutil.rmtree(work, ignore_errors=True)
@@ -707,6 +887,47 @@ def build(base, name, resolved, keep, intermediates=None, latex_only=False):
     print(f"Wrote {out_path}: {len(assembly.pages)} page(s), "
           f"{found['images']} image(s), {found['without_alt']} without "
           "alternative text.", file=sys.stderr)
+    return 0
+
+
+def write_latex(base, name, resolved, project, document, out_dir):
+    """The latex target: the LaTeX the PDF target builds from, as a master
+    file that \\include-s a file per top-level entry, with the images it
+    shows beside them, SVGs made PDFs. Prints the master's path."""
+    svgs, failed = svg_to_pdf(document["blocks"], base, out_dir)
+    copied = copy_images(document["blocks"], base, out_dir)
+    work = tempfile.mkdtemp(prefix="build-latex-")
+    try:
+        book_json = os.path.join(work, "book.json")
+        with open(book_json, "w", encoding="utf-8") as fh:
+            json.dump(document, fh)
+        filters = ["--lua-filter", os.path.join(HERE, "target-blocks.lua"),
+                   "--lua-filter", os.path.join(HERE, "pdf-target.lua")]
+        environment = dict(os.environ, TARGET_NAME=name,
+                           TITLE_BLOCK=str(resolved["title_block"]))
+        done = subprocess.run(["pandoc", "-f", "json", "-t", "latex", "-s", book_json]
+                              + filters, cwd=base, env=environment,
+                              capture_output=True, text=True)
+        sys.stderr.write(done.stderr)
+        if done.returncode:
+            return done.returncode
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+    master, files = split_book(done.stdout)
+    master_name = os.path.splitext(output_name(resolved, project, name))[0] + ".tex"
+    for stem, body in files.items():
+        with open(os.path.join(out_dir, stem + ".tex"), "w", encoding="utf-8") as fh:
+            fh.write(body.strip("\n") + "\n")
+    with open(os.path.join(out_dir, master_name), "w", encoding="utf-8") as fh:
+        fh.write(master)
+    print(f"{name}: {master_name} and {len(files)} file(s) it \\include-s, "
+          f"{copied} image(s) beside them" + (f", {svgs} SVG(s) made PDF" if svgs else "")
+          + ". Build it with latexmk -lualatex.", file=sys.stderr)
+    if failed:
+        print(f"WARNING: {len(failed)} SVG image(s) weren't made PDF ({failed[0]} first): "
+              "rsvg-convert is needed (sudo apt install librsvg2-bin); LaTeX's \\includesvg "
+              "is left, which needs Inkscape and takes no alt text.", file=sys.stderr)
+    print(os.path.abspath(os.path.join(out_dir, master_name)))
     return 0
 
 
@@ -727,16 +948,19 @@ def main():
     parser.add_argument("--latex-only", action="store_true",
                         help="write book.json and book.tex beside where the "
                              "PDF would go, and don't run LaTeX")
+    parser.add_argument("--latex-target", action="store_true",
+                        help="build the latex targets (format: latex): the "
+                             "book's LaTeX as a master and a file per chapter")
     parser.add_argument("--allow-unknown-keys", action="store_true",
                         help="report settings this version does not know "
                              "about instead of refusing them")
     args = parser.parse_args()
 
-    for program in ("pandoc",) if args.latex_only else ("pandoc", ENGINE):
+    for program in ("pandoc",) if args.latex_only or args.latex_target else ("pandoc", ENGINE):
         if shutil.which(program) is None:
             sys.exit(f"{program} is not on the path; a pdf target needs it "
                      "(see docs/installation.md).")
-    if not args.latex_only:
+    if not args.latex_only and not args.latex_target:
         problem = latex_problem()
         if problem:
             sys.exit(problem)
@@ -744,8 +968,9 @@ def main():
     try:
         schema, project_schema, documents = load_documents(
             args.dir, args.allow_unknown_keys)
-        targets = pdf_targets(schema, project_schema, documents,
-                              args.target, args.allow_unknown_keys)
+        targets = targets_of(schema, project_schema, documents, args.target,
+                             args.allow_unknown_keys,
+                             "latex" if args.latex_target else "pdf")
     except oerconfig.ConfigError as exc:
         sys.exit(str(exc))
 
@@ -760,7 +985,8 @@ def main():
     status = 0
     for name, resolved in targets:
         status = build(args.dir, name, resolved, args.keep,
-                       args.intermediates, args.latex_only) or status
+                       args.intermediates, args.latex_only,
+                       as_latex=args.latex_target) or status
     return status
 
 

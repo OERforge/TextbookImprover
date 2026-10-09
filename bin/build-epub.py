@@ -261,10 +261,15 @@ def retitle_chapters(path):
                 text = data.decode("utf-8")
                 found = heading.search(text)
                 if found:
-                    plain = " ".join(re.sub(r"<[^>]+>", "", found.group(1))
-                                     .split())
+                    # A formula's TeX, kept in its MathML as an annotation,
+                    # is no part of the title's text; and the title is put in
+                    # as it is, not as a pattern's template, where a
+                    # backslash in it (\pmb) was an escape.
+                    words = re.sub(r"<annotation\b.*?</annotation>", "",
+                                   found.group(1), flags=re.S)
+                    plain = " ".join(re.sub(r"<[^>]+>", "", words).split())
                     if plain:
-                        text = title.sub("<title>" + plain + "</title>",
+                        text = title.sub(lambda m: "<title>" + plain + "</title>",
                                          text, count=1)
                         retitled += 1
                 text, _ = number_notes(text)
@@ -272,6 +277,69 @@ def retitle_chapters(path):
             zout.writestr(info, data)
     os.replace(tmp, path)
     return retitled
+
+
+ID = re.compile(r'\sid="([^"]+)"')
+FRAGMENT_LINK = re.compile(r'(<a\b[^>]*?\shref=")#([^"]+)(")')
+
+
+def link_across_chapters(path):
+    """A link to an id in another chapter file, given that file's name,
+    and the navigation document's mathml property when its entries hold
+    a formula. Returns the number of links fixed.
+
+    Pandoc's writer splits the book into chapter files and gives a link
+    the file its target is in, but finds only the ids of a Div, a Header,
+    a Table, a Span, a Link, an Image, and raw HTML (getBlockIdent and
+    getInlineIdent, Text/Pandoc/Chunks.hs, 3.12): a link to a figure's id
+    in another chapter kept its bare #fragment, which epubcheck reports
+    as RSC-012 (13 on OpenIntro Statistics, whose chapters cite each
+    other's figures). And a heading with a formula puts the formula in the
+    navigation document too, whose manifest item then lacks the mathml
+    property (OPF-014)."""
+    tmp = path + ".tmp"
+    where, files = {}, {}
+    with zipfile.ZipFile(path) as zin:
+        for info in zin.infolist():
+            if info.filename.endswith(".xhtml"):
+                text = zin.read(info.filename).decode("utf-8")
+                files[info.filename] = text
+                for ident in set(ID.findall(text)):
+                    # An id in two files (each chapter's fn1) names neither.
+                    where[ident] = None if ident in where else info.filename
+    fixed = 0
+    changed = {}
+    for name, text in files.items():
+
+        def fix(m):
+            nonlocal fixed
+            target = where.get(m.group(2))
+            if not target or target == name:
+                return m.group(0)
+            fixed += 1
+            relative = os.path.relpath(target, os.path.dirname(name)).replace(os.sep, "/")
+            return m.group(1) + relative + "#" + m.group(2) + m.group(3)
+        new = FRAGMENT_LINK.sub(fix, text)
+        if new != text:
+            changed[name] = new
+    nav_math = any(name.endswith("nav.xhtml") and "<math" in text for name, text in files.items())
+    if not changed and not nav_math:
+        return 0
+    with zipfile.ZipFile(path) as zin, \
+            zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as zout:
+        for info in zin.infolist():
+            data = zin.read(info.filename)
+            if info.filename == "mimetype":
+                zout.writestr(info, data, compress_type=zipfile.ZIP_STORED)
+                continue
+            if info.filename in changed:
+                data = changed[info.filename].encode("utf-8")
+            elif nav_math and info.filename.endswith(".opf"):
+                data = re.sub(r'(<item\b[^>]*\bproperties=")nav(")', r"\1nav mathml\2",
+                              data.decode("utf-8")).encode("utf-8")
+            zout.writestr(info, data)
+    os.replace(tmp, path)
+    return fixed
 
 
 def arrange_epub_notes(path, assembly, numbering, placement):
@@ -402,6 +470,7 @@ def build(base, name, resolved, keep, intermediates=None):
         assembly.add_single_page(tree[0][1], tree[0][2])
     else:
         assembly.add_tree(tree)
+    assembly.finish()
     title_page = wants_title_page(str(resolved["title_page"]), tree, assembly)
     numbering = str(resolved["notes.numbering"])
     placement = str(resolved["notes.placement"])
@@ -456,6 +525,7 @@ def build(base, name, resolved, keep, intermediates=None):
         retitle_chapters(out_path)
         if numbering != "page" or placement != "page":
             arrange_epub_notes(out_path, assembly, numbering, placement)
+        link_across_chapters(out_path)
         if keep:
             shutil.copy(book_json, os.path.join(out_dir, "book.json"))
     finally:

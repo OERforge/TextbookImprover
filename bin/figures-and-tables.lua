@@ -1922,6 +1922,9 @@ local function caption_data_table(tbl, next_block, after_next, after_after, out)
   local th_index = tbl.attr.attributes[TH_INDEX_ATTR]
   tbl.attr.attributes[TH_INDEX_ATTR] = nil
   tbl.attr.attributes[MARKER_ATTR] = nil
+  -- A LaTeX table's place in its file (latex-source.lua), for the
+  -- header pre-pass and a remediated source only.
+  tbl.attr.attributes['data-latex-table'] = nil
   tbl.attr.attributes[CAPTION_ROWS_ATTR] = nil
   tbl.attr.attributes[SPLIT_AT_ATTR] = nil
   tbl.attr.attributes[PART_CAPTIONS_ATTR] = nil
@@ -2170,15 +2173,36 @@ local function set_page_role(doc, role)
   doc.meta['header-includes'] = list
 end
 
+-- The page's one H1, its title. A bibliography's heading, which a LaTeX
+-- source's page gets beside its own (an article's References), doesn't
+-- count, unless it's the only one: the bibliography's own page. A LaTeX
+-- page with several names the one that is its title (title-from: its
+-- one numbered chapter, a \chapter* of exercises after it).
 local function title_header_index(doc)
-  local found, count = nil, 0
+  local wanted = doc.meta['title-from']
+  doc.meta['title-from'] = nil
+  if wanted ~= nil then
+    wanted = pandoc.utils.stringify(wanted)
+    for index, block in ipairs(doc.blocks) do
+      if block.t == 'Header' and block.level == 1 and block.identifier == wanted then
+        return index
+      end
+    end
+  end
+  local found, count, listed, listings = nil, 0, nil, 0
   for index, block in ipairs(doc.blocks) do
     if block.t == 'Header' and block.level == 1 then
-      count = count + 1
-      if found == nil then found = index end
+      if block.classes:includes('bibliography') then
+        listings = listings + 1
+        if listed == nil then listed = index end
+      else
+        count = count + 1
+        if found == nil then found = index end
+      end
     end
   end
   if count == 1 then return found end
+  if count == 0 and listings == 1 then return listed end
   return nil
 end
 
@@ -2205,6 +2229,20 @@ local function says_title(declared, h1)
   if declared == '' or h1 == '' then return false end
   return declared == h1 or h1:find(declared, 1, true) ~= nil
     or declared:find(h1, 1, true) ~= nil
+end
+
+-- A title's formulas as text: a page's <title>, its entry in the contents,
+-- and a cartridge's name for it hold no MathML, and Pandoc's writers give a
+-- formula there as its TeX ("\pmb{t}-Probability Table", OpenIntro
+-- Statistics's t-table). Pandoc's plain writer sets one in Unicode where it
+-- can (t, x²); the heading on the page keeps its formula.
+local function plain_formulas(inlines)
+  return inlines:walk({
+    Math = function(math)
+      local text = pandoc.write(pandoc.Pandoc({ pandoc.Plain({ math }) }), 'plain')
+      return pandoc.Str((text:gsub('%s+$', '')))
+    end,
+  })
 end
 
 local function should_promote_h1(doc, index)
@@ -2272,7 +2310,7 @@ function Pandoc(doc)
       or (PROMOTE_H1_TO_TITLE == 'shorter' and #h1 < #declared
           and declared:find(h1, 1, true) ~= nil)
     if h1_wins then
-      doc.meta.title = pandoc.MetaInlines(heading.content)
+      doc.meta.title = pandoc.MetaInlines(plain_formulas(heading.content))
     elseif folded(h1):match('^[%d%.]+%s') and folded(h1):find(folded(declared), 1, true) then
       -- The title stands without the number its heading puts before it;
       -- convert.py says so once, since a cartridge names pages by it.
@@ -2422,12 +2460,17 @@ local function figure_div(div)
   if not div.classes:includes('figure') then return nil end
   local image, caption = nil, nil
   for _, block in ipairs(div.content) do
-    if block.t == 'Figure' and image == nil then
-      image = block.content
-    elseif (block.t == 'Para' or block.t == 'Plain') and image == nil then
-      image = { block }
-    elseif block.t == 'Div' and block.classes:includes('caption') then
+    if block.t == 'Div' and block.classes:includes('caption') then
       caption = block.content
+    elseif block.t == 'Figure' and image == nil then
+      image = block.content
+    elseif image == nil then
+      -- An image in a paragraph, or whatever else the figure held: a
+      -- centered div around the image, as a LaTeX source's \centering
+      -- or center environment gives.
+      image = { block }
+    else
+      table.insert(image, block)
     end
   end
   if image == nil then return nil end
@@ -2446,7 +2489,31 @@ end
 -- heading is what gets renumbered, which is the right way round: an
 -- anchor is a link target another file may name, and a heading's auto
 -- id is Pandoc's own invention.
+--
+-- A LaTeX label in a caption (\caption{A\label{a}}) is the one exception:
+-- the reader gives its name both to the figure or table and to an empty
+-- span in the caption. The float keeps it, which a reference to it means,
+-- and the span goes.
+local function caption_labels(doc)
+  local function strip(el)
+    local id = el.identifier
+    if id == nil or id == '' then return nil end
+    local changed = false
+    el.caption.long = el.caption.long:walk({
+      Span = function(span)
+        if span.identifier == id and #span.content == 0 then
+          changed = true
+          return {}
+        end
+      end
+    })
+    if changed then return el end
+  end
+  return doc:walk({ Figure = strip, Table = strip })
+end
+
 local function make_ids_unique(doc)
+  doc = caption_labels(doc)
   local seen, renamed = {}, 0
   local function fix(el)
     local id = el.identifier

@@ -720,6 +720,44 @@ def check_pdf_summary():
     ]
 
 
+def check_pdf_read_quietly():
+    """Reading a PDF whose page holds a key twice, as LaTeX writes an
+    included figure's transparency group, prints nothing: pypdf's word on
+    it isn't a finding."""
+    import contextlib
+    import io
+    import pdfcheck
+    if pdfcheck.pypdf is None:
+        return [("a PDF with a key twice is read without a word",
+                 lambda: print("  skip  no pypdf to read a PDF") or True)]
+    work = tempfile.mkdtemp(prefix="pdf-quiet-")
+    path = os.path.join(work, "twice.pdf")
+    objects = [b"<< /Type /Catalog /Pages 2 0 R >>",
+               b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+               b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 100 100] "
+               b"/Group << /S /Transparency >> /Group << /S /Transparency /K false >> >>"]
+    data, offsets = bytearray(b"%PDF-1.7\n"), []
+    for number, body in enumerate(objects, 1):
+        offsets.append(len(data))
+        data += b"%d 0 obj\n" % number + body + b"\nendobj\n"
+    xref = len(data)
+    data += b"xref\n0 %d\n0000000000 65535 f \n" % (len(objects) + 1)
+    data += b"".join(b"%010d 00000 n \n" % offset for offset in offsets)
+    data += b"trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n" % (
+        len(objects) + 1, xref)
+    with open(path, "wb") as fh:
+        fh.write(data)
+    said = io.StringIO()
+    with contextlib.redirect_stderr(said):
+        facts, found = pdfcheck.inspect(path)
+    shutil.rmtree(work, ignore_errors=True)
+    return [
+        ("a PDF with a key twice is read without a word, and checked as any other",
+         lambda: said.getvalue() == "" and facts.get("pages") == 1
+         and "pdf-not-tagged" in {f.check for f in found}),
+    ]
+
+
 def check_drawings_without_preview():
     """A LaTeX book's drawings, where LaTeX lacks the preview package each
     is made a page of: said once, as what to install, not as LaTeX's log
@@ -795,6 +833,7 @@ def check_tlmgr_command():
 
 GROUPS = [
     ("a report's rows", check_report_rows),
+    ("a PDF read without pypdf's warnings", check_pdf_read_quietly),
     ("the PDF findings in the output check's summary", check_pdf_summary),
     ("tlmgr, with sudo where it needs it", check_tlmgr_command),
     ("drawings without the preview package", check_drawings_without_preview),

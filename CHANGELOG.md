@@ -9,6 +9,7 @@ Versions are two-part and pre-1.0: breaking changes may land in any of them unti
 ### Fixed
 
 - **The LaTeX, convert, and PDF suites ran with a Pandoc too old for `convert.py`**, which refuses one older than 3.9, so every case failed with the reason only in the run's own output: seven of one LaTeX case's checks, run by hand with Ubuntu 24.04's Pandoc 3.1.3. Each stops first now and says so, as the filter, EPUB, and split suites did, and the unpacking suite's one case that converts skips; a unit check holds every suite that runs `convert.py` to the same minimum.
+- **pypdf's warnings in the middle of the output check**, as it read past a fault in a PDF's syntax: GIAM's PDF printed "Multiple definitions in dictionary … for key /Group" twice, for two figures LaTeX's graphics code gives a second `/Group`. They aren't findings, and veraPDF judges the file; the PDF check reads without them now, as the figure check did. And without pypdf, it says how to install it on Ubuntu 22.04 too.
 
 ## [0.9] - 2026-10-08
 

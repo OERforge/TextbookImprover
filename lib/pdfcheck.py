@@ -27,6 +27,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
 import json
+import logging
 import os
 import re
 import subprocess
@@ -38,6 +39,13 @@ try:
     import pypdf
 except ImportError:                     # reported, not fatal
     pypdf = None
+
+# What pypdf says as it reads past a fault in a file's syntax, a key a
+# dictionary holds twice (LaTeX's graphics code gives an included PDF that
+# has a transparency group a second /Group) or a broken cross-reference
+# table, is no finding, and printed in the middle of the run's own lines
+# it reads as one. veraPDF judges the file.
+logging.getLogger("pypdf").setLevel(logging.ERROR)
 
 
 def _text(value):
@@ -138,7 +146,8 @@ def inspect(path):
     if pypdf is None:
         out.append(Finding(name, "pdf-unreadable",
                            "pypdf is not installed (sudo apt install "
-                           "python3-pypdf)", file=name, kind="pdf"))
+                           "python3-pypdf, or pip3 install --user pypdf "
+                           "on Ubuntu 22.04)", file=name, kind="pdf"))
         return facts, out
     try:
         reader = pypdf.PdfReader(path)

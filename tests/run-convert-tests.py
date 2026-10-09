@@ -3463,6 +3463,8 @@ def case_structure(work):
                                  encoding="utf-8"))["project"]["contents"]
     roles = {str(n.get("title", n.get("page"))): n.get("role")
              for n in sample if isinstance(n, dict)}
+    types = {str(n.get("title", n.get("page"))): n.get("type")
+             for n in sample if isinstance(n, dict)}
     # Second run: adopt it, number the book, and ask for a contents page.
     for n in sample:
         if isinstance(n, dict) and n.get("role") == "front":
@@ -3488,10 +3490,12 @@ def case_structure(work):
     return [
         ("the runs succeed", lambda: first.returncode == 0
          and second.returncode == 0),
-        ("the guess reads \\frontmatter, {.appendix}, and \\backmatter",
+        ("the guess reads \\frontmatter, {.appendix}, and \\backmatter, "
+         "the Glossary's back matter said by the type its title names",
          lambda: roles.get("The Book") == "front"
          and roles.get("Extra Material") == "appendix"
-         and roles.get("Z1-Glossary") == "back"),
+         and roles.get("Z1-Glossary") is None
+         and types.get("Z1-Glossary") == "glossary"),
         ("the contents page numbers chapters, sections, and appendices",
          lambda: ("01-One.html", "1 Chapter One") in entries
          and ("01-One--first.html", "1.1 First") in entries

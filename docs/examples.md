@@ -78,7 +78,8 @@ The order is in `packaging-sample.yaml` under `contents` now, with the book's ow
 
 ```yaml
   contents:
-  - preface
+  - page: preface
+    type: preface
   - title: Chapter 1 Sampling and Data
     items:
     - 1-introduction
@@ -86,13 +87,17 @@ The order is in `packaging-sample.yaml` under `contents` now, with the book's ow
     - 1-2-data-sampling-and-variation-in-data-and-sampling
     - 1-3-levels-of-measurement
     - 1-4-experimental-design-and-ethics
-    - 1-key-terms
+    - page: 1-key-terms
+      type: glossary
     - 1-chapter-review
     - 1-homework
-    - 1-references
+    - page: 1-references
+      type: bibliography
     - 1-solutions
   - title: Chapter 2 Descriptive Statistics
 ```
+
+A page whose title says what it is gets a `type`: each chapter's Key Terms is a glossary and its References a bibliography, which an EPUB marks for a screen reader, and the preface's type makes it front matter ([Configuration](configuration.md#contents)).
 
 Do this before the next step. `--toc` orders only the pages the contents don't place already, and the sample a first run writes places every page, by guessing. So once that sample is adopted as `packaging.yaml`, the PDF has nothing left to order, and `--toc` says so and changes nothing. (If that happens, delete the `contents` block from `packaging.yaml` and run it again.) Without a PDF, step 5 is the way to fix the order by hand.
 
@@ -141,7 +146,7 @@ Without step 2, the pages are in an order guessed from their file names. The gue
 ```yaml
   contents:
   - page: preface
-    role: front
+    type: preface
   - title: Chapter 1
     items:
     - 1-introduction
@@ -149,10 +154,12 @@ Without step 2, the pages are in an order guessed from their file names. The gue
     - 1-2-data-sampling-and-variation-in-data-and-sampling
     - 1-3-levels-of-measurement
     - 1-4-experimental-design-and-ethics
-    - 1-key-terms
+    - page: 1-key-terms
+      type: glossary
     - 1-chapter-review
     - 1-homework
-    - 1-references
+    - page: 1-references
+      type: bibliography
     - 1-solutions
 ```
 

@@ -429,9 +429,66 @@ def expand_split_sources(contents, stems, titles=None, parts=None,
                                      roles))
 
 
+# A page whose title names what it is, in the words books use for it,
+# and the type that says so (PAGE_TYPES): a chapter's Key Terms is a
+# glossary and its References a bibliography, as OpenStax titles them.
+# Only names with one meaning are here. An Introduction or a Conclusion
+# is as often a chapter's own section as the book's, a Part or a
+# Chapter is said by the contents' groups, and none of them is guessed.
+TITLE_TYPES = {
+    "preface": "preface", "foreword": "foreword", "dedication": "dedication",
+    "epigraph": "epigraph", "acknowledgments": "acknowledgments",
+    "acknowledgements": "acknowledgments", "prologue": "prologue",
+    "epilogue": "epilogue", "afterword": "afterword", "abstract": "abstract",
+    "colophon": "colophon", "copyright": "copyright-page",
+    "copyright page": "copyright-page", "glossary": "glossary",
+    "key terms": "glossary", "bibliography": "bibliography",
+    "references": "bibliography", "works cited": "bibliography",
+    "index": "index",
+}
+
+
+def type_of_title(title):
+    """The type a page's title names, or None: one of TITLE_TYPES, or an
+    appendix by its title's first word (Appendix A Statistical Tables)."""
+    words = " ".join(re.sub(r"[^\w\s-]", " ", str(title or "")).lower().split())
+    if words in TITLE_TYPES:
+        return TITLE_TYPES[words]
+    if words == "appendix" or words.startswith("appendix "):
+        return "appendix"
+    return None
+
+
+def typed_by_title(nodes, titles):
+    """The contents with a type on each page whose title names one
+    (type_of_title), its own title in the contents first and the page's
+    otherwise, for a sample to suggest. A page that has a type keeps it;
+    a role the type implies is dropped, since the type says it, and one
+    it doesn't is kept, since then it says more."""
+    out = []
+    for node in nodes or []:
+        if isinstance(node, dict) and "items" in node:
+            node = dict(node, items=typed_by_title(node["items"], titles))
+        elif isinstance(node, dict) and node.get("generate"):
+            pass
+        else:
+            stem = node if isinstance(node, str) else str(node.get("page", ""))
+            title = (node.get("title") if isinstance(node, dict) else None) \
+                or titles.get(stem, "")
+            kind = type_of_title(title)
+            if kind and not (isinstance(node, dict) and node.get("type")):
+                node = dict(node) if isinstance(node, dict) else {"page": node}
+                node["type"] = kind
+                if node.get("role") == PAGE_TYPES[kind][0]:
+                    del node["role"]
+        out.append(node)
+    return out
+
+
 def guess_contents(stems, back_matter=None, titles=None, parts=None,
                    roles=None):
-    """Best-effort contents tree from filenames alone.
+    """Best-effort contents tree from filenames alone, each page whose
+    title names what it is given that type (typed_by_title).
 
     parts maps a piece's stem to (source stem, part number, parent
     titles, position) when the caller has read that from the page; otherwise
@@ -450,6 +507,13 @@ def guess_contents(stems, back_matter=None, titles=None, parts=None,
     knowing the names, and unrecognized ones sort last rather than
     preventing the grouping.
     """
+    return typed_by_title(_guessed_order(stems, back_matter, titles, parts,
+                                         roles), titles or {})
+
+
+def _guessed_order(stems, back_matter=None, titles=None, parts=None,
+                   roles=None):
+    """guess_contents's order, before typed_by_title."""
     back_matter = back_matter or BACK_MATTER_ORDER
     titles = titles or {}
     parts = parts or {}
@@ -459,7 +523,7 @@ def guess_contents(stems, back_matter=None, titles=None, parts=None,
     if ordered:
         stems = plain + [s for s in ordered if s not in plain]
         tree = strip_source(group_pieces(
-            guess_contents(stems, back_matter, titles, None, roles), ordered,
+            _guessed_order(stems, back_matter, titles, None, roles), ordered,
             titles, roles))
         # A book that is one source is the source: a group for it would
         # only push every page one level down.

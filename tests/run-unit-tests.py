@@ -556,6 +556,47 @@ def check_matter_by_name():
     ]
 
 
+def check_types_by_title():
+    """A page whose title names what it is gets the type in a guessed
+    contents, the role the type implies dropped and one it doesn't kept."""
+    titles = {"preface": "Preface", "1-introduction": "Introduction",
+              "1-1-a": "1.1 A", "1-key-terms": "Key Terms",
+              "1-references": "References", "2-1-b": "2.1 B",
+              "2-introduction": "Introduction", "index": "Index"}
+    order = bookcontents.guess_contents(list(titles), titles=titles)
+    chapter = order[1]["items"]
+    typed = bookcontents.typed_by_title(
+        [{"page": "g", "role": "front"}, {"page": "h", "type": "index"},
+         {"generate": "toc"}, {"page": "a", "title": "Appendix B Tables"}],
+        {"g": "Glossary", "h": "Glossary"})
+    return [
+        ("a title's words name a type, an appendix by its first word, and "
+         "an Introduction none",
+         lambda: [bookcontents.type_of_title(t) for t in
+                  ("Key Terms", "works cited.", "Appendix A Statistical Tables",
+                   "Appendixes", "Introduction")]
+         == ["glossary", "bibliography", "appendix", None, None]),
+        ("every type a title can name is a page type",
+         lambda: set(bookcontents.TITLE_TYPES.values())
+         <= set(bookcontents.PAGE_TYPES)),
+        ("the guess types the preface and the index, whose types say "
+         "they're front and back matter",
+         lambda: order[0] == {"page": "preface", "type": "preface"}
+         and order[-1] == {"page": "index", "type": "index"}),
+        ("and a chapter's Key Terms and References, nothing else in it",
+         lambda: {"page": "1-key-terms", "type": "glossary"} in chapter
+         and {"page": "1-references", "type": "bibliography"} in chapter
+         and "1-introduction" in chapter and "1-1-a" in chapter),
+        ("a role the type doesn't imply stays, a declared type isn't "
+         "replaced, a generated page is left, and a title in the contents "
+         "counts",
+         lambda: typed == [{"page": "g", "role": "front", "type": "glossary"},
+                           {"page": "h", "type": "index"}, {"generate": "toc"},
+                           {"page": "a", "title": "Appendix B Tables",
+                            "type": "appendix"}]),
+    ]
+
+
 def check_one_file_chapters():
     """A book written one file per numbered chapter: each file is its
     chapter, not a page under a "Chapter N" of its own; a chapter of
@@ -877,6 +918,7 @@ GROUPS = [
     ("layout tables", check_layout_tables),
     ("unique ids", check_unique_ids),
     ("front and back matter by name", check_matter_by_name),
+    ("types by title", check_types_by_title),
     ("caption contrast", check_contrast),
     ("manifest names", check_manifest_names),
     ("repairing a .docx on the way in", check_docx_repair),

@@ -72,7 +72,7 @@ from bookcontents import (  # noqa: E402
     natural_key, chapter_of, within_chapter_key, unrecognized_roles,
     guess_contents, walk_contents, flatten_pages, contents_from_tree,
     expand_split_sources, page_title, page_provenance, page_role,
-    TITLE_RE, META_RE,
+    typed_by_title, TITLE_RE, META_RE,
     stem_title, slugify, clean_title, number_tree, numbered_title, opener_types,
 )
 
@@ -1114,6 +1114,9 @@ def main():
 
             from_pdf, placed, unmapped = contents_from_outline(
                 args.toc, extra, TITLES, PARTS)
+            # Typed by their titles as a guess is: the outline orders the
+            # pages, and doesn't say what a Preface or a Key Terms is.
+            from_pdf = typed_by_title(from_pdf, TITLES)
             destination.extend(
                 walk_contents(from_pdf, available, used, problems))
 

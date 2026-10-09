@@ -198,6 +198,17 @@ numbering, the PDF, the cartridge, and the EPUB; a Word heading can't say
 it at all, which is what `type` is for, and `contents` outranks a heading.
 A LaTeX book's sample gives the bibliography page the run writes out
 `type: bibliography`, at the top level after any parts and appendices.
+A guessed `contents`, and one ordered from an outline with `--toc`,
+gives a type to each page whose title names what it is: Preface,
+Foreword, Dedication, Epigraph, Acknowledgments, Prologue, Epilogue,
+Afterword, Abstract, Colophon, and Copyright; Glossary and Key Terms
+(`glossary`); Bibliography, References, and Works Cited
+(`bibliography`); Index; and an Appendix by its title's first word. So
+an OpenStax chapter's Key Terms is a glossary and its References a
+bibliography, and the preface and index are front and back matter by
+their types, with no `role` beside them. An Introduction or a
+Conclusion is as often a chapter's section as the book's, and isn't
+guessed; nor is a part or a chapter, which the groups already say.
 
 An entry `generate: toc` is a page the run writes: the full table of
 contents as a nested list of links, numbered when the book is, placed

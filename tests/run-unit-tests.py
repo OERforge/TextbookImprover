@@ -261,12 +261,31 @@ def check_consistency():
     named = set(re.findall(r"TextbookImprover-(\d+\.\d+)", installation)
                 + re.findall(r"refs/tags/v(\d+\.\d+)\.tar\.gz", installation)
                 + re.findall(r"replace `v(\d+\.\d+)`", installation))
+    # The oldest Pandoc convert.py takes, which each suite that runs it
+    # checks first, as run-all.sh does, so an older one says why.
+    pandoc_minimums = set()
+    for folder in ("bin", "tests"):
+        for name in sorted(os.listdir(os.path.join(ROOT, folder))):
+            if name.endswith(".py"):
+                text = open(os.path.join(ROOT, folder, name), encoding="utf-8").read()
+                pandoc_minimums.update(re.findall(r"\)\[:3\]\) < \((\d+), (\d+)\)", text))
+    run_all = open(os.path.join(HERE, "run-all.sh"), encoding="utf-8").read()
+    pandoc_minimums.update(tuple(v.split(".")) for v in
+                           re.findall(r"!= \"(\d+\.\d+)\" \]", run_all))
+    pandoc_checked = {name for name in os.listdir(HERE)
+                      if name.startswith("run-") and name.endswith(".py")
+                      and ") < (" in open(os.path.join(HERE, name), encoding="utf-8").read()}
 
     return [
         ("the schema's back-matter default matches the built-in order",
          lambda: list(declared) == builtin),
         ("the newest release is the one the audit reports and the installation page "
          "downloads", lambda: audit == released and named == {released}),
+        ("the oldest Pandoc is the same everywhere it's checked, and every suite that runs "
+         "convert.py checks it", lambda: len(pandoc_minimums) == 1
+         and {"run-convert-tests.py", "run-latex-tests.py", "run-pdf-tests.py",
+              "run-unpack-tests.py", "run-epub-tests.py", "run-split-tests.py",
+              "run-filter-tests.py"} <= pandoc_checked),
         ("every schema loads and declares its keys",
          lambda: all("keys" in yaml.safe_load(open(p, encoding="utf-8"))
                      for p in (

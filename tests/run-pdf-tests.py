@@ -764,6 +764,11 @@ def main():
 
     if shutil.which("pandoc") is None:
         sys.exit("pandoc is not on the path.")
+    version = subprocess.run(["pandoc", "--version"], capture_output=True,
+                             text=True).stdout.split()[1]
+    if tuple(int(p) for p in re.findall(r"\d+", version)[:3]) < (3, 9):
+        sys.exit(f"Pandoc {version} is too old; these tests need 3.9 or "
+                 "later, as convert.py does.")
     if shutil.which("lualatex") is None or pypdf is None or pdfparagraphs.pikepdf is None:
         print("  skip  " + ("lualatex is not on the path"
                             if shutil.which("lualatex") is None

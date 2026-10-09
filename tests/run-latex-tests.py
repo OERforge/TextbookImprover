@@ -4696,6 +4696,11 @@ def main():
              if not arguments.case or any(c in label for c in arguments.case)]
     if shutil.which("pandoc") is None:
         sys.exit("pandoc is not on the path.")
+    version = subprocess.run(["pandoc", "--version"], capture_output=True,
+                             text=True).stdout.split()[1]
+    if tuple(int(p) for p in re.findall(r"\d+", version)[:3]) < (3, 9):
+        sys.exit(f"Pandoc {version} is too old; these tests need 3.9 or "
+                 "later, as convert.py does.")
     work = tempfile.mkdtemp(prefix="latex-tests-")
     failed = 0
     lacking = tex_ready()

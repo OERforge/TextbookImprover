@@ -189,6 +189,11 @@ def case_convert(work):
     if shutil.which("pandoc") is None:
         print("  skip  pandoc not found")
         return []
+    version = subprocess.run(["pandoc", "--version"], capture_output=True,
+                             text=True).stdout.split()[1]
+    if tuple(int(p) for p in re.findall(r"\d+", version)[:3]) < (3, 9):
+        print(f"  skip  Pandoc {version} is too old; convert.py needs 3.9 or later")
+        return []
     os.makedirs(work)
     epub = os.path.join(work, "small.epub")
     build_epub(epub)

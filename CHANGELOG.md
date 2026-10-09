@@ -6,6 +6,10 @@ Versions are two-part and pre-1.0: breaking changes may land in any of them unti
 
 ## [Unreleased]
 
+### Fixed
+
+- **The LaTeX, convert, and PDF suites ran with a Pandoc too old for `convert.py`**, which refuses one older than 3.9, so every case failed with the reason only in the run's own output: seven of one LaTeX case's checks, run by hand with Ubuntu 24.04's Pandoc 3.1.3. Each stops first now and says so, as the filter, EPUB, and split suites did, and the unpacking suite's one case that converts skips; a unit check holds every suite that runs `convert.py` to the same minimum.
+
 ## [0.9] - 2026-10-08
 
 LaTeX, mostly. A LaTeX book is now a source: Pandoc reads it whole through its master file, from a copy put right where Pandoc's reader can't take it, and it's cut into a page per `\include`-d file, its references, formulas, captions, bibliography, and citations numbered and printed as LaTeX prints them. A PDF target builds a LaTeX book's PDF from its own LaTeX, tagged by LaTeX and claiming PDF/UA-2, and a `latex` target writes the LaTeX a PDF target builds from. Four books of different kinds have been through it, GIAM, a calculus course's notes in one file, FINC 308's 18 documents, and *OpenIntro Statistics*, and each turned up something the others hadn't, so every path from LaTeX is rated NEEDS MORE TESTING on [the formats page](docs/formats.md#at-a-glance): check a book's pages against its own PDF before relying on them. PDFs from any source, Word files, EPUBs, and AsciiDoc got fixes on the way. Tested with Pandoc 3.12.1 and 3.12, and on Python 3.9, the oldest supported.

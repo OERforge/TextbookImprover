@@ -88,6 +88,10 @@ CHECKS = OrderedDict([
                       "drawing, with nothing to read it back from; it's "
                       "marked [formula]", "error", "WCAG 2.0 SC 1.1.1 (A)",
                       "source")),
+    ("formula-shown-as-tex", ("a formula Pandoc couldn't convert to MathML, "
+                              "shown as its TeX, which a screen reader reads "
+                              "out as typed", "error", "WCAG 2.0 SC 1.3.1 (A)",
+                              "source")),
     ("link-to-file-dropped", ("a link to a file an EPUB can't carry; its "
                               "text is kept and the file is only in the "
                               "other targets", "warning", "EPUB 3.3",

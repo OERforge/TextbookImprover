@@ -46,7 +46,7 @@ GOOD = """<!DOCTYPE html><html lang="en"><head><title>A page</title></head>
 <table><caption>Data</caption><tr><th scope="col">H</th></tr></table></div>
 <table role="presentation"><tr><td>layout</td></tr></table>
 <a href="#top">up</a><a href="other.html#there">over</a>
-<a href="https://example.org/#x">out</a><p><a href="other.html" aria-label="Read more about cats">Read more</a> <a href="other.html" aria-label="Chart of sales, larger"><img src="c.png" alt="Chart of sales"></a> <a href="other.html">no label</a></p>
+<a href="https://example.org/#x">out</a><p>A formula <math><mi>x</mi></math>, and one in MathJax's form <span class="math inline">\\(y\\)</span>.</p><p><a href="other.html" aria-label="Read more about cats">Read more</a> <a href="other.html" aria-label="Chart of sales, larger"><img src="c.png" alt="Chart of sales"></a> <a href="other.html">no label</a></p>
 </body></html>"""
 
 OTHER = """<!DOCTYPE html><html lang="en"><head><title>Other</title></head>
@@ -58,7 +58,12 @@ BAD = """<!DOCTYPE html><html><head><title></title></head>
 <table><tr><td>1</td></tr></table>
 <a href="#nowhere">x</a><a href="gone.html">y</a><a href="other.html#no">z</a>
 <a href="other.html" aria-label="DOI for Klein and Stern 2005">https://doi.org/10/b8xx35</a>
+<p><span class="math inline">$x_{2}\\text{\\cdot}x_{n}$</span></p>
 </body></html>"""
+
+# The formula Pandoc couldn't convert, on a page whose script may render it.
+SCRIPTED = OTHER.replace("</h1>", "</h1><p><span class=\"math inline\">$x_{2}\\text{\\cdot}$"
+                         "</span></p><script src=\"mathjax.js\"></script>")
 
 
 def checks(findings):
@@ -103,6 +108,9 @@ def main():
         titled = outputcheck.check_html_files([os.path.join(work, n) for n in named])
         bad = outputcheck.check_html_files(
             [os.path.join(work, "bad.html"), os.path.join(work, "other.html")])
+        with open(os.path.join(work, "scripted.html"), "w", encoding="utf-8") as fh:
+            fh.write(SCRIPTED)
+        scripted = outputcheck.check_html_files([os.path.join(work, "scripted.html")])
         cases = [
             ("a correct pair of pages produces no finding",
              lambda: checks(good) == []),
@@ -117,7 +125,12 @@ def main():
                  "table-without-headers-or-caption",
                  "table-not-in-scroll-region",
                  "link-to-missing-fragment", "link-to-missing-file",
-                 "link-to-missing-fragment"])),
+                 "link-to-missing-fragment", "formula-shown-as-tex"])),
+            ("a formula shown as TeX is named by its TeX",
+             lambda: any(f.check == "formula-shown-as-tex"
+                         and f.detail == "$x_{2}\\text{\\cdot}x_{n}$" for f in bad)),
+            ("and isn't found on a page with a script, which may render it",
+             lambda: checks(scripted) == []),
             ("a page titled with its file's name is found, one whose name is a word isn't, "
              "nor one named for its H1",
              lambda: sorted((os.path.basename(f.where), f.check) for f in titled) == [
@@ -142,7 +155,8 @@ def main():
                 for info in src.infolist():
                     data = src.read(info.filename)
                     if info.filename.endswith("ch001.xhtml"):
-                        data = data.replace(b"#two", b"#gone")
+                        data = data.replace(b"#two", b"#gone").replace(
+                            b"See ", b'See <span class="math display">$$\\text{\\cdot}$$</span> ')
                     dst.writestr(info, data)
             damaged = outputcheck.check_epub(broken)
             cases += [
@@ -151,6 +165,8 @@ def main():
                  or checks(clean) == []),
                 ("a fragment broken inside the archive is found",
                  lambda: "link-to-missing-fragment" in checks(damaged)),
+                ("and a formula shown as TeX in it",
+                 lambda: "formula-shown-as-tex" in checks(damaged)),
                 ("the EPUB's own structure is read: manifest, spine, nav",
                  lambda: not any(c.startswith(("manifest", "spine", "no-nav",
                                                "file-not", "mimetype"))

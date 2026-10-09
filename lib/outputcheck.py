@@ -83,11 +83,32 @@ class Page:
         self.links = []             # href values of <a>
         self.dropped_files = []     # files an EPUB's links named, kept as text
         self.lost_formulas = 0      # MathJax renderings nothing could read
+        self.tex_formulas = []      # formulas Pandoc couldn't make MathML of
+        self.scripts = 0            # <script> elements, any of which may
+                                    # render TeX the page holds as text
         self.images = []            # (has_alt, alt, decorative, src)
         self.headings = []          # (level, text)
         self.tables = []            # (has_th, has_caption, role, wrapped)
         self.labeled_links = []     # (aria-label, visible text) of <a>
         self.parse_error = None
+
+
+def is_math_span(classes):
+    """Pandoc's span around a formula: class "math inline" or "math
+    display". Written as MathML, a formula has no such span; it has one
+    only when texmath couldn't read its TeX, or under another math method."""
+    tokens = (classes or "").split()
+    return "math" in tokens and ("inline" in tokens or "display" in tokens)
+
+
+def add_formula(page, text):
+    """A math span's text, kept when it's TeX between dollar signs, the
+    form Pandoc's MathML writer falls back to (Writers/Math.hs,
+    mkFallback): MathJax's own form is \\( \\) or \\[ \\], and a
+    formula written as MathML has no span at all."""
+    text = text.strip()
+    if len(text) > 1 and text.startswith("$") and text.endswith("$"):
+        page.tex_formulas.append(text)
 
 
 class _Collector(HTMLParser):
@@ -100,11 +121,18 @@ class _Collector(HTMLParser):
         self._title = None
         self._table = None
         self._link = None
+        self._math = None           # [text parts, depth of spans inside]
 
     def handle_starttag(self, tag, attrs):
         a = dict(attrs)
         if a.get("id"):
             self.page.ids.append(a["id"])
+        if tag == "span" and self._math is not None:
+            self._math[1] += 1
+        elif tag == "span" and is_math_span(a.get("class")):
+            self._math = [[], 0]
+        if tag == "script":
+            self.page.scripts += 1
         if tag == "html":
             self.page.lang = a.get("lang") or a.get("xml:lang")
         elif tag == "title":
@@ -139,6 +167,12 @@ class _Collector(HTMLParser):
             self._table[1] = True
 
     def handle_endtag(self, tag):
+        if tag == "span" and self._math is not None:
+            if self._math[1]:
+                self._math[1] -= 1
+            else:
+                add_formula(self.page, "".join(self._math[0]))
+                self._math = None
         if tag == "a" and self._link is not None:
             self.page.labeled_links.append((self._link[0], " ".join(
                 "".join(self._link[1]).split())))
@@ -157,6 +191,8 @@ class _Collector(HTMLParser):
             self._in_wrapper = False
 
     def handle_data(self, data):
+        if self._math is not None:
+            self._math[0].append(data)
         if self._title is not None:
             self._title.append(data)
         if self._heading:
@@ -198,6 +234,10 @@ def read_xhtml(name, markup):
             page.dropped_files.append(el.get("data-file"))
         elif tag == "span" and "math-lost" in (el.get("class") or "").split():
             page.lost_formulas += 1
+        elif tag == "span" and is_math_span(el.get("class")):
+            add_formula(page, "".join(el.itertext()))
+        elif tag == "script":
+            page.scripts += 1
         elif tag == "img":
             page.images.append(("alt" in el.attrib, el.get("alt") or "",
                                 is_decorative(el.attrib), el.get("src", "")))
@@ -226,6 +266,13 @@ def check_page(page, findings):
     if page.lost_formulas:
         findings.append(Finding(where, "formula-lost",
                                 f"{page.lost_formulas} formula(s)"))
+    # A formula shown as its TeX, unless a script on the page may be there
+    # to render it: Pandoc couldn't convert it, and says so only in a
+    # warning among the run's output.
+    if not page.scripts:
+        for tex in page.tex_formulas:
+            findings.append(Finding(where, "formula-shown-as-tex",
+                                    tex if len(tex) <= 80 else tex[:79] + "\u2026"))
     if page.parse_error:
         findings.append(Finding(where, "not-well-formed", page.parse_error))
     if not page.lang:
@@ -501,6 +548,7 @@ DESCRIPTIONS = {
     "no-title": "no title element, or an empty one",
     "title-is-file-name": "the page's title is its file's name",
     "not-well-formed": "the document could not be parsed",
+    "formula-shown-as-tex": "a formula Pandoc couldn't convert, shown as its TeX",
 }
 
 

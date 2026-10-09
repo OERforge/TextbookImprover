@@ -19,6 +19,7 @@ The checks are the class of defect that has reached this project's output before
 | `image-without-alt` | An `img` has no `alt` attribute, so a screen reader announces the file name. |
 | `image-empty-alt-not-decorative` | `alt=""` without `aria-hidden="true"`: the image was neither described nor declared decorative. In an EPUB this is the usual form of a missing description, since Pandoc's writer gives every image an `alt`. |
 | `heading-skips-level` | A heading is more than one level below the one before it. |
+| `formula-shown-as-tex` | A formula Pandoc couldn't convert to MathML, so the page shows its TeX (`$r_{s} = \left( …$`) and a screen reader reads that out. Pandoc says so only in a warning among the run's output; the detail is the formula, to find it in the source. A page with a script is skipped, since a script there may be what renders the TeX. |
 | `empty-heading` | A heading with no text. |
 | `invalid-id` | An `id` containing whitespace, which no `id` may. |
 | `duplicate-id` | An `id` used more than once in one document, so links to it are ambiguous. |

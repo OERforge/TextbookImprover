@@ -1,0 +1,3 @@
+# A key that is another file's setting says whose: the package's version
+# belongs in packaging.yaml, not in a conversion's defaults.
+error: "version is a packaging.yaml setting, under defaults: or a package"

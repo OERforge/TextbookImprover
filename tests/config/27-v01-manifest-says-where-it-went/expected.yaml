@@ -1,0 +1,3 @@
+# v0.1's manifest block, pasted into a v0.2 file, says what became of it
+# and what moves a v0.1 configuration whole.
+error: "util/migrate-config.py moves a v0.1 configuration whole"

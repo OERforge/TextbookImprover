@@ -1,0 +1,4 @@
+defaults:
+  manifest:
+    title: The Book
+    cartridge: book.imscc

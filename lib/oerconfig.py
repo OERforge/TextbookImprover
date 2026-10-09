@@ -299,6 +299,9 @@ def load_document(path, schema=None):
                        + " under defaults: (or inside a target). In v0.1 "
                          "everything sat at the top level; from v0.2 it "
                          "does not.")
+        for key in unknown:
+            if key not in misplaced and _elsewhere(key):
+                detail += "\n  " + _elsewhere(key) + "."
         raise ConfigError(detail)
     return Document(data, path)
 
@@ -347,10 +350,79 @@ def _merge(node, base, override, source, problems, warnings=None):
     return out
 
 
+# Settings an earlier version had, and where each went, so a configuration
+# written for that version says so, not only that the key is unknown. A
+# key is its dotted path within a block (project:, defaults:, a target).
+# v0.1's imsmanifest.yaml had no schema; util/migrate-config.py moves one
+# whole.
+RETIRED = {
+    "manifest": "was v0.1's, split in v0.2: identifier, title, language, and "
+                "description are under project:, version, modified, and keywords "
+                "are packaging.yaml settings, and cartridge is a package's filename "
+                "(util/migrate-config.py moves a v0.1 configuration whole)",
+    "images.spacer_log": "is reports.spacer_images since v0.2",
+    "reports.table_headers_missing": "was retired in v0.3 with "
+                                     "table-headers-missing.csv: what it reported is "
+                                     "a needs-source row in table-headers-report.csv",
+}
+
+# Where each block's settings are declared, for saying that a key unknown
+# in one is a setting of another.
+_HERE = os.path.dirname(os.path.abspath(__file__))
+_HOMES = (
+    (os.path.join(_HERE, "schema-project.yaml"), "project", None),
+    (os.path.join(_HERE, "..", "bin", "schema-conversion.yaml"), "conversion.yaml",
+     "target"),
+    (os.path.join(_HERE, "..", "bin", "schema-packaging.yaml"), "packaging.yaml",
+     "package"),
+)
+_HOME_SCHEMAS = []
+
+
+def _homes(dotted):
+    """The other places a setting by this dotted path is declared, as
+    ("conversion.yaml", "under defaults: or a target") pairs, the block
+    as the setting's own kind allows: a target-only setting in a target,
+    a book-level one under defaults:."""
+    if not _HOME_SCHEMAS:
+        for path, name, block in _HOMES:
+            try:
+                _HOME_SCHEMAS.append((load_schema(path), name, block))
+            except (OSError, ConfigError, yaml.YAMLError):
+                continue
+    out = []
+    for schema, name, block in _HOME_SCHEMAS:
+        if schema.node(dotted) is None:
+            continue
+        top = schema.node(dotted.split(".")[0])
+        where = ("under project:" if block is None
+                 else f"in a {block}" if top.target_only
+                 else "under defaults:" if top.book_level
+                 else f"under defaults: or a {block}")
+        out.append((name, where))
+    return out
+
+
+def _elsewhere(dotted):
+    """What to say about a key that isn't a setting here: where it went,
+    if a version had it, or where it is a setting; empty if neither."""
+    if dotted in RETIRED:
+        return f"{dotted} {RETIRED[dotted]}"
+    homes = _homes(dotted)
+    if not homes:
+        return ""
+    return (f"{dotted} is a "
+            + ", and a ".join(f"{name} setting, {where}" for name, where in homes))
+
+
 def _unknown_key(node, key, source):
     known = sorted(node.keys) if node.is_section else []
-    close = difflib.get_close_matches(key, known, n=1, cutoff=0.6)
     where = node.path or "the top level"
+    dotted = f"{node.path}.{key}" if node.path else key
+    elsewhere = _elsewhere(dotted)
+    if elsewhere:
+        return f"{source}: unknown setting {key!r} in {where}: {elsewhere}"
+    close = difflib.get_close_matches(key, known, n=1, cutoff=0.6)
     hint = f"; did you mean {close[0]}?" if close else ""
     return f"{source}: unknown setting {key!r} in {where}{hint}"
 

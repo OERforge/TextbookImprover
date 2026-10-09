@@ -12,7 +12,7 @@ one failed, and exits non-zero if any did.
 | Suite | What it pins down |
 |---|---|
 | `run-spelling-tests.py` | US spelling in every tracked text file, prose and names alike, naming file and line; a released changelog section is history and skipped. Needs git. |
-| `run-config-tests.py` | Twenty-four fixtures over the configuration cascade: what a `false` override means, what an explicit `null` means, whether lists append, which identifiers are valid XML names, what happens when a setting is written twice, and a sidecar or report setting inside a target. |
+| `run-config-tests.py` | Twenty-seven fixtures over the configuration cascade: what a `false` override means, what an explicit `null` means, whether lists append, which identifiers are valid XML names, what happens when a setting is written twice, a sidecar or report setting inside a target, and what a retired setting or another block's says. |
 | `run-roundtrip-test.py` | That writing a configuration and reading it back changes nothing. |
 | `run-unit-tests.py` | The small functions that decide filenames and directory names, and the places where one fact is written down twice and could drift apart. |
 | `run-headers-tests.py` | The table-headers pre-pass end to end, on `.docx` files built as OOXML: keys, the sidecar's values and aliases, the new-rows file, the report, and the stop on a key that matches nothing. |

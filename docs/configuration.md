@@ -110,7 +110,9 @@ govern the rest, kept few on purpose:
   An absent key inherits.
 - No coercion happens during the merge; each resolved value is checked
   once at the end against its declared type.
-- An unknown key is an error, with a suggestion if one is close. Pass
+- An unknown key is an error, with a suggestion if one is close, and
+  where it went if an earlier version had it or where it belongs if it's
+  another block's setting (`version` is packaging.yaml's). Pass
   `--allow-unknown-keys` to report and ignore them instead, which is for
   reading a config written for a newer version of the tools.
 

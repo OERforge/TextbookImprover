@@ -18,7 +18,7 @@
 #                          override means, what an explicit null means,
 #                          whether lists append, which identifiers are
 #                          valid XML names, what happens when a setting is
-#                          written twice. Twenty-four fixtures, each
+#                          written twice. Twenty-seven fixtures, each
 #                          pinning one decision.
 #
 #   run-roundtrip-test.py  that writing a configuration and reading it

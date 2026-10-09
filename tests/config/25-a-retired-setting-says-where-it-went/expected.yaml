@@ -1,0 +1,3 @@
+# A setting an earlier version had says where it went, not only that it
+# is unknown: v0.1's images.spacer_log is reports.spacer_images.
+error: "images.spacer_log is reports.spacer_images since v0.2"

@@ -43,17 +43,22 @@ table-headers: 319 table(s) have no sidecar row; prefilled rows are in table-hea
 Wrote table-captions-missing.csv (262 table(s) needing a description).
 Wrote image-alt-missing.csv (208 image(s) needing alt text).
 Wrote bare-links-new.csv (169 bare link(s) with no row in bare-links.csv).
-Output check: 169 page(s), 64 finding(s):
-     64  link-to-missing-fragment: a link's #fragment matches no id
+61 page(s) keep their declared title without the number their heading puts before it ("1.1 Definitions of Statistics, Probability, and Key Terms" is titled "Definitions of Statistics, Probability, and Key Terms"), in <title> and in the names a cartridge gives its pages; promote_h1_to_title: always titles them with the number.
+Wrote math-repaired.csv (1632 math repair(s)).
+Output check: 169 page(s), nothing found.
 ```
 
-The HTML is already written, one page per Word file, in `html/`. The 1,604 links OpenStax's files make to its own website now point at pages of this book. The run stops at packaging, which needs two things only you can supply:
+The HTML is already written, one page per Word file, in `html/`. The 1,604 links OpenStax's files make to its own website now point at pages of this book. The 1,632 math repairs are equations given the characters they mean, such as the micro sign `µ` where the Greek `μ` was meant, and math typed as text made an equation; `math-repaired.csv` lists each, in case one shouldn't have changed ([Math](configuration.md#math)). The 61 pages are the numbered sections, whose Word files are titled without the number. The output check finds nothing to report.
+
+The run stops at packaging, which needs two things only you can supply:
 
 ```
+WARNING: contents not specified; using guessed order.
 ERROR: packaging.yaml not found.
 
 Wrote packaging-sample.yaml.
 Edit it, rename it to packaging.yaml, and run again.
+Every setting is in there with its description, so nothing you had set is lost by renaming it.
 ```
 
 ### 2. Order the pages from the book's PDF
@@ -112,7 +117,7 @@ python3 $T/bin/convert.py
 This time the run goes through to the end and writes the cartridge's manifest. It also says, as every run from now on will, that the zip beside the Word files isn't read:
 
 ```
-Introductory_Business_Statistics_2e_-_DOCX_Customization.zip: not read, since this directory has sources, which are the book once an archive is unpacked.
+Introductory_Business_Statistics_2e_-_DOCX_Customization.zip: not read, since this directory has sources, which are the book once an archive is unpacked. To unpack it afresh, extract it into a new directory.
 ```
 
 ### 4. Credit OpenStax on every page
@@ -167,11 +172,13 @@ Each report is a CSV file listing what needs a person, and each decision goes in
 cp table-headers-new.csv table-headers.csv
 ```
 
+Each guess says `TI` in its `drafted-by` column, since TextbookImprover made it. It's used as it stands, and once you've checked a row, your initials in its `reviewed` column say so ([Who drafted a value](sidecars.md#who-drafted-a-value-and-whether-its-been-reviewed)).
+
 **Alt text.** `image-alt-missing.csv` names each image whose description is missing or too long, with the reason and the description it has now:
 
 ```
-Image,Alt,Source,Reason,CurrentAlt
-1-2-data-sampling-and-variation-in-data-and-sampling/media/rId100.png,,1-2-data-sampling-and-variation-in-data-and-sampling,too long (185 characters),Bar graph consisting of 8 bars with values matching the given data. …
+Image,Alt,Source,Reason,CurrentAlt,Drafted by,Reviewed
+1-2-data-sampling-and-variation-in-data-and-sampling/media/rId100.png,,1-2-data-sampling-and-variation-in-data-and-sampling,too long (185 characters),Bar graph consisting of 8 bars with values matching the given data. …,,
 ```
 
 Write a shorter description in the `Alt` column and put the row in `image-alt.csv`. An image that carries no meaning gets `[decorative]` instead:
@@ -188,7 +195,7 @@ Label,Description
 Table 1.1,"Speeds at which cars crashed, by the location of the driver."
 ```
 
-**Bare links.** `bare-links-new.csv` lists the 169 addresses the book shows as link text, 165 of them on the chapters' reference pages, each with the citation before it. A screen reader reads each one aloud. They conform as they are, since the citation gives each link its context, so decide what's worth changing: a Title gives the link a tooltip, and text in the Replacement column replaces the address shown, as [Bare links](bare-links.md) explains:
+**Bare links.** `bare-links-new.csv` lists the 169 addresses the book shows as link text, 164 of them on the chapters' reference pages, each with the citation before it. A screen reader reads each one aloud. They conform as they are, since the citation gives each link its context, so decide what's worth changing: a Title gives the link a tooltip, and text in the Replacement column replaces the address shown, as [Bare links](bare-links.md) explains:
 
 ```
 URL,Replacement,Title
@@ -196,8 +203,6 @@ http://blog.flurry.com,The Flurry Blog,
 ```
 
 None of this book's addresses is a DOI, so the shortDOI helper has nothing to do here; for a book whose references cite DOIs, it's the quickest way to shorten them.
-
-**The output check.** `output-check.csv` has the 64 links whose `#fragment` names nothing, all from a chapter's solutions page into its practice or homework page. They point at ids OpenStax's export leaves out of its own files, and the `Fix` column says `source` for each: they can be fixed only in the Word files, or by OpenStax.
 
 Run again, and the reports shrink by what the sidecars now answer:
 
@@ -209,9 +214,11 @@ python3 $T/bin/convert.py
 table-headers: 332 data table(s): 4 blank, 328 declared
 Wrote table-captions-missing.csv (261 table(s) needing a description).
 Wrote image-alt-missing.csv (207 image(s) needing alt text).
+Wrote bare-links-new.csv (168 bare link(s) with no row in bare-links.csv).
+315 value(s) in the sidecars were drafted by TextbookImprover or a model and not yet reviewed (table-headers.csv 315); they're used as they stand. Put a name or initials in a row's Reviewed column once a person has checked it.
 ```
 
-The four `blank` tables have a sidecar row with nothing in `headers`: the guess was left blank because the file doesn't say enough to guess. Fill theirs in. This is the loop you'll spend the most time in: add rows, run again, and watch the reports shrink. Nothing requires them to reach zero before you build, but each row left is a table or image a screen-reader user meets without what it needs.
+The four `blank` tables have a sidecar row with nothing in `headers`: the guess was left blank because the file doesn't say enough to guess. Fill theirs in. The 315 drafted values are the rest of the guesses you copied, and the count falls as you fill in `reviewed`. This is the loop you'll spend the most time in: add rows, run again, and watch the reports shrink. Nothing requires them to reach zero before you build, but each row left is a table or image a screen-reader user meets without what it needs.
 
 ### 7. Build the cartridge
 
@@ -220,7 +227,7 @@ python3 $T/bin/convert.py --zip
 ```
 
 ```
-Wrote org.example.introductory-business-statistics.imscc (18.0 MB, 423 entries).
+Wrote org.example.introductory-business-statistics.imscc (18.1 MB, 423 entries).
 ```
 
 Now you have a Common Cartridge file that you can import into your LMS of choice.
@@ -254,10 +261,14 @@ python3 $T/bin/convert.py
 ```
 Unpacked dcic.warc.gz: 80 source(s), which are the book from now on. Correct them, not the archive: later runs don't read it again. unpack-report.csv says what the unpacking found.
 table-headers: 85 data table(s): 85 new
+table-headers: 50 table(s) have no sidecar row; prefilled rows are in table-headers-new.csv -- paste them into table-headers.csv
 Wrote table-captions-missing.csv (91 table(s) needing a description).
+Wrote bare-links-new.csv (2 bare link(s) with no row in bare-links.csv).
 Output check: 80 page(s), 40 finding(s):
      40  heading-skips-level: a heading is more than one level below the last
 ```
+
+Before the reports, most pages get a line naming the tags the reader dropped, keeping what they held: nearly all are Scribble's `<wbr>`, a hint where a long name may break. A few pages get a line saying an id was moved onto an anchor, so that links to it still land. Neither asks anything of you.
 
 The unpacking recognized Scribble, took its navigation off each page, and made a page of each of the book's 80 pages. Unlike the Word files, the website says what the book is, so the unpacking also wrote `project.yaml` from it: the title, the authors, an identifier made from the address, and the order of the pages, taken from the site's own menus.
 
@@ -273,6 +284,13 @@ project:
     - "Joe Gibbs Politz"
   contents:
     - page: index
+      title: "A Data-Centric Introduction to Computing"
+    - page: booklet_intro
+      title: "I Introduction"
+    - title: "II Introduction to Programming"
+      items:
+        - page: booklet_intro-to-programming
+          title: "II Introduction to Programming"
 ```
 
 It's yours to edit. Because it names the book, this first run doesn't stop at packaging. The 40 headings that skip a level are how DCIC's pages are built (a page's title, then its sections at the third level), which the check reports and leaves as they are. The reports are worked through as in the first example.
@@ -296,9 +314,11 @@ python3 $T/bin/convert.py
 Wrote epub/dcic-world.org-2025-08-27.epub: 80 page(s), 42 image(s), 0 without alternative text.
   Claims: accessMode textual, visual; sufficient textual; features structuralNavigation, tableOfContents, readingOrder, alternativeText, MathML.
   epubcheck ran on 1 EPUB(s).
+Output check: 80 page(s) and 1 EPUB(s), 80 finding(s):
+     80  heading-skips-level: a heading is more than one level below the last
 ```
 
-The EPUB is named for the identifier, and the claims are the accessibility metadata it declares, each checked against what the book holds. The EPUB passes [epubcheck](https://www.w3.org/publishing/epubcheck/) with no message at all, which the run checks for itself when epubcheck is installed ([Installation](installation.md#optional-the-full-validators) says how).
+The EPUB is named for the identifier, and the claims are the accessibility metadata it declares, each checked against what the book holds. The EPUB passes [epubcheck](https://www.w3.org/publishing/epubcheck/) with no message at all, which the run checks for itself when epubcheck is installed ([Installation](installation.md#optional-the-full-validators) says how). With an EPUB target, the output check reads the EPUB's pages as well as the HTML, so the 40 headings are counted twice, once in each.
 
 ### 3. The round trip
 

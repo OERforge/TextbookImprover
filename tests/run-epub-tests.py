@@ -738,6 +738,15 @@ def case_declared_types(work):
     nav = out.files.get("EPUB/nav.xhtml", "")
     marks = re.search(r'<nav epub:type="landmarks".*?</nav>', nav, re.S)
     marks = marks.group(0) if marks else ""
+
+    def labelled_by(ident):
+        """The text of the heading a section's aria-labelledby names."""
+        m = re.search(r'aria-labelledby="([^"]+)"', section(ident))
+        if not m:
+            return None
+        h = re.search(r'<h[1-6]\b[^>]*\bid="%s"[^>]*>(.*?)</h[1-6]>' % re.escape(m.group(1)),
+                      chapter(ident), re.S)
+        return " ".join(re.sub(r"<[^>]+>", "", h.group(1)).split()) if h else None
     return [
         ("a Word page that contents calls a preface is one, in the front matter",
          lambda: out.status == 0 and body("page-metadata") == "frontmatter"
@@ -762,6 +771,12 @@ def case_declared_types(work):
          and 'epub:type="glossary" role="doc-glossary"' in section("page-said")),
         ("a type that isn't one is a warning naming the types",
          lambda: "type 'postscript' is not one of" in out.stderr),
+        ("each typed section is named by its own heading, so a screen reader's list of "
+         "landmarks names it, and an untyped one isn't named",
+         lambda: [labelled_by(i) for i in ("page-metadata", "group-1-part-one", "page-terms",
+                                           "page-words")]
+         == ["1.3 Levels of Measurement", "1 Part One", "Key Terms", "Words"]
+         and "aria-labelledby" not in section("page-math")),
         ("numbered, the preface and the book's index count as the front and back matter "
          "their types put them in, and the part as a part",
          lambda: any(t.startswith("1 Part One") for _, t in numbered)

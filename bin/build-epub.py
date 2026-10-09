@@ -465,6 +465,30 @@ TITLE = re.compile(r"<title>(.*?)</title>", re.S)
 LANDMARKS = re.compile(r'\s*<nav epub:type="landmarks"[^>]*>.*?</nav>', re.S)
 
 
+def name_section(text, ident):
+    """The section with this id named by its heading (aria-labelledby),
+    the heading given an id if it has none. A DPUB-ARIA role makes the
+    section a landmark, and NVDA lists an unnamed landmark as a blank line
+    in its elements list and says only "landmark" on entering it, where a
+    named one is listed and announced by its name (tested, Firefox and
+    Chrome)."""
+    tag_at = re.search(r'<section\b[^>]*\bid="%s"[^>]*>' % re.escape(ident), text)
+    if not tag_at or "aria-label" in tag_at.group(0):
+        return text
+    heading = re.compile(r"<h[1-6]\b([^>]*)>").search(text, tag_at.end())
+    if not heading or text[tag_at.end():heading.start()].strip():
+        return text                 # not the section's own heading, first
+    own = re.search(r'\bid="([^"]+)"', heading.group(1))
+    label = own.group(1) if own else ident + "--title"
+    if not own:
+        if ' id="%s"' % label in text:
+            return text
+        text = text[:heading.end() - 1] + ' id="%s"' % label + text[heading.end() - 1:]
+    tag = tag_at.group(0)
+    return text[:tag_at.start()] + tag[:-1] + ' aria-labelledby="%s">' % label \
+        + text[tag_at.end():]
+
+
 def mark_divisions(path, divisions, contents_id):
     """Each chapter file's body says the division its page is in, its
     section what the page is, with the ARIA role; and the landmarks name
@@ -515,6 +539,8 @@ def mark_divisions(path, divisions, contents_id):
                 extra += ' role="%s"' % aria
             if extra or retagged != tag:
                 new = new.replace(tag, retagged[:-1] + extra + ">", 1)
+            if aria:
+                new = name_section(new, section.group(1))
             title = TITLE.search(new)
             label = html_unescape(" ".join(re.sub(r"<[^>]+>", "", title.group(1)).split())) \
                 if title else ""

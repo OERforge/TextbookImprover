@@ -193,7 +193,7 @@ The distinction between the two matters more than either case. A table whose rea
 
 **Rewriting the publisher's links.** Shipped as `links.rewrite_publisher`: a link to a page of the book on the publisher's site becomes a link to the page here, in every output, when the book has the page. The link-text question that held it, a bare URL as link text, was answered in 0.7 by the bare-links sidecar.
 
-**Landmarks and `epub:type`** shipped after 0.9: each EPUB page's division from its top-level entry's `role`, a `type` in `contents` (or a Markdown heading's) on its section with its ARIA role, and landmarks for the contents and the start of the body ([Building an EPUB](docs/epub.md#what-goes-in-and-in-what-order)). HTML pages don't carry the ARIA roles: NVDA does nothing with DPUB-ARIA's, as far as its source shows, so that waits for a screen reader that does, tested.
+**Landmarks and `epub:type`** shipped after 0.9: each EPUB page's division from its top-level entry's `role`, a `type` in `contents` (or a Markdown heading's) on its section with its ARIA role, and landmarks for the contents and the start of the body ([Building an EPUB](docs/epub.md#what-goes-in-and-in-what-order)). HTML pages don't carry the ARIA roles: NVDA, tested in Firefox and Chrome, takes each for a generic landmark, which on a page that is wholly a glossary adds nothing its heading doesn't say.
 
 **Retired key names** shipped after 0.9: a setting an earlier version had says where it went (`images.spacer_log`, v0.1's `manifest`, `reports.table_headers_missing`), and one that belongs to another block says whose.
 

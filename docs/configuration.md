@@ -143,6 +143,13 @@ A target can also decide `title_block`, `numbering`, and the footnote
 settings for itself; the [conversion settings](conversion-settings.md)
 reference says which settings are a target's and which are the book's.
 
+`archive: zip` or `archive: tar.gz` packs a target's folder into one
+file once it's written, beside the folder and named after it
+(`html.zip`), for handing the output on whole; the cartridge is the
+packager's (`--zip`). A folder of PowerPoint decks is slides rather
+than a book (`project.kind`), and implies a `remediated` target with
+`format: source` when it declares none ([Slides](slides.md)).
+
 ### How values are settled
 
 Four layers, in this order: the schema's default, the `project:` block,

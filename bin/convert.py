@@ -114,6 +114,11 @@ REPOSITORY_FILES = ("readme.md", "license.md", "contributing.md", "changelog.md"
                     "code_of_conduct.md", "security.md")
 INCLUDE = re.compile(r"^include::([^\[\s]+\.(?:adoc|asciidoc|asc))\[", re.M)
 SOURCE_EXTENSIONS = (".docx", ".md", ".html", ".adoc", ".asciidoc")
+# PowerPoint decks: sources of a slides run, not a book's pages (deckrun.py).
+DECK_EXTENSIONS = (".pptx",)
+# A tar, compressed or not, which a plain archive of a book's files can be
+# as well as a zip.
+TAR_EXTENSIONS = (".tar", ".tar.gz", ".tgz", ".tar.bz2", ".tbz2", ".tar.xz", ".txz")
 PAGE_CSS = os.path.join(HERE, "page.css")
 HEADERS_TOOL = os.path.join(HERE, "table-headers.py")
 SPLIT_TOOL = os.path.join(HERE, "split-pages.py")
@@ -135,40 +140,150 @@ def say(text):
     print(text, file=sys.stderr)
 
 
+def archive_entry(name):
+    """An archive entry's path as parts, None for what a system leaves
+    behind (macOS's __MACOSX and ._ files, .DS_Store, Thumbs.db), or
+    "unsafe" for one that would land outside the book: an absolute path,
+    or one with .. in it."""
+    name = name.replace("\\", "/")
+    parts = [p for p in name.split("/") if p not in ("", ".")]
+    if name.startswith("__MACOSX/") or (parts and (
+            parts[-1] in (".DS_Store", "Thumbs.db", "desktop.ini")
+            or parts[-1].startswith("._"))):
+        return None
+    if name.startswith("/") or re.match(r"^[A-Za-z]:", name) or ".." in parts:
+        return "unsafe"
+    return parts
+
+
+def unwrapped(entries):
+    """How many leading folders every entry shares and nothing else sits
+    beside ("My Book/..."), which extraction drops."""
+    strip = 0
+    while entries and all(len(parts) > strip + 1 for _, parts in entries) \
+            and len({parts[strip] for _, parts in entries}) == 1:
+        strip += 1
+    return strip
+
+
 def extract_zip(path, work):
     """A plain zip's files, written into work. Folders that wrap everything
     ("My Book/...") are dropped, so the sources sit at the top where
-    convert.py finds them; macOS's __MACOSX and .DS_Store are left out; and
-    an entry that would land outside the book -- an absolute path, or one
-    with .. in it -- is refused rather than written. Returns the report's
-    rows."""
+    convert.py finds them; what macOS and Windows leave behind is left out;
+    and an entry that would land outside the book -- an absolute path, or
+    one with .. in it -- is refused rather than written. Returns the
+    report's rows."""
+    import stat
     import zipfile
     notes, entries = [], []
     with zipfile.ZipFile(path) as archive:
         for info in archive.infolist():
-            name = info.filename.replace("\\", "/")
-            parts = [p for p in name.split("/") if p not in ("", ".")]
-            if name.startswith("__MACOSX/") or (parts and parts[-1] in (
-                    ".DS_Store", "Thumbs.db", "desktop.ini")):
-                continue
-            if (name.startswith("/") or re.match(r"^[A-Za-z]:", name)
-                    or ".." in parts):
+            parts = archive_entry(info.filename)
+            if parts == "unsafe":
                 notes.append((info.filename, "unsafe-path",
                               "would land outside the book; not extracted"))
                 continue
             if info.is_dir() or not parts:
                 continue
+            # A link, which a zip made on Unix can hold, as a tar can: its
+            # target is a path on someone else's machine, not a file.
+            if stat.S_ISLNK(info.external_attr >> 16):
+                notes.append((info.filename, "not-a-file",
+                              "a link or a special file, not a file; not extracted"))
+                continue
             entries.append((info, parts))
-        strip = 0
-        while entries and all(len(parts) > strip + 1 for _, parts in entries) \
-                and len({parts[strip] for _, parts in entries}) == 1:
-            strip += 1
+        strip = unwrapped(entries)
         for info, parts in entries:
             dest = os.path.join(work, *parts[strip:])
             os.makedirs(os.path.dirname(dest), exist_ok=True)
             with archive.open(info) as source, open(dest, "wb") as out:
                 shutil.copyfileobj(source, out)
     return notes
+
+
+def extract_tar(path, work):
+    """A tar's files, compressed or not, written into work as a zip's are
+    (extract_zip). Only files: a link, a device, or a pipe is nothing a
+    book is made of, and a link could point anywhere, so each is left out
+    and reported. Returns the report's rows."""
+    import tarfile
+    notes, entries = [], []
+    with tarfile.open(path) as archive:
+        for info in archive.getmembers():
+            parts = archive_entry(info.name)
+            if parts == "unsafe":
+                notes.append((info.name, "unsafe-path",
+                              "would land outside the book; not extracted"))
+                continue
+            if info.isdir() or not parts:
+                continue
+            if not info.isfile():
+                notes.append((info.name, "not-a-file",
+                              "a link or a special file, not a file; not extracted"))
+                continue
+            entries.append((info, parts))
+        strip = unwrapped(entries)
+        for info, parts in entries:
+            dest = os.path.join(work, *parts[strip:])
+            os.makedirs(os.path.dirname(dest), exist_ok=True)
+            with archive.extractfile(info) as source, open(dest, "wb") as out:
+                shutil.copyfileobj(source, out)
+    return notes
+
+
+def archive_stem(path):
+    """An archive's path without its extension: remediated.tar.gz ->
+    remediated."""
+    lower = path.lower()
+    for ext in sorted(TAR_EXTENSIONS + (".zip", ".imscc"), key=len, reverse=True):
+        if lower.endswith(ext):
+            return path[:-len(ext)]
+    return path
+
+
+def archive_targets(targets, base):
+    """Each target whose archive setting asks for it packed into one file
+    beside its folder and named after it (html.zip, remediated.tar.gz),
+    the folder inside it. Written whole, then put in place, so a run that
+    stops leaves the last one, never half of one."""
+    import tarfile
+    import zipfile
+    for target in targets:
+        kind = str(target["archive"] or "none")
+        folder = os.path.abspath(target.output_dir)
+        if kind == "none" or not os.path.isdir(folder):
+            continue
+        if folder == os.path.abspath(base) or \
+                os.path.abspath(base).startswith(folder + os.sep):
+            say(f"NOTE: target {target.name} writes into the content directory, which "
+                "isn't archived; give it an output_dir of its own.")
+            continue
+        path = folder + (".zip" if kind == "zip" else ".tar.gz")
+        root = os.path.basename(folder)
+        files = sorted(os.path.relpath(os.path.join(here, name), folder)
+                       for here, dirs, names in os.walk(folder) for name in names)
+        handle, temp = tempfile.mkstemp(prefix=".archive-", dir=os.path.dirname(folder))
+        os.close(handle)
+        try:
+            if kind == "zip":
+                with zipfile.ZipFile(temp, "w", zipfile.ZIP_DEFLATED) as archive:
+                    for rel in files:
+                        archive.write(os.path.join(folder, rel),
+                                      root + "/" + rel.replace(os.sep, "/"))
+            else:
+                with tarfile.open(temp, "w:gz") as archive:
+                    for rel in files:
+                        archive.add(os.path.join(folder, rel),
+                                    root + "/" + rel.replace(os.sep, "/"), recursive=False)
+            # mkstemp's file is the owner's alone; an archive is for handing on
+            mask = os.umask(0o022)
+            os.umask(mask)
+            os.chmod(temp, 0o666 & ~mask)
+            os.replace(temp, path)
+        finally:
+            if os.path.exists(temp):
+                os.remove(temp)
+        say(f"{target.name}: {len(files)} file(s) packed into {os.path.relpath(path, base)}.")
 
 
 def browser_save(directory):
@@ -219,20 +334,22 @@ def latex_book_here(base):
 def unpack_archives(base, check_only=False, linked_documents=False):
     """A web archive -- a WARC, compressed or not, or a WACZ, recognized
     by its first bytes -- or a Common Cartridge, recognized by its
-    manifest, or a plain .zip of a book's files, in a directory with no
-    sources is unpacked there first, as unpack-site.py or
-    unpack-cartridge.py would or by extracting the zip, and its sources
-    are then converted. From then on they're the book: they're where
-    corrections are made, so a later run, finding sources, never reads the
-    archive again. A project.yaml or conversion.yaml already here is kept,
-    and the archive's is written beside it (project-unpacked.yaml). For an
-    unpacker's own options (a profile, whole pages), run it yourself. A
-    plain zip is known by its name, since Word files, slide decks, EPUBs,
-    and cartridges are zips too."""
+    manifest, or a plain .zip or tar (.tar.gz, .tgz, ...) of a book's
+    files or a set of slides, in a directory with no sources is unpacked
+    there first, as unpack-site.py or unpack-cartridge.py would or by
+    extracting the archive, and its sources are then converted. From then
+    on they're the book: they're where corrections are made, so a later
+    run, finding sources, never reads the archive again. A project.yaml or
+    conversion.yaml already here is kept, and the archive's is written
+    beside it (project-unpacked.yaml). For an unpacker's own options (a
+    profile, whole pages), run it yourself. A plain archive is known by
+    its name, since Word files, slide decks, EPUBs, and cartridges are
+    zips too, and a compressed WARC is a gzip as a .tar.gz is."""
     import sitesource
     import cartridgesource
-    skip = SOURCE_EXTENSIONS + (".yaml", ".yml", ".csv", ".json", ".css",
-                                ".lua", ".txt", ".pdf", ".epub")
+    import tarfile
+    skip = SOURCE_EXTENSIONS + DECK_EXTENSIONS + (".yaml", ".yml", ".csv", ".json", ".css",
+                                                  ".lua", ".txt", ".pdf", ".epub")
     candidates = sorted(p for p in glob.glob(os.path.join(base, "*"))
                         if os.path.isfile(p) and not p.lower().endswith(skip))
     cartridges = [p for p in candidates if cartridgesource.is_cartridge(p)]
@@ -242,6 +359,10 @@ def unpack_archives(base, check_only=False, linked_documents=False):
     zips = [p for p in candidates
             if p not in cartridges and p not in archives
             and p.lower().endswith(".zip") and zipfile.is_zipfile(p)]
+    tars = [p for p in candidates
+            if p not in cartridges and p not in archives
+            and p.lower().endswith(TAR_EXTENSIONS) and tarfile.is_tarfile(p)]
+    zips += tars        # a plain archive either way, extracted alike
     unused = ("--linked-documents applies when a run unpacks a cartridge, "
               "and this one doesn't: ")
     if not archives and not cartridges and not zips:
@@ -253,12 +374,21 @@ def unpack_archives(base, check_only=False, linked_documents=False):
     # the download it came from). A LaTeX book's are its masters, here or
     # where latex.main names them (FINC 308's src/), whose own cartridge,
     # built beside them, was taken for a book to unpack.
-    if any(p.lower().endswith(SOURCE_EXTENSIONS)
+    if any(p.lower().endswith(SOURCE_EXTENSIONS + DECK_EXTENSIONS)
            for p in glob.glob(os.path.join(base, "*"))) or latex_book_here(base):
-        found = cartridges + zips + archives
+        # Beside a folder of its own name, an archive is that folder
+        # packed, as a target's archive setting packs one: the run's own
+        # output, which needs no word on every run.
+        found = [p for p in cartridges + zips + archives
+                 if not (archive_stem(p) != p and os.path.isdir(archive_stem(p)))]
+        if not found:
+            return
+        slides_here = not any(p.lower().endswith(SOURCE_EXTENSIONS)
+                              for p in glob.glob(os.path.join(base, "*"))) \
+            and not latex_book_here(base)
         say(", ".join(os.path.basename(p) for p in found)
             + ": not read, since this directory has sources, which are the "
-            "book once an archive is unpacked. To unpack "
+            + ("slides" if slides_here else "book") + " once an archive is unpacked. To unpack "
             + ("it afresh, " if len(found) == 1 else "one afresh, ")
             + ("extract it into a new directory." if len(found) == 1 and zips
                else "use unpack-cartridge.py or unpack-site.py, or extract "
@@ -272,13 +402,13 @@ def unpack_archives(base, check_only=False, linked_documents=False):
     if (cartridges or zips) and (archives or len(cartridges + zips) > 1):
         die("More than one thing to unpack here ("
             + ", ".join(os.path.basename(p) for p in cartridges + zips + archives)
-            + "); a book comes from one cartridge or zip, or from web "
+            + "); a book comes from one cartridge, zip, or tar, or from web "
             "archives. Unpack them into directories of their own.")
     tool = ("unpack-cartridge.py" if cartridges else
-            "zip" if zips else "unpack-site.py")
+            "tar" if tars else "zip" if zips else "unpack-site.py")
     archives = cartridges or zips or archives
     if linked_documents and tool != "unpack-cartridge.py":
-        say(unused + ("a zip's files are the book as they are." if zips
+        say(unused + ("an archive's files are the book as they are." if zips
                       else "a web archive's pages keep their links to files."))
     names = ", ".join(os.path.basename(p) for p in archives)
     if check_only:
@@ -286,8 +416,8 @@ def unpack_archives(base, check_only=False, linked_documents=False):
         return
     work = tempfile.mkdtemp(prefix=".unpacking-", dir=base)
     try:
-        if tool == "zip":
-            notes = extract_zip(archives[0], work)
+        if tool in ("zip", "tar"):
+            notes = (extract_tar if tool == "tar" else extract_zip)(archives[0], work)
             # A zip of pages a browser saved is a capture of a site, like a
             # WARC: unpack-site.py strips the site's chrome and names pages
             # from their addresses, where converting the saved files would
@@ -308,9 +438,11 @@ def unpack_archives(base, check_only=False, linked_documents=False):
                 say(f"{names} holds pages saved from a browser; they're "
                     "unpacked as unpack-site.py unpacks a browser's save.")
             held = sorted(os.listdir(work))
-            if not any(n.lower().endswith(SOURCE_EXTENSIONS) for n in held):
+            if not any(n.lower().endswith(SOURCE_EXTENSIONS + DECK_EXTENSIONS)
+                       for n in held):
                 inside = [n for n in held if n.lower().endswith(
-                    (".imscc", ".warc", ".gz", ".wacz", ".epub", ".zip"))]
+                    (".imscc", ".warc", ".gz", ".wacz", ".epub", ".zip")
+                    + TAR_EXTENSIONS)]
                 die(f"{names} holds no source convert.py reads at its top "
                     "(" + (", ".join(held[:8]) + (", ..." if len(held) > 8
                                                    else "") or "nothing")
@@ -355,8 +487,13 @@ def unpack_archives(base, check_only=False, linked_documents=False):
         shutil.rmtree(work, ignore_errors=True)
     sources = sum(1 for p in glob.glob(os.path.join(base, "*"))
                   if p.lower().endswith(SOURCE_EXTENSIONS))
-    say(f"Unpacked {names}: {sources} source(s), which are the book from now "
-        "on. Correct them, not the archive: later runs don't read it again."
+    decks = sum(1 for p in glob.glob(os.path.join(base, "*"))
+                if p.lower().endswith(DECK_EXTENSIONS))
+    held = (f"{decks} PowerPoint deck(s), which are the slides" if decks and not sources
+            else f"{sources} source(s)" + (f" and {decks} PowerPoint deck(s)" if decks else "")
+            + ", which are the book")
+    say(f"Unpacked {names}: {held} from now on. Correct them, not the archive: "
+        "later runs don't read it again."
         + (" unpack-report.csv says what the unpacking found."
            if os.path.exists(os.path.join(base, "unpack-report.csv")) else ""))
 
@@ -419,8 +556,67 @@ class Target:
         return self.resolved[key]
 
 
-def load_targets(base, allow_unknown):
-    """Every conversion target, resolved, plus the project block."""
+def book_sources(base):
+    """The files at the top of base a book is read from, by their
+    extension, apart from a repository's files about itself (README.md and
+    the rest), which a folder of decks may have too."""
+    return sorted(os.path.basename(p) for p in glob.glob(os.path.join(base, "*"))
+                  if os.path.isfile(p) and p.lower().endswith(SOURCE_EXTENSIONS)
+                  and os.path.basename(p).lower() not in REPOSITORY_FILES)
+
+
+def slides_run(base, decks, targets, project, paths, reports, args, first):
+    """A folder of PowerPoint decks: each checked, the decisions it needs
+    written to the reports, and each format: source target given a copy of
+    each deck with the decisions made so far written in (deckrun.py), the
+    copies then checked. No pages and no cartridge: those come with the
+    slides' later phases (ROADMAP.md)."""
+    import deckrun
+    if not decks:
+        die("project.kind is slides, but there's no PowerPoint deck (.pptx) here to "
+            "check or remediate.")
+    others = book_sources(base)
+    if others:
+        say(f"NOTE: {len(others)} file(s) here are left out ("
+            + ", ".join(others[:4]) + (", ..." if len(others) > 4 else "")
+            + "): this folder is slides (project.kind), and a slides run reads "
+            "PowerPoint decks.")
+    say(f"Slides: {len(decks)} PowerPoint deck(s), each checked and remediated on its own"
+        + (" (project.kind)." if KIND_DECLARED == "slides" else
+           ", since they're all this folder holds."))
+    code = deckrun.run(
+        base, decks, targets, paths, reports,
+        # Written into a copy only when the project declares it, as a
+        # book's copies get it: the schema's default is nobody's decision.
+        language=project["language"] if LANGUAGE_DECLARED else None,
+        alt_max_chars=first["images.alt_max_chars"],
+        alt_placeholders=first["images.alt_placeholders"] or (),
+        check_only=args.check_only, say=say)
+    warn_unreviewed(paths)
+    if not args.check_only and code == 0:
+        archive_targets([t for t in targets if t.format == "source"], base)
+    elif not args.check_only and any(str(t["archive"] or "none") != "none" for t in targets):
+        say("NOTE: nothing was archived, since a deck couldn't be read or a copy couldn't be "
+            "read back; the copies that were written are in their folders.")
+    return code
+
+
+def declared_kind(documents):
+    """project.kind as the files give it, the later winning, or None when
+    none does: a folder of decks alone is slides without saying so, but
+    one that says book is a book."""
+    kind = None
+    for doc in documents:
+        if (doc.project or {}).get("kind") is not None:
+            kind = str(doc.project["kind"])
+    return kind
+
+
+def load_targets(base, allow_unknown, decks_only=False):
+    """Every conversion target, resolved, plus the project block. A slides
+    run with no target declared has one implied, remediated, format source,
+    where a book has html: decks_only says the folder's sources are
+    PowerPoint decks alone."""
     schema = oerconfig.load_schema(os.path.join(HERE, "schema-conversion.yaml"))
     project_schema = oerconfig.load_schema(
         os.path.join(os.path.dirname(HERE), "lib", "schema-project.yaml"))
@@ -457,8 +653,16 @@ def load_targets(base, allow_unknown):
     declared = oerconfig.target_names(documents)
     # Whether the book declares its language: a source target writes it
     # into the author's files only then, never the schema's default.
-    global LANGUAGE_DECLARED, TITLE_DECLARED, DECLARED_PROJECT
+    global LANGUAGE_DECLARED, TITLE_DECLARED, DECLARED_PROJECT, KIND_DECLARED
     LANGUAGE_DECLARED = any((doc.project or {}).get("language") for doc in documents)
+    KIND_DECLARED = declared_kind(documents)
+    if not declared and (KIND_DECLARED == "slides" or (KIND_DECLARED is None and decks_only)):
+        # The target a slides folder means when it names none: a copy of
+        # each deck with its decisions written in. First, so it is the
+        # weakest, and the files a message names are still the person's.
+        documents.insert(0, oerconfig.Document(
+            {"targets": {"remediated": {"format": "source"}}}, "(the implied target)"))
+        declared = ["remediated"]
     # Whether the book is named where conversion reads: an EPUB or a PDF
     # needs a title, and the schema's default, "Untitled", names nothing.
     DECLARED_PROJECT = oerconfig.declared_project(documents)
@@ -598,6 +802,7 @@ WORD_HEADINGS, WORD_DELETIONS = "keep", "accept"
 LATEX_MAIN = []
 LATEX_MACROS = "latex-conversion-macros.tex"
 LANGUAGE_DECLARED = False
+KIND_DECLARED = None        # project.kind as a file gives it, if one does
 TITLE_DECLARED = False
 DECLARED_PROJECT = {}
 # What the sources say about the book, read from a master file: its title,
@@ -2487,8 +2692,9 @@ REVIEW_COLUMNS = {
     "table_captions": ((1,), 4, 5),
     "table_headers": ((1,), 8, 9),
     "bare_links": ((1, 2), 5, 6),
+    "slide_titles": ((1,), 3, 4),
 }
-HEADER_WORDS = {"image", "label", "table", "file", "key", "url"}
+HEADER_WORDS = {"image", "label", "table", "file", "key", "url", "slide"}
 
 
 def unreviewed_rows(path, columns):
@@ -4021,7 +4227,20 @@ def main():
 
     unpack_archives(base, check_only=args.check_only,
                     linked_documents=args.linked_documents)
-    targets, project = load_targets(base, args.allow_unknown_keys)
+    import deckrun
+    decks = deckrun.deck_sources(base)
+    book_here = bool(book_sources(base)) or latex_book_here(base)
+    targets, project = load_targets(base, args.allow_unknown_keys,
+                                    decks_only=bool(decks) and not book_here)
+    # A folder is a book or a set of slides: slides when project.kind says
+    # so, or when it says nothing and the folder holds decks alone.
+    slides = KIND_DECLARED == "slides" or (KIND_DECLARED is None and bool(decks)
+                                           and not book_here)
+    if decks and not slides:
+        say(f"NOTE: {len(decks)} PowerPoint deck(s) here are left out ("
+            + ", ".join(decks[:4]) + (", ..." if len(decks) > 4 else "")
+            + "): a deck isn't a page of a book. In a folder of their own, decks "
+            "are slides, each checked and remediated (project.kind: slides).")
     global PASSTHROUGH
     PASSTHROUGH = str(project.get("passthrough", "_pt") or "").strip("/")
     for target in targets:
@@ -4050,13 +4269,14 @@ def main():
 
     paths = {key: resolve_path(base, first[f"sidecars.{key}"])
              for key in ("table_captions", "image_alt", "table_headers",
-                         "page_names", "bare_links", "math_keep")}
+                         "page_names", "bare_links", "math_keep", "slide_titles")}
     for key, default in (("table_captions", "table-captions.csv"),
                          ("image_alt", "image-alt.csv"),
                          ("bare_links", "bare-links.csv"),
                          ("table_headers", "table-headers.csv"),
                          ("page_names", "page-names.csv"),
-                         ("math_keep", "math-keep.csv")):
+                         ("math_keep", "math-keep.csv"),
+                         ("slide_titles", "slide-titles.csv")):
         check_sidecar(paths[key], f"sidecars.{key}", default, base)
     reports = {key: resolve_path(base, first[f"reports.{key}"])
                for key in ("table_captions_missing", "image_alt_missing",
@@ -4064,7 +4284,10 @@ def main():
                            "table_headers_new", "table_headers_report",
                            "page_names_new", "page_names_report",
                            "media_unresolved", "spacer_images",
-                           "output_check", "math_repaired")}
+                           "output_check", "math_repaired",
+                           "slide_titles_new", "slides_check")}
+    if slides:
+        return slides_run(base, decks, targets, project, paths, reports, args, first)
 
     work = tempfile.mkdtemp(prefix="convert-")
     try:
@@ -4430,6 +4653,7 @@ def main():
             run(command, check=False)
     finally:
         shutil.rmtree(work, ignore_errors=True)
+    archive_targets(targets, base)
 
     # ---- 6. the cartridge --------------------------------------------------
     # Handed off to build-cartridge.py, which is read-only with respect to

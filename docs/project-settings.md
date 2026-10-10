@@ -8,6 +8,10 @@ Facts about the book itself, true of every rendering of it.
 
 A name for this book that no other book anywhere will use. It is what an LMS matches on to recognize a re-import as the same course, it's what the content folder inside a package is named after, and two books sharing one are two books the LMS will treat as one. The IMS schema only requires it to be unique within the package; uniqueness beyond that's your responsibility and nothing will warn you. It also has to be a valid XML name, because IMS types it as xs:ID: start with a letter, then letters, digits, and . - _ only. No colons, and it may not start with a digit—which rules out both obvious ways of generating a unique one, since a bare UUID usually starts with a digit and urn:uuid: has colons. Reverse-DNS is the least error-prone form and reads well as a folder name: org.example.dept.course-code. A UUID works with a letter in front, which you can generate with python3 -c "import uuid; print('i' + uuid.uuid4().hex)". Whichever you choose, keep it for the life of the book. Changing it makes every future import a new course rather than an update.
 
+**`kind`**—one of `book`, `slides`; default `book`
+
+What the folder holds: a book, whose files are its pages, or slides, a set of PowerPoint decks, each checked and remediated on its own. A folder of decks with nothing a book is read from (a README.md aside) is slides without saying so here, and the run says so as it starts. A slides folder takes format: source targets, which write each deck's decisions into a copy of it, and implies one, remediated, when it names none; the other formats come with the slides' later phases (see ROADMAP.md).
+
 **`title`**—`string`; default `Untitled`
 
 The book's title, as it should appear to a reader.

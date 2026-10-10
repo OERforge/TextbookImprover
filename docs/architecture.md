@@ -55,6 +55,11 @@ on another `bin/` script.
 | `lib/findings.py` | One format for everything a check finds: the CSV, the Markdown report, the input hashes, the cache. |
 | `lib/sourcecheck.py` | What a Word or Markdown source says about itself, from Pandoc's unfiltered reading. |
 | `lib/pdfcheck.py` | What a PDF states about itself: metadata, claims, structure, with veraPDF when installed. |
+| `lib/pptxparse.py` | What a PowerPoint deck holds, read from its XML: slides in order, each slide's shapes in the tree's order (its reading order and its stacking order alike) and where each sits, titles, pictures keyed by their image's SHA-256, tables, charts and embedded objects, links, notes, sections, languages. Changes nothing. |
+| `lib/pptxcheck.py` | What's wrong with a deck: what PowerPoint's Accessibility Checker reports, and more. |
+| `lib/pptxremediate.py` | A `source` target on a deck: the sidecars' decisions written into a copy, edited as text, the rest byte for byte. |
+| `lib/deckrun.py` | A slides run, for `convert.py`: each deck checked, its reports written, its copies written and checked. |
+| `lib/sidecars.py` | What a sidecar's values mean, read alike by every part that reads them: the decorative marker. |
 | `lib/names.py` | The one rule for a safe file name, shared with `safe-media.lua`. |
 | `split-pages.py` | Cuts filtered intermediates into one page per heading, names the pieces, rewrites links between them and links into them from the book's other pages, and records where each came from. |
 | `page.css` | The rules every page carries beyond Pandoc's own stylesheet: caption contrast, real table display, the scroll wrapper. |

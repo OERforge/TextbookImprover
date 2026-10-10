@@ -54,6 +54,19 @@ keys:
       Where this target writes. Defaults to the target's own name, so two
       targets in the same format can't overwrite each other.
 
+  archive:
+    type: enum
+    values: ["none", "zip", "tar.gz"]
+    default: "none"
+    stage: render
+    description: >
+      Whether this target's folder is packed into one file too, once it's
+      written: a zip or a tar.gz beside the folder, named after it
+      (remediated.zip), holding the folder. The folder stays, and each
+      run writes both afresh. A Common Cartridge is the packager's
+      (--zip); this is for handing a folder on whole, such as a set of
+      remediated decks.
+
   filename:
     type: path
     default: ""
@@ -300,6 +313,19 @@ keys:
           Alt text longer than this is reported so it can be shortened,
           with the detail moved into the surrounding prose where every
           reader benefits from it.
+
+      alt_placeholders:
+        type: list
+        item: string
+        default: []
+        description: >
+          Alt text that says nothing about an image, besides what's always
+          reported (punctuation alone, a file name, a word such as image
+          or picture, a clip-art id, a default shape name, Office's
+          generated descriptions). Each entry is matched against the whole
+          alt text, case, surrounding spaces, and closing punctuation
+          aside; one starting re: is a regular expression the whole alt
+          text must match. Read for PowerPoint decks for now.
 
       responsive:
         type: bool
@@ -746,7 +772,22 @@ keys:
         default: image-alt.csv
         description: >
           Alt text, keyed on the image path with the extension ignored.
-          Use [decorative] for an image that carries no meaning.
+          Use [decorative] for an image that carries no meaning. A
+          PowerPoint deck's picture is keyed on its image's content,
+          media/ and the first 16 characters of its SHA-256, so one row
+          covers every copy of the image in every deck (deck/media/... for
+          one deck's copies alone); any other object on a slide, a chart
+          or a group, on deck/slide-N/shape-M, N and M the ids PowerPoint
+          gave the slide and the shape.
+
+      slide_titles:
+        type: path
+        default: slide-titles.csv
+        description: >
+          Titles for a PowerPoint deck's untitled slides, keyed on
+          deck/slide-N, N the id PowerPoint gave the slide. A source
+          target writes each as a title above the slide, read by a screen
+          reader and not seen, as PowerPoint's Add Hidden Slide Title does.
 
       bare_links:
         type: path
@@ -812,6 +853,21 @@ keys:
         default: image-alt-missing.csv
         description: >
           Images with no alt text, or with alt text over the length limit.
+
+      slide_titles_new:
+        type: path
+        default: slide-titles-new.csv
+        description: >
+          A PowerPoint deck's slides with no title, for slide-titles.csv.
+
+      slides_check:
+        type: path
+        default: slides-check.csv
+        description: >
+          What the checks found in each PowerPoint deck, one finding a row
+          in the output check's format: what PowerPoint's own Accessibility
+          Checker reports, and more. audit.py writes the same findings as a
+          report to read.
 
       fidelity:
         type: path

@@ -13,7 +13,7 @@ Tools in `util/` that aren't part of a conversion but help before or around one:
 | `docx-compat.py` | Reads, and optionally sets, the Word compatibility mode of a DOCX. |
 | `restyle-headings.py` | Reports the paragraph styles a DOCX uses, and rewrites its heading styles from a map: the repair a book whose top level is styled `Title` needs before its structure can be seen. |
 | `settings-reference.py` | Writes the three settings reference pages under `docs/` from the schemas; `--check` says whether they're current. |
-| `remediate.py` | Writes remediated copies of a book's Word files and hand-maintained HTML pages: the sidecars' decisions about tables, images, and links written into the files themselves, as a `format: source` target does. |
+| `remediate.py` | Writes remediated copies of a book's Word files and hand-maintained HTML pages, or of PowerPoint decks: the sidecars' decisions about tables, images, and links (and a deck's slide titles) written into the files themselves, as a `format: source` target does. |
 | `shortdoi.py` | Fills in shortDOIs for the DOIs in a bare-links sidecar ([Bare links](bare-links.md)). |
 | `fix-empty-paragraphs.py` | Removes the empty paragraph elements LaTeX's tagging leaves in a PDF made some other way, as the PDF target does for its own (`pdf.remove_empty_paragraphs`). |
 | `slim-corpus.py` | Copies a corpus of Word books with nothing but `word/document.xml` in each file, for the table census: nine books, 1,782 files, in 10.5 MB. |
@@ -67,6 +67,13 @@ remediate.py *.docx --resolved resolved.json \
 Measured on the statistics book's 169 Word files with `--include-guesses`, since the book has no table-headers sidecar: 308 of its 332 data tables got header rows and 229 a header column, none was skipped, and the header pre-pass, run again on the copies, reads every one of the 332 as declared with the same value, from the file's own bookmarks. Only `word/document.xml` changed, and only in the 57 files that have tables; the others are the originals byte for byte. OpenStax's files fail Word's schema check on their own, mostly for a paragraph style out of place, and the copies fail it with exactly the same errors. What Word and screen readers do with the changes is documented, not tested here.
 
 Not yet: bands and table splits have no Word equivalent and are left alone, and anything the pipeline decides in the filter rather than a sidecar isn't written. Table captions a run of `convert.py` writes ([Source](formats.md#source)), since they depend on which table the filter gave each description to.
+
+A PowerPoint deck gets what a slides run's `source` target writes ([The copy](slides.md#the-copy)), from the sidecars named, its tables read straight from the table-headers sidecar by their keys:
+
+```sh
+remediate.py *.pptx --alt image-alt.csv --table-headers table-headers.csv \
+    --slide-titles slide-titles.csv --language en-US --out remediated
+```
 
 ## Repairing tracked deletions in the source
 

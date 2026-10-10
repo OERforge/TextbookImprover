@@ -294,7 +294,7 @@ def check_consistency():
          "convert.py checks it", lambda: len(pandoc_minimums) == 1
          and {"run-convert-tests.py", "run-latex-tests.py", "run-pdf-tests.py",
               "run-unpack-tests.py", "run-epub-tests.py", "run-split-tests.py",
-              "run-filter-tests.py"} <= pandoc_checked),
+              "run-filter-tests.py", "run-slides-tests.py"} <= pandoc_checked),
         ("the page types a heading can give are the ones contents can, a tree written back "
          "keeps an entry's type, and a type with no role puts it where it usually is", lambda: lua_types == set(contents_lib.PAGE_TYPES)
          and contents_lib.contents_from_tree(contents_lib.walk_contents(

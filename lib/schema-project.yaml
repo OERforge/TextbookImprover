@@ -63,6 +63,20 @@ keys:
       Whichever you choose, keep it for the life of the book. Changing it
       makes every future import a new course rather than an update.
 
+  kind:
+    type: enum
+    values: [book, slides]
+    default: book
+    description: >
+      What the folder holds: a book, whose files are its pages, or slides,
+      a set of PowerPoint decks, each checked and remediated on its own. A
+      folder of decks with nothing a book is read from (a README.md aside)
+      is slides without saying so here, and the run says so as it starts.
+      A slides folder takes format: source targets, which write each
+      deck's decisions into a copy of it, and implies one, remediated,
+      when it names none; the other formats come with the slides' later
+      phases (see ROADMAP.md).
+
   title:
     type: string
     default: Untitled

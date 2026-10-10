@@ -1279,9 +1279,12 @@ def case_zip(work):
          "--zip built, say) isn't read, and the run goes on",
          lambda: second_run.returncode == second.returncode
          and "More than one thing" not in second_run.stderr),
-        ("a slide deck is a zip but not an archive to unpack",
-         lambda: "talk.pptx" not in deck_run.stdout + deck_run.stderr
-         and not exists(deck, "[Content_Types].xml")),
+        ("a slide deck is a zip but not an archive to unpack: a folder of decks is "
+         "slides, and one that isn't a deck says so",
+         lambda: "Unpacked" not in deck_run.stderr
+         and not exists(deck, "[Content_Types].xml")
+         and "Slides: 1 PowerPoint deck(s)" in deck_run.stderr
+         and "talk.pptx couldn't be read as a PowerPoint deck" in deck_run.stderr),
     ]
 
 

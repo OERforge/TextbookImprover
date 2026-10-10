@@ -36,6 +36,8 @@ the others. A report existing at all means there's work outstanding.
 | `table-headers-unmatched.csv` | Looking at each row, whose key matches no table now: the table's text or shape changed, or it's gone. The table's row as it is now is in `table-headers-new.csv`. |
 | `table-headers-sample.csv` | Renaming it to `table-headers.csv` once you've looked: the sidecar without the unmatched rows, and with `drafted-by` and `reviewed` added if it had no such columns. Written with `table-headers-unmatched.csv`, or when the sidecar predates the two columns. |
 | `fidelity.csv` | Nothing in the book: it says what a target's files can't carry, a row per page and kind, so reading them back won't restore it. See [Word output](formats.md#word-output). |
+| `slide-titles-new.csv` | Filling in the `Title` column and appending the rows to `slide-titles.csv`: a PowerPoint deck's slides with no title ([Slides](slides.md#the-reports-and-the-sidecars)). |
+| `slides-check.csv` | Fixing what it names, in the deck or through the sidecars: every finding in a folder of PowerPoint decks, written every slides run ([Slides](slides.md#whats-checked)). |
 
 ### Who drafted a value, and whether it's been reviewed
 
@@ -138,6 +140,14 @@ tables are unaffected and keep their label as the key.
 
 One alt per image file. If the same image appears twice on a page with
 different alt text, you get a warning and the first entry wins.
+
+A PowerPoint deck's rows are in the same `image-alt.csv`, with the same
+four states, keyed differently: a picture on its image's content
+(`media/` and the first 16 characters of its SHA-256), so one row covers
+every copy of it in every deck, and any other object on its deck, slide,
+and shape (`deck/slide-N/shape-M`). Its tables are in `table-headers.csv`
+as a book's are, and its untitled slides get titles from
+`slide-titles.csv` ([Slides](slides.md#the-reports-and-the-sidecars)).
 
 ## After a Markdown round trip
 

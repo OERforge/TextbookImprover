@@ -43,7 +43,7 @@ COLUMNS = ["Where", "Check", "Detail", "File", "Kind", "Severity",
            "Standard", "Tool", "Fix"]
 
 SEVERITIES = ("error", "warning", "note")
-KINDS = ("source-docx", "source-md", "html", "epub", "pdf")
+KINDS = ("source-docx", "source-md", "source-pptx", "html", "epub", "pdf", "pptx")
 FIXES = ("source", "sidecar", "manual", "tool", "none")
 
 # What each check means, once. The output check's descriptions live
@@ -126,6 +126,70 @@ CHECKS = OrderedDict([
                          "WCAG 2.0 SC 2.4.2 (A)", "source")),
     ("source-no-language", ("the document declares no language", "warning",
                             "WCAG 2.0 SC 3.1.1 (A)", "source")),
+    # pptx: what a PowerPoint deck says about itself, PowerPoint's own
+    # checker's results first (its names in parentheses)
+    ("pptx-slide-no-title", ("a slide with no title (PowerPoint's Missing Slide Title)", "error",
+                             "WCAG 2.0 SC 2.4.6 (AA)", "sidecar")),
+    ("pptx-object-no-alt", ("a picture, chart, SmartArt graphic, embedded object, or media "
+                            "with no alt text that isn't marked decorative (PowerPoint's "
+                            "Missing Object Description)", "error", "WCAG 2.0 SC 1.1.1 (A)",
+                            "sidecar")),
+    ("pptx-table-no-header", ("a table with no header row marked (PowerPoint's Missing Table "
+                              "Header)", "error", "WCAG 2.0 SC 1.3.1 (A)", "sidecar")),
+    ("pptx-section-default-name", ("a section with PowerPoint's default name (Default Section "
+                                   "Name)", "error", "WCAG 2.0 SC 2.4.6 (AA)", "source")),
+    ("pptx-merged-cells", ("a table with merged cells (Use of Merged or Split Cells)", "warning",
+                           "WCAG 2.0 SC 1.3.1 (A)", "source")),
+    ("pptx-reading-order", ("a slide whose shapes are read in a different order from how they "
+                            "sit, top to bottom and left to right (Check Reading Order)",
+                            "warning", "WCAG 2.0 SC 1.3.2 (A)", "manual")),
+    ("pptx-media-no-captions", ("audio or video, which needs captions (Missing Audio or Video "
+                                "Subtitles)", "warning", "WCAG 2.0 SC 1.2.2 (A)", "manual")),
+    ("pptx-duplicate-title", ("slides with the same title (Duplicate Slide Title)", "note",
+                              "WCAG 2.0 SC 2.4.6 (AA)", "sidecar")),
+    ("pptx-duplicate-section", ("sections with the same name (Duplicate Section Name)", "note",
+                                "WCAG 2.0 SC 2.4.6 (AA)", "source")),
+    ("pptx-alt-auto-generated", ("alt text Office generated, for a person to review (Review "
+                                 "Auto-Generated Description)", "warning",
+                                 "WCAG 2.0 SC 1.1.1 (A)", "sidecar")),
+    ("pptx-shape-no-alt", ("a group, or a shape with no text, with no alt text that isn't "
+                           "marked decorative", "warning", "WCAG 2.0 SC 1.1.1 (A)", "sidecar")),
+    ("pptx-alt-is-file-name", ("alt text holding a file name or extension, which "
+                               "PowerPoint's checker counts as missing (Missing Object "
+                               "Description)", "error",
+                               "WCAG 2.0 SC 1.1.1 (A)", "sidecar")),
+    ("pptx-alt-placeholder", ("alt text that says nothing about the image: punctuation, a word "
+                              "such as \"image\", a default name, a clip-art id, or a pattern "
+                              "from images.alt_placeholders", "error", "WCAG 2.0 SC 1.1.1 (A)",
+                              "sidecar")),
+    ("pptx-alt-too-long", ("alt text longer than images.alt_max_chars", "warning",
+                           "WCAG 2.0 SC 1.1.1 (A)", "sidecar")),
+    ("pptx-decorative-with-alt", ("a shape marked decorative that still has alt text, which a "
+                                  "converter may read", "note", "WCAG 2.0 SC 1.1.1 (A)",
+                                  "sidecar")),
+    ("pptx-master-image-no-alt", ("a picture on a layout or master with no alt text and not "
+                                  "marked decorative; PowerPoint's checker doesn't look there, "
+                                  "but a converted copy may show it", "note",
+                                  "WCAG 2.0 SC 1.1.1 (A)", "sidecar")),
+    ("pptx-no-language", ("the deck's text declares no language", "warning",
+                          "WCAG 2.0 SC 3.1.1 (A)", "source")),
+    ("pptx-no-core-title", ("the deck's properties give no title, which a PDF made from it "
+                            "takes as its own; a copy takes the first slide's", "note",
+                            "WCAG 2.0 SC 2.4.2 (A)", "tool")),
+    ("pptx-hidden-slide", ("a hidden slide, which a PDF or a converted copy may include or "
+                           "leave out", "note", "", "manual")),
+    ("pptx-link-bare-url", ("a link whose text is its own address", "note",
+                            "WCAG 2.0 SC 2.4.4 (A)", "source")),
+    ("pptx-drawn-diagram", ("a diagram drawn with many loose shapes and labels, which a screen "
+                            "reader reads one by one; group and describe it, or replace it with "
+                            "a picture with alt text", "warning", "WCAG 2.0 SC 1.1.1 (A)",
+                            "manual")),
+    ("pptx-tab-table", ("text laid out in columns with tabs, which is read as a run of words "
+                        "rather than as a table", "warning", "WCAG 2.0 SC 1.3.1 (A)", "manual")),
+    ("pptx-malformed", ("XML PowerPoint can't read as written: an empty shape, which stops it "
+                        "opening the deck, or a prefix used without its namespace declared, "
+                        "which it repairs by removing content", "error", "ISO/IEC 29500-1",
+                        "source")),
     # pdf: what the file states
     ("pdf-not-tagged", ("the PDF is not marked as tagged (no /MarkInfo "
                         "/Marked true), so it has no structure a screen "

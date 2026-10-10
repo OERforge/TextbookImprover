@@ -280,4 +280,4 @@ From the directory you cloned into:
 bash tests/run-all.sh
 ```
 
-Eighteen suites run, and a check that the settings pages are current; the ones needing a validator print `skip` with the reason when its jar isn't set, so a pass without Java means the pipeline is sound and the validators are simply absent.
+Nineteen suites run, and a check that the settings pages are current; the ones needing a validator print `skip` with the reason when its jar isn't set, so a pass without Java means the pipeline is sound and the validators are simply absent.

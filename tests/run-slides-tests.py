@@ -1,0 +1,1366 @@
+#!/usr/bin/env python3
+"""
+run-slides-tests.py -- PowerPoint decks: reading one, checking it, writing
+a person's decisions into a copy, and a run of convert.py over a folder
+of them.
+
+    python3 tests/run-slides-tests.py
+
+Builds small decks as PresentationML with the standard library, so every
+shape a check or a decision is about is there on purpose, and reads back
+what the code wrote. The parts that run convert.py need Pandoc 3.9 or
+later, which convert.py requires of every run, and are skipped without
+it; the rest needs nothing but the standard library.
+
+WHY THESE EXIST
+
+A deck is remediated by editing its XML as text, so that nothing a
+person or PowerPoint wrote is lost to a parser's idea of the file. Every
+edit is therefore a pattern that has to find exactly its element and
+nothing else, in Choice and Fallback alike, and leave every other byte
+where it was; and every decision is found again by a key a person copied
+from a report into a sidecar. Each of those is pinned here, with the
+checks that say what a deck still needs, since a check that never fires
+and an edit that quietly lands nowhere look the same from outside.
+
+Copyright 2026 Robert Szarka
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
+"""
+
+import csv
+import io
+import os
+import re
+import shutil
+import struct
+import subprocess
+import sys
+import tarfile
+import tempfile
+import zipfile
+import zlib
+from xml.etree import ElementTree as ET
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(HERE)
+BIN = os.path.join(ROOT, "bin")
+sys.path.insert(0, os.path.join(ROOT, "lib"))
+import deckrun  # noqa: E402
+import pptxcheck  # noqa: E402
+import pptxparse  # noqa: E402
+import pptxremediate as rem  # noqa: E402
+
+NS = ('xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" '
+      'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" '
+      'xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"')
+MC = ('xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" '
+      'xmlns:p14="http://schemas.microsoft.com/office/powerpoint/2010/main"')
+REL = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/"
+EMU = 914400
+
+
+# ---------------------------------------------------------------------------
+# Building decks
+# ---------------------------------------------------------------------------
+
+def png(red, green, blue):
+    """A one-pixel PNG of a color, so each color is an image of its own."""
+    def chunk(kind, data):
+        return (struct.pack(">I", len(data)) + kind + data
+                + struct.pack(">I", zlib.crc32(kind + data) & 0xFFFFFFFF))
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", 1, 1, 8, 2, 0, 0, 0))
+            + chunk(b"IDAT", zlib.compress(bytes([0, red, green, blue])))
+            + chunk(b"IEND", b""))
+
+
+RED, GREEN, BLUE = png(200, 0, 0), png(0, 200, 0), png(0, 0, 200)
+
+
+def esc(text):
+    return (text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+            .replace('"', "&quot;"))
+
+
+def nv(tag, shape_id, name, descr=None, decorative=False, ph=None, extra=""):
+    """A shape's non-visual properties: its id, name, description, and
+    decorative mark, and its placeholder."""
+    attrs = ' descr="%s"' % esc(descr) if descr is not None else ""
+    inner = ""
+    if decorative:
+        inner = ('<a:extLst><a:ext uri="{C183D7F6-B498-43B3-948B-1728B52AA6E4}">'
+                 '<adec:decorative xmlns:adec="http://schemas.microsoft.com/office/drawing/'
+                 '2017/decorative" val="1"/></a:ext></a:extLst>')
+    cnvpr = ('<p:cNvPr id="%s" name="%s"%s>%s</p:cNvPr>' % (shape_id, esc(name), attrs, inner)
+             if inner else '<p:cNvPr id="%s" name="%s"%s/>' % (shape_id, esc(name), attrs))
+    kind = {"sp": "p:cNvSpPr", "pic": "p:cNvPicPr", "graphicFrame": "p:cNvGraphicFramePr",
+            "grpSp": "p:cNvGrpSpPr", "cxnSp": "p:cNvCxnSpPr"}[tag]
+    nvpr = "<p:nvPr>%s%s</p:nvPr>" % (ph or "", extra)
+    return "<p:nv%sPr>%s<%s/>%s</p:nv%sPr>" % (tag[0].upper() + tag[1:], cnvpr, kind, nvpr,
+                                               tag[0].upper() + tag[1:])
+
+
+def xfrm(x, y, cx, cy, tag="a:xfrm"):
+    return '<%s><a:off x="%d" y="%d"/><a:ext cx="%d" cy="%d"/></%s>' % (tag, x, y, cx, cy, tag)
+
+
+def body(paragraphs, lang=None, link=None):
+    """A text body: each paragraph a run, the first linked when link is a
+    relationship id."""
+    out = []
+    lang_attr = ' lang="%s"' % lang if lang else ""
+    for i, text in enumerate(paragraphs):
+        if link and i == 0:
+            rpr = '<a:rPr%s><a:hlinkClick r:id="%s"/></a:rPr>' % (lang_attr, link)
+        else:
+            rpr = "<a:rPr%s/>" % lang_attr if lang else ""
+        out.append("<a:p><a:r>%s<a:t>%s</a:t></a:r></a:p>" % (rpr, esc(text)))
+    return "<p:txBody><a:bodyPr/><a:lstStyle/>%s</p:txBody>" % ("".join(out) or "<a:p/>")
+
+
+def title(shape_id, text, ph_type="title", box=None, lang=None):
+    """A title placeholder, placed by the layout unless box says."""
+    sppr = "<p:spPr>%s</p:spPr>" % xfrm(*box) if box else "<p:spPr/>"
+    return ("<p:sp>%s%s%s</p:sp>"
+            % (nv("sp", shape_id, "Title %s" % shape_id, ph='<p:ph type="%s"/>' % ph_type),
+               sppr, body([text] if text else [], lang)))
+
+
+def content(shape_id, paragraphs, box=None, lang=None):
+    """The layout's content placeholder (idx 1)."""
+    sppr = "<p:spPr>%s</p:spPr>" % xfrm(*box) if box else "<p:spPr/>"
+    return ("<p:sp>%s%s%s</p:sp>"
+            % (nv("sp", shape_id, "Content Placeholder %s" % shape_id, ph='<p:ph idx="1"/>'),
+               sppr, body(paragraphs, lang)))
+
+
+def textbox(shape_id, name, paragraphs, box, link=None, lang=None):
+    return ("<p:sp>%s<p:spPr>%s<a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom></p:spPr>%s</p:sp>"
+            % (nv("sp", shape_id, name), xfrm(*box), body(paragraphs, lang, link)))
+
+
+def rect(shape_id, name, box, descr=None, decorative=False):
+    """A shape with no text."""
+    return ("<p:sp>%s<p:spPr>%s<a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom></p:spPr></p:sp>"
+            % (nv("sp", shape_id, name, descr, decorative), xfrm(*box)))
+
+
+def line(shape_id, box):
+    return ("<p:cxnSp>%s<p:spPr>%s<a:prstGeom prst=\"line\"><a:avLst/></a:prstGeom></p:spPr>"
+            "</p:cxnSp>" % (nv("cxnSp", shape_id, "Straight Connector %s" % shape_id), xfrm(*box)))
+
+
+def pic(shape_id, rid, box, descr=None, decorative=False, name=None, extra=""):
+    return ("<p:pic>%s<p:blipFill><a:blip r:embed=\"%s\"/><a:stretch><a:fillRect/></a:stretch>"
+            "</p:blipFill><p:spPr>%s<a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom></p:spPr>"
+            "</p:pic>" % (nv("pic", shape_id, name or "Picture %s" % shape_id, descr, decorative,
+                             extra=extra), rid, xfrm(*box)))
+
+
+def video(shape_id, rid, box):
+    return ("<p:pic>%s<p:blipFill><a:blip r:embed=\"%s\"/></p:blipFill><p:spPr>%s</p:spPr>"
+            "</p:pic>" % (nv("pic", shape_id, "Video %s" % shape_id, "A talk",
+                             extra='<a:videoFile r:link="%s"/>' % rid), rid, xfrm(*box)))
+
+
+def group(shape_id, children, box, descr=None, decorative=False):
+    x, y, cx, cy = box
+    return ('<p:grpSp>%s<p:grpSpPr><a:xfrm><a:off x="%d" y="%d"/><a:ext cx="%d" cy="%d"/>'
+            '<a:chOff x="0" y="0"/><a:chExt cx="%d" cy="%d"/></a:xfrm></p:grpSpPr>%s</p:grpSp>'
+            % (nv("grpSp", shape_id, "Group %s" % shape_id, descr, decorative), x, y, cx, cy,
+               cx * 2, cy * 2, "".join(children)))
+
+
+def cell(text, bold=False, attrs=""):
+    rpr = '<a:rPr b="1"/>' if bold else ""
+    return ("<a:tc%s><a:txBody><a:bodyPr/><a:lstStyle/><a:p><a:r>%s<a:t>%s</a:t></a:r></a:p>"
+            "</a:txBody><a:tcPr/></a:tc>" % (attrs, rpr, esc(text)) if text is not None else
+            "<a:tc%s><a:txBody><a:bodyPr/><a:lstStyle/><a:p/></a:txBody><a:tcPr/></a:tc>" % attrs)
+
+
+def table(shape_id, rows, box, first_row=False, first_col=False, cells=None):
+    """A table; cells, if given, are a row's <a:tc> elements as written."""
+    flags = "".join([' firstRow="1"' if first_row else "", ' firstCol="1"' if first_col else ""])
+    width = max(len(r) for r in rows)
+    grid = "".join('<a:gridCol w="%d"/>' % (box[2] // width) for _ in range(width))
+    body_rows = "".join('<a:tr h="370840">%s</a:tr>' % ("".join(cells[i]) if cells and i in cells
+                                                        else "".join(cell(t) for t in row))
+                        for i, row in enumerate(rows))
+    return ('<p:graphicFrame>%s%s<a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/'
+            'drawingml/2006/table"><a:tbl><a:tblPr%s/><a:tblGrid>%s</a:tblGrid>%s</a:tbl>'
+            '</a:graphicData></a:graphic></p:graphicFrame>'
+            % (nv("graphicFrame", shape_id, "Table %s" % shape_id), xfrm(*box, tag="p:xfrm"),
+               flags, grid, body_rows))
+
+
+def chart(shape_id, rid, box, descr=None):
+    return ('<p:graphicFrame>%s%s<a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/'
+            'drawingml/2006/chart"><c:chart xmlns:c="http://schemas.openxmlformats.org/drawingml/'
+            '2006/chart" r:id="%s"/></a:graphicData></a:graphic></p:graphicFrame>'
+            % (nv("graphicFrame", shape_id, "Chart %s" % shape_id, descr),
+               xfrm(*box, tag="p:xfrm"), rid))
+
+
+def alternate(choice, fallback):
+    return ('<mc:AlternateContent %s><mc:Choice Requires="p14">%s</mc:Choice>'
+            '<mc:Fallback>%s</mc:Fallback></mc:AlternateContent>' % (MC, choice, fallback))
+
+
+def slide_xml(shapes, hidden=False):
+    return ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<p:sld %s%s><p:cSld>'
+            '<p:spTree><p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/>'
+            '</p:nvGrpSpPr><p:grpSpPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/>'
+            '<a:chOff x="0" y="0"/><a:chExt cx="0" cy="0"/></a:xfrm></p:grpSpPr>%s</p:spTree>'
+            '</p:cSld><p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr></p:sld>'
+            % (NS, ' show="0"' if hidden else "", "".join(shapes)))
+
+
+def rels(entries):
+    return ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Relationships xmlns='
+            '"http://schemas.openxmlformats.org/package/2006/relationships">%s</Relationships>'
+            % "".join('<Relationship Id="%s" Type="%s%s" Target="%s"%s/>'
+                      % (rid, REL, kind, esc(target), ' TargetMode="External"' if external else "")
+                      for rid, kind, target, external in entries))
+
+
+TITLE_BOX = (457200, 274320, 8229600, 1143000)
+BODY_BOX = (457200, 1600200, 8229600, 4525963)
+
+
+def layout_xml():
+    return ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<p:sldLayout %s type="obj">'
+            '<p:cSld name="Title and Content"><p:spTree><p:nvGrpSpPr><p:cNvPr id="1" name=""/>'
+            '<p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr/>%s%s</p:spTree></p:cSld>'
+            '<p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr></p:sldLayout>'
+            % (NS, title(2, "", box=TITLE_BOX), content(3, [], box=BODY_BOX)))
+
+
+def master_xml(logo=False, styles_lang=None):
+    lang = ' lang="%s"' % styles_lang if styles_lang else ""
+    level = '<a:lvl1pPr><a:defRPr sz="2800"%s/></a:lvl1pPr>' % lang
+    return ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<p:sldMaster %s><p:cSld>'
+            '<p:spTree><p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/>'
+            '</p:nvGrpSpPr><p:grpSpPr/>%s%s</p:spTree></p:cSld><p:clrMap bg1="lt1" tx1="dk1" '
+            'bg2="lt2" tx2="dk2" accent1="accent1" accent2="accent2" accent3="accent3" '
+            'accent4="accent4" accent5="accent5" accent6="accent6" hlink="hlink" '
+            'folHlink="folHlink"/><p:sldLayoutIdLst><p:sldLayoutId id="2147483649" r:id="rId1"/>'
+            '</p:sldLayoutIdLst><p:txStyles><p:titleStyle>%s</p:titleStyle><p:bodyStyle>%s'
+            '</p:bodyStyle><p:otherStyle><a:defPPr><a:defRPr%s/></a:defPPr>%s</p:otherStyle>'
+            '</p:txStyles></p:sldMaster>'
+            % (NS, title(2, "", box=TITLE_BOX),
+               pic(7, "rId2", (8229600, 6172200, 457200, 457200), name="Logo") if logo else "",
+               level, level, lang, level))
+
+
+def presentation_xml(count, default_lang="en-US", sections=None, style=True):
+    ids = "".join('<p:sldId id="%d" r:id="rId%d"/>' % (256 + i, 2 + i) for i in range(count))
+    lang = ' lang="%s"' % default_lang if default_lang else ""
+    styles = ('<p:defaultTextStyle><a:defPPr><a:defRPr%s/></a:defPPr><a:lvl1pPr>'
+              '<a:defRPr sz="1800"/></a:lvl1pPr></p:defaultTextStyle>' % lang) if style else ""
+    ext = ""
+    if sections:
+        ext = ('<p:extLst><p:ext uri="{521415D9-36F7-43E2-AB2F-B90AF26B5E84}"><p14:sectionLst %s>'
+               % MC + "".join('<p14:section name="%s" id="{00000000-0000-0000-0000-00000000000%d}">'
+                              '<p14:sldIdLst>%s</p14:sldIdLst></p14:section>'
+                              % (esc(name), n, "".join('<p14:sldId id="%d"/>' % (256 + i)
+                                                       for i in members))
+                              for n, (name, members) in enumerate(sections))
+               + '</p14:sectionLst></p:ext></p:extLst>')
+    return ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<p:presentation %s>'
+            '<p:sldMasterIdLst><p:sldMasterId id="2147483648" r:id="rId1"/></p:sldMasterIdLst>'
+            '<p:sldIdLst>%s</p:sldIdLst><p:sldSz cx="12192000" cy="6858000"/>'
+            '<p:notesSz cx="6858000" cy="9144000"/>%s%s</p:presentation>'
+            % (NS, ids, styles, ext))
+
+
+def core_xml(core_title):
+    return ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<cp:coreProperties '
+            'xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" '
+            'xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" '
+            'xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">%s<dc:creator>Test</dc:creator>'
+            '</cp:coreProperties>' % ("<dc:title>%s</dc:title>" % esc(core_title)
+                                      if core_title else "<dc:title></dc:title>"))
+
+
+def notes_xml(text):
+    return ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<p:notes %s><p:cSld>'
+            '<p:spTree><p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/>'
+            '</p:nvGrpSpPr><p:grpSpPr/><p:sp>%s<p:spPr/>%s</p:sp></p:spTree></p:cSld></p:notes>'
+            % (NS, nv("sp", 3, "Notes Placeholder 2", ph='<p:ph type="body" idx="1"/>'),
+               body([text])))
+
+
+def deck(path, slides, default_lang="en-US", core_title="A Deck", sections=None, logo=False,
+         style=True, styles_lang=None):
+    """A deck: each slide a dict of shapes, and its images, links, charts,
+    notes, and whether it's hidden, by relationship id."""
+    types = ['<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.'
+             'relationships+xml"/>', '<Default Extension="xml" ContentType="application/xml"/>',
+             '<Default Extension="png" ContentType="image/png"/>',
+             '<Override PartName="/ppt/presentation.xml" ContentType="application/vnd.'
+             'openxmlformats-officedocument.presentationml.presentation.main+xml"/>',
+             '<Override PartName="/ppt/slideMasters/slideMaster1.xml" ContentType="application/'
+             'vnd.openxmlformats-officedocument.presentationml.slideMaster+xml"/>',
+             '<Override PartName="/ppt/slideLayouts/slideLayout1.xml" ContentType="application/'
+             'vnd.openxmlformats-officedocument.presentationml.slideLayout+xml"/>',
+             '<Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-'
+             'package.core-properties+xml"/>']
+    parts = [("_rels/.rels", rels([("rId1", "officeDocument", "ppt/presentation.xml", False),
+                                   ("rId2", "metadata/core-properties", "docProps/core.xml",
+                                    False)]).replace(REL + "metadata/core-properties",
+                                                     "http://schemas.openxmlformats.org/package/"
+                                                     "2006/relationships/metadata/"
+                                                     "core-properties")),
+             ("docProps/core.xml", core_xml(core_title)),
+             ("ppt/presentation.xml", presentation_xml(len(slides), default_lang, sections,
+                                                       style)),
+             ("ppt/_rels/presentation.xml.rels",
+              rels([("rId1", "slideMaster", "slideMasters/slideMaster1.xml", False)]
+                   + [("rId%d" % (2 + i), "slide", "slides/slide%d.xml" % (i + 1), False)
+                      for i in range(len(slides))])),
+             ("ppt/slideMasters/slideMaster1.xml", master_xml(logo, styles_lang)),
+             ("ppt/slideMasters/_rels/slideMaster1.xml.rels",
+              rels([("rId1", "slideLayout", "../slideLayouts/slideLayout1.xml", False)]
+                   + ([("rId2", "image", "../media/logo.png", False)] if logo else []))),
+             ("ppt/slideLayouts/slideLayout1.xml", layout_xml()),
+             ("ppt/slideLayouts/_rels/slideLayout1.xml.rels",
+              rels([("rId1", "slideMaster", "../slideMasters/slideMaster1.xml", False)]))]
+    if logo:
+        parts.append(("ppt/media/logo.png", BLUE))
+    for number, spec in enumerate(slides, 1):
+        entries = [("rId1", "slideLayout", "../slideLayouts/slideLayout1.xml", False)]
+        for rid, data in sorted(spec.get("images", {}).items()):
+            name = "ppt/media/s%d-%s.png" % (number, rid)
+            parts.append((name, data))
+            entries.append((rid, "image", "../media/" + os.path.basename(name), False))
+        for rid, url in sorted(spec.get("links", {}).items()):
+            entries.append((rid, "hyperlink", url, True))
+        for rid in sorted(spec.get("charts", ())):
+            name = "ppt/charts/chart%d%s.xml" % (number, rid)
+            parts.append((name, '<?xml version="1.0"?><c:chartSpace xmlns:c="http://schemas.'
+                                'openxmlformats.org/drawingml/2006/chart"/>'))
+            entries.append((rid, "chart", "../charts/" + os.path.basename(name), False))
+        for rid in sorted(spec.get("videos", ())):
+            entries.append((rid, "video", "https://example.org/talk.mp4", True))
+        if spec.get("notes"):
+            parts.append(("ppt/notesSlides/notesSlide%d.xml" % number, notes_xml(spec["notes"])))
+            entries.append(("rId99", "notesSlide", "../notesSlides/notesSlide%d.xml" % number,
+                            False))
+            types.append('<Override PartName="/ppt/notesSlides/notesSlide%d.xml" ContentType="'
+                         'application/vnd.openxmlformats-officedocument.presentationml.'
+                         'notesSlide+xml"/>' % number)
+        parts.append(("ppt/slides/slide%d.xml" % number,
+                      slide_xml(spec.get("shapes", []), spec.get("hidden", False))))
+        parts.append(("ppt/slides/_rels/slide%d.xml.rels" % number, rels(entries)))
+        types.append('<Override PartName="/ppt/slides/slide%d.xml" ContentType="application/vnd.'
+                     'openxmlformats-officedocument.presentationml.slide+xml"/>' % number)
+    content_types = ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Types xmlns='
+                     '"http://schemas.openxmlformats.org/package/2006/content-types">%s</Types>'
+                     % "".join(types))
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("[Content_Types].xml", content_types)
+        for name, data in parts:
+            z.writestr(name, data)
+    return path
+
+
+def read_part(path, part):
+    with zipfile.ZipFile(path) as z:
+        return z.read(part).decode("utf-8")
+
+
+def read_part_bytes(path, part):
+    with zipfile.ZipFile(path) as z:
+        return z.read(part)
+
+
+def checks_of(found):
+    return sorted({f.check for f in found})
+
+
+# ---------------------------------------------------------------------------
+# The decks the checks are about
+# ---------------------------------------------------------------------------
+
+def clean_deck(path):
+    """A deck with nothing to report: titles, described pictures, a table
+    with its header row, a language, and a title in its properties."""
+    return deck(path, [
+        {"shapes": [title(2, "The Course", "ctrTitle", box=TITLE_BOX),
+                    content(3, ["Week one"])]},
+        {"shapes": [title(2, "Supply"), content(3, ["Prices rise", "Quantities fall"]),
+                    pic(4, "rId2", (7000000, 2000000, 2000000, 2000000), "A supply curve")],
+         "images": {"rId2": RED}},
+        {"shapes": [title(2, "Prices"),
+                    table(4, [["Good", "Price"], ["Bread", "2"]], (457200, 1600200, 6000000, 800000),
+                          first_row=True)]},
+    ], sections=[("Introduction", [0]), ("Markets", [1, 2])])
+
+
+def messy_deck(path):
+    """A deck with one of each problem, each on a slide of its own."""
+    loose = [rect(10 + i, "Rectangle %d" % i, (300000 * i, 3000000, 200000, 200000))
+             for i in range(5)] + [line(20 + i, (300000 * i, 3500000, 200000, 0)) for i in range(3)]
+    return deck(path, [
+        # 1: no title at all, a picture with no alt text
+        {"shapes": [pic(4, "rId2", (457200, 1600200, 2000000, 2000000))], "images": {"rId2": RED}},
+        # 2: an empty title placeholder; a chart with no alt text
+        {"shapes": [title(2, ""), chart(5, "rId3", (457200, 1600200, 4000000, 3000000))],
+         "charts": ["rId3"]},
+        # 3: a table without its header row, with merged cells
+        {"shapes": [title(2, "Costs"), table(4, [["Cost", "Amount", ""], ["Fixed", "10", "x"]],
+                                             (457200, 1600200, 6000000, 800000),
+                                             cells={0: [cell("Cost"), cell("Amount", attrs=' gridSpan="2"'),
+                                                        cell(None, attrs=' hMerge="1"')]})]},
+        # 4: the title read last, below the text it heads
+        {"shapes": [textbox(4, "TextBox 3", ["Read first"], (457200, 1600200, 4000000, 600000)),
+                    title(2, "Costs")]},
+        # 5: a video, a group with no alt text holding a picture with none
+        {"shapes": [title(2, "Media"), video(4, "rId5", (457200, 1600200, 3000000, 2000000)),
+                    group(6, [rect(7, "Rectangle 6", (0, 0, 100000, 100000)),
+                              pic(8, "rId2", (200000, 0, 100000, 100000))],
+                          (5000000, 1600200, 2000000, 2000000))],
+         "images": {"rId2": GREEN}, "videos": ["rId5"]},
+        # 6: alt text that says nothing, in five ways, and some too long
+        {"shapes": [title(2, "Words"),
+                    pic(4, "rId2", (0, 1600200, 900000, 900000), "IMG_2041.JPG"),
+                    pic(5, "rId3", (1000000, 1600200, 900000, 900000), "..."),
+                    pic(6, "rId4", (2000000, 1600200, 900000, 900000), "Image"),
+                    pic(7, "rId5", (3000000, 1600200, 900000, 900000), "j0309720"),
+                    pic(8, "rId6", (4000000, 1600200, 900000, 900000),
+                        "A close up of a logo\n\nDescription automatically generated"),
+                    pic(9, "rId7", (5000000, 1600200, 900000, 900000), "x" * 130),
+                    pic(10, "rId8", (6000000, 1600200, 900000, 900000), "Picture 9")],
+         "images": {"rId2": png(1, 1, 1), "rId3": png(2, 2, 2), "rId4": png(3, 3, 3),
+                    "rId5": png(4, 4, 4), "rId6": png(5, 5, 5), "rId7": png(6, 6, 6),
+                    "rId8": png(7, 7, 7)}},
+        # 7: decorative with a description; a hidden slide; a bare link;
+        # columns laid out with tabs
+        {"shapes": [title(2, "Words"),
+                    pic(4, "rId2", (0, 1600200, 900000, 900000), "A flourish", decorative=True),
+                    textbox(5, "TextBox 4", ["https://example.org/"], (0, 3000000, 4000000, 400000),
+                            link="rId3"),
+                    textbox(6, "TextBox 5", ["Good\tPrice\tTax", "Bread\t2\t0"],
+                            (5000000, 3000000, 4000000, 800000))],
+         "images": {"rId2": png(9, 9, 9)}, "links": {"rId3": "https://example.org"},
+         "hidden": True},
+        # 8: a diagram drawn with loose shapes
+        {"shapes": [title(2, "A diagram")] + loose},
+    ], default_lang=None, core_title=None, sections=[("Default Section", [0, 1, 2]),
+                                                    ("Part", [3, 4]), ("part", [5, 6, 7])],
+        logo=True)
+
+
+def case_parse(work):
+    path = clean_deck(os.path.join(work, "clean.pptx"))
+    d = pptxparse.read(path)
+    yield "a centered title is a title, and each slide's is read", \
+        [s.title for s in d.slides] == ["The Course", "Supply", "Prices"], [s.title for s in d.slides]
+    placed = d.slides[1].shapes[0].box
+    yield "a placeholder with no position of its own takes its layout's", \
+        placed is not None and (placed.x, placed.y) == TITLE_BOX[:2], placed
+    yield "the slide size, sections, default language, and core title are read", \
+        (d.width, d.height) == (12192000, 6858000) and d.default_language == "en-US" \
+        and d.core_title == "A Deck" and [n for n, _ in d.sections] == ["Introduction", "Markets"], \
+        (d.width, d.default_language, d.core_title, d.sections)
+    tbl = d.slides[2].shapes[1].table
+    yield "a table's cells and its header row are read", \
+        tbl is not None and tbl.rows == [["Good", "Price"], ["Bread", "2"]] and tbl.first_row \
+        and not tbl.first_col and not tbl.merged, tbl and tbl.rows
+    # The same picture twice, in a group whose children are placed through
+    # it, and in mc:AlternateContent, read from the Choice.
+    other = deck(os.path.join(work, "other.pptx"), [
+        {"shapes": [title(2, "One"), group(4, [pic(5, "rId2", (1000, 2000, 400, 400))],
+                                           (100000, 200000, 1000, 1000))],
+         "images": {"rId2": RED}},
+        {"shapes": [title(2, "Two"), alternate(pic(4, "rId2", (0, 0, 10, 10), "Choice"),
+                                               pic(4, "rId2", (0, 0, 10, 10), "Fallback"))],
+         "images": {"rId2": RED}, "notes": "Say this aloud.", "hidden": True},
+    ])
+    d = pptxparse.read(other)
+    child = d.slides[0].shapes[1].children[0]
+    yield "a group's child is placed through the group's transform", \
+        child.box is not None and (child.box.x, child.box.y, child.box.cx) == (100500, 201000, 200), \
+        child.box
+    pictures = [s for _slide, s in d.pictures()]
+    yield "one image in two parts is one picture by its content, read once from AlternateContent", \
+        len(pictures) == 2 and len({p.image[1] for p in pictures}) == 1 \
+        and pictures[1].alternate and pictures[1].descr == "Choice" and len(d.images) == 1, \
+        [(p.image, p.descr) for p in pictures]
+    yield "speaker notes and a hidden slide are read", \
+        d.slides[1].notes == "Say this aloud." and d.slides[1].hidden and not d.slides[0].hidden, \
+        (d.slides[1].notes, d.slides[1].hidden)
+
+
+def case_check(work):
+    found = pptxcheck.check(pptxparse.read(clean_deck(os.path.join(work, "clean.pptx"))))
+    yield "a clean deck has nothing to report", not found, [(f.check, f.where) for f in found]
+    found = pptxcheck.check(pptxparse.read(messy_deck(os.path.join(work, "messy.pptx"))))
+    by = {}
+    for f in found:
+        by.setdefault(f.check, []).append(f)
+    expected = {
+        "pptx-slide-no-title": 2, "pptx-object-no-alt": 3, "pptx-table-no-header": 1,
+        "pptx-merged-cells": 1, "pptx-reading-order": 1, "pptx-media-no-captions": 1,
+        "pptx-shape-no-alt": 1, "pptx-alt-is-file-name": 1, "pptx-alt-placeholder": 4,
+        "pptx-alt-auto-generated": 1, "pptx-alt-too-long": 1, "pptx-decorative-with-alt": 1,
+        "pptx-hidden-slide": 1, "pptx-link-bare-url": 1, "pptx-tab-table": 1,
+        "pptx-drawn-diagram": 1, "pptx-duplicate-title": 2, "pptx-section-default-name": 1,
+        "pptx-duplicate-section": 1, "pptx-no-language": 1, "pptx-no-core-title": 1,
+        "pptx-master-image-no-alt": 1,
+    }
+    counts = {k: len(v) for k, v in by.items()}
+    for check, n in sorted(expected.items()):
+        yield "%s: found %d time(s) in the messy deck" % (check, n), counts.get(check) == n, \
+            [(f.where, f.detail) for f in by.get(check, [])]
+    yield "and nothing else", set(counts) == set(expected), sorted(set(counts) ^ set(expected))
+    # Each finding names its kind and the checks' own meaning.
+    yield "every finding is a source-pptx finding with a known check", \
+        all(f.kind == "source-pptx" and f.severity in ("error", "warning", "note") for f in found), ""
+    # The group's rectangle is the group's to describe; its picture isn't.
+    wheres = [f.where for f in by.get("pptx-object-no-alt", [])]
+    yield "a picture inside an undescribed group still needs its own alt text", \
+        "slide 5, Picture 8" in wheres and not any("Rectangle 6" in w for w in
+                                                   [f.where for f in found]), wheres
+    # A pattern of the project's own, plain or a regular expression.
+    rules = pptxcheck.placeholder_rules(["slide image", "re:fig\\. ?\\d+"])
+    yield "images.alt_placeholders: a phrase and a re: pattern say nothing too", \
+        pptxcheck.alt_problem("Slide Image.", rules=rules)[0] == "pptx-alt-placeholder" \
+        and pptxcheck.alt_problem("Fig. 12", rules=rules)[0] == "pptx-alt-placeholder" \
+        and pptxcheck.alt_problem("A figure of twelve bars", rules=rules) is None, ""
+    yield "the length limit is the project's", \
+        pptxcheck.alt_problem("y" * 50, limit=40)[0] == "pptx-alt-too-long" \
+        and pptxcheck.alt_problem("y" * 50, limit=60) is None, ""
+    yield "a decorative group quiets its pieces", not list(pptxcheck.alt_items(
+        pptxparse.read(deck(os.path.join(work, "quiet.pptx"), [
+            {"shapes": [title(2, "Q"), group(4, [pic(5, "rId2", (0, 0, 10, 10)),
+                                                 rect(6, "Rectangle 5", (20, 0, 10, 10))],
+                                             (0, 1600200, 100, 100), decorative=True)],
+             "images": {"rId2": RED}}])).slides[0])), ""
+
+
+def remediated(work, name, source, alts=None, tables=None, titles=None, language=None,
+               core_title=True):
+    out = os.path.join(work, "out", name)
+    counts = rem.remediate(source, out, alts, tables, titles, language, core_title)
+    return out, counts
+
+
+def case_remediate(work):
+    path = messy_deck(os.path.join(work, "messy.pptx"))
+    d = pptxparse.read(path)
+    dname = rem.deck_name(path)
+
+    def on(number, name, deck_=None):
+        """The shape a slide has by that name, and the slide."""
+        slide = (deck_ or d).slides[number - 1]
+        return slide, next(s for s in slide.all_shapes() if s.name == name)
+
+    red = on(1, "Picture 4")[1].image[1]
+    chart_slide, chart_shape = on(2, "Chart 5")
+    group_slide, group_shape = on(5, "Group 6")
+    # The marker as a person types it, not as the sidecar reader gives it:
+    # a decision is decorative either way.
+    alts = {rem.image_key(red): "A red square",
+            rem.object_key(dname, chart_slide, chart_shape): 'Costs "rise" <fast> & fall',
+            rem.object_key(dname, group_slide, group_shape): "Decorative"}
+    seven = [s for s in d.slides[6].all_shapes() if s.image][0]
+    alts[rem.image_key(seven.image[1])] = "A flourish, described"
+    logo = [s for _p, tops in d.masters for t in tops for s in t.walk() if s.image][0]
+    alts[rem.image_key(logo.image[1])] = None          # decorative, everywhere
+    table_shape = on(3, "Table 4")[1]
+    tables = {table_shape.table.key(): "first-row"}
+    titles = {rem.slide_key(dname, d.slides[0]): "Opening",
+              rem.slide_key(dname, d.slides[1]): "A chart"}
+    out, counts = remediated(work, "messy.pptx", path, alts, tables, titles, "en-GB")
+    e = pptxparse.read(out)
+    yield "the counts say what was written", \
+        (counts["described"], counts["decorative"], counts["header_rows"], counts["titles"],
+         counts["language"], counts["core_title"]) == (3, 2, 1, 2, 1, 1), counts
+    yield "a picture gets its alt text by its image's content", \
+        on(1, "Picture 4", e)[1].descr == "A red square", [s.descr for s in e.slides[0].all_shapes()]
+    yield "a chart gets its alt text by its slide and shape, escaped and read back whole", \
+        on(2, "Chart 5", e)[1].descr == 'Costs "rise" <fast> & fall', on(2, "Chart 5", e)[1].descr
+    grouped = on(5, "Group 6", e)[1]
+    yield "a group marked decorative is marked, with no description", \
+        grouped.decorative and not grouped.descr, grouped.descr
+    seven = [s for s in e.slides[6].all_shapes() if s.image][0]
+    yield "a decorative shape given alt text loses the mark and gets the text", \
+        seven.descr == "A flourish, described" and not seven.decorative, (seven.descr, seven.decorative)
+    logo = [s for _p, tops in e.masters for t in tops for s in t.walk() if s.image][0]
+    yield "a picture on the master is marked decorative once, for every slide", \
+        logo.decorative and not logo.descr, (logo.descr, logo.decorative)
+    tbl = on(3, "Table 4", e)[1].table
+    yield "a table gets the header row the sidecar decides", tbl.first_row and not tbl.first_col, ""
+    yield "an empty title placeholder takes the title and moves above the slide", \
+        e.slides[1].title == "A chart" and e.slides[1].title_shape.box.y < 0, \
+        (e.slides[1].title, e.slides[1].title_shape and e.slides[1].title_shape.box)
+    first = e.slides[0].shapes[0]
+    yield "a slide with no title placeholder gets one first in its tree, above the slide", \
+        e.slides[0].title == "Opening" and first.is_title and first.box.y < 0, \
+        (e.slides[0].title, first)
+    pres = read_part(out, "ppt/presentation.xml")
+    master = read_part(out, "ppt/slideMasters/slideMaster1.xml")
+    slide6 = read_part(out, "ppt/slides/slide6.xml")
+    yield "a deck with no default language gets the project's in its default text style", \
+        e.default_language == "en-GB" and '<a:defPPr><a:defRPr lang="en-GB"/></a:defPPr>' in pres, \
+        re.findall(r"<p:defaultTextStyle>.{0,120}", pres)
+    yield "and in its master's text styles, the runs left as they were", \
+        master.count('lang="en-GB"') == 4 and 'lang=' not in slide6, master.count('lang="en-GB"')
+    yield "the file's properties take the first slide's title, when they have none", \
+        e.core_title == "Opening", e.core_title
+    found = pptxcheck.check(e, kind="pptx")
+    fixed = {"pptx-slide-no-title", "pptx-table-no-header", "pptx-no-language",
+             "pptx-no-core-title", "pptx-master-image-no-alt", "pptx-decorative-with-alt"}
+    yield "the copy's check no longer finds what was decided", \
+        not fixed & set(checks_of(found)), sorted(fixed & set(checks_of(found)))
+    # What wasn't decided is as it was, byte for byte, in the same order.
+    with zipfile.ZipFile(path) as a, zipfile.ZipFile(out) as b:
+        names_a, names_b = [i.filename for i in a.infolist()], [i.filename for i in b.infolist()]
+        changed = sorted(n for n in names_a if a.read(n) != b.read(n))
+        parses = all(ET.fromstring(b.read(n)) is not None for n in changed)
+    yield "every part keeps its place, and only the decided ones change", \
+        names_a == names_b and changed == ["docProps/core.xml", "ppt/presentation.xml",
+                                           "ppt/slideMasters/slideMaster1.xml",
+                                           "ppt/slides/slide1.xml", "ppt/slides/slide2.xml",
+                                           "ppt/slides/slide3.xml", "ppt/slides/slide5.xml",
+                                           "ppt/slides/slide7.xml"], changed
+    yield "every changed part is still well-formed XML", parses, ""
+
+
+def case_remediate_more(work):
+    # A picture in mc:AlternateContent is described in Choice and Fallback.
+    path = deck(os.path.join(work, "alt.pptx"), [
+        {"shapes": [title(2, "One"), alternate(pic(4, "rId2", (0, 0, 10, 10)),
+                                               pic(4, "rId2", (0, 0, 10, 10)))],
+         "images": {"rId2": RED}}])
+    digest = pptxparse.read(path).slides[0].shapes[1].image[1]
+    out, counts = remediated(work, "alt.pptx", path, {rem.image_key(digest): "A red square"})
+    xml = read_part(out, "ppt/slides/slide1.xml")
+    yield "a shape in AlternateContent is described in its Choice and its Fallback", \
+        xml.count('descr="A red square"') == 2 and counts["described"] == 1, \
+        (xml.count('descr="A red square"'), counts)
+    # A blank Alt keeps what the picture has: decided, and nothing written.
+    out, counts = remediated(work, "kept.pptx", path, {rem.image_key(digest): ""})
+    yield "a blank Alt leaves the picture as it is, and isn't counted", \
+        counts["described"] == counts["decorative"] == 0 \
+        and "descr" not in read_part(out, "ppt/slides/slide1.xml"), counts
+    # A deck's own key wins over every deck's, for that deck alone.
+    two = deck(os.path.join(work, "two.pptx"), [
+        {"shapes": [title(2, "One"), pic(4, "rId2", (0, 0, 10, 10))], "images": {"rId2": RED}}])
+    alts = {rem.image_key(digest): "Red", rem.image_key(digest, "two"): "Red, here"}
+    one_out = remediated(work, "alt2.pptx", path, alts)[0]
+    two_out = remediated(work, "two.pptx", two, alts)[0]
+    yield "deck/media/... covers one deck's copies, media/... every other's", \
+        pptxparse.read(one_out).slides[0].shapes[1].descr == "Red" \
+        and pptxparse.read(two_out).slides[0].shapes[1].descr == "Red, here", ""
+    # Existing extensions on a shape stay, beside the decorative mark.
+    ext = ('<a:extLst><a:ext uri="{FF2B5EF4-FFF2-40B4-BE49-F238E27FC236}"><a16:creationId '
+           'xmlns:a16="http://schemas.microsoft.com/office/drawing/2014/main" id="{1}"/>'
+           '</a:ext></a:extLst>')
+    keep = deck(os.path.join(work, "keep.pptx"), [
+        {"shapes": [title(2, "One"), pic(4, "rId2", (0, 0, 10, 10), "x").replace(
+            'descr="x"/>', 'descr="x">%s</p:cNvPr>' % ext)], "images": {"rId2": GREEN}}])
+    green = pptxparse.read(keep).slides[0].shapes[1].image[1]
+    out = remediated(work, "keep.pptx", keep, {rem.image_key(green): None})[0]
+    xml = read_part(out, "ppt/slides/slide1.xml")
+    yield "the decorative mark goes beside a shape's other extensions, which stay", \
+        "a16:creationId" in xml and "adec:decorative" in xml and 'descr=' not in xml \
+        and xml.count("<a:extLst>") == 1 and pptxparse.read(out).slides[0].shapes[1].decorative, \
+        re.findall(r"<p:cNvPr.*?</p:cNvPr>", xml)
+    # A table decided to have none is left, and a copy's check doesn't
+    # count it as missing a header row; matrix is both.
+    tdeck = deck(os.path.join(work, "tables.pptx"), [
+        {"shapes": [title(2, "T"), table(4, [["a", "b"], ["c", "d"]], (0, 1600200, 900, 900)),
+                    table(5, [["Year", "GDP"], ["2020", "1"]], (0, 3000000, 900, 900))]}])
+    tables = pptxparse.read(tdeck).slides[0].shapes
+    decided = {tables[1].table.key(): "none", tables[2].table.key(): "both"}
+    out, counts = remediated(work, "tables.pptx", tdeck, tables=decided)
+    copy = pptxparse.read(out).slides[0].shapes
+    found = pptxcheck.check(pptxparse.read(out), tables=decided)
+    yield "none on a table with no flags changes nothing, and both marks the row and the column", \
+        not copy[1].table.first_row and copy[2].table.first_row and copy[2].table.first_col \
+        and (counts["header_rows"], counts["header_columns"]) == (1, 1), counts
+    yield "a table decided to have no headers isn't counted against the copy", \
+        "pptx-table-no-header" not in checks_of(found), checks_of(found)
+    # A deck that declares its language keeps it, whatever the project says.
+    clean = clean_deck(os.path.join(work, "clean.pptx"))
+    out, counts = remediated(work, "clean.pptx", clean, language="fr-FR")
+    yield "a deck with a default language keeps it", \
+        counts["language"] == 0 and pptxparse.read(out).default_language == "en-US", counts
+    yield "and a deck with nothing decided comes out byte for byte", \
+        open(out, "rb").read() != b"" and all(
+            zipfile.ZipFile(out).read(n) == zipfile.ZipFile(clean).read(n)
+            for n in zipfile.ZipFile(clean).namelist()), ""
+    # A deck whose presentation has no default text style gets one.
+    bare = deck(os.path.join(work, "bare.pptx"), [{"shapes": [title(2, "One")]}],
+                default_lang=None, style=False)
+    out, counts = remediated(work, "bare.pptx", bare, language="de-DE")
+    yield "a presentation with no default text style gets one, in the schema's place", \
+        pptxparse.read(out).default_language == "de-DE" and re.search(
+            r'<p:notesSz [^>]*/><p:defaultTextStyle><a:defPPr><a:defRPr lang="de-DE"/>',
+            read_part(out, "ppt/presentation.xml")) is not None, \
+        read_part(out, "ppt/presentation.xml")[-200:]
+    # A shape whose id its slide repeats is left alone, and said to be.
+    dup = deck(os.path.join(work, "dup.pptx"), [
+        {"shapes": [title(2, "One"), pic(4, "rId2", (0, 0, 10, 10)),
+                    rect(4, "Rectangle 3", (20, 0, 10, 10))], "images": {"rId2": RED}}])
+    out, counts = remediated(work, "dup.pptx", dup, {rem.image_key(digest): "Red"})
+    yield "a decision for a shape whose id repeats on its slide is skipped and counted", \
+        counts["skipped"] == 1 and counts["described"] == 0 \
+        and "descr" not in read_part(out, "ppt/slides/slide1.xml"), counts
+
+
+def case_sidecars(work):
+    path = os.path.join(work, "image-alt.csv")
+    with open(path, "w", encoding="utf-8", newline="") as fh:
+        writer = csv.writer(fh)
+        writer.writerow(["media/aaaa.png", "First"])            # no header row
+        writer.writerow(["Image", "Alt", "Source"])               # one pasted in later
+        writer.writerow(["media/bbbb.jpeg", "DECORATIVE"])
+        writer.writerow(["deck/slide-256/shape-4", "A chart\n with a break"])
+        writer.writerow(["media/cccc.png", ""])                  # reviewed: keep it
+    rows = rem.alt_rows(path)
+    yield "image-alt rows read by position, a header anywhere skipped, extensions aside, " \
+        "a blank Alt kept as a review", \
+        rows == {"media/aaaa": "First", "media/bbbb": None, "media/cccc": "",
+                 "deck/slide-256/shape-4": "A chart with a break"}, rows
+    path = os.path.join(work, "table-headers.csv")
+    with open(path, "w", encoding="utf-8", newline="") as fh:
+        writer = csv.writer(fh)
+        writer.writerows([["key", "headers"], ["k1", "Matrix"], ["k2", "grid"], ["k3", "manual"],
+                          ["k4", "sideways"], ["k5", "first-row"]])
+    unknown = set()
+    rows = rem.header_rows(path, unknown)
+    yield "table-headers rows: matrix and grid as both and none; manual and an unknown value " \
+        "decided, leaving the table alone, the unknown one named", \
+        rows == {"k1": "both", "k2": "none", "k3": "", "k4": "", "k5": "first-row"} \
+        and unknown == {"sideways"}, (rows, unknown)
+    path = os.path.join(work, "slide-titles.csv")
+    with open(path, "w", encoding="utf-8", newline="") as fh:
+        csv.writer(fh).writerows([deckrun.TITLE_COLUMNS, ["d/slide-257", "  A  title ", "", "", ""],
+                                  ["d/slide-258", "", "", "", ""]])
+    yield "slide-titles rows: a title per slide, spaces squeezed, blanks left out", \
+        rem.title_rows(path) == {"d/slide-257": "A title"}, rem.title_rows(path)
+
+
+def case_edges(work):
+    """What a review of the first version found, each pinned."""
+    # A backslash in alt text is a backslash, on a shape that has a
+    # description already as on one that hasn't; control characters,
+    # which XML has no place for, are left out.
+    path = deck(os.path.join(work, "tex.pptx"), [
+        {"shapes": [title(2, "One"), pic(4, "rId2", (0, 0, 10, 10), "old"),
+                    pic(5, "rId3", (20, 0, 10, 10))], "images": {"rId2": RED, "rId3": GREEN}}],
+        core_title=None)
+    d = pptxparse.read(path)
+    alt = r"\bar{x} \mu, \alpha \0 \1 \\ and a bell" + "\x07"
+    alts = {rem.image_key(d.slides[0].shapes[1].image[1]): alt,
+            rem.image_key(d.slides[0].shapes[2].image[1]): alt}
+    titles = {rem.slide_key("tex", d.slides[0]): r"\0 \g<0>"}
+    out, counts = remediated(work, "tex.pptx", path, alts, core_title=r"Means \1 \n")
+    e = pptxparse.read(out)
+    wanted = r"\bar{x} \mu, \alpha \0 \1 \\ and a bell"
+    yield "alt text with backslashes is written as it is, replacing a description or not", \
+        [s.descr for s in e.slides[0].shapes[1:]] == [wanted, wanted] \
+        and counts["described"] == 2, [s.descr for s in e.slides[0].shapes[1:]]
+    yield "a title with backslashes too, in the file's properties", \
+        e.core_title == r"Means \1 \n", e.core_title
+    del titles
+    # A picture's row names every copy of its image, a copy whose own alt
+    # text was fine among them, and what each has now.
+    folder = os.path.join(work, "copies")
+    os.makedirs(folder)
+    deck(os.path.join(folder, "a.pptx"), [
+        {"shapes": [title(2, "One"), pic(4, "rId2", (0, 0, 10, 10), "Bar chart of sales")],
+         "images": {"rId2": RED}},
+        {"shapes": [title(2, "Two"), pic(4, "rId2", (0, 0, 10, 10))], "images": {"rId2": RED}}])
+    deck(os.path.join(folder, "b.pptx"), [
+        {"shapes": [title(2, "Three"), pic(4, "rId2", (0, 0, 10, 10), "A logo",
+                                           decorative=True)], "images": {"rId2": RED}}])
+    reports = {k: os.path.join(folder, v) for k, v in (
+        ("image_alt_missing", "image-alt-missing.csv"), ("table_headers_new", "t.csv"),
+        ("slide_titles_new", "s.csv"), ("slides_check", "check.csv"))}
+    paths = {"image_alt": os.path.join(folder, "image-alt.csv"),
+             "table_headers": os.path.join(folder, "table-headers.csv"),
+             "slide_titles": os.path.join(folder, "slide-titles.csv")}
+    said = []
+    code = deckrun.run(folder, deckrun.deck_sources(folder), [], paths, reports,
+                       check_only=True, say=said.append)
+    rows = rows_of(reports["image_alt_missing"])
+    yield "a picture's row names every copy of its image and what each has now", \
+        code == 0 and len(rows) == 1 \
+        and rows[0][2] == "a.pptx slide 1; a.pptx slide 2; b.pptx slide 1" \
+        and rows[0][4] == "Bar chart of sales | (none) | (decorative)", rows
+    # A shape's own row wins over its image's.
+    a = pptxparse.read(os.path.join(folder, "a.pptx"))
+    digest = a.slides[0].shapes[1].image[1]
+    alts = {rem.image_key(digest): "Sales chart",
+            rem.object_key("a", a.slides[0], a.slides[0].shapes[1]): ""}
+    out = remediated(work, "a.pptx", os.path.join(folder, "a.pptx"), alts)[0]
+    e = pptxparse.read(out)
+    yield "a shape's own row wins over its image's, a blank one keeping what it has", \
+        [s.shapes[1].descr for s in e.slides] == ["Bar chart of sales", "Sales chart"], \
+        [s.shapes[1].descr for s in e.slides]
+    # Two decks whose names are one key stop the run; names otherwise are
+    # as the files have them.
+    clash = os.path.join(work, "clash")
+    os.makedirs(clash)
+    for name in ("Deck.pptx", "Deck.PPTX", "Week 1.pptx", "Week-1.pptx", "経済学.pptx"):
+        deck(os.path.join(clash, name), [{"shapes": [title(2, "One")]}])
+    said = []
+    code = deckrun.run(clash, deckrun.deck_sources(clash), [], paths, reports,
+                       check_only=True, say=said.append)
+    yield "two decks whose names are one key stop the run, and the run says why", \
+        code == 1 and any("Deck.PPTX and Deck.pptx are one deck" in line for line in said), said
+    yield "a deck's key is its file's name as it is", \
+        [rem.deck_name(n) for n in ("Week 1.pptx", "Week-1.pptx", "経済学.pptx")] == \
+        ["Week 1", "Week-1", "経済学"], ""
+    # A table's value is its headers whole: none clears First Column too,
+    # and a table with no properties gets them.
+    tdeck = deck(os.path.join(work, "flags.pptx"), [
+        {"shapes": [title(2, "T"),
+                    table(4, [["a", "b"], ["c", "d"]], (0, 1600200, 900, 900), first_col=True),
+                    table(5, [["e", "f"], ["1", "2"]], (0, 3000000, 900, 900), first_col=True),
+                    table(6, [["g", "h"], ["3", "4"]], (0, 4000000, 900, 900)).replace(
+                        "<a:tblPr/>", "")]}])
+    shapes = pptxparse.read(tdeck).slides[0].shapes
+    decided = {shapes[1].table.key(): "none", shapes[2].table.key(): "first-row",
+               shapes[3].table.key(): "both"}
+    out, counts = remediated(work, "flags.pptx", tdeck, tables=decided)
+    copy = pptxparse.read(out).slides[0].shapes
+    yield "none clears both flags, first-row sets the row and clears the column", \
+        (copy[1].table.first_row, copy[1].table.first_col) == (False, False) \
+        and (copy[2].table.first_row, copy[2].table.first_col) == (True, False), \
+        [(c.table.first_row, c.table.first_col) for c in copy[1:]]
+    yield "a table with no properties gets them, first in the table", \
+        (copy[3].table.first_row, copy[3].table.first_col) == (True, True) \
+        and '<a:tbl><a:tblPr firstRow="1" firstCol="1"/><a:tblGrid>' in read_part(
+            out, "ppt/slides/slide1.xml"), counts
+    # The decorative mark goes into the shape's own extension list, not
+    # its link's, and only the shape's own counts when it's read.
+    link = ('<a:hlinkClick r:id="rId3"><a:extLst><a:ext uri="{A12FA001-AC4F-418D-AE19-'
+            '62706E023703}"><ahyp:hlinkClr xmlns:ahyp="http://schemas.microsoft.com/office/'
+            'drawing/2018/hyperlinkcolor" val="tx"/></a:ext></a:extLst></a:hlinkClick>')
+    linked = deck(os.path.join(work, "linked.pptx"), [
+        {"shapes": [title(2, "L"), pic(4, "rId2", (0, 0, 10, 10), "x").replace(
+            'descr="x"/>', 'descr="x">%s</p:cNvPr>' % link)],
+         "images": {"rId2": BLUE}, "links": {"rId3": "https://example.org/"}}])
+    blue = pptxparse.read(linked).slides[0].shapes[1].image[1]
+    out = remediated(work, "linked.pptx", linked, {rem.image_key(blue): None})[0]
+    xml = read_part(out, "ppt/slides/slide1.xml")
+    yield "the decorative mark goes into the shape's own extension list, after its link", \
+        re.search(r"</a:hlinkClick><a:extLst><a:ext uri=\"\{C183D7F6", xml) is not None \
+        and pptxparse.read(out).slides[0].shapes[1].decorative, \
+        re.findall(r"<p:cNvPr.*?</p:cNvPr>", xml)
+    inside = deck(os.path.join(work, "inside.pptx"), [
+        {"shapes": [title(2, "L"), pic(4, "rId2", (0, 0, 10, 10), "x").replace(
+            'descr="x"/>', 'descr="x">%s</p:cNvPr>' % link.replace(
+                "<ahyp:hlinkClr", '<adec:decorative xmlns:adec="http://schemas.microsoft.com/'
+                'office/drawing/2017/decorative" val="1"/><ahyp:hlinkClr').replace(
+                "{A12FA001-AC4F-418D-AE19-62706E023703}",
+                "{C183D7F6-B498-43B3-948B-1728B52AA6E4}"))],
+         "images": {"rId2": BLUE}, "links": {"rId3": "https://example.org/"}}])
+    yield "a mark inside a link's extension list isn't the shape's", \
+        not pptxparse.read(inside).slides[0].shapes[1].decorative, ""
+    # Where the schema puts things, whatever the file already holds.
+    odd = deck(os.path.join(work, "odd.pptx"), [
+        {"shapes": [title(2, "").replace("<p:spPr/>", '<p:spPr bwMode="auto"/>'),
+                    pic(4, "rId2", (0, 0, 10, 10), "x").replace('descr="x"', "descr='x'")],
+         "images": {"rId2": RED}}], default_lang=None, style=False)
+    xml = read_part(odd, "ppt/presentation.xml").replace(
+        '<p:sldId id="256" r:id="rId2"/>',
+        '<p:sldId id="256" r:id="rId2"><p:extLst><p:ext uri="{1}"/></p:extLst></p:sldId>')
+    with zipfile.ZipFile(odd) as z:
+        others = [(i, z.read(i.filename)) for i in z.infolist()]
+    with zipfile.ZipFile(odd, "w") as z:
+        for info, data in others:
+            z.writestr(info, xml if info.filename == "ppt/presentation.xml" else data)
+    od = pptxparse.read(odd)
+    out, counts = remediated(work, "odd.pptx", odd, {rem.image_key(od.slides[0].shapes[1].image[1]):
+                                                     "Red"},
+                             titles={rem.slide_key("odd", od.slides[0]): "Odd"}, language="en-US")
+    slide = read_part(out, "ppt/slides/slide1.xml")
+    pres = read_part(out, "ppt/presentation.xml")
+    yield "a title placeholder with a self-closing spPr gets its position inside it", \
+        '<p:spPr bwMode="auto"><a:xfrm>' in slide and pptxparse.read(out).slides[0].title == "Odd", \
+        re.findall(r"<p:spPr.{0,80}", slide)
+    yield "a single-quoted description is replaced, not repeated", \
+        slide.count("descr=") == 1 and 'descr="Red"' in slide, re.findall(r"<p:cNvPr[^>]*>", slide)
+    yield "a default text style goes after the notes' size, not into a slide's extension list", \
+        re.search(r'<p:notesSz [^>]*/><p:defaultTextStyle>', pres) is not None \
+        and ET.fromstring(pres.encode()) is not None, pres[-400:]
+    # An empty title placeholder in AlternateContent is filled in its
+    # Choice and its Fallback alike.
+    empty = title(2, "")
+    twice = deck(os.path.join(work, "twice.pptx"), [{"shapes": [alternate(empty, empty)]}])
+    tw = pptxparse.read(twice)
+    out, counts = remediated(work, "twice.pptx", twice,
+                             titles={rem.slide_key("twice", tw.slides[0]): "Both"})
+    slide = read_part(out, "ppt/slides/slide1.xml")
+    yield "an empty title in AlternateContent is filled in its Choice and its Fallback", \
+        counts["titles"] == 1 and slide.count("<a:t>Both</a:t>") == 2 \
+        and slide.count('<a:off x="0" y="-914400"/>') == 2, (counts, slide.count("Both"))
+    # The checks: a title read first wherever it sits; a picture in a
+    # described group still needs its own alt text; a language the masters
+    # alone declare is a language.
+    checked = pptxparse.read(deck(os.path.join(work, "checks.pptx"), [
+        {"shapes": [title(2, "Below", box=(457200, 5000000, 8229600, 900000)),
+                    pic(4, "rId2", (457200, 300000, 2000000, 2000000), "A red square")],
+         "images": {"rId2": RED}},
+        {"shapes": [title(2, "Grouped"), group(4, [pic(5, "rId2", (0, 0, 100, 100)),
+                                                   rect(6, "Rectangle 5", (200, 0, 100, 100))],
+                                               (0, 1600200, 300, 100), descr="Two shapes")],
+         "images": {"rId2": RED}}], default_lang=None, styles_lang="fr-FR"))
+    found = pptxcheck.check(checked)
+    yield "a title read first is in order wherever it sits on the slide", \
+        "pptx-reading-order" not in checks_of(found), [(f.check, f.detail) for f in found]
+    yield "a picture in a described group still needs its own alt text; its rectangle doesn't", \
+        [f.where for f in found if f.check == "pptx-object-no-alt"] == ["slide 2, Picture 5"] \
+        and "pptx-shape-no-alt" not in checks_of(found), [(f.check, f.where) for f in found]
+    yield "a language the masters alone declare is the deck's", \
+        checked.language == "fr-FR" and "pptx-no-language" not in checks_of(found), \
+        checked.language
+    # A deck that can't be read is named, with why, here and in the audit.
+    locked = os.path.join(work, "locked")
+    os.makedirs(locked)
+    clean_deck(os.path.join(locked, "open.pptx"))
+    with open(os.path.join(locked, "locked.pptx"), "wb") as fh:
+        fh.write(b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1" + b"\0" * 504)
+    with open(os.path.join(locked, "~$open.pptx"), "wb") as fh:
+        fh.write(b"lock")
+    said = []
+    code = deckrun.run(locked, deckrun.deck_sources(locked), [], paths, reports,
+                       check_only=True, say=said.append)
+    yield "a deck saved with a password is named, and why, and the lock file isn't", \
+        code == 1 and deckrun.deck_sources(locked) == ["locked.pptx", "open.pptx"] \
+        and any("locked.pptx couldn't be read" in l and "password" in l for l in said), said
+    audited = os.path.join(work, "audited")
+    result = subprocess.run(["python3", os.path.join(BIN, "audit.py"),
+                             os.path.join(locked, "locked.pptx"), "-o", audited, "--no-cache",
+                             "--quick"], capture_output=True, text=True)
+    yield "the audit names it unreadable, and goes on", \
+        [r[1] for r in rows_of(os.path.join(audited, "audit.csv"))] == ["source-unreadable"], \
+        result.stderr[-300:]
+    # A copy is readable by others, as any file a person writes.
+    old = os.umask(0o022)
+    try:
+        out = remediated(work, "mode.pptx", clean_deck(os.path.join(work, "mode-src.pptx")))[0]
+    finally:
+        os.umask(old)
+    yield "a copy's permissions are a written file's, not a temporary file's", \
+        os.stat(out).st_mode & 0o777 == 0o644, oct(os.stat(out).st_mode & 0o777)
+
+
+def case_powerpoint(work):
+    """What PowerPoint made of three decks Pandoc wrote: one it wouldn't
+    open (an empty p:sp), one it repaired by removing content (a14 used
+    undeclared in a table cell), and one whose six file names as alt text
+    its checker counted as six missing descriptions."""
+    formula = ('<a:tc><a:txBody><a:bodyPr/><a:lstStyle/><a:p><a14:m><m:oMath xmlns:m="http://'
+               'schemas.openxmlformats.org/officeDocument/2006/math"><m:r><m:t>q</m:t></m:r>'
+               '</m:oMath></a14:m></a:p></a:txBody><a:tcPr/></a:tc>')
+    path = deck(os.path.join(work, "pandoc.pptx"), [
+        {"shapes": [title(2, "FLOER", "ctrTitle", box=TITLE_BOX), "<p:sp />"]},
+        {"shapes": [title(2, "Demand"),
+                    table(4, [["Price", "q"], ["1", "2"]], (457200, 1600200, 6000000, 800000),
+                          first_row=True, cells={0: [cell("Price"), formula]})]},
+        {"shapes": [title(2, "The base"),
+                    pic(0, "rId2", (457200, 1600200, 4000000, 3000000),
+                        "Monetary Base Graph\n\nassets/fred-monetary-base.png", name="Picture 1")],
+         "images": {"rId2": RED}},
+    ])
+    d = pptxparse.read(path)
+    found = pptxcheck.check(d)
+    bad = [(f.where, f.detail) for f in found if f.check == "pptx-malformed"]
+    yield "an empty p:sp and an undeclared a14 are each named, on their slides", \
+        bad == [("slide 1", "an empty <p:sp/>"),
+                ("slide 2", "the prefix a14 used without a namespace declaration")], bad
+    yield "the empty shape isn't a shape needing alt text, and the table is still read", \
+        not [f for f in found if f.check == "pptx-shape-no-alt"] \
+        and d.slides[1].shapes[1].table is not None \
+        and d.slides[1].shapes[1].table.rows[1] == ["1", "2"], checks_of(found)
+    named = [f for f in found if f.check == "pptx-alt-is-file-name"]
+    flagged = ("A graph (fred-M2.png) of M2", "chart.SVG.", ".png", "Image .JPG", "graph/.png",
+               "An icon for an image file (.png)", "A .png file's icon, a folded corner",
+               "https://example.org/a/chart.jpeg?raw=1")
+    yield "a file name or extension in alt text, wherever it is, is an error, as PowerPoint " \
+        "counts it", len(named) == 1 and named[0].severity == "error" \
+        and all((pptxcheck.alt_problem(t) or ("",))[0] == "pptx-alt-is-file-name"
+                for t in flagged), \
+        [t for t in flagged if (pptxcheck.alt_problem(t) or ("",))[0] != "pptx-alt-is-file-name"]
+    passed = ("Version 2.5 of the model", "U.S. GDP, 1990 to 2020", "Growth, e.g. in Japan",
+              "Dr.Gifford at the board", "The JPEG committee's home page, www.jpeg.org",
+              "Festival poster, www.tiff.net", "Guidance at https://www.ico.org.uk/guide")
+    yield "a decimal, an abbreviation, a name after a period, or a domain isn't a file name", \
+        all(pptxcheck.alt_problem(t) is None for t in passed), \
+        [t for t in passed if pptxcheck.alt_problem(t) is not None]
+    # A copy has both put right, as PowerPoint opened a deck with each
+    # repair alone, and gets its decisions besides.
+    out, counts = remediated(work, "pandoc.pptx", path,
+                             alts={rem.image_key(d.slides[2].shapes[1].image[1]):
+                                   "The monetary base, 2008 to 2020"})
+    copied = pptxcheck.check(pptxparse.read(out), kind="pptx")
+    yield "a copy has the empty shape taken out and a14 declared, and its decision written", \
+        counts["repaired"] == 2 and counts["described"] == 1 and not copied, \
+        (counts, checks_of(copied))
+    first, second = read_part(out, "ppt/slides/slide1.xml"), read_part(out, "ppt/slides/slide2.xml")
+    root = second[second.index("<p:sld"):second.index(">", second.index("<p:sld")) + 1]
+    yield "the repaired parts parse as they are, a14 declared on the root, and nothing else moved", \
+        "<p:sp />" not in first and ET.fromstring(first.encode()) is not None \
+        and ET.fromstring(second.encode()) is not None \
+        and 'xmlns:a14="http://schemas.microsoft.com/office/drawing/2010/main"' in root \
+        and second.replace(' xmlns:a14="http://schemas.microsoft.com/office/drawing/2010/main"',
+                           "", 1) == read_part(path, "ppt/slides/slide2.xml") \
+        and first == read_part(path, "ppt/slides/slide1.xml").replace("<p:sp />", "") \
+        and read_part(out, "ppt/presentation.xml") == read_part(path, "ppt/presentation.xml"), root
+    # A shape with text but no properties isn't empty: taking it out would
+    # lose the text, so it stays, and the copy's check names it.
+    kept = deck(os.path.join(work, "kept.pptx"), [
+        {"shapes": [title(2, "Kept"), "<p:sp><p:spPr/>%s</p:sp>" % body(["Words"])]}])
+    out, counts = remediated(work, "kept.pptx", kept)
+    yield "a shape with text and no properties is left, and still named", \
+        counts["repaired"] == 0 and "<a:t>Words</a:t>" in read_part(out, "ppt/slides/slide1.xml") \
+        and [f.detail for f in pptxcheck.check(pptxparse.read(out)) if f.check == "pptx-malformed"] \
+        == ["a <p:sp> with no non-visual properties"], counts
+    # a14 declared around a text box's formula, as Pandoc declares it, and
+    # used undeclared in a table's on the same slide; a decision written
+    # into the repaired slide too.
+    textbox_math = ('<mc:AlternateContent xmlns:mc="http://schemas.openxmlformats.org/markup-'
+                    'compatibility/2006"><mc:Choice xmlns:a14="http://schemas.microsoft.com/office/'
+                    'drawing/2010/main" Requires="a14"><p:sp>%s<p:spPr/><p:txBody><a:bodyPr/>'
+                    '<a:lstStyle/><a:p><a:r><a:t>Demand is </a:t></a:r><a14:m><m:oMath xmlns:m="'
+                    'http://schemas.openxmlformats.org/officeDocument/2006/math"><m:r><m:t>D</m:t>'
+                    '</m:r></m:oMath></a14:m></a:p></p:txBody></p:sp></mc:Choice>'
+                    '</mc:AlternateContent>' % nv("sp", 3, "Content Placeholder 3",
+                                                  ph='<p:ph idx="1"/>'))
+    mixed = deck(os.path.join(work, "mixed.pptx"), [
+        {"shapes": [title(2, "Demand"), textbox_math,
+                    table(4, [["Price", "q"], ["1", "2"]], (457200, 2600200, 6000000, 800000),
+                          first_row=True, cells={0: [cell("Price"), formula]}),
+                    pic(5, "rId2", (457200, 4000000, 900000, 900000), "chart.png")],
+         "images": {"rId2": GREEN}}])
+    m = pptxparse.read(mixed)
+    out, counts = remediated(work, "mixed.pptx", mixed,
+                             alts={rem.image_key(m.slides[0].shapes[-1].image[1]): "A demand curve"})
+    slide = read_part(out, "ppt/slides/slide1.xml")
+    yield "a14 declared on one element and used undeclared on another is named, declared, and " \
+        "a decision written beside it", \
+        m.malformed == [("ppt/slides/slide1.xml",
+                         "the prefix a14 used without a namespace declaration")] \
+        and counts["repaired"] == 1 and counts["described"] == 1 \
+        and ET.fromstring(slide.encode()) is not None and 'descr="A demand curve"' in slide \
+        and not pptxcheck.check(pptxparse.read(out)), (m.malformed, counts)
+    # An empty shape with an attribute, and a group emptied by taking out
+    # its one shape, are taken out too.
+    groups = deck(os.path.join(work, "groups.pptx"), [
+        {"shapes": [title(2, "Groups"), '<p:sp useBgFill="1"/>',
+                    "<p:grpSp><p:sp/></p:grpSp>"]}])
+    out, counts = remediated(work, "groups.pptx", groups)
+    yield "an empty shape with an attribute, and a group emptied by the repair, are taken out", \
+        counts["repaired"] == 3 \
+        and not re.search(r"<p:grpSp[\s/>]", read_part(out, "ppt/slides/slide1.xml")) \
+        and not pptxcheck.check(pptxparse.read(out)), counts
+    # A group with no properties is read, so the ids inside it still count:
+    # a decision for a shape whose id repeats there is skipped.
+    hidden = deck(os.path.join(work, "hidden.pptx"), [
+        {"shapes": [title(2, "Hidden"), pic(5, "rId2", (0, 1600200, 900000, 900000)),
+                    "<p:grpSp><p:grpSpPr/>%s</p:grpSp>"
+                    % pic(5, "rId3", (0, 3000000, 900000, 900000), "A green square")],
+         "images": {"rId2": RED, "rId3": GREEN}}])
+    h = pptxparse.read(hidden)
+    out, counts = remediated(work, "hidden.pptx", hidden,
+                             alts={rem.image_key(h.slides[0].shapes[1].image[1]): "A red square"})
+    yield "a group with no properties is read, an id repeated inside it is still guarded, and " \
+        "it isn't asked for alt text it can't hold", \
+        counts["skipped"] == 1 and counts["described"] == 0 \
+        and 'descr="A green square"' in read_part(out, "ppt/slides/slide1.xml") \
+        and checks_of(pptxcheck.check(h)) == ["pptx-malformed", "pptx-object-no-alt"], \
+        (counts, checks_of(pptxcheck.check(h)))
+    # A part in UTF-16, which OPC allows, isn't repaired, and the run goes on.
+    wide = deck(os.path.join(work, "wide.pptx"), [{"shapes": [title(2, "Wide"), "<p:sp/>"]}])
+    with zipfile.ZipFile(wide) as z:
+        members = [(i, z.read(i.filename)) for i in z.infolist()]
+    with zipfile.ZipFile(wide, "w", zipfile.ZIP_DEFLATED) as z:
+        for info, data in members:
+            if info.filename == "ppt/slides/slide1.xml":
+                data = data.decode("utf-8").replace('encoding="UTF-8"', 'encoding="UTF-16"', 1)
+                data = data.encode("utf-16")
+            z.writestr(info, data)
+    out, counts = remediated(work, "wide.pptx", wide)
+    yield "a slide in UTF-16 is copied as it is, and still named", \
+        counts["repaired"] == 0 and read_part_bytes(out, "ppt/slides/slide1.xml") \
+        == read_part_bytes(wide, "ppt/slides/slide1.xml") \
+        and [f.check for f in pptxcheck.check(pptxparse.read(out))] == ["pptx-malformed"], counts
+
+
+# ---------------------------------------------------------------------------
+# convert.py over a folder of decks
+# ---------------------------------------------------------------------------
+
+def pandoc_ok():
+    if shutil.which("pandoc") is None:
+        print("  skip  pandoc not found; convert.py needs it")
+        return False
+    version = subprocess.run(["pandoc", "--version"], capture_output=True,
+                             text=True).stdout.split()[1]
+    if tuple(int(p) for p in re.findall(r"\d+", version)[:3]) < (3, 9):
+        print(f"  skip  Pandoc {version} is too old; convert.py needs 3.9 or later")
+        return False
+    return True
+
+
+def convert(where, *flags):
+    return subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quiet", *flags],
+                          cwd=where, capture_output=True, text=True, stdin=subprocess.DEVNULL)
+
+
+def rows_of(path):
+    if not os.path.exists(path):
+        return []
+    with open(path, encoding="utf-8", newline="") as fh:
+        return list(csv.reader(fh))[1:]
+
+
+def case_convert(work):
+    if not pandoc_ok():
+        return
+    folder = os.path.join(work, "decks")
+    os.makedirs(folder)
+    messy_deck(os.path.join(folder, "messy.pptx"))
+    clean_deck(os.path.join(folder, "clean.pptx"))
+    deck(os.path.join(folder, "numbers.pptx"), [
+        {"shapes": [title(2, "Growth"), table(4, [["Year", "GDP"], ["2020", "1.0"], ["2021", "1.1"]],
+                                              (457200, 1600200, 6000000, 1200000))]}])
+    with open(os.path.join(folder, "README.md"), "w") as fh:
+        fh.write("# About these slides\n")
+    first = convert(folder, "--check-only")
+    alt = rows_of(os.path.join(folder, "image-alt-missing.csv"))
+    yield "--check-only on a folder of decks: the reports, and no copies", \
+        first.returncode == 0 and alt and not os.path.exists(os.path.join(folder, "remediated")) \
+        and os.path.exists(os.path.join(folder, "slides-check.csv")), first.stderr[-600:]
+    second = convert(folder)
+    yield "a folder of decks alone is slides: the implied target writes a copy of each", \
+        second.returncode == 0 and sorted(os.listdir(os.path.join(folder, "remediated"))) == \
+        ["clean.pptx", "messy.pptx", "numbers.pptx"] and "Output check: 3 deck(s)" in second.stderr, \
+        second.stderr[-800:]
+    keys = [r[0] for r in alt]
+    picture = next(k for k in keys if k.startswith("media/"))
+    yield "a picture's row is keyed on its content, and its image is where the key says", \
+        re.fullmatch(r"media/[0-9a-f]{16}\.png", picture) is not None \
+        and os.path.isfile(os.path.join(folder, picture)), keys
+    yield "an object's row is keyed on its deck, slide, and shape", \
+        "messy/slide-257/shape-5" in keys and "messy/slide-260/shape-6" in keys, keys
+    tables = rows_of(os.path.join(folder, "table-headers-new.csv"))
+    titles = rows_of(os.path.join(folder, "slide-titles-new.csv"))
+    by_source = {r[5]: r for r in tables}
+    merged = deckrun.census_guess(pptxparse.read(os.path.join(folder, "messy.pptx"))
+                                  .slides[2].shapes[1].table)
+    yield "a table with no header row gets a row with the census's guess, drafted by TI", \
+        len(tables) == 2 and by_source["numbers.pptx slide 1"][1] in ("first-row", "both") \
+        and by_source["numbers.pptx slide 1"][8] == "TI" \
+        and by_source["numbers.pptx slide 1"][6] == "Growth", tables
+    yield "and a table the census can't guess gets an empty row, nobody's draft", \
+        merged == "" and by_source["messy.pptx slide 3"][1:2] == [""] \
+        and by_source["messy.pptx slide 3"][8] == "", (merged, tables)
+    yield "each untitled slide gets a row", [r[0] for r in titles] == [
+        "messy/slide-256", "messy/slide-257"], titles
+    # Decide everything, adopting the reports' rows as a person would.
+    with open(os.path.join(folder, "image-alt.csv"), "w", encoding="utf-8", newline="") as fh:
+        writer = csv.writer(fh)
+        writer.writerow(deckrun.ALT_COLUMNS)
+        for i, row in enumerate(alt):
+            writer.writerow([row[0], "[decorative]" if "says nothing" in row[3] else
+                             "" if row[3].startswith("too long") else
+                             "Described, number %d" % i] + row[2:])
+    # The census's row adopted as it stands, a person's value where it has
+    # none, as TI's draft and a person's own.
+    with open(os.path.join(folder, "table-headers.csv"), "w", encoding="utf-8", newline="") as fh:
+        csv.writer(fh).writerows([deckrun.TABLE_COLUMNS] + [
+            [r[0], r[1] or "first-row"] + r[2:] for r in tables])
+    with open(os.path.join(folder, "slide-titles.csv"), "w", encoding="utf-8", newline="") as fh:
+        csv.writer(fh).writerows([deckrun.TITLE_COLUMNS] + [[r[0], "Slide %d" % i] + r[2:]
+                                                            for i, r in enumerate(titles, 1)])
+    with open(os.path.join(folder, "project.yaml"), "w") as fh:
+        fh.write("project:\n  language: en-US\n")
+    third = convert(folder)
+    found = rows_of(os.path.join(folder, "output-check.csv"))
+    left = sorted({r[1] for r in found})
+    yield "with every decision made, the reports are gone", \
+        third.returncode == 0 and not any(os.path.exists(os.path.join(folder, n)) for n in (
+            "image-alt-missing.csv", "table-headers-new.csv", "slide-titles-new.csv")), \
+        third.stderr[-800:]
+    decided = {"pptx-slide-no-title", "pptx-object-no-alt", "pptx-table-no-header",
+               "pptx-alt-placeholder", "pptx-alt-is-file-name", "pptx-no-language",
+               "pptx-no-core-title", "pptx-shape-no-alt", "pptx-alt-auto-generated"}
+    yield "and the copies' check finds nothing that was decided, but alt text kept as it was", \
+        not decided & set(left) and "pptx-alt-too-long" in left, left
+    copy = pptxparse.read(os.path.join(folder, "remediated", "messy.pptx"))
+    yield "the copy has the titles, the language, and the title in its properties", \
+        [s.title for s in copy.slides][:2] == ["Slide 1", "Slide 2"] \
+        and copy.default_language == "en-US" and copy.core_title == "Slide 1", \
+        ([s.title for s in copy.slides][:2], copy.default_language, copy.core_title)
+    yield "the table's row is used, and a drafted row nobody reviewed is said to be", \
+        "drafted by TextbookImprover or a model and not yet reviewed" in third.stderr \
+        and copy.slides[2].shapes[1].table.first_row, third.stderr[-400:]
+    # A row whose key no deck has is said to be stale.
+    with open(os.path.join(folder, "slide-titles.csv"), "a", encoding="utf-8", newline="") as fh:
+        csv.writer(fh).writerow(["messy/slide-999", "Gone"])
+    fourth = convert(folder, "--check-only")
+    yield "a sidecar row matching no slide is named", \
+        "1 row(s) of slide-titles.csv match no slide" in fourth.stderr, fourth.stderr[-500:]
+
+
+def case_folders(work):
+    if not pandoc_ok():
+        return
+    # A book's folder with a deck in it: the deck is left out, and said to be.
+    book = os.path.join(work, "book")
+    os.makedirs(book)
+    with open(os.path.join(book, "one.md"), "w") as fh:
+        fh.write("---\ntitle: One\n---\n\n# One\n\nText.\n")
+    clean_deck(os.path.join(book, "talk.pptx"))
+    with open(os.path.join(book, "project.yaml"), "w") as fh:
+        fh.write("project:\n  identifier: org.example.slides\n  title: A Book\n")
+    result = convert(book, "--check-only")
+    yield "a deck beside a book's pages is left out, and the run says so", \
+        result.returncode == 0 and "1 PowerPoint deck(s) here are left out (talk.pptx)" \
+        in result.stderr and not os.path.exists(os.path.join(book, "slides-check.csv")), \
+        result.stderr[-500:]
+    # project.kind: slides makes it slides, and the page is left out instead.
+    with open(os.path.join(book, "project.yaml"), "w") as fh:
+        fh.write("project:\n  identifier: org.example.slides\n  title: A Book\n  kind: slides\n")
+    result = convert(book, "--check-only")
+    yield "project.kind: slides makes it slides, with the pages left out", \
+        result.returncode == 0 and "1 file(s) here are left out (one.md)" in result.stderr \
+        and os.path.exists(os.path.join(book, "slides-check.csv")), result.stderr[-500:]
+    # Decks in a zip, wrapped in a folder, with macOS's leftovers.
+    zipped = os.path.join(work, "zipped")
+    os.makedirs(zipped)
+    clean = clean_deck(os.path.join(work, "clean.pptx"))
+    with zipfile.ZipFile(os.path.join(zipped, "slides.zip"), "w") as z:
+        z.write(clean, "Slides/clean.pptx")
+        z.writestr("__MACOSX/Slides/._clean.pptx", b"junk")
+        link = zipfile.ZipInfo("Slides/elsewhere")
+        link.external_attr = (0o120777 << 16)          # a link, as Info-ZIP stores one
+        z.writestr(link, "/etc/passwd")
+    result = convert(zipped)
+    yield "decks in a zip are unpacked and remediated, a link in it refused and reported", \
+        result.returncode == 0 and os.path.exists(os.path.join(zipped, "clean.pptx")) \
+        and os.path.exists(os.path.join(zipped, "remediated", "clean.pptx")) \
+        and not os.path.lexists(os.path.join(zipped, "elsewhere")) \
+        and rows_of(os.path.join(zipped, "unpack-report.csv")) == [
+            ["Slides/elsewhere", "not-a-file", "a link or a special file, not a file; not extracted"]] \
+        and "1 PowerPoint deck(s), which are the slides" in result.stderr, result.stderr[-500:]
+    # Decks in a .tgz, its link refused; the copies packed, and left alone after.
+    tarred = os.path.join(work, "tarred")
+    os.makedirs(tarred)
+    with tarfile.open(os.path.join(tarred, "slides.tgz"), "w:gz") as t:
+        t.add(clean, "Slides/clean.pptx")
+        link = tarfile.TarInfo("Slides/elsewhere")
+        link.type, link.linkname = tarfile.SYMTYPE, "/etc/passwd"
+        t.addfile(link)
+        junk = tarfile.TarInfo("Slides/._clean.pptx")
+        junk.size = 4
+        t.addfile(junk, io.BytesIO(b"junk"))
+    with open(os.path.join(tarred, "conversion.yaml"), "w") as fh:
+        fh.write("targets:\n  fixed:\n    format: source\n    archive: zip\n")
+    result = convert(tarred)
+    report = rows_of(os.path.join(tarred, "unpack-report.csv"))
+    yield "decks in a tgz are unpacked, a link in it refused and reported", \
+        result.returncode == 0 and os.path.exists(os.path.join(tarred, "clean.pptx")) \
+        and not os.path.lexists(os.path.join(tarred, "elsewhere")) \
+        and not os.path.exists(os.path.join(tarred, "._clean.pptx")) \
+        and report == [["Slides/elsewhere", "not-a-file",
+                        "a link or a special file, not a file; not extracted"]], \
+        (report, result.stderr[-400:])
+    with zipfile.ZipFile(os.path.join(tarred, "fixed.zip")) as z:
+        packed = z.namelist()
+    again = convert(tarred)
+    yield "archive: zip packs the target's folder beside it, and a later run lets it be", \
+        packed == ["fixed/clean.pptx"] and again.returncode == 0 \
+        and "fixed.zip" not in again.stderr.replace("packed into fixed.zip", ""), \
+        (packed, again.stderr[-300:])
+    # A deck that can't be read: the copies that could be written are, and
+    # nothing is archived, so a whole-looking archive is never half the set.
+    os.remove(os.path.join(tarred, "fixed.zip"))
+    with open(os.path.join(tarred, "broken.pptx"), "wb") as fh:
+        fh.write(b"not a deck")
+    broken = convert(tarred)
+    yield "with a deck that can't be read, nothing is archived, and the run says so", \
+        broken.returncode == 1 and not os.path.exists(os.path.join(tarred, "fixed.zip")) \
+        and os.path.exists(os.path.join(tarred, "fixed", "clean.pptx")) \
+        and "nothing was archived" in broken.stderr \
+        and "broken.pptx couldn't be read as a PowerPoint deck: it isn't a PowerPoint file" \
+        in broken.stderr, broken.stderr[-400:]
+    # The audit reads a deck, and remediate.py writes one.
+    audited = os.path.join(work, "audited")
+    result = subprocess.run(["python3", os.path.join(BIN, "audit.py"), clean, "-o", audited,
+                             "--no-cache", "--quick"], capture_output=True, text=True)
+    rows = rows_of(os.path.join(audited, "audit.csv"))
+    yield "audit.py reads a deck, and finds a clean one clean", \
+        result.returncode == 0 and rows == [] and "clean.pptx: 0 finding(s)" in result.stderr, \
+        result.stderr[-300:]
+    messy = messy_deck(os.path.join(work, "messy.pptx"))
+    sidecar = os.path.join(work, "titles.csv")
+    with open(sidecar, "w", encoding="utf-8", newline="") as fh:
+        csv.writer(fh).writerows([["Slide", "Title"], ["messy/slide-256", "Opening"]])
+    result = subprocess.run(["python3", os.path.join(ROOT, "util", "remediate.py"), messy,
+                             "--slide-titles", sidecar, "--out", os.path.join(work, "util-out")],
+                            capture_output=True, text=True)
+    copy = pptxparse.read(os.path.join(work, "util-out", "messy.pptx"))
+    yield "remediate.py writes a deck's decisions too", \
+        result.returncode == 0 and copy.slides[0].title == "Opening" \
+        and "1 title(s) added above their slides" in result.stderr, result.stderr[-300:]
+
+
+CASES = [("reading a deck", case_parse), ("the checks", case_check),
+         ("the copy", case_remediate), ("the copy, more", case_remediate_more),
+         ("the sidecars", case_sidecars), ("what a review found", case_edges),
+         ("what PowerPoint made of Pandoc's decks", case_powerpoint),
+         ("convert.py on decks", case_convert),
+         ("folders, archives, and tools", case_folders)]
+
+
+def main():
+    failures = total = 0
+    for label, case in CASES:
+        print(label)
+        work = tempfile.mkdtemp(prefix="slides-test-")
+        try:
+            for name, ok, detail in case(work):
+                total += 1
+                if ok:
+                    print("  ok    %s" % name)
+                else:
+                    failures += 1
+                    print("  FAIL  %s" % name)
+                    if detail:
+                        print("          %s" % str(detail)[:400])
+        except Exception as exc:              # a case that breaks is a failure, not a stop
+            failures += 1
+            total += 1
+            print("  ERROR %s: %s: %s" % (label, type(exc).__name__, exc))
+        finally:
+            shutil.rmtree(work, ignore_errors=True)
+    print("")
+    if failures:
+        print("%d of %d slides checks failed." % (failures, total), file=sys.stderr)
+        return 1
+    print("all %d slides checks passed" % total)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

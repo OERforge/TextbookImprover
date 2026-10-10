@@ -16,6 +16,8 @@ Reads a book's sources, one file per page (Word, Markdown, AsciiDoc, or HTML, or
 
 **LaTeX as a source is new, and needs more testing**: every path from it is rated NEEDS MORE TESTING on [the formats page](docs/formats.md#at-a-glance), since each book read so far has turned up something the others hadn't ([LaTeX sources](docs/latex.md)).
 
+**PowerPoint decks are newer still**: a folder of them is slides, each deck checked as PowerPoint's own Accessibility Checker checks it and for more, the decisions it needs reported, and a copy of each written with the decisions made so far ([Slides](docs/slides.md)). Converting a deck to other formats comes later.
+
 **Every run checks what it wrote**: dead links and fragments, missing alt text, heading order, invalid ids, tables without headers or caption, and, when the validators are installed, epubcheck, the Nu HTML checker, and veraPDF. The same checks, plus what a Word, Markdown, or PDF file says about itself, run on any file without converting it: `audit.py` writes a findings CSV and a report.
 
 Everything a run decides is written down: reports name what to fix, sidecar files hold what you decided, and the configuration file lists every setting with a sentence explaining it.
@@ -71,7 +73,8 @@ Each target writes into a directory of its own; the content directory keeps the 
 | [Building the cartridge](docs/packaging.md) | The packager, ordering from a PDF, validating the manifest |
 | [Building an EPUB](docs/epub.md) | One EPUB per book from the same pages and the same contents, and what it claims about itself |
 | [Checking the output](docs/checking.md) | What every run checks about the pages and EPUBs it wrote, and what it doesn't |
-| [Auditing](docs/auditing.md) | `audit.py`: what is wrong with a Word, Markdown, HTML, EPUB, or PDF file, without converting it; the findings format every check shares |
+| [Auditing](docs/auditing.md) | `audit.py`: what is wrong with a Word, Markdown, PowerPoint, HTML, EPUB, or PDF file, without converting it; the findings format every check shares |
+| [Slides](docs/slides.md) | A folder of PowerPoint decks: each checked as PowerPoint's own checker does and more, the decisions it needs reported, and a copy with the decisions written in |
 | [HTML sources](docs/html.md) | Every `.html` beside the sources is a source, and a finished page goes in `_pt/`: what is read from it, what isn't, and why converting this pipeline's own pages changes nothing |
 | [A book saved from the web](docs/site-input.md) | `unpack-site.py`: browser saves or `.mhtml` into pages whose every reference is local, the generator recognized, the order read from the site's own menus |
 | [LaTeX sources](docs/latex.md) | A LaTeX book read through its master file, a page per `\include`; what is put right on a copy before Pandoc reads it, drawings rendered by LaTeX, and `latex-conversion-macros.tex` for what only a person can name |

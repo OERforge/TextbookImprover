@@ -4,8 +4,8 @@ audit.py -- what is wrong with a file, without converting it.
 
     python3 audit.py FILE-OR-DIRECTORY ... [-o DIR] [--force] [--no-cache]
 
-Takes Word and Markdown sources, HTML pages, EPUBs, and PDFs, in any
-mix, and writes two things to the output directory (the first
+Takes Word and Markdown sources, PowerPoint decks, HTML pages, EPUBs,
+and PDFs, in any mix, and writes two things to the output directory (the first
 directory given, or -o): audit.csv, one finding per row in the format
 every check here shares, and audit.md, the same findings as a report a
 person reads, with each PDF's metadata and claims. A file already
@@ -43,12 +43,14 @@ sys.path.insert(0, os.path.join(HERE, "..", "lib"))
 import findings as fl  # noqa: E402
 import outputcheck  # noqa: E402
 import pdfcheck  # noqa: E402
+import pptxcheck  # noqa: E402
+import pptxparse  # noqa: E402
 import sourcecheck  # noqa: E402
 import tablecensus  # noqa: E402
 
 VERSION = "0.9"
 KIND_OF = {".docx": "source-docx", ".md": "source-md", ".html": "html",
-           ".xhtml": "html", ".epub": "epub", ".pdf": "pdf"}
+           ".xhtml": "html", ".epub": "epub", ".pdf": "pdf", ".pptx": "source-pptx"}
 
 
 def gather(paths):
@@ -81,6 +83,16 @@ def audit_one(path, kind, validators):
         if kind == "source-docx":
             found += sourcecheck.census_findings(path, tablecensus)
         return found, []
+    if kind == "source-pptx":
+        # What PowerPoint's own checker reports, and more (pptxcheck.py),
+        # with the defaults for alt text's length and placeholders: a
+        # project's own are read by convert.py, which checks decks too.
+        try:
+            deck = pptxparse.read(path)
+        except Exception as exc:       # a deck with a password, or no deck at all
+            return [fl.Finding(name, "source-unreadable", str(exc)[:200], file=name,
+                               kind="source-pptx")], []
+        return pptxcheck.check(deck, name), []
     if kind == "html":
         pages = outputcheck.check_html_files([path])
         found = [fl.Finding(f.where, f.check, f.detail, file=name, kind="html")

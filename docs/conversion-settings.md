@@ -12,6 +12,10 @@ What this target produces. markdown and asciidoc write source again: what the au
 
 Where this target writes. Defaults to the target's own name, so two targets in the same format can't overwrite each other.
 
+**`archive`**—one of `none`, `zip`, `tar.gz`; default `none`
+
+Whether this target's folder is packed into one file too, once it's written: a zip or a tar.gz beside the folder, named after it (remediated.zip), holding the folder. The folder stays, and each run writes both afresh. A Common Cartridge is the packager's (--zip); this is for handing a folder on whole, such as a set of remediated decks.
+
 **`filename`**—`path`; default `""` (empty); *target only*
 
 For a format that produces one file for the whole book, such as epub3, the file to write inside output_dir. Left empty it's worked out afresh on every run from the book's identifier and the format, so renaming the book renames the file. Given without an extension, the one matching the format is added.
@@ -95,6 +99,10 @@ Remove spacer images rather than hiding them from assistive technology.
 **`images.alt_max_chars`**—`int`; default `120`
 
 Alt text longer than this is reported so it can be shortened, with the detail moved into the surrounding prose where every reader benefits from it.
+
+**`images.alt_placeholders`**—`list`; default `[]`
+
+Alt text that says nothing about an image, besides what's always reported (punctuation alone, a file name, a word such as image or picture, a clip-art id, a default shape name, Office's generated descriptions). Each entry is matched against the whole alt text, case, surrounding spaces, and closing punctuation aside; one starting re: is a regular expression the whole alt text must match. Read for PowerPoint decks for now.
 
 **`images.responsive`**—`bool`; default `true`
 
@@ -264,7 +272,11 @@ Descriptive captions, keyed on the table's label. A bare label is a valid captio
 
 **`sidecars.image_alt`**—`path`; default `image-alt.csv`
 
-Alt text, keyed on the image path with the extension ignored. Use [decorative] for an image that carries no meaning.
+Alt text, keyed on the image path with the extension ignored. Use [decorative] for an image that carries no meaning. A PowerPoint deck's picture is keyed on its image's content, media/ and the first 16 characters of its SHA-256, so one row covers every copy of the image in every deck (deck/media/... for one deck's copies alone); any other object on a slide, a chart or a group, on deck/slide-N/shape-M, N and M the ids PowerPoint gave the slide and the shape.
+
+**`sidecars.slide_titles`**—`path`; default `slide-titles.csv`
+
+Titles for a PowerPoint deck's untitled slides, keyed on deck/slide-N, N the id PowerPoint gave the slide. A source target writes each as a title above the slide, read by a screen reader and not seen, as PowerPoint's Add Hidden Slide Title does.
 
 **`sidecars.bare_links`**—`path`; default `bare-links.csv`
 
@@ -295,6 +307,14 @@ Tables whose caption is a bare label with no description.
 **`reports.image_alt_missing`**—`path`; default `image-alt-missing.csv`
 
 Images with no alt text, or with alt text over the length limit.
+
+**`reports.slide_titles_new`**—`path`; default `slide-titles-new.csv`
+
+A PowerPoint deck's slides with no title, for slide-titles.csv.
+
+**`reports.slides_check`**—`path`; default `slides-check.csv`
+
+What the checks found in each PowerPoint deck, one finding a row in the output check's format: what PowerPoint's own Accessibility Checker reports, and more. audit.py writes the same findings as a report to read.
 
 **`reports.fidelity`**—`path`; default `fidelity.csv`
 

@@ -278,6 +278,10 @@ Alt text, keyed on the image path with the extension ignored. Use [decorative] f
 
 Titles for a PowerPoint deck's untitled slides, keyed on deck/slide-N, N the id PowerPoint gave the slide. A source target writes each as a title above the slide, read by a screen reader and not seen, as PowerPoint's Add Hidden Slide Title does.
 
+**`sidecars.reading_order`**—`path`; default `reading-order.csv`
+
+The order a screen reader should read a PowerPoint slide's shapes in, keyed on deck/slide-N: the ids of the shapes at the top of the slide's tree, separated by spaces or commas. A source target puts the shapes named in that order, in the places they had, unless two that overlap would be drawn the other way round, since PowerPoint draws in the order it reads; a blank order leaves the slide as it is.
+
 **`sidecars.bare_links`**—`path`; default `bare-links.csv`
 
 What to do with each bare link, one whose text is its own address, keyed on the address: a Replacement that is a URL (http, https, or ftp) replaces the address and the text; any other Replacement replaces only the text; a blank one keeps the link bare. A Title sets the link's title (a tooltip in HTML); a blank one keeps the source's. See docs/bare-links.md.
@@ -311,6 +315,10 @@ Images with no alt text, or with alt text over the length limit.
 **`reports.slide_titles_new`**—`path`; default `slide-titles-new.csv`
 
 A PowerPoint deck's slides with no title, for slide-titles.csv.
+
+**`reports.reading_order_new`**—`path`; default `reading-order-new.csv`
+
+A PowerPoint deck's slides read in another order than they're laid out, each with an order drafted from the layout, for reading-order.csv.
 
 **`reports.slides_check`**—`path`; default `slides-check.csv`
 

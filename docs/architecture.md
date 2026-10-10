@@ -58,6 +58,7 @@ on another `bin/` script.
 | `lib/pptxparse.py` | What a PowerPoint deck holds, read from its XML: slides in order, each slide's shapes in the tree's order (its reading order and its stacking order alike) and where each sits, titles, pictures keyed by their image's SHA-256, tables, charts and embedded objects, links, notes, sections, languages. Changes nothing. |
 | `lib/pptxcheck.py` | What's wrong with a deck: what PowerPoint's Accessibility Checker reports, and more. |
 | `lib/pptxremediate.py` | A `source` target on a deck: the sidecars' decisions written into a copy, edited as text, the rest byte for byte. |
+| `lib/pptxorder.py` | A slide's reading order: the shapes at the top of its tree as text spans, which pairs overlap, an order drafted from the layout, and an order written only where it keeps what's drawn over what. |
 | `lib/deckrun.py` | A slides run, for `convert.py`: each deck checked, its reports written, its copies written and checked. |
 | `lib/sidecars.py` | What a sidecar's values mean, read alike by every part that reads them: the decorative marker. |
 | `lib/names.py` | The one rule for a safe file name, shared with `safe-media.lua`. |

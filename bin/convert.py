@@ -2693,6 +2693,7 @@ REVIEW_COLUMNS = {
     "table_headers": ((1,), 8, 9),
     "bare_links": ((1, 2), 5, 6),
     "slide_titles": ((1,), 3, 4),
+    "reading_order": ((1,), 5, 6),
 }
 HEADER_WORDS = {"image", "label", "table", "file", "key", "url", "slide"}
 
@@ -4269,14 +4270,16 @@ def main():
 
     paths = {key: resolve_path(base, first[f"sidecars.{key}"])
              for key in ("table_captions", "image_alt", "table_headers",
-                         "page_names", "bare_links", "math_keep", "slide_titles")}
+                         "page_names", "bare_links", "math_keep", "slide_titles",
+                         "reading_order")}
     for key, default in (("table_captions", "table-captions.csv"),
                          ("image_alt", "image-alt.csv"),
                          ("bare_links", "bare-links.csv"),
                          ("table_headers", "table-headers.csv"),
                          ("page_names", "page-names.csv"),
                          ("math_keep", "math-keep.csv"),
-                         ("slide_titles", "slide-titles.csv")):
+                         ("slide_titles", "slide-titles.csv"),
+                         ("reading_order", "reading-order.csv")):
         check_sidecar(paths[key], f"sidecars.{key}", default, base)
     reports = {key: resolve_path(base, first[f"reports.{key}"])
                for key in ("table_captions_missing", "image_alt_missing",
@@ -4285,7 +4288,7 @@ def main():
                            "page_names_new", "page_names_report",
                            "media_unresolved", "spacer_images",
                            "output_check", "math_repaired",
-                           "slide_titles_new", "slides_check")}
+                           "slide_titles_new", "reading_order_new", "slides_check")}
     if slides:
         return slides_run(base, decks, targets, project, paths, reports, args, first)
 

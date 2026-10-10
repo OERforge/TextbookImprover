@@ -72,7 +72,8 @@ A PowerPoint deck gets what a slides run's `source` target writes ([The copy](sl
 
 ```sh
 remediate.py *.pptx --alt image-alt.csv --table-headers table-headers.csv \
-    --slide-titles slide-titles.csv --language en-US --out remediated
+    --slide-titles slide-titles.csv --reading-order reading-order.csv --language en-US \
+    --out remediated
 ```
 
 ## Repairing tracked deletions in the source

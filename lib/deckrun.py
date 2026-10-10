@@ -15,6 +15,10 @@ each deck (pptxremediate.py). The reports:
 - table-headers-new.csv: each table with no header row marked, keyed on
   its content as a book's tables are, with the table census's guess;
 - slide-titles-new.csv: each slide with no title, keyed on deck/slide-N;
+- reading-order-new.csv: each slide read in another order than it's laid
+  out, keyed on deck/slide-N, with an order drafted for a person to
+  review, as near to the layout as it can come without drawing two
+  shapes that overlap the other way round (pptxorder.py);
 - slides-check.csv: every finding, in the output check's format; and,
   once a source target has written its copies, output-check.csv, what's
   left to do in them.
@@ -45,6 +49,7 @@ from collections import Counter, OrderedDict
 
 import findings as fl
 import pptxcheck
+import pptxorder
 import pptxparse
 import pptxremediate
 import tablecensus
@@ -53,6 +58,7 @@ ALT_COLUMNS = ["Image", "Alt", "Source", "Reason", "CurrentAlt", "Drafted by", "
 TABLE_COLUMNS = ["key", "headers", "split-at", "caption-rows", "part-captions", "source",
                  "label", "preview", "drafted-by", "reviewed"]
 TITLE_COLUMNS = ["Slide", "Title", "Source", "Drafted by", "Reviewed"]
+ORDER_COLUMNS = ["Slide", "Order", "Source", "Shapes", "Note", "Drafted by", "Reviewed"]
 # The alt-text findings that ask a person for a decision.
 DECIDE = ("pptx-object-no-alt", "pptx-shape-no-alt", "pptx-alt-is-file-name",
           "pptx-alt-placeholder", "pptx-alt-auto-generated", "pptx-alt-too-long",
@@ -180,7 +186,7 @@ def deck_key(key):
     return key.startswith("media/") or "/media/" in key or "/slide-" in key
 
 
-def unmatched(paths, alts, tables, titles, present, say):
+def unmatched(paths, alts, tables, titles, present, say, orders=()):
     """Said once for each sidecar: rows whose key no deck has. A picture's
     key is its content, so a row stops matching only when the picture is
     replaced; an object's and a slide's are the ids PowerPoint gave them,
@@ -189,9 +195,10 @@ def unmatched(paths, alts, tables, titles, present, say):
     for kind, rows, setting, what in (
             ("alt", [k for k in alts if deck_key(k)], "image_alt", "picture or object"),
             ("table", list(tables), "table_headers", "table"),
-            ("slide", list(titles), "slide_titles", "slide")):
+            ("slide", list(titles), "slide_titles", "slide"),
+            ("slide", list(orders), "reading_order", "slide")):
         stale = sorted(k for k in rows if k not in present[kind])
-        if stale:
+        if stale and paths.get(setting):
             say("NOTE: %d row(s) of %s match no %s in these decks (%s%s); if a deck "
                 "changed, its new row is in this run's report, and the old one can go."
                 % (len(stale), os.path.basename(paths[setting]), what,
@@ -232,6 +239,11 @@ def run(base, decks, targets, paths, reports, language=None, alt_max_chars=120,
         say("WARNING: %s: headers value %r is not one this version understands; "
             "treated as blank" % (paths.get("table_headers"), value))
     titles = pptxremediate.title_rows(paths.get("slide_titles"))
+    bad = []
+    orders = pptxremediate.order_rows(paths.get("reading_order"), bad)
+    for key, token in bad:
+        say("WARNING: %s: the order for %s isn't a list of shape ids (%r isn't one); its slide is "
+            "left as it is." % (paths.get("reading_order"), key, token))
     rules = pptxcheck.placeholder_rules(alt_placeholders)
     clashes = clashing(decks)
     if clashes:
@@ -243,6 +255,7 @@ def run(base, decks, targets, paths, reports, language=None, alt_max_chars=120,
     alt_report = OrderedDict()      # key: [sources, reason, current alt]
     table_report = OrderedDict()
     title_report = []
+    order_report = []
     images = {}
     present = {"alt": set(), "table": set(), "slide": set()}   # every key the decks have
     copies = {}       # image digest: {where: what each copy's alt text is now}
@@ -318,6 +331,7 @@ def run(base, decks, targets, paths, reports, language=None, alt_max_chars=120,
                     title_report.append([key, "", "%s slide %d%s" % (
                         name, slide.number, ", layout %s" % slide.layout if slide.layout else ""),
                         "", ""])
+        order_report += order_rows(path, name, dname, deck, orders)
         for shape, check, detail in pptxcheck.master_items(deck, rules, alt_max_chars):
             note(shape, check, detail, None)
     # The images the report names, written where their keys point, so a
@@ -329,7 +343,7 @@ def run(base, decks, targets, paths, reports, language=None, alt_max_chars=120,
             with zipfile.ZipFile(path) as zf, open(target, "wb") as out:
                 out.write(zf.read(part))
     if not failed:
-        unmatched(paths, alts, tables, titles, present, say)
+        unmatched(paths, alts, tables, titles, present, say, orders)
     # A CSV, as every report beside the sources is: a Markdown report
     # there would be read as a book's page on the next run, and the folder
     # taken for a book. audit.py writes one, from the decks, wherever -o says.
@@ -348,6 +362,12 @@ def run(base, decks, targets, paths, reports, language=None, alt_max_chars=120,
            "table(s) with no header row marked", paths["table_headers"], say)
     report(reports["slide_titles_new"], TITLE_COLUMNS, title_report,
            "slide(s) with no title", paths["slide_titles"], say)
+    if reports.get("reading_order_new"):
+        report(reports["reading_order_new"], ORDER_COLUMNS, order_report,
+               "slide(s) read in another order than they're laid out", paths["reading_order"], say,
+               "Each Order is drafted from the slide's layout; a blank one leaves the slide as it "
+               "is. Shapes that overlap keep their order, since PowerPoint draws in the order a "
+               "screen reader reads.")
     if check_only:
         return 1 if failed else 0
     copies = []
@@ -367,11 +387,17 @@ def run(base, decks, targets, paths, reports, language=None, alt_max_chars=120,
                     % (target.name, name))
                 failed += 1
                 continue
+            problems = []
             counts = pptxremediate.remediate(path, destination, alts, tables, titles,
-                                             language, deck=pptxremediate.deck_name(path))
+                                             language, deck=pptxremediate.deck_name(path),
+                                             orders=orders, problems=problems)
+            for key, why in problems:
+                say("WARNING: %s: the reading order for %s isn't written: %s." % (
+                    target.name, key, why))
             totals.update(counts)
             written += 1
-            changed += any(n for key, n in counts.items() if key != "skipped")
+            changed += any(n for key, n in counts.items()
+                           if key not in ("skipped", "orders_refused"))
             copies.append((target, name, destination))
         say("%s: %d deck(s) written, %d of them changed: %d picture(s) and object(s) given alt "
             "text and %d marked decorative, %d header row(s) and %d header column(s) marked, "
@@ -381,6 +407,10 @@ def run(base, decks, targets, paths, reports, language=None, alt_max_chars=120,
                totals["described"], totals["decorative"], totals["header_rows"],
                totals["header_columns"], totals["titles"], totals["language"],
                totals["core_title"]))
+        if totals["orders"]:
+            say("%s: %d slide(s) put in the reading order %s gives." % (
+                target.name, totals["orders"],
+                os.path.basename(paths.get("reading_order") or "reading-order.csv")))
         if totals["repaired"]:
             say("%s: %d thing(s) PowerPoint couldn't read put right, as Pandoc's PowerPoint "
                 "writer leaves them: empty shapes taken out, and prefixes declared that were "
@@ -391,14 +421,40 @@ def run(base, decks, targets, paths, reports, language=None, alt_max_chars=120,
                 % (target.name, totals["skipped"]))
     if copies and reports.get("output_check"):
         failed += check_copies(copies, reports["output_check"], tables, alt_max_chars,
-                               alt_placeholders, say)
+                               alt_placeholders, say, orders)
     return 1 if failed else 0
 
 
-def check_copies(copies, path, tables, alt_max_chars, alt_placeholders, say):
+def order_rows(path, name, dname, deck, orders):
+    """reading-order-new.csv's rows for a deck: each slide read in another
+    order than it's laid out that the sidecar hasn't decided, with an order
+    drafted from its layout and, in Shapes, what each id is."""
+    flagged = [s for s in deck.slides if pptxcheck.reading_order(s, deck.width, deck.height)
+               and pptxremediate.slide_key(dname, s) not in orders]
+    rows = []
+    if not flagged:
+        return rows
+    with zipfile.ZipFile(path) as zf:
+        for slide in flagged:
+            read = pptxcheck.read_shapes(slide, deck.width, deck.height)
+            try:
+                kids = pptxorder.tree(pptxparse.part_text(zf.read(slide.part))[0], slide)
+            except (KeyError, UnicodeDecodeError):
+                kids = None
+            ids, note = pptxorder.draft(kids, read) if kids else (
+                None, "the slide's shapes couldn't be read in order")
+            rows.append([pptxremediate.slide_key(dname, slide), " ".join(ids or []),
+                         "%s slide %d" % (name, slide.number),
+                         "; ".join(pptxorder.label(s) for s in read), note,
+                         "TI" if ids else "", ""])
+    return rows
+
+
+def check_copies(copies, path, tables, alt_max_chars, alt_placeholders, say, orders=None):
     """The output check, on the copies: what's left to do in each, a table
-    the sidecar says has no headers not counted against it. Returns the
-    number of copies that couldn't be read back."""
+    the sidecar says has no headers not counted against it, nor a slide
+    put in the order the sidecar gives. Returns the number of copies that
+    couldn't be read back."""
     found, unreadable = [], 0
     for target, name, destination in copies:
         try:
@@ -409,7 +465,9 @@ def check_copies(copies, path, tables, alt_max_chars, alt_placeholders, say):
             continue
         found += pptxcheck.check(deck, os.path.join(os.path.basename(target.output_dir), name),
                                  kind="pptx", alt_max_chars=alt_max_chars,
-                                 alt_placeholders=alt_placeholders, tables=tables)
+                                 alt_placeholders=alt_placeholders, tables=tables,
+                                 orders=pptxremediate.slide_orders(
+                                     orders or {}, pptxremediate.deck_name(name)))
     if found:
         fl.write_csv(path, found)
     elif os.path.exists(path):

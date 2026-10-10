@@ -42,6 +42,7 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
+import codecs
 import collections
 import hashlib
 import posixpath
@@ -104,6 +105,8 @@ def declare_unbound(text):
     by where the parse fails."""
     declared = []
     for _ in range(len(TOLERATED) + 1):
+        # Text, not bytes: the parser reads it whatever encoding its
+        # declaration names, UTF-16 for a part that was.
         try:
             ET.fromstring(text)
             return text, declared
@@ -126,6 +129,26 @@ def declare_unbound(text):
     return None, declared
 
 
+BOMS = ((codecs.BOM_UTF8, "utf-8"), (codecs.BOM_UTF16_LE, "utf-16-le"),
+        (codecs.BOM_UTF16_BE, "utf-16-be"))
+
+
+def part_text(data):
+    """A part's bytes as text, and its byte-order mark and codec, which
+    encode_part() writes it back with: UTF-8, or UTF-16 with its mark,
+    which is what OPC allows an XML part to be."""
+    for bom, codec in BOMS:
+        if data.startswith(bom):
+            return data[len(bom):].decode(codec), (bom, codec)
+    return data.decode("utf-8"), (b"", "utf-8")
+
+
+def encode_part(text, encoding=(b"", "utf-8")):
+    """Text as a part's bytes, as part_text() found them written."""
+    bom, codec = encoding
+    return bom + text.encode(codec)
+
+
 def parse_xml(data, problems=None):
     """An element tree from a part's bytes, declaring a tolerated prefix
     on the root when the part uses it undeclared. problems, a list, is
@@ -136,7 +159,7 @@ def parse_xml(data, problems=None):
         if "unbound prefix" not in str(exc):
             raise
         first = exc
-    text, declared = declare_unbound(data.decode("utf-8"))
+    text, declared = declare_unbound(part_text(data)[0])
     if text is None:
         raise first
     if problems is not None:
@@ -230,7 +253,7 @@ class Shape:
     __slots__ = ("kind", "frame", "id", "name", "descr", "title", "hidden", "decorative",
                  "ph_type", "ph_idx", "text", "paragraphs", "box", "children", "image",
                  "links", "table", "prog_id", "media", "depth", "alternate", "math",
-                 "malformed")
+                 "malformed", "rotation", "stroke")
 
     def __init__(self, kind):
         self.kind = kind            # sp, pic, graphicFrame, grpSp, cxnSp, contentPart
@@ -252,6 +275,8 @@ class Shape:
         self.alternate = False      # read from mc:AlternateContent's Choice
         self.math = 0               # Office math formulas in the shape's text
         self.malformed = False      # no non-visual properties: no id, name, or alt text
+        self.rotation = 0.0         # degrees clockwise, about the box's center
+        self.stroke = 0             # how far its outline can reach past its box, in EMU
 
     @property
     def placeholder(self):
@@ -499,6 +524,22 @@ def _table(frame_el):
     return Table(rows, first_row, first_col, merged, grid)
 
 
+def _stroke(sppr):
+    """How far a shape's outline can reach past its box, in EMU: its
+    width, or three times it for a line with an arrowhead, which is wider
+    than the line; nothing when it has no outline of its own."""
+    ln = sppr.find(q("a:ln")) if sppr is not None else None
+    if ln is None or ln.find(q("a:noFill")) is not None:
+        return 0
+    try:
+        width = int(ln.get("w") or 0)
+    except ValueError:
+        return 0
+    arrows = any(end is not None and end.get("type") not in (None, "none")
+                 for end in (ln.find(q("a:headEnd")), ln.find(q("a:tailEnd"))))
+    return width * (3 if arrows else 1)
+
+
 def _decorative(cnvpr):
     """Whether a shape carries PowerPoint's decorative mark, in its own
     extension list: one inside its link's list isn't the shape's."""
@@ -603,6 +644,10 @@ class _Reader:
             spr = el.find(q("p:spPr"))
             xfrm = spr.find(q("a:xfrm")) if spr is not None else None
         box = _offset(xfrm)
+        try:                        # sixty-thousandths of a degree
+            shape.rotation = int(xfrm.get("rot") or 0) / 60000 if xfrm is not None else 0.0
+        except ValueError:
+            shape.rotation = 0.0
         if box is None and shape.placeholder:
             box = self.inherited.get(("idx", shape.ph_idx)) or self.inherited.get(
                 ("type", _base_type(shape.ph_type)))
@@ -617,6 +662,8 @@ class _Reader:
             fill = spr.find(q("a:blipFill")) if spr is not None else None
             if fill is not None:
                 shape.image = self.image(fill.find(q("a:blip")))
+        if kind in ("sp", "pic", "cxnSp"):
+            shape.stroke = _stroke(el.find(q("p:spPr")))
         if kind in ("sp", "cxnSp"):
             shape.paragraphs = _text_body(el)
             shape.text = "\n".join(shape.paragraphs).strip()
@@ -643,6 +690,7 @@ class _Reader:
                 outer = mapper
                 child_map = (lambda inner: (lambda b: outer(inner(b))))(child_map)
             shape.children = self.shapes(el, depth + 1, child_map or mapper, alternate)
+            shape.stroke = max((c.stroke for c in shape.children), default=0)
         shape.links = _links(el, self.rels, cnvpr)
         if depth == 0 and self.part.startswith("ppt/slides/"):
             for rpr in el.iter():

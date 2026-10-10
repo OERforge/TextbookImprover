@@ -39,7 +39,7 @@ import re
 from collections import Counter
 
 import findings as fl
-import pptxparse
+import pptxorder
 
 ALT_MAX_CHARS = 120
 IMAGE_EXTENSIONS = r"png|jpe?g|jpe|jfif|gif|bmp|tiff?|svgz?|emf|wmf|webp|heic|heif|avif|ico|eps|pdf"
@@ -166,14 +166,23 @@ def where(slide, shape=None):
     return head
 
 
+def read_shapes(slide, width=0, height=0):
+    """The shapes at the top of a slide's tree that a screen reader reads
+    and the order is about, in the tree's order: not the date, footer, or
+    slide number, nothing hidden or decorative, nothing off the slide, and
+    nothing with neither text nor a need for alt text, but the title even
+    when it's empty."""
+    return [s for s in slide.shapes
+            if not s.furniture and not s.hidden and not s.decorative and s.box is not None
+            and (not width or s.box.on_slide(width, height))
+            and (s.text.strip() or needs_alt(s) or s.is_title)]
+
+
 def reading_order(slide, width=0, height=0):
     """(read, visual): the shapes a screen reader reads, in the tree's
     order and in visual order (top to bottom, left to right), when the
     two disagree about a pair that doesn't overlap; else None."""
-    shapes = [s for s in slide.shapes
-              if not s.furniture and not s.hidden and not s.decorative and s.box is not None
-              and (not width or s.box.on_slide(width, height))
-              and (s.text.strip() or needs_alt(s) or s.is_title)]
+    shapes = read_shapes(slide, width, height)
     if len(shapes) < 2:
         return None
 
@@ -204,9 +213,7 @@ def reading_order(slide, width=0, height=0):
     title_late = bool(titles) and shapes[0] is not titles[0]
     if not inverted and not title_late:
         return None
-    visual = sorted(shapes, key=lambda s: (not s.is_title, s.box.y // (pptxparse.EMU_PER_INCH // 4),
-                                           s.box.x))
-    return shapes, visual
+    return shapes, pptxorder.visual(shapes)
 
 
 def drawn(slide):
@@ -293,11 +300,14 @@ def loose_pieces(slide):
 
 
 def check(deck, name=None, kind="source-pptx", alt_max_chars=ALT_MAX_CHARS,
-          alt_placeholders=(), tables=None):
+          alt_placeholders=(), tables=None, orders=None):
     """Findings for a parsed deck. tables: a table-headers sidecar's
     decisions by key (pptxremediate.header_rows()), for a copy they were
-    written into: one decided to have no headers isn't missing them."""
-    tables = tables or {}
+    written into: one decided to have no headers isn't missing them.
+    orders: the reading-order sidecar's orders for this deck's slides, by
+    the slide's id: a slide whose shapes are in its order was decided, in
+    whatever order a person put them."""
+    tables, orders = tables or {}, orders or {}
     name = name or os.path.basename(deck.path)
     rules = placeholder_rules(alt_placeholders)
     out = []
@@ -341,6 +351,9 @@ def check(deck, name=None, kind="source-pptx", alt_max_chars=ALT_MAX_CHARS,
                 if text and link.external and _bare(text, link.target):
                     add(where(slide, shape), "pptx-link-bare-url", link.target)
         order = reading_order(slide, deck.width, deck.height)
+        decided = orders.get(slide.slide_id)
+        if order and decided and [s.id for s in slide.shapes if s.id in set(decided)] == decided:
+            order = None
         if order:
             read, visual = order
             add(where(slide), "pptx-reading-order",

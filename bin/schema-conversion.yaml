@@ -789,6 +789,18 @@ keys:
           target writes each as a title above the slide, read by a screen
           reader and not seen, as PowerPoint's Add Hidden Slide Title does.
 
+      reading_order:
+        type: path
+        default: reading-order.csv
+        description: >
+          The order a screen reader should read a PowerPoint slide's shapes
+          in, keyed on deck/slide-N: the ids of the shapes at the top of the
+          slide's tree, separated by spaces or commas. A source target puts
+          the shapes named in that order, in the places they had, unless
+          two that overlap would be drawn the other way round, since
+          PowerPoint draws in the order it reads; a blank order leaves the
+          slide as it is.
+
       bare_links:
         type: path
         default: bare-links.csv
@@ -859,6 +871,14 @@ keys:
         default: slide-titles-new.csv
         description: >
           A PowerPoint deck's slides with no title, for slide-titles.csv.
+
+      reading_order_new:
+        type: path
+        default: reading-order-new.csv
+        description: >
+          A PowerPoint deck's slides read in another order than they're
+          laid out, each with an order drafted from the layout, for
+          reading-order.csv.
 
       slides_check:
         type: path

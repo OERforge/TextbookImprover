@@ -69,7 +69,11 @@ Each report is written only when it has rows, and a stale one is removed. A repo
 
 **`slide-titles-new.csv`**, for `slide-titles.csv`, has a row for each slide with no title, keyed on `deck/slide-N`, with `Slide`, `Title`, `Source`, `Drafted by`, and `Reviewed` columns.
 
-**`output-check.csv`** has the copies' findings, written once a `source` target has written them, with `Kind` `pptx`. A table that the sidecar says has no headers (`none`) isn't counted against a copy.
+**`reading-order-new.csv`**, for `reading-order.csv`, has a row for each slide whose shapes are read in another order than they're laid out (`pptx-reading-order`), keyed on `deck/slide-N`. `Order` is a draft, marked `TI`: the ids of the shapes a screen reader reads, the title first and then top to bottom and left to right, or as near to that as the slide can come without looking any different. A slide's shape tree is its reading order and its stacking order at once. A screen reader reads the shapes in the tree's order, and PowerPoint draws them in that order, each over the ones before it, so "changing the order of objects can affect how the slide looks when there are overlapping objects," as [Microsoft says of PowerPoint's own Reading Order pane](https://support.microsoft.com/powerpoint/make-slides-easier-to-read-by-using-the-reading-order-pane). Two shapes whose boxes overlap therefore keep their order, and `Note` says which pairs kept the draft from the layout's order. `Shapes` says what each id is, in the order the shapes are read now: the id, the shape's name, and its text or alt text. A slide where nothing can move without changing what's drawn over what gets no draft, and `Note` says so. Often that's a picture behind the text, read before the title: marked decorative, it isn't read at all, and the slide is in order.
+
+An `Order` is ids separated by spaces or commas. Only the shapes it names move, each into a place one of them had in the tree, so a shape it leaves out stays where it was. A blank `Order` leaves the slide as it is, and, like any row, takes it off the report.
+
+**`output-check.csv`** has the copies' findings, written once a `source` target has written them, with `Kind` `pptx`. A table that the sidecar says has no headers (`none`) isn't counted against a copy, nor is a slide whose shapes are in the order the reading-order sidecar gives, whatever order a person chose.
 
 A sidecar row whose key matches nothing in the decks is named in a note. A deck that changed since the row was written will have its new row in this run's report.
 
@@ -80,6 +84,7 @@ A `source` target writes a copy of each deck to its folder, under the deck's own
 - **Alt text**: each decision goes into the picture's or object's description. For `[decorative]`, PowerPoint's decorative mark is added and the description removed. A shape that was marked decorative and is given alt text loses the mark.
 - **Table headers**: each table gets the header row and first column the sidecar decides.
 - **Slide titles**: each title is placed above its slide, where a screen reader reads it and the slide doesn't show it, as PowerPoint's Add Hidden Slide Title does ([Microsoft](https://support.microsoft.com/en-us/powerpoint/title-a-slide)). An empty title placeholder takes the text and moves above the slide. Otherwise, a title placeholder is added first in the slide's shapes, so it's read first.
+- **Reading order**: the shapes an order names are put in its order, in the places they had in the slide's tree. A group moves with everything in it, as the Reading Order pane lists a group as one item, and a shape in `mc:AlternateContent` moves with its Fallback. An order isn't written if it would draw two overlapping shapes the other way round, or if it names a shape that isn't at the top of the slide's tree (one in a group moves with the group, by the group's id), an id two shapes share, or one id twice; the run says which order and why. Overlap is judged by the boxes the shapes are drawn in, a rotated shape's box turned with it, each widened on every side by four points, or by the reach of its outline when that's more (its width, or three times it for a line with an arrowhead), since outlines, arrowheads, and the smoothing of edges reach past a box. A shape whose box can't be known counts as overlapping everything, and a hidden shape or an empty placeholder, which draws nothing, as overlapping nothing. Text that runs further past its box, and a shadow or a glow, aren't counted. Measured with LibreOffice on real decks, every slide put in order was drawn pixel for pixel as it had been; with boxes widened by one point or two, a few weren't.
 - **The language**, when the project declares one (`project.language`): it goes where PowerPoint declares a deck's language, in the default text style and the masters' text styles, which every run that names no language of its own inherits. It's written only into a deck with no default language, and a run that names a language keeps it.
 - **The title in the file's properties**, when they have none, is the first slide's title (the sidecar's, if that slide has none of its own), since a PDF exported from the deck takes the properties' title as its own.
 - **What PowerPoint can't read as written** (`pptx-malformed`), where putting it right loses nothing: an empty shape is taken out, and a prefix used without its namespace declared is declared on the part's root. A deck Pandoc wrote with each, which PowerPoint wouldn't open or repaired by removing content, opened in PowerPoint with only that repair made. A part with something else wrong is left as it is, and its copy's check names it.
@@ -103,7 +108,7 @@ targets:
 
 Some findings ask for work in PowerPoint itself, and the copy doesn't change them:
 
-- **Reading order** is reported, not changed. A slide's shape tree is its reading order and its stacking order at once. Reordering it changes how overlapping shapes look, so a reorder would have to keep the relative order of every pair that overlaps. A sidecar giving a slide's order, with that rule, is planned. Until then, it's PowerPoint's Selection Pane.
+- **Reading order on a slide where nothing can move** without changing how it looks, which the report's row says. A picture behind the text that carries no meaning can be marked decorative, which takes it out of what's read, or made the slide's background in PowerPoint, where it isn't a shape at all. Otherwise it's the author's to lay out again, or to put in order with PowerPoint's Reading Order pane and accept the change in how it looks.
 - **Drawn diagrams and tab tables** are the author's to rebuild: a group with alt text or a picture for the one, a table for the other.
 - **Media captions** can't be confirmed from the file yet, so every video and audio clip is reported.
 - **An old Equation Editor object** (`Equation.3`) is a picture of a formula to a screen reader. It needs alt text now, and retyping in PowerPoint's own equation editor later.
@@ -114,5 +119,6 @@ Some findings ask for work in PowerPoint itself, and the copy doesn't change the
 
 ```bash
 python3 $T/util/remediate.py *.pptx --alt image-alt.csv --table-headers table-headers.csv \
-    --slide-titles slide-titles.csv --language en-US --out remediated
+    --slide-titles slide-titles.csv --reading-order reading-order.csv --language en-US \
+    --out remediated
 ```

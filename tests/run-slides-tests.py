@@ -59,6 +59,7 @@ BIN = os.path.join(ROOT, "bin")
 sys.path.insert(0, os.path.join(ROOT, "lib"))
 import deckrun  # noqa: E402
 import pptxcheck  # noqa: E402
+import pptxorder  # noqa: E402
 import pptxparse  # noqa: E402
 import pptxremediate as rem  # noqa: E402
 
@@ -387,6 +388,21 @@ def read_part_bytes(path, part):
 
 def checks_of(found):
     return sorted({f.check for f in found})
+
+
+def utf16(path, part):
+    """A deck with one part rewritten in UTF-16, its byte-order mark first,
+    as OPC allows."""
+    with zipfile.ZipFile(path) as z:
+        members = [(i, z.read(i.filename)) for i in z.infolist()]
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as z:
+        for info, data in members:
+            if info.filename == part:
+                data = data.decode("utf-8").replace('encoding="UTF-8"', 'encoding="UTF-16"', 1)
+                data = data.encode("utf-16-le")
+                data = b"\xff\xfe" + data
+            z.writestr(info, data)
+    return path
 
 
 # ---------------------------------------------------------------------------
@@ -1088,21 +1104,294 @@ def case_powerpoint(work):
         and 'descr="A green square"' in read_part(out, "ppt/slides/slide1.xml") \
         and checks_of(pptxcheck.check(h)) == ["pptx-malformed", "pptx-object-no-alt"], \
         (counts, checks_of(pptxcheck.check(h)))
-    # A part in UTF-16, which OPC allows, isn't repaired, and the run goes on.
-    wide = deck(os.path.join(work, "wide.pptx"), [{"shapes": [title(2, "Wide"), "<p:sp/>"]}])
-    with zipfile.ZipFile(wide) as z:
-        members = [(i, z.read(i.filename)) for i in z.infolist()]
-    with zipfile.ZipFile(wide, "w", zipfile.ZIP_DEFLATED) as z:
-        for info, data in members:
-            if info.filename == "ppt/slides/slide1.xml":
-                data = data.decode("utf-8").replace('encoding="UTF-8"', 'encoding="UTF-16"', 1)
-                data = data.encode("utf-16")
-            z.writestr(info, data)
-    out, counts = remediated(work, "wide.pptx", wide)
-    yield "a slide in UTF-16 is copied as it is, and still named", \
-        counts["repaired"] == 0 and read_part_bytes(out, "ppt/slides/slide1.xml") \
-        == read_part_bytes(wide, "ppt/slides/slide1.xml") \
-        and [f.check for f in pptxcheck.check(pptxparse.read(out))] == ["pptx-malformed"], counts
+    # A part in UTF-16, which OPC allows, is repaired, and a decision written
+    # into it, and it stays UTF-16, its byte-order mark and all.
+    wide = utf16(deck(os.path.join(work, "wide.pptx"), [
+        {"shapes": [title(2, "Wide"), "<p:sp/>", pic(4, "rId2", (0, 1600200, 900000, 900000)),
+                    table(5, [["Price", "q"], ["1", "2"]], (457200, 3600200, 6000000, 800000),
+                          first_row=True, cells={0: [cell("Price"), formula]})],
+         "images": {"rId2": BLUE}}]), "ppt/slides/slide1.xml")
+    wd = pptxparse.read(wide)
+    out, counts = remediated(work, "wide.pptx", wide,
+                             alts={rem.image_key(wd.slides[0].shapes[1].image[1]): "A blue square"})
+    written = read_part_bytes(out, "ppt/slides/slide1.xml")
+    yield "a slide in UTF-16 is read, repaired, and given its decision, and stays UTF-16", \
+        [p for _part, p in wd.malformed] == ["the prefix a14 used without a namespace declaration",
+                                              "an empty <p:sp/>"] \
+        and counts["repaired"] == 2 and counts["described"] == 1 \
+        and written.startswith(b"\xff\xfe") and "<p:sp/>" not in written.decode("utf-16") \
+        and pptxparse.read(out).slides[0].shapes[1].descr == "A blue square" \
+        and not pptxcheck.check(pptxparse.read(out)), counts
+
+
+def order_deck(path):
+    """A deck whose slides are read out of their layout's order, each in
+    its own way."""
+    return deck(path, [
+        # 1: the title read second; nothing overlaps; the shapes on lines
+        # of their own, as a pretty-printed slide has them
+        {"shapes": ["\n  ", textbox(4, "TextBox 3", ["Second"], (457200, 1600200, 4000000, 600000)),
+                    "\n  ", title(2, "Order"), "\n  ",
+                    textbox(5, "TextBox 4", ["Third"], (457200, 4000000, 4000000, 600000)), "\n"]},
+        # 2: a label over a picture starts higher than the picture, which
+        # is drawn under it; a note at the top right is read last
+        {"shapes": [title(2, "A map"),
+                    pic(4, "rId2", (457200, 3000000, 6000000, 3000000), "A map of the county"),
+                    textbox(5, "TextBox 4", ["The river"], (1000000, 2800000, 3000000, 600000)),
+                    textbox(6, "TextBox 5", ["A note"], (7000000, 1600200, 3000000, 600000))],
+         "images": {"rId2": RED}},
+        # 3: the title over a picture filling the slide, which is drawn first
+        {"shapes": [pic(4, "rId2", (0, 0, 12192000, 6858000), "A classroom"), title(2, "Class")],
+         "images": {"rId2": GREEN}},
+        # 4: a group and a picture in AlternateContent, laid out bottom up
+        {"shapes": [textbox(4, "TextBox 3", ["Last"], (457200, 5000000, 4000000, 600000)),
+                    group(6, [rect(10, "Rectangle 9", (0, 0, 100000, 100000)),
+                              rect(11, "Rectangle 10", (200000, 0, 100000, 100000))],
+                          (457200, 3000000, 2000000, 1000000), descr="Two boxes"),
+                    alternate(pic(8, "rId2", (457200, 1600200, 900000, 900000), "Choice"),
+                              pic(8, "rId2", (457200, 1600200, 900000, 900000), "Fallback")),
+                    title(2, "Whole")],
+         "images": {"rId2": BLUE}},
+        # 5: a decorative picture between two shapes read out of order, and
+        # a wide shape turned on end, over the square below it only once
+        # it's turned
+        {"shapes": [textbox(4, "TextBox 3", ["Bottom"], (457200, 4500000, 3000000, 600000)),
+                    pic(5, "rId2", (9000000, 4500000, 900000, 900000), decorative=True),
+                    textbox(6, "TextBox 5", ["Top"], (457200, 1600200, 3000000, 600000)),
+                    textbox(7, "TextBox 6", ["Turned"], (5000000, 3600000, 4000000, 200000)).replace(
+                        "<a:xfrm>", '<a:xfrm rot="5400000">', 1),
+                    rect(9, "Rectangle 8", (6800000, 4800000, 400000, 400000), descr="A square"),
+                    title(2, "Turned")],
+         "images": {"rId2": png(10, 10, 10)}},
+        # 6: a decorative picture drawn over the shape before it, which can't
+        # move past it, so it's read before the title
+        {"shapes": [textbox(4, "TextBox 3", ["Low"], (457200, 4500000, 3000000, 600000)),
+                    pic(5, "rId2", (457200, 4400000, 3000000, 900000), decorative=True),
+                    textbox(6, "TextBox 5", ["High"], (457200, 1600200, 3000000, 600000)),
+                    title(2, "Under")],
+         "images": {"rId2": png(11, 11, 11)}},
+    ])
+
+
+def tree_texts(xml):
+    """The XML of each shape at the top of a slide's tree, in order."""
+    kids = pptxorder.tree(xml)
+    return [xml[k.start:k.end] for k in kids if k.movable]
+
+
+def case_order(work):
+    path = order_deck(os.path.join(work, "order.pptx"))
+    d = pptxparse.read(path)
+    key = [rem.slide_key("order", s) for s in d.slides]
+    folder = os.path.join(work, "run")
+    os.makedirs(folder)
+    shutil.copy(path, folder)
+    reports = {k: os.path.join(folder, v) for k, v in (
+        ("image_alt_missing", "a.csv"), ("table_headers_new", "t.csv"),
+        ("slide_titles_new", "s.csv"), ("reading_order_new", "reading-order-new.csv"),
+        ("slides_check", "check.csv"))}
+    paths = {"image_alt": os.path.join(folder, "image-alt.csv"),
+             "table_headers": os.path.join(folder, "table-headers.csv"),
+             "slide_titles": os.path.join(folder, "slide-titles.csv"),
+             "reading_order": os.path.join(folder, "reading-order.csv")}
+    said = []
+    deckrun.run(folder, ["order.pptx"], [], paths, reports, check_only=True, say=said.append)
+    rows = {r[0]: r for r in rows_of(reports["reading_order_new"])}
+    yield "each slide read out of its layout's order gets a row, keyed on its deck and slide", \
+        sorted(rows) == sorted(key), sorted(rows)
+    first = rows.get(key[0], [""] * 7)
+    yield "a row's order is drafted from the layout, the title first, drafted by TI", \
+        first[1] == "2 4 5" and first[5] == "TI" and first[4] == "" \
+        and first[2] == "order.pptx slide 1" \
+        and first[3] == '4 TextBox 3 "Second"; 2 Title 2 "Order"; 5 TextBox 4 "Third"', first
+    second = rows.get(key[1], [""] * 7)
+    yield "a label that overlaps the picture under it stays after it, and the note says why", \
+        second[1] == "2 6 4 5" and "4 before 5" in second[4] \
+        and "usually decorative" in second[4], second
+    third = rows.get(key[2], [""] * 7)
+    yield "a title over a picture that fills the slide can't be read first; the row says so", \
+        third[1] == "" and third[5] == "" and "Nothing can move" in third[4] \
+        and "4 before 2" in third[4], third
+    yield "a group and a picture in AlternateContent are drafted by their own ids", \
+        rows.get(key[3], [""] * 7)[1] == "2 8 6 4", rows.get(key[3])
+    yield "a decorative picture isn't in the order, and a turned shape overlaps by its turn", \
+        rows.get(key[4], [""] * 7)[1] == "2 6 7 4 9", rows.get(key[4])
+    yield "a shape a decorative picture is drawn over stays before it, ahead of the title", \
+        rows.get(key[5], [""] * 7)[1] == "4 2 6" and "4 before 5" in rows.get(key[5])[4], \
+        rows.get(key[5])
+    # Adopted as drafted, and one order of a person's own that isn't the
+    # layout's; slide 5 in two orders, one swapping shapes that overlap
+    # only once one of them is turned.
+    orders = {key[0]: ["2", "4", "5"], key[1]: ["2", "6", "4", "5"], key[3]: ["2", "8", "6", "4"],
+              key[4]: ["6", "4"]}
+    problems = []
+    out = os.path.join(work, "out", "ordered.pptx")
+    counts = rem.remediate(path, out, orders=orders, problems=problems, deck="order")
+    e = pptxparse.read(out)
+    yield "each order is written: the shapes it names in its order, in the places they had", \
+        counts["orders"] == 4 and not problems \
+        and [[s.id for s in slide.shapes] for slide in e.slides] == [
+            ["2", "4", "5"], ["2", "6", "4", "5"], ["4", "2"], ["2", "8", "6", "4"],
+            ["6", "5", "4", "7", "9", "2"], ["4", "5", "6", "2"]], \
+        [[s.id for s in slide.shapes] for slide in e.slides]
+    four = read_part(out, "ppt/slides/slide4.xml")
+    yield "a group moves with its pieces, and AlternateContent with its Choice and Fallback", \
+        [s.id for s in e.slides[3].shapes[2].children] == ["10", "11"] \
+        and four.index('descr="Choice"') < four.index('descr="Fallback"') < four.index("Group 6"), \
+        four[:300]
+    same = all(sorted(tree_texts(read_part(out, "ppt/slides/slide%d.xml" % n))) ==
+               sorted(tree_texts(read_part(path, "ppt/slides/slide%d.xml" % n)))
+               and len(read_part(out, "ppt/slides/slide%d.xml" % n)) ==
+               len(read_part(path, "ppt/slides/slide%d.xml" % n)) for n in range(1, 7))
+    with zipfile.ZipFile(path) as a, zipfile.ZipFile(out) as b:
+        changed = sorted(n for n in a.namelist() if a.read(n) != b.read(n))
+    yield "only the slides put in order change, and only in the order of their shapes", \
+        same and changed == ["ppt/slides/slide1.xml", "ppt/slides/slide2.xml",
+                             "ppt/slides/slide4.xml", "ppt/slides/slide5.xml"], changed
+    copy_found = pptxcheck.check(e, orders=rem.slide_orders(orders, "order"))
+    yield "a slide in the order the sidecar gives isn't counted against the copy, " \
+        "the person's order or the layout's", \
+        [f.where for f in copy_found if f.check == "pptx-reading-order"] == ["slide 3", "slide 6"], \
+        [(f.where, f.detail) for f in copy_found if f.check == "pptx-reading-order"]
+    # Orders that can't be written are left out, each with why.
+    refused = {key[4]: ["9", "7"], key[1]: ["5", "4"], key[0]: ["4", "99"],
+               key[3]: ["10", "2"], key[2]: ["2", "2"]}
+    problems = []
+    counts = rem.remediate(path, os.path.join(work, "out", "refused.pptx"), orders=refused,
+                           problems=problems, deck="order")
+    why = dict(problems)
+    yield "an order drawing overlapping shapes the other way round is refused, and why", \
+        "7 and 9 overlap" in why.get(key[4], "") and "4 and 5 overlap" in why.get(key[1], ""), why
+    yield "an order naming an id the slide doesn't have, a piece of a group, or one twice too", \
+        "names 99" in why.get(key[0], "") and "names 10" in why.get(key[3], "") \
+        and "in a group" in why.get(key[3], "") and "names 2 twice" in why.get(key[2], "") \
+        and counts["orders_refused"] == 5 and counts["orders"] == 0, (counts, why)
+    yield "and a refused order changes nothing", all(
+        read_part(os.path.join(work, "out", "refused.pptx"), "ppt/slides/slide%d.xml" % n)
+        == read_part(path, "ppt/slides/slide%d.xml" % n) for n in range(1, 6)), ""
+    # A shape turned the other way, or not turned, doesn't reach the square.
+    unturned = deck(os.path.join(work, "unturned.pptx"), [
+        {"shapes": [textbox(7, "TextBox 6", ["Flat"], (5000000, 3600000, 4000000, 200000)),
+                    rect(9, "Rectangle 8", (6800000, 4800000, 400000, 400000), descr="A square"),
+                    title(2, "Flat")]}])
+    problems = []
+    counts = rem.remediate(unturned, os.path.join(work, "out", "unturned.pptx"),
+                           orders={rem.slide_key("unturned", pptxparse.read(unturned).slides[0]):
+                                   ["9", "7"]}, problems=problems, deck="unturned")
+    yield "the same two shapes, the wide one not turned, don't overlap and can swap", \
+        counts["orders"] == 1 and not problems, problems
+    # Boxes that only touch count as overlapping, as does a thick line whose
+    # outline reaches a shape its box doesn't; the same line with no
+    # outline doesn't.
+    thick = line(4, (457200, 3000000, 3000000, 0)).replace(
+        "</p:spPr>", '<a:ln w="254000"/></p:spPr>')
+    edges = deck(os.path.join(work, "edges.pptx"), [
+        {"shapes": [title(2, "Touch"),
+                    textbox(4, "TextBox 3", ["Upper"], (457200, 3000000, 3000000, 600000)),
+                    textbox(5, "TextBox 4", ["Lower"], (457200, 3600000, 3000000, 600000))]},
+        {"shapes": [title(2, "Thick"), thick,
+                    textbox(5, "TextBox 4", ["Under"], (457200, 3150000, 3000000, 600000))]},
+        {"shapes": [title(2, "Thin"), thick.replace('<a:ln w="254000"/>',
+                                                    '<a:ln w="254000"><a:noFill/></a:ln>'),
+                    textbox(5, "TextBox 4", ["Under"], (457200, 3150000, 3000000, 600000))]},
+        {"shapes": [title(2, "Hidden"),
+                    textbox(4, "TextBox 3", ["A"], (457200, 3000000, 3000000, 600000)),
+                    textbox(5, "TextBox 4", ["Gone"], (457200, 3100000, 3000000, 600000)).replace(
+                        'name="TextBox 4"', 'name="TextBox 4" hidden="1"'),
+                    textbox(6, "TextBox 5", ["B"], (457200, 4500000, 3000000, 600000))]},
+        {"shapes": [title(2, "Empty"),
+                    textbox(4, "TextBox 3", ["A"], (457200, 4500000, 3000000, 600000)),
+                    content(3, []),
+                    textbox(6, "TextBox 5", ["B"], (457200, 2000000, 3000000, 600000))]},
+        {"shapes": [title(2, "Arrow"),
+                    line(4, (457200, 3000000, 3000000, 0)).replace(
+                        "</p:spPr>", '<a:ln w="50800"><a:tailEnd type="triangle"/></a:ln></p:spPr>'),
+                    textbox(5, "TextBox 4", ["Near"], (457200, 3120000, 3000000, 600000))]},
+        {"shapes": [title(2, "Grouped"),
+                    group(6, [line(7, (0, 0, 6000000, 0)).replace(
+                        "</p:spPr>", '<a:ln w="254000"/></p:spPr>')], (457200, 3000000, 3000000, 1)),
+                    textbox(5, "TextBox 4", ["Under"], (457200, 3150000, 3000000, 600000))]},
+        {"shapes": [title(2, "Unplaced"),
+                    textbox(4, "TextBox 3", ["A"], (457200, 4500000, 3000000, 600000)),
+                    "<p:sp>%s<p:spPr/>%s</p:sp>" % (nv("sp", 7, "TextBox 6"), body(["Nowhere"])),
+                    textbox(6, "TextBox 5", ["B"], (457200, 2000000, 3000000, 600000))]},
+        {"shapes": [title(2, "Twice"),
+                    textbox(5, "TextBox 4", ["A"], (457200, 4500000, 3000000, 600000)),
+                    group(8, [textbox(5, "TextBox 4", ["Inner"], (0, 0, 100000, 100000))],
+                          (7000000, 5500000, 200000, 200000), descr="A group"),
+                    textbox(6, "TextBox 5", ["B"], (457200, 2000000, 3000000, 600000))]}])
+    ed = pptxparse.read(edges)
+    problems = []
+    swaps = {rem.slide_key("edges", ed.slides[n]): ids for n, ids in (
+        (0, ["5", "4"]), (1, ["5", "4"]), (2, ["5", "4"]), (3, ["6", "4"]), (4, ["6", "4"]),
+        (5, ["5", "4"]), (6, ["5", "6"]), (7, ["6", "4"]), (8, ["6", "5"]))}
+    counts = rem.remediate(edges, os.path.join(work, "out", "edges.pptx"), orders=swaps,
+                           problems=problems, deck="edges")
+    refused = [k for k, _why in problems]
+    yield "boxes that touch overlap, and so does a thick line's outline; one with none doesn't", \
+        rem.slide_key("edges", ed.slides[0]) in refused \
+        and rem.slide_key("edges", ed.slides[1]) in refused \
+        and rem.slide_key("edges", ed.slides[2]) not in refused \
+        and ed.slides[1].shapes[1].stroke == 254000 and ed.slides[2].shapes[1].stroke == 0, \
+        (counts, problems)
+    yield "a hidden shape and an empty placeholder draw nothing, and overlap nothing", \
+        rem.slide_key("edges", ed.slides[3]) not in refused \
+        and rem.slide_key("edges", ed.slides[4]) not in refused and counts["orders"] == 3, \
+        (counts, problems)
+    yield "a shape with no box overlaps everything, and an id a group's piece repeats can't " \
+        "be named", rem.slide_key("edges", ed.slides[7]) in refused \
+        and "more than one shape" in dict(problems).get(rem.slide_key("edges", ed.slides[8]), ""), \
+        problems
+    yield "a line's arrowhead reaches past its outline, and a group's line past the group", \
+        rem.slide_key("edges", ed.slides[5]) in refused \
+        and rem.slide_key("edges", ed.slides[6]) in refused \
+        and ed.slides[5].shapes[1].stroke == 152400 and ed.slides[6].shapes[1].stroke == 254000, \
+        (refused, [s.stroke for s in ed.slides[6].shapes])
+    # Two shapes with one id can't be named; the row says so.
+    twin = deck(os.path.join(work, "twin.pptx"), [
+        {"shapes": [pic(0, "rId2", (457200, 4000000, 900000, 900000), "Low"),
+                    pic(0, "rId3", (457200, 1600200, 900000, 900000), "High"), title(2, "Twins")],
+         "images": {"rId2": RED, "rId3": GREEN}}])
+    t = pptxparse.read(twin)
+    kids = pptxorder.tree(read_part(twin, "ppt/slides/slide1.xml"), t.slides[0])
+    ids, note = pptxorder.draft(kids, pptxcheck.read_shapes(t.slides[0], t.width, t.height))
+    problems = []
+    rem.remediate(twin, os.path.join(work, "out", "twin.pptx"),
+                  orders={rem.slide_key("twin", t.slides[0]): ["2", "0"]}, problems=problems,
+                  deck="twin")
+    yield "shapes sharing an id get no draft, and an order naming them isn't written", \
+        ids is None and "share the id" in note and problems \
+        and "more than one shape" in problems[0][1], (ids, note, problems)
+    # The sidecar: ids by spaces, commas, or semicolons; anything else isn't
+    # an order, and is said not to be.
+    sidecar = os.path.join(work, "reading-order.csv")
+    with open(sidecar, "w", encoding="utf-8", newline="") as fh:
+        csv.writer(fh).writerows([deckrun.ORDER_COLUMNS, ["d/slide-256", "2, 4;5  6"],
+                                  ["d/slide-257", ""], ["d/slide-258", "Title 1, TextBox 3"]])
+    bad = []
+    read = rem.order_rows(sidecar, bad)
+    yield "reading-order rows: ids however separated, a blank kept, names refused and said", \
+        read == {"d/slide-256": ["2", "4", "5", "6"], "d/slide-257": [], "d/slide-258": []} \
+        and bad == [("d/slide-258", "Title")], (read, bad)
+    # A run with the rows adopted: written, reported no more, a stale one named.
+    rows[key[2]][1] = "2 4"                     # the title over the picture: refused
+    with open(paths["reading_order"], "w", encoding="utf-8", newline="") as fh:
+        csv.writer(fh).writerows([deckrun.ORDER_COLUMNS] + [r for r in rows.values()]
+                                 + [["order/slide-999", "2 4"]])
+    target = type("Target", (), {"format": "source", "name": "fixed",
+                                 "output_dir": os.path.join(folder, "fixed")})()
+    reports["output_check"] = os.path.join(folder, "output-check.csv")
+    said = []
+    code = deckrun.run(folder, ["order.pptx"], [target], paths, reports, say=said.append)
+    left = [r for r in rows_of(reports["output_check"]) if r[1] == "pptx-reading-order"]
+    yield "adopted rows are written, the report goes, and only the slide that can't move is left", \
+        code == 0 and not os.path.exists(reports["reading_order_new"]) \
+        and "fixed: 5 slide(s) put in the reading order reading-order.csv gives." in said \
+        and [r[0] for r in left] == ["slide 3"] and any(
+            "the reading order for %s isn't written: 4 and 2 overlap" % key[2] in line
+            for line in said), (said[-6:], left)
+    yield "a row naming a slide no deck has is named", \
+        any("1 row(s) of reading-order.csv match no slide" in line for line in said), said
 
 
 # ---------------------------------------------------------------------------
@@ -1176,6 +1465,9 @@ def case_convert(work):
         and by_source["messy.pptx slide 3"][8] == "", (merged, tables)
     yield "each untitled slide gets a row", [r[0] for r in titles] == [
         "messy/slide-256", "messy/slide-257"], titles
+    orders = rows_of(os.path.join(folder, "reading-order-new.csv"))
+    yield "a slide read out of its layout's order gets a row with an order drafted", \
+        [r[:2] for r in orders] == [["messy/slide-259", "2 4"]] and orders[0][5] == "TI", orders
     # Decide everything, adopting the reports' rows as a person would.
     with open(os.path.join(folder, "image-alt.csv"), "w", encoding="utf-8", newline="") as fh:
         writer = csv.writer(fh)
@@ -1192,6 +1484,8 @@ def case_convert(work):
     with open(os.path.join(folder, "slide-titles.csv"), "w", encoding="utf-8", newline="") as fh:
         csv.writer(fh).writerows([deckrun.TITLE_COLUMNS] + [[r[0], "Slide %d" % i] + r[2:]
                                                             for i, r in enumerate(titles, 1)])
+    with open(os.path.join(folder, "reading-order.csv"), "w", encoding="utf-8", newline="") as fh:
+        csv.writer(fh).writerows([deckrun.ORDER_COLUMNS] + orders)
     with open(os.path.join(folder, "project.yaml"), "w") as fh:
         fh.write("project:\n  language: en-US\n")
     third = convert(folder)
@@ -1199,18 +1493,21 @@ def case_convert(work):
     left = sorted({r[1] for r in found})
     yield "with every decision made, the reports are gone", \
         third.returncode == 0 and not any(os.path.exists(os.path.join(folder, n)) for n in (
-            "image-alt-missing.csv", "table-headers-new.csv", "slide-titles-new.csv")), \
-        third.stderr[-800:]
+            "image-alt-missing.csv", "table-headers-new.csv", "slide-titles-new.csv",
+            "reading-order-new.csv")), third.stderr[-800:]
     decided = {"pptx-slide-no-title", "pptx-object-no-alt", "pptx-table-no-header",
                "pptx-alt-placeholder", "pptx-alt-is-file-name", "pptx-no-language",
-               "pptx-no-core-title", "pptx-shape-no-alt", "pptx-alt-auto-generated"}
+               "pptx-no-core-title", "pptx-shape-no-alt", "pptx-alt-auto-generated",
+               "pptx-reading-order"}
     yield "and the copies' check finds nothing that was decided, but alt text kept as it was", \
         not decided & set(left) and "pptx-alt-too-long" in left, left
     copy = pptxparse.read(os.path.join(folder, "remediated", "messy.pptx"))
-    yield "the copy has the titles, the language, and the title in its properties", \
+    yield "the copy has the titles, the language, the title in its properties, and the order", \
         [s.title for s in copy.slides][:2] == ["Slide 1", "Slide 2"] \
-        and copy.default_language == "en-US" and copy.core_title == "Slide 1", \
-        ([s.title for s in copy.slides][:2], copy.default_language, copy.core_title)
+        and copy.default_language == "en-US" and copy.core_title == "Slide 1" \
+        and [s.id for s in copy.slides[3].shapes] == ["2", "4"], \
+        ([s.title for s in copy.slides][:2], copy.default_language, copy.core_title,
+         [s.id for s in copy.slides[3].shapes])
     yield "the table's row is used, and a drafted row nobody reviewed is said to be", \
         "drafted by TextbookImprover or a model and not yet reviewed" in third.stderr \
         and copy.slides[2].shapes[1].table.first_row, third.stderr[-400:]
@@ -1316,19 +1613,27 @@ def case_folders(work):
     sidecar = os.path.join(work, "titles.csv")
     with open(sidecar, "w", encoding="utf-8", newline="") as fh:
         csv.writer(fh).writerows([["Slide", "Title"], ["messy/slide-256", "Opening"]])
+    order = os.path.join(work, "order.csv")
+    with open(order, "w", encoding="utf-8", newline="") as fh:
+        csv.writer(fh).writerows([["messy/slide-259", "2 4"], ["messy/slide-260", "6 4 4"]])
     result = subprocess.run(["python3", os.path.join(ROOT, "util", "remediate.py"), messy,
-                             "--slide-titles", sidecar, "--out", os.path.join(work, "util-out")],
+                             "--slide-titles", sidecar, "--reading-order", order,
+                             "--out", os.path.join(work, "util-out")],
                             capture_output=True, text=True)
     copy = pptxparse.read(os.path.join(work, "util-out", "messy.pptx"))
-    yield "remediate.py writes a deck's decisions too", \
+    yield "remediate.py writes a deck's decisions too, the reading order among them", \
         result.returncode == 0 and copy.slides[0].title == "Opening" \
-        and "1 title(s) added above their slides" in result.stderr, result.stderr[-300:]
+        and [s.id for s in copy.slides[3].shapes] == ["2", "4"] \
+        and "1 title(s) added above their slides, 1 slide(s) put in the reading order given" \
+        in result.stderr and "the reading order for messy/slide-260 isn't written: it names 4 " \
+        "twice" in result.stderr, result.stderr[-500:]
 
 
 CASES = [("reading a deck", case_parse), ("the checks", case_check),
          ("the copy", case_remediate), ("the copy, more", case_remediate_more),
          ("the sidecars", case_sidecars), ("what a review found", case_edges),
          ("what PowerPoint made of Pandoc's decks", case_powerpoint),
+         ("the reading order", case_order),
          ("convert.py on decks", case_convert),
          ("folders, archives, and tools", case_folders)]
 

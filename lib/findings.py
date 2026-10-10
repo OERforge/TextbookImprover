@@ -142,7 +142,7 @@ CHECKS = OrderedDict([
                            "WCAG 2.0 SC 1.3.1 (A)", "source")),
     ("pptx-reading-order", ("a slide whose shapes are read in a different order from how they "
                             "sit, top to bottom and left to right (Check Reading Order)",
-                            "warning", "WCAG 2.0 SC 1.3.2 (A)", "manual")),
+                            "warning", "WCAG 2.0 SC 1.3.2 (A)", "sidecar")),
     ("pptx-media-no-captions", ("audio or video, which needs captions (Missing Audio or Video "
                                 "Subtitles)", "warning", "WCAG 2.0 SC 1.2.2 (A)", "manual")),
     ("pptx-duplicate-title", ("slides with the same title (Duplicate Slide Title)", "note",

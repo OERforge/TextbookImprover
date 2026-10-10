@@ -16,6 +16,9 @@ docxremediate.py does for Word:
 - a title for a slide that has none, placed above the slide, where it's
   read and not seen, as PowerPoint's own Add Hidden Slide Title does; an
   empty title placeholder takes the text and moves above the slide;
+- a slide's reading order, the shapes at the top of its tree put in the
+  order given, unless that would draw two that overlap the other way
+  round (pptxorder.py);
 - the language, on text that declares none, when the project declares one;
 - the title in the file's core properties, when they have none.
 
@@ -55,6 +58,7 @@ import tempfile
 import zipfile
 from collections import Counter
 
+import pptxorder
 import pptxparse
 import sidecars
 
@@ -170,6 +174,31 @@ def title_rows(path):
         if title:
             found[row[0]] = title
     return found
+
+
+def order_rows(path, bad=None):
+    """{slide key: [shape ids], or [] to leave the slide's order as it
+    is} from a reading-order sidecar. An order that isn't a list of ids
+    (bad, a list, is told the key and what isn't an id) leaves its slide
+    alone, as a blank one does; either is a decision, and isn't reported
+    again."""
+    found = {}
+    for row in sidecar_rows(path):
+        try:
+            found[row[0]] = pptxorder.parse_order(row[1])
+        except ValueError as exc:
+            found[row[0]] = []
+            if bad is not None:
+                bad.append((row[0], str(exc)))
+    return found
+
+
+def slide_orders(orders, deck):
+    """One deck's orders, by its slides' ids, as pptxcheck.check() takes
+    them."""
+    prefix = deck + "/slide-"
+    return {key[len(prefix):]: ids for key, ids in orders.items()
+            if key.startswith(prefix) and ids}
 
 
 def decision(alts, deck, slide, shape):
@@ -514,39 +543,39 @@ def repair_part(xml):
 # --------------------------------------------------------------------------
 
 def remediate(source, destination, alts=None, tables=None, titles=None, language=None,
-              core_title=True, deck=None):
+              core_title=True, deck=None, orders=None, problems=None):
     """Write source's decisions into destination; counts of what was
-    written. alts, tables, titles as alt_rows(), header_rows(), and
-    title_rows() read them; deck, the name keys use (deck_name()). The
-    file's properties get core_title as their title when they have none,
-    or, when it's True, the first slide's title, the sidecar's if the
-    slide has none of its own."""
-    alts, tables, titles = alts or {}, tables or {}, titles or {}
+    written. alts, tables, titles, orders as alt_rows(), header_rows(),
+    title_rows(), and order_rows() read them; deck, the name keys use
+    (deck_name()). The file's properties get core_title as their title
+    when they have none, or, when it's True, the first slide's title, the
+    sidecar's if the slide has none of its own. problems, a list, is told
+    each order not written, by its slide's key, and why."""
+    alts, tables, titles, orders = alts or {}, tables or {}, titles or {}, orders or {}
     deck = deck or deck_name(source)
     parsed = pptxparse.read(source)
     if core_title is True:
         first = parsed.slides[0] if parsed.slides else None
         core_title = first and (first.title or titles.get(slide_key(deck, first)))
     counts = {"described": 0, "decorative": 0, "header_rows": 0, "header_columns": 0,
-              "titles": 0, "language": 0, "core_title": 0, "repaired": 0, "skipped": 0}
+              "titles": 0, "language": 0, "core_title": 0, "repaired": 0, "skipped": 0,
+              "orders": 0, "orders_refused": 0}
     with zipfile.ZipFile(source) as zin:
         infos = zin.infolist()
         parts = {info.filename: zin.read(info.filename) for info in infos}
-    texts = {}
+    texts, encodings = {}, {}
 
     def text_of(part):
+        """A part's XML as text, UTF-8 or UTF-16 as OPC allows, written
+        back as it was found."""
         if part not in texts:
-            texts[part] = parts[part].decode("utf-8")
+            texts[part], encodings[part] = pptxparse.part_text(parts[part])
         return texts[part]
 
     # What PowerPoint can't read as written is put right first, so the
     # decisions go into XML it reads.
     for part in sorted({part for part, _problem in parsed.malformed}):
-        try:
-            xml, removed, declared = repair_part(text_of(part))
-        except UnicodeDecodeError:  # a part in UTF-16, which OPC allows
-            texts.pop(part, None)
-            continue
+        xml, removed, declared = repair_part(text_of(part))
         if removed or declared:
             texts[part] = xml
             counts["repaired"] += removed + len(declared)
@@ -584,6 +613,22 @@ def remediate(source, destination, alts=None, tables=None, titles=None, language
                         texts[part] = xml
                         counts["header_rows"] += headers in ("first-row", "both")
                         counts["header_columns"] += headers in ("first-column", "both")
+        # The reading order, before a title is added first in the tree: the
+        # shapes the order names take their places in it, unless that would
+        # draw two that overlap the other way round.
+        ids = orders.get(slide_key(deck, slide)) if slide is not None else None
+        if ids:
+            xml = text_of(part)
+            kids = pptxorder.tree(xml, slide)
+            arrangement, why = pptxorder.arrange(kids, ids) if kids else (
+                None, "the slide has no shapes to put in order")
+            if why:
+                counts["orders_refused"] += 1
+                if problems is not None:
+                    problems.append((slide_key(deck, slide), why))
+            elif arrangement != list(range(len(kids))):
+                texts[part] = pptxorder.rewrite(xml, kids, arrangement)
+                counts["orders"] += 1
         if slide is not None and not slide.title:
             title = titles.get(slide_key(deck, slide))
             if title:
@@ -615,7 +660,8 @@ def remediate(source, destination, alts=None, tables=None, titles=None, language
             texts["docProps/core.xml"] = xml
             counts["core_title"] += 1
     for part, xml in texts.items():
-        parts[part] = xml.encode("utf-8")
+        if xml != pptxparse.part_text(parts[part])[0]:
+            parts[part] = pptxparse.encode_part(xml, encodings[part])
     folder = os.path.dirname(os.path.abspath(destination))
     os.makedirs(folder, exist_ok=True)
     fd, temp = tempfile.mkstemp(suffix=".pptx", dir=folder)

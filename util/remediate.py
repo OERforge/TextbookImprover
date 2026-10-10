@@ -11,7 +11,8 @@ sidecars written back into it, the rest of it left as it was
         --links bare-links.csv --language en --out remediated
 
     remediate.py *.pptx --alt image-alt.csv --table-headers table-headers.csv \\
-        --slide-titles slide-titles.csv --language en --out remediated
+        --slide-titles slide-titles.csv --reading-order reading-order.csv \\
+        --language en --out remediated
 
 convert.py does the same for a target with format: source. Tables get
 only what the sidecar declares, unless --include-guesses (Word only); a
@@ -51,6 +52,7 @@ def main(argv=None):
     ap.add_argument("--links", help="the bare-links sidecar")
     ap.add_argument("--table-headers", help="the table-headers sidecar, for a deck's tables")
     ap.add_argument("--slide-titles", help="the slide-titles sidecar, for a deck's slides")
+    ap.add_argument("--reading-order", help="the reading-order sidecar, for a deck's slides")
     ap.add_argument("--compat", action="store_true",
                     help="set compatibility mode 15, which Word's Accessibility "
                          "Checker needs according to guides for Word")
@@ -74,6 +76,11 @@ def main(argv=None):
     deck_alts, deck_tables = pptxremediate.alt_rows(args.alt), pptxremediate.header_rows(
         args.table_headers)
     slide_titles = pptxremediate.title_rows(args.slide_titles)
+    bad = []
+    slide_orders = pptxremediate.order_rows(args.reading_order, bad)
+    for key, token in bad:
+        print(f"remediate: {args.reading_order}: the order for {key} isn't a list of shape ids "
+              f"({token!r} isn't one); its slide is left as it is", file=sys.stderr)
     os.makedirs(args.out, exist_ok=True)
     totals = {}
     failed = 0
@@ -95,8 +102,13 @@ def main(argv=None):
         elif ext.lower() == ".md":
             counts = mdremediate.remediate(path, out, page_alts, links, [], args.language)
         elif ext.lower() == ".pptx":
+            problems = []
             counts = pptxremediate.remediate(path, out, deck_alts, deck_tables, slide_titles,
-                                             args.language)
+                                             args.language, orders=slide_orders,
+                                             problems=problems)
+            for key, why in problems:
+                print(f"remediate: the reading order for {key} isn't written: {why}",
+                      file=sys.stderr)
             try:                # read back, as a run reads its copies back
                 pptxparse.read(out)
             except Exception as exc:
@@ -116,10 +128,10 @@ def main(argv=None):
              totals.get("decorative", 0),
              totals.get("links", 0), totals.get("compat", 0)), file=sys.stderr)
     if any(p.lower().endswith(".pptx") for p in args.files):
-        print("remediate: slides: %d title(s) added above their slides, %d deck(s) given "
-              "the language as their default, %d given a title in the file's properties; "
-              "%d thing(s) PowerPoint couldn't read put right."
-              % (totals.get("titles", 0), totals.get("language", 0),
+        print("remediate: slides: %d title(s) added above their slides, %d slide(s) put in "
+              "the reading order given, %d deck(s) given the language as their default, %d given "
+              "a title in the file's properties; %d thing(s) PowerPoint couldn't read put right."
+              % (totals.get("titles", 0), totals.get("orders", 0), totals.get("language", 0),
                  totals.get("core_title", 0), totals.get("repaired", 0)), file=sys.stderr)
     return 1 if failed else 0
 

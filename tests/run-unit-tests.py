@@ -493,10 +493,10 @@ def check_word_equation_text():
 
 
 def check_equation_bars():
-    """A bar written as an upper limit: Office's overbar in a Word file,
-    and in a deck still a limit, a macron in place of an en dash. A limit
-    inside another's base is repaired with it, and a limit of any other
-    character is left."""
+    """A bar written as an upper limit: an accent of the macron in a Word
+    file, and in a deck still a limit, a macron in place of an en dash. A
+    limit inside another's base is repaired with it, and a limit of any
+    other character is left."""
     import docxremediate
 
     def limit(base, char, props=""):
@@ -507,7 +507,7 @@ def check_equation_bars():
         return "<m:r><m:t>%s</m:t></m:r>" % text
 
     def bar(base):
-        return '<m:bar><m:barPr><m:pos m:val="top" /></m:barPr><m:e>%s</m:e></m:bar>' % base
+        return '<m:acc><m:accPr><m:chr m:val="\u00af" /></m:accPr><m:e>%s</m:e></m:acc>' % base
 
     x, y = run("x"), run("y")
     one = ("<m:oMath>" + limit(x, "¯", "<m:limUppPr><m:ctrlPr /></m:limUppPr>") + run("–")
@@ -521,8 +521,8 @@ def check_equation_bars():
     deck_nested, deck_nested_counts = docxremediate.remediate_equations(nested, macron_bars=True)
     kept, kept_counts = docxremediate.remediate_equations(macron, macron_bars=True)
     return [
-        ("in a Word file, a macron's limit and an en dash's are each Office's overbar, the "
-         "en dash between them a minus, and an arrow's limit left",
+        ("in a Word file, a macron's limit and an en dash's are each an accent of the "
+         "macron, the en dash between them a minus, and an arrow's limit left",
          lambda: word == "<m:oMath>" + bar(x) + run("−") + bar(y) + run("+")
          + limit(x, "→") + "</m:oMath>"
          and word_counts == {"equations_repaired": 1, "equation_characters": 3}),
@@ -541,6 +541,66 @@ def check_equation_bars():
         ("a deck's bar that's already a macron is no repair at all",
          lambda: kept == macron and kept_counts == {"equations_repaired": 0,
                                                     "equation_characters": 0}),
+    ]
+
+
+def check_bar_accents():
+    """Pandoc's \\bar, an accent of the overline, is the macron's in a
+    docx target's file, and reading a Word file the macron's is the
+    overline's again: only an accent's character, either way."""
+    import zipfile
+    import docxrepair
+    import docxtarget
+
+    def accent(char, props=""):
+        return ('<m:acc><m:accPr>%s<m:chr m:val="%s" /></m:accPr><m:e><m:r><m:t>x</m:t></m:r>'
+                '</m:e></m:acc>' % (props, char))
+    group = ('<m:groupChr><m:groupChrPr><m:chr m:val="%s" /></m:groupChrPr><m:e><m:r><m:t>x'
+             '</m:t></m:r></m:e></m:groupChr>')
+    bar = '<m:bar><m:barPr><m:pos m:val="top" /></m:barPr><m:e><m:r><m:t>x</m:t></m:r></m:e></m:bar>'
+    pandoc = ("<m:oMath>" + accent("\u203e") + accent("\u0302") + group % "\u203e" + bar
+              + accent("\u203e", "<m:ctrlPr />") + "</m:oMath>")
+    written, n_written = docxtarget.bar_accents(pandoc)
+    read, n_read = docxrepair.bar_accents(written)
+    others = ("<m:oMath>" + accent("&#175;") + accent("&#xAF;") + group % "\u00af"
+              + accent("\u0304") + "</m:oMath>")
+    others_read, n_others = docxrepair.bar_accents(others)
+    # A conversion's copy of a Word file: the body, the footnotes, and the
+    # endnotes read so, and a header, which Pandoc doesn't read, as it was.
+    folder = tempfile.mkdtemp()
+    source, copy = os.path.join(folder, "notes.docx"), os.path.join(folder, "copy.docx")
+    body = '<w:document><w:body><w:p>%s</w:p></w:body></w:document>' % accent("\u00af")
+    note = '<w:footnotes><w:footnote w:id="1"><w:p>%s</w:p></w:footnote></w:footnotes>' % accent("\u00af")
+    endnote = '<w:endnotes><w:endnote w:id="1"><w:p>%s</w:p></w:endnote></w:endnotes>' % accent("\u00af")
+    header = '<w:hdr><w:p>%s</w:p></w:hdr>' % accent("\u00af")
+    with zipfile.ZipFile(source, "w") as z:
+        z.writestr("word/document.xml", body)
+        z.writestr("word/footnotes.xml", note)
+        z.writestr("word/endnotes.xml", endnote)
+        z.writestr("word/header1.xml", header)
+    docxrepair.repaired_copy(source, copy)
+    with zipfile.ZipFile(copy) as z:
+        copied = {n: z.read(n).decode("utf-8") for n in z.namelist()}
+    shutil.rmtree(folder)
+    return [
+        ("the docx target gives Pandoc's two accents of the overline the macron, and leaves "
+         "the hat, a group character of the overline, and Office's overbar",
+         lambda: written == pandoc.replace(accent("\u203e"), accent("\u00af")).replace(
+             accent("\u203e", "<m:ctrlPr />"), accent("\u00af", "<m:ctrlPr />"))
+         and n_written == 2),
+        ("reading a Word file, each accent of the macron is the overline's again, so the "
+         "file reads as Pandoc wrote it",
+         lambda: read == pandoc and n_read == 2),
+        ("a macron written as a character reference is one too, a group character of the "
+         "macron isn't an accent, and the combining macron, which Pandoc reads as \\bar "
+         "already, is left",
+         lambda: others_read == others.replace(accent("&#175;"), accent("\u203e")).replace(
+             accent("&#xAF;"), accent("\u203e")) and n_others == 2),
+        ("a conversion's copy reads the body's, the footnotes', and the endnotes' so, and "
+         "leaves a header's, which Pandoc doesn't read",
+         lambda: all(accent("\u203e") in copied[n] for n in
+                     ("word/document.xml", "word/footnotes.xml", "word/endnotes.xml"))
+         and copied["word/header1.xml"] == header),
     ]
 
 
@@ -1214,6 +1274,7 @@ GROUPS = [
     ("repairing a .docx on the way in", check_docx_repair),
     ("normal text in a Word equation", check_word_equation_text),
     ("a bar in a Word equation and in a deck's", check_equation_bars),
+    ("Pandoc's bar accent, written and read", check_bar_accents),
     ("a bare link's replacement in a source copy", check_link_replacements),
     ("the archive's name", check_archive_name),
     ("the content prefix", check_content_prefix),

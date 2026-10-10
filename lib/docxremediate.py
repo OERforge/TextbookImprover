@@ -353,18 +353,21 @@ def remediate_captions(xml, applied, resolved):
 # (math.repair_equations), written into Word's own equations (OMML). Each
 # structure below is what the statistics textbook's equations hold; each
 # replacement is what Pandoc writes for the TeX the filter writes, so the
-# file reads back as the pages already read, except the bar.
+# file reads back as the pages already read; the bar, below, by way of
+# docxrepair.
 MATH_RUN = re.compile(r"(<m:r>)((?:(?!</m:r>).)*?)(<m:t(?:\s[^>]*)?>)([^<]*)(</m:t>)(</m:r>)", re.S)
 # A bar written as an upper limit: the base, and a macron or an en dash as
 # the limit. Pandoc writes \bar{x} as an accent whose character is an
-# overline (U+203E), for which Narrator said nothing in Word or PowerPoint.
-# Office's own overbar, which PowerPoint's Equation tab wrote for a bar
-# made there and Pandoc writes for \overline, Narrator read as "overbar"
-# and NVDA with MathCAT as "bar", in Word; Pandoc reads it back as
-# \overline{x}, where the pages have \bar{x}. In PowerPoint, NVDA read an
+# overline (U+203E), for which Narrator said nothing in Word or PowerPoint,
+# and which LibreOffice reads as an acute accent. An accent of the macron
+# (U+00AF) Narrator read as "cap X overbar" and NVDA with MathCAT as "X
+# bar", in Word, and LibreOffice reads and writes it as its own bar accent.
+# Pandoc's reader takes the macron for \overline, so reading a Word file
+# gives the accent the overline again first (docxrepair.bar_accents), and
+# the copy reads back as the pages have it. In PowerPoint, NVDA read an
 # equation's characters and none of its structures, so a deck's bar stays
 # a limit, with a macron, which NVDA read, in place of an en dash.
-BAR = '<m:bar><m:barPr><m:pos m:val="top" /></m:barPr><m:e>%s</m:e></m:bar>'
+BAR = '<m:acc><m:accPr><m:chr m:val="\u00af" /></m:accPr><m:e>%s</m:e></m:acc>'
 HAT = '<m:acc><m:accPr><m:chr m:val="\u0302" /></m:accPr><m:e>%s</m:e></m:acc>'
 SUB_SLASHED_O = re.compile(r"(<m:sub><m:r>(?:(?!</m:r>).)*?<m:t(?:\s[^>]*)?>)\u00d8(</m:t></m:r></m:sub>)", re.S)
 EQUATION_CHARACTERS = {"\u00b5": "\u03bc", "\u2206": "\u0394"}
@@ -427,9 +430,9 @@ def _upper_limits(eq):
 
 
 def _limit_bars(eq, macron=False):
-    """Each upper limit whose limit is a macron or an en dash, as Office's
-    overbar over its base; or, with macron, kept a limit, an en dash there
-    made a macron. A limit inside another's base is repaired with it.
+    """Each upper limit whose limit is a macron or an en dash, as an
+    accent of the macron over its base (BAR); or, with macron, kept a
+    limit, an en dash there made a macron. A limit inside another's base is repaired with it.
     Returns (eq, count)."""
     out, pos, count = [], 0, 0
     for start, base_start, base_end, end, char in _upper_limits(eq):
@@ -459,10 +462,13 @@ def equation_texs(parts, name):
     """The TeX Pandoc reads from each of a part's equations, in order: the
     same TeX the filter saw, which is what the keep sidecar names. One
     Pandoc run: a copy of the file whose body is the equations, one to a
-    paragraph."""
+    paragraph, each read as the conversion reads it (docxrepair's bar
+    accents)."""
     import json
     import subprocess
-    equations = EQUATION.findall(parts[name].decode("utf-8"))
+    import docxrepair
+    equations = [docxrepair.bar_accents(eq)[0]
+                 for eq in EQUATION.findall(parts[name].decode("utf-8"))]
     if not equations:
         return []
     document = parts["word/document.xml"].decode("utf-8")

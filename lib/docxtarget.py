@@ -17,7 +17,7 @@
 """What a docx target adds to the Word file Pandoc writes.
 
 Pandoc 3.11's writer marks a header row to repeat, writes an image's alt
-text as its description, and sets the language and the title. Four
+text as its description, and sets the language and the title. Five
 things it doesn't do, each of which Word's Accessibility Checker or a
 reader of the file notices:
 
@@ -36,6 +36,10 @@ reader of the file notices:
 - **Header columns.** A table whose first column heads its rows gets its
   First Column flag (tblLook), which is also what the table census reads
   when the file is read back as a source.
+- **A bar Narrator reads.** Pandoc writes \\bar as an accent whose
+  character is an overline (U+203E), which Narrator read as nothing in
+  Word and LibreOffice reads as an acute accent. The macron (U+00AF)
+  takes its place (bar_accents).
 
 The file is rewritten as text, part by part, so every part and byte this
 doesn't touch is copied through as Pandoc wrote it. Each rule matches
@@ -871,6 +875,23 @@ def single_alignment(xml):
     return xml, count
 
 
+# Pandoc writes \bar as an accent whose character is an overline (U+203E),
+# for which Narrator said nothing in Word, and which LibreOffice 24.2 reads
+# as an acute accent and draws as one. An accent of the macron (U+00AF)
+# Narrator read as "cap X overbar" and NVDA with MathCAT as "X bar", and
+# LibreOffice reads it as its bar accent and writes its own bar so. Reading
+# a Word file, docxrepair.bar_accents gives the accent the overline again,
+# so the file reads back as \bar. Office's overbar, which Pandoc writes
+# for \overline, isn't an accent, and is left.
+OVERLINE_ACCENT = re.compile(r'(<m:accPr>(?:(?!</m:accPr>).)*?<m:chr m:val=")\u203e(")', re.S)
+
+
+def bar_accents(xml):
+    """Each accent of the overline, Pandoc's \\bar, given the macron;
+    returns (xml, count)."""
+    return OVERLINE_ACCENT.subn("\\g<1>\u00af\\g<2>", xml)
+
+
 # What a page has that a Word file can't carry, known before writing.
 LOSSES = {
     "uncaptioned-figure": "a figure with no caption comes back as an image",
@@ -1233,8 +1254,8 @@ def page_title_text(doc):
 
 def finish(path, doc, keep=None):
     """Rewrite the .docx at path with what the page's AST says; returns a
-    dict of counts: tooltips, decorative, first_columns, and compat (1
-    when the mode was set). keep: the bookmark names links go to, when
+    dict of counts: tooltips, decorative, first_columns, bars, and compat
+    (1 when the mode was set). keep: the bookmark names links go to, when
     the others are to go (bookmarks: linked); None keeps them all."""
     if isinstance(doc, str):
         with open(doc, encoding="utf-8") as fh:
@@ -1247,7 +1268,7 @@ def finish(path, doc, keep=None):
     counts = {"compat": 0, "tooltips": 0, "decorative": 0, "first_columns": 0,
               "quotes": 0, "jaws_titles": 0, "ids": 0, "captions_kept": 0,
               "code_lines": 0, "code_languages": 0, "bookmarks_removed": 0,
-              "alignments": 0}
+              "alignments": 0, "bars": 0}
     with zipfile.ZipFile(path) as z:
         names = z.namelist()
         parts = {n: z.read(n) for n in names}
@@ -1282,6 +1303,8 @@ def finish(path, doc, keep=None):
         counts["captions_kept"] += n
         xml, n = single_alignment(xml)
         counts["alignments"] += n
+        xml, n = bar_accents(xml)
+        counts["bars"] += n
         if keep is not None:
             xml, n = prune_bookmarks(xml, keep)
             counts["bookmarks_removed"] += n

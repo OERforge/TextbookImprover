@@ -3495,7 +3495,9 @@ def render_markdown(target, pages, base, work, project, env, losses=None):
             f"decorative image(s) marked, {added['first_columns']} header "
             "column(s) flagged"
             + (f", {added['bookmarks_removed']} bookmark(s) no link goes to removed"
-               if added.get("bookmarks_removed") else "") + ".")
+               if added.get("bookmarks_removed") else "")
+            + (f", {added['bars']} bar accent(s) given the macron, which Narrator reads"
+               if added.get("bars") else "") + ".")
         return written
     copy_media(base, target.output_dir, pages, safe=False)
     return written

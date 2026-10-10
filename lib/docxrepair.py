@@ -16,6 +16,15 @@ id, and the links land. A bookmark before a table is left where it is;
 the table-headers pre-pass reads those and the filter restores them as
 anchors ahead of the table, which a split table keeps.
 
+AN ACCENT OF THE MACRON
+
+A bar over a letter written as an accent whose character is the macron
+(U+00AF): what the docx target and a remediated copy write for one, and
+what LibreOffice writes for its own bar accent. Pandoc's reader takes the
+macron for \\overline, by texmath's table of accents, so it's given the
+overline (U+203E) Pandoc writes for \\bar, and the accent reads back as
+the accent it is.
+
 Everything else in the package is copied byte for byte.
 
 Copyright 2026 Robert Szarka
@@ -1170,10 +1179,21 @@ def drop_jaws_titles(xml):
     return xml
 
 
+# An accent's character, the macron, written or as a character reference.
+MACRON_ACCENT = re.compile(r'(<m:accPr>(?:(?!</m:accPr>).)*?<m:chr m:val=")'
+                           r'(?:\u00af|&#175;|&#x0*[aA][fF];)(")', re.S)
+
+
+def bar_accents(xml):
+    """Each accent whose character is the macron given the overline,
+    which Pandoc reads as \\bar. Returns (xml, count)."""
+    return MACRON_ACCENT.subn("\\g<1>\u203e\\g<2>", xml)
+
+
 def repaired_copy(source, destination, headings="keep", deletions="accept", notes=None):
     """Write a copy of the .docx with the repairs applied to
-    word/document.xml and word/footnotes.xml and every other part byte
-    for byte, after the book's word.headings and word.tracked_deletions
+    word/document.xml and word/footnotes.xml, the bar accents to
+    word/endnotes.xml too, and every other part byte for byte, after the book's word.headings and word.tracked_deletions
     (lib/wordrepairs.py). Returns how many bookmarks moved; a heading
     setting that can't apply to the file is appended to notes."""
     import wordrepairs
@@ -1202,9 +1222,15 @@ def repaired_copy(source, destination, headings="keep", deletions="accept", note
                                                 docxtarget.level_indents(numbering, blank=True))
                 text, _ = keep_unlinked_bookmarks(text)
                 text, _ = join_continuations(text, blank)
+                text, _ = bar_accents(text)
                 data = text.encode("utf-8")
-            elif info.filename == "word/footnotes.xml" and blank:
-                text, _ = join_continuations(data.decode("utf-8"), blank)
+            elif info.filename == "word/footnotes.xml":
+                text = data.decode("utf-8")
+                if blank:
+                    text, _ = join_continuations(text, blank)
+                text, _ = bar_accents(text)
                 data = text.encode("utf-8")
+            elif info.filename == "word/endnotes.xml":
+                data = bar_accents(data.decode("utf-8"))[0].encode("utf-8")
             zout.writestr(info, data)
     return moved

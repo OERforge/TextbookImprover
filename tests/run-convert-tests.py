@@ -2177,7 +2177,8 @@ def run_tool(cwd, args, util=False):
 # Word's own equations as the statistics textbook writes them: a bar as an
 # upper limit holding a macron, an en dash for a minus, the micro sign, a
 # slashed O for H's zero, a one-character y-hat, and the increment sign,
-# with an en dash inside normal text, which is text and stays.
+# with an en dash inside normal text, which is text and stays; and an
+# accent of the macron, as LibreOffice writes a bar, which reads as \bar.
 WORD_EQUATION = (
     '<m:oMath><m:sSub><m:e><m:r><m:t>\u00b5</m:t></m:r></m:e><m:sub><m:limUpp>'
     '<m:e><m:r><m:t>x</m:t></m:r></m:e><m:lim><m:r><m:rPr><m:sty m:val="p" /></m:rPr>'
@@ -2185,6 +2186,7 @@ WORD_EQUATION = (
     '<m:r><m:rPr><m:sty m:val="p" /></m:rPr><m:t>\u2013</m:t></m:r>'
     '<m:sSub><m:e><m:r><m:t>H</m:t></m:r></m:e><m:sub><m:r><m:t>\u00d8</m:t></m:r></m:sub></m:sSub>'
     '<m:r><m:t>\u0177=a</m:t></m:r>'
+    '<m:acc><m:accPr><m:chr m:val="\u00af" /></m:accPr><m:e><m:r><m:t>z</m:t></m:r></m:e></m:acc>'
     '<m:r><m:rPr><m:nor /></m:rPr><m:t>pages 1\u20135 %\u2206Q</m:t></m:r></m:oMath>')
 
 
@@ -2204,43 +2206,57 @@ def case_word_equations(work):
                               data.decode("utf-8"), count=1, flags=re.S).encode("utf-8")
             z.writestr(info, data)
 
+    sys.path.insert(0, os.path.join(ROOT, "lib"))
+    import docxrepair
+
+    def tex_of(path, as_pipeline=True):
+        # As a conversion reads a Word file, through docxrepair's copy, or
+        # as Pandoc alone does.
+        if as_pipeline:
+            copy = os.path.join(work, "read-" + os.path.basename(path))
+            docxrepair.repaired_copy(path, copy)
+            path = copy
+        back = subprocess.run(["pandoc", "-f", "docx", "-t", "json", path],
+                              capture_output=True, text=True)
+        tex = [n["c"][1] for n in walk_json(json.loads(back.stdout)) if n.get("t") == "Math"]
+        return tex[0] if tex else ""
+
     def build(setting):
         with open(os.path.join(work, "conversion.yaml"), "w") as fh:
             fh.write("targets:\n  source:\n    format: source\n" + setting)
         result = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
                                 cwd=work, capture_output=True, text=True,
                                 stdin=subprocess.DEVNULL)
-        back = subprocess.run(["pandoc", "-f", "docx", "-t", "json",
-                               os.path.join(work, "source", "eq.docx")],
-                              capture_output=True, text=True)
-        tex = [n["c"][1] for n in walk_json(json.loads(back.stdout)) if n.get("t") == "Math"]
-        return result, (tex[0] if tex else "")
+        return result, tex_of(os.path.join(work, "source", "eq.docx"))
     on_result, on = build("")
+    on_alone = tex_of(os.path.join(work, "source", "eq.docx"), as_pipeline=False)
     with zipfile.ZipFile(os.path.join(work, "source", "eq.docx")) as z:
         on_xml = z.read("word/document.xml").decode("utf-8")
+    # The keep sidecar names the equation by its Before in the report, the
+    # TeX the filter read; a second row names nothing.
+    with open(os.path.join(work, "math-repaired.csv"), encoding="utf-8", newline="") as fh:
+        before = next((row["Before"] for row in csv.DictReader(fh)
+                       if row["Kind"] == "equation"), "")
     off_result, off = build("    math:\n      repair_equations: false\n")
-    # The keep sidecar names the equation by the TeX Pandoc reads from the
-    # original, as the report shows it; a second row names nothing.
-    original = subprocess.run(["pandoc", "-f", "docx", "-t", "json",
-                               os.path.join(work, "eq.docx")], capture_output=True, text=True)
-    before = [n["c"][1] for n in walk_json(json.loads(original.stdout)) if n.get("t") == "Math"][0]
     with open(os.path.join(work, "math-keep.csv"), "w", encoding="utf-8", newline="") as fh:
         csv.writer(fh).writerows([["Kind", "Page", "Before"], ["equation", "eq", before],
                                   ["expression", "", "\u03b2 = 7"]])
     kept_result, kept = build("")
     kept_said = kept_result.stdout + kept_result.stderr
     return [
-        # As Pandoc reads it back: \mu for the Greek letter, - for the minus,
-        # and \overline for Office's overbar, which Narrator reads in Word
-        # where it said nothing for the accent Pandoc writes for \bar.
+        # As a conversion reads it back: \mu for the Greek letter, - for the
+        # minus, and \bar for the accent of the macron, which Narrator reads
+        # in Word where it said nothing for the overline Pandoc writes.
         ("the copy's equation reads back with a bar, mu, a minus, H sub 0, "
          "a hatted y, and Delta",
-         lambda: all(part in on for part in ("\\mu_{\\overline{x}} - H_{0}",
-                                             "\\hat{y}", "\u0394"))
+         lambda: all(part in on for part in ("\\mu_{\\bar{x}} - H_{0}",
+                                             "\\hat{y}", "\\bar{z}", "\u0394"))
          and not any(c in on for c in "\u00b5\u00d8\u0177\u2206")),
-        ("the bar is Office's overbar, the limit gone",
-         lambda: '<m:bar><m:barPr><m:pos m:val="top" /></m:barPr><m:e><m:r><m:t>x</m:t>'
-         in on_xml and "<m:limUpp>" not in on_xml and on_xml.count("<m:acc>") == 1),
+        ("the bar is an accent of the macron, the limit gone, which Pandoc alone reads as "
+         "\\overline",
+         lambda: '<m:acc><m:accPr><m:chr m:val="\u00af" /></m:accPr><m:e><m:r><m:t>x</m:t>'
+         in on_xml and "<m:limUpp>" not in on_xml and on_xml.count("<m:acc>") == 3
+         and "\\mu_{\\overline{x}}" in on_alone),
         ("an en dash in normal text stays an en dash",
          lambda: "1\u20135" in on),
         ("the run says how many equations it repaired, and how many characters: mu, the "
@@ -2249,9 +2265,10 @@ def case_word_equations(work):
          in on_result.stdout + on_result.stderr),
         ("with math.repair_equations off, the equation is as it was",
          lambda: "\u00b5" in off and "\\overset" in off),
-        ("an equation the keep sidecar names is as it was in the copy, and "
-         "the run says so",
-         lambda: kept == before and "1 equation(s) kept as they were" in kept_said),
+        ("an equation the keep sidecar names by the report's Before, its accent of "
+         "the macron read as \\bar, is as it was in the copy, and the run says so",
+         lambda: "\\bar{z}" in before and kept == tex_of(os.path.join(work, "eq.docx"))
+         and "\\overset" in kept and "1 equation(s) kept as they were" in kept_said),
         ("a row of the keep sidecar that keeps nothing is warned about",
          lambda: "1 row(s) of math-keep.csv kept nothing" in kept_said
          and "expression,,\u03b2 = 7" in kept_said),
@@ -2730,8 +2747,9 @@ def case_remediate_docx(work):
 
 def case_docx_target(work):
     """A docx target: Pandoc's Word file, then compatibility mode 15,
-    ScreenTips, Word's decorative marker, and the First Column flag; and
-    the file read back as a source gives the book back."""
+    ScreenTips, Word's decorative marker, the First Column flag, and a bar
+    Narrator reads; and the file read back as a source gives the book
+    back."""
     import zipfile as zf
     os.makedirs(os.path.join(work, "assets"))
     for name in ("chart.png", "rule.png"):
@@ -2749,10 +2767,12 @@ def case_docx_target(work):
                  "```{.python .numberLines startFrom=\"5\"}\ntotal = 0\nfor x in data:\n    total += x\n```\n\n"
                  "```js\nlet shown = true;\n```\n\n"
                  "```{.my-lang}\nno bookmark for this one\n```\n\n"
+                 "The mean $\\bar{x}$, the segment $\\overline{AB}$, and the estimate $\\hat{y}$.\n\n"
                  "## Foundations {#_foundations}\n\nSee [the foundations](#_foundations).\n\n"
                  "## Long {#an-identifier-well-past-the-forty-characters-word-allows}\n\n"
                  "Back to [the long one](#an-identifier-well-past-the-forty-characters-word-allows).\n\n"
-                 '[^1]: The [source](https://example.org/source "Where the data came from") explains it.\n')
+                 '[^1]: The [source](https://example.org/source "Where the data came from") explains it,'
+                 ' with its mean $\\bar{y}$.\n')
     with open(os.path.join(work, "two.html"), "w", encoding="utf-8") as fh:
         fh.write('<!DOCTYPE html><html lang="en"><head><title>Two</title></head><body><h1>Two</h1>'
                  "<table><caption>Costs by year</caption><thead><tr><th>Item</th><th>2024</th>"
@@ -2823,6 +2843,16 @@ def case_docx_target(work):
          lambda: "3 Word file(s)" in run.stderr and all(
              'w:name="compatibilityMode"' in part(n, "word/settings.xml")
              and 'w:val="15"' in part(n, "word/settings.xml") for n in ("one.docx", "two.docx"))),
+        ("a bar is an accent of the macron, which Narrator reads, where Pandoc wrote the "
+         "overline; the segment's overbar and the hat are as Pandoc wrote them",
+         lambda: one.count('<m:chr m:val="\u00af" />') == 2 and "\u203e" not in one
+         and '<m:bar><m:barPr><m:pos m:val="top" /></m:barPr>' in one
+         and '<m:chr m:val="\u0302" />' in one
+         and "2 bar accent(s) given the macron, which Narrator reads" in run.stderr),
+        ("read back as a source, the bar is \\bar again, in the text and in a note, and "
+         "the segment \\overline",
+         lambda: "\\bar{x}</annotation>" in one_back and "\\bar{y}</annotation>" in one_back
+         and "\\overline{AB}</annotation>" in one_back and "\\hat{y}</annotation>" in one_back),
         ("a link's title is its ScreenTip, in the body and in a footnote",
          lambda: 'w:tooltip="The data, as a CSV file"' in one
          and 'w:tooltip="Where the data came from"' in one),

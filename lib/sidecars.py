@@ -25,6 +25,8 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
+import re
+
 # Accepted spellings of the decorative marker, matched case-insensitively
 # after trimming. figures-and-tables.lua's DECORATIVE_MARKERS is the same
 # list; tests/run-unit-tests.py holds the two together.
@@ -34,3 +36,16 @@ DECORATIVE_MARKERS = ("[decorative]", "decorative")
 def is_decorative(value):
     """Whether a sidecar's alt text is the decorative marker."""
     return (value or "").strip().lower() in DECORATIVE_MARKERS
+
+
+# The schemes a bare link's Replacement can be an address in, as the
+# filter's BARE_SCHEMES: an address replaces the link's address and its
+# text, and anything else replaces only its text.
+ADDRESS_SCHEMES = ("http", "https", "ftp")
+
+
+def is_address(value):
+    """Whether a bare-links sidecar's Replacement is an address, as
+    figures-and-tables.lua's web_scheme tells: a scheme it names, then ://."""
+    match = re.match(r"([A-Za-z][A-Za-z0-9+.-]*)://", (value or "").strip())
+    return bool(match) and match.group(1).lower() in ADDRESS_SCHEMES

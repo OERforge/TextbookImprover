@@ -492,6 +492,41 @@ def check_word_equation_text():
     ]
 
 
+def check_link_replacements():
+    """A bare link's Replacement in a source target's copy, as the filter
+    reads it on the pages: an address replaces the link's address and its
+    text, and any other text its text alone. The copies had written text
+    as the address: an href or a relationship's Target of words."""
+    import docxremediate
+    import htmlremediate
+    import mdremediate
+    url, words, short = "https://example.org/data", "The [cars] data", "https://doi.org/10/x"
+    page = '<p><a href="%s">%s</a></p>' % (url, url)
+    html_words = htmlremediate.remediate_links(page, {url: (words, "")})[0]
+    html_short = htmlremediate.remediate_links(page, {url: (short, "")})[0]
+    xml = '<w:hyperlink r:id="rId9"><w:r><w:t>%s</w:t></w:r></w:hyperlink>' % url
+    rels = ('<Relationship Id="rId9" Type="x/hyperlink" Target="%s" TargetMode="External"/>'
+            % url)
+    word_words = docxremediate.replace_links(xml, rels, {url: words})
+    word_short = docxremediate.replace_links(xml, rels, {url: short})
+    doc = {"blocks": [{"t": "Para", "c": [{"t": "Link", "c": [
+        ["", [], []], [{"t": "Str", "c": url}], [url, ""]]}]}]}
+    md_words = mdremediate.remediate_links("See <%s>." % url, doc, {url: (words, "")})[0]
+    md_short = mdremediate.remediate_links("See <%s>." % url, doc, {url: (short, "")})[0]
+    return [
+        ("HTML: text replaces the link's text, an address its address and text",
+         lambda: html_words == '<p><a href="%s">The [cars] data</a></p>' % url
+         and html_short == '<p><a href="%s">%s</a></p>' % (short, short)),
+        ("Word: text replaces the hyperlink's text, an address its relationship's target too",
+         lambda: "<w:t>The [cars] data</w:t>" in word_words[0]
+         and 'Target="%s"' % url in word_words[1]
+         and 'Target="%s"' % short in word_short[1] and "<w:t>%s</w:t>" % short in word_short[0]),
+        ("Markdown: text replaces the link's text, its brackets escaped, an address both",
+         lambda: md_words == "See [The \\[cars\\] data](%s)." % url
+         and md_short == "See [%s](%s)." % (short, short)),
+    ]
+
+
 def check_manifest_names():
     """What a file name with a space does to a manifest."""
     return [
@@ -1028,6 +1063,7 @@ GROUPS = [
     ("manifest names", check_manifest_names),
     ("repairing a .docx on the way in", check_docx_repair),
     ("normal text in a Word equation", check_word_equation_text),
+    ("a bare link's replacement in a source copy", check_link_replacements),
     ("the archive's name", check_archive_name),
     ("the content prefix", check_content_prefix),
     ("the wrapper module's name", check_wrapper_title),

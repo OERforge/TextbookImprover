@@ -208,8 +208,8 @@ def remediate_images(page, alts):
 
 def remediate_links(page, links):
     """links: {address: (replacement, title)}. A bare link, its text its
-    own address, gets its title, and its replacement as both address and
-    text. Returns (page, counts)."""
+    own address, gets its title, and its replacement as its text, and as
+    its address too when the replacement is one. Returns (page, counts)."""
     counts = {"links": 0, "replaced": 0}
     if not links:
         return page, counts
@@ -224,7 +224,9 @@ def remediate_links(page, links):
             return m.group(0)
         replacement, title = links[address]
         if replacement:
-            attrs = attrs.replace(href.group(0), ' href="%s"' % htmllib.escape(replacement, quote=True))
+            if sidecars.is_address(replacement):
+                attrs = attrs.replace(href.group(0),
+                                      ' href="%s"' % htmllib.escape(replacement, quote=True))
             text = htmllib.escape(replacement, quote=False)
             counts["replaced"] += 1
         if title and not re.search(r"\stitle\s*=", attrs, re.I):

@@ -33,6 +33,8 @@ import subprocess
 from collections import Counter
 from urllib.parse import unquote
 
+import sidecars
+
 ESC = re.compile(r"\\([^A-Za-z0-9\s])")
 SPLIT = "<!-- TIQ-SPLIT -->"
 
@@ -194,11 +196,15 @@ def remediate_links(text, doc, links):
             counts["links_skipped"] += n
             continue
         replacement, title = links[url]
-        address = replacement or url
+        # An address replaces the link's address and its text; other text,
+        # its text alone.
+        address = replacement if sidecars.is_address(replacement) else url
+        shown = re.sub(r"([\\\[\]])", r"\\\1", replacement) if replacement and address == url \
+            else address
         for m in spots:
             kept = m.group(1)[1:-1] if m.group(1) else ""
             label = title or kept
-            new = "[%s](%s%s)" % (address, address,
+            new = "[%s](%s%s)" % (shown, address,
                                   ' "%s"' % label.replace('"', '\\"') if label else "")
             edits.append((m.start(), m.end(), new))
             counts["replaced"] += bool(replacement)

@@ -746,9 +746,9 @@ def equations_for(texs):
 
 def replace_links(xml, rels, replacements):
     """replacements: {address: replacement}. Each relationship to one gets
-    the replacement; each hyperlink using it whose text is the address
-    gets the replacement as its text, in its first run. Returns (xml,
-    rels, count)."""
+    the replacement when it's an address itself; each hyperlink using it
+    whose text is the address gets the replacement as its text, in its
+    first run. Returns (xml, rels, count)."""
     if not replacements:
         return xml, rels, 0
     changed = {}
@@ -757,8 +757,10 @@ def replace_links(xml, rels, replacements):
         target = html.unescape(m.group(2))
         if target in replacements and 'TargetMode="External"' in m.group(0):
             changed[m.group(1)] = (target, replacements[target])
-            return m.group(0).replace('Target="%s"' % m.group(2),
-                                      'Target="%s"' % html.escape(replacements[target], quote=True))
+            if sidecars.is_address(replacements[target]):
+                return m.group(0).replace(
+                    'Target="%s"' % m.group(2),
+                    'Target="%s"' % html.escape(replacements[target], quote=True))
         return m.group(0)
     rels = re.sub(r'<Relationship\b[^>]*?Id="([^"]+)"[^>]*?Target="([^"]*)"[^>]*/>', rel, rels)
     count = 0

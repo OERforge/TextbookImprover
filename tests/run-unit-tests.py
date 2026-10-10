@@ -512,6 +512,8 @@ def check_link_replacements():
     doc = {"blocks": [{"t": "Para", "c": [{"t": "Link", "c": [
         ["", [], []], [{"t": "Str", "c": url}], [url, ""]]}]}]}
     md_words = mdremediate.remediate_links("See <%s>." % url, doc, {url: (words, "")})[0]
+    md_marks = mdremediate.remediate_links("See <%s>." % url, doc,
+                                           {url: ("Smith's *Nature* `cars` paper", "")})[0]
     md_short = mdremediate.remediate_links("See <%s>." % url, doc, {url: (short, "")})[0]
     return [
         ("HTML: text replaces the link's text, an address its address and text",
@@ -521,8 +523,9 @@ def check_link_replacements():
          lambda: "<w:t>The [cars] data</w:t>" in word_words[0]
          and 'Target="%s"' % url in word_words[1]
          and 'Target="%s"' % short in word_short[1] and "<w:t>%s</w:t>" % short in word_short[0]),
-        ("Markdown: text replaces the link's text, its brackets escaped, an address both",
+        ("Markdown: text replaces the link's text, its markup escaped, an address both",
          lambda: md_words == "See [The \\[cars\\] data](%s)." % url
+         and md_marks == "See [Smith's \\*Nature\\* \\`cars\\` paper](%s)." % url
          and md_short == "See [%s](%s)." % (short, short)),
     ]
 

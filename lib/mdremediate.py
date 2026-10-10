@@ -199,8 +199,7 @@ def remediate_links(text, doc, links):
         # An address replaces the link's address and its text; other text,
         # its text alone.
         address = replacement if sidecars.is_address(replacement) else url
-        shown = re.sub(r"([\\\[\]])", r"\\\1", replacement) if replacement and address == url \
-            else address
+        shown = escape_inline(replacement) if replacement and address == url else address
         for m in spots:
             kept = m.group(1)[1:-1] if m.group(1) else ""
             label = title or kept

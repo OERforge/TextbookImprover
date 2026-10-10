@@ -47,6 +47,8 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
+import bisect
+import heapq
 import math
 import re
 from collections import Counter
@@ -65,8 +67,10 @@ CNVPR = re.compile(r"<p:cNvPr" + ATTRS + r"/?>")
 ID = re.compile(r"""\sid\s*=\s*(?:"([^"]*)"|'([^']*)')""")
 SHAPES = ("p:sp", "p:pic", "p:graphicFrame", "p:grpSp", "p:cxnSp", "p:contentPart")
 ALTERNATE = "mc:AlternateContent"
-# How many places a search for an order may try before giving up.
-BUDGET = 20000
+# How many shapes a draft puts in order at most: past that, a slide is a
+# drawing in loose pieces more than a page to read, and its order is the
+# author's to set.
+DRAFT_LIMIT = 200
 # How far past its box a shape counts as drawn, at least, in EMU: four
 # points, for an outline, an arrowhead, and the smoothing of edges, which
 # reach past the box; a wider outline counts at its own width. Measured: at
@@ -223,12 +227,52 @@ def overlap(a, b):
     return first.overlaps(second)
 
 
+def before(a, b):
+    """Whether parsed shape a comes before b as they're laid out, when
+    the two don't overlap: wholly above it, or beside it and wholly to its
+    left; None when neither comes before the other. A line has no height,
+    so two lines side by side are each "above" the other by their edges
+    alone; one starts above the other only if it starts higher too."""
+    if a.box.overlaps(b.box):
+        return None
+    if a.box.y + a.box.cy <= b.box.y and a.box.y < b.box.y:
+        return True
+    if b.box.y + b.box.cy <= a.box.y and b.box.y < a.box.y:
+        return False
+    if a.box.x + a.box.cx <= b.box.x and a.box.x < b.box.x:
+        return True
+    if b.box.x + b.box.cx <= a.box.x and b.box.x < a.box.x:
+        return False
+    return None
+
+
+def _ahead(shapes):
+    """For each of shapes, how many of the others come before it (before()),
+    and which come after it: (counts, lists), by position."""
+    counts, after = [0] * len(shapes), [[] for _ in shapes]
+    for i, a in enumerate(shapes):
+        for j, b in enumerate(shapes):
+            if i != j and before(a, b):
+                counts[j] += 1
+                after[i].append(j)
+    return counts, after
+
+
 def visual(shapes):
-    """Shapes in the order they're laid out: the title first, then top to
-    bottom (in bands a quarter of an inch tall, so a row of shapes that
-    don't quite line up is still a row), then left to right."""
-    return sorted(shapes, key=lambda s: (not s.is_title,
-                                         s.box.y // (pptxparse.EMU_PER_INCH // 4), s.box.x))
+    """Shapes, in the tree's order, in the order they're laid out: the
+    title first, then in turn a shape none of those left comes before
+    (wholly above it, or beside it and wholly to its left), the earliest
+    in the tree among them; where every shape left has one before it, as
+    a layout can go round in a circle, the one with the fewest."""
+    counts, after = _ahead(shapes)
+    left, out = set(range(len(shapes))), []
+    while left:
+        pick = min(left, key=lambda i: (not shapes[i].is_title, counts[i], i))
+        left.discard(pick)
+        out.append(shapes[pick])
+        for j in after[pick]:
+            counts[j] -= 1
+    return out
 
 
 def label(shape):
@@ -325,12 +369,40 @@ def order_of(kids, ids):
     return [kid.id for kid in kids if kid.movable and kid.id in wanted]
 
 
+def _fits(rest, start, end, lo, hi, first, then):
+    """Whether the shapes in rest, the tree's places of shapes to read,
+    can take the slots from start to end, one each: each in a slot from
+    lo to hi, and after every overlapping shape before it in the tree
+    (first, then: those before it and after it). Release times and
+    deadlines are tightened along the overlaps, and the earliest deadline
+    is taken first, which finds a way whenever there's one for slots of
+    equal length."""
+    order = sorted(rest)            # an overlap is always kept in the tree's order
+    release, due = {}, {}
+    for c in order:
+        release[c] = max([lo[c], start] + [release[a] + 1 for a in first[c] if a in rest])
+    for c in reversed(order):
+        due[c] = min([hi[c]] + [due[b] - 1 for b in then[c] if b in rest])
+        if due[c] < release[c]:
+            return False
+    waiting, ready, i = sorted(order, key=release.get), [], 0
+    for slot in range(start, end):
+        while i < len(waiting) and release[waiting[i]] <= slot:
+            heapq.heappush(ready, (due[waiting[i]], waiting[i]))
+            i += 1
+        if not ready or heapq.heappop(ready)[0] < slot:
+            return False
+    return True
+
+
 def draft(kids, read):
     """An order for a person to review: the shapes a screen reader reads
-    (read, parsed shapes) in the order they're laid out, as near to it as
-    the tree can come with every overlapping pair kept in its order.
-    (ids, note), or (None, note) when nothing can move or ids can't name
-    the shapes."""
+    (read, parsed shapes) in the order they're laid out (visual()), as
+    near to it as the tree can come with every overlapping pair kept in
+    its order. Slot by slot, the shape the layout puts first among those
+    that can go there, with the rest still able to go somewhere. (ids,
+    note), or (None, note) when no order nearer the layout keeps what's
+    drawn over what, or ids can't name the shapes."""
     index = {id(kid.shape): i for i, kid in enumerate(kids) if kid.shape is not None}
     unnamed = [s for s in read if id(s) not in index]
     if unnamed:
@@ -339,42 +411,60 @@ def draft(kids, read):
                           ", ".join(s.name or "a shape" for s in unnamed[:3]),
                           "two shapes share the id" if any(s.id for s in unnamed)
                           else "it has no id"))
-    reading = sorted(index[id(s)] for s in read)
-    rank = {index[id(s)]: n for n, s in enumerate(visual(read))}
-    preferred = sorted(reading, key=rank.get)
+    if len(read) > DRAFT_LIMIT:
+        return None, ("With %d shapes to read, no order is drafted; that's for the author, in "
+                      "PowerPoint's Reading Order pane." % len(read))
+    reading = sorted(index[id(s)] for s in read)        # the slots, in the tree
+    shape_at = {index[id(s)]: s for s in read}
+    count = len(reading)
     movable = [i for i, kid in enumerate(kids) if kid.movable]
-    fixed = [i for i in movable if i not in rank]
-    over = {(a, b): overlap(kids[a], kids[b]) for a in movable for b in movable if a != b}
-    # Which overlapping pairs the visual order would draw the other way
+    boxes = {}
+    for i in movable:
+        shape = kids[i].shape
+        boxes[i] = (envelope(shape) if shape is not None else None) if draws(shape) else False
+
+    def over(a, b):         # overlap(), each box worked out once
+        if boxes[a] is False or boxes[b] is False:
+            return False
+        return boxes[a] is None or boxes[b] is None or boxes[a].overlaps(boxes[b])
+    # A shape that isn't read stays where it is, so one it overlaps keeps
+    # to its side of it: the slots it can take run from lo to hi.
+    lo, hi = {c: 0 for c in reading}, {c: count - 1 for c in reading}
+    for f in movable:
+        if f in shape_at:
+            continue
+        cut = bisect.bisect_left(reading, f)
+        for c in reading:
+            if over(c, f):
+                if c < f:
+                    hi[c] = min(hi[c], cut - 1)
+                else:
+                    lo[c] = max(lo[c], cut)
+    first, then = {c: [] for c in reading}, {c: [] for c in reading}
+    for x, a in enumerate(reading):
+        for b in reading[x + 1:]:
+            if over(a, b):
+                first[b].append(a)
+                then[a].append(b)
+    # Which overlapping pairs the layout's order would draw the other way
     # round: what keeps the draft from being it.
     ideal = list(range(len(kids)))
-    for slot, child in zip(reading, preferred):
-        ideal[slot] = child
+    for slot, shape in zip(reading, visual([shape_at[c] for c in reading])):
+        ideal[slot] = index[id(shape)]
     kept = violations(kids, ideal)
-
-    def fits(child, slot, left):
-        """Whether child can go in slot, with left still to place after
-        it: no overlapping shape it would cross."""
-        return all(not over[child, f] or (slot < f) == (child < f) for f in fixed) and \
-            all(other == child or not over[child, other] or child < other for other in left)
-
-    budget = [BUDGET]
-
-    def place(n, left):
-        if n == len(reading):
-            return []
-        for child in sorted(left, key=rank.get):
-            budget[0] -= 1
-            if budget[0] < 0:
-                return None
-            if fits(child, reading[n], left):
-                rest = place(n + 1, left - {child})
-                if rest is not None:
-                    return [child] + rest
-        return None
-
-    # With nothing kept, the first order tried is the visual one, and fits.
-    found = place(0, frozenset(reading))
+    counts, after = _ahead([shape_at[c] for c in reading])
+    ahead = {c: counts[n] for n, c in enumerate(reading)}
+    behind = {c: [reading[j] for j in after[n]] for n, c in enumerate(reading)}
+    left, found = set(reading), []
+    for slot in range(count):
+        ready = [c for c in left if lo[c] <= slot <= hi[c] and not any(a in left for a in first[c])]
+        # The tree's own order always fits, so some shape always can.
+        pick = next(c for c in sorted(ready, key=lambda c: (not shape_at[c].is_title, ahead[c], c))
+                    if _fits(left - {c}, slot + 1, count, lo, hi, first, then))
+        left.discard(pick)
+        found.append(pick)
+        for b in behind[pick]:
+            ahead[b] -= 1
     note = ""
     if kept:
         note = "kept in the tree's order, since they overlap: " + "; ".join(
@@ -384,7 +474,9 @@ def draft(kids, read):
         if pictures:
             note += (" A picture under text is usually decorative, or belongs in the slide's "
                      "background.")
-    if found is None or found == reading:
-        return None, (note + " Nothing can move without changing what's drawn over what; that's "
-                      "for the author, in PowerPoint.").strip()
+    if found == reading:
+        return None, (note + (" No order nearer the layout keeps what's drawn over what"
+                              if kept else " No order reads every shape after those above it "
+                              "and to its left, as these are laid out") +
+                      "; that's for the author, in PowerPoint.").strip()
     return [kids[i].id for i in found], note

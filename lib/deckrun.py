@@ -262,6 +262,7 @@ def run(base, decks, targets, paths, reports, language=None, alt_max_chars=120,
     alt_report = OrderedDict()      # key: [sources, reason, current alt]
     table_report = OrderedDict()
     title_report = []
+    own_titles = []     # rows for slides with a title no other slide has
     order_report = []
     link_report = OrderedDict()     # address: [title, [sources], context]
     images = {}
@@ -354,7 +355,8 @@ def run(base, decks, targets, paths, reports, language=None, alt_max_chars=120,
                     where = "%s slide %d" % (name, slide.number)
                     if where not in entry[1]:
                         entry[1].append(where)
-        order_report += order_rows(path, name, dname, deck, orders)
+        order_report += order_rows(path, name, dname, deck, orders, alts)
+        own_titles += kept_titles(dname, deck, titles)
         for shape, check, detail in pptxcheck.master_items(deck, rules, alt_max_chars):
             note(shape, check, detail, None)
     # The images the report names, written where their keys point, so a
@@ -367,6 +369,11 @@ def run(base, decks, targets, paths, reports, language=None, alt_max_chars=120,
                 out.write(zf.read(part))
     if not failed:
         unmatched(paths, alts, tables, titles, present, say, orders, links)
+    if own_titles:
+        say("NOTE: %d row(s) of %s aren't used: each is for a slide with a title of its own "
+            "that no other slide in its deck has, which its copy keeps (%s%s)." % (
+                len(own_titles), os.path.basename(paths.get("slide_titles") or "slide-titles.csv"),
+                ", ".join(own_titles[:3]), " ..." if len(own_titles) > 3 else ""))
     # A CSV, as every report beside the sources is: a Markdown report
     # there would be read as a book's page on the next run, and the folder
     # taken for a book. audit.py writes one, from the decks, wherever -o says.
@@ -494,18 +501,47 @@ def repeated_titles(name, dname, deck, titles):
     return rows
 
 
-def order_rows(path, name, dname, deck, orders):
+def kept_titles(dname, deck, titles):
+    """The keys of slide-titles.csv's rows that a copy doesn't use: for a
+    slide with a title of its own that no other slide in its deck has,
+    as when a slide that had none, or had another's, has been given its
+    own in PowerPoint since its row was written."""
+    shared = Counter(pptxcheck.same_title(s.title) for s in deck.slides if s.title)
+    out = []
+    for slide in deck.slides:
+        key = pptxremediate.slide_key(dname, slide)
+        if slide.title and shared[pptxcheck.same_title(slide.title)] < 2 \
+                and titles.get(key) and titles[key] != slide.title:
+            out.append(key)
+    return out
+
+
+def sidecar_decorative(alts, dname, slide):
+    """The ids of a slide's shapes that its copy marks decorative, as the
+    image-alt sidecar decides, so aren't read; a shape whose id another
+    on the slide has too is left as it is, as a copy leaves it."""
+    count = Counter(s.id for s in slide.all_shapes() if s.id)
+    return {s.id for s in slide.shapes if s.id and count[s.id] == 1
+            and pptxremediate.decision(alts, dname, slide, s) == (True, None)}
+
+
+def order_rows(path, name, dname, deck, orders, alts=None):
     """reading-order-new.csv's rows for a deck: each slide read in another
     order than it's laid out that the sidecar hasn't decided, with an order
-    drafted from its layout and, in Shapes, what each id is."""
-    flagged = [s for s in deck.slides if pptxcheck.reading_order(s, deck.width, deck.height)
-               and pptxremediate.slide_key(dname, s) not in orders]
+    drafted from its layout and, in Shapes, what each id is. A shape the
+    image-alt sidecar marks decorative (alts) isn't read, as in the copy."""
+    flagged = []
+    for slide in deck.slides:
+        gone = sidecar_decorative(alts or {}, dname, slide)
+        if pptxremediate.slide_key(dname, slide) not in orders \
+                and pptxcheck.reading_order(slide, deck.width, deck.height, gone):
+            flagged.append((slide, gone))
     rows = []
     if not flagged:
         return rows
     with zipfile.ZipFile(path) as zf:
-        for slide in flagged:
-            read = pptxcheck.read_shapes(slide, deck.width, deck.height)
+        for slide, gone in flagged:
+            read = pptxcheck.read_shapes(slide, deck.width, deck.height, gone)
             try:
                 kids = pptxorder.tree(pptxparse.part_text(zf.read(slide.part))[0], slide)
             except (KeyError, UnicodeDecodeError):

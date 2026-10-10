@@ -1134,7 +1134,8 @@ def order_deck(path):
                     "\n  ", title(2, "Order"), "\n  ",
                     textbox(5, "TextBox 4", ["Third"], (457200, 4000000, 4000000, 600000)), "\n"]},
         # 2: a label over a picture starts higher than the picture, which
-        # is drawn under it; a note at the top right is read last
+        # is drawn under it, though the two overlap, so neither is laid out
+        # before the other; a note at the top right is read last
         {"shapes": [title(2, "A map"),
                     pic(4, "rId2", (457200, 3000000, 6000000, 3000000), "A map of the county"),
                     textbox(5, "TextBox 4", ["The river"], (1000000, 2800000, 3000000, 600000)),
@@ -1205,13 +1206,13 @@ def case_order(work):
         and first[2] == "order.pptx slide 1" \
         and first[3] == '4 TextBox 3 "Second"; 2 Title 2 "Order"; 5 TextBox 4 "Third"', first
     second = rows.get(key[1], [""] * 7)
-    yield "a label that overlaps the picture under it stays after it, and the note says why", \
-        second[1] == "2 6 4 5" and "4 before 5" in second[4] \
-        and "usually decorative" in second[4], second
+    yield "a label over the picture under it, neither laid out before the other, stays after it", \
+        second[1] == "2 6 4 5" and second[4] == "", second
     third = rows.get(key[2], [""] * 7)
     yield "a title over a picture that fills the slide can't be read first; the row says so", \
-        third[1] == "" and third[5] == "" and "Nothing can move" in third[4] \
-        and "4 before 2" in third[4], third
+        third[1] == "" and third[5] == "" and "No order nearer the layout keeps what's drawn " \
+        "over what" in third[4] and "4 before 2" in third[4] and "usually decorative" in third[4], \
+        third
     yield "a group and a picture in AlternateContent are drafted by their own ids", \
         rows.get(key[3], [""] * 7)[1] == "2 8 6 4", rows.get(key[3])
     yield "a decorative picture isn't in the order, and a turned shape overlaps by its turn", \
@@ -1394,11 +1395,138 @@ def case_order(work):
         any("1 row(s) of reading-order.csv match no slide" in line for line in said), said
 
 
+def drafted(path, alts=None):
+    """{slide number: (Order, Note)} of reading-order-new.csv's rows for a
+    deck, as a run drafts them."""
+    d = pptxparse.read(path)
+    return {int(r[2].rsplit(" ", 1)[1]): (r[1], r[4])
+            for r in deckrun.order_rows(path, os.path.basename(path), rem.deck_name(path), d, {},
+                                        alts)}
+
+
+def case_draft(work):
+    inch = 914400
+    top = (457200, 100000, 8000000, 700000)
+    rows = [textbox(10 + n, "TextBox %d" % (10 + n), ["Point %d" % (6 - n)],
+                    (457200, 5000000 - n * 800000, 4000000, 500000)) for n in range(6)]
+    path = deck(os.path.join(work, "drafts.pptx"), [
+        # 1: two columns side by side, their tops either side of a quarter
+        # inch, the left one lower; the title read last
+        {"shapes": [textbox(5, "Left column", ["Benefits"],
+                            (457200, int(1.26 * inch), 5000000, 3000000)),
+                    textbox(4, "Right column", ["Costs"], (6400000, int(1.20 * inch), 5000000, 3000000)),
+                    title(2, "Columns", box=top)]},
+        # 2: a line wholly above a text box, beside it and not over it,
+        # read after it
+        {"shapes": [title(2, "A line", box=top),
+                    textbox(4, "TextBox 3", ["Words"], (457200, 3100000, 4000000, 500000)),
+                    line(5, (5000000, 3000000, 2000000, 0))]},
+        # 3: a footnote a decorative picture is drawn over, which keeps it
+        # ahead of the picture and so of everything, then six points laid
+        # out bottom up, and the title last
+        {"shapes": [textbox(3, "Footnote", ["X"], (457200, 6000000, 3000000, 400000)),
+                    pic(4, "rId2", (457200, 5900000, 3000000, 600000), decorative=True)]
+         + rows + [title(2, "Points", box=top)],
+         "images": {"rId2": png(12, 12, 12)}},
+        # 4: three shapes laid out in a circle: the first above the second,
+        # the second left of the third, the third left of the first
+        {"shapes": [title(2, "Round", box=top),
+                    textbox(4, "TextBox 3", ["A"], (8000000, 1000000, 2000000, 1000000)),
+                    textbox(5, "TextBox 4", ["B"], (457200, 4000000, 2000000, 1000000)),
+                    textbox(6, "TextBox 5", ["C"], (4000000, 1000000, 2000000, 4500000))]},
+        # 5: more shapes to read than a draft takes, bottom up
+        {"shapes": [rect(10 + n, "Rectangle %d" % n, (100000 + (n % 20) * 500000,
+                                                      6000000 - (n // 20) * 500000, 300000, 300000))
+                    for n in range(pptxorder.DRAFT_LIMIT + 1)] + [title(2, "Many", box=top)]},
+        # 6: two lines at the left, and a tall box over both at the right of
+        # them, which neither is laid out before; below them, a line wholly
+        # left of the box, laid out before it once the two above are read
+        {"shapes": [textbox(4, "TextBox 3", ["First"], (457200, 1000000, 3000000, 300000)),
+                    textbox(5, "TextBox 4", ["Second"], (457200, 1500000, 3000000, 300000)),
+                    textbox(6, "TextBox 5", ["Beside"], (3000000, 1000000, 3000000, 2000000)),
+                    textbox(7, "TextBox 6", ["Third"], (457200, 2100000, 2393000, 300000)),
+                    title(2, "Counted", box=top)]},
+        # 7: a decorative picture between a line at the foot and one at the
+        # head, drawn under the head's, which so can't be read first
+        {"shapes": [textbox(4, "TextBox 3", ["Foot"], (457200, 5000000, 3000000, 500000)),
+                    pic(5, "rId2", (457200, 1500000, 3000000, 900000), decorative=True),
+                    textbox(6, "TextBox 5", ["Head"], (457200, 1400000, 3000000, 500000))],
+         "images": {"rId2": png(13, 13, 13)}},
+    ])
+    found = drafted(path)
+    yield "two columns whose tops straddle a quarter inch are read left first", \
+        found.get(1, ("",))[0] == "2 5 4", found.get(1)
+    yield "a line wholly above a text box beside it is read first, as the check has it", \
+        found.get(2, ("",))[0] == "2 5 4", found.get(2)
+    yield "a slide whose order is pinned at one end is still drafted: the rest as laid out", \
+        found.get(3, ("",))[0] == "3 2 15 14 13 12 11 10" and "3 before 4" in found[3][1], \
+        found.get(3)
+    yield "shapes laid out in a circle get no draft, and the note says why", \
+        found.get(4, ("x",))[0] == "" and "No order reads every shape after those above it and " \
+        "to its left" in found[4][1], found.get(4)
+    yield "the layout's order counts only the shapes not yet read before each", \
+        found.get(6, ("",))[0] == "2 4 5 7 6", found.get(6)
+    yield "a shape a picture that isn't read is drawn under stays after it", \
+        found.get(7, ("x",))[0] == "" and "5 before 6" in found[7][1], found.get(7)
+    yield "a slide with more shapes than a draft takes gets a note in place of one", \
+        found.get(5, ("x",))[0] == "" and "With %d shapes to read, no order is drafted" % (
+            pptxorder.DRAFT_LIMIT + 2) in found[5][1], found.get(5)
+    d = pptxparse.read(path)
+    yield "the check finds each slide, and lays out the columns as the draft does", \
+        [s.number for s in d.slides if pptxcheck.reading_order(s, d.width, d.height)] \
+        == [1, 2, 3, 4, 5, 6, 7] and [s.id for s in pptxcheck.reading_order(
+            d.slides[0], d.width, d.height)[1]] == ["2", "5", "4"] \
+        and [s.id for s in pptxcheck.reading_order(d.slides[5], d.width, d.height)[1]] \
+        == ["2", "4", "5", "7", "6"], ""
+    # Every draft, written, reads in order, and nothing overlapping swapped.
+    orders = {rem.slide_key("drafts", d.slides[n - 1]): order.split()
+              for n, (order, _note) in found.items() if order}
+    problems = []
+    out = os.path.join(work, "out", "drafts.pptx")
+    counts = rem.remediate(path, out, orders=orders, problems=problems, deck="drafts")
+    e = pptxparse.read(out)
+    yield "each draft is written as it stands, and the copy's check finds those slides in order", \
+        counts["orders"] == 4 and not problems \
+        and [s.number for s in e.slides if pptxcheck.reading_order(s, e.width, e.height)] \
+        == [3, 4, 5, 7], (counts, problems)
+    # Whether the shapes left can still go somewhere: an overlap's order
+    # carried forward, and backward, through the slots each can take.
+    later = pptxorder._fits({1, 2, 3}, 1, 4, {1: 2, 2: 0, 3: 2}, {1: 3, 2: 3, 3: 3},
+                            {1: [], 2: [1], 3: []}, {1: [2], 2: [], 3: []})
+    sooner = pptxorder._fits({1, 2, 3}, 0, 3, {1: 0, 2: 0, 3: 0}, {1: 2, 2: 1, 3: 1},
+                             {1: [], 2: [1], 3: []}, {1: [2], 2: [], 3: []})
+    room = pptxorder._fits({1, 2, 3}, 0, 3, {1: 0, 2: 0, 3: 0}, {1: 2, 2: 1, 3: 2},
+                           {1: [], 2: [1], 3: []}, {1: [2], 2: [], 3: []})
+    yield "the search knows when the shapes left can't all go after those they're drawn over", \
+        later is False and sooner is False and room is True, (later, sooner, room)
+    # The picture under the title, marked decorative in the image-alt
+    # sidecar, isn't read, and the slide leaves the report.
+    under = order_deck(os.path.join(work, "order.pptx"))
+    picture = pptxparse.read(under).slides[2].shapes[0]
+    plain, decided = drafted(under), drafted(under, {rem.image_key(picture.image[1]): None})
+    yield "a picture the image-alt sidecar marks decorative isn't read, so its slide is in order", \
+        3 in plain and sorted(decided) == [n for n in sorted(plain) if n != 3], \
+        (sorted(plain), sorted(decided))
+    shared = deck(os.path.join(work, "shared.pptx"), [
+        {"shapes": [pic(4, "rId2", (0, 0, 12192000, 6858000), "A classroom"),
+                    rect(4, "Rectangle 3", (100000, 6000000, 100000, 100000), decorative=True),
+                    title(2, "Class")], "images": {"rId2": GREEN}}])
+    image = pptxparse.read(shared).slides[0].shapes[0].image[1]
+    yield "but not one whose id another shape has, which a copy leaves as it is", \
+        1 in drafted(shared, {rem.image_key(image): None}), ""
+
+
 def styled_title(shape_id, paragraphs):
     """A title placeholder whose paragraphs are given as XML."""
     return ("<p:sp>%s<p:spPr/><p:txBody><a:bodyPr/><a:lstStyle/>%s</p:txBody></p:sp>"
             % (nv("sp", shape_id, "Title %s" % shape_id, ph='<p:ph type="title"/>'),
                "".join(paragraphs)))
+
+
+MEAN = ('<a:p><a:r><a:rPr lang="en-US"/><a:t>The mean of </a:t></a:r><a14:m xmlns:a14="'
+        'http://schemas.microsoft.com/office/drawing/2010/main"><m:oMath xmlns:m="http://schemas.'
+        'openxmlformats.org/officeDocument/2006/math"><m:r><m:t>x</m:t></m:r></m:oMath></a14:m>'
+        '<a:endParaRPr lang="en-US"/></a:p>')
 
 
 def case_retitle(work):
@@ -1417,6 +1545,11 @@ def case_retitle(work):
         {"shapes": [styled_title(2, [bold]), rect(2, "Rectangle 1", (0, 1600200, 10, 10))]},
         {"shapes": [styled_title(2, ['<a:p><a:r><a:t>Supply</a:t></a:r></a:p>',
                                      '<a:p><a:r><a:t>and more</a:t></a:r></a:p>'])]},
+        {"shapes": [styled_title(2, ['<a:p><a:r><a:t>Supply</a:t></a:r></a:p>',
+                                     '<a:p><a:r><a:t>and more</a:t></a:r></a:p>'])]},
+        {"shapes": [styled_title(2, ['<a:p><a:r><a:t>Elasticity of demand</a:t></a:r></a:p>'])]},
+        {"shapes": [styled_title(2, [MEAN])]},
+        {"shapes": [styled_title(2, [MEAN])]},
     ])
     d = pptxparse.read(path)
     rows = deckrun.repeated_titles("titles.pptx", "titles", d, {})
@@ -1424,11 +1557,13 @@ def case_retitle(work):
         [r[:2] for r in rows] == [
             ["titles/slide-257", "Demand (2)"], ["titles/slide-259", "Market Demand (2)"],
             ["titles/slide-260", "Demand (3)"], ["titles/slide-261", "demand. (4)"],
-            ["titles/slide-262", "Demand (5)"]] and all(r[3] == "TI" for r in rows), rows
+            ["titles/slide-262", "Demand (5)"], ["titles/slide-264", "Supply and more (2)"],
+            ["titles/slide-267", "The mean of x (2)"]] and all(r[3] == "TI" for r in rows), rows
     key = [rem.slide_key("titles", s) for s in d.slides]
     titles = {key[1]: "Demand (2)", key[2]: "Shifts in <demand> & supply",
               key[3]: "Market Demand (2)", key[4]: "Demand (3)", key[5]: "demand.",
-              key[6]: "Demand (4)", key[7]: "Elasticity"}
+              key[6]: "Demand (4)", key[7]: "Elasticity", key[9]: "Price elasticity",
+              key[11]: "The mean of x (2)"}
     out, counts = remediated(work, "titles.pptx", path, titles=titles)
     e = pptxparse.read(out)
     second = read_part(out, "ppt/slides/slide2.xml")
@@ -1457,7 +1592,32 @@ def case_retitle(work):
     yield "a row giving the title as it is keeps it, and a title whose id repeats is left", \
         read_part(out, "ppt/slides/slide6.xml") == read_part(path, "ppt/slides/slide6.xml") \
         and read_part(out, "ppt/slides/slide7.xml") == read_part(path, "ppt/slides/slide7.xml") \
-        and counts["retitled"] == 5 and counts["skipped"] == 1, counts
+        and counts["retitled"] == 6 and counts["skipped"] == 1, counts
+    twelfth = read_part(out, "ppt/slides/slide12.xml")
+    yield "what a new title adds goes after an equation that ends the old", \
+        '</a14:m><a:r><a:rPr lang="en-US"/><a:t> (2)</a:t></a:r><a:endParaRPr' in twelfth \
+        and e.slides[11].title == "The mean of x (2)", twelfth[twelfth.find("<p:txBody>"):][:500]
+    # A row for a slide whose title is its own alone: the author's stands.
+    folder = os.path.join(work, "titles-run")
+    os.makedirs(folder)
+    shutil.copy(path, folder)
+    sidecar = os.path.join(folder, "slide-titles.csv")
+    with open(sidecar, "w", encoding="utf-8", newline="") as fh:
+        csv.writer(fh).writerows([deckrun.TITLE_COLUMNS] + [[k, v] for k, v in titles.items()])
+    said = []
+    deckrun.run(folder, ["titles.pptx"], [],
+                {"slide_titles": sidecar, "image_alt": os.path.join(folder, "image-alt.csv"),
+                 "table_headers": os.path.join(folder, "table-headers.csv")},
+                {k: os.path.join(folder, v) for k, v in (
+                    ("image_alt_missing", "a.csv"), ("table_headers_new", "t.csv"),
+                    ("slide_titles_new", "s.csv"), ("slides_check", "check.csv"))},
+                check_only=True, say=said.append)
+    yield "a row for a slide with a title no other slide has isn't used, and the run says so", \
+        read_part(out, "ppt/slides/slide10.xml") == read_part(path, "ppt/slides/slide10.xml") \
+        and counts["titles_kept"] == 1 and deckrun.kept_titles("titles", d, titles) == [key[9]] \
+        and any("1 row(s) of slide-titles.csv aren't used: each is for a slide with a title of " \
+                "its own that no other slide in its deck has, which its copy keeps " \
+                "(titles/slide-265)." in line for line in said), (counts, said)
     found = pptxcheck.check(e)
     yield "the copy's slides titled alike are only those the sidecar left alike", \
         [f.detail for f in found if f.check == "pptx-duplicate-title"] == [
@@ -1468,6 +1628,8 @@ DOI, SHORT = "https://doi.org/10.1080/08913810508443640", "https://doi.org/10/b8
 CARS = "https://dasl.datadescription.com/datafile/cars"
 KEPT = "https://example.org/kept"
 SPLIT = "https://example.org/split"
+TIPPED = "https://example.org/tipped"
+ALTERNATE = "https://example.org/alternate"
 
 
 def linked(shape_id, name, box, runs):
@@ -1526,6 +1688,20 @@ def case_links(work):
                     linked(10, "TextBox 9", (457200, 3400000, 8000000, 400000),
                            [("https://example.org/grouped", "rId6", None)])],
          "links": {"rId6": "https://example.org/grouped", "rId7": SPLIT}},
+        # 4: an address over two runs with a ScreenTip on one, two links to
+        # a reader, as the report reads it, and the address bare elsewhere
+        {"shapes": [title(2, "Tipped"),
+                    linked(4, "TextBox 3", (457200, 1600200, 8000000, 400000),
+                           [("https://example.org/", "rId9", "A tip"), ("tipped", "rId9", None)]),
+                    linked(5, "TextBox 4", (457200, 2200000, 8000000, 400000),
+                           [(TIPPED, "rId10", None)])],
+         "links": {"rId9": TIPPED, "rId10": TIPPED}},
+        # 5: a link in a shape in AlternateContent, in its Choice and its
+        # Fallback
+        {"shapes": [title(2, "Alternate"),
+                    alternate(*[linked(4, "TextBox 3", (457200, 1600200, 8000000, 400000),
+                                       [(ALTERNATE, "rId11", None)]) for _ in range(2)])],
+         "links": {"rId11": ALTERNATE}},
     ])
     d = pptxparse.read(path)
     yield "a link inside a group is its piece's, not the group's too, and named once", \
@@ -1556,12 +1732,15 @@ def case_links(work):
                  [CARS, "", "", "links.pptx slide 1", "Cars:", "", ""],
                  [KEPT, "", "Its own title", "links.pptx slide 1", "", "", ""],
                  ["https://example.org/grouped", "", "", "links.pptx slide 3", "", "", ""],
-                 [SPLIT, "", "", "links.pptx slide 3", "", "", ""]], rows
+                 [SPLIT, "", "", "links.pptx slide 3", "", "", ""],
+                 [TIPPED, "", "", "links.pptx slide 4", "", "", ""],
+                 [ALTERNATE, "", "", "links.pptx slide 5", "", "", ""]], rows
     with open(paths["bare_links"], "w", encoding="utf-8", newline="") as fh:
         csv.writer(fh).writerows([deckrun.LINK_COLUMNS, [DOI, SHORT, "DOI for Klein and Stern 2005"],
                                   [CARS, "The Data and Story Library's cars data", ""],
                                   [KEPT, "", ""], ["https://example.org/grouped", "", ""],
-                                  [SPLIT, "", "Split over two runs"],
+                                  [SPLIT, "", "Split over two runs"], [TIPPED, "Tipped", ""],
+                                  [ALTERNATE, "", "In AlternateContent"],
                                   ["https://example.org/gone", "", ""]])
     links = rem.link_rows(paths["bare_links"])
     out = os.path.join(work, "out", "links.pptx")
@@ -1577,8 +1756,14 @@ def case_links(work):
         slide[slide.find("Cars"):][:300]
     yield "a blank row keeps the link and its own ScreenTip", \
         '<a:hlinkClick r:id="rId5" tooltip="Its own title"/>' in slide \
-        and "<a:t>%s</a:t>" % KEPT in slide and counts["links"] == 2 and counts["replaced"] == 2, \
+        and "<a:t>%s</a:t>" % KEPT in slide and counts["links"] == 3 and counts["replaced"] == 3, \
         counts
+    four, five = read_part(out, "ppt/slides/slide4.xml"), read_part(out, "ppt/slides/slide5.xml")
+    yield "an address over runs with two ScreenTips is two links, as the report reads it: left", \
+        "<a:t>https://example.org/</a:t>" in four and "<a:t>tipped</a:t>" in four \
+        and "<a:t>Tipped</a:t>" in four, four[four.find("TextBox 3"):][:600]
+    yield "a link in AlternateContent gets its ScreenTip in its Choice and its Fallback, " \
+        "counted once", five.count('tooltip="In AlternateContent"') == 2, five
     three = read_part(out, "ppt/slides/slide3.xml")
     split = [(l.text, l.tooltip) for l in pptxparse.read(out).slides[2].shapes[2].links]
     yield "a ScreenTip alone goes on every run of its link, which stays one link", \
@@ -1624,7 +1809,7 @@ def case_links(work):
     left = [r[1] for r in rows_of(reports["output_check"])]
     yield "a run writes them, says so, and names a row matching no link", \
         code == 0 and not os.path.exists(reports["bare_links_new"]) \
-        and "fixed: 2 bare link(s) given a ScreenTip and 2 a replacement, as bare-links.csv " \
+        and "fixed: 3 bare link(s) given a ScreenTip and 3 a replacement, as bare-links.csv " \
         "says." in said and "fixed: 1 equation(s) given the characters they mean, 3 " \
         "character(s) in all (math.repair_equations)." in said \
         and any("1 row(s) of bare-links.csv match no bare link" in l for l in said) \
@@ -1857,7 +2042,8 @@ def case_folders(work):
     messy = messy_deck(os.path.join(work, "messy.pptx"))
     sidecar = os.path.join(work, "titles.csv")
     with open(sidecar, "w", encoding="utf-8", newline="") as fh:
-        csv.writer(fh).writerows([["Slide", "Title"], ["messy/slide-256", "Opening"]])
+        csv.writer(fh).writerows([["Slide", "Title"], ["messy/slide-256", "Opening"],
+                                  ["messy/slide-260", "Video"]])
     order = os.path.join(work, "order.csv")
     with open(order, "w", encoding="utf-8", newline="") as fh:
         csv.writer(fh).writerows([["messy/slide-259", "2 4"], ["messy/slide-260", "6 4 4"]])
@@ -1868,6 +2054,9 @@ def case_folders(work):
     copy = pptxparse.read(os.path.join(work, "util-out", "messy.pptx"))
     yield "remediate.py writes a deck's decisions too, the reading order among them", \
         result.returncode == 0 and copy.slides[0].title == "Opening" \
+        and copy.slides[4].title == "Media" and "slides: 1 slide-titles row(s) not used: each " \
+        "is for a slide with a title of its own that no other slide in its deck has, which the " \
+        "copy keeps." in result.stderr \
         and [s.id for s in copy.slides[3].shapes] == ["2", "4"] \
         and "1 title(s) added above their slides, 1 slide(s) put in the reading order given" \
         in result.stderr and "the reading order for messy/slide-260 isn't written: it names 4 " \
@@ -1934,7 +2123,8 @@ CASES = [("reading a deck", case_parse), ("the checks", case_check),
          ("the copy", case_remediate), ("the copy, more", case_remediate_more),
          ("the sidecars", case_sidecars), ("what a review found", case_edges),
          ("what PowerPoint made of Pandoc's decks", case_powerpoint),
-         ("the reading order", case_order), ("titles another slide has", case_retitle),
+         ("the reading order", case_order), ("drafting an order", case_draft),
+         ("titles another slide has", case_retitle),
          ("links and equations", case_links),
          ("convert.py on decks", case_convert),
          ("folders, archives, and tools", case_folders),

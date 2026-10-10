@@ -172,44 +172,30 @@ def where(slide, shape=None):
     return head
 
 
-def read_shapes(slide, width=0, height=0):
+def read_shapes(slide, width=0, height=0, decorative=()):
     """The shapes at the top of a slide's tree that a screen reader reads
     and the order is about, in the tree's order: not the date, footer, or
     slide number, nothing hidden or decorative, nothing off the slide, and
     nothing with neither text nor a need for alt text, but the title even
-    when it's empty."""
+    when it's empty. decorative: the ids of shapes a sidecar marks
+    decorative, which aren't read either."""
     return [s for s in slide.shapes
-            if not s.furniture and not s.hidden and not s.decorative and s.box is not None
+            if not s.furniture and not s.hidden and not s.decorative
+            and (s.id is None or s.id not in decorative) and s.box is not None
             and (not width or s.box.on_slide(width, height))
             and (s.text.strip() or needs_alt(s) or s.is_title)]
 
 
-def reading_order(slide, width=0, height=0):
+def reading_order(slide, width=0, height=0, decorative=()):
     """(read, visual): the shapes a screen reader reads, in the tree's
-    order and in visual order (top to bottom, left to right), when the
-    two disagree about a pair that doesn't overlap; else None."""
-    shapes = read_shapes(slide, width, height)
+    order and in the order they're laid out (pptxorder.visual()), when the
+    title isn't first or the tree has a shape before one laid out before
+    it (pptxorder.before()); else None. decorative as read_shapes()
+    takes it."""
+    shapes = read_shapes(slide, width, height, decorative)
     if len(shapes) < 2:
         return None
-
-    def before(a, b):
-        """Whether a comes visually before b, when the two don't overlap:
-        wholly above it, or beside it and wholly to its left. A line has
-        no height, so two lines side by side are each "above" the other
-        by their edges alone; one starts above the other only if it
-        starts higher too."""
-        if a.box.overlaps(b.box):
-            return None
-        if a.box.y + a.box.cy <= b.box.y and a.box.y < b.box.y:
-            return True
-        if b.box.y + b.box.cy <= a.box.y and b.box.y < a.box.y:
-            return False
-        if a.box.x + a.box.cx <= b.box.x and a.box.x < b.box.x:
-            return True
-        if b.box.x + b.box.cx <= a.box.x and b.box.x < a.box.x:
-            return False
-        return None
-
+    before = pptxorder.before
     # The title is meant to be read first wherever it sits, so a pair
     # with the title in it is never out of order on that account.
     inverted = any(before(shapes[j], shapes[i])

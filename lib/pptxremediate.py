@@ -423,23 +423,23 @@ def add_title(xml, slide, title, width, language):
 
 
 # A run or a field, a run's properties, and a paragraph, none of which
-# nests in its own kind.
+# nests in its own kind; and what text shows, those and an equation.
 RUN = re.compile(r"<a:(r|fld)\b[^>]*>.*?</a:\1>", re.S)
+SHOWN = re.compile(r"<a:(r|fld)\b[^>]*>.*?</a:\1>|<a14:m\b[^>]*>.*?</a14:m>", re.S)
 RPR = re.compile(r"<a:rPr\b[^>]*?(?:/>|>.*?</a:rPr>)", re.S)
 PARAGRAPH = re.compile(r"<a:p\b[^>]*?(?:/>|>(.*?)</a:p>)", re.S)
 
 
 def _retitle_body(body, old, new):
     """A title's text body with new for its text: what old lacks added
-    after its last run, in that run's formatting, when new begins with
-    old; otherwise one paragraph of one run in place of all of them, in
-    the first paragraph's and the first run's formatting."""
-    runs = list(RUN.finditer(body))
-    if new.startswith(old) and runs:
-        last = runs[-1]
-        rpr = RPR.search(last.group(0))
+    after the last run or equation, in the last run's formatting, when new
+    begins with old; otherwise one paragraph of one run in place of all of
+    them, in the first paragraph's and the first run's formatting."""
+    runs, shown = list(RUN.finditer(body)), list(SHOWN.finditer(body))
+    if new.startswith(old) and shown:
+        rpr = RPR.search(runs[-1].group(0)) if runs else None
         run = "<a:r>%s<a:t>%s</a:t></a:r>" % (rpr.group(0) if rpr else "", _text(new[len(old):]))
-        return body[:last.end()] + run + body[last.end():]
+        return body[:shown[-1].end()] + run + body[shown[-1].end():]
     paragraphs = list(PARAGRAPH.finditer(body))
     if not paragraphs:
         return None
@@ -503,9 +503,9 @@ def _external_targets(rels):
 
 def _link_runs(xml):
     """Each link in a slide's text, as the runs that give it: consecutive
-    runs of one paragraph whose clicks go to one relationship, as
-    PowerPoint splits one link's text over runs. [(relationship id,
-    [(start, end) of each run])]"""
+    runs of one paragraph whose clicks go to one relationship with one
+    ScreenTip, as PowerPoint splits one link's text over runs and as
+    pptxparse reads them. [(relationship id, [(start, end) of each run])]"""
     found = []
     for paragraph in re.finditer(r"<a:p\b[^>]*?(?:/>|>.*?</a:p>)", xml, re.S):
         last = None
@@ -513,11 +513,12 @@ def _link_runs(xml):
                 xml, *pptxorder._inside(xml, paragraph.start(), paragraph.end())):
             click = HLINK.search(xml, start, end) if name == "a:r" else None
             rid = _attr_value(click.group(1), "r:id") if click else None
-            if rid is not None and rid == last:
+            key = (rid, _attr_value(click.group(1), "tooltip")) if rid is not None else None
+            if key is not None and key == last:
                 found[-1][1].append((start, end))
-            elif rid is not None:
+            elif key is not None:
                 found.append((rid, [(start, end)]))
-            last = rid
+            last = key
     return found
 
 
@@ -529,7 +530,12 @@ def set_links(xml, rels, links):
     the first run, and the others go. (xml, rels, titles, replacements)"""
     targets = _external_targets(rels)
     edits, readdress, titled, replaced = [], {}, 0, 0
+    # A shape in mc:AlternateContent is in its Fallback too, edited alike
+    # and counted once.
+    fallbacks = [m.span() for m in re.finditer(
+        r"<mc:Fallback\b[^>]*?(?:/>|>.*?</mc:Fallback>)", xml, re.S)]
     for rid, runs in _link_runs(xml):
+        counted = not any(a <= runs[0][0] < b for a, b in fallbacks)
         target = targets.get(rid)
         text = "".join(html.unescape(t.group(2)) for s, e in runs for t in TEXT.finditer(xml, s, e))
         if target not in links or not text.strip() or not pptxcheck.bare(text, target):
@@ -544,14 +550,14 @@ def set_links(xml, rels, links):
             edits += [(s, e, "") for s, e in runs[1:]]
             if sidecars.is_address(replacement):
                 readdress[rid] = replacement
-            replaced += 1
+            replaced += counted
         if title:
             # the runs that stay: the first, or all when the text does
             for s, e in runs[:1] if replacement else runs:
                 for click in HLINK.finditer(xml, s, e):
                     edits.append((click.start(), click.end(), "<a:hlinkClick%s%s>" % (
                         _set_attr(click.group(1), "tooltip", title), click.group(2))))
-            titled += 1
+            titled += counted
     # From the end, so each edit's place is where it was found.
     for start, end, new in sorted(edits, key=lambda e: e[0], reverse=True):
         xml = xml[:start] + new + xml[end:]
@@ -738,8 +744,11 @@ def remediate(source, destination, alts=None, tables=None, titles=None, language
         core_title = first and (first.title or titles.get(slide_key(deck, first)))
     counts = {"described": 0, "decorative": 0, "header_rows": 0, "header_columns": 0,
               "titles": 0, "language": 0, "core_title": 0, "repaired": 0, "skipped": 0,
-              "orders": 0, "orders_refused": 0, "retitled": 0, "links": 0, "replaced": 0,
-              "equations_repaired": 0, "equation_characters": 0}
+              "orders": 0, "orders_refused": 0, "retitled": 0, "titles_kept": 0, "links": 0,
+              "replaced": 0, "equations_repaired": 0, "equation_characters": 0}
+    # A titled slide's row replaces its title only when another slide in
+    # the deck has it too: a title the author gave since stands.
+    shared = Counter(pptxcheck.same_title(s.title) for s in parsed.slides if s.title)
     with zipfile.ZipFile(source) as zin:
         infos = zin.infolist()
         parts = {info.filename: zin.read(info.filename) for info in infos}
@@ -829,9 +838,13 @@ def remediate(source, destination, alts=None, tables=None, titles=None, language
             # A title another slide has too, replaced on the slide
             title = titles.get(slide_key(deck, slide))
             shape = slide.title_shape
-            if title and title != slide.title and shape.id in repeated:
+            if not title or title == slide.title:
+                pass
+            elif shared[pptxcheck.same_title(slide.title)] < 2:
+                counts["titles_kept"] += 1
+            elif shape.id in repeated:
                 counts["skipped"] += 1
-            elif title and title != slide.title:
+            else:
                 xml, n = retitle(text_of(part), slide, title)
                 if n:
                     texts[part] = xml

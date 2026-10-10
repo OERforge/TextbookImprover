@@ -142,6 +142,10 @@ def main(argv=None):
                  deck_totals.get("core_title", 0), deck_totals.get("replaced", 0),
                  deck_totals.get("equations_repaired", 0), deck_totals.get("repaired", 0)),
               file=sys.stderr)
+        if deck_totals.get("titles_kept"):
+            print("remediate: slides: %d slide-titles row(s) not used: each is for a slide with a "
+                  "title of its own that no other slide in its deck has, which the copy keeps."
+                  % deck_totals["titles_kept"], file=sys.stderr)
     return 1 if failed else 0
 
 

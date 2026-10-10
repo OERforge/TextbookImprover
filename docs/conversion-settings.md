@@ -276,7 +276,7 @@ Alt text, keyed on the image path with the extension ignored. Use [decorative] f
 
 **`sidecars.slide_titles`**—`path`; default `slide-titles.csv`
 
-Titles for a PowerPoint deck's slides, keyed on deck/slide-N, N the id PowerPoint gave the slide. A source target writes an untitled slide's above the slide, read by a screen reader and not seen, as PowerPoint's Add Hidden Slide Title does, and a titled slide's in place of its title, on the slide.
+Titles for a PowerPoint deck's slides, keyed on deck/slide-N, N the id PowerPoint gave the slide. A source target writes an untitled slide's above the slide, read by a screen reader and not seen, as PowerPoint's Add Hidden Slide Title does, and the title of a slide whose title another slide in its deck has in place of that title, on the slide.
 
 **`sidecars.reading_order`**—`path`; default `reading-order.csv`
 

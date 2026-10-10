@@ -127,9 +127,12 @@ FIGURE_PLACEMENT = {
 # MathML structure elements there are non-standard types veraPDF rejects;
 # the formula keeps the attached file, and latex-lab gives it its TeX
 # source as alternative text, which it switches on itself for PDF/UA-1.
-# pdf.ua1_math: office adds the MathML as Microsoft Office's own attribute
-# on the formula (/O /MSFT_Office /MSFT_MathML), which Word writes in the
-# PDFs it saves and latex-lab's mathml-MS option reproduces.
+# pdf.ua1_math: office, the default, adds the MathML as Microsoft Office's
+# own attribute on the formula (/O /MSFT_Office /MSFT_MathML), which Word
+# writes in the PDFs it saves and latex-lab's mathml-MS option reproduces.
+# NVDA reads that attribute before a formula's alternative text
+# (NVDAObjects/IAccessible/adobeAcrobat.py, _get_mathMl), and in Acrobat
+# it read the formulas as math, where with alt it read the TeX source.
 MATH_SETUP = {
     "ua2": "mathml-SE,mathml-AF",
     "ua1-alt": "mathml-AF",
@@ -792,12 +795,16 @@ def build(base, name, resolved, keep, intermediates=None, latex_only=False,
     # Inkscape and passes no alt text at all.
     formulas = count_math(assembly.blocks) if is_ua1(claimed) else 0
     if formulas:
+        if str(resolved["pdf.ua1_math"]) == "office":
+            how = ("with their TeX source as alternative text and their MathML attached "
+                   "as files and as Microsoft Office's attribute, which NVDA reads; a "
+                   "reader that takes only the alternative text reads the TeX as written")
+        else:
+            how = ("with their TeX source as alternative text, which a screen reader "
+                   "reads as written, and their MathML attached as files")
         print(f"WARNING: PDF/UA-1 has no standard way to tag MathML, so the book's "
-              f"{formulas} equation(s) are tagged as formulas with their TeX source as "
-              "alternative text, which a screen reader reads as written, and their "
-              "MathML attached as files"
-              + (" and as Microsoft Office's attribute" if str(resolved["pdf.ua1_math"]) == "office"
-                 else "") + ". PDF/UA-2 tags MathML properly.", file=sys.stderr)
+              f"{formulas} equation(s) are tagged as formulas {how}. PDF/UA-2 tags "
+              "MathML properly.", file=sys.stderr)
     svgs = svg_images(assembly.blocks)
     if svgs and not latex_only and shutil.which("rsvg-convert") is None and not as_latex:
         sys.exit(f"The book has {len(svgs)} SVG image(s) ({svgs[0]} first), and a PDF "

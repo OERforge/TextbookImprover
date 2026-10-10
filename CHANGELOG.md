@@ -35,6 +35,7 @@ Versions are two-part and pre-1.0: breaking changes may land in any of them unti
 
 ### Changed
 
+- **A PDF/UA-1 file's formulas carry Microsoft Office's MathML attribute by default** (`pdf.ua1_math: office`, which had been an option), beside the TeX alternative text and the attached MathML LaTeX gives each. NVDA reads the attribute before anything else, and in Acrobat it read such a file's formulas as math, where with the old default it read their TeX source aloud, "LaTeX formula starts" and all. `pdf.ua1_math: alt` leaves the attribute out, as before, and the run's warning about a PDF/UA-1 book's equations says which it did.
 - **A folder of `.pptx` files alone is converted as slides**, where the run had stopped with nothing to convert, and a deck beside a book's pages is named as left out, where it had been passed over without a word. The convert suite's check that a deck isn't unpacked as an archive says so.
 
 ### Fixed

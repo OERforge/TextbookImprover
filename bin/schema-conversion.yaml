@@ -607,16 +607,18 @@ keys:
       ua1_math:
         type: enum
         values: [alt, office]
-        default: alt
+        default: office
         description: >
           How a PDF/UA-1 file carries its math. PDF 1.7, which PDF/UA-1 is
-          built on, has no standard way to tag MathML, so alt gives each
-          formula its TeX source as alternative text and attaches its
-          MathML as a file, as LaTeX does by itself for PDF/UA-1; a screen
-          reader reads the TeX as written. office also writes the MathML
-          as Microsoft Office's own attribute on each formula, the one
-          Word puts in the PDFs it saves, which some readers use. PDF/UA-2
-          tags the MathML itself, and neither applies there.
+          built on, has no standard way to tag MathML, so each formula gets
+          its TeX source as alternative text, as LaTeX does by itself for
+          PDF/UA-1, and its MathML attached as a file. office also writes
+          the MathML as Microsoft Office's own attribute on each formula,
+          the one Word puts in the PDFs it saves, which NVDA reads before
+          anything else: in Acrobat it read the formulas as math, where
+          with alt it read the TeX source as written. alt leaves the
+          attribute out. PDF/UA-2 tags the MathML itself, and neither
+          applies there.
 
       remove_empty_paragraphs:
         type: bool

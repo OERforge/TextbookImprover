@@ -200,9 +200,9 @@ Where a figure goes, on the page and in the order a screen reader reads. in_plac
 
 Retag each table's caption, which LaTeX's tagging code writes as a first row of one header cell spanning the table, as the table's Caption, and take out the empty copy of the table's head it leaves inside the table, so a screen reader reads the caption as one and counts the table's rows and columns right. Only a table the book gave a caption, matched in order. Needs pikepdf; without it the run says so and leaves the tags as LaTeX wrote them.
 
-**`pdf.ua1_math`**—one of `alt`, `office`; default `alt`
+**`pdf.ua1_math`**—one of `alt`, `office`; default `office`
 
-How a PDF/UA-1 file carries its math. PDF 1.7, which PDF/UA-1 is built on, has no standard way to tag MathML, so alt gives each formula its TeX source as alternative text and attaches its MathML as a file, as LaTeX does by itself for PDF/UA-1; a screen reader reads the TeX as written. office also writes the MathML as Microsoft Office's own attribute on each formula, the one Word puts in the PDFs it saves, which some readers use. PDF/UA-2 tags the MathML itself, and neither applies there.
+How a PDF/UA-1 file carries its math. PDF 1.7, which PDF/UA-1 is built on, has no standard way to tag MathML, so each formula gets its TeX source as alternative text, as LaTeX does by itself for PDF/UA-1, and its MathML attached as a file. office also writes the MathML as Microsoft Office's own attribute on each formula, the one Word puts in the PDFs it saves, which NVDA reads before anything else: in Acrobat it read the formulas as math, where with alt it read the TeX source as written. alt leaves the attribute out. PDF/UA-2 tags the MathML itself, and neither applies there.
 
 **`pdf.remove_empty_paragraphs`**—`bool`; default `true`
 

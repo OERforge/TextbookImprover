@@ -309,8 +309,9 @@ formula, $a^2 + b^2 = c^2$, with a note.[^1]
 
 
 def build_ua1(work):
-    """A one-chapter book claiming PDF/UA-1, its math as Office writes it:
-    (the PDF's path, what the run said, the output check's rows)."""
+    """A one-chapter book claiming PDF/UA-1, its math as Office writes it,
+    which is the default: (the PDF's path, what the run said, the output
+    check's rows)."""
     os.makedirs(work)
     with open(os.path.join(work, "old.md"), "w", encoding="utf-8") as fh:
         fh.write(UA1_PAGE)
@@ -318,8 +319,7 @@ def build_ua1(work):
         fh.write("project:\n  title: Old Standard\n  identifier: org.example.ua1\n"
                  "  language: en-US\n")
     with open(os.path.join(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
-        fh.write("targets:\n  pdf:\n    format: pdf\n    pdf:\n      standard: [ua-1]\n"
-                 "      ua1_math: office\n")
+        fh.write("targets:\n  pdf:\n    format: pdf\n    pdf:\n      standard: [ua-1]\n")
     converted = subprocess.run(["python3", os.path.join(BIN, "convert.py")], cwd=work,
                                capture_output=True, text=True, stdin=subprocess.DEVNULL)
     report = os.path.join(work, "output-check.csv")
@@ -635,8 +635,8 @@ def checks(work, jobs=1):
         ("a quotation in a table cell is unwrapped, since a cell can't hold one",
          lambda: not quoted_cells(pdf_path)),
         # PDF/UA-1 is PDF 1.7: no MathML structure elements, a TeX alt text
-        # on each formula, Office's MathML attribute when asked for, and a
-        # /Contents on every link, LaTeX's own included.
+        # on each formula, Office's MathML attribute unless pdf.ua1_math is
+        # alt, and a /Contents on every link, LaTeX's own included.
         ("a PDF/UA-1 book is PDF 1.7, and veraPDF finds nothing in it",
          lambda: ua1_version == "1.7" and os.path.exists(ua1_path)
          and (not shutil.which("verapdf") and not os.environ.get("VERAPDF") or not ua1_rows)),
@@ -654,8 +654,10 @@ def checks(work, jobs=1):
         # reached the main matter: numbered i, its chapter unnumbered.
         ("and its page is in the main matter, numbered 1, 2, 3",
          lambda: os.path.exists(ua1_path) and page_label_styles(ua1_path)[-1:] == ["/D"]),
-        ("the run warns that its equations are tagged as PDF/UA-1 allows",
-         lambda: "PDF/UA-1 has no standard way to tag MathML" in ua1_said),
+        ("the run warns that its equations are tagged as PDF/UA-1 allows, "
+         "Office's attribute among them",
+         lambda: "PDF/UA-1 has no standard way to tag MathML" in ua1_said
+         and "Microsoft Office's attribute, which NVDA reads" in ua1_said),
         ("no paragraph element is left empty",
          lambda: not pdfparagraphs.find(pdfparagraphs.pikepdf.open(pdf_path)).doomed),
         ("a captioned table's caption is its Caption, before its rows",

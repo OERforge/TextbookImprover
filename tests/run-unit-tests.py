@@ -1011,6 +1011,33 @@ def check_tlmgr_command():
     ]
 
 
+def check_ua1_math():
+    """A PDF/UA-1 file's formulas get Office's MathML attribute by default,
+    which NVDA read as math in Acrobat where it read the TeX alt text
+    aloud; the alt text and attached file alone stay a choice."""
+    build_pdf = load(os.path.join(ROOT, "bin", "build-pdf.py"), "build_pdf")
+    schema = oerconfig.load_schema(os.path.join(ROOT, "bin", "schema-conversion.yaml"))
+    project = oerconfig.load_schema(os.path.join(ROOT, "lib", "schema-project.yaml"))
+
+    def chosen(pdf):
+        document = oerconfig.Document(
+            {"targets": {"pdf": {"format": "pdf", "pdf": pdf}}}, "conversion.yaml")
+        return str(oerconfig.resolve(schema, project, [document], target="pdf")["pdf.ua1_math"])
+
+    return [
+        ("office is the default", lambda: chosen({"standard": ["ua-1"]}) == "office"),
+        ("alt can still be chosen",
+         lambda: chosen({"standard": ["ua-1"], "ua1_math": "alt"}) == "alt"),
+        ("office writes Office's attribute beside the attached file",
+         lambda: build_pdf.math_setup(["ua-1"], "office") == "mathml-AF,mathml-MS"),
+        ("alt writes the attached file alone",
+         lambda: build_pdf.math_setup(["ua-1"], "alt") == "mathml-AF"),
+        ("PDF/UA-2 takes structure elements whichever is set",
+         lambda: build_pdf.math_setup(["ua-2"], "office")
+         == build_pdf.math_setup(["ua-2"], "alt") == "mathml-SE,mathml-AF"),
+    ]
+
+
 def check_decorative_marker():
     """The decorative marker, read alike by the filter and the Python.
 
@@ -1077,6 +1104,7 @@ GROUPS = [
     ("sidecar paths", check_sidecar_paths),
     ("shortDOIs for a bare-links sidecar", check_shortdoi),
     ("the decorative marker", check_decorative_marker),
+    ("PDF/UA-1's math", check_ua1_math),
 ]
 
 

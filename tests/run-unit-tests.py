@@ -492,6 +492,58 @@ def check_word_equation_text():
     ]
 
 
+def check_equation_bars():
+    """A bar written as an upper limit: Office's overbar in a Word file,
+    and in a deck still a limit, a macron in place of an en dash. A limit
+    inside another's base is repaired with it, and a limit of any other
+    character is left."""
+    import docxremediate
+
+    def limit(base, char, props=""):
+        return ("<m:limUpp>%s<m:e>%s</m:e><m:lim><m:r><m:rPr><m:sty m:val=\"p\" /></m:rPr>"
+                "<m:t>%s</m:t></m:r></m:lim></m:limUpp>" % (props, base, char))
+
+    def run(text):
+        return "<m:r><m:t>%s</m:t></m:r>" % text
+
+    def bar(base):
+        return '<m:bar><m:barPr><m:pos m:val="top" /></m:barPr><m:e>%s</m:e></m:bar>' % base
+
+    x, y = run("x"), run("y")
+    one = ("<m:oMath>" + limit(x, "¯", "<m:limUppPr><m:ctrlPr /></m:limUppPr>") + run("–")
+           + limit(y, "–") + run("+") + limit(x, "→") + "</m:oMath>")
+    nested = ("<m:oMath>" + limit("<m:sSub><m:e>" + limit(x, "–") + "</m:e><m:sub>" + run("1")
+                                  + "</m:sub></m:sSub>", "¯") + "</m:oMath>")
+    macron = "<m:oMath>" + limit(x, "¯") + "</m:oMath>"
+    word, word_counts = docxremediate.remediate_equations(one)
+    deck, deck_counts = docxremediate.remediate_equations(one, macron_bars=True)
+    word_nested, word_nested_counts = docxremediate.remediate_equations(nested)
+    deck_nested, deck_nested_counts = docxremediate.remediate_equations(nested, macron_bars=True)
+    kept, kept_counts = docxremediate.remediate_equations(macron, macron_bars=True)
+    return [
+        ("in a Word file, a macron's limit and an en dash's are each Office's overbar, the "
+         "en dash between them a minus, and an arrow's limit left",
+         lambda: word == "<m:oMath>" + bar(x) + run("−") + bar(y) + run("+")
+         + limit(x, "→") + "</m:oMath>"
+         and word_counts == {"equations_repaired": 1, "equation_characters": 3}),
+        ("in a deck, the macron's limit stays, the en dash's is a macron, the en dash between "
+         "them a minus, and the arrow's left",
+         lambda: deck == one.replace("<m:t>–</m:t></m:r></m:lim>",
+                                     "<m:t>¯</m:t></m:r></m:lim>")
+         .replace(run("–"), run("−"))
+         and deck_counts == {"equations_repaired": 1, "equation_characters": 2}),
+        ("a limit inside another's base is repaired with it, in a Word file and in a deck",
+         lambda: word_nested == "<m:oMath>" + bar("<m:sSub><m:e>" + bar(x) + "</m:e><m:sub>"
+                                                  + run("1") + "</m:sub></m:sSub>") + "</m:oMath>"
+         and word_nested_counts["equation_characters"] == 2
+         and deck_nested == nested.replace("–", "¯")
+         and deck_nested_counts["equation_characters"] == 1),
+        ("a deck's bar that's already a macron is no repair at all",
+         lambda: kept == macron and kept_counts == {"equations_repaired": 0,
+                                                    "equation_characters": 0}),
+    ]
+
+
 def check_link_replacements():
     """A bare link's Replacement in a source target's copy, as the filter
     reads it on the pages: an address replaces the link's address and its
@@ -1161,6 +1213,7 @@ GROUPS = [
     ("manifest names", check_manifest_names),
     ("repairing a .docx on the way in", check_docx_repair),
     ("normal text in a Word equation", check_word_equation_text),
+    ("a bar in a Word equation and in a deck's", check_equation_bars),
     ("a bare link's replacement in a source copy", check_link_replacements),
     ("the archive's name", check_archive_name),
     ("the content prefix", check_content_prefix),

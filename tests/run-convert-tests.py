@@ -2216,6 +2216,8 @@ def case_word_equations(work):
         tex = [n["c"][1] for n in walk_json(json.loads(back.stdout)) if n.get("t") == "Math"]
         return result, (tex[0] if tex else "")
     on_result, on = build("")
+    with zipfile.ZipFile(os.path.join(work, "source", "eq.docx")) as z:
+        on_xml = z.read("word/document.xml").decode("utf-8")
     off_result, off = build("    math:\n      repair_equations: false\n")
     # The keep sidecar names the equation by the TeX Pandoc reads from the
     # original, as the report shows it; a second row names nothing.
@@ -2228,16 +2230,23 @@ def case_word_equations(work):
     kept_result, kept = build("")
     kept_said = kept_result.stdout + kept_result.stderr
     return [
-        # As Pandoc reads it back: \mu for the Greek letter, - for the minus.
+        # As Pandoc reads it back: \mu for the Greek letter, - for the minus,
+        # and \overline for Office's overbar, which Narrator reads in Word
+        # where it said nothing for the accent Pandoc writes for \bar.
         ("the copy's equation reads back with a bar, mu, a minus, H sub 0, "
          "a hatted y, and Delta",
-         lambda: all(part in on for part in ("\\mu_{\\bar{x}} - H_{0}",
+         lambda: all(part in on for part in ("\\mu_{\\overline{x}} - H_{0}",
                                              "\\hat{y}", "\u0394"))
          and not any(c in on for c in "\u00b5\u00d8\u0177\u2206")),
+        ("the bar is Office's overbar, the limit gone",
+         lambda: '<m:bar><m:barPr><m:pos m:val="top" /></m:barPr><m:e><m:r><m:t>x</m:t>'
+         in on_xml and "<m:limUpp>" not in on_xml and on_xml.count("<m:acc>") == 1),
         ("an en dash in normal text stays an en dash",
          lambda: "1\u20135" in on),
-        ("the run says how many equations it repaired",
-         lambda: "1 Word equation(s) given the characters they mean" in on_result.stdout + on_result.stderr),
+        ("the run says how many equations it repaired, and how many characters: mu, the "
+         "bar, the minus, the zero, the hat, and Delta",
+         lambda: "1 Word equation(s) given the characters they mean (6 change(s))"
+         in on_result.stdout + on_result.stderr),
         ("with math.repair_equations off, the equation is as it was",
          lambda: "\u00b5" in off and "\\overset" in off),
         ("an equation the keep sidecar names is as it was in the copy, and "

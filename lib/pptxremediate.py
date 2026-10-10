@@ -25,8 +25,10 @@ docxremediate.py does for Word:
 - a bare link's ScreenTip, from the bare-links sidecar's Title, and its
   Replacement as its text, and as its address when it's an address;
 - each equation's characters, with math.repair_equations, as
-  docxremediate.py repairs a Word file's: PowerPoint's equations are the
-  same Office math;
+  docxremediate.py repairs a Word file's, since PowerPoint's equations are
+  the same Office math, except that a bar written as an upper limit stays
+  one, a macron in place of an en dash: NVDA reads a deck's equations by
+  their characters, and the limit's macron was the only bar it read;
 - the language, on text that declares none, when the project declares one;
 - the title in the file's core properties, when they have none.
 
@@ -734,7 +736,8 @@ def remediate(source, destination, alts=None, tables=None, titles=None, language
     first slide's title, the sidecar's if the slide has none of its own.
     problems, a list, is told each order not written, by its slide's key,
     and why. equations: whether each equation gets the characters it
-    means, as math.repair_equations gives a Word file's."""
+    means, as math.repair_equations gives a Word file's, its bars kept
+    limits (docxremediate.BAR)."""
     alts, tables, titles, orders = alts or {}, tables or {}, titles or {}, orders or {}
     links = links or {}
     deck = deck or deck_name(source)
@@ -813,7 +816,8 @@ def remediate(source, destination, alts=None, tables=None, titles=None, language
                     counts["links"] += n_titles
                     counts["replaced"] += n_replaced
         if slide is not None and equations:
-            xml, found = docxremediate.remediate_equations(text_of(part), pattern=OMATH)
+            xml, found = docxremediate.remediate_equations(text_of(part), pattern=OMATH,
+                                                           macron_bars=True)
             if found["equations_repaired"]:
                 texts[part] = xml
                 for key, n in found.items():

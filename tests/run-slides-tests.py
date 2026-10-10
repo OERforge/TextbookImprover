@@ -1745,8 +1745,11 @@ def equation(shape_id, omml):
             % (box, rect(shape_id, "TextBox %d" % shape_id, (457200, 1600200, 4000000, 600000))))
 
 
+# Two bars written as upper limits, a macron's and an en dash's, as
+# OpenStax's decks have them, and an en dash and the micro sign.
 BAR_OMML = ('<m:limUpp><m:e><m:r><m:t>x</m:t></m:r></m:e><m:lim><m:r><m:t>¯</m:t></m:r>'
-            '</m:lim></m:limUpp><m:r><m:t>–µ</m:t></m:r>')
+            '</m:lim></m:limUpp><m:r><m:t>–µ</m:t></m:r><m:limUpp><m:e><m:r><m:t>y</m:t>'
+            '</m:r></m:e><m:lim><m:r><m:t>–</m:t></m:r></m:lim></m:limUpp>')
 
 
 def case_links(work):
@@ -1874,11 +1877,14 @@ def case_links(work):
         and "pptx-link-bare-url" in checks_of(pptxcheck.check(pptxparse.read(out))), \
         [(f.check, f.detail) for f in found]
     two = read_part(out, "ppt/slides/slide2.xml")
-    yield "an equation gets the characters it means, PowerPoint's as Word's: a bar for a " \
-        "macron over x, a minus for an en dash, mu for the micro sign", \
-        "<m:acc>" in two and "<m:limUpp>" not in two and "<m:t>−μ</m:t>" in two \
+    yield "an equation gets the characters it means, PowerPoint's as Word's, but a bar stays " \
+        "an upper limit, NVDA reading only characters: a macron's limit kept, a macron for " \
+        "an en dash's, a minus for an en dash, mu for the micro sign", \
+        two.count("<m:limUpp>") == 2 and two.count("<m:t>¯</m:t>") == 2 \
+        and "<m:bar>" not in two and "<m:acc>" not in two and "–" not in two \
+        and "<m:t>−μ</m:t>" in two \
         and counts["equations_repaired"] == 1 and counts["equation_characters"] == 3 \
-        and ET.fromstring(two.encode()) is not None, two[two.find("<a14:m>"):][:400]
+        and ET.fromstring(two.encode()) is not None, two[two.find("<a14:m>"):][:600]
     plain = rem.remediate(path, os.path.join(work, "out", "plain.pptx"), deck="links")
     yield "and nothing of the kind without math.repair_equations or a sidecar", \
         plain["equations_repaired"] == plain["links"] == plain["replaced"] == 0 \
@@ -2167,8 +2173,8 @@ def case_folders(work):
              for l in shape.links if l.external]
     yield "remediate.py writes a deck's bare links and equations, and counts the decks' alone", \
         result.returncode == 0 and found == [("Example", "https://example.org", "An example")] \
-        and "<m:acc>" in read_part(os.path.join(work, "util-links", "maths.pptx"),
-                                   "ppt/slides/slide1.xml") \
+        and read_part(os.path.join(work, "util-links", "maths.pptx"),
+                      "ppt/slides/slide1.xml").count("<m:t>¯</m:t>") == 2 \
         and "1 bare link(s) given a replacement; 1 equation(s) repaired;" in result.stderr \
         and "Example</a>" in open(os.path.join(work, "util-links", "page.html"),
                                   encoding="utf-8").read(), (found, result.stderr[-600:])

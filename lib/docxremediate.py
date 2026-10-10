@@ -353,11 +353,18 @@ def remediate_captions(xml, applied, resolved):
 # (math.repair_equations), written into Word's own equations (OMML). Each
 # structure below is what the statistics textbook's equations hold; each
 # replacement is what Pandoc writes for the TeX the filter writes, so the
-# file reads back as the pages already read.
+# file reads back as the pages already read, except the bar.
 MATH_RUN = re.compile(r"(<m:r>)((?:(?!</m:r>).)*?)(<m:t(?:\s[^>]*)?>)([^<]*)(</m:t>)(</m:r>)", re.S)
 # A bar written as an upper limit: the base, and a macron or an en dash as
-# the limit. Pandoc writes \bar{x} as an accent with an overline.
-BAR = '<m:acc><m:accPr><m:chr m:val="\u203e" /></m:accPr><m:e>%s</m:e></m:acc>'
+# the limit. Pandoc writes \bar{x} as an accent whose character is an
+# overline (U+203E), for which Narrator said nothing in Word or PowerPoint.
+# Office's own overbar, which PowerPoint's Equation tab wrote for a bar
+# made there and Pandoc writes for \overline, Narrator read as "overbar"
+# and NVDA with MathCAT as "bar", in Word; Pandoc reads it back as
+# \overline{x}, where the pages have \bar{x}. In PowerPoint, NVDA read an
+# equation's characters and none of its structures, so a deck's bar stays
+# a limit, with a macron, which NVDA read, in place of an en dash.
+BAR = '<m:bar><m:barPr><m:pos m:val="top" /></m:barPr><m:e>%s</m:e></m:bar>'
 HAT = '<m:acc><m:accPr><m:chr m:val="\u0302" /></m:accPr><m:e>%s</m:e></m:acc>'
 SUB_SLASHED_O = re.compile(r"(<m:sub><m:r>(?:(?!</m:r>).)*?<m:t(?:\s[^>]*)?>)\u00d8(</m:t></m:r></m:sub>)", re.S)
 EQUATION_CHARACTERS = {"\u00b5": "\u03bc", "\u2206": "\u0394"}
@@ -391,37 +398,56 @@ def _repair_run(m, counts):
 
 
 LIMIT_OPEN = re.compile(r"<m:limUpp>")
-LIMIT_TAIL = re.compile(r"</m:e><m:lim><m:r>(?:(?!</m:r>).)*?<m:t(?:\s[^>]*)?>[\u00af\u2013]</m:t>"
+LIMIT_HEAD = re.compile(r"(?:<m:limUppPr>(?:(?!</m:limUppPr>).)*</m:limUppPr>)?<m:e>", re.S)
+LIMIT_TAIL = re.compile(r"</m:e><m:lim><m:r>(?:(?!</m:r>).)*?<m:t(?:\s[^>]*)?>([\u00af\u2013])</m:t>"
                         r"</m:r></m:lim></m:limUpp>", re.S)
+BASE_TAG = re.compile(r"<m:e>|</m:e>")
 
 
-def _limit_bars(eq):
-    """Each upper limit whose limit is a macron or an en dash, as a bar
-    over its base, the base found by counting m:e, since it can hold
-    structures of its own (X sub 1). Returns (eq, count)."""
-    out, pos, count = [], 0, 0
+def _upper_limits(eq):
+    """Each upper limit whose limit is a macron or an en dash, in order:
+    (its start, its base's start and end, its end, the index of its limit's
+    character). The base is found by counting m:e, since it can hold
+    structures of its own (X sub 1)."""
     for m in LIMIT_OPEN.finditer(eq):
-        if m.start() < pos:
-            continue
-        rest = eq[m.end():]
-        head = re.match(r"(?:<m:limUppPr>(?:(?!</m:limUppPr>).)*</m:limUppPr>)?<m:e>", rest, re.S)
+        head = LIMIT_HEAD.match(eq, m.end())
         if not head:
             continue
-        depth, i = 1, head.end()
-        for tag in re.finditer(r"<m:e>|</m:e>", rest[i:]):
+        depth = 1
+        for tag in BASE_TAG.finditer(eq, head.end()):
             depth += 1 if tag.group(0) == "<m:e>" else -1
             if depth == 0:
-                base_end = i + tag.start()
+                base_end = tag.start()
                 break
         else:
             continue
-        tail = LIMIT_TAIL.match(rest, base_end)
-        if not tail:
+        tail = LIMIT_TAIL.match(eq, base_end)
+        if tail:
+            yield m.start(), head.end(), base_end, tail.end(), tail.start(1)
+
+
+def _limit_bars(eq, macron=False):
+    """Each upper limit whose limit is a macron or an en dash, as Office's
+    overbar over its base; or, with macron, kept a limit, an en dash there
+    made a macron. A limit inside another's base is repaired with it.
+    Returns (eq, count)."""
+    out, pos, count = [], 0, 0
+    for start, base_start, base_end, end, char in _upper_limits(eq):
+        if start < pos:
             continue
-        out.append(eq[pos:m.start()])
-        out.append(BAR % rest[head.end():base_end])
-        pos = m.end() + tail.end()
-        count += 1
+        base, inner = _limit_bars(eq[base_start:base_end], macron)
+        count += inner
+        if not macron:
+            out.append(eq[pos:start] + BAR % base)
+            count += 1
+        elif eq[char] == "\u2013":
+            out.append(eq[pos:base_start] + base + eq[base_end:char] + "\u00af")
+            end = char + 1
+            count += 1
+        else:
+            out.append(eq[pos:base_start] + base)
+            end = base_end
+        pos = end
     out.append(eq[pos:])
     return "".join(out), count
 
@@ -463,7 +489,7 @@ def equation_texs(parts, name):
     return texs if len(texs) == len(equations) else []
 
 
-def remediate_equations(xml, skip=(), pattern=None):
+def remediate_equations(xml, skip=(), pattern=None, macron_bars=False):
     """The characters of each of Word's equations, as math.repair_equations
     repairs them in the pages: mu for the micro sign, Delta for the
     increment sign, a minus for an en dash, a bar for an upper limit that
@@ -471,7 +497,9 @@ def remediate_equations(xml, skip=(), pattern=None):
     and 0 for a subscript's slashed O. Only inside m:oMath; the text around
     an equation is left to math.from_text. pattern: the regular expression
     an equation matches, where it isn't Word's m:oMath with no attributes
-    (PowerPoint declares the namespace on m:oMath). Returns (xml, counts)."""
+    (PowerPoint declares the namespace on m:oMath). macron_bars: a bar
+    written as an upper limit stays one, a macron in place of an en dash,
+    as a deck's should (BAR). Returns (xml, counts)."""
     counts = {"equations_repaired": 0, "equation_characters": 0}
     number = [-1]
 
@@ -480,7 +508,7 @@ def remediate_equations(xml, skip=(), pattern=None):
         number[0] += 1
         if number[0] in skip:
             return eq
-        fixed, bars = _limit_bars(eq)
+        fixed, bars = _limit_bars(eq, macron_bars)
         counts["equation_characters"] += bars
         fixed, zeros = SUB_SLASHED_O.subn(r"\g<1>0\g<2>", fixed)
         counts["equation_characters"] += zeros

@@ -1348,6 +1348,71 @@ def case_order(work):
         and rem.slide_key("edges", ed.slides[6]) in refused \
         and ed.slides[5].shapes[1].stroke == 152400 and ed.slides[6].shapes[1].stroke == 254000, \
         (refused, [s.stroke for s in ed.slides[6].shapes])
+    # Geometry that reaches past its box: a callout's tail, a line
+    # callout's line, a connector's bend, a freeform's points, and a
+    # callout in a group, each over a shape its box doesn't reach.
+    def shaped(xml, prst, adjustments=()):
+        guides = "".join('<a:gd name="adj%d" fmla="val %d"/>' % (n, v)
+                         for n, v in enumerate(adjustments, 1))
+        return re.sub(r'<a:prstGeom prst="\w+"><a:avLst/></a:prstGeom>',
+                      lambda _m: '<a:prstGeom prst="%s"><a:avLst>%s</a:avLst></a:prstGeom>'
+                      % (prst, guides), xml, count=1)
+
+    def freeform(xml, points):
+        path = "".join('<a:%s><a:pt x="%s" y="%s"/></a:%s>' % (verb, x, y, verb)
+                       for verb, x, y in points)
+        return re.sub(r'<a:prstGeom prst="\w+"><a:avLst/></a:prstGeom>',
+                      lambda _m: '<a:custGeom><a:avLst/><a:gdLst/><a:ahLst/><a:cxnLst/>'
+                      '<a:rect l="0" t="0" r="r" b="b"/><a:pathLst><a:path w="100" h="100">'
+                      + path + '<a:close/></a:path></a:pathLst></a:custGeom>', xml, count=1)
+    near = textbox(5, "TextBox 4", ["Near"], (4000000, 1700000, 2000000, 400000))
+    box = (457200, 1600200, 2000000, 600000)
+    reach = deck(os.path.join(work, "reach.pptx"), [
+        {"shapes": [title(2, "Tip"), shaped(textbox(4, "Callout 3", ["Says"], box),
+                                            "wedgeRectCallout", (150000, 0)), near]},
+        {"shapes": [title(2, "Line"), shaped(textbox(4, "Callout 3", ["Says"], box),
+                                             "borderCallout1", (50000, 0, 50000, 250000)), near]},
+        {"shapes": [title(2, "Bend"), shaped(line(4, (457200, 1600200, 1000000, 600000)),
+                                             "bentConnector3", (400000,)), near]},
+        {"shapes": [title(2, "Free"), freeform(textbox(4, "Freeform 3", ["Free"], box),
+                                               [("moveTo", 0, 0), ("lnTo", 200, 50)]), near]},
+        {"shapes": [title(2, "Guide"), freeform(textbox(4, "Freeform 3", ["Free"], box),
+                                                [("moveTo", 0, 0), ("lnTo", "w", 50)]),
+                    textbox(5, "TextBox 4", ["Far"], (8000000, 5000000, 1000000, 400000))]},
+        {"shapes": [title(2, "Held"),
+                    group(6, [shaped(textbox(7, "Callout 6", ["Says"], (0, 0, 4000000, 1200000)),
+                                     "wedgeRectCallout", (150000, 0))], box),
+                    near]},
+        {"shapes": [title(2, "Default"),
+                    shaped(textbox(4, "Callout 3", ["Says"], (457200, 1600200, 2000000, 800000)),
+                           "wedgeRectCallout"),
+                    textbox(5, "TextBox 4", ["Below"], (457200, 2520200, 2000000, 400000))]},
+        {"shapes": [title(2, "Plain"), textbox(4, "TextBox 3", ["Says"], box), near]},
+        {"shapes": [title(2, "Cloud"), shaped(textbox(4, "Callout 3", ["Says"], box),
+                                              "cloudCallout", (150000, 0)),
+                    textbox(5, "TextBox 4", ["Beyond"], (4600000, 1700000, 1000000, 400000))]},
+        {"shapes": [title(2, "Hid"),
+                    group(6, [textbox(8, "TextBox 7", ["Shown"], (0, 0, 4000000, 1200000)),
+                              shaped(textbox(7, "Callout 6", ["Gone"], (0, 0, 4000000, 1200000)),
+                                     "wedgeRectCallout", (150000, 0)).replace(
+                                  'name="Callout 6"', 'name="Callout 6" hidden="1"')], box),
+                    near]}])
+    rd = pptxparse.read(reach)
+    problems = []
+    counts = rem.remediate(reach, os.path.join(work, "out", "reach.pptx"), problems=problems,
+                           orders={rem.slide_key("reach", slide): [
+                               "5", "6" if slide.number in (6, 10) else "4"]
+                               for slide in rd.slides},
+                           deck="reach")
+    refused = sorted(int(k.rsplit("-", 1)[1]) - 255 for k, _why in problems)
+    yield "a callout's tail, a line callout's line, a connector's bend, a freeform's points, " \
+        "a cloud's trail, and a callout in a group reach past their boxes, a guide's point " \
+        "anywhere, and a hidden piece of a group nowhere", \
+        refused == [1, 2, 3, 4, 5, 6, 7, 9] and counts["orders"] == 2 \
+        and rd.slides[0].shapes[1].extent == (0.0, 0.0, 2.0, 1.0) \
+        and rd.slides[3].shapes[1].extent == (0.0, 0.0, 2.0, 1.0) \
+        and rd.slides[4].shapes[1].extent is None, \
+        (refused, [s.shapes[1].extent for s in rd.slides])
     # Two shapes with one id can't be named; the row says so.
     twin = deck(os.path.join(work, "twin.pptx"), [
         {"shapes": [pic(0, "rId2", (457200, 4000000, 900000, 900000), "Low"),

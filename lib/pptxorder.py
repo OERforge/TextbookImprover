@@ -20,10 +20,12 @@ those shapes had, in the order given, and every other shape stays where it
 was.
 
 Overlap is judged by the boxes shapes are drawn in, a rotated shape's box
-turned with it, each widened on every side by four points, or by the reach
-of its outline when that's more (its width, three times it for a line with
-an arrowhead), since an outline, an arrowhead, and the smoothing of edges
-reach past the box: two widened boxes that share any area overlap. A shape
+turned with it, stretched to where a shape's geometry reaches past it (a
+callout's tail, a connector's bend, a freeform's points), a group's to
+hold its pieces, and each widened on every side by four points, or by the
+reach of its outline when that's more (its width, three times it for a
+line with an arrowhead), since an outline, an arrowhead, and the smoothing
+of edges reach past the box: two widened boxes that share any area overlap. A shape
 whose box can't be known counts as overlapping everything, and one that
 draws nothing (a hidden shape, an empty placeholder) as overlapping
 nothing. Text that runs further past its box, and a shadow or a glow,
@@ -185,22 +187,52 @@ def tree(xml, slide=None):
     return kids
 
 
-def envelope(shape):
-    """The box a shape is drawn in, turned with it (a rotated box's own
-    box on the slide), and widened on every side by MARGIN or its
-    outline's reach, whichever is more."""
+def _turned(x0, y0, x1, y1, middle_x, middle_y, degrees):
+    """The box holding the rectangle from (x0, y0) to (x1, y1) once turned
+    clockwise about a point."""
+    if not degrees % 360:
+        return x0, y0, x1, y1
+    theta = math.radians(degrees)
+    cos, sin = math.cos(theta), math.sin(theta)
+    xs, ys = [], []
+    for x, y in ((x0, y0), (x1, y0), (x0, y1), (x1, y1)):
+        dx, dy = x - middle_x, y - middle_y
+        xs.append(middle_x + dx * cos - dy * sin)
+        ys.append(middle_y + dx * sin + dy * cos)
+    return min(xs), min(ys), max(xs), max(ys)
+
+
+def _drawn(shape):
+    """Where a shape is drawn, (x0, y0, x1, y1) on the slide: its box,
+    stretched to where its geometry reaches (pptxparse's extent: a
+    callout's tail, a connector's bend), and to a group's pieces, turned
+    with it about its box's middle; None when that can't be known."""
     box = shape.box
-    if box is None:
+    if box is None or shape.extent is None:
         return None
-    width, height = box.cx, box.cy
-    if shape.rotation % 180:
-        theta = math.radians(shape.rotation)
-        cos, sin = abs(math.cos(theta)), abs(math.sin(theta))
-        width, height = box.cx * cos + box.cy * sin, box.cx * sin + box.cy * cos
-    middle_x, middle_y = box.x + box.cx / 2, box.y + box.cy / 2
+    fx0, fy0, fx1, fy1 = shape.extent
+    x0, y0 = box.x + fx0 * box.cx, box.y + fy0 * box.cy
+    x1, y1 = box.x + fx1 * box.cx, box.y + fy1 * box.cy
+    for child in shape.children:
+        if child.hidden:
+            continue
+        inner = _drawn(child)
+        if inner is None:
+            return None
+        x0, y0, x1, y1 = min(x0, inner[0]), min(y0, inner[1]), max(x1, inner[2]), max(y1, inner[3])
+    return _turned(x0, y0, x1, y1, box.x + box.cx / 2, box.y + box.cy / 2, shape.rotation)
+
+
+def envelope(shape):
+    """The box a shape is drawn in (_drawn), widened on every side by
+    MARGIN or its outline's reach, whichever is more."""
+    drawn = _drawn(shape)
+    if drawn is None:
+        return None
+    x0, y0, x1, y1 = drawn
     pad = max(MARGIN, shape.stroke)
-    return pptxparse.Box(int(middle_x - width / 2 - pad), int(middle_y - height / 2 - pad),
-                         int(round(width + 2 * pad)), int(round(height + 2 * pad)))
+    return pptxparse.Box(int(x0 - pad), int(y0 - pad), int(round(x1 - x0 + 2 * pad)),
+                         int(round(y1 - y0 + 2 * pad)))
 
 
 def draws(shape):

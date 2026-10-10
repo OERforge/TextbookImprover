@@ -254,7 +254,7 @@ class Shape:
     __slots__ = ("kind", "frame", "id", "name", "descr", "title", "hidden", "decorative",
                  "ph_type", "ph_idx", "text", "paragraphs", "box", "children", "image",
                  "links", "table", "prog_id", "media", "depth", "alternate", "math",
-                 "malformed", "rotation", "stroke")
+                 "malformed", "rotation", "stroke", "extent")
 
     def __init__(self, kind):
         self.kind = kind            # sp, pic, graphicFrame, grpSp, cxnSp, contentPart
@@ -278,6 +278,10 @@ class Shape:
         self.malformed = False      # no non-visual properties: no id, name, or alt text
         self.rotation = 0.0         # degrees clockwise, about the box's center
         self.stroke = 0             # how far its outline can reach past its box, in EMU
+        # Where its geometry reaches, in its box's widths and heights from
+        # the box's corner: (0, 0, 1, 1), more for a callout's tail, a
+        # connector's bend, or a freeform's points, or None when unknown.
+        self.extent = (0.0, 0.0, 1.0, 1.0)
 
     @property
     def placeholder(self):
@@ -551,6 +555,105 @@ def _stroke(sppr):
     return width * (3 if arrows else 1)
 
 
+# Preset shapes drawn past their box, by ECMA-376's presetShapeDefinitions
+# (each adjustment in hundred-thousandths of the box's width or height,
+# with its default): a wedge or cloud callout's tip, from the box's center;
+# a line callout's points, from its corner, y then x in turn; a bent or
+# curved connector's bends, x or y.
+TIP_CALLOUTS = {name: (-20833, 62500) for name in (
+    "wedgeRectCallout", "wedgeRoundRectCallout", "wedgeEllipseCallout", "cloudCallout")}
+LINE_CALLOUTS = {}
+for _n, _adj in (("1", (18750, -8333, 112500, -38333)),
+                 ("2", (18750, -8333, 18750, -16667, 112500, -46667)),
+                 ("3", (18750, -8333, 18750, -16667, 100000, -16667, 112963, -8333))):
+    for _family in ("callout", "accentCallout", "borderCallout", "accentBorderCallout"):
+        LINE_CALLOUTS[_family + _n] = _adj
+CONNECTOR_BENDS = {"3": "x", "4": "xy", "5": "xyx"}
+
+
+def _adjustments(geom, defaults):
+    """A preset's adjustments, its avLst's values over the defaults."""
+    values = list(defaults)
+    av = geom.find(q("a:avLst"))
+    for gd in (av.findall(q("a:gd")) if av is not None else []):
+        match = re.fullmatch(r"adj(\d*)", gd.get("name") or "")
+        value = re.fullmatch(r"val\s+(-?\d+)", (gd.get("fmla") or "").strip())
+        if match and value:
+            n = int(match.group(1) or 1) - 1
+            if 0 <= n < len(values):
+                values[n] = int(value.group(1))
+    return values
+
+
+def _extent(sppr):
+    """Where a shape's geometry reaches, as Shape.extent says: its box,
+    stretched to a callout's tail, a connector's bends, or a freeform's
+    points; None when a freeform's can't be read."""
+    xs, ys = [0.0, 1.0], [0.0, 1.0]
+    geom = sppr.find(q("a:prstGeom")) if sppr is not None else None
+    name = geom.get("prst") if geom is not None else None
+    if name in TIP_CALLOUTS:
+        dx, dy = _adjustments(geom, TIP_CALLOUTS[name])
+        # a cloud trails small clouds to its tip, the largest a twelfth of
+        # its shorter side in radius (1,800 of 21,600 in the definition)
+        spread = 0.09 if name == "cloudCallout" else 0.0
+        xs += [0.5 + dx / 100000 - spread, 0.5 + dx / 100000 + spread]
+        ys += [0.5 + dy / 100000 - spread, 0.5 + dy / 100000 + spread]
+    elif name in LINE_CALLOUTS:
+        values = _adjustments(geom, LINE_CALLOUTS[name])
+        ys += [v / 100000 for v in values[0::2]]
+        xs += [v / 100000 for v in values[1::2]]
+    elif name and re.fullmatch(r"(bent|curved)Connector[345]", name):
+        axes = CONNECTOR_BENDS[name[-1]]
+        for axis, value in zip(axes, _adjustments(geom, [50000] * len(axes))):
+            (xs if axis == "x" else ys).append(value / 100000)
+    custom = sppr.find(q("a:custGeom")) if sppr is not None else None
+    if custom is not None:
+        reach = _custom_reach(custom, sppr)
+        if reach is None:
+            return None
+        xs += reach[0]
+        ys += reach[1]
+    return min(xs), min(ys), max(xs), max(ys)
+
+
+def _custom_reach(custom, sppr):
+    """A freeform's points, in its box's widths and heights, as ([x], [y]):
+    each path's points over its own width and height, or the shape's when
+    it gives none; an arc held by the ellipse it's drawn on. None when a
+    point is a guide's name, or an arc's start isn't known."""
+    xfrm = sppr.find(q("a:xfrm"))
+    ext = xfrm.find(q("a:ext")) if xfrm is not None else None
+    xs, ys = [], []
+    for path in custom.iter(q("a:path")):
+        try:
+            width = float(path.get("w") or (ext.get("cx") if ext is not None else 0) or 0)
+            height = float(path.get("h") or (ext.get("cy") if ext is not None else 0) or 0)
+        except ValueError:
+            return None
+        if not width or not height:
+            return None
+        here = None
+        for step in path:
+            tag = step.tag.split("}")[-1]
+            try:
+                if tag == "arcTo":
+                    if here is None:
+                        return None
+                    rx, ry = float(step.get("wR")), float(step.get("hR"))
+                    xs += [(here[0] - 2 * rx) / width, (here[0] + 2 * rx) / width]
+                    ys += [(here[1] - 2 * ry) / height, (here[1] + 2 * ry) / height]
+                    here = None
+                    continue
+                for pt in step.findall(q("a:pt")):
+                    here = (float(pt.get("x")), float(pt.get("y")))
+                    xs.append(here[0] / width)
+                    ys.append(here[1] / height)
+            except (TypeError, ValueError):
+                return None
+    return xs, ys
+
+
 def _decorative(cnvpr):
     """Whether a shape carries PowerPoint's decorative mark, in its own
     extension list: one inside its link's list isn't the shape's."""
@@ -675,6 +778,7 @@ class _Reader:
                 shape.image = self.image(fill.find(q("a:blip")))
         if kind in ("sp", "pic", "cxnSp"):
             shape.stroke = _stroke(el.find(q("p:spPr")))
+            shape.extent = _extent(el.find(q("p:spPr")))
         if kind in ("sp", "cxnSp"):
             shape.paragraphs = _text_body(el)
             shape.text = "\n".join(shape.paragraphs).strip()

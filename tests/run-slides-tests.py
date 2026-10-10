@@ -1636,8 +1636,10 @@ def case_links(work):
 # ---------------------------------------------------------------------------
 
 def pandoc_ok():
+    """Whether convert.py can read a book here, which it reads with Pandoc
+    3.9 or later; a slides run needs none."""
     if shutil.which("pandoc") is None:
-        print("  skip  pandoc not found; convert.py needs it")
+        print("  skip  pandoc not found; convert.py needs it for a book")
         return False
     version = subprocess.run(["pandoc", "--version"], capture_output=True,
                              text=True).stdout.split()[1]
@@ -1660,8 +1662,6 @@ def rows_of(path):
 
 
 def case_convert(work):
-    if not pandoc_ok():
-        return
     folder = os.path.join(work, "decks")
     os.makedirs(folder)
     messy_deck(os.path.join(folder, "messy.pptx"))
@@ -1765,9 +1765,8 @@ def case_convert(work):
 
 
 def case_folders(work):
-    if not pandoc_ok():
-        return
     # A book's folder with a deck in it: the deck is left out, and said to be.
+    # A book is read by Pandoc; the rest is slides, which need none.
     book = os.path.join(work, "book")
     os.makedirs(book)
     with open(os.path.join(book, "one.md"), "w") as fh:
@@ -1775,11 +1774,12 @@ def case_folders(work):
     clean_deck(os.path.join(book, "talk.pptx"))
     with open(os.path.join(book, "project.yaml"), "w") as fh:
         fh.write("project:\n  identifier: org.example.slides\n  title: A Book\n")
-    result = convert(book, "--check-only")
-    yield "a deck beside a book's pages is left out, and the run says so", \
-        result.returncode == 0 and "1 PowerPoint deck(s) here are left out (talk.pptx)" \
-        in result.stderr and not os.path.exists(os.path.join(book, "slides-check.csv")), \
-        result.stderr[-500:]
+    if pandoc_ok():
+        result = convert(book, "--check-only")
+        yield "a deck beside a book's pages is left out, and the run says so", \
+            result.returncode == 0 and "1 PowerPoint deck(s) here are left out (talk.pptx)" \
+            in result.stderr and not os.path.exists(os.path.join(book, "slides-check.csv")), \
+            result.stderr[-500:]
     # project.kind: slides makes it slides, and the page is left out instead.
     with open(os.path.join(book, "project.yaml"), "w") as fh:
         fh.write("project:\n  identifier: org.example.slides\n  title: A Book\n  kind: slides\n")
@@ -1900,6 +1900,36 @@ def case_folders(work):
                                   encoding="utf-8").read(), (found, result.stderr[-600:])
 
 
+def case_no_pandoc(work):
+    """convert.py with no Pandoc on the PATH: a slides run reads and writes
+    its decks itself, and a book says what it needs."""
+    tools = os.path.join(work, "bin")
+    os.makedirs(tools)
+    os.symlink(sys.executable, os.path.join(tools, "python3"))
+
+    def bare_run(where):
+        return subprocess.run([os.path.join(tools, "python3"), os.path.join(BIN, "convert.py"),
+                               "--quiet"], cwd=where, env=dict(os.environ, PATH=tools),
+                              capture_output=True, text=True, stdin=subprocess.DEVNULL)
+    decks = os.path.join(work, "decks")
+    os.makedirs(decks)
+    messy_deck(os.path.join(decks, "messy.pptx"))
+    result = bare_run(decks)
+    yield "a slides run needs no Pandoc: the reports and the copies", \
+        result.returncode == 0 and os.path.exists(os.path.join(decks, "remediated", "messy.pptx")) \
+        and os.path.exists(os.path.join(decks, "image-alt-missing.csv")), result.stderr[-500:]
+    book = os.path.join(work, "book")
+    os.makedirs(book)
+    with open(os.path.join(book, "one.md"), "w") as fh:
+        fh.write("---\ntitle: One\n---\n\n# One\n\nText.\n")
+    with open(os.path.join(book, "project.yaml"), "w") as fh:
+        fh.write("project:\n  identifier: org.example.book\n  title: A Book\n")
+    result = bare_run(book)
+    yield "and a book's run says it needs Pandoc 3.9 or later", \
+        result.returncode != 0 and "pandoc not found. Version 3.9 or later is required." \
+        in result.stderr, result.stderr[-300:]
+
+
 CASES = [("reading a deck", case_parse), ("the checks", case_check),
          ("the copy", case_remediate), ("the copy, more", case_remediate_more),
          ("the sidecars", case_sidecars), ("what a review found", case_edges),
@@ -1907,7 +1937,8 @@ CASES = [("reading a deck", case_parse), ("the checks", case_check),
          ("the reading order", case_order), ("titles another slide has", case_retitle),
          ("links and equations", case_links),
          ("convert.py on decks", case_convert),
-         ("folders, archives, and tools", case_folders)]
+         ("folders, archives, and tools", case_folders),
+         ("no Pandoc", case_no_pandoc)]
 
 
 def main():

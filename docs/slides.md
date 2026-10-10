@@ -13,6 +13,8 @@ cd stats-slides
 python3 $T/bin/convert.py
 ```
 
+A slides run needs Python and PyYAML from the [requirements](installation.md#requirements), and not Pandoc, which a book's run reads its sources with.
+
 On OpenStax's 13 decks for _Introductory Business Statistics 2e_, the run begins:
 
 ```

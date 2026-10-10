@@ -33,8 +33,9 @@
 #   run-unpack-tests.py    unpack-epub.py and unpack-jekyll.py, and an
 #                          unpacked book converted.
 #   run-slides-tests.py    PowerPoint decks read, checked, and remediated,
-#                          and convert.py on folders of them (that part
-#                          skipped without Pandoc 3.9).
+#                          and convert.py on folders of them, which needs
+#                          no Pandoc (a deck in a book's folder skipped
+#                          without Pandoc 3.9).
 #   run-site-tests.py      unpack-site.py on saves, WARCs, and captures.
 #   run-mathjax-tests.py   formulas as MathJax 2, 3, and 4 drew them.
 #

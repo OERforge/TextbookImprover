@@ -4215,17 +4215,6 @@ def main():
         if not os.path.isfile(required):
             die(f"Missing {required} -- save it alongside this script.")
 
-    # Pandoc 3.9 introduced the options this script relies on. Earlier
-    # versions accept most of the command line and quietly do something
-    # else: 3.6 and older write grid tables without cell spans, so a table
-    # with merged cells loses them without any warning.
-    if shutil.which("pandoc") is None:
-        die("pandoc not found. Version 3.9 or later is required.")
-    version = subprocess.run(["pandoc", "--version"], capture_output=True,
-                             text=True).stdout.split()[1]
-    if tuple(int(p) for p in re.findall(r"\d+", version)[:3]) < (3, 9):
-        die(f"Pandoc {version} is too old; 3.9 or later is required.")
-
     unpack_archives(base, check_only=args.check_only,
                     linked_documents=args.linked_documents)
     import deckrun
@@ -4242,6 +4231,18 @@ def main():
             + ", ".join(decks[:4]) + (", ..." if len(decks) > 4 else "")
             + "): a deck isn't a page of a book. In a folder of their own, decks "
             "are slides, each checked and remediated (project.kind: slides).")
+    # Pandoc 3.9 introduced the options this script relies on. Earlier
+    # versions accept most of the command line and quietly do something
+    # else: 3.6 and older write grid tables without cell spans, so a table
+    # with merged cells loses them without any warning. A slides run reads
+    # and writes its decks itself, and needs no Pandoc.
+    if not slides:
+        if shutil.which("pandoc") is None:
+            die("pandoc not found. Version 3.9 or later is required.")
+        version = subprocess.run(["pandoc", "--version"], capture_output=True,
+                                 text=True).stdout.split()[1]
+        if tuple(int(p) for p in re.findall(r"\d+", version)[:3]) < (3, 9):
+            die(f"Pandoc {version} is too old; 3.9 or later is required.")
     global PASSTHROUGH
     PASSTHROUGH = str(project.get("passthrough", "_pt") or "").strip("/")
     for target in targets:

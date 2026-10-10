@@ -58,6 +58,7 @@ NS = {
     "a14": "http://schemas.microsoft.com/office/drawing/2010/main",
     "adec": "http://schemas.microsoft.com/office/drawing/2017/decorative",
     "p14": "http://schemas.microsoft.com/office/powerpoint/2010/main",
+    "p173": "http://schemas.microsoft.com/office/powerpoint/2017/3/main",
     "m": "http://schemas.openxmlformats.org/officeDocument/2006/math",
     "rel": "http://schemas.openxmlformats.org/package/2006/relationships",
     "cp": "http://schemas.openxmlformats.org/package/2006/metadata/core-properties",
@@ -254,7 +255,7 @@ class Shape:
     __slots__ = ("kind", "frame", "id", "name", "descr", "title", "hidden", "decorative",
                  "ph_type", "ph_idx", "text", "paragraphs", "box", "children", "image",
                  "links", "table", "prog_id", "media", "depth", "alternate", "math",
-                 "malformed", "rotation", "stroke", "extent")
+                 "malformed", "rotation", "stroke", "extent", "tracks")
 
     def __init__(self, kind):
         self.kind = kind            # sp, pic, graphicFrame, grpSp, cxnSp, contentPart
@@ -282,6 +283,10 @@ class Shape:
         # the box's corner: (0, 0, 1, 1), more for a callout's tail, a
         # connector's bend, or a freeform's points, or None when unknown.
         self.extent = (0.0, 0.0, 1.0, 1.0)
+        # A video's or audio's caption tracks, as PowerPoint's Insert
+        # Captions keeps them: (part, label, language, cues), cues None
+        # when the part isn't in the file (_Reader.tracks).
+        self.tracks = []
 
     @property
     def placeholder(self):
@@ -694,6 +699,27 @@ class _Reader:
             return (target, None, posixpath.splitext(target)[1].lower())
         return None
 
+    def tracks(self, nvpr):
+        """A media shape's caption tracks. PowerPoint lists them in the
+        media's extension (p173:tracksInfo), each embedding a Track part,
+        a WebVTT file ([MS-PPTX] 2.1.3, 2.2.4.1); a part's cues are its
+        timing lines, the WebVTT signature first."""
+        out = []
+        for track in nvpr.iter(q("p173:track")):
+            rid = track.get(q("r:embed"))
+            entry = self.rels.get(rid)
+            cues = None
+            if entry and entry[0] == "track" and not entry[2]:
+                try:
+                    text = self.zf.read(entry[1]).decode("utf-8-sig", "replace")
+                except KeyError:
+                    text = None
+                if text is not None:
+                    cues = len(re.findall(r"-->", text)) if text.startswith("WEBVTT") else 0
+            out.append((entry[1] if entry else None, track.get("label") or "",
+                        track.get("lang") or "", cues))
+        return out
+
     def shapes(self, parent, depth=0, mapper=None, alternate=False):
         out = []
         for el in parent:
@@ -747,6 +773,8 @@ class _Reader:
                 for ext in nvpr.iter(q("a:ext")):
                     if ext.find(q("p14:media")) is not None:
                         shape.media = "media"
+            if shape.media:
+                shape.tracks = self.tracks(nvpr)
         # Position: the shape's own, or its placeholder's on the layout
         # or master; a group's children are placed through the group.
         if kind == "graphicFrame":

@@ -175,6 +175,51 @@ def video(shape_id, rid, box):
                              extra='<a:videoFile r:link="%s"/>' % rid), rid, xfrm(*box)))
 
 
+TRACK_REL = "http://schemas.microsoft.com/office/2017/04/relationships/track"
+VTT = "WEBVTT\n\n00:00:01.000 --> 00:00:04.000\nWelcome to the talk.\n"
+
+
+def captioned(shape_id, rid, box, tracks=(), audio=False):
+    """A video, or audio, whose media extension lists caption tracks as
+    PowerPoint's Insert Captions writes them, each embedding a part by
+    relationship (add_tracks)."""
+    listed = "".join('<p173:track id="{%08d-6AC2-3BD8-4686-DAC71591EB65}" label="Captions" '
+                     'lang="en" r:embed="%s"/>' % (i, track) for i, track in enumerate(tracks))
+    ext = ('<p:extLst><p:ext uri="{DAA4B4D4-6D71-4841-9C94-3DE7FCFB9230}"><p14:media xmlns:p14='
+           '"http://schemas.microsoft.com/office/powerpoint/2010/main" r:embed="%s"><p14:extLst>'
+           '<p:ext uri="{3AFAAA56-56D3-431D-BCD4-E75A35582382}"><p173:tracksInfo xmlns:p173='
+           '"http://schemas.microsoft.com/office/powerpoint/2017/3/main" displayLoc="media">'
+           '<p173:trackLst>%s</p173:trackLst></p173:tracksInfo></p:ext></p14:extLst></p14:media>'
+           '</p:ext></p:extLst>' % (rid, listed)) if tracks else ""
+    media = '<a:%s r:link="%s"/>' % ("audioFile" if audio else "videoFile", rid)
+    return ("<p:pic>%s<p:blipFill><a:blip r:embed=\"%s\"/></p:blipFill><p:spPr>%s</p:spPr>"
+            "</p:pic>" % (nv("pic", shape_id, "Media %s" % shape_id, "A talk", extra=media + ext),
+                          rid, xfrm(*box)))
+
+
+def add_tracks(path, tracks):
+    """The deck at path with each slide's track relationships added,
+    {slide number: [(id, part, its text or None, type)]}, a part with no
+    text left out of the file."""
+    with zipfile.ZipFile(path) as z:
+        members = [(i.filename, z.read(i.filename)) for i in z.infolist()]
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as z:
+        for name, data in members:
+            number = re.match(r"ppt/slides/_rels/slide(\d+)\.xml\.rels$", name)
+            if number and int(number.group(1)) in tracks:
+                added = "".join('<Relationship Id="%s" Type="%s" Target="../media/%s"/>'
+                                % (rid, kind, os.path.basename(part))
+                                for rid, part, _, kind in tracks[int(number.group(1))])
+                data = data.decode("utf-8").replace("</Relationships>",
+                                                    added + "</Relationships>").encode("utf-8")
+            z.writestr(name, data)
+        for entries in tracks.values():
+            for _, part, text, _ in entries:
+                if text is not None:
+                    z.writestr(part, text.encode("utf-8"))
+    return path
+
+
 def group(shape_id, children, box, descr=None, decorative=False):
     x, y, cx, cy = box
     return ('<p:grpSp>%s<p:grpSpPr><a:xfrm><a:off x="%d" y="%d"/><a:ext cx="%d" cy="%d"/>'
@@ -564,6 +609,56 @@ def case_check(work):
                                                  rect(6, "Rectangle 5", (20, 0, 10, 10))],
                                              (0, 1600200, 100, 100), decorative=True)],
              "images": {"rId2": RED}}])).slides[0])), ""
+
+
+def case_captions(work):
+    """A video's or audio's captions, as PowerPoint's Insert Captions keeps
+    them: a track list in the media's extension, each track a WebVTT part.
+    A track with a cue is captions; one whose part is missing, empty, of
+    another kind, or not WebVTT isn't."""
+    box = (457200, 1600200, 3000000, 2000000)
+    right = (4000000, 1600200, 3000000, 2000000)
+    path = deck(os.path.join(work, "captions.pptx"), [
+        {"shapes": [title(2, "Captioned"), captioned(4, "rId5", box, ["rId6"])],
+         "videos": ["rId5"]},
+        {"shapes": [title(2, "Empty track"), captioned(4, "rId5", box, ["rId6"])],
+         "videos": ["rId5"]},
+        {"shapes": [title(2, "Missing track"), captioned(4, "rId5", box, ["rId6"])],
+         "videos": ["rId5"]},
+        {"shapes": [title(2, "Audio"), captioned(4, "rId5", box, ["rId6"], audio=True)],
+         "videos": ["rId5"]},
+        {"shapes": [title(2, "Plain"), captioned(4, "rId5", box)], "videos": ["rId5"]},
+        {"shapes": [title(2, "Not captions"), captioned(4, "rId5", box, ["rId6"]),
+                    captioned(5, "rId5", right, ["rId7"])], "videos": ["rId5"]},
+        {"shapes": [title(2, "Marked"), captioned(4, "rId5", box, ["rId6"])],
+         "videos": ["rId5"]}])
+    add_tracks(path, {
+        1: [("rId6", "ppt/media/track1.vtt", VTT, TRACK_REL)],
+        2: [("rId6", "ppt/media/track2.vtt", "WEBVTT\n\n", TRACK_REL)],
+        3: [("rId6", "ppt/media/track3.vtt", None, TRACK_REL)],
+        4: [("rId6", "ppt/media/track4.vtt", VTT, TRACK_REL)],
+        6: [("rId6", "ppt/media/track6.vtt", VTT, REL + "image"),
+            ("rId7", "ppt/media/track6.srt", "1\n00:00:01,000 --> 00:00:04,000\nWelcome.\n",
+             TRACK_REL)],
+        7: [("rId6", "ppt/media/track7.vtt", "\ufeff" + VTT, TRACK_REL)]})
+    parsed = pptxparse.read(path)
+    media = {s.number: [shape for shape in s.all_shapes() if shape.media] for s in parsed.slides}
+    found = [(f.where, f.detail) for f in pptxcheck.check(parsed)
+             if f.check == "pptx-media-no-captions"]
+    yield "a caption track is read: its part, label, language, and cues", \
+        media[1][0].tracks == [("ppt/media/track1.vtt", "Captions", "en", 1)] \
+        and media[3][0].tracks == [("ppt/media/track3.vtt", "Captions", "en", None)] \
+        and media[5][0].tracks == [], [m[0].tracks for m in media.values() if m]
+    yield "a video or audio with captions isn't reported, a byte-order mark before WebVTT's " \
+        "signature allowed", not any(w.startswith(("slide 1,", "slide 4,", "slide 7,"))
+                                    for w, _ in found) and media[4][0].media == "audio", found
+    yield "one whose track is empty, missing, of another kind, or not WebVTT is reported, " \
+        "and one with no track as before", sorted(found) == [
+            ("slide 2, Media 4", "video, whose caption track holds no captions"),
+            ("slide 3, Media 4", "video, whose caption track holds no captions"),
+            ("slide 5, Media 4", "video"),
+            ("slide 6, Media 4", "video, whose caption track holds no captions"),
+            ("slide 6, Media 5", "video, whose caption track holds no captions")], found
 
 
 def remediated(work, name, source, alts=None, tables=None, titles=None, language=None,
@@ -2211,6 +2306,7 @@ def case_no_pandoc(work):
 
 
 CASES = [("reading a deck", case_parse), ("the checks", case_check),
+         ("captions on video and audio", case_captions),
          ("the copy", case_remediate), ("the copy, more", case_remediate_more),
          ("the sidecars", case_sidecars), ("what a review found", case_edges),
          ("what PowerPoint made of Pandoc's decks", case_powerpoint),

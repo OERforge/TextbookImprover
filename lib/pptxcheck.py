@@ -336,7 +336,8 @@ def check(deck, name=None, kind="source-pptx", alt_max_chars=ALT_MAX_CHARS,
                 if shape.table.merged:
                     add(where(slide, shape), "pptx-merged-cells", "a table with merged cells")
             if shape.media and not _captioned(shape):
-                add(where(slide, shape), "pptx-media-no-captions", shape.media)
+                add(where(slide, shape), "pptx-media-no-captions", shape.media + (
+                    ", whose caption track holds no captions" if shape.tracks else ""))
             if shape.kind == "sp" and shape.paragraphs and tab_table(shape):
                 add(where(slide, shape), "pptx-tab-table",
                     " | ".join(p.replace("\t", " / ") for p in shape.paragraphs[:2])[:120])
@@ -379,9 +380,10 @@ def check(deck, name=None, kind="source-pptx", alt_max_chars=ALT_MAX_CHARS,
 
 
 def _captioned(shape):
-    """Whether a video or audio shape carries a caption track. PowerPoint
-    keeps inserted captions as a track list in the media extension."""
-    return False
+    """Whether a video or audio shape carries captions: a caption track,
+    as PowerPoint's Insert Captions keeps one (pptxparse), whose WebVTT
+    file in the deck holds at least one cue."""
+    return any(cues for _, _, _, cues in shape.tracks)
 
 
 def bare(text, target):

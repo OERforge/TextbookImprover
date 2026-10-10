@@ -1122,6 +1122,23 @@ def case_powerpoint(work):
         and written.startswith(b"\xff\xfe") and "<p:sp/>" not in written.decode("utf-16") \
         and pptxparse.read(out).slides[0].shapes[1].descr == "A blue square" \
         and not pptxcheck.check(pptxparse.read(out)), counts
+    # Two prefixes used undeclared, on two elements of one slide: each is
+    # found where the parse fails, and both are declared.
+    noted = textbox(4, "TextBox 3", ["Noted"], (457200, 1600200, 4000000, 600000)).replace(
+        '<p:cNvPr id="4" name="TextBox 3"/>', '<p:cNvPr id="4" name="TextBox 3"><a:extLst><a:ext '
+        'uri="{3C9C8C24-9D32-4F4F-9A33-6B5F9B3F0D11}"><p14:modId val="1"/></a:ext></a:extLst>'
+        '</p:cNvPr>')
+    pair = deck(os.path.join(work, "pair.pptx"), [
+        {"shapes": [title(2, "Pair"), noted,
+                    table(5, [["Price", "q"], ["1", "2"]], (457200, 3600200, 6000000, 800000),
+                          first_row=True, cells={0: [cell("Price"), formula]})]}])
+    pd = pptxparse.read(pair)
+    out, counts = remediated(work, "pair.pptx", pair)
+    yield "two prefixes used undeclared on one slide are both named and both declared", \
+        [p for _part, p in pd.malformed] == ["the prefixes p14, a14 used without a namespace "
+                                              "declaration"] \
+        and counts["repaired"] == 2 and not pptxparse.read(out).malformed, \
+        ([p for _part, p in pd.malformed], counts)
 
 
 def order_deck(path):
@@ -1391,6 +1408,9 @@ def case_order(work):
         {"shapes": [title(2, "Cloud"), shaped(textbox(4, "Callout 3", ["Says"], box),
                                               "cloudCallout", (150000, 0)),
                     textbox(5, "TextBox 4", ["Beyond"], (4600000, 1700000, 1000000, 400000))]},
+        {"shapes": [title(2, "Below"), shaped(textbox(4, "Callout 3", ["Says"], box),
+                                              "cloudCallout", (0, 150000)),
+                    textbox(5, "TextBox 4", ["Under"], (457200, 2930000, 2000000, 400000))]},
         {"shapes": [title(2, "Hid"),
                     group(6, [textbox(8, "TextBox 7", ["Shown"], (0, 0, 4000000, 1200000)),
                               shaped(textbox(7, "Callout 6", ["Gone"], (0, 0, 4000000, 1200000)),
@@ -1401,14 +1421,14 @@ def case_order(work):
     problems = []
     counts = rem.remediate(reach, os.path.join(work, "out", "reach.pptx"), problems=problems,
                            orders={rem.slide_key("reach", slide): [
-                               "5", "6" if slide.number in (6, 10) else "4"]
+                               "5", "6" if slide.number in (6, 11) else "4"]
                                for slide in rd.slides},
                            deck="reach")
     refused = sorted(int(k.rsplit("-", 1)[1]) - 255 for k, _why in problems)
     yield "a callout's tail, a line callout's line, a connector's bend, a freeform's points, " \
         "a cloud's trail, and a callout in a group reach past their boxes, a guide's point " \
         "anywhere, and a hidden piece of a group nowhere", \
-        refused == [1, 2, 3, 4, 5, 6, 7, 9] and counts["orders"] == 2 \
+        refused == [1, 2, 3, 4, 5, 6, 7, 9, 10] and counts["orders"] == 2 \
         and rd.slides[0].shapes[1].extent == (0.0, 0.0, 2.0, 1.0) \
         and rd.slides[3].shapes[1].extent == (0.0, 0.0, 2.0, 1.0) \
         and rd.slides[4].shapes[1].extent is None, \

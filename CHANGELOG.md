@@ -31,7 +31,7 @@ Versions are two-part and pre-1.0: breaking changes may land in any of them unti
 - **A tar of a book's files or a set of decks (`.tar.gz`, `.tgz`, `.tar`, `.tar.bz2`, `.tar.xz`) is unpacked as a zip is**, alone in a folder on the first run: a folder that wraps everything dropped, macOS's leftovers left out, and an entry outside the folder refused. A link or another special file in a tar is refused and listed in `unpack-report.csv`, and so now is a link in a zip, which had been written as a file holding the link's target. A zip's `._` files, which macOS adds beside each file in some archives, are left out too, as `__MACOSX` was.
 - **`archive: zip` or `archive: tar.gz`** packs a target's folder into one file beside it, named after it, once it's written. A later run doesn't take the archive for a source to unpack.
 - **`audit.py` reads PowerPoint decks**, and `util/remediate.py` writes their copies, from the sidecars named with `--alt`, `--table-headers`, `--slide-titles`, and `--reading-order`.
-- **`tests/run-slides-tests.py`**: decks built as PresentationML, each check found in a messy deck and none in a clean one, each decision written into a copy and read back with the rest byte for byte, and `convert.py` on folders of decks, in zips and tars, with no Pandoc on the `PATH` too. Breaking each piece of the code in turn, 78 ways, fails it every time.
+- **`tests/run-slides-tests.py`**: decks built as PresentationML, each check found in a messy deck and none in a clean one, each decision written into a copy and read back with the rest byte for byte, and `convert.py` on folders of decks, in zips and tars, with no Pandoc on the `PATH` too. Breaking each piece of the code in turn, 198 ways, fails it every time.
 
 ### Changed
 

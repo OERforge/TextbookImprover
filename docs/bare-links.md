@@ -22,7 +22,7 @@ https://doi.org/10.1080/08913810508443640,,,refs,"Klein and Stern. 2005. “Prof
 - **A Title** becomes the link's title: a tooltip in HTML and EPUB, a ScreenTip in Word once there's Word output. A blank Title keeps whatever title the source gave the link.
 - **A row with both columns blank** keeps the link as it is. That's a decision too, and the link leaves the report.
 
-A PowerPoint deck's bare links are in the same report and sidecar, and its `source` target writes each decision into its copy, the Title as the link's ScreenTip ([Slides](slides.md#the-copy)), as a book's `source` target writes them into a Word, HTML, or Markdown source's.
+A PowerPoint deck's bare links are in the same report and sidecar, and its `source` target writes each decision into its copy, the Title as the link's ScreenTip ([Slides](slides.md#the-copy)), as a book's `source` target writes them into a Word, HTML, or Markdown source's. In PowerPoint, NVDA reads a ScreenTip only when the mouse is over the link in the normal view and its Report tooltips is on, and never in Slide Show, so there a Replacement does more for a screen reader than a Title.
 
 The replacement happens on the way through the filter, so the sources keep their addresses and a row keeps matching on every run. A row matching no bare link in the book is named at the end of the run, as a mistyped address would be. [Sidecar files](sidecars.md) has what all the sidecars share.
 

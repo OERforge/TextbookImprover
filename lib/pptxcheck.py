@@ -16,7 +16,9 @@ project lists in images.alt_placeholders), alt text over
 images.alt_max_chars, a deck with no language, links whose text is their
 address, hidden slides, and what older decks are made of: diagrams drawn
 as dozens of loose shapes, and columns of text laid out with tabs. And
-XML PowerPoint can't read as written, which Pandoc's writer leaves.
+XML PowerPoint can't read as written, which Pandoc's writer leaves; and a
+font whose license keeps the deck from being edited where the font isn't
+installed (pptxfonts.py).
 
 Copyright 2026 Robert Szarka
 
@@ -39,6 +41,7 @@ import re
 from collections import Counter
 
 import findings as fl
+import pptxfonts
 import pptxorder
 
 ALT_MAX_CHARS = 120
@@ -292,7 +295,7 @@ def loose_pieces(slide):
 
 
 def check(deck, name=None, kind="source-pptx", alt_max_chars=ALT_MAX_CHARS,
-          alt_placeholders=(), tables=None, orders=None, links=None):
+          alt_placeholders=(), tables=None, orders=None, links=None, restricted=None):
     """Findings for a parsed deck. tables: a table-headers sidecar's
     decisions by key (pptxremediate.header_rows()), for a copy they were
     written into: one decided to have no headers isn't missing them.
@@ -300,7 +303,8 @@ def check(deck, name=None, kind="source-pptx", alt_max_chars=ALT_MAX_CHARS,
     the slide's id: a slide whose shapes are in its order was decided, in
     whatever order a person put them. links: the addresses the bare-links
     sidecar decides, and those it replaces them with: a bare link to one
-    was decided, kept bare or not."""
+    was decided, kept bare or not. restricted: {typeface: fsType} of the
+    fonts other decks of the run embed restricted (font_items())."""
     tables, orders, links = tables or {}, orders or {}, links or set()
     name = name or os.path.basename(deck.path)
     rules = placeholder_rules(alt_placeholders)
@@ -371,11 +375,34 @@ def check(deck, name=None, kind="source-pptx", alt_max_chars=ALT_MAX_CHARS,
         add("deck", "pptx-no-language", "no run, master, or default says what language the text is in")
     if not deck.core_title:
         add("deck", "pptx-no-core-title", "the file's properties give no title")
+    for check_, detail in font_items(deck, restricted):
+        add("deck", check_, detail)
     for shape, check_, detail in master_items(deck, rules, alt_max_chars):
         add(where(None, shape), check_, detail)
     numbers = {slide.part: slide.number for slide in deck.slides}
     for part, problem in deck.malformed:
         add("slide %d" % numbers[part] if part in numbers else part, "pptx-malformed", problem)
+    return out
+
+
+def font_items(deck, restricted=None):
+    """(check, detail) for each font a license restricts that a deck embeds
+    so, and each that restricted ({typeface: fsType}, from the run's other
+    decks) names that it uses without embedding it, when it's set to embed
+    its fonts, which PowerPoint can't do where the font isn't installed."""
+    out = []
+    own = deck.fonts.restricted()
+    for typeface, fstype in own.items():
+        out.append(("pptx-font-restricted", "%s, embedded %s: PowerPoint opens the deck "
+                    "read-only where %s isn't installed" % (typeface, pptxfonts.license(fstype),
+                                                            typeface)))
+    for typeface, fstype in (restricted or {}).items():
+        if typeface not in deck.fonts.embedded and deck.fonts.used.get(typeface) \
+                and deck.fonts.embedding:
+            out.append(("pptx-font-unembedded", "%s, which another deck embeds %s, used without "
+                        "being embedded: the deck is set to embed its fonts, so PowerPoint won't "
+                        "save it where %s isn't installed" % (typeface, pptxfonts.license(fstype),
+                                                              typeface)))
     return out
 
 

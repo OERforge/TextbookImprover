@@ -190,6 +190,14 @@ CHECKS = OrderedDict([
                             "manual")),
     ("pptx-tab-table", ("text laid out in columns with tabs, which is read as a run of words "
                         "rather than as a table", "warning", "WCAG 2.0 SC 1.3.1 (A)", "manual")),
+    ("pptx-font-restricted", ("a font the deck embeds for preview and print only, as its license "
+                              "asks, or that its license forbids embedding: PowerPoint opens the "
+                              "deck read-only where the font isn't installed (fonts.restricted)",
+                              "warning", "", "tool")),
+    ("pptx-font-unembedded", ("a font another deck of the run embeds for preview and print only, "
+                              "used without being embedded by a deck set to embed its fonts: "
+                              "PowerPoint won't save the deck where the font isn't installed "
+                              "(fonts.restricted)", "warning", "", "tool")),
     ("pptx-malformed", ("XML PowerPoint can't read as written: an empty shape, which stops it "
                         "opening the deck, or a prefix used without its namespace declared, "
                         "which it repairs by removing content", "error", "ISO/IEC 29500-1",

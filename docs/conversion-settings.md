@@ -232,6 +232,18 @@ How media extracted from the source is handled.
 
 Abort as soon as an image can't be identified, rather than collecting every such image and stopping once at the gate.
 
+## fonts
+
+Fonts whose license keeps a PowerPoint deck from being edited where they aren't installed. Read for PowerPoint decks for now.
+
+**`fonts.restricted`**—one of `keep`, `replace`; default `keep`
+
+What a source target's copies do with a font a deck embeds for preview and print only, as its license asks, or whose license forbids embedding it: PowerPoint opens such a deck read-only where the font isn't installed, and won't save a deck there that uses the font without embedding it when the deck is set to embed its fonts. keep leaves the font, and the run says how many decks use it, embed it, and use it without embedding it. replace gives each copy another font in its place, the one replacements names, else the nearest the deck already uses by PANOSE, and takes the restricted font's embedded files out, so the copy opens for editing anywhere. Text in another font can take more room or less.
+
+**`fonts.replacements`**—`opaque`; default `{}`
+
+Fonts to use in place of others in a source target's copies, each a font's name and its replacement's (Avenir Next: Arial), whatever restricted says: a restricted font's in place of the nearest the deck uses, and any other font's as asked.
+
 ## word
 
 Repairs to a Word source that change what reading it means, decided once for the book and applied both to the copy the conversion reads and, with a source target, to the author's remediated copy, so the book and the file agree. They're what util/restyle-headings.py and util/untrack-deletions.py do by hand.

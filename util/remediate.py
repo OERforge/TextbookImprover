@@ -132,12 +132,14 @@ def main(argv=None):
              totals.get("decorative", 0),
              totals.get("links", 0), totals.get("compat", 0)), file=sys.stderr)
     if any(p.lower().endswith(".pptx") for p in args.files):
-        print("remediate: slides: %d title(s) added above their slides, %d slide(s) put in "
+        print("remediate: slides: %d slide(s) given the heading they show as their title, in "
+              "place, %d title(s) added above their slides, %d slide(s) put in "
               "the reading order given, %d title(s) given in place of one another slide has, "
               "%d deck(s) given the language as their default, %d given a title in the file's "
               "properties; %d bare link(s) given a replacement; %d equation(s) repaired; %d "
               "thing(s) PowerPoint couldn't read put right."
-              % (deck_totals.get("titles", 0), deck_totals.get("orders", 0),
+              % (deck_totals.get("titles_in_place", 0), deck_totals.get("titles", 0),
+                 deck_totals.get("orders", 0),
                  deck_totals.get("retitled", 0), deck_totals.get("language", 0),
                  deck_totals.get("core_title", 0), deck_totals.get("replaced", 0),
                  deck_totals.get("equations_repaired", 0), deck_totals.get("repaired", 0)),

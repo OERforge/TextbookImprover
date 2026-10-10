@@ -13,9 +13,13 @@ docxremediate.py does for Word:
   object, a group, a shape) by its slide and shape id;
 - a table's header row and column, PowerPoint's firstRow and firstCol,
   for the table whose content hash the sidecar names;
-- a title for a slide that has none, placed above the slide, where it's
-  read and not seen, as PowerPoint's own Add Hidden Slide Title does; an
-  empty title placeholder takes the text and moves above the slide;
+- a title for a slide that has none: the heading the slide shows made its
+  title in place, its look kept, as PowerPoint's Set as Slide Title makes
+  it (pptxtitle.py), when the title is that heading's text, or that text
+  with a number added, as " (2)" is, which goes after its last run;
+  otherwise placed above the slide, where it's read and not seen, as
+  PowerPoint's own Add Hidden Slide Title does, an empty title
+  placeholder taking the text and moving above the slide;
 - a title for a slide whose title another slide has, in its place on the
   slide: what's added to the old title, as " (2)" is, goes after its last
   run, in that run's formatting;
@@ -30,7 +34,10 @@ docxremediate.py does for Word:
   one, a macron in place of an en dash: NVDA reads a deck's equations by
   their characters, and the limit's macron was the only bar it read;
 - the language, on text that declares none, when the project declares one;
-- the title in the file's core properties, when they have none.
+- the title in the file's core properties, when they have none;
+- another font in place of one a license restricts, or one named for
+  replacing, and the restricted font's embedded files taken out
+  (pptxfonts.py).
 
 And two repairs, which lose nothing, of XML PowerPoint can't read as
 written, both of which Pandoc's PowerPoint writer leaves: a shape element
@@ -71,8 +78,10 @@ from collections import Counter
 
 import docxremediate
 import pptxcheck
+import pptxfonts
 import pptxorder
 import pptxparse
+import pptxtitle
 import sidecars
 
 DECORATIVE_EXT = ('<a:ext uri="%s"><adec:decorative xmlns:adec="%s" val="1"/></a:ext>'
@@ -462,8 +471,14 @@ def retitle(xml, slide, title):
     shapes = list(slide.all_shapes())
     if shape is None or not shape.id or [s.id for s in shapes].count(shape.id) != 1:
         return xml, 0
-    old, count = slide.title, 0
-    for start, _end, _attrs, _closing in reversed(_cnvpr_spans(xml, shape.id)):
+    return retitle_shape(xml, shape.id, slide.title, title)
+
+
+def retitle_shape(xml, shape_id, old, title):
+    """xml with the text old of the shape whose id is shape_id replaced by
+    title, as _retitle_body() replaces it: (xml, count)."""
+    count = 0
+    for start, _end, _attrs, _closing in reversed(_cnvpr_spans(xml, shape_id)):
         close = xml.find("</p:sp>", start)
         body = start_tag("p:txBody").search(xml, start, close) if close >= 0 else None
         if body is None or body.group(2):
@@ -727,7 +742,7 @@ def repair_part(xml):
 
 def remediate(source, destination, alts=None, tables=None, titles=None, language=None,
               core_title=True, deck=None, orders=None, problems=None, links=None,
-              equations=False):
+              equations=False, fonts=None, replaced=None):
     """Write source's decisions into destination; counts of what was
     written. alts, tables, titles, orders, links as alt_rows(),
     header_rows(), title_rows(), order_rows(), and link_rows() read them;
@@ -735,9 +750,15 @@ def remediate(source, destination, alts=None, tables=None, titles=None, language
     core_title as their title when they have none, or, when it's True, the
     first slide's title, the sidecar's if the slide has none of its own.
     problems, a list, is told each order not written, by its slide's key,
-    and why. equations: whether each equation gets the characters it
-    means, as math.repair_equations gives a Word file's, its bars kept
-    limits (docxremediate.BAR)."""
+    and each font not replaced, by the deck's name, and why. equations:
+    whether each equation gets the characters it means, as
+    math.repair_equations gives a Word file's, its bars kept limits
+    (docxremediate.BAR). fonts: {typeface: the font in its place, or None
+    for the nearest the deck uses, when the deck doesn't embed it with a
+    license that lets it be edited}, for the fonts to replace where the
+    deck uses or embeds them; replaced, a list, is told (typeface, the font in
+    its place, the elements changed, whether the deck embedded it) for
+    each one replaced."""
     alts, tables, titles, orders = alts or {}, tables or {}, titles or {}, orders or {}
     links = links or {}
     deck = deck or deck_name(source)
@@ -746,15 +767,23 @@ def remediate(source, destination, alts=None, tables=None, titles=None, language
         first = parsed.slides[0] if parsed.slides else None
         core_title = first and (first.title or titles.get(slide_key(deck, first)))
     counts = {"described": 0, "decorative": 0, "header_rows": 0, "header_columns": 0,
-              "titles": 0, "language": 0, "core_title": 0, "repaired": 0, "skipped": 0,
-              "orders": 0, "orders_refused": 0, "retitled": 0, "titles_kept": 0, "links": 0,
-              "replaced": 0, "equations_repaired": 0, "equation_characters": 0}
+              "titles": 0, "titles_in_place": 0, "language": 0, "core_title": 0, "repaired": 0,
+              "skipped": 0, "orders": 0, "orders_refused": 0, "retitled": 0, "titles_kept": 0,
+              "links": 0, "replaced": 0, "equations_repaired": 0, "equation_characters": 0,
+              "fonts_replaced": 0, "fonts_unembedded": 0}
     # A titled slide's row replaces its title only when another slide in
     # the deck has it too: a title the author gave since stands.
     shared = Counter(pptxcheck.same_title(s.title) for s in parsed.slides if s.title)
     with zipfile.ZipFile(source) as zin:
         infos = zin.infolist()
         parts = {info.filename: zin.read(info.filename) for info in infos}
+        # Each layout's master, which a heading made a title in place
+        # inherits from, as its layout does.
+        masters = {}
+        for slide in parsed.slides:
+            if slide.layout_part and slide.layout_part not in masters:
+                masters[slide.layout_part] = pptxparse.rel_target(
+                    pptxparse.relationships(zin, slide.layout_part), "slideMaster")
     texts, encodings = {}, {}
 
     def text_of(part):
@@ -855,7 +884,23 @@ def remediate(source, destination, alts=None, tables=None, titles=None, language
                     counts["retitled"] += 1
         if slide is not None and not slide.title:
             title = titles.get(slide_key(deck, slide))
+            n = 0
             if title:
+                # The heading the slide shows, when the title is its text,
+                # made the title in place; else a title above the slide.
+                shape, added = pptxtitle.heading_for(slide, title)
+                if shape is not None and shape.id not in repeated:
+                    xml, n = pptxtitle.set_as_title(
+                        text_of(part), shape.id, *[text_of(p) if p in parts else None for p in (
+                            slide.layout_part, masters.get(slide.layout_part),
+                            parsed.presentation_part)])
+                    if n and added:
+                        xml, n = retitle_shape(xml, shape.id, pptxtitle.collapsed(shape.text),
+                                               title)
+                    if n:
+                        texts[part] = xml
+                        counts["titles_in_place"] += 1
+            if title and not n:
                 xml, n = add_title(text_of(part), slide, title, parsed.width,
                                    language or parsed.language)
                 if n:
@@ -883,6 +928,46 @@ def remediate(source, destination, alts=None, tables=None, titles=None, language
         if n:
             texts["docProps/core.xml"] = xml
             counts["core_title"] += 1
+    gone = set()
+    for old, new in (fonts or {}).items():
+        embedded = parsed.fonts.embedded.get(old)
+        if not parsed.fonts.used.get(old) and not embedded:
+            continue
+        # One to replace with the nearest because it's restricted isn't,
+        # where the deck embeds it with a license that lets it be edited.
+        if new is None and embedded and not embedded.restricted:
+            continue
+        new = new or pptxfonts.nearest(parsed.fonts, old, avoid=fonts)
+        if not new:
+            if problems is not None:
+                problems.append((deck, "%s isn't replaced: no font the deck uses is near it by "
+                                       "PANOSE; fonts.replacements can name one" % old))
+            continue
+        changed = 0
+        for part in sorted(parts):
+            if part.endswith(".xml") and not part.startswith("["):
+                xml, n = pptxfonts.retypeface(text_of(part), old, new,
+                                              parsed.fonts.traits.get(new))
+                if n:
+                    texts[part] = xml
+                    changed += n
+        if old in parsed.fonts.embedded:
+            rels = pptxfonts.relationships_part(parsed.presentation_part)
+            pres, rels_xml, unused = pptxfonts.unembed(
+                text_of(parsed.presentation_part), text_of(rels) if rels in parts else "", old,
+                parsed.presentation_part)
+            texts[parsed.presentation_part] = pres
+            if rels in parts:
+                texts[rels] = rels_xml
+            gone.update(unused)
+            counts["fonts_unembedded"] += 1
+        counts["fonts_replaced"] += 1
+        if replaced is not None:
+            replaced.append((old, new, changed, old in parsed.fonts.embedded))
+    if gone and "[Content_Types].xml" in parts:
+        texts["[Content_Types].xml"] = re.sub(
+            r"<Override\b[^>]*\bPartName=\"/(%s)\"[^>]*/>" % "|".join(
+                re.escape(p) for p in sorted(gone)), "", text_of("[Content_Types].xml"))
     for part, xml in texts.items():
         if xml != pptxparse.part_text(parts[part])[0]:
             parts[part] = pptxparse.encode_part(xml, encodings[part])
@@ -893,7 +978,8 @@ def remediate(source, destination, alts=None, tables=None, titles=None, language
     try:
         with zipfile.ZipFile(temp, "w") as zout:
             for info in infos:
-                zout.writestr(info, parts[info.filename])
+                if info.filename not in gone:
+                    zout.writestr(info, parts[info.filename])
         # mkstemp's file is the owner's alone; a copy is for handing on
         os.chmod(temp, 0o666 & ~current_umask())
         shutil.move(temp, destination)

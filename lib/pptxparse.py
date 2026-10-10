@@ -50,6 +50,8 @@ import re
 import zipfile
 from xml.etree import ElementTree as ET
 
+import pptxfonts
+
 NS = {
     "p": "http://schemas.openxmlformats.org/presentationml/2006/main",
     "a": "http://schemas.openxmlformats.org/drawingml/2006/main",
@@ -255,7 +257,7 @@ class Shape:
     __slots__ = ("kind", "frame", "id", "name", "descr", "title", "hidden", "decorative",
                  "ph_type", "ph_idx", "text", "paragraphs", "box", "children", "image",
                  "links", "table", "prog_id", "media", "depth", "alternate", "math",
-                 "malformed", "rotation", "stroke", "extent", "tracks")
+                 "malformed", "rotation", "stroke", "extent", "tracks", "styled")
 
     def __init__(self, kind):
         self.kind = kind            # sp, pic, graphicFrame, grpSp, cxnSp, contentPart
@@ -287,6 +289,9 @@ class Shape:
         # Captions keeps them: (part, label, language, cues), cues None
         # when the part isn't in the file (_Reader.tracks).
         self.tracks = []
+        # Whether it takes its look from the theme's styles (p:style), as
+        # a shape PowerPoint draws does and a text box doesn't.
+        self.styled = False
 
     @property
     def placeholder(self):
@@ -341,7 +346,7 @@ class Slide:
 class Deck:
     __slots__ = ("path", "slides", "width", "height", "sections", "core_title", "creator",
                  "application", "languages", "default_language", "masters", "images",
-                 "parts", "presentation_part", "master_languages", "malformed")
+                 "parts", "presentation_part", "master_languages", "malformed", "fonts")
 
     def __init__(self, path):
         self.path = path
@@ -357,6 +362,7 @@ class Deck:
         self.presentation_part = "ppt/presentation.xml"
         self.master_languages = collections.Counter()  # in the masters' text styles
         self.malformed = []         # (part, what PowerPoint can't read there as written)
+        self.fonts = pptxfonts.Fonts()  # what it embeds, and the typefaces it names
 
     @property
     def language(self):
@@ -811,6 +817,7 @@ class _Reader:
             shape.paragraphs = _text_body(el)
             shape.text = "\n".join(shape.paragraphs).strip()
             shape.math = len(el.findall(".//" + q("m:oMath")))
+            shape.styled = el.find(q("p:style")) is not None
         if kind == "graphicFrame":
             data = el.find(".//" + q("a:graphicData"))
             uri = data.get("uri") if data is not None else ""
@@ -977,6 +984,7 @@ def read(path):
         if app in deck.parts:
             match = re.search(rb"<Application>([^<]*)</Application>", zf.read(app))
             deck.application = match.group(1).decode("utf-8", "replace") if match else None
+        deck.fonts = pptxfonts.read(deck.parts, zf.read, pres_part)
     return deck
 
 

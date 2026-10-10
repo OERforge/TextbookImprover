@@ -16,7 +16,10 @@ each deck (pptxremediate.py). The reports:
   its content as a book's tables are, with the table census's guess;
 - slide-titles-new.csv: each slide with no title, and each whose title
   an earlier slide in its deck has, keyed on deck/slide-N, the second of
-  them drafted "Title (2)", the third "Title (3)";
+  them drafted "Title (2)", the third "Title (3)"; a slide with no title
+  drafted from the heading it shows, when it shows one (pptxtitle.py),
+  which its copy makes its title in place, numbered so too when an earlier
+  slide has that title;
 - reading-order-new.csv: each slide read in another order than it's laid
   out, keyed on deck/slide-N, with an order drafted for a person to
   review, as near to the layout as it can come without drawing two
@@ -53,9 +56,11 @@ from collections import Counter, OrderedDict
 
 import findings as fl
 import pptxcheck
+import pptxfonts
 import pptxorder
 import pptxparse
 import pptxremediate
+import pptxtitle
 import tablecensus
 
 ALT_COLUMNS = ["Image", "Alt", "Source", "Reason", "CurrentAlt", "Drafted by", "Reviewed"]
@@ -262,6 +267,7 @@ def run(base, decks, targets, paths, reports, language=None, alt_max_chars=120,
     alt_report = OrderedDict()      # key: [sources, reason, current alt]
     table_report = OrderedDict()
     title_report = []
+    headings = set()    # the keys of rows drafted from a slide's heading
     own_titles = []     # rows for slides with a title no other slide has
     order_report = []
     link_report = OrderedDict()     # address: [title, [sources], context]
@@ -278,8 +284,12 @@ def run(base, decks, targets, paths, reports, language=None, alt_max_chars=120,
             failed += 1
             continue
         parsed.append((name, path, deck))
+    # A font one deck embeds restricted is restricted in every deck that
+    # uses it, whether or not that one embeds it.
+    restricted = restricted_fonts(parsed)
+    for name, path, deck in parsed:
         found += pptxcheck.check(deck, name, alt_max_chars=alt_max_chars,
-                                 alt_placeholders=alt_placeholders)
+                                 alt_placeholders=alt_placeholders, restricted=restricted)
         dname = pptxremediate.deck_name(path)
 
         def note(shape, check, detail, slide):
@@ -334,12 +344,9 @@ def run(base, decks, targets, paths, reports, language=None, alt_max_chars=120,
                                      "%s slide %d" % (name, slide.number),
                                      (slide.title or "")[:60], preview(shape.table),
                                      "TI" if guess else "", ""]
-            if not slide.title:
-                key = pptxremediate.slide_key(dname, slide)
-                if key not in titles:
-                    title_report.append([key, "", "%s slide %d%s" % (
-                        name, slide.number, ", layout %s" % slide.layout if slide.layout else ""),
-                        "", ""])
+        rows = untitled_rows(name, dname, deck, titles)
+        headings.update(r[0] for r in rows if r[1])
+        title_report += rows
         title_report += repeated_titles(name, dname, deck, titles)
         for slide in deck.slides:
             for shape in slide.all_shapes():
@@ -381,6 +388,7 @@ def run(base, decks, targets, paths, reports, language=None, alt_max_chars=120,
     fl.write_csv(check_csv, found)
     summarize("Checked %d deck(s): " % len(parsed), found, say)
     say("Written to %s." % check_csv)
+    font_report(parsed, restricted, targets, say)
     report(reports["image_alt_missing"], ALT_COLUMNS,
            [alt_row(key, sources, reason, current, copies)
             for key, (sources, reason, current) in alt_report.items()],
@@ -390,11 +398,17 @@ def run(base, decks, targets, paths, reports, language=None, alt_max_chars=120,
            "image is at the path the row names.")
     report(reports["table_headers_new"], TABLE_COLUMNS, list(table_report.values()),
            "table(s) with no header row marked", paths["table_headers"], say)
+    hints = []
+    if any(r[3] and r[0] in headings for r in title_report):
+        hints.append("A Title drafted from a slide's heading makes the heading its title, in "
+                     "place, as PowerPoint's Set as Slide Title does; any other Title for a slide "
+                     "with none is added above it, where it's read and not seen.")
+    if any(r[3] and r[0] not in headings for r in title_report):
+        hints.append("A title for a slide that has one takes its place on the slide, where it's "
+                     "seen; the title as it is keeps it.")
     report(reports["slide_titles_new"], TITLE_COLUMNS, title_report,
            "slide(s) with no title, or with a title an earlier slide has",
-           paths["slide_titles"], say,
-           "A title for a slide that has one takes its place on the slide, where it's seen; "
-           "the title as it is keeps it." if any(r[3] for r in title_report) else None)
+           paths["slide_titles"], say, " ".join(hints) or None)
     if reports.get("bare_links_new"):
         report(reports["bare_links_new"], LINK_COLUMNS,
                [[url, "", title, "; ".join(sources), context, "", ""]
@@ -421,6 +435,7 @@ def run(base, decks, targets, paths, reports, language=None, alt_max_chars=120,
         os.makedirs(target.output_dir, exist_ok=True)
         totals = Counter()
         written = changed = 0
+        plan, replaced = font_plan(target, restricted, say), []
         for name, path, deck in parsed:
             destination = os.path.join(target.output_dir, name)
             if os.path.abspath(destination) == os.path.abspath(path):
@@ -432,10 +447,14 @@ def run(base, decks, targets, paths, reports, language=None, alt_max_chars=120,
             counts = pptxremediate.remediate(path, destination, alts, tables, titles,
                                              language, deck=pptxremediate.deck_name(path),
                                              orders=orders, problems=problems, links=links,
-                                             equations=setting(target, "math.repair_equations"))
+                                             equations=setting(target, "math.repair_equations"),
+                                             fonts=plan, replaced=replaced)
             for key, why in problems:
-                say("WARNING: %s: the reading order for %s isn't written: %s." % (
-                    target.name, key, why))
+                if key == pptxremediate.deck_name(path):
+                    say("WARNING: %s: in %s, %s." % (target.name, name, why))
+                else:
+                    say("WARNING: %s: the reading order for %s isn't written: %s." % (
+                        target.name, key, why))
             totals.update(counts)
             written += 1
             changed += any(n for key, n in counts.items()
@@ -443,12 +462,13 @@ def run(base, decks, targets, paths, reports, language=None, alt_max_chars=120,
             copies.append((target, name, destination))
         say("%s: %d deck(s) written, %d of them changed: %d picture(s) and object(s) given alt "
             "text and %d marked decorative, %d header row(s) and %d header column(s) marked, "
-            "%d title(s) added above their slides, %d deck(s) given the project's language as "
-            "their default, and %d given a title in the file's properties, their first slide's."
+            "%d slide(s) given the heading they show as their title, in place, %d title(s) "
+            "added above their slides, %d deck(s) given the project's language as their "
+            "default, and %d given a title in the file's properties, their first slide's."
             % (target.name, written, changed,
                totals["described"], totals["decorative"], totals["header_rows"],
-               totals["header_columns"], totals["titles"], totals["language"],
-               totals["core_title"]))
+               totals["header_columns"], totals["titles_in_place"], totals["titles"],
+               totals["language"], totals["core_title"]))
         if totals["links"] or totals["replaced"]:
             say("%s: %d bare link(s) given a ScreenTip and %d a replacement, as %s says." % (
                 target.name, totals["links"], totals["replaced"],
@@ -469,14 +489,132 @@ def run(base, decks, targets, paths, reports, language=None, alt_max_chars=120,
             say("%s: %d thing(s) PowerPoint couldn't read put right, as Pandoc's PowerPoint "
                 "writer leaves them: empty shapes taken out, and prefixes declared that were "
                 "used without their namespace." % (target.name, totals["repaired"]))
+        for (old, new), (decks_, places, unembedded) in replaced_fonts(replaced).items():
+            say("%s: %s replaced with %s in %d deck(s), %d place(s) in all%s." % (
+                target.name, old, new, decks_, places,
+                ", and its embedded files taken out of %d" % unembedded if unembedded else ""))
         if totals["skipped"]:
             say("WARNING: %s: %d decision(s) not written, for shapes whose id their slide "
                 "repeats, which PowerPoint repairs when it opens and saves the deck."
                 % (target.name, totals["skipped"]))
     if copies and reports.get("output_check"):
         failed += check_copies(copies, reports["output_check"], tables, alt_max_chars,
-                               alt_placeholders, say, orders, links)
+                               alt_placeholders, say, orders, links, restricted)
     return 1 if failed else 0
+
+
+def restricted_fonts(parsed):
+    """{typeface: fsType} of the fonts a license restricts that any deck of
+    the run embeds so, in the order they're first found."""
+    out = OrderedDict()
+    for _name, _path, deck in parsed:
+        for typeface, fstype in deck.fonts.restricted().items():
+            out.setdefault(typeface, fstype)
+    return out
+
+
+def font_report(parsed, restricted, targets, say):
+    """The run's word on each restricted font: how many decks use it, how
+    many embed it so and how many use it without embedding it, and what
+    fonts.restricted does about it."""
+    replacing = [t for t in targets if t.format == "source"
+                 and value(t, "fonts.restricted", "keep") == "replace"]
+    for typeface, fstype in restricted.items():
+        # A deck that embeds it with a license that lets it be edited
+        # isn't held back by it.
+        users = [d for _n, _p, d in parsed
+                 if (d.fonts.used.get(typeface) or typeface in d.fonts.embedded)
+                 and (typeface not in d.fonts.embedded or d.fonts.embedded[typeface].restricted)]
+        embedded = sum(1 for d in users if typeface in d.fonts.restricted())
+        stuck = sum(1 for d in users if typeface not in d.fonts.embedded and d.fonts.embedding)
+        loose = sum(1 for d in users if typeface not in d.fonts.embedded and not d.fonts.embedding)
+        said = []
+        if embedded:
+            said.append("%d embed it, so PowerPoint opens them read-only where %s isn't "
+                        "installed" % (embedded, typeface))
+        if stuck:
+            said.append("%d use it without embedding it, set to embed their fonts, so "
+                        "PowerPoint won't save them there" % stuck)
+        if loose:
+            said.append("%d use it without embedding it, so it's shown in another font there"
+                        % loose)
+        nearest = sorted({pptxfonts.nearest(d.fonts, typeface, restricted) or "" for d in users})
+        near = ", ".join(n for n in nearest if n) or "none of them have one near it"
+        if replacing:
+            then = ("%s copies use another font in its place (fonts.restricted: replace): the "
+                    "one fonts.replacements names, else the nearest each deck uses (%s)." % (
+                        " and ".join("%s's" % t.name for t in replacing), near))
+        else:
+            then = ("Set fonts.restricted: replace for the copies to use another font in its "
+                    "place: the nearest each deck uses (%s), or the one fonts.replacements "
+                    "names." % near)
+        say("WARNING: %d of %d deck(s) use the restricted font %s, whose license %s: %s. %s" % (
+            len(users), len(parsed), typeface,
+            "lets a deck embed it for preview and print only" if fstype & pptxfonts.PREVIEW_PRINT
+            else "forbids embedding it", "; ".join(said), then))
+
+
+def value(target, key, default=None):
+    """A target's setting as it is, or default for one it doesn't have."""
+    try:
+        found = target[key]
+    except (KeyError, TypeError):
+        return default
+    return default if found is None else found
+
+
+def font_plan(target, restricted, say):
+    """{typeface: the font in its place, or None for the nearest each deck
+    uses} for a target's copies: each font fonts.replacements names, and,
+    with fonts.restricted: replace, each the run finds restricted."""
+    names = value(target, "fonts.replacements", {}) or {}
+    if not isinstance(names, dict):
+        say("WARNING: %s: fonts.replacements is a map of fonts, each to the one to use in its "
+            "place (Avenir Next: Arial), and this isn't one; it's left out." % target.name)
+        names = {}
+    plan = OrderedDict((str(k), str(v) if v else None) for k, v in names.items())
+    if value(target, "fonts.restricted", "keep") == "replace":
+        for typeface in restricted:
+            plan.setdefault(typeface, None)
+    return plan
+
+
+def replaced_fonts(replaced):
+    """{(typeface, the font in its place): (decks, places, decks it was
+    embedded in)} from what remediate() was told."""
+    out = OrderedDict()
+    for old, new, places, embedded in replaced:
+        decks, total, unembedded = out.get((old, new), (0, 0, 0))
+        out[(old, new)] = (decks + 1, total + places, unembedded + bool(embedded))
+    return out
+
+
+def untitled_rows(name, dname, deck, titles):
+    """slide-titles-new.csv's rows for the slides with no title that the
+    sidecar doesn't decide yet, each drafted from the heading it shows,
+    when it shows one (pptxtitle.heading()), for a person to review, which
+    its copy then makes its title in place: numbered "Heading (2)" when an
+    earlier slide has that title, or is to have it."""
+    seen, rows = Counter(), []
+    for slide in deck.slides:
+        key = pptxremediate.slide_key(dname, slide)
+        title = slide.title or titles.get(key)
+        if title:
+            seen[pptxcheck.same_title(title)] += 1
+            continue
+        where = "%s slide %d%s" % (name, slide.number,
+                                   ", layout %s" % slide.layout if slide.layout else "")
+        shape = pptxtitle.heading(slide)
+        if shape is None:
+            rows.append([key, "", where, "", ""])
+            continue
+        text = pptxtitle.collapsed(shape.text)
+        seen[pptxcheck.same_title(text)] += 1
+        count = seen[pptxcheck.same_title(text)]
+        rows.append([key, text if count == 1 else "%s (%d)" % (text, count),
+                     "%s, its heading in %s" % (where, shape.name or "shape %s" % shape.id),
+                     "TI", ""])
+    return rows
 
 
 def repeated_titles(name, dname, deck, titles):
@@ -564,7 +702,7 @@ def setting(target, key, default=False):
 
 
 def check_copies(copies, path, tables, alt_max_chars, alt_placeholders, say, orders=None,
-                 links=None):
+                 links=None, restricted=None):
     """The output check, on the copies: what's left to do in each, a table
     the sidecar says has no headers not counted against it, nor a slide
     put in the order the sidecar gives. Returns the number of copies that
@@ -582,7 +720,8 @@ def check_copies(copies, path, tables, alt_max_chars, alt_placeholders, say, ord
                                  alt_placeholders=alt_placeholders, tables=tables,
                                  orders=pptxremediate.slide_orders(
                                      orders or {}, pptxremediate.deck_name(name)),
-                                 links=pptxremediate.decided_links(links or {}))
+                                 links=pptxremediate.decided_links(links or {}),
+                                 restricted=restricted)
     if found:
         fl.write_csv(path, found)
     elif os.path.exists(path):

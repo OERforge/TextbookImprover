@@ -59,9 +59,11 @@ BIN = os.path.join(ROOT, "bin")
 sys.path.insert(0, os.path.join(ROOT, "lib"))
 import deckrun  # noqa: E402
 import pptxcheck  # noqa: E402
+import pptxfonts  # noqa: E402
 import pptxorder  # noqa: E402
 import pptxparse  # noqa: E402
 import pptxremediate as rem  # noqa: E402
+import pptxtitle  # noqa: E402
 
 NS = ('xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" '
       'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" '
@@ -348,9 +350,10 @@ def notes_xml(text):
 
 
 def deck(path, slides, default_lang="en-US", core_title="A Deck", sections=None, logo=False,
-         style=True, styles_lang=None):
+         style=True, styles_lang=None, layout=None, master=None):
     """A deck: each slide a dict of shapes, and its images, links, charts,
-    notes, and whether it's hidden, by relationship id."""
+    notes, and whether it's hidden, by relationship id. layout and master:
+    the XML of its one layout and its master, when not the usual ones."""
     types = ['<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.'
              'relationships+xml"/>', '<Default Extension="xml" ContentType="application/xml"/>',
              '<Default Extension="png" ContentType="image/png"/>',
@@ -375,11 +378,11 @@ def deck(path, slides, default_lang="en-US", core_title="A Deck", sections=None,
               rels([("rId1", "slideMaster", "slideMasters/slideMaster1.xml", False)]
                    + [("rId%d" % (2 + i), "slide", "slides/slide%d.xml" % (i + 1), False)
                       for i in range(len(slides))])),
-             ("ppt/slideMasters/slideMaster1.xml", master_xml(logo, styles_lang)),
+             ("ppt/slideMasters/slideMaster1.xml", master or master_xml(logo, styles_lang)),
              ("ppt/slideMasters/_rels/slideMaster1.xml.rels",
               rels([("rId1", "slideLayout", "../slideLayouts/slideLayout1.xml", False)]
                    + ([("rId2", "image", "../media/logo.png", False)] if logo else []))),
-             ("ppt/slideLayouts/slideLayout1.xml", layout_xml()),
+             ("ppt/slideLayouts/slideLayout1.xml", layout or layout_xml()),
              ("ppt/slideLayouts/_rels/slideLayout1.xml.rels",
               rels([("rId1", "slideMaster", "../slideMasters/slideMaster1.xml", False)]))]
     if logo:
@@ -1804,6 +1807,592 @@ def case_retitle(work):
             "3 slides titled demand"], [(f.check, f.detail) for f in found]
 
 
+# A master whose title is centered, 44 points, in the headings' font, over
+# a yellow fill, its text anchored in the middle with no insets; and a
+# layout with no title placeholder, whose heading is a body placeholder
+# (idx 10) of 72-point bold, as in the decks PowerPoint's Set as Slide
+# Title was measured on.
+HEADING_BOX = (457200, 457200, 8229600, 914400)
+TITLE_STYLE = ('<a:lvl1pPr algn="ctr"><a:lnSpc><a:spcPct val="90000"/></a:lnSpc><a:spcBef>'
+               '<a:spcPct val="0"/></a:spcBef><a:buNone/><a:defRPr sz="4400" kern="1200">'
+               '<a:solidFill><a:schemeClr val="tx1"/></a:solidFill><a:latin typeface="+mj-lt"/>'
+               '<a:ea typeface="+mj-ea"/><a:cs typeface="+mj-cs"/></a:defRPr></a:lvl1pPr>')
+BODY_STYLE = ('<a:lvl1pPr marL="228600" indent="-228600" algn="l"><a:spcBef><a:spcPts val="1000"/>'
+              '</a:spcBef><a:buFont typeface="Arial"/><a:buChar char="o"/><a:defRPr sz="2800" '
+              'kern="1200"><a:solidFill><a:schemeClr val="tx1"/></a:solidFill><a:latin '
+              'typeface="+mn-lt"/><a:ea typeface="+mn-ea"/><a:cs typeface="+mn-cs"/></a:defRPr>'
+              '</a:lvl1pPr><a:lvl2pPr marL="685800" indent="-228600" algn="l"><a:buChar char="-"/>'
+              '<a:defRPr sz="2400"/></a:lvl2pPr>')
+THEMED = ('<p:style><a:lnRef idx="2"><a:schemeClr val="accent1"/></a:lnRef><a:fillRef idx="1">'
+          '<a:schemeClr val="accent1"/></a:fillRef><a:effectRef idx="0"><a:schemeClr '
+          'val="accent1"/></a:effectRef><a:fontRef idx="minor"><a:schemeClr val="lt1"/>'
+          '</a:fontRef></p:style>')
+
+
+def banner_master():
+    title_ph = ('<p:sp>%s<p:spPr>%s<a:solidFill><a:srgbClr val="FFFF00"/></a:solidFill></p:spPr>'
+                '<p:txBody><a:bodyPr vert="horz" lIns="0" tIns="0" rIns="0" bIns="0" anchor="ctr">'
+                '<a:normAutofit/></a:bodyPr><a:lstStyle/><a:p/></p:txBody></p:sp>'
+                % (nv("sp", 2, "Title Placeholder 1", ph='<p:ph type="title"/>'), xfrm(*TITLE_BOX)))
+    body_ph = ('<p:sp>%s<p:spPr>%s</p:spPr><p:txBody><a:bodyPr vert="horz" lIns="91440" '
+               'tIns="45720" rIns="91440" bIns="45720"><a:normAutofit/></a:bodyPr><a:lstStyle>'
+               '<a:lvl1pPr><a:defRPr sz="3000"/></a:lvl1pPr></a:lstStyle><a:p/></p:txBody></p:sp>'
+               % (nv("sp", 3, "Text Placeholder 2", ph='<p:ph type="body" idx="1"/>'),
+                  xfrm(*BODY_BOX)))
+    return ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<p:sldMaster %s><p:cSld>'
+            '<p:spTree><p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/>'
+            '</p:nvGrpSpPr><p:grpSpPr/>%s%s</p:spTree></p:cSld><p:clrMap bg1="lt1" tx1="dk1" '
+            'bg2="lt2" tx2="dk2" accent1="accent1" accent2="accent2" accent3="accent3" '
+            'accent4="accent4" accent5="accent5" accent6="accent6" hlink="hlink" '
+            'folHlink="folHlink"/><p:sldLayoutIdLst><p:sldLayoutId id="2147483649" r:id="rId1"/>'
+            '</p:sldLayoutIdLst><p:txStyles><p:titleStyle>%s</p:titleStyle><p:bodyStyle>%s'
+            '</p:bodyStyle><p:otherStyle><a:defPPr><a:defRPr lang="en-US"/></a:defPPr>'
+            '<a:lvl1pPr algn="r"><a:defRPr sz="1000"/></a:lvl1pPr></p:otherStyle></p:txStyles>'
+            '</p:sldMaster>' % (NS, title_ph, body_ph, TITLE_STYLE, BODY_STYLE))
+
+
+def banner_layout():
+    heading = ('<p:sp>%s<p:spPr>%s</p:spPr><p:txBody><a:bodyPr/><a:lstStyle><a:lvl1pPr marL="0" '
+               'indent="0"><a:buNone/><a:defRPr sz="7200" b="1"><a:latin typeface="Avenir Next"/>'
+               '</a:defRPr></a:lvl1pPr></a:lstStyle><a:p/></p:txBody></p:sp>'
+               % (nv("sp", 2, "Text Placeholder 1", ph='<p:ph type="body" sz="quarter" idx="10"/>'),
+                  xfrm(*HEADING_BOX)))
+    # A second body placeholder, which a slide's matches by its idx alone.
+    subhead = ('<p:sp>%s<p:spPr>%s</p:spPr><p:txBody><a:bodyPr/><a:lstStyle><a:lvl1pPr>'
+               '<a:defRPr sz="3600" i="1"/></a:lvl1pPr></a:lstStyle><a:p/></p:txBody></p:sp>'
+               % (nv("sp", 4, "Text Placeholder 3", ph='<p:ph type="body" sz="quarter" idx="11"/>'),
+                  xfrm(457200, 1371600, 8229600, 457200)))
+    return ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<p:sldLayout %s '
+            'preserve="1"><p:cSld name="Banner"><p:spTree><p:nvGrpSpPr><p:cNvPr id="1" name=""/>'
+            '<p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr/>%s%s%s</p:spTree></p:cSld>'
+            '<p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr></p:sldLayout>'
+            % (NS, heading, subhead, content(3, [], box=BODY_BOX)))
+
+
+def banner_heading(shape_id, text, idx=10):
+    """A slide's heading in one of the layout's body placeholders, placed
+    by the layout, its formatting all inherited."""
+    return ('<p:sp>%s<p:spPr/><p:txBody><a:bodyPr/><a:lstStyle/><a:p><a:r><a:rPr lang="en-US" '
+            'dirty="0"/><a:t>%s</a:t></a:r></a:p></p:txBody></p:sp>'
+            % (nv("sp", shape_id, "Text Placeholder %s" % shape_id,
+                  ph='<p:ph type="body" sz="quarter" idx="%d"/>' % idx), esc(text)))
+
+
+def heading_box(shape_id, text, style=""):
+    """A heading in a text box, 40-point bold, inheriting the rest."""
+    return ('<p:sp><p:nvSpPr><p:cNvPr id="%s" name="TextBox %s"/><p:cNvSpPr txBox="1"/><p:nvPr/>'
+            '</p:nvSpPr><p:spPr>%s<a:prstGeom prst="rect"><a:avLst/></a:prstGeom></p:spPr>%s'
+            '<p:txBody><a:bodyPr wrap="square" rtlCol="0"><a:spAutoFit/></a:bodyPr><a:lstStyle/>'
+            '<a:p><a:r><a:rPr lang="en-US" sz="4000" b="1" dirty="0"/><a:t>%s</a:t></a:r></a:p>'
+            '</p:txBody></p:sp>' % (shape_id, shape_id, xfrm(*HEADING_BOX), style, esc(text)))
+
+
+def looks(path, part, shape_id):
+    """What a shape's paragraphs and runs look like: each one's properties
+    as they come out of its chain (pptxtitle.effective()), over the
+    defaults, all but its language and proofing marks."""
+    with zipfile.ZipFile(path) as z:
+        xml = z.read(part).decode("utf-8")
+        layout = z.read("ppt/slideLayouts/slideLayout1.xml").decode("utf-8")
+        master = z.read("ppt/slideMasters/slideMaster1.xml").decode("utf-8")
+        pres = z.read("ppt/presentation.xml").decode("utf-8")
+    return looks_of(xml, shape_id, layout, master, pres)
+
+
+def looks_of(xml, shape_id, layout, master, pres):
+    def flat(props, attrs, groups):
+        out = dict(attrs)
+        out.update(props.attrs)
+        out.update({"<%s>" % k: v for k, v in dict(groups, **props.groups).items()})
+        for k in ("lang", "dirty", "err", "lvl"):
+            out.pop(k, None)
+        return out
+    return [(flat(p, pptxtitle.P_ATTR_DEFAULTS, pptxtitle.P_GROUP_DEFAULTS),
+             [flat(r, pptxtitle.R_ATTR_DEFAULTS, pptxtitle.R_GROUP_DEFAULTS) for r in runs])
+            for p, runs in pptxtitle.effective(xml, shape_id, layout, master, pres)]
+
+
+class CopyTarget:
+    """A format: source target, as a run's copies are written for one,
+    with settings of its own."""
+    name, format = "copies", "source"
+
+    def __init__(self, folder, settings=None):
+        self.output_dir = os.path.join(folder, "copies")
+        self.settings = settings or {}
+
+    def __getitem__(self, key):
+        return self.settings[key]
+
+
+def case_set_title(work):
+    long_text = "A heading that goes on " + "and on " * 30
+    path = deck(os.path.join(work, "banner.pptx"), [
+        {"shapes": [banner_heading(2, "Market Basics"), content(3, ["Supply", "Demand"])]},
+        {"shapes": [heading_box(4, "Chapter One"), content(3, ["Why it matters"])]},
+        {"shapes": [banner_heading(2, "Market Basics"), content(3, ["More"])]},
+        {"shapes": [banner_heading(2, "Pros & Cons")]},
+        {"shapes": [group(5, [textbox(6, "TextBox 6", ["Grouped"], HEADING_BOX)], HEADING_BOX),
+                    content(3, ["Under a grouped heading"])]},
+        {"shapes": [banner_heading(2, "Twice"), rect(2, "Rectangle 1", (0, 6000000, 10, 10))]},
+        {"shapes": [alternate(banner_heading(2, "Both"), banner_heading(2, "Both"))]},
+        {"shapes": [heading_box(4, "Styled", THEMED), content(3, ["Under a styled heading"])]},
+        {"shapes": [banner_heading(2, "Elasticity")]},
+        {"shapes": [title(5, ""), heading_box(4, "Placed")]},
+        {"shapes": [banner_heading(2, long_text)]},
+        {"shapes": [title(5, "Summary")]},
+        {"shapes": [banner_heading(2, "Summary"), content(3, ["Again"])]},
+        {"shapes": [banner_heading(2, "Subhead", idx=11)]},
+    ], layout=banner_layout(), master=banner_master())
+    d = pptxparse.read(path)
+    rows = deckrun.untitled_rows("banner.pptx", "banner", d, {})
+    key = [rem.slide_key("banner", s) for s in d.slides]
+    yield "each slide with no title is drafted from its heading, numbered as a title is when " \
+        "an earlier slide has it", \
+        [r[1] for r in rows] == ["Market Basics", "Chapter One", "Market Basics (2)",
+                                 "Pros & Cons", "", "", "Both", "", "Elasticity", "", "",
+                                 "Summary (2)", "Subhead"] \
+        and [r[3] for r in rows] == ["TI" if r[1] else "" for r in rows], [r[:4] for r in rows]
+    yield "a draft's source names the shape it's drafted from", \
+        rows[0][2] == "banner.pptx slide 1, layout Banner, its heading in Text Placeholder 2" \
+        and rows[4][2] == "banner.pptx slide 5, layout Banner", (rows[0][2], rows[4][2])
+    yield "a shape that takes its look from the theme is read as styled; a text box isn't", \
+        d.slides[7].shapes[0].styled and not d.slides[1].shapes[0].styled, ""
+    titles = {key[0]: "Market Basics", key[1]: "Chapter One", key[2]: "Market Basics (2)",
+              key[3]: "Pros & Cons", key[4]: "Grouped", key[5]: "Twice", key[6]: "Both",
+              key[7]: "Styled", key[8]: "Price elasticity", key[9]: "Placed",
+              key[10]: "A long slide", key[12]: "Summary (2)", key[13]: "Subhead"}
+    out, counts = remediated(work, "banner.pptx", path, titles=titles)
+    e = pptxparse.read(out)
+    yield "a title that's a heading's text makes it the title in place; any other is added", \
+        counts["titles_in_place"] == 7 and counts["titles"] == 6, counts
+    yield "each slide reads back with its title, from its heading where it was", \
+        [s.title for s in e.slides] == [
+            "Market Basics", "Chapter One", "Market Basics (2)", "Pros & Cons", "Grouped",
+            "Twice", "Both", "Styled", "Price elasticity", "Placed", "A long slide", "Summary",
+            "Summary (2)", "Subhead"] \
+        and [(e.slides[n].title_shape.id, e.slides[n].shapes.index(e.slides[n].title_shape))
+             for n in (0, 1, 2, 3, 6, 12)] == [("2", 0), ("4", 0), ("2", 0), ("2", 0), ("2", 0),
+                                                ("2", 0)], [s.title for s in e.slides]
+    first = read_part(out, "ppt/slides/slide1.xml")
+    sp = first[first.find('<p:cNvPr id="2"'):]
+    yield "a placeholder heading becomes a title that matches no placeholder of the layout", \
+        '<p:nvPr><p:ph type="title" idx="4294967295"/></p:nvPr>' in sp and 'type="body"' not in sp, \
+        sp[:300]
+    yield "what it inherited is written into its own list style, and what a title would " \
+        "inherit and it didn't, as its default", \
+        '<a:lvl1pPr marL="0" indent="0" algn="l"><a:lnSpc><a:spcPct val="100000"/></a:lnSpc>' \
+        '<a:spcBef><a:spcPts val="1000"/></a:spcBef><a:buFont typeface="Arial"/><a:buNone/>' \
+        '<a:defRPr lang="en-US" sz="7200" b="1" kern="1200"><a:solidFill><a:schemeClr ' \
+        'val="tx1"/></a:solidFill><a:latin typeface="Avenir Next"/><a:ea typeface="+mn-ea"/>' \
+        '<a:cs typeface="+mn-cs"/></a:defRPr></a:lvl1pPr><a:lvl2pPr marL="685800" ' \
+        'indent="-228600" algn="l">' in sp, re.findall(r"<a:lstStyle>.{0,700}", sp)
+    yield "and its text body's and shape's properties: its own, the layout's and master's, and " \
+        "the defaults of what a title's have", \
+        '<p:spPr>%s<a:noFill/></p:spPr><p:txBody><a:bodyPr vert="horz" lIns="91440" ' \
+        'tIns="45720" rIns="91440" bIns="45720" anchor="t"><a:normAutofit/></a:bodyPr>' \
+        % xfrm(*HEADING_BOX) in sp, sp[sp.find("<p:spPr"):][:400]
+    second = read_part(out, "ppt/slides/slide2.xml")
+    box = second[second.find('<p:cNvPr id="4"'):]
+    yield "a text box's heading becomes a title too, locked as PowerPoint locks it", \
+        '<p:cNvSpPr txBox="1"><a:spLocks noGrp="1"/></p:cNvSpPr><p:nvPr><p:ph type="title" ' \
+        'idx="4294967295"/></p:nvPr>' in box, box[:300]
+    yield "inheriting what the presentation's default text style gives it, and the defaults of " \
+        "what a title's chain gives", \
+        '<a:bodyPr vert="horz" wrap="square" lIns="91440" tIns="45720" rIns="91440" bIns="45720" ' \
+        'rtlCol="0" anchor="t"><a:spAutoFit/></a:bodyPr><a:lstStyle><a:lvl1pPr algn="l">' \
+        '<a:lnSpc><a:spcPct val="100000"/></a:lnSpc><a:spcBef><a:spcPts val="0"/></a:spcBef>' \
+        '<a:buNone/><a:defRPr lang="en-US" sz="1800" kern="0"><a:solidFill><a:schemeClr ' \
+        'val="tx1"/></a:solidFill><a:latin typeface="+mn-lt"/><a:ea typeface="+mn-ea"/><a:cs ' \
+        'typeface="+mn-cs"/></a:defRPr></a:lvl1pPr>' in box \
+        and '<a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:noFill/></p:spPr>' in box, \
+        box[box.find("<p:spPr"):][:700]
+    sub = read_part(out, "ppt/slides/slide14.xml")
+    yield "a placeholder takes what it inherited from the layout's of its idx, not another of " \
+        "its type", '<a:lvl1pPr marL="228600" indent="-228600" algn="l"><a:lnSpc><a:spcPct ' \
+        'val="100000"/></a:lnSpc><a:spcBef><a:spcPts val="1000"/></a:spcBef><a:buFont ' \
+        'typeface="Arial"/><a:buChar char="o"/><a:defRPr lang="en-US" sz="3600" i="1" ' \
+        'kern="1200">' in sub, re.findall(r"<a:lstStyle>.{0,400}", sub)
+    same = [(n, looks(path, "ppt/slides/slide%d.xml" % n, sid) == looks(
+        out, "ppt/slides/slide%d.xml" % n, sid)) for n, sid in ((1, "2"), (2, "4"), (4, "2"),
+                                                              (7, "2"), (14, "2"))]
+    before = looks(path, "ppt/slides/slide1.xml", "2")
+    yield "every paragraph and run looks as it did", \
+        all(ok for _n, ok in same) and before[0][0]["algn"] == "l" \
+        and before[0][1][0]["sz"] == "7200" and before[0][1][0]["b"] == "1", same
+    # The placeholder made a title and nothing else: the master's title
+    # style shows through, as it would in PowerPoint.
+    with zipfile.ZipFile(path) as z:
+        parts = [z.read(p).decode("utf-8") for p in (
+            "ppt/slides/slide1.xml", "ppt/slideLayouts/slideLayout1.xml",
+            "ppt/slideMasters/slideMaster1.xml", "ppt/presentation.xml")]
+    bare = parts[0].replace('<p:ph type="body" sz="quarter" idx="10"/>', pptxtitle.TITLE_PH)
+    shown = looks_of(bare, "2", *parts[1:])
+    yield "where a placeholder made a title and nothing more would look like the master's title", \
+        shown[0][0]["algn"] == "ctr" and shown[0][1][0]["sz"] == "4400" \
+        and shown[0][1][0]["<latin>"] == '<a:latin typeface="+mj-lt"/>', shown[0]
+    third = read_part(out, "ppt/slides/slide3.xml")
+    yield "a number added to a heading's text goes after its last run, in that run's formatting", \
+        '<a:t>Market Basics</a:t></a:r><a:r><a:rPr lang="en-US" dirty="0"/><a:t> (2)</a:t></a:r>' \
+        in third and pptxtitle.TITLE_PH in third, third[third.find("<a:t>"):][:200]
+    yield "a heading with an ampersand is matched by its text and stays escaped", \
+        "<a:t>Pros &amp; Cons</a:t>" in read_part(out, "ppt/slides/slide4.xml"), ""
+    yield "a heading in AlternateContent is made the title in its Choice and its Fallback", \
+        read_part(out, "ppt/slides/slide7.xml").count(pptxtitle.TITLE_PH) == 2, ""
+    ninth = read_part(out, "ppt/slides/slide9.xml")
+    heading = re.search(r"<p:sp><p:nvSpPr><p:cNvPr id=\"2\".*?</p:sp>",
+                        read_part(path, "ppt/slides/slide9.xml")).group(0)
+    yield "a title that isn't a heading's text is added above the slide, the heading left as " \
+        "it was", heading in ninth and e.slides[8].shapes[0].is_title \
+        and e.slides[8].shapes[0].box.y < 0, [s.name for s in e.slides[8].shapes]
+    yield "and so is one for a heading in a group, a heading whose id repeats, a styled one, " \
+        "and one on a slide with an empty title placeholder, which takes it", \
+        all(e.slides[n].title_shape.box.y < 0 for n in (4, 5, 7, 9, 10)) \
+        and e.slides[9].title_shape.id == "5" \
+        and pptxtitle.TITLE_PH not in read_part(out, "ppt/slides/slide8.xml"), \
+        [(n, e.slides[n].title_shape.id, e.slides[n].title_shape.box) for n in (4, 5, 7, 9, 10)]
+    found = pptxcheck.check(e)
+    with zipfile.ZipFile(out) as z:
+        parses = all(ET.fromstring(z.read(n)) is not None for n in z.namelist()
+                     if n.endswith(".xml"))
+    yield "the copy's slides all have titles, none of them another's, and every part parses", \
+        not {"pptx-slide-no-title", "pptx-duplicate-title"} & set(checks_of(found)) and parses, \
+        checks_of(found)
+    # A run's report: the drafts, and what a drafted title does.
+    folder = os.path.join(work, "banner-run")
+    os.makedirs(folder)
+    shutil.copy(path, folder)
+    said = []
+    deckrun.run(folder, ["banner.pptx"], [],
+                {"slide_titles": os.path.join(folder, "slide-titles.csv"),
+                 "image_alt": os.path.join(folder, "image-alt.csv"),
+                 "table_headers": os.path.join(folder, "table-headers.csv")},
+                {k: os.path.join(folder, v) for k, v in (
+                    ("image_alt_missing", "a.csv"), ("table_headers_new", "t.csv"),
+                    ("slide_titles_new", "s.csv"), ("slides_check", "check.csv"))},
+                check_only=True, say=said.append)
+    yield "a run writes the drafts and says what a drafted title does", \
+        [r[1] for r in rows_of(os.path.join(folder, "s.csv"))] == [r[1] for r in rows] \
+        and any("A Title drafted from a slide's heading makes the heading its title, in place, " \
+                "as PowerPoint's Set as Slide Title does" in line for line in said), said[-4:]
+    # A slide the sidecar decides isn't drafted, and its title counts.
+    decided = deckrun.untitled_rows("banner.pptx", "banner", d, {key[0]: "Market Basics"})
+    yield "a slide the sidecar decides gets no row, and a later one is numbered after it", \
+        [r[1] for r in decided][:2] == ["Chapter One", "Market Basics (2)"], decided[:2]
+    # A copy's run says how many titles were made in place.
+    with open(os.path.join(folder, "slide-titles.csv"), "w", encoding="utf-8", newline="") as fh:
+        csv.writer(fh).writerows([deckrun.TITLE_COLUMNS] + [[k, v] for k, v in titles.items()])
+    said = []
+    deckrun.run(folder, ["banner.pptx"], [CopyTarget(folder)],
+                {"slide_titles": os.path.join(folder, "slide-titles.csv"),
+                 "image_alt": os.path.join(folder, "image-alt.csv"),
+                 "table_headers": os.path.join(folder, "table-headers.csv")},
+                {k: os.path.join(folder, v) for k, v in (
+                    ("image_alt_missing", "a.csv"), ("table_headers_new", "t.csv"),
+                    ("slide_titles_new", "s.csv"), ("slides_check", "check.csv"))},
+                say=said.append)
+    yield "a run's copies say how many headings were made titles, and how many titles added", \
+        any("7 slide(s) given the heading they show as their title, in place, 6 title(s) added " \
+            "above their slides" in line for line in said), said[-3:]
+    # set_as_title() itself refuses a shape in a group, one styled by the
+    # theme, and a title.
+    with zipfile.ZipFile(path) as z:
+        inherited = [z.read(p).decode("utf-8") for p in (
+            "ppt/slideLayouts/slideLayout1.xml", "ppt/slideMasters/slideMaster1.xml",
+            "ppt/presentation.xml")]
+        refused = [pptxtitle.set_as_title(z.read("ppt/slides/slide%d.xml" % n).decode("utf-8"),
+                                          sid, *inherited)[1]
+                   for n, sid in ((5, "6"), (8, "4"), (12, "5"))]
+    yield "a shape in a group, one the theme styles, and a title aren't made titles", \
+        refused == [0, 0, 0], refused
+
+
+AVENIR, ARIAL, GEORGIA = "020B0503020202020204", "020B0604020202020204", "02040502050405020303"
+
+
+def eot(family, fstype, panose, style="regular"):
+    """An Embedded OpenType file's header as PowerPoint writes one, version
+    2.2, and no font data after it: what a deck's fonts are read from."""
+    def name(text):
+        data = text.encode("utf-16-le")
+        return struct.pack("<HH", 0, len(data)) + data
+    data = (struct.pack("<IIII", 0, 0, 0x00020002, 0x5) + bytes.fromhex(panose)
+            + struct.pack("<BBIHH", 1, 0, 400, fstype, 0x504C) + bytes(44)
+            + name(family) + name(style) + name("Version 1.0") + name(family))
+    return struct.pack("<I", len(data)) + data[4:]
+
+
+def embed_fonts(path, fonts, embedding=True, override=False):
+    """A deck with fonts embedded as PowerPoint embeds them: for each
+    (typeface, fsType, PANOSE, styles), an entry in the presentation's
+    list, a file for each style in ppt/fonts/, and a relationship to each;
+    embedTrueTypeFonts on when embedding; override: the first file's
+    content type given by name too, not only by its extension."""
+    with zipfile.ZipFile(path) as z:
+        members = [(i, z.read(i.filename)) for i in z.infolist()]
+    files, entries, added = [], [], []
+    for typeface, fstype, panose, styles in fonts:
+        refs = []
+        for n, style in enumerate(styles):
+            # one license for every style, or one each; None, a file that
+            # isn't EOT at all
+            each = fstype[n] if isinstance(fstype, tuple) else fstype
+            files.append(("ppt/fonts/font%d.fntdata" % (len(files) + 1),
+                          eot(typeface, each, panose, style) if each is not None
+                          else b"\x00\x01\x00\x00" + b" a TrueType font, not EOT" * 8))
+            added.append('<Relationship Id="rIdF%d" Type="%sfont" Target="fonts/font%d.fntdata"/>'
+                         % (len(files), REL, len(files)))
+            refs.append('<p:%s r:id="rIdF%d"/>' % (style, len(files)))
+        entries.append('<p:embeddedFont><p:font typeface="%s" panose="%s" pitchFamily="34" '
+                       'charset="0"/>%s</p:embeddedFont>' % (esc(typeface), panose, "".join(refs)))
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as z:
+        for info, data in members:
+            text = data.decode("utf-8") if info.filename.endswith((".xml", ".rels")) else None
+            if info.filename == "ppt/presentation.xml":
+                if entries:
+                    text = text.replace('<p:notesSz cx="6858000" cy="9144000"/>',
+                                        '<p:notesSz cx="6858000" cy="9144000"/><p:embeddedFontLst>'
+                                        '%s</p:embeddedFontLst>' % "".join(entries))
+                if embedding:
+                    text = text.replace("<p:presentation %s>" % NS, '<p:presentation %s '
+                                        'embedTrueTypeFonts="1" saveSubsetFonts="1">' % NS)
+            elif info.filename == "ppt/_rels/presentation.xml.rels":
+                text = text.replace("</Relationships>", "".join(added) + "</Relationships>")
+            elif info.filename == "[Content_Types].xml" and files:
+                text = text.replace('<Default Extension="png"', '<Default Extension="fntdata" '
+                                    'ContentType="application/x-fontdata"/><Default Extension="png"')
+                if override:
+                    text = text.replace("</Types>", '<Override PartName="/%s" ContentType="'
+                                        'application/x-fontdata"/></Types>' % files[0][0])
+            z.writestr(info, text.encode("utf-8") if text is not None else data)
+        for part, data in files:
+            z.writestr(part, data)
+    return path
+
+
+def font_box(shape_id, text, typeface, panose=None, y=1600200):
+    """A text box whose run names a typeface, as its Latin and complex
+    script font, with its PANOSE when given."""
+    traits = ' panose="%s" pitchFamily="34" charset="0"' % panose if panose else ""
+    return ('<p:sp>%s<p:spPr>%s</p:spPr><p:txBody><a:bodyPr/><a:lstStyle/><a:p><a:r><a:rPr '
+            'lang="en-US"><a:latin typeface="%s"%s/><a:cs typeface="%s"%s/></a:rPr><a:t>%s</a:t>'
+            '</a:r></a:p></p:txBody></p:sp>'
+            % (nv("sp", shape_id, "TextBox %s" % shape_id), xfrm(457200, y, 8000000, 500000),
+               esc(typeface), traits, esc(typeface), traits, esc(text)))
+
+
+def font_bullet(shape_id, typeface, panose):
+    """A text box whose bullet is in a typeface."""
+    return ('<p:sp>%s<p:spPr>%s</p:spPr><p:txBody><a:bodyPr/><a:lstStyle/><a:p><a:pPr><a:buFont '
+            'typeface="%s" panose="%s" pitchFamily="34" charset="0"/><a:buChar char="-"/></a:pPr>'
+            '<a:r><a:rPr lang="en-US"/><a:t>A point</a:t></a:r></a:p></p:txBody></p:sp>'
+            % (nv("sp", shape_id, "TextBox %s" % shape_id), xfrm(457200, 3000000, 8000000, 500000),
+               esc(typeface), panose))
+
+
+def case_fonts(work):
+    header = pptxfonts.eot_header(eot("Avenir Next", 4, AVENIR))
+    yield "an embedded font's family, license, and PANOSE are read from its EOT header", \
+        header == ("Avenir Next", 4, AVENIR), header
+    yield "a license restricts a deck that embeds the font unless it lets the font be edited", \
+        [pptxfonts.restricted(x) for x in (0, 2, 4, 6, 8, 12, 0x104)] \
+        == [False, True, True, True, False, False, True], ""
+    yield "PANOSE puts a sans nearer a sans than a serif, and a font of unknown look nowhere", \
+        pptxfonts.distance(AVENIR, ARIAL) < pptxfonts.distance(AVENIR, GEORGIA) \
+        and pptxfonts.distance(AVENIR, "00000500000000000000") is None, ""
+    folder = os.path.join(work, "fonts")
+    os.makedirs(folder)
+    slide = [title(2, "Fonts"), font_box(6, "Plain", "Arial", y=1000000),
+             font_box(3, "Body", "Avenir Next", AVENIR),
+             font_box(4, "Other", "Arial", ARIAL, y=2200000),
+             font_box(5, "Serif", "Georgia", GEORGIA, y=2800000)]
+    embeds = embed_fonts(deck(os.path.join(folder, "embeds.pptx"), [
+        {"shapes": slide}, {"shapes": [title(2, "Points"), font_bullet(3, "Avenir Next", AVENIR)]}]),
+        [("Avenir Next", 4, AVENIR, ("regular", "bold")), ("Georgia", 8, GEORGIA, ("regular",))],
+        override=True)
+    uses = embed_fonts(deck(os.path.join(folder, "uses.pptx"), [{"shapes": slide}]),
+                       [("Georgia", 8, GEORGIA, ("regular",))])
+    editable = embed_fonts(deck(os.path.join(folder, "editable.pptx"), [{"shapes": slide}]),
+                           [("Avenir Next", 8, AVENIR, ("regular",))])
+    loose = deck(os.path.join(folder, "loose.pptx"), [{"shapes": slide}])
+    d = pptxparse.read(embeds)
+    yield "a deck's fonts: what it embeds, under what license, and how often it names each", \
+        dict(d.fonts.restricted()) == {"Avenir Next": 4} and d.fonts.used["Avenir Next"] == 3 \
+        and d.fonts.embedding and not d.fonts.embedded["Georgia"].restricted \
+        and d.fonts.traits["Arial"] == {"panose": ARIAL, "pitchFamily": "34", "charset": "0"} \
+        and pptxfonts.nearest(d.fonts, "Avenir Next") == "Arial", \
+        (dict(d.fonts.restricted()), d.fonts.used, d.fonts.traits)
+    # The most restrictive style's license is the font's, a file that isn't
+    # EOT has none, and the nearest font is never a restricted one, nor
+    # another kind of font, nor one with another serif style.
+    mixed = pptxparse.read(embed_fonts(deck(os.path.join(work, "mixed.pptx"), [{"shapes": slide}]),
+                                       [("Avenir Next", (8, 4), AVENIR, ("regular", "bold")),
+                                        ("Georgia", (None,), GEORGIA, ("regular",))]))
+    near = pptxparse.read(embed_fonts(deck(os.path.join(work, "near.pptx"), [{"shapes": [
+        title(2, "Near"), font_box(3, "Body", "Avenir Next", AVENIR),
+        font_box(4, "Script", "Brush", "030B0503020202020204", y=2200000),
+        font_box(5, "Serif", "Serifa", "02020503020202020204", y=2800000),
+        font_box(6, "Close", "Futura", "020B0502020202020204", y=3400000),
+        font_box(7, "Other", "Arial", ARIAL, y=4000000)]}]),
+        [("Futura", 4, "020B0502020202020204", ("regular",))]))
+    yield "a font's most restrictive file is its license, and the nearest font is the same kind, " \
+        "then the same serif style, and never a restricted one", \
+        dict(mixed.fonts.restricted()) == {"Avenir Next": 4} \
+        and mixed.fonts.embedded["Georgia"].fstype is None \
+        and pptxfonts.nearest(near.fonts, "Avenir Next") == "Arial", \
+        (dict(mixed.fonts.restricted()), pptxfonts.nearest(near.fonts, "Avenir Next"))
+    found = {os.path.basename(p): [(f.check, f.detail) for f in pptxcheck.check(
+        pptxparse.read(p), restricted={"Avenir Next": 4}) if f.check.startswith("pptx-font")]
+        for p in (embeds, uses, editable, loose)}
+    yield "a deck that embeds a font for preview and print only is found, and so is one that " \
+        "uses it without embedding it, set to embed its fonts; one that embeds it editable, or " \
+        "doesn't embed fonts, isn't", found == {
+            "embeds.pptx": [("pptx-font-restricted", "Avenir Next, embedded for preview and print "
+                             "only: PowerPoint opens the deck read-only where Avenir Next isn't "
+                             "installed")],
+            "uses.pptx": [("pptx-font-unembedded", "Avenir Next, which another deck embeds for "
+                           "preview and print only, used without being embedded: the deck is set "
+                           "to embed its fonts, so PowerPoint won't save it where Avenir Next "
+                           "isn't installed")],
+            "editable.pptx": [], "loose.pptx": []}, found
+    replaced, problems = [], []
+    out = os.path.join(work, "out", "embeds.pptx")
+    counts = rem.remediate(embeds, out, fonts={"Avenir Next": None}, replaced=replaced,
+                           problems=problems)
+    first = read_part(out, "ppt/slides/slide1.xml")
+    with zipfile.ZipFile(out) as z:
+        names = z.namelist()
+        pres, rels = z.read("ppt/presentation.xml").decode(), \
+            z.read("ppt/_rels/presentation.xml.rels").decode()
+        types = z.read("[Content_Types].xml").decode()
+        parses = all(ET.fromstring(z.read(n)) is not None for n in names
+                     if n.endswith((".xml", ".rels")))
+    yield "a restricted font is replaced with the nearest the deck uses, its PANOSE, pitch, and " \
+        "character set with it, bullets too", \
+        replaced == [("Avenir Next", "Arial", 3, True)] and counts["fonts_replaced"] == 1 \
+        and '<a:latin typeface="Arial" panose="%s" pitchFamily="34" charset="0"/><a:cs ' \
+        'typeface="Arial" panose="%s" pitchFamily="34" charset="0"/></a:rPr><a:t>Body' \
+        % (ARIAL, ARIAL) in first and '<a:buFont typeface="Arial" panose="%s"' % ARIAL \
+        in read_part(out, "ppt/slides/slide2.xml") and "Avenir" not in first, (replaced, counts)
+    yield "and its embedded files are taken out, with their relationships, list entry, and " \
+        "content type, the deck's other font kept", \
+        counts["fonts_unembedded"] == 1 and "ppt/fonts/font1.fntdata" not in names \
+        and "ppt/fonts/font2.fntdata" not in names and "ppt/fonts/font3.fntdata" in names \
+        and "rIdF1" not in rels and "rIdF2" not in rels and 'Id="rIdF3"' in rels \
+        and re.findall(r'<p:font typeface="([^"]+)"', pres) == ["Georgia"] \
+        and "font1.fntdata" not in types and 'Extension="fntdata"' in types and parses, \
+        (names, re.findall(r"<p:embeddedFontLst>.*</p:embeddedFontLst>", pres))
+    copy = pptxparse.read(out)
+    yield "the copy's check finds no restricted font", \
+        not [f for f in pptxcheck.check(copy, restricted={"Avenir Next": 4})
+             if f.check.startswith("pptx-font")] and not copy.fonts.restricted(), ""
+    named = rem.remediate(embeds, os.path.join(work, "out", "named.pptx"),
+                          fonts={"Avenir Next": "Georgia"}, replaced=replaced)
+    yield "a replacement fonts.replacements names is used in place of the nearest", \
+        replaced[-1] == ("Avenir Next", "Georgia", 3, True) and named["fonts_replaced"] == 1 \
+        and '<a:latin typeface="Georgia" panose="%s"' % GEORGIA \
+        in read_part(os.path.join(work, "out", "named.pptx"), "ppt/slides/slide1.xml"), replaced
+    alone = embed_fonts(deck(os.path.join(work, "alone.pptx"), [{"shapes": [
+        title(2, "Alone"), font_box(3, "Body", "Avenir Next"),
+        font_box(4, "Other", "Montserrat", "00000500000000000000", y=2200000)]}]),
+        [("Avenir Next", 4, "00000000000000000000", ("regular",))])
+    problems = []
+    kept = rem.remediate(alone, os.path.join(work, "out", "alone.pptx"),
+                         fonts={"Avenir Next": None}, problems=problems)
+    yield "a font with nothing near it is left, and the copy says to name one", \
+        kept["fonts_replaced"] == 0 and problems == [
+            ("alone", "Avenir Next isn't replaced: no font the deck uses is near it by PANOSE; "
+                      "fonts.replacements can name one")] \
+        and "ppt/fonts/font1.fntdata" in zipfile.ZipFile(
+            os.path.join(work, "out", "alone.pptx")).namelist(), problems
+    both = []
+    rem.remediate(embeds, os.path.join(work, "out", "both.pptx"),
+                  fonts={"Avenir Next": None, "Arial": "Helvetica"}, replaced=both)
+    none = []
+    clean = rem.remediate(clean_deck(os.path.join(work, "clean.pptx")),
+                          os.path.join(work, "out", "clean.pptx"),
+                          fonts={"Avenir Next": "Arial"}, replaced=none)
+    yield "the nearest font isn't one being replaced itself, and a deck without the font is " \
+        "left alone", both == [("Avenir Next", "Georgia", 3, True), ("Arial", "Helvetica", 4,
+                                                                      False)] \
+        and none == [] and clean["fonts_replaced"] == 0, (both, none)
+    styled = deck(os.path.join(work, "styled.pptx"), [{"shapes": slide}])
+    with zipfile.ZipFile(styled) as z:
+        members = [(i, z.read(i.filename)) for i in z.infolist()]
+    with zipfile.ZipFile(styled, "w", zipfile.ZIP_DEFLATED) as z:
+        for info, data in members:
+            if info.filename == "ppt/presentation.xml":
+                data = data.replace(b'<a:lvl1pPr><a:defRPr sz="1800"/>',
+                                    b'<a:lvl1pPr><a:defRPr sz="1800"><a:latin typeface="Avenir '
+                                    b'Next" panose="020B0503020202020204"/></a:defRPr>')
+            z.writestr(info, data)
+    told = []
+    rem.remediate(styled, os.path.join(work, "out", "styled.pptx"), fonts={"Avenir Next": None},
+                  replaced=told)
+    yield "a typeface the presentation's default text style names counts, and is replaced", \
+        pptxparse.read(styled).fonts.used["Avenir Next"] == 3 and told == [
+            ("Avenir Next", "Arial", 3, False)] and "Avenir" not in read_part(
+            os.path.join(work, "out", "styled.pptx"), "ppt/presentation.xml"), told
+    only = embed_fonts(deck(os.path.join(work, "only.pptx"), [{"shapes": slide}]),
+                       [("Avenir Next", 4, AVENIR, ("regular",))])
+    rem.remediate(only, os.path.join(work, "out", "only.pptx"), fonts={"Avenir Next": None})
+    fish = deck(os.path.join(work, "fish.pptx"), [{"shapes": [
+        title(2, "Fish"), font_box(3, "Body", "Fish & Chips", AVENIR)]}])
+    rem.remediate(fish, os.path.join(work, "out", "fish.pptx"), fonts={"Fish & Chips": "Q&A Sans"})
+    fished = read_part(os.path.join(work, "out", "fish.pptx"), "ppt/slides/slide1.xml")
+    yield "a list left with no font goes, and names are matched and written escaped", \
+        "embeddedFontLst" not in read_part(os.path.join(work, "out", "only.pptx"),
+                                           "ppt/presentation.xml") \
+        and '<a:latin typeface="Q&amp;A Sans"/>' in fished \
+        and pptxparse.read(os.path.join(work, "out", "fish.pptx")).fonts.used["Q&A Sans"] == 2, \
+        fished[fished.find("<a:rPr"):][:200]
+    # A run: what it says of the font, then a copy with it replaced.
+    said = []
+    paths = {"slide_titles": os.path.join(folder, "slide-titles.csv"),
+             "image_alt": os.path.join(folder, "image-alt.csv"),
+             "table_headers": os.path.join(folder, "table-headers.csv")}
+    reports = {k: os.path.join(folder, v) for k, v in (
+        ("image_alt_missing", "a.csv"), ("table_headers_new", "t.csv"),
+        ("slide_titles_new", "s.csv"), ("slides_check", "check.csv"),
+        ("output_check", "output-check.csv"))}
+    decks = ["editable.pptx", "embeds.pptx", "loose.pptx", "uses.pptx"]
+    deckrun.run(folder, decks, [], paths, reports, check_only=True, say=said.append)
+    yield "a run says how many decks use a restricted font, and how, and names the setting", \
+        any("WARNING: 3 of 4 deck(s) use the restricted font Avenir Next, whose license lets a "
+            "deck embed it for preview and print only: 1 embed it, so PowerPoint opens them "
+            "read-only where Avenir Next isn't installed; 1 use it without embedding it, set to "
+            "embed their fonts, so PowerPoint won't save them there; 1 use it without embedding "
+            "it, so it's shown in another font there. Set fonts.restricted: replace for the "
+            "copies to use another font in its place: the nearest each deck uses (Arial), or "
+            "the one fonts.replacements names." == line for line in said), said
+    said = []
+    deckrun.run(folder, decks, [CopyTarget(folder)], paths, reports, say=said.append)
+    yield "by default the copies keep the font, and their check names it", \
+        sorted(r[1] for r in rows_of(reports["output_check"]) if r[1].startswith("pptx-font")) \
+        == ["pptx-font-restricted", "pptx-font-unembedded"], said
+    said = []
+    deckrun.run(folder, decks, [CopyTarget(folder, {"fonts.restricted": "replace"})], paths,
+                reports, say=said.append)
+    yield "with fonts.restricted: replace, the copies use another font, and their check is clear", \
+        any("copies: Avenir Next replaced with Arial in 3 deck(s), 7 place(s) in all, and its "
+            "embedded files taken out of 1." == line for line in said) \
+        and any("copies's copies use another font in its place" in line for line in said) \
+        and not [r for r in rows_of(reports["output_check"]) if r[1].startswith("pptx-font")], \
+        said
+    said = []
+    deckrun.run(folder, decks, [CopyTarget(folder, {"fonts.replacements": {
+        "Avenir Next": "Georgia"}})], paths, reports, say=said.append)
+    yield "fonts.replacements replaces what it names, in every deck that uses it", \
+        any("copies: Avenir Next replaced with Georgia in 4 deck(s), 9 place(s) in all, and its "
+            "embedded files taken out of 2." == line for line in said), said
+    said = []
+    deckrun.run(folder, decks, [CopyTarget(folder, {"fonts.replacements": ["Avenir Next"]})],
+                paths, reports, check_only=False, say=said.append)
+    yield "fonts.replacements that isn't a map is left out, and the run says so", \
+        any("fonts.replacements is a map of fonts" in line for line in said) \
+        and not any("replaced with" in line for line in said), said
+
+
 DOI, SHORT = "https://doi.org/10.1080/08913810508443640", "https://doi.org/10/b8xx35"
 CARS = "https://dasl.datadescription.com/datafile/cars"
 KEPT = "https://example.org/kept"
@@ -2312,6 +2901,8 @@ CASES = [("reading a deck", case_parse), ("the checks", case_check),
          ("what PowerPoint made of Pandoc's decks", case_powerpoint),
          ("the reading order", case_order), ("drafting an order", case_draft),
          ("titles another slide has", case_retitle),
+         ("a heading made a slide's title", case_set_title),
+         ("fonts a license restricts", case_fonts),
          ("links and equations", case_links),
          ("convert.py on decks", case_convert),
          ("folders, archives, and tools", case_folders),

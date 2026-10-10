@@ -79,6 +79,12 @@ def _clean(text):
     return re.sub(r"[\s.!?;:,]+$", "", " ".join((text or "").split())).lower()
 
 
+def same_title(title):
+    """A slide's title as two are compared for being the same: case,
+    spacing, and closing punctuation aside."""
+    return _clean(title)
+
+
 def placeholder_rules(extra=()):
     """The project's own patterns from images.alt_placeholders: plain
     text matched as a whole, case aside; "re:" for a regular expression."""
@@ -319,7 +325,7 @@ def check(deck, name=None, kind="source-pptx", alt_max_chars=ALT_MAX_CHARS,
     for slide in deck.slides:
         title = slide.title
         if title:
-            titles[_clean(title)] += 1
+            titles[same_title(title)] += 1
         else:
             add(where(slide), "pptx-slide-no-title",
                 "no title" + (" (layout %s)" % slide.layout if slide.layout else ""))

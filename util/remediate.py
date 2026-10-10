@@ -129,10 +129,12 @@ def main(argv=None):
              totals.get("links", 0), totals.get("compat", 0)), file=sys.stderr)
     if any(p.lower().endswith(".pptx") for p in args.files):
         print("remediate: slides: %d title(s) added above their slides, %d slide(s) put in "
-              "the reading order given, %d deck(s) given the language as their default, %d given "
-              "a title in the file's properties; %d thing(s) PowerPoint couldn't read put right."
-              % (totals.get("titles", 0), totals.get("orders", 0), totals.get("language", 0),
-                 totals.get("core_title", 0), totals.get("repaired", 0)), file=sys.stderr)
+              "the reading order given, %d title(s) given in place of one another slide has, "
+              "%d deck(s) given the language as their default, %d given a title in the file's "
+              "properties; %d thing(s) PowerPoint couldn't read put right."
+              % (totals.get("titles", 0), totals.get("orders", 0), totals.get("retitled", 0),
+                 totals.get("language", 0), totals.get("core_title", 0),
+                 totals.get("repaired", 0)), file=sys.stderr)
     return 1 if failed else 0
 
 

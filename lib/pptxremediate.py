@@ -16,6 +16,9 @@ docxremediate.py does for Word:
 - a title for a slide that has none, placed above the slide, where it's
   read and not seen, as PowerPoint's own Add Hidden Slide Title does; an
   empty title placeholder takes the text and moves above the slide;
+- a title for a slide whose title another slide has, in its place on the
+  slide: what's added to the old title, as " (2)" is, goes after its last
+  run, in that run's formatting;
 - a slide's reading order, the shapes at the top of its tree put in the
   order given, unless that would draw two that overlap the other way
   round (pptxorder.py);
@@ -395,6 +398,58 @@ def add_title(xml, slide, title, width, language):
     return xml[:at] + element + xml[at:], 1
 
 
+# A run or a field, a run's properties, and a paragraph, none of which
+# nests in its own kind.
+RUN = re.compile(r"<a:(r|fld)\b[^>]*>.*?</a:\1>", re.S)
+RPR = re.compile(r"<a:rPr\b[^>]*?(?:/>|>.*?</a:rPr>)", re.S)
+PARAGRAPH = re.compile(r"<a:p\b[^>]*?(?:/>|>(.*?)</a:p>)", re.S)
+
+
+def _retitle_body(body, old, new):
+    """A title's text body with new for its text: what old lacks added
+    after its last run, in that run's formatting, when new begins with
+    old; otherwise one paragraph of one run in place of all of them, in
+    the first paragraph's and the first run's formatting."""
+    runs = list(RUN.finditer(body))
+    if new.startswith(old) and runs:
+        last = runs[-1]
+        rpr = RPR.search(last.group(0))
+        run = "<a:r>%s<a:t>%s</a:t></a:r>" % (rpr.group(0) if rpr else "", _text(new[len(old):]))
+        return body[:last.end()] + run + body[last.end():]
+    paragraphs = list(PARAGRAPH.finditer(body))
+    if not paragraphs:
+        return None
+    inner = paragraphs[0].group(1) or ""
+    ppr = re.match(r"\s*(<a:pPr\b[^>]*?(?:/>|>.*?</a:pPr>))", inner, re.S)
+    end = re.search(r"<a:endParaRPr\b[^>]*?(?:/>|>.*?</a:endParaRPr>)", inner, re.S)
+    rpr = RPR.search(runs[0].group(0)) if runs else None
+    paragraph = "<a:p>%s<a:r>%s<a:t>%s</a:t></a:r>%s</a:p>" % (
+        ppr.group(1) if ppr else "", rpr.group(0) if rpr else "", _text(new),
+        end.group(0) if end else "")
+    return body[:paragraphs[0].start()] + paragraph + body[paragraphs[-1].end():]
+
+
+def retitle(xml, slide, title):
+    """xml with a slide's title, which another slide has too, replaced by
+    title, in its Choice and its Fallback alike: (xml, count)."""
+    shape = slide.title_shape
+    shapes = list(slide.all_shapes())
+    if shape is None or not shape.id or [s.id for s in shapes].count(shape.id) != 1:
+        return xml, 0
+    old, count = slide.title, 0
+    for start, _end, _attrs, _closing in reversed(_cnvpr_spans(xml, shape.id)):
+        close = xml.find("</p:sp>", start)
+        body = start_tag("p:txBody").search(xml, start, close) if close >= 0 else None
+        if body is None or body.group(2):
+            continue
+        end = xml.find("</p:txBody>", body.end(), close)
+        changed = _retitle_body(xml[body.end():end], old, title) if end >= 0 else None
+        if changed is not None:
+            xml = xml[:body.end()] + changed + xml[end:]
+            count = 1
+    return xml, count
+
+
 def _lang_on_defaults(region, language):
     """A text style list with a language on each default run property that
     declares none; (region, count)."""
@@ -559,7 +614,7 @@ def remediate(source, destination, alts=None, tables=None, titles=None, language
         core_title = first and (first.title or titles.get(slide_key(deck, first)))
     counts = {"described": 0, "decorative": 0, "header_rows": 0, "header_columns": 0,
               "titles": 0, "language": 0, "core_title": 0, "repaired": 0, "skipped": 0,
-              "orders": 0, "orders_refused": 0}
+              "orders": 0, "orders_refused": 0, "retitled": 0}
     with zipfile.ZipFile(source) as zin:
         infos = zin.infolist()
         parts = {info.filename: zin.read(info.filename) for info in infos}
@@ -629,6 +684,17 @@ def remediate(source, destination, alts=None, tables=None, titles=None, language
             elif arrangement != list(range(len(kids))):
                 texts[part] = pptxorder.rewrite(xml, kids, arrangement)
                 counts["orders"] += 1
+        if slide is not None and slide.title:
+            # A title another slide has too, replaced on the slide
+            title = titles.get(slide_key(deck, slide))
+            shape = slide.title_shape
+            if title and title != slide.title and shape.id in repeated:
+                counts["skipped"] += 1
+            elif title and title != slide.title:
+                xml, n = retitle(text_of(part), slide, title)
+                if n:
+                    texts[part] = xml
+                    counts["retitled"] += 1
         if slide is not None and not slide.title:
             title = titles.get(slide_key(deck, slide))
             if title:

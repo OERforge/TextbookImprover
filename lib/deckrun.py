@@ -14,7 +14,9 @@ each deck (pptxremediate.py). The reports:
   object, a group) that needs alt text, keyed on deck/slide-N/shape-M;
 - table-headers-new.csv: each table with no header row marked, keyed on
   its content as a book's tables are, with the table census's guess;
-- slide-titles-new.csv: each slide with no title, keyed on deck/slide-N;
+- slide-titles-new.csv: each slide with no title, and each whose title
+  an earlier slide in its deck has, keyed on deck/slide-N, the second of
+  them drafted "Title (2)", the third "Title (3)";
 - reading-order-new.csv: each slide read in another order than it's laid
   out, keyed on deck/slide-N, with an order drafted for a person to
   review, as near to the layout as it can come without drawing two
@@ -331,6 +333,7 @@ def run(base, decks, targets, paths, reports, language=None, alt_max_chars=120,
                     title_report.append([key, "", "%s slide %d%s" % (
                         name, slide.number, ", layout %s" % slide.layout if slide.layout else ""),
                         "", ""])
+        title_report += repeated_titles(name, dname, deck, titles)
         order_report += order_rows(path, name, dname, deck, orders)
         for shape, check, detail in pptxcheck.master_items(deck, rules, alt_max_chars):
             note(shape, check, detail, None)
@@ -361,7 +364,10 @@ def run(base, decks, targets, paths, reports, language=None, alt_max_chars=120,
     report(reports["table_headers_new"], TABLE_COLUMNS, list(table_report.values()),
            "table(s) with no header row marked", paths["table_headers"], say)
     report(reports["slide_titles_new"], TITLE_COLUMNS, title_report,
-           "slide(s) with no title", paths["slide_titles"], say)
+           "slide(s) with no title, or with a title an earlier slide has",
+           paths["slide_titles"], say,
+           "A title for a slide that has one takes its place on the slide, where it's seen; "
+           "the title as it is keeps it." if any(r[3] for r in title_report) else None)
     if reports.get("reading_order_new"):
         report(reports["reading_order_new"], ORDER_COLUMNS, order_report,
                "slide(s) read in another order than they're laid out", paths["reading_order"], say,
@@ -407,6 +413,10 @@ def run(base, decks, targets, paths, reports, language=None, alt_max_chars=120,
                totals["described"], totals["decorative"], totals["header_rows"],
                totals["header_columns"], totals["titles"], totals["language"],
                totals["core_title"]))
+        if totals["retitled"]:
+            say("%s: %d slide(s) given the title %s gives in place of one another slide has." % (
+                target.name, totals["retitled"],
+                os.path.basename(paths.get("slide_titles") or "slide-titles.csv")))
         if totals["orders"]:
             say("%s: %d slide(s) put in the reading order %s gives." % (
                 target.name, totals["orders"],
@@ -423,6 +433,28 @@ def run(base, decks, targets, paths, reports, language=None, alt_max_chars=120,
         failed += check_copies(copies, reports["output_check"], tables, alt_max_chars,
                                alt_placeholders, say, orders)
     return 1 if failed else 0
+
+
+def repeated_titles(name, dname, deck, titles):
+    """slide-titles-new.csv's rows for the slides whose title an earlier
+    slide in the deck has, as PowerPoint's checker compares them, the
+    sidecar not deciding them yet: the second drafted "Title (2)", and so
+    on, for a person to review."""
+    first, count, rows = {}, Counter(), []
+    for slide in deck.slides:
+        if not slide.title:
+            continue
+        same = pptxcheck.same_title(slide.title)
+        count[same] += 1
+        if same not in first:
+            first[same] = slide.number
+            continue
+        key = pptxremediate.slide_key(dname, slide)
+        if key not in titles:
+            rows.append([key, "%s (%d)" % (slide.title, count[same]),
+                         "%s slide %d, titled as slide %d is" % (name, slide.number, first[same]),
+                         "TI", ""])
+    return rows
 
 
 def order_rows(path, name, dname, deck, orders):

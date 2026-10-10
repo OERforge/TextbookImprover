@@ -1394,6 +1394,76 @@ def case_order(work):
         any("1 row(s) of reading-order.csv match no slide" in line for line in said), said
 
 
+def styled_title(shape_id, paragraphs):
+    """A title placeholder whose paragraphs are given as XML."""
+    return ("<p:sp>%s<p:spPr/><p:txBody><a:bodyPr/><a:lstStyle/>%s</p:txBody></p:sp>"
+            % (nv("sp", shape_id, "Title %s" % shape_id, ph='<p:ph type="title"/>'),
+               "".join(paragraphs)))
+
+
+def case_retitle(work):
+    bold = '<a:p><a:r><a:rPr lang="en-US" b="1"/><a:t>Demand</a:t></a:r></a:p>'
+    two = ('<a:p><a:pPr algn="ctr"/><a:r><a:rPr lang="en-US"/><a:t>Market </a:t></a:r>'
+           '<a:r><a:rPr lang="en-US" i="1"/><a:t>Demand</a:t></a:r>'
+           '<a:endParaRPr lang="en-US" dirty="0"/></a:p>')
+    path = deck(os.path.join(work, "titles.pptx"), [
+        {"shapes": [styled_title(2, [bold])]},
+        {"shapes": [styled_title(2, [bold])]},
+        {"shapes": [styled_title(2, [two])]},
+        {"shapes": [styled_title(2, ['<a:p><a:r><a:t>Market</a:t></a:r></a:p>',
+                                     '<a:p><a:r><a:t>Demand</a:t></a:r></a:p>'])]},
+        {"shapes": [alternate(styled_title(2, [bold]), styled_title(2, [bold]))]},
+        {"shapes": [styled_title(2, [bold.replace("Demand", "demand.")])]},
+        {"shapes": [styled_title(2, [bold]), rect(2, "Rectangle 1", (0, 1600200, 10, 10))]},
+        {"shapes": [styled_title(2, ['<a:p><a:r><a:t>Supply</a:t></a:r></a:p>',
+                                     '<a:p><a:r><a:t>and more</a:t></a:r></a:p>'])]},
+    ])
+    d = pptxparse.read(path)
+    rows = deckrun.repeated_titles("titles.pptx", "titles", d, {})
+    yield "each slide titled as one before it gets a row, drafted with its number among them", \
+        [r[:2] for r in rows] == [
+            ["titles/slide-257", "Demand (2)"], ["titles/slide-259", "Market Demand (2)"],
+            ["titles/slide-260", "Demand (3)"], ["titles/slide-261", "demand. (4)"],
+            ["titles/slide-262", "Demand (5)"]] and all(r[3] == "TI" for r in rows), rows
+    key = [rem.slide_key("titles", s) for s in d.slides]
+    titles = {key[1]: "Demand (2)", key[2]: "Shifts in <demand> & supply",
+              key[3]: "Market Demand (2)", key[4]: "Demand (3)", key[5]: "demand.",
+              key[6]: "Demand (4)", key[7]: "Elasticity"}
+    out, counts = remediated(work, "titles.pptx", path, titles=titles)
+    e = pptxparse.read(out)
+    second = read_part(out, "ppt/slides/slide2.xml")
+    yield "what a new title adds to the old goes after its last run, in that run's formatting", \
+        '<a:t>Demand</a:t></a:r><a:r><a:rPr lang="en-US" b="1"/><a:t> (2)</a:t></a:r></a:p>' \
+        in second and e.slides[1].title == "Demand (2)", second[second.find("<p:txBody>"):][:300]
+    third = read_part(out, "ppt/slides/slide3.xml")
+    yield "a new title that doesn't begin with the old is one run, in the first run's and the " \
+        "first paragraph's formatting, escaped", \
+        '<a:p><a:pPr algn="ctr"/><a:r><a:rPr lang="en-US"/><a:t>Shifts in &lt;demand&gt; &amp; ' \
+        'supply</a:t></a:r><a:endParaRPr lang="en-US" dirty="0"/></a:p></p:txBody>' in third \
+        and e.slides[2].title == "Shifts in <demand> & supply", \
+        third[third.find("<p:txBody>"):][:400]
+    fourth = read_part(out, "ppt/slides/slide4.xml")
+    yield "a title of two paragraphs keeps them, its addition after the last run", \
+        fourth.count("<a:p>") == 2 and '<a:t>Demand</a:t></a:r><a:r><a:t> (2)</a:t></a:r>' \
+        in fourth and e.slides[3].title == "Market Demand (2)", \
+        fourth[fourth.find("<p:txBody>"):][:400]
+    eighth = read_part(out, "ppt/slides/slide8.xml")
+    yield "and in place of every paragraph of the old title", \
+        eighth.count("<a:p>") == 1 and "<a:t>Elasticity</a:t>" in eighth \
+        and "Supply" not in eighth and "and more" not in eighth, \
+        eighth[eighth.find("<p:txBody>"):][:300]
+    yield "a title in AlternateContent is replaced in its Choice and its Fallback", \
+        read_part(out, "ppt/slides/slide5.xml").count("<a:t> (3)</a:t>") == 2, ""
+    yield "a row giving the title as it is keeps it, and a title whose id repeats is left", \
+        read_part(out, "ppt/slides/slide6.xml") == read_part(path, "ppt/slides/slide6.xml") \
+        and read_part(out, "ppt/slides/slide7.xml") == read_part(path, "ppt/slides/slide7.xml") \
+        and counts["retitled"] == 5 and counts["skipped"] == 1, counts
+    found = pptxcheck.check(e)
+    yield "the copy's slides titled alike are only those the sidecar left alike", \
+        [f.detail for f in found if f.check == "pptx-duplicate-title"] == [
+            "3 slides titled demand"], [(f.check, f.detail) for f in found]
+
+
 # ---------------------------------------------------------------------------
 # convert.py over a folder of decks
 # ---------------------------------------------------------------------------
@@ -1463,8 +1533,11 @@ def case_convert(work):
     yield "and a table the census can't guess gets an empty row, nobody's draft", \
         merged == "" and by_source["messy.pptx slide 3"][1:2] == [""] \
         and by_source["messy.pptx slide 3"][8] == "", (merged, tables)
-    yield "each untitled slide gets a row", [r[0] for r in titles] == [
-        "messy/slide-256", "messy/slide-257"], titles
+    yield "each untitled slide gets a row, and each titled as one before it a drafted one", \
+        [r[:2] + r[3:4] for r in titles] == [
+            ["messy/slide-256", "", ""], ["messy/slide-257", "", ""],
+            ["messy/slide-259", "Costs (2)", "TI"], ["messy/slide-262", "Words (2)", "TI"]] \
+        and titles[2][2] == "messy.pptx slide 4, titled as slide 3 is", titles
     orders = rows_of(os.path.join(folder, "reading-order-new.csv"))
     yield "a slide read out of its layout's order gets a row with an order drafted", \
         [r[:2] for r in orders] == [["messy/slide-259", "2 4"]] and orders[0][5] == "TI", orders
@@ -1482,7 +1555,7 @@ def case_convert(work):
         csv.writer(fh).writerows([deckrun.TABLE_COLUMNS] + [
             [r[0], r[1] or "first-row"] + r[2:] for r in tables])
     with open(os.path.join(folder, "slide-titles.csv"), "w", encoding="utf-8", newline="") as fh:
-        csv.writer(fh).writerows([deckrun.TITLE_COLUMNS] + [[r[0], "Slide %d" % i] + r[2:]
+        csv.writer(fh).writerows([deckrun.TITLE_COLUMNS] + [[r[0], r[1] or "Slide %d" % i] + r[2:]
                                                             for i, r in enumerate(titles, 1)])
     with open(os.path.join(folder, "reading-order.csv"), "w", encoding="utf-8", newline="") as fh:
         csv.writer(fh).writerows([deckrun.ORDER_COLUMNS] + orders)
@@ -1498,16 +1571,21 @@ def case_convert(work):
     decided = {"pptx-slide-no-title", "pptx-object-no-alt", "pptx-table-no-header",
                "pptx-alt-placeholder", "pptx-alt-is-file-name", "pptx-no-language",
                "pptx-no-core-title", "pptx-shape-no-alt", "pptx-alt-auto-generated",
-               "pptx-reading-order"}
+               "pptx-reading-order", "pptx-duplicate-title"}
     yield "and the copies' check finds nothing that was decided, but alt text kept as it was", \
         not decided & set(left) and "pptx-alt-too-long" in left, left
     copy = pptxparse.read(os.path.join(folder, "remediated", "messy.pptx"))
     yield "the copy has the titles, the language, the title in its properties, and the order", \
         [s.title for s in copy.slides][:2] == ["Slide 1", "Slide 2"] \
         and copy.default_language == "en-US" and copy.core_title == "Slide 1" \
-        and [s.id for s in copy.slides[3].shapes] == ["2", "4"], \
-        ([s.title for s in copy.slides][:2], copy.default_language, copy.core_title,
+        and [s.id for s in copy.slides[3].shapes] == ["2", "4"] \
+        and [s.title for s in copy.slides][2:7] == ["Costs", "Costs (2)", "Media", "Words",
+                                                    "Words (2)"], \
+        ([s.title for s in copy.slides], copy.default_language, copy.core_title,
          [s.id for s in copy.slides[3].shapes])
+    yield "the run says how many slides got a title in place of one another slide has", \
+        "remediated: 2 slide(s) given the title slide-titles.csv gives in place of one another " \
+        "slide has." in third.stderr, third.stderr[-800:]
     yield "the table's row is used, and a drafted row nobody reviewed is said to be", \
         "drafted by TextbookImprover or a model and not yet reviewed" in third.stderr \
         and copy.slides[2].shapes[1].table.first_row, third.stderr[-400:]
@@ -1633,7 +1711,7 @@ CASES = [("reading a deck", case_parse), ("the checks", case_check),
          ("the copy", case_remediate), ("the copy, more", case_remediate_more),
          ("the sidecars", case_sidecars), ("what a review found", case_edges),
          ("what PowerPoint made of Pandoc's decks", case_powerpoint),
-         ("the reading order", case_order),
+         ("the reading order", case_order), ("titles another slide has", case_retitle),
          ("convert.py on decks", case_convert),
          ("folders, archives, and tools", case_folders)]
 

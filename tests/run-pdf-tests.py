@@ -165,6 +165,10 @@ Table: Price by year
 | c     | d     |
 | e     | f     |
 
+| $q_d$ | Revenue, $p \cdot q_d$ |
+|-------|------------------------|
+| 10    | 10                     |
+
 #### Deep
 
 ##### Run-in one
@@ -611,9 +615,9 @@ def checks(work, jobs=1):
         # first cell of each body row TH-row only if pdf-target.lua set
         # table/header-columns around it.
         ("the matrix table's first column is row headers",
-         lambda: len(tabled) == 7 and row_headers(tabled[0]) == 2),
+         lambda: len(tabled) == 8 and row_headers(tabled[0]) == 2),
         ("the plain table has header cells and no row headers",
-         lambda: len(tabled) == 7 and row_headers(tabled[1]) == 0
+         lambda: len(tabled) == 8 and row_headers(tabled[1]) == 0
          and any(kind(e) == "/TH" for e in tabled[1])),
         # LaTeX writes a longtable's caption as a first row of one header
         # cell, and leaves the empty copy of the head it repeats inside the
@@ -690,6 +694,13 @@ def checks(work, jobs=1):
         ("an image with no alt text is reported by the output check",
          lambda: [r["Check"] for r in pdf_rows].count(
              "pdf-figure-alt-is-file-name") == 1),
+        # NVDA announces no column header for a cell holding only a
+        # formula, and announces the words beside one (round 5).
+        ("a header cell holding only a formula is reported, in the PDF and on its "
+         "page, and one with words beside its formula isn't",
+         lambda: [r["Check"] for r in pdf_rows].count("pdf-table-header-is-formula") == 1
+         and [r["Check"] for r in rows if r.get("Kind") == "html"].count(
+             "table-header-is-formula") == 1),
         ("a link with a description reads its text, then the description",
          lambda: by_uri.get("https://doi.org/10/b8xx35")
          == "https://doi.org/10/b8xx35 (Crandall 2019 via doi.org)"),
@@ -727,7 +738,7 @@ def checks(work, jobs=1):
         # \pmb, on which LuaTeX's tagging of the formula stopped.
         ("every formula, an eqnarray* and a \\pmb among them, has MathML structure "
          "elements and a MathML file",
-         lambda: len(formulas) == 5
+         lambda: len(formulas) == 7
          and all("/AF" in f for f in formulas)
          and "/math" in kinds),
         # Once each in the whole file: the template's own are switched

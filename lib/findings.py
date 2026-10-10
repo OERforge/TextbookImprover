@@ -82,6 +82,10 @@ CHECKS = OrderedDict([
     ("table-not-in-scroll-region",
      ("a data table outside the focusable scroll wrapper (HTML pages)",
       "warning", "WCAG 2.1 SC 1.4.10 (AA)", "tool")),
+    ("table-header-is-formula",
+     ("a header cell holding only a formula: NVDA reads it in the header "
+      "row but announces no header on moving into its column, where it "
+      "announces words beside a formula", "note", "", "source")),
     ("link-to-missing-file", ("a link names a file that is not in the set",
                               "error", "WCAG 2.0 SC 2.4.4 (A)", "source")),
     ("formula-lost", ("a formula the saved page held only as MathJax's "
@@ -218,6 +222,10 @@ CHECKS = OrderedDict([
      ("a figure's alternative text in the PDF is the placeholder LaTeX "
       "writes for a drawing that has none", "error",
       "WCAG 2.0 SC 1.1.1 (A)", "sidecar")),
+    ("pdf-table-header-is-formula",
+     ("a header cell (TH) holding only a formula: NVDA reads it in the "
+      "header row but announces no header on moving into its column, "
+      "where it announces words beside a formula", "note", "", "source")),
     ("pdf-claims-unverified", ("the PDF claims a conformance level; only a "
                                "validator can confirm it", "note", "",
                                "tool")),

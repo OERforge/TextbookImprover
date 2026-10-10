@@ -44,7 +44,10 @@ GOOD = """<!DOCTYPE html><html lang="en"><head><title>A page</title></head>
 <img src="x.png" alt="A thing"><img src="y.png" alt="" aria-hidden="true">
 <div class="table-wrapper" tabindex="0" role="region" aria-label="Data">
 <table><caption>Data</caption><tr><th scope="col">H</th></tr></table></div>
-<table role="presentation"><tr><td>layout</td></tr></table>
+<div class="table-wrapper" tabindex="0" role="region" aria-label="Revenue">
+<table><caption>Revenue</caption><tr><th scope="col">Revenue, <math><semantics><mi>p</mi><annotation encoding="application/x-tex">p</annotation></semantics></math></th>
+<th scope="col"><img src="h.png" alt="Height"> <math><mi>h</mi></math></th><th scope="col"><math><mi>q</mi></math> per day</th></tr></table></div>
+<table role="presentation"><tr><th><math><mi>z</mi></math></th><td>layout</td></tr></table>
 <a href="#top">up</a><a href="other.html#there">over</a>
 <a href="https://example.org/#x">out</a><p>A formula <math><mi>x</mi></math>, and one in MathJax's form <span class="math inline">\\(y\\)</span>.</p><p><a href="other.html" aria-label="Read more about cats">Read more</a> <a href="other.html" aria-label="Chart of sales, larger"><img src="c.png" alt="Chart of sales"></a> <a href="other.html">no label</a></p>
 </body></html>"""
@@ -56,9 +59,25 @@ BAD = """<!DOCTYPE html><html><head><title></title></head>
 <body><h1 id="a">A</h1><h3 id="a">Skipped</h3><h2 id="two words"></h2>
 <img src="p.png"><img src="q.png" alt=""><img src="media/db-locked.png" alt="db locked">
 <table><tr><td>1</td></tr></table>
+<div class="table-wrapper" tabindex="0" role="region" aria-label="Demand">
+<table><caption>Demand</caption><tr><th scope="col"><math display="inline"><semantics><msub><mi>q</mi><mi>d</mi></msub><annotation encoding="application/x-tex">q_d</annotation></semantics></math></th>
+<th scope="col"> <math><mi>p</mi></math> </th><th scope="col">Price</th></tr>
+<tr><th scope="row"><math><mi>r</mi></math><th scope="row">Rate</th></tr></table></div>
 <a href="#nowhere">x</a><a href="gone.html">y</a><a href="other.html#no">z</a>
 <a href="other.html" aria-label="DOI for Klein and Stern 2005">https://doi.org/10/b8xx35</a>
 <p><span class="math inline">$x_{2}\\text{\\cdot}x_{n}$</span></p>
+</body></html>"""
+
+# An EPUB document whose table holds another in a cell: the outer
+# header has words, the inner one only a formula.
+NESTED = """<html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><title>N</title></head>
+<body><table><tr><th>Words, <math xmlns="http://www.w3.org/1998/Math/MathML"><mi>w</mi></math></th>
+<th><math xmlns="http://www.w3.org/1998/Math/MathML"><mi>v</mi></math> per day</th>
+<th><img src="i.png" alt="Income"/><math xmlns="http://www.w3.org/1998/Math/MathML"><mi>i</mi></math></th></tr>
+<tr><td><table><tr><th><math
+xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mi>y</mi><annotation
+encoding="application/x-tex">y</annotation></semantics></math></th></tr></table></td></tr></table>
+<table role="presentation"><tr><th><math xmlns="http://www.w3.org/1998/Math/MathML"><mi>z</mi></math></th></tr></table>
 </body></html>"""
 
 # The formula Pandoc couldn't convert, on a page whose script may render it.
@@ -125,7 +144,18 @@ def main():
                  "table-without-headers-or-caption",
                  "table-not-in-scroll-region",
                  "link-to-missing-fragment", "link-to-missing-file",
-                 "link-to-missing-fragment", "formula-shown-as-tex"])),
+                 "link-to-missing-fragment", "formula-shown-as-tex",
+                 "table-header-is-formula", "table-header-is-formula",
+                 "table-header-is-formula"])),
+            ("a header cell holding only a formula is named by its table and TeX, "
+             "and one with no TeX by its table",
+             lambda: sorted(f.detail for f in bad if f.check == "table-header-is-formula")
+             == ["table 2", "table 2", "table 2: q_d"]),
+            # An EPUB's documents are read as XML: a nested table's header is
+            # its own table's, not the table around it.
+            ("in XHTML too, each header its own table's",
+             lambda: outputcheck.read_xhtml("n.xhtml", NESTED).formula_headers
+             == [(2, "y")]),
             ("a formula shown as TeX is named by its TeX",
              lambda: any(f.check == "formula-shown-as-tex"
                          and f.detail == "$x_{2}\\text{\\cdot}x_{n}$" for f in bad)),
@@ -157,6 +187,9 @@ def main():
                     if info.filename.endswith("ch001.xhtml"):
                         data = data.replace(b"#two", b"#gone").replace(
                             b"See ", b'See <span class="math display">$$\\text{\\cdot}$$</span> ')
+                        data = data.replace(b"</h1>", b'</h1><table><tr><th><math '
+                                            b'xmlns="http://www.w3.org/1998/Math/MathML">'
+                                            b'<mi>x</mi></math></th></tr></table>', 1)
                     dst.writestr(info, data)
             damaged = outputcheck.check_epub(broken)
             cases += [
@@ -167,6 +200,9 @@ def main():
                  lambda: "link-to-missing-fragment" in checks(damaged)),
                 ("and a formula shown as TeX in it",
                  lambda: "formula-shown-as-tex" in checks(damaged)),
+                ("and a header cell holding only a formula",
+                 lambda: [f.detail for f in damaged if f.check == "table-header-is-formula"]
+                 == ["table 1"]),
                 ("the EPUB's own structure is read: manifest, spine, nav",
                  lambda: not any(c.startswith(("manifest", "spine", "no-nav",
                                                "file-not", "mimetype"))

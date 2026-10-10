@@ -127,6 +127,190 @@ def _walk_structure(node, counts, depth=0, seen=0, alts=None):
     return seen
 
 
+# Operators that show something inside marked content: text, or an
+# XObject (an image, or a form that may hold text of its own).
+SHOWING = {b"Tj", b"TJ", b"'", b'"', b"Do"}
+
+
+def _resolved(obj):
+    try:
+        return obj.get_object() if hasattr(obj, "get_object") else obj
+    except Exception:
+        return None
+
+
+def _role_resolver(tree):
+    """A structure type's standard type, through the tree's /RoleMap and
+    each namespace's /RoleMapNS, as pdfparagraphs.make_role_resolver
+    follows them."""
+    mapping = {}
+
+    def add(rolemap, first):
+        rolemap = _resolved(rolemap)
+        if not isinstance(rolemap, dict):
+            return
+        for key, value in rolemap.items():
+            value = _resolved(value)
+            if isinstance(value, list):
+                value = value[0] if value else None
+            if value is not None and (first or _text(key) not in mapping):
+                mapping[_text(key)] = _text(value)
+
+    add(tree.get("/RoleMap"), True)
+    for namespace in _resolved(tree.get("/Namespaces")) or []:
+        namespace = _resolved(namespace)
+        if isinstance(namespace, dict):
+            add(namespace.get("/RoleMapNS"), False)
+
+    def resolve(kind):
+        seen = set()
+        while kind in mapping and kind not in seen:
+            seen.add(kind)
+            kind = mapping[kind]
+        return kind
+    return resolve
+
+
+def _showing_mcids(page):
+    """The marked-content ids on a page whose content shows something, or
+    None when its content stream can't be read."""
+    try:
+        contents = page.get_contents()
+        operations = contents.operations if contents is not None else []
+    except Exception:
+        return None
+    properties = {}
+    try:
+        resources = _resolved(page.get("/Resources")) or {}
+        properties = _resolved(resources.get("/Properties")) or {}
+    except Exception:
+        properties = {}
+    shown, stack = set(), []
+    for operands, operator in operations:
+        if operator == b"BDC":
+            mcid = None
+            if len(operands) > 1:
+                listed = _resolved(operands[1])
+                if not isinstance(listed, dict):
+                    listed = _resolved(properties.get(_text(listed)))
+                if isinstance(listed, dict) and "/MCID" in listed:
+                    mcid = int(listed["/MCID"])
+            stack.append(mcid)
+        elif operator == b"BMC":
+            stack.append(None)
+        elif operator == b"EMC":
+            if stack:
+                stack.pop()
+        elif operator in SHOWING or operator == b"INLINE IMAGE":
+            current = next((m for m in reversed(stack) if m is not None), None)
+            if current is not None:
+                shown.add(current)
+    return shown
+
+
+def _header_content(cell, page, resolve, depth=0):
+    """What a header cell holds: (whether it holds a formula, the
+    (page, mcid) of its marked content outside formulas, whether it holds
+    anything else that may be read: content in a form XObject, or a
+    figure outside a formula; and the page its first content is on)."""
+    formula, outside, other, pages = False, [], False, []
+
+    def walk(node, page, in_formula, depth):
+        nonlocal formula, other
+        if depth > 200:
+            other = True
+            return
+        page = node.get("/Pg", page)
+        kids = _resolved(node.get("/K"))
+        if kids is None:
+            return
+        if not isinstance(kids, list):
+            kids = [kids]
+        for kid in kids:
+            kid = _resolved(kid)
+            if isinstance(kid, int):
+                pages.append(page)
+                if not in_formula:
+                    outside.append((page, int(kid)))
+            elif isinstance(kid, dict) and _text(kid.get("/Type")) == "/MCR":
+                pages.append(kid.get("/Pg", page))
+                if "/Stm" in kid:
+                    other = other or not in_formula
+                elif not in_formula and "/MCID" in kid:
+                    outside.append((kid.get("/Pg", page), int(kid["/MCID"])))
+            elif isinstance(kid, dict) and "/S" in kid:
+                role = resolve(_text(kid.get("/S")))
+                if role == "/Formula":
+                    formula = True
+                    walk(kid, page, True, depth + 1)
+                else:
+                    if role == "/Figure" and not in_formula:
+                        other = True
+                    walk(kid, page, in_formula, depth + 1)
+
+    walk(cell, page, False, depth)
+    return formula, outside, other, next((p for p in pages if p is not None), page)
+
+
+def _formula_headers(reader, tree):
+    """Where each header cell holding only formulas is, as "page P, table
+    T, header H": a TH with a Formula in it and nothing outside its
+    formulas that shows text. NVDA's Acrobat support puts a single space
+    in its buffer for a formula and takes a column's header from the
+    header cell's text there (adobeAcrobat.cpp), so such a header is never
+    announced, as it was heard in Acrobat, where the words beside a
+    formula were. Marked content holding only a space glyph counts as
+    text here, so a cell padded that way isn't found."""
+    resolve = _role_resolver(tree)
+    numbers, cache = {}, {}
+    for index, page in enumerate(reader.pages, 1):
+        ref = getattr(page, "indirect_reference", None)
+        if ref is not None:
+            numbers[ref.idnum] = (index, page)
+
+    def shows(page_ref, mcid):
+        number = numbers.get(getattr(page_ref, "idnum", None))
+        if number is None:
+            return True
+        if number[0] not in cache:
+            cache[number[0]] = _showing_mcids(number[1])
+        shown = cache[number[0]]
+        return shown is None or mcid in shown
+
+    found, tables, counted = [], [], {"tables": 0, "elements": 0}
+
+    def walk(node, page, depth):
+        node = _resolved(node)
+        if not isinstance(node, dict) or depth > 200 or counted["elements"] > WALK_LIMIT:
+            return
+        counted["elements"] += 1
+        page = node.get("/Pg", page)
+        role = resolve(_text(node.get("/S"))) if "/S" in node else ""
+        if role == "/Table":
+            counted["tables"] += 1
+            tables.append([counted["tables"], 0])     # its number, its headers so far
+        if role == "/TH" and tables:
+            tables[-1][1] += 1
+            formula, outside, other, first = _header_content(node, page, resolve)
+            if formula and not other and not any(shows(p, m) for p, m in outside):
+                where = numbers.get(getattr(first, "idnum", None))
+                found.append("%stable %d, header %d" % (
+                    "page %d, " % where[0] if where else "", tables[-1][0], tables[-1][1]))
+            return
+        kids = _resolved(node.get("/K"))
+        if kids is None:
+            return
+        if not isinstance(kids, list):
+            kids = [kids]
+        for kid in kids:
+            walk(kid, page, depth + 1)
+        if role == "/Table":
+            tables[-1:] = []
+
+    walk(tree, None, 0)
+    return found
+
+
 def _outline_depth(outlines, depth=1):
     deepest, count = depth if outlines else 0, 0
     for item in outlines or []:
@@ -226,6 +410,14 @@ def inspect(path):
     facts["tags"] = dict(counts.most_common(12))
     facts["tag-total"] = sum(counts.values())
     facts["tag-total-capped"] = facts["tag-total"] >= WALK_LIMIT
+    if tree is not None:
+        try:
+            headers = _formula_headers(reader, _resolved(tree))
+        except Exception:                 # a malformed tree is veraPDF's to name
+            headers = []
+        for where in headers:
+            out.append(Finding(name, "pdf-table-header-is-formula", where,
+                               file=name, kind="pdf"))
     # LaTeX's tagging code gives an image with no alt text its file name
     # as /Alt (latex-lab-testphase-graphic.sty, the alt-text-missing
     # warning), which a validator accepts and which describes nothing, and

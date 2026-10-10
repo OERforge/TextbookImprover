@@ -938,6 +938,74 @@ def check_pdf_read_quietly():
     ]
 
 
+def check_pdf_formula_headers():
+    """A header cell holding only formulas is found in a PDF's structure,
+    and one LaTeX pads with empty marked content; one with words or a
+    figure beside its formula isn't, nor a data cell. Types role-mapped to
+    TH and Formula count as those, and a formula's content may be an MCR."""
+    import pdfcheck
+    if pdfcheck.pypdf is None:
+        return [("header cells holding only formulas are found",
+                 lambda: print("  skip  no pypdf to read a PDF") or True)]
+    stream = (b"/Span <</MCID 0>> BDC BT /F1 10 Tf 10 180 Td (q) Tj ET EMC\n"
+              b"/Span <</MCID 1>> BDC BT /F1 10 Tf 30 180 Td (Revenue) Tj ET EMC\n"
+              b"/Span <</MCID 2>> BDC BT /F1 10 Tf 80 180 Td (p) Tj ET EMC\n"
+              b"/Span <</MCID 3>> BDC EMC\n"
+              b"/Span <</MCID 4>> BDC BT /F1 10 Tf 10 160 Td (x) Tj ET EMC\n"
+              b"/Span <</MCID 5>> BDC BT /F1 10 Tf 30 160 Td (y) Tj ET EMC\n"
+              b"/Span <</MCID 6>> BDC BT /F1 10 Tf 60 160 Td (z) Tj ET EMC\n"
+              b"/Figure <</MCID 7>> BDC EMC\n"
+              b"/Span <</MCID 8>> BDC BT /F1 10 Tf 90 160 Td (w) Tj ET EMC\n")
+    elem = b"<< /Type /StructElem /S /%s /P %d 0 R /Pg 3 0 R /K %s >>"
+    objects = [
+        b"<< /Type /Catalog /Pages 2 0 R /StructTreeRoot 5 0 R /MarkInfo << /Marked true >> >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Contents 4 0 R "
+        b"/Resources << /Font << /F1 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> >> >> >>",
+        b"<< /Length %d >>\nstream\n" % len(stream) + stream + b"endstream",
+        b"<< /Type /StructTreeRoot /K 6 0 R /RoleMap << /Equation /Formula /HeaderCell /TH >> >>",
+        elem % (b"Document", 5, b"[7 0 R]"),
+        elem % (b"Table", 6, b"[8 0 R]"),
+        elem % (b"TR", 7, b"[9 0 R 11 0 R 13 0 R 15 0 R 17 0 R 19 0 R]"),
+        elem % (b"TH", 8, b"[10 0 R]"),                  # a formula alone
+        elem % (b"Formula", 9, b"0"),
+        elem % (b"TH", 8, b"[1 12 0 R]"),                # words, then a formula
+        elem % (b"Formula", 11, b"2"),
+        elem % (b"TH", 8, b"[3 14 0 R]"),                # padding that shows nothing
+        elem % (b"Formula", 13, b"4"),
+        elem % (b"HeaderCell", 8, b"[16 0 R]"),          # role-mapped, an MCR inside
+        elem % (b"Equation", 15, b"<< /Type /MCR /Pg 3 0 R /MCID 5 >>"),
+        elem % (b"TD", 8, b"[18 0 R]"),                  # a data cell
+        elem % (b"Formula", 17, b"6"),
+        elem % (b"TH", 8, b"[20 0 R 21 0 R]"),           # a figure beside a formula
+        elem % (b"Figure", 19, b"7"),
+        elem % (b"Formula", 19, b"8"),
+    ]
+    data, offsets = bytearray(b"%PDF-1.7\n"), []
+    for number, body in enumerate(objects, 1):
+        offsets.append(len(data))
+        data += b"%d 0 obj\n" % number + body + b"\nendobj\n"
+    xref = len(data)
+    data += b"xref\n0 %d\n0000000000 65535 f \n" % (len(objects) + 1)
+    data += b"".join(b"%010d 00000 n \n" % offset for offset in offsets)
+    data += b"trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n" % (
+        len(objects) + 1, xref)
+    work = tempfile.mkdtemp(prefix="pdf-headers-")
+    path = os.path.join(work, "headers.pdf")
+    with open(path, "wb") as fh:
+        fh.write(data)
+    _, found = pdfcheck.inspect(path)
+    shutil.rmtree(work, ignore_errors=True)
+    headers = [f.detail for f in found if f.check == "pdf-table-header-is-formula"]
+    return [
+        ("a header cell holding only a formula, or padding beside it, is found, "
+         "a role-mapped one too; one with words or a figure isn't, nor a data cell",
+         lambda: headers == ["page 1, table 1, header 1", "page 1, table 1, header 3",
+                             "page 1, table 1, header 4"]
+         or print("        got %r" % (headers,))),
+    ]
+
+
 def check_drawings_without_preview():
     """A LaTeX book's drawings, where LaTeX lacks the preview package each
     is made a page of: said once, as what to install, not as LaTeX's log
@@ -1105,6 +1173,7 @@ GROUPS = [
     ("shortDOIs for a bare-links sidecar", check_shortdoi),
     ("the decorative marker", check_decorative_marker),
     ("PDF/UA-1's math", check_ua1_math),
+    ("header cells holding only formulas, in a PDF", check_pdf_formula_headers),
 ]
 
 

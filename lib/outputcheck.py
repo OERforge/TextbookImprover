@@ -90,6 +90,8 @@ class Page:
         self.headings = []          # (level, text)
         self.tables = []            # (has_th, has_caption, role, wrapped)
         self.labeled_links = []     # (aria-label, visible text) of <a>
+        self.formula_headers = []   # (table number, TeX) of a th holding
+                                    # only formulas
         self.parse_error = None
 
 
@@ -99,6 +101,54 @@ def is_math_span(classes):
     only when texmath couldn't read its TeX, or under another math method."""
     tokens = (classes or "").split()
     return "math" in tokens and ("inline" in tokens or "display" in tokens)
+
+
+MATHML = "{http://www.w3.org/1998/Math/MathML}"
+TEX = "application/x-tex"
+
+
+def header_formula(cell):
+    """The TeX of a header cell's formulas, joined, when formulas are all
+    it holds ("" when they carry none), or None. NVDA takes a column's
+    header from the cell's text in its buffer, where a formula is a single
+    space (gecko_ia2.cpp, adobeAcrobat.cpp), so such a header is never
+    announced, while words beside a formula are; an image's alt text is
+    text there too."""
+    words, tex, found = [], [], False
+
+    def visit(element):
+        nonlocal found
+        tag = element.tag.replace(XHTML, "").replace(MATHML, "")
+        if tag == "math":
+            found = True
+            tex.extend(" ".join("".join(a.itertext()).split())
+                       for a in element.iter()
+                       if a.tag.replace(MATHML, "") == "annotation"
+                       and a.get("encoding") == TEX)
+            return
+        if tag == "img":
+            words.append(element.get("alt") or "")
+        words.append(element.text or "")
+        for child in element:
+            visit(child)
+            words.append(child.tail or "")
+
+    visit(cell)
+    if found and not "".join(words).strip():
+        return " ".join(t for t in tex if t)
+    return None
+
+
+def own_header_cells(table):
+    """A table's th elements, not a nested table's."""
+    for child in table:
+        tag = child.tag.replace(XHTML, "")
+        if tag == "table":
+            continue
+        if tag == "th":
+            yield child
+        else:
+            yield from own_header_cells(child)
 
 
 def add_formula(page, text):
@@ -122,9 +172,38 @@ class _Collector(HTMLParser):
         self._table = None
         self._link = None
         self._math = None           # [text parts, depth of spans inside]
+        self._header = None         # a th being read: its words, its
+                                    # formulas' TeX, and how deep in a math
+                                    # element the parser is
+
+    def _end_header(self):
+        """A th ends: a formula and nothing else in it is a finding."""
+        header, self._header = self._header, None
+        if header["found"] and not "".join(header["words"]).strip():
+            tex = " ".join(" ".join(t.split()) for t in header["tex"] if t.strip())
+            self.page.formula_headers.append((len(self.page.tables) + 1, tex))
+
+    def _read_header(self, tag, a):
+        if self._header is not None and tag in ("th", "td", "tr"):
+            self._end_header()
+        if tag == "th":
+            if not (self._table and self._table[2] == "presentation"):
+                self._header = {"words": [], "tex": [], "math": 0,
+                                "found": False, "annotation": False}
+        elif self._header is None:
+            return
+        elif tag == "math":
+            self._header["math"] += 1
+            self._header["found"] = True
+        elif tag == "annotation" and self._header["math"] and a.get("encoding") == TEX:
+            self._header["annotation"] = True
+            self._header["tex"].append("")
+        elif tag == "img" and not self._header["math"]:
+            self._header["words"].append(a.get("alt") or "")
 
     def handle_starttag(self, tag, attrs):
         a = dict(attrs)
+        self._read_header(tag, a)
         if a.get("id"):
             self.page.ids.append(a["id"])
         if tag == "span" and self._math is not None:
@@ -167,6 +246,13 @@ class _Collector(HTMLParser):
             self._table[1] = True
 
     def handle_endtag(self, tag):
+        if self._header is not None:
+            if tag == "annotation":
+                self._header["annotation"] = False
+            elif tag == "math" and self._header["math"]:
+                self._header["math"] -= 1
+            elif tag in ("th", "tr", "thead", "tbody", "tfoot", "table"):
+                self._end_header()
         if tag == "span" and self._math is not None:
             if self._math[1]:
                 self._math[1] -= 1
@@ -191,6 +277,11 @@ class _Collector(HTMLParser):
             self._in_wrapper = False
 
     def handle_data(self, data):
+        if self._header is not None:
+            if not self._header["math"]:
+                self._header["words"].append(data)
+            elif self._header["annotation"]:
+                self._header["tex"][-1] += data
         if self._math is not None:
             self._math[0].append(data)
         if self._title is not None:
@@ -247,6 +338,11 @@ def read_xhtml(name, markup):
             page.headings.append((int(tag[1]), " ".join(
                 ("".join(el.itertext()) + " " + alts).split())))
         elif tag == "table":
+            if el.get("role") != "presentation":
+                for cell in own_header_cells(el):
+                    tex = header_formula(cell)
+                    if tex is not None:
+                        page.formula_headers.append((len(page.tables) + 1, tex))
             has_th = any(c.tag.replace(XHTML, "") == "th" for c in el.iter())
             has_caption = any(c.tag.replace(XHTML, "") == "caption"
                               for c in el.iter())
@@ -333,6 +429,12 @@ def check_page(page, findings):
             # table sits in the focusable scroll region (WCAG 1.4.10).
             findings.append(Finding(where, "table-not-in-scroll-region",
                                     f"table {index}"))
+    # A header cell holding only a formula: right as it stands, but NVDA
+    # announces no header on moving into its column (heard so in a browser
+    # and in Acrobat), and words beside the formula it does.
+    for index, tex in page.formula_headers:
+        findings.append(Finding(where, "table-header-is-formula",
+                                f"table {index}: {tex}" if tex else f"table {index}"))
 
 
 def check_links(pages, findings, base_of=None):
@@ -549,6 +651,8 @@ DESCRIPTIONS = {
     "title-is-file-name": "the page's title is its file's name",
     "not-well-formed": "the document could not be parsed",
     "formula-shown-as-tex": "a formula Pandoc couldn't convert, shown as its TeX",
+    "table-header-is-formula":
+        "a header cell holding only a formula, which NVDA doesn't announce as its column's header",
 }
 
 

@@ -30,6 +30,8 @@ import re
 import shutil
 import tempfile
 
+import sidecars
+
 TABLE_TAG = re.compile(r"<table\b[^>]*>|</table\s*>", re.I)
 ROW_TAG = re.compile(r"<table\b[^>]*>|</table\s*>|<tr\b[^>]*>|</tr\s*>", re.I)
 CELL = re.compile(r"<(td|th)\b([^>]*)>(.*?)</\1\s*>", re.I | re.S)
@@ -254,7 +256,7 @@ def alt_rows(path):
         for row in csv.DictReader(fh):
             image, alt = (row.get("Image") or "").strip(), (row.get("Alt") or "").strip()
             if image and alt:
-                found[os.path.splitext(image)[0]] = None if alt == "[decorative]" else alt
+                found[os.path.splitext(image)[0]] = None if sidecars.is_decorative(alt) else alt
     return found
 
 

@@ -56,6 +56,7 @@ import tempfile
 import zipfile
 
 import docxtarget
+import sidecars
 
 R_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
 FIRST_ROW = 0x0020
@@ -269,7 +270,7 @@ def alt_rows(path):
             if len(parts) != 3 or parts[1] != "media" or not alt:
                 continue
             found.setdefault(parts[0], {})[os.path.splitext(parts[2])[0]] = \
-                None if alt == "[decorative]" else alt
+                None if sidecars.is_decorative(alt) else alt
     return found
 
 

@@ -137,6 +137,8 @@ local function load_resolved()
 end
 
 -- Accepted spellings of the decorative marker, matched case-insensitively.
+-- lib/sidecars.py's DECORATIVE_MARKERS is the same list, for the Python that
+-- writes the sidecars' decisions into a book's sources.
 local DECORATIVE_MARKERS = {
   ['[decorative]'] = true,
   ['decorative'] = true,

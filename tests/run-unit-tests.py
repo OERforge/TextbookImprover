@@ -973,6 +973,46 @@ def check_tlmgr_command():
     ]
 
 
+def check_decorative_marker():
+    """The decorative marker, read alike by the filter and the Python.
+
+    The filter took "decorative" in any case; the Python that writes a
+    book's decisions into its sources took only "[decorative]", so a row
+    saying "Decorative" made the image decorative on the pages and gave
+    the author's copy the alt text "Decorative".
+    """
+    import sidecars
+    import docxremediate
+    import htmlremediate
+    work = tempfile.mkdtemp(prefix="decorative-")
+    sidecar = os.path.join(work, "image-alt.csv")
+    with open(sidecar, "w", encoding="utf-8", newline="") as fh:
+        writer = csv.writer(fh)
+        writer.writerow(["Image", "Alt"])
+        writer.writerow(["ch1/media/rId7.png", "Decorative"])
+        writer.writerow(["ch1/media/rId8.png", " [DECORATIVE] "])
+        writer.writerow(["ch1/media/rId9.png", "A decorative border"])
+    word = docxremediate.alt_rows(sidecar).get("ch1", {})
+    pages = htmlremediate.alt_rows(sidecar)
+    with open(os.path.join(ROOT, "bin", "figures-and-tables.lua"), encoding="utf-8") as fh:
+        lua = fh.read()
+    block = re.search(r"local DECORATIVE_MARKERS = \{(.*?)\}", lua, re.S)
+    lua_markers = set(re.findall(r"\['([^']*)'\]\s*=\s*true", block.group(1))) if block else set()
+    shutil.rmtree(work, ignore_errors=True)
+    return [
+        ("the Word copies take the marker in any case",
+         lambda: word.get("rId7", "") is None and word.get("rId8", "") is None),
+        ("and so do the HTML, Markdown, and LaTeX copies",
+         lambda: pages.get("ch1/media/rId7", "") is None
+         and pages.get("ch1/media/rId8", "") is None),
+        ("a description that only mentions the word is a description",
+         lambda: word.get("rId9") == "A decorative border"
+         and pages.get("ch1/media/rId9") == "A decorative border"),
+        ("the filter's list and the Python's are the same list",
+         lambda: lua_markers == set(sidecars.DECORATIVE_MARKERS)),
+    ]
+
+
 GROUPS = [
     ("a report's rows", check_report_rows),
     ("a PDF read without pypdf's warnings", check_pdf_read_quietly),
@@ -997,6 +1037,7 @@ GROUPS = [
     ("facts written down twice", check_consistency),
     ("sidecar paths", check_sidecar_paths),
     ("shortDOIs for a bare-links sidecar", check_shortdoi),
+    ("the decorative marker", check_decorative_marker),
 ]
 
 

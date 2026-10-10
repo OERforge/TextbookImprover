@@ -21,6 +21,8 @@ each deck (pptxremediate.py). The reports:
   out, keyed on deck/slide-N, with an order drafted for a person to
   review, as near to the layout as it can come without drawing two
   shapes that overlap the other way round (pptxorder.py);
+- bare-links-new.csv: each address a deck's link shows as its text, as
+  a book's report has them, for the bare-links sidecar a book's run reads;
 - slides-check.csv: every finding, in the output check's format; and,
   once a source target has written its copies, output-check.csv, what's
   left to do in them.
@@ -61,6 +63,7 @@ TABLE_COLUMNS = ["key", "headers", "split-at", "caption-rows", "part-captions", 
                  "label", "preview", "drafted-by", "reviewed"]
 TITLE_COLUMNS = ["Slide", "Title", "Source", "Drafted by", "Reviewed"]
 ORDER_COLUMNS = ["Slide", "Order", "Source", "Shapes", "Note", "Drafted by", "Reviewed"]
+LINK_COLUMNS = ["URL", "Replacement", "Title", "Source", "Context", "Drafted by", "Reviewed"]
 # The alt-text findings that ask a person for a decision.
 DECIDE = ("pptx-object-no-alt", "pptx-shape-no-alt", "pptx-alt-is-file-name",
           "pptx-alt-placeholder", "pptx-alt-auto-generated", "pptx-alt-too-long",
@@ -188,7 +191,7 @@ def deck_key(key):
     return key.startswith("media/") or "/media/" in key or "/slide-" in key
 
 
-def unmatched(paths, alts, tables, titles, present, say, orders=()):
+def unmatched(paths, alts, tables, titles, present, say, orders=(), links=()):
     """Said once for each sidecar: rows whose key no deck has. A picture's
     key is its content, so a row stops matching only when the picture is
     replaced; an object's and a slide's are the ids PowerPoint gave them,
@@ -198,7 +201,8 @@ def unmatched(paths, alts, tables, titles, present, say, orders=()):
             ("alt", [k for k in alts if deck_key(k)], "image_alt", "picture or object"),
             ("table", list(tables), "table_headers", "table"),
             ("slide", list(titles), "slide_titles", "slide"),
-            ("slide", list(orders), "reading_order", "slide")):
+            ("slide", list(orders), "reading_order", "slide"),
+            ("link", list(links), "bare_links", "bare link")):
         stale = sorted(k for k in rows if k not in present[kind])
         if stale and paths.get(setting):
             say("NOTE: %d row(s) of %s match no %s in these decks (%s%s); if a deck "
@@ -241,6 +245,7 @@ def run(base, decks, targets, paths, reports, language=None, alt_max_chars=120,
         say("WARNING: %s: headers value %r is not one this version understands; "
             "treated as blank" % (paths.get("table_headers"), value))
     titles = pptxremediate.title_rows(paths.get("slide_titles"))
+    links = pptxremediate.link_rows(paths.get("bare_links"))
     bad = []
     orders = pptxremediate.order_rows(paths.get("reading_order"), bad)
     for key, token in bad:
@@ -258,8 +263,9 @@ def run(base, decks, targets, paths, reports, language=None, alt_max_chars=120,
     table_report = OrderedDict()
     title_report = []
     order_report = []
+    link_report = OrderedDict()     # address: [title, [sources], context]
     images = {}
-    present = {"alt": set(), "table": set(), "slide": set()}   # every key the decks have
+    present = {"alt": set(), "table": set(), "slide": set(), "link": set()}  # every key the decks have
     copies = {}       # image digest: {where: what each copy's alt text is now}
     failed = 0
     for name in decks:
@@ -334,6 +340,20 @@ def run(base, decks, targets, paths, reports, language=None, alt_max_chars=120,
                         name, slide.number, ", layout %s" % slide.layout if slide.layout else ""),
                         "", ""])
         title_report += repeated_titles(name, dname, deck, titles)
+        for slide in deck.slides:
+            for shape in slide.all_shapes():
+                for link in shape.links:
+                    if not (link.external and link.text.strip()
+                            and pptxcheck.bare(link.text, link.target)):
+                        continue
+                    present["link"].add(link.target)
+                    if link.target in links:
+                        continue
+                    entry = link_report.setdefault(link.target, [link.tooltip or "", [],
+                                                                 link.context[-160:].strip()])
+                    where = "%s slide %d" % (name, slide.number)
+                    if where not in entry[1]:
+                        entry[1].append(where)
         order_report += order_rows(path, name, dname, deck, orders)
         for shape, check, detail in pptxcheck.master_items(deck, rules, alt_max_chars):
             note(shape, check, detail, None)
@@ -346,7 +366,7 @@ def run(base, decks, targets, paths, reports, language=None, alt_max_chars=120,
             with zipfile.ZipFile(path) as zf, open(target, "wb") as out:
                 out.write(zf.read(part))
     if not failed:
-        unmatched(paths, alts, tables, titles, present, say, orders)
+        unmatched(paths, alts, tables, titles, present, say, orders, links)
     # A CSV, as every report beside the sources is: a Markdown report
     # there would be read as a book's page on the next run, and the folder
     # taken for a book. audit.py writes one, from the decks, wherever -o says.
@@ -368,6 +388,14 @@ def run(base, decks, targets, paths, reports, language=None, alt_max_chars=120,
            paths["slide_titles"], say,
            "A title for a slide that has one takes its place on the slide, where it's seen; "
            "the title as it is keeps it." if any(r[3] for r in title_report) else None)
+    if reports.get("bare_links_new"):
+        report(reports["bare_links_new"], LINK_COLUMNS,
+               [[url, "", title, "; ".join(sources), context, "", ""]
+                for url, (title, sources, context) in link_report.items()],
+               "bare link(s), whose text is their address", paths["bare_links"], say,
+               "A Replacement that's an address replaces the link's address and its text; any "
+               "other replaces its text. A Title is its ScreenTip. A row left blank keeps the "
+               "link as it is (docs/bare-links.md).")
     if reports.get("reading_order_new"):
         report(reports["reading_order_new"], ORDER_COLUMNS, order_report,
                "slide(s) read in another order than they're laid out", paths["reading_order"], say,
@@ -396,7 +424,8 @@ def run(base, decks, targets, paths, reports, language=None, alt_max_chars=120,
             problems = []
             counts = pptxremediate.remediate(path, destination, alts, tables, titles,
                                              language, deck=pptxremediate.deck_name(path),
-                                             orders=orders, problems=problems)
+                                             orders=orders, problems=problems, links=links,
+                                             equations=setting(target, "math.repair_equations"))
             for key, why in problems:
                 say("WARNING: %s: the reading order for %s isn't written: %s." % (
                     target.name, key, why))
@@ -413,6 +442,14 @@ def run(base, decks, targets, paths, reports, language=None, alt_max_chars=120,
                totals["described"], totals["decorative"], totals["header_rows"],
                totals["header_columns"], totals["titles"], totals["language"],
                totals["core_title"]))
+        if totals["links"] or totals["replaced"]:
+            say("%s: %d bare link(s) given a ScreenTip and %d a replacement, as %s says." % (
+                target.name, totals["links"], totals["replaced"],
+                os.path.basename(paths.get("bare_links") or "bare-links.csv")))
+        if totals["equations_repaired"]:
+            say("%s: %d equation(s) given the characters they mean, %d character(s) in all "
+                "(math.repair_equations)." % (target.name, totals["equations_repaired"],
+                                              totals["equation_characters"]))
         if totals["retitled"]:
             say("%s: %d slide(s) given the title %s gives in place of one another slide has." % (
                 target.name, totals["retitled"],
@@ -431,7 +468,7 @@ def run(base, decks, targets, paths, reports, language=None, alt_max_chars=120,
                 % (target.name, totals["skipped"]))
     if copies and reports.get("output_check"):
         failed += check_copies(copies, reports["output_check"], tables, alt_max_chars,
-                               alt_placeholders, say, orders)
+                               alt_placeholders, say, orders, links)
     return 1 if failed else 0
 
 
@@ -482,7 +519,16 @@ def order_rows(path, name, dname, deck, orders):
     return rows
 
 
-def check_copies(copies, path, tables, alt_max_chars, alt_placeholders, say, orders=None):
+def setting(target, key, default=False):
+    """A target's setting, or default for one that has none."""
+    try:
+        return bool(target[key])
+    except (KeyError, TypeError):
+        return default
+
+
+def check_copies(copies, path, tables, alt_max_chars, alt_placeholders, say, orders=None,
+                 links=None):
     """The output check, on the copies: what's left to do in each, a table
     the sidecar says has no headers not counted against it, nor a slide
     put in the order the sidecar gives. Returns the number of copies that
@@ -499,7 +545,8 @@ def check_copies(copies, path, tables, alt_max_chars, alt_placeholders, say, ord
                                  kind="pptx", alt_max_chars=alt_max_chars,
                                  alt_placeholders=alt_placeholders, tables=tables,
                                  orders=pptxremediate.slide_orders(
-                                     orders or {}, pptxremediate.deck_name(name)))
+                                     orders or {}, pptxremediate.deck_name(name)),
+                                 links=pptxremediate.decided_links(links or {}))
     if found:
         fl.write_csv(path, found)
     elif os.path.exists(path):

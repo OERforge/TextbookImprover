@@ -306,14 +306,16 @@ def loose_pieces(slide):
 
 
 def check(deck, name=None, kind="source-pptx", alt_max_chars=ALT_MAX_CHARS,
-          alt_placeholders=(), tables=None, orders=None):
+          alt_placeholders=(), tables=None, orders=None, links=None):
     """Findings for a parsed deck. tables: a table-headers sidecar's
     decisions by key (pptxremediate.header_rows()), for a copy they were
     written into: one decided to have no headers isn't missing them.
     orders: the reading-order sidecar's orders for this deck's slides, by
     the slide's id: a slide whose shapes are in its order was decided, in
-    whatever order a person put them."""
-    tables, orders = tables or {}, orders or {}
+    whatever order a person put them. links: the addresses the bare-links
+    sidecar decides, and those it replaces them with: a bare link to one
+    was decided, kept bare or not."""
+    tables, orders, links = tables or {}, orders or {}, links or set()
     name = name or os.path.basename(deck.path)
     rules = placeholder_rules(alt_placeholders)
     out = []
@@ -354,7 +356,8 @@ def check(deck, name=None, kind="source-pptx", alt_max_chars=ALT_MAX_CHARS,
                     " | ".join(p.replace("\t", " / ") for p in shape.paragraphs[:2])[:120])
             for link in shape.links:
                 text = " ".join(link.text.split())
-                if text and link.external and _bare(text, link.target):
+                if text and link.external and bare(text, link.target) \
+                        and link.target not in links:
                     add(where(slide, shape), "pptx-link-bare-url", link.target)
         order = reading_order(slide, deck.width, deck.height)
         decided = orders.get(slide.slide_id)
@@ -395,7 +398,9 @@ def _captioned(shape):
     return False
 
 
-def _bare(text, target):
+def bare(text, target):
+    """Whether a link's text is its own address: a scheme, www., a
+    trailing slash, and case aside."""
     def squash(value):
         value = re.sub(r"^(https?://)?(www\.)?", "", value.strip().lower())
         return value.rstrip("/")

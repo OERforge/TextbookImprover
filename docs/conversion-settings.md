@@ -284,7 +284,7 @@ The order a screen reader should read a PowerPoint slide's shapes in, keyed on d
 
 **`sidecars.bare_links`**—`path`; default `bare-links.csv`
 
-What to do with each bare link, one whose text is its own address, keyed on the address: a Replacement that is a URL (http, https, or ftp) replaces the address and the text; any other Replacement replaces only the text; a blank one keeps the link bare. A Title sets the link's title (a tooltip in HTML); a blank one keeps the source's. See docs/bare-links.md.
+What to do with each bare link, one whose text is its own address, keyed on the address: a Replacement that is a URL (http, https, or ftp) replaces the address and the text; any other Replacement replaces only the text; a blank one keeps the link bare. A Title sets the link's title (a tooltip in HTML, a ScreenTip in a PowerPoint deck); a blank one keeps the source's. See docs/bare-links.md.
 
 **`sidecars.math_keep`**—`path`; default `math-keep.csv`
 

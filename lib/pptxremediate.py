@@ -22,6 +22,11 @@ docxremediate.py does for Word:
 - a slide's reading order, the shapes at the top of its tree put in the
   order given, unless that would draw two that overlap the other way
   round (pptxorder.py);
+- a bare link's ScreenTip, from the bare-links sidecar's Title, and its
+  Replacement as its text, and as its address when it's an address;
+- each equation's characters, with math.repair_equations, as
+  docxremediate.py repairs a Word file's: PowerPoint's equations are the
+  same Office math;
 - the language, on text that declares none, when the project declares one;
 - the title in the file's core properties, when they have none.
 
@@ -55,12 +60,15 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 import csv
 import html
 import os
+import posixpath
 import re
 import shutil
 import tempfile
 import zipfile
 from collections import Counter
 
+import docxremediate
+import pptxcheck
 import pptxorder
 import pptxparse
 import sidecars
@@ -194,6 +202,22 @@ def order_rows(path, bad=None):
             if bad is not None:
                 bad.append((row[0], str(exc)))
     return found
+
+
+def link_rows(path):
+    """{address: (replacement, title)} from a bare-links sidecar, read by
+    position (URL, Replacement, Title), as the filter reads it. Every row
+    is a decision: a blank one keeps its link as it is."""
+    found = {}
+    for row in sidecar_rows(path):
+        found[row[0]] = (" ".join(row[1].split()), " ".join(row[2].split()))
+    return found
+
+
+def decided_links(links):
+    """The addresses a copy's bare links can have that the sidecar
+    decided: each row's, and each address it replaces one with."""
+    return set(links) | {r for r, _title in links.values() if sidecars.is_address(r)}
 
 
 def slide_orders(orders, deck):
@@ -450,6 +474,102 @@ def retitle(xml, slide, title):
     return xml, count
 
 
+HLINK = start_tag("a:hlinkClick")
+RELATIONSHIP = start_tag("Relationship")
+TEXT = re.compile(r"(<a:t(?:\s[^>]*)?>)([^<]*)(</a:t>)")
+# A Word equation is an m:oMath with nothing on its tag; PowerPoint's can
+# declare its namespace there.
+OMATH = r"<m:oMath\b[^>]*>(?:(?!</m:oMath>).)*</m:oMath>"
+
+
+def _attr_value(attrs, name):
+    """An attribute's value from a start tag's attributes, or None."""
+    found = re.search(r"""\s%s\s*=\s*(?:"([^"]*)"|'([^']*)')""" % re.escape(name), attrs)
+    if found is None:
+        return None
+    return html.unescape(found.group(1) if found.group(1) is not None else found.group(2))
+
+
+def _external_targets(rels):
+    """{relationship id: address} for a part's external relationships."""
+    out = {}
+    for match in RELATIONSHIP.finditer(rels):
+        attrs = match.group(1)
+        rid, target = _attr_value(attrs, "Id"), _attr_value(attrs, "Target")
+        if rid and target is not None and _attr_value(attrs, "TargetMode") == "External":
+            out[rid] = target
+    return out
+
+
+def _link_runs(xml):
+    """Each link in a slide's text, as the runs that give it: consecutive
+    runs of one paragraph whose clicks go to one relationship, as
+    PowerPoint splits one link's text over runs. [(relationship id,
+    [(start, end) of each run])]"""
+    found = []
+    for paragraph in re.finditer(r"<a:p\b[^>]*?(?:/>|>.*?</a:p>)", xml, re.S):
+        last = None
+        for start, end, name in pptxorder.children(
+                xml, *pptxorder._inside(xml, paragraph.start(), paragraph.end())):
+            click = HLINK.search(xml, start, end) if name == "a:r" else None
+            rid = _attr_value(click.group(1), "r:id") if click else None
+            if rid is not None and rid == last:
+                found[-1][1].append((start, end))
+            elif rid is not None:
+                found.append((rid, [(start, end)]))
+            last = rid
+    return found
+
+
+def set_links(xml, rels, links):
+    """A slide's XML and its relationships' with each bare link the
+    bare-links sidecar decides given its Title as its ScreenTip, and its
+    Replacement as its text, and as its address too when the replacement
+    is one. A link given over several runs is one link: its text goes in
+    the first run, and the others go. (xml, rels, titles, replacements)"""
+    targets = _external_targets(rels)
+    edits, readdress, titled, replaced = [], {}, 0, 0
+    for rid, runs in _link_runs(xml):
+        target = targets.get(rid)
+        text = "".join(html.unescape(t.group(2)) for s, e in runs for t in TEXT.finditer(xml, s, e))
+        if target not in links or not text.strip() or not pptxcheck.bare(text, target):
+            continue
+        replacement, title = links[target]
+        if replacement:
+            first = TEXT.search(xml, *runs[0])
+            if first is None:
+                continue
+            edits.append((first.start(), first.end(),
+                          first.group(1) + _text(replacement) + first.group(3)))
+            edits += [(s, e, "") for s, e in runs[1:]]
+            if sidecars.is_address(replacement):
+                readdress[rid] = replacement
+            replaced += 1
+        if title:
+            # the runs that stay: the first, or all when the text does
+            for s, e in runs[:1] if replacement else runs:
+                for click in HLINK.finditer(xml, s, e):
+                    edits.append((click.start(), click.end(), "<a:hlinkClick%s%s>" % (
+                        _set_attr(click.group(1), "tooltip", title), click.group(2))))
+            titled += 1
+    # From the end, so each edit's place is where it was found.
+    for start, end, new in sorted(edits, key=lambda e: e[0], reverse=True):
+        xml = xml[:start] + new + xml[end:]
+    if readdress:
+        rels = RELATIONSHIP.sub(lambda m: _readdress(m, readdress), rels)
+    return xml, rels, titled, replaced
+
+
+def _readdress(match, readdress):
+    """A relationship's start tag with the address the sidecar gives it,
+    in place of the Target every relationship has."""
+    attrs = match.group(1)
+    rid = _attr_value(attrs, "Id")
+    if rid not in readdress:
+        return match.group(0)
+    return "<Relationship%s%s>" % (_set_attr(attrs, "Target", readdress[rid]), match.group(2))
+
+
 def _lang_on_defaults(region, language):
     """A text style list with a language on each default run property that
     declares none; (region, count)."""
@@ -598,15 +718,19 @@ def repair_part(xml):
 # --------------------------------------------------------------------------
 
 def remediate(source, destination, alts=None, tables=None, titles=None, language=None,
-              core_title=True, deck=None, orders=None, problems=None):
+              core_title=True, deck=None, orders=None, problems=None, links=None,
+              equations=False):
     """Write source's decisions into destination; counts of what was
-    written. alts, tables, titles, orders as alt_rows(), header_rows(),
-    title_rows(), and order_rows() read them; deck, the name keys use
-    (deck_name()). The file's properties get core_title as their title
-    when they have none, or, when it's True, the first slide's title, the
-    sidecar's if the slide has none of its own. problems, a list, is told
-    each order not written, by its slide's key, and why."""
+    written. alts, tables, titles, orders, links as alt_rows(),
+    header_rows(), title_rows(), order_rows(), and link_rows() read them;
+    deck, the name keys use (deck_name()). The file's properties get
+    core_title as their title when they have none, or, when it's True, the
+    first slide's title, the sidecar's if the slide has none of its own.
+    problems, a list, is told each order not written, by its slide's key,
+    and why. equations: whether each equation gets the characters it
+    means, as math.repair_equations gives a Word file's."""
     alts, tables, titles, orders = alts or {}, tables or {}, titles or {}, orders or {}
+    links = links or {}
     deck = deck or deck_name(source)
     parsed = pptxparse.read(source)
     if core_title is True:
@@ -614,7 +738,8 @@ def remediate(source, destination, alts=None, tables=None, titles=None, language
         core_title = first and (first.title or titles.get(slide_key(deck, first)))
     counts = {"described": 0, "decorative": 0, "header_rows": 0, "header_columns": 0,
               "titles": 0, "language": 0, "core_title": 0, "repaired": 0, "skipped": 0,
-              "orders": 0, "orders_refused": 0, "retitled": 0}
+              "orders": 0, "orders_refused": 0, "retitled": 0, "links": 0, "replaced": 0,
+              "equations_repaired": 0, "equation_characters": 0}
     with zipfile.ZipFile(source) as zin:
         infos = zin.infolist()
         parts = {info.filename: zin.read(info.filename) for info in infos}
@@ -668,6 +793,22 @@ def remediate(source, destination, alts=None, tables=None, titles=None, language
                         texts[part] = xml
                         counts["header_rows"] += headers in ("first-row", "both")
                         counts["header_columns"] += headers in ("first-column", "both")
+        if slide is not None and links:
+            folder, name = posixpath.split(part)
+            rels = posixpath.join(folder, "_rels", name + ".rels")
+            if rels in parts:
+                xml, rels_xml, n_titles, n_replaced = set_links(text_of(part), text_of(rels),
+                                                                links)
+                if n_titles or n_replaced:
+                    texts[part], texts[rels] = xml, rels_xml
+                    counts["links"] += n_titles
+                    counts["replaced"] += n_replaced
+        if slide is not None and equations:
+            xml, found = docxremediate.remediate_equations(text_of(part), pattern=OMATH)
+            if found["equations_repaired"]:
+                texts[part] = xml
+                for key, n in found.items():
+                    counts[key] += n
         # The reading order, before a title is added first in the tree: the
         # shapes the order names take their places in it, unless that would
         # draw two that overlap the other way round.

@@ -463,13 +463,15 @@ def equation_texs(parts, name):
     return texs if len(texs) == len(equations) else []
 
 
-def remediate_equations(xml, skip=()):
+def remediate_equations(xml, skip=(), pattern=None):
     """The characters of each of Word's equations, as math.repair_equations
     repairs them in the pages: mu for the micro sign, Delta for the
     increment sign, a minus for an en dash, a bar for an upper limit that
     is a macron or an en dash, a hat over y for the one-character y-hat,
     and 0 for a subscript's slashed O. Only inside m:oMath; the text around
-    an equation is left to math.from_text. Returns (xml, counts)."""
+    an equation is left to math.from_text. pattern: the regular expression
+    an equation matches, where it isn't Word's m:oMath with no attributes
+    (PowerPoint declares the namespace on m:oMath). Returns (xml, counts)."""
     counts = {"equations_repaired": 0, "equation_characters": 0}
     number = [-1]
 
@@ -486,7 +488,7 @@ def remediate_equations(xml, skip=()):
         if fixed != eq:
             counts["equations_repaired"] += 1
         return fixed
-    xml = re.sub(r"<m:oMath>(?:(?!</m:oMath>).)*</m:oMath>", one, xml, flags=re.S)
+    xml = re.sub(pattern or r"<m:oMath>(?:(?!</m:oMath>).)*</m:oMath>", one, xml, flags=re.S)
     return xml, counts
 
 

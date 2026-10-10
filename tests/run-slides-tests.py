@@ -1464,6 +1464,173 @@ def case_retitle(work):
             "3 slides titled demand"], [(f.check, f.detail) for f in found]
 
 
+DOI, SHORT = "https://doi.org/10.1080/08913810508443640", "https://doi.org/10/b8xx35"
+CARS = "https://dasl.datadescription.com/datafile/cars"
+KEPT = "https://example.org/kept"
+SPLIT = "https://example.org/split"
+
+
+def linked(shape_id, name, box, runs):
+    """A text box of one paragraph whose runs are (text, relationship id
+    or None, tooltip or None)."""
+    out = []
+    for text, rid, tip in runs:
+        if rid:
+            click = '<a:hlinkClick r:id="%s"%s/>' % (rid, ' tooltip="%s"' % esc(tip) if tip else "")
+            out.append('<a:r><a:rPr lang="en-US">%s</a:rPr><a:t>%s</a:t></a:r>' % (click, esc(text)))
+        else:
+            out.append('<a:r><a:rPr lang="en-US"/><a:t>%s</a:t></a:r>' % esc(text))
+    return ('<p:sp>%s<p:spPr>%s<a:prstGeom prst="rect"><a:avLst/></a:prstGeom></p:spPr><p:txBody>'
+            '<a:bodyPr/><a:lstStyle/><a:p>%s</a:p></p:txBody></p:sp>'
+            % (nv("sp", shape_id, name), xfrm(*box), "".join(out)))
+
+
+def equation(shape_id, omml):
+    """A text box holding one equation, as PowerPoint writes one: Office
+    math in a14:m, its namespace declared on m:oMath, in AlternateContent."""
+    box = ('<p:sp>%s<p:spPr>%s</p:spPr><p:txBody><a:bodyPr/><a:lstStyle/><a:p><a14:m><m:oMath '
+           'xmlns:m="http://schemas.openxmlformats.org/officeDocument/2006/math">%s</m:oMath>'
+           '</a14:m></a:p></p:txBody></p:sp>' % (nv("sp", shape_id, "TextBox %d" % shape_id),
+                                                 xfrm(457200, 1600200, 4000000, 600000), omml))
+    return ('<mc:AlternateContent xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/'
+            '2006"><mc:Choice xmlns:a14="http://schemas.microsoft.com/office/drawing/2010/main" '
+            'Requires="a14">%s</mc:Choice><mc:Fallback>%s</mc:Fallback></mc:AlternateContent>'
+            % (box, rect(shape_id, "TextBox %d" % shape_id, (457200, 1600200, 4000000, 600000))))
+
+
+BAR_OMML = ('<m:limUpp><m:e><m:r><m:t>x</m:t></m:r></m:e><m:lim><m:r><m:t>¯</m:t></m:r>'
+            '</m:lim></m:limUpp><m:r><m:t>–µ</m:t></m:r>')
+
+
+def case_links(work):
+    path = deck(os.path.join(work, "links.pptx"), [
+        {"shapes": [title(2, "Sources"),
+                    linked(4, "TextBox 3", (457200, 1600200, 8000000, 400000),
+                           [("Klein and Stern. 2005. ", None, None),
+                            ("https://doi.org/10.1080/", "rId3", None),
+                            ("08913810508443640", "rId3", None)]),
+                    linked(5, "TextBox 4", (457200, 2200000, 8000000, 400000),
+                           [("Cars: ", None, None), (CARS, "rId4", None), (" (see ", None, None),
+                            ("the codebook", "rId8", None), (")", None, None)]),
+                    linked(6, "TextBox 5", (457200, 2800000, 8000000, 400000),
+                           [(KEPT, "rId5", "Its own title"), (" and ", None, None),
+                            ("the cars data", "rId4", None)])],
+         "links": {"rId3": DOI, "rId4": CARS, "rId5": KEPT, "rId8": "https://example.org/codebook"}},
+        {"shapes": [title(2, "Means"), equation(4, BAR_OMML)]},
+        {"shapes": [title(2, "Grouped"),
+                    group(7, [linked(8, "TextBox 7", (0, 0, 4000000, 400000),
+                                     [("https://example.org/grouped", "rId6", None)])],
+                          (457200, 1600200, 4000000, 400000), descr="A link in a group"),
+                    linked(9, "TextBox 8", (457200, 2800000, 8000000, 400000),
+                           [("https://example.org/", "rId7", None), ("split", "rId7", None)]),
+                    linked(10, "TextBox 9", (457200, 3400000, 8000000, 400000),
+                           [("https://example.org/grouped", "rId6", None)])],
+         "links": {"rId6": "https://example.org/grouped", "rId7": SPLIT}},
+    ])
+    d = pptxparse.read(path)
+    yield "a link inside a group is its piece's, not the group's too, and named once", \
+        [len(s.links) for s in d.slides[2].all_shapes()][1:3] == [0, 1] \
+        and [f.where for f in pptxcheck.check(d) if f.check == "pptx-link-bare-url"
+             and "grouped" in f.detail] == ["slide 3, TextBox 7", "slide 3, TextBox 9"], \
+        [(s.name, len(s.links)) for s in d.slides[2].all_shapes()]
+    first = d.slides[0].shapes[1].links
+    yield "a link over two runs is one link, with the text before it in its paragraph", \
+        [(l.text, l.target, l.context) for l in first] == [
+            ("https://doi.org/10.1080/08913810508443640", DOI, "Klein and Stern. 2005. ")], \
+        [(l.text, l.target, l.context) for l in first]
+    folder = os.path.join(work, "run")
+    os.makedirs(folder)
+    shutil.copy(path, folder)
+    reports = {k: os.path.join(folder, v) for k, v in (
+        ("image_alt_missing", "a.csv"), ("table_headers_new", "t.csv"),
+        ("slide_titles_new", "s.csv"), ("bare_links_new", "bare-links-new.csv"),
+        ("slides_check", "check.csv"), ("output_check", "output-check.csv"))}
+    paths = {k: os.path.join(folder, v) for k, v in (
+        ("image_alt", "image-alt.csv"), ("table_headers", "table-headers.csv"),
+        ("slide_titles", "slide-titles.csv"), ("bare_links", "bare-links.csv"))}
+    deckrun.run(folder, ["links.pptx"], [], paths, reports, check_only=True, say=lambda _m: None)
+    rows = rows_of(reports["bare_links_new"])
+    yield "each bare address gets a row, as a book's report has it, with its own ScreenTip and " \
+        "each slide it's on named once, and a link named in words none", \
+        rows == [[DOI, "", "", "links.pptx slide 1", "Klein and Stern. 2005.", "", ""],
+                 [CARS, "", "", "links.pptx slide 1", "Cars:", "", ""],
+                 [KEPT, "", "Its own title", "links.pptx slide 1", "", "", ""],
+                 ["https://example.org/grouped", "", "", "links.pptx slide 3", "", "", ""],
+                 [SPLIT, "", "", "links.pptx slide 3", "", "", ""]], rows
+    with open(paths["bare_links"], "w", encoding="utf-8", newline="") as fh:
+        csv.writer(fh).writerows([deckrun.LINK_COLUMNS, [DOI, SHORT, "DOI for Klein and Stern 2005"],
+                                  [CARS, "The Data and Story Library's cars data", ""],
+                                  [KEPT, "", ""], ["https://example.org/grouped", "", ""],
+                                  [SPLIT, "", "Split over two runs"],
+                                  ["https://example.org/gone", "", ""]])
+    links = rem.link_rows(paths["bare_links"])
+    out = os.path.join(work, "out", "links.pptx")
+    counts = rem.remediate(path, out, links=links, equations=True, deck="links")
+    slide, rels = read_part(out, "ppt/slides/slide1.xml"), read_part(out, "ppt/slides/_rels/slide1.xml.rels")
+    yield "an address replaces the link's address and its text, in its first run, with its " \
+        "ScreenTip", ('<a:hlinkClick r:id="rId3" tooltip="DOI for Klein and Stern 2005"/></a:rPr>'
+                      '<a:t>%s</a:t></a:r></a:p>' % SHORT) in slide and "08913810508443640" not in slide \
+        and 'Target="%s"' % SHORT in rels and DOI not in rels, slide[slide.find("Klein"):][:400]
+    yield "text replaces only the bare link's text; the same address's named link is left", \
+        "<a:t>The Data and Story Library's cars data</a:t>" in slide \
+        and "<a:t>the cars data</a:t>" in slide and 'Target="%s"' % CARS in rels, \
+        slide[slide.find("Cars"):][:300]
+    yield "a blank row keeps the link and its own ScreenTip", \
+        '<a:hlinkClick r:id="rId5" tooltip="Its own title"/>' in slide \
+        and "<a:t>%s</a:t>" % KEPT in slide and counts["links"] == 2 and counts["replaced"] == 2, \
+        counts
+    three = read_part(out, "ppt/slides/slide3.xml")
+    split = [(l.text, l.tooltip) for l in pptxparse.read(out).slides[2].shapes[2].links]
+    yield "a ScreenTip alone goes on every run of its link, which stays one link", \
+        three.count('<a:hlinkClick r:id="rId7" tooltip="Split over two runs"/>') == 2 \
+        and split == [(SPLIT, "Split over two runs")], (split, three[three.find("TextBox 8"):][:500])
+    yield "every changed part is well-formed, and nothing else changed", \
+        ET.fromstring(slide.encode()) is not None and ET.fromstring(rels.encode()) is not None \
+        and read_part(out, "ppt/presentation.xml") == read_part(path, "ppt/presentation.xml"), ""
+    odd = ('<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+           '<Relationship Id="rId9" Type="x" Target="https://example.org/?a>b" '
+           'TargetMode="External" /><Relationship Id="rId8" Type="y" Target="../media/x.png"/>'
+           '</Relationships>')
+    xml, new_rels, _titled, replaced = rem.set_links(
+        '<a:p><a:r><a:rPr><a:hlinkClick r:id="rId9"/></a:rPr><a:t>https://example.org/?a>b</a:t>'
+        '</a:r></a:p>', odd, {"https://example.org/?a>b": ("https://example.org/", "")})
+    yield "an address with > in it, which XML allows unescaped, is found and replaced", \
+        replaced == 1 and "<a:t>https://example.org/</a:t>" in xml and new_rels == odd.replace(
+            'Target="https://example.org/?a>b" TargetMode="External" />',
+            'Target="https://example.org/" TargetMode="External"/>'), new_rels
+    found = pptxcheck.check(pptxparse.read(out), links=rem.decided_links(links))
+    yield "a link the sidecar decided isn't counted against the copy, kept bare or not", \
+        "pptx-link-bare-url" not in checks_of(found) \
+        and "pptx-link-bare-url" in checks_of(pptxcheck.check(pptxparse.read(out))), \
+        [(f.check, f.detail) for f in found]
+    two = read_part(out, "ppt/slides/slide2.xml")
+    yield "an equation gets the characters it means, PowerPoint's as Word's: a bar for a " \
+        "macron over x, a minus for an en dash, mu for the micro sign", \
+        "<m:acc>" in two and "<m:limUpp>" not in two and "<m:t>−μ</m:t>" in two \
+        and counts["equations_repaired"] == 1 and counts["equation_characters"] == 3 \
+        and ET.fromstring(two.encode()) is not None, two[two.find("<a14:m>"):][:400]
+    plain = rem.remediate(path, os.path.join(work, "out", "plain.pptx"), deck="links")
+    yield "and nothing of the kind without math.repair_equations or a sidecar", \
+        plain["equations_repaired"] == plain["links"] == plain["replaced"] == 0 \
+        and read_part(os.path.join(work, "out", "plain.pptx"), "ppt/slides/slide2.xml") \
+        == read_part(path, "ppt/slides/slide2.xml"), plain
+    # A run: the target's math.repair_equations, the counts said, a stale
+    # row named, the report gone.
+    target = type("Target", (), {"format": "source", "name": "fixed",
+                                 "output_dir": os.path.join(folder, "fixed"),
+                                 "__getitem__": lambda self, key: key == "math.repair_equations"})()
+    said = []
+    code = deckrun.run(folder, ["links.pptx"], [target], paths, reports, say=said.append)
+    left = [r[1] for r in rows_of(reports["output_check"])]
+    yield "a run writes them, says so, and names a row matching no link", \
+        code == 0 and not os.path.exists(reports["bare_links_new"]) \
+        and "fixed: 2 bare link(s) given a ScreenTip and 2 a replacement, as bare-links.csv " \
+        "says." in said and "fixed: 1 equation(s) given the characters they mean, 3 " \
+        "character(s) in all (math.repair_equations)." in said \
+        and any("1 row(s) of bare-links.csv match no bare link" in l for l in said) \
+        and "pptx-link-bare-url" not in left, (said, left)
+
+
 # ---------------------------------------------------------------------------
 # convert.py over a folder of decks
 # ---------------------------------------------------------------------------
@@ -1705,6 +1872,32 @@ def case_folders(work):
         and "1 title(s) added above their slides, 1 slide(s) put in the reading order given" \
         in result.stderr and "the reading order for messy/slide-260 isn't written: it names 4 " \
         "twice" in result.stderr, result.stderr[-500:]
+    # A deck's bare links and equations, beside a page with the same link:
+    # the slides line counts the decks' alone.
+    maths = deck(os.path.join(work, "maths.pptx"), [
+        {"shapes": [title(2, "Means"), equation(4, BAR_OMML)]}])
+    page = os.path.join(work, "page.html")
+    with open(page, "w", encoding="utf-8") as fh:
+        fh.write('<html lang="en"><head><title>Page</title></head><body><p>'
+                 '<a href="https://example.org">https://example.org</a></p></body></html>')
+    links = os.path.join(work, "links.csv")
+    with open(links, "w", encoding="utf-8", newline="") as fh:
+        csv.writer(fh).writerows([["URL", "Replacement", "Title"],
+                                  ["https://example.org", "Example", "An example"]])
+    result = subprocess.run(["python3", os.path.join(ROOT, "util", "remediate.py"), messy, maths,
+                             page, "--links", links, "--repair-equations",
+                             "--out", os.path.join(work, "util-links")],
+                            capture_output=True, text=True)
+    copy = pptxparse.read(os.path.join(work, "util-links", "messy.pptx"))
+    found = [(l.text, l.target, l.tooltip) for s in copy.slides for shape in s.all_shapes()
+             for l in shape.links if l.external]
+    yield "remediate.py writes a deck's bare links and equations, and counts the decks' alone", \
+        result.returncode == 0 and found == [("Example", "https://example.org", "An example")] \
+        and "<m:acc>" in read_part(os.path.join(work, "util-links", "maths.pptx"),
+                                   "ppt/slides/slide1.xml") \
+        and "1 bare link(s) given a replacement; 1 equation(s) repaired;" in result.stderr \
+        and "Example</a>" in open(os.path.join(work, "util-links", "page.html"),
+                                  encoding="utf-8").read(), (found, result.stderr[-600:])
 
 
 CASES = [("reading a deck", case_parse), ("the checks", case_check),
@@ -1712,6 +1905,7 @@ CASES = [("reading a deck", case_parse), ("the checks", case_check),
          ("the sidecars", case_sidecars), ("what a review found", case_edges),
          ("what PowerPoint made of Pandoc's decks", case_powerpoint),
          ("the reading order", case_order), ("titles another slide has", case_retitle),
+         ("links and equations", case_links),
          ("convert.py on decks", case_convert),
          ("folders, archives, and tools", case_folders)]
 

@@ -214,10 +214,11 @@ class Box:
 
 
 class Link:
-    __slots__ = ("text", "target", "tooltip", "external")
+    __slots__ = ("text", "target", "tooltip", "external", "context")
 
-    def __init__(self, text, target, tooltip, external):
+    def __init__(self, text, target, tooltip, external, context=""):
         self.text, self.target, self.tooltip, self.external = text, target, tooltip, external
+        self.context = context      # the paragraph's text before the link
 
 
 class Table:
@@ -434,10 +435,13 @@ def _text_body(shape_el):
     return [_paragraph_text(p) for p in body.findall(q("a:p"))]
 
 
-def _links(shape_el, rels, cnvpr):
+def _links(shape_el, rels, cnvpr, own_text=True):
+    """A shape's links: its own click, and its text's, each with the text
+    before it in its paragraph. own_text: whether the shape's text is its
+    own, which a group's is not: each shape in it has its own."""
     found = []
 
-    def add(el, text):
+    def add(el, text, context=""):
         rid = el.get(q("r:id"))
         action = el.get("action") or ""
         target, external = None, False
@@ -446,27 +450,34 @@ def _links(shape_el, rels, cnvpr):
         elif action.startswith("ppaction://"):
             target = action
         if target:
-            found.append(Link(text, target, el.get("tooltip"), external))
+            found.append(Link(text, target, el.get("tooltip"), external, context))
+        return bool(target)
 
     if cnvpr is not None:
         click = cnvpr.find(q("a:hlinkClick"))
         if click is not None:
             add(click, "")
-    for run in shape_el.iter(q("a:r")):
-        rpr = run.find(q("a:rPr"))
-        click = rpr.find(q("a:hlinkClick")) if rpr is not None else None
-        if click is not None:
-            t = run.find(q("a:t"))
-            add(click, t.text if t is not None and t.text else "")
-    # Adjacent runs of one link are one link to a reader.
-    merged = []
-    for link in found:
-        if merged and link.text and merged[-1].text and merged[-1].target == link.target \
-                and merged[-1].tooltip == link.tooltip:
-            merged[-1].text += link.text
-        else:
-            merged.append(link)
-    return merged
+    for paragraph in (shape_el.iter(q("a:p")) if own_text else ()):
+        before, previous = [], None
+        for piece in paragraph:
+            rpr = piece.find(q("a:rPr")) if piece.tag in (q("a:r"), q("a:fld")) else None
+            click = rpr.find(q("a:hlinkClick")) if rpr is not None else None
+            if piece.tag in (q("a:r"), q("a:fld")):
+                text = piece.findtext(q("a:t")) or ""
+            else:
+                text = " " if piece.tag == q("a:br") else ""
+            # Adjacent runs of one link are one link to a reader.
+            key = (click.get(q("r:id")), click.get("tooltip")) if click is not None else None
+            if key is not None and key == previous and found and piece.tag == q("a:r"):
+                found[-1].text += text
+            elif click is not None and piece.tag == q("a:r"):
+                if not add(click, text, "".join(before)):
+                    key = None
+            else:
+                key = None
+            previous = key
+            before.append(text)
+    return found
 
 
 def _cell_text(tc):
@@ -691,7 +702,7 @@ class _Reader:
                 child_map = (lambda inner: (lambda b: outer(inner(b))))(child_map)
             shape.children = self.shapes(el, depth + 1, child_map or mapper, alternate)
             shape.stroke = max((c.stroke for c in shape.children), default=0)
-        shape.links = _links(el, self.rels, cnvpr)
+        shape.links = _links(el, self.rels, cnvpr, kind != "grpSp")
         if depth == 0 and self.part.startswith("ppt/slides/"):
             for rpr in el.iter():
                 if rpr.tag in (q("a:rPr"), q("a:endParaRPr")) and rpr.get("lang"):

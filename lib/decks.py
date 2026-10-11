@@ -464,6 +464,26 @@ def list_styles(tex):
     return LIST_STYLE.sub(one, tex)
 
 
+# A section's footnotes, which only its slide sets (deck-pdf.lua): marks
+# and texts the short title, which bookmarks and contents take, leaves out.
+SECTION_NOTES = re.compile(r"\\oersection(?:mark|notes)(?=\{)")
+
+
+def without_section_notes(title):
+    """A section's title without its footnotes' marks and texts."""
+    out, pos = [], 0
+    for m in SECTION_NOTES.finditer(title):
+        if m.start() < pos:
+            continue
+        end = group_end(title, m.end())
+        if end < 0:
+            break
+        out.append(title[pos:m.start()])
+        pos = end
+    out.append(title[pos:])
+    return "".join(out)
+
+
 def section_titles(tex):
     """Each section's short title given as ltx-talk's shorttitle key."""
     out, pos = [], 0
@@ -490,9 +510,26 @@ def section_titles(tex):
                 and "=" in short:
             keys = short
         else:
-            keys = "shorttitle={%s}" % (title if short is None else short)
+            keys = "shorttitle={%s}" % without_section_notes(title if short is None else short)
         out.append(tex[pos:m.start()] + "\\%s%s[%s]{%s}" % (m.group(1), m.group(2), keys, title))
         pos = k
+
+
+# Pandoc's beamer writer links to a heading's, a div's, or a span's id
+# with \hyperlink, which names a destination beamer makes of a \label;
+# ltx-talk's \label makes none, so such a link landed on the PDF's last
+# page. \hyperref goes to the anchor the label records. A name a
+# \hypertarget makes is left to \hyperlink.
+HYPERLINK = re.compile(r"\\hyperlink\{([^{}\]]*)\}")
+LABEL = re.compile(r"\\label\{([^{}]*)\}")
+HYPERTARGET = re.compile(r"\\hypertarget\{([^{}]*)\}")
+
+
+def hyperlinks(tex):
+    """Each \\hyperlink to a label as a \\hyperref to it."""
+    labels = set(LABEL.findall(tex)) - set(HYPERTARGET.findall(tex))
+    return HYPERLINK.sub(lambda m: "\\hyperref[%s]" % m.group(1) if m.group(1) in labels
+                         else m.group(0), tex)
 
 
 def talkify(tex):
@@ -509,8 +546,9 @@ def talkify(tex):
     isn't code. Columns' alignments become ltx-talk's t, c, and b, and
     their totalwidth its width; a footnote loses beamer's overlay and
     [frame]; a numbered list's style is LaTeX's \\labelenumi; a
-    section's short title is given as a key; and beamer's modes are
-    ltx-talk's. Code is set aside first, so none of this touches it.
+    section's short title is given as a key; beamer's modes are
+    ltx-talk's; and a link to a label is a \\hyperref (hyperlinks). Code
+    is set aside first, so none of this touches it.
     Returns the LaTeX and counts: verbatim frames, untitled frames, and
     the options dropped."""
     counts = {"verbatim": 0, "untitled": 0, "dropped": []}
@@ -540,6 +578,7 @@ def talkify(tex):
         "projector" if any(mode.strip() in SHOWN_MODES for mode in m.group(1).split("|"))
         else "article"), tex)
     tex = re.sub(r"\\mode\*", "", tex)
+    tex = hyperlinks(tex)
     out, pos = [], 0
     while True:
         m = FRAME.search(tex, pos)
@@ -678,6 +717,12 @@ BEAMER_COMMANDS = re.compile(
 # title isn't the code it knows, and every slide's title is tagged at one
 # level.
 ONE_LEVEL = "oer: every frame title tagged at one level"
+# And when LaTeX's footnote code isn't the code it knows, and a footnote's
+# mark given apart from its text is a number, not tied to the text.
+UNLINKED = "oer: footnote marks given apart not linked"
+# And when ltx-talk's code for a block isn't the code it knows, and a
+# block's title stays a paragraph.
+UNTAGGED_BLOCKS = "oer: block titles not tagged as headings"
 
 
 def raw_text(value):
@@ -699,6 +744,155 @@ def raw_text(value):
     return " ".join(found)
 
 
+def tidy(path):
+    """What LaTeX leaves in a deck's PDF, put right in place, and a count
+    of what it can't put right:
+
+    - Links in content LaTeX left untagged, which tagpdf gathers in a
+      structure element of their own ("Ignored link annotations", an
+      Artifact holding a Link holding only the annotations), taken out with
+      it: a slide's earlier steps' links (ltx-talk tags a frame's last slide
+      only), those in what a step hasn't shown yet too, which a screen
+      reader in Acrobat met as links saying "artifact" and keyboard focus
+      landed on unseen. veraPDF failed a step with two, which share one Link
+      element (8.2.5.20-2). Any other Artifact is left alone.
+    - A /Ref to a structure element the tree doesn't hold: a table's head
+      that LaTeX sets again to repeat it gives its marks structure elements
+      no page holds, and the captions' repair takes out the artifact the
+      repeat is (8.2.5.14-3).
+    - A footnote's mark with no /Ref to a note that refers back to it,
+      counted, as PDF/UA-2 asks for one (8.2.5.14): the template ties each
+      mark to its note, and one that isn't means LaTeX's footnote code isn't
+      the code it was written for.
+
+    Returns {"step_links": n, "ghost_refs": n, "untied_marks": n}."""
+    import pikepdf
+    counts = {"step_links": 0, "ghost_refs": 0, "untied_marks": 0}
+    with pikepdf.open(path, allow_overwriting_input=True) as pdf:
+        root = pdf.Root.get("/StructTreeRoot")
+        if root is None:
+            return counts
+
+        def kids_of(node):
+            kids = node.get("/K")
+            if kids is None:
+                return []
+            return list(kids) if isinstance(kids, pikepdf.Array) else [kids]
+
+        def refs_of(elem):
+            refs = elem.get("/Ref")
+            if refs is None:
+                return []
+            return [r for r in (list(refs) if isinstance(refs, pikepdf.Array) else [refs])
+                    if isinstance(r, pikepdf.Dictionary)]
+
+        def annotations(node, found, structs):
+            """The link annotations under a link bin, its structure
+            elements gathered in structs, or None if it holds anything else:
+            content, or an annotation other than a link."""
+            for kid in kids_of(node):
+                if not isinstance(kid, pikepdf.Dictionary):
+                    return None
+                if kid.get("/Type") == "/OBJR":
+                    if kid.get("/Obj") is None or kid.Obj.get("/Subtype") != "/Link":
+                        return None
+                    found.append(kid.Obj)
+                elif "/S" in kid and kid.get("/Type") != "/MCR":
+                    if kid.is_indirect:
+                        structs.add(kid.objgen)
+                    if annotations(kid, found, structs) is None:
+                        return None
+                else:
+                    return None
+            return found
+
+        def walk(node, parent, seen, bins):
+            if isinstance(node, pikepdf.Array):
+                for kid in node:
+                    walk(kid, parent, seen, bins)
+                return
+            if not isinstance(node, pikepdf.Dictionary) or "/S" not in node:
+                return
+            if node.is_indirect:
+                if node.objgen in seen:
+                    return
+                seen.add(node.objgen)
+            if node.get("/S") == "/Artifact" and bins is not None:
+                structs = {node.objgen} if node.is_indirect else set()
+                found = annotations(node, [], structs)
+                if found:
+                    bins.append((node, parent, found, structs))
+                    return
+            kids = node.get("/K")
+            if kids is not None:
+                walk(kids, node, seen, bins)
+
+        bins = []
+        walk(root.get("/K"), root, set(), bins)
+        gone, annots = set(), []
+        for node, parent, found, structs in bins:
+            annots += found
+            gone |= structs
+            kids = parent.get("/K")
+            if isinstance(kids, pikepdf.Array):
+                parent.K = pikepdf.Array([k for k in kids if not (
+                    isinstance(k, pikepdf.Dictionary) and k.is_indirect
+                    and k.objgen == node.objgen)])
+            elif isinstance(kids, pikepdf.Dictionary) and kids.is_indirect \
+                    and kids.objgen == node.objgen:
+                del parent["/K"]
+        if annots:
+            listed_gone = {a.objgen for a in annots if a.is_indirect}
+            keys = {int(a.StructParent) for a in annots if "/StructParent" in a}
+            for page in pdf.pages:
+                listed = page.obj.get("/Annots")
+                if listed is None:
+                    continue
+                kept = [a for a in listed if not (a.is_indirect and a.objgen in listed_gone)]
+                if len(kept) != len(listed):
+                    counts["step_links"] += len(listed) - len(kept)
+                    page.obj.Annots = pikepdf.Array(kept)
+            tree = root.get("/ParentTree")
+            if tree is not None and keys:
+                numbers = pikepdf.NumberTree(tree)
+                for key in keys:
+                    if key in numbers:
+                        del numbers[key]
+        if gone and root.get("/IDTree") is not None:
+            names = pikepdf.NameTree(root.IDTree)
+            for key in [k for k, v in names.items()
+                        if isinstance(v, pikepdf.Dictionary) and v.is_indirect
+                        and v.objgen in gone]:
+                del names[key]
+        # What the tree holds now, the bins out of it.
+        reachable = set()
+        walk(root.get("/K"), root, reachable, None)
+        for objgen in list(reachable):
+            elem = pdf.get_object(objgen)
+            refs = elem.get("/Ref")
+            if refs is None:
+                continue
+            listed = list(refs) if isinstance(refs, pikepdf.Array) else [refs]
+            kept = [r for r in refs_of(elem) if r.is_indirect and r.objgen in reachable]
+            if len(kept) != len(listed):
+                counts["ghost_refs"] += len(listed) - len(kept)
+                if kept:
+                    elem.Ref = pikepdf.Array(kept)
+                else:
+                    del elem["/Ref"]
+        for objgen in reachable:
+            mark = pdf.get_object(objgen)
+            if mark.get("/S") != "/footnotemark":
+                continue
+            notes = [r for r in refs_of(mark) if r.get("/S") == "/footnote"]
+            if not notes or not all(objgen in [m.objgen for m in refs_of(n) if m.is_indirect]
+                                    for n in notes):
+                counts["untied_marks"] += 1
+        if bins or counts["ghost_refs"]:
+            pdf.save(path)
+    return counts
+
+
 def build_pdf(intermediate, base, out_pdf, *, template, filters, language,
               standards=("ua-2",), ua1_math="office", ratio="auto", title=None,
               repair_captions=True, remove_empty_paragraphs=True, env=None,
@@ -707,8 +901,9 @@ def build_pdf(intermediate, base, out_pdf, *, template, filters, language,
     intermediate, its headings renumbered (renumber), written by Pandoc's
     beamer writer with template and filters, talkified, and built by
     LuaLaTeX in a folder of its own, at least twice (ltx-talk's first run
-    leaves a placeholder page) and again while the log asks for it, up to
-    four times, each run stopped after LATEX_TIMEOUT seconds; then the
+    leaves a placeholder page) and again while the log asks for it or the
+    .aux file changed, up to four times, each run stopped after
+    LATEX_TIMEOUT seconds; then the
     tables' captions retagged and the empty paragraph elements taken out,
     as for a book's PDF. title names the PDF when the deck has none. keep:
     a folder the LaTeX is copied to. An SVG that can't be made a PDF stops
@@ -726,6 +921,7 @@ def build_pdf(intermediate, base, out_pdf, *, template, filters, language,
     shape, why = aspect_ratio(meta, ratio)
     result = {"ok": False, "pages": 0, "log": "", "timeout": False, "ratio": shape,
               "ratio_why": why, "level": level, "tag": None, "own_levels": True,
+              "linked_marks": True, "block_headings": True, "tidied": None,
               "talkify": None, "svg_failed": [], "retag": None, "paragraphs": None,
               "beamer_commands": sorted(set(BEAMER_COMMANDS.findall(
                   raw_text(meta.get("header-includes"))))),
@@ -756,7 +952,7 @@ def build_pdf(intermediate, base, out_pdf, *, template, filters, language,
                    "-M", f"lang={language}",
                    "-V", f"aspect-ratio={shape}", "-V", f"frametitle-tag={tag}",
                    "-V", "math-setup=" + latexbuild.math_setup(standards, ua1_math),
-                   "-V", "oer-macros=" + macros]
+                   "-V", "oer-macros=" + macros, "-V", "code-spaces=" + latexbuild.CODE_SPACES]
         for standard in standards:
             command += ["-M", f"pdfstandard={standard}"]
         if ua1:
@@ -784,6 +980,7 @@ def build_pdf(intermediate, base, out_pdf, *, template, filters, language,
             shutil.copy(tex, os.path.join(keep, os.path.splitext(
                 os.path.basename(out_pdf))[0] + ".tex"))
         log_path = os.path.join(work, "deck.log")
+        aux_path, aux = os.path.join(work, "deck.aux"), None
         for run in range(1, 5):
             try:
                 done = subprocess.run(
@@ -804,9 +1001,19 @@ def build_pdf(intermediate, base, out_pdf, *, template, filters, language,
             result["log"] = log or done.stdout
             if done.returncode or not os.path.exists(os.path.join(work, "deck.pdf")):
                 return result
-            if run >= 2 and not RERUN.search(log):
+            # LaTeX asks for no run where a label is defined twice, as
+            # ltx-talk defines a frame's on each page of a frame it breaks,
+            # though a footnote's link target has changed: ltx-talk tags a
+            # frame's last step, which a first run doesn't know.
+            previous, aux = aux, None
+            if os.path.exists(aux_path):
+                with open(aux_path, encoding="utf-8", errors="replace") as fh:
+                    aux = fh.read()
+            if run >= 2 and not RERUN.search(log) and aux == previous:
                 break
         result["own_levels"] = ONE_LEVEL not in result["log"]
+        result["linked_marks"] = UNLINKED not in result["log"]
+        result["block_headings"] = UNTAGGED_BLOCKS not in result["log"]
         os.makedirs(os.path.dirname(os.path.abspath(out_pdf)), exist_ok=True)
         shutil.copyfile(os.path.join(work, "deck.pdf"), out_pdf)
         found = re.search(r"Output written on .*?\((\d+) pages?", result["log"])
@@ -822,4 +1029,5 @@ def build_pdf(intermediate, base, out_pdf, *, template, filters, language,
             result["retag"] = pdfretag.retag(out_pdf, captioned)
         if remove_empty_paragraphs:
             result["paragraphs"] = pdfparagraphs.remove_from(out_pdf)
+        result["tidied"] = tidy(out_pdf)
     return result

@@ -66,6 +66,7 @@ sys.path.insert(0, os.path.join(ROOT, "lib"))
 import pdfparagraphs  # noqa: E402
 sys.path.insert(0, HERE)
 import parallel  # noqa: E402
+import pdftext  # noqa: E402
 
 FRONT = r"""---
 title: The Test Book
@@ -173,6 +174,13 @@ Elasticity[^term]
 :   How much quantity responds to price.
 
 [^term]: A term's footnote, which LaTeX's tagging stopped on.
+
+Highlighted code, whose spaces were lost beside a colored word:
+
+```python
+def demand(p):
+    return 12 - 2 * p > 0
+```
 
 #### Deep
 
@@ -788,6 +796,16 @@ def checks(work, jobs=1):
     else:
         print("  skip  veraPDF not found (set VERAPDF); its verdict is "
               "not checked")
+    # Pandoc's highlighted code, its tokens colored: a space beside a
+    # color's change was no character, and an indentation one
+    # (latexbuild.CODE_SPACES).
+    if pdftext.AVAILABLE:
+        items.append(("a highlighted code block's spaces are characters, its "
+                      "indentation kept",
+                      lambda: pdftext.code_lines(pdf_path)[-2:]
+                      == ["def demand(p):", "    return 12 - 2 * p > 0"]))
+    else:
+        print("  skip  pdfminer.six not found; a code block's spaces aren't checked")
     return items
 
 

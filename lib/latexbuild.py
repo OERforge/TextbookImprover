@@ -360,6 +360,21 @@ def math_setup(standards, choice):
     return MATH_SETUP["ua2"]
 
 
+# Highlighted code's spaces as characters in a tagged PDF's text, which is
+# what a screen reader reads. Pandoc writes highlighted code in fancyvrb's
+# Verbatim (inline, \Verb), its tokens colored by \textcolor, and fancyvrb
+# makes a space \ , interword glue; under LuaLaTeX a space beside a
+# color's change became no character at all ("return12-2* p >0"), and a
+# run of spaces, an indentation, one. A space as \nobreak\ , as LaTeX's
+# own verbatim makes one, is a character each, and nothing on the page
+# moves. Read after Pandoc's highlighting macros: by build-pdf.py in a
+# book's preamble when it has highlighted code, and by a deck's template.
+CODE_SPACES = r"""\makeatletter
+\fvset{formatcom*={\def\FV@Space{\nobreak\ }}}
+\makeatother
+"""
+
+
 # PDF/UA-1 wants a /Contents on every link (7.18.5), LaTeX's own too: a
 # contents line, a cross-reference it makes. hyperref has a plug for that
 # ("Go to destination" and the destination's name, or the address), which

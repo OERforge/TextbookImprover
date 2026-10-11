@@ -444,6 +444,10 @@ def book_metadata(project, resolved, base, numbered):
     # The template loads amssymb before unicode-math, which leaves the
     # names unicode-math lacks drawn as control characters.
     ours += "\\ifdefined\\directlua\n" + latexbuild.UM_ALIASES + "\\fi\n"
+    # A highlighted code block's spaces as characters (Pandoc's macros come
+    # before these, and define Highlighting when there's highlighted code).
+    ours += ("\\ifdefined\\directlua\\ifdefined\\Highlighting\n" + latexbuild.CODE_SPACES
+             + "\\fi\\fi\n")
     # A LaTeX book's own colors, which convert.py passes on: a formula keeps
     # its TeX as the book wrote it, \color{redcards} and all, and LaTeX
     # stops on a color nothing defines (OpenIntro Statistics).

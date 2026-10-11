@@ -16,7 +16,8 @@
 --    a table, or a figure, where Pandoc's slide writers find no section,
 --    whatever its level. A deck with no title has no H1 above them, so its
 --    headings start at H1. A piece the split cut from a deck has its own
---    heading for its title, and its body's headings start at H2.
+--    heading for its title, and its body's headings are placed so under
+--    it, from H2.
 --
 -- 2. A pause, Pandoc's ". . ." on a line of its own, which a slide shows
 --    as the slide's next step and a page would show as three dots, goes.
@@ -81,8 +82,7 @@ local function clamp(level)
 end
 
 -- The shallowest heading made base, the rest kept in their places under
--- it: a piece the split cut, and a deck with no slides at headings
--- (a slide level of 0).
+-- it: a deck with no slides at headings (a slide level of 0).
 local function shifted(doc, base)
   local shallowest
   doc.blocks:walk({
@@ -100,19 +100,47 @@ local function shifted(doc, base)
   end
 end
 
+-- Whether a heading holds anything that's set: words, code, a formula, a
+-- picture, a footnote, raw markup, in a span or any other inline or not;
+-- a block whose title holds nothing, or only empty spans, has no title,
+-- and no heading (deck-pdf.lua's titled, the same).
+local function holds_words(inlines)
+  for _, inline in ipairs(inlines) do
+    local kind = inline.t
+    if kind == 'Str' or kind == 'Code' or kind == 'Math' or kind == 'Image'
+        or kind == 'Note' or kind == 'RawInline' then
+      return true
+    elseif kind ~= 'Space' and kind ~= 'SoftBreak' and kind ~= 'LineBreak'
+        and inline.content and holds_words(inline.content) then
+      return true
+    end
+  end
+  return false
+end
+
+local function titled(header)
+  return holds_words(header.content)
+end
+
 -- Each heading at its level among the sections around it, in reading
 -- order: a section's below the sections it's in, a slide's one below its
 -- section's, and one in a slide below the slide's and the slide's own
 -- headings it's under, as beamer makes any of them a block of the slide.
--- Returns the function for the deck's own headings, and one that makes
--- the function for the headings in something in a slide whatever their
--- level: its notes, a quotation, a list, a table, or a figure, where
--- they're no section, and nothing the deck's next heading is under.
+-- One in a slide that holds nothing, as a block with no title has, is no
+-- heading, as in the deck's PDF: what follows isn't under it, and a link
+-- to it lands where it was. Returns the function for the deck's own
+-- headings, and one that makes the function for the headings in something
+-- in a slide whatever their level: its notes, a quotation, a list, a
+-- table, or a figure, where they're no section, and nothing the deck's
+-- next heading is under.
 local function placed(level, base)
   local open, inner, slide = {}, {}, nil
   local function under(stack, header)
     local own = header.level
     while #stack > 0 and stack[#stack] >= own do table.remove(stack) end
+    if not titled(header) then
+      return pandoc.Div({ pandoc.Plain(header.content) }, pandoc.Attr(header.identifier))
+    end
     header.level = clamp((slide or base + #open - 1) + 1 + #stack)
     table.insert(stack, own)
     return header
@@ -151,11 +179,10 @@ function Pandoc(doc)
   local level = tonumber(pandoc.utils.stringify(recorded)) or 0
   local titled = doc.meta.title ~= nil
     and pandoc.utils.stringify(doc.meta.title):match('%S') ~= nil
+  -- A piece the split cut is titled too, by its heading, its own H1.
   local base = titled and 2 or 1
   local heading, within
-  if doc.meta['page-part'] ~= nil then
-    heading = shifted(doc, 2)
-  elseif level <= 0 then
+  if level <= 0 then
     heading = shifted(doc, base)
   else
     heading, within = placed(level, base)

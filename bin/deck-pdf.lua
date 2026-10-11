@@ -13,14 +13,25 @@
 --
 -- A passage in another language, a span or a div with a lang attribute,
 -- is tagged with its language (ltx-talk.latex's \oerlang and oerlanguage),
--- where the writer would mark it for babel, which tags nothing.
+-- where the writer would mark it for babel, which tags nothing: after the
+-- footnotes are numbered, so a footnote's text set after its heading, as
+-- below, is in the heading's language still.
 --
 -- A footnote in a slide's title keeps its mark in the title, and its
 -- text goes at the head of the slide (\footnotetext, numbered as LaTeX
 -- numbers the deck's footnotes, in order): ltx-talk sets the title after
--- the slide's footnotes, and a footnote there was lost. A footnote in a
--- figure's caption is numbered so too, its text after the figure, since
--- LaTeX sets a caption twice and counted its mark twice.
+-- the slide's footnotes, and a footnote there was lost. A footnote in any
+-- other heading is numbered so too, its text after the heading, where it
+-- had been inside it and a screen reader read it as part of it: on a
+-- section's slide, after its heading, at the head of a block, and after a
+-- heading in a quotation or a list. So is one in a figure's caption,
+-- since LaTeX sets a caption twice and counted its mark twice, or in a
+-- table, its text after the figure or the table. The template ties each
+-- mark to its text, a link and a /Ref each way.
+--
+-- A block's title, and a heading in a quotation, a list, or a table, is a
+-- heading at the level the deck's page gives it (nested_headings; the
+-- template's \oerblocklevel and oerheading).
 --
 -- Each slide with a title gets a bookmark, under the section it's in:
 -- ltx-talk bookmarks a section and not a slide, so a deck without
@@ -73,19 +84,74 @@ local function holds_heading(div, any)
   return false
 end
 
--- A heading inside a quotation, a list, a table, or a figure, which the
--- writer gives as \section and the like inside the frame, where ltx-talk
--- sets nothing and LaTeX's tagging stops on what the template does after
--- a section: its words in bold, as ltx-talk sets a block's title.
-local function nested_headings(blocks)
+-- Whether a heading holds anything that's set: words, code, a formula, a
+-- picture, a footnote, raw markup, in a span or any other inline or not;
+-- a block whose title holds nothing, or only empty spans, has no title,
+-- and no heading.
+local function holds_words(inlines)
+  for _, inline in ipairs(inlines) do
+    local kind = inline.t
+    if kind == 'Str' or kind == 'Code' or kind == 'Math' or kind == 'Image'
+        or kind == 'Note' or kind == 'RawInline' then
+      return true
+    elseif kind ~= 'Space' and kind ~= 'SoftBreak' and kind ~= 'LineBreak'
+        and inline.content and holds_words(inline.content) then
+      return true
+    end
+  end
+  return false
+end
+
+local function titled(header)
+  return holds_words(header.content)
+end
+
+-- A heading in a slide at the level the deck's page gives it
+-- (deck-html.lua's placed), counted from the slide's title: one below it,
+-- and one more for each heading before it that it's under, in reading
+-- order, columns and all, a block with no title left out, as it has no
+-- heading. A block's title (a heading below the slide level) is given its
+-- level as an attribute, oer-level, which the template reads from the
+-- title (heading_levels). A heading inside a quotation, a list, a table,
+-- or a figure, which the writer gives as \section and the like inside the
+-- frame, where ltx-talk sets nothing and LaTeX's tagging stops on what the
+-- template does after a section, is its words in bold, as ltx-talk sets a
+-- block's title, in the template's oerheading, which tags them as the
+-- heading: a div with the class oer-heading until its footnotes are
+-- numbered; one with nothing set in it is no heading, as on the page. Its
+-- id stays, for a link to land on. inner: the levels the deck gives the
+-- titles of the blocks open.
+local function nested_headings(blocks, inner)
   local out = pandoc.Blocks({})
   for _, block in ipairs(blocks) do
     if block.t == 'Div' then
-      block.content = nested_headings(block.content)
-    elseif block.t ~= 'Header' then
+      block.content = nested_headings(block.content, inner)
+    elseif block.t == 'Header' then
+      if block.level <= LEVEL then
+        for i = #inner, 1, -1 do inner[i] = nil end
+      else
+        while #inner > 0 and inner[#inner] >= block.level do table.remove(inner) end
+        if titled(block) then
+          block.attributes['oer-level'] = tostring(1 + #inner)
+          table.insert(inner, block.level)
+        end
+      end
+    else
+      local open = {}
+      for i, own in ipairs(inner) do open[i] = own end
       block = block:walk({
+        traverse = 'topdown',
         Header = function(header)
-          return pandoc.Para({ pandoc.Strong(header.content) })
+          while #open > 0 and open[#open] >= header.level do table.remove(open) end
+          -- Its id, which a link may name, kept, as on the page.
+          local anchor = pandoc.Span({}, pandoc.Attr(header.identifier))
+          if not titled(header) then
+            return pandoc.Plain({ anchor, pandoc.Span(header.content) }), false
+          end
+          local level = 1 + #open
+          table.insert(open, header.level)
+          return pandoc.Div({ pandoc.Para({ anchor, pandoc.Strong(header.content) }) },
+            pandoc.Attr('', { 'oer-heading' }, { level = tostring(level) })), false
         end,
       })
     end
@@ -93,6 +159,29 @@ local function nested_headings(blocks)
   end
   return out
 end
+
+-- The levels nested_headings worked out, where the template reads them,
+-- once the footnotes are numbered and the languages marked: a heading in
+-- a quotation, a list, or a table in oerheading; a block's title with
+-- \oerblocklevel first in it, which the template reads before LaTeX sets
+-- the title.
+local heading_levels = {
+  Div = function(div)
+    if not div.classes:includes('oer-heading') then return nil end
+    local blocks = pandoc.Blocks({ pandoc.RawBlock('latex',
+      ('\\begin{oerheading}[%d]'):format(tonumber(div.attributes.level) or 1)) })
+    blocks:extend(div.content)
+    blocks:insert(pandoc.RawBlock('latex', '\\end{oerheading}'))
+    return blocks
+  end,
+  Header = function(header)
+    local level = tonumber(header.attributes['oer-level'])
+    if not level then return nil end
+    header.attributes['oer-level'] = nil
+    header.content:insert(1, pandoc.RawInline('latex', ('\\oerblocklevel{%d}'):format(level)))
+    return header
+  end,
+}
 
 -- A language tag the PDF can carry: BCP 47's letters, digits, and
 -- hyphens, nothing a PDF string would read otherwise.
@@ -135,7 +224,7 @@ local function in_language(blocks, lang, whole)
   end
   for _, block in ipairs(blocks) do
     if block.t == 'Header' then
-      block.content = marked(lang, block.content)
+      if titled(block) then block.content = marked(lang, block.content) end
       out:insert(block)
     elseif block.t == 'Div' and (holds_heading(block, true)
                                  or block.classes:includes('columns')) then
@@ -161,10 +250,25 @@ end
 
 -- A footnote's text given apart from its mark, numbered: its first
 -- paragraph set where \footnotetext opens, as the writer sets a
--- footnote's, so the number and the text share a line.
-local function footnote_text(number, content)
+-- footnote's, so the number and the text share a line; in lang, the
+-- language of a passage its mark was in, when given. One block, a div, so
+-- a passage in another language around it is tagged around all of it.
+local function footnote_text(number, content, lang)
+  if lang then
+    local marked_content = pandoc.Blocks({})
+    for i, block in ipairs(content) do
+      if i == 1 and (block.t == 'Para' or block.t == 'Plain') then
+        block = block:clone()
+        block.content = { pandoc.Span(block.content, pandoc.Attr('', {}, { lang = lang })) }
+      else
+        block = pandoc.Div({ block }, pandoc.Attr('', {}, { lang = lang }))
+      end
+      marked_content:insert(block)
+    end
+    content = marked_content
+  end
   local opening = pandoc.Inlines({
-    pandoc.RawInline('latex', ('\\footnotetext[%d]{'):format(number)) })
+    pandoc.RawInline('latex', ('\\footnotetext[%d]{\\oerfootnotelabel{%d}'):format(number, number)) })
   local closing = pandoc.RawInline('latex', '}\\stepcounter{footnote}')
   local blocks, rest = pandoc.Blocks({}), 1
   local first = content[1]
@@ -175,57 +279,86 @@ local function footnote_text(number, content)
   if rest > #content then
     opening:insert(closing)
     blocks:insert(pandoc.Plain(opening))
-    return blocks
+    return pandoc.Blocks({ pandoc.Div(blocks) })
   end
   blocks:insert(pandoc.Plain(opening))
   for i = rest, #content do blocks:insert(content[i]) end
   blocks:insert(pandoc.Plain({ closing }))
-  return blocks
+  return pandoc.Blocks({ pandoc.Div(blocks) })
 end
 
 -- Footnotes numbered here, as LaTeX numbers the deck's, in reading order:
 -- after, the number of footnotes before. A footnote whose mark the writer
--- would give in a place LaTeX sets twice or after its text, a slide's
--- title, a figure, a table, is given its number here, its mark
--- \oertitlemark and its text given apart (footnote_text); one in an
--- image's description, which the writer leaves out and a figure's image
--- repeats from its caption, isn't counted.
+-- would give in a heading, or in a place LaTeX sets twice or after its
+-- text, a figure, a table, is given its number here, its mark the
+-- template's \oerfootnotemark (mark, the command) and its text given
+-- apart (footnote_text); one in an image's description, which the writer
+-- leaves out and a figure's image repeats from its caption, isn't
+-- counted. A figure's, a table's, or a heading's texts follow it, so a
+-- reader meets them after what they're about; a text whose mark is in a
+-- passage in another language is in it too (lang).
 local function numbering(after)
   local self = { number = after }
-  function self.move(element, texts)
+  function self.move(element, texts, mark, lang)
+    local function passage(inline)
+      local own = language(inline.attr)
+      if not own then return nil end
+      inline.content = self.move(inline.content, texts, mark, own)
+      return inline, false
+    end
     return element:walk({
       traverse = 'topdown',
       Image = function(image) return image, false end,
+      Span = passage,
+      Link = passage,
       Note = function(note)
         self.number = self.number + 1
-        texts:extend(footnote_text(self.number, note.content))
-        return pandoc.RawInline('latex', ('\\oertitlemark{%d}'):format(self.number))
+        texts:extend(footnote_text(self.number, note.content, lang))
+        return pandoc.RawInline('latex', ('\\%s{%d}'):format(mark or 'oerfootnotemark', self.number))
       end,
     })
+  end
+  local function texts_after(element)
+    local texts = pandoc.Blocks({})
+    element = self.move(element, texts)
+    if #texts == 0 then return nil end
+    texts:insert(1, element)
+    return texts, false
   end
   function self.walk(block)
     local walked = pandoc.Blocks({ block }):walk({
       traverse = 'topdown',
       Image = function(image) return image, false end,
       Note = function() self.number = self.number + 1 end,
-      Figure = function(figure)
-        local texts = pandoc.Blocks({})
-        figure = self.move(figure, texts)
-        if #texts == 0 then return nil end
-        texts:insert(figure)
-        return texts, false
-      end,
-      Table = function(table)
-        local texts = pandoc.Blocks({})
-        table = self.move(table, texts)
-        if #texts == 0 then return nil end
-        texts:insert(table)
-        return texts, false
+      Figure = texts_after,
+      Table = texts_after,
+      Div = function(div)
+        if div.classes:includes('oer-heading') then return texts_after(div) end
       end,
     })
     return walked
   end
   return self
+end
+
+-- pdf-target.lua, which a section's footnotes, written as LaTeX here,
+-- never reach otherwise: a link's /Contents, a formula's repairs.
+local PDF_TARGET = pandoc.path.join({ pandoc.path.directory(PANDOC_SCRIPT_FILE),
+                                      'pdf-target.lua' })
+
+-- A section's footnotes, which the section's slide sets after its
+-- heading (the template's \oersectionnotes), as LaTeX, in the language of
+-- a div holding the section (lang), passages in other languages tagged,
+-- and through pdf-target.lua first: the texts are in the section's title,
+-- so a paragraph's end in one is \endgraf, which a title can hold.
+local function section_notes(texts, lang)
+  if lang then texts = pandoc.Blocks({ pandoc.Div(texts, pandoc.Attr('', {}, { lang = lang })) }) end
+  local doc = pandoc.Pandoc(texts):walk({ Span = inline_language, Link = inline_language,
+                                         Div = div_language })
+  doc = pandoc.utils.run_lua_filter(doc, PDF_TARGET)
+  local latex = pandoc.write(doc, 'latex')
+  latex = latex:gsub('%s+$', ''):gsub('\n%s*\n+', '\\endgraf\n')
+  return pandoc.RawInline('latex', '\\oersectionnotes{' .. latex .. '}')
 end
 
 local function heading_text(inlines)
@@ -238,13 +371,18 @@ local function slides(doc)
   -- ltx-talk bookmarks \section at level 1 and \subsection at 2.
   local count, open = 0, {}
   local numbers = numbering(0)
-  local function walk(blocks)
+  -- lang: the language of the divs around, which a section's footnotes,
+  -- set as LaTeX in its title, are given here.
+  local function walk(blocks, lang)
     local out = pandoc.Blocks({})
     for _, block in ipairs(blocks) do
       if block.t == 'Header' and block.level < LEVEL then
         while #open > 0 and open[#open] >= block.level do table.remove(open) end
         table.insert(open, block.level)
-        out:extend(numbers.walk(block))
+        local texts = pandoc.Blocks({})
+        block.content = numbers.move(block.content, texts, 'oersectionmark')
+        if #texts > 0 then block.content:insert(section_notes(texts, lang)) end
+        out:insert(block)
       elseif block.t == 'Header' and block.level == LEVEL then
         local text = heading_text(block.content)
         local texts = pandoc.Blocks({})
@@ -258,8 +396,14 @@ local function slides(doc)
             :format(#open + 1, tex_escape(text), count)))
         end
         out:extend(texts)
-      elseif block.t == 'Div' and holds_heading(block) then
-        block.content = walk(block.content)
+      elseif block.t == 'Header' then
+        -- A block's title: its footnotes' texts at the head of the block.
+        local texts = pandoc.Blocks({})
+        block.content = numbers.move(block.content, texts)
+        out:insert(block)
+        out:extend(texts)
+      elseif block.t == 'Div' and holds_heading(block, true) then
+        block.content = walk(block.content, language(block.attr) or lang)
         out:insert(block)
       else
         out:extend(numbers.walk(block))
@@ -273,7 +417,8 @@ end
 
 return {
   { Div = notes },
-  { Pandoc = function(doc) doc.blocks = nested_headings(doc.blocks); return doc end },
-  { Span = inline_language, Link = inline_language, Div = div_language },
+  { Pandoc = function(doc) doc.blocks = nested_headings(doc.blocks, {}); return doc end },
   { Pandoc = slides },
+  { Span = inline_language, Link = inline_language, Div = div_language },
+  heading_levels,
 }

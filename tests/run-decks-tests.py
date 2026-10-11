@@ -53,6 +53,7 @@ BIN = os.path.join(ROOT, "bin")
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(ROOT, "lib"))
 import parallel  # noqa: E402
+import pdftext  # noqa: E402
 import decks  # noqa: E402
 
 try:
@@ -210,6 +211,8 @@ Its text.
 Produce where they meet.
 
 [^p]: Marginal revenue and marginal cost.
+
+    Each is [per unit](https://example.org/unit).
 """
 
 # Sections at ##, slides at ###, as a deck cut from a longer document has.
@@ -384,6 +387,34 @@ Ein Text im Block.
 |                       | +-----+-------+   |
 +-----------------------+-------------------+
 
+# Long {.allowframebreaks}
+
+1. Item 1
+2. Item 2
+3. Item 3
+4. Item 4
+5. Item 5
+6. Item 6
+7. Item 7
+8. Item 8
+9. Item 9
+10. Item 10
+11. Item 11
+12. Item 12
+13. Item 13
+14. Item 14
+15. Item 15
+16. Item 16
+17. Item 17
+18. Item 18
+19. Item 19
+20. Item 20
+21. Item 21
+22. Item 22
+23. Item 23
+24. Item 24
+25. Item 25
+
 [^i]: In a description, which LaTeX leaves out.
 [^h]: The head's note.
 [^c]: The caption's note.
@@ -392,6 +423,151 @@ Ein Text im Block.
 [^w]: The wrapped slide's note.
 [^z]: The last note.
 [^y]: The inner table's note.
+"""
+
+# Headings in a slide: in a list's item and a table's cell, where
+# Pandoc's slide writers find no slide, a block in a block, quotations in
+# it with headings the deck puts under its title and beside it, a block
+# with no title, blocks in two columns, the second's deeper, with a
+# quotation in it, and headings in a quotation, one under another, each at
+# the level the deck's page gives it; and footnotes in a block's title,
+# one in a column too, and a heading in an item and a quotation. And an
+# empty heading in a quotation, and a block whose title is an anchor, which
+# are no headings, and links to the anchor and a heading in a quotation.
+HEADINGS = """---
+title: Headings
+---
+
+# A List
+
+- ### In an item[^i]
+
+  Its text, and links to [a heading in a quotation](#quoted-beside-inner), [the
+  anchor block](#anchor-only), and [the columns slide](#columns).
+
+- Plain item
+
+# A Table
+
++---------------------+---------+
+| Head                | Other   |
++=====================+=========+
+| ### In a cell       | b       |
+|                     |         |
+| Cell text.          |         |
++---------------------+---------+
+
+# Blocks
+
+## Outer[^o]
+
+Outer text.
+
+### Inner
+
+Inner text.
+
+> #### Quoted under Inner
+>
+> Its text.
+
+> ### Quoted beside Inner
+>
+> Its text.
+
+## {.example}
+
+An untitled block's text.
+
+## []{#anchor-only}
+
+An anchor's block's text.
+
+# Columns
+
+:::: columns
+::: column
+## Left[^l]
+
+Left text.
+:::
+::: column
+### Right
+
+> #### Quoted right
+>
+> Its text.
+:::
+::::
+
+# Quoted
+
+> ### Quoted[^q]
+>
+> #### Under it
+>
+> Its text.
+>
+> ####
+
+[^i]: The item's note.
+[^o]: The block's note.
+[^l]: The column's note.
+[^q]: The quotation's note.
+"""
+
+# Footnotes in headings in another language: a section's, a slide's, a
+# block's (of two paragraphs), and a quotation's heading's, in a div in
+# German, and one in a passage in French in a slide's title; each note in
+# its language. And a block with no title in the div, and a quotation's
+# heading in one, which has no heading for it to be under.
+LANGS = """---
+title: Sprachen
+---
+
+# Teil Eins
+
+## Eine Folie
+
+Text.
+
+::: {lang=de}
+# Teil Zwei[^t]
+
+## Zweite Folie[^f]
+
+### Ein Block[^b]
+
+Ein Text.
+
+> ### Ein Zitat[^z]
+>
+> Zitiert.
+
+### {.example}
+
+Ein Text ohne Titel.
+:::
+
+## A [Mot[^m]]{lang=fr} Slide
+
+Text.
+
+## Ohne Titel
+
+### {.example}
+
+> #### Im Block ohne Titel
+>
+> Text.
+
+[^t]: Die Fußnote des Teils.
+[^f]: Die Fußnote der Folie.
+[^b]: Die Fußnote des Blocks.
+
+    Ihr zweiter Absatz.
+[^z]: Die Fußnote des Zitats.
+[^m]: La note du mot.
 """
 
 # What beamer and LaTeX's other classes read and ltx-talk didn't: a
@@ -506,6 +682,74 @@ def para(text="Text."):
     return {"t": "Para", "c": [{"t": "Str", "c": text}]}
 
 
+def tidy_fixture(path, ghost=True):
+    """A PDF in the shapes LaTeX leaves in a deck's, for decks.tidy: a link
+    tagged in the tree; a link bin, an Artifact holding a Link holding the
+    annotation of a link made while tagging was suspended; an Artifact with
+    content of its own, as a table's repeated head is, holding a footnote's
+    mark, its link and its marked content; a note whose /Ref names its own
+    mark, that one, and (ghost) a mark the tree doesn't hold; a mark with no
+    note; and an Artifact holding a form field's annotation, which is no
+    link."""
+    pdf = pikepdf.new()
+    pdf.add_blank_page()
+    name = pikepdf.Name
+
+    def link(n):
+        return pdf.make_indirect(pikepdf.Dictionary(
+            Type=name.Annot, Subtype=name.Link, Rect=[0, 0, 10, 10], StructParent=n,
+            A=pikepdf.Dictionary(S=name.URI, URI=pikepdf.String(f"https://example.org/{n}"))))
+
+    def element(kind, kids, **keys):
+        return pdf.make_indirect(pikepdf.Dictionary(Type=name.StructElem, S=name(kind),
+                                                    K=pikepdf.Array(kids), **keys))
+
+    tagged, binned, repeated = link(0), link(1), link(3)
+    widget = pdf.make_indirect(pikepdf.Dictionary(Type=name.Annot, Subtype=name.Widget,
+                                                  Rect=[0, 20, 10, 30], StructParent=2))
+    pdf.pages[0].obj.Annots = pikepdf.Array([tagged, binned, widget, repeated])
+    repeated_link = element("/Link", [pikepdf.Dictionary(Type=name.OBJR, Obj=repeated)])
+    own, untied, lost = (element("/footnotemark", [n]) for n in (0, 3, 2))
+    kept = element("/footnotemark", [pikepdf.Dictionary(Type=name.MCR, MCID=1,
+                                                        Pg=pdf.pages[0].obj),
+                                     repeated_link])
+    marks = [own, kept, lost] if ghost else [own, kept]
+    note = element("/footnote", [4], Ref=pikepdf.Array(marks))
+    for mark in marks:
+        mark.Ref = pikepdf.Array([note])
+    tagged_link = element("/Link", [pikepdf.Dictionary(Type=name.OBJR, Obj=tagged)])
+    binned_link = element("/Link", [pikepdf.Dictionary(Type=name.OBJR, Obj=binned)])
+    bin_ = element("/Artifact", [binned_link], T=pikepdf.String("Ignored link annotations"))
+    field = element("/Form", [pikepdf.Dictionary(Type=name.OBJR, Obj=widget)])
+    document = element("/Document", [element("/P", [own, tagged_link]),
+                                     element("/Artifact", [element("/TD", [kept])]),
+                                     element("/P", [untied]), note, bin_,
+                                     element("/Artifact", [field])])
+    parents, ids = pikepdf.NumberTree.new(pdf), pikepdf.NameTree.new(pdf)
+    parents[0], parents[1], parents[2], parents[3] = tagged_link, binned_link, field, repeated_link
+    ids["bin"], ids["binned"], ids["note"] = bin_, binned_link, note
+    pdf.Root.StructTreeRoot = pdf.make_indirect(pikepdf.Dictionary(
+        Type=name.StructTreeRoot, K=pikepdf.Array([document]), ParentTree=parents.obj,
+        IDTree=ids.obj))
+    pdf.save(path)
+
+
+def tidied(path):
+    """What tidy_fixture's PDF holds: the document's elements, the MCIDs of
+    the marks its note names, the page's links, and the parent tree's keys
+    and the ID tree's."""
+    with pikepdf.open(path) as pdf:
+        root = pdf.Root.StructTreeRoot
+        kids = list(root.K[0].K)
+        note = next(k for k in kids if k.S == "/footnote")
+        return ([str(k.S) for k in kids],
+                [int(r.K[0].MCID if isinstance(r.K[0], pikepdf.Dictionary) else r.K[0])
+                 for r in note.Ref],
+                [str(a.A.URI) if "/A" in a else str(a.Subtype) for a in pdf.pages[0].obj.Annots],
+                sorted(int(k) for k, _ in pikepdf.NumberTree(root.ParentTree).items()),
+                sorted(str(k) for k, _ in pikepdf.NameTree(root.IDTree).items()))
+
+
 def case_pieces(work):
     rule = {"t": "HorizontalRule"}
     div = {"t": "Div", "c": [["", ["notes"], []], [para()]]}
@@ -551,10 +795,35 @@ def case_pieces(work):
                  "date": {"t": "MetaList", "c": [{"t": "MetaString", "c": "1"},
                                                  {"t": "MetaString", "c": "2"}]}}
     changed = decks.single_values(meta_list)
+    linked = decks.talkify("\\begin{frame}{A}\n\\protect\\phantomsection\\label{a-b.c}\n"
+                           "See \\hyperlink{a-b.c}{this} and \\hyperlink{t}{that}."
+                           "\\hypertarget{t}{}\\label{both}\\hypertarget{both}{}"
+                           "\\hyperlink{both}{too}\n\\begin{verbatim}\n\\hyperlink{a-b.c}{x}\n"
+                           "\\end{verbatim}\n\\end{frame}\n")[0]
     doc = {"meta": {}, "blocks": [header(1), para(), header(1), para()]}
     declared = {"meta": {"slide-level": {"t": "MetaString", "c": "2"}},
                 "blocks": [header(1), para()]}
-    return [
+    extra = []
+    if pikepdf is None:
+        print("  skip  pikepdf not found; what tidy does to a deck's PDF isn't checked")
+    else:
+        bins, only = os.path.join(work, "bins.pdf"), os.path.join(work, "only-bins.pdf")
+        os.makedirs(work, exist_ok=True)
+        tidy_fixture(bins)
+        tidy_fixture(only, ghost=False)
+        tidy_counts, only_counts = decks.tidy(bins), decks.tidy(only)
+        left = (["/P", "/Artifact", "/P", "/footnote", "/Artifact"], [0, 1],
+                ["https://example.org/0", "/Widget", "https://example.org/3"], [0, 2, 3], ["note"])
+        extra.append((
+            "tidy takes out a link bin, its link, and their entries in the parent tree and the"
+            " ID tree, leaves an artifact with content of its own, a link in it too, or a form"
+            " field, drops a /Ref to an element the tree doesn't hold, and counts a mark tied"
+            " to no note; a bin alone to take out is taken out too",
+            lambda: tidy_counts == {"step_links": 1, "ghost_refs": 1, "untied_marks": 1}
+            and tidied(bins) == left
+            and only_counts == {"step_links": 1, "ghost_refs": 0, "untied_marks": 1}
+            and tidied(only) == left))
+    return extra + [
         ("the slide level is the shallowest heading something else follows",
          lambda: decks.slide_level([header(1), para(), header(2), para()]) == 1
          and decks.slide_level([header(1), header(2), para(), header(1), header(2), para()]) == 2),
@@ -631,6 +900,10 @@ def case_pieces(work):
          and "\\footnote{N.}\\footnote{M.}" in out and "beamerpauses" not in out),
         ("a frame with no end is left as it is", lambda: decks.talkify(
             "\\begin{frame}{A}\ntext")[0] == "\\begin{frame}{A}\ntext"),
+        ("a link to a label goes to it, one to a hypertarget stays, a label's too, and code"
+         " is left alone",
+         lambda: "See \\hyperref[a-b.c]{this} and \\hyperlink{t}{that}" in linked
+         and "\\hyperlink{both}{too}" in linked and "\\hyperlink{a-b.c}{x}" in linked),
     ]
 
 
@@ -944,6 +1217,40 @@ def shape_of(path):
     return float(box.width) / float(box.height)
 
 
+# The namespaces of PDF 2.0's standard structure types and PDF 1.7's.
+STANDARD = ("http://iso.org/pdf2/ssn", "http://iso.org/pdf/ssn")
+
+
+def resolver(root):
+    """A function giving a structure element's standard type: through its
+    namespace's role map to a type in a standard namespace, PDF 2.0's
+    (FENote, Title) or PDF 1.7's, or through the role map where it has no
+    namespace, as in PDF/UA-1. The role map of a PDF 2.0 file maps PDF
+    2.0's types to PDF 1.7's too (FENote to Note), for older readers."""
+    rolemap = root.get("/RoleMap") or {}
+
+    def standard(element):
+        name, ns = element.get("/S"), element.get("/NS")
+        for _ in range(8):
+            if ns is not None:
+                if str(ns.get("/NS")) in STANDARD:
+                    break
+                mapped = (ns.get("/RoleMapNS") or {}).get(name)
+                if mapped is None:
+                    break
+                if isinstance(mapped, pikepdf.Array):
+                    name, ns = mapped[0], (mapped[1] if len(mapped) > 1 else None)
+                else:
+                    name, ns = mapped, None
+            else:
+                mapped = rolemap.get(name)
+                if mapped is None:
+                    break
+                name = mapped
+        return str(name)
+    return standard
+
+
 def heading_elements(path):
     """Each heading element in the structure, in reading order: its level
     (through the role maps), whether it holds content of its own, its
@@ -951,21 +1258,9 @@ def heading_elements(path):
     found = []
     with pikepdf.open(path) as pdf:
         root = pdf.Root.StructTreeRoot
-        maps = [root.get("/RoleMap") or {}] + [ns.get("/RoleMapNS") or {}
-                                               for ns in root.get("/Namespaces") or []]
+        standard = resolver(root)
         pages = {page.objgen: n for n, page in enumerate(pdf.pages)}
         texts = [page.extract_text() or "" for page in pypdf.PdfReader(path).pages]
-
-        def standard(name):
-            for _ in range(4):
-                for mapping in maps:
-                    mapped = mapping.get(name)
-                    if mapped is not None:
-                        name = mapped[0] if isinstance(mapped, pikepdf.Array) else mapped
-                        break
-                else:
-                    break
-            return str(name)
 
         def walk(element):
             if isinstance(element, pikepdf.Array):
@@ -974,7 +1269,7 @@ def heading_elements(path):
                 return
             if not isinstance(element, pikepdf.Dictionary) or "/S" not in element:
                 return
-            kind = standard(element.S)
+            kind = standard(element)
             kids = element.get("/K")
             if re.fullmatch(r"/H[1-6]", kind):
                 listed = list(kids) if isinstance(kids, pikepdf.Array) else [kids]
@@ -996,19 +1291,7 @@ def lang_spans_holding_paragraphs(path):
     found = 0
     with pikepdf.open(path) as pdf:
         root = pdf.Root.StructTreeRoot
-        maps = [root.get("/RoleMap") or {}] + [ns.get("/RoleMapNS") or {}
-                                               for ns in root.get("/Namespaces") or []]
-
-        def standard(name):
-            for _ in range(4):
-                for mapping in maps:
-                    mapped = mapping.get(name)
-                    if mapped is not None:
-                        name = mapped[0] if isinstance(mapped, pikepdf.Array) else mapped
-                        break
-                else:
-                    break
-            return str(name)
+        standard = resolver(root)
 
         def walk(element, inside):
             nonlocal found
@@ -1018,7 +1301,7 @@ def lang_spans_holding_paragraphs(path):
                 return
             if not isinstance(element, pikepdf.Dictionary) or "/S" not in element:
                 return
-            kind = standard(element.S)
+            kind = standard(element)
             if inside and kind in ("/P", "/Part"):
                 found += 1
             if element.get("/K") is not None:
@@ -1042,6 +1325,268 @@ def titles(path):
                     walk(element.K)
         walk(pdf.Root.StructTreeRoot.K)
     return found
+
+
+def structure(path):
+    """The structure tree in reading order: (element, its standard role,
+    its ancestors' roles), with the role maps followed (resolver)."""
+    pdf = pikepdf.open(path)
+    root = pdf.Root.StructTreeRoot
+    standard = resolver(root)
+    found = []
+
+    def walk(element, above):
+        if isinstance(element, pikepdf.Array):
+            for kid in element:
+                walk(kid, above)
+            return
+        if not isinstance(element, pikepdf.Dictionary) or "/S" not in element:
+            return
+        role = standard(element)
+        found.append((element, role, above))
+        if element.get("/K") is not None:
+            walk(element.K, above + (role,))
+
+    walk(root.K, ())
+    return pdf, found
+
+
+def refs(element):
+    """What an element's /Ref names."""
+    named = element.get("/Ref")
+    if named is None:
+        return []
+    return list(named) if isinstance(named, pikepdf.Array) else [named]
+
+
+def footnote_ties(path, linked=True):
+    """(marks, untied, unlinked, notes_before, dangling): the footnote marks
+    LaTeX tags, those without a /Ref to a note that refers back, those not
+    a link (when linked), the notes that come before a mark of theirs, and
+    the /Ref entries of marks and notes naming an element the structure
+    tree doesn't hold."""
+    pdf, found = structure(path)
+    order = {element.objgen: n for n, (element, _, _) in enumerate(found)}
+    marks = [e for e, _, _ in found if e.S == "/footnotemark"]
+    untied = unlinked = before = dangling = 0
+    for mark in marks:
+        notes = [r for r in refs(mark) if r.get("/S") == "/footnote"]
+        if not notes or not all(mark.objgen in [b.objgen for b in refs(r)] for r in notes):
+            untied += 1
+        if linked and not any(isinstance(k, pikepdf.Dictionary) and k.get("/S") == "/Link"
+                              for k in (mark.K if isinstance(mark.get("/K"), pikepdf.Array)
+                                        else [mark.get("/K")])):
+            unlinked += 1
+    for element, _, _ in found:
+        if element.S in ("/footnote", "/footnotemark"):
+            dangling += sum(1 for r in refs(element) if r.objgen not in order)
+        if element.S == "/footnote":
+            for mark in refs(element):
+                if order.get(mark.objgen, -1) > order[element.objgen]:
+                    before += 1
+    return len(marks), untied, unlinked, before, dangling
+
+
+def within(path, role, container):
+    """The roles of the elements of role within one of role container,
+    in reading order: each a pattern."""
+    _, found = structure(path)
+    return [r for _, r, above in found if re.fullmatch(role, r)
+            and any(re.fullmatch(container, a) for a in above)]
+
+
+def heading_texts(path):
+    """Each heading's level and its own text, in reading order: the
+    characters its own content holds (pdftext), not a footnote's mark."""
+    texts = pdftext.marked_text(path)
+    pdf, found = structure(path)
+    pages = {page.objgen: n for n, page in enumerate(pdf.pages)}
+    return [(int(role[2]), pdftext.own_text(element, texts, pages))
+            for element, role, _ in found if re.fullmatch(r"/H[1-6]", role)]
+
+
+def artifacts_in_tables(path):
+    """How many Artifact elements a table holds."""
+    pdf, found = structure(path)
+    with pdf:
+        return sum(1 for e, _, above in found if e.S == "/Artifact" and "/Table" in above)
+
+
+def link_contents(path):
+    """{address: /Contents} for each link to an address."""
+    found = {}
+    with pikepdf.open(path) as pdf:
+        for page in pdf.pages:
+            for annot in page.obj.get("/Annots") or []:
+                action = annot.get("/A")
+                if annot.get("/Subtype") == "/Link" and action is not None and "/URI" in action:
+                    found[str(action.URI)] = str(annot.get("/Contents", ""))
+    return found
+
+
+def misdirected_marks(path):
+    """The footnote marks whose link goes to a page other than their
+    note's: the link's destination, resolved, against the first page the
+    note's content is on."""
+    pdf, found = structure(path)
+    with pdf:
+        pages = {page.objgen: n for n, page in enumerate(pdf.pages)}
+        names = pdf.Root.get("/Names")
+        dests = pikepdf.NameTree(names.Dests) if names is not None and "/Dests" in names else {}
+
+        def page_of(element):
+            todo = [element]
+            while todo:
+                node = todo.pop(0)
+                if isinstance(node, pikepdf.Dictionary):
+                    if "/Pg" in node:
+                        return pages.get(node.Pg.objgen)
+                    kids = node.get("/K")
+                    if kids is not None:
+                        todo[0:0] = list(kids) if isinstance(kids, pikepdf.Array) else [kids]
+            return None
+
+        def target(annot):
+            action = annot.get("/A")
+            dest = action.get("/D") if action is not None else annot.get("/Dest")
+            if isinstance(dest, (pikepdf.String, pikepdf.Name)):
+                dest = dests[str(dest)]
+            if isinstance(dest, pikepdf.Dictionary):
+                dest = dest.D
+            return pages.get(dest[0].objgen)
+
+        wrong = 0
+        for mark, _, _ in found:
+            if mark.S != "/footnotemark":
+                continue
+            notes = [r for r in refs(mark) if r.get("/S") == "/footnote"]
+            for link in mark.get("/K") if isinstance(mark.get("/K"), pikepdf.Array) else []:
+                if not isinstance(link, pikepdf.Dictionary) or link.get("/S") != "/Link":
+                    continue
+                for kid in (link.K if isinstance(link.get("/K"), pikepdf.Array) else [link.K]):
+                    if isinstance(kid, pikepdf.Dictionary) and kid.get("/Type") == "/OBJR":
+                        if any(target(kid.Obj) != page_of(note) for note in notes):
+                            wrong += 1
+        return wrong
+
+
+def note_languages(path):
+    """The languages each footnote's note holds, in reading order: its own
+    and its parts' /Lang, joined."""
+    pdf, found = structure(path)
+    with pdf:
+        out = []
+        for note, role, _ in found:
+            if role != "/FENote":
+                continue
+            langs, todo = set(), [note]
+            while todo:
+                node = todo.pop()
+                if isinstance(node, pikepdf.Dictionary) and "/S" in node:
+                    if "/Lang" in node:
+                        langs.add(str(node.Lang))
+                    kids = node.get("/K")
+                    if kids is not None:
+                        todo += list(kids) if isinstance(kids, pikepdf.Array) else [kids]
+            out.append(",".join(sorted(langs)))
+        return out
+
+
+def paragraph_languages(path):
+    """The languages each footnote's paragraphs are in, in reading order:
+    each paragraph's own /Lang or the nearest within the note above it, ""
+    for the document's, joined."""
+    pdf, found = structure(path)
+    with pdf:
+        out = []
+        for note, role, _ in found:
+            if role != "/FENote":
+                continue
+            langs, standard = set(), resolver(pdf.Root.StructTreeRoot)
+            todo = [(note, str(note.Lang) if "/Lang" in note else "")]
+            while todo:
+                node, lang = todo.pop()
+                if not isinstance(node, pikepdf.Dictionary) or "/S" not in node:
+                    continue
+                lang = str(node.Lang) if "/Lang" in node else lang
+                if standard(node) == "/P":
+                    langs.add(lang)
+                kids = node.get("/K")
+                for kid in (list(kids) if isinstance(kids, pikepdf.Array) else [kids]):
+                    todo.append((kid, lang))
+            out.append(",".join(sorted(langs)))
+        return out
+
+
+def link_pages(path):
+    """{a link's /Contents: the index of the page it goes to}, for each link
+    within the PDF."""
+    with pikepdf.open(path) as pdf:
+        pages = {page.objgen: n for n, page in enumerate(pdf.pages)}
+        names = pdf.Root.get("/Names")
+        dests = pikepdf.NameTree(names.Dests) if names is not None and "/Dests" in names else {}
+        found = {}
+        for page in pdf.pages:
+            for annot in page.obj.get("/Annots") or []:
+                action = annot.get("/A")
+                if annot.get("/Subtype") != "/Link" or action is None or action.get("/S") != "/GoTo":
+                    continue
+                dest = action.D
+                if not isinstance(dest, pikepdf.Array):
+                    dest = dests[str(dest)]
+                if isinstance(dest, pikepdf.Dictionary):
+                    dest = dest.D
+                found[str(annot.get("/Contents", ""))] = pages.get(dest[0].objgen)
+        return found
+
+
+def page_with(path, words):
+    """The index of the first page whose text holds words."""
+    return next((n for n, page in enumerate(pypdf.PdfReader(path).pages)
+                 if words in (page.extract_text() or "")), None)
+
+
+def piece_levels(pages, stem):
+    """The levels of the headings on the pages a split cut a deck into, in
+    their order."""
+    pieces = []
+    for name in os.listdir(pages):
+        if name.endswith(".html"):
+            page = read(os.path.join(pages, name))
+            part = re.search(r'<meta name="page-part" content="(\d+)/', page)
+            if f'<meta name="source-page" content="{stem}"' in page and part:
+                pieces.append((int(part.group(1)), page))
+    return [level for _, page in sorted(pieces) for level, _ in headings(page)]
+
+
+def step_links(path, title):
+    """The links left on a slide's earlier steps: on each page but the
+    last whose text starts with the slide's title, and any LaTeX gathered
+    as untagged (an Artifact structure element holding them), with any
+    entry of the parent tree naming a structure element not in the tree."""
+    with pikepdf.open(path) as pdf:
+        texts = [page.extract_text() or "" for page in pypdf.PdfReader(path).pages]
+        steps = [n for n, text in enumerate(texts) if text.strip().startswith(title)]
+        left = sum(len(pdf.pages[n].obj.get("/Annots") or []) for n in steps[:-1])
+    pdf, found = structure(path)
+    reachable = {e.objgen for e, _, _ in found if e.is_indirect}
+    stale = 0
+    for _, value in pikepdf.NumberTree(pdf.Root.StructTreeRoot.ParentTree).items():
+        for element in (list(value) if isinstance(value, pikepdf.Array) else [value]):
+            if isinstance(element, pikepdf.Dictionary) and element.is_indirect \
+                    and element.objgen not in reachable:
+                stale += 1
+
+    def holds_link(element):
+        kids = element.get("/K")
+        for kid in (list(kids) if isinstance(kids, pikepdf.Array) else [kids]):
+            if isinstance(kid, pikepdf.Dictionary) and (
+                    kid.get("/Type") == "/OBJR" or ("/S" in kid and holds_link(kid))):
+                return True
+        return False
+
+    return len(steps), left + stale + sum(1 for e, _, _ in found
+                                          if e.S == "/Artifact" and holds_link(e))
 
 
 def languages(path):
@@ -1070,6 +1615,7 @@ def case_pdf(work):
     work = folder(work, PDF, decks_given={
         "Flat Deck.md": FLAT, "untitled.md": UNTITLED, "agenda.md": AGENDA, "odd.md": ODD,
         "nested.md": NESTED, "more.md": MORE, "subsections.md": SUBSECTIONS,
+        "headings.md": HEADINGS, "langs.md": LANGS,
         "sectioned.md": SECTIONED.replace("Right.", "![A dark bar](<img/a bar.svg>)" if svg
                                           else "Right.")})
     write(os.path.join(work, "img", "a bar.svg"), SVG)
@@ -1084,6 +1630,10 @@ def case_pdf(work):
     nested = os.path.join(work, "pdf", "nested.pdf")
     more = os.path.join(work, "pdf", "more.pdf")
     subsections = os.path.join(work, "pdf", "subsections.pdf")
+    headings = os.path.join(work, "pdf", "headings.pdf")
+    langs = os.path.join(work, "pdf", "langs.pdf")
+    built = lambda: [os.path.join(work, "pdf", name)  # noqa: E731
+                     for name in sorted(os.listdir(os.path.join(work, "pdf")))]
     check = rows_of(os.path.join(work, "output-check.csv"))
     ran = verapdf()
     if not ran:
@@ -1094,21 +1644,21 @@ def case_pdf(work):
     checks = [
         ("a PDF of each deck, the whole deck however its pages are cut",
          lambda: result.returncode == 0 and sorted(os.listdir(os.path.join(work, "pdf"))) == [
-             "Flat-Deck.pdf", "agenda.pdf", "more.pdf", "nested.pdf", "odd.pdf",
-             "sectioned.pdf", "subsections.pdf", "untitled.pdf"]
-         and "Wrote 8 PDF(s)" in out),
+             "Flat-Deck.pdf", "agenda.pdf", "headings.pdf", "langs.pdf", "more.pdf", "nested.pdf",
+             "odd.pdf", "sectioned.pdf", "subsections.pdf", "untitled.pdf"]
+         and "Wrote 10 PDF(s)" in out),
         ("a slide's title is an H1, or an H2 in a section, and a section's an H1",
          lambda: levels(flat) == [1, 1, 1, 1] and levels(sectioned) == [1, 2, 2, 1, 2]),
         ("a slide before the first section is an H1, as a section is, and bookmarked"
          " beside the sections, one in another language by its words",
-         lambda: levels(agenda) == [1, 1, 2, 1, 2] and outline(agenda) == [
+         lambda: levels(agenda) == [1, 1, 2, 3, 1, 2] and outline(agenda) == [
              ("Agenda", []), ("Supply", [("The Curve", [])]),
              ("Profit: MR = MC", [("The Rule", [])])]),
         ("sections at ## are LaTeX's sections, their slides H2s under H1s",
          lambda: levels(subsections) == [1, 2, 1, 2] and outline(subsections) == [
              ("Part A", [("Slide One", [])]), ("Part B", [("Slide Two", [])])]),
         ("two levels of sections nest, in the headings and the bookmarks",
-         lambda: levels(nested) == [1, 2, 3, 2, 3, 1, 2] and outline(nested) == [
+         lambda: levels(nested) == [1, 2, 3, 2, 3, 1, 2, 3, 3] and outline(nested) == [
              ("Part One", [("Chapter A", [("Slide A1", [])]), ("Chapter B", [("Slide B1", [])])]),
              ("Part Two", [("Slide C1", [])])]),
         ("a slide's bookmark leaves out its title's footnote",
@@ -1116,9 +1666,70 @@ def case_pdf(work):
         ("a slide in a div is a slide: bookmarked, its title's footnote set",
          lambda: ("Wrapped Slide", []) in outline(more) and "Wrapped Slide5" in more_text
          and "5The wrapped" in more_text),
-        ("a heading in a quotation is bold text in its slide, which stays an H1 among H1s",
-         lambda: levels(more) == [1] * 9 and "Quoted heading" in more_text
-         and "Quoted big heading" in more_text),
+        ("a heading in a quotation is a heading one below its slide's, in the quotation,"
+         " as a block's title is, whatever level the deck gives it",
+         lambda: levels(more)[:14] == [1, 1, 1, 1, 1, 2, 2, 1, 1, 1, 2, 2, 2, 1]
+         and levels(more)[14:] == [1, 1]
+         and within(more, r"/H[1-6]", "/BlockQuote") == ["/H2", "/H2"]
+         and within(nested, r"/H[1-6]", "/BlockQuote") == ["/H3"]
+         and "Quoted heading" in more_text and "Quoted big heading" in more_text),
+        ("and so is a heading in a list's item or a table's cell, and a block's title, one"
+         " below the block's it's in, across columns too; a heading in a quotation in a"
+         " block is below that, or beside it, as the deck has it, and one in a quotation"
+         " below another there; a block with no title has no heading",
+         lambda: levels(headings) == [1, 2, 1, 2, 1, 2, 3, 4, 3, 1, 2, 3, 4, 1, 2, 3]
+         and within(headings, r"/H[1-6]", "/LBody") == ["/H2"]
+         and within(headings, r"/H[1-6]", "/TD") == ["/H2"]
+         and within(headings, r"/H[1-6]", "/BlockQuote") == ["/H4", "/H3", "/H4", "/H2", "/H3"]
+         and all(h[1] for h in heading_elements(headings))),
+        ("a link to a heading in a quotation, a block's anchor, and a slide lands on its"
+         " page, where a \\hyperlink to a label went to the last page, and on the pages,"
+         " a block's anchor stays where its heading goes",
+         lambda: link_pages(headings).get("a heading in a quotation")
+         == page_with(headings, "Quoted beside Inner") is not None
+         and link_pages(headings).get("the anchor block") == page_with(headings, "An anchor")
+         and link_pages(headings).get("the columns slide") == page_with(headings, "Columns")
+         and page_with(headings, "Columns") is not None
+         and not [r for r in check if r[1] == "link-to-missing-fragment"]),
+        ("the PDF's headings are at the levels the deck's pages give them, split a page a"
+         " slide, and no page has a heading for a block with no title, as no PDF has",
+         lambda: piece_levels(os.path.join(work, "pages"), "headings") == levels(headings)
+         and not [r for r in check if r[1] == "empty-heading"]),
+        ("a block's title is a heading one below its slide's",
+         lambda: heading_elements(agenda)[3][0] == 3),
+        ("every footnote's mark is a link to its note, the two tied by a /Ref each way,"
+         " naming nothing the tree lacks, and no note comes before its mark: in a slide's"
+         " or a section's title, a block's, a heading in an item or a quotation, a"
+         " caption, a table, and on a slide shown in steps",
+         lambda: footnote_ties(more) == (7, 0, 0, 0, 0) and footnote_ties(odd) == (4, 0, 0, 0, 0)
+         and footnote_ties(agenda) == (1, 0, 0, 0, 0)
+         and footnote_ties(headings) == (4, 0, 0, 0, 0)
+         and "aren't tied to their notes" not in out),
+        ("each mark's link goes to its note's page, on a slide shown in steps too, in a deck"
+         " with a slide LaTeX breaks over pages",
+         lambda: all(misdirected_marks(path) == 0 for path in built())),
+        ("a heading's footnote set after it is in the heading's language: a section's, a"
+         " slide's, a block's, and a quotation's heading's in a div in German, and one in"
+         " a passage in French in a slide's title, every paragraph of a German note"
+         " German; and a block with no title in the div has no heading, and a quotation's"
+         " heading in one is one below its slide's",
+         lambda: note_languages(langs) == ["de", "de", "de", "de", "fr"]
+         and paragraph_languages(langs) == ["de", "de", "de", "de", ""]
+         and levels(langs) == [1, 2, 1, 2, 3, 3, 2, 2, 3]),
+        ("a footnote in a heading of any kind is set after it, never in it, and no note's"
+         " text is a heading",
+         lambda: all(within(path, "/FENote", r"/H[1-6]") == []
+                     and within(path, r"/H[1-6]", "/FENote") == [] for path in built())
+         and len(within(agenda, "/FENote", ".*")) == 1
+         and len(within(headings, "/FENote", ".*")) == 4),
+        ("a section's footnote is set on its slide after its heading, its link with its"
+         " text for /Contents, as any link has",
+         lambda: "1Marginal revenue" in agenda_text and "Each is per unit." in agenda_text
+         and link_contents(agenda).get("https://example.org/unit") == "per unit"),
+        ("a slide's earlier steps have no links, and nothing left untagged holds any",
+         lambda: step_links(more, "Paused") == (2, 0)),
+        ("a piece the split cut has its headings placed as the page has them, none skipped",
+         lambda: not [r for r in check if r[1] == "heading-skips-level"]),
         ("a passage in another language that begins a paragraph or an item is in it,"
          " and a link, a slide, and a slide's title are tagged with theirs",
          lambda: lang_spans_holding_paragraphs(more) == 0
@@ -1203,7 +1814,40 @@ def case_pdf(work):
     if ran:
         checks.insert(1, ("veraPDF finds nothing to fail in any of them",
                           lambda: not [r for r in check if r[1].startswith("verapdf")]))
+    if not pdftext.AVAILABLE:
+        print("  skip  pdfminer.six not found; a code block's spaces, and the headings' words,"
+              " aren't checked")
+    else:
+        checks.append(("a code block's spaces are characters in the PDF, its indentation kept",
+                       lambda: pdftext.code_lines(sectioned) == ["def demand(p):",
+                                                                 "    return 12 - 2 * p > 0"]))
+        checks.append(("each heading's words, its footnote's mark not among them",
+                       lambda: heading_texts(headings) == [
+                           (1, "A List"), (2, "In an item"), (1, "A Table"), (2, "In a cell"),
+                           (1, "Blocks"), (2, "Outer"), (3, "Inner"), (4, "Quoted under Inner"),
+                           (3, "Quoted beside Inner"), (1, "Columns"), (2, "Left"),
+                           (3, "Right"), (4, "Quoted right"), (1, "Quoted"), (2, "Quoted"),
+                           (3, "Under it")]
+                       and heading_texts(agenda)[3] == (3, "A Block")))
     return checks
+
+
+# A table whose head LaTeX sets twice, the second an artifact, with a
+# footnote in it.
+CAPTIONED = """---
+title: Captioned
+---
+
+# A Table
+
+| Price[^h] | Quantity |
+|------:|------:|
+| 1 | 10 |
+
+: Prices
+
+[^h]: The head's note.
+"""
 
 
 def case_pdf_settings(work):
@@ -1211,11 +1855,17 @@ def case_pdf_settings(work):
     if problem:
         print(f"  skip  {problem}; a deck's PDF settings aren't checked")
         return []
-    work = folder(work, "targets:\n  pdf:\n    format: pdf\n    pdf:\n      standard: [ua-1]\n"
-                  "    slides:\n      aspect_ratio: \"5:4\"\n",
+    plain = folder(os.path.join(work, "plain"), "targets:\n  pdf:\n    format: pdf\n    pdf:\n"
+                   "      repair_captions: false\n", decks_given={"captioned.md": CAPTIONED})
+    unrepaired = convert(plain)
+    captioned = os.path.join(plain, "pdf", "captioned.pdf")
+    plain_check = rows_of(os.path.join(plain, "output-check.csv"))
+    work = folder(os.path.join(work, "ua1"), "targets:\n  pdf:\n    format: pdf\n    pdf:\n"
+                  "      standard: [ua-1]\n    slides:\n      aspect_ratio: \"5:4\"\n",
                   decks_given={"sectioned.md": SECTIONED, "agenda.md": AGENDA})
     result = convert(work)
     built = os.path.join(work, "pdf", "sectioned.pdf")
+    agenda = os.path.join(work, "pdf", "agenda.pdf")
     check = rows_of(os.path.join(work, "output-check.csv"))
     ran = verapdf()
     if not ran:
@@ -1229,11 +1879,92 @@ def case_pdf_settings(work):
          and pikepdf.open(built).pdf_version == "1.7"),
         ("an aspect ratio that isn't one stops the run, saying what it takes",
          lambda: wrong.returncode != 0 and "slides.aspect_ratio is 'wide'" in wrong.stderr),
+        ("in PDF/UA-1 a footnote's mark is tied to its note too, though no link, and a"
+         " section's footnote's link has its text for /Contents",
+         lambda: footnote_ties(agenda) == (1, 0, 1, 0, 0)
+         and link_contents(agenda).get("https://example.org/unit") == "per unit"),
+        ("with the captions' repair off, the artifact LaTeX makes of a table's repeated"
+         " head stays, and its footnote's mark with it, tied as the other is",
+         lambda: unrepaired.returncode == 0
+         and artifacts_in_tables(captioned) == 1
+         and footnote_ties(captioned)[1:] == (0, 0, 0, 0)),
     ]
     if ran:
         checks.insert(1, ("veraPDF passes them as PDF/UA-1: the footnote's mark no link, "
                           "the agenda's heading an H1",
                           lambda: not [r for r in check if r[1].startswith("verapdf")]))
+        checks.append(("and veraPDF passes that PDF as PDF/UA-2",
+                       lambda: not [r for r in plain_check if r[1].startswith("verapdf")]))
+    return checks
+
+
+# What a newer ltx-talk or LaTeX would change, as the template's checks of
+# their code see it: the copy of ltx-talk's code for a slide's title, and
+# for a block, made unlike the class's, and LaTeX's footnote variable the
+# template looks for named as one that doesn't exist.
+FALLBACKS = [("        tag      = frametitle ,\n", "        tag      = frametitle-changed ,\n"),
+             ("\\normalfont \\large \\bfseries", "\\normalfont \\Large \\bfseries"),
+             ("{ \\bool_if_exist_p:N \\l__fnote_autodetect_bool }",
+              "{ \\bool_if_exist_p:N \\l__fnote_autodetect_changed_bool }")]
+# The agenda, with a footnote in a slide's title, which LaTeX can't tie to
+# a text set before it, and a heading in a quotation.
+FALLBACK = AGENDA.replace("## The Rule\n\nProduce where they meet.\n",
+                          "## The Rule[^r]\n\nProduce where they meet.\n\n"
+                          "> ### Quoted\n>\n> Its text.\n") + "\n[^r]: The rule's note.\n"
+
+
+def case_fallbacks(work):
+    """A deck's PDF where ltx-talk's code for a slide's title and a block,
+    and LaTeX's footnote code, aren't the code the template knows: each
+    falls back to what the class and LaTeX do, the PDF still passes, and
+    the run says so. A copy of bin and lib, its template changed."""
+    problem = pdf_ready()
+    if problem:
+        print(f"  skip  {problem}; the template's fallbacks aren't checked")
+        return []
+    copy = os.path.join(work, "copy")
+    shutil.copytree(BIN, os.path.join(copy, "bin"))
+    shutil.copytree(os.path.join(ROOT, "lib"), os.path.join(copy, "lib"))
+    template = os.path.join(copy, "bin", "ltx-talk.latex")
+    with open(template, encoding="utf-8") as fh:
+        text = fh.read()
+    found = [text.count(old) for old, _ in FALLBACKS]
+    for old, new in FALLBACKS:
+        text = text.replace(old, new)
+    write(template, text)
+    decks_dir = folder(os.path.join(work, "decks"), "targets:\n  pdf:\n    format: pdf\n",
+                       decks_given={"agenda.md": FALLBACK})
+    result = subprocess.run([sys.executable, os.path.join(copy, "bin", "convert.py"), "--quiet"],
+                            cwd=decks_dir, capture_output=True, text=True,
+                            stdin=subprocess.DEVNULL)
+    out = result.stderr
+    agenda = os.path.join(decks_dir, "pdf", "agenda.pdf")
+    check = rows_of(os.path.join(decks_dir, "output-check.csv"))
+    ran = verapdf()
+    levels = lambda path: [h[0] for h in heading_elements(path)]  # noqa: E731
+    checks = [
+        ("each of the template's checks found the code it changes",
+         lambda: FALLBACK != AGENDA + "\n[^r]: The rule's note.\n" and found == [1, 1, 1]),
+        ("the PDF is built, and the run warns of each fallback, and of the mark LaTeX"
+         " couldn't tie",
+         lambda: result.returncode == 0 and os.path.exists(agenda)
+         and "every slide's title is tagged at one level" in out
+         and "a block's title is a paragraph, not a heading" in out
+         and "has a mark that is a number, not a link to its note" in out
+         and "1 footnote mark(s) in 1 deck PDF(s) (agenda) aren't tied" in out),
+        ("every slide's title at one level, H2 below the sections, the block's a"
+         " paragraph, its level not set in it, and a heading in a quotation one below the"
+         " slides'",
+         lambda: levels(agenda) == [2, 1, 2, 1, 2, 3]
+         and re.search(r"(?<!\d)A Block", text_of(agenda))),
+        ("a section's footnote still after its slide's heading, and no mark a link,"
+         " though LaTeX ties a mark set before its text, not the slide's title's",
+         lambda: within(agenda, "/FENote", r"/H[1-6]") == []
+         and footnote_ties(agenda) == (2, 1, 2, 0, 0) and "1Marginal revenue" in text_of(agenda)),
+    ]
+    if ran:
+        checks.append(("veraPDF still finds nothing to fail",
+                       lambda: not [r for r in check if r[1].startswith("verapdf")]))
     return checks
 
 
@@ -1340,8 +2071,9 @@ CASES = [("the pieces", case_pieces),
          ("the PDF's settings", case_pdf_settings),
          ("an SVG the PDF can't show", case_svg),
          ("LaTeX that doesn't finish", case_timeout),
+         ("the template's fallbacks", case_fallbacks),
          ("no LuaLaTeX", case_no_latex)]
-SLOW = ("a deck's PDF", "the PDF's settings")
+SLOW = ("a deck's PDF", "the PDF's settings", "the template's fallbacks")
 
 
 def run_cases(cases):

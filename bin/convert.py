@@ -3575,7 +3575,8 @@ def deck_pdfs(target, stems, names, base, language):
     with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
         results = list(pool.map(one, stems))
     written, failed, pages, missing, dropped, ratios = [], [], 0, {}, [], {}
-    unmatched, beamer, one_level = [], {}, []
+    unmatched, beamer, one_level, unlinked, untagged_blocks = [], {}, [], [], []
+    untied = {}
     for stem, result in results:
         for command in result["beamer_commands"]:
             beamer.setdefault(command, []).append(stem)
@@ -3613,6 +3614,12 @@ def deck_pdfs(target, stems, names, base, language):
             unmatched.append(stem)
         if not result["own_levels"]:
             one_level.append(stem)
+        if not result["linked_marks"]:
+            unlinked.append(stem)
+        if not result["block_headings"]:
+            untagged_blocks.append(stem)
+        if result["tidied"] and result["tidied"]["untied_marks"]:
+            untied[stem] = result["tidied"]["untied_marks"]
     if written:
         say(f"Wrote {len(written)} PDF(s) in {target.output_dir}, one for each deck, "
             f"through ltx-talk: {pages} page(s); the slides "
@@ -3636,16 +3643,31 @@ def deck_pdfs(target, stems, names, base, language):
             f"was written for (ltx-talk 0.6.9), so in {len(one_level)} deck PDF(s) ("
             + ", ".join(one_level[:4]) + ") every slide's title is tagged at one level, not "
             "at the level of the sections around it.")
+    if untagged_blocks:
+        say(f"WARNING: ltx-talk's code for a block isn't the code bin/ltx-talk.latex was "
+            f"written for (ltx-talk 0.6.9), so in {len(untagged_blocks)} deck PDF(s) ("
+            + ", ".join(untagged_blocks[:4]) + ") a block's title is a paragraph, not a "
+            "heading.")
+    if unlinked:
+        say(f"WARNING: LaTeX's footnote code isn't the code bin/ltx-talk.latex was written "
+            f"for (LaTeX 2026-06-01), so in {len(unlinked)} deck PDF(s) ("
+            + ", ".join(unlinked[:4]) + ") a footnote in a heading, a caption, or a table "
+            "has a mark that is a number, not a link to its note.")
+    if untied:
+        say(f"WARNING: {sum(untied.values())} footnote mark(s) in {len(untied)} deck PDF(s) ("
+            + ", ".join(list(untied)[:4]) + ") aren't tied to their notes by a /Ref each "
+            "way, as PDF/UA-2 asks of a footnote (8.2.5.14), as bin/ltx-talk.latex ties them "
+            "with LaTeX 2026-06-01's footnote code.")
     if unmatched:
         say(f"WARNING: the tables in {len(unmatched)} deck PDF(s) ("
             + ", ".join(unmatched[:4]) + ") don't line up with the decks' own, so no "
             "caption was retagged in them.")
-    if pdfretag.pikepdf is None and (target["pdf.repair_captions"]
-                                     or target["pdf.remove_empty_paragraphs"]):
+    if pdfretag.pikepdf is None:
         say("WARNING: pikepdf isn't installed, so the decks' PDFs keep the tags LaTeX "
-            "gives a table's caption, a first row a screen reader reads as data, and the "
-            "empty paragraph elements LaTeX leaves (pip install pikepdf, or sudo apt "
-            "install python3-pikepdf).")
+            "gives a table's caption, a first row a screen reader reads as data, the "
+            "empty paragraph elements LaTeX leaves, and the links of a slide's earlier "
+            "steps, which a screen reader meets as links saying \"artifact\" (pip install "
+            "pikepdf, or sudo apt install python3-pikepdf).")
     if failed:
         die(f"{len(failed)} of the {len(stems)} deck PDF(s) for target {target.name} "
             "weren't built (" + ", ".join(failed[:4]) + (", ..." if len(failed) > 4 else "")

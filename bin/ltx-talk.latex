@@ -8,7 +8,9 @@ $-- frametitle-tag (the heading every slide's title is tagged as if
 $-- ltx-talk's code for a slide's title isn't the code this template knows,
 $-- 0.6.9's: H1, or one level more for each level of sections), math-setup
 $-- (how a formula's MathML is carried), oer-macros (the commands
-$-- pdf-target.lua's output uses, from lib/latexbuild.py), and, for
+$-- pdf-target.lua's output uses, from lib/latexbuild.py), code-spaces (a
+$-- highlighted code block's spaces as characters, latexbuild.CODE_SPACES,
+$-- read after Pandoc's highlighting macros), and, for
 $-- PDF/UA-1, hyperfootnotes-off (a footnote's mark not made a link, since
 $-- PDF/UA-1 wants a /Contents on every link and LaTeX gives that one
 $-- none). lang and pdfstandard come as metadata, and the deck's own
@@ -71,14 +73,60 @@ $oer-macros$
       }
   }
 % The mark of a footnote whose number deck-pdf.lua gives (in a slide's
-% title, a caption, a table), its text given apart; the title's text, for
-% its bookmark and its structure element, leaves it out. Not a link:
-% hyperref pairs a mark with the next text, and a title is set after its
-% slide's footnotes, so on a slide shown in steps the mark's link went to
-% another footnote, and veraPDF failed the file.
-\NewDocumentCommand \oertitlemark { m }
-  { \begin { NoHyper } \footnotemark [ #1 ] \end { NoHyper } }
-\text_declare_purify_equivalent:Nn \oertitlemark { \use_none:n }
+% title, a section's, a caption, a table), its text given apart, which
+% \oerfootnotelabel names: the mark is tied to that text as \footref ties
+% one, a link to it and a /Ref each way, as PDF/UA-2 asks of a footnote
+% (8.2.5.14). LaTeX pairs a mark given apart with the next text of its
+% number, but a slide's title is set after its body, footnotes and all,
+% so on a slide shown in steps a mark went to another step's footnote
+% and veraPDF failed the file. The text is recorded only on the slide
+% that's tagged, a frame's last, and its structure and link target are
+% that slide's. Where LaTeX's footnote code isn't the one this knows, as
+% far as what it defines shows, the mark is a number with no link, as it
+% was. The title's text, for its bookmark and its structure element,
+% leaves the mark out.
+\bool_lazy_all:nTF
+  {
+    { \bool_if_exist_p:N \l__fnote_autodetect_bool }
+    { \tl_if_exist_p:N \l__fnote_currentlabel_tl }
+    { \cs_if_exist_p:N \fnote_set_fnmark:nn }
+    { \property_if_exist_p:n { fnote/struct } }
+    { \property_if_exist_p:n { fnote/id } }
+  }
+  {
+    \cs_new_protected:Npn \oerfootnotemark #1
+      {
+        \fnote_set_fnmark:nn {#1} { footnote }
+        \bool_set_false:N \l__fnote_autodetect_bool
+        \tl_set:Nn \l__fnote_currentlabel_tl { oerfn - #1 }
+        \use:c { @footnotemark }
+        \bool_set_true:N \l__fnote_autodetect_bool
+      }
+    \cs_new_protected:Npn \oerfootnotelabel #1
+      {
+        \tag_if_active:T
+          { \property_record:ee { __fnote / oerfn - #1 } { fnote/struct , fnote/id } }
+      }
+  }
+  {
+    \cs_new_protected:Npn \oerfootnotemark #1
+      { \begin { NoHyper } \footnotemark [ #1 ] \end { NoHyper } }
+    \cs_new_protected:Npn \oerfootnotelabel #1 { }
+    \typeout { oer:~footnote~marks~given~apart~not~linked }
+  }
+\text_declare_purify_equivalent:Nn \oerfootnotemark { \use_none:n }
+% A footnote in a section's title: its mark and its text, which the
+% section's slide sets, the text after the slide's heading, as only the
+% title set there holds them; set anywhere else (a table of contents),
+% neither is.
+\bool_new:N \l__oer_section_title_bool
+\tl_new:N \g__oer_section_notes_tl
+\NewDocumentCommand \oersectionmark { m }
+  { \bool_if:NT \l__oer_section_title_bool { \oerfootnotemark {#1} } }
+\NewDocumentCommand \oersectionnotes { m }
+  { \bool_if:NT \l__oer_section_title_bool { \tl_gput_right:Nn \g__oer_section_notes_tl {#1} } }
+\text_declare_purify_equivalent:Nn \oersectionmark { \use_none:n }
+\text_declare_purify_equivalent:Nn \oersectionnotes { \use_none:n }
 % A slide's title is tagged at the level of the sections around it: H1
 % with none, as for a slide before a deck's first section, H2 in a
 % section, H3 in a subsection, as on the deck's page. ltx-talk tags every
@@ -86,6 +134,10 @@ $oer-macros$
 % the sections below change, if the code is 0.6.9's, as this is.
 \tl_new:N \g__oer_frametitle_tag_tl
 \tl_gset:Nn \g__oer_frametitle_tag_tl { oerframetitle1 }
+% The level of a slide's title, which a heading on the slide is one below.
+\int_new:N \g__oer_slide_level_int
+\int_gset:Nn \g__oer_slide_level_int { 1 }
+\bool_new:N \g__oer_own_levels_bool
 \tagpdfsetup
   {
     role / new-tag = oerframetitle1 / H1 ,
@@ -125,8 +177,12 @@ $oer-macros$
         \group_end:
         \__talk_header_tag_end:
       }
+    \bool_gset_true:N \g__oer_own_levels_bool
   }
-  { \typeout { oer:~every~frame~title~tagged~at~one~level } }
+  {
+    \typeout { oer:~every~frame~title~tagged~at~one~level }
+    \int_gset:Nn \g__oer_slide_level_int { \str_range:nnn { $frametitle-tag$ } { 2 } { -1 } }
+  }
 % A section's title on a slide of its own, as beamer's and PowerPoint's
 % section slides show it, and the slide's text is the section's heading.
 % ltx-talk 0.6.9 tags a section's heading with no content, its title as
@@ -147,11 +203,14 @@ $oer-macros$
       { \bool_if:NF \l__talk_frame_bool { \__oer_section_slide_aux:nn {#1} {#2} } }
       { \__oer_section_slide_aux:nn {#1} {#2} }
   }
-% A section inside a frame, as the writer gives a heading in a quotation
-% (deck-pdf.lua makes those bold text), ltx-talk ignores, and so does this.
+% A section inside a frame, as the writer would give a heading in a
+% quotation (deck-pdf.lua gives those as oerheading), ltx-talk ignores,
+% and so does this.
 \cs_new_protected:Npn \__oer_section_slide_aux:nn #1#2
   {
     \tl_gset:Ne \g__oer_frametitle_tag_tl { oerframetitle \int_eval:n { #1 + 1 } }
+    \bool_if:NT \g__oer_own_levels_bool
+      { \int_gset:Nn \g__oer_slide_level_int { #1 + 1 } }
     \tl_if_exist:cTF { l__talk_ #2 _tl }
       {
         \exp_args:Nv \tl_if_blank:nF { l__talk_ #2 _tl }
@@ -170,16 +229,70 @@ $oer-macros$
         }
         { \tag_mc_begin:n { artifact } }
       \vspace* { \fill }
-      { \centering \Large \bfseries \color { structure } #2 \par }
+      {
+        \bool_set_true:N \l__oer_section_title_bool
+        \centering \Large \bfseries \color { structure } #2 \par
+      }
       \vspace* { \fill }
       \tag_mc_end:
       \bool_if:NT \g__oer_section_heading_bool { \tag_struct_end: }
       \tagpdfparaOn
+      \tl_use:N \g__oer_section_notes_tl
+      \tl_gclear:N \g__oer_section_notes_tl
     \end { frame }
   }
 \AddToHook { cmd / section / after } { \__oer_section_slide:nn { 1 } { section } }
 \AddToHook { cmd / subsection / after } { \__oer_section_slide:nn { 2 } { subsection } }
 \AddToHook { cmd / subsubsection / after } { \__oer_section_slide:nn { 3 } { subsubsection } }
+% A heading on a slide, as on the deck's page, #1 levels below the
+% slide's title, deck-pdf.lua working out how many, as the page does: a
+% block's title (a heading below the slide level), which ltx-talk sets as
+% a paragraph, the block's first, if its code is 0.6.9's, as this is, the
+% level \oerblocklevel at the head of the title gives (a block with no
+% title has none, and no heading); and a heading in a quotation, a list, or
+% a table, which deck-pdf.lua makes a bold paragraph in oerheading. Each
+% is the paragraph LaTeX tags, tagged as the heading, in a group that
+% holds no footnote's text (deck-pdf.lua sets a heading's after it).
+\cs_new_protected:Npn \__oer_heading_paragraph:n #1
+  {
+    \exp_args:Ne \tagpdfsetup
+      { para/tag = H \int_eval:n { \int_min:nn { \g__oer_slide_level_int + (#1) } { 6 } } }
+  }
+\NewDocumentEnvironment { oerheading } { O { 1 } }
+  { \par \__oer_heading_paragraph:n {#1} }
+  { \par }
+\cs_new_protected:Npn \oerblocklevel #1 { }
+\text_declare_purify_equivalent:Nn \oerblocklevel { \use_none:n }
+\cs_new_protected:cpn { __oer_talk_block_begin:nn } #1#2
+  {
+    \__talk_action_begin:n {#1}
+    \par
+    \vbox_set:Nw \l__talk_tmp_box
+      \group_begin:
+        \medskip
+        \leavevmode
+        \normalfont \large \bfseries
+        \color { structure }
+        #2
+        \par
+        \medskip
+      \group_end:
+  }
+\cs_new_protected:Npn \__oer_titled_block:nNnw #1#2#3#4 \q_stop
+  {
+    \AddToHookNext { para / before } { \__oer_heading_paragraph:n {#3} }
+    \__oer_talk_block_begin:nn {#1} {#4}
+  }
+\cs_if_eq:ccTF { environment~block~code } { __oer_talk_block_begin:nn }
+  {
+    \cs_gset_protected:cpn { environment~block~code } #1#2
+      {
+        \tl_if_head_eq_meaning:nNTF {#2} \oerblocklevel
+          { \__oer_titled_block:nNnw {#1} #2 \q_stop }
+          { \__oer_talk_block_begin:nn {#1} {#2} }
+      }
+  }
+  { \typeout { oer:~block~titles~not~tagged~as~headings } }
 % A passage in another language (deck-pdf.lua): its words, and everything
 % in a block of it, tagged with its language, which a screen reader
 % speaks it in. babel, which the writer would load for it, marks no
@@ -207,7 +320,10 @@ $oer-macros$
 \pdfstringdefDisableCommands
   {
     \cs_set:Npn \oerlang #1#2 {#2}
-    \cs_set:Npn \oertitlemark #1 { }
+    \cs_set:Npn \oerfootnotemark #1 { }
+    \cs_set:Npn \oersectionmark #1 { }
+    \cs_set:Npn \oersectionnotes #1 { }
+    \cs_set:Npn \oerblocklevel #1 { }
   }
 \cs_set_protected:Npn \foreignlanguage #1#2 {#2}
 \cs_set_protected:Npn \otherlanguage #1 { }
@@ -343,6 +459,7 @@ $header-includes$
 $endfor$
 $if(highlighting-macros)$
 $highlighting-macros$
+$code-spaces$
 $endif$
 \begin{document}
 $if(title)$

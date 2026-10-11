@@ -3027,6 +3027,9 @@ def case_title_heading(work):
     kept = book("kept", [("defs", "---\ntitle: Definitions\n---\n\n# 1.1 Definitions\n\nText.\n")],
                 "  html:\n    format: html\n", "defaults:\n  promote_h1_to_title: always\n")
     kept_html = read(kept, "html", "defs.html") if exists(kept, "html", "defs.html") else ""
+    # A declared title that is the numbered heading, number and all.
+    book("same", [("defs", "---\ntitle: 1.1 Definitions\n---\n\n# 1.1 Definitions\n\nText.\n")],
+         "  html:\n    format: html\n")
     # A Word Title with a curly apostrophe over a heading with a straight one.
     quoted = book("quoted", [("cohen", "---\ntitle: Cohen\u2019s Standards\n---\n\n"
                                        "# 10.2 Cohen\\'s standards\n\nText.\n")],
@@ -3060,7 +3063,8 @@ def case_title_heading(work):
         ("the run says when a title stands without its heading's number, and "
          "always keeps the number", lambda: "without the number their heading" in said["numbered"]
          and "<title>1.1 Definitions</title>" in kept_html
-         and "without the number their heading" not in said["kept"]),
+         and "without the number their heading" not in said["kept"]
+         and "without the number their heading" not in said["same"]),
         ("curly and straight apostrophes, and case, don't keep a heading from "
          "saying the title", lambda: quoted_html.count("<h1") == 1),
         ("a numbered book numbers the page's own heading, wrapped or not",

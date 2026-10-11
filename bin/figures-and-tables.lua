@@ -2350,7 +2350,8 @@ function Pandoc(doc)
           and declared:find(h1, 1, true) ~= nil)
     if h1_wins then
       doc.meta.title = pandoc.MetaInlines(plain_formulas(heading.content))
-    elseif folded(h1):match('^[%d%.]+%s') and folded(h1):find(folded(declared), 1, true) then
+    elseif folded(h1):match('^[%d%.]+%s') and folded(h1) ~= folded(declared)
+        and folded(h1):find(folded(declared), 1, true) then
       -- The title stands without the number its heading puts before it;
       -- convert.py says so once, since a cartridge names pages by it.
       local numbers = os.getenv('TITLE_NUMBERS')

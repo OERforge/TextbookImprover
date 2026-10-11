@@ -729,7 +729,8 @@ local BARE_FOUND_FILE = os.getenv('BARE_LINKS_FOUND')
 -- the table's shape instead. Rows: page, position, how, key, description,
 -- how being "position" (no label anywhere), or "label-after" or
 -- "label-before": a label paragraph beside the table, after or before it,
--- which the description is joined to.
+-- which the description is joined to, or "caption": the table's own
+-- caption, its label alone, which the description is joined to.
 local CAPTIONS_APPLIED_FILE = os.getenv('CAPTIONS_APPLIED')
 local BARE_SCHEMES = { http = true, https = true, ftp = true }
 local bare_rows = nil
@@ -1967,6 +1968,23 @@ local function caption_data_table(tbl, next_block, after_next, after_after, out)
           label = label .. ' ' .. extra
         end
         tbl.caption = mk_caption({ pandoc.Plain(text_to_inlines(label)) })
+      else
+        -- A caption that is its label alone (an HTML table's
+        -- <caption>Table 3.8</caption>) names the table and says
+        -- nothing of it: it takes a description from the sidecar, as a
+        -- label paragraph beside a table does, and is reported without.
+        local description = description_for(label, position_key(ordinal))
+        if description and description ~= '' then
+          local inlines = text_to_inlines(label)
+          inlines:insert(pandoc.Space())
+          inlines:extend(text_to_inlines(description))
+          tbl.caption = mk_caption({ pandoc.Plain(inlines) })
+          append_row(CAPTIONS_APPLIED_FILE, { source_stem(), th_index or '',
+                                              'caption', label, description })
+        elseif description == nil and pending.text == '' then
+          record_missing(label, table_excerpt(tbl))
+          warn('no description for "' .. label .. '"')
+        end
       end
     end
   else

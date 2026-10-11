@@ -15,7 +15,8 @@ saved from a platform is better fixed in the platform.
 - **Captions.** A description from the table-captions sidecar: for a table
   with no label anywhere, as its <caption>; for one whose label is a
   paragraph beside it, joined to the end of that paragraph, where it
-  stands, as the rendered page joins it. The filter records which table it
+  stands, as the rendered page joins it; for one whose own <caption> is
+  its label alone, joined to the end of the caption. The filter records which table it
   gave each description to, by position (the sidecar's key names the table
   as the filter sees the page, which can differ from the file), and the
   copy finds that table as it does for headers.
@@ -153,6 +154,22 @@ def remediate_captions(page, applied, resolved):
                 para = paras[-1] if paras else None
             if para and _text(para.group(2)) == " ".join(key.split()):
                 edits.append((para.start(3), " " + htmllib.escape(description, quote=False)))
+                counts["labels_joined"] += 1
+            else:
+                counts["captions_left"] += 1
+            continue
+        if how == "caption" and position < len(spans):
+            # The table's own caption, its label alone: the description
+            # joins it, inside the caption.
+            start, end = spans[position]
+            table = page[start:end]
+            opening = TABLE_TAG.match(table)
+            cap = re.compile(r"\s*(?:<!--.*?-->\s*)*(<caption\b[^>]*>)(.*?)"
+                             r"(</caption\s*>)", re.I | re.S).match(
+                                 table, opening.end()) if opening else None
+            if cap and _text(cap.group(2)) == " ".join(key.split()):
+                edits.append((start + cap.start(3),
+                              " " + htmllib.escape(description, quote=False)))
                 counts["labels_joined"] += 1
             else:
                 counts["captions_left"] += 1

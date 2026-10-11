@@ -126,7 +126,11 @@ rather than a file.
 A blank cell deliberately doesn't mean decorative. "I checked this and it
 is fine" and "this image carries no meaning" are different decisions.
 
-`table-captions.csv` keys on the table's label, such as `Table 2.1`. A
+`table-captions.csv` keys on the table's label, such as `Table 2.1`,
+whether the label is a paragraph beside the table, as a Word file has it,
+or the table's own caption, as an HTML page's `<caption>Table 2.1</caption>`
+or a Markdown table's `Table: Table 2.1`; a label that says nothing more
+is reported for a description either way. A
 table the source never labeled has no such key, so it's reported under a
 positional one instead:
 

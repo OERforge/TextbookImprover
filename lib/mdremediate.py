@@ -314,6 +314,20 @@ def remediate_captions(text, doc, applied):
             inserts.append((at, ["", "Table: " + description]))
             counts["captions"] += 1
             continue
+        if how == "caption":
+            # The table's own caption line, its label alone: the
+            # description joins it.
+            hit = None
+            for i in range(a, min(b, len(lines))):
+                m = re.match(r"^\s*(?:Table)?:\s+(.*?)\s*$", lines[i])
+                if m and " ".join(m.group(1).split()) == " ".join(key.split()):
+                    hit = i
+            if hit is not None:
+                appends.append((hit, " " + description))
+                counts["labels_joined"] += 1
+            else:
+                counts["captions_left"] += 1
+            continue
         # A label paragraph: the next stretch after the table, or the one
         # before it, whose text is the label.
         if how == "label-after":

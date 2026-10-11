@@ -2388,7 +2388,9 @@ def case_source_target(work):
                  "  <tr><td>Name</td><td>Score</td></tr>\n  <tr><td>Ana</td><td>90</td></tr>\n"
                  "  <tr><td>Ben</td><td>85</td></tr>\n  <tr><td>Cy</td><td>70</td></tr>\n</table>\n"
                  "<p><img src=\"img/bar.png\"></p>\n<table>\n  <tr><td>Term</td><td>Count</td></tr>\n"
-                 "  <tr><td>Fall</td><td>12</td></tr>\n</table>\n<p>Table 1.2</p>\n<p>More text.</p>\n<p>See <a href=\"https://doi.org/10.1000/xyz123\">"
+                 "  <tr><td>Fall</td><td>12</td></tr>\n</table>\n<p>Table 1.2</p>\n<p>More text.</p>\n"
+                 "<table>\n  <caption>Table 1.3</caption>\n  <tr><td>Section</td><td>Grade</td></tr>\n"
+                 "  <tr><td>A</td><td>88</td></tr>\n</table>\n<p>See <a href=\"https://doi.org/10.1000/xyz123\">"
                  "https://doi.org/10.1000/xyz123</a>.</p>\n</body>\n</html>\n")
     with open(os.path.join(work, "project.yaml"), "w", encoding="utf-8") as fh:
         fh.write("project:\n  language: en\n")
@@ -2411,6 +2413,8 @@ def case_source_target(work):
     conf()
     first = run()
     first_page = read(work, "fixed", "page.html") if exists(work, "fixed", "page.html") else ""
+    first_missing = read(work, "table-captions-missing.csv") if exists(
+        work, "table-captions-missing.csv") else ""
     first_differ = {n: differ(n) for n in ("ch1.docx", "ch2.docx")} \
         if os.path.exists(os.path.join(work, "fixed", "ch1.docx")) else None
     shutil.copy(os.path.join(work, "table-headers-new.csv"), os.path.join(work, "table-headers.csv"))
@@ -2424,11 +2428,13 @@ def case_source_target(work):
         fh.write(f"Image,Alt\nch1/media/{rid}.png,A navy rectangle\nimg/bar.png,A bar chart of the scores\n")
     with open(os.path.join(work, "table-captions.csv"), "w", encoding="utf-8") as fh:
         fh.write("Label,Description\npage#table-1,Scores by student\nTable 1.2,Enrollment by term\n"
-                 "ch1#table-1,Scores in chapter one\nTable 2.1,Scores in chapter two\n")
+                 "ch1#table-1,Scores in chapter one\nTable 2.1,Scores in chapter two\n"
+                 "Table 1.3,Grades by section\n")
     with open(os.path.join(work, "bare-links.csv"), "w", encoding="utf-8") as fh:
         fh.write("URL,Replacement,Title\nhttps://doi.org/10.1000/xyz123,https://doi.org/10/abcd,The source study\n")
     second = run()
     page = read(work, "fixed", "page.html") if exists(work, "fixed", "page.html") else ""
+    page_html = read(work, "html", "page.html") if exists(work, "html", "page.html") else ""
 
     def xml(n):
         with zipfile.ZipFile(os.path.join(work, "fixed", n)) as z:
@@ -2476,6 +2482,11 @@ def case_source_target(work):
          lambda: "<table><caption>Scores by student</caption>" in page),
         ("a description joined to a label paragraph is joined to it where it stands",
          lambda: "<p>Table 1.2 Enrollment by term</p>" in page and "not written" not in second.stderr),
+        ("a table whose own caption is its label alone is reported for a description, then given "
+         "it, on the page and in the copy's caption",
+         lambda: re.search(r"^Table 1\.3,,page,", first_missing, re.M)
+         and re.search(r"<caption>\s*Table 1\.3 Grades by section\s*</caption>", page_html)
+         and "<caption>Table 1.3 Grades by section</caption>" in page),
         ("a Word table with no label gets a Caption paragraph, which Pandoc reads as its caption",
          lambda: re.search(r'<w:pStyle w:val="Caption"/><w:keepNext/></w:pPr><w:r><w:t xml:space="preserve">'
                            r'Scores in chapter one</w:t></w:r></w:p><w:tbl>', one)
@@ -2572,7 +2583,8 @@ def case_markdown_source(work):
         "See <https://doi.org/10.1000/xyz123>.\n\n"
         "| A | B |\n|---|---|\n| 1 | 2 |\n\n"
         "::: matrix\n|   | X | Y |\n|---|---|---|\n| P | 1 | 2 |\n:::\n\n"
-        "| C | D |\n|---|---|\n| 3 | 4 |\n\nTable 1.2\n\nThe end.\n")
+        "| C | D |\n|---|---|\n| 3 | 4 |\n\nTable 1.2\n\n"
+        "| E | F |\n|---|---|\n| 5 | 6 |\n\nTable: Table 1.3\n\nThe end.\n")
     with open(os.path.join(work, "ch.md"), "w", encoding="utf-8") as fh:
         fh.write(original)
 
@@ -2593,7 +2605,7 @@ def case_markdown_source(work):
         fh.write("URL,Replacement,Title\nhttps://doi.org/10.1000/xyz123,https://doi.org/10/abcd,The study\n")
     with open(os.path.join(work, "table-captions.csv"), "w", encoding="utf-8") as fh:
         fh.write("Label,Description\nch#table-1,First table\nch#table-2,Second table\n"
-                 "Table 1.2,Third table\n")
+                 "Table 1.2,Third table\nTable 1.3,Fourth table\n")
     second = run()
     copy = read(work, "mine", "ch.md") if exists(work, "mine", "ch.md") else ""
     return [
@@ -2613,6 +2625,8 @@ def case_markdown_source(work):
          and "| P | 1 | 2 |\n\nTable: Second table\n:::" in copy),
         ("a label paragraph gets its description joined, where it stands",
          lambda: "\nTable 1.2 Third table\n" in copy),
+        ("a caption that's the table's label alone gets its description joined",
+         lambda: "\nTable: Table 1.3 Fourth table\n" in copy),
         ("the declared language goes in the front matter, and the rest is as written",
          lambda: copy.startswith("---\ntitle: Chapter\nlang: en\n---")
          and "Setext Heading\n==============\n\nSome _emphasis_ kept as written." in copy),

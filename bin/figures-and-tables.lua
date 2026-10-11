@@ -1726,8 +1726,11 @@ local function split_table(tbl, bands, part_captions, apply, head_leads)
     local caption_inlines, caption_text = compose_part_caption(
       base, band_inlines, band_text, part_captions and part_captions[i], i)
 
+    -- The first part keeps the table's own id, which a link to the table
+    -- names (an HTML source's <table id>); the others are numbered from 2.
     local attr = pandoc.Attr(
-      tbl.attr.identifier ~= '' and (tbl.attr.identifier .. '-' .. i) or '',
+      tbl.attr.identifier ~= '' and (i == 1 and tbl.attr.identifier
+                                     or (tbl.attr.identifier .. '-' .. i)) or '',
       tbl.attr.classes, {})
     local head_rows = clone_rows(tbl.head.rows)
     if lead then head_rows[#head_rows + 1] = lead:clone() end

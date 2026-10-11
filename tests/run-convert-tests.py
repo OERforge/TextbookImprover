@@ -757,7 +757,8 @@ BANDED = """<!DOCTYPE html><html lang="en"><head><title>Bands</title></head>
 <tr><td><b>Element</b></td><td><b>Focus</b></td><td><b>Example</b></td></tr>
 <tr><td>Purpose</td><td>The core idea</td><td>A request</td></tr>
 <tr><td>Clarity</td><td>How simply</td><td>A number</td></tr></table>
-<table><tr><td></td><td><b>Labor</b></td><td><b>Total</b></td></tr>
+<p>The <a href="#costs">costs</a> follow.</p>
+<table id="costs"><tr><td></td><td><b>Labor</b></td><td><b>Total</b></td></tr>
 <tr><td colspan="3">Example A: workers cost $40</td></tr>
 <tr><td>Tech 1</td><td>$400</td><td>$560</td></tr>
 <tr><td>Tech 2</td><td>$280</td><td>$600</td></tr>
@@ -852,6 +853,11 @@ def case_bands(work):
          and len(re.findall(r'<th scope="col">(?:<strong>)?Labor', page)) == 2),
         ("groups the source already made split the same way",
          lambda: "Group one" in captions(page) and "Group two" in captions(page)),
+        ("a split table's first part keeps the table's id, so a link to the "
+         "table lands",
+         lambda: re.search(r'<table id="costs"', page)
+         and re.search(r'<table id="costs-2"', page)
+         and 'href="#costs"' in page),
         ("a Markdown target keeps each banded table whole, a body per band "
          "headed by the band",
          lambda: len(re.findall(r'<tbody>\s*<tr>\s*<th colspan="\d">'

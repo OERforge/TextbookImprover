@@ -29,6 +29,9 @@ on another `bin/` script.
 | `markdown-html.lua` | When a Markdown source is read: raw HTML reassembled a tag with its match, read as HTML, and cleaned by `html-raw.lua` and `html-source.lua`, loaded from their files. |
 | `html-source.lua` | When an HTML source is read: what the page says about its tables becomes a declaration, and what an earlier run derived (the title block, a table's scroll wrapper) is taken out. |
 | `markdown-source.lua` | For a markdown or asciidoc target: takes out what the filter derived and writes what it decided as source markup. For AsciiDoc it runs in two passes, the tables that go as HTML first, and writes much of the output itself where Pandoc's AsciiDoc writer and reader disagree. |
+| `deck-html.lua` | At render time, for a deck written in Markdown: its headings below its title, each at its level among the sections around it, its pauses gone, and its speaker notes in a disclosure under each slide, open, closed, or left off (`slides.notes`). |
+| `deck-pdf.lua` | When a deck's PDF is written: speaker notes left out, a passage in another language tagged with it, a footnote in a slide's title given its text on the slide, and a bookmark for each slide with a title, under the section it's in. |
+| `ltx-talk.latex` | The template a deck's PDF is written with, by Pandoc's beamer writer, for the ltx-talk class: slides' titles tagged at the level of the sections around them, a section's slide headed by its title, and what beamer has and ltx-talk doesn't given or made harmless. |
 | `header-includes.lua` | Adds the stylesheet to a page's `header-includes` at render time, alongside what the page already carries there; `--include-in-header` would replace it. |
 | `unpack-epub.py` | Turns an EPUB into a directory `convert.py` converts: a page per content document, the media, and a `project.yaml` with the package's metadata and its navigation as `contents`. See [An EPUB as the source](epub-input.md). |
 | `unpack-cartridge.py` | Turns a Common Cartridge into a directory `convert.py` converts: its HTML pages and Word documents as sources, its other files, and a `project.yaml` with its modules as `contents`. See [A course cartridge as the source](cartridge-input.md). |
@@ -59,6 +62,7 @@ on another `bin/` script.
 | `lib/pptxcheck.py` | What's wrong with a deck: what PowerPoint's Accessibility Checker reports, and more. |
 | `lib/pptxremediate.py` | A `source` target on a deck: the sidecars' decisions written into a copy, edited as text, the rest byte for byte. |
 | `lib/pptxorder.py` | A slide's reading order: the shapes at the top of its tree as text spans, which pairs overlap, an order drafted from the layout, and an order written only where it keeps what's drawn over what. |
+| `lib/decks.py` | A deck written in Markdown: its slide level, recorded once, one-item lists read as values, its untitled slides, and its PDF through ltx-talk, its headings renumbered as LaTeX's sections and the LaTeX the beamer writer gives put right where ltx-talk reads it differently. |
 | `lib/deckrun.py` | A slides run, for `convert.py`: each deck checked, its reports written, its copies written and checked. |
 | `lib/sidecars.py` | What a sidecar's values mean, read alike by every part that reads them: the decorative marker. |
 | `lib/names.py` | The one rule for a safe file name, shared with `safe-media.lua`. |
@@ -68,7 +72,7 @@ on another `bin/` script.
 | `check-output.py` | Checks the pages, EPUBs, and PDFs a run wrote for dead links, missing alt text, skipped headings, and the like; the command line over `lib/outputcheck.py`. |
 | `build-epub.py` | Assembles the filtered intermediates into one EPUB3, ordered by `project.contents`, with accessibility claims computed from the build. |
 | `build-pdf.py` | Assembles the same way into one tagged PDF through Pandoc's LaTeX writer and LuaLaTeX: roles as division commands, the metadata file's YAML for the writer, and the macros `pdf-target.lua` uses. |
-| `pdf-target.lua` | What the LaTeX writer can't be told: a declared header column as row headers, a decorative image as an artifact, each link's `/Contents`, a cell spanning rows as `table/multirow`, a quotation in a table cell unwrapped, and a table in a table cell written as a `tabular` with its head declared for tagging (as lines, only when a cell spans rows). |
+| `pdf-target.lua` | What the LaTeX writer can't be told: a declared header column as row headers, a decorative image as an artifact, each link's `/Contents`, a cell spanning rows as `table/multirow`, a quotation in a table cell unwrapped, a table in a table cell written as a `tabular` with its head declared for tagging (as lines, only when a cell spans rows), and a footnote in a definition list's term moved to its definition. |
 | `schema-conversion.yaml` | Declares every conversion setting, its type, default, and meaning. |
 
 **`bin/` — auditing**

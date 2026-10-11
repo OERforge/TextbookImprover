@@ -333,6 +333,131 @@ UM_ALIASES = r"""  % amssymb's names unicode-math has no command for, which drew
 """
 
 
+# How math is tagged, by the standard the PDF claims. PDF 2.0 (PDF/UA-2)
+# has a MathML namespace, so each formula gets its MathML as structure
+# elements and as an attached file. PDF 1.7 (PDF/UA-1) has neither, and
+# MathML structure elements there are non-standard types veraPDF rejects;
+# the formula keeps the attached file, and latex-lab gives it its TeX
+# source as alternative text, which it switches on itself for PDF/UA-1.
+# pdf.ua1_math: office, the default, adds the MathML as Microsoft Office's
+# own attribute on the formula (/O /MSFT_Office /MSFT_MathML), which Word
+# writes in the PDFs it saves and latex-lab's mathml-MS option reproduces.
+# NVDA reads that attribute before a formula's alternative text
+# (NVDAObjects/IAccessible/adobeAcrobat.py, _get_mathMl), and in Acrobat
+# it read the formulas as math, where with alt it read the TeX source.
+MATH_SETUP = {
+    "ua2": "mathml-SE,mathml-AF",
+    "ua1-alt": "mathml-AF",
+    "ua1-office": "mathml-AF,mathml-MS",
+}
+
+
+def math_setup(standards, choice):
+    """The math/setup value for the standards the PDF claims."""
+    if any(s.lower().startswith("ua-1") for s in standards) and \
+            not any(s.lower().startswith("ua-2") for s in standards):
+        return MATH_SETUP["ua1-" + choice]
+    return MATH_SETUP["ua2"]
+
+
+# PDF/UA-1 wants a /Contents on every link (7.18.5), LaTeX's own too: a
+# contents line, a cross-reference it makes. hyperref has a plug for that
+# ("Go to destination" and the destination's name, or the address), which
+# would overwrite the text-and-description /Contents pdf-target.lua gives a
+# text link. These plugs use hyperref's text only for a link that has none
+# of its own.
+UA1_LINKS = r"""\ExplSyntaxOn
+\AddToHook{begindocument/end}
+  {
+    \socket_if_exist:nT {hyp/link/GoTo/Contents}
+      {
+        \socket_new_plug:nnn {hyp/link/GoTo/Contents}{oer}
+          {
+            \tl_if_empty:NT \l__oer_link_contents_tl
+              {
+                \pdfstringdef \l_tmpa_tl {Go~to~destination~#1}
+                \pdfannot_dict_put:nne {link/GoTo}{Contents}{(\l_tmpa_tl)}
+              }
+          }
+        \socket_assign_plug:nn {hyp/link/GoTo/Contents}{oer}
+      }
+    \socket_if_exist:nT {hyp/link/URI/Contents}
+      {
+        \socket_new_plug:nnn {hyp/link/URI/Contents}{oer}
+          {
+            \tl_if_empty:NT \l__oer_link_contents_tl
+              {
+                \pdfstringdef \l_tmpa_tl {#1}
+                \pdfannot_dict_put:nne {link/URI}{Contents}{(\l_tmpa_tl)}
+              }
+          }
+        \socket_assign_plug:nn {hyp/link/URI/Contents}{oer}
+      }
+  }
+\ExplSyntaxOff
+"""
+
+
+def is_ua1(standards):
+    return any(s.lower().startswith("ua-1") for s in standards) and \
+        not any(s.lower().startswith("ua-2") for s in standards)
+
+
+# Written into a tagged PDF's preamble, by build-pdf.py after the metadata
+# file's own header-includes, and by a deck's template (decks.py).
+# math/setup names both forms of MathML luamml makes (it needs
+# unicode-math, which Pandoc's template loads under LuaLaTeX): structure
+# elements under each formula, and a MathML file attached to it. The key
+# switches every form off before applying the ones listed (read in
+# latex-lab-math.ltx), so both are named rather than left to defaults
+# that could change. The link commands are
+# the ones pdf-target.lua puts around every link; LaTeX's own default
+# /Contents -- the address, or "Go to destination" and an id -- is
+# switched off, since every link the book's text makes gets one here.
+PDF_MACROS = r"""\ExplSyntaxOn
+% A long table's cells that a row span covers are recorded as untagged
+% (table/multirow), and the record outlives the table: measured, every
+% table after one with spans lost the cells at the same positions. Each
+% long table starts with none.
+\AddToHook{env/longtable/begin}
+  {
+    \prop_if_exist:NT \g__tbl_untagged_cells_prop
+      { \prop_gclear:N \g__tbl_untagged_cells_prop }
+  }
+\tl_new:N \l__oer_link_contents_tl
+\NewDocumentCommand \OERLinkContents { m }
+  {
+    \cs_if_exist:NT \pdfannot_dict_put:nne
+      {
+        \pdfstringdef \l__oer_link_contents_tl {#1}
+        \pdfannot_dict_put:nne {link/URI} {Contents}
+          { (\l__oer_link_contents_tl) }
+        \pdfannot_dict_put:nne {link/GoTo} {Contents}
+          { (\l__oer_link_contents_tl) }
+      }
+  }
+\NewDocumentCommand \OERLinkContentsReset { }
+  {
+    \tl_clear:N \l__oer_link_contents_tl
+    \cs_if_exist:NT \pdfannot_dict_remove:nn
+      {
+        \pdfannot_dict_remove:nn {link/URI} {Contents}
+        \pdfannot_dict_remove:nn {link/GoTo} {Contents}
+      }
+  }
+\AddToHook{begindocument}
+  {
+    \socket_if_exist:nT {hyp/link/URI/Contents}
+      { \socket_assign_plug:nn {hyp/link/URI/Contents} {noop} }
+    \socket_if_exist:nT {hyp/link/GoTo/Contents}
+      { \socket_assign_plug:nn {hyp/link/GoTo/Contents} {noop} }
+  }
+\NewDocumentCommand \OERArtifactGraphics { }
+  { \cs_if_exist:NT \tag_mc_begin:n { \setkeys{Gin}{artifact} } }
+\ExplSyntaxOff
+"""
+
+
 def missing_characters(lines):
     """{character: times} LaTeX's log says a font didn't have, and the
     lines that aren't about that."""

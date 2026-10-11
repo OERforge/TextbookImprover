@@ -97,3 +97,12 @@ nav.book-menu { margin: 0 0 1.5em; }
 nav.book-menu summary { cursor: pointer; font-weight: bold; }
 nav.book-pager { display: flex; justify-content: space-between;
                  gap: 1em; margin: 2em 0 0; flex-wrap: wrap; }
+
+/* A deck's speaker notes, under each slide's content (deck-html.lua): set
+   off from the slide by a rule at their left, the text's own color. */
+details.notes {
+  margin: 1em 0;
+  padding-left: 1em;
+  border-left: 2px solid currentColor;
+}
+details.notes > summary { cursor: pointer; }

@@ -2,7 +2,9 @@
 
 A folder of PowerPoint decks is slides. Each deck is checked as PowerPoint's own Accessibility Checker checks it, and for more besides; what needs a person's decision goes into the reports, as a book's does, keyed so one decision covers every place it applies; and a `source` target writes the decisions made so far into a copy of each deck, changing nothing else. The run never guesses into a deck: a copy holds only what a person decided in the sidecars and the settings, apart from two things it takes from the project and the deck, and two repairs of XML PowerPoint can't read, below.
 
-That's the first part of slides support. Converting a deck to HTML, to a tagged PDF, or to Markdown, decks written in Markdown, and decks packaged beside a book come later ([ROADMAP.md](../ROADMAP.md#3-slides-and-test-banks)).
+So is a folder of decks written in Markdown, when `project.yaml` says so: each deck becomes a page and a tagged PDF of its own, by way of the filter that does a book's pages ([Decks written in Markdown](#decks-written-in-markdown)).
+
+Converting a PowerPoint deck to a page, a PDF, or Markdown, writing a Markdown deck as PowerPoint or as a reveal.js presentation, and packaging decks beside a book come later ([ROADMAP.md](../ROADMAP.md#3-slides-and-test-banks)).
 
 ## A first run
 
@@ -147,6 +149,79 @@ Some findings ask for work in PowerPoint itself, and the copy doesn't change the
 - **Drawn diagrams and tab tables** are the author's to rebuild: a group with alt text or a picture for the one, a table for the other.
 - **Media captions**, for a clip reported as having none, go in through PowerPoint's Insert Captions, from a WebVTT file. Captions burned into the video's picture can't be seen in the file, so a clip that has only those is reported too.
 - **An old Equation Editor object** (`Equation.3`) is a picture of a formula to a screen reader. It needs alt text now, and retyping in PowerPoint's own equation editor later.
+
+## Decks written in Markdown
+
+A deck written in Pandoc's slide Markdown, a slide at each heading of the slide level and its speaker notes in `::: notes` divs, is read, filtered, and reported on as a page of a book is: the same sidecars decide its pictures' alt text, its tables' headers and captions, and its bare links, and the same reports ask for them. Nothing in a Markdown file says it's a deck rather than a page, so the folder has to: `project.kind: slides`.
+
+```yaml
+# project.yaml
+project:
+  identifier: edu.example.econ205.slides
+  title: Principles of Economics, the slides
+  language: en-US
+  kind: slides
+```
+
+Each `.md` file there is a deck, but for a repository's own (`README.md` and the rest), named as a book's page would be (`S05 Value and Demand.md` is `S05-Value-and-Demand`). A deck can be written as an `html` target, a `pdf` target, a `markdown` target, or a `source` target; with none declared, the run implies `html`, as a book's does. A target of another format is skipped, and the run says so. A folder holding both PowerPoint decks and Markdown ones stops the run, since one run reads one kind for now, and so does one holding no deck at all. Word, HTML, and AsciiDoc files beside the decks are left out, and the run names them. Slides aren't packaged yet.
+
+```yaml
+# conversion.yaml
+targets:
+  pages:
+    format: html
+  pdf:
+    format: pdf
+```
+
+The slide level is Pandoc's: the shallowest heading level that something other than a heading follows somewhere in the deck, or the deck's own `slide-level` in its YAML. It's worked out once, when the deck is read, and the page's headings and the PDF's slides follow it. A heading above it begins a section, as Pandoc's slide writers take one. A title, subtitle, date, or language the YAML gives as a list of one (`title:` and `- The Title` on the next line), which Pandoc's writers lose, is read as the value, for a book's Markdown pages too.
+
+### The page
+
+A deck's page opens with its title block, which plays its title slide's part: the deck's title, as the page's one H1, and its subtitle, authors, and date. A deck's authors stay on its page whatever `author_byline` says, as they're on its title slide. Its sections and slides are headings below that, each at its level among the sections around it: a section's heading is an H2, one in a section an H3, and a slide's heading one below the sections it's in, so a slide before the first section, as an agenda often is, is an H2, as a section is, and one in a section an H3. A heading in a slide, which beamer makes a block, is one below the slide's, with no level skipped whatever levels the deck gives it, and so is one in a slide's notes, a quotation, a list, a table, or a figure, whatever its level, since Pandoc's slide writers find no section there. A deck with no title has no H1 above them, so its headings start at H1. A pause (`. . .`, a slide's next step) is left out. With `pages.split_level`, a deck is cut into a page per section or per slide, as a book's file is cut into pages, each headed by its section's or slide's title.
+
+A slide's notes go under its content, as `slides.notes` says: `collapsed`, the default, in a `<details>` element a reader opens, its control labeled `slides.notes_label` ("Speaker notes"); `visible`, the same element open; or `omitted`, left off. Browsers give a screen reader a disclosure's control as a button with its state, open or closed, and leave what it holds out while it's closed; an `<aside>` per slide would have made every slide's notes a landmark of the same name for a screen reader to list. The label is in English unless the setting gives it in the page's language:
+
+```yaml
+targets:
+  handouts:
+    format: html
+    slides:
+      notes: visible
+      notes_label: Notas del orador
+```
+
+### The PDF
+
+A `pdf` target writes a PDF of each deck, through [ltx-talk](https://ctan.org/pkg/ltx-talk), a presentation class built for LaTeX's tagging: Pandoc's beamer writer, a template of ours (`bin/ltx-talk.latex`), and LuaLaTeX, run until the cross-references settle. Each PDF claims the standards `pdf.standard` names (PDF/UA-2 by default), and its formulas carry their MathML as a book's PDF's do. A deck's PDF is the whole deck, whatever `pages.split_level` cuts its pages into.
+
+- **Headings**: a slide's title is tagged as a heading at the level of the sections around it, where ltx-talk's own default is H4 for every one: H1 for a slide in no section, as on a deck without sections or an agenda before the first, H2 in a section, H3 in a subsection: a level above where a titled deck's page has it, under the page's H1, the deck's title. A section has a slide of its own, as in beamer and PowerPoint, its title the slide's heading, H1 for a section and H2 for a subsection; ltx-talk would have tagged it as a heading of no content, its title as actual text, shown on no slide. Sections are numbered for LaTeX in the order of their levels, so a deck whose sections are `##` and slides `###` has the same headings as one at `#` and `##`, and none is skipped. Every slide with a title is bookmarked, under the section it's in.
+- **The title slide** shows the deck's title, subtitle, authors, institute, and date, from its YAML, and no date when the YAML gives none.
+- **The slide's shape** is `slides.aspect_ratio`: `auto`, the default, takes the deck's own `aspectratio` as beamer reads it (`169`, `43`, `1610`, and the rest), else 4:3 for a deck that names a theme or another of beamer's variables, since that's what its author saw (a theme of reveal.js's own, `white` or `black`, doesn't count), else 16:9, PowerPoint's default. A ratio given (`16:9`, `4:3`) is every deck's. A picture as wide as a 16:9 slide can be taller than a 4:3 slide has room for, and the other way round.
+- **Links** are colored, where ltx-talk hides them: `#0066CC`, which has 3.8:1 against black text and 5.6:1 against white, as WCAG's G183 asks of a link told apart by its color alone, unless the deck's YAML sets `linkcolor` or `urlcolor`.
+- **Speaker notes** are left out, since ltx-talk has no notes yet.
+- **Footnotes**: a footnote in a slide's title keeps its mark in the title and its text at the foot of the slide, where ltx-talk lost it; one in a table, which the writer gives as a mark and its text apart, is set, where ltx-talk 0.6.9 never finished. Those, and a caption's, which LaTeX would count twice, are numbered in order with the deck's others, and their marks aren't links, since a title is set after its slide's footnotes and a link went to the wrong one on a slide shown in steps. A footnote in an image's description is left out, as the writer leaves it out.
+- **A passage in another language**, a span, a link, or a div with `lang`, is tagged with its language, which a screen reader speaks it in: a passage that begins a paragraph or a list item as part of it, a slide's title by its words, and a div holding slides a block at a time, so it spans none of them. A book's PDF, built through babel, doesn't mark one.
+- **beamer's commands** in a deck's `header-includes` that ltx-talk hasn't, for its themes, colors, fonts, templates, and options (`\usetheme`, `\setbeamercolor*`, `\setbeamertemplate`, `\setbeameroption`, `\AtBeginSection`, `\logo`), do nothing, and the run names them, where LaTeX had stopped on them. beamer's modes are ltx-talk's: what `\mode<...>` would show in beamer's presentation is `projector`, the mode the PDF is built in, anything else is `article`, which it doesn't show, and `\mode*` goes.
+- **A heading in a quotation, a list, or a table** is bold text in its slide: the writer gives it as `\section` and the like inside the slide, which ltx-talk sets nothing for.
+- **What ltx-talk takes differently from beamer** is put right in the writer's LaTeX: a slide holding code is set with ltx-talk's `frame*`, which can read a verbatim body, and code is left as written, a slide's `\end{frame}` in it too; a slide's `{.allowframebreaks}` becomes ltx-talk's `auto-break` (`allowframebreaks=0.8` its coverage too), `{.t}`, `{.c}`, and `{.b}` its alignment, and `{label=...}` stays, while options ltx-talk has no key for (`{.plain}`, `{shrink=10}`) are left out and named; columns' alignment and `totalwidth` become ltx-talk's; a footnote loses beamer's overlay; a numbered list's style (`a.`, `(i)`, `1)`) is LaTeX's label, where ltx-talk set beamer's template as text and stopped; a section's title can hold an `=` (`Profit: MR = MC`), which ltx-talk would have read as a setting; and a slide with no title, one a horizontal rule begins, gets an empty one, which ltx-talk neither shows nor tags. Example and alert blocks are plain blocks. Struck, underlined, and highlighted text, a table's cell spanning rows, and the colors xcolor names (`NavyBlue`) are loaded as Pandoc's own templates load them.
+- **Fonts**: ltx-talk's New Computer Modern Sans, whose bold face, the one a slide's title is set in, has no `<` or `>`; a character a face lacks comes from the regular face, then Latin Modern Math, then DejaVu Sans where it's installed.
+- **After LaTeX**, a table's caption is retagged as its caption and the empty paragraph elements LaTeX leaves are taken out, as in a book's PDF (`pdf.repair_captions`, `pdf.remove_empty_paragraphs`, both needing pikepdf). An SVG picture is made a PDF first, with `rsvg-convert`, as for a book: without `rsvg-convert` a run whose decks show one stops before LaTeX, saying what to install, and an SVG it can't read stops its deck's PDF, saying which and why, since LaTeX can't show an SVG. A LuaLaTeX run that hasn't finished in five minutes is stopped, and its deck's PDF isn't built. `pdf.metadata` isn't read: the template and the deck's YAML are all there is.
+
+A deck's PDF needs LuaLaTeX with LaTeX 2026-06-01 or later, and the `ltx-talk`, `lua-unicode-math`, and `newcomputermodern` packages, which TinyTeX doesn't install with LaTeX ([Installation](installation.md)); the run stops, saying what's missing, without them. Built from a course's 25 decks written for beamer, a conference talk written for PowerPoint, and a lecture with speaker notes, every PDF passed veraPDF's PDF/UA-2 profile; the eight decks that named a theme had as many pages as beamer gave them, 152. So did 27 small decks made to hold what the code has to handle (an agenda before the first section, sections at `##`, footnotes in a table and in titles, lettered lists, passages in other languages, code that shows a frame), and 13 of them built as PDF/UA-1 passed that profile too. ltx-talk sets a block's title, a heading below the slide level, as bold text, not a heading, so the PDF's structure doesn't have it, where the deck's page does.
+
+### Markdown again, and the source
+
+A `markdown` target writes each deck as slide Markdown, its notes divs and its title in its YAML as they were, with what the filter decided written in, as for a book's page ([Markdown](markdown.md)). A `source` target writes the sidecars' decisions into a copy of each deck, as it does a book's Markdown files.
+
+### What the run says about the decks
+
+- Slides with no title: one a horizontal rule begins without a heading after it, and text before the first slide's heading, which Pandoc's slide writers make a slide with no title. A heading of the slide level gives one, and a screen reader moves through a deck by its titles.
+- A deck that names its language `language:`, which Pandoc doesn't read (its name is `lang`). The run writes the project's language either way.
+- A deck with no title: its page is named by its file's name, and its PDF has no title slide.
+- A heading in a deck's speaker notes that sets its slide level, as a cue written `# Cue` in the notes does: Pandoc takes the shallowest heading that something follows, in the notes too, so the deck's sections become slides and its slides their contents. The run says what the level would be without it; bold text in the notes, or `slide-level` in the deck's YAML, keeps the deck's own.
+- beamer's commands in a deck's `header-includes`, which do nothing in its PDF, and frame options ltx-talk has no key for, which are left out.
+- An image a deck names in another case than its file's (`assets/cs168-layers.png` for `CS168-layers.png`), which macOS and Windows find and Pandoc doesn't, is read as the file and named in a warning, for every Markdown, HTML, and AsciiDoc source.
 
 ## Tools
 

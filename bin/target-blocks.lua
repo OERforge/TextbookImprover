@@ -170,6 +170,9 @@ local function title_heading(doc)
   -- an HTML page, which isn't XHTML, can't carry epub:type.
   local page_type = meta['page-type'] and pandoc.utils.stringify(meta['page-type']) or ''
   meta['page-type'] = nil
+  -- A deck's slide level, which decks.py recorded when the deck was read,
+  -- and the PDF's writer is given as an option.
+  meta['deck-slide-level'] = nil
   if not marked or meta.title == nil or TITLE_WRITER == '' then return doc end
   if TITLE_WRITER == 'html' and TITLE_BLOCK
       and (meta.subtitle or meta.date or meta.abstract) then
@@ -193,7 +196,21 @@ local function title_heading(doc)
   return doc
 end
 
+-- A link color a source gives for its PDF (a beamer deck's linkcolor:
+-- blue) reaches the HTML page too, where Pandoc's stylesheet (3.12) writes
+-- light-dark(blue, inherit) for it, which isn't CSS, inherit being no
+-- color: the Nu checker's CSS checker stopped on it. currentcolor is one,
+-- and does in dark mode what inherit would have, so a link takes the text's
+-- own color there, underlined, as with no link color at all.
+local function link_color(meta)
+  if FORMAT:match('html') and not FORMAT:match('epub')
+      and meta.linkcolor ~= nil and meta.linkcolordark == nil then
+    meta.linkcolordark = pandoc.MetaString('currentcolor')
+  end
+end
+
 local function drop_title_block(meta)
+  link_color(meta)
   if meta.title == nil and meta.pagetitle == nil and own_name() ~= '' then
     meta.pagetitle = pandoc.MetaString(own_name())
     if TITLE_BLOCK then return meta end

@@ -169,6 +169,11 @@ Table: Price by year
 |-------|------------------------|
 | 10    | 10                     |
 
+Elasticity[^term]
+:   How much quantity responds to price.
+
+[^term]: A term's footnote, which LaTeX's tagging stopped on.
+
 #### Deep
 
 ##### Run-in one
@@ -638,6 +643,12 @@ def checks(work, jobs=1):
          lambda: spanning_table(pdf_path, 6) == [[1, 1]] * 4),
         ("a quotation in a table cell is unwrapped, since a cell can't hold one",
          lambda: not quoted_cells(pdf_path)),
+        # The writer gives a term's footnote as a mark in the term and its
+        # text after the list, a pair LaTeX's tagging stops on in a list's
+        # label; pdf-target.lua puts it at the head of the definition.
+        ("a footnote in a definition list's term is set, at the head of its definition",
+         lambda: re.search(r"Elasticity\s*\d+How much", text) is not None
+         and "A term" in text),
         # PDF/UA-1 is PDF 1.7: no MathML structure elements, a TeX alt text
         # on each formula, Office's MathML attribute unless pdf.ua1_math is
         # alt, and a /Contents on every link, LaTeX's own included.

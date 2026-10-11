@@ -123,7 +123,7 @@ Put that `export` line in `~/.bashrc` (see [below](#optional-the-full-validators
 
 | Tool | Needed for | Install |
 |---|---|---|
-| `pandoc` | Everything but slides ([Slides](slides.md)). **Version 3.9 or later**; see below, because Ubuntu's own package is older. | from Pandoc's release page |
+| `pandoc` | Everything but PowerPoint decks ([Slides](slides.md)). **Version 3.9 or later**; see below, because Ubuntu's own package is older. | from Pandoc's release page |
 | `python3` | Required, 3.9 or later. Runs the driver and every script. | present on Ubuntu |
 | PyYAML | Reading configuration | `sudo apt install python3-yaml` |
 | `file` | Detecting real image types | present on Ubuntu |
@@ -131,6 +131,7 @@ Put that `export` line in `~/.bashrc` (see [below](#optional-the-full-validators
 | `lxml` | Optional. Full schema validation of the manifest; without it a smaller set of checks runs. | `sudo apt install python3-lxml` |
 | `pypdf` | `--toc` with a PDF, and checking a PDF the run builds or the audit reads; an EPUB needs nothing | `sudo apt install python3-pypdf`; on Ubuntu 22.04, `pip3 install --user pypdf` ([above](#which-ubuntu-you-have)) |
 | LuaLaTeX | A `pdf` target only; see [below](#for-a-pdf-target-lualatex) | TeX Live 2026 |
+| The `ltx-talk`, `lua-unicode-math`, and `newcomputermodern` packages | A `pdf` target for decks written in Markdown ([Slides](slides.md#the-pdf)), which also needs LaTeX 2026-06-01 or later; without them, the run says what to install | `tlmgr install ltx-talk lua-unicode-math newcomputermodern` |
 | pdfLaTeX or LuaLaTeX, LaTeX's `preview` package, and `pdftocairo` | A LaTeX source with drawings or PDF images, which become SVG ([LaTeX sources](latex.md)); without them they're left out of the pages | TeX Live (`tlmgr install preview` where it's missing); `sudo apt install poppler-utils` |
 | TeX's `latex-tagging-status` package | A LaTeX source's copy made for tagging, whose class and packages are checked against the tagging project's status list ([LaTeX sources](latex.md#the-source-target)); without it, the run says how to install it and checks nothing | `tlmgr install latex-tagging-status`; MiKTeX installs it on demand |
 | `zip` | Only if you package with the printed command instead of `--zip` | `sudo apt install zip` |
@@ -238,7 +239,7 @@ This installs every TeX package and program anything in the project uses, the te
 
 ```bash
 tlmgr install latex-lab tagpdf luamml luatexbase selnolig luacolor lua-ul footnotehyper xurl multirow \
-  luatex85 placeins latex-tagging-status preview \
+  luatex85 placeins latex-tagging-status preview ltx-talk lua-unicode-math newcomputermodern \
   amsfonts amsmath babel-english caption fancyhdr framed geometry grfext mdframed pgf soul \
   tabto-ltx tex-gyre titlesec tools ulem wasysym wrapfig
 sudo apt install librsvg2-bin poppler-utils ghostscript fonts-dejavu-core python3-pikepdf
@@ -253,6 +254,8 @@ The first five TeX packages are the tagging code and what Pandoc's template load
 A book with SVG images needs `rsvg-convert` for its PDF (`librsvg2-bin`); the build stops and says so if it's missing. DejaVu Sans, which most Linux desktops have already (`fonts-dejavu-core`), supplies characters Latin Modern lacks, such as the circled digits of an AsciiDoc book's code callouts. For the PDF's table captions and empty paragraph elements, `pikepdf` (`python3-pikepdf`); without it the run says so and leaves both as LaTeX tags them, and the PDF suite skips.
 
 A LaTeX book's PDF is built from the book's own LaTeX ([LaTeX sources](latex.md#the-pdf-target)), by `latexmk`, which TinyTeX and TeX Live include, and with the packages the book itself loads. The copy loads `unicode-math` for its formulas' MathML, which TinyTeX has, and, for a book that uses pdfTeX's own commands or tests for pdfTeX by `\pdfoutput`, `luatex85`. A LaTeX book's drawings are each made a page of LaTeX's `preview` package, and its PDF images and drawings become SVG through `pdftocairo` (`poppler-utils`). Its PDF figures that don't embed their fonts, as R's plots don't, are rewritten in the copy with them embedded, which PDF/UA requires: by Ghostscript where it's installed, and otherwise by `pdftocairo`. `latex-tagging-status` lets the run check a book's packages against the tagging project's list of what tagging supports.
+
+`ltx-talk`, `lua-unicode-math`, and `newcomputermodern` are for a deck's PDF: ltx-talk is the presentation class a deck written in Markdown is built with, and it loads the other two, the math and the fonts it sets a deck in, which TinyTeX doesn't install with it. It needs LaTeX 2026-06-01 or later, TeX Live 2026 ([Slides](slides.md#the-pdf)).
 
 The rest of the TeX packages in the line, from `amsfonts` on, are what the LaTeX suite's small books load (`tests/run-latex-tests.py`). Its first check names any of them that are missing, with the line that installs them, and `rsvg-convert` too. It has one check of Ghostscript's way of embedding fonts, which skips without Ghostscript.
 

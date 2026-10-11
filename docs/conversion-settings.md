@@ -6,7 +6,7 @@ How the book is rendered into one output format.
 
 **`format`**—one of `html`, `epub3`, `pdf`, `latex`, `docx`, `markdown`, `asciidoc`, `source`; default `html`; *target only*
 
-What this target produces. markdown and asciidoc write source again: what the author decided, which the pipeline reads back to the same book. docx writes Word files from the same pages, in compatibility mode 15 with ScreenTips and Word's decorative marker. pdf writes one tagged PDF of the whole book through LaTeX, which needs LuaLaTeX (see the installation page). latex writes the LaTeX the pdf target builds from, as a master file that \include-s a file per chapter, with its images beside them, for an author to go on working in.
+What this target produces. markdown and asciidoc write source again: what the author decided, which the pipeline reads back to the same book. docx writes Word files from the same pages, in compatibility mode 15 with ScreenTips and Word's decorative marker. pdf writes one tagged PDF of the whole book through LaTeX, which needs LuaLaTeX (see the installation page), or one of each deck in a folder of decks written in Markdown. latex writes the LaTeX the pdf target builds from, as a master file that \include-s a file per chapter, with its images beside them, for an author to go on working in.
 
 **`output_dir`**—`path`; default `""` (empty); *target only*
 
@@ -66,11 +66,11 @@ Markdown placed at the bottom of every page, or the path to a file holding it. T
 
 **`promote_h1_to_title`**—one of `always`, `if-absent`, `longer`, `shorter`, `never`; default `if-absent`
 
-Which title a page has when it declares one and its only H1 says something else. A declared title is Markdown's title or title-meta, HTML's <title>, or a Word paragraph styled Title, which Pandoc's reader takes out of the body as the title. if-absent keeps the declared title, and the H1 stays a heading of its own; the H1 is the title only when none is declared, or when it says the same. always makes the H1 the title, as for the OpenStax books, whose Title paragraph repeats the H1 without its section number; longer does only when the H1 contains the declared title; shorter takes the H1 when the declared title contains it and more, which cleans up a page saved from the web whose <title> adds the site's name; never keeps the declared title and every H1 a heading. An H1 that says the declared title, the same or one inside the other, is the page's title heading whichever text is the title. A format source copy keeps the author's own title whatever this says: the source writers never write a page's title. Whichever H1 is the title, every output shows it as the page's own H1 (the HTML's, the Word file's Heading 1, the EPUB's and PDF's chapter heading), never twice.
+Which title a page has when it declares one and its only H1 says something else. A declared title is Markdown's title or title-meta, HTML's <title>, or a Word paragraph styled Title, which Pandoc's reader takes out of the body as the title. if-absent keeps the declared title, and the H1 stays a heading of its own; the H1 is the title only when none is declared, or when it says the same. always makes the H1 the title, as for the OpenStax books, whose Title paragraph repeats the H1 without its section number; longer does only when the H1 contains the declared title; shorter takes the H1 when the declared title contains it and more, which cleans up a page saved from the web whose <title> adds the site's name; never keeps the declared title and every H1 a heading. An H1 that says the declared title, the same or one inside the other, is the page's title heading whichever text is the title. A format source copy keeps the author's own title whatever this says: the source writers never write a page's title. Whichever H1 is the title, every output shows it as the page's own H1 (the HTML's, the Word file's Heading 1, the EPUB's and PDF's chapter heading), never twice. Not read for a deck, whose headings are its slides and sections, and whose title is its YAML's.
 
 **`author_byline`**—one of `meta`, `visible`, `drop`; default `meta`
 
-What to do with author metadata from the source. Reading .docx this comes from a paragraph styled Author, which Pandoc consumes out of the body the same way it consumes a Title-styled one. meta keeps it in the page head and suppresses the visible byline Pandoc's template would otherwise print under every title; visible keeps both; drop removes it.
+What to do with author metadata from the source. Reading .docx this comes from a paragraph styled Author, which Pandoc consumes out of the body the same way it consumes a Title-styled one. meta keeps it in the page head and suppresses the visible byline Pandoc's template would otherwise print under every title; visible keeps both; drop removes it. Not read for a deck, whose authors are on its page as on its title slide.
 
 ## math
 
@@ -156,6 +156,22 @@ page restarts the numbers on every page. group continues them across the pages o
 
 page keeps each page's notes at its end. group gathers a group's notes at the end of its last page. book gathers every note on one Notes page at the end, with a heading for each group, numbered per group. A reference always links to its note wherever it went, and the note links back.
 
+## slides
+
+Settings read only for decks written in Markdown, in a folder that project.kind says is slides: each deck a page of its own in an html target, and a PDF of its own in a pdf target, through the ltx-talk presentation class.
+
+**`slides.notes`**—one of `collapsed`, `visible`, `omitted`; default `collapsed`
+
+Where a deck's speaker notes (Pandoc's ::: notes) go on its page: collapsed puts each slide's under its content, closed, for a reader to open; visible puts them there open; omitted leaves them off. A PDF leaves them off whatever this says, since ltx-talk has no notes yet, and a markdown target keeps them as they were.
+
+**`slides.notes_label`**—`string`; default `Speaker notes`
+
+What the control that opens a slide's notes says, in the page's language.
+
+**`slides.aspect_ratio`**—`string`; default `auto`
+
+The shape of a deck's PDF, width to height (4:3, 16:9, 16:10). auto takes the deck's own, its aspectratio as beamer reads it (169, 43, and the rest); else 4:3 for a deck that names a theme or another of beamer's variables, since that's what its author saw (a theme of reveal.js's own doesn't count); else 16:9, PowerPoint's default.
+
 ## epub
 
 Settings read only by an epub3 target. One EPUB holds the whole book: every page in project.contents, in that order, with each group a heading over its pages and the table of contents built from the same tree the cartridge organization uses.
@@ -178,7 +194,7 @@ The sentence or two a reading system shows a reader about the book's accessibili
 
 ## pdf
 
-Settings read only by a pdf target. One PDF holds the whole book, assembled from the pages the way the EPUB is, and written by Pandoc's LaTeX writer and LuaLaTeX with LaTeX's tagging on, so the file carries its structure, its images' alternative text, its tables' header cells, and its equations as MathML. A LaTeX book's PDF is built from the book's own LaTeX instead, unless from says pages.
+Settings read only by a pdf target. One PDF holds the whole book, assembled from the pages the way the EPUB is, and written by Pandoc's LaTeX writer and LuaLaTeX with LaTeX's tagging on, so the file carries its structure, its images' alternative text, its tables' header cells, and its equations as MathML. A LaTeX book's PDF is built from the book's own LaTeX instead, unless from says pages. A deck written in Markdown gets a PDF of its own, through the ltx-talk class (see slides), which reads standard, ua1_math, repair_captions, and remove_empty_paragraphs of these.
 
 **`pdf.from`**—one of `book`, `pages`; default `book`
 

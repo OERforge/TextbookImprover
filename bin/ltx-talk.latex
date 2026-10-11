@@ -1,0 +1,352 @@
+$-- ltx-talk.latex -- the template a deck's PDF is written with: Pandoc's
+$-- beamer writer, for Joseph Wright's ltx-talk class, which is built for
+$-- LaTeX's tagging. lib/decks.py runs it, and puts right after it what the
+$-- writer writes for beamer and ltx-talk reads differently (talkify).
+$--
+$-- Variables decks.py sets: aspect-ratio (the slide's shape, width:height),
+$-- frametitle-tag (the heading every slide's title is tagged as if
+$-- ltx-talk's code for a slide's title isn't the code this template knows,
+$-- 0.6.9's: H1, or one level more for each level of sections), math-setup
+$-- (how a formula's MathML is carried), oer-macros (the commands
+$-- pdf-target.lua's output uses, from lib/latexbuild.py), and, for
+$-- PDF/UA-1, hyperfootnotes-off (a footnote's mark not made a link, since
+$-- PDF/UA-1 wants a /Contents on every link and LaTeX gives that one
+$-- none). lang and pdfstandard come as metadata, and the deck's own
+$-- fields (title, subtitle, author, institute, date, linkcolor, urlcolor,
+$-- subject, keywords, header-includes) from its YAML. What the writer sets
+$-- for what the deck holds (strikeout, multirow, cancel, subfigure, dir) is
+$-- read as Pandoc's own templates read it.
+$--
+$-- Copyright 2026 Robert Szarka. GPL-3.0-or-later; see convert.py.
+$--
+\DocumentMetadata{
+$if(pdfstandard.version)$
+  pdfversion=$pdfstandard.version$,
+$endif$
+$if(pdfstandard.standards)$
+  pdfstandard={$for(pdfstandard.standards)$$it$$sep$,$endfor$},
+$endif$
+  tagging=on,
+  lang=$lang$,
+  xmp=true}
+$-- xcolor's named colors, which Pandoc's manual offers for linkcolor and
+$-- urlcolor (NavyBlue); ltx-talk loads xcolor itself.
+\PassOptionsToPackage{dvipsnames,svgnames,x11names}{xcolor}
+$if(hyperfootnotes-off)$
+\PassOptionsToPackage{hyperfootnotes=false}{hyperref}
+$endif$
+\documentclass[frame-title-arg$if(aspect-ratio)$, aspect-ratio=$aspect-ratio$$endif$]{ltx-talk}
+% A slide's title is the slide's heading, at the level a reader of the
+% deck's page meets it: ltx-talk's own default is H4. This is what every
+% slide's title is tagged as if the code below can't tag each at its own.
+\tagpdfsetup{role/new-tag = frametitle/$frametitle-tag$}
+\tagpdfsetup{math/setup={$math-setup$}}
+$oer-macros$
+% New Computer Modern Sans Bold, which ltx-talk sets a slide's title in,
+% has no < or > (Specialization => Growth lost its >, and veraPDF failed
+% the file on the blank glyph): a character a face lacks comes from the
+% regular face, then Latin Modern Math, then DejaVu Sans where it's
+% installed. The fonts are ltx-talk's own, given the fallback.
+\IfFontExistsTF{DejaVu Sans}
+  {\directlua{luaotfload.add_fallback("oerfallback", {"file:NewCMSans10-Regular.otf:mode=node;", "Latin Modern Math:mode=harf;", "DejaVu Sans:mode=harf;"})}}
+  {\directlua{luaotfload.add_fallback("oerfallback", {"file:NewCMSans10-Regular.otf:mode=node;", "Latin Modern Math:mode=harf;"})}}
+\setmainfont{NewCMSans10-Regular.otf}[RawFeature={fallback=oerfallback}]
+\setsansfont{NewCMSans10-Regular.otf}[RawFeature={fallback=oerfallback}]
+\setmonofont{Latin Modern Mono}[RawFeature={fallback=oerfallback}]
+\ExplSyntaxOn
+% A footnote's text given apart from its mark (\footnotetext, as the
+% writer gives a footnote in a table), and a slide's title's footnote
+% (deck-pdf.lua): ltx-talk 0.6.9 takes the overlay a footnote is shown on
+% from a list \footnote adds to, and with nothing there LaTeX never
+% finished. Its text is shown on the whole frame.
+\seq_if_exist:NT \g__talk_footnote_overlay_seq
+  {
+    \NewCommandCopy \__oer_footnotetext:w \footnotetext
+    \RenewDocumentCommand \footnotetext { o +m }
+      {
+        \seq_gpush:Nn \g__talk_footnote_overlay_seq { all }
+        \IfNoValueTF {#1}
+          { \__oer_footnotetext:w {#2} }
+          { \__oer_footnotetext:w [ {#1} ] {#2} }
+      }
+  }
+% The mark of a footnote whose number deck-pdf.lua gives (in a slide's
+% title, a caption, a table), its text given apart; the title's text, for
+% its bookmark and its structure element, leaves it out. Not a link:
+% hyperref pairs a mark with the next text, and a title is set after its
+% slide's footnotes, so on a slide shown in steps the mark's link went to
+% another footnote, and veraPDF failed the file.
+\NewDocumentCommand \oertitlemark { m }
+  { \begin { NoHyper } \footnotemark [ #1 ] \end { NoHyper } }
+\text_declare_purify_equivalent:Nn \oertitlemark { \use_none:n }
+% A slide's title is tagged at the level of the sections around it: H1
+% with none, as for a slide before a deck's first section, H2 in a
+% section, H3 in a subsection, as on the deck's page. ltx-talk tags every
+% slide's title with one tag, frametitle, so its code is given a tag that
+% the sections below change, if the code is 0.6.9's, as this is.
+\tl_new:N \g__oer_frametitle_tag_tl
+\tl_gset:Nn \g__oer_frametitle_tag_tl { oerframetitle1 }
+\tagpdfsetup
+  {
+    role / new-tag = oerframetitle1 / H1 ,
+    role / new-tag = oerframetitle2 / H2 ,
+    role / new-tag = oerframetitle3 / H3 ,
+    role / new-tag = oerframetitle4 / H4
+  }
+\cs_new_protected:Npn \__oer_talk_frame_title_tagged:n #1
+  {
+   \__talk_header_tag_begin:e
+      {
+        firstkid = true ,
+        parent   = \int_use:N \g__talk_frame_struct_int ,
+        tag      = frametitle ,
+        title    = { \text_purify:n { \g__talk_frame_title_tl } } ,
+      }
+    \group_begin:
+      \tagpdfparaOff
+      #1
+    \group_end:
+    \__talk_header_tag_end:
+  }
+\cs_if_eq:NNTF \__talk_frame_title_tagged:n \__oer_talk_frame_title_tagged:n
+  {
+    \cs_gset_protected:Npn \__talk_frame_title_tagged:n #1
+      {
+       \__talk_header_tag_begin:e
+          {
+            firstkid = true ,
+            parent   = \int_use:N \g__talk_frame_struct_int ,
+            tag      = \g__oer_frametitle_tag_tl ,
+            title    = { \text_purify:n { \g__talk_frame_title_tl } } ,
+          }
+        \group_begin:
+          \tagpdfparaOff
+          #1
+        \group_end:
+        \__talk_header_tag_end:
+      }
+  }
+  { \typeout { oer:~every~frame~title~tagged~at~one~level } }
+% A section's title on a slide of its own, as beamer's and PowerPoint's
+% section slides show it, and the slide's text is the section's heading.
+% ltx-talk 0.6.9 tags a section's heading with no content, its title as
+% its actual text, shown on no page; that heading is left out, so a
+% screen reader meets the title once, as the slide's heading. Where
+% ltx-talk has no such heading to leave out, the slide's text is an
+% artifact, and ltx-talk's heading is the title.
+\bool_new:N \g__oer_section_heading_bool
+\socket_if_exist:nT { tagsupport / talk / sec / title }
+  {
+    \NewTaggingSocketPlug { talk / sec / title } { oer } { }
+    \AssignTaggingSocketPlug { talk / sec / title } { oer }
+    \bool_gset_true:N \g__oer_section_heading_bool
+  }
+\cs_new_protected:Npn \__oer_section_slide:nn #1#2
+  {
+    \bool_if_exist:NTF \l__talk_frame_bool
+      { \bool_if:NF \l__talk_frame_bool { \__oer_section_slide_aux:nn {#1} {#2} } }
+      { \__oer_section_slide_aux:nn {#1} {#2} }
+  }
+% A section inside a frame, as the writer gives a heading in a quotation
+% (deck-pdf.lua makes those bold text), ltx-talk ignores, and so does this.
+\cs_new_protected:Npn \__oer_section_slide_aux:nn #1#2
+  {
+    \tl_gset:Ne \g__oer_frametitle_tag_tl { oerframetitle \int_eval:n { #1 + 1 } }
+    \tl_if_exist:cTF { l__talk_ #2 _tl }
+      {
+        \exp_args:Nv \tl_if_blank:nF { l__talk_ #2 _tl }
+          { \__oer_section_frame:nn {#1} { \tl_use:c { l__talk_ #2 _tl } } }
+      }
+      { \__oer_section_frame:nn {#1} { \use:c { insert #2 } } }
+  }
+\cs_new_protected:Npn \__oer_section_frame:nn #1#2
+  {
+    \begin { frame } { }
+      \tagpdfparaOff
+      \bool_if:NTF \g__oer_section_heading_bool
+        {
+          \exp_args:Ne \tag_struct_begin:n { tag = H #1 }
+          \tag_mc_begin:n { }
+        }
+        { \tag_mc_begin:n { artifact } }
+      \vspace* { \fill }
+      { \centering \Large \bfseries \color { structure } #2 \par }
+      \vspace* { \fill }
+      \tag_mc_end:
+      \bool_if:NT \g__oer_section_heading_bool { \tag_struct_end: }
+      \tagpdfparaOn
+    \end { frame }
+  }
+\AddToHook { cmd / section / after } { \__oer_section_slide:nn { 1 } { section } }
+\AddToHook { cmd / subsection / after } { \__oer_section_slide:nn { 2 } { subsection } }
+\AddToHook { cmd / subsubsection / after } { \__oer_section_slide:nn { 3 } { subsubsection } }
+% A passage in another language (deck-pdf.lua): its words, and everything
+% in a block of it, tagged with its language, which a screen reader
+% speaks it in. babel, which the writer would load for it, marks no
+% language in the tags. A passage the writer marks for babel itself
+% stands unmarked.
+\NewDocumentCommand \oerlang { m +m }
+  {
+    % In the paragraph: a passage that begins one would otherwise begin
+    % before it, and hold it.
+    \mode_leave_vertical:
+    \tag_mc_end_push:
+    \tag_struct_begin:n { tag = Span , lang = #1 }
+    \tag_mc_begin:n { }
+    #2
+    \tag_mc_end:
+    \tag_struct_end:
+    \tag_mc_begin_pop:n { }
+  }
+\NewDocumentEnvironment { oerlanguage } { m }
+  { \par \tagpdfsetup { text / lang = #1 } }
+  { \par }
+% A slide's title in another language: its words in its structure
+% element's title and its bookmark, the language left out.
+\text_declare_purify_equivalent:Nn \oerlang { \use_ii:nn }
+\pdfstringdefDisableCommands
+  {
+    \cs_set:Npn \oerlang #1#2 {#2}
+    \cs_set:Npn \oertitlemark #1 { }
+  }
+\cs_set_protected:Npn \foreignlanguage #1#2 {#2}
+\cs_set_protected:Npn \otherlanguage #1 { }
+\cs_set_protected:Npn \endotherlanguage { }
+% beamer's commands a deck's header-includes may give, which ltx-talk
+% hasn't, do nothing, with what they take (the run names them).
+\cs_new_protected:Npn \__oer_skip_command:
+  { \peek_charcode_remove:NTF * { \__oer_skip_groups: } { \__oer_skip_groups: } }
+\cs_new_protected:Npn \__oer_skip_groups:
+  {
+    \peek_remove_spaces:n
+      {
+        \peek_charcode:NTF [
+          { \__oer_skip_optional:w }
+          {
+            \peek_catcode:NT \c_group_begin_token
+              { \__oer_skip_group:n }
+          }
+      }
+  }
+\cs_new_protected:Npn \__oer_skip_optional:w [ #1 ] { \__oer_skip_groups: }
+\cs_new_protected:Npn \__oer_skip_group:n #1 { \__oer_skip_groups: }
+\clist_map_inline:nn
+  {
+    setbeamertemplate , setbeamercolor , setbeamerfont , setbeamersize ,
+    setbeamercovered , setbeameroption , addtobeamertemplate ,
+    defbeamertemplate , usebeamercolor , usebeamerfont , usebeamertemplate ,
+    usetheme , usecolortheme , usefonttheme , useinnertheme , useoutertheme ,
+    logo , titlegraphic , AtBeginSection , AtBeginSubsection , AtBeginPart ,
+    beamertemplatesolidbackgroundcolor , beamertemplateshadingbackground ,
+    beamertemplategridbackground , beamertemplatetransparentcovered ,
+    beamertemplatetransparentcoveredhigh , beamertemplateballitem ,
+    beamertemplatecircleitem , beamertemplatesquareitem ,
+    beamertemplatetriangleitem
+  }
+  {
+    \cs_if_exist:cF {#1}
+      { \cs_new_protected:cpn {#1} { \__oer_skip_command: } }
+  }
+\cs_if_exist:NF \beamertemplatenavigationsymbolsempty
+  { \cs_new_protected:Npn \beamertemplatenavigationsymbolsempty { } }
+\ExplSyntaxOff
+% What beamer has, and the writer can write, that ltx-talk doesn't: example
+% and alert blocks (a heading below the slide level with {.example} or
+% {.alert}) are plain blocks.
+\ifdefined\exampleblock\else\NewEnvironmentCopy{exampleblock}{block}\fi
+\ifdefined\alertblock\else\NewEnvironmentCopy{alertblock}{block}\fi
+\setlength{\parskip}{0.5\baselineskip plus 2pt}
+\providecommand{\tightlist}{\setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}}
+\usepackage{graphicx}
+\usepackage{longtable,booktabs,array,calc}
+\newcounter{none}
+$if(multirow)$
+\usepackage{multirow}
+$endif$
+$if(cancel)$
+\usepackage{cancel}
+$endif$
+$if(subfigure)$
+\usepackage{subcaption}
+$endif$
+$if(strikeout)$
+$-- also underline (\ul) and a passage marked {.mark} (\hl)
+\usepackage{luacolor}
+\usepackage[soul]{lua-ul}
+$endif$
+$if(dir)$
+\newcommand{\RL}[1]{\bgroup\textdir TRT#1\egroup}
+\newcommand{\LR}[1]{\bgroup\textdir TLT#1\egroup}
+\newenvironment{RTL}{\textdir TRT\pardir TRT\bodydir TRT}{}
+\newenvironment{LTR}{\textdir TLT\pardir TLT\bodydir TLT}{}
+$endif$
+% A long address breaks where it can, in the text's own type.
+\IfFileExists{xurl.sty}{\usepackage{xurl}}{}
+\urlstyle{same}
+% A picture as large as the slide has room for: no wider than the line,
+% and no taller than the slide's text less three lines, for its title
+% and a caption.
+\makeatletter
+\newlength\pandocimageheight
+\AtBeginDocument{\setlength\pandocimageheight{\dimexpr\textheight-3\baselineskip\relax}}
+\newsavebox\pandoc@box
+\newcommand*\pandocbounded[1]{%
+  \sbox\pandoc@box{#1}%
+  \Gscale@div\@tempa{\pandocimageheight}{\dimexpr\ht\pandoc@box+\dp\pandoc@box\relax}%
+  \Gscale@div\@tempb{\linewidth}{\wd\pandoc@box}%
+  \ifdim\@tempb\p@<\@tempa\p@\let\@tempa\@tempb\fi
+  \ifdim\@tempa\p@<\p@\scalebox{\@tempa}{\usebox\pandoc@box}%
+  \else\usebox{\pandoc@box}%
+  \fi
+}
+\makeatother
+% Links look like links: ltx-talk hides them (hidelinks). The default blue
+% has 3.8:1 against black text and 5.6:1 against white, as WCAG's G183
+% asks of a link told apart by its color alone; a deck's own linkcolor and
+% urlcolor win.
+\definecolor{oerlink}{HTML}{0066CC}
+\hypersetup{colorlinks=true,
+  linkcolor={$if(linkcolor)$$linkcolor$$else$oerlink$endif$},
+  urlcolor={$if(urlcolor)$$urlcolor$$else$oerlink$endif$}}
+$if(title-meta)$
+\hypersetup{pdftitle={$title-meta$}}
+$endif$
+$if(author-meta)$
+\hypersetup{pdfauthor={$author-meta$}}
+$endif$
+$if(subject)$
+\hypersetup{pdfsubject={$subject$}}
+$endif$
+$if(keywords)$
+\hypersetup{pdfkeywords={$for(keywords)$$keywords$$sep$, $endfor$}}
+$endif$
+$if(title)$
+\title{$title$}
+$endif$
+$if(subtitle)$
+\subtitle{$subtitle$}
+$endif$
+$if(author)$
+\author{$for(author)$$author$$sep$ \and $endfor$}
+$endif$
+$if(institute)$
+\institute{$for(institute)$$institute$$sep$ \and $endfor$}
+$endif$
+$-- No date rather than ltx-talk's default, the day the PDF was built.
+$if(date)$
+\date{$date$}
+$else$
+\date{}
+$endif$
+$for(header-includes)$
+$header-includes$
+$endfor$
+$if(highlighting-macros)$
+$highlighting-macros$
+$endif$
+\begin{document}
+$if(title)$
+\maketitle
+$endif$
+$body$
+\end{document}

@@ -294,7 +294,8 @@ def check_consistency():
          "convert.py checks it", lambda: len(pandoc_minimums) == 1
          and {"run-convert-tests.py", "run-latex-tests.py", "run-pdf-tests.py",
               "run-unpack-tests.py", "run-epub-tests.py", "run-split-tests.py",
-              "run-filter-tests.py", "run-slides-tests.py"} <= pandoc_checked),
+              "run-filter-tests.py", "run-slides-tests.py", "run-decks-tests.py"}
+         <= pandoc_checked),
         ("the page types a heading can give are the ones contents can, a tree written back "
          "keeps an entry's type, and a type with no role puts it where it usually is", lambda: lua_types == set(contents_lib.PAGE_TYPES)
          and contents_lib.contents_from_tree(contents_lib.walk_contents(
@@ -1258,6 +1259,40 @@ def check_decorative_marker():
     ]
 
 
+def check_cased_images_in_copies():
+    """An image a source names in another case than its file's, in the
+    source's copy.
+
+    The conversion reads such an image as its file, and its alt text is
+    keyed on the file's path; a Markdown source's copy found the row, and
+    an HTML source's didn't, keying on the src as written, so the site's
+    page had the alt text and the author's copy of the page didn't.
+    """
+    import htmlremediate
+    import mdremediate
+    work = tempfile.mkdtemp(prefix="cased-images-")
+    os.makedirs(os.path.join(work, "Assets"))
+    for name in ("red.png", "my pic.png"):
+        with open(os.path.join(work, "Assets", name), "wb") as fh:
+            fh.write(b"")
+    alts = {"Assets/red": "A red square", "Assets/my pic": "A picture"}
+    page = ('<p><img src="assets/Red.png"> <img src="./Assets/my%20pic.png" alt="">'
+            ' <img src="assets/blue.png"></p>')
+    copied = htmlremediate.remediate_images(page, alts, work)
+    shutil.rmtree(work, ignore_errors=True)
+    return [
+        ("an HTML page's image in another case takes its file's alt text, spaces decoded",
+         lambda: '<img src="assets/Red.png" alt="A red square">' in copied[0]
+         and 'alt="A picture"' in copied[0] and copied[1]["described"] == 2),
+        ("one naming no file in any case is left as it is",
+         lambda: '<img src="assets/blue.png">' in copied[0]),
+        ("the Markdown copy's key and the HTML copy's agree",
+         lambda: htmlremediate.image_key("assets/Red.png", None) == "assets/Red"
+         and mdremediate.sidecar_key("assets/my%20pic.png") == "assets/my pic"
+         == htmlremediate.image_key("./assets/my%20pic.png")),
+    ]
+
+
 GROUPS = [
     ("a report's rows", check_report_rows),
     ("a PDF read without pypdf's warnings", check_pdf_read_quietly),
@@ -1288,6 +1323,7 @@ GROUPS = [
     ("the decorative marker", check_decorative_marker),
     ("PDF/UA-1's math", check_ua1_math),
     ("header cells holding only formulas, in a PDF", check_pdf_formula_headers),
+    ("an image named in another case, in a source's copy", check_cased_images_in_copies),
 ]
 
 

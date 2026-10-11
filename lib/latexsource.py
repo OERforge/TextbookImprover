@@ -61,6 +61,8 @@ import re
 import shutil
 import subprocess
 
+from names import case_match
+
 # A page marker, a paragraph of its own the reader keeps as text, put
 # before each \include in the copy and cut at afterwards; and one after
 # each, where the master's own text begins again.
@@ -2587,29 +2589,6 @@ def graphics_paths(preamble):
     """The directories \\graphicspath names, as relative paths."""
     m = re.search(r"\\graphicspath\s*\{((?:\s*\{[^}]*\})*)\s*\}", preamble)
     return [d for d in re.findall(r"\{([^}]*)\}", m.group(1))] if m else []
-
-
-def case_match(base, path):
-    """path, relative to base, found as a file system that ignores case
-    finds it, a part at a time, where exactly one entry matches each
-    part; or None."""
-    found, current = [], base
-    for part in os.path.normpath(path).split(os.sep):
-        if part in ("", "."):
-            continue
-        if part != "..":
-            try:
-                entries = os.listdir(current)
-            except OSError:
-                return None
-            if part not in entries:
-                matches = [e for e in entries if e.lower() == part.lower()]
-                if len(matches) != 1:
-                    return None
-                part = matches[0]
-        found.append(part)
-        current = os.path.join(current, part)
-    return os.path.join(*found) if found and os.path.isfile(current) else None
 
 
 def resolve_graphic(base, name, dirs, counter=None):

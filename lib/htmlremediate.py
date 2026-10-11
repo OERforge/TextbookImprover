@@ -29,8 +29,10 @@ import os
 import re
 import shutil
 import tempfile
+from urllib.parse import unquote
 
 import sidecars
+from names import case_match
 
 TABLE_TAG = re.compile(r"<table\b[^>]*>|</table\s*>", re.I)
 ROW_TAG = re.compile(r"<table\b[^>]*>|</table\s*>|<tr\b[^>]*>|</tr\s*>", re.I)
@@ -181,9 +183,24 @@ def remediate_captions(page, applied, resolved):
     return page, counts
 
 
-def remediate_images(page, alts):
-    """alts: {path without extension: alt, or None for decorative}.
-    Returns (page, counts)."""
+def image_key(src, base=None):
+    """The image-alt sidecar's key for an image's src: decoded, without
+    ./ or the extension. With base, the folder the page is in, a path
+    naming no file there is the file it names in another case, if one
+    does, as the conversion reads it."""
+    path = unquote(src.replace("\\", "/"))
+    path = path[2:] if path.startswith("./") else path
+    if base and "://" not in path and not os.path.isabs(path) \
+            and not os.path.isfile(os.path.join(base, path)):
+        cased = case_match(base, path)
+        if cased:
+            path = cased.replace(os.sep, "/")
+    return os.path.splitext(path)[0]
+
+
+def remediate_images(page, alts, base=None):
+    """alts: {path without extension: alt, or None for decorative}; base,
+    the page's folder (image_key). Returns (page, counts)."""
     counts = {"described": 0, "decorative": 0}
     if not alts:
         return page, counts
@@ -195,6 +212,8 @@ def remediate_images(page, alts):
             return tag
         path = htmllib.unescape(src.group(2) if src.group(2) is not None else src.group(3))
         key = os.path.splitext(path[2:] if path.startswith("./") else path)[0]
+        if key not in alts:
+            key = image_key(path, base)
         if key not in alts:
             return tag
         alt = alts[key]
@@ -308,7 +327,7 @@ def remediate(source, destination, tables=None, alts=None, links=None, language=
     counts.update(found)
     new, found = remediate_captions(new, captions or [], tables or [])
     counts.update(found)
-    new, found = remediate_images(new, alts or {})
+    new, found = remediate_images(new, alts or {}, os.path.dirname(os.path.abspath(source)))
     counts.update(found)
     new, found = remediate_links(new, links or {})
     counts.update(found)

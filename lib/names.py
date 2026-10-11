@@ -24,6 +24,7 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
+import os
 import re
 
 # What may stay: ASCII letters and digits, dot, underscore, hyphen, and
@@ -51,3 +52,27 @@ def safe_stem(stem):
 
 def is_safe(path):
     return safe_path(path) == path
+
+
+def case_match(base, path):
+    """path, relative to base, found as a file system that ignores case
+    finds it (macOS's and Windows's, where a book or a deck was likely
+    made), a part at a time, where exactly one entry matches each part;
+    or None."""
+    found, current = [], base
+    for part in os.path.normpath(path).split(os.sep):
+        if part in ("", "."):
+            continue
+        if part != "..":
+            try:
+                entries = os.listdir(current)
+            except OSError:
+                return None
+            if part not in entries:
+                matches = [e for e in entries if e.lower() == part.lower()]
+                if len(matches) != 1:
+                    return None
+                part = matches[0]
+        found.append(part)
+        current = os.path.join(current, part)
+    return os.path.join(*found) if found and os.path.isfile(current) else None

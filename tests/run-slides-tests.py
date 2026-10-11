@@ -3069,12 +3069,23 @@ def case_folders(work):
             result.returncode == 0 and "1 PowerPoint deck(s) here are left out (talk.pptx)" \
             in result.stderr and not os.path.exists(os.path.join(book, "slides-check.csv")), \
             result.stderr[-500:]
-    # project.kind: slides makes it slides, and the page is left out instead.
+    # project.kind: slides makes it slides, where Markdown is a deck too: a
+    # folder of both kinds stops, nothing written.
     with open(os.path.join(book, "project.yaml"), "w") as fh:
         fh.write("project:\n  identifier: org.example.slides\n  title: A Book\n  kind: slides\n")
     result = convert(book, "--check-only")
+    yield "project.kind: slides with a deck of each kind stops, and says to part them", \
+        result.returncode != 0 and "1 PowerPoint deck(s) and 1 written in Markdown " \
+        "(talk.pptx, one.md)" in result.stderr and "folder of its own" in result.stderr \
+        and not os.path.exists(os.path.join(book, "slides-check.csv")), result.stderr[-500:]
+    # A Word file in a folder of PowerPoint decks is left out, and said to be.
+    os.remove(os.path.join(book, "one.md"))
+    shutil.copy(clean_deck(os.path.join(work, "word-stand-in.pptx")),
+                os.path.join(book, "notes.docx"))
+    result = convert(book, "--check-only")
     yield "project.kind: slides makes it slides, with the pages left out", \
-        result.returncode == 0 and "1 file(s) here are left out (one.md)" in result.stderr \
+        result.returncode == 0 and "1 file(s) here are left out (notes.docx)" in result.stderr \
+        and "decks, PowerPoint or Markdown" in result.stderr \
         and os.path.exists(os.path.join(book, "slides-check.csv")), result.stderr[-500:]
     # Decks in a zip, wrapped in a folder, with macOS's leftovers.
     zipped = os.path.join(work, "zipped")

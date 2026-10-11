@@ -40,7 +40,8 @@ keys:
       book. docx writes Word files from the same pages, in compatibility
       mode 15 with ScreenTips and Word's decorative marker. pdf writes one
       tagged PDF of the whole book through LaTeX, which needs LuaLaTeX
-      (see the installation page). latex writes the LaTeX the pdf target
+      (see the installation page), or one of each deck in a folder of
+      decks written in Markdown. latex writes the LaTeX the pdf target
       builds from, as a master file that \include-s a file per chapter,
       with its images beside them, for an author to go on working in.
 
@@ -239,7 +240,9 @@ keys:
       text is the title. A format source copy keeps the author's own title
       whatever this says: the source writers never write a page's title. Whichever H1 is the title, every
       output shows it as the page's own H1 (the HTML's, the Word file's
-      Heading 1, the EPUB's and PDF's chapter heading), never twice.
+      Heading 1, the EPUB's and PDF's chapter heading), never twice. Not
+      read for a deck, whose headings are its slides and sections, and
+      whose title is its YAML's.
 
   author_byline:
     type: enum
@@ -251,7 +254,8 @@ keys:
       the body the same way it consumes a Title-styled one. meta keeps it
       in the page head and suppresses the visible byline Pandoc's template
       would otherwise print under every title; visible keeps both; drop
-      removes it.
+      removes it. Not read for a deck, whose authors are on its page as on
+      its title slide.
 
   math:
     description: >
@@ -471,6 +475,44 @@ keys:
           group, numbered per group. A reference always links to its
           note wherever it went, and the note links back.
 
+  slides:
+    stage: render
+    description: >
+      Settings read only for decks written in Markdown, in a folder that
+      project.kind says is slides: each deck a page of its own in an html
+      target, and a PDF of its own in a pdf target, through the ltx-talk
+      presentation class.
+    keys:
+
+      notes:
+        type: enum
+        values: [collapsed, visible, omitted]
+        default: collapsed
+        description: >
+          Where a deck's speaker notes (Pandoc's ::: notes) go on its page:
+          collapsed puts each slide's under its content, closed, for a
+          reader to open; visible puts them there open; omitted leaves them
+          off. A PDF leaves them off whatever this says, since ltx-talk has
+          no notes yet, and a markdown target keeps them as they were.
+
+      notes_label:
+        type: string
+        default: Speaker notes
+        description: >
+          What the control that opens a slide's notes says, in the page's
+          language.
+
+      aspect_ratio:
+        type: string
+        default: auto
+        description: >
+          The shape of a deck's PDF, width to height (4:3, 16:9, 16:10).
+          auto takes the deck's own, its aspectratio as beamer reads it
+          (169, 43, and the rest); else 4:3 for a deck that names a theme
+          or another of beamer's variables, since that's what its author
+          saw (a theme of reveal.js's own doesn't count); else 16:9,
+          PowerPoint's default.
+
   epub:
     stage: package
     description: >
@@ -527,7 +569,9 @@ keys:
       file carries its structure, its images' alternative text, its
       tables' header cells, and its equations as MathML. A LaTeX book's
       PDF is built from the book's own LaTeX instead, unless from says
-      pages.
+      pages. A deck written in Markdown gets a PDF of its own, through
+      the ltx-talk class (see slides), which reads standard, ua1_math,
+      repair_captions, and remove_empty_paragraphs of these.
     keys:
 
       from:

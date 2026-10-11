@@ -34,6 +34,7 @@ from collections import Counter
 from urllib.parse import unquote
 
 import sidecars
+from names import case_match
 
 ESC = re.compile(r"\\([^A-Za-z0-9\s])")
 SPLIT = "<!-- TIQ-SPLIT -->"
@@ -125,17 +126,24 @@ def scan_images(text):
         i = j
 
 
-def sidecar_key(target):
+def sidecar_key(target, base=None):
     """The image-alt sidecar's key for a Markdown image's path: forward
     slashes, as the conversion makes it (portable_media_paths), decoded,
-    without the extension."""
+    without the extension. With base, the folder the source is in, a path
+    naming no file there is the file it names in another case, if one
+    does, as the conversion reads it."""
     path = unquote(target.replace("\\", "/"))
-    return os.path.splitext(path[2:] if path.startswith("./") else path)[0]
+    path = path[2:] if path.startswith("./") else path
+    if base and not os.path.isabs(path) and not os.path.isfile(os.path.join(base, path)):
+        cased = case_match(base, path)
+        if cased:
+            path = cased.replace(os.sep, "/")
+    return os.path.splitext(path)[0]
 
 
-def remediate_images(text, doc, alts):
-    """alts: {path without extension: alt, or None for decorative}.
-    Returns (text, counts)."""
+def remediate_images(text, doc, alts, base=None):
+    """alts: {path without extension: alt, or None for decorative}; base,
+    the source's folder (sidecar_key). Returns (text, counts)."""
     counts = {"described": 0, "decorative": 0, "images_skipped": 0}
     if not alts:
         return text, counts
@@ -144,7 +152,7 @@ def remediate_images(text, doc, alts):
     written = Counter(unquote(o["dest"]) for o in scanned)
     edits = []
     for target, n in wanted.items():
-        key = sidecar_key(target)
+        key = sidecar_key(target, base)
         if key not in alts:
             continue
         if written[target] != n:
@@ -362,7 +370,8 @@ def remediate(source, destination, alts=None, links=None, captions=None, languag
     # are found in the text as read.
     new, found = remediate_captions(text, read(text), captions or [])
     counts.update(found)
-    new, found = remediate_images(new, read(new), alts or {})
+    new, found = remediate_images(new, read(new), alts or {},
+                                  os.path.dirname(os.path.abspath(source)))
     counts.update(found)
     new, found = remediate_links(new, read(new), links or {})
     counts.update(found)

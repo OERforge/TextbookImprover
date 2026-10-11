@@ -42,6 +42,13 @@
 --
 -- 6. A heading's label and links (below).
 --
+-- 7. A footnote in a definition list's term, which the writer gives as a
+--    mark in the term and its text after the list (\footnotemark,
+--    \footnotetext), and LaTeX's tagging stops on that pair in a list's
+--    label (the number of automatic begin and end text-unit hooks differ,
+--    LaTeX 2026-06-01). It goes at the head of the term's definition, where
+--    the writer gives it as a footnote, as it does in a paragraph.
+--
 -- Copyright 2026 Robert Szarka
 --
 -- This program is free software: you can redistribute it and/or modify
@@ -567,7 +574,42 @@ local function equation(span)
   return out
 end
 
+local function term_notes(list)
+  local items, moved_any = pandoc.List({}), false
+  for _, item in ipairs(list.content) do
+    local moved = pandoc.Inlines({})
+    local term = pandoc.Inlines(item[1]):walk({
+      Note = function(note)
+        moved:insert(note)
+        return {}
+      end,
+    })
+    local definitions = pandoc.List(item[2])
+    if #moved > 0 then
+      moved_any = true
+      local blocks = pandoc.Blocks(definitions[1] or {})
+      local first = blocks[1]
+      if first and (first.t == 'Para' or first.t == 'Plain') then
+        local content = pandoc.Inlines({})
+        content:extend(moved)
+        content:extend(first.content)
+        first.content = content
+        blocks[1] = first
+      else
+        blocks:insert(1, pandoc.Plain(moved))
+      end
+      definitions[1] = blocks
+    end
+    items:insert({ term, definitions })
+  end
+  if moved_any then
+    list.content = items
+    return list
+  end
+end
+
 return {
+  { DefinitionList = term_notes },
   { Span = equation },
   { Inlines = lift_display, Header = heading },
   { Figure = Figure },

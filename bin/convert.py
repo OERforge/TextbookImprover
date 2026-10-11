@@ -33,6 +33,11 @@ THE RUN
   5.7  check what was written                     (per target)
   6.   build the cartridge                        (the packager)
 
+A folder of decks is slides (project.kind, or PowerPoint decks alone):
+PowerPoint decks are checked and remediated by lib/deckrun.py, and decks
+written in Markdown go through the run above a deck at a time, each a
+page of its own and, through ltx-talk, a PDF of its own (lib/decks.py).
+
 Two targets share a filtered intermediate when every setting the
 schema marks stage: filter agrees between them; otherwise the filter
 runs again into a directory of that target's own. Reports and sidecars
@@ -101,6 +106,10 @@ NOT_YET_IMPLEMENTED = ()
 # decided, and not what the filter derived from it.
 SOURCE_TARGETS = ("markdown", "asciidoc")
 TARGET_FILTER = os.path.join(HERE, "target-blocks.lua")
+DECK_HTML_FILTER = os.path.join(HERE, "deck-html.lua")
+DECK_PDF_FILTER = os.path.join(HERE, "deck-pdf.lua")
+DECK_TEMPLATE = os.path.join(HERE, "ltx-talk.latex")
+PDF_TARGET_FILTER = os.path.join(HERE, "pdf-target.lua")
 MARKDOWN_FILTER = os.path.join(HERE, "markdown-source.lua")
 MARKDOWN_HTML_FILTER = os.path.join(HERE, "markdown-html.lua")
 HTML_SOURCE_FILTER = os.path.join(HERE, "html-source.lua")
@@ -573,14 +582,14 @@ def slides_run(base, decks, targets, project, paths, reports, args, first):
     slides' later phases (ROADMAP.md)."""
     import deckrun
     if not decks:
-        die("project.kind is slides, but there's no PowerPoint deck (.pptx) here to "
-            "check or remediate.")
+        die("project.kind is slides, but there's no deck here: no PowerPoint deck "
+            "(.pptx), and nothing written in Markdown (.md).")
     others = book_sources(base)
     if others:
         say(f"NOTE: {len(others)} file(s) here are left out ("
             + ", ".join(others[:4]) + (", ..." if len(others) > 4 else "")
             + "): this folder is slides (project.kind), and a slides run reads "
-            "PowerPoint decks.")
+            "decks, PowerPoint or Markdown.")
     say(f"Slides: {len(decks)} PowerPoint deck(s), each checked and remediated on its own"
         + (" (project.kind)." if KIND_DECLARED == "slides" else
            ", since they're all this folder holds."))
@@ -612,11 +621,15 @@ def declared_kind(documents):
     return kind
 
 
-def load_targets(base, allow_unknown, decks_only=False):
+def load_targets(base, allow_unknown, decks_only=False, pptx_decks=False,
+                 markdown_decks=False):
     """Every conversion target, resolved, plus the project block. A slides
-    run with no target declared has one implied, remediated, format source,
-    where a book has html: decks_only says the folder's sources are
-    PowerPoint decks alone."""
+    run of PowerPoint decks with no target declared has one implied,
+    remediated, format source, where a book has html, and so do decks
+    written in Markdown: decks_only says the folder's sources are
+    PowerPoint decks alone, pptx_decks that it holds some, markdown_decks
+    that it holds Markdown files, which are decks when project.kind says
+    the folder is slides (DECK_RUN)."""
     schema = oerconfig.load_schema(os.path.join(HERE, "schema-conversion.yaml"))
     project_schema = oerconfig.load_schema(
         os.path.join(os.path.dirname(HERE), "lib", "schema-project.yaml"))
@@ -653,10 +666,15 @@ def load_targets(base, allow_unknown, decks_only=False):
     declared = oerconfig.target_names(documents)
     # Whether the book declares its language: a source target writes it
     # into the author's files only then, never the schema's default.
-    global LANGUAGE_DECLARED, TITLE_DECLARED, DECLARED_PROJECT, KIND_DECLARED
+    global LANGUAGE_DECLARED, TITLE_DECLARED, DECLARED_PROJECT, KIND_DECLARED, DECK_RUN
     LANGUAGE_DECLARED = any((doc.project or {}).get("language") for doc in documents)
     KIND_DECLARED = declared_kind(documents)
-    if not declared and (KIND_DECLARED == "slides" or (KIND_DECLARED is None and decks_only)):
+    # Markdown is a deck only where the project says the folder is slides:
+    # Pandoc's slide Markdown is ordinary Markdown. A folder of both kinds
+    # of deck is stopped once the targets are read.
+    DECK_RUN = KIND_DECLARED == "slides" and markdown_decks and not pptx_decks
+    if not declared and pptx_decks and (KIND_DECLARED == "slides"
+                                        or (KIND_DECLARED is None and decks_only)):
         # The target a slides folder means when it names none: a copy of
         # each deck with its decisions written in. First, so it is the
         # weakest, and the files a message names are still the person's.
@@ -720,6 +738,21 @@ def load_targets(base, allow_unknown, decks_only=False):
         die("Every target here is a format that is NOT YET IMPLEMENTED "
             f"({', '.join(NOT_YET_IMPLEMENTED)}); add an html, epub3, or "
             "markdown target to conversion.yaml.")
+    if DECK_RUN:
+        # What a deck is written as: a page, a PDF, Markdown again, or a
+        # copy of its source. An EPUB or a Word file of one isn't.
+        for target in targets:
+            if target.format not in DECK_FORMATS:
+                say(f"WARNING: target {target.name} is format {target.format}, which "
+                    "isn't written for decks (" + ", ".join(DECK_FORMATS)
+                    + " are); nothing is written for it.")
+            elif target.format == "pdf":
+                # A deck's PDF is the whole deck, whatever cuts its pages.
+                target.derived["pages.split_level"] = 0
+        targets = [t for t in targets if t.format in DECK_FORMATS]
+        if not targets:
+            die("Every target here is a format that isn't written for decks; add an html, "
+                "pdf, markdown, or source target to conversion.yaml.")
     for warning in targets[0].resolved.warnings if targets else []:
         say(f"WARNING: {warning}")
 
@@ -803,6 +836,10 @@ LATEX_MAIN = []
 LATEX_MACROS = "latex-conversion-macros.tex"
 LANGUAGE_DECLARED = False
 KIND_DECLARED = None        # project.kind as a file gives it, if one does
+# A slides run of decks written in Markdown: each .md a deck, read and
+# filtered as a page is, and written by the formats a deck has.
+DECK_RUN = False
+DECK_FORMATS = ("html", "pdf", "markdown", "source")
 TITLE_DECLARED = False
 DECLARED_PROJECT = {}
 # What the sources say about the book, read from a master file: its title,
@@ -854,18 +891,20 @@ def is_variant(name):
     return name in VARIANT_FILES
 
 
-def markdown_sources(base, fragments):
+def markdown_sources(base, fragments, decks=False):
     """The .md files this run converts: a page each, the way a .docx is,
     those in the pass-through directory too (named by its path, since
     they're read from the book's directory as though they sat there).
 
     One with a same-named .docx beside it is what a v0.1 run left behind
     and is not a source; neither is a file the header or footer setting
-    names. Everything else written in Markdown is a page of the book."""
+    names. Everything else written in Markdown is a page of the book.
+    decks: the folder is slides, and each file here a deck, but for a
+    repository's files about itself (README.md and the rest)."""
     found = []
     here = sorted(glob.glob(os.path.join(base, "*.md")))
     passthrough = passthrough_dir(base)
-    if passthrough:
+    if passthrough and not decks:
         here += sorted(glob.glob(os.path.join(passthrough, "*.md")))
     for path in here:
         name = os.path.relpath(path, base).replace(os.sep, "/")
@@ -873,8 +912,9 @@ def markdown_sources(base, fragments):
             continue
         if os.path.exists(os.path.join(base, name[:-3] + ".docx")):
             continue
-        # A LaTeX book's repository files, which aren't the book's pages.
-        if name.lower() in REPOSITORY_FILES and latex_master(base, quiet=True):
+        # A LaTeX book's repository files, which aren't the book's pages,
+        # nor a folder of decks'.
+        if name.lower() in REPOSITORY_FILES and (decks or latex_master(base, quiet=True)):
             continue
         found.append(name)
     return found
@@ -1710,11 +1750,28 @@ def portable_media_paths(path, base, name):
     before punctuation is a Markdown escape and never reaches the path
     (assets\\_fig.png reads as assets_fig.png), so a reference that
     resolves once a separator follows a directory's name is the same
-    mistake and is treated the same way. Anything else is left for the
-    media gate."""
+    mistake and is treated the same way.
+
+    A name that differs from its file only in case (assets/cs168-tcp.png,
+    the file CS168-TCP.png) is found the same way: macOS and Windows find
+    it, where the source was likely written, and so does TeX Live on Linux
+    (kpathsea's casefolding search), so a PDF built from the source has the
+    image, but Pandoc looks a name up as written. Anything else is left
+    for the media gate."""
+    from names import case_match
     with open(path, encoding="utf-8") as fh:
         doc = json.load(fh)
     fixed = []
+
+    def found(ref):
+        """ref as it names a file here: (path, how) or None."""
+        if os.path.isfile(os.path.join(base, unquote(ref))):
+            return None
+        if "%" not in ref and not os.path.isabs(ref):
+            cased = case_match(base, ref)
+            if cased:
+                return cased.replace(os.sep, "/"), "case"
+        return None
 
     def candidate(ref):
         if os.path.isfile(os.path.join(base, unquote(ref))):
@@ -1723,14 +1780,17 @@ def portable_media_paths(path, base, name):
                      .replace("%5c", "/")
         if swapped != ref and os.path.isfile(
                 os.path.join(base, unquote(swapped))):
-            return swapped
+            return swapped, "windows"
         for entry in sorted(os.listdir(base)):
             rest = ref[len(entry):]
             if ref.startswith(entry) and rest \
                     and os.path.isdir(os.path.join(base, entry)) \
                     and os.path.isfile(os.path.join(base, entry,
                                                     unquote(rest))):
-                return entry + "/" + rest
+                return entry + "/" + rest, "windows"
+        cased = found(swapped)
+        if cased:
+            return cased[0], "windows" if swapped != ref else "case"
         return None
 
     def walk(node):
@@ -1740,8 +1800,8 @@ def portable_media_paths(path, base, name):
                 better = None if ref.startswith(EXTERNAL_REF) \
                     else candidate(ref)
                 if better:
-                    fixed.append((ref, better))
-                    node["c"][2][0] = better
+                    fixed.append((ref,) + better)
+                    node["c"][2][0] = better[0]
             for value in node.values():
                 walk(value)
         elif isinstance(node, list):
@@ -1751,19 +1811,96 @@ def portable_media_paths(path, base, name):
     if fixed:
         with open(path, "w", encoding="utf-8") as fh:
             json.dump(doc, fh)
-        for ref, better in fixed:
-            say(f"WARNING: {name} names an image {ref}, a path only "
-                f"Windows resolves; read as {better}. Changing it in the "
-                "source is the fix.")
-    return fixed
+        for ref, better, how in fixed:
+            if how == "case":
+                say(f"WARNING: {name} names an image {ref}, and the file is {better}, "
+                    "a name in another case, which macOS and Windows find and Pandoc "
+                    f"doesn't; read as {better}. Changing it in the source is the fix.")
+            else:
+                say(f"WARNING: {name} names an image {ref}, a path only "
+                    f"Windows resolves; read as {better}. Changing it in the "
+                    "source is the fix.")
+    return [(ref, better) for ref, better, _ in fixed]
 
 
-def read_markdown_to_json(base, docs, env):
+def settle_markdown(path, base, name, decks=False, report=True):
+    """What reading a Markdown source needs after Pandoc: its images'
+    paths as they name files here (portable_media_paths); a one-item YAML
+    list where Pandoc wants a value (title:\\n- The Title), which Pandoc's
+    writers lose, made the value; and, for a deck, its slide level recorded
+    (decks.mark). What a deck says about itself is gathered in
+    DECK_FINDINGS for the run to report once, unless report is off (a
+    target's variant of a deck)."""
+    import decks as decklib
+    portable_media_paths(path, base, name)
+    with open(path, encoding="utf-8") as fh:
+        doc = json.load(fh)
+    meta = doc.setdefault("meta", {})
+    changed = decklib.single_values(meta)
+    if decks:
+        level = decklib.mark(doc)
+        untitled = decklib.untitled_slides(doc.get("blocks", []), level)
+        if report and untitled:
+            DECK_FINDINGS["untitled"].append((name, untitled))
+        if report and decklib.language_key(meta):
+            DECK_FINDINGS["language"].append(name)
+        if report and not meta.get("title"):
+            DECK_FINDINGS["no_title"].append(name)
+        without = decklib.notes_level(meta, doc.get("blocks", []), level)
+        if report and without:
+            DECK_FINDINGS["notes_level"].append((name, level, without))
+        changed.append(decklib.LEVEL_KEY)
+    if changed:
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(doc, fh)
+
+
+# What the decks a run reads say about themselves, reported once.
+DECK_FINDINGS = {"untitled": [], "language": [], "no_title": [], "notes_level": []}
+
+
+def report_decks():
+    """The run's lines about its decks' own files: slides with no title,
+    a language Pandoc doesn't read, a deck with no title."""
+    found = DECK_FINDINGS
+    if found["untitled"]:
+        count = sum(n for _, n in found["untitled"])
+        say(f"NOTE: {count} slide(s) in {len(found['untitled'])} deck(s) have no title ("
+            + ", ".join(f"{name} {n}" for name, n in found["untitled"][:4])
+            + (", ..." if len(found["untitled"]) > 4 else "")
+            + "): a slide a horizontal rule begins, or what comes before the first "
+            "slide's heading. A heading of the slide level gives one a title, which "
+            "is what a screen reader moves between.")
+    if found["language"]:
+        say(f"NOTE: {len(found['language'])} deck(s) name their language language: ("
+            + ", ".join(found["language"][:4])
+            + (", ..." if len(found["language"]) > 4 else "")
+            + "), which Pandoc doesn't read; its name is lang. The project's "
+            "language is what the run writes either way.")
+    if found["notes_level"]:
+        say(f"WARNING: a heading in the speaker notes of {len(found['notes_level'])} "
+            "deck(s) sets its slide level ("
+            + ", ".join(f"{name} {level}, {without} without it"
+                        for name, level, without in found["notes_level"][:4])
+            + (", ..." if len(found["notes_level"]) > 4 else "")
+            + "): Pandoc takes the shallowest heading that something follows, in the "
+            "notes too, so the headings between are slides' contents. Bold text in "
+            "the notes, or slide-level in the deck's YAML, keeps the deck's own.")
+    if found["no_title"]:
+        say(f"NOTE: {len(found['no_title'])} deck(s) have no title ("
+            + ", ".join(found["no_title"][:4])
+            + (", ..." if len(found["no_title"]) > 4 else "")
+            + "): a deck's page is headed by its title, and its PDF opens with "
+            "it, from the YAML; without one, each is named by its file's name.")
+
+
+def read_markdown_to_json(base, docs, env, decks=False):
     """A Markdown source is read as Pandoc's markdown, into the same
     intermediate a .docx gets. Its images are files it names by path,
     so there is nothing to extract; they are copied to each target with
     the page. Raw LaTeX in it -- \\frontmatter, \\chaptermark -- rides
-    along and is dropped by the HTML and EPUB writers."""
+    along and is dropped by the HTML and EPUB writers. decks: each is a
+    deck (settle_markdown)."""
     stems = []
     for name in docs:
         # A page is named after its source, made safe for an href: the
@@ -1774,8 +1911,10 @@ def read_markdown_to_json(base, docs, env):
              "-o", stem + ".json", "--lua-filter=" + MARKDOWN_HTML_FILTER,
              "--lua-filter=" + MEDIA_FILTER],
             env=env, cwd=base)
-        portable_media_paths(os.path.join(base, stem + ".json"), base, name)
+        settle_markdown(os.path.join(base, stem + ".json"), base, name, decks)
         stems.append(stem)
+    if decks:
+        report_decks()
     return stems
 
 
@@ -2071,7 +2210,7 @@ def read_variants(base, target, work, env):
             run(["pandoc", "-f", "markdown", "-t", "json", path, "-o", out,
                  "--lua-filter=" + MARKDOWN_HTML_FILTER,
                  "--lua-filter=" + MEDIA_FILTER], env=env, cwd=base)
-            portable_media_paths(out, base, name)
+            settle_markdown(out, base, name, DECK_RUN, report=False)
         raw[stem] = out
     return raw
 
@@ -2285,6 +2424,12 @@ def filter_env(target, base, paths, env):
         "BARE_LINKS": paths["bare_links"],
         "TABLE_HEADERS": paths["table_headers"],
     })
+    if DECK_RUN:
+        # A deck's headings are its slides and sections, never its title,
+        # which is its YAML's; and its authors are its title slide's, in
+        # every rendering.
+        out["PROMOTE_H1_TO_TITLE"] = "never"
+        out["AUTHOR_BYLINE"] = "visible"
     return out
 
 
@@ -2366,15 +2511,17 @@ def rewrite_publisher_links(pages):
         say(f"{total} publisher link(s) now point at pages of this book.")
 
 
-def split_pages(target, pages, paths, reports):
+def split_pages(target, pages, paths, reports, splitting=False):
     """split-pages.py runs on the filtered intermediates, after the
     filter and before the render, so the pieces carry everything the
     filter did while the sidecar keys and the reports still name the
-    source. It prints the pages to render, in reading order."""
+    source. It prints the pages to render, in reading order. splitting:
+    whether any target cuts pages, whose reports a target that doesn't
+    leaves alone."""
     level = int(target["pages.split_level"])
     if level <= 0:
         for name in ("page_names_new", "page_names_report"):
-            if os.path.exists(reports[name]):
+            if not splitting and os.path.exists(reports[name]):
                 os.remove(reports[name])
         return pages
     result = run(["python3", SPLIT_TOOL, "--level", str(level),
@@ -3373,6 +3520,139 @@ def latex_book_pdf(target, base, latex_parts, paths, work, language, project, ta
     return written
 
 
+def deck_pdfs(target, stems, names, base, language):
+    """Each deck's PDF, through ltx-talk (decks.build_pdf), built side by
+    side, a PDF per deck named as its page is: stems are the decks' pages,
+    names their source files, which title a PDF whose deck has no title.
+    Returns the PDFs' paths; a deck LaTeX stopped on stops the run, with
+    LaTeX's first errors, once every deck has been tried."""
+    import concurrent.futures
+    import decks as decklib
+    import latexbuild
+    import pdfretag
+    ratio = str(target["slides.aspect_ratio"] or "auto").strip()
+    if ratio != "auto" and not decklib.RATIO.match(ratio):
+        die(f"slides.aspect_ratio is {ratio!r} for target {target.name}; it's auto, or a "
+            "width and a height with a colon between them, as 16:9 or 4:3.")
+    if shutil.which("rsvg-convert") is None:
+        shown = []
+        for stem in stems:
+            with open(os.path.join(target.pages_dir, stem + INTERMEDIATE), encoding="utf-8") as fh:
+                svgs = decklib.svg_images(json.load(fh))
+            if svgs:
+                shown.append((stem, svgs[0]))
+        if shown:
+            die(f"{len(shown)} deck(s) show SVG images ({shown[0][1]} in {shown[0][0]} "
+                "first), and a deck's PDF needs rsvg-convert to turn them into PDF: sudo "
+                "apt install librsvg2-bin (see docs/installation.md).")
+    problem = decklib.ltx_talk_problem()
+    if problem:
+        die(problem)
+    if str(target["pdf.metadata"] or "").strip():
+        say(f"NOTE: pdf.metadata isn't read for decks (target {target.name}): a deck's "
+            "PDF is written with the template of its own, ltx-talk.latex, and the deck's "
+            "YAML.")
+    standards = [str(s).strip() for s in (target["pdf.standard"] or []) if str(s).strip()]
+    # deck-pdf.lua before pdf-target.lua, which writes a table in a table's
+    # cell as LaTeX, its footnotes too, where deck-pdf.lua counts them.
+    filters = [TARGET_FILTER, DECK_PDF_FILTER, PDF_TARGET_FILTER]
+    env = dict(os.environ, TARGET_NAME=target.name, TITLE_BLOCK=str(target["title_block"]))
+    os.makedirs(target.output_dir, exist_ok=True)
+
+    def one(stem):
+        return stem, decklib.build_pdf(
+            os.path.join(target.pages_dir, stem + INTERMEDIATE), base,
+            os.path.join(target.output_dir, stem + ".pdf"),
+            template=DECK_TEMPLATE, filters=filters, language=language,
+            standards=standards or ["ua-2"], ua1_math=str(target["pdf.ua1_math"]),
+            ratio=ratio, title=os.path.splitext(os.path.basename(names.get(stem, stem)))[0],
+            repair_captions=bool(target["pdf.repair_captions"]),
+            remove_empty_paragraphs=bool(target["pdf.remove_empty_paragraphs"]), env=env,
+            trace=(lambda c: say("+ " + " ".join(shell_quote(p) for p in c[:12]) + " ..."))
+            if TRACE else None)
+
+    workers = max(1, min(len(stems), os.cpu_count() or 1, 4))
+    with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
+        results = list(pool.map(one, stems))
+    written, failed, pages, missing, dropped, ratios = [], [], 0, {}, [], {}
+    unmatched, beamer, one_level = [], {}, []
+    for stem, result in results:
+        for command in result["beamer_commands"]:
+            beamer.setdefault(command, []).append(stem)
+        if not result["ok"]:
+            failed.append(stem)
+            if result["svg_failed"]:
+                say(f"{stem}'s PDF wasn't built: LaTeX can't show an SVG image, and "
+                    + "; ".join(f"{src} couldn't be made a PDF ({why})"
+                                for src, why in result["svg_failed"]) + ".")
+                continue
+            if result["timeout"]:
+                say(f"LuaLaTeX ran on {stem}'s PDF for {decklib.LATEX_TIMEOUT // 60} minutes "
+                    "without finishing, and was stopped; its log ends:")
+                for line in result["log"].strip().splitlines()[-5:]:
+                    say(line)
+                continue
+            say(f"LaTeX stopped on {stem}'s PDF:" if result["log"] else
+                f"Pandoc couldn't write {stem}'s LaTeX:")
+            for line in (latexbuild.first_errors(result["log"]) or
+                         result["log"].strip().splitlines()[-5:]):
+                say(line)
+            for advice in latexbuild.failure_advice(result["log"]):
+                say(advice)
+            continue
+        written.append(result["pdf"])
+        pages += result["pages"]
+        ratios.setdefault(f"{result['ratio']} ({result['ratio_why']})", []).append(stem)
+        for character, n in latexbuild.missing_characters(
+                result["log"].splitlines())[0].items():
+            missing[character] = missing.get(character, 0) + n
+        for option in (result["talkify"] or {}).get("dropped", []):
+            if option not in dropped:
+                dropped.append(option)
+        if result["retag"] is not None and not result["retag"]["matched"]:
+            unmatched.append(stem)
+        if not result["own_levels"]:
+            one_level.append(stem)
+    if written:
+        say(f"Wrote {len(written)} PDF(s) in {target.output_dir}, one for each deck, "
+            f"through ltx-talk: {pages} page(s); the slides "
+            + "; ".join(f"{shape} for {len(which)}" for shape, which in ratios.items())
+            + ".")
+    if missing:
+        say(latexbuild.missing_warning(
+            missing, "A font that has them, loaded in a deck's header-includes, would "
+            "draw them."))
+    if dropped:
+        say("NOTE: frame options ltx-talk has no key for were left out of the PDFs: "
+            + ", ".join(dropped) + ".")
+    if beamer:
+        named = sorted({stem for which in beamer.values() for stem in which})
+        say("NOTE: beamer's " + ", ".join("\\" + c for c in sorted(beamer))
+            + " in the header-includes of " + ", ".join(named[:4])
+            + (", ..." if len(named) > 4 else "") + " do nothing in a deck's PDF, which "
+            "ltx-talk sets, not beamer.")
+    if one_level:
+        say(f"WARNING: ltx-talk's code for a slide's title isn't the code bin/ltx-talk.latex "
+            f"was written for (ltx-talk 0.6.9), so in {len(one_level)} deck PDF(s) ("
+            + ", ".join(one_level[:4]) + ") every slide's title is tagged at one level, not "
+            "at the level of the sections around it.")
+    if unmatched:
+        say(f"WARNING: the tables in {len(unmatched)} deck PDF(s) ("
+            + ", ".join(unmatched[:4]) + ") don't line up with the decks' own, so no "
+            "caption was retagged in them.")
+    if pdfretag.pikepdf is None and (target["pdf.repair_captions"]
+                                     or target["pdf.remove_empty_paragraphs"]):
+        say("WARNING: pikepdf isn't installed, so the decks' PDFs keep the tags LaTeX "
+            "gives a table's caption, a first row a screen reader reads as data, and the "
+            "empty paragraph elements LaTeX leaves (pip install pikepdf, or sudo apt "
+            "install python3-pikepdf).")
+    if failed:
+        die(f"{len(failed)} of the {len(stems)} deck PDF(s) for target {target.name} "
+            "weren't built (" + ", ".join(failed[:4]) + (", ..." if len(failed) > 4 else "")
+            + ").")
+    return written
+
+
 def render_markdown(target, pages, base, work, project, env, losses=None):
     """Markdown or AsciiDoc files as source: what the author decided, in
     Pandoc's own flavor of each, and nothing the filter derived. Or Word
@@ -3571,11 +3851,17 @@ def render_html(target, pages, base, fragments, language, env):
     os.makedirs(target.output_dir, exist_ok=True)
     header, footer = fragments
     written = []
+    # A deck's page: its headings under its title, and its notes where
+    # slides.notes says (deck-html.lua, which passes any other page by).
+    deck = ["--lua-filter=" + DECK_HTML_FILTER] if DECK_RUN else []
+    if DECK_RUN:
+        env = dict(env, DECK_NOTES=str(target["slides.notes"]),
+                   DECK_NOTES_LABEL=str(target["slides.notes_label"] or ""))
     for page in pages:
         stem = os.path.basename(page)[:-len(INTERMEDIATE)]
         out = os.path.join(target.output_dir, stem + ".html")
         command = ["pandoc", "-f", "json", "-t", "html5", page, "-o", out,
-                   "--standalone", "--ascii", "--math-method=mathml",
+                   "--standalone", "--ascii", "--math-method=mathml"] + deck + [
                    "--lua-filter=" + TARGET_FILTER,
                    "--lua-filter=" + SAFE_MEDIA_FILTER,
                    "--lua-filter=" + HEADER_FILTER, "-M", f"lang={language}"]
@@ -4222,8 +4508,11 @@ def main():
     import deckrun
     decks = deckrun.deck_sources(base)
     book_here = bool(book_sources(base)) or latex_book_here(base)
+    markdown_here = [n for n in book_sources(base) if n.lower().endswith(".md")]
     targets, project = load_targets(base, args.allow_unknown_keys,
-                                    decks_only=bool(decks) and not book_here)
+                                    decks_only=bool(decks) and not book_here,
+                                    pptx_decks=bool(decks),
+                                    markdown_decks=bool(markdown_here))
     # A folder is a book or a set of slides: slides when project.kind says
     # so, or when it says nothing and the folder holds decks alone.
     slides = KIND_DECLARED == "slides" or (KIND_DECLARED is None and bool(decks)
@@ -4233,12 +4522,20 @@ def main():
             + ", ".join(decks[:4]) + (", ..." if len(decks) > 4 else "")
             + "): a deck isn't a page of a book. In a folder of their own, decks "
             "are slides, each checked and remediated (project.kind: slides).")
+    if slides and decks and markdown_here:
+        # One run reads PowerPoint decks itself and Markdown through Pandoc,
+        # and the two would write the same reports; until PowerPoint decks
+        # are converted as Markdown ones are, a folder holds one kind.
+        die(f"This folder is slides, with {len(decks)} PowerPoint deck(s) and "
+            f"{len(markdown_here)} written in Markdown ({decks[0]}, {markdown_here[0]}). "
+            "Put each kind in a folder of its own: a slides run reads one kind of deck "
+            "for now. Nothing was converted.")
     # Pandoc 3.9 introduced the options this script relies on. Earlier
     # versions accept most of the command line and quietly do something
     # else: 3.6 and older write grid tables without cell spans, so a table
-    # with merged cells loses them without any warning. A slides run reads
-    # and writes its decks itself, and needs no Pandoc.
-    if not slides:
+    # with merged cells loses them without any warning. A slides run of
+    # PowerPoint decks reads and writes them itself, and needs no Pandoc.
+    if not slides or DECK_RUN:
         if shutil.which("pandoc") is None:
             die("pandoc not found. Version 3.9 or later is required.")
         version = subprocess.run(["pandoc", "--version"], capture_output=True,
@@ -4292,8 +4589,17 @@ def main():
                            "media_unresolved", "spacer_images",
                            "output_check", "math_repaired",
                            "slide_titles_new", "reading_order_new", "slides_check")}
-    if slides:
+    if slides and not DECK_RUN:
         return slides_run(base, decks, targets, project, paths, reports, args, first)
+    if DECK_RUN:
+        others = [n for n in book_sources(base) if not n.lower().endswith(".md")]
+        if latex_book_here(base):
+            others.append("its LaTeX")
+        if others:
+            say(f"NOTE: what else this folder holds is left out ("
+                + ", ".join(others[:4]) + (", ..." if len(others) > 4 else "")
+                + "): it's slides (project.kind), and its decks are the files "
+                "written in Markdown.")
 
     work = tempfile.mkdtemp(prefix="convert-")
     try:
@@ -4319,7 +4625,7 @@ def main():
             "MEDIA_STRICT": "1" if first["media.strict"] else "",
         })
 
-        docs = source_documents(base)
+        docs = [] if DECK_RUN else source_documents(base)
 
         # ---- 3. fragments, per target ----------------------------------------
         fragments = {}
@@ -4338,18 +4644,23 @@ def main():
         # ---- 1. read ----------------------------------------------------------
         # Every file that becomes a page is found before any is read, so
         # two that would be one page stop the run before either is.
-        markdown = markdown_sources(base, fragment_files)
-        adoc, adoc_order, imagesdir, adoc_header = asciidoc_sources(base)
+        markdown = markdown_sources(base, fragment_files, decks=DECK_RUN)
+        if DECK_RUN:
+            say(f"Slides: {len(markdown)} deck(s) written in Markdown (project.kind), "
+                "each converted on its own: " + ", ".join(
+                    f"{t.name} ({t.format})" for t in targets) + ".")
+        adoc, adoc_order, imagesdir, adoc_header = (([], [], "", None) if DECK_RUN
+                                                    else asciidoc_sources(base))
         output_dirs = [t.output_dir for t in targets]
-        latex_main = latex_masters(base, skip=output_dirs)
+        latex_main = [] if DECK_RUN else latex_masters(base, skip=output_dirs)
         master = latex_main[0] if latex_main else None
         named = {page_name_of(n) for n in list(docs) + markdown + adoc}
-        hand = hand_pages(base, named)
-        web = html_sources(base, named, set(hand))
+        hand = [] if DECK_RUN else hand_pages(base, named)
+        web = [] if DECK_RUN else html_sources(base, named, set(hand))
         check_page_names([docs, markdown, adoc, web,
                           [f"{PASSTHROUGH}/{h}.html" for h in hand]])
         stems = read_to_json(base, docs, env, work)
-        stems += read_markdown_to_json(base, markdown, env)
+        stems += read_markdown_to_json(base, markdown, env, decks=DECK_RUN)
         adoc_stems = read_asciidoc_to_json(base, adoc, env, imagesdir)
         resolve_asciidoc_xrefs(base, adoc_stems)
         stems += adoc_stems
@@ -4478,8 +4789,9 @@ def main():
                                  raw)
             if target["links.rewrite_publisher"]:
                 rewrite_publisher_links(pages)
-            pages_by_dir[target.pages_dir] = split_pages(target, pages,
-                                                         paths, reports)
+            pages_by_dir[target.pages_dir] = split_pages(
+                target, pages, paths, reports,
+                splitting=any(int(t["pages.split_level"]) > 0 for t in targets))
 
         if args.check_only:
             say("Check only: the reports are written; nothing was rendered "
@@ -4487,7 +4799,7 @@ def main():
             return 0
 
         # ---- 4.6 hand-written pages ------------------------------------------
-        hand = hand_pages(base, stems)
+        hand = [] if DECK_RUN else hand_pages(base, stems)
         if hand:
             say(f"{len(hand)} hand-written page(s): " + ", ".join(hand))
         for target in targets:
@@ -4603,6 +4915,12 @@ def main():
         for target in targets:
             if target.format != "pdf":
                 continue
+            if DECK_RUN:
+                # A PDF per deck, not one of the whole folder.
+                pdfs += deck_pdfs(target, [s for s in stems if s not in hand_stems],
+                                  {safe_stem(os.path.basename(n)[:-3]): n for n in markdown},
+                                  base, language)
+                continue
             # A LaTeX book's own build titles its PDF as its \title does.
             own_build = master and str(target["pdf.from"]) == "book"
             named, title = (True, None) if own_build else name_book_target(
@@ -4669,6 +4987,11 @@ def main():
     # its pages from the first html target's directory; a package whose
     # includes name another html target is a roadmap item.
     unnamed = 1 if UNNAMED else 0
+    if DECK_RUN:
+        # Decks are packaged beside a book, or as a course of their own,
+        # once a package can hold more than one target (ROADMAP.md).
+        say("Slides aren't packaged yet; each target's folder holds its decks.")
+        return unnamed
     html_targets = [t for t in targets if t.format == "html"]
     if not os.path.isfile(CARTRIDGE_TOOL) or not html_targets:
         say(f"No {CARTRIDGE_TOOL}, so skipping the manifest."

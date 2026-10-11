@@ -9,7 +9,7 @@
 # CI step. Each suite is independent and runs even if an earlier one
 # failed, because knowing everything that broke is more useful than
 # knowing the first thing that broke. -j goes to the suites whose cases
-# can run side by side (convert, LaTeX, EPUB) and to the PDF suite, which
+# can run side by side (convert, LaTeX, EPUB, decks) and to the PDF suite, which
 # builds its two books at once; each prints its cases in its own order.
 #
 # WHAT EACH ONE COVERS (docs/testing.md says more)
@@ -48,6 +48,9 @@
 #   run-audit-tests.py     the audit, and convert.py --check-only.
 #   run-latex-tests.py     LaTeX as a source, and the copies and PDFs
 #                          made from it; its drawings need a TeX.
+#   run-decks-tests.py     decks written in Markdown: each deck's page,
+#                          its copies, and its PDF through ltx-talk, which
+#                          needs LuaLaTeX and ltx-talk (skipped without).
 #
 # Copyright 2026 Robert Szarka
 #
@@ -154,7 +157,7 @@ run run-mathjax-tests.py
 # These convert real documents, so they need Pandoc. Skipping is
 # reported rather than silent: a suite that quietly does not run is worse
 # than one that fails.
-needs_pandoc="run-filter-tests.py, run-convert-tests.py, run-epub-tests.py, run-pdf-tests.py, run-split-tests.py, run-audit-tests.py, and run-latex-tests.py"
+needs_pandoc="run-filter-tests.py, run-convert-tests.py, run-epub-tests.py, run-pdf-tests.py, run-split-tests.py, run-audit-tests.py, run-latex-tests.py, and run-decks-tests.py"
 if ! command -v pandoc >/dev/null 2>&1; then
   skipped="$needs_pandoc (pandoc not found)"
 elif [ "$(printf '%s\n3.9\n' \
@@ -170,6 +173,7 @@ else
   run run-split-tests.py
   run run-audit-tests.py
   run run-latex-tests.py $side
+  run run-decks-tests.py $side
 fi
 
 printf '\n'

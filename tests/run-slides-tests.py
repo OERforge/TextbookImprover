@@ -40,6 +40,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
 import csv
+import hashlib
+import html
 import io
 import os
 import re
@@ -2592,6 +2594,333 @@ def case_links(work):
 
 
 # ---------------------------------------------------------------------------
+# pictures cropped differently, alt text copied from the web, and the
+# file's lists of fonts and slide titles
+# ---------------------------------------------------------------------------
+
+PARTS, DOTS, ALIKE, BARE = png(10, 20, 30), png(40, 50, 60), png(70, 80, 90), png(100, 110, 120)
+WEB = png(130, 140, 150)
+
+
+def cropped(shape_id, rid, box, crop, descr=None, decorative=False):
+    """A picture cropped as PowerPoint crops one: a:srcRect's l, t, r, and
+    b, each how far in from its side, in thousandths of a percent (None
+    leaves one out)."""
+    rect = "<a:srcRect %s/>" % " ".join('%s="%s"' % (side, value)
+                                        for side, value in zip("ltrb", crop) if value is not None)
+    return pic(shape_id, rid, box, descr, decorative).replace(
+        '<a:blip r:embed="%s"/>' % rid, '<a:blip r:embed="%s"/>%s' % (rid, rect))
+
+
+LEFT, RIGHT = (None, None, 50000, None), (50000, None, None, None)
+SPOT = (457200, 1600200, 2000000, 2000000)
+SPOT2 = (3000000, 1600200, 2000000, 2000000)
+SPOT3 = (5500000, 1600200, 2000000, 2000000)
+SPOT4 = (457200, 4000000, 2000000, 2000000)
+
+
+def parts_deck(path):
+    """Pictures on two slides: one image cropped to a different half on
+    each, with one alt text for both; one cropped so with an alt text
+    each; one cropped alike, to within a fiftieth, with one alt text; and
+    one cropped to different halves with none."""
+    return deck(path, [
+        {"shapes": [title(2, "Left"), cropped(3, "rId2", SPOT, LEFT, "Two icons"),
+                    cropped(4, "rId3", SPOT2, LEFT, "A green dot"),
+                    cropped(5, "rId4", SPOT3, (None, None, 50000, None), "A dot"),
+                    cropped(6, "rId5", SPOT4, LEFT)],
+         "images": {"rId2": PARTS, "rId3": DOTS, "rId4": ALIKE, "rId5": BARE}},
+        {"shapes": [title(2, "Right"), cropped(3, "rId2", SPOT, RIGHT, "Two icons"),
+                    cropped(4, "rId3", SPOT2, RIGHT, "Another green dot"),
+                    cropped(5, "rId4", SPOT3, (None, None, 48000, None), "A dot"),
+                    cropped(6, "rId5", SPOT4, RIGHT)],
+         "images": {"rId2": PARTS, "rId3": DOTS, "rId4": ALIKE, "rId5": BARE}}])
+
+
+def case_crops(work):
+    path = parts_deck(os.path.join(work, "parts.pptx"))
+    d = pptxparse.read(path)
+    crops = [[s.crop for s in slide.shapes if s.image] for slide in d.slides]
+    filled = rect(5, "Filled", SPOT3).replace(
+        '<a:prstGeom prst="rect"><a:avLst/></a:prstGeom>',
+        '<a:prstGeom prst="ellipse"><a:avLst/></a:prstGeom><a:blipFill><a:blip r:embed="rId2"/>'
+        '<a:srcRect t="10000" b="20000"/><a:stretch><a:fillRect/></a:stretch></a:blipFill>')
+    odd = pptxparse.read(deck(os.path.join(work, "odd.pptx"), [{"shapes": [
+        title(2, "Odd"), cropped(3, "rId2", SPOT, ("25.5%", "-10000", "0", "125000")),
+        pic(4, "rId2", SPOT2), filled, cropped(6, "rId2", SPOT4, (None, "60000", None, "60000"))],
+        "images": {"rId2": RED}}]))
+    yield "a picture's crop is the part of its image it shows: a:srcRect read, the strict form " \
+        "too, a negative crop showing all of that side, one past the whole image or past the " \
+        "other side none of it, an uncropped picture all of it, and a shape filled with a picture " \
+        "its fill's crop", \
+        crops[0][0] == (0, 0, 50000, 100000) and crops[1][0] == (50000, 0, 100000, 100000) \
+        and [s.crop for s in odd.slides[0].shapes if s.image] == [
+            (25500, 0, 100000, 0), (0, 0, 100000, 100000), (0, 10000, 100000, 80000),
+            (0, 60000, 100000, 60000)], \
+        (crops, [s.crop for s in odd.slides[0].shapes if s.image])
+    views = pptxcheck.crop_views([(0, 0, 100000, 100000), (5000, 0, 100000, 100000),
+                                  (5001, 0, 100000, 100000), None, (0, 0, 50000, 100000)])
+    yield "copies cropped alike to within a twentieth of the image on every side show one part " \
+        "of it", views == [0, 0, 1, 0, 2], views
+    found = [(f.where, f.check) for f in pptxcheck.check(d)
+             if f.check.startswith("pptx-alt") or f.check.endswith("no-alt")]
+    yield "one alt text on copies cropped to show different parts is found on each copy; " \
+        "different alt texts, or copies cropped alike, aren't", sorted(found) == [
+            ("slide 1, Picture 3", "pptx-alt-same-for-crops"),
+            ("slide 1, Picture 6", "pptx-object-no-alt"),
+            ("slide 2, Picture 3", "pptx-alt-same-for-crops"),
+            ("slide 2, Picture 6", "pptx-object-no-alt")], found
+    titled = pptxparse.read(deck(os.path.join(work, "titled.pptx"), [
+        {"shapes": [title(2, "A"), cropped(3, "rId2", SPOT, LEFT, "Icons | Freepik")],
+         "images": {"rId2": PARTS}},
+        {"shapes": [title(2, "B"), cropped(3, "rId2", SPOT, RIGHT, "Icons | Freepik")],
+         "images": {"rId2": PARTS}},
+        {"shapes": [title(2, "C"), cropped(3, "rId2", SPOT, LEFT, "Two", decorative=True),
+                    cropped(4, "rId3", SPOT2, RIGHT, "Two")], "images": {"rId2": DOTS, "rId3": DOTS}},
+        {"shapes": [title(2, "D"), cropped(3, "rId2", SPOT, LEFT, "One")],
+         "images": {"rId2": DOTS}},
+        {"shapes": [title(2, "E"), cropped(3, "rId2", SPOT, RIGHT, "One")],
+         "images": {"rId2": DOTS}}]))
+    found = sorted((f.where, f.check) for f in pptxcheck.check(titled)
+                   if f.check.startswith("pptx-alt"))
+    yield "a copy another alt-text finding names isn't named again, and a decorative copy's alt " \
+        "text is no copy's", \
+        found == [("slide 1, Picture 3", "pptx-alt-page-title"),
+                  ("slide 2, Picture 3", "pptx-alt-page-title"),
+                  ("slide 4, Picture 3", "pptx-alt-same-for-crops"),
+                  ("slide 5, Picture 3", "pptx-alt-same-for-crops")], found
+    folder = os.path.join(work, "decks")
+    os.makedirs(folder)
+    parts_deck(os.path.join(folder, "parts.pptx"))
+    deck(os.path.join(folder, "logo.pptx"), [
+        {"shapes": [title(2, "Logo"), cropped(3, "rId2", SPOT, LEFT),
+                    pic(4, "rId3", SPOT2, "Marketing Mix Explained | Quizlet")],
+         "images": {"rId2": BLUE, "rId3": WEB}}], logo=True)
+    run = convert(folder, "--check-only")
+    alt = {r[0]: r for r in rows_of(os.path.join(folder, "image-alt-missing.csv"))}
+    parts_key, bare_key = (rem.image_key(hashlib.sha256(data).hexdigest()) + ".png"
+                           for data in (PARTS, BARE))
+    blue_key, web_key = (rem.image_key(hashlib.sha256(data).hexdigest()) + ".png"
+                         for data in (BLUE, WEB))
+    crop_reason = "; a crop of %s, which other copies crop differently"
+    yield "each copy of a picture cropped to show a different part has a row of its own, keyed " \
+        "on its shape and naming its image, which is written where its key would point", \
+        run.returncode == 0 and sorted(alt) == sorted([
+            "parts/slide-256/shape-3", "parts/slide-257/shape-3", "parts/slide-256/shape-6",
+            "parts/slide-257/shape-6", blue_key, web_key]) \
+        and alt["parts/slide-256/shape-3"][2:5] == [
+            "parts.pptx slide 1", "shared with a copy showing another part" + crop_reason % parts_key,
+            "Two icons"] \
+        and alt["parts/slide-257/shape-6"][2:5] == [
+            "parts.pptx slide 2", "missing (picture)" + crop_reason % bare_key, ""] \
+        and all(os.path.isfile(os.path.join(folder, k)) for k in (parts_key, bare_key)) \
+        and "has a row of its own, keyed on its shape" in run.stderr, (sorted(alt), run.stderr[-600:])
+    yield "a picture with a copy on a layout keeps its one row, whose key can name that copy", \
+        alt.get(blue_key, [""] * 5)[2] == "logo.pptx slide 1; logo.pptx layout or master", alt.get(blue_key)
+    yield "a page's title copied as alt text has a row, which says so", \
+        alt.get(web_key, [""] * 5)[3] == "a web page's title", alt.get(web_key)
+    alike_key = rem.image_key(hashlib.sha256(ALIKE).hexdigest()) + ".png"
+    with open(os.path.join(folder, "image-alt.csv"), "w", encoding="utf-8", newline="") as fh:
+        csv.writer(fh).writerows([["Image", "Alt"], [parts_key, "Two icons, described once"],
+                                  [alike_key, "A dot, described once"],
+                                  [bare_key, "[decorative]"]])
+    noted = convert(folder, "--check-only")
+    said = [l for l in noted.stderr.splitlines()
+            if l.startswith("NOTE:") and "cropped to show different parts" in l]
+    yield "a picture's row giving copies that show different parts one alt text is named in a " \
+        "note; one for copies cropped alike, or decorative, isn't", \
+        len(said) == 1 and said[0].startswith("NOTE: 1 row(s) of image-alt.csv give one alt text") \
+        and parts_key[:-4] + ": parts.pptx slide 1, parts.pptx slide 2" in said[0], noted.stderr[-800:]
+    with open(os.path.join(folder, "image-alt.csv"), "w", encoding="utf-8", newline="") as fh:
+        csv.writer(fh).writerows([["Image", "Alt"], [parts_key, "Two icons, described once"],
+                                  ["parts/slide-256/shape-3", "The left icon"]])
+    one = convert(folder, "--check-only")
+    yield "nor one that gives one alt text to the only copy no row of its own describes", \
+        not any(l.startswith("NOTE:") and "cropped" in l for l in one.stderr.splitlines()), \
+        one.stderr[-600:]
+    with open(os.path.join(folder, "image-alt.csv"), "w", encoding="utf-8", newline="") as fh:
+        csv.writer(fh).writerows([["Image", "Alt"], [parts_key, "Two icons, described once"],
+                                  ["parts/slide-256/shape-3", "The left icon"],
+                                  ["parts/slide-257/shape-3", "The right icon"],
+                                  [bare_key, "[decorative]"], [blue_key, "[decorative]"],
+                                  [web_key, "A diagram of the marketing mix"]])
+    done = convert(folder)
+    copy = pptxparse.read(os.path.join(folder, "remediated", "parts.pptx"))
+    left = sorted({r[1] for r in rows_of(os.path.join(folder, "output-check.csv"))})
+    yield "rows keyed on each copy's shape give each its own alt text, over the picture's row, " \
+        "and the copy's check finds nothing left of it", done.returncode == 0 \
+        and [s.descr for slide in copy.slides for s in slide.shapes if s.id == "3"] == [
+            "The left icon", "The right icon"] \
+        and not any(l.startswith("NOTE:") for l in done.stderr.splitlines()) \
+        and not any(c.startswith("pptx-alt") or c.endswith("no-alt") for c in left), \
+        (done.stderr[-600:], left)
+
+
+def case_web_titles(work):
+    # One of each kind, made up: a site after a pipe, a short name after a
+    # dash, a title cut off, a search engine's "What Is It", a numbered
+    # section and its book, a stock site's words, and a stock site's name.
+    examples = [
+        "Marketing Mix Explained | Quizlet",
+        "Why Do Supply Chains Fail? - Examplepedia",
+        "Ten Tips for Better Slides - example.com",
+        "Robot Shaking Hands With A Person ...",
+        "Opportunity Cost - What Is It and Why It Matters",
+        "4.3 Demand and Supply Together – Introductory Economics",
+        "Download Free High-Quality Vectors of Teamwork",
+        "Handshake Royalty-Free Images",
+        "Woman with a tablet flat concept icon",
+        "A laptop on a desk from Shutterstock",
+        "Notebook vector illustration isolated on white background",
+    ]
+    found = [(pptxcheck.alt_problem(t, limit=0) or ("",))[0] for t in examples]
+    yield "alt text copied from a web page with its picture, the page's title or a stock " \
+        "site's caption, is found", found == ["pptx-alt-page-title"] * len(examples), \
+        list(zip(found, examples))
+    fine = [
+        "Two overlapping circles model P(A | B) = P(A AND B)/P(B).",
+        "The residual (|e|) is the vertical distance from a data point to the line.",
+        "The cover of a book whose author is Jo Smith – Jones.",
+        "A sign that reads “Recycling. What is it? And why does it matter?”",
+        "A vector diagram showing the forces on a block, and the net force vector.",
+        "Map of Europe in 1914, the Central Powers in gray.",
+        "A flat, open field under a cloudy sky.",
+        "A stock chart of the S&P 500 rising from 2010 to 2020.",
+        "A comparison of raster and vector images of the same letter.",
+        "A camera that takes high-quality images, beside a phone.",
+        "A website with a flat design and a menu at the top.",
+        "The Golden Gate Bridge at dusk - San Francisco Bay",
+    ]
+    found = [pptxcheck.alt_problem(t, limit=0) for t in fine]
+    yield "a description that only shares a pipe, a dash, or a word with a page's title isn't", \
+        found == [None] * len(fine), list(zip(found, fine))
+    generated = pptxcheck.alt_problem("A clipboard with a paper on it\n\nAI-generated content may "
+                                      "be incorrect.")
+    yield "Office's generated description is found in its newer wording as in its older ones", \
+        generated == ("pptx-alt-auto-generated", "A clipboard with a paper on it AI-generated "
+                      "content may be incorrect.") \
+        and pptxcheck.alt_problem("A dog Description automatically generated")[0] \
+        == "pptx-alt-auto-generated", generated
+    yield "the report says why: a web page's title", \
+        deckrun.reason_of("pptx-alt-page-title", examples[0]) == "a web page's title" \
+        and deckrun.reason_of("pptx-alt-same-for-crops", "Two icons") \
+        == "shared with a copy showing another part", ""
+
+
+def app_xml(fonts, titles, names=("Fonts Used", "Theme", "Slide Titles")):
+    """docProps/app.xml as PowerPoint writes it: the fonts a deck uses, its
+    theme, and its slides' titles, each list counted in HeadingPairs and
+    its entries in TitlesOfParts, an empty one written <vt:lpstr/>."""
+    lists = list(zip(names, (fonts, ["Office Theme"], titles)))
+    heading = "".join('<vt:variant><vt:lpstr>%s</vt:lpstr></vt:variant><vt:variant><vt:i4>%d'
+                      '</vt:i4></vt:variant>' % (esc(n), len(items)) for n, items in lists)
+    entries = "".join("<vt:lpstr>%s</vt:lpstr>" % esc(e) if e else "<vt:lpstr/>"
+                      for _n, items in lists for e in items)
+    return ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Properties xmlns="http://'
+            'schemas.openxmlformats.org/officeDocument/2006/extended-properties" xmlns:vt="http://'
+            'schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes"><Application>Microsoft '
+            'Office PowerPoint</Application><Slides>%d</Slides><HeadingPairs><vt:vector size="%d" '
+            'baseType="variant">%s</vt:vector></HeadingPairs><TitlesOfParts><vt:vector size="%d" '
+            'baseType="lpstr">%s</vt:vector></TitlesOfParts></Properties>'
+            % (len(titles), 2 * len(lists), heading, sum(len(i) for _n, i in lists), entries))
+
+
+def app_lists(xml):
+    """The lists in an app.xml, as {name: entries}, if they add up."""
+    heading = re.findall(r"<vt:lpstr>([^<]*)</vt:lpstr></vt:variant><vt:variant><vt:i4>(\d+)<", xml)
+    entries = [html.unescape(m.group(1) or "") for m in re.finditer(
+        r"<vt:lpstr/>|<vt:lpstr>([^<]*)</vt:lpstr>",
+        re.search(r"<TitlesOfParts>.*</TitlesOfParts>", xml, re.S).group(0))]
+    size = int(re.search(r'<TitlesOfParts><vt:vector size="(\d+)"', xml).group(1))
+    out, at = {}, 0
+    for name, n in heading:
+        out[name] = entries[at:at + int(n)]
+        at += int(n)
+    return out if at == len(entries) == size else None
+
+
+def with_app(path, xml):
+    """A deck with docProps/app.xml, its relationship, and its type."""
+    with zipfile.ZipFile(path) as z:
+        members = [(i, z.read(i.filename)) for i in z.infolist()]
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as z:
+        for info, data in members:
+            if info.filename == "_rels/.rels":
+                data = data.replace(b"</Relationships>", b'<Relationship Id="rId9" Type="http://'
+                                    b'schemas.openxmlformats.org/officeDocument/2006/relationships/'
+                                    b'extended-properties" Target="docProps/app.xml"/>'
+                                    b"</Relationships>")
+            elif info.filename == "[Content_Types].xml":
+                data = data.replace(b"</Types>", b'<Override PartName="/docProps/app.xml" '
+                                    b'ContentType="application/vnd.openxmlformats-officedocument.'
+                                    b'extended-properties+xml"/></Types>')
+            z.writestr(info, data)
+        z.writestr("docProps/app.xml", xml)
+    return path
+
+
+def case_app_properties(work):
+    xml = app_xml(["Montserrat", "Avenir Next", "Arial", "Georgia", "Futura"],
+                  ["PowerPoint Presentation", "Kept", ""])
+    out, n = rem.set_app_properties(xml, {"Avenir Next": "Arial", "Futura": "Helvetica"},
+                                    ["The First", None, "A & B"])
+    yield "the copy's list of fonts names a replacement in the font's place, or drops the font " \
+        "where the replacement is listed, and its list of titles the titles it wrote", \
+        n == 4 and app_lists(out) == {
+            "Fonts Used": ["Montserrat", "Arial", "Georgia", "Helvetica"],
+            "Theme": ["Office Theme"], "Slide Titles": ["The First", "Kept", "A & B"]} \
+        and "<vt:lpstr>A &amp; B</vt:lpstr>" in out and '<vt:vector size="6"' in out, out
+    same = [rem.set_app_properties(xml, {"Avenir Next": "Arial"}, ["One", "Two"])[0] == xml,
+            rem.set_app_properties(xml, {"Courier": "Arial"}, [None, None, None]) == (xml, 0),
+            rem.set_app_properties(app_xml(["Avenir Next"], ["PowerPoint Presentation"],
+                                           ("Verwendete Schriftarten", "Design", "Folientitel")),
+                                   {"Avenir Next": "Arial"}, ["One"])[1] == 0,
+            rem.set_app_properties(xml.replace("<vt:i4>5</vt:i4>", "<vt:i4>4</vt:i4>"),
+                                   {"Avenir Next": "Arial"}, ["One", None, None])[1] == 0]
+    first, second = (re.search(r"<%s>.*?</%s>" % (n, n), xml, re.S).group(0)
+                     for n in ("HeadingPairs", "TitlesOfParts"))
+    swapped = xml.replace(first, "\0").replace(second, first).replace("\0", second)
+    turned = rem.set_app_properties(swapped, {"Avenir Next": "Arial"}, ["One", None, None])
+    yield "and so does one whose list of titles comes before its counts", \
+        turned[1] == 2 and swapped.index("TitlesOfParts") < swapped.index("HeadingPairs") \
+        and ET.fromstring(turned[0].encode("utf-8")) is not None \
+        and turned[0].count("<HeadingPairs>") == turned[0].count("<TitlesOfParts>") == 1 \
+        and app_lists(turned[0]) == {
+            "Fonts Used": ["Montserrat", "Arial", "Georgia", "Futura"],
+            "Theme": ["Office Theme"], "Slide Titles": ["One", "Kept", ""]}, turned
+    yield "a list of titles that isn't one for each slide is left, and so is a file whose lists " \
+        "change nothing, are named in another language, or don't add up", \
+        same == [False, True, True, True] and app_lists(rem.set_app_properties(
+            xml, {"Avenir Next": "Arial"}, ["One", "Two"])[0])["Slide Titles"] == [
+                "PowerPoint Presentation", "Kept", ""], same
+    path = with_app(embed_fonts(deck(os.path.join(work, "app.pptx"), [
+        {"shapes": [textbox(2, "Heading", ["Growth"], (457200, 274320, 8229600, 1143000)),
+                    font_box(3, "Body", "Avenir Next", AVENIR),
+                    font_box(4, "Other", "Arial", ARIAL, y=2200000)]},
+        {"shapes": [title(2, "Costs"), font_box(3, "More", "Avenir Next", AVENIR)]},
+        {"shapes": [font_box(3, "Note", "Arial", ARIAL)]},
+        {"shapes": [title(2, "Costs")]}]),
+        [("Avenir Next", 4, AVENIR, ("regular",))]),
+        app_xml(["Avenir Next", "Arial"], ["PowerPoint Presentation", "Costs",
+                                           "PowerPoint Presentation", "Costs"]))
+    out = os.path.join(work, "out", "app.pptx")
+    rem.remediate(path, out, titles={"app/slide-256": "Growth", "app/slide-258": "A note",
+                                     "app/slide-259": "Costs (2)"},
+                  fonts={"Avenir Next": None})
+    lists = app_lists(read_part(out, "docProps/app.xml"))
+    yield "a copy whose fonts and titles change lists them so in its properties: a heading " \
+        "made its title, a title above its slide, and a title another slide had", lists == {
+            "Fonts Used": ["Arial"], "Theme": ["Office Theme"],
+            "Slide Titles": ["Growth", "Costs", "A note", "Costs (2)"]}, lists
+    plain = with_app(deck(os.path.join(work, "plain.pptx"), [{"shapes": [title(2, "Plain")]}]),
+                     app_xml(["Calibri"], ["Plain"]).replace("Microsoft Office PowerPoint", "x"))
+    out = os.path.join(work, "out", "plain.pptx")
+    rem.remediate(plain, out, alts={})
+    yield "a copy whose fonts and titles don't change keeps its properties byte for byte", \
+        read_part_bytes(out, "docProps/app.xml") == read_part_bytes(plain, "docProps/app.xml"), ""
+
+
+# ---------------------------------------------------------------------------
 # convert.py over a folder of decks
 # ---------------------------------------------------------------------------
 
@@ -2904,6 +3233,9 @@ CASES = [("reading a deck", case_parse), ("the checks", case_check),
          ("a heading made a slide's title", case_set_title),
          ("fonts a license restricts", case_fonts),
          ("links and equations", case_links),
+         ("pictures cropped differently", case_crops),
+         ("alt text copied from a web page", case_web_titles),
+         ("the file's lists of fonts and titles", case_app_properties),
          ("convert.py on decks", case_convert),
          ("folders, archives, and tools", case_folders),
          ("no Pandoc", case_no_pandoc)]

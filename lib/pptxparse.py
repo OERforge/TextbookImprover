@@ -257,7 +257,7 @@ class Shape:
     __slots__ = ("kind", "frame", "id", "name", "descr", "title", "hidden", "decorative",
                  "ph_type", "ph_idx", "text", "paragraphs", "box", "children", "image",
                  "links", "table", "prog_id", "media", "depth", "alternate", "math",
-                 "malformed", "rotation", "stroke", "extent", "tracks", "styled")
+                 "malformed", "rotation", "stroke", "extent", "tracks", "styled", "crop")
 
     def __init__(self, kind):
         self.kind = kind            # sp, pic, graphicFrame, grpSp, cxnSp, contentPart
@@ -292,6 +292,8 @@ class Shape:
         # Whether it takes its look from the theme's styles (p:style), as
         # a shape PowerPoint draws does and a text box doesn't.
         self.styled = False
+        # The part of its image a picture or picture fill shows (_crop).
+        self.crop = None
 
     @property
     def placeholder(self):
@@ -405,6 +407,34 @@ def _offset(xfrm):
                    int(ext.get("cx", 0)), int(ext.get("cy", 0)))
     except ValueError:
         return None
+
+
+FULL = 100000       # an image's whole width or height, in a:srcRect's units
+
+
+def _percent(value):
+    """An ST_Percentage as thousandths of a percent: 44076, or the strict
+    form, "44.076%"."""
+    value = (value or "0").strip()
+    try:
+        return round(float(value[:-1]) * 1000) if value.endswith("%") else int(value)
+    except ValueError:
+        return 0
+
+
+def _crop(fill):
+    """The part of its image a picture shows, as the edges (left, top,
+    right, bottom) of the rectangle it shows, in thousandths of a percent
+    of the image's width and height: (0, 0, 100000, 100000) when it shows
+    all of it. PowerPoint crops with the fill's a:srcRect, each value how
+    far in from its side; a negative one pads the image, showing all of it
+    on that side."""
+    rect = fill.find(q("a:srcRect")) if fill is not None else None
+    if rect is None:
+        return (0, 0, FULL, FULL)
+    left, top, right, bottom = (min(FULL, max(0, _percent(rect.get(side))))
+                                for side in ("l", "t", "r", "b"))
+    return (left, top, max(left, FULL - right), max(top, FULL - bottom))
 
 
 def _group_map(xfrm):
@@ -805,11 +835,13 @@ class _Reader:
         if kind == "pic":
             fill = el.find(q("p:blipFill"))
             shape.image = self.image(fill.find(q("a:blip")) if fill is not None else None)
+            shape.crop = _crop(fill)
         elif kind == "sp":
             spr = el.find(q("p:spPr"))
             fill = spr.find(q("a:blipFill")) if spr is not None else None
             if fill is not None:
                 shape.image = self.image(fill.find(q("a:blip")))
+                shape.crop = _crop(fill)
         if kind in ("sp", "pic", "cxnSp"):
             shape.stroke = _stroke(el.find(q("p:spPr")))
             shape.extent = _extent(el.find(q("p:spPr")))
@@ -833,6 +865,7 @@ class _Reader:
                 if pic is not None:
                     fill = pic.find(q("p:blipFill"))
                     shape.image = self.image(fill.find(q("a:blip")) if fill is not None else None)
+                    shape.crop = _crop(fill)
         if kind == "grpSp":
             gpr = el.find(q("p:grpSpPr"))
             child_map = _group_map(gpr.find(q("a:xfrm"))) if gpr is not None else None

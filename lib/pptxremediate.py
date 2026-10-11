@@ -10,7 +10,8 @@ docxremediate.py does for Word:
   description. A picture is found by its image's SHA-256, so one row
   covers every copy of an image, on every slide and on the layouts and
   masters; an object with no image (a chart, SmartArt, an embedded
-  object, a group, a shape) by its slide and shape id;
+  object, a group, a shape) by its slide and shape id, as a copy of a
+  picture can be too, cropped to show another part of its image;
 - a table's header row and column, PowerPoint's firstRow and firstCol,
   for the table whose content hash the sidecar names;
 - a title for a slide that has none: the heading the slide shows made its
@@ -37,7 +38,10 @@ docxremediate.py does for Word:
 - the title in the file's core properties, when they have none;
 - another font in place of one a license restricts, or one named for
   replacing, and the restricted font's embedded files taken out
-  (pptxfonts.py).
+  (pptxfonts.py);
+- and, where the fonts or the titles change, the lists of the fonts the
+  deck uses and of its slides' titles that PowerPoint keeps in the
+  file's extended properties (docProps/app.xml), as the copy has them.
 
 And two repairs, which lose nothing, of XML PowerPoint can't read as
 written, both of which Pandoc's PowerPoint writer leaves: a shape element
@@ -718,6 +722,71 @@ def set_core_title(xml, title):
     return xml[:match.end()] + element + xml[match.end():], 1
 
 
+# PowerPoint's names for the lists in docProps/app.xml it keeps of the
+# fonts a deck uses and of its slides' titles, in English.
+APP_FONTS, APP_TITLES = "Fonts Used", "Slide Titles"
+APP_HEADING = re.compile(r"(<vt:variant>\s*<vt:lpstr>)(.*?)(</vt:lpstr>\s*</vt:variant>\s*"
+                         r"<vt:variant>\s*<vt:i4>)(\d+)(</vt:i4>\s*</vt:variant>)", re.S)
+APP_ENTRY = re.compile(r"<vt:lpstr\s*/>|<vt:lpstr>(.*?)</vt:lpstr>", re.S)
+
+
+def set_app_properties(xml, fonts=None, titles=None):
+    """docProps/app.xml with the lists PowerPoint keeps there of the fonts
+    a deck uses and of its slides' titles as the copy has them: (xml,
+    entries changed). fonts: {typeface: its replacement}, named in the
+    typeface's place in the list of fonts used, or the typeface taken out
+    where its replacement is listed already. titles: each slide's title in
+    order, None for one whose title the copy didn't write, put in the list
+    of slide titles when it has one for each slide. PowerPoint writes both
+    afresh when it saves a deck; a file whose lists don't add up, or name
+    them in another language, is left as it is."""
+    pairs = re.search(r"(<HeadingPairs>\s*<vt:vector\b[^>]*>)(.*?)(</vt:vector>\s*</HeadingPairs>)",
+                      xml, re.S)
+    named = re.search(r"(<TitlesOfParts>\s*<vt:vector\b[^>]*>)(.*?)(</vt:vector>\s*"
+                      r"</TitlesOfParts>)", xml, re.S)
+    if not pairs or not named:
+        return xml, 0
+    groups = [[html.unescape(m.group(2)), int(m.group(4))]
+              for m in APP_HEADING.finditer(pairs.group(2))]
+    entries = [html.unescape(m.group(1) or "") for m in APP_ENTRY.finditer(named.group(2))]
+    if not groups or sum(n for _name, n in groups) != len(entries):
+        return xml, 0
+    lists, at = [], 0
+    for _name, n in groups:
+        lists.append(entries[at:at + n])
+        at += n
+    changes = 0
+    for group, items in zip(groups, lists):
+        if group[0] == APP_FONTS:
+            for old, new in (fonts or {}).items():
+                if old in items and new:
+                    if new in items:
+                        items.remove(old)
+                    else:
+                        items[items.index(old)] = new
+                    changes += 1
+        elif group[0] == APP_TITLES and titles is not None and len(items) == len(titles):
+            for index, title in enumerate(titles):
+                if title is not None and items[index] != title:
+                    items[index] = title
+                    changes += 1
+        group[1] = len(items)
+    if not changes:
+        return xml, 0
+    counts = iter(n for _name, n in groups)
+    heading = APP_HEADING.sub(lambda m: m.group(1) + m.group(2) + m.group(3) + str(next(counts))
+                              + m.group(5), pairs.group(2))
+    flat = [entry for items in lists for entry in items]
+    start = re.sub(r'\bsize="\d+"', 'size="%d"' % len(flat), named.group(1), count=1)
+    body = "".join("<vt:lpstr>%s</vt:lpstr>" % _text(e) if e else "<vt:lpstr/>" for e in flat)
+    # The later of the two first, so the earlier's place in the text holds.
+    for match, replacement in sorted(((named, start + body + named.group(3)),
+                                      (pairs, pairs.group(1) + heading + pairs.group(3))),
+                                     key=lambda item: -item[0].start()):
+        xml = xml[:match.start()] + replacement + xml[match.end():]
+    return xml, changes
+
+
 def repair_part(xml):
     """A part with what PowerPoint can't read put right, where nothing is
     lost by it: (xml, empty shapes taken out, prefixes declared). Each
@@ -801,6 +870,7 @@ def remediate(source, destination, alts=None, tables=None, titles=None, language
             texts[part] = xml
             counts["repaired"] += removed + len(declared)
 
+    written = {}    # slide part: the title the copy gives it
     shapes_by_part = [(slide.part, slide, list(slide.all_shapes())) for slide in parsed.slides]
     shapes_by_part += [(part, None, [s for top in tops for s in top.walk()])
                        for part, tops in parsed.masters]
@@ -882,6 +952,7 @@ def remediate(source, destination, alts=None, tables=None, titles=None, language
                 if n:
                     texts[part] = xml
                     counts["retitled"] += 1
+                    written[part] = title
         if slide is not None and not slide.title:
             title = titles.get(slide_key(deck, slide))
             n = 0
@@ -900,12 +971,14 @@ def remediate(source, destination, alts=None, tables=None, titles=None, language
                     if n:
                         texts[part] = xml
                         counts["titles_in_place"] += 1
+                        written[part] = title
             if title and not n:
                 xml, n = add_title(text_of(part), slide, title, parsed.width,
                                    language or parsed.language)
                 if n:
                     texts[part] = xml
                     counts["titles"] += 1
+                    written[part] = title
     # The language goes where PowerPoint declares a deck's, its default
     # text style and its masters' text styles, which every run that says
     # nothing of its own inherits, and only when the deck has no default:
@@ -928,7 +1001,7 @@ def remediate(source, destination, alts=None, tables=None, titles=None, language
         if n:
             texts["docProps/core.xml"] = xml
             counts["core_title"] += 1
-    gone = set()
+    gone, swapped = set(), {}
     for old, new in (fonts or {}).items():
         embedded = parsed.fonts.embedded.get(old)
         if not parsed.fonts.used.get(old) and not embedded:
@@ -962,12 +1035,20 @@ def remediate(source, destination, alts=None, tables=None, titles=None, language
             gone.update(unused)
             counts["fonts_unembedded"] += 1
         counts["fonts_replaced"] += 1
+        swapped[old] = new
         if replaced is not None:
             replaced.append((old, new, changed, old in parsed.fonts.embedded))
     if gone and "[Content_Types].xml" in parts:
         texts["[Content_Types].xml"] = re.sub(
             r"<Override\b[^>]*\bPartName=\"/(%s)\"[^>]*/>" % "|".join(
                 re.escape(p) for p in sorted(gone)), "", text_of("[Content_Types].xml"))
+    # The lists PowerPoint keeps of the fonts used and the slides' titles,
+    # as the copy now has them, until PowerPoint saves it and writes its own.
+    if (written or swapped) and "docProps/app.xml" in parts:
+        xml, n = set_app_properties(text_of("docProps/app.xml"), swapped,
+                                    [written.get(s.part) for s in parsed.slides])
+        if n:
+            texts["docProps/app.xml"] = xml
     for part, xml in texts.items():
         if xml != pptxparse.part_text(parts[part])[0]:
             parts[part] = pptxparse.encode_part(xml, encodings[part])

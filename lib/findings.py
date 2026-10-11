@@ -156,6 +156,13 @@ CHECKS = OrderedDict([
     ("pptx-alt-auto-generated", ("alt text Office generated, for a person to review (Review "
                                  "Auto-Generated Description)", "warning",
                                  "WCAG 2.0 SC 1.1.1 (A)", "sidecar")),
+    ("pptx-alt-page-title", ("alt text that looks copied from a web page with the picture, the "
+                             "page's title or a stock site's caption: a site's name after a pipe "
+                             "or a dash, a stock site's words, or a title cut off with an ellipsis",
+                             "warning", "WCAG 2.0 SC 1.1.1 (A)", "sidecar")),
+    ("pptx-alt-same-for-crops", ("the same alt text on copies of a picture cropped to show "
+                                 "different parts of it, which a picture copied and cropped again "
+                                 "keeps", "warning", "WCAG 2.0 SC 1.1.1 (A)", "sidecar")),
     ("pptx-shape-no-alt", ("a group, or a shape with no text, with no alt text that isn't "
                            "marked decorative", "warning", "WCAG 2.0 SC 1.1.1 (A)", "sidecar")),
     ("pptx-alt-is-file-name", ("alt text holding a file name or extension, which "

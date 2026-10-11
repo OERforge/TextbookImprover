@@ -12,9 +12,11 @@ holding a file name or extension is an error too, since PowerPoint counts
 it as missing. To those it adds what the pipeline checks elsewhere: alt text
 that says nothing (punctuation, a word such as "image", a clip-art id, a
 shape's default name, Office's generated descriptions, or a pattern a
-project lists in images.alt_placeholders), alt text over
-images.alt_max_chars, a deck with no language, links whose text is their
-address, hidden slides, and what older decks are made of: diagrams drawn
+project lists in images.alt_placeholders), alt text copied from a web page
+with its picture (the page's title, or a stock site's caption), one alt
+text on copies of a picture cropped to show different parts of it, alt
+text over images.alt_max_chars, a deck with no language, links whose text
+is their address, hidden slides, and what older decks are made of: diagrams drawn
 as dozens of loose shapes, and columns of text laid out with tabs. And
 XML PowerPoint can't read as written, which Pandoc's writer leaves; and a
 font whose license keeps the deck from being edited where the font isn't
@@ -71,7 +73,49 @@ GENERIC_PATTERNS = [
                 r"text ?box|rectangle|oval|freeform|straight connector|line|google shape)"
                 r"[\s;]*[\d;p]*", re.I)),
 ]
-AUTO_GENERATED = re.compile(r"description automatically generated|^a picture containing\b", re.I)
+# Office's generated descriptions: "Description automatically generated"
+# after the description, and "A picture containing" before it, in older
+# versions; "AI-generated content may be incorrect." after it, in newer ones.
+AUTO_GENERATED = re.compile(r"description automatically generated|^a picture containing\b|"
+                            r"ai-generated content may be incorrect", re.I)
+# Alt text copied from a web page with its picture: the page's title, or a
+# stock site's caption. A stock or clip-art site's name, or its words,
+# anywhere; or, at the end, a site's name after a pipe, or a one-word name
+# or a domain after a dash, a title cut off with an ellipsis, or a search
+# engine's title's "- What Is It"; or a numbered section's title followed
+# by its book's. Words a description uses too are left out (a vector
+# image, a flat design, high-quality images). OpenStax's alt text, 2,478
+# descriptions in eight of its book repositories, matches none of these.
+STOCK_SITES = re.compile(
+    r"\b(?:freepik|vectorstock|shutterstock|istock(?:photo)?|getty ?images|dreamstime|"
+    r"depositphotos|123rf|alamy|adobe ?stock|vecteezy|pixabay|pexels|unsplash|flaticon|icons8|"
+    r"iconfinder|noun ?project|rawpixel|storyblocks|pond5|bigstock(?:photo)?|can ?stock ?photo|"
+    r"fotolia|stocksy|picfair|png(?:tree|wing|egg|item|img)|(?:kind|stick|seek|fav|clean|nice)png|"
+    r"hiclipart|clipart(?:max| ?library))\b", re.I)
+STOCK_WORDS = re.compile(
+    r"\broyalty[- ]free\b|\bstock (?:photo|image|vector|illustration|footage|picture)s?\b|"
+    r"\bfree (?:download|vectors?|png|svg|clip ?art|icons?)\b|\bdownload free\b|"
+    r"\bhigh[- ]quality (?:vectors?|png)\b|\bpremium vector\b|"
+    r"\b(?:png|svg) (?:images?|files?|icons?|clip ?art|graphics?|download|transparent)\b|"
+    r"\btransparent (?:png|background)\b|\bvector (?:illustration|concept|art)s?\b|"
+    r"\bflat (?:concept|vector)s?\b|\bflat (?:design |style )?icons?\b|\bconcept icon\b|"
+    r"\bisolated on (?:a )?white\b", re.I)
+PAGE_TITLE = (
+    # "Marketing Mix Explained | Quizlet", "Woman with a tablet | Premium Vector"
+    re.compile(r"\s\|\s+[^|()]{1,40}$"),
+    # "Why Do Supply Chains Fail? - Examplepedia", "... - example.com"
+    re.compile(r"\s[-\u2013\u2014]\s*(?:[A-Z][\w&']*|[\w-]+\.(?:com|org|net|edu|gov|io|co))$"),
+    # "Robot Shaking Hands With A Person ..."
+    re.compile(r"\s(?:\.\.\.|\u2026)$"),
+    # "Opportunity Cost - What Is It and Why It Matters"
+    re.compile(r"[-\u2013\u2014:|]\s*what (?:is|are) (?:it|they)\b", re.I),
+    # "4.3 Demand and Supply Together - Introductory Economics"
+    re.compile(r"^\d+(?:\.\d+)+\s+\S.*\s[-\u2013\u2014|]\s"),
+)
+# Copies of an image cropped alike, to within a twentieth of the image on
+# every side (pptxparse._crop's units), show the same part of it.
+CROP_SLACK = 5000
+UNCROPPED = (0, 0, 100000, 100000)
 SECTION_DEFAULTS = re.compile(r"(default section|untitled section|section \d+)$", re.I)
 # A slide with this many loose shapes without text or alt text, or tiny
 # labels, is a diagram drawn with shapes.
@@ -101,6 +145,14 @@ def placeholder_rules(extra=()):
     return words, patterns
 
 
+def page_title(text):
+    """Whether alt text looks copied from a web page with its picture: the
+    page's title, or a stock site's caption (STOCK_SITES, STOCK_WORDS,
+    PAGE_TITLE)."""
+    return bool(STOCK_SITES.search(text) or STOCK_WORDS.search(text)
+                or any(p.search(text) for p in PAGE_TITLE))
+
+
 def alt_problem(alt, name=None, rules=None, limit=ALT_MAX_CHARS):
     """(check, reason) for an alt text that needs a person, or None.
     rules: placeholder_rules() of the project's own patterns."""
@@ -121,6 +173,8 @@ def alt_problem(alt, name=None, rules=None, limit=ALT_MAX_CHARS):
             return ("pptx-alt-placeholder", "%s: %s" % (kind, text))
     if AUTO_GENERATED.search(text):
         return ("pptx-alt-auto-generated", text)
+    if page_title(text):
+        return ("pptx-alt-page-title", text)
     if limit and len(text) > limit:
         return ("pptx-alt-too-long", "%d characters (limit %d)" % (len(text), limit))
     return None
@@ -288,6 +342,49 @@ def master_items(deck, rules=None, limit=ALT_MAX_CHARS):
                         yield shape, problem[0], problem[1]
 
 
+def crop_views(crops):
+    """Which part of its image each copy shows, as an index for each of
+    their crops (pptxparse._crop): copies cropped alike, to within
+    CROP_SLACK on every side, share one."""
+    kept, out = [], []
+    for crop in crops:
+        crop = crop or UNCROPPED
+        for index, seen in enumerate(kept):
+            if all(abs(a - b) <= CROP_SLACK for a, b in zip(seen, crop)):
+                out.append(index)
+                break
+        else:
+            kept.append(crop)
+            out.append(len(kept) - 1)
+    return out
+
+
+def crop_items(deck, flagged=frozenset()):
+    """(slide, shape, check, detail) for each copy of a picture on a deck's
+    slides whose alt text a copy cropped to show another part of the image
+    has too: one alt text for what are different pictures, which a picture
+    copied and cropped again keeps. flagged: the ids of shapes whose alt
+    text another finding names already."""
+    copies = {}
+    for slide in deck.slides:
+        for shape in slide.all_shapes():
+            if shape.image and shape.image[1]:
+                copies.setdefault(shape.image[1], []).append((slide, shape))
+    for where_ in copies.values():
+        views = crop_views([shape.crop for _slide, shape in where_])
+        if len(set(views)) < 2:
+            continue
+        shown = {}
+        for (_slide, shape), view in zip(where_, views):
+            if _clean(shape.descr) and not shape.decorative:
+                shown.setdefault(_clean(shape.descr), set()).add(view)
+        for slide, shape in where_:
+            text = _clean(shape.descr)
+            if text and not shape.decorative and len(shown[text]) > 1 \
+                    and id(shape) not in flagged:
+                yield slide, shape, "pptx-alt-same-for-crops", " ".join(shape.descr.split())
+
+
 def loose_pieces(slide):
     """The pieces of a slide's drawn diagram, or none."""
     pieces = drawn(slide)
@@ -314,6 +411,7 @@ def check(deck, name=None, kind="source-pptx", alt_max_chars=ALT_MAX_CHARS,
         out.append(fl.Finding(where_, check_, detail, file=name, kind=kind, **kw))
 
     titles = Counter()
+    flagged = set()     # the shapes an alt-text finding names
     for slide in deck.slides:
         title = slide.title
         if title:
@@ -331,6 +429,7 @@ def check(deck, name=None, kind="source-pptx", alt_max_chars=ALT_MAX_CHARS,
         for shape, check_, detail in alt_items(slide, rules, alt_max_chars,
                                                frozenset(id(p) for p in pieces)):
             add(where(slide, shape), check_, detail)
+            flagged.add(id(shape))
         for shape in slide.all_shapes():
             if shape.table is not None:
                 if not shape.table.first_row and tables.get(shape.table.key()) != "none":
@@ -360,6 +459,8 @@ def check(deck, name=None, kind="source-pptx", alt_max_chars=ALT_MAX_CHARS,
                 "read: %s; on the slide: %s" % (
                     ", ".join(s.name or s.id or "?" for s in read)[:200],
                     ", ".join(s.name or s.id or "?" for s in visual)[:200]))
+    for slide, shape, check_, detail in crop_items(deck, flagged):
+        add(where(slide, shape), check_, detail)
     for title, count in titles.items():
         if count > 1:
             add("deck", "pptx-duplicate-title", "%d slides titled %s" % (count, title))

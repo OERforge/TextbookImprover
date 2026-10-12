@@ -110,6 +110,7 @@ DECK_HTML_FILTER = os.path.join(HERE, "deck-html.lua")
 DECK_PDF_FILTER = os.path.join(HERE, "deck-pdf.lua")
 FOOTNOTE_CODE_FILTER = os.path.join(HERE, "footnote-code.lua")
 DECK_PPTX_FILTER = os.path.join(HERE, "deck-pptx.lua")
+DECK_REVEALJS_FILTER = os.path.join(HERE, "deck-revealjs.lua")
 DECK_TEMPLATE = os.path.join(HERE, "ltx-talk.latex")
 PDF_TARGET_FILTER = os.path.join(HERE, "pdf-target.lua")
 MARKDOWN_FILTER = os.path.join(HERE, "markdown-source.lua")
@@ -727,20 +728,21 @@ def load_targets(base, allow_unknown, decks_only=False, pptx_decks=False,
             targets.append(Target(name, resolved, base))
     except oerconfig.ConfigError as exc:
         die(str(exc))
-    # A PowerPoint file is written of a deck written in Markdown: a book's
-    # pages have no slides, and a PowerPoint deck's copy is format source.
-    if not DECK_RUN and any(t.format == "pptx" for t in targets):
+    # A PowerPoint file and a reveal.js presentation are written of a deck
+    # written in Markdown: a book's pages have no slides, and a PowerPoint
+    # deck's copy is format source.
+    if not DECK_RUN and any(t.format in ("pptx", "revealjs") for t in targets):
         for target in targets:
-            if target.format == "pptx":
-                say(f"WARNING: target {target.name} is format pptx, which is written for decks "
-                    "written in Markdown, in a folder project.kind says is slides"
+            if target.format in ("pptx", "revealjs"):
+                say(f"WARNING: target {target.name} is format {target.format}, which is written "
+                    "for decks written in Markdown, in a folder project.kind says is slides"
                     + ("; a PowerPoint deck's copy is format source" if pptx_decks else "")
                     + "; nothing is written for it.")
-        targets = [t for t in targets if t.format != "pptx"]
+        targets = [t for t in targets if t.format not in ("pptx", "revealjs")]
         if not targets:
-            die("Every target here is format pptx, which is written for decks written in "
-                "Markdown; add another target to conversion.yaml, or say the folder is "
-                "slides (project.kind: slides).")
+            die("Every target here is format pptx or revealjs, which are written for decks "
+                "written in Markdown; add another target to conversion.yaml, or say the "
+                "folder is slides (project.kind: slides).")
     # A format the schema names before a target can build it is skipped,
     # and said to be, rather than read, filtered, and then quietly never
     # written. (pdf was one until it was built.)
@@ -763,13 +765,14 @@ def load_targets(base, allow_unknown, decks_only=False, pptx_decks=False,
                 say(f"WARNING: target {target.name} is format {target.format}, which "
                     "isn't written for decks (" + ", ".join(DECK_FORMATS)
                     + " are); nothing is written for it.")
-            elif target.format == "pdf":
-                # A deck's PDF is the whole deck, whatever cuts its pages.
+            elif target.format in ("pdf", "revealjs"):
+                # A deck's PDF, and its presentation, is the whole deck,
+                # whatever cuts its pages.
                 target.derived["pages.split_level"] = 0
         targets = [t for t in targets if t.format in DECK_FORMATS]
         if not targets:
             die("Every target here is a format that isn't written for decks; add an html, "
-                "pdf, pptx, markdown, or source target to conversion.yaml.")
+                "pdf, pptx, revealjs, markdown, or source target to conversion.yaml.")
     for warning in targets[0].resolved.warnings if targets else []:
         say(f"WARNING: {warning}")
 
@@ -856,11 +859,14 @@ KIND_DECLARED = None        # project.kind as a file gives it, if one does
 # A slides run of decks written in Markdown: each .md a deck, read and
 # filtered as a page is, and written by the formats a deck has.
 DECK_RUN = False
-DECK_FORMATS = ("html", "pdf", "pptx", "markdown", "source")
+DECK_FORMATS = ("html", "pdf", "pptx", "revealjs", "markdown", "source")
 # The Pandoc whose PowerPoint writer keeps a table and the text around it
 # on one slide (3.10.1, #11433), which deck-pptx.lua's cutting of slides
 # follows; an older one cut such a slide into slides with no title.
 PPTX_PANDOC = (3, 10, 1)
+# The Pandoc whose reveal.js template loads reveal.js 6's plugins (3.12),
+# which the copy beside a deck's presentation is.
+REVEALJS_PANDOC = (3, 12)
 TITLE_DECLARED = False
 DECLARED_PROJECT = {}
 # What the sources say about the book, read from a master file: its title,
@@ -3979,6 +3985,102 @@ def deck_pptxs(target, stems, names, base, language, work):
     return written
 
 
+def deck_presentations(target, stems, base, language):
+    """Each deck's reveal.js presentation, through Pandoc's reveal.js writer
+    and what revealtarget puts right in it (see deck-revealjs.lua and
+    revealtarget), a page per deck named as its page is, beside a copy of
+    reveal.js (REVEALJS_DIR's) and the pictures it shows: stems are the
+    decks' pages. Its slides are the shape a deck's PDF's are
+    (slides.aspect_ratio). Returns the pages' paths; a deck Pandoc
+    couldn't write stops the run, once every deck has been tried."""
+    import concurrent.futures
+    import decks as decklib
+    import revealtarget
+    version = subprocess.run(["pandoc", "--version"], capture_output=True,
+                             text=True).stdout.split()[1]
+    if tuple(int(p) for p in re.findall(r"\d+", version)[:3]) < REVEALJS_PANDOC:
+        die(f"Pandoc {version} is too old for target {target.name}'s presentations; "
+            + ".".join(map(str, REVEALJS_PANDOC)) + " or later loads reveal.js 6, whose copy "
+            "goes beside them.")
+    folder = os.environ.get("REVEALJS_DIR", "").strip()
+    folder = os.path.abspath(os.path.expanduser(folder)) if folder else ""
+    problem = revealtarget.revealjs_problem(folder)
+    if problem:
+        die(problem)
+    ratio = str(target["slides.aspect_ratio"] or "auto").strip()
+    if ratio != "auto" and not decklib.RATIO.match(ratio):
+        die(f"slides.aspect_ratio is {ratio!r} for target {target.name}; it's auto, or a "
+            "width and a height with a colon between them, as 16:9 or 4:3.")
+    unread = [name for name, given in (
+        ("slides.reference_doc", str(target["slides.reference_doc"] or "").strip()),
+        ("slides.size", str(target["slides.size"] or "widescreen") != "widescreen")) if given]
+    if unread:
+        say(f"NOTE: {' and '.join(unread)} {'is' if len(unread) == 1 else 'are'}n't read for "
+            f"target {target.name}'s presentations, which are a deck's PowerPoint file's.")
+    jobs = []
+    for stem in stems:
+        intermediate = os.path.join(target.pages_dir, stem + INTERMEDIATE)
+        with open(intermediate, encoding="utf-8") as fh:
+            doc = json.load(fh)
+        level = decklib.level_of(doc)
+        if level is None:
+            level = decklib.slide_level(doc.get("blocks", []))
+        shape, why = decklib.aspect_ratio(doc.get("meta") or {}, ratio)
+        jobs.append((stem, intermediate, level, shape, why))
+    env = dict(os.environ, TARGET_NAME=target.name, TITLE_BLOCK=str(target["title_block"]))
+    os.makedirs(target.output_dir, exist_ok=True)
+    notes = str(target["slides.notes"])
+
+    def one(job):
+        stem, intermediate, level, shape, _why = job
+        return job, revealtarget.build(
+            intermediate, base, os.path.join(target.output_dir, stem + ".html"),
+            filters=[DECK_HTML_FILTER, DECK_REVEALJS_FILTER, TARGET_FILTER, SAFE_MEDIA_FILTER,
+                     HEADER_FILTER],
+            level=level, language=language, shape=shape, notes=notes, env=env)
+
+    workers = max(1, min(len(jobs), os.cpu_count() or 1, 4))
+    with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
+        results = list(pool.map(one, jobs))
+    written, failed, slides, ratios, warnings = [], [], 0, {}, []
+    for (stem, _intermediate, _level, shape, why), result in results:
+        if not result["ok"]:
+            failed.append(stem)
+            say(f"Pandoc couldn't write {stem}'s presentation:")
+            for line in result["log"].strip().splitlines()[-5:]:
+                say(line)
+            continue
+        written.append(result["html"])
+        slides += result["slides"]
+        ratios.setdefault(f"{shape} ({why})", []).append(stem)
+        warnings += [(stem, message) for message in result["warnings"]]
+    if written:
+        revealtarget.copy_revealjs(folder, target.output_dir)
+        copy_media(base, target.output_dir,
+                   [os.path.join(target.pages_dir, stem + INTERMEDIATE)
+                    for stem in stems if os.path.join(
+                        target.output_dir, stem + ".html") in written])
+        say(f"Wrote {len(written)} presentation(s) in {target.output_dir}, one for each deck, "
+            f"through Pandoc's reveal.js writer and reveal.js "
+            f"{revealtarget.revealjs_version(folder)}, copied beside them: {slides} slide(s); "
+            + "; ".join(f"{shape} for {len(which)}" for shape, which in ratios.items())
+            + ("; speaker notes left out" if notes == "omitted" else
+               "; speaker notes shown under each slide" if notes == "visible" else
+               "; speaker notes in reveal.js's speaker view (press S)") + ".")
+    if warnings:
+        say(f"WARNING: Pandoc's reveal.js writer warned of {len(warnings)} thing(s) writing the "
+            "presentations:")
+        for stem, message in warnings[:5]:
+            say(f"  {stem}: {message}")
+        if len(warnings) > 5:
+            say("  ...")
+    if failed:
+        die(f"{len(failed)} of the {len(stems)} deck presentation(s) for target {target.name} "
+            "weren't written (" + ", ".join(failed[:4]) + (", ..." if len(failed) > 4 else "")
+            + ").")
+    return written
+
+
 def render_markdown(target, pages, base, work, project, env, losses=None):
     """Markdown or AsciiDoc files as source: what the author decided, in
     Pandoc's own flavor of each, and nothing the filter derived. Or Word
@@ -5280,6 +5382,12 @@ def main():
                 pptxs += deck_pptxs(target, [s for s in stems if s not in hand_stems],
                                     {safe_stem(os.path.basename(n)[:-3]): n for n in markdown},
                                     base, language, work)
+        # ---- 5.62 reveal.js presentations, per revealjs target -----------
+        presentations = []
+        for target in targets:
+            if target.format == "revealjs":
+                presentations += deck_presentations(
+                    target, [s for s in stems if s not in hand_stems], base, language)
         # ---- 5.65 LaTeX, per latex target: the PDF target's own LaTeX,
         # a master and a file per chapter, for an author to go on with.
         for target in targets:
@@ -5307,6 +5415,7 @@ def main():
             + (["--quick"] if args.quick else [])
         for pages in written.values():
             command += [p for p in pages if p.endswith(".html")]
+        command += presentations
         for epub in epubs:
             command += ["--epub", epub]
         for pdf in pdfs:

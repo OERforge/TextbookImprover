@@ -130,6 +130,18 @@ def main():
         with open(os.path.join(work, "scripted.html"), "w", encoding="utf-8") as fh:
             fh.write(SCRIPTED)
         scripted = outputcheck.check_html_files([os.path.join(work, "scripted.html")])
+        # A reveal.js presentation's links within it are reveal.js's routes,
+        # #/ and an id, or a slide's place, which a page's aren't.
+        routes = ('<a href="#/one">1</a> <a href="#/one/2">2</a> <a href="#/3/1">3</a> '
+                  '<a href="#/gone">4</a>')
+        with open(os.path.join(work, "presented.html"), "w", encoding="utf-8") as fh:
+            fh.write(OTHER.replace('<h1 id="there">', '<div class="reveal"><section id="one">'
+                                   '<h1 id="there">').replace("</body>", routes
+                                                              + "</section></div></body>"))
+        with open(os.path.join(work, "routed.html"), "w", encoding="utf-8") as fh:
+            fh.write(OTHER.replace("</body>", '<a href="#/there">1</a></body>'))
+        presented = outputcheck.check_html_files([os.path.join(work, "presented.html")])
+        routed = outputcheck.check_html_files([os.path.join(work, "routed.html")])
         cases = [
             ("a correct pair of pages produces no finding",
              lambda: checks(good) == []),
@@ -166,7 +178,13 @@ def main():
              lambda: sorted((os.path.basename(f.where), f.check) for f in titled) == [
                  ("ch_intro_to_data.html", "title-is-file-name"),
                  ("tTable.html", "title-is-file-name")]),
-            ("a finding says where and what",
+            ("in a reveal.js presentation, a route to an id or a slide's place is a link "
+             "within it, one to no id a missing fragment, and on a page any route is",
+             lambda: [(f.check, f.detail) for f in presented]
+             == [("link-to-missing-fragment", "#/gone")]
+             and [(f.check, f.detail) for f in routed]
+             == [("link-to-missing-fragment", "#/there")]),
+                        ("a finding says where and what",
              lambda: any(f.where == "bad.html" and f.detail == "gone.html"
                          for f in bad)),
         ]

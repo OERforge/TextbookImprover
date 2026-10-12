@@ -4,9 +4,9 @@ Settings that describe one rendering of the book, in `conversion.yaml`: under `d
 
 How the book is rendered into one output format.
 
-**`format`**—one of `html`, `epub3`, `pdf`, `latex`, `docx`, `pptx`, `markdown`, `asciidoc`, `source`; default `html`; *target only*
+**`format`**—one of `html`, `epub3`, `pdf`, `latex`, `docx`, `pptx`, `revealjs`, `markdown`, `asciidoc`, `source`; default `html`; *target only*
 
-What this target produces. markdown and asciidoc write source again: what the author decided, which the pipeline reads back to the same book. docx writes Word files from the same pages, in compatibility mode 15 with ScreenTips and Word's decorative marker. pdf writes one tagged PDF of the whole book through LaTeX, which needs LuaLaTeX (see the installation page), or one of each deck in a folder of decks written in Markdown. pptx writes a PowerPoint file of each such deck, and nothing for a book. latex writes the LaTeX the pdf target builds from, as a master file that \include-s a file per chapter, with its images beside them, for an author to go on working in.
+What this target produces. markdown and asciidoc write source again: what the author decided, which the pipeline reads back to the same book. docx writes Word files from the same pages, in compatibility mode 15 with ScreenTips and Word's decorative marker. pdf writes one tagged PDF of the whole book through LaTeX, which needs LuaLaTeX (see the installation page), or one of each deck in a folder of decks written in Markdown. pptx writes a PowerPoint file of each such deck, and nothing for a book, and revealjs a reveal.js presentation of each, which needs a copy of reveal.js 6 (see the installation page). latex writes the LaTeX the pdf target builds from, as a master file that \include-s a file per chapter, with its images beside them, for an author to go on working in.
 
 **`output_dir`**—`path`; default `""` (empty); *target only*
 
@@ -158,11 +158,11 @@ page keeps each page's notes at its end. group gathers a group's notes at the en
 
 ## slides
 
-Settings read only for decks written in Markdown, in a folder that project.kind says is slides: each deck a page of its own in an html target, a PDF of its own in a pdf target, through the ltx-talk presentation class, and a PowerPoint file of its own in a pptx target, through Pandoc's PowerPoint writer.
+Settings read only for decks written in Markdown, in a folder that project.kind says is slides: each deck a page of its own in an html target, a PDF of its own in a pdf target, through the ltx-talk presentation class, a PowerPoint file of its own in a pptx target, through Pandoc's PowerPoint writer, and a reveal.js presentation of its own in a revealjs target.
 
 **`slides.notes`**—one of `collapsed`, `visible`, `omitted`; default `collapsed`
 
-Where a deck's speaker notes (Pandoc's ::: notes) go on its page: collapsed puts each slide's under its content, closed, for a reader to open; visible puts them there open; omitted leaves them off. A PowerPoint file has them as its slides' speaker notes, unless this is omitted. A PDF leaves them off whatever this says, since ltx-talk has no notes yet, and a markdown target keeps them as they were.
+Where a deck's speaker notes (Pandoc's ::: notes) go on its page: collapsed puts each slide's under its content, closed, for a reader to open; visible puts them there open; omitted leaves them off. A PowerPoint file has them as its slides' speaker notes, unless this is omitted. A reveal.js presentation has them in reveal.js's speaker view, shown under each slide to everyone with visible, and not at all with omitted. A PDF leaves them off whatever this says, since ltx-talk has no notes yet, and a markdown target keeps them as they were.
 
 **`slides.notes_label`**—`string`; default `Speaker notes`
 
@@ -170,7 +170,7 @@ What the control that opens a slide's notes says, in the page's language.
 
 **`slides.aspect_ratio`**—`string`; default `auto`
 
-The shape of a deck's PDF and its PowerPoint file's slides, width to height (4:3, 16:9, 16:10). auto takes the deck's own, its aspectratio as beamer reads it (169, 43, and the rest); else 4:3 for a deck that names a theme or another of beamer's variables, since that's what its author saw (a theme of reveal.js's own doesn't count); else 16:9, PowerPoint's default. A PowerPoint file made with reference_doc has that file's shape instead.
+The shape of a deck's PDF, its PowerPoint file's slides, and its reveal.js presentation's, width to height (4:3, 16:9, 16:10). auto takes the deck's own, its aspectratio as beamer reads it (169, 43, and the rest); else 4:3 for a deck that names a theme or another of beamer's variables, since that's what its author saw (a theme of reveal.js's own doesn't count); else 16:9, PowerPoint's default. A PowerPoint file made with reference_doc has that file's shape instead.
 
 **`slides.size`**—one of `widescreen`, `on-screen-show`; default `widescreen`
 

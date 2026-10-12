@@ -30,7 +30,7 @@ keys:
 
   format:
     type: enum
-    values: [html, epub3, pdf, latex, docx, pptx, markdown, asciidoc, source]
+    values: [html, epub3, pdf, latex, docx, pptx, revealjs, markdown, asciidoc, source]
     default: html
     target_only: true
     stage: render
@@ -42,7 +42,9 @@ keys:
       tagged PDF of the whole book through LaTeX, which needs LuaLaTeX
       (see the installation page), or one of each deck in a folder of
       decks written in Markdown. pptx writes a PowerPoint file of each
-      such deck, and nothing for a book. latex writes the LaTeX the pdf
+      such deck, and nothing for a book, and revealjs a reveal.js
+      presentation of each, which needs a copy of reveal.js 6 (see the
+      installation page). latex writes the LaTeX the pdf
       target builds from, as a master file that \include-s a file per
       chapter, with its images beside them, for an author to go on
       working in.
@@ -483,8 +485,9 @@ keys:
       Settings read only for decks written in Markdown, in a folder that
       project.kind says is slides: each deck a page of its own in an html
       target, a PDF of its own in a pdf target, through the ltx-talk
-      presentation class, and a PowerPoint file of its own in a pptx
-      target, through Pandoc's PowerPoint writer.
+      presentation class, a PowerPoint file of its own in a pptx target,
+      through Pandoc's PowerPoint writer, and a reveal.js presentation of
+      its own in a revealjs target.
     keys:
 
       notes:
@@ -496,9 +499,11 @@ keys:
           collapsed puts each slide's under its content, closed, for a
           reader to open; visible puts them there open; omitted leaves them
           off. A PowerPoint file has them as its slides' speaker notes,
-          unless this is omitted. A PDF leaves them off whatever this says,
-          since ltx-talk has no notes yet, and a markdown target keeps them
-          as they were.
+          unless this is omitted. A reveal.js presentation has them in
+          reveal.js's speaker view, shown under each slide to everyone with
+          visible, and not at all with omitted. A PDF leaves them off
+          whatever this says, since ltx-talk has no notes yet, and a
+          markdown target keeps them as they were.
 
       notes_label:
         type: string
@@ -511,8 +516,8 @@ keys:
         type: string
         default: auto
         description: >
-          The shape of a deck's PDF and its PowerPoint file's slides, width
-          to height (4:3, 16:9, 16:10). auto takes the deck's own, its
+          The shape of a deck's PDF, its PowerPoint file's slides, and its
+          reveal.js presentation's, width to height (4:3, 16:9, 16:10). auto takes the deck's own, its
           aspectratio as beamer reads it (169, 43, and the rest); else 4:3
           for a deck that names a theme or another of beamer's variables,
           since that's what its author saw (a theme of reveal.js's own

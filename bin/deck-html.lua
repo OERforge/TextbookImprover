@@ -47,6 +47,13 @@
 -- along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 local NOTES = os.getenv('DECK_NOTES') or 'collapsed'
+-- For a deck's reveal.js presentation (lib/revealtarget.py), whose slides
+-- Pandoc's writer finds by the deck's own levels: each heading's level
+-- here is given as an attribute, oer-level, which revealtarget.finish
+-- makes the heading's tag, and the deck's pauses and notes are left for
+-- the writer, which shows a pause as a slide's next step and notes in
+-- reveal.js's speaker view.
+local LEVELS_ONLY = os.getenv('DECK_LEVELS_ONLY') == '1'
 local LABEL = os.getenv('DECK_NOTES_LABEL') or ''
 if LABEL == '' then LABEL = 'Speaker notes' end
 
@@ -81,6 +88,16 @@ local function clamp(level)
   return math.max(1, math.min(6, level))
 end
 
+-- A heading given the level the page gives it: its own, or its oer-level
+-- (LEVELS_ONLY).
+local function set_level(header, level)
+  if LEVELS_ONLY then
+    header.attributes['oer-level'] = tostring(level)
+  else
+    header.level = level
+  end
+end
+
 -- The shallowest heading made base, the rest kept in their places under
 -- it: a deck with no slides at headings (a slide level of 0).
 local function shifted(doc, base)
@@ -95,7 +112,7 @@ local function shifted(doc, base)
   local shift = shallowest and base - shallowest or 0
   return function(header)
     if shift == 0 then return nil end
-    header.level = clamp(header.level + shift)
+    set_level(header, clamp(header.level + shift))
     return header
   end
 end
@@ -141,7 +158,7 @@ local function placed(level, base)
     if not titled(header) then
       return pandoc.Div({ pandoc.Plain(header.content) }, pandoc.Attr(header.identifier))
     end
-    header.level = clamp((slide or base + #open - 1) + 1 + #stack)
+    set_level(header, clamp((slide or base + #open - 1) + 1 + #stack))
     table.insert(stack, own)
     return header
   end
@@ -154,12 +171,12 @@ local function placed(level, base)
     local own = header.level
     if own < level then
       while #open > 0 and open[#open] >= own do table.remove(open) end
-      header.level = clamp(base + #open)
+      set_level(header, clamp(base + #open))
       table.insert(open, own)
       slide, inner = nil, {}
     elseif own == level then
-      header.level = clamp(base + #open)
-      slide, inner = header.level, {}
+      slide, inner = clamp(base + #open), {}
+      set_level(header, slide)
     else
       return under(inner, header)
     end
@@ -199,5 +216,6 @@ function Pandoc(doc)
   end
   -- In reading order.
   doc = doc:walk(filter)
+  if LEVELS_ONLY then return doc end
   return doc:walk({ Div = notes, Para = pause })
 end

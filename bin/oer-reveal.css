@@ -1,0 +1,140 @@
+/*
+ * oer-reveal.css -- the look of a deck's reveal.js presentation, over
+ * reveal.js's white theme: written into each presentation's head by
+ * lib/revealtarget.py.
+ *
+ * Its proportions are the deck's PowerPoint file's: text 42 pixels on a
+ * slide 720 high, as the white theme has it and as the pptx target's
+ * Widescreen master's 32 points are on a slide 7.5 inches high; a slide's
+ * title 1.375 times that, as the master's 44 points are; headings in
+ * their own case, where the theme sets them in capitals; links in
+ * #0066CC, as in the deck's PDF, and underlined, so they're told apart
+ * from text by more than their color. Pictures are kept within the slide
+ * with room for a title and a caption; a slide still too tall is fitted
+ * by oer-reveal.js.
+ *
+ * Copyright 2026 Robert Szarka
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+:root {
+  --r-heading-text-transform: none;
+  --r-heading1-size: 1.1em;
+  --r-heading2-size: 1.1em;
+  --r-heading3-size: 1.1em;
+  --r-heading4-size: 1em;
+  --r-link-color: #0066cc;
+  --r-link-color-dark: #004c99;
+  --r-link-color-hover: #004c99;
+  --r-selection-background-color: #0066cc;
+}
+.reveal a {
+  text-decoration: underline;
+}
+/* A slide's title: its first heading, at the level the deck's page gives
+   it (H2 for a slide in no section, H3 for one in a section); the title
+   slide's, the deck's. */
+.reveal .slides section > :is(h1, h2, h3, h4, h5, h6):first-child {
+  font-size: 1.375em;
+}
+.reveal .slides h1.title {
+  font-size: 1.6em;
+}
+.reveal .slides section img,
+.reveal .slides section svg,
+.reveal .slides section video {
+  max-height: calc(var(--slide-height, 720px) * 0.6);
+  width: auto;
+  max-width: 100%;
+}
+.reveal figure {
+  margin: 0.4em 0;
+}
+.reveal figcaption,
+.reveal table caption {
+  font-size: 0.7em;
+}
+.reveal aside.footnotes {
+  font-size: 0.55em;
+  text-align: left;
+}
+.reveal aside.footnotes hr {
+  margin: 0.4em 0;
+}
+/* What oer-reveal.js does to a slide too tall for the frame: its content
+   under its title set closer, then smaller, by the step it reached. */
+html:not(.oer-page-view) .reveal .slides section.oer-fitted > :not(.oer-title):not(aside.notes) {
+  font-size: calc(var(--oer-scale, 1) * 1em);
+  line-height: calc(var(--oer-line, 1) * 1.3);
+}
+html:not(.oer-page-view) .reveal .slides section.oer-scrolled {
+  height: var(--slide-height, 720px);
+  overflow-y: auto;
+}
+/* A narrow window's page (oer-reveal.js): the slide shown flowing down
+   the page at its own size, which scrolls, the controls kept in a
+   corner, with room below the slide for the page to scroll its end
+   clear of them. */
+html.oer-page-view,
+html.oer-page-view body.reveal-viewport,
+html.oer-page-view .reveal {
+  height: auto;
+  min-height: 100%;
+  overflow: visible;
+}
+html.oer-page-view .reveal .slides {
+  position: relative;
+  inset: auto;
+  width: auto;
+  margin: 0;
+  padding: 0.5em 0.5em max(3em, 80px);
+  pointer-events: auto;
+  perspective: none;
+}
+html.oer-page-view .reveal .slides section {
+  position: relative;
+  top: auto !important;
+  height: auto;
+}
+html.oer-page-view .reveal .slides > section:not(.present) {
+  display: none !important;
+}
+html.oer-page-view .reveal .controls,
+html.oer-page-view .reveal .progress {
+  position: fixed;
+}
+/* On a phone or a tablet, text a page's size, where a laptop's zoomed
+   window keeps the slide's, which its zoom enlarges. */
+@media (pointer: coarse) {
+  html.oer-page-view {
+    --r-main-font-size: 1.25rem;
+  }
+}
+/* Keyboard focus, which the theme leaves to the browser, shown plainly;
+   not on what the script focuses as a slide or a step appears. */
+.reveal :focus-visible {
+  outline: 3px solid #0066cc;
+  outline-offset: 2px;
+}
+.reveal .slides [data-oer-focus]:focus {
+  outline: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .reveal .slides,
+  .reveal .slides section,
+  .reveal .slides .fragment,
+  .reveal .backgrounds {
+    transition: none !important;
+  }
+}

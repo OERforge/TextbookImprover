@@ -134,6 +134,7 @@ Put that `export` line in `~/.bashrc` (see [below](#optional-the-full-validators
 | The `ltx-talk`, `lua-unicode-math`, and `newcomputermodern` packages | A `pdf` target for decks written in Markdown ([Slides](slides.md#the-pdf)), which also needs LaTeX 2026-06-01 or later; without them, the run says what to install | `tlmgr install ltx-talk lua-unicode-math newcomputermodern` |
 | pdfLaTeX or LuaLaTeX, LaTeX's `preview` package, and `pdftocairo` | A LaTeX source with drawings or PDF images, which become SVG ([LaTeX sources](latex.md)); without them they're left out of the pages | TeX Live (`tlmgr install preview` where it's missing); `sudo apt install poppler-utils` |
 | TeX's `latex-tagging-status` package | A LaTeX source's copy made for tagging, whose class and packages are checked against the tagging project's status list ([LaTeX sources](latex.md#the-source-target)); without it, the run says how to install it and checks nothing | `tlmgr install latex-tagging-status`; MiKTeX installs it on demand |
+| reveal.js 6, and Node.js's `npm` to install it | A `revealjs` target for decks written in Markdown ([Slides](slides.md#the-revealjs-presentation)), which also needs Pandoc 3.12 or later; without it, the run says how to install it | `npm install reveal.js@6`, and `REVEALJS_DIR` set to its folder; see [below](#for-a-revealjs-target-revealjs) |
 | `zip` | Only if you package with the printed command instead of `--zip` | `sudo apt install zip` |
 
 **Pandoc has to come from Pandoc.** `sudo apt install pandoc` on Ubuntu 24.04 gives 3.1.3, which this project refuses to run with: Pandoc 3.6 and older write tables without cell spans, so a table with merged cells loses them silently, and several things the filter relies on arrived later. Install the `.deb` from [Pandoc's releases](https://github.com/jgm/pandoc/releases) instead:
@@ -144,7 +145,7 @@ sudo apt install ./pandoc-3.12.1-1-amd64.deb
 pandoc --version | head -1
 ```
 
-Pandoc 3.9 is a hard requirement for a book, checked before the book is read; a folder of PowerPoint decks needs no Pandoc, and a deck's PowerPoint file (a `pptx` target) needs 3.10.1, whose PowerPoint writer keeps a table and the text around it on one slide. Versions above it still differ in ways that show up here — newer releases read Word caption paragraphs into table captions, older ones don't — so the same document can produce different reports on different machines. Neither is wrong; the sidecar files absorb the difference.
+Pandoc 3.9 is a hard requirement for a book, checked before the book is read; a folder of PowerPoint decks needs no Pandoc, a deck's PowerPoint file (a `pptx` target) needs 3.10.1, whose PowerPoint writer keeps a table and the text around it on one slide, and a deck's reveal.js presentation (a `revealjs` target) needs 3.12, whose template loads reveal.js 6's plugins. Versions above it still differ in ways that show up here — newer releases read Word caption paragraphs into table captions, older ones don't — so the same document can produce different reports on different machines. Neither is wrong; the sidecar files absorb the difference.
 
 **Python packages come from `apt`, not `pip`.** Ubuntu 24.04 manages its Python installation, so `pip3 install pypdf` stops with `error: externally-managed-environment` (and on a fresh WSL install `pip3` isn't there to begin with). The `python3-*` packages in the table are the ones to use. Ubuntu 22.04 doesn't stop pip, and its one gap, pypdf, comes from pip there, as [above](#which-ubuntu-you-have). If you need a version newer than Ubuntu ships, make a virtual environment for it (`python3 -m venv ~/venv && ~/venv/bin/pip install pypdf`) and run the tools with that interpreter.
 
@@ -274,6 +275,18 @@ export VERAPDF="$HOME/tools/verapdf/verapdf"    # and add this line to ~/.bashrc
 ```
 
 The run finds it through `VERAPDF` or as `verapdf` on the path. veraPDF chooses its profiles from what the file claims: for a PDF claiming PDF/UA-2 and PDF/A-4f, veraPDF 1.30 applies PDF/UA-2 with Tagged PDF, PDF/A-4f, and both WTPDF 1.0 profiles.
+
+## For a revealjs target: reveal.js
+
+A deck's reveal.js presentation loads reveal.js from a copy beside it, which the run takes from the folder `REVEALJS_DIR` names: reveal.js 6, which Pandoc 3.12's template is written for. npm, which comes with [Node.js](https://nodejs.org) (`sudo apt install npm` on Ubuntu), installs it in a folder of your choosing:
+
+```bash
+mkdir -p ~/tools/revealjs && cd ~/tools/revealjs
+npm install reveal.js@6
+export REVEALJS_DIR="$HOME/tools/revealjs/node_modules/reveal.js"    # and add this line to ~/.bashrc
+```
+
+reveal.js is MIT-licensed, and its license goes with each copy. The suites build and check a presentation when `REVEALJS_DIR` is set, and try it in a browser when Python's Playwright and its Chromium are installed (`pip install playwright` and `playwright install chromium`, in a virtual environment on Ubuntu 24.04); without them, they say what they skipped.
 
 ## Checking the whole setup
 

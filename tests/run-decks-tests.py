@@ -3212,6 +3212,561 @@ def case_pptx_edges(work):
     return checks
 
 
+# --------------------------------------------------------------------------
+# a deck's reveal.js presentation
+# --------------------------------------------------------------------------
+
+REVEALJS = """\
+targets:
+  present:
+    format: revealjs
+"""
+
+# An agenda before the first section, a section's slides, a block under a
+# slide two levels down, a block with no title, a footnote, a link to a
+# slide, a formula, notes, a slide in steps, a picture the deck has load
+# lazily, a slide too tall for its frame, with a footnote far from its
+# mark, and one too tall even at a quarter of its size.
+PRESENTED = """---
+title: Presented
+author: A. Lecturer
+---
+
+## Agenda
+
+1. One
+2. Two
+
+# Part One
+
+## Opening
+
+Text with a [link](https://example.org/) and $x^2$.[^1] On to [the steps](#steps).
+
+#### A Block
+
+Its text.
+
+### {.example}
+
+Untitled block text.
+
+::: notes
+Say hello.
+:::
+
+## Steps
+
+- First
+- Second
+
+. . .
+
+Later.
+
+## A Picture
+
+![A rising line](img/chart.png){loading=lazy}
+
+## A Big Picture
+
+![A big square](img/big.png)
+
+""" + "".join(f"Paragraph {n} under the picture, with words.\n\n" for n in range(1, 4)) + """
+# Part Two
+
+## A Bit Long
+
+""" + "".join(f"- Short item {n}\n" for n in range(1, 13)) + """
+## A Long List
+
+- Item number 1, with words enough to wrap its line on a slide[^2]
+""" + "".join(f"- Item number {n}, with words enough to wrap its line on a slide\n"
+              for n in range(2, 19)) + """
+## Too Long
+
+""" + "".join(f"- Line {n}\n" for n in range(1, 160)) + """
+[^1]: A note on the opening.
+
+[^2]: A note on the long list.
+"""
+
+# A slide too tall for a narrow window's page, a step at its end, and
+# after it a slide with no title, as tall: where the step is, and where
+# that slide's page starts.
+NO_TITLE_SLIDE = """---
+title: A Slide With No Title
+---
+
+## Long First
+
+""" + "".join(f"- Long line {n}\n" for n in range(1, 40)) + """
+. . .
+
+The step at its end.
+
+---
+
+""" + "".join(f"- Line {n} of a slide with no title\n" for n in range(1, 11))
+
+
+def revealjs_ready():
+    """Why a presentation can't be built here, or None: REVEALJS_DIR is
+    where reveal.js 6 is."""
+    import revealtarget
+    return revealtarget.revealjs_problem(os.environ.get("REVEALJS_DIR", "").strip())
+
+
+# Fonts that come after the page has loaded, as from a slow server: the
+# page's document.fonts.ready a tenth of a second after its load event,
+# after reveal.js's own layout on that event.
+LATE_FONTS = """(() => {
+  const ready = document.fonts.ready;
+  const late = new Promise(done => addEventListener('load', () => setTimeout(done, 100)));
+  Object.defineProperty(document.fonts, 'ready',
+                        {get: () => Promise.all([ready, late]).then(() => document.fonts)});
+})();"""
+
+
+def in_browser(path, steps, width=1280, height=720, touch=False, broken=False, late_fonts=False):
+    """What steps (a function of a Playwright page) give of the presentation
+    at path (and #fragment), opened in Chromium in a window width by
+    height, served over HTTP from its folder, its big picture a second
+    late, as from a slow server, or never (broken), and its fonts after
+    the page has loaded (late_fonts); or None when Playwright or its
+    Chromium isn't installed."""
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        return None
+    import functools
+    import http.server
+    import threading
+    import time
+    file, _, fragment = path.partition("#")
+
+    class Quiet(http.server.SimpleHTTPRequestHandler):
+        def log_message(self, *args):
+            pass
+    server = http.server.ThreadingHTTPServer(
+        ("127.0.0.1", 0), functools.partial(Quiet, directory=os.path.dirname(file)))
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+
+    def late(route):
+        time.sleep(1)
+        if broken:
+            route.abort()
+        else:
+            route.continue_()
+    try:
+        with sync_playwright() as play:
+            browser = play.chromium.launch()
+            try:
+                context = browser.new_context(viewport={"width": width, "height": height},
+                                              has_touch=touch, is_mobile=touch)
+                if late_fonts:
+                    context.add_init_script(LATE_FONTS)
+                page = context.new_page()
+                page.route("**/img/big.png", late)
+                page.goto(f"http://127.0.0.1:{server.server_port}/{os.path.basename(file)}"
+                          + (f"#{fragment}" if fragment else ""))
+                page.wait_for_function("() => window.Reveal && Reveal.isReady()")
+                page.wait_for_function("() => document.fonts.status === 'loaded'")
+                page.wait_for_function("() => Array.from(document.images).every(i => i.complete)"
+                                       if not broken else "() => true")
+                if broken:
+                    page.wait_for_timeout(1500)
+                page.wait_for_timeout(500)
+                return steps(page)
+            finally:
+                browser.close()
+    except Exception as exc:  # no Chromium, most often
+        return {"error": f"{type(exc).__name__}: {exc}"}
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+FOCUSED = "() => { const a = document.activeElement; return [a.tagName, a.textContent.trim()]; }"
+OUTLINE = "() => getComputedStyle(document.activeElement).outlineStyle"
+LINK = """() => { const a = document.querySelector('#opening a[href^="http"]'); const s = getComputedStyle(a);
+  return [s.color, s.textDecorationLine]; }"""
+FITTED = """() => Reveal.getSlides().map(s => {
+  const shown = s.style.display; s.style.display = 'block';
+  const title = s.querySelector('h1,h2,h3');
+  const out = [title && title.textContent,
+               s.classList.contains('oer-fitted'), s.classList.contains('oer-scrolled'),
+               s.style.getPropertyValue('--oer-scale'), s.scrollHeight,
+               title && getComputedStyle(title).fontSize, s.style.getPropertyValue('--oer-line'),
+               getComputedStyle(s).overflowY, s.clientHeight,
+               title && getComputedStyle(title).textTransform];
+  s.style.display = shown; return out; })"""
+
+
+def presentation_steps(page):
+    found = {"role": page.evaluate("() => document.querySelector('.reveal').getAttribute('role')"),
+             "live": page.evaluate("() => { const s = document.querySelector('.aria-status');"
+                                   " return [s.getAttribute('aria-live'), s.getAttribute('aria-hidden')]; }"),
+             "fitted": page.evaluate(FITTED)}
+    page.keyboard.press("ArrowRight")
+    page.wait_for_timeout(300)
+    found["first"] = page.evaluate(FOCUSED)
+    found["arrows"] = page.evaluate("() => ['left', 'right'].map(side => getComputedStyle("
+                                    "document.querySelector('.reveal .controls .navigate-' + side))"
+                                    ".opacity)")
+    found["outline"] = page.evaluate(OUTLINE)
+    found["link"] = page.evaluate(LINK)
+    page.emulate_media(reduced_motion="reduce")
+    found["motion"] = page.evaluate("() => getComputedStyle(Reveal.getCurrentSlide())"
+                                    ".transitionDuration")
+    page.emulate_media(reduced_motion="no-preference")
+    page.evaluate("() => Reveal.slide(Reveal.getSlides().findIndex("
+                  "s => s.id === 'steps'))")
+    page.wait_for_timeout(300)
+    found["title"] = page.evaluate(FOCUSED)
+    page.keyboard.press("ArrowRight")
+    page.wait_for_timeout(300)
+    found["step"] = page.evaluate(FOCUSED)
+    page.keyboard.press("Escape")
+    page.wait_for_timeout(300)
+    page.keyboard.press("ArrowRight")
+    page.wait_for_timeout(300)
+    found["overview"] = page.evaluate(FOCUSED)
+    return found
+
+
+PLACE = """() => { const a = document.activeElement;
+  return [a.tagName, a.id || a.textContent.trim(), a.hasAttribute('tabindex'),
+          getComputedStyle(a).outlineStyle, Reveal.getCurrentSlide().id]; }"""
+
+
+def link_steps(page):
+    """Opened at the Opening slide: its footnote's mark followed from the
+    keyboard, the note's way back, and the link to the Steps slide."""
+    found = {}
+    for name, link in (("note", "#opening a.footnote-ref"), ("back", "#opening a.footnote-back"),
+                       ("slide", '#opening a[href="#/steps"]')):
+        page.focus(link)
+        page.keyboard.press("Enter")
+        page.wait_for_timeout(300)
+        found[name] = page.evaluate(PLACE)
+    return found
+
+
+def scroll_steps(page):
+    """Opened at A Long List: on to Too Long, which scrolls, then down, the
+    overview opened and closed with space, and left."""
+    current = "() => [Reveal.getCurrentSlide().id, Reveal.getCurrentSlide().scrollTop]"
+    found = {}
+    for name, key in (("right", "ArrowRight"), ("down", "ArrowDown"), ("overview", "Escape"),
+                      ("space", "Space"), ("left", "ArrowLeft")):
+        page.keyboard.press(key)
+        page.wait_for_timeout(300)
+        found[name] = page.evaluate(current) + [page.evaluate("() => Reveal.isOverview()")]
+    return found
+
+
+def narrow_steps(page):
+    view = ("() => [document.documentElement.classList.contains('oer-page-view'),"
+            " Reveal.getCurrentSlide().id, scrollY,"
+            " getComputedStyle(Reveal.getCurrentSlide().querySelector('li, p')).fontSize,"
+            " document.querySelector('.reveal .slides').style.transform]")
+    # The controls shown, top and bottom, and the bottom of the slide's end.
+    controls = """() => { const shown = Array.from(document.querySelectorAll('.reveal .controls button'))
+      .filter(b => { const s = getComputedStyle(b);
+        return s.display !== 'none' && s.visibility !== 'hidden' && s.opacity !== '0'; })
+      .map(b => b.getBoundingClientRect());
+      return [Math.min(...shown.map(r => r.top)), Math.max(...shown.map(r => r.bottom)),
+              Reveal.getCurrentSlide().lastElementChild.getBoundingClientRect().bottom]; }"""
+    found = {"opened": page.evaluate(view)}
+    # Where the slide is on the page, against the top of the slides' room
+    # (nothing before it, nor reveal.js's centering left on it), and
+    # whether the page is any wider than the window.
+    found["placed"] = page.evaluate("""() => {
+      const s = Reveal.getCurrentSlide(), room = document.querySelector('.reveal .slides');
+      return [Math.round(s.getBoundingClientRect().top - room.getBoundingClientRect().top
+                         - parseFloat(getComputedStyle(room).paddingTop)),
+              document.documentElement.scrollWidth <= innerWidth]; }""")
+    page.keyboard.press("ArrowDown")
+    page.wait_for_timeout(300)
+    found["down"] = page.evaluate(view)
+    top, bottom, _ = page.evaluate(controls)
+    found["controls"] = top >= 0 and bottom <= page.viewport_size["height"]
+    page.keyboard.press("End")
+    page.wait_for_timeout(300)
+    top, _, end = page.evaluate(controls)
+    found["end"] = page.evaluate(view)[1:3] + [end <= top]
+    page.keyboard.press("ArrowRight")
+    page.wait_for_timeout(300)
+    found["right"] = page.evaluate(view)
+    page.keyboard.press("Escape")
+    page.wait_for_timeout(300)
+    found["overview"] = page.evaluate("() => Reveal.isOverview()")
+    width, height = page.viewport_size["width"], page.viewport_size["height"]
+    page.set_viewport_size({"width": 1280, "height": 720})
+    page.wait_for_timeout(300)
+    found["widened"] = page.evaluate(view)
+    page.keyboard.press("Escape")
+    page.wait_for_timeout(300)
+    found["widened overview"] = page.evaluate("() => Reveal.isOverview()")
+    page.set_viewport_size({"width": width, "height": height})
+    page.wait_for_timeout(300)
+    found["narrowed"] = page.evaluate(view)[:2] + [page.evaluate("() => Reveal.isOverview()")]
+    return found
+
+
+def top_steps(page):
+    """In a narrow window, Long First's step shown, far below its title, then
+    on to the slide with no title: whether the step is scrolled into view
+    as it takes focus, and where that slide's page starts."""
+    page.keyboard.press("ArrowRight")
+    page.wait_for_timeout(500)
+    found = {"step": page.evaluate("""() => { const a = document.activeElement, r = a.getBoundingClientRect();
+      return [a.textContent.trim(), Reveal.getCurrentSlide().id, r.top >= 0 && r.bottom <= innerHeight]; }""")}
+    page.keyboard.press("ArrowRight")
+    page.wait_for_timeout(500)
+    found["next"] = page.evaluate("() => [scrollY, document.activeElement.tagName, "
+                                  "!Reveal.getCurrentSlide().querySelector('h1, h2, h3')]")
+    return found
+
+
+def note_steps(page):
+    """In a narrow window, A Long List's footnote mark followed: whether the
+    note, far below it, is scrolled into view."""
+    page.focus("#a-long-list a.footnote-ref")
+    page.keyboard.press("Enter")
+    page.wait_for_timeout(300)
+    return page.evaluate("""() => { const a = document.activeElement, r = a.getBoundingClientRect();
+      return [a.id, r.top >= 0 && r.bottom <= innerHeight]; }""")
+
+
+def case_revealjs(work):
+    problem = revealjs_ready()
+    if problem:
+        print(f"  skip  {problem}")
+        return []
+    decks_dir = folder(work, REVEALJS, decks_given={"presented.md": PRESENTED,
+                                                    "no-title.md": NO_TITLE_SLIDE})
+    png(os.path.join(decks_dir, "img", "big.png"), 200, 120, 40, size=600)
+    result = convert(decks_dir)
+    out = os.path.join(decks_dir, "present")
+    path = os.path.join(out, "presented.html")
+    page = read(path) if os.path.exists(path) else ""
+    check = [r for r in rows_of(os.path.join(decks_dir, "output-check.csv"))
+             if r[0].endswith(".html")]
+    browsed = in_browser(path, presentation_steps) if page else {}
+    linked = in_browser(path + "#/opening", link_steps) if page else {}
+    scrolled = in_browser(path + "#/a-long-list", scroll_steps) if page else {}
+    narrow = in_browser(path + "#/a-long-list", narrow_steps, 900, 506) if page else {}
+    noted = in_browser(path + "#/a-long-list", note_steps, 900, 506) if page else {}
+    topped = in_browser(os.path.join(out, "no-title.html#/long-first"), top_steps, 900, 506) \
+        if page else {}
+    phone = in_browser(path + "#/a-long-list", narrow_steps, 375, 667, touch=True) if page else {}
+    broken = in_browser(path, lambda p: p.evaluate(FITTED), broken=True) if page else {}
+    centered = in_browser(path + "#/a-long-list", lambda p: (p.wait_for_function(
+        "() => Reveal.getCurrentSlide().classList.contains('oer-fitted')"), p.evaluate(
+        "() => [Reveal.getCurrentSlide().style.top, Reveal.getCurrentSlide().scrollHeight]"))[1],
+        late_fonts=True) if page else {}
+    checks = [
+        ("a presentation of each deck, beside a copy of reveal.js and its license and the "
+         "deck's pictures, nothing loaded from elsewhere",
+         lambda: result.returncode == 0 and "Wrote 2 presentation(s)" in result.stderr
+         and all(os.path.isfile(os.path.join(out, "reveal.js", name)) for name in (
+             "dist/reveal.js", "dist/reveal.css", "dist/reset.css", "dist/theme/white.css",
+             "dist/plugin/notes.js", "dist/plugin/search.js", "dist/plugin/zoom.js", "LICENSE"))
+         and os.path.isfile(os.path.join(out, "img", "chart.png"))
+         and "unpkg" not in page and 'href="reveal.js/dist/theme/white.css"' in page),
+        ("the deck's language, a viewport a reader can zoom, and every picture's address src, "
+         "loaded with the page",
+         lambda: '<html lang="en-US">' in page
+         and '<meta name="viewport" content="width=device-width, initial-scale=1.0">' in page
+         and "user-scalable" not in page and "data-src" not in page
+         and '<img src="img/chart.png"' in page and "loading=" not in page),
+        ("each heading at the level the deck's page gives it, the title the one H1, and a "
+         "block with no title no heading",
+         lambda: headings(page) == [
+             (1, "Presented"), (2, "Agenda"), (2, "Part One"), (3, "Opening"), (4, "A Block"),
+             (3, "Steps"), (3, "A Picture"), (3, "A Big Picture"), (2, "Part Two"),
+             (3, "A Bit Long"), (3, "A Long List"), (3, "Too Long")]
+         and "oer-level" not in page and "Untitled block text." in page),
+        ("a section's slides in one row with the rest, and reveal.js's own scroll view off",
+         lambda: not re.search(r"<section>\s*<section", page)
+         and "Reveal.initialize({\n        scrollActivationWidth: null," in page),
+        ("the slides the deck's shape, no bouncing arrow, a footnote at the foot of its slide, "
+         "MathML, and the notes for the speaker's view",
+         lambda: "        width: 1280,\n" in page and "        height: 720,\n" in page
+         and "        controlsTutorial: false,\n" in page
+         and re.search(r'<section id="opening"(?:(?!<section).)*<aside id="footnotes" '
+                       r'class="footnotes footnotes-end-of-section"', page, re.S)
+         and "<math" in page and '<aside class="notes">' in page
+         and "showNotes: false," in page and "speaker notes in reveal.js's speaker view"
+         in result.stderr),
+        ("the look over reveal.js's white theme and the script after reveal.js starts",
+         lambda: "--r-heading-text-transform: none;" in page and "oer-page-view" in page
+         and page.index("Reveal.initialize(") < page.index("function pageView")),
+        ("the output check finds nothing in the presentations but the slide with no title, a "
+         "section with no heading, which the Nu checker warns of",
+         lambda: page and [(os.path.basename(r[0]), r[1]) for r in check]
+         == [("no-title.html", "vnu:warning")] and "Section lacks heading" in check[0][2]),
+    ]
+    if browsed is None:
+        print("  skip  Playwright isn't installed; the presentation isn't tried in a browser")
+        return checks
+    checks += [
+        ("in a browser, reveal.js's role and its live region go, and a slide's title takes "
+         "focus as it's shown, outlined as no keyboard focus is, a step's content as it "
+         "appears, and nothing in the overview",
+         lambda: browsed.get("role") is None and browsed.get("live") == [None, "true"]
+         and browsed.get("first") == ["H2", "Agenda"] and browsed.get("outline") == "none"
+         and browsed.get("title") == ["H3", "Steps"] and browsed.get("step") == ["DIV", "Later."]
+         and browsed.get("overview") == ["DIV", "Later."]),
+        ("a link within the presentation takes focus to its place: a footnote's mark to its "
+         "note, the note's way back to the mark, still a link with its outline, and a link to a "
+         "slide to the slide's title",
+         lambda: linked.get("note") == ["LI", "fn1", True, "none", "opening"]
+         and linked.get("back") == ["A", "fnref1", False, "solid", "opening"]
+         and linked.get("slide") == ["H3", "Steps", True, "none", "steps"]),
+        ("links in #0066CC, underlined, the arrow back as plain as the arrow on, and no slide "
+         "moving with reduced motion asked for",
+         lambda: browsed.get("link") == ["rgb(0, 102, 204)", "underline"]
+         and len(set(browsed.get("arrows", []))) == 1 and browsed["arrows"][0] != "0.3"
+         and browsed.get("motion") == "0s"),
+        ("a slide too tall is set closer and smaller to fit, as PowerPoint shrinks text, once "
+         "its pictures are in, its title as it was, and one too tall at a quarter of its size "
+         "scrolls",
+         lambda: [f[:3] for f in browsed.get("fitted", []) if f[1] or f[2]]
+         == [["A Big Picture", True, False], ["A Bit Long", True, False],
+             ["A Long List", True, False], ["Too Long", True, True]]
+         and all(f[4] <= 720 for f in browsed["fitted"] if not f[2])
+         and [f[6] for f in browsed["fitted"] if f[0] == "A Bit Long"] == ["0.9"]
+         and [f[3] for f in browsed["fitted"] if f[0] == "A Bit Long"] == ["1"]
+         and 0.25 < float(next(f[3] for f in browsed["fitted"] if f[0] == "A Long List")) < 1
+         and [f[3] + " " + f[7] + " " + str(f[8]) for f in browsed["fitted"] if f[2]]
+         == ["0.25 auto 720"]
+         and {f[5] for f in browsed["fitted"] if f[0] in ("A Long List", "Opening")}
+         == {"57.75px"}
+         and {f[9] for f in browsed["fitted"] if f[9]} == {"none"}),
+        ("a slide too tall even then takes the up and down keys and space as a page does, the "
+         "left and right keys going from slide to slide, and space still closes the overview",
+         lambda: [scrolled.get(k, [None])[0] for k in ("right", "down", "overview", "space", "left")]
+         == ["too-long", "too-long", "too-long", "too-long", "a-long-list"]
+         and scrolled["down"][1] > 0 and scrolled["overview"][2] is True
+         and scrolled["space"][2] is False),
+        ("a fitted slide shown first is centered on its fitted height, though its fonts come "
+         "after the page has loaded",
+         lambda: isinstance(centered, list) and centered[0] == f"{(720 - centered[1]) / 2}px"),
+        ("and a picture that never comes doesn't keep the slides from being fitted",
+         lambda: isinstance(broken, list)
+         and [f[:3] for f in broken if f[0] == "A Long List"] == [["A Long List", True, False]]),
+        ("a narrow window shows the slide as a page that scrolls, at the slide's size, at the "
+         "top and no wider than the window, its controls kept in view and its end clear of them, "
+         "the left and right keys going from slide to slide",
+         lambda: narrow.get("opened") == [True, "a-long-list", 0, "42px", ""]
+         and narrow["placed"] == [0, True]
+         and narrow["down"][1] == "a-long-list" and narrow["down"][2] > 0
+         and narrow["controls"] is True and narrow["end"][0] == "a-long-list"
+         and narrow["end"][1] > narrow["down"][2] and narrow["end"][2] is True
+         and narrow["right"][1] == "too-long" and narrow["right"][2] == 0),
+        ("and widened, the slides again",
+         lambda: narrow.get("widened", [None])[0] is False
+         and narrow["widened"][4].startswith("translate(-50%, -50%) scale(")),
+        ("the page has no overview, which showed nothing there, and one open as the window "
+         "narrows is closed",
+         lambda: narrow.get("overview") is False and narrow.get("widened overview") is True
+         and narrow.get("narrowed") == [True, "too-long", False]),
+        ("the page scrolls to the place a link takes focus to and to a step as it appears, and "
+         "a slide's page starts at its top, one with no title too",
+         lambda: noted == ["fn2", True]
+         and topped.get("step") == ["The step at its end.", "long-first", True]
+         and topped.get("next") == [0, "SECTION", True]),
+        ("a phone's page has text a page's size, at the slide its address names, at the top and "
+         "no wider than the window, its end clear of the controls",
+         lambda: phone.get("opened") == [True, "a-long-list", 0, "20px", ""]
+         and phone["placed"] == [0, True] and phone["end"][1] > 0 and phone["end"][2] is True),
+    ]
+    return checks
+
+
+def case_revealjs_settings(work):
+    """slides.notes visible and omitted, slides.aspect_ratio, slides.size and
+    slides.reference_doc said unread, a book's revealjs target, no
+    reveal.js, reveal.js 5, and a Pandoc too old."""
+    problem = revealjs_ready()
+    if problem:
+        print(f"  skip  {problem}")
+        return []
+    visible_dir = folder(os.path.join(work, "visible"), "defaults:\n  pages:\n    "
+                         "split_level: 2\n" + REVEALJS + "    slides:\n      "
+                         "notes: visible\n      aspect_ratio: \"4:3\"\n      size: "
+                         "on-screen-show\n", decks_given={"presented.md": PRESENTED})
+    png(os.path.join(visible_dir, "img", "big.png"), 200, 120, 40, size=400)
+    visible = convert(visible_dir, "--quick")
+    shown = read(os.path.join(visible_dir, "present", "presented.html")) \
+        if visible.returncode == 0 else ""
+    omitted_dir = folder(os.path.join(work, "omitted"), REVEALJS + "    slides:\n      "
+                         "notes: omitted\n", decks_given={"presented.md": PRESENTED})
+    png(os.path.join(omitted_dir, "img", "big.png"), 200, 120, 40, size=400)
+    omitted = convert(omitted_dir, "--quick")
+    left = read(os.path.join(omitted_dir, "present", "presented.html")) \
+        if omitted.returncode == 0 else ""
+    book = os.path.join(work, "book")
+    os.makedirs(book)
+    write(os.path.join(book, "one.md"), "# A Page\n\nText.\n")
+    write(os.path.join(book, "project.yaml"),
+          "project:\n  identifier: org.example.book\n  title: A Book\n")
+    write(os.path.join(book, "conversion.yaml"), REVEALJS + "  pages:\n    format: html\n")
+    as_book = convert(book, "--quick")
+    plain = folder(os.path.join(work, "plain"), REVEALJS, decks_given={"one.md": UNTITLED})
+    unset = convert(plain, "--quick", env=dict(os.environ, REVEALJS_DIR=""))
+    five = os.path.join(work, "reveal5")
+    shutil.copytree(os.environ["REVEALJS_DIR"], five)
+    write(os.path.join(five, "package.json"), '{"name": "reveal.js", "version": "5.2.1"}\n')
+    older = convert(plain, "--quick", env=dict(os.environ, REVEALJS_DIR=five))
+    empty = os.path.join(work, "empty")
+    os.makedirs(empty)
+    nothing = convert(plain, "--quick", env=dict(os.environ, REVEALJS_DIR=empty))
+    tools = os.path.join(work, "tools")
+    os.makedirs(tools)
+    write(os.path.join(tools, "pandoc"), "#!/bin/sh\nif [ \"$1\" = --version ]; then echo "
+          "'pandoc 3.11.0'; exit 0; fi\nexec %s \"$@\"\n" % shutil.which("pandoc"))
+    os.chmod(os.path.join(tools, "pandoc"), 0o755)
+    old = convert(plain, "--quick", env=dict(os.environ, PATH=tools + os.pathsep
+                                             + os.environ["PATH"]))
+    return [
+        ("slides.notes visible shows the notes under each slide, slides.aspect_ratio sets "
+         "the shape, and the presentation is the whole deck, whatever cuts its pages",
+         lambda: sorted(os.listdir(os.path.join(visible_dir, "present")))[-1] == "reveal.js"
+         and [n for n in os.listdir(os.path.join(visible_dir, "present"))
+              if n.endswith(".html")] == ["presented.html"]
+         and "showNotes: true," in shown and '<aside class="notes">' in shown
+         and "        width: 960,\n" in shown and "4:3 (slides.aspect_ratio) for 1" in visible.stderr
+         and "speaker notes shown under each slide" in visible.stderr),
+        ("slides.size isn't read for a presentation, and the run says so",
+         lambda: "NOTE: slides.size isn't read for target present's presentations"
+         in visible.stderr),
+        ("slides.notes omitted leaves the notes out, and the run says so",
+         lambda: omitted.returncode == 0 and left and '<aside class="notes">' not in left
+         and "speaker notes left out" in omitted.stderr),
+        ("a book's revealjs target is refused, the rest written",
+         lambda: as_book.returncode == 0 and "target present is format revealjs, which is "
+         "written for decks written in Markdown" in as_book.stderr
+         and not os.path.exists(os.path.join(book, "present"))),
+        ("without REVEALJS_DIR the run stops, saying how to install reveal.js",
+         lambda: unset.returncode != 0 and "REVEALJS_DIR, the folder of one, isn't set: "
+         "`npm install reveal.js@6`" in unset.stderr),
+        ("so does a folder that isn't reveal.js, what's missing named",
+         lambda: nothing.returncode != 0 and f"REVEALJS_DIR is {empty}, which isn't a copy of "
+         "reveal.js: it has no dist/reveal.js, dist/reveal.css, dist/reset.css, ..."
+         in nothing.stderr),
+        ("reveal.js 5 stops it too, its version named",
+         lambda: older.returncode != 0 and "REVEALJS_DIR's reveal.js is 5.2.1, and the "
+         "presentations are written for reveal.js 6" in older.stderr),
+        ("a Pandoc older than 3.12 is refused, its version named",
+         lambda: old.returncode != 0 and "Pandoc 3.11.0 is too old for target present's "
+         "presentations; 3.12 or later" in old.stderr),
+    ]
+
+
 CASES = [("the pieces", case_pieces),
          ("a folder of decks", case_folder),
          ("the headings' levels on a page", case_levels),
@@ -3226,7 +3781,9 @@ CASES = [("the pieces", case_pieces),
          ("no LuaLaTeX", case_no_latex),
          ("a deck's PowerPoint file", case_pptx),
          ("the PowerPoint files' settings", case_pptx_settings),
-         ("what the PowerPoint writer can't do", case_pptx_edges)]
+         ("what the PowerPoint writer can't do", case_pptx_edges),
+         ("a deck's reveal.js presentation", case_revealjs),
+         ("the presentations' settings", case_revealjs_settings)]
 SLOW = ("a deck's PDF", "the PDF's settings", "the template's fallbacks")
 
 

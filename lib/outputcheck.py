@@ -92,6 +92,7 @@ class Page:
         self.labeled_links = []     # (aria-label, visible text) of <a>
         self.formula_headers = []   # (table number, TeX) of a th holding
                                     # only formulas
+        self.presentation = False   # a reveal.js presentation (its div)
         self.parse_error = None
 
 
@@ -212,6 +213,8 @@ class _Collector(HTMLParser):
             self._math = [[], 0]
         if tag == "script":
             self.page.scripts += 1
+        if tag == "div" and "reveal" in (a.get("class") or "").split():
+            self.page.presentation = True
         if tag == "html":
             self.page.lang = a.get("lang") or a.get("xml:lang")
         elif tag == "title":
@@ -437,6 +440,18 @@ def check_page(page, findings):
                                 f"table {index}: {tex}" if tex else f"table {index}"))
 
 
+def route(page, fragment):
+    """A link's fragment as an id: in a reveal.js presentation, a link
+    within it is reveal.js's route, #/ and the id of what it shows (and
+    perhaps a step, #/name/2), as Pandoc's writer writes one so a browser
+    doesn't scroll the slides to it; a route of numbers names a slide by
+    its place, and needs no id (None)."""
+    if not page.presentation or not fragment.startswith("/"):
+        return fragment
+    name = fragment[1:].split("/")[0]
+    return None if re.fullmatch(r"[\d/]*", fragment[1:]) else name
+
+
 def check_links(pages, findings, base_of=None):
     """Every internal link resolves to a file in the set, and every
     fragment to an id in that file."""
@@ -446,6 +461,8 @@ def check_links(pages, findings, base_of=None):
             if href.startswith(EXTERNAL) or not href:
                 continue
             target, _, fragment = href.partition("#")
+            if not target:
+                fragment = route(page, fragment)
             target = unquote(target)
             if target:
                 here = posixpath.dirname(page.name)

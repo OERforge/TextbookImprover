@@ -3087,6 +3087,9 @@ def remediate_sources(target, base, docs, paths, env, html_stems=(), language=No
             + (f" {counts['macro_calls']} of them are calls of the book's own macros for an "
                "image, each given its key at the call, the macros left as they are."
                if counts.get("macro_calls") else "")
+            + (" A block before \\begin{document} skips any key the LaTeX building the "
+               "copy doesn't know, so it builds without tagging as the book did."
+               if counts.get("keys_skipped") else "")
             + (f" {counts['definitions']} definition(s) from {LATEX_MACROS} written after "
                "the preamble, as the conversion reads them." if counts.get("definitions") else "")
             + (f" {counts.get('header_rows', 0)} table(s) declared with a header row and "

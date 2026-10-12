@@ -805,7 +805,8 @@ def case_source(work):
     with open(os.path.join(work, "figures", "f.tex"), "w") as fh:
         fh.write(FIG2DEV_PAIR)
     source = ("\\documentclass[pdftex,12pt]{article}\n\\usepackage{graphicx}\n"
-              "\\usepackage{amsthm}\n\\usepackage[english]{babel}\n\\pdfcompresslevel=9\n"
+              "\\usepackage{tikz}\n\\usepackage{amsthm}\n\\usepackage[english]{babel}\n"
+              "\\pdfcompresslevel=9\n"
               "\\newtheorem{thm}{Theorem}\n\\newtheorem*{thm*}{Theorem}\n"
               "\\newcommand{\\suchthat}{\\; \\rule[-3pt]{.5pt}{13pt} \\;}\n"
               + IMAGE_MACROS +
@@ -823,6 +824,7 @@ def case_source(work):
               "and \\figalt{sq5}.\n\n"
               "\\begin{figure}\\fig{sq2}{1cm}\\caption{Small: \\fig{sq2}{2mm}}\\end{figure}\n\n"
               "\\begin{picture}(40,20)\\put(0,0){\\framebox(40,20){two}}\\end{picture}\n\n"
+              "A line: \\begin{tikzpicture}\\draw (0,0) -- (2,1);\\end{tikzpicture}.\n\n"
               "A rule: \\includegraphics[height=2pt]{figures/f.png}\n\n"
               "\\begin{figure}\\input{figures/f.tex}\\caption{F}\\end{figure}\n"
               "\\begin{tabular}{cc}\nName & Value \\\\\na & 1 \\\\\nb & 2 \\\\\n\\end{tabular}\n\n"
@@ -833,7 +835,8 @@ def case_source(work):
         fh.write(source)
     with open(os.path.join(work, "image-alt.csv"), "w", encoding="utf-8") as fh:
         fh.write("Image,Alt\nsq.png,A gray square: 50% shaded\n"
-                 "rendered/notes-1.svg,Two boxes\nfigures/f.png,[decorative]\n"
+                 "rendered/notes-1.svg,Two boxes\nrendered/notes-2.svg,A rising line\n"
+                 "figures/f.png,[decorative]\n"
                  "rendered/figures/f.svg,A figure from xfig\n"
                  "sq2.png,A darker square\nsq3.png,A third square\n"
                  "sq4.png,A fourth square\nsq5.png,A fifth [square]\n")
@@ -921,7 +924,8 @@ def case_source(work):
         with pikepdf.open(path) as pdf:
             walk(pdf.Root.StructTreeRoot)
         return alts.count("A darker square") == 3 and "Fixed" in alts \
-            and alts.count("A fifth [square]") == 2
+            and alts.count("A fifth [square]") == 2 and "Two boxes" in alts \
+            and "A rising line" in alts
 
     def mathml_in_tagged_pdf():
         """The tagged build's formula carries its MathML, from unicode-math:
@@ -997,6 +1001,13 @@ def case_source(work):
          in notes),
         ("a drawing in the text gets its alt text",
          lambda: "\\begin{picture}[alt={Two boxes}](40,20)" in notes),
+        # pdfLaTeX stops on a tikzpicture's key without tagging, and on a
+        # picture's before LaTeX 2026-06-01; builds() below builds the copy.
+        ("a tikzpicture too, and a block before \\begin{document} skips a key the "
+         "LaTeX building the copy doesn't know, and the run says so",
+         lambda: "\\begin{tikzpicture}[alt={A rising line}]" in notes
+         and 0 < notes.find("\\long\\def\\TIQkernelpicture") < notes.find("\\begin{document}")
+         and notes.count("\\TIQatcode") == 2 and "skips any key" in said),
         ("decorative is the artifact key",
          lambda: "\\includegraphics[artifact,height=2pt]{figures/f.png}" in notes),
         ("fig2dev's pair: alt text on the first picture, the labels an artifact",
@@ -1056,7 +1067,8 @@ def case_source(work):
         ("tagging off leaves the book's build alone",
          lambda: "\\DocumentMetadata" not in notes and "pdftex" in notes),
         ("the tagged copy builds with LuaLaTeX, no tagging error or warning", builds_tagged),
-        ("and the image behind the macro has its alt text in the PDF", alt_in_tagged_pdf),
+        ("and the image behind the macro has its alt text in the PDF, the drawings theirs",
+         alt_in_tagged_pdf),
         ("tagging: unicode-math for the formulas' MathML, LuaLaTeX only, with a fallback font",
          lambda: re.search(r"\\ifdefined\\directlua\n  \\usepackage\{unicode-math\}\n"
                            r"(?:.*\n)*?.*RawFeature=\{fallback=textbookimprover\}(?:.*\n)*?"

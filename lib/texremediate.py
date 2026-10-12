@@ -7,9 +7,11 @@ the conversion, so a decision reaches the element it was made about.
 - **Images and drawings.** Alt text from the image-alt sidecar, as the
   `alt` key LaTeX's tagging reads (`\\includegraphics[alt={...}]`,
   `\\begin{picture}[alt={...}]`, `\\begin{tikzpicture}[alt={...}]`), or
-  `artifact` for `[decorative]`. The keys are harmless without tagging:
-  pdfLaTeX builds the book as before (checked with TeX Live 2026), and
-  with `\\DocumentMetadata{tagging=on}` each becomes the figure's /Alt.
+  `artifact` for `[decorative]`. Without tagging, a LaTeX or a package
+  that doesn't know a key stops on it, so a block in the master's
+  preamble (KEYS_SKIPPED) skips each one that isn't known: pdfLaTeX
+  builds the book as before (checked with TeX Live 2023, 2025, and 2026),
+  and with `\\DocumentMetadata{tagging=on}` each becomes the figure's /Alt.
   A drawing is named as the conversion named it (latexsource.drawing_name);
   an image by its file. fig2dev's pair of picture environments is one
   drawing: the alt text goes on the first, and the second, its labels, is
@@ -346,6 +348,38 @@ DEFINITIONS_NOTE = (
     "%% The definitions in %s, which a person wrote to say what\n"
     "%% the book's macros mean, so they replace the book's own here.\n")
 DEFINES = re.compile(r"\\(?:(?:(?:re)?newcommand|providecommand)\*?|def)\b")
+# The keys the copy writes stop a build where nothing defines them, which
+# without tagging is: a picture's before LaTeX 2026-06-01, whose \picture
+# took no options; a tikzpicture's always, since latex-lab's tikz module,
+# loaded only by tagging, defines them; and artifact before graphicx 1.2e
+# (2024-12-31), TeX Live 2023's stopping at it. This block, before the
+# master's \begin{document}, gives each a key that does nothing where it's
+# missing, at the end of the preamble, when every package is loaded, and
+# leaves the kernel's \picture alone unless it's the one that took no
+# options (latex-lab's, for tagging, takes them). Checked with TeX Live
+# 2023, 2025, and 2026, each building with pdfLaTeX, a picture without
+# keys drawn as before, and with 2025 and 2026 tagged with LuaLaTeX, every
+# figure keeping its alt text; GIAM's copy builds to its 434 pages on all
+# three. The block puts @'s category code back as it found it.
+KEYS_SKIPPED = r"""% Written for LaTeX's tagging, which reads the alt and artifact keys this
+% copy gives images and drawings: a key this LaTeX or a package doesn't
+% know is skipped, so the book builds without tagging as it did.
+\edef\TIQatcode{\the\catcode`\@}\catcode`\@=11
+\long\def\TIQkernelpicture#1{\pictur@#1}
+\AtBeginDocument{%
+  \ifx\picture\TIQkernelpicture
+    \renewcommand\picture[1][]{\TIQkernelpicture}%
+  \fi
+  \ifdefined\define@key
+    \@ifundefined{KV@Gin@alt}{\define@key{Gin}{alt}{}}{}%
+    \@ifundefined{KV@Gin@artifact}{\define@key{Gin}{artifact}[]{}}{}%
+  \fi
+  \ifdefined\pgfkeysifdefined
+    \pgfkeysifdefined{/tikz/alt/.@cmd}{}{\pgfkeys{/tikz/alt/.code={}}}%
+    \pgfkeysifdefined{/tikz/artifact/.@cmd}{}{\pgfkeys{/tikz/artifact/.code={}}}%
+  \fi}
+\catcode`\@=\TIQatcode\relax
+"""
 
 
 def remediate(base, out_dir, master, files, alts, tagging=False, language=None,
@@ -394,11 +428,15 @@ def remediate(base, out_dir, master, files, alts, tagging=False, language=None,
     values = latexsource.macro_walk(order, lambda *_: None, includes, after, calls)[2] \
         if macros else {}
     accounted, unplaced = set(), set()
+    keyed = False
     for name in files:
         texts[name], counts = remediate_file(
             base, name, originals[name], alts, dirs, name == master, macros,
             definition_spans.get(name, ()), accounted, unplaced,
             {pos: found for (text, pos), found in values.items() if text == name})
+        # A key in a file another master's copy wrote is in this one's
+        # build too.
+        keyed = keyed or bool(counts["described"] or counts["decorative"])
         if name in written:             # counted where it was written
             continue
         for key, n in counts.items():
@@ -425,6 +463,13 @@ def remediate(base, out_dir, master, files, alts, tagging=False, language=None,
             spans = latexsource.skip_spans(definitions)
             totals["definitions"] = sum(1 for m in DEFINES.finditer(definitions)
                                         if not latexsource.in_spans(m.start(), spans))
+    if keyed and master not in written:
+        text = texts[master]
+        begin = latexsource.code_matches(latexsource.BEGIN_DOCUMENT, text)
+        if begin:
+            at = begin[0].start()
+            texts[master] = text[:at] + KEYS_SKIPPED + text[at:]
+            totals["keys_skipped"] = 1
     if tagging:
         if not language:
             language = latexsource.preamble_language(

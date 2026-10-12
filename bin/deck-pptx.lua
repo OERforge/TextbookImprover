@@ -62,6 +62,10 @@
 -- 10. title-meta, a title for the file's properties, is recorded, for
 --    pptxtarget.py to write there.
 -- 11. With slides.notes omitted, the speaker notes are left out.
+-- 12. A display equation has a paragraph's space before it, as the text
+--    around it has, and the paragraph after it too: each, but where the
+--    deck gives some of its own, is marked for pptxtarget.py to give half
+--    a line before it, as the page and the PDF set one off.
 --
 -- Copyright 2026 Robert Szarka
 --
@@ -172,6 +176,145 @@ local function picture(img, caption)
   }
   img.title = PICTURE .. pictures
   img.caption = own ~= '' and caption or pandoc.Inlines({})
+end
+
+-- Display equations, set off by space as the page and the PDF set them
+-- off: each in a paragraph of its own, as the writer makes one
+-- (fixDisplayMath, in Writers/Powerpoint.hs), and it, and the paragraph
+-- after it, marked with SPACE_MARK for pptxtarget.py to give space
+-- before, unless the deck gives it some there itself that the writer
+-- keeps: an empty paragraph or a line break. Raw HTML or LaTeX, a \vspace
+-- say, the writer leaves out, so it neither gives space nor stands between
+-- an equation and the text around it. An equation's mark is the first
+-- character of its TeX, which the writer would part from it as a
+-- paragraph of its own; the paragraph's, its first inline.
+local SPACE_MARK = '\u{E002}'
+
+local function is_display(inline)
+  return inline.t == 'Math' and inline.mathtype == 'DisplayMath'
+end
+
+-- A space, or what the writer leaves out of a line, raw HTML or LaTeX.
+local function is_blank(inline)
+  return inline.t == 'Space' or inline.t == 'SoftBreak' or inline.t == 'RawInline'
+    or (inline.t == 'Str' and inline.text:gsub('\u{A0}', ''):match('^%s*$') ~= nil)
+end
+
+local function textual(block)
+  return block ~= nil and (block.t == 'Para' or block.t == 'Plain')
+end
+
+-- The first or the last inline of a list but a blank one.
+local function edge(inlines, last)
+  local from, to, step = 1, #inlines, 1
+  if last then from, to, step = #inlines, 1, -1 end
+  for k = from, to, step do
+    if not is_blank(inlines[k]) then return inlines[k] end
+  end
+  return nil
+end
+
+local function spaced_edge(block, last)
+  local inline = textual(block) and edge(block.content, last)
+  return inline ~= nil and inline ~= false and inline.t == 'LineBreak'
+end
+
+-- An empty paragraph, or one of line breaks.
+local function is_space_block(block)
+  if not textual(block) then return false end
+  for _, inline in ipairs(block.content) do
+    if not (is_blank(inline) or inline.t == 'LineBreak') then return false end
+  end
+  return true
+end
+
+local function display_alone(block)
+  if not textual(block) then return false end
+  local found = false
+  for _, inline in ipairs(block.content) do
+    if is_display(inline) then
+      found = true
+    elseif not (is_blank(inline) or inline.t == 'LineBreak') then
+      return false
+    end
+  end
+  return found
+end
+
+-- A paragraph as paragraphs, each display equation in it one of its own.
+local function split_displays(block)
+  local displays, other = 0, false
+  for _, inline in ipairs(block.content) do
+    if is_display(inline) then
+      displays = displays + 1
+    elseif not is_blank(inline) then
+      other = true
+    end
+  end
+  if displays == 0 or (displays == 1 and not other) then return { block } end
+  local make = block.t == 'Para' and pandoc.Para or pandoc.Plain
+  local out, current = {}, pandoc.Inlines({})
+  local function flush()
+    while #current > 0 and is_blank(current[1]) do current:remove(1) end
+    while #current > 0 and is_blank(current[#current]) do current:remove(#current) end
+    if #current > 0 then table.insert(out, make(current)) end
+    current = pandoc.Inlines({})
+  end
+  for _, inline in ipairs(block.content) do
+    if is_display(inline) then
+      flush()
+      table.insert(out, make({ inline }))
+    else
+      current:insert(inline)
+    end
+  end
+  flush()
+  return out
+end
+
+-- The block nearest k in list, before it (step -1) or after it (1), but
+-- raw HTML or LaTeX, which the writer leaves out: (index, block) or nil.
+local function neighbor(list, k, step)
+  local j = k + step
+  while list[j] ~= nil and list[j].t == 'RawBlock' do j = j + step end
+  if list[j] == nil then return nil end
+  return j, list[j]
+end
+
+local function space_displays(blocks)
+  local list = pandoc.Blocks({})
+  for _, block in ipairs(blocks) do
+    if textual(block) then list:extend(split_displays(block)) else list:insert(block) end
+  end
+  local marks = {}
+  for k, block in ipairs(list) do
+    if display_alone(block) then
+      local _, before = neighbor(list, k, -1)
+      local at, after = neighbor(list, k, 1)
+      if before ~= nil and not is_space_block(before) and not spaced_edge(before, true)
+          and not spaced_edge(block, false) then
+        marks[k] = true
+      end
+      if textual(after) and not display_alone(after) and not is_space_block(after)
+          and not opening_image(after) and not spaced_edge(block, true)
+          and not spaced_edge(after, false) then
+        marks[at] = true
+      end
+    end
+  end
+  for k in pairs(marks) do
+    local marked = false
+    if display_alone(list[k]) then
+      for _, inline in ipairs(list[k].content) do
+        if is_display(inline) and not marked then
+          inline.text = SPACE_MARK .. inline.text
+          marked = true
+        end
+      end
+    end
+    if not marked then list[k].content:insert(1, pandoc.Str(SPACE_MARK)) end
+  end
+  return list
 end
 
 -- A paragraph's inlines after its first, the spaces and breaks it opens
@@ -599,6 +742,17 @@ function Pandoc(doc)
       end
       return out
     end,
+  })
+  -- Display equations in a slide's text, speaker notes, tables, and
+  -- figures aside.
+  doc = doc:walk({
+    traverse = 'topdown',
+    Div = function(div)
+      if is_notes(div) then return div, false end
+    end,
+    Table = function(tbl) return tbl, false end,
+    Figure = function(fig) return fig, false end,
+    Blocks = space_displays,
   })
   doc.blocks = shapes(doc.blocks)
   if LEVEL then

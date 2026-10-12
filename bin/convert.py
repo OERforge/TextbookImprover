@@ -3718,11 +3718,11 @@ def deck_pptxs(target, stems, names, base, language, work):
     what pptxtarget puts right in it (see deck-pptx.lua and pptxtarget), a
     file per deck named as its page is: stems are the decks' pages, names
     their source files, whose names title a file whose deck has no title.
-    Its slides are the shape a deck's PDF's are (slides.aspect_ratio), on
-    Pandoc's own reference document made that shape, unless
-    slides.reference_doc names one of the deck's own. Returns the files'
-    paths; a deck Pandoc couldn't write stops the run, once every deck has
-    been tried."""
+    Its slides are the shape a deck's PDF's are (slides.aspect_ratio), at
+    PowerPoint's size for it (slides.size), on Pandoc's own reference
+    document made that size, unless slides.reference_doc names one of the
+    deck's own. Returns the files' paths; a deck Pandoc couldn't write
+    stops the run, once every deck has been tried."""
     import concurrent.futures
     import zipfile
     from collections import Counter
@@ -3738,6 +3738,7 @@ def deck_pptxs(target, stems, names, base, language, work):
     if ratio != "auto" and not decklib.RATIO.match(ratio):
         die(f"slides.aspect_ratio is {ratio!r} for target {target.name}; it's auto, or a "
             "width and a height with a colon between them, as 16:9 or 4:3.")
+    slide_size = str(target["slides.size"] or "widescreen")
     reference = str(target["slides.reference_doc"] or "").strip()
     if reference:
         reference = resolve_path(base, reference)
@@ -3751,9 +3752,22 @@ def deck_pptxs(target, stems, names, base, language, work):
         if not size:
             die(f"slides.reference_doc is {reference} for target {target.name}, which isn't a "
                 "PowerPoint file (.pptx) whose slides have a size.")
-        if ratio != "auto":
-            say(f"NOTE: slides.aspect_ratio isn't read for target {target.name}'s PowerPoint "
-                "files: their slides are the size slides.reference_doc's are.")
+        unread = [name for name, given in (("slides.aspect_ratio", ratio != "auto"),
+                                           ("slides.size", slide_size != "widescreen"))
+                  if given]
+        if unread:
+            say(f"NOTE: {' and '.join(unread)} {'is' if len(unread) == 1 else 'are'}n't read "
+                f"for target {target.name}'s PowerPoint files: their slides are the size "
+                "slides.reference_doc's are.")
+        judged = pptxtarget.table_contrast(reference)
+        if judged and judged[3] < pptxtarget.CONTRAST:
+            say(f"WARNING: the tables in target {target.name}'s PowerPoint files take "
+                f"slides.reference_doc's default table style, {judged[0]}, whose header row "
+                f"is #{judged[1]} on #{judged[2]}, a contrast of {judged[3]:.1f}:1, under the "
+                f"{pptxtarget.CONTRAST:g}:1 PowerPoint's Accessibility Checker asks for: another "
+                "table style as the reference document's default (in PowerPoint, right-click one "
+                "in Table Design's gallery and choose Set as Default), or a darker color in its "
+                "theme, is the fix.")
     if shutil.which("rsvg-convert") is None:
         shown = []
         for stem in stems:
@@ -3778,8 +3792,8 @@ def deck_pptxs(target, stems, names, base, language, work):
                                                                           ratio)
         jobs.append((stem, intermediate, level, shape, why))
     references = {shape: pptxtarget.reference_doc(shape, os.path.join(
-        work, f"reference-{target.name}-{shape.replace(':', 'x')}.pptx"))
-        for shape in sorted({job[3] for job in jobs if job[3]})}
+        work, f"reference-{target.name}-{shape.replace(':', 'x')}-{slide_size}.pptx"),
+        slide_size) for shape in sorted({job[3] for job in jobs if job[3]})}
     env = dict(os.environ, TARGET_NAME=target.name, TITLE_BLOCK=str(target["title_block"]))
     os.makedirs(target.output_dir, exist_ok=True)
 
@@ -3815,7 +3829,10 @@ def deck_pptxs(target, stems, names, base, language, work):
         written.append(result["pptx"])
         slides += result["slides"]
         if shape:
-            ratios.setdefault(f"{shape} ({why})", []).append(stem)
+            # A 16:9 deck's size is named, since slides.size picks one of two.
+            width, height, _kind, named = pptxtarget.slide_size(shape, slide_size)
+            named = f", {named.replace(' (16:9)', '')}," if width * 9 == height * 16 else ""
+            ratios.setdefault(f"{shape} ({why}){named}", []).append(stem)
         counts.update(result["counts"])
         record = result["record"]
         for key in ("cut", "pauses", "inline_images", "languages", "unlinked", "column_blocks",
@@ -3852,8 +3869,11 @@ def deck_pptxs(target, stems, names, base, language, work):
             + (f", {counts['animations']} list(s) shown a step at a time tied to the shape "
                "that holds them, where Pandoc's writer tied them to another"
                if counts["animations"] else "")
-            + (f", {counts['bars']} bar(s) made a macron over its letter, which NVDA and "
-               "Narrator read" if counts["bars"] else "")
+            + (f", {counts['bars']} bar(s) over a letter given the macron, as a Word file's "
+               "is, which Narrator reads and LibreOffice draws as a bar" if counts["bars"]
+               else "")
+            + (f", {counts['displays']} display equation(s) set off by space from the text "
+               "around them" if counts["displays"] else "")
             + (f", {counts['math_fallbacks']} shape(s) holding equations given their text "
                "for programs that show no PowerPoint equation" if counts["math_fallbacks"]
                else "")
@@ -3897,8 +3917,8 @@ def deck_pptxs(target, stems, names, base, language, work):
             + (", ..." if len(found["small"]) > 4 else "") + "): each holds more text than "
             "its slide has room for at the size its layout sets.")
     if found["overflow"]:
-        say(f"WARNING: a table or text is too much for its slide even set small, at 10 points "
-            f"for a table or a quarter of its size for text, on slides of "
+        say(f"WARNING: a table or text is too much for its slide even set small, at three "
+            f"quarters of its size for a table or a quarter for text, on slides of "
             f"{len(found['overflow'])} PowerPoint file(s) (" + "; ".join(
                 f"{stem} {which}" for stem, which in found["overflow"][:4])
             + (", ..." if len(found["overflow"]) > 4 else "") + "), so it runs off the "

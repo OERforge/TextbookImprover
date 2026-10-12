@@ -9,6 +9,14 @@ the run of the writer (build), and what's put right in what it wrote
 (finish), each read in Writers/Powerpoint/ at 3.12.1 and measured on the
 writer's output:
 
+- the reference document is Pandoc's own at PowerPoint's size for the
+  slides' shape, 16:9 PowerPoint's Widescreen, 13.333 inches by 7.5, where
+  Pandoc's is its older On-screen Show (16:9), 10 by 5.625
+  (slides.size); and its tables take PowerPoint's Light Style 1 - Accent
+  1, dark text on white and a pale blue, where Pandoc's reference
+  document gives Medium Style 2 - Accent 1, whose header row's white on
+  its theme's blue has a contrast of 4.0:1, under the 4.5:1 PowerPoint's
+  Accessibility Checker asks for;
 - each picture's description is its alt text, or it has PowerPoint's
   decorative mark and no description, in place of the title and file path
   the writer gives every picture (makePicElements); a caption that repeats
@@ -23,8 +31,9 @@ writer's output:
 - a table's caption is read before the table, as on the deck's page and
   in its PDF, and shown above it, as in the PDF, where the writer puts it
   under the table, read after it;
-- a table taller than its room is set smaller, down to ten points, so it
-  fits, as it does in the PDF: the writer sets every table in the
+- a table taller than its room is set smaller, down to three quarters
+  of its size (ten points of Pandoc's 13.5), so it fits, as it does in
+  the PDF: the writer sets every table in the
   master's size, and PowerPoint doesn't shrink a table to fit. Its room
   ends at the slide's foot, or at the text the writer stacks under it,
   which it gives a share of the slide by its paragraphs and rows, not by
@@ -40,10 +49,19 @@ writer's output:
   edited: the scale it would record (fontScale, lnSpcReduction) is
   reckoned here and written;
 - a bar over a letter, which Pandoc writes as an accent whose character
-  is an overline (U+203E), is an upper limit of the macron (U+00AF), as
-  the PowerPoint remediation keeps one: of six forms tried in PowerPoint,
-  the only one whose bar NVDA read, and one Narrator reads, where neither
-  read the overline's (2026-10-10);
+  is an overline (U+203E), is an accent of the macron (U+00AF), as a Word
+  file's is: of six forms tried in PowerPoint, Narrator reads it
+  "overbar", where it read the overline's as nothing, and LibreOffice
+  draws it as a bar, where it drew the overline's as an acute accent;
+  NVDA reads no accent's character in PowerPoint, and read the upper
+  limit's macron only character by character, in the editor
+  (2026-10-10 and 12);
+- a display equation, and the paragraph after one, have half a line of
+  space before them, where the writer gives them a paragraph's, a fifth:
+  set off from the text around them, as on the page and in the PDF; but
+  where the deck gives them space of its own that the writer keeps, an
+  empty paragraph or a line break, which deck-pptx.lua looks for as it
+  marks them, or at the top of a shape's text;
 - the deck's language is on every run and on the text styles every run
   inherits from, in place of the reference document's, since the writer
   writes no language;
@@ -101,7 +119,7 @@ import zipfile
 from urllib.parse import unquote
 
 import decks
-import docxremediate
+import docxtarget
 import pptxorder
 import pptxparse
 import pptxremediate
@@ -114,81 +132,240 @@ _set_attr = pptxremediate._set_attr
 # the reference document
 # --------------------------------------------------------------------------
 
-# PowerPoint's width for an on-screen show, ten inches, which Pandoc's
-# reference document has: a slide of another shape is as wide, and as tall
-# as its ratio makes it.
+# The sizes PowerPoint gives the shapes it names, as it writes them in
+# presentation.xml (p:sldSz and its type) and docProps/app.xml: 4:3 and
+# 16:10 ten inches wide, and 16:9 its Widescreen, 13.333 inches by 7.5,
+# the size of a new deck since PowerPoint 2013, which it writes with no
+# type; or, with slides.size on-screen-show, its older On-screen Show
+# (16:9), ten inches by 5.625, Pandoc's reference document's. A slide of
+# another shape is ten inches wide and as tall as its ratio makes it.
 WIDTH = 9144000
-SLIDE_TYPES = {(4, 3): "screen4x3", (16, 9): "screen16x9", (16, 10): "screen16x10"}
-# What PowerPoint calls each in docProps/app.xml, in English, as Pandoc's
-# reference document has it.
-SHOW_NAMES = {"screen4x3": "On-screen Show (4:3)", "screen16x9": "On-screen Show (16:9)",
-              "screen16x10": "On-screen Show (16:10)"}
+SIZES = {(4, 3): (9144000, 6858000, "screen4x3", "On-screen Show (4:3)"),
+         (16, 9): (12192000, 6858000, None, "Widescreen"),
+         (16, 10): (9144000, 5715000, "screen16x10", "On-screen Show (16:10)")}
+ON_SCREEN_SHOW = {(16, 9): (9144000, 5143500, "screen16x9", "On-screen Show (16:9)")}
 SLIDE_SIZE = re.compile(r"<p:sldSz" + ATTRS + r"(/?)>")
 POSITION = re.compile(r"<a:(off|ext|chOff|chExt)" + ATTRS + r"(/?)>")
+# What a text's size and measures are given in, scaled with it: a run's
+# size and spacing (hundredths of a point), a paragraph's margins and tab
+# size, a text body's insets, and a line's width (EMU).
+TEXT_MEASURES = [
+    (re.compile(r"<a:(rPr|defRPr|endParaRPr)" + ATTRS + r"(/?)>"), ("sz", "spc", "kern")),
+    (re.compile(r"<a:(pPr|lvl[1-9]pPr)" + ATTRS + r"(/?)>"), ("marL", "indent", "defTabSz")),
+    (re.compile(r"<a:(bodyPr)" + ATTRS + r"(/?)>"), ("lIns", "tIns", "rIns", "bIns")),
+    (re.compile(r"<a:(spcPts)" + ATTRS + r"(/?)>"), ("val",)),
+    (re.compile(r"<a:(tab)" + ATTRS + r"(/?)>"), ("pos",)),
+    (re.compile(r"<a:(ln)" + ATTRS + r"(/?)>"), ("w",)),
+]
 
 
-def slide_size(ratio):
-    """(width, height, PowerPoint's name for the size or None) in EMU, for
-    a ratio as slides.aspect_ratio gives one (16:9, 1.41:1)."""
+def slide_size(ratio, size="widescreen"):
+    """(width, height, the size's type or None, PowerPoint's name for it)
+    in EMU, for a ratio as slides.aspect_ratio gives one (16:9, 1.41:1),
+    and size as slides.size does (widescreen, on-screen-show)."""
     match = decks.RATIO.match(ratio)
     w, h = float(match.group(1)), float(match.group(2))
-    kind = next((name for (a, b), name in SLIDE_TYPES.items() if abs(w * b - h * a) < 1e-9),
-                None)
-    return WIDTH, int(round(WIDTH * h / w)), kind
+    sizes = {**SIZES, **ON_SCREEN_SHOW} if size == "on-screen-show" else SIZES
+    for (a, b), found in sizes.items():
+        if abs(w * b - h * a) < 1e-9:
+            return found
+    return WIDTH, int(round(WIDTH * h / w)), None, "Custom"
 
 
-def _scaled(xml, factor):
-    """A part's shapes' heights and places down the slide scaled by factor,
-    their widths and places across it as they were."""
-    def one(match):
-        name, attrs, close = match.groups()
-        key = "y" if name in ("off", "chOff") else "cy"
+def _times(attrs, keys, factor):
+    """A start tag's attributes with each of keys that's a number scaled."""
+    for key in keys:
         value = _attr_value(attrs, key)
-        if value is None or not re.fullmatch(r"-?\d+", value):
-            return match.group(0)
-        return "<a:%s%s%s>" % (name, _set_attr(attrs, key, str(int(round(int(value) * factor)))),
-                               close)
-    return POSITION.sub(one, xml)
+        if value is not None and re.fullmatch(r"-?\d+", value):
+            attrs = _set_attr(attrs, key, str(int(round(int(value) * factor))))
+    return attrs
 
 
-def _show_name(xml, kind):
+def _scaled(xml, across, down, text):
+    """A part's shapes scaled: their places and widths across the slide by
+    across, down it and their heights by down, and their text's sizes and
+    measures by text."""
+    def place(match):
+        name, attrs, close = match.groups()
+        keys = (("x", across), ("y", down)) if name in ("off", "chOff") else \
+            (("cx", across), ("cy", down))
+        for key, factor in keys:
+            attrs = _times(attrs, (key,), factor)
+        return "<a:%s%s%s>" % (name, attrs, close)
+    if (across, down) != (1, 1):
+        xml = POSITION.sub(place, xml)
+    if text != 1:
+        for pattern, keys in TEXT_MEASURES:
+            xml = pattern.sub(lambda m, keys=keys: "<a:%s%s%s>" % (
+                m.group(1), _times(m.group(2), keys, text), m.group(3)), xml)
+    return xml
+
+
+def _show_name(xml, name):
     return re.sub(r"<PresentationFormat>[^<]*</PresentationFormat>",
-                  lambda _m: "<PresentationFormat>%s</PresentationFormat>"
-                  % SHOW_NAMES.get(kind, "Custom"), xml, count=1)
+                  lambda _m: "<PresentationFormat>%s</PresentationFormat>" % name, xml, count=1)
 
 
-def reference_doc(ratio, out):
+def reference_doc(ratio, out, size="widescreen"):
     """Pandoc's own reference document (16:9) as a reference document for
-    slides of ratio, written to out: its slides as tall as the ratio makes
-    them, and each placeholder on its layouts and master as far down them
-    and as tall, in proportion, as PowerPoint scales a deck's slides when
-    their size changes. Pandoc's 16:9 is PowerPoint's own 4:3 so scaled, its
-    title 205979 EMU down where PowerPoint's 4:3 has it 274638."""
+    slides of ratio, written to out, at PowerPoint's size for the ratio
+    (SIZES, or with size on-screen-show ON_SCREEN_SHOW): each placeholder
+    on its layouts and master as far across and down them, and as wide and
+    tall, in proportion, and their text as large as the slides' height and
+    width both allow, as PowerPoint scales a deck's slides when their size
+    changes ("Ensure Fit"). So a 4:3 deck's title is 274638 EMU down, where
+    PowerPoint's own 4:3 has it, in Pandoc's 33 points, and a 16:9 deck is
+    Pandoc's enlarged a third, Widescreen, its title 44 points and its text
+    32. Its tables take a style of PowerPoint's own whose text has the
+    contrast PowerPoint's checker asks for (TABLE_STYLE), where Pandoc's
+    reference document's default has 4.0:1 in a table's header row."""
     data = subprocess.run(["pandoc", "--print-default-data-file", "reference.pptx"],
                           capture_output=True, check=True).stdout
-    width, height, kind = slide_size(ratio)
+    width, height, kind, name = slide_size(ratio, size)
     with zipfile.ZipFile(io.BytesIO(data)) as zin:
         infos = zin.infolist()
         parts = {info.filename: zin.read(info.filename) for info in infos}
     presentation = parts["ppt/presentation.xml"].decode("utf-8")
-    size = SLIDE_SIZE.search(presentation)
-    old = int(_attr_value(size.group(1), "cy"))
-    attrs = _set_attr(_set_attr(size.group(1), "cx", str(width)), "cy", str(height))
+    found = SLIDE_SIZE.search(presentation)
+    across = width / int(_attr_value(found.group(1), "cx"))
+    down = height / int(_attr_value(found.group(1), "cy"))
+    text = min(across, down)
+    attrs = _set_attr(_set_attr(found.group(1), "cx", str(width)), "cy", str(height))
     attrs = _set_attr(attrs, "type", kind)
-    presentation = (presentation[:size.start()] + "<p:sldSz%s%s>" % (attrs, size.group(2))
-                    + presentation[size.end():])
-    parts["ppt/presentation.xml"] = presentation.encode("utf-8")
-    factor = height / old
-    for name in parts:
-        if re.match(r"ppt/(slideMasters|slideLayouts|slides)/[^/]+\.xml$", name):
-            parts[name] = _scaled(parts[name].decode("utf-8"), factor).encode("utf-8")
+    presentation = (presentation[:found.start()] + "<p:sldSz%s%s>" % (attrs, found.group(2))
+                    + presentation[found.end():])
+    # The text styles a text box outside a placeholder takes.
+    parts["ppt/presentation.xml"] = _scaled(presentation, 1, 1, text).encode("utf-8")
+    for part in parts:
+        if re.match(r"ppt/(slideMasters|slideLayouts|slides)/[^/]+\.xml$", part):
+            parts[part] = _scaled(parts[part].decode("utf-8"), across, down, text).encode("utf-8")
+    # The default table style, which the writer gives every table.
+    styles = parts["ppt/tableStyles.xml"].decode("utf-8")
+    parts["ppt/tableStyles.xml"] = re.sub(
+        r'(<a:tblStyleLst\b[^>]*?\sdef=")[^"]*(")', lambda m: m.group(1) + TABLE_STYLE + m.group(2),
+        styles, count=1).encode("utf-8")
     if "docProps/app.xml" in parts:
         parts["docProps/app.xml"] = _show_name(parts["docProps/app.xml"].decode("utf-8"),
-                                               kind).encode("utf-8")
+                                               name).encode("utf-8")
     with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as zout:
         for info in infos:
             zout.writestr(info, parts[info.filename])
     return out
+
+
+# --------------------------------------------------------------------------
+# a table's contrast
+# --------------------------------------------------------------------------
+
+# PowerPoint's built-in table styles, by their ids, as LibreOffice names
+# and builds them (oox/source/drawingml/table/predefined-table-styles.cxx,
+# after ECMA-376's presetTableStyles.xml): each family's style with no
+# accent, then its Accent 1 to 6.
+STYLE_FAMILIES = {
+    "Themed Style 1": "2D5ABB26-0587-4C30-8999-92F81FD0307C 3C2FFA5D-87B4-456A-9821-1D502468CF0F "
+                      "284E427A-3D55-4303-BF80-6455036E1DE7 69C7853C-536D-4A76-A0AE-DD22124D55A5 "
+                      "775DCB02-9BB8-47FD-8907-85C794F793BA 35758FB7-9AC5-4552-8A53-C91805E547FA "
+                      "08FB837D-C827-4EFA-A057-4D05807E0F7C",
+    "Themed Style 2": "5940675A-B579-460E-94D1-54222C63F5DA D113A9D2-9D6B-4929-AA2D-F23B5EE8CBE7 "
+                      "18603FDC-E32A-4AB5-989C-0864C3EAD2B8 306799F8-075E-4A3A-A7F6-7FBC6576F1A4 "
+                      "E269D01E-BC32-4049-B463-5C60D7B0CCD2 327F97BB-C833-4FB7-BDE5-3F7075034690 "
+                      "638B1855-1B75-4FBE-930C-398BA8C253C6",
+    "Light Style 1": "9D7B26C5-4107-4FEC-AEDC-1716B250A1EF 3B4B98B0-60AC-42C2-AFA5-B58CD77FA1E5 "
+                     "0E3FDE45-AF77-4B5C-9715-49D594BDF05E C083E6E3-FA7D-4D7B-A595-EF9225AFEA82 "
+                     "D27102A9-8310-4765-A935-A1911B00CA55 5FD0F851-EC5A-4D38-B0AD-8093EC10F338 "
+                     "68D230F3-CF80-4859-8CE7-A43EE81993B5",
+    "Light Style 2": "7E9639D4-E3E2-4D34-9284-5A2195B3D0D7 69012ECD-51FC-41F1-AA8D-1B2483CD663E "
+                     "72833802-FEF1-4C79-8D5D-14CF1EAF98D9 F2DE63D5-997A-4646-A377-4702673A728D "
+                     "17292A2E-F333-43FB-9621-5CBBE7FDCDCB 5A111915-BE36-4E01-A7E5-04B1672EAD32 "
+                     "912C8C85-51F0-491E-9774-3900AFEF0FD7",
+    "Light Style 3": "616DA210-FB5B-4158-B5E0-FEB733F419BA BC89EF96-8CEA-46FF-86C4-4CE0E7609802 "
+                     "5DA37D80-6434-44D0-A028-1B22A696006F 8799B23B-EC83-4686-B30A-512413B5E67A "
+                     "ED083AE6-46FA-4A59-8FB0-9F97EB10719F BDBED569-4797-4DF1-A0F4-6AAB3CD982D8 "
+                     "E8B1032C-EA38-4F05-BA0D-38AFFFC7BED3",
+    "Medium Style 1": "793D81CF-94F2-401A-BA57-92F5A7B2D0C5 B301B821-A1FF-4177-AEE7-76D212191A09 "
+                      "9DCAF9ED-07DC-4A11-8D7F-57B35C25682E 1FECB4D8-DB02-4DC6-A0A2-4F2EBAE1DC90 "
+                      "1E171933-4619-4E11-9A3F-F7608DF75F80 FABFCF23-3B69-468F-B69F-88F6DE6A72F2 "
+                      "10A1B5D5-9B99-4C35-A422-299274C87663",
+    "Medium Style 2": "073A0DAA-6AF3-43AB-8588-CEC1D06C72B9 5C22544A-7EE6-4342-B048-85BDC9FD1C3A "
+                      "21E4AEA4-8DFA-4A89-87EB-49C32662AFE0 F5AB1C69-6EDB-4FF4-983F-18BD219EF322 "
+                      "00A15C55-8517-42AA-B614-E9B94910E393 7DF18680-E054-41AD-8BC1-D1AEF772440D "
+                      "93296810-A885-4BE3-A3E7-6D5BEEA58F35",
+    "Medium Style 3": "8EC20E35-A176-4012-BC5E-935CFFF8708E 6E25E649-3F16-4E02-A733-19D2CDBF48F0 "
+                      "85BE263C-DBD7-4A20-BB59-AAB30ACAA65A EB344D84-9AFB-497E-A393-DC336BA19D2E "
+                      "EB9631B5-78F2-41C9-869B-9F39066F8104 74C1A8A3-306A-4EB7-A6B1-4F7E0EB9C5D6 "
+                      "2A488322-F2BA-4B5B-9748-0D474271808F",
+}
+STYLES = {"{%s}" % guid: (family, n) for family, guids in STYLE_FAMILIES.items()
+          for n, guid in enumerate(guids.split())}
+# A family's header row: its text's color and its fill's, each a theme
+# color, "accent" its accent (the style with none: dk1), the fill None for
+# none, the slide's background, taken as lt1. A family whose header is
+# drawn with a tint, a shade, or a transparency (Medium Style 4, the dark
+# styles), or the themed styles with no accent, isn't judged.
+HEADERS = {"Themed Style 1": ("lt1", "accent"), "Themed Style 2": ("lt1", "accent"),
+           "Light Style 1": ("dk1", None), "Light Style 2": ("lt1", "accent"),
+           "Light Style 3": ("accent", None), "Medium Style 1": ("lt1", "accent"),
+           "Medium Style 2": ("lt1", "accent"), "Medium Style 3": ("lt1", "accent")}
+# Pandoc's reference document's default, and Office's: Medium Style 2 -
+# Accent 1, a header row of white on Accent 1, which in Pandoc's theme
+# (Office 2007's colors) is 4.0:1; and the style ours takes, Light Style 1
+# - Accent 1, a header row of the theme's dark text in bold over a rule in
+# Accent 1, its rows banded in a pale Accent 1.
+MEDIUM_STYLE_2 = "{5C22544A-7EE6-4342-B048-85BDC9FD1C3A}"
+TABLE_STYLE = "{3B4B98B0-60AC-42C2-AFA5-B58CD77FA1E5}"
+# What WCAG 2's 1.4.3 asks of text under 18 points, or 14 in bold, and
+# PowerPoint's Accessibility Checker of a slide's text.
+CONTRAST = 4.5
+
+
+def _linear(channel):
+    c = channel / 255
+    return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
+
+
+def contrast(first, second):
+    """WCAG 2's contrast ratio of two colors given as six hex digits."""
+    def luminance(color):
+        r, g, b = (_linear(int(color[i:i + 2], 16)) for i in (0, 2, 4))
+        return 0.2126 * r + 0.7152 * g + 0.0722 * b
+    light, dark = sorted((luminance(first), luminance(second)), reverse=True)
+    return (light + 0.05) / (dark + 0.05)
+
+
+def theme_color(theme, slot):
+    """A theme's color in a slot (dk1, lt1, accent1, ...) as six hex
+    digits, or None: an sRGB color's value, a system color's last."""
+    found = re.search(r"<a:%s>(.*?)</a:%s>" % (slot, slot), theme, re.S)
+    if found is None:
+        return None
+    value = re.search(r'<a:srgbClr\b[^>]*?\sval="([0-9A-Fa-f]{6})"', found.group(1)) or \
+        re.search(r'<a:sysClr\b[^>]*?\slastClr="([0-9A-Fa-f]{6})"', found.group(1))
+    return value.group(1).upper() if value else None
+
+
+def table_contrast(path):
+    """(the style's name, its header row's text color, its fill's, their
+    contrast) for a reference document's default table style, which the
+    writer gives every table, when it's one of PowerPoint's whose header
+    row is one theme color on another (HEADERS); else None."""
+    with zipfile.ZipFile(path) as z:
+        names = z.namelist()
+        styles = z.read("ppt/tableStyles.xml").decode("utf-8", "replace") \
+            if "ppt/tableStyles.xml" in names else ""
+        theme = next((z.read(n).decode("utf-8", "replace") for n in sorted(names)
+                      if re.match(r"ppt/theme/theme\d+\.xml$", n)), "")
+    default = re.search(r'<a:tblStyleLst\b[^>]*?\sdef="([^"]*)"', styles)
+    style = STYLES.get(default.group(1).upper()) if default else None
+    if style is None or style[0] not in HEADERS or (style[1] == 0 and "Themed" in style[0]):
+        return None
+    family, n = style
+    accent = "accent%d" % n if n else "dk1"
+    text, fill = (accent if slot == "accent" else slot or "lt1" for slot in HEADERS[family])
+    colors = theme_color(theme, text), theme_color(theme, fill)
+    if None in colors:
+        return None
+    name = family + (" - Accent %d" % n if n else "")
+    return (name,) + colors + (contrast(*colors),)
 
 
 def reference_size(path):
@@ -348,13 +525,6 @@ SVG_BLIP = ('<a:extLst><a:ext uri="{96DAC541-7B7A-43D3-8B79-37D633B846F1}">'
             '<asvg:svgBlip xmlns:asvg="http://schemas.microsoft.com/office/drawing/2016/SVG/main"'
             ' r:embed="%s"/></a:ext></a:extLst>')
 IMAGE_RELATIONSHIP = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image"
-# Pandoc's \bar: an accent whose character is an overline (U+203E); and
-# the form the PowerPoint remediation keeps, the macron typed as an upper
-# limit, its run plain, as the deck round 6 tried has it.
-OVERLINE_ACCENT = re.compile(r'<m:acc><m:accPr>(?:(?!</m:accPr>).)*?<m:chr m:val="' "\u203e" r'"\s*/>'
-                             r"(?:(?!</m:accPr>).)*?</m:accPr><m:e>", re.S)
-MACRON_LIMIT = ('<m:limUpp><m:e>%s</m:e><m:lim><m:r><m:rPr><m:sty m:val="p" /></m:rPr>'
-                "<m:t>\u00af</m:t></m:r></m:lim></m:limUpp>")
 LANG_TAG = re.compile(r"<a:(defRPr|rPr|endParaRPr)" + ATTRS + r"(/?)>")
 TABLE_ROW = re.compile(r"<a:tr\b[^>]*>(.*?)</a:tr>", re.S)
 TABLE_CELL = re.compile(r"<a:tc\b([^>]*)>(.*?)</a:tc>", re.S)
@@ -368,13 +538,15 @@ PARAGRAPH_PROPERTIES = re.compile(r"<a:pPr" + ATTRS + r"(/?)>")
 # and a character half its size wide on average (Calibri's digits are
 # 0.507 of it, its lowercase letters narrower). A table's text is the
 # master's size for text that isn't a placeholder's (otherStyle), as
-# LibreOffice draws it; set smaller to fit, these are the sizes tried, a
-# table reaching to a fifth of an inch above the slide's foot, past its
-# layout's content, where the writer puts no footer.
+# LibreOffice draws it; set smaller to fit, these are the parts of that
+# size tried, down to three quarters of it (10 points of Pandoc's 13.5), a
+# table reaching to a little over a thirtieth of the slide's height above
+# its foot (a fifth of an inch on Pandoc's slide), past its layout's
+# content, where the writer puts no footer.
 CELL_SIDES, CELL_ENDS = 182880, 91440
-TABLE_FOOT = 182880
+TABLE_FOOT = 182880 / 5143500
 LINE, CHARACTER = 1.2, 0.5
-TABLE_SIZES = (16, 14, 12, 11, 10)
+TABLE_STEPS = (12 / 13.5, 11 / 13.5, 10 / 13.5)
 EMU_PER_POINT = 12700
 # The metadata a deck's file holds that isn't the deck's own field: the
 # pipeline's, what another writer reads (Pandoc's manual's variables for
@@ -410,27 +582,14 @@ NOT_PROPERTIES = frozenset("""
 """.split())
 
 
-def limit_bars(xml):
-    """xml with each of Pandoc's bar accents an upper limit of the macron,
-    one inside another's base with it: (xml, count)."""
-    out, pos, count = [], 0, 0
-    for match in OVERLINE_ACCENT.finditer(xml):
-        if match.start() < pos:
-            continue
-        depth, base_end = 1, None
-        for tag in docxremediate.BASE_TAG.finditer(xml, match.end()):
-            depth += 1 if tag.group(0) == "<m:e>" else -1
-            if depth == 0:
-                base_end = tag.start()
-                break
-        if base_end is None or not xml.startswith("</m:e></m:acc>", base_end):
-            continue
-        base, inner = limit_bars(xml[match.end():base_end])
-        out.append(xml[pos:match.start()] + MACRON_LIMIT % base)
-        count += 1 + inner
-        pos = base_end + len("</m:e></m:acc>")
-    out.append(xml[pos:])
-    return "".join(out), count
+def bar_accents(xml):
+    """xml with each of Pandoc's bar accents, an accent of the overline
+    (U+203E), which Narrator reads nothing for and LibreOffice draws as an
+    acute accent, given the macron (U+00AF), as a Word file's is (round 6's
+    form E, docxtarget.bar_accents): Narrator reads it "overbar", and
+    LibreOffice draws a bar. NVDA reads no accent's character in
+    PowerPoint, the macron's or another. (xml, count)."""
+    return docxtarget.bar_accents(xml)
 
 
 def relanguage(xml, language):
@@ -676,7 +835,7 @@ def slide_tree(xml, record, svgs, add_svg, counts, size=18, height=5143500, capt
             below = [place[1] for place in (_place(x) for x in pieces[at + 1:])
                      if place and place[1] > top]
             pieces[at], smaller, overflow = fit_table(
-                pieces[at], size, min(below) if below else height - TABLE_FOOT)
+                pieces[at], size, min(below) if below else height - int(height * TABLE_FOOT))
             counts["tables_fitted"] += 1 if smaller and not overflow else 0
             counts["tables_overflow"] += 1 if overflow else 0
         i += 1
@@ -738,19 +897,21 @@ def _sized(piece, size):
 
 def fit_table(piece, size, bottom):
     """A table frame set small enough to fit between its top and bottom,
-    in EMU down the slide, in the largest of its size and TABLE_SIZES that
-    does: (piece, size set or None, whether it's still too tall at the
-    smallest)."""
+    in EMU down the slide, at the largest of its size and the parts of it
+    TABLE_STEPS gives that does: (piece, size set or None, whether it's
+    still too tall at the smallest)."""
     place = _place(piece)
     if place is None:
         return piece, None, False
     room = bottom - place[1]
     if table_height(piece, size) <= room:
         return piece, None, False
-    for smaller in TABLE_SIZES:
-        if smaller < size and table_height(piece, smaller) <= room:
+    smaller = size
+    for step in TABLE_STEPS:
+        smaller = round(size * step, 2)
+        if table_height(piece, smaller) <= room:
             return _sized(piece, smaller), smaller, False
-    return _sized(piece, TABLE_SIZES[-1]), TABLE_SIZES[-1], True
+    return _sized(piece, smaller), smaller, True
 
 
 LEVEL_STYLE = re.compile(r"<a:lvl(\d)pPr\b([^>]*?)(?:/>|>(.*?)</a:lvl\1pPr>)", re.S)
@@ -829,8 +990,10 @@ def layout_styles(layout):
 
 def body_height(piece, levels, width, scale=1.0, reduction=0.0):
     """How tall a shape's text is, in EMU, its paragraphs at their
-    levels' sizes and margins (levels: _merged's), wrapped at width EMU
-    inside the insets, at a fontScale and lnSpcReduction (fractions)."""
+    levels' sizes and margins and space before them (levels: _merged's),
+    or their own, wrapped at width EMU inside the insets, at a fontScale
+    and lnSpcReduction (fractions). A display equation holding a fraction,
+    a sum or integral, a stack, or a matrix takes a line more."""
     total, first = CELL_ENDS, True
     body = re.search(r"<p:txBody>(.*?)</p:txBody>", piece, re.S)
     for paragraph in PARAGRAPH.finditer(body.group(1) if body else ""):
@@ -842,11 +1005,14 @@ def body_height(piece, levels, width, scale=1.0, reduction=0.0):
         own = _attr_value(attrs, "marL")
         if own and re.fullmatch(r"-?\d+", own):
             margin = int(own)
+        spaced = SPACE_BEFORE_PERCENT.search(_paragraph_properties(inner))
+        if spaced:
+            before = int(spaced.group(1)) / 100000
         sizes = [int(v) / 100 for v in re.findall(r'<a:rPr\b[^>]*?\ssz="(\d+)"', inner)]
         size = max(sizes) if sizes else size
         wide = MONOSPACED if "<a:latin " in inner else CHARACTER
         room = max(width - CELL_SIDES - margin, EMU_PER_POINT) / EMU_PER_POINT
-        lines = 0
+        lines = 1 if OMATH_PARA.search(inner) and TALL_MATH.search(inner) else 0
         for part in LINE_BREAK.split(inner):
             text = "".join(html.unescape(a or b) for a, b in SHOWN_TEXT.findall(part))
             lines += max(1, math.ceil(len(text) * wide * size * scale / room))
@@ -855,6 +1021,96 @@ def body_height(piece, levels, width, scale=1.0, reduction=0.0):
         total += lines * line * (1 - reduction) + (0 if first else before * line)
         first = False
     return int(total)
+
+
+# A display equation, and the paragraph after one, which deck-pptx.lua
+# marks where the deck gives them no space of its own (SPACE_MARK at their
+# head), are given this much space before them, a fraction of a line
+# (thousandths of a percent), where the master gives a paragraph a fifth:
+# set off from the text around it, as the page and the PDF set one off.
+DISPLAY_SPACE = 50000
+SPACE_MARK = "\ue002"
+OMATH_PARA = re.compile(r"<m:oMathPara\b")
+TALL_MATH = re.compile(r"<m:(?:f|nary|eqArr|m)\b")
+SPACE_BEFORE = re.compile(r"<a:spcBef>.*?</a:spcBef>", re.S)
+SPACE_BEFORE_PERCENT = re.compile(r'<a:spcBef>\s*<a:spcPct\s+val="(\d+)"')
+LINE_SPACING = re.compile(r"<a:lnSpc>.*?</a:lnSpc>", re.S)
+TEXT_BODY = re.compile(r"(<p:txBody>)(.*?)(</p:txBody>)", re.S)
+RUN = re.compile(r"<a:r>.*?</a:r>", re.S)
+MATH_RUN = re.compile(r"<m:r>.*?</m:r>", re.S)
+EMPTY_MATH_RUN = re.compile(r"<m:r>(?:<m:rPr>(?:(?!</m:rPr>).)*</m:rPr>|<m:rPr\s*/>)?"
+                            r"(?:<a:rPr\b[^>]*?(?:/>|>(?:(?!</a:rPr>).)*</a:rPr>))?"
+                            r"<m:t(?:\s[^>]*)?(?:/>|></m:t>)</m:r>", re.S)
+
+
+def _paragraph_properties(inner):
+    """A paragraph's own properties' XML (inner: what <a:p> holds), or ""."""
+    props = PARAGRAPH_PROPERTIES.match(inner)
+    if props is None:
+        return ""
+    if props.group(2):
+        return props.group(0)
+    end = inner.find("</a:pPr>", props.end())
+    return inner[:end + len("</a:pPr>")] if end >= 0 else props.group(0)
+
+
+def _unspaced(inner):
+    """A paragraph's insides (what <a:p> holds) without SPACE_MARK, a run
+    of its text or of an equation that held nothing else taken out with
+    it."""
+    def run(match):
+        if SPACE_MARK not in match.group(0):
+            return match.group(0)
+        text = match.group(0).replace(SPACE_MARK, "")
+        return "" if EMPTY_RUN.fullmatch(text) or EMPTY_MATH_RUN.fullmatch(text) else text
+    inner = RUN.sub(run, inner)
+    return MATH_RUN.sub(run, inner).replace(SPACE_MARK, "")
+
+
+def _space_before(inner, amount):
+    """A paragraph's insides (what <a:p> holds) with at least amount of
+    space before it, a spcPct value."""
+    own = _paragraph_properties(inner)
+    spacing = '<a:spcBef><a:spcPct val="%d"/></a:spcBef>' % amount
+    if not own:
+        return "<a:pPr>%s</a:pPr>" % spacing + inner
+    found = SPACE_BEFORE_PERCENT.search(own)
+    if found and int(found.group(1)) >= amount or SPACE_BEFORE.search(own) and not found:
+        return inner
+    if SPACE_BEFORE.search(own):
+        new = SPACE_BEFORE.sub(lambda _m: spacing, own, count=1)
+    elif own.endswith("/>"):
+        new = own[:-2].rstrip() + ">%s</a:pPr>" % spacing
+    else:
+        start = PARAGRAPH_PROPERTIES.match(own).end()
+        line = LINE_SPACING.match(own, start)
+        at = line.end() if line else start
+        new = own[:at] + spacing + own[at:]
+    return new + inner[len(own):]
+
+
+def display_spacing(xml, counts):
+    """A slide whose paragraphs deck-pptx.lua marked, its display equations
+    and the paragraphs after them, have DISPLAY_SPACE before them, their
+    marks taken out, as is any mark elsewhere; but the first paragraph of a
+    shape's text, which has no text above it to be set off from, as a
+    display equation has after a slide's title or where a slide is cut.
+    counts["displays"] counts the equations given space."""
+    def body(match):
+        first = [True]
+
+        def paragraph(found):
+            inner, opening = found.group(1), first[0]
+            first[0] = False
+            if inner is None or SPACE_MARK not in inner:
+                return found.group(0)
+            inner = _unspaced(inner)
+            if not opening:
+                counts["displays"] += 1 if OMATH_PARA.search(inner) else 0
+                inner = _space_before(inner, DISPLAY_SPACE)
+            return found.group(0)[:found.start(1) - found.start()] + inner + "</a:p>"
+        return match.group(1) + PARAGRAPH.sub(paragraph, match.group(2)) + match.group(3)
+    return TEXT_BODY.sub(body, xml).replace(SPACE_MARK, "")
 
 
 def _autofit(piece, scale, reduction):
@@ -1189,12 +1445,13 @@ def _core(xml, title, creator):
     return xml
 
 
-def app_properties(xml, titles, notes, kind):
+def app_properties(xml, titles, notes):
     """docProps/app.xml as the deck's, where the writer copies the
     reference document's: its slides' titles, the reference's other lists
-    as they were; its counts of slides and notes; and the name of its
-    slides' size. A list whose counts don't add up is left; the counts the
-    deck can't give (words, paragraphs, editing time) go."""
+    as they were; and its counts of slides and notes. The name of its
+    slides' size is the reference's, as they are (reference_doc names its
+    own). A list whose counts don't add up is left; the counts the deck
+    can't give (words, paragraphs, editing time) go."""
     pairs = re.search(r"(<HeadingPairs>\s*<vt:vector\b[^>]*>)(.*?)(</vt:vector>\s*</HeadingPairs>)",
                       xml, re.S)
     named = re.search(r"(<TitlesOfParts>\s*<vt:vector\b[^>]*>)(.*?)(</vt:vector>\s*"
@@ -1235,7 +1492,7 @@ def app_properties(xml, titles, notes, kind):
                      count=1)
     for tag in ("TotalTime", "Words", "Paragraphs"):
         xml = re.sub(r"<%s>[^<]*</%s>" % (tag, tag), "", xml, count=1)
-    return _show_name(xml, kind) if kind is not False else xml
+    return xml
 
 
 def finish(path, record, *, language, title, svgs=None, notes=None):
@@ -1252,7 +1509,7 @@ def finish(path, record, *, language, title, svgs=None, notes=None):
               "first_columns": 0, "table_captions": 0, "captions_taller": 0,
               "tables_fitted": 0, "tables_overflow": 0, "text_fitted": 0, "text_overflow": 0,
               "bars": 0, "math_fallbacks": 0, "ids": 0, "animations": 0, "repaired": 0,
-              "svgs": 0, "properties": 0}
+              "svgs": 0, "properties": 0, "displays": 0}
     with zipfile.ZipFile(path) as zin:
         infos = zin.infolist()
         parts = {info.filename: zin.read(info.filename) for info in infos}
@@ -1279,7 +1536,7 @@ def finish(path, record, *, language, title, svgs=None, notes=None):
     for name in slide_parts + notes_parts:
         xml, removed, declared = pptxremediate.repair_part(text(name))
         counts["repaired"] += removed + len(declared)
-        xml, n = limit_bars(xml)
+        xml, n = bar_accents(xml)
         counts["bars"] += n
         if name in slide_parts:
             folder, base = name.rsplit("/", 1)
@@ -1303,6 +1560,7 @@ def finish(path, record, *, language, title, svgs=None, notes=None):
             xml, n = unique_ids(xml)
             counts["ids"] += n
             xml = animation_targets(xml, counts)
+            xml = display_spacing(xml, counts)
         xml = math_fallbacks(xml, counts)
         if language:
             xml, _ = relanguage(xml, language)
@@ -1347,10 +1605,8 @@ def finish(path, record, *, language, title, svgs=None, notes=None):
                                      layouts.get(slide.layout_part, {}), counts, placeholders,
                                      notes)
     if "docProps/app.xml" in parts:
-        kind = _attr_value(sized.group(1), "type") if sized else None
         texts["docProps/app.xml"] = app_properties(
-            text("docProps/app.xml"), [s.title or "" for s in deck.slides],
-            len(notes_parts), kind)
+            text("docProps/app.xml"), [s.title or "" for s in deck.slides], len(notes_parts))
     _write(path, infos, parts, texts, added)
     return counts
 

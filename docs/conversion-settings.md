@@ -172,9 +172,13 @@ What the control that opens a slide's notes says, in the page's language.
 
 The shape of a deck's PDF and its PowerPoint file's slides, width to height (4:3, 16:9, 16:10). auto takes the deck's own, its aspectratio as beamer reads it (169, 43, and the rest); else 4:3 for a deck that names a theme or another of beamer's variables, since that's what its author saw (a theme of reveal.js's own doesn't count); else 16:9, PowerPoint's default. A PowerPoint file made with reference_doc has that file's shape instead.
 
+**`slides.size`**—one of `widescreen`, `on-screen-show`; default `widescreen`
+
+How large a 16:9 deck's PowerPoint slides are: widescreen is PowerPoint's Widescreen, 13.333 by 7.5 inches, the size of a new deck in PowerPoint since 2013; on-screen-show is its older On-screen Show (16:9), 10 by 5.625 inches, the size Pandoc's own PowerPoint files have. A deck of another shape is PowerPoint's size for it either way, ten inches wide (4:3 is 10 by 7.5). The slides look the same at either size, their text scaled with them. A PowerPoint file made with reference_doc is that file's size instead.
+
 **`slides.reference_doc`**—`path`; default `""` (empty)
 
-A PowerPoint file whose look a deck's PowerPoint file takes, as Pandoc's reference-doc option takes it: its slide size, its slide master and layouts, its fonts, and its colors, the layouts named as Pandoc's manual says (Title Slide, Title and Content, Section Header, Two Content, Comparison, Content with Caption, Blank), as an absolute path or one relative to the folder converted. Left empty, the look is Pandoc's own, its slides the shape aspect_ratio says. A path that doesn't exist stops the run.
+A PowerPoint file whose look a deck's PowerPoint file takes, as Pandoc's reference-doc option takes it: its slide size, its slide master and layouts, its fonts, its colors, and its default table style, the layouts named as Pandoc's manual says (Title Slide, Title and Content, Section Header, Two Content, Comparison, Content with Caption, Blank), as an absolute path or one relative to the folder converted. A default table style whose header row has too little contrast is warned of. Left empty, the look is Pandoc's own, its slides the shape aspect_ratio says at the size size says, its tables PowerPoint's Light Style 1 - Accent 1. A path that doesn't exist stops the run.
 
 ## epub
 

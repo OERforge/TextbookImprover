@@ -2169,7 +2169,7 @@ Some words before the table.
 
 | Price | Quantity |
 |------:|---------:|
-""" + "".join("| %d | %d |\n" % (n, 40 - n) for n in range(1, 8)) + """
+""" + "".join("| %d | %d |\n" % (n, 40 - n) for n in range(1, 9)) + """
 Words after the table.
 
 # Formatted Table
@@ -2254,6 +2254,37 @@ Left.
 Right.
 :::
 ::::
+
+# Display
+
+$$E = mc^2$$
+
+The mean:
+
+$$\\bar{x} = \\frac{1}{n}\\sum x_i$$
+
+and the rest.
+
+In a line
+$$y = mx + b$$
+and after.
+
+# Display Kept
+
+After a break\\
+$$a = b$$
+
+\\vspace{1em}
+
+$$c = d$$
+
+\\medskip
+
+then this.
+
+&nbsp;
+
+$$f = g$$
 
 # Languages
 
@@ -2340,10 +2371,10 @@ def animated(xml):
             sorted(set(re.findall(r'<p:bldP\b[^>]*?\sspid="(\d+)"', xml))))
 
 
-def table_ends_above(xml):
-    """Whether a slide's table, set smaller than the master's 13.5 points,
-    ends above the shape the writer stacks under it, as pptxtarget reckons
-    a table's height."""
+def table_ends_above(xml, base):
+    """Whether a slide's table, set smaller than base, the master's size
+    for its text, ends above the shape the writer stacks under it, as
+    pptxtarget reckons a table's height."""
     import pptxorder
     import pptxtarget
     tree = pptxorder.TREE.search(xml)
@@ -2359,7 +2390,55 @@ def table_ends_above(xml):
     if not below or len(sizes) != 1:
         return False
     size = int(sizes.pop()) / 100
-    return size < 13.5 and top + pptxtarget.table_height(frame, size) <= min(below)
+    return size < base and top + pptxtarget.table_height(frame, size) <= min(below)
+
+
+def master_sizes(parts):
+    """The points the master sets a title, a body's first level, and other
+    text in."""
+    import pptxtarget
+    styles = pptxtarget.text_styles(parts["ppt/slideMasters/slideMaster1.xml"])
+    return tuple(styles[key][0][0] for key in ("title", "body", "other"))
+
+
+def display_spaces(xml):
+    """For each paragraph of a slide's text but its title's: whether it
+    holds a display equation, the space before it it's given itself (a
+    spcPct value, or None), and its words, if it has any. A shape's
+    fallback, its equations as text, is left out."""
+    out = []
+    xml = re.sub(r"<mc:Fallback>.*?</mc:Fallback>", "", xml, flags=re.S)
+    for shape in re.findall(r"<p:sp\b[^>]*>(.*?)</p:sp>", xml, re.S):
+        if re.search(r'<p:ph\b[^>]*type="(?:title|ctrTitle)"', shape):
+            continue
+        for body in re.findall(r"<p:txBody>(.*?)</p:txBody>", shape, re.S):
+            for paragraph in re.findall(r"<a:p>(.*?)</a:p>", body, re.S):
+                space = re.search(r'<a:pPr\b[^>]*>(?:(?!</a:pPr>).)*?<a:spcBef>'
+                                  r'<a:spcPct val="(\d+)"', paragraph, re.S)
+                words = "".join(re.findall(r"<a:t>([^<]*)</a:t>",
+                                           re.sub(r"<a14:m>.*?</a14:m>", "", paragraph,
+                                                  flags=re.S)))
+                out.append(("<m:oMathPara" in paragraph, space.group(1) if space else None,
+                            words.strip()))
+    return out
+
+
+def text_height(*paragraphs):
+    """pptxtarget's estimate of a text box's height holding paragraphs
+    (what each <a:p> holds), at 24 points with a fifth of a line before
+    each, as Pandoc's master has its body text."""
+    import pptxtarget
+    return pptxtarget.body_height("<p:sp><p:txBody><a:bodyPr/>%s</p:txBody></p:sp>" % "".join(
+        "<a:p>%s</a:p>" % p for p in paragraphs), {0: (24, 0, 0.2)}, 8000000)
+
+
+WORDS = '<a:pPr/><a:r><a:rPr lang="en"/><a:t>Words</a:t></a:r>'
+SPACED_WORDS = ('<a:pPr><a:spcBef><a:spcPct val="50000"/></a:spcBef></a:pPr>'
+                '<a:r><a:rPr lang="en"/><a:t>Words</a:t></a:r>')
+FLAT_DISPLAY = ('<a:pPr/><a14:m><m:oMathPara><m:oMath><m:r><m:t>x</m:t></m:r></m:oMath>'
+                '</m:oMathPara></a14:m>')
+TALL_DISPLAY = ('<a:pPr/><a14:m><m:oMathPara><m:oMath><m:f><m:num><m:r><m:t>1</m:t></m:r></m:num>'
+                '<m:den><m:r><m:t>n</m:t></m:r></m:den></m:f></m:oMath></m:oMathPara></a14:m>')
 
 
 def case_pptx(work):
@@ -2402,6 +2481,8 @@ def case_pptx(work):
     pair = slide_titled(hd, "Figure Pair (2)")
     private = slide_titled(hd, "Private Notes")
     notes_first = slide_titled(hd, "Notes First")
+    display = slide_titled(hd, "Display")
+    kept = slide_titled(hd, "Display Kept")
 
     def number(slide):
         return hd.slides.index(slide) + 1 if slide in hd.slides else None
@@ -2461,9 +2542,10 @@ def case_pptx(work):
          lambda: opening is not None and first is not None and re.search(
              r'Target="%s"' % re.escape(first.part.rsplit("/", 1)[1]),
              hp[opening.part.replace("slides/", "slides/_rels/") + ".rels"])),
-        ("a bar over a letter is an upper limit of the macron, a hat an accent",
-         lambda: bars_xml.count("<m:limUpp>") == 2 and "\u203e" not in bars_xml
-         and "<m:t>\u00af</m:t>" in bars_xml and 'm:val="\u0302"' in bars_xml),
+        ("a bar over a letter is an accent of the macron, as a Word file's is, a hat an "
+         "accent of the circumflex",
+         lambda: bars_xml.count('<m:chr m:val="\u00af"') == 2 and "\u203e" not in bars_xml
+         and "<m:limUpp>" not in bars_xml and 'm:val="\u0302"' in bars_xml),
         ("an equation in a table's cell is declared, and each shape with one has a fallback",
          lambda: not any(problem for _, problem in hd.malformed)
          and bars_xml.count("<mc:Fallback>") == 2
@@ -2472,17 +2554,40 @@ def case_pptx(work):
         ("a long table is set smaller to fit its slide, and text too much for its box shrunk",
          lambda: long_table is not None
          and set(re.findall(r'<a:rPr[^>]*?\ssz="(\d+)"', hp[long_table.part])) in (
-             {"1200"}, {"1100"}, {"1000"})
+             {"1600"}, {"1467"}, {"1333"})
          and overflow is not None and str(number(long_table)) not in overflow.group(1).split(", ")
          and "2 table(s) set smaller to fit their slides" in out
          and dense is not None and re.search(r'<a:normAutofit fontScale="\d+"',
                                              hp[dense.part])),
-        ("a table too long for its slide even at 10 points is warned of, by its slide",
+        ("a table too long for its slide even at three quarters of its size is warned of, "
+         "by its slide",
          lambda: too_long is not None and overflow is not None
          and overflow.group(1).split(", ") == [str(number(too_long))]
-         and set(re.findall(r'<a:rPr[^>]*?\ssz="(\d+)"', hp[too_long.part])) == {"1000"}),
+         and set(re.findall(r'<a:rPr[^>]*?\ssz="(\d+)"', hp[too_long.part])) == {"1333"}),
         ("a table stacked over text is set small enough to end above it",
-         lambda: stacked is not None and table_ends_above(hp[stacked.part])),
+         lambda: stacked is not None and table_ends_above(hp[stacked.part], 18)),
+        ("the tables take PowerPoint's Light Style 1 - Accent 1, its text dark on white and "
+         "pale blue, not Pandoc's Medium Style 2 - Accent 1, its header white on blue",
+         lambda: '<a:tblStyleLst xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" '
+         'def="{3B4B98B0-60AC-42C2-AFA5-B58CD77FA1E5}"' in hp["ppt/tableStyles.xml"]
+         and set(re.findall(r"<a:tableStyleId>([^<]*)</a:tableStyleId>", "".join(
+             pptx_slides(hp)))) == {"{3B4B98B0-60AC-42C2-AFA5-B58CD77FA1E5}"}),
+        ("a display equation, and the paragraph after it, are given space before them, but "
+         "where the deck gives some the writer keeps or an equation opens its slide's text; "
+         "raw LaTeX, which the writer leaves out, gives none",
+         lambda: display is not None and display_spaces(hp[display.part]) == [
+             (True, None, ""), (False, "50000", "The mean:"), (True, "50000", ""),
+             (False, "50000", "and the rest."),
+             (False, None, "In a line"), (True, "50000", ""), (False, "50000", "and after.")]
+         and kept is not None and display_spaces(hp[kept.part]) == [
+             (False, None, "After a break"), (True, None, ""), (True, "50000", ""),
+             (False, "50000", "then this."), (False, None, ""), (True, None, "")]
+         and "\ue002" not in every and "3 display equation(s) set off by space" in out
+         and not re.search(r"<m:t(?:\s[^>]*)?(?:/>|></m:t>)", hp[display.part] + hp[kept.part])),
+        ("text set to fit counts a paragraph's own space before it, and a display equation "
+         "with a fraction a line taller",
+         lambda: text_height(WORDS, SPACED_WORDS) > text_height(WORDS, WORDS)
+         and text_height(WORDS, TALL_DISPLAY) > text_height(WORDS, FLAT_DISPLAY)),
         ("a table's cells keep their words, spaces, and formatting, the marker taken out",
          lambda: formatted is not None
          and [s.text for s in formatted.shapes if s.kind == "graphicFrame"]
@@ -2536,17 +2641,27 @@ def case_pptx(work):
          lambda: "<vt:lpstr>Picture and Text (2)</vt:lpstr>" in hp["docProps/app.xml"]
          and "Slide Title for Two-Content" not in hp["docProps/app.xml"]
          and "<Slides>%d</Slides>" % len(hd.slides) in hp["docProps/app.xml"]),
-        ("the slides are the deck's shape: 4:3 for a beamer theme, 16:10 its aspectratio, "
-         "16:9 otherwise",
+        ("the slides are the deck's shape at PowerPoint's size: 4:3 for a beamer theme, "
+         "16:10 its aspectratio, 16:9 otherwise, Widescreen",
          lambda: (fd.width, fd.height) == (9144000, 6858000)
          and (sd.width, sd.height) == (9144000, 5715000)
-         and (hd.width, hd.height) == (9144000, 5143500)
+         and (hd.width, hd.height) == (12192000, 6858000)
          and '<p:sldSz cx="9144000" cy="5715000" type="screen16x10"' in sp["ppt/presentation.xml"]
-         and "4:3 (its theme, which is beamer's) for 1" in out),
-        ("a 4:3 deck's layouts are Pandoc's, scaled down the slide as PowerPoint's 4:3 has them",
+         and '<p:sldSz cx="12192000" cy="6858000" />' in hp["ppt/presentation.xml"]
+         and "<PresentationFormat>Widescreen</PresentationFormat>" in hp["docProps/app.xml"]
+         and "<PresentationFormat>On-screen Show (4:3)</PresentationFormat>" in fp["docProps/app.xml"]
+         and "4:3 (its theme, which is beamer's) for 1" in out
+         and "16:9 (the default), Widescreen, for 2" in out),
+        ("a 4:3 deck's layouts are Pandoc's, scaled down the slide as PowerPoint's 4:3 has "
+         "them, its text Pandoc's size; a Widescreen deck's Pandoc's enlarged a third, text "
+         "and all",
          lambda: abs(fd.slides[1].title_shape.box.y - 274638) <= 1
          and fd.slides[1].title_shape.box.cy == 1143000
-         and slide_titled(hd, "Columns").title_shape.box.cy == 857250),
+         and master_sizes(fp) == (33.0, 24.0, 13.5)
+         and (slide_titled(hd, "Columns").title_shape.box.x,
+              slide_titled(hd, "Columns").title_shape.box.cx,
+              slide_titled(hd, "Columns").title_shape.box.cy) == (609600, 10972800, 1143000)
+         and master_sizes(hp) == (44.0, 32.0, 18.0)),
         ("speaker notes are the slides' notes, and a pause is gone, the run says",
          lambda: "Ask what the class would pay for water." in "".join(
              x for n, x in fp.items() if n.startswith("ppt/notesSlides/"))
@@ -2562,7 +2677,8 @@ def case_pptx(work):
 
 def foreign_reference(source, out):
     """A reference document unlike Pandoc's: its Comparison layout named
-    otherwise, and no size in its master's text styles."""
+    otherwise, no size in its master's text styles, and Pandoc's default
+    table style, a header row of white on its theme's blue, 4.0:1."""
     import zipfile
     with zipfile.ZipFile(source) as z, zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as o:
         for info in z.infolist():
@@ -2574,16 +2690,20 @@ def foreign_reference(source, out):
                 start, end = text.find("<p:txStyles>"), text.find("</p:txStyles>")
                 data = (text[:start] + re.sub(r'\ssz="\d+"', "", text[start:end])
                         + text[end:]).encode("utf-8")
+            elif info.filename == "ppt/tableStyles.xml":
+                data = re.sub(rb'def="[^"]*"', b'def="{5C22544A-7EE6-4342-B048-85BDC9FD1C3A}"',
+                              data)
             o.writestr(info, data)
 
 
 def case_pptx_settings(work):
     """slides.notes omitted, slides.reference_doc and slides.aspect_ratio
-    beside it, a reference document unlike Pandoc's, a book's pptx target,
-    and a Pandoc too old."""
+    and slides.size beside it, a reference document unlike Pandoc's,
+    slides.size on-screen-show, a book's pptx target, and a Pandoc too
+    old."""
     import pptxtarget
     config = PPTX + "    slides:\n      notes: omitted\n      reference_doc: look.pptx\n" \
-        "      aspect_ratio: \"16:9\"\n"
+        "      aspect_ratio: \"16:9\"\n      size: on-screen-show\n"
     decks_dir = folder(os.path.join(work, "decks"), config,
                        decks_given={"Flat Deck.md": FLAT})
     pptxtarget.reference_doc("1.41:1", os.path.join(decks_dir, "look.pptx"))
@@ -2597,6 +2717,11 @@ def case_pptx_settings(work):
                       os.path.join(foreign_dir, "house.pptx"))
     foreign = convert(foreign_dir, "--quick")
     foreign_made = os.path.join(foreign_dir, "slides", "Flat-Deck.pptx")
+    show_dir = folder(os.path.join(work, "show"), PPTX + "    slides:\n      size: on-screen-show\n",
+                      decks_given={"one.md": UNTITLED})
+    show = convert(show_dir, "--quick")
+    shown = os.path.join(show_dir, "slides", "one.pptx")
+    show_parts = pptx_parts(shown) if os.path.exists(shown) else {}
     missing = folder(os.path.join(work, "missing"), PPTX + "    slides:\n      reference_doc: "
                      "nowhere.pptx\n", decks_given={"one.md": UNTITLED})
     nowhere = convert(missing, "--quick")
@@ -2621,10 +2746,29 @@ def case_pptx_settings(work):
          lambda: result.returncode == 0 and parts
          and not any(n.startswith("ppt/notesSlides/") for n in parts)
          and "slides.notes is omitted for target slides" in result.stderr),
-        ("slides.reference_doc's slides' size is the file's, slides.aspect_ratio said unread",
+        ("slides.reference_doc's slides' size is the file's, slides.aspect_ratio and "
+         "slides.size said unread",
          lambda: '<p:sldSz cx="9144000" cy="6485106"' in parts.get("ppt/presentation.xml", "")
-         and "slides.aspect_ratio isn't read for target slides's PowerPoint files"
-         in result.stderr),
+         and "slides.aspect_ratio and slides.size aren't read for target slides's PowerPoint "
+         "files" in result.stderr),
+        ("slides.size on-screen-show makes a 16:9 deck PowerPoint's On-screen Show, Pandoc's "
+         "own size and text",
+         lambda: show.returncode == 0
+         and '<p:sldSz cx="9144000" cy="5143500" type="screen16x9"' in show_parts.get(
+             "ppt/presentation.xml", "")
+         and "<PresentationFormat>On-screen Show (16:9)</PresentationFormat>"
+         in show_parts["docProps/app.xml"]
+         and master_sizes(show_parts) == (33.0, 24.0, 13.5)
+         and "16:9 (the default), On-screen Show, for 1" in show.stderr),
+        ("a reference document whose default table style's header row has too little "
+         "contrast is warned of, and ours has enough",
+         lambda: "WARNING: the tables in target slides's PowerPoint files take "
+         "slides.reference_doc's default table style, Medium Style 2 - Accent 1, whose header "
+         "row is #FFFFFF on #4F81BD, a contrast of 4.0:1, under the 4.5:1 PowerPoint's "
+         "Accessibility Checker asks for" in foreign.stderr
+         and "contrast of" not in result.stderr
+         and pptxtarget.table_contrast(os.path.join(decks_dir, "look.pptx"))[1:3]
+         == ("000000", "FFFFFF")),
         ("a reference document without a layout Pandoc's writer looks for is warned of, and "
          "one whose master gives no text size is read",
          lambda: foreign.returncode == 0 and os.path.exists(foreign_made)

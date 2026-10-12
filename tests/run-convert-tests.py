@@ -1682,7 +1682,9 @@ def case_html_images(work):
                  '<p><img src="d.png" alt="A dot"> described</p>'
                  '<p><img src="d.png"> missing</p>'
                  '<p><iframe src="https://example.org/x" width="1200px" height="100%" '
-                 'style="border: 0"></iframe></p></body></html>')
+                 'style="border: 0"></iframe></p>'
+                 '<p><iframe src="https://example.org/y" title="Y" width="660" '
+                 'height="371.4"></iframe></p></body></html>')
     with open(os.path.join(work, "conversion.yaml"), "w") as fh:
         fh.write("targets:\n  html:\n    format: html\n")
     subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
@@ -1691,7 +1693,8 @@ def case_html_images(work):
     images = re.findall(r"<img[^>]*>", page)
     report = open(os.path.join(work, "output-check.csv")).read() if exists(
         work, "output-check.csv") else ""
-    frame = (re.findall(r"<iframe[^>]*>", page) or [""])[0]
+    frames = re.findall(r"<iframe[^>]*>", page) + ["", ""]
+    frame = frames[0]
     return [
         ("an empty alt, and role=presentation without one, are decorative: "
          "alt=\"\", no role", lambda: len(images) == 4
@@ -1702,6 +1705,9 @@ def case_html_images(work):
         ("a frame's width in px loses the unit, and a percentage is a style",
          lambda: 'width="1200"' in frame and "height=" not in frame
          and "height: 100%" in frame),
+        ("a frame's size with a fraction of a pixel is rounded, not a style",
+         lambda: 'width="660"' in frames[1] and 'height="371"' in frames[1]
+         and "style=" not in frames[1]),
     ]
 
 

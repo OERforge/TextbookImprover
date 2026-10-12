@@ -114,16 +114,18 @@ local function framed(text, block)
     title = 'Embedded content at ' .. (src:match('^%a*:?//([^/?#]+)') or src)
     attributes[#attributes + 1] = { 'title', title }
   end
-  -- A frame's width and height are a number of pixels, and nothing else:
-  -- embed code often writes width="1200px" or width="100%", which HTML
-  -- rejects. Pixels lose their unit; anything else becomes a style.
+  -- A frame's width and height are a whole number of pixels, and nothing
+  -- else: embed code often writes width="1200px" or width="100%", and
+  -- OpenStax's books height="371.4", which HTML rejects. Pixels lose
+  -- their unit and are rounded; anything else becomes a style.
   local kept, style = {}, {}
   for _, pair in ipairs(attributes) do
     local name, value = pair[1], pair[2]
     if name == 'width' or name == 'height' then
-      local pixels = value:match('^%s*(%d+)%s*px%s*$') or value:match('^%s*(%d+)%s*$')
+      local pixels = value:match('^%s*(%d+%.?%d*)%s*px%s*$')
+        or value:match('^%s*(%d+%.?%d*)%s*$')
       if pixels then
-        kept[#kept + 1] = { name, pixels }
+        kept[#kept + 1] = { name, tostring(math.floor(tonumber(pixels) + 0.5)) }
       elseif value:match('%S') then
         style[#style + 1] = name .. ': ' .. value
       end

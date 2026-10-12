@@ -1557,7 +1557,8 @@ def case_pdf_with_old_latex(work):
     return [
         ("an old LaTeX stops the PDF, naming the release found and the one needed",
          lambda: result.returncode != 0 and "2023-11-01" in said
-         and "2025-11-01" in said and not exists(work, "print")),
+         and "2026-06-01" in said and "tlmgr update --self --all" in said
+         and not exists(work, "print")),
     ]
 
 

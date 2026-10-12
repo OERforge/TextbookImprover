@@ -253,7 +253,7 @@ The target's name is yours, and names its folder. Two `source` targets write the
 
 ### PDF
 
-One tagged PDF of the whole book, assembled from the pages as the EPUB is and written by Pandoc's LaTeX writer and LuaLaTeX (a LaTeX book's is built from its own LaTeX instead, one PDF per document, unless `pdf.from` is `pages`: [LaTeX sources](latex.md#the-pdf-target)), with LaTeX's tagging switched on by the PDF/UA standard the target declares (`pdf.standard`, `ua-2` by default). It needs LuaLaTeX from TeX Live 2026 ([installation](installation.md#for-a-pdf-target-lualatex)); the output check runs [veraPDF](installation.md#optional-verapdf) on it when that's installed.
+One tagged PDF of the whole book, assembled from the pages as the EPUB is and written by Pandoc's LaTeX writer and LuaLaTeX (a LaTeX book's is built from its own LaTeX instead, one PDF per document, unless `pdf.from` is `pages`: [LaTeX sources](latex.md#the-pdf-target)), with LaTeX's tagging switched on by the PDF/UA standard the target declares (`pdf.standard`, `ua-2` by default). It needs LuaLaTeX with LaTeX 2026-06-01 or later, from TeX Live 2026 ([installation](installation.md#for-a-pdf-target-lualatex)); the output check runs [veraPDF](installation.md#optional-verapdf) on it when that's installed.
 
 ```yaml
 targets:

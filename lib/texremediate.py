@@ -543,8 +543,9 @@ MATH_SETUP_LINE = "  \\ifdefined\\tagpdfsetup\\tagpdfsetup{math/setup={mathml-SE
 # it's printed doesn't change.
 FLOAT = re.compile(r"\\begin\s*\{(?:figure|table)\*?\}")
 FLOAT_KEY = re.compile(r"\\tagpdfsetup\s*\{[^}]*float/")
-# The key came in latex-lab-float 0.81m (2025-12-04), after LaTeX 2025-11-01,
-# the oldest release a tagged build is taken to; there it's skipped.
+# The key came in latex-lab-float 0.81m (2025-12-04), after LaTeX 2025-11-01.
+# The run builds only with a LaTeX that has it (MINIMUM_LATEX); a copy its
+# author builds with an older one skips it.
 FLOATS_HERE = (
     "% Written for LaTeX's tagging: a figure's or table's tags where the text\n"
     "% has it, not gathered at the end of the document; it's printed where it was.\n"

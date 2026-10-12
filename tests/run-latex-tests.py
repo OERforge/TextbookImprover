@@ -522,25 +522,35 @@ SUITE_TEX = [("amsfonts", "amssymb.sty"), ("amsmath", "amsmath.sty"),
 
 
 def tex_ready():
-    """Where there's a TeX, the packages and tools the suite's books need
-    that it lacks, as the check that names them and what installs them;
-    None where it has them all or there's no TeX, whose checks skip."""
+    """Where there's a TeX, what it lacks that the suite's books need, as
+    the checks that name it and say what installs it: a LaTeX too old for
+    the PDF target to build with (latexbuild.MINIMUM_LATEX), whose checks
+    fail on its refusal, and the packages and tools the books load. An
+    empty list where it has them all or there's no TeX, whose checks
+    skip."""
     if not (shutil.which("lualatex") or shutil.which("pdflatex")) \
             or not shutil.which("kpsewhich"):
-        return None
+        return []
+    sys.path.insert(0, os.path.join(ROOT, "lib"))
+    import latexbuild
+    lacking = []
+    if shutil.which(latexbuild.ENGINE):
+        problem = latexbuild.latex_problem(lambda message: None)
+        if problem:
+            lacking.append("TeX's LaTeX can build a tagged PDF, or the checks of the PDF "
+                           "target fail on the run's refusal: " + problem)
     missing = [package for package, name in SUITE_TEX
                if not subprocess.run(["kpsewhich", name], capture_output=True,
                                      text=True, stdin=subprocess.DEVNULL).stdout.strip()]
     tools = [] if shutil.which("rsvg-convert") else ["rsvg-convert"]
-    if not missing and not tools:
-        return None
-    sys.path.insert(0, os.path.join(ROOT, "lib"))
-    import latexbuild
-    return ("TeX has what the suite's books load, or the checks that build them "
+    if missing or tools:
+        lacking.append(
+            "TeX has what the suite's books load, or the checks that build them "
             "fail: missing " + ", ".join(missing + tools) + " ("
             + "; ".join(([latexbuild.tlmgr_command("install " + " ".join(missing))]
                          if missing else [])
                         + (["sudo apt install librsvg2-bin"] if tools else [])) + ")")
+    return lacking
 
 
 def built_or_why(ok, said):
@@ -4768,8 +4778,7 @@ def main():
     cases = [(label, case) for label, case in CASES
              if not arguments.case or any(c in label for c in arguments.case)]
     failed = 0
-    lacking = tex_ready()
-    if lacking:
+    for lacking in tex_ready():
         print(f"  FAIL  {lacking}")
         failed += 1
     if arguments.jobs > 1 and len(cases) > 1:

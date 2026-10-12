@@ -26,13 +26,19 @@ import subprocess
 import tempfile
 
 ENGINE = "lualatex"
-# The LaTeX release the tagging project describes as usable in production
-# for documents that keep to packages supporting it. Older releases load
-# pdfmanagement-testphase.sty for \DocumentMetadata, where current ones
-# load pdfmanagement-init (documentmetadata-support.ltx), and Ubuntu 24.04's
-# texlive packages (LaTeX 2023-11-01) stop on that file not found; they
-# would tag less if it were there. Verified here: 2026-06-01.
-MINIMUM_LATEX = "2025-11-01"
+# The oldest LaTeX release a tagged build is taken to. The tagging project
+# describes 2025-11-01 as usable in production for documents that keep to
+# packages supporting it, but measured with the suites (TeX Live 2025's
+# 2025-11-01 against TeX Live 2026's 2026-06-01, which passes every check),
+# 2025-11-01 stops a PDF/UA-1 book (math/setup has no mathml-MS) and a
+# LaTeX book with enumitem's settings, gives a table cell's formulas no
+# MathML and an eqnarray*'s no file, leaves floats' tags at the end (there's
+# no float/here), and repeats the enumerate package's labels. Releases
+# before it load pdfmanagement-testphase.sty for \DocumentMetadata, where
+# current ones load pdfmanagement-init (documentmetadata-support.ltx), and
+# Ubuntu 24.04's texlive packages (LaTeX 2023-11-01) stop on that file not
+# found.
+MINIMUM_LATEX = "2026-06-01"
 MISSING_FILE = re.compile(r"File `([^']+)' not found")
 MISSING = re.compile(r"Missing character: There is no (\S+)")
 CAPACITY = re.compile(r"TeX capacity exceeded, sorry \[([^\]=]+)")
@@ -66,9 +72,11 @@ def latex_problem(warn):
         return None
     if release < MINIMUM_LATEX:
         return (f"{ENGINE} runs the LaTeX release of {release}, and a tagged "
-                f"PDF needs {MINIMUM_LATEX} or later (TeX Live 2026). "
-                "Distribution packages are often older; docs/installation.md "
-                "says how to install a current TeX Live.")
+                f"PDF needs {MINIMUM_LATEX} or later: TeX Live 2026 since its "
+                "June update (`" + tlmgr_command("update --self --all")
+                + "` brings an earlier TeX Live 2026 to it). Distribution "
+                "packages are often older; docs/installation.md says how to "
+                "install a current TeX Live.")
     return None
 
 

@@ -183,7 +183,7 @@ Two notes on versions. Ubuntu packages `epubcheck` as well (`sudo apt install ep
 
 ## For a PDF target: LuaLaTeX
 
-A `pdf` target writes the book through Pandoc's LaTeX writer and LuaLaTeX, with LaTeX's tagging switched on, so it needs a TeX distribution recent enough to tag. The LaTeX Project's [tagging project](https://latex3.github.io/tagging-project/) describes tagging as usable in production since the LaTeX release of 2025-11-01, for documents that keep to packages that support it, and TeX Live 2026 ships that; what's verified here is LaTeX 2026-06-01, tagpdf 1.0g, and latex-lab 2026-06-01a. A LaTeX source needs TeX too, for its drawings and its own PDF. Nothing else in the project does, and a book without a `pdf` target or LaTeX in it never looks for it.
+A `pdf` target writes the book through Pandoc's LaTeX writer and LuaLaTeX, with LaTeX's tagging switched on, so it needs a TeX distribution recent enough to tag. The LaTeX Project's [tagging project](https://latex3.github.io/tagging-project/) describes tagging as usable in production since the LaTeX release of 2025-11-01, for documents that keep to packages that support it. A build here needs 2026-06-01 or later, which TeX Live 2026 has had since its June update: with 2025-11-01, a PDF/UA-1 book and a LaTeX book using enumitem's settings stop, and some formulas, figures, and lists are tagged wrong. What's verified here is LaTeX 2026-06-01, with tagpdf 1.0g and latex-lab 2026-06-01a (TinyTeX, updated) and with tagpdf 1.0c (Debian's TeX Live 2026 of July 2026). A LaTeX source needs TeX too, for its drawings and its own PDF. Nothing else in the project does, and a book without a `pdf` target or LaTeX in it never looks for it.
 
 **What you have now.** In the Ubuntu terminal:
 
@@ -194,8 +194,8 @@ lualatex --version | head -1
 
 - Nothing found: there's no TeX yet. Install one of the two below.
 - A path under your home folder, `~/.TinyTeX/bin/...`, and TeX Live 2026: TinyTeX, as below. Go on to [`tlmgr` and `sudo`](#tlmgr-and-sudo).
-- A path under `/usr/local/texlive/`, and TeX Live 2025 or 2026: a TeX Live from its own installer, for the whole system. Go on to [`tlmgr` and `sudo`](#tlmgr-and-sudo); its `tlmgr` needs `sudo`.
-- `/usr/bin/lualatex` and "TeX Live 2023/Debian" (2021 on Ubuntu 22.04): Ubuntu's own `texlive` packages, too old to tag a book. A build stops on anything older than LaTeX 2025-11-01, saying which release it found. Install one of the two below; you can leave Ubuntu's in place, since whichever comes first on your path is the one used, and the installation steps put the new one first. The `tlmgr` that comes with Ubuntu's packages can't add to them: it runs in a user mode that isn't set up, and installs nothing.
+- A path under `/usr/local/texlive/`, and TeX Live 2026: a TeX Live from its own installer, for the whole system. Go on to [`tlmgr` and `sudo`](#tlmgr-and-sudo); its `tlmgr` needs `sudo`. TeX Live 2025 there is too old: its LaTeX stopped at 2025-11-01, so install 2026 as below.
+- `/usr/bin/lualatex` and "TeX Live 2023/Debian" (2021 on Ubuntu 22.04): Ubuntu's own `texlive` packages, too old to tag a book. A build stops on anything older than LaTeX 2026-06-01, saying which release it found. Install one of the two below; you can leave Ubuntu's in place, since whichever comes first on your path is the one used, and the installation steps put the new one first. The `tlmgr` that comes with Ubuntu's packages can't add to them: it runs in a user mode that isn't set up, and installs nothing.
 
 **Installing one.** Two ways, both TeX Live 2026:
 
@@ -221,7 +221,7 @@ lualatex --version | head -1
   lualatex --version | head -1
   ```
 
-Either way, `which lualatex` should now name the one you installed, and `lualatex --version` say TeX Live 2026.
+Either way, `which lualatex` should now name the one you installed, and `lualatex --version` say TeX Live 2026. A TeX Live 2026 installed before June 2026 has LaTeX 2025-11-01 until `tlmgr update --self --all` brings it up to date; the run checks the release itself and says which it found.
 
 ### `tlmgr` and `sudo`
 
@@ -259,7 +259,7 @@ A LaTeX book's PDF is built from the book's own LaTeX ([LaTeX sources](latex.md#
 
 `ltx-talk`, `lua-unicode-math`, and `newcomputermodern` are for a deck's PDF: ltx-talk is the presentation class a deck written in Markdown is built with, and it loads the other two, the math and the fonts it sets a deck in, which TinyTeX doesn't install with it. It needs LaTeX 2026-06-01 or later, TeX Live 2026 ([Slides](slides.md#the-pdf)).
 
-The rest of the TeX packages in the line, from `amsfonts` on, are what the LaTeX suite's small books load (`tests/run-latex-tests.py`). Its first check names any of them that are missing, with the line that installs them, and `rsvg-convert` too. It has one check of Ghostscript's way of embedding fonts, which skips without Ghostscript.
+The rest of the TeX packages in the line, from `amsfonts` on, are what the LaTeX suite's small books load (`tests/run-latex-tests.py`). Its first checks name a LaTeX too old for the PDF target and any of them that are missing, with the line that installs them, and `rsvg-convert` too. It has one check of Ghostscript's way of embedding fonts, which skips without Ghostscript.
 
 Two more kinds of package, depending on the book. A book with passages in another language needs that language's `babel-` and `hyphen-` packages (`tlmgr install babel-german hyphen-german` for German), or LuaLaTeX stops with babel's `Unknown option`. And whatever a `pdf.metadata` file's `header-includes` loads, and whatever else a book of your own loads, has to be installed too (`hanging`, say). When LuaLaTeX stops on `File 'something.sty' not found`, `tlmgr search --global --file /something.sty` names the package to install, and the run says so.
 

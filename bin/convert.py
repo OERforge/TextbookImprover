@@ -108,6 +108,7 @@ SOURCE_TARGETS = ("markdown", "asciidoc")
 TARGET_FILTER = os.path.join(HERE, "target-blocks.lua")
 DECK_HTML_FILTER = os.path.join(HERE, "deck-html.lua")
 DECK_PDF_FILTER = os.path.join(HERE, "deck-pdf.lua")
+DECK_PPTX_FILTER = os.path.join(HERE, "deck-pptx.lua")
 DECK_TEMPLATE = os.path.join(HERE, "ltx-talk.latex")
 PDF_TARGET_FILTER = os.path.join(HERE, "pdf-target.lua")
 MARKDOWN_FILTER = os.path.join(HERE, "markdown-source.lua")
@@ -725,6 +726,20 @@ def load_targets(base, allow_unknown, decks_only=False, pptx_decks=False,
             targets.append(Target(name, resolved, base))
     except oerconfig.ConfigError as exc:
         die(str(exc))
+    # A PowerPoint file is written of a deck written in Markdown: a book's
+    # pages have no slides, and a PowerPoint deck's copy is format source.
+    if not DECK_RUN and any(t.format == "pptx" for t in targets):
+        for target in targets:
+            if target.format == "pptx":
+                say(f"WARNING: target {target.name} is format pptx, which is written for decks "
+                    "written in Markdown, in a folder project.kind says is slides"
+                    + ("; a PowerPoint deck's copy is format source" if pptx_decks else "")
+                    + "; nothing is written for it.")
+        targets = [t for t in targets if t.format != "pptx"]
+        if not targets:
+            die("Every target here is format pptx, which is written for decks written in "
+                "Markdown; add another target to conversion.yaml, or say the folder is "
+                "slides (project.kind: slides).")
     # A format the schema names before a target can build it is skipped,
     # and said to be, rather than read, filtered, and then quietly never
     # written. (pdf was one until it was built.)
@@ -739,8 +754,9 @@ def load_targets(base, allow_unknown, decks_only=False, pptx_decks=False,
             f"({', '.join(NOT_YET_IMPLEMENTED)}); add an html, epub3, or "
             "markdown target to conversion.yaml.")
     if DECK_RUN:
-        # What a deck is written as: a page, a PDF, Markdown again, or a
-        # copy of its source. An EPUB or a Word file of one isn't.
+        # What a deck is written as: a page, a PDF, a PowerPoint file,
+        # Markdown again, or a copy of its source. An EPUB or a Word file
+        # of one isn't.
         for target in targets:
             if target.format not in DECK_FORMATS:
                 say(f"WARNING: target {target.name} is format {target.format}, which "
@@ -752,7 +768,7 @@ def load_targets(base, allow_unknown, decks_only=False, pptx_decks=False,
         targets = [t for t in targets if t.format in DECK_FORMATS]
         if not targets:
             die("Every target here is a format that isn't written for decks; add an html, "
-                "pdf, markdown, or source target to conversion.yaml.")
+                "pdf, pptx, markdown, or source target to conversion.yaml.")
     for warning in targets[0].resolved.warnings if targets else []:
         say(f"WARNING: {warning}")
 
@@ -839,7 +855,11 @@ KIND_DECLARED = None        # project.kind as a file gives it, if one does
 # A slides run of decks written in Markdown: each .md a deck, read and
 # filtered as a page is, and written by the formats a deck has.
 DECK_RUN = False
-DECK_FORMATS = ("html", "pdf", "markdown", "source")
+DECK_FORMATS = ("html", "pdf", "pptx", "markdown", "source")
+# The Pandoc whose PowerPoint writer keeps a table and the text around it
+# on one slide (3.10.1, #11433), which deck-pptx.lua's cutting of slides
+# follows; an older one cut such a slide into slides with no title.
+PPTX_PANDOC = (3, 10, 1)
 TITLE_DECLARED = False
 DECLARED_PROJECT = {}
 # What the sources say about the book, read from a master file: its title,
@@ -3686,6 +3706,245 @@ def deck_pdfs(target, stems, names, base, language):
     return written
 
 
+def named_decks(found, limit=4):
+    """A message's list of decks, with a count where each has one: the
+    first few, and "..." for the rest."""
+    items = [f"{stem} {n}" if n is not None else stem for stem, n in found[:limit]]
+    return ", ".join(items) + (", ..." if len(found) > limit else "")
+
+
+def deck_pptxs(target, stems, names, base, language, work):
+    """Each deck's PowerPoint file, through Pandoc's PowerPoint writer and
+    what pptxtarget puts right in it (see deck-pptx.lua and pptxtarget), a
+    file per deck named as its page is: stems are the decks' pages, names
+    their source files, whose names title a file whose deck has no title.
+    Its slides are the shape a deck's PDF's are (slides.aspect_ratio), on
+    Pandoc's own reference document made that shape, unless
+    slides.reference_doc names one of the deck's own. Returns the files'
+    paths; a deck Pandoc couldn't write stops the run, once every deck has
+    been tried."""
+    import concurrent.futures
+    import zipfile
+    from collections import Counter
+    import decks as decklib
+    import pptxtarget
+    version = subprocess.run(["pandoc", "--version"], capture_output=True,
+                             text=True).stdout.split()[1]
+    if tuple(int(p) for p in re.findall(r"\d+", version)[:3]) < PPTX_PANDOC:
+        die(f"Pandoc {version} is too old for target {target.name}'s PowerPoint files; "
+            + ".".join(map(str, PPTX_PANDOC)) + " or later keeps a table and the text around "
+            "it on one slide, where an older writer cut the slide into slides with no title.")
+    ratio = str(target["slides.aspect_ratio"] or "auto").strip()
+    if ratio != "auto" and not decklib.RATIO.match(ratio):
+        die(f"slides.aspect_ratio is {ratio!r} for target {target.name}; it's auto, or a "
+            "width and a height with a colon between them, as 16:9 or 4:3.")
+    reference = str(target["slides.reference_doc"] or "").strip()
+    if reference:
+        reference = resolve_path(base, reference)
+        if not os.path.isfile(reference):
+            die(f"slides.reference_doc is {reference} for target {target.name}, which doesn't "
+                "exist. A relative name resolves against the folder converted.")
+        try:
+            size = pptxtarget.reference_size(reference)
+        except (OSError, KeyError, zipfile.BadZipFile):
+            size = None
+        if not size:
+            die(f"slides.reference_doc is {reference} for target {target.name}, which isn't a "
+                "PowerPoint file (.pptx) whose slides have a size.")
+        if ratio != "auto":
+            say(f"NOTE: slides.aspect_ratio isn't read for target {target.name}'s PowerPoint "
+                "files: their slides are the size slides.reference_doc's are.")
+    if shutil.which("rsvg-convert") is None:
+        shown = []
+        for stem in stems:
+            with open(os.path.join(target.pages_dir, stem + INTERMEDIATE), encoding="utf-8") as fh:
+                svgs = decklib.svg_images(json.load(fh))
+            if svgs:
+                shown.append((stem, svgs[0]))
+        if shown:
+            die(f"{len(shown)} deck(s) show SVG images ({shown[0][1]} in {shown[0][0]} "
+                "first), and a deck's PowerPoint file needs rsvg-convert to make each a PNG, "
+                "which PowerPoint shows beside it: sudo apt install librsvg2-bin (see "
+                "docs/installation.md).")
+    jobs = []
+    for stem in stems:
+        intermediate = os.path.join(target.pages_dir, stem + INTERMEDIATE)
+        with open(intermediate, encoding="utf-8") as fh:
+            doc = json.load(fh)
+        level = decklib.level_of(doc)
+        if level is None:
+            level = decklib.slide_level(doc.get("blocks", []))
+        shape, why = (None, None) if reference else decklib.aspect_ratio(doc.get("meta") or {},
+                                                                          ratio)
+        jobs.append((stem, intermediate, level, shape, why))
+    references = {shape: pptxtarget.reference_doc(shape, os.path.join(
+        work, f"reference-{target.name}-{shape.replace(':', 'x')}.pptx"))
+        for shape in sorted({job[3] for job in jobs if job[3]})}
+    env = dict(os.environ, TARGET_NAME=target.name, TITLE_BLOCK=str(target["title_block"]))
+    os.makedirs(target.output_dir, exist_ok=True)
+
+    def one(job):
+        stem, intermediate, level, shape, _why = job
+        return job, pptxtarget.build(
+            intermediate, base, os.path.join(target.output_dir, stem + ".pptx"),
+            filters=[TARGET_FILTER, DECK_PPTX_FILTER], reference=reference or references[shape],
+            level=level, language=language,
+            title=os.path.splitext(os.path.basename(names.get(stem, stem)))[0],
+            notes=str(target["slides.notes"]), env=env)
+
+    workers = max(1, min(len(jobs), os.cpu_count() or 1, 4))
+    with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
+        results = list(pool.map(one, jobs))
+    written, failed, slides, ratios, layouts = [], [], 0, {}, set()
+    counts, found = Counter(), {key: [] for key in (
+        "cut", "pauses", "inline_images", "languages", "unlinked", "column_blocks", "notes",
+        "not_rendered", "overlaps", "small", "overflow", "warnings")}
+    left_out = Counter()
+    for (stem, _intermediate, _level, shape, why), result in results:
+        if not result["ok"]:
+            failed.append(stem)
+            if result["svg_failed"]:
+                say(f"{stem}'s PowerPoint file wasn't written: "
+                    + "; ".join(f"{src} couldn't be made a PNG ({why})"
+                                for src, why in result["svg_failed"]) + ".")
+            else:
+                say(f"Pandoc couldn't write {stem}'s PowerPoint file:")
+                for line in result["log"].strip().splitlines()[-5:]:
+                    say(line)
+            continue
+        written.append(result["pptx"])
+        slides += result["slides"]
+        if shape:
+            ratios.setdefault(f"{shape} ({why})", []).append(stem)
+        counts.update(result["counts"])
+        record = result["record"]
+        for key in ("cut", "pauses", "inline_images", "languages", "unlinked", "column_blocks",
+                    "notes"):
+            if record.get(key):
+                found[key].append((stem, record[key] if key != "cut" else record.get("added")))
+        if result["not_rendered"]:
+            found["not_rendered"].append((stem, len(result["not_rendered"])))
+            left_out.update(kind for kind, _ in result["not_rendered"])
+        layouts.update(result["layouts"])
+        found["warnings"] += [(stem, message) for message in result["warnings"]]
+        for what in ("small", "overflow"):
+            numbers = sorted({n for kind, n in result["notes"] if kind == what})
+            if numbers:
+                found[what].append((stem, "slide(s) " + ", ".join(map(str, numbers[:6]))
+                                    + (", ..." if len(numbers) > 6 else "")))
+        if result["overlaps"]:
+            found["overlaps"].append((stem, None))
+            found.setdefault("overlap_slides", []).append(
+                (stem, ", ".join(map(str, result["overlaps"][:6]))))
+    if written:
+        say(f"Wrote {len(written)} PowerPoint file(s) in {target.output_dir}, one for each "
+            f"deck, through Pandoc's PowerPoint writer: {slides} slide(s), "
+            + (f"each the size of {os.path.basename(reference)}'s" if reference else
+               "; ".join(f"{shape} for {len(which)}" for shape, which in ratios.items()))
+            + f"; {counts['described']} picture(s) described, {counts['decorative']} marked "
+            f"decorative, {counts['captions_marked']} caption(s) that repeat their picture's "
+            f"alt text marked decorative, {counts['first_columns']} header column(s) flagged, "
+            f"{counts['table_captions']} table caption(s) put above their tables"
+            + (f", {counts['tables_fitted']} table(s) set smaller to fit their slides"
+               if counts["tables_fitted"] else "")
+            + (f", {counts['text_fitted']} text box(es) shrunk to fit, as PowerPoint shrinks "
+               "one once it's edited" if counts["text_fitted"] else "")
+            + (f", {counts['animations']} list(s) shown a step at a time tied to the shape "
+               "that holds them, where Pandoc's writer tied them to another"
+               if counts["animations"] else "")
+            + (f", {counts['bars']} bar(s) made a macron over its letter, which NVDA and "
+               "Narrator read" if counts["bars"] else "")
+            + (f", {counts['math_fallbacks']} shape(s) holding equations given their text "
+               "for programs that show no PowerPoint equation" if counts["math_fallbacks"]
+               else "")
+            + (f", {counts['repaired']} repair(s) of XML PowerPoint can't read as Pandoc "
+               "wrote it" if counts["repaired"] else "") + ".")
+    if found["cut"]:
+        added = sum(n for _, n in found["cut"])
+        say(f"NOTE: {len(found['cut'])} deck(s) have slides cut into more in the PowerPoint "
+            f"files, {added} slide(s) added (" + named_decks(found["cut"]) + "), each "
+            "titled as the slide it's part of, with its number, as (2): Pandoc's writer puts "
+            "a slide's pictures where its other content goes, so a picture is last on its "
+            "slide, after any text, which it shows beside it; and a slide's columns, or a "
+            "second table, are a slide of their own.")
+    if found["pauses"]:
+        say(f"NOTE: {sum(n for _, n in found['pauses'])} pause(s) in "
+            f"{len(found['pauses'])} deck(s) are left out of the PowerPoint files ("
+            + named_decks(found["pauses"]) + "), so each such slide shows all at once there: "
+            "Pandoc's writer shows only an incremental list's items one at a time.")
+    if found["inline_images"]:
+        say(f"NOTE: {sum(n for _, n in found['inline_images'])} image(s) in a line of text, a "
+            f"list, or a table in {len(found['inline_images'])} deck(s) are written as their "
+            "alt text in the PowerPoint files (" + named_decks(found["inline_images"])
+            + "): Pandoc's writer makes a picture only of an image that begins a paragraph.")
+    if found["languages"]:
+        say(f"NOTE: {sum(n for _, n in found['languages'])} passage(s) in another language in "
+            f"{len(found['languages'])} deck(s) are marked in the deck's language in the "
+            "PowerPoint files (" + named_decks(found["languages"]) + "): Pandoc's writer "
+            "writes no passage's own language.")
+    if found["unlinked"]:
+        say(f"NOTE: {sum(n for _, n in found['unlinked'])} link(s) in "
+            f"{len(found['unlinked'])} deck(s) to a place on a slide with no heading aren't "
+            "links in the PowerPoint files, their words kept (" + named_decks(found["unlinked"])
+            + "): PowerPoint links to a slide, which Pandoc's writer finds by a heading on it.")
+    if found["notes"]:
+        say(f"NOTE: slides.notes is omitted for target {target.name}, so the speaker notes of "
+            f"{len(found['notes'])} deck(s) are left out of their PowerPoint files too.")
+    if found["small"]:
+        say(f"NOTE: text is shrunk to less than half its size to fit on slides of "
+            f"{len(found['small'])} PowerPoint file(s) (" + "; ".join(
+                f"{stem} {which}" for stem, which in found["small"][:4])
+            + (", ..." if len(found["small"]) > 4 else "") + "): each holds more text than "
+            "its slide has room for at the size its layout sets.")
+    if found["overflow"]:
+        say(f"WARNING: a table or text is too much for its slide even set small, at 10 points "
+            f"for a table or a quarter of its size for text, on slides of "
+            f"{len(found['overflow'])} PowerPoint file(s) (" + "; ".join(
+                f"{stem} {which}" for stem, which in found["overflow"][:4])
+            + (", ..." if len(found["overflow"]) > 4 else "") + "), so it runs off the "
+            "slide; cutting the slide in two in the deck is the fix.")
+    if found["column_blocks"]:
+        say(f"WARNING: {sum(n for _, n in found['column_blocks'])} block(s) in the columns of "
+            f"{len(found['column_blocks'])} deck(s) are left out of the PowerPoint files ("
+            + named_decks(found["column_blocks"]) + "): Pandoc's writer shows a column's "
+            "content up to a second table, a table after a picture, or a horizontal rule.")
+    if found["not_rendered"]:
+        what = " and ".join(part for part in (
+            f"{left_out['block']} block(s)" if left_out["block"] else "",
+            f"{left_out['inline']} piece(s) of raw HTML or LaTeX in a line of text"
+            if left_out["inline"] else "") if part)
+        say(f"WARNING: Pandoc's PowerPoint writer left out {what} of "
+            f"{len(found['not_rendered'])} deck(s) (" + named_decks(found["not_rendered"])
+            + "): a slide's columns past the second, what follows a slide's columns inside "
+            "its columns div, raw HTML or LaTeX, and a table or a horizontal rule in a list or "
+            "a quotation aren't written.")
+    if layouts:
+        say(f"WARNING: slides.reference_doc, {os.path.basename(reference)}, has no layout named "
+            + ", ".join(f'"{name}"' for name in sorted(layouts)) + ", which Pandoc's "
+            "PowerPoint writer looks for by name, so a slide that would take one takes the "
+            "layout of that name in Pandoc's own reference document instead, which may not "
+            "match the look or the size of the reference document's slides: name a layout so "
+            "in PowerPoint's Slide Master view (see docs/slides.md).")
+    if found["warnings"]:
+        say(f"WARNING: Pandoc's PowerPoint writer warned of {len(found['warnings'])} thing(s) "
+            "writing the PowerPoint files:")
+        for stem, message in found["warnings"][:5]:
+            say(f"  {stem}: {message}")
+        if len(found["warnings"]) > 5:
+            say("  ...")
+    if found["overlaps"]:
+        say(f"WARNING: shapes overlap on slides of {len(found['overlaps'])} PowerPoint "
+            "file(s) (" + "; ".join(f"{stem} slide(s) {which}"
+                                   for stem, which in found["overlap_slides"][:4])
+            + (", ..." if len(found["overlaps"]) > 4 else "") + "): Pandoc's writer puts a "
+            "column's pictures where the column's other content goes.")
+    if failed:
+        die(f"{len(failed)} of the {len(stems)} deck PowerPoint file(s) for target "
+            f"{target.name} weren't written (" + ", ".join(failed[:4])
+            + (", ..." if len(failed) > 4 else "") + ").")
+    return written
+
+
 def render_markdown(target, pages, base, work, project, env, losses=None):
     """Markdown or AsciiDoc files as source: what the author decided, in
     Pandoc's own flavor of each, and nothing the filter derived. Or Word
@@ -4539,7 +4798,12 @@ def main():
     unpack_archives(base, check_only=args.check_only,
                     linked_documents=args.linked_documents)
     import deckrun
-    decks = deckrun.deck_sources(base)
+    # A deck's reference document beside the decks is their look, not a
+    # deck (slides.reference_doc).
+    looks = {os.path.normcase(os.path.abspath(resolve_path(base, name)))
+             for name in oerconfig.reference_docs(os.path.join(base, CONFIG_NAME))}
+    decks = [name for name in deckrun.deck_sources(base)
+             if os.path.normcase(os.path.abspath(os.path.join(base, name))) not in looks]
     book_here = bool(book_sources(base)) or latex_book_here(base)
     markdown_here = [n for n in book_sources(base) if n.lower().endswith(".md")]
     targets, project = load_targets(base, args.allow_unknown_keys,
@@ -4975,6 +5239,13 @@ def main():
                 die(f"The PDF for target {target.name} wasn't built.")
             pdfs += [line for line in result.stdout.split("\n")
                      if line.strip()]
+        # ---- 5.61 PowerPoint files, per pptx target: a deck's own --------
+        pptxs = []
+        for target in targets:
+            if target.format == "pptx":
+                pptxs += deck_pptxs(target, [s for s in stems if s not in hand_stems],
+                                    {safe_stem(os.path.basename(n)[:-3]): n for n in markdown},
+                                    base, language, work)
         # ---- 5.65 LaTeX, per latex target: the PDF target's own LaTeX,
         # a master and a file per chapter, for an author to go on with.
         for target in targets:
@@ -5006,6 +5277,8 @@ def main():
             command += ["--epub", epub]
         for pdf in pdfs:
             command += ["--pdf", pdf]
+        for pptx in pptxs:
+            command += ["--pptx", pptx]
         if os.path.isfile(CHECK_TOOL):
             run(command, check=False)
     finally:

@@ -4,9 +4,9 @@ Settings that describe one rendering of the book, in `conversion.yaml`: under `d
 
 How the book is rendered into one output format.
 
-**`format`**—one of `html`, `epub3`, `pdf`, `latex`, `docx`, `markdown`, `asciidoc`, `source`; default `html`; *target only*
+**`format`**—one of `html`, `epub3`, `pdf`, `latex`, `docx`, `pptx`, `markdown`, `asciidoc`, `source`; default `html`; *target only*
 
-What this target produces. markdown and asciidoc write source again: what the author decided, which the pipeline reads back to the same book. docx writes Word files from the same pages, in compatibility mode 15 with ScreenTips and Word's decorative marker. pdf writes one tagged PDF of the whole book through LaTeX, which needs LuaLaTeX (see the installation page), or one of each deck in a folder of decks written in Markdown. latex writes the LaTeX the pdf target builds from, as a master file that \include-s a file per chapter, with its images beside them, for an author to go on working in.
+What this target produces. markdown and asciidoc write source again: what the author decided, which the pipeline reads back to the same book. docx writes Word files from the same pages, in compatibility mode 15 with ScreenTips and Word's decorative marker. pdf writes one tagged PDF of the whole book through LaTeX, which needs LuaLaTeX (see the installation page), or one of each deck in a folder of decks written in Markdown. pptx writes a PowerPoint file of each such deck, and nothing for a book. latex writes the LaTeX the pdf target builds from, as a master file that \include-s a file per chapter, with its images beside them, for an author to go on working in.
 
 **`output_dir`**—`path`; default `""` (empty); *target only*
 
@@ -158,11 +158,11 @@ page keeps each page's notes at its end. group gathers a group's notes at the en
 
 ## slides
 
-Settings read only for decks written in Markdown, in a folder that project.kind says is slides: each deck a page of its own in an html target, and a PDF of its own in a pdf target, through the ltx-talk presentation class.
+Settings read only for decks written in Markdown, in a folder that project.kind says is slides: each deck a page of its own in an html target, a PDF of its own in a pdf target, through the ltx-talk presentation class, and a PowerPoint file of its own in a pptx target, through Pandoc's PowerPoint writer.
 
 **`slides.notes`**—one of `collapsed`, `visible`, `omitted`; default `collapsed`
 
-Where a deck's speaker notes (Pandoc's ::: notes) go on its page: collapsed puts each slide's under its content, closed, for a reader to open; visible puts them there open; omitted leaves them off. A PDF leaves them off whatever this says, since ltx-talk has no notes yet, and a markdown target keeps them as they were.
+Where a deck's speaker notes (Pandoc's ::: notes) go on its page: collapsed puts each slide's under its content, closed, for a reader to open; visible puts them there open; omitted leaves them off. A PowerPoint file has them as its slides' speaker notes, unless this is omitted. A PDF leaves them off whatever this says, since ltx-talk has no notes yet, and a markdown target keeps them as they were.
 
 **`slides.notes_label`**—`string`; default `Speaker notes`
 
@@ -170,7 +170,11 @@ What the control that opens a slide's notes says, in the page's language.
 
 **`slides.aspect_ratio`**—`string`; default `auto`
 
-The shape of a deck's PDF, width to height (4:3, 16:9, 16:10). auto takes the deck's own, its aspectratio as beamer reads it (169, 43, and the rest); else 4:3 for a deck that names a theme or another of beamer's variables, since that's what its author saw (a theme of reveal.js's own doesn't count); else 16:9, PowerPoint's default.
+The shape of a deck's PDF and its PowerPoint file's slides, width to height (4:3, 16:9, 16:10). auto takes the deck's own, its aspectratio as beamer reads it (169, 43, and the rest); else 4:3 for a deck that names a theme or another of beamer's variables, since that's what its author saw (a theme of reveal.js's own doesn't count); else 16:9, PowerPoint's default. A PowerPoint file made with reference_doc has that file's shape instead.
+
+**`slides.reference_doc`**—`path`; default `""` (empty)
+
+A PowerPoint file whose look a deck's PowerPoint file takes, as Pandoc's reference-doc option takes it: its slide size, its slide master and layouts, its fonts, and its colors, the layouts named as Pandoc's manual says (Title Slide, Title and Content, Section Header, Two Content, Comparison, Content with Caption, Blank), as an absolute path or one relative to the folder converted. Left empty, the look is Pandoc's own, its slides the shape aspect_ratio says. A path that doesn't exist stops the run.
 
 ## epub
 

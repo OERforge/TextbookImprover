@@ -144,7 +144,7 @@ sudo apt install ./pandoc-3.12.1-1-amd64.deb
 pandoc --version | head -1
 ```
 
-Pandoc 3.9 is a hard requirement for a book, checked before the book is read; a folder of PowerPoint decks needs no Pandoc. Versions above it still differ in ways that show up here — newer releases read Word caption paragraphs into table captions, older ones don't — so the same document can produce different reports on different machines. Neither is wrong; the sidecar files absorb the difference.
+Pandoc 3.9 is a hard requirement for a book, checked before the book is read; a folder of PowerPoint decks needs no Pandoc, and a deck's PowerPoint file (a `pptx` target) needs 3.10.1, whose PowerPoint writer keeps a table and the text around it on one slide. Versions above it still differ in ways that show up here — newer releases read Word caption paragraphs into table captions, older ones don't — so the same document can produce different reports on different machines. Neither is wrong; the sidecar files absorb the difference.
 
 **Python packages come from `apt`, not `pip`.** Ubuntu 24.04 manages its Python installation, so `pip3 install pypdf` stops with `error: externally-managed-environment` (and on a fresh WSL install `pip3` isn't there to begin with). The `python3-*` packages in the table are the ones to use. Ubuntu 22.04 doesn't stop pip, and its one gap, pypdf, comes from pip there, as [above](#which-ubuntu-you-have). If you need a version newer than Ubuntu ships, make a virtual environment for it (`python3 -m venv ~/venv && ~/venv/bin/pip install pypdf`) and run the tools with that interpreter.
 

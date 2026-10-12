@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """
-check-output.py -- report what is wrong with the pages and EPUBs a run
-wrote, using nothing but Python.
+check-output.py -- report what is wrong with the pages, EPUBs, PDFs, and
+PowerPoint files a run wrote, using nothing but Python.
 
     check-output.py --pages LIST --report output-check.csv [--epub FILE ...]
     check-output.py page1.html page2.html ...
     check-output.py --epub book.epub
+    check-output.py --pptx deck.pptx
 
 Runs at the end of convert.py over the pages of this run and any EPUB
 built from them, and writes the findings to a report beside the other
@@ -18,8 +19,9 @@ to nothing, images with no alt attribute, headings that skip a level,
 duplicate ids, tables with neither header cells nor a caption, pages
 with no language or title, and an EPUB whose manifest, spine, and
 archive disagree or whose package document lacks the metadata every
-EPUB needs. They are not epubcheck, the Nu HTML checker, or Ace, which
-know their specifications in full. epubcheck and the Nu checker are run
+EPUB needs; and a PowerPoint file a deck's pptx target wrote as a
+PowerPoint deck is checked (lib/pptxcheck.py). They are not epubcheck,
+the Nu HTML checker, or Ace, which know their specifications in full. epubcheck and the Nu checker are run
 as well when they are installed -- named by EPUBCHECK_JAR and VNU_JAR,
 or as commands on the path -- and their findings go into the same
 report with the tool's own message id as the check; --quick skips them,
@@ -49,12 +51,14 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(HERE), "lib"))
 import outputcheck  # noqa: E402
 import pdfcheck  # noqa: E402
+import pptxcheck  # noqa: E402
+import pptxparse  # noqa: E402
 import findings as findings_lib  # noqa: E402
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Check the pages, EPUBs, and PDFs a run wrote.")
+        description="Check the pages, EPUBs, PDFs, and PowerPoint files a run wrote.")
     parser.add_argument("pages", nargs="*", help="HTML pages to check")
     parser.add_argument("--pages", dest="pages_file",
                         help="a file listing pages, one per line; a "
@@ -63,6 +67,8 @@ def main():
                         help="an EPUB to check (repeatable)")
     parser.add_argument("--pdf", action="append", default=[],
                         help="a PDF to check (repeatable)")
+    parser.add_argument("--pptx", action="append", default=[],
+                        help="a PowerPoint file to check (repeatable)")
     parser.add_argument("--report", help="write findings here as CSV")
     parser.add_argument("--quick", action="store_true",
                         help="skip epubcheck, the Nu checker, and veraPDF "
@@ -108,9 +114,15 @@ def main():
             notes.append("veraPDF not found (set VERAPDF, or put verapdf on "
                          "the path); skipped.")
         pdf_findings += found
+    # A PowerPoint file's, as a PowerPoint deck's are found.
+    pptxs = [p for p in args.pptx if os.path.exists(p)]
+    pptx_findings = []
+    for path in pptxs:
+        pptx_findings += pptxcheck.check(pptxparse.read(path), os.path.basename(path),
+                                         kind="pptx")
 
     if args.report:
-        if findings or pdf_findings:
+        if findings or pdf_findings or pptx_findings:
             # The shared findings format: the first three columns are
             # the ones this report has always had, the rest say more.
             findings_lib.write_csv(args.report, [
@@ -121,47 +133,52 @@ def main():
                     tool=("vnu" if f.check.startswith("vnu") else
                           "epubcheck" if f.check.startswith("epubcheck")
                           else "oer"))
-                for f in findings] + pdf_findings)
+                for f in findings] + pdf_findings + pptx_findings)
         elif os.path.exists(args.report):
             os.remove(args.report)
 
     parts = [f"{len(pages)} page(s)"] + (
         [f"{len(epubs)} EPUB(s)"] if epubs else []) + (
-        [f"{len(pdfs)} PDF(s)"] if pdfs else [])
+        [f"{len(pdfs)} PDF(s)"] if pdfs else []) + (
+        [f"{len(pptxs)} PowerPoint file(s)"] if pptxs else [])
     checked = parts[0] if len(parts) == 1 else (
         f"{parts[0]} and {parts[1]}" if len(parts) == 2
-        else f"{parts[0]}, {parts[1]}, and {parts[2]}")
+        else ", ".join(parts[:-1]) + f", and {parts[-1]}")
     for note in notes:
         print(f"  {note}", file=sys.stderr)
-    if not findings and not pdf_findings:
+    if not findings and not pdf_findings and not pptx_findings:
         print(f"Output check: {checked}, nothing found.", file=sys.stderr)
         return 0
     print(f"Output check: {checked}, "
-          f"{len(findings) + len(pdf_findings)} finding(s):", file=sys.stderr)
+          f"{len(findings) + len(pdf_findings) + len(pptx_findings)} finding(s):",
+          file=sys.stderr)
     for check, count in outputcheck.summarize(findings):
         print(f"  {count:5}  {check}: "
               f"{outputcheck.DESCRIPTIONS.get(check) or findings_lib.describe(check)}",
               file=sys.stderr)
-    for line in pdf_summary(pdf_findings):
+    for line in pdf_summary(pdf_findings) + pdf_summary(pptx_findings, by_file=True):
         print(line, file=sys.stderr)
     if args.report:
         print(f"Written to {args.report}.", file=sys.stderr)
     return 0
 
 
-def pdf_summary(pdf_findings):
+def pdf_summary(pdf_findings, by_file=False):
     """The PDF findings' lines in the run's summary: one for each finding,
     its detail beside it, unless a PDF has the same one more than once,
     as every figure LaTeX gave a placeholder for alt text does (195 on
     GIAM), which is one line with the count and what the check means.
-    The report has every one."""
+    The report has every one. by_file: the findings are a PowerPoint
+    file's, each where on a slide, gathered by the file instead."""
     groups = {}
     for finding in pdf_findings:
-        groups.setdefault((finding.where, finding.check), []).append(finding)
+        key = finding.file if by_file else finding.where
+        groups.setdefault((key, finding.check), []).append(finding)
     lines = []
     for (where, check), found in groups.items():
         if len(found) == 1:
-            lines.append(f"  {where}: {check}: {found[0].detail}")
+            place = f"{where}, {found[0].where}" if by_file else where
+            lines.append(f"  {place}: {check}: {found[0].detail}")
         else:
             lines.append(f"  {where}: {len(found)} {check}: "
                          f"{findings_lib.describe(check)}")

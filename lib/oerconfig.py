@@ -934,6 +934,35 @@ def inline_project(path):
     return block if isinstance(block, dict) and block else None
 
 
+def reference_docs(path):
+    """The files slides.reference_doc names in a conversion.yaml, in its
+    defaults and its targets, as given: read leniently, as inline_project
+    reads, for a run to know that a PowerPoint file named there isn't a
+    deck."""
+    if not path or not os.path.isfile(path):
+        return []
+    try:
+        with open(path, encoding="utf-8") as handle:
+            data = yaml.safe_load(handle)
+    except (OSError, yaml.YAMLError):
+        return []
+    if not isinstance(data, dict):
+        return []
+    targets = data.get("targets")
+    blocks = [data.get("defaults")] + (list(targets.values()) if isinstance(targets, dict)
+                                       else [])
+    found = []
+    for block in blocks:
+        if not isinstance(block, dict):
+            continue
+        slides = block.get("slides")
+        for value in (slides.get("reference_doc") if isinstance(slides, dict) else None,
+                      block.get("slides.reference_doc")):
+            if isinstance(value, str) and value.strip():
+                found.append(value.strip())
+    return found
+
+
 def write_config(schema, project_schema, resolved_defaults, targets, path,
                  notes=(), include_project=True):
     """Write a complete configuration file.

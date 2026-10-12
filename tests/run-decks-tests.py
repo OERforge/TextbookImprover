@@ -2063,6 +2063,750 @@ def case_timeout(work):
     ]
 
 
+# --------------------------------------------------------------------------
+# a deck's PowerPoint file
+# --------------------------------------------------------------------------
+
+PPTX = """\
+targets:
+  slides:
+    format: pptx
+"""
+
+# What Pandoc's PowerPoint writer does with a deck, as deck-pptx.lua and
+# pptxtarget.py put it right: a picture between text, two pictures, a
+# table with a header column and a caption before a picture, columns with
+# text around them, a paragraph that opens with a picture and links to a
+# figure on another slide, bars over letters in text and in a table's
+# cell, a caption that isn't the alt text, a decorative picture, more text
+# than a slide holds, a long table, a passage in another language, and an
+# institute.
+SHAPES = """\
+---
+title: Shapes
+author: A. Lecturer
+institute: Shepherd University
+date: 2026
+---
+
+# Picture and Text
+
+Before the picture.
+
+![A rising line](img/plot.png)
+
+After the picture.
+
+# Two Pictures
+
+![First chart](img/plot.png){#fig-first}
+
+![A second chart](img/plot.png){alt="The second chart, described"}
+
+# Table Then Picture
+
+::: matrix
+| Good | Price |
+|------|------:|
+| Apples | 1 |
+| Pears | 2 |
+
+: Prices of fruit
+:::
+
+![After the table](img/plot.png)
+
+# Columns
+
+Before the columns.
+
+:::: columns
+::: column
+Left words.
+:::
+::: column
+Right words.
+:::
+::::
+
+After the columns.
+
+# Opening Picture
+
+![Inline alt](img/plot.png) and words after it, see [the first chart](#fig-first).
+
+# Bars
+
+$\\bar{x} = \\frac{1}{n}\\sum x_i$ and $\\hat{y}$.
+
+| Statistic | Value |
+|-----------|------:|
+| $\\bar{x}$ | 3 |
+
+# Decorative
+
+![](img/plot.png){.decorative}
+
+# Dense
+
+""" + "".join("- Item %d says a good deal more than a slide's item should, at length.\n" % n
+              for n in range(1, 21)) + """
+# Long Table
+
+| Price | Quantity |
+|------:|---------:|
+""" + "".join("| %d | %d |\n" % (n, 40 - n) for n in range(1, 13)) + """
+: A long demand schedule
+
+# Too Long
+
+| Price | Quantity |
+|------:|---------:|
+""" + "".join("| %d | %d |\n" % (n, 40 - n) for n in range(1, 31)) + """
+# Table and Text
+
+Some words before the table.
+
+| Price | Quantity |
+|------:|---------:|
+""" + "".join("| %d | %d |\n" % (n, 40 - n) for n in range(1, 8)) + """
+Words after the table.
+
+# Formatted Table
+
+| **Bold** *italic* | Value |
+|-------------------|------:|
+| [a link](https://example.org) `code` | 1 |
+
+# Steps
+
+| Step | Done |
+|------|-----:|
+| One | 1 |
+
+: Steps taken
+
+::: incremental
+- First step
+- Second step
+:::
+
+# More Steps
+
+Before the steps.
+
+| Step | Done |
+|------|-----:|
+| Two | 2 |
+
+::: incremental
+- Third step
+- Fourth step
+:::
+
+# Figure Pair
+
+::: {#fig-pair .figure}
+![Left chart](img/plot.png)
+
+![Right chart](img/plot.png)
+
+::: caption
+Two charts side by side.
+:::
+:::
+
+# Div Target
+
+::: {#box}
+Words in a box.
+:::
+
+# Boxed Picture
+
+::: {#boxed}
+![Boxed chart](img/plot.png) and words after it.
+:::
+
+# Div Link
+
+See [the box](#box), [the pair](#fig-pair), and [the boxed chart](#boxed).
+
+# Private Notes
+
+Shown words.
+
+::: {.notes .private}
+Only for the speaker.
+:::
+
+# Notes First
+
+::: notes
+Say this first.
+:::
+
+:::: columns
+::: column
+Left.
+:::
+::: column
+Right.
+:::
+::::
+
+# Languages
+
+[Bonjour]{lang=fr} and more.
+
+::: notes
+Say hello in French.
+:::
+"""
+
+
+def pptx_parts(path):
+    """A PowerPoint file's parts, its XML as text."""
+    import zipfile
+    with zipfile.ZipFile(path) as z:
+        return {name: z.read(name).decode("utf-8", "replace")
+                if name.endswith((".xml", ".rels")) else z.read(name) for name in z.namelist()}
+
+
+def pptx_slides(parts):
+    """Each slide's XML, in order."""
+    names = [n for n in parts if re.match(r"ppt/slides/slide\d+\.xml$", n)]
+    return [parts[n] for n in sorted(names, key=lambda n: int(re.search(r"(\d+)\.xml$", n)[1]))]
+
+
+def pptx_deck(path):
+    import pptxparse
+    return pptxparse.read(path)
+
+
+def pptx_findings(path):
+    import pptxcheck
+    return [(f.where, f.check) for f in pptxcheck.check(pptx_deck(path), kind="pptx")]
+
+
+def slide_titled(deck, title):
+    return next((s for s in deck.slides if s.title == title), None)
+
+
+def unique_ids(parts):
+    """Whether each slide's shapes' ids are their own, mc:Fallback's copies
+    aside, which share their Choice's."""
+    for xml in pptx_slides(parts):
+        xml = re.sub(r"<mc:Fallback>.*?</mc:Fallback>", "", xml, flags=re.S)
+        ids = re.findall(r'<p:cNvPr\b[^>]*?\sid="(\d+)"', xml)
+        if len(ids) != len(set(ids)) or "0" in ids:
+            return False
+    return True
+
+
+def slide_rels(parts, slide):
+    return parts.get(slide.part.replace("slides/", "slides/_rels/") + ".rels", "") \
+        if slide else ""
+
+
+def slide_links(parts, slide):
+    """The files of the slides a slide links to."""
+    return sorted(re.findall(r'relationships/slide" Target="(slide\d+\.xml)"',
+                             slide_rels(parts, slide)))
+
+
+def file_of(slide):
+    return slide.part.rsplit("/", 1)[1] if slide else None
+
+
+def notes_of(parts, slide):
+    """The XML of a slide's notes."""
+    found = re.search(r'Target="\.\./notesSlides/(notesSlide\d+\.xml)"', slide_rels(parts, slide))
+    return parts.get("ppt/notesSlides/" + found.group(1), "") if found else ""
+
+
+def shape_id(xml, words):
+    """The id of the shape on a slide whose text holds words."""
+    for piece in re.findall(r"<p:sp>.*?</p:sp>", xml, re.S):
+        if words in piece:
+            return re.search(r'<p:cNvPr\b[^>]*?\sid="(\d+)"', piece).group(1)
+    return None
+
+
+def animated(xml):
+    """The ids of the shapes a slide's animation names, in its steps and in
+    its build list."""
+    return (sorted(set(re.findall(r'<p:spTgt spid="(\d+)"', xml))),
+            sorted(set(re.findall(r'<p:bldP\b[^>]*?\sspid="(\d+)"', xml))))
+
+
+def table_ends_above(xml):
+    """Whether a slide's table, set smaller than the master's 13.5 points,
+    ends above the shape the writer stacks under it, as pptxtarget reckons
+    a table's height."""
+    import pptxorder
+    import pptxtarget
+    tree = pptxorder.TREE.search(xml)
+    close = xml.find("</p:spTree>", tree.end())
+    pieces = [(xml[a:b], name) for a, b, name in pptxorder.children(xml, tree.end(), close)]
+    frame = next((p for p, name in pieces if name == "p:graphicFrame"), None)
+    if frame is None:
+        return False
+    top = pptxtarget._place(frame)[1]
+    below = [place[1] for place in (pptxtarget._place(p) for p, name in pieces if name == "p:sp")
+             if place and place[1] > top]
+    sizes = set(re.findall(r'<a:rPr[^>]*?\ssz="(\d+)"', frame))
+    if not below or len(sizes) != 1:
+        return False
+    size = int(sizes.pop()) / 100
+    return size < 13.5 and top + pptxtarget.table_height(frame, size) <= min(below)
+
+
+def case_pptx(work):
+    work = folder(work, PPTX, decks_given={"Flat Deck.md": FLAT, "sectioned.md": SECTIONED,
+                                           "untitled.md": UNTITLED, "shapes.md": SHAPES})
+    write(os.path.join(work, "image-alt.csv"), "Image,Alt\nimg/chart,A line rising to the right\n")
+    png(os.path.join(work, "img", "plot.png"), 200, 90, 40)
+    write(os.path.join(work, "project.yaml"),
+          "project:\n  identifier: org.example.decks\n  title: The Decks\n"
+          "  language: de-DE\n  kind: slides\n")
+    result = convert(work, "--quick")
+    out = result.stderr
+    where = os.path.join(work, "slides")
+    flat, sectioned = os.path.join(where, "Flat-Deck.pptx"), os.path.join(where, "sectioned.pptx")
+    shapes, untitled = os.path.join(where, "shapes.pptx"), os.path.join(where, "untitled.pptx")
+    if result.returncode or not os.path.exists(shapes):
+        return [("the pptx target writes a PowerPoint file of each deck",
+                 lambda: False and print(out[-2000:]))]
+    fp, sp, hp = pptx_parts(flat), pptx_parts(sectioned), pptx_parts(shapes)
+    fd, sd, hd = pptx_deck(flat), pptx_deck(sectioned), pptx_deck(shapes)
+    every = "".join(x for p in (fp, sp, hp) for x in p.values() if isinstance(x, str))
+    chart = slide_titled(fd, "A Chart")
+    market = slide_titled(fd, "Market Demand")
+    bars = slide_titled(hd, "Bars")
+    bars_xml = hp[bars.part] if bars else ""
+    fruit = slide_titled(hd, "Table Then Picture")
+    fruit_xml = hp[fruit.part] if fruit else ""
+    long_table = slide_titled(hd, "Long Table")
+    too_long = slide_titled(hd, "Too Long")
+    dense = slide_titled(hd, "Dense")
+    opening = slide_titled(hd, "Opening Picture (2)")
+    first = slide_titled(hd, "Two Pictures")
+    formatted = slide_titled(hd, "Formatted Table")
+    formatted_xml = hp[formatted.part] if formatted else ""
+    steps = slide_titled(hd, "Steps")
+    steps_xml = hp[steps.part] if steps else ""
+    more = slide_titled(hd, "More Steps")
+    more_xml = hp[more.part] if more else ""
+    stacked = slide_titled(hd, "Table and Text")
+    pair = slide_titled(hd, "Figure Pair (2)")
+    private = slide_titled(hd, "Private Notes")
+    notes_first = slide_titled(hd, "Notes First")
+
+    def number(slide):
+        return hd.slides.index(slide) + 1 if slide in hd.slides else None
+    overflow = re.search(r"too much for its slide even set small.*?\(shapes slide\(s\) ([\d, ]+)\)",
+                         out, re.S)
+    checks = [
+        ("the pptx target writes a PowerPoint file of each deck, and says how",
+         lambda: result.returncode == 0 and "Wrote 4 PowerPoint file(s)" in out
+         and "through Pandoc's PowerPoint writer" in out),
+        ("the output check reads each, and finds only the slide the deck gives no title",
+         lambda: pptx_findings(flat) == [("slide 4", "pptx-slide-no-title")]
+         and pptx_findings(shapes) == [] and pptx_findings(sectioned) == []
+         and pptx_findings(untitled) == []
+         and "pptx-slide-no-title" in read(os.path.join(work, "output-check.csv"))),
+        ("a picture's description is its alt text, the sidecar's, not its title and path",
+         lambda: chart is not None
+         and [s.descr for s in chart.shapes if s.kind == "pic"] == ["A line rising to the right"]
+         and "oer-pic" not in every and "img/chart.png" not in every),
+        ("a picture's caption is a figure's own, shown and read beside the alt text",
+         lambda: any(s.text == "A rising line" and not s.decorative for s in chart.shapes)),
+        ("a caption that repeats the alt text is marked decorative, as the page hides it",
+         lambda: any(s.text == "A rising line" and s.decorative
+                     for s in slide_titled(hd, "Picture and Text").shapes)
+         and [s.descr for s in slide_titled(hd, "Picture and Text").shapes
+              if s.kind == "pic"] == ["A rising line"]),
+        ("a caption that isn't the alt text is shown and read",
+         lambda: any(s.kind == "pic" and s.descr == "The second chart, described"
+                     for s in slide_titled(hd, "Two Pictures (2)").shapes)
+         and any(s.text == "A second chart" and not s.decorative
+                 for s in slide_titled(hd, "Two Pictures (2)").shapes)),
+        ("an image that isn't a figure shows no caption",
+         lambda: [s.kind for s in slide_titled(hd, "Opening Picture").shapes
+                  if not s.is_title] == ["pic"]),
+        ("a decorative picture has PowerPoint's mark and no description",
+         lambda: [(s.kind, s.decorative, s.descr) for s in slide_titled(hd, "Decorative").shapes
+                  if not s.is_title] == [("pic", True, None)]),
+        ("each shape's id is its own on its slide", lambda: all(map(unique_ids, (fp, sp, hp)))),
+        ("a table's marker is taken out, its caption above it and read first",
+         lambda: "\ue000" not in every and market is not None
+         and [s.kind for s in market.shapes if not s.is_title] == ["sp", "graphicFrame"]
+         and market.shapes[1].text == "Demand at each price"
+         and market.shapes[1].box.y + market.shapes[1].box.cy <= market.shapes[2].box.y),
+        ("a table's header column is PowerPoint's First Column, its header row too",
+         lambda: re.search(r'<a:tblPr[^>]*firstRow="1"[^>]*firstCol="1"', fruit_xml)
+         and not re.search(r'firstCol="1"', hp[slide_titled(hd, "Long Table").part])),
+        ("a slide is cut where the writer would put a picture over other content, or "
+         "begin a slide with no title, each part titled with its number",
+         lambda: [s.title for s in hd.slides][1:12] == [
+             "Picture and Text", "Picture and Text (2)", "Two Pictures", "Two Pictures (2)",
+             "Table Then Picture", "Table Then Picture (2)", "Columns", "Columns (2)",
+             "Columns (3)", "Opening Picture", "Opening Picture (2)"]
+         and "1 deck(s) have slides cut into more in the PowerPoint files, 8 slide(s) added "
+         "(shapes 8)" in out),
+        ("a picture after text is the writer's own layout, the text beside it",
+         lambda: slide_titled(hd, "Picture and Text").layout == "Content with Caption"),
+        ("a link to a figure goes to the slide the figure is on",
+         lambda: opening is not None and first is not None and re.search(
+             r'Target="%s"' % re.escape(first.part.rsplit("/", 1)[1]),
+             hp[opening.part.replace("slides/", "slides/_rels/") + ".rels"])),
+        ("a bar over a letter is an upper limit of the macron, a hat an accent",
+         lambda: bars_xml.count("<m:limUpp>") == 2 and "\u203e" not in bars_xml
+         and "<m:t>\u00af</m:t>" in bars_xml and 'm:val="\u0302"' in bars_xml),
+        ("an equation in a table's cell is declared, and each shape with one has a fallback",
+         lambda: not any(problem for _, problem in hd.malformed)
+         and bars_xml.count("<mc:Fallback>") == 2
+         and "x\u0304" in re.sub(r"<[^>]+>", "", "".join(
+             re.findall(r"<mc:Fallback>.*?</mc:Fallback>", bars_xml, re.S)))),
+        ("a long table is set smaller to fit its slide, and text too much for its box shrunk",
+         lambda: long_table is not None
+         and set(re.findall(r'<a:rPr[^>]*?\ssz="(\d+)"', hp[long_table.part])) in (
+             {"1200"}, {"1100"}, {"1000"})
+         and overflow is not None and str(number(long_table)) not in overflow.group(1).split(", ")
+         and "2 table(s) set smaller to fit their slides" in out
+         and dense is not None and re.search(r'<a:normAutofit fontScale="\d+"',
+                                             hp[dense.part])),
+        ("a table too long for its slide even at 10 points is warned of, by its slide",
+         lambda: too_long is not None and overflow is not None
+         and overflow.group(1).split(", ") == [str(number(too_long))]
+         and set(re.findall(r'<a:rPr[^>]*?\ssz="(\d+)"', hp[too_long.part])) == {"1000"}),
+        ("a table stacked over text is set small enough to end above it",
+         lambda: stacked is not None and table_ends_above(hp[stacked.part])),
+        ("a table's cells keep their words, spaces, and formatting, the marker taken out",
+         lambda: formatted is not None
+         and [s.text for s in formatted.shapes if s.kind == "graphicFrame"]
+         == ["Bold italic\tValue\na link code\t1"]
+         and re.search(r'<a:rPr b="1"[^>]*/><a:t>Bold</a:t>', formatted_xml)
+         and re.search(r'<a:t> </a:t></a:r><a:r><a:rPr i="1"[^>]*/><a:t>italic</a:t>',
+                       formatted_xml)
+         and "<a:hlinkClick" in formatted_xml
+         and 'Target="https://example.org"' in slide_rels(hp, formatted)),
+        ("an incremental list's animation names the shape holding it, after a captioned "
+         "table, or after text and a table",
+         lambda: steps_xml and shape_id(steps_xml, "First step") is not None
+         and animated(steps_xml) == ([shape_id(steps_xml, "First step")],) * 2
+         and more_xml and shape_id(more_xml, "Third step") is not None
+         and animated(more_xml) == ([shape_id(more_xml, "Third step")],) * 2),
+        ("a figure of two pictures shows both, its caption under the last",
+         lambda: [(s.kind, s.descr) for s in slide_titled(hd, "Figure Pair").shapes
+                  if not s.is_title] == [("pic", "Left chart")]
+         and pair is not None and [(s.kind, s.descr, s.text or "", s.decorative)
+                                   for s in pair.shapes if not s.is_title] == [
+             ("pic", "Right chart", "", False), ("sp", None, "Two charts side by side.", False)]),
+        ("a link to a div, or to a figure of two pictures, goes to the slide it's on, and a "
+         "div's picture stays one",
+         lambda: slide_links(hp, slide_titled(hd, "Div Link")) == sorted(
+             [file_of(slide_titled(hd, "Div Target")), file_of(slide_titled(hd, "Figure Pair")),
+              file_of(slide_titled(hd, "Boxed Picture"))])
+         and [s.descr for s in slide_titled(hd, "Boxed Picture").shapes if s.kind == "pic"]
+         == ["Boxed chart"]),
+        ("a notes div with another class too is the slide's notes, not shown on it",
+         lambda: private is not None and "Only for the speaker." not in hp[private.part]
+         and "Only for the speaker." in notes_of(hp, private)),
+        ("notes between a slide's heading and its columns stay with the slide",
+         lambda: notes_first is not None and notes_first.layout == "Two Content"
+         and slide_titled(hd, "Notes First (2)") is None
+         and "Say this first." in notes_of(hp, notes_first)),
+        ("the deck's language is on its runs and the styles they inherit, not the "
+         "reference's",
+         lambda: 'lang="en-US"' not in every and 'lang="de-DE"' in hp["ppt/presentation.xml"]
+         and 'lang="de-DE"' in hp["ppt/slideMasters/slideMaster1.xml"] and hd.language == "de-DE"),
+        ("the file's title is the deck's, a list of one in its YAML, or its file's name",
+         lambda: fd.core_title == "Demand: A Short Deck"
+         and pptx_deck(untitled).core_title == "untitled"),
+        ("an institute is shown under the authors, and the authors alone are the creator",
+         lambda: "Shepherd University" in hd.slides[0].shapes[1].text
+         and "<dc:creator>A. Lecturer</dc:creator>" in hp["docProps/core.xml"]),
+        ("the custom properties hold none of beamer's or the pipeline's fields",
+         lambda: "theme" not in fp["docProps/custom.xml"]
+         and "aspectratio" not in sp["docProps/custom.xml"]
+         and "institute" not in hp["docProps/custom.xml"]),
+        ("docProps/app.xml lists the deck's slides' titles, not the reference's",
+         lambda: "<vt:lpstr>Picture and Text (2)</vt:lpstr>" in hp["docProps/app.xml"]
+         and "Slide Title for Two-Content" not in hp["docProps/app.xml"]
+         and "<Slides>%d</Slides>" % len(hd.slides) in hp["docProps/app.xml"]),
+        ("the slides are the deck's shape: 4:3 for a beamer theme, 16:10 its aspectratio, "
+         "16:9 otherwise",
+         lambda: (fd.width, fd.height) == (9144000, 6858000)
+         and (sd.width, sd.height) == (9144000, 5715000)
+         and (hd.width, hd.height) == (9144000, 5143500)
+         and '<p:sldSz cx="9144000" cy="5715000" type="screen16x10"' in sp["ppt/presentation.xml"]
+         and "4:3 (its theme, which is beamer's) for 1" in out),
+        ("a 4:3 deck's layouts are Pandoc's, scaled down the slide as PowerPoint's 4:3 has them",
+         lambda: abs(fd.slides[1].title_shape.box.y - 274638) <= 1
+         and fd.slides[1].title_shape.box.cy == 1143000
+         and slide_titled(hd, "Columns").title_shape.box.cy == 857250),
+        ("speaker notes are the slides' notes, and a pause is gone, the run says",
+         lambda: "Ask what the class would pay for water." in "".join(
+             x for n, x in fp.items() if n.startswith("ppt/notesSlides/"))
+         and ". . ." not in "".join(pptx_slides(fp))
+         and "1 pause(s) in 1 deck(s) are left out of the PowerPoint files" in out),
+        ("a footnote's text is on the end's Notes slide", lambda: sd.slides[-1].title == "Notes"
+         and "Its source." in sd.slides[-1].shapes[1].text),
+        ("a passage in another language is named in the run's notes",
+         lambda: "1 passage(s) in another language in 1 deck(s)" in out),
+    ]
+    return checks
+
+
+def foreign_reference(source, out):
+    """A reference document unlike Pandoc's: its Comparison layout named
+    otherwise, and no size in its master's text styles."""
+    import zipfile
+    with zipfile.ZipFile(source) as z, zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as o:
+        for info in z.infolist():
+            data = z.read(info.filename)
+            if re.match(r"ppt/slideLayouts/slideLayout\d+\.xml$", info.filename):
+                data = re.sub(rb'(<p:cSld name=")Comparison(")', rb"\1Side by Side\2", data)
+            elif info.filename == "ppt/slideMasters/slideMaster1.xml":
+                text = data.decode("utf-8")
+                start, end = text.find("<p:txStyles>"), text.find("</p:txStyles>")
+                data = (text[:start] + re.sub(r'\ssz="\d+"', "", text[start:end])
+                        + text[end:]).encode("utf-8")
+            o.writestr(info, data)
+
+
+def case_pptx_settings(work):
+    """slides.notes omitted, slides.reference_doc and slides.aspect_ratio
+    beside it, a reference document unlike Pandoc's, a book's pptx target,
+    and a Pandoc too old."""
+    import pptxtarget
+    config = PPTX + "    slides:\n      notes: omitted\n      reference_doc: look.pptx\n" \
+        "      aspect_ratio: \"16:9\"\n"
+    decks_dir = folder(os.path.join(work, "decks"), config,
+                       decks_given={"Flat Deck.md": FLAT})
+    pptxtarget.reference_doc("1.41:1", os.path.join(decks_dir, "look.pptx"))
+    result = convert(decks_dir, "--quick")
+    made = os.path.join(decks_dir, "slides", "Flat-Deck.pptx")
+    parts = pptx_parts(made) if os.path.exists(made) else {}
+    foreign_dir = folder(os.path.join(work, "foreign"), PPTX + "    slides:\n      "
+                         "reference_doc: house.pptx\n", decks_given={"Flat Deck.md": FLAT})
+    pptxtarget.reference_doc("16:9", os.path.join(work, "pandoc-look.pptx"))
+    foreign_reference(os.path.join(work, "pandoc-look.pptx"),
+                      os.path.join(foreign_dir, "house.pptx"))
+    foreign = convert(foreign_dir, "--quick")
+    foreign_made = os.path.join(foreign_dir, "slides", "Flat-Deck.pptx")
+    missing = folder(os.path.join(work, "missing"), PPTX + "    slides:\n      reference_doc: "
+                     "nowhere.pptx\n", decks_given={"one.md": UNTITLED})
+    nowhere = convert(missing, "--quick")
+    book = os.path.join(work, "book")
+    os.makedirs(book)
+    write(os.path.join(book, "one.md"), "# A Page\n\nText.\n")
+    write(os.path.join(book, "project.yaml"),
+          "project:\n  identifier: org.example.book\n  title: A Book\n")
+    write(os.path.join(book, "conversion.yaml"), PPTX + "  pages:\n    format: html\n")
+    as_book = convert(book, "--quick")
+    old_dir = folder(os.path.join(work, "old"), PPTX, decks_given={"one.md": UNTITLED})
+    tools = os.path.join(work, "tools")
+    os.makedirs(tools)
+    real = shutil.which("pandoc")
+    write(os.path.join(tools, "pandoc"), "#!/bin/sh\nif [ \"$1\" = --version ]; then echo "
+          "'pandoc 3.10.0'; exit 0; fi\nexec %s \"$@\"\n" % real)
+    os.chmod(os.path.join(tools, "pandoc"), 0o755)
+    old = convert(old_dir, "--quick", env=dict(os.environ, PATH=tools + os.pathsep
+                                               + os.environ["PATH"]))
+    return [
+        ("slides.notes omitted leaves the speaker notes out, and the run says so",
+         lambda: result.returncode == 0 and parts
+         and not any(n.startswith("ppt/notesSlides/") for n in parts)
+         and "slides.notes is omitted for target slides" in result.stderr),
+        ("slides.reference_doc's slides' size is the file's, slides.aspect_ratio said unread",
+         lambda: '<p:sldSz cx="9144000" cy="6485106"' in parts.get("ppt/presentation.xml", "")
+         and "slides.aspect_ratio isn't read for target slides's PowerPoint files"
+         in result.stderr),
+        ("a reference document without a layout Pandoc's writer looks for is warned of, and "
+         "one whose master gives no text size is read",
+         lambda: foreign.returncode == 0 and os.path.exists(foreign_made)
+         and 'WARNING: slides.reference_doc, house.pptx, has no layout named "Comparison", '
+         "which Pandoc's PowerPoint writer looks for by name" in foreign.stderr
+         and "Traceback" not in foreign.stderr),
+        ("a reference document that isn't there stops the run, saying where it looked",
+         lambda: nowhere.returncode != 0 and "slides.reference_doc is" in nowhere.stderr
+         and "nowhere.pptx" in nowhere.stderr and "doesn't exist" in nowhere.stderr),
+        ("a book's pptx target writes nothing, and the run says why",
+         lambda: as_book.returncode == 0
+         and "target slides is format pptx, which is written for decks written in Markdown"
+         in as_book.stderr and not os.path.exists(os.path.join(book, "slides"))),
+        ("a Pandoc older than 3.10.1 stops the pptx target, saying why",
+         lambda: old.returncode != 0 and "Pandoc 3.10.0 is too old for target slides's "
+         "PowerPoint files" in old.stderr),
+    ]
+
+
+# A column with two pictures, which the writer puts in one place; a third
+# column, which it doesn't write; a column with a table after a picture,
+# which it leaves out; and an SVG.
+EDGES = """\
+---
+title: Edges
+---
+
+# Stacked
+
+:::: columns
+::: column
+![One](img/chart.png)
+
+![Two](img/chart.png)
+:::
+::: column
+Words.
+:::
+::::
+
+# Three Columns
+
+:::: columns
+::: column
+A
+:::
+::: column
+B
+:::
+::: column
+C
+:::
+::::
+
+# Cut Column
+
+:::: columns
+::: column
+![One](img/chart.png)
+
+| a | b |
+|---|---|
+| 1 | 2 |
+:::
+::: column
+Words.
+:::
+::::
+
+# Vector
+
+![A bar](img/bar.svg)
+
+# Column Picture
+
+:::: columns
+::: column
+![Pic](img/chart.png) and its words.
+
+More words.
+:::
+::: column
+Right.
+:::
+::::
+
+# Compare
+
+:::: columns
+::: column
+Left text.
+
+![Left pic](img/chart.png)
+:::
+::: column
+Right text.
+
+![Right pic](img/chart.png)
+:::
+::::
+
+# Compare Table
+
+:::: columns
+::: column
+Left text.
+
+![Left pic](img/chart.png)
+
+| a | b |
+|---|---|
+| 1 | 2 |
+:::
+::: column
+Right text.
+
+![Right pic](img/chart.png)
+:::
+::::
+
+# Bad Math
+
+The writer can't read $\\begin{nope} x \\end{nope}$.
+
+# Raw LaTeX
+
+Press \\textsc{small} and \\LaTeX{} now.
+"""
+
+
+def case_pptx_edges(work):
+    """What the writer can't be brought to do, named; and an SVG, with
+    rsvg-convert and without."""
+    decks_dir = folder(os.path.join(work, "decks"), PPTX, decks_given={"edges.md": EDGES})
+    write(os.path.join(decks_dir, "img", "bar.svg"), "<svg xmlns='http://www.w3.org/2000/svg' "
+          "width='40' height='20'><rect width='40' height='20' fill='#333'/></svg>")
+    without = convert(decks_dir, "--quick", env=dict(os.environ, PATH=tools_without(work)))
+    checks = [
+        ("without rsvg-convert, a deck's SVG stops the pptx target, saying what it needs",
+         lambda: without.returncode != 0 and "a deck's PowerPoint file needs rsvg-convert"
+         in without.stderr and "librsvg2-bin" in without.stderr),
+    ]
+    if not shutil.which("rsvg-convert"):
+        return checks
+    result = convert(decks_dir, "--quick")
+    made = os.path.join(decks_dir, "slides", "edges.pptx")
+    parts = pptx_parts(made) if os.path.exists(made) else {}
+    deck = pptx_deck(made) if parts else None
+    vector = slide_titled(deck, "Vector") if deck else None
+    rels = parts.get(vector.part.replace("slides/", "slides/_rels/") + ".rels", "") \
+        if vector else ""
+    checks += [
+        ("shapes the writer puts over one another are named, by slide, and those less than "
+         "a point into another not",
+         lambda: result.returncode == 0 and "shapes overlap on slides of 1 PowerPoint file(s) "
+         "(edges slide(s) 2, 6, 8)" in result.stderr),
+        ("a paragraph that opens with a picture keeps its words in a column",
+         lambda: "and its words." in parts[slide_titled(deck, "Column Picture").part]
+         and "More words." in parts[slide_titled(deck, "Column Picture").part]),
+        ("what the writer doesn't write is named: a third column, and raw LaTeX in a line",
+         lambda: "Pandoc's PowerPoint writer left out 1 block(s) and 2 piece(s) of raw HTML or "
+         "LaTeX in a line of text of 1 deck(s) (edges 3)" in result.stderr),
+        ("what the writer leaves out of a column is named, a comparison's columns, shown "
+         "whole, not",
+         lambda: "1 block(s) in the columns of 1 deck(s) are left out of the PowerPoint files"
+         in result.stderr and slide_titled(deck, "Compare Table").layout == "Comparison"
+         and [s.kind for s in slide_titled(deck, "Compare Table").shapes
+              if s.kind != "sp"] == ["pic", "graphicFrame", "pic"]),
+        ("the writer's own warnings are passed on, by deck",
+         lambda: "Pandoc's PowerPoint writer warned of 1 thing(s) writing the PowerPoint files:"
+         in result.stderr and "  edges: Could not convert TeX math \\begin{nope} x \\end{nope}"
+         in result.stderr),
+        ("an SVG is a PNG with the SVG beside it, as PowerPoint inserts one",
+         lambda: vector is not None and "asvg:svgBlip" in parts[vector.part]
+         and re.search(r'Target="\.\./media/oer-svg1\.svg"', rels)
+         and "ppt/media/oer-svg1.svg" in parts
+         and 'Extension="svg"' in parts["[Content_Types].xml"]
+         and [s.descr for s in vector.shapes if s.kind == "pic"] == ["A bar"]),
+    ]
+    return checks
+
+
 CASES = [("the pieces", case_pieces),
          ("a folder of decks", case_folder),
          ("the headings' levels on a page", case_levels),
@@ -2073,7 +2817,10 @@ CASES = [("the pieces", case_pieces),
          ("an SVG the PDF can't show", case_svg),
          ("LaTeX that doesn't finish", case_timeout),
          ("the template's fallbacks", case_fallbacks),
-         ("no LuaLaTeX", case_no_latex)]
+         ("no LuaLaTeX", case_no_latex),
+         ("a deck's PowerPoint file", case_pptx),
+         ("the PowerPoint files' settings", case_pptx_settings),
+         ("what the PowerPoint writer can't do", case_pptx_edges)]
 SLOW = ("a deck's PDF", "the PDF's settings", "the template's fallbacks")
 
 

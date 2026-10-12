@@ -596,6 +596,8 @@ The population mean μ is unknown; the parameter *p* is a proportion.
 
 Years 1773–1799, ±3%, and 3 < 5 stay text, as do *a* lot, *A* = {1, 2}, the *n*^th^ term, and a plain x = 3.
 
+Heat: *q* = *m* $\times$ *c* $\times$ Δ*T*.
+
 Repaired: $\overset{–}{X} – µ + ŷ$ and $H_{Ø}$, but not $\text{pages 1–5}$, and in
 text only a character for a character: $x_{2}\text{···}x_{n} + \text{µ ŷ}$.
 """
@@ -682,8 +684,11 @@ def case_math_repair(work):
          lambda: kinds == {"equation", "expression", "symbol"}),
         ("math.repair_equations off leaves equations as they are",
          lambda: "\\overset{\u2013}{X} \u2013 \u00b5 + \u0177" in off_eq),
+        ("an equation's command before a Greek letter is set apart from "
+         "it, which texmath would read as one command's name",
+         lambda: "q=m\\times c\\times \u0394T" in maths),
         ("math.from_text off makes no equation of text",
-         lambda: len(off_text) == 4),
+         lambda: len(off_text) == 6),
         ("the keep sidecar leaves its expression and its symbol text, and "
          "its equation unrepaired",
          lambda: "\u03bc=5.51" not in kept_maths and "\u03bc" not in kept_maths

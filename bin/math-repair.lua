@@ -450,8 +450,12 @@ local function join_tex(run)
   local out = ''
   for _, a in ipairs(run) do
     if a.kind ~= 'sp' then
-      -- a command's name ends at the first non-letter
-      if out:match('\\%a+$') and a.tex:match('^%a') then
+      -- A command's name ends at the first character that isn't an ASCII
+      -- letter, as LuaLaTeX reads it; texmath, which makes the MathML,
+      -- reads any letter as part of it, so "\times" run into a Greek
+      -- letter is "\timesΔT", a command it doesn't know (Chemistry 2e's
+      -- q = m × c × ΔT).
+      if out:match('\\%a+$') and (a.tex:match('^%a') or a.tex:match('^[\128-\255]')) then
         out = out .. ' '
       end
       out = out .. a.tex

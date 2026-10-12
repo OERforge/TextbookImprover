@@ -3323,18 +3323,15 @@ def browser_problem():
     try:
         from playwright.sync_api import sync_playwright
     except ImportError:
-        return ("Python's Playwright isn't installed, so the presentations aren't tried in a "
-                "browser (docs/installation.md, For the suites: Playwright and its Chromium, says "
-                "how to install both)")
+        return "Playwright isn't installed (docs/installation.md says how to install both)"
     try:
         with sync_playwright() as play:
             play.chromium.launch().close()
     except Exception as exc:
         lines = str(exc).strip().splitlines()
         reason = lines[0][:200] if lines else type(exc).__name__
-        return (f"Playwright's Chromium doesn't start ({reason}), so the presentations aren't "
-                "tried in a browser: `python3 -m playwright install --with-deps chromium` "
-                "installs it (see docs/installation.md)")
+        return (f"Playwright's Chromium doesn't start ({reason}); `python3 -m playwright install "
+                "--with-deps --only-shell chromium` installs it (see docs/installation.md)")
     return None
 
 
@@ -3630,10 +3627,7 @@ def case_revealjs(work):
          lambda: page and [(os.path.basename(r[0]), r[1]) for r in check]
          == [("no-title.html", "vnu:warning")] and "Section lacks heading" in check[0][2]),
     ]
-    if browser:
-        print(f"  skip  {browser}")
-        return checks
-    checks += [
+    in_browser_checks = [
         ("in a browser, reveal.js's role and its live region go, and a slide's title takes "
          "focus as it's shown, outlined as no keyboard focus is, a step's content as it "
          "appears, and nothing in the overview",
@@ -3705,7 +3699,13 @@ def case_revealjs(work):
          lambda: phone.get("opened") == [True, "a-long-list", 0, "20px", ""]
          and phone["placed"] == [0, True] and phone["end"][1] > 0 and phone["end"][2] is True),
     ]
-    return checks
+    if browser:
+        # One line for them all, which says how many it stands for, as
+        # run-all.sh counts it.
+        print(f"  skip  {len(in_browser_checks)} checks of the presentations in a browser, which "
+              f"need Python's Playwright and its Chromium, both optional: {browser}")
+        return checks
+    return checks + in_browser_checks
 
 
 def case_revealjs_settings(work):

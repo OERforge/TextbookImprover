@@ -135,7 +135,7 @@ Put that `export` line in `~/.bashrc` (see [below](#optional-the-full-validators
 | pdfLaTeX or LuaLaTeX, LaTeX's `preview` package, and `pdftocairo` | A LaTeX source with drawings or PDF images, which become SVG ([LaTeX sources](latex.md)); without them they're left out of the pages | TeX Live (`tlmgr install preview` where it's missing); `sudo apt install poppler-utils` |
 | TeX's `latex-tagging-status` package | A LaTeX source's copy made for tagging, whose class and packages are checked against the tagging project's status list ([LaTeX sources](latex.md#the-source-target)); without it, the run says how to install it and checks nothing | `tlmgr install latex-tagging-status`; MiKTeX installs it on demand |
 | reveal.js 6 | A `revealjs` target for decks written in Markdown ([Slides](slides.md#the-revealjs-presentation)), which also needs Pandoc 3.12 or later; without it, the run says how to get it | its package, unpacked, and `REVEALJS_DIR` set to its folder; see [below](#for-a-revealjs-target-revealjs) |
-| Python's Playwright and its Chromium | The test suites only: the decks suite tries a reveal.js presentation in a browser with them, and skips that without them | in a virtual environment; see [below](#for-the-suites-playwright-and-its-chromium) |
+| Python's Playwright and its Chromium | Optional, and for the test suites only: twelve of the decks suite's checks try a reveal.js presentation in a browser with them, and skip without them | in a virtual environment; see [below](#optional-for-the-suites-playwright-and-its-chromium) |
 | `zip` | Only if you package with the printed command instead of `--zip` | `sudo apt install zip` |
 
 **Pandoc has to come from Pandoc.** `sudo apt install pandoc` on Ubuntu 24.04 gives 3.1.3, which this project refuses to run with: Pandoc 3.6 and older write tables without cell spans, so a table with merged cells loses them silently, and several things the filter relies on arrived later. Install the `.deb` from [Pandoc's releases](https://github.com/jgm/pandoc/releases) instead:
@@ -148,7 +148,7 @@ pandoc --version | head -1
 
 Pandoc 3.9 is a hard requirement for a book, checked before the book is read; a folder of PowerPoint decks needs no Pandoc, a deck's PowerPoint file (a `pptx` target) needs 3.10.1, whose PowerPoint writer keeps a table and the text around it on one slide, and a deck's reveal.js presentation (a `revealjs` target) needs 3.12, whose template loads reveal.js 6's plugins. Versions above it still differ in ways that show up here — newer releases read Word caption paragraphs into table captions, older ones don't — so the same document can produce different reports on different machines. Neither is wrong; the sidecar files absorb the difference.
 
-**Python packages come from `apt`, not `pip`.** Ubuntu 24.04 manages its Python installation, so `pip3 install pypdf` stops with `error: externally-managed-environment` (and on a fresh WSL install `pip3` isn't there to begin with). The `python3-*` packages in the table are the ones to use. Ubuntu 22.04 doesn't stop pip, and its one gap, pypdf, comes from pip there, as [above](#which-ubuntu-you-have). If you need a version newer than Ubuntu ships, or a package it doesn't ship at all, make a virtual environment that sees Ubuntu's packages as well (`python3 -m venv --system-site-packages ~/venv && ~/venv/bin/pip install pypdf`) and run the tools with that interpreter. The one package anything here takes from pip is Playwright, which only the test suites use ([below](#for-the-suites-playwright-and-its-chromium)).
+**Python packages come from `apt`, not `pip`.** Ubuntu 24.04 manages its Python installation, so `pip3 install pypdf` stops with `error: externally-managed-environment` (and on a fresh WSL install `pip3` isn't there to begin with). The `python3-*` packages in the table are the ones to use. Ubuntu 22.04 doesn't stop pip, and its one gap, pypdf, comes from pip there, as [above](#which-ubuntu-you-have). If you need a version newer than Ubuntu ships, or a package it doesn't ship at all, make a virtual environment that sees Ubuntu's packages as well (`python3 -m venv --system-site-packages ~/venv && ~/venv/bin/pip install pypdf`) and run the tools with that interpreter. The one package anything here takes from pip is Playwright, which only the test suites use, and they don't need it ([below](#optional-for-the-suites-playwright-and-its-chromium)).
 
 ## Optional: the full validators
 
@@ -302,18 +302,20 @@ ls "$REVEALJS_DIR/dist/reveal.js" && grep -m1 '"version"' "$REVEALJS_DIR/package
 
 If you have Node.js's `npm` already, `npm install reveal.js@6` in a folder of your own does the same, and `REVEALJS_DIR` is then that folder's `node_modules/reveal.js`. A later 6.x works as well: the run checks the major version, and the files it copies. reveal.js is MIT-licensed, and its license goes with each copy.
 
-### For the suites: Playwright and its Chromium
+### Optional, for the suites: Playwright and its Chromium
 
-With `REVEALJS_DIR` set, the decks suite builds presentations and checks what was written; most of what the presentation does, though, happens in a browser (focus moving to a slide's title, slides fitted, a narrow window's page), and the suite tries that in Chromium, through Python's Playwright. Neither is needed to convert anything. Ubuntu doesn't package Playwright, and Ubuntu 24.04's Python won't take a package from pip ([above](#requirements)), so it goes in a virtual environment that sees Ubuntu's own packages too (`--system-site-packages`), and the suites run with that environment's Python:
+Nothing here needs these but twelve of the decks suite's checks. With `REVEALJS_DIR` set, the suite builds presentations and checks what was written; the twelve then open them in a browser, to see what the presentation does there (focus moving to a slide's title, slides fitted, a narrow window's page), through Python's Playwright and the Chromium it installs. Without them, those twelve skip, saying so, and everything else runs. They're worth installing to work on the presentations themselves, and can otherwise be left out: together they take about 570 MB.
+
+Ubuntu doesn't package Playwright, and Ubuntu 24.04's Python won't take a package from pip ([above](#requirements)), so it goes in a virtual environment that sees Ubuntu's own packages too (`--system-site-packages`), and the suites run with that environment's Python:
 
 ```bash
 sudo apt install python3-venv
 python3 -m venv --system-site-packages ~/venv
 ~/venv/bin/pip install playwright
-~/venv/bin/python -m playwright install --with-deps chromium
+~/venv/bin/python -m playwright install --with-deps --only-shell chromium
 ```
 
-The last line downloads Playwright's Chromium, a few hundred megabytes, into `~/.cache/ms-playwright`, and installs the libraries it needs with `apt`, which asks for your password. To check that it starts:
+`--only-shell` installs only the Chromium that runs without a window, which is all the suites use: about 320 MB, in `~/.cache/ms-playwright`, where Chromium in full would add 600 MB. `--with-deps` installs the libraries and fonts it needs with `apt`, which asks for your password, about 110 MB of them where none is installed yet; Playwright itself is about 130 MB (sizes measured with Playwright 1.56 and its Chromium 141). To check that it starts:
 
 ```bash
 ~/venv/bin/python -c "from playwright.sync_api import sync_playwright as p; s = p().start(); print(s.chromium.launch().version); s.stop()"
@@ -326,9 +328,9 @@ source ~/venv/bin/activate
 bash tests/run-all.sh
 ```
 
-Activating it lasts for that terminal (`deactivate` ends it early). Add `source ~/venv/bin/activate` to `~/.bashrc` to have it in every terminal; the tools run the same in it, since the environment's Python is Ubuntu's, with Playwright added. Playwright supports Ubuntu 22.04 and 24.04 and WSL ([its system requirements](https://playwright.dev/python/docs/intro#system-requirements)); on Ubuntu 22.04, `pip3 install --user playwright` and then `python3 -m playwright install --with-deps chromium` work as well, without the environment, as pypdf does there.
+Activating it lasts for that terminal (`deactivate` ends it early). Add `source ~/venv/bin/activate` to `~/.bashrc` to have it in every terminal; the tools run the same in it, since the environment's Python is Ubuntu's, with Playwright added. Playwright supports Ubuntu 22.04 and 24.04 and WSL ([its system requirements](https://playwright.dev/python/docs/intro#system-requirements)); on Ubuntu 22.04, `pip3 install --user playwright` and then `python3 -m playwright install --with-deps --only-shell chromium` work as well, without the environment, as pypdf does there.
 
-When either is missing, the decks suite says what and how to install it, and `run-all.sh` lists it at its end among the checks skipped: without `REVEALJS_DIR`, both reveal.js cases skip; without Playwright, or with a Chromium that doesn't start, the checks in a browser do.
+When reveal.js or these are missing, the decks suite says what and how to install it, and `run-all.sh` counts what was skipped and lists why at its end: without `REVEALJS_DIR`, both reveal.js cases skip; without Playwright, or with a Chromium that doesn't start, the twelve checks in a browser do, in one line saying how many it stands for.
 
 ## Checking the whole setup
 
@@ -338,4 +340,4 @@ From the directory you cloned into:
 bash tests/run-all.sh
 ```
 
-Twenty suites run, and a check that the settings pages are current. A check that needs something not installed prints `skip` with the reason and what to install, a validator whose jar isn't set or the decks suite's reveal.js cases without reveal.js or Playwright, and `run-all.sh` lists every skip at its end, so a pass without Java means the pipeline is sound and the validators are simply absent.
+Twenty suites run, and a check that the settings pages are current. A check that needs something not installed prints `skip` with the reason and what to install, a validator whose jar isn't set or the decks suite's reveal.js cases without reveal.js or the optional Playwright, and `run-all.sh` lists every skip at its end, so a pass without Java means the pipeline is sound and the validators are simply absent.

@@ -181,7 +181,12 @@ if [ -n "$skipped" ]; then
   echo "skipped: $skipped" >&2
 fi
 if [ -s "$skips" ]; then
-  echo "$(wc -l < "$skips") check(s) skipped, which passing doesn't cover:" >&2
+  # A skip line that stands for several checks says how many
+  # ("skip  12 checks of ..."), and counts as that many; any other, one.
+  count="$(awk '{ if (match($0, /skip +[0-9]+ checks /)) {
+                    n += substr($0, RSTART + 4, RLENGTH - 11) + 0 } else n += 1 }
+                END { print n }' "$skips")"
+  echo "$count check(s) skipped, which passing doesn't cover:" >&2
   cat "$skips" >&2
 fi
 if [ "$failures" -gt 0 ]; then

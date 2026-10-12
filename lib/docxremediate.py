@@ -25,7 +25,10 @@ What it changes, all of it decided elsewhere in the pipeline:
   the filter recorded it (see htmlremediate): for a table with no label, a
   paragraph in Word's Caption style before it, kept with the table, where
   Word's Insert Caption puts one; for a label paragraph beside the table,
-  the description joined to its end.
+  the description joined to its end; and for a caption that is its label
+  alone, a paragraph in a caption style that Pandoc's reader takes for the
+  table's caption (the one before the table, or the one after it), the
+  description joined to its end too.
 - **Links.** From the bare-links sidecar, a link's title as its ScreenTip,
   and its replacement address, which replaces the link's address and, for
   a bare link, its text.
@@ -315,18 +318,27 @@ def remediate_captions(xml, applied, resolved):
             counts["captions_left"] += 1
             continue
         start, end = spans[position]
-        if how in ("label-after", "label-before"):
+        if how in ("label-after", "label-before", "caption"):
             # Between a table and its label, only what Pandoc's reader
             # doesn't count as content: bookmarks (OpenStax wraps each table
-            # in one) and empty paragraphs.
-            if how == "label-after":
-                para = re.compile(SKIPPABLE + r"(<w:p\b[^>]*>(?:(?!</w:p>).)*)(</w:p>)",
-                                  re.S).match(xml, end)
-            else:
-                paras = list(re.finditer(r"(<w:p\b[^>]*>(?:(?!</w:p>).)*)(</w:p>)" + SKIPPABLE + r"\Z",
-                                         xml[:start], re.S))
-                para = paras[-1] if paras else None
-            if para and _text(para.group(1)) == " ".join(key.split()):
+            # in one) and empty paragraphs. A caption is a paragraph Pandoc's
+            # reader paired with the table (addCaptioned, Docx/Parse.hs): the
+            # one before it, or the one after it if that isn't kept with the
+            # next; whichever holds the label.
+            para = None
+            sides = ("before", "after") if how == "caption" else (how[len("label-"):],)
+            for side in sides:
+                if side == "after":
+                    found = re.compile(SKIPPABLE + r"(<w:p\b[^>]*>(?:(?!</w:p>).)*)(</w:p>)",
+                                       re.S).match(xml, end)
+                else:
+                    paras = list(re.finditer(r"(<w:p\b[^>]*>(?:(?!</w:p>).)*)(</w:p>)" + SKIPPABLE
+                                             + r"\Z", xml[:start], re.S))
+                    found = paras[-1] if paras else None
+                if found and _text(found.group(1)) == " ".join(key.split()):
+                    para = found
+                    break
+            if para:
                 edits.append((para.start(2), _run(" " + description)))
                 counts["labels_joined"] += 1
             else:

@@ -19,8 +19,10 @@ and counted.
 - **Captions.** A description from the table-captions sidecar, found as
   the filter recorded it (see htmlremediate): a Table: line for a table
   with none, inside its div if it's in one, or joined to the end of a
-  label paragraph beside it. A table is found as a stretch of lines that
-  Pandoc's Markdown reader reads as exactly that table.
+  label paragraph beside it, or of a caption that is the label alone,
+  before any attributes the caption ends with. A table is found as a
+  stretch of lines that Pandoc's Markdown reader reads as exactly that
+  table.
 - **Language.** lang in the front matter, when it has none.
 
 Copyright 2026 Robert Szarka
@@ -291,6 +293,13 @@ def table_stretches(text, doc):
     return out
 
 
+# A table's caption line as Pandoc's reader takes one (tableCaption,
+# Readers/Markdown.hs): up to three spaces, then "Table:", "table:", or
+# ":", the caption, and the attributes that may end it ({#tbl:costs}),
+# which the reader takes off the caption.
+CAPTION_LINE = re.compile(r"^ {0,3}(?:[Tt]able)?:\s*(.*?)\s*(\{[^{}]*\})?\s*$")
+
+
 def remediate_captions(text, doc, applied):
     """applied: [(position, how, key, description)] the filter recorded for
     the page. Returns (text, counts)."""
@@ -300,7 +309,7 @@ def remediate_captions(text, doc, applied):
     places = table_stretches(text, doc)
     lines = text.split("\n")
     inserts = []                      # (line index, lines to insert)
-    appends = []                      # (line index, text to append)
+    appends = []                      # (line index, text, where in it or None for the end)
     for position, how, key, description in applied:
         place = places[position] if position < len(places) else None
         if place is None:
@@ -316,14 +325,14 @@ def remediate_captions(text, doc, applied):
             continue
         if how == "caption":
             # The table's own caption line, its label alone: the
-            # description joins it.
+            # description joins it, before its attributes if it has any.
             hit = None
             for i in range(a, min(b, len(lines))):
-                m = re.match(r"^\s*(?:Table)?:\s+(.*?)\s*$", lines[i])
+                m = CAPTION_LINE.match(lines[i])
                 if m and " ".join(m.group(1).split()) == " ".join(key.split()):
-                    hit = i
+                    hit = (i, m.end(1) if m.group(2) else None)
             if hit is not None:
-                appends.append((hit, " " + description))
+                appends.append((hit[0], " " + description, hit[1]))
                 counts["labels_joined"] += 1
             else:
                 counts["captions_left"] += 1
@@ -345,12 +354,13 @@ def remediate_captions(text, doc, applied):
             while s > 0 and lines[s - 1].strip():
                 s -= 1
         if s < e and " ".join(" ".join(lines[s:e]).split()) == " ".join(key.split()):
-            appends.append((e - 1, " " + description))
+            appends.append((e - 1, " " + description, None))
             counts["labels_joined"] += 1
         else:
             counts["captions_left"] += 1
-    for index, extra in appends:
-        lines[index] = lines[index].rstrip() + extra
+    for index, extra, at in appends:
+        line = lines[index]
+        lines[index] = line.rstrip() + extra if at is None else line[:at] + extra + line[at:]
     for index, block in sorted(inserts, key=lambda i: i[0], reverse=True):
         lines[index:index] = block
     return "\n".join(lines), counts

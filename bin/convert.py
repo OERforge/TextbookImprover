@@ -3181,7 +3181,8 @@ def remediate_sources(target, base, docs, paths, env, html_stems=(), language=No
             "picture. They're in math-repaired.csv.")
     if totals.get("captions_left"):
         say(f"{target.name}: {totals['captions_left']} table description(s) not written: "
-            "the table, or the label paragraph beside it, isn't what the filter saw.")
+            "the table, its caption, or the label paragraph beside it isn't what the filter "
+            "saw.")
     if totals.get("undecided"):
         say(f"{target.name}: {totals['undecided']} table(s) left as they are, with only "
             "the census's guess; adopt their rows from the table_headers_new report "

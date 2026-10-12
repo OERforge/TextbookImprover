@@ -2365,7 +2365,11 @@ def case_source_target(work):
         with open(os.path.join(work, f"ch{n}.md"), "w", encoding="utf-8") as fh:
             fh.write(f"---\ntitle: Chapter {n}\nlang: en\n---\n\n# Chapter {n}\n\n"
                      f"| Name | Score |\n|------|------:|\n| Ana | 9{n} |\n| Ben | 8{n} |\n| Cy | 7{n} |\n\n"
-                     + ("Table 2.1\n\n" if n == 2 else "See <https://doi.org/10.1000/xyz123>.\n\n")
+                     + ("Table 2.1\n\n" if n == 2 else "See <https://doi.org/10.1000/xyz123>.\n\n"
+                        # A caption that is its label alone, which Pandoc writes as a
+                        # Table Caption paragraph before the table and reads back as
+                        # the table's caption.
+                        "| Term | Count |\n|------|------:|\n| Fall | 12 |\n\nTable: Table 1.4\n\n")
                      + "![](assets/a.png)\n\nText.\n")
         subprocess.run(["pandoc", f"ch{n}.md", "-o", f"ch{n}.docx"], cwd=work, check=True)
         os.remove(os.path.join(work, f"ch{n}.md"))
@@ -2429,12 +2433,13 @@ def case_source_target(work):
     with open(os.path.join(work, "table-captions.csv"), "w", encoding="utf-8") as fh:
         fh.write("Label,Description\npage#table-1,Scores by student\nTable 1.2,Enrollment by term\n"
                  "ch1#table-1,Scores in chapter one\nTable 2.1,Scores in chapter two\n"
-                 "Table 1.3,Grades by section\n")
+                 "Table 1.3,Grades by section\nTable 1.4,Terms by season\n")
     with open(os.path.join(work, "bare-links.csv"), "w", encoding="utf-8") as fh:
         fh.write("URL,Replacement,Title\nhttps://doi.org/10.1000/xyz123,https://doi.org/10/abcd,The source study\n")
     second = run()
     page = read(work, "fixed", "page.html") if exists(work, "fixed", "page.html") else ""
     page_html = read(work, "html", "page.html") if exists(work, "html", "page.html") else ""
+    ch1_html = read(work, "html", "ch1.html") if exists(work, "html", "ch1.html") else ""
 
     def xml(n):
         with zipfile.ZipFile(os.path.join(work, "fixed", n)) as z:
@@ -2493,6 +2498,12 @@ def case_source_target(work):
          and re.search(r"<caption>\s*<p>Scores in chapter one</p>\s*</caption>", one_read)),
         ("a Word label paragraph gets its description joined",
          lambda: re.search(r"Table 2\.1</w:t></w:r>(?:(?!</w:p>).)*Scores in chapter two", two, re.S)),
+        ("a Word table whose caption paragraph is its label alone gets its description, on the "
+         "page and joined to the paragraph in the copy, which Pandoc reads back as the caption",
+         lambda: re.search(r"<caption>\s*Table 1\.4 Terms by season\s*</caption>", ch1_html)
+         and re.search(r"Table 1\.4</w:t></w:r>(?:(?!</w:p>).)*Terms by season</w:t></w:r></w:p>\s*<w:tbl>",
+                       one, re.S)
+         and re.search(r"<caption>\s*<p>Table 1\.4 Terms by season</p>\s*</caption>", one_read)),
         ("a Word link gets its replacement address and text, and its title",
          lambda: 'Target="https://doi.org/10/abcd"' in one_rels
          and "https://doi.org/10.1000/xyz123" not in one and "https://doi.org/10/abcd" in one
@@ -2584,7 +2595,9 @@ def case_markdown_source(work):
         "| A | B |\n|---|---|\n| 1 | 2 |\n\n"
         "::: matrix\n|   | X | Y |\n|---|---|---|\n| P | 1 | 2 |\n:::\n\n"
         "| C | D |\n|---|---|\n| 3 | 4 |\n\nTable 1.2\n\n"
-        "| E | F |\n|---|---|\n| 5 | 6 |\n\nTable: Table 1.3\n\nThe end.\n")
+        "| E | F |\n|---|---|\n| 5 | 6 |\n\nTable: Table 1.3\n\n"
+        "| G | H |\n|---|---|\n| 7 | 8 |\n\ntable: Table 1.4\n\n"
+        "| I | J |\n|---|---|\n| 9 | 0 |\n\nTable: Table 1.5 {#tbl:five}\n\nThe end.\n")
     with open(os.path.join(work, "ch.md"), "w", encoding="utf-8") as fh:
         fh.write(original)
 
@@ -2605,9 +2618,12 @@ def case_markdown_source(work):
         fh.write("URL,Replacement,Title\nhttps://doi.org/10.1000/xyz123,https://doi.org/10/abcd,The study\n")
     with open(os.path.join(work, "table-captions.csv"), "w", encoding="utf-8") as fh:
         fh.write("Label,Description\nch#table-1,First table\nch#table-2,Second table\n"
-                 "Table 1.2,Third table\nTable 1.3,Fourth table\n")
+                 "Table 1.2,Third table\nTable 1.3,Fourth table\nTable 1.4,Fifth table\n"
+                 "Table 1.5,Sixth table\n")
     second = run()
     copy = read(work, "mine", "ch.md") if exists(work, "mine", "ch.md") else ""
+    copy_html = subprocess.run(["pandoc", "-f", "markdown", "-t", "html"], input=copy,
+                               capture_output=True, text=True).stdout
     return [
         ("with nothing decided and no language declared, the copy is the file, byte for byte",
          lambda: first.returncode in (0, 1) and first_copy == original),
@@ -2627,6 +2643,12 @@ def case_markdown_source(work):
          lambda: "\nTable 1.2 Third table\n" in copy),
         ("a caption that's the table's label alone gets its description joined",
          lambda: "\nTable: Table 1.3 Fourth table\n" in copy),
+        ("so does one written table:, and one with attributes, before them, which Pandoc "
+         "reads back as the caption and the table's id",
+         lambda: "\ntable: Table 1.4 Fifth table\n" in copy
+         and "\nTable: Table 1.5 Sixth table {#tbl:five}\n" in copy
+         and re.search(r'<table id="tbl:five">\s*<caption>(?:<p>)?Table 1\.5 Sixth table', copy_html)
+         and "not written" not in second.stderr),
         ("the declared language goes in the front matter, and the rest is as written",
          lambda: copy.startswith("---\ntitle: Chapter\nlang: en\n---")
          and "Setext Heading\n==============\n\nSome _emphasis_ kept as written." in copy),
@@ -3027,9 +3049,15 @@ def case_title_heading(work):
     kept = book("kept", [("defs", "---\ntitle: Definitions\n---\n\n# 1.1 Definitions\n\nText.\n")],
                 "  html:\n    format: html\n", "defaults:\n  promote_h1_to_title: always\n")
     kept_html = read(kept, "html", "defs.html") if exists(kept, "html", "defs.html") else ""
-    # A declared title that is the numbered heading, number and all.
-    book("same", [("defs", "---\ntitle: 1.1 Definitions\n---\n\n# 1.1 Definitions\n\nText.\n")],
-         "  html:\n    format: html\n")
+    # A declared title that is the numbered heading, number and all, and one
+    # shorter than its heading that keeps the number.
+    same = book("same", [("defs", "---\ntitle: 1.1 Definitions\n---\n\n# 1.1 Definitions\n\nText.\n")],
+                "  html:\n    format: html\n")
+    same_html = read(same, "html", "defs.html") if exists(same, "html", "defs.html") else ""
+    shorter = book("shorter", [("defs", "---\ntitle: 1.1 Definitions\n---\n\n"
+                                        "# 1.1 Definitions and Notation\n\nText.\n")],
+                   "  html:\n    format: html\n")
+    shorter_html = read(shorter, "html", "defs.html") if exists(shorter, "html", "defs.html") else ""
     # A Word Title with a curly apostrophe over a heading with a straight one.
     quoted = book("quoted", [("cohen", "---\ntitle: Cohen\u2019s Standards\n---\n\n"
                                        "# 10.2 Cohen\\'s standards\n\nText.\n")],
@@ -3063,8 +3091,11 @@ def case_title_heading(work):
         ("the run says when a title stands without its heading's number, and "
          "always keeps the number", lambda: "without the number their heading" in said["numbered"]
          and "<title>1.1 Definitions</title>" in kept_html
-         and "without the number their heading" not in said["kept"]
-         and "without the number their heading" not in said["same"]),
+         and "without the number their heading" not in said["kept"]),
+        ("and says nothing of it when the title has the number, whether it's the heading or "
+         "shorter", lambda: "<title>1.1 Definitions</title>" in same_html
+         and "<title>1.1 Definitions</title>" in shorter_html
+         and "without the number their heading" not in said["same"] + said["shorter"]),
         ("curly and straight apostrophes, and case, don't keep a heading from "
          "saying the title", lambda: quoted_html.count("<h1") == 1),
         ("a numbered book numbers the page's own heading, wrapped or not",

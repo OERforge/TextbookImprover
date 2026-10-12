@@ -16,10 +16,10 @@ saved from a platform is better fixed in the platform.
   with no label anywhere, as its <caption>; for one whose label is a
   paragraph beside it, joined to the end of that paragraph, where it
   stands, as the rendered page joins it; for one whose own <caption> is
-  its label alone, joined to the end of the caption. The filter records which table it
-  gave each description to, by position (the sidecar's key names the table
-  as the filter sees the page, which can differ from the file), and the
-  copy finds that table as it does for headers.
+  its label alone, joined to the end of the caption. The filter records
+  which table it gave each description to, by position (the sidecar's key
+  names the table as the filter sees the page, which can differ from the
+  file), and the copy finds that table as it does for headers.
 - **Language.** The book's language as lang on <html>, when it has none.
 
 Copyright 2026 Robert Szarka

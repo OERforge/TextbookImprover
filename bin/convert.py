@@ -3576,7 +3576,7 @@ def deck_pdfs(target, stems, names, base, language):
         results = list(pool.map(one, stems))
     written, failed, pages, missing, dropped, ratios = [], [], 0, {}, [], {}
     unmatched, beamer, one_level, unlinked, untagged_blocks = [], {}, [], [], []
-    untied = {}
+    untied, step_links = {}, {}
     for stem, result in results:
         for command in result["beamer_commands"]:
             beamer.setdefault(command, []).append(stem)
@@ -3620,6 +3620,8 @@ def deck_pdfs(target, stems, names, base, language):
             untagged_blocks.append(stem)
         if result["tidied"] and result["tidied"]["untied_marks"]:
             untied[stem] = result["tidied"]["untied_marks"]
+        if result["tidied"] and result["tidied"]["step_links"]:
+            step_links[stem] = result["tidied"]["step_links"]
     if written:
         say(f"Wrote {len(written)} PDF(s) in {target.output_dir}, one for each deck, "
             f"through ltx-talk: {pages} page(s); the slides "
@@ -3638,6 +3640,14 @@ def deck_pdfs(target, stems, names, base, language):
             + " in the header-includes of " + ", ".join(named[:4])
             + (", ..." if len(named) > 4 else "") + " do nothing in a deck's PDF, which "
             "ltx-talk sets, not beamer.")
+    if step_links:
+        say(f"NOTE: {sum(step_links.values())} link(s) on the earlier steps of slides shown "
+            f"in steps were taken out of {len(step_links)} deck PDF(s) ("
+            + ", ".join(list(step_links)[:4]) + (", ..." if len(step_links) > 4 else "")
+            + "): ltx-talk tags only a slide's last step, which has all its links, and LaTeX "
+            "files an earlier step's links as an artifact, which a screen reader in Acrobat "
+            "reads as links saying \"artifact\". Presenting from the PDF, such a slide's "
+            "links work on its last step, not before.")
     if one_level:
         say(f"WARNING: ltx-talk's code for a slide's title isn't the code bin/ltx-talk.latex "
             f"was written for (ltx-talk 0.6.9), so in {len(one_level)} deck PDF(s) ("

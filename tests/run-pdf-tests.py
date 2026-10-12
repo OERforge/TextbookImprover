@@ -6,10 +6,10 @@ run-pdf-tests.py -- check the pdf target against a small Markdown book.
     python3 tests/run-pdf-tests.py --keep    # leave the output in place
 
 Needs Pandoc 3.9 or later, LuaLaTeX with LaTeX's tagging code (TeX Live
-2026 or later; see docs/installation.md), and pypdf to read the result.
-Without LuaLaTeX or pypdf it says so and skips; veraPDF, when found
-through VERAPDF or on the path, is run by the output check and its
-findings are checked too.
+2026 or later; see docs/installation.md), and pypdf and pikepdf to read
+the result. Without LuaLaTeX, pypdf, or pikepdf it says so and skips;
+veraPDF, when found through VERAPDF or on the path, is run by the
+output check and its findings are checked too.
 
 WHAT IS LOAD-BEARING HERE
 
@@ -799,13 +799,10 @@ def checks(work, jobs=1):
     # Pandoc's highlighted code, its tokens colored: a space beside a
     # color's change was no character, and an indentation one
     # (latexbuild.CODE_SPACES).
-    if pdftext.AVAILABLE:
-        items.append(("a highlighted code block's spaces are characters, its "
-                      "indentation kept",
-                      lambda: pdftext.code_lines(pdf_path)[-2:]
-                      == ["def demand(p):", "    return 12 - 2 * p > 0"]))
-    else:
-        print("  skip  pdfminer.six not found; a code block's spaces aren't checked")
+    items.append(("a highlighted code block's spaces are characters, its "
+                  "indentation kept",
+                  lambda: pdftext.code_lines(pdf_path)[-2:]
+                  == ["def demand(p):", "    return 12 - 2 * p > 0"]))
     return items
 
 

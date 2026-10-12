@@ -1726,8 +1726,11 @@ def case_pdf(work):
          " text for /Contents, as any link has",
          lambda: "1Marginal revenue" in agenda_text and "Each is per unit." in agenda_text
          and link_contents(agenda).get("https://example.org/unit") == "per unit"),
-        ("a slide's earlier steps have no links, and nothing left untagged holds any",
-         lambda: step_links(more, "Paused") == (2, 0)),
+        ("a slide's earlier steps have no links, and nothing left untagged holds any, and"
+         " the run notes the links taken out, and from which deck",
+         lambda: step_links(more, "Paused") == (2, 0)
+         and "NOTE: 2 link(s) on the earlier steps of slides shown in steps were taken out of"
+         " 1 deck PDF(s) (more)" in out),
         ("a piece the split cut has its headings placed as the page has them, none skipped",
          lambda: not [r for r in check if r[1] == "heading-skips-level"]),
         ("a passage in another language that begins a paragraph or an item is in it,"
@@ -1810,25 +1813,21 @@ def case_pdf(work):
          lambda: any(re.fullmatch(rb"0(?:\.0)? 0\.4 0\.8", c) for c in colors(sectioned, 2))),
         ("an SVG picture named with a space is made a PDF, its alt text kept",
          lambda: not svg or "A dark bar" in figures(sectioned)),
+        ("a code block's spaces are characters in the PDF, its indentation kept",
+         lambda: pdftext.code_lines(sectioned) == ["def demand(p):",
+                                                   "    return 12 - 2 * p > 0"]),
+        ("each heading's words, its footnote's mark not among them",
+         lambda: heading_texts(headings) == [
+             (1, "A List"), (2, "In an item"), (1, "A Table"), (2, "In a cell"),
+             (1, "Blocks"), (2, "Outer"), (3, "Inner"), (4, "Quoted under Inner"),
+             (3, "Quoted beside Inner"), (1, "Columns"), (2, "Left"),
+             (3, "Right"), (4, "Quoted right"), (1, "Quoted"), (2, "Quoted"),
+             (3, "Under it")]
+         and heading_texts(agenda)[3] == (3, "A Block")),
     ]
     if ran:
         checks.insert(1, ("veraPDF finds nothing to fail in any of them",
                           lambda: not [r for r in check if r[1].startswith("verapdf")]))
-    if not pdftext.AVAILABLE:
-        print("  skip  pdfminer.six not found; a code block's spaces, and the headings' words,"
-              " aren't checked")
-    else:
-        checks.append(("a code block's spaces are characters in the PDF, its indentation kept",
-                       lambda: pdftext.code_lines(sectioned) == ["def demand(p):",
-                                                                 "    return 12 - 2 * p > 0"]))
-        checks.append(("each heading's words, its footnote's mark not among them",
-                       lambda: heading_texts(headings) == [
-                           (1, "A List"), (2, "In an item"), (1, "A Table"), (2, "In a cell"),
-                           (1, "Blocks"), (2, "Outer"), (3, "Inner"), (4, "Quoted under Inner"),
-                           (3, "Quoted beside Inner"), (1, "Columns"), (2, "Left"),
-                           (3, "Right"), (4, "Quoted right"), (1, "Quoted"), (2, "Quoted"),
-                           (3, "Under it")]
-                       and heading_texts(agenda)[3] == (3, "A Block")))
     return checks
 
 
@@ -1888,6 +1887,8 @@ def case_pdf_settings(work):
          lambda: unrepaired.returncode == 0
          and artifacts_in_tables(captioned) == 1
          and footnote_ties(captioned)[1:] == (0, 0, 0, 0)),
+        ("decks with no slide shown in steps have no note of links taken out",
+         lambda: "on the earlier steps" not in result.stderr + unrepaired.stderr),
     ]
     if ran:
         checks.insert(1, ("veraPDF passes them as PDF/UA-1: the footnote's mark no link, "

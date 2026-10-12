@@ -3874,6 +3874,8 @@ def deck_pptxs(target, stems, names, base, language, work):
                else "")
             + (f", {counts['displays']} display equation(s) set off by space from the text "
                "around them" if counts["displays"] else "")
+            + (f", {counts['spaces']} vertical space(s) the decks give in raw LaTeX given "
+               "before the text after them, in proportion to it" if counts["spaces"] else "")
             + (f", {counts['math_fallbacks']} shape(s) holding equations given their text "
                "for programs that show no PowerPoint equation" if counts["math_fallbacks"]
                else "")
@@ -3936,8 +3938,9 @@ def deck_pptxs(target, stems, names, base, language, work):
         say(f"WARNING: Pandoc's PowerPoint writer left out {what} of "
             f"{len(found['not_rendered'])} deck(s) (" + named_decks(found["not_rendered"])
             + "): a slide's columns past the second, what follows a slide's columns inside "
-            "its columns div, raw HTML or LaTeX, and a table or a horizontal rule in a list or "
-            "a quotation aren't written.")
+            "its columns div, raw HTML or LaTeX (but vertical space with text after it, given "
+            "before the text), and a table or a horizontal rule in a list or a quotation aren't "
+            "written.")
     if layouts:
         say(f"WARNING: slides.reference_doc, {os.path.basename(reference)}, has no layout named "
             + ", ".join(f'"{name}"' for name in sorted(layouts)) + ", which Pandoc's "

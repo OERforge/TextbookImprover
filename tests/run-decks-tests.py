@@ -2286,6 +2286,52 @@ then this.
 
 $$f = g$$
 
+# Space
+
+First words.
+
+\\bigskip
+
+Second words.
+
+\\vspace{-1em}
+
+Third words \\vspace{1cm}
+
+Fourth words.
+
+\\addvspace{5mm}
+
+\\vfill
+
+Fifth words.
+
+# Space Again
+
+Words before.
+
+\\vspace*{0.5\\baselineskip}
+
+- An item
+
+  \\smallskip
+
+\\vskip 6pt plus 2pt
+
+## A Heading
+
+`\\vspace{3ex}`{=latex} Last words.
+
+# Space Top
+
+\\vspace{2em}
+
+Pushed down.
+
+Not pushed.
+
+\\vspace{1em}
+
 # Languages
 
 [Bonjour]{lang=fr} and more.
@@ -2423,13 +2469,15 @@ def display_spaces(xml):
     return out
 
 
-def text_height(*paragraphs):
+def text_height(*paragraphs, respected=False):
     """pptxtarget's estimate of a text box's height holding paragraphs
     (what each <a:p> holds), at 24 points with a fifth of a line before
-    each, as Pandoc's master has its body text."""
+    each, as Pandoc's master has its body text; respected, the box told to
+    respect its first paragraph's space before."""
     import pptxtarget
-    return pptxtarget.body_height("<p:sp><p:txBody><a:bodyPr/>%s</p:txBody></p:sp>" % "".join(
-        "<a:p>%s</a:p>" % p for p in paragraphs), {0: (24, 0, 0.2)}, 8000000)
+    return pptxtarget.body_height("<p:sp><p:txBody><a:bodyPr%s/>%s</p:txBody></p:sp>" % (
+        ' spcFirstLastPara="1"' if respected else "",
+        "".join("<a:p>%s</a:p>" % p for p in paragraphs)), {0: (24, 0, 0.2)}, 8000000)
 
 
 WORDS = '<a:pPr/><a:r><a:rPr lang="en"/><a:t>Words</a:t></a:r>'
@@ -2483,6 +2531,9 @@ def case_pptx(work):
     notes_first = slide_titled(hd, "Notes First")
     display = slide_titled(hd, "Display")
     kept = slide_titled(hd, "Display Kept")
+    space = slide_titled(hd, "Space")
+    space_again = slide_titled(hd, "Space Again")
+    space_top = slide_titled(hd, "Space Top")
 
     def number(slide):
         return hd.slides.index(slide) + 1 if slide in hd.slides else None
@@ -2574,20 +2625,43 @@ def case_pptx(work):
              pptx_slides(hp)))) == {"{3B4B98B0-60AC-42C2-AFA5-B58CD77FA1E5}"}),
         ("a display equation, and the paragraph after it, are given space before them, but "
          "where the deck gives some the writer keeps or an equation opens its slide's text; "
-         "raw LaTeX, which the writer leaves out, gives none",
+         "the deck's raw \\vspace or \\medskip is added to it, in lines of its PDF",
          lambda: display is not None and display_spaces(hp[display.part]) == [
              (True, None, ""), (False, "50000", "The mean:"), (True, "50000", ""),
              (False, "50000", "and the rest."),
              (False, None, "In a line"), (True, "50000", ""), (False, "50000", "and after.")]
          and kept is not None and display_spaces(hp[kept.part]) == [
-             (False, None, "After a break"), (True, None, ""), (True, "50000", ""),
-             (False, "50000", "then this."), (False, None, ""), (True, None, "")]
+             (False, None, "After a break"), (True, None, ""), (True, "130515", ""),
+             (False, "94118", "then this."), (False, None, ""), (True, None, "")]
          and "\ue002" not in every and "3 display equation(s) set off by space" in out
          and not re.search(r"<m:t(?:\s[^>]*)?(?:/>|></m:t>)", hp[display.part] + hp[kept.part])),
-        ("text set to fit counts a paragraph's own space before it, and a display equation "
-         "with a fraction a line taller",
+        ("vertical space the deck gives in raw LaTeX is added to the space before the text "
+         "after it, in lines of the deck's PDF, its units each its own, and less than none is "
+         "none; it can't fill, or come after the text on its slide",
+         lambda: space is not None and display_spaces(hp[space.part]) == [
+             (False, None, "First words."), (False, "108235", "Second words."),
+             (False, "0", "Third words"), (False, "229211", "Fourth words."),
+             (False, "124606", "Fifth words.")]
+         and space_again is not None and display_spaces(hp[space_again.part]) == [
+             (False, None, "Words before."), (False, "70000", "An item"),
+             (False, "122243", "A Heading"), (False, "123897", "Last words.")]
+         and "\ue003" not in every and not re.search("[\U000F0000-\U000FFFFD]", every)
+         and "vfill" not in every and "vspace" not in every
+         and "10 vertical space(s) the decks give in raw LaTeX given before the text after "
+         "them" in out
+         and "Pandoc's PowerPoint writer left out 3 block(s) of 1 deck(s) (shapes 3)" in out),
+        ("space the deck gives at the top of a slide's text is given there, and the text body "
+         "told to respect it, as PowerPoint otherwise wouldn't",
+         lambda: space_top is not None and display_spaces(hp[space_top.part]) == [
+             (False, "161029", "Pushed down."), (False, None, "Not pushed.")]
+         and re.search(r'<a:bodyPr\b[^>]*\sspcFirstLastPara="1"', hp[space_top.part])
+         and "".join(pptx_slides(hp)).count("spcFirstLastPara") == 1),
+        ("text set to fit counts a paragraph's own space before it, the first one's when its "
+         "box respects it, and a display equation with a fraction a line taller",
          lambda: text_height(WORDS, SPACED_WORDS) > text_height(WORDS, WORDS)
-         and text_height(WORDS, TALL_DISPLAY) > text_height(WORDS, FLAT_DISPLAY)),
+         and text_height(WORDS, TALL_DISPLAY) > text_height(WORDS, FLAT_DISPLAY)
+         and text_height(SPACED_WORDS, respected=True) > text_height(SPACED_WORDS)
+         == text_height(WORDS)),
         ("a table's cells keep their words, spaces, and formatting, the marker taken out",
          lambda: formatted is not None
          and [s.text for s in formatted.shapes if s.kind == "graphicFrame"]

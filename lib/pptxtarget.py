@@ -62,6 +62,13 @@ writer's output:
   where the deck gives them space of its own that the writer keeps, an
   empty paragraph or a line break, which deck-pptx.lua looks for as it
   marks them, or at the top of a shape's text;
+- vertical space the deck gives in raw LaTeX, which the writer leaves out
+  (\\vspace, \\vskip, \\addvspace, \\smallskip, \\medskip, \\bigskip), is added to
+  the space before the paragraph of text after it, in lines of the deck's
+  PDF (11-point text 13.6 points apart): a display equation's half line,
+  a paragraph's own, or its level's in the master; at the top of a
+  shape's text, which PowerPoint gives no space before, the text body is
+  told to respect it (spcFirstLastPara), and less than none is none;
 - the deck's language is on every run and on the text styles every run
   inherits from, in place of the reference document's, since the writer
   writes no language;
@@ -996,6 +1003,7 @@ def body_height(piece, levels, width, scale=1.0, reduction=0.0):
     a sum or integral, a stack, or a matrix takes a line more."""
     total, first = CELL_ENDS, True
     body = re.search(r"<p:txBody>(.*?)</p:txBody>", piece, re.S)
+    respected = bool(body and FIRST_LAST.search(body.group(1)))
     for paragraph in PARAGRAPH.finditer(body.group(1) if body else ""):
         inner = paragraph.group(1) or ""
         props = PARAGRAPH_PROPERTIES.search(inner)
@@ -1017,8 +1025,10 @@ def body_height(piece, levels, width, scale=1.0, reduction=0.0):
             text = "".join(html.unescape(a or b) for a, b in SHOWN_TEXT.findall(part))
             lines += max(1, math.ceil(len(text) * wide * size * scale / room))
         line = LINE * size * scale * EMU_PER_POINT
-        # PowerPoint puts no space before a text body's first paragraph.
-        total += lines * line * (1 - reduction) + (0 if first else before * line)
+        # PowerPoint puts no space before a text body's first paragraph,
+        # unless the body says to (spcFirstLastPara).
+        total += lines * line * (1 - reduction) + (0 if first and not respected
+                                                   else before * line)
         first = False
     return int(total)
 
@@ -1028,8 +1038,24 @@ def body_height(piece, levels, width, scale=1.0, reduction=0.0):
 # head), are given this much space before them, a fraction of a line
 # (thousandths of a percent), where the master gives a paragraph a fifth:
 # set off from the text around it, as the page and the PDF set one off.
+# The deck's own vertical space in raw LaTeX, which deck-pptx.lua takes out
+# and marks on the paragraph after it (VSPACE_MARK and a character naming
+# its amount in record["spaces"], U+F0001 the first), in lines, is added to
+# the space that paragraph has otherwise, as LaTeX adds it: the half line
+# of a display equation or of one after it, the paragraph's own (a
+# heading's 30 points), or its level's in the master; none for a text
+# body's first paragraph, whose space before PowerPoint leaves out unless
+# the body says to respect it (spcFirstLastPara), which it's then told to.
+# Space that comes to less than none is none, as close as PowerPoint comes.
 DISPLAY_SPACE = 50000
 SPACE_MARK = "\ue002"
+VSPACE_MARK = "\ue003"
+SPACE_BASE = 0xF0000
+SPACE_INDEX = re.compile("\ue003([\U000F0000-\U000FFFFD])")
+SPACE_CHARACTERS = re.compile("[\ue002\ue003\U000F0000-\U000FFFFD]")
+SPACE_BEFORE_POINTS = re.compile(r'<a:spcBef>\s*<a:spcPts\s+val="(\d+)"')
+FIRST_LAST = re.compile(r'<a:bodyPr\b[^>]*?\sspcFirstLastPara="(?:1|true)"')
+BODY_PROPERTIES = re.compile(r"<a:bodyPr" + ATTRS + r"(/?)>")
 OMATH_PARA = re.compile(r"<m:oMathPara\b")
 TALL_MATH = re.compile(r"<m:(?:f|nary|eqArr|m)\b")
 SPACE_BEFORE = re.compile(r"<a:spcBef>.*?</a:spcBef>", re.S)
@@ -1055,28 +1081,41 @@ def _paragraph_properties(inner):
 
 
 def _unspaced(inner):
-    """A paragraph's insides (what <a:p> holds) without SPACE_MARK, a run
-    of its text or of an equation that held nothing else taken out with
-    it."""
+    """A paragraph's insides (what <a:p> holds) without the marks
+    deck-pptx.lua puts in (SPACE_CHARACTERS), a run of its text or of an
+    equation that held nothing else taken out with it."""
     def run(match):
-        if SPACE_MARK not in match.group(0):
+        if not SPACE_CHARACTERS.search(match.group(0)):
             return match.group(0)
-        text = match.group(0).replace(SPACE_MARK, "")
+        text = SPACE_CHARACTERS.sub("", match.group(0))
         return "" if EMPTY_RUN.fullmatch(text) or EMPTY_MATH_RUN.fullmatch(text) else text
-    inner = RUN.sub(run, inner)
-    return MATH_RUN.sub(run, inner).replace(SPACE_MARK, "")
+    return MATH_RUN.sub(run, RUN.sub(run, inner))
+
+
+def _space_now(inner, levels):
+    """The space before a paragraph (what <a:p> holds) it has as it is, in
+    lines: its own, or its level's in levels (_merged's)."""
+    own = _paragraph_properties(inner)
+    attrs = PARAGRAPH_PROPERTIES.match(own).group(1) if own else ""
+    level = min(max(int(_attr_value(attrs, "lvl") or 0), 0), 8)
+    size, _margin, before = levels.get(level, (18, 0, 0))
+    percent = SPACE_BEFORE_PERCENT.search(own)
+    if percent:
+        return int(percent.group(1)) / 100000
+    points = SPACE_BEFORE_POINTS.search(own)
+    if points:
+        sizes = [int(v) / 100 for v in re.findall(r'<a:rPr\b[^>]*?\ssz="(\d+)"', inner)]
+        return int(points.group(1)) / 100 / (LINE * (max(sizes) if sizes else size))
+    return before
 
 
 def _space_before(inner, amount):
-    """A paragraph's insides (what <a:p> holds) with at least amount of
-    space before it, a spcPct value."""
+    """A paragraph's insides (what <a:p> holds) with amount of space before
+    it, a spcPct value, in place of any it had."""
     own = _paragraph_properties(inner)
     spacing = '<a:spcBef><a:spcPct val="%d"/></a:spcBef>' % amount
     if not own:
         return "<a:pPr>%s</a:pPr>" % spacing + inner
-    found = SPACE_BEFORE_PERCENT.search(own)
-    if found and int(found.group(1)) >= amount or SPACE_BEFORE.search(own) and not found:
-        return inner
     if SPACE_BEFORE.search(own):
         new = SPACE_BEFORE.sub(lambda _m: spacing, own, count=1)
     elif own.endswith("/>"):
@@ -1089,28 +1128,58 @@ def _space_before(inner, amount):
     return new + inner[len(own):]
 
 
-def display_spacing(xml, counts):
-    """A slide whose paragraphs deck-pptx.lua marked, its display equations
-    and the paragraphs after them, have DISPLAY_SPACE before them, their
-    marks taken out, as is any mark elsewhere; but the first paragraph of a
-    shape's text, which has no text above it to be set off from, as a
-    display equation has after a slide's title or where a slide is cut.
-    counts["displays"] counts the equations given space."""
+def _space_amount(spaces, character):
+    """The lines the deck's space a mark's character names (U+F0001 the
+    first of spaces) gives, or none."""
+    n = ord(character) - SPACE_BASE
+    return float(spaces[n - 1]) if 1 <= n <= len(spaces) else 0.0
+
+
+def paragraph_spacing(xml, counts, spaces=(), levels=None):
+    """A slide whose paragraphs deck-pptx.lua marked, each given the space
+    before it the marks call for (see DISPLAY_SPACE), the marks taken out,
+    as is any mark elsewhere: a display equation, and the paragraph after
+    one, DISPLAY_SPACE, but the first paragraph of a shape's text, which
+    has no text above it to be set off from, as a display equation has
+    after a slide's title or where a slide is cut; and the deck's own space
+    added. spaces: record["spaces"]; levels: the master's body text's
+    (_merged's). counts["displays"] counts the equations given space,
+    counts["spaces"] the deck's spaces given."""
+    levels = levels or {}
+
     def body(match):
-        first = [True]
+        state = {"first": True, "respected": False}
 
         def paragraph(found):
-            inner, opening = found.group(1), first[0]
-            first[0] = False
-            if inner is None or SPACE_MARK not in inner:
+            inner, opening = found.group(1), state["first"]
+            state["first"] = False
+            if inner is None or not SPACE_CHARACTERS.search(inner):
                 return found.group(0)
+            shown = "".join(re.findall(r">([^<]*)<", ">" + inner + "<"))
+            given = [_space_amount(spaces, c) for c in SPACE_INDEX.findall(shown)]
+            set_off = SPACE_MARK in shown
+            start = found.group(0)[:found.start(1) - found.start()]
             inner = _unspaced(inner)
-            if not opening:
+            if opening and not given:
+                return start + inner + "</a:p>"
+            if set_off and not opening:
                 counts["displays"] += 1 if OMATH_PARA.search(inner) else 0
-                inner = _space_before(inner, DISPLAY_SPACE)
-            return found.group(0)[:found.start(1) - found.start()] + inner + "</a:p>"
-        return match.group(1) + PARAGRAPH.sub(paragraph, match.group(2)) + match.group(3)
-    return TEXT_BODY.sub(body, xml).replace(SPACE_MARK, "")
+            counts["spaces"] += len(given)
+            if opening:
+                state["respected"] = True
+                base = 0.0
+            elif set_off:
+                base = DISPLAY_SPACE / 100000
+            else:
+                base = _space_now(inner, levels)
+            amount = int(round(max(0.0, base + sum(given)) * 100000))
+            return start + _space_before(inner, amount) + "</a:p>"
+        inside = PARAGRAPH.sub(paragraph, match.group(2))
+        if state["respected"]:
+            inside = BODY_PROPERTIES.sub(lambda m: "<a:bodyPr%s%s>" % (
+                _set_attr(m.group(1), "spcFirstLastPara", "1"), m.group(2)), inside, count=1)
+        return match.group(1) + inside + match.group(3)
+    return SPACE_CHARACTERS.sub("", TEXT_BODY.sub(body, xml))
 
 
 def _autofit(piece, scale, reduction):
@@ -1509,7 +1578,7 @@ def finish(path, record, *, language, title, svgs=None, notes=None):
               "first_columns": 0, "table_captions": 0, "captions_taller": 0,
               "tables_fitted": 0, "tables_overflow": 0, "text_fitted": 0, "text_overflow": 0,
               "bars": 0, "math_fallbacks": 0, "ids": 0, "animations": 0, "repaired": 0,
-              "svgs": 0, "properties": 0, "displays": 0}
+              "svgs": 0, "properties": 0, "displays": 0, "spaces": 0}
     with zipfile.ZipFile(path) as zin:
         infos = zin.infolist()
         parts = {info.filename: zin.read(info.filename) for info in infos}
@@ -1524,6 +1593,8 @@ def finish(path, record, *, language, title, svgs=None, notes=None):
     master = next((text(n) for n in sorted(parts)
                    if re.match(r"ppt/slideMasters/slideMaster\d+\.xml$", n)), "")
     styles = text_styles(master)
+    body_levels = _merged(styles["body"])
+    spaces = record.get("spaces") or []
     size = styles["other"].get(0, (None,))[0] or 18
     # A caption the writer makes takes the body's size (createCaption's
     # placeholder index is the body's).
@@ -1560,7 +1631,7 @@ def finish(path, record, *, language, title, svgs=None, notes=None):
             xml, n = unique_ids(xml)
             counts["ids"] += n
             xml = animation_targets(xml, counts)
-            xml = display_spacing(xml, counts)
+            xml = paragraph_spacing(xml, counts, spaces, body_levels)
         xml = math_fallbacks(xml, counts)
         if language:
             xml, _ = relanguage(xml, language)

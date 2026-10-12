@@ -66,6 +66,10 @@
 --    around it has, and the paragraph after it too: each, but where the
 --    deck gives some of its own, is marked for pptxtarget.py to give half
 --    a line before it, as the page and the PDF set one off.
+-- 13. Vertical space the deck gives in raw LaTeX (\vspace, \bigskip, and
+--    the rest) is left out: each is taken out and its amount marked on the
+--    paragraph of text after it, for pptxtarget.py to add to the space
+--    before it, in proportion to the deck's PDF.
 --
 -- Copyright 2026 Robert Szarka
 --
@@ -97,7 +101,7 @@ local KEPT_DIVS = { 'notes', 'columns', 'column', 'incremental', 'nonincremental
 local record = {
   pictures = {}, tables = {}, inline_images = 0, pauses = 0, languages = 0,
   retargeted = 0, unlinked = 0, notes = 0, institute = false, cut = 0, added = 0,
-  continued = 0, column_blocks = 0,
+  continued = 0, column_blocks = 0, spaces = {},
 }
 local pictures, tables = 0, 0
 
@@ -183,12 +187,131 @@ end
 -- (fixDisplayMath, in Writers/Powerpoint.hs), and it, and the paragraph
 -- after it, marked with SPACE_MARK for pptxtarget.py to give space
 -- before, unless the deck gives it some there itself that the writer
--- keeps: an empty paragraph or a line break. Raw HTML or LaTeX, a \vspace
--- say, the writer leaves out, so it neither gives space nor stands between
--- an equation and the text around it. An equation's mark is the first
--- character of its TeX, which the writer would part from it as a
+-- keeps: an empty paragraph or a line break. Raw HTML or LaTeX the writer
+-- leaves out, so it stands between nothing. An equation's mark is the
+-- first character of its TeX, which the writer would part from it as a
 -- paragraph of its own; the paragraph's, its first inline.
 local SPACE_MARK = '\u{E002}'
+
+-- Vertical space the deck gives in raw LaTeX, which the writer leaves out:
+-- \vspace, \vspace*, \addvspace, \vskip, \smallskip, \medskip, and
+-- \bigskip, in a raw block of nothing else, or at the start or the end of
+-- a paragraph, taken out and given to the paragraph of text after it, as
+-- LaTeX puts it before what follows, in lines of the deck's PDF: ltx-talk
+-- sets 11-point text 13.6 points apart (size11.clo), so a line there is a
+-- line on the slide, and 1em about four fifths of one. The amount, in
+-- lines, goes in record.spaces, and the paragraph it's for is marked
+-- VSPACE_MARK and a character naming its place there (U+F0001 for the
+-- first), as SPACE_MARK marks one, for pptxtarget.py to add to the space
+-- before it. Space that stretches to fill (\vfill, \fill, \stretch), or
+-- anything else the commands above don't say, and space with no paragraph
+-- of text after it in the same list of blocks, before a picture, a table,
+-- or the end of a slide, the writer leaves out, and logs, as before.
+local VSPACE_MARK = '\u{E003}'
+local SPACE_BASE = 0xF0000
+local LATEX_LINE = 13.6
+local UNITS = {
+  pt = 1, bp = 72.27 / 72, px = 72.27 / 72, ['in'] = 72.27, cm = 72.27 / 2.54,
+  mm = 72.27 / 25.4, pc = 12, dd = 1238 / 1157, cc = 14856 / 1157, sp = 1 / 65536,
+  em = 10.95, ex = 4.71,
+}
+local LENGTHS = {
+  baselineskip = LATEX_LINE, normalbaselineskip = LATEX_LINE, smallskipamount = 3,
+  medskipamount = 6, bigskipamount = 12, jot = 3, parskip = LATEX_LINE / 2,
+}
+local SKIPS = { smallskip = 3, medskip = 6, bigskip = 12 }
+local TEX_FORMATS = { tex = true, latex = true, beamer = true }
+
+-- A length at the head of s, in points, and the rest of s: a number and a
+-- unit, a number and a named length, or a named length (\baselineskip);
+-- or nil when s doesn't begin with one, a length that stretches without
+-- end (1fill, \fill) among them.
+local function scan_length(s)
+  local sign, number, rest = s:match('^%s*([+-]?)%s*(%d*%.?%d*)%s*(.*)$')
+  if sign == nil then return nil end
+  local factor = tonumber(number)
+  if number ~= '' and factor == nil then return nil end
+  local value
+  local unit, after = rest:match('^(%a%a)(.*)$')
+  local name, tail = rest:match('^\\(%a+)(.*)$')
+  if factor and unit and UNITS[unit] and not after:match('^%a') then
+    value, rest = factor * UNITS[unit], after
+  elseif name and LENGTHS[name] then
+    value, rest = (factor or 1) * LENGTHS[name], tail
+  else
+    return nil
+  end
+  if sign == '-' then value = -value end
+  return value, rest
+end
+
+-- A glue at the head of s, its natural size in points, and the rest of
+-- s; or nil, as for a glue that stretches without end.
+local function scan_glue(s)
+  local natural, rest = scan_length(s)
+  if natural == nil then return nil end
+  for _, word in ipairs({ 'plus', 'minus' }) do
+    local after = rest:match('^%s*' .. word .. '%f[^%a](.*)$')
+    if after then
+      local part
+      part, rest = scan_length(after)
+      if part == nil then return nil end
+    end
+  end
+  return natural, rest
+end
+
+-- The vertical space a piece of raw LaTeX gives, in points, when it holds
+-- nothing but the commands above; nil otherwise.
+local function raw_space(text)
+  local s = text:gsub('%%[^\n]*', ''):gsub('^%s+', '')
+  local total, found = 0, false
+  while s ~= '' do
+    local name, rest = s:match('^\\(%a+)%*?(.*)$')
+    if name == nil then return nil end
+    if SKIPS[name] then
+      total, s = total + SKIPS[name], rest
+    elseif name == 'vspace' or name == 'addvspace' then
+      local argument, after = rest:match('^%s*(%b{})(.*)$')
+      if argument == nil then return nil end
+      local natural, left = scan_glue(argument:sub(2, -2))
+      if natural == nil or left:match('%S') then return nil end
+      total, s = total + natural, after
+    elseif name == 'vskip' then
+      local natural, left = scan_glue(rest)
+      if natural == nil then return nil end
+      total, s = total + natural, left
+    else
+      return nil
+    end
+    found = true
+    s = s:gsub('^%s+', '')
+  end
+  if not found then return nil end
+  return total
+end
+
+-- The space raw LaTeX inlines give, from inlines[from] stepping by step
+-- while they're spaces or raw LaTeX of vertical space alone: (points, how
+-- many inlines that is) or nil, when there's none.
+local function edge_space(inlines, from, step)
+  local total, count, found = 0, 0, false
+  local k = from
+  while inlines[k] ~= nil do
+    local inline = inlines[k]
+    if inline.t == 'RawInline' and TEX_FORMATS[inline.format] then
+      local points = raw_space(inline.text)
+      if points == nil then break end
+      total, found = total + points, true
+    elseif not (inline.t == 'Space' or inline.t == 'SoftBreak') then
+      break
+    end
+    count = count + 1
+    k = k + step
+  end
+  if not found then return nil end
+  return total, count
+end
 
 local function is_display(inline)
   return inline.t == 'Math' and inline.mathtype == 'DisplayMath'
@@ -281,11 +404,123 @@ local function neighbor(list, k, step)
   return j, list[j]
 end
 
+-- Where the space before a block goes in PowerPoint: the first
+-- paragraph of text it makes, as the display equation its TeX opens
+-- ("math") or the inlines a paragraph opens ("inlines"); nil for a block
+-- that makes no text there, a picture, a table, a slide's columns, or a
+-- heading that begins a slide.
+local function space_target(block)
+  if block == nil then return nil end
+  if textual(block) then
+    if opening_image(block) then return nil end
+    if display_alone(block) then
+      for _, inline in ipairs(block.content) do
+        if is_display(inline) then return 'math', inline end
+      end
+    end
+    return 'inlines', block.content
+  end
+  if block.t == 'Header' and LEVEL ~= nil and block.level > LEVEL then
+    return 'inlines', block.content
+  end
+  if (block.t == 'BulletList' or block.t == 'OrderedList') and #block.content > 0 then
+    return space_target(block.content[1][1])
+  end
+  if block.t == 'BlockQuote' then return space_target(block.content[1]) end
+  if block.t == 'Div' and (block.classes:includes('incremental')
+      or block.classes:includes('nonincremental')) then
+    return space_target(block.content[1])
+  end
+  return nil
+end
+
+-- A paragraph of nothing but the deck's vertical space, in raw LaTeX.
+local function space_paragraph(block)
+  if not textual(block) or #block.content == 0 then return false end
+  local _, count = edge_space(block.content, 1, 1)
+  return count == #block.content
+end
+
+-- The block after k that the writer writes, past raw HTML or LaTeX and
+-- paragraphs of vertical space alone.
+local function written_after(list, k)
+  local j = k + 1
+  while list[j] ~= nil and (list[j].t == 'RawBlock' or space_paragraph(list[j])) do
+    j = j + 1
+  end
+  return list[j]
+end
+
+-- The deck's vertical space (raw_space) taken out of list and summed up
+-- for the block it comes before: (the blocks left, {index there: points}).
+-- A raw block of space with nothing after it to take it is put back, for
+-- the writer to leave out.
+local function deck_space(list)
+  local out, given = pandoc.Blocks({}), {}
+  local held, amount = {}, 0
+  for k, block in ipairs(list) do
+    local points
+    if block.t == 'RawBlock' and TEX_FORMATS[block.format] then
+      points = raw_space(block.text)
+    elseif space_paragraph(block) then
+      points = edge_space(block.content, 1, 1)
+    end
+    if points ~= nil then
+      table.insert(held, block)
+      amount = amount + points
+    elseif block.t == 'RawBlock' then
+      out:insert(block)
+    else
+      if textual(block) and space_target(block) then
+        local lead, count = edge_space(block.content, 1, 1)
+        if lead ~= nil then
+          for _ = 1, count do block.content:remove(1) end
+          amount = amount + lead
+        end
+      end
+      if #held > 0 or amount ~= 0 then
+        if space_target(block) then
+          given[#out + 1] = amount
+        else
+          out:extend(held)
+        end
+      end
+      held, amount = {}, 0
+      out:insert(block)
+      if textual(block) and #block.content > 0 and space_target(written_after(list, k)) then
+        local trail, count = edge_space(block.content, #block.content, -1)
+        if trail ~= nil and count < #block.content then
+          for _ = 1, count do block.content:remove(#block.content) end
+          amount = trail
+        end
+      end
+    end
+  end
+  out:extend(held)
+  return out, given
+end
+
+-- The deck's space marked on the block that takes it: its amount, in
+-- lines, put in record.spaces.
+local function mark_space(block, points)
+  local kind, target = space_target(block)
+  if kind == nil then return end
+  table.insert(record.spaces, points / LATEX_LINE)
+  local mark = VSPACE_MARK .. utf8.char(SPACE_BASE + #record.spaces)
+  if kind == 'math' then
+    target.text = mark .. target.text
+  else
+    target:insert(1, pandoc.Str(mark))
+  end
+end
+
 local function space_displays(blocks)
   local list = pandoc.Blocks({})
   for _, block in ipairs(blocks) do
     if textual(block) then list:extend(split_displays(block)) else list:insert(block) end
   end
+  local given
+  list, given = deck_space(list)
   local marks = {}
   for k, block in ipairs(list) do
     if display_alone(block) then
@@ -314,6 +549,7 @@ local function space_displays(blocks)
     end
     if not marked then list[k].content:insert(1, pandoc.Str(SPACE_MARK)) end
   end
+  for k, points in pairs(given) do mark_space(list[k], points) end
   return list
 end
 

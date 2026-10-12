@@ -13,14 +13,15 @@ output check and its findings are checked too.
 
 WHAT IS LOAD-BEARING HERE
 
-Each thing pdf-target.lua and build-pdf.py add to what Pandoc's LaTeX
-writer does has a check that fails without it: a declared header
-column tagged as row headers, a decorative image an artifact rather
-than a figure, every link's /Contents its visible text with any
-description after it and nothing left over for a link LaTeX makes on
-its own, the division commands written once each from the roles, the
-page the metadata file made given no heading, and every formula's
-MathML both as structure and as an attached file. The book is small
+Each thing pdf-target.lua, footnote-code.lua, and build-pdf.py add to
+what Pandoc's LaTeX writer does has a check that fails without it: a
+declared header column tagged as row headers, a decorative image an
+artifact rather than a figure, every link's /Contents its visible text
+with any description after it and nothing left over for a link LaTeX
+makes on its own, the division commands written once each from the
+roles, the page the metadata file made given no heading, every
+formula's MathML both as structure and as an attached file, and a code
+block in a footnote set in its note. The book is small
 because a LaTeX run is slow; it holds one of each thing, and two of the
 things that come in kinds.
 
@@ -181,6 +182,21 @@ Highlighted code, whose spaces were lost beside a colored word:
 def demand(p):
     return 12 - 2 * p > 0
 ```
+
+And code in a footnote, which LaTeX reads as the footnote's text.[^code]
+
+[^code]: Highlighted:
+
+    ```python
+    def supply(p):
+        return 2 * p  # 100%
+    ```
+
+    And not, which is LaTeX's own verbatim:
+
+    ```
+    q   = 10
+    ```
 
 #### Deep
 
@@ -801,8 +817,16 @@ def checks(work, jobs=1):
     # (latexbuild.CODE_SPACES).
     items.append(("a highlighted code block's spaces are characters, its "
                   "indentation kept",
-                  lambda: pdftext.code_lines(pdf_path)[-2:]
+                  lambda: pdftext.code_lines(pdf_path)[-5:-3]
                   == ["def demand(p):", "    return 12 - 2 * p > 0"]))
+    # LaTeX's tagged footnote takes its text as an argument, where a code
+    # block's verbatim can't be read; footnote-code.lua writes each to a
+    # file of its own, read where it stood.
+    items.append(("a code block in a footnote is set in its note, highlighted or not, "
+                  "its lines and spaces kept",
+                  lambda: pdftext.code_lines(pdf_path)[-3:]
+                  == ["def supply(p):", "    return 2 * p  # 100%", "q   = 10"]
+                  and len(inside(tree, "/footnote", "/codeline")) == 3))
     return items
 
 

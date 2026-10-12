@@ -24,12 +24,16 @@ WHAT A PIECE IS
 
 Everything from a top-level heading of the chosen level or shallower up
 to the next one. The heading itself becomes the piece's title, the way
-promote_h1_to_title makes a source's H1 its page title, and its id is
-kept as an empty anchor at the top of the piece so links to the section
-still land. Body headings shift up so each piece starts its own
-structure at H2. Whatever precedes the first cut -- a chapter's own
-introduction -- is a piece of its own, named after the source and titled
-by it, unless it is empty.
+promote_h1_to_title makes a source's H1 its page title, its words the
+title and the heading as written (a footnote and all) the page's own
+H1, and its id is kept as an empty anchor at the top of the piece so
+links to the section still land. Body headings shift up so each piece
+starts its own structure at H2. Whatever precedes the first cut -- a
+chapter's own introduction -- is a piece of its own, named after the
+source and titled by it, unless it is empty. A deck (its slide level
+recorded) differs twice: a section or a slide in a div is cut too, as
+Pandoc's slide writers find them in one, and its headings stay at the
+deck's levels, which deck-html.lua places on each piece.
 
 STRUCTURE
 
@@ -40,7 +44,8 @@ metadata and in the page's <head> as <meta> elements, so the packager
 and the EPUB assembler group the pieces under their source and under
 their enclosing headings without being told. A heading with nothing of
 its own before the next cut is not a page; it survives as a group,
-through the provenance of the pages under it.
+through the provenance of the pages under it, unless it holds a
+footnote, which only its page would show.
 
 NAMES
 
@@ -116,6 +121,15 @@ def stringify(node):
 
 def heading_text(inlines):
     return " ".join(stringify(inlines).split())
+
+
+def holds_note(node):
+    """Whether inlines hold a footnote."""
+    if isinstance(node, dict):
+        return node.get("t") == "Note" or holds_note(node.get("c"))
+    if isinstance(node, list):
+        return any(holds_note(child) for child in node)
+    return False
 
 
 def meta_string(text):
@@ -304,6 +318,61 @@ def matter_marker(block):
     return None
 
 
+def is_cut(block, level):
+    """Whether a block is a heading the split cuts at: of the level or
+    shallower, with words in it. An empty heading is Word cruft, not a
+    section: it cuts nothing and is nobody's parent."""
+    return block.get("t") == "Header" and block["c"][0] <= level \
+        and bool(heading_text(block["c"][2]))
+
+
+def holds_cut(blocks, level):
+    """Whether blocks hold a heading the split cuts at, in a div or not."""
+    return any(is_cut(b, level) or b.get("t") == "Div" and holds_cut(b["c"][1], level)
+               for b in blocks)
+
+
+# A div's attributes that say how its words are read, which a heading
+# brought out of it keeps.
+READING = ("lang", "dir")
+
+
+def open_divs(blocks, level):
+    """A deck's blocks with each div that holds a heading the split cuts at
+    opened, as Pandoc's slide writers find a deck's sections and slides in
+    a div (a passage in another language around a section, say): each such
+    heading brought out to where the split finds it, its words in a span
+    with the div's language, and what's between them in copies of the div,
+    its id on the first."""
+    out = []
+    for block in blocks:
+        if block.get("t") != "Div" or not holds_cut(block["c"][1], level):
+            out.append(block)
+            continue
+        (identifier, classes, attributes), content = block["c"]
+        reading = [[k, v] for k, v in attributes if k in READING]
+        part = []
+
+        def close():
+            nonlocal identifier
+            if part:
+                out.append({"t": "Div", "c": [[identifier, classes, attributes], list(part)]})
+                identifier = ""
+                part.clear()
+
+        for inner in open_divs(content, level):
+            if is_cut(inner, level):
+                close()
+                if reading:
+                    inner = copy.deepcopy(inner)
+                    inner["c"][2] = [{"t": "Span", "c": [["", [], reading], inner["c"][2]]}]
+                out.append(inner)
+            else:
+                part.append(inner)
+        close()
+    return out
+
+
 def cut(blocks, level, initial=None):
     """[(heading block or None, parents, position, blocks, role)] in
     reading order, where parents are the titles of the cut headings
@@ -326,10 +395,7 @@ def cut(blocks, level, initial=None):
             role[0] = marker
         if block.get("t") == "Header" and "appendix" in block["c"][1][1]:
             role[0] = "appendix"      # {.appendix} on a heading
-        # An empty heading is Word cruft, not a section: it cuts nothing
-        # and is nobody's parent.
-        if block.get("t") == "Header" and block["c"][0] <= level \
-                and heading_text(block["c"][2]):
+        if is_cut(block, level):
             close()
             head, current = block, []
             own = block["c"][0]
@@ -357,8 +423,14 @@ def split_document(doc, stem, level, names, taken, problems):
 
     taken holds every page name in use across the run, so a sidecar
     cannot give two pieces of different sources one name."""
-    parts = cut(doc["blocks"], level,
-                meta_text(doc.get("meta", {}), "page-role") or None)
+    # A deck, whose slide level decks.py recorded: its sections and slides
+    # are found in divs, as Pandoc's slide writers find them, and its
+    # headings are left at the deck's levels, which deck-html.lua places
+    # on each piece as on the whole deck's page, a slide's block below the
+    # slide, and a block with no title no heading.
+    deck = "deck-slide-level" in doc.get("meta", {})
+    blocks = open_divs(doc["blocks"], level) if deck else doc["blocks"]
+    parts = cut(blocks, level, meta_text(doc.get("meta", {}), "page-role") or None)
     if len(parts) <= 1 and (not parts or parts[0][0] is None):
         return []                       # nothing at that level to cut at
     source_title = meta_text(doc.get("meta", {}), "title") \
@@ -376,10 +448,13 @@ def split_document(doc, stem, level, names, taken, problems):
         else:
             title = heading_text(head["c"][2])
             # A heading with nothing of its own before the next cut is a
-            # group, not a page; the pages under it carry it as a parent.
+            # group, not a page; the pages under it carry it as a parent. A
+            # footnote in it is its own, which only its page would show, as
+            # a deck's PDF shows a section's on the section's slide.
             following = parts[n + 1] if n + 1 < len(parts) else None
             if not blocks and following and following[0] is not None \
-                    and following[1][:len(parents) + 1] == parents + [title]:
+                    and following[1][:len(parents) + 1] == parents + [title] \
+                    and not holds_note(head["c"][2]):
                 # A link to the heading -- a Word TOC's, say -- should
                 # land on the first page under it, so its id goes there.
                 if head["c"][1][0]:
@@ -419,15 +494,16 @@ def split_document(doc, stem, level, names, taken, problems):
         taken.add(piece)
         paths[piece] = parents
         out.append((piece, title, key, parents, position, blocks,
-                    [a for a in pending + [anchor] if a], role))
+                    [a for a in pending + [anchor] if a], role, head))
         pending = []
 
     total = len(out)
     pieces = []
     for index, (piece, title, key, parents, position, blocks, anchors,
-                role) in enumerate(out, 1):
+                role, head) in enumerate(out, 1):
         body = copy.deepcopy(blocks)
-        shift_headers(body, level - 1)
+        if not deck:
+            shift_headers(body, level - 1)
         for anchor in reversed(anchors):
             body.insert(0, {"t": "Div", "c": [[anchor, [ANCHOR_CLASS], []],
                                               []]})
@@ -452,9 +528,12 @@ def split_document(doc, stem, level, names, taken, problems):
                                                     for i, w in enumerate(
                                                         interleave(title))]}
         # The piece's heading is its title heading: the HTML shows it as the
-        # piece's own H1 (target-blocks.lua), as a whole page's.
-        if piece != stem:
-            meta["title-heading"] = dict(meta["title"])
+        # piece's own H1 (target-blocks.lua), as a whole page's, as it was
+        # written, its footnote, its emphasis, and its formula with it,
+        # where the title, for the page's <title> and the contents, is its
+        # words.
+        if head is not None:
+            meta["title-heading"] = {"t": "MetaInlines", "c": copy.deepcopy(head["c"][2])}
         meta["source-page"] = meta_string(stem)
         meta["source-title"] = meta_string(source_title)
         meta["page-part"] = meta_string(f"{index}/{total}")

@@ -108,6 +108,7 @@ SOURCE_TARGETS = ("markdown", "asciidoc")
 TARGET_FILTER = os.path.join(HERE, "target-blocks.lua")
 DECK_HTML_FILTER = os.path.join(HERE, "deck-html.lua")
 DECK_PDF_FILTER = os.path.join(HERE, "deck-pdf.lua")
+FOOTNOTE_CODE_FILTER = os.path.join(HERE, "footnote-code.lua")
 DECK_PPTX_FILTER = os.path.join(HERE, "deck-pptx.lua")
 DECK_TEMPLATE = os.path.join(HERE, "ltx-talk.latex")
 PDF_TARGET_FILTER = os.path.join(HERE, "pdf-target.lua")
@@ -3574,9 +3575,11 @@ def deck_pdfs(target, stems, names, base, language):
             "PDF is written with the template of its own, ltx-talk.latex, and the deck's "
             "YAML.")
     standards = [str(s).strip() for s in (target["pdf.standard"] or []) if str(s).strip()]
-    # deck-pdf.lua before pdf-target.lua, which writes a table in a table's
-    # cell as LaTeX, its footnotes too, where deck-pdf.lua counts them.
-    filters = [TARGET_FILTER, DECK_PDF_FILTER, PDF_TARGET_FILTER]
+    # footnote-code.lua before deck-pdf.lua, which moves footnotes' texts
+    # where it would no longer find them; deck-pdf.lua before pdf-target.lua,
+    # which writes a table in a table's cell as LaTeX, its footnotes too,
+    # where deck-pdf.lua counts them.
+    filters = [TARGET_FILTER, FOOTNOTE_CODE_FILTER, DECK_PDF_FILTER, PDF_TARGET_FILTER]
     env = dict(os.environ, TARGET_NAME=target.name, TITLE_BLOCK=str(target["title_block"]))
     os.makedirs(target.output_dir, exist_ok=True)
 
@@ -3597,7 +3600,7 @@ def deck_pdfs(target, stems, names, base, language):
         results = list(pool.map(one, stems))
     written, failed, pages, missing, dropped, ratios = [], [], 0, {}, [], {}
     unmatched, beamer, one_level, unlinked, untagged_blocks = [], {}, [], [], []
-    untied, step_links = {}, {}
+    untied, step_links, unsettled = {}, {}, []
     for stem, result in results:
         for command in result["beamer_commands"]:
             beamer.setdefault(command, []).append(stem)
@@ -3633,6 +3636,8 @@ def deck_pdfs(target, stems, names, base, language):
                 dropped.append(option)
         if result["retag"] is not None and not result["retag"]["matched"]:
             unmatched.append(stem)
+        if result["unsettled"]:
+            unsettled.append(stem)
         if not result["own_levels"]:
             one_level.append(stem)
         if not result["linked_marks"]:
@@ -3689,6 +3694,12 @@ def deck_pdfs(target, stems, names, base, language):
             + ", ".join(list(untied)[:4]) + ") aren't tied to their notes by a /Ref each "
             "way, as PDF/UA-2 asks of a footnote (8.2.5.14), as bin/ltx-talk.latex ties them "
             "with LaTeX 2026-06-01's footnote code.")
+    if unsettled:
+        say(f"WARNING: in {len(unsettled)} deck PDF(s) (" + ", ".join(unsettled[:4])
+            + (", ..." if len(unsettled) > 4 else "") + "), LaTeX's cross-references were "
+            f"still changing after {decklib.LATEX_RUNS} runs of LuaLaTeX, the most it's "
+            "given, so a footnote mark's link, or a link within the deck, may go to the wrong "
+            "page; check those links in the PDF.")
     if unmatched:
         say(f"WARNING: the tables in {len(unmatched)} deck PDF(s) ("
             + ", ".join(unmatched[:4]) + ") don't line up with the decks' own, so no "

@@ -346,6 +346,13 @@ end
 local PDF_TARGET = pandoc.path.join({ pandoc.path.directory(PANDOC_SCRIPT_FILE),
                                       'pdf-target.lua' })
 
+-- Whether a section's footnotes hold highlighted code (fancyvrb's \VERB),
+-- whose macros the writer gives only a deck with highlighted code in it,
+-- and the footnotes are written apart from the deck: if so, the deck is
+-- given them (slides). A code block in a footnote is already read from a
+-- file of its own (footnote-code.lua), the writer highlighting it there.
+local highlighted = false
+
 -- A section's footnotes, which the section's slide sets after its
 -- heading (the template's \oersectionnotes), as LaTeX, in the language of
 -- a div holding the section (lang), passages in other languages tagged,
@@ -357,8 +364,19 @@ local function section_notes(texts, lang)
                                          Div = div_language })
   doc = pandoc.utils.run_lua_filter(doc, PDF_TARGET)
   local latex = pandoc.write(doc, 'latex')
+  highlighted = highlighted or latex:find('\\VERB', 1, true) ~= nil
   latex = latex:gsub('%s+$', ''):gsub('\n%s*\n+', '\\endgraf\n')
   return pandoc.RawInline('latex', '\\oersectionnotes{' .. latex .. '}')
+end
+
+-- Pandoc's highlighting macros, as the writer would give them a deck with
+-- highlighted code, for one whose only highlighted code is in a section's
+-- footnotes: the template variable, which the writer leaves as it's set.
+local function highlighting_macros()
+  local code = pandoc.Pandoc({ pandoc.Plain({ pandoc.Code('x', pandoc.Attr('', { 'c' })) }) })
+  local macros = pandoc.write(code, 'latex',
+    { template = pandoc.template.compile('$highlighting-macros$') })
+  return pandoc.MetaBlocks({ pandoc.RawBlock('latex', macros) })
 end
 
 local function heading_text(inlines)
@@ -412,6 +430,7 @@ local function slides(doc)
     return out
   end
   doc.blocks = walk(doc.blocks)
+  if highlighted then doc.meta['highlighting-macros'] = highlighting_macros() end
   return doc
 end
 

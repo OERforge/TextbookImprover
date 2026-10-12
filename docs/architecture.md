@@ -75,6 +75,7 @@ on another `bin/` script.
 | `build-epub.py` | Assembles the filtered intermediates into one EPUB3, ordered by `project.contents`, with accessibility claims computed from the build. |
 | `build-pdf.py` | Assembles the same way into one tagged PDF through Pandoc's LaTeX writer and LuaLaTeX: roles as division commands, the metadata file's YAML for the writer, and the macros `pdf-target.lua` uses. |
 | `pdf-target.lua` | What the LaTeX writer can't be told: a declared header column as row headers, a decorative image as an artifact, each link's `/Contents`, a cell spanning rows as `table/multirow`, a quotation in a table cell unwrapped, a table in a table cell written as a `tabular` with its head declared for tagging (as lines, only when a cell spans rows), and a footnote in a definition list's term moved to its definition. |
+| `footnote-code.lua` | When a PDF is written, a book's or a deck's: a code block in a footnote, which LaTeX's tagged footnote can't read as its text, written to a file of its own from the preamble and read where it stood. |
 | `schema-conversion.yaml` | Declares every conversion setting, its type, default, and meaning. |
 
 **`bin/` — auditing**

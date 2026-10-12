@@ -21,7 +21,9 @@ project.contents generates is \\tableofcontents, where the entry sits.
 
 What the writer can't be told -- row headers, decorative images, a
 link's /Contents -- is pdf-target.lua's job, with the macros it needs
-written into the header here. A source's own division commands, read
+written into the header here; a code block in a footnote, which LaTeX
+can't read as the footnote's text, is footnote-code.lua's. A source's
+own division commands, read
 into the roles when the book was converted, are dropped here, where the
 roles are written.
 
@@ -722,6 +724,7 @@ def build(base, name, resolved, keep, intermediates=None, latex_only=False,
         with open(book_json, "w", encoding="utf-8") as fh:
             json.dump(document, fh)
         filters = ["--lua-filter", os.path.join(HERE, "target-blocks.lua"),
+                   "--lua-filter", os.path.join(HERE, "footnote-code.lua"),
                    "--lua-filter", os.path.join(HERE, "pdf-target.lua")]
         environment = dict(os.environ, TARGET_NAME=name,
                            TITLE_BLOCK=str(resolved["title_block"]))
@@ -791,6 +794,7 @@ def write_latex(base, name, resolved, project, document, out_dir):
         with open(book_json, "w", encoding="utf-8") as fh:
             json.dump(document, fh)
         filters = ["--lua-filter", os.path.join(HERE, "target-blocks.lua"),
+                   "--lua-filter", os.path.join(HERE, "footnote-code.lua"),
                    "--lua-filter", os.path.join(HERE, "pdf-target.lua")]
         environment = dict(os.environ, TARGET_NAME=name,
                            TITLE_BLOCK=str(resolved["title_block"]))

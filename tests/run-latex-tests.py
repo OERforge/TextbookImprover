@@ -1619,8 +1619,9 @@ def case_latex_target(work):
                  '<circle cx="20" cy="20" r="15" fill="black"/></svg>\n')
     with open(os.path.join(work, "one.md"), "w", encoding="utf-8") as fh:
         fh.write("# Shapes\n\nA square:\n\n![A gray square.](img/square.png)\n\n"
-                 "The area is $s^2$, and the next chapter has [circles](two.md#circles).\n\n"
-                 "| Shape | Sides |\n|---|---|\n| Square | 4 |\n| Triangle | 3 |\n")
+                 "The area is $s^2$,[^area] and the next chapter has [circles](two.md#circles).\n\n"
+                 "| Shape | Sides |\n|---|---|\n| Square | 4 |\n| Triangle | 3 |\n\n"
+                 "[^area]: Computed so:\n\n    ```\n    area = s * s\n    ```\n")
     with open(os.path.join(work, "two.md"), "w", encoding="utf-8") as fh:
         fh.write("# Circles {#circles}\n\n![A black circle.](img/circle.svg)\n\n"
                  "Its area is $\\pi r^2$.\n\n1. Draw it.\n2. Measure it.\n\n"
@@ -1746,6 +1747,12 @@ def case_latex_target(work):
          and "A & B & A and B \\\\\n\\hline\n" in two and "T & F & F \\\\" in two),
         ("what the PDF target's filter writes is there too: a link's /Contents",
          lambda: "\\OERLinkContents{" in one and "\\OERLinkContents" in master),
+        # LaTeX's tagged footnote can't read a code block's verbatim as its
+        # text (footnote-code.lua); read back, Pandoc's reader takes the file
+        # the preamble writes.
+        ("and a code block in a footnote, read from a file the master's preamble writes",
+         lambda: "\\OERCodeFile{oer-code-1.tex}" in one
+         and "\\begin{filecontents*}[overwrite]{oer-code-1.tex}" in master),
         ("read back as a LaTeX source, each chapter gives the same page", round_trip),
         ("it builds with latexmk and LuaLaTeX", builds),
     ]

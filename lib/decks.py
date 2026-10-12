@@ -705,6 +705,9 @@ def ltx_talk_problem():
 # LaTeX caught in a loop, as ltx-talk 0.6.9 is by a \footnotetext the
 # template hadn't fixed, never finishes.
 LATEX_TIMEOUT = 300
+# How many times LuaLaTeX may run on a deck: twice at least, and again
+# while the log asks for it or the .aux changes, up to this.
+LATEX_RUNS = 4
 # beamer's commands a deck's header-includes may give, which ltx-talk
 # hasn't: the template makes them do nothing, and the run names them.
 BEAMER_COMMANDS = re.compile(
@@ -902,13 +905,14 @@ def build_pdf(intermediate, base, out_pdf, *, template, filters, language,
     beamer writer with template and filters, talkified, and built by
     LuaLaTeX in a folder of its own, at least twice (ltx-talk's first run
     leaves a placeholder page) and again while the log asks for it or the
-    .aux file changed, up to four times, each run stopped after
+    .aux file changed, up to LATEX_RUNS times (unsettled: still asking, or
+    changed, after the last), each run stopped after
     LATEX_TIMEOUT seconds; then the
     tables' captions retagged and the empty paragraph elements taken out,
     as for a book's PDF. title names the PDF when the deck has none. keep:
     a folder the LaTeX is copied to. An SVG that can't be made a PDF stops
     it before LaTeX, which can't show one. Returns a dict: ok, pages, log
-    (the last run's), timeout (LaTeX stopped), ratio and why, level, frame
+    (the last run's), timeout (LaTeX stopped), unsettled, ratio and why, level, frame
     tag, whether each slide's title was tagged at its own level, talkify's
     counts, the SVGs that couldn't be converted and why, the beamer
     commands header-includes gives, and the repairs' counts."""
@@ -919,8 +923,8 @@ def build_pdf(intermediate, base, out_pdf, *, template, filters, language,
     if level is None:
         level = slide_level(doc.get("blocks", []))
     shape, why = aspect_ratio(meta, ratio)
-    result = {"ok": False, "pages": 0, "log": "", "timeout": False, "ratio": shape,
-              "ratio_why": why, "level": level, "tag": None, "own_levels": True,
+    result = {"ok": False, "pages": 0, "log": "", "timeout": False, "unsettled": False,
+              "ratio": shape, "ratio_why": why, "level": level, "tag": None, "own_levels": True,
               "linked_marks": True, "block_headings": True, "tidied": None,
               "talkify": None, "svg_failed": [], "retag": None, "paragraphs": None,
               "beamer_commands": sorted(set(BEAMER_COMMANDS.findall(
@@ -981,7 +985,8 @@ def build_pdf(intermediate, base, out_pdf, *, template, filters, language,
                 os.path.basename(out_pdf))[0] + ".tex"))
         log_path = os.path.join(work, "deck.log")
         aux_path, aux = os.path.join(work, "deck.aux"), None
-        for run in range(1, 5):
+        result["unsettled"] = True
+        for run in range(1, LATEX_RUNS + 1):
             try:
                 done = subprocess.run(
                     [latexbuild.ENGINE, "-interaction=nonstopmode", "-halt-on-error",
@@ -1010,6 +1015,7 @@ def build_pdf(intermediate, base, out_pdf, *, template, filters, language,
                 with open(aux_path, encoding="utf-8", errors="replace") as fh:
                     aux = fh.read()
             if run >= 2 and not RERUN.search(log) and aux == previous:
+                result["unsettled"] = False
                 break
         result["own_levels"] = ONE_LEVEL not in result["log"]
         result["linked_marks"] = UNLINKED not in result["log"]

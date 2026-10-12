@@ -14,8 +14,9 @@ convert.py sends it, and is cut from the filtered intermediate.
 WHAT IS LOAD-BEARING HERE
 
 A piece is the content between two cut headings, titled by the first,
-with its own headings one level up and the cut heading's id kept as an
-anchor. Names come from headings unless the sidecar says otherwise, and
+its heading as written (its emphasis, formula, and footnote, which
+makes a heading with nothing else of its own a page), with its own
+headings one level up and the cut heading's id kept as an anchor. Names come from headings unless the sidecar says otherwise, and
 a sidecar row that matches nothing is reported. Links between pieces are
 rewritten to the piece the target moved to and links within a piece are
 left alone. Every piece says where it came from, and both the packager
@@ -282,6 +283,31 @@ def case_document_meta(work):
          "page is, which are the source's own page's",
          lambda: not any(k in typed_piece.get("meta", {}) for k in ("page-type", "title-id"))
          and typed_own.get("meta", {}).get("page-type", {}).get("c") == "glossary"),
+    ]
+
+
+def case_heading_as_written(work):
+    """A cut heading is its page's heading as it was written: its
+    emphasis, its formula, and its footnote, which only its page shows,
+    so a heading with nothing else of its own is a page for it."""
+    os.makedirs(work, exist_ok=True)
+    with open(os.path.join(work, "book.md"), "w", encoding="utf-8") as fh:
+        fh.write("# One[^1]\n\n## *Stressed* and $x^2$\n\nText.\n\n"
+                 "# Two\n\n## Under Two\n\nMore.\n\n[^1]: A note on the first part.\n")
+    run(["pandoc", "book.md", "-t", "json", "-o", "book.filtered.json"], work)
+    out = Pieces(work, split(work, [os.path.join(work, "book.filtered.json")]))
+
+    def heading(stem):
+        return out.docs.get(stem, {}).get("meta", {}).get("title-heading", {}).get("c", [])
+    kinds = lambda stem: [i["t"] for i in heading(stem)]  # noqa: E731
+    return [
+        ("a cut heading's page has it as written, its emphasis and its formula",
+         lambda: "Emph" in kinds("book--stressed-and-x-2") and "Math" in kinds("book--stressed-and-x-2")
+         and out.title("book--stressed-and-x-2") == "Stressed and x^2"),
+        ("and its footnote, a heading with nothing else of its own a page for it, one"
+         " without a group still",
+         lambda: out.stems == ["book--one", "book--stressed-and-x-2", "book--under-two"]
+         and "Note" in kinds("book--one") and '"part."' in out.text("book--one")),
     ]
 
 
@@ -604,6 +630,7 @@ def case_restyle(work):
 CASES = [
     ("restyling a Title-styled source", case_restyle),
     ("what a piece is", case_pieces),
+    ("a cut heading as it was written", case_heading_as_written),
     ("document metadata stays on the document", case_document_meta),
     ("the page-names sidecar", case_names),
     ("levels and refusals", case_levels),

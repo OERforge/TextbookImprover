@@ -40,6 +40,7 @@ import html
 import json
 import os
 import re
+import shlex
 import shutil
 import struct
 import subprocess
@@ -570,6 +571,70 @@ Text.
 [^m]: La note du mot.
 """
 
+# Code in footnotes, which LaTeX's footnote reads as an argument, where a
+# code block's verbatim can't be read: a section's footnote with the
+# deck's only highlighted code, inline, and a code block of LaTeX's own
+# verbatim in it, in a slide's, and in a block's title's; and the deck's
+# own header-includes, which the code's files join.
+CODE_NOTES = r"""---
+title: Code in Notes
+header-includes: \hypersetup{pdfsubject={Code in notes}}
+---
+
+# Costs[^s]
+
+## Marginal Cost
+
+Where it turns up.[^m]
+
+#### A Block[^b]
+
+Its text.
+
+[^s]: Computed by `mc(q)`{.python}, and tabled:
+
+    ```
+    q   mc
+    ```
+[^m]: As a rule:
+
+    ```
+    mc  = 2 * q
+    ```
+[^b]: And its total:
+
+    ```
+    tc  = q * q  % of all
+    ```
+"""
+
+# Highlighted code blocks in a section's footnote and a slide's, and
+# header-includes as a list.
+SHADED_NOTES = r"""---
+title: Highlighted Notes
+header-includes:
+- \hypersetup{pdfkeywords={notes, code}}
+---
+
+# Revenue[^r]
+
+## Marginal Revenue
+
+Where it falls.[^f]
+
+[^r]: The function:
+
+    ```python
+    def mr(q):
+        return 12 - 2 * q  # 100%
+    ```
+[^f]: Its slope:
+
+    ```python
+    slope = -2
+    ```
+"""
+
 # What beamer and LaTeX's other classes read and ltx-talk didn't: a
 # footnote in a caption, a table, and a slide's title, struck text, a
 # passage in another language, code that shows a frame, a frame option
@@ -1056,19 +1121,75 @@ targets:
 """
 
 
+# A section and its slide in a div in a div, a passage in German with an
+# id around an incremental one, with a sentence before the section.
+DIVIDED = """---
+title: Divided
+---
+
+# Part One
+
+## First Slide
+
+Text.
+
+::: {#german lang=de}
+Noch ein Satz.
+
+::: incremental
+# Teil Zwei
+
+## Zweite Folie
+
+- Ein Punkt
+:::
+:::
+"""
+
+
 def case_split(work):
-    work = folder(work, SPLIT, decks_given={"sectioned.md": SECTIONED})
+    work = folder(work, SPLIT, decks_given={"sectioned.md": SECTIONED, "langs.md": LANGS,
+                                            "divided.md": DIVIDED})
     result = convert(work, "--quick")
     split = os.path.join(work, "split")
-    piece = read(os.path.join(split, "sectioned--a-footnote.html")) \
-        if os.path.exists(os.path.join(split, "sectioned--a-footnote.html")) else ""
+
+    def page(name):
+        path = os.path.join(split, name + ".html")
+        return html.unescape(read(path)) if os.path.exists(path) else ""
+    piece = page("sectioned--a-footnote")
     bare = read(os.path.join(work, "bare", "sectioned.html"))
     return [
         ("pages.split_level cuts a deck into a page per slide, its sections groups",
          lambda: result.returncode == 0 and sorted(
              n for n in os.listdir(split) if n.endswith(".html")) == [
+             "divided--first-slide.html", "divided--zweite-folie.html",
+             "langs--a-mot-slide.html", "langs--eine-folie.html", "langs--ohne-titel.html",
+             "langs--teil-zwei.html", "langs--zweite-folie.html",
              "sectioned--a-footnote.html", "sectioned--opening.html",
              "sectioned--some-code.html"]),
+        # Pandoc's slide writers find a deck's sections and slides in a div,
+        # and the split had found them only outside one.
+        ("a slide in a passage in another language is cut there, its title in it",
+         lambda: page("langs--zweite-folie").count('<h1><span lang="de">Zweite Folie') == 1),
+        ("in a div in a div too, what's around it in copies of both, the id on the first",
+         lambda: '<div id="german" lang="de">\n<p>Noch ein Satz.</p>' in page("divided--first-slide")
+         and '<h1><span lang="de">Zweite Folie</span></h1>' in page("divided--zweite-folie")
+         and re.search(r'<div lang="de">\s*<div class="incremental">\s*<ul[^>]*>\s*<li>Ein Punkt',
+                       page("divided--zweite-folie"))
+         and 'id="german"' not in page("divided--zweite-folie")),
+        ("and its section, a group, is a page of its own for the footnote in its heading,"
+         " which no page had shown",
+         lambda: '<h1><span lang="de">Teil Zwei' in page("langs--teil-zwei")
+         and "Die Fußnote des Teils." in page("langs--teil-zwei")),
+        # The split had moved a deck's headings up a level, and deck-html.lua
+        # took a block's title for a slide's, a block with no title an
+        # empty heading.
+        ("a block's title on a slide's page is one below the slide's, and a block with"
+         " no title is no heading, as on the whole deck's page",
+         lambda: [level for level, _ in headings(page("langs--zweite-folie"))] == [1, 2, 2]
+         and [level for level, _ in headings(page("langs--ohne-titel"))] == [1, 2]
+         and not re.search(r"<h[1-6][^>]*>\s*</h[1-6]>",
+                           "".join(page(n[:-5]) for n in os.listdir(split)))),
         ("a slide's page is headed by its title, as its H1",
          lambda: headings(piece)[:1] == [(1, "A Footnote")]),
         ("notes: visible opens the disclosure, under the label given",
@@ -1359,6 +1480,14 @@ def refs(element):
     return list(named) if isinstance(named, pikepdf.Array) else [named]
 
 
+def document_info(path, key):
+    """A value of the PDF's document information dictionary, as text, or
+    None; read while the file is open, as pikepdf's objects need."""
+    with pikepdf.open(path) as pdf:
+        value = pdf.docinfo.get(key)
+        return None if value is None else str(value)
+
+
 def footnote_ties(path, linked=True):
     """(marks, untied, unlinked, notes_before, dangling): the footnote marks
     LaTeX tags, those without a /Ref to a note that refers back, those not
@@ -1615,7 +1744,8 @@ def case_pdf(work):
     work = folder(work, PDF, decks_given={
         "Flat Deck.md": FLAT, "untitled.md": UNTITLED, "agenda.md": AGENDA, "odd.md": ODD,
         "nested.md": NESTED, "more.md": MORE, "subsections.md": SUBSECTIONS,
-        "headings.md": HEADINGS, "langs.md": LANGS,
+        "headings.md": HEADINGS, "langs.md": LANGS, "code-notes.md": CODE_NOTES,
+        "shaded-notes.md": SHADED_NOTES,
         "sectioned.md": SECTIONED.replace("Right.", "![A dark bar](<img/a bar.svg>)" if svg
                                           else "Right.")})
     write(os.path.join(work, "img", "a bar.svg"), SVG)
@@ -1632,6 +1762,8 @@ def case_pdf(work):
     subsections = os.path.join(work, "pdf", "subsections.pdf")
     headings = os.path.join(work, "pdf", "headings.pdf")
     langs = os.path.join(work, "pdf", "langs.pdf")
+    code_notes = os.path.join(work, "pdf", "code-notes.pdf")
+    shaded_notes = os.path.join(work, "pdf", "shaded-notes.pdf")
     built = lambda: [os.path.join(work, "pdf", name)  # noqa: E731
                      for name in sorted(os.listdir(os.path.join(work, "pdf")))]
     check = rows_of(os.path.join(work, "output-check.csv"))
@@ -1644,9 +1776,10 @@ def case_pdf(work):
     checks = [
         ("a PDF of each deck, the whole deck however its pages are cut",
          lambda: result.returncode == 0 and sorted(os.listdir(os.path.join(work, "pdf"))) == [
-             "Flat-Deck.pdf", "agenda.pdf", "headings.pdf", "langs.pdf", "more.pdf", "nested.pdf",
-             "odd.pdf", "sectioned.pdf", "subsections.pdf", "untitled.pdf"]
-         and "Wrote 10 PDF(s)" in out),
+             "Flat-Deck.pdf", "agenda.pdf", "code-notes.pdf", "headings.pdf", "langs.pdf",
+             "more.pdf", "nested.pdf", "odd.pdf", "sectioned.pdf", "shaded-notes.pdf",
+             "subsections.pdf", "untitled.pdf"]
+         and "Wrote 12 PDF(s)" in out and "still changing" not in out),
         ("a slide's title is an H1, or an H2 in a section, and a section's an H1",
          lambda: levels(flat) == [1, 1, 1, 1] and levels(sectioned) == [1, 2, 2, 1, 2]),
         ("a slide before the first section is an H1, as a section is, and bookmarked"
@@ -1695,6 +1828,14 @@ def case_pdf(work):
          " slide, and no page has a heading for a block with no title, as no PDF has",
          lambda: piece_levels(os.path.join(work, "pages"), "headings") == levels(headings)
          and not [r for r in check if r[1] == "empty-heading"]),
+        # The split found a deck's sections and slides only outside a div, and
+        # a heading it cut lost its footnote, its title being its words alone.
+        ("and a section in a passage in another language is cut there, its pages' levels"
+         " the PDF's, and a section's footnote is on its page, as on the whole deck's",
+         lambda: piece_levels(os.path.join(work, "pages"), "langs") == levels(langs)
+         and os.path.exists(os.path.join(work, "pages", "langs--teil-zwei.html"))
+         and "Marginal revenue and marginal cost." in read(
+             os.path.join(work, "pages", "agenda--profit-mr-mc.html"))),
         ("a block's title is a heading one below its slide's",
          lambda: heading_elements(agenda)[3][0] == 3),
         ("every footnote's mark is a link to its note, the two tied by a /Ref each way,"
@@ -1816,6 +1957,24 @@ def case_pdf(work):
         ("a code block's spaces are characters in the PDF, its indentation kept",
          lambda: pdftext.code_lines(sectioned) == ["def demand(p):",
                                                    "    return 12 - 2 * p > 0"]),
+        # LaTeX's footnote takes its text as an argument, where a code
+        # block's verbatim can't be read (footnote-code.lua), and a
+        # section's footnotes are written apart from the deck, which had
+        # no highlighting macros for them (deck-pdf.lua).
+        ("a code block in a footnote is set in its note, a section's, a slide's, or a"
+         " block title's, highlighted or not, its lines and spaces kept",
+         lambda: pdftext.code_lines(code_notes) == ["q   mc", "mc  = 2 * q", "tc  = q * q  % of all"]
+         and pdftext.code_lines(shaded_notes) == ["def mr(q):", "    return 12 - 2 * q  # 100%",
+                                                  "slope = -2"]
+         and within(code_notes, "/Code", "/FENote") == ["/Code"] * 3
+         and within(shaded_notes, "/Code", "/FENote") == ["/Code"] * 2),
+        ("and highlighted code in a section's footnote, the deck's only, is set, and the"
+         " deck's own header-includes, one or a list, kept beside the code's files",
+         lambda: re.search(r"Computed by mc\(q\), and tabled", text_of(code_notes))
+         and footnote_ties(code_notes) == (3, 0, 0, 0, 0)
+         and footnote_ties(shaded_notes) == (2, 0, 0, 0, 0)
+         and document_info(code_notes, "/Subject") == "Code in notes"
+         and document_info(shaded_notes, "/Keywords") == "notes, code"),
         ("each heading's words, its footnote's mark not among them",
          lambda: heading_texts(headings) == [
              (1, "A List"), (2, "In an item"), (1, "A Table"), (2, "In a cell"),
@@ -2060,6 +2219,34 @@ def case_timeout(work):
         ("LaTeX that doesn't finish is stopped, and the result says so",
          lambda: result["timeout"] and not result["ok"]
          and not os.path.exists(os.path.join(work, "deck.pdf"))),
+    ]
+
+
+def case_unsettled(work):
+    """Cross-references that never settle: a deck built through a LuaLaTeX
+    that runs the real one and then changes the .aux, as a deck whose
+    labels move each run would."""
+    real = shutil.which("lualatex")
+    if not real or pdf_ready():
+        print(f"  skip  {pdf_ready() or 'lualatex not found'}; LaTeX's runs aren't checked")
+        return []
+    decks_dir = folder(os.path.join(work, "decks"), "targets:\n  pdf:\n    format: pdf\n",
+                       decks_given={"moving.md": "---\ntitle: Moving\n---\n\n# Slide\n\nText.\n"})
+    tools, runs = os.path.join(work, "tools"), os.path.join(work, "runs.log")
+    write(os.path.join(tools, "lualatex"),
+          f"#!/bin/sh\n{shlex.quote(real)} \"$@\"\nstatus=$?\n"
+          "if [ -f deck.aux ]; then echo \"% run $(date +%s%N)\" >> deck.aux; "
+          f"echo run >> {shlex.quote(runs)}; fi\nexit $status\n")
+    os.chmod(os.path.join(tools, "lualatex"), 0o755)
+    result = convert(decks_dir, "--quick",
+                     env=dict(os.environ, PATH=tools + os.pathsep + os.environ["PATH"]))
+    return [
+        ("LaTeX's cross-references still changing after its last run are warned of, the"
+         " deck named, its PDF written",
+         lambda: result.returncode == 0 and read(runs).count("run") == 4
+         and "WARNING: in 1 deck PDF(s) (moving), LaTeX's cross-references were still "
+             "changing after 4 runs of LuaLaTeX" in result.stderr
+         and os.path.exists(os.path.join(decks_dir, "pdf", "moving.pdf"))),
     ]
 
 
@@ -3034,6 +3221,7 @@ CASES = [("the pieces", case_pieces),
          ("the PDF's settings", case_pdf_settings),
          ("an SVG the PDF can't show", case_svg),
          ("LaTeX that doesn't finish", case_timeout),
+         ("LaTeX that doesn't settle", case_unsettled),
          ("the template's fallbacks", case_fallbacks),
          ("no LuaLaTeX", case_no_latex),
          ("a deck's PowerPoint file", case_pptx),

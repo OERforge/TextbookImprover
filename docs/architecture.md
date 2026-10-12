@@ -164,6 +164,9 @@ Beyond the Word-to-HTML translation, each page gets:
   declaration applied on its own. Where the bands each sit over their own
   header row, as in the cost tables of Economics 3e, each part keeps its
   own. `part-captions` in the sidecar overrides the composed captions.
+  A merged row with no row under it before the next band or the table's
+  end, a note across a table's foot, heads nothing and stays a row of
+  the table, whether inferred or named in `split-at`.
 - **Tables get the headers they were declared to have.** `table-headers.csv`
   says, per table, whether the headers are in the first row, the first
   column, both, or nowhere (see [Sidecar files](sidecars.md#sidecar-files)), and for a

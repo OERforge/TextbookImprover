@@ -1663,6 +1663,17 @@ local function split_table(tbl, bands, part_captions, apply, head_leads)
     for _, row in ipairs(body.body) do rows[#rows + 1] = row end
   end
 
+  -- A band with no row under it before the next band or the table's end
+  -- heads no part, and a part of no rows would take the band with it:
+  -- it stays a row of the table. Every row of a graphic organizer had
+  -- been guessed a group's header (the Writing Guide's Table 15.2), and
+  -- the whole table went.
+  for i, row in ipairs(rows) do
+    if is_band[row] and (rows[i + 1] == nil or is_band[rows[i + 1]]) then
+      is_band[row] = nil
+    end
+  end
+
   local segments, current, band_for = {}, {}, {}
   local pending_band = nil
   for _, row in ipairs(rows) do

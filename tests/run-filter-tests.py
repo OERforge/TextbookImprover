@@ -396,13 +396,33 @@ def case_split(work):
         hb.row([hb.cell("Unequal system"), hb.cell("Marx"), hb.cell("Inequality")]),
         hb.row([hb.cell("Power elite"), hb.cell("Mills"), hb.cell("Power")]),
     ])
+    # Not that shape: a graphic organizer whose every row repeats the same
+    # bold cell beside a bold name, the Writing Guide's Table 15.2. No
+    # row heads a group, and splitting at each lost the table whole.
+    criteria = [hb.row([hb.cell("Criterion %d" % n, bold=True),
+                        hb.cell("Research data and analysis", bold=True)])
+                for n in range(1, 5)]
+    organizer = hb.table(criteria)
+    # Nor is a note one cell across a table's foot a band: nothing under
+    # it, and the split had dropped it, the conclusion of Economics 3e's
+    # Table 11.1 ("Then the four-firm concentration ratio is ... = 40.").
+    noted = hb.table([
+        hb.row([hb.cell("Firm", bold=True), hb.cell("Share", bold=True)]),
+        hb.row([hb.cell("Smooth as Glass"), hb.cell("16%")]),
+        hb.row([hb.cell("Auto Glass Doctor"), hb.cell("10%")]),
+        hb.row([hb.cell("Source: a survey of shops", span=2)]),
+    ])
     os.makedirs(work, exist_ok=True)
     hb.docx(os.path.join(work, "banded.docx"),
             [hb.para("Table 7.14 Total cost with rising labor costs"), banded,
              hb.para("Prose between the tables, as there always is."),
              hb.para("Table 1.1 Report parts"), headed,
              hb.para("More prose."),
-             hb.para("Table 7.2 Theoretical perspectives"), grouped])
+             hb.para("Table 7.2 Theoretical perspectives"), grouped,
+             hb.para("And more."),
+             hb.para("Table 2.1 Organizational structure"), organizer,
+             hb.para("Last."),
+             hb.para("Table 11.1 Market shares"), noted])
 
     tool = os.path.join(BIN, "table-headers.py")
     resolved = os.path.join(work, "table-headers.json")
@@ -416,7 +436,33 @@ def case_split(work):
         new = list(csv.DictReader(fh))
     out = Converted(work, ["banded"], {"TABLE_HEADERS_RESOLVED": resolved})
     everything = out.tables("banded")
-    tables, headed_parts, grouped_parts = everything[:3], everything[3:5], everything[5:]
+    # And a person's split at rows with nothing between them: none heads a
+    # part, so none is a split, and every row stays.
+    declared_dir = os.path.join(work, "declared")
+    os.makedirs(declared_dir, exist_ok=True)
+    shutil.copy(os.path.join(work, "banded.docx"), declared_dir)
+    with open(os.path.join(declared_dir, "table-headers.csv"), "w",
+              newline="", encoding="utf-8") as fh:
+        writer = csv.writer(fh)
+        writer.writerow(["key", "headers", "split-at", "label"])
+        for row in new:
+            if row["label"] == "Table 2.1":
+                writer.writerow([row["key"], "none", "1,2,3,4", row["label"]])
+    declared_resolved = os.path.join(declared_dir, "table-headers.json")
+    subprocess.run([sys.executable, tool, "banded.docx",
+                    "--sidecar", os.path.join(declared_dir, "table-headers.csv"),
+                    "--new", os.path.join(declared_dir, "table-headers-new.csv"),
+                    "--report", os.path.join(declared_dir, "table-headers-report.csv"),
+                    "--resolved", declared_resolved],
+                   cwd=declared_dir, capture_output=True, text=True,
+                   stdin=subprocess.DEVNULL)
+    declared = Converted(declared_dir, ["banded"],
+                         {"TABLE_HEADERS_RESOLVED": declared_resolved})
+    declared_tables = declared.tables("banded")[7:8]
+    tables, headed_parts, grouped_parts = everything[:3], everything[3:5], everything[5:7]
+    organized, noted_out = everything[7:8], everything[8:]
+    organizer_new = [r for r in new if r["label"] == "Table 2.1"]
+    noted_new = [r for r in new if r["label"] == "Table 11.1"]
     headed_heads = [re.search(r"<thead>.*?</thead>", t, re.S) for t in headed_parts]
     grouped_heads = [re.search(r"<thead>.*?</thead>", t, re.S) for t in grouped_parts]
     grouped_new = [r for r in new if r["label"] == "Table 7.2"]
@@ -462,6 +508,22 @@ def case_split(work):
                  and "Table 7.2 Theoretical perspectives: Functionalism" in flat(grouped_parts[0])
                  and "Table 7.2 Theoretical perspectives: Conflict theory" in flat(grouped_parts[1])
                  and "Theorist" not in re.search(r"<caption>.*?</caption>", grouped_parts[0], re.S).group(0)),
+        ("rows that all repeat one bold cell beside a bold name aren't "
+         "groups' headers: no split is inferred",
+         lambda: organizer_new and organizer_new[0]["split-at"] == ""),
+        ("and the table keeps every row",
+         lambda: len(organized) == 1
+                 and all("Criterion %d" % n in organized[0] for n in range(1, 5))),
+        ("a note one cell across a table's foot isn't a band: no split is "
+         "inferred, and the table keeps it, captioned as it was",
+         lambda: noted_new and noted_new[0]["split-at"] == ""
+                 and len(noted_out) == 1 and "Source: a survey of shops" in noted_out[0]
+                 and "Part 1" not in noted_out[0]),
+        ("split where a person says, at rows with nothing between them, it "
+         "still keeps every row, none of them a split",
+         lambda: len(declared_tables) == 1
+                 and all("Criterion %d" % n in declared_tables[0]
+                         for n in range(1, 5))),
         ("with the table's caption and the band as each part's caption",
          lambda: len(headed_parts) == 2
                  and all("Table 1.1 Report parts:" in " ".join(

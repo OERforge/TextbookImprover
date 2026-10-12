@@ -1230,7 +1230,17 @@ def repeated_header_rows(grid):
              and len({id(c) for c in r}) > 1
              and looks_like_header_band(r)
              and tail(r) == tail(first) and r[0].text != first[0].text]
-    return [0] + later if later else []
+    if not later:
+        return []
+    rows = [0] + later
+    # Each heads a group of rows: one with nothing under it before the
+    # next, or at the table's end, names no group, and the shape isn't
+    # this one. The Writing Guide's Table 15.2, a graphic organizer, has
+    # a bold "Criterion N" beside the same bold list in every row.
+    if any(b - a < 2 for a, b in zip(rows, rows[1:])) \
+            or rows[-1] == len(grid) - 1:
+        return []
+    return rows
 
 
 def inferred_structure(grid):
@@ -1245,6 +1255,10 @@ def inferred_structure(grid):
     "Example A", then "Example B" at row 6, each with its own header row
     beneath. Written into the prefilled row so the plan is visible."""
     bands = band_rows(grid)
+    # A band with nothing under it before the next band or the table's
+    # end heads no rows, and the split keeps it a row of the table: a
+    # note one cell across a table's foot ("Source: …") isn't a band.
+    bands = [i for i in bands if i + 1 < len(grid) and i + 1 not in bands]
     if not bands:
         repeated = repeated_header_rows(grid)
         if repeated:

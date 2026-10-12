@@ -96,7 +96,9 @@ ONE = r"""# One
 
 Greek and symbols as text, and not math, which the math repair would make
 of a Greek letter alone: the letters αβγ as one word, and ≤ and ≈ named on
-their own. And 漢, which no Latin Modern font has.
+their own. And 漢, which no Latin Modern font has, and ⓐ, a circled
+letter, which of the fonts the build falls back to only New Computer
+Modern's math font has.
 
 Inline math $x^2 + y^2 = z^2$, and a display:
 
@@ -170,6 +172,12 @@ Table: Price by year
 | $q_d$ | Revenue, $p \cdot q_d$ |
 |-------|------------------------|
 | 10    | 10                     |
+
+| Year | Cost |
+|------|------|
+| 2020 | 3    |
+
+Table: Cost by year {.unnumbered}
 
 Elasticity[^term]
 :   How much quantity responds to price.
@@ -516,6 +524,15 @@ def font_names(reader):
     return names
 
 
+def font_installed(name):
+    """Whether TeX finds the font file."""
+    if not shutil.which("kpsewhich"):
+        return False
+    found = subprocess.run(["kpsewhich", name], capture_output=True, text=True,
+                           stdin=subprocess.DEVNULL)
+    return bool(found.stdout.strip())
+
+
 def head_sizes(reader, words):
     """The size each page's running head holding words is drawn at, its
     font's size as the page scales it."""
@@ -644,9 +661,9 @@ def checks(work, jobs=1):
         # first cell of each body row TH-row only if pdf-target.lua set
         # table/header-columns around it.
         ("the matrix table's first column is row headers",
-         lambda: len(tabled) == 8 and row_headers(tabled[0]) == 2),
+         lambda: len(tabled) == 9 and row_headers(tabled[0]) == 2),
         ("the plain table has header cells and no row headers",
-         lambda: len(tabled) == 8 and row_headers(tabled[1]) == 0
+         lambda: len(tabled) == 9 and row_headers(tabled[1]) == 0
          and any(kind(e) == "/TH" for e in tabled[1])),
         # LaTeX writes a longtable's caption as a first row of one header
         # cell, and leaves the empty copy of the head it repeats inside the
@@ -701,6 +718,12 @@ def checks(work, jobs=1):
          lambda: not pdfparagraphs.find(pdfparagraphs.pikepdf.open(pdf_path)).doomed),
         ("a captioned table's caption is its Caption, before its rows",
          lambda: shape(table_elements[2]) == ["/Caption", 2, 2, 2]),
+        # Pandoc writes an unnumbered table's caption with \LTcaptype set
+        # to none, which the caption package stopped on (latexbuild.py).
+        ("a table marked unnumbered keeps its caption, with no number",
+         lambda: "Cost by year" in text
+         and not re.search(r"Table\s*\d+\s*:\s*Cost by year", text)
+         and shape(table_elements[8])[:1] == ["/Caption"]),
         ("a table whose first header row is one spanning cell, with no "
          "caption, keeps that row",
          lambda: shape(table_elements[3])[:2] == [1, 2]
@@ -812,6 +835,14 @@ def checks(work, jobs=1):
     else:
         print("  skip  veraPDF not found (set VERAPDF); its verdict is "
               "not checked")
+    # The fallbacks' last, when it's installed (build-pdf.py).
+    if font_installed("NewCMMath-Book.otf"):
+        items.append(("a circled letter, which of the fallbacks only New Computer "
+                      "Modern's math font has, is in the PDF's text",
+                      lambda: "\u24d0" in text))
+    else:
+        print("  skip  New Computer Modern isn't installed; the circled letter "
+              "it would supply isn't checked")
     # Pandoc's highlighted code, its tokens colored: a space beside a
     # color's change was no character, and an indentation one
     # (latexbuild.CODE_SPACES).

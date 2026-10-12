@@ -100,12 +100,19 @@ OPEN_FRONT = "\\AddToHook{begindocument/end}{\\frontmatter}\n"
 # DejaVu Sans comes after it when it's installed, as it is with most Linux
 # desktops: it has what Latin Modern Math doesn't, such as the circled
 # digits an AsciiDoc book's code callouts are (58 of them in the security
-# textbook, all drawn blank without it).
-FALLBACK = ("\\IfFontExistsTF{DejaVu Sans}\n"
-            "  {\\directlua{luaotfload.add_fallback(\"oerfallback\", "
-            "{\"Latin Modern Math:mode=harf;\", \"DejaVu Sans:mode=harf;\"})}}\n"
-            "  {\\directlua{luaotfload.add_fallback(\"oerfallback\", "
-            "{\"Latin Modern Math:mode=harf;\"})}}\n")
+# textbook, all drawn blank without it). New Computer Modern's math font
+# comes last when it's installed, as it is wherever decks are built: it has
+# the circled letters OpenStax's math books letter a question's parts with
+# (1,391 in the first chapter of College Algebra), which neither has.
+FALLBACK = ("\\def\\OERFallbackFonts{\"Latin Modern Math:mode=harf;\"}\n"
+            "\\IfFontExistsTF{DejaVu Sans}\n"
+            "  {\\edef\\OERFallbackFonts{\\OERFallbackFonts, "
+            "\"DejaVu Sans:mode=harf;\"}}{}\n"
+            "\\IfFontExistsTF{NewCMMath-Book.otf}\n"
+            "  {\\edef\\OERFallbackFonts{\\OERFallbackFonts, "
+            "\"NewCMMath-Book.otf:mode=harf;\"}}{}\n"
+            "\\directlua{luaotfload.add_fallback(\"oerfallback\", "
+            "{\\OERFallbackFonts})}\n")
 FAMILIES = (("mainfont", "\\setmainfont{Latin Modern Roman}"),
             ("sansfont", "\\setsansfont{Latin Modern Sans}"),
             ("monofont", "\\setmonofont{Latin Modern Mono}"))

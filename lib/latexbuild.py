@@ -469,6 +469,18 @@ PDF_MACROS = r"""\ExplSyntaxOn
   }
 \NewDocumentCommand \OERArtifactGraphics { }
   { \cs_if_exist:NT \tag_mc_begin:n { \setkeys{Gin}{artifact} } }
+% A table of class unnumbered that has a caption is written in a group
+% that sets \LTcaptype to none, and the caption package, which the
+% template loads, stopped at its \caption ("No float type 'none'
+% defined"), looking for the list such a table goes in (\ext@none). A list
+% nothing opens takes it, and the caption has no label, as an unnumbered
+% one hasn't.
+\cs_if_exist:cF { ext@none } { \cs_gset:cpn { ext@none } { none } }
+\AddToHook { begindocument/before }
+  {
+    \IfPackageLoadedT { caption }
+      { \captionsetup [ none ] { labelformat = empty , labelsep = none } }
+  }
 \ExplSyntaxOff
 """
 

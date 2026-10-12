@@ -570,12 +570,16 @@ end
 -- then rejects every one (RSC-005, 469 times in one book). Whitespace in
 -- an id becomes a hyphen, and so does whitespace in a link's #fragment,
 -- decoded first, so a link to it -- here or from another page -- still
--- finds it.
+-- finds it. A link to another site is left as it is: its fragment names
+-- nothing here, and a text fragment (#:~:text=Now%20worth%20%242) means
+-- its spaces and escapes as written, where decoded and hyphenated it
+-- matched nothing and, its %25 now a lone %, wasn't a valid address.
 local function unspaced(id)
   return (id:gsub('%s+', '-'))
 end
 
 local function fix_fragment(target)
+  if target:match('^%a[%w+.-]*:') then return target end
   local path, fragment = target:match('^([^#]*)#(.*)$')
   if not fragment then return target end
   local decoded = fragment:gsub('%%(%x%x)', function(hex)

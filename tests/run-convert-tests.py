@@ -1629,9 +1629,16 @@ def case_pdf_capacity(work):
     ]
 
 
+# A link to another site's text fragment, as OpenStax's references have
+# one: its escapes are the address's own.
+TEXT_FRAGMENT = ("https://example.org/apple#:~:text=Now%20worth%20a%20cool%20"
+                 "%242.2,96%25%20of%20countries")
+
+
 def case_html_ids(work):
     """An id with a space in it -- Scribble writes them -- becomes one
-    without, and every link to it follows, from its own page or another."""
+    without, and every link to it follows, from its own page or another;
+    a link to another site's fragment is left as it is."""
     import importlib.util
     if not (importlib.util.find_spec("html5lib") or importlib.util.find_spec("lxml")):
         return [("skip: HTML sources need html5lib or lxml", lambda: True)]
@@ -1639,7 +1646,8 @@ def case_html_ids(work):
     with open(os.path.join(work, "a.html"), "w", encoding="utf-8") as fh:
         fh.write('<html lang="en"><head><title>A</title></head><body><h1>A</h1>'
                  '<h2 id="section 15">Fifteen</h2><p>See <a href="#section 15">here</a> '
-                 'and <a href="#section%2015">there</a>.</p></body></html>')
+                 'and <a href="#section%2015">there</a>, and <a href="' + TEXT_FRAGMENT
+                 + '">a site</a>.</p></body></html>')
     with open(os.path.join(work, "b.html"), "w", encoding="utf-8") as fh:
         fh.write('<html lang="en"><head><title>B</title></head><body><h1>B</h1>'
                  '<p>Back to <a href="a.html#section 15">fifteen</a>.</p></body></html>')
@@ -1660,6 +1668,8 @@ def case_html_ids(work):
         ("links to it follow, encoded or not, from its page or another",
          lambda: a.count('href="#section-15"') == 2
          and 'href="a.html#section-15"' in b),
+        ("a link to another site's fragment is left as it is, escapes and all",
+         lambda: 'href="' + TEXT_FRAGMENT + '"' in a),
         ("nothing is reported missing, and epubcheck has no complaint",
          lambda: exists(work, "epub", "org.example.ids.epub") and "missing-fragment" not in checked
          and (validated == [] if validated is not None else True)),

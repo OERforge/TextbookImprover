@@ -127,20 +127,22 @@ def revealjs_problem(folder):
     presentations can load, or None."""
     if not folder:
         return ("A revealjs target's presentations load reveal.js from a copy beside them, and "
-                "REVEALJS_DIR, the folder of one, isn't set: `npm install reveal.js@"
-                f"{REVEALJS_MAJOR}` installs it in node_modules/reveal.js (see "
-                "docs/installation.md).")
+                f"REVEALJS_DIR, the folder of one, isn't set: unpack reveal.js {REVEALJS_MAJOR}'s "
+                f"package from the npm registry, or `npm install reveal.js@{REVEALJS_MAJOR}`, and "
+                "set REVEALJS_DIR to its folder (see docs/installation.md, For a revealjs "
+                "target).")
     missing = [name for name in REVEALJS_FILES if not os.path.isfile(os.path.join(folder, name))]
     if missing:
         return (f"REVEALJS_DIR is {folder}, which isn't a copy of reveal.js: it has no "
                 + ", ".join(missing[:3]) + (", ..." if len(missing) > 3 else "")
-                + f" (the folder npm installs reveal.js@{REVEALJS_MAJOR} in, which holds dist "
-                "and package.json).")
+                + " (the folder reveal.js's package unpacks to, or npm's "
+                "node_modules/reveal.js, holds dist and package.json; see docs/installation.md).")
     version = revealjs_version(folder)
     if not version or not version.startswith(f"{REVEALJS_MAJOR}."):
         return (f"REVEALJS_DIR's reveal.js is {version or 'of no version package.json gives'}, and "
                 f"the presentations are written for reveal.js {REVEALJS_MAJOR}, whose plugins "
-                f"Pandoc's template loads: `npm install reveal.js@{REVEALJS_MAJOR}`.")
+                f"Pandoc's template loads: docs/installation.md says how to get reveal.js "
+                f"{REVEALJS_MAJOR}.")
     return None
 
 

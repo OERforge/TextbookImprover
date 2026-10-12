@@ -41,6 +41,8 @@ The suites' runs of `convert.py` pass `--quick`, so the output check's validator
 
 `run-all.sh` ends with `All suites passed.` or with the names of the suites that failed and their `FAIL` and `ERROR` lines repeated, so the reason is at the bottom rather than somewhere in ten suites of output. A check that runs one of the full validators says what the validator returned when it fails, since the usual cause is the tool, not the page.
 
+A check that needs something not installed passes with `skip` and the reason, and `run-all.sh` lists those skips at its end, since a pass doesn't cover them. Most are a validator whose jar isn't set, or LuaLaTeX and its packages ([Installation](installation.md)). The decks suite's two reveal.js cases need reveal.js 6 in `REVEALJS_DIR`, and their checks in a browser need Python's Playwright and its Chromium, with the suites run by the Python that Playwright is installed for ([Installation](installation.md#for-a-revealjs-target-revealjs) has the commands for both); without Playwright, or with a Chromium that doesn't start, those checks skip and the rest run.
+
 ### Why these and not others
 
 Every filter bug fixed in v0.2 was silent. Alt text applied to the wrong

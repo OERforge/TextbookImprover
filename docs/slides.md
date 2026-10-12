@@ -249,7 +249,7 @@ Small decks made to hold what the code handles, and three of the course's, were 
 
 ### The reveal.js presentation
 
-A `revealjs` target writes each deck as a [reveal.js](https://revealjs.com) presentation, a page named as the deck's page is, for presenting in a browser, through Pandoc's reveal.js writer and what `lib/revealtarget.py` puts right in what it writes. The deck's page is the one to read: the presentation shows one slide at a time, as a projector does. It loads reveal.js from a copy beside it, which the run takes from `REVEALJS_DIR`, the folder of reveal.js 6 (`npm install reveal.js@6` installs it in `node_modules/reveal.js`; [Installation](installation.md#for-a-revealjs-target-revealjs)): without one, or with another version, the run stops, saying so. It needs Pandoc 3.12 or later, whose template loads reveal.js 6's plugins.
+A `revealjs` target writes each deck as a [reveal.js](https://revealjs.com) presentation, a page named as the deck's page is, for presenting in a browser, through Pandoc's reveal.js writer and what `lib/revealtarget.py` puts right in what it writes. The deck's page is the one to read: the presentation shows one slide at a time, as a projector does. It loads reveal.js from a copy beside it, which the run takes from `REVEALJS_DIR`, the folder of reveal.js 6 (its package from the npm registry, unpacked, or `npm install reveal.js@6`'s `node_modules/reveal.js`; [Installation](installation.md#for-a-revealjs-target-revealjs) has the commands): without one, or with another version, the run stops, saying so. It needs Pandoc 3.12 or later, whose template loads reveal.js 6's plugins.
 
 ```yaml
 targets:

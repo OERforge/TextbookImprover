@@ -3317,6 +3317,27 @@ def revealjs_ready():
     return revealtarget.revealjs_problem(os.environ.get("REVEALJS_DIR", "").strip())
 
 
+def browser_problem():
+    """Why a presentation can't be tried in a browser here, or None: Python's
+    Playwright tries it, in the Chromium Playwright installs."""
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        return ("Python's Playwright isn't installed, so the presentations aren't tried in a "
+                "browser (docs/installation.md, For the suites: Playwright and its Chromium, says "
+                "how to install both)")
+    try:
+        with sync_playwright() as play:
+            play.chromium.launch().close()
+    except Exception as exc:
+        lines = str(exc).strip().splitlines()
+        reason = lines[0][:200] if lines else type(exc).__name__
+        return (f"Playwright's Chromium doesn't start ({reason}), so the presentations aren't "
+                "tried in a browser: `python3 -m playwright install --with-deps chromium` "
+                "installs it (see docs/installation.md)")
+    return None
+
+
 # Fonts that come after the page has loaded, as from a slow server: the
 # page's document.fonts.ready a tenth of a second after its load event,
 # after reveal.js's own layout on that event.
@@ -3333,12 +3354,10 @@ def in_browser(path, steps, width=1280, height=720, touch=False, broken=False, l
     at path (and #fragment), opened in Chromium in a window width by
     height, served over HTTP from its folder, its big picture a second
     late, as from a slow server, or never (broken), and its fonts after
-    the page has loaded (late_fonts); or None when Playwright or its
-    Chromium isn't installed."""
-    try:
-        from playwright.sync_api import sync_playwright
-    except ImportError:
-        return None
+    the page has loaded (late_fonts), or {"error": ...} when they fail.
+    browser_problem() says first whether Playwright and its Chromium are
+    here to try it."""
+    from playwright.sync_api import sync_playwright
     import functools
     import http.server
     import threading
@@ -3380,7 +3399,7 @@ def in_browser(path, steps, width=1280, height=720, touch=False, broken=False, l
                 return steps(page)
             finally:
                 browser.close()
-    except Exception as exc:  # no Chromium, most often
+    except Exception as exc:
         return {"error": f"{type(exc).__name__}: {exc}"}
     finally:
         server.shutdown()
@@ -3554,19 +3573,21 @@ def case_revealjs(work):
     page = read(path) if os.path.exists(path) else ""
     check = [r for r in rows_of(os.path.join(decks_dir, "output-check.csv"))
              if r[0].endswith(".html")]
-    browsed = in_browser(path, presentation_steps) if page else {}
-    linked = in_browser(path + "#/opening", link_steps) if page else {}
-    scrolled = in_browser(path + "#/a-long-list", scroll_steps) if page else {}
-    narrow = in_browser(path + "#/a-long-list", narrow_steps, 900, 506) if page else {}
-    noted = in_browser(path + "#/a-long-list", note_steps, 900, 506) if page else {}
+    browser = browser_problem() if page else None
+    tried = page and not browser
+    browsed = in_browser(path, presentation_steps) if tried else {}
+    linked = in_browser(path + "#/opening", link_steps) if tried else {}
+    scrolled = in_browser(path + "#/a-long-list", scroll_steps) if tried else {}
+    narrow = in_browser(path + "#/a-long-list", narrow_steps, 900, 506) if tried else {}
+    noted = in_browser(path + "#/a-long-list", note_steps, 900, 506) if tried else {}
     topped = in_browser(os.path.join(out, "no-title.html#/long-first"), top_steps, 900, 506) \
-        if page else {}
-    phone = in_browser(path + "#/a-long-list", narrow_steps, 375, 667, touch=True) if page else {}
-    broken = in_browser(path, lambda p: p.evaluate(FITTED), broken=True) if page else {}
+        if tried else {}
+    phone = in_browser(path + "#/a-long-list", narrow_steps, 375, 667, touch=True) if tried else {}
+    broken = in_browser(path, lambda p: p.evaluate(FITTED), broken=True) if tried else {}
     centered = in_browser(path + "#/a-long-list", lambda p: (p.wait_for_function(
         "() => Reveal.getCurrentSlide().classList.contains('oer-fitted')"), p.evaluate(
         "() => [Reveal.getCurrentSlide().style.top, Reveal.getCurrentSlide().scrollHeight]"))[1],
-        late_fonts=True) if page else {}
+        late_fonts=True) if tried else {}
     checks = [
         ("a presentation of each deck, beside a copy of reveal.js and its license and the "
          "deck's pictures, nothing loaded from elsewhere",
@@ -3609,8 +3630,8 @@ def case_revealjs(work):
          lambda: page and [(os.path.basename(r[0]), r[1]) for r in check]
          == [("no-title.html", "vnu:warning")] and "Section lacks heading" in check[0][2]),
     ]
-    if browsed is None:
-        print("  skip  Playwright isn't installed; the presentation isn't tried in a browser")
+    if browser:
+        print(f"  skip  {browser}")
         return checks
     checks += [
         ("in a browser, reveal.js's role and its live region go, and a slide's title takes "
@@ -3753,7 +3774,8 @@ def case_revealjs_settings(work):
          and not os.path.exists(os.path.join(book, "present"))),
         ("without REVEALJS_DIR the run stops, saying how to install reveal.js",
          lambda: unset.returncode != 0 and "REVEALJS_DIR, the folder of one, isn't set: "
-         "`npm install reveal.js@6`" in unset.stderr),
+         "unpack reveal.js 6's package from the npm registry, or `npm install reveal.js@6`, "
+         "and set REVEALJS_DIR to its folder (see docs/installation.md" in unset.stderr),
         ("so does a folder that isn't reveal.js, what's missing named",
          lambda: nothing.returncode != 0 and f"REVEALJS_DIR is {empty}, which isn't a copy of "
          "reveal.js: it has no dist/reveal.js, dist/reveal.css, dist/reset.css, ..."

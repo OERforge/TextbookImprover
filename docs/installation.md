@@ -134,7 +134,8 @@ Put that `export` line in `~/.bashrc` (see [below](#optional-the-full-validators
 | The `ltx-talk`, `lua-unicode-math`, and `newcomputermodern` packages | A `pdf` target for decks written in Markdown ([Slides](slides.md#the-pdf)), which also needs LaTeX 2026-06-01 or later; without them, the run says what to install | `tlmgr install ltx-talk lua-unicode-math newcomputermodern` |
 | pdfLaTeX or LuaLaTeX, LaTeX's `preview` package, and `pdftocairo` | A LaTeX source with drawings or PDF images, which become SVG ([LaTeX sources](latex.md)); without them they're left out of the pages | TeX Live (`tlmgr install preview` where it's missing); `sudo apt install poppler-utils` |
 | TeX's `latex-tagging-status` package | A LaTeX source's copy made for tagging, whose class and packages are checked against the tagging project's status list ([LaTeX sources](latex.md#the-source-target)); without it, the run says how to install it and checks nothing | `tlmgr install latex-tagging-status`; MiKTeX installs it on demand |
-| reveal.js 6, and Node.js's `npm` to install it | A `revealjs` target for decks written in Markdown ([Slides](slides.md#the-revealjs-presentation)), which also needs Pandoc 3.12 or later; without it, the run says how to install it | `npm install reveal.js@6`, and `REVEALJS_DIR` set to its folder; see [below](#for-a-revealjs-target-revealjs) |
+| reveal.js 6 | A `revealjs` target for decks written in Markdown ([Slides](slides.md#the-revealjs-presentation)), which also needs Pandoc 3.12 or later; without it, the run says how to get it | its package, unpacked, and `REVEALJS_DIR` set to its folder; see [below](#for-a-revealjs-target-revealjs) |
+| Python's Playwright and its Chromium | The test suites only: the decks suite tries a reveal.js presentation in a browser with them, and skips that without them | in a virtual environment; see [below](#for-the-suites-playwright-and-its-chromium) |
 | `zip` | Only if you package with the printed command instead of `--zip` | `sudo apt install zip` |
 
 **Pandoc has to come from Pandoc.** `sudo apt install pandoc` on Ubuntu 24.04 gives 3.1.3, which this project refuses to run with: Pandoc 3.6 and older write tables without cell spans, so a table with merged cells loses them silently, and several things the filter relies on arrived later. Install the `.deb` from [Pandoc's releases](https://github.com/jgm/pandoc/releases) instead:
@@ -147,7 +148,7 @@ pandoc --version | head -1
 
 Pandoc 3.9 is a hard requirement for a book, checked before the book is read; a folder of PowerPoint decks needs no Pandoc, a deck's PowerPoint file (a `pptx` target) needs 3.10.1, whose PowerPoint writer keeps a table and the text around it on one slide, and a deck's reveal.js presentation (a `revealjs` target) needs 3.12, whose template loads reveal.js 6's plugins. Versions above it still differ in ways that show up here — newer releases read Word caption paragraphs into table captions, older ones don't — so the same document can produce different reports on different machines. Neither is wrong; the sidecar files absorb the difference.
 
-**Python packages come from `apt`, not `pip`.** Ubuntu 24.04 manages its Python installation, so `pip3 install pypdf` stops with `error: externally-managed-environment` (and on a fresh WSL install `pip3` isn't there to begin with). The `python3-*` packages in the table are the ones to use. Ubuntu 22.04 doesn't stop pip, and its one gap, pypdf, comes from pip there, as [above](#which-ubuntu-you-have). If you need a version newer than Ubuntu ships, make a virtual environment for it (`python3 -m venv ~/venv && ~/venv/bin/pip install pypdf`) and run the tools with that interpreter.
+**Python packages come from `apt`, not `pip`.** Ubuntu 24.04 manages its Python installation, so `pip3 install pypdf` stops with `error: externally-managed-environment` (and on a fresh WSL install `pip3` isn't there to begin with). The `python3-*` packages in the table are the ones to use. Ubuntu 22.04 doesn't stop pip, and its one gap, pypdf, comes from pip there, as [above](#which-ubuntu-you-have). If you need a version newer than Ubuntu ships, or a package it doesn't ship at all, make a virtual environment that sees Ubuntu's packages as well (`python3 -m venv --system-site-packages ~/venv && ~/venv/bin/pip install pypdf`) and run the tools with that interpreter. The one package anything here takes from pip is Playwright, which only the test suites use ([below](#for-the-suites-playwright-and-its-chromium)).
 
 ## Optional: the full validators
 
@@ -278,15 +279,56 @@ The run finds it through `VERAPDF` or as `verapdf` on the path. veraPDF chooses 
 
 ## For a revealjs target: reveal.js
 
-A deck's reveal.js presentation loads reveal.js from a copy beside it, which the run takes from the folder `REVEALJS_DIR` names: reveal.js 6, which Pandoc 3.12's template is written for. npm, which comes with [Node.js](https://nodejs.org) (`sudo apt install npm` on Ubuntu), installs it in a folder of your choosing:
+A deck's reveal.js presentation loads reveal.js from a copy beside it, which the run takes from the folder `REVEALJS_DIR` names: reveal.js 6, which Pandoc 3.12's template is written for. reveal.js is a set of files ready to use, with nothing to build, and getting it needs no Node.js: its package on the npm registry, unpacked, is the folder.
 
 ```bash
-mkdir -p ~/tools/revealjs && cd ~/tools/revealjs
-npm install reveal.js@6
-export REVEALJS_DIR="$HOME/tools/revealjs/node_modules/reveal.js"    # and add this line to ~/.bashrc
+mkdir -p ~/tools && cd ~/tools
+curl -L -o reveal.js-6.0.2.tgz https://registry.npmjs.org/reveal.js/-/reveal.js-6.0.2.tgz
+mkdir -p reveal.js-6.0.2
+tar xzf reveal.js-6.0.2.tgz -C reveal.js-6.0.2 --strip-components=1    # gives ~/tools/reveal.js-6.0.2
 ```
 
-reveal.js is MIT-licensed, and its license goes with each copy. The suites build and check a presentation when `REVEALJS_DIR` is set, and try it in a browser when Python's Playwright and its Chromium are installed (`pip install playwright` and `playwright install chromium`, in a virtual environment on Ubuntu 24.04); without them, they say what they skipped.
+Then tell the run where it is, with this line in `~/.bashrc`, as for the validators ([above](#optional-the-full-validators)):
+
+```bash
+export REVEALJS_DIR="$HOME/tools/reveal.js-6.0.2"
+```
+
+Open a new terminal (or run `source ~/.bashrc`) and check that it names reveal.js:
+
+```bash
+ls "$REVEALJS_DIR/dist/reveal.js" && grep -m1 '"version"' "$REVEALJS_DIR/package.json"
+```
+
+If you have Node.js's `npm` already, `npm install reveal.js@6` in a folder of your own does the same, and `REVEALJS_DIR` is then that folder's `node_modules/reveal.js`. A later 6.x works as well: the run checks the major version, and the files it copies. reveal.js is MIT-licensed, and its license goes with each copy.
+
+### For the suites: Playwright and its Chromium
+
+With `REVEALJS_DIR` set, the decks suite builds presentations and checks what was written; most of what the presentation does, though, happens in a browser (focus moving to a slide's title, slides fitted, a narrow window's page), and the suite tries that in Chromium, through Python's Playwright. Neither is needed to convert anything. Ubuntu doesn't package Playwright, and Ubuntu 24.04's Python won't take a package from pip ([above](#requirements)), so it goes in a virtual environment that sees Ubuntu's own packages too (`--system-site-packages`), and the suites run with that environment's Python:
+
+```bash
+sudo apt install python3-venv
+python3 -m venv --system-site-packages ~/venv
+~/venv/bin/pip install playwright
+~/venv/bin/python -m playwright install --with-deps chromium
+```
+
+The last line downloads Playwright's Chromium, a few hundred megabytes, into `~/.cache/ms-playwright`, and installs the libraries it needs with `apt`, which asks for your password. To check that it starts:
+
+```bash
+~/venv/bin/python -c "from playwright.sync_api import sync_playwright as p; s = p().start(); print(s.chromium.launch().version); s.stop()"
+```
+
+which prints Chromium's version. Then run the suites with the environment active:
+
+```bash
+source ~/venv/bin/activate
+bash tests/run-all.sh
+```
+
+Activating it lasts for that terminal (`deactivate` ends it early). Add `source ~/venv/bin/activate` to `~/.bashrc` to have it in every terminal; the tools run the same in it, since the environment's Python is Ubuntu's, with Playwright added. Playwright supports Ubuntu 22.04 and 24.04 and WSL ([its system requirements](https://playwright.dev/python/docs/intro#system-requirements)); on Ubuntu 22.04, `pip3 install --user playwright` and then `python3 -m playwright install --with-deps chromium` work as well, without the environment, as pypdf does there.
+
+When either is missing, the decks suite says what and how to install it, and `run-all.sh` lists it at its end among the checks skipped: without `REVEALJS_DIR`, both reveal.js cases skip; without Playwright, or with a Chromium that doesn't start, the checks in a browser do.
 
 ## Checking the whole setup
 
@@ -296,4 +338,4 @@ From the directory you cloned into:
 bash tests/run-all.sh
 ```
 
-Nineteen suites run, and a check that the settings pages are current; the ones needing a validator print `skip` with the reason when its jar isn't set, so a pass without Java means the pipeline is sound and the validators are simply absent.
+Twenty suites run, and a check that the settings pages are current. A check that needs something not installed prints `skip` with the reason and what to install, a validator whose jar isn't set or the decks suite's reveal.js cases without reveal.js or Playwright, and `run-all.sh` lists every skip at its end, so a pass without Java means the pipeline is sound and the validators are simply absent.

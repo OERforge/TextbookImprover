@@ -1087,6 +1087,10 @@ LATEX_READ_CHANGES = (
     ("repeated_head", "longtable's head repeated for later pages read once"),
     ("longtable_head_rows", "longtable's head of more than one row left to the census"),
     ("bounded", "\\pandocbounded image read as the image it holds"),
+    ("highlighted_code", "block of code Pandoc highlighted read as the code it shows, "
+     "numbered as it was, where the reader made it a paragraph or nothing"),
+    ("highlighted_inline", "inline code Pandoc highlighted (\\VERB) read as the code it shows, "
+     "where a bracket or a parenthesis in it stopped the reader"),
     ("link_contents", "link's /Contents for the PDF left out"),
     ("stacked_lines", "table cell's lines stacked in \\vtop read as lines"),
     ("minipage_breaks", "line break in a minipage read as \\newline"),

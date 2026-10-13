@@ -30,6 +30,9 @@ measured (PANDOC-NOTES.md, "The LaTeX reader"):
   in its place.
 - an \\includegraphics marked artifact is marked for the filter, which
   takes it as decorative; the reader ignores the key.
+- Pandoc's highlighted code, a block in Highlighting and inline code in
+  \\VERB, becomes an lstlisting and \\verb; the reader makes a block a
+  paragraph, and stops on inline code holding a bracket.
 - an \\includegraphics of a PDF or EPS, which no browser shows, or of a
   name without its extension, which the reader resolves in the copy's
   directory and so never finds, is made an SVG from the file graphicx
@@ -2041,11 +2044,115 @@ def invisible_rule(m):
     return m.group(0)
 
 
+# Highlighted code as Pandoc's LaTeX writer writes it, the latex target's
+# and a book's that was made with Pandoc (R Markdown's and Quarto's too):
+# a block in fancyvrb's Highlighting environment inside Shaded, each
+# token in a macro of its own (\KeywordTok{def}) and the characters LaTeX
+# treats specially escaped, and inline code in \VERB, the same macros in
+# it. The reader (3.12) takes neither: a block is an empty division where
+# the preamble doesn't define the macros, and where it does a paragraph
+# of spans in colors no browser reads; and \VERB, which the preamble
+# makes \Verb with commandchars, stops the reading of the whole book at
+# a bracket or a parenthesis in the code ("unexpected ()"). Each is made
+# the code it shows: a block an lstlisting, numbered from where it was,
+# with the language and the id the latex target writes beside it
+# (latex-target.lua, the label the writer puts before a block with an
+# id), which latex-source.lua makes the block's own; inline code \verb.
+CODE_MARK = "TextbookImproverCode"
+CODE_KEY = "textbookimprovercode"
+HIGHLIGHTED_BLOCK = re.compile(
+    r"(?:^[ \t]*%[ \t]*" + CODE_MARK + r"[ \t]+(?P<language>[^\s%]+)[ \t]*\n\s*)?"
+    r"(?:\\protect\\phantomsection\\label\{(?P<label>[^{}\n]*)\}%?[ \t]*\n\s*)?"
+    r"(?P<shaded>\\begin\{Shaded\}\s*)?"
+    r"(?P<begin>\\begin\{Highlighting\})(?:\[(?P<options>[^\]\n]*)\])?[ \t]*\n?"
+    r"(?P<body>.*?)\n?[ \t]*\\end\{Highlighting\}(?(shaded)\s*\\end\{Shaded\})",
+    re.M | re.S)
+HIGHLIGHTED_INLINE = re.compile(r"\\VERB\|((?:[^|\n])*)\|")
+TOKEN = re.compile(r"\\[A-Z][A-Za-z]*Tok\{")
+CODE_ESCAPES = {"\\textbackslash{}": "\\", "\\textasciitilde{}": "~",
+                "\\textasciigrave{}": "`", "\\textquotesingle{}": "'",
+                "\\textless{}": "<", "\\textgreater{}": ">", "\\^{}": "^",
+                "\\VerbBar{}": "|", "{-}": "-"}
+CODE_ESCAPED = re.compile("|".join(re.escape(e) for e in CODE_ESCAPES)
+                          + r"|\\([#$%&_{} ])")
+# The delimiters the reader takes for \verb, each tried (Pandoc 3.12):
+# not a letter, a digit, a space, %, or *, which makes it \verb*.
+VERB_DELIMITERS = "|!+=@;:/^~\"'-.,?<>#&_$()[]`"
+
+
+def code_text(body):
+    """The characters a Highlighting body or a \\VERB argument shows: each
+    token's macro taken away, and what an escape stands for put back."""
+    def unescape(text):
+        return CODE_ESCAPED.sub(lambda m: m.group(1) if m.group(1) is not None
+                                else CODE_ESCAPES[m.group(0)], text)
+    out, i = [], 0
+    while True:
+        m = TOKEN.search(body, i)
+        end = matching_brace(body, m.end() - 1) if m else -1
+        if end < 0:
+            out.append(unescape(body[i:]))
+            return "".join(out)
+        out.append(unescape(body[i:m.start()]))
+        out.append(unescape(body[m.end():end - 1]))
+        i = end
+
+
+def verb(code):
+    """code as \\verb, with a delimiter it doesn't hold: as several, one
+    after another, when it holds every delimiter the reader takes."""
+    out = []
+    while code:
+        free = next((d for d in VERB_DELIMITERS if d not in code), None)
+        if free:
+            out.append("\\verb" + free + code + free)
+            break
+        # The delimiter whose first place in the code is the latest: the
+        # code before it doesn't hold it.
+        delimiter = max(VERB_DELIMITERS, key=code.index)
+        cut = code.index(delimiter)
+        out.append("\\verb" + delimiter + code[:cut] + delimiter)
+        code = code[cut:]
+    return "".join(out) or "\\verb||"
+
+
+def highlighted_code(text, counter):
+    """Pandoc's highlighted code read as the code it shows (above)."""
+    if "\\begin{Highlighting}" not in text and "\\VERB|" not in text:
+        return text
+    spans = skip_spans(text)
+
+    def block(m):
+        if in_spans(m.start("shaded") if m.group("shaded") else m.start("begin"), spans):
+            return m.group(0)
+        code = code_text(m.group("body"))
+        if "\\end{lstlisting}" in code:
+            return m.group(0)
+        keys = [o.strip() for o in (m.group("options") or "").split(",")]
+        options = (["label={%s}" % m.group("label")] if m.group("label") else []) + [
+            "%s={%s}" % (CODE_KEY, m.group("language") or "")] + [
+            k for k in keys if re.fullmatch(r"(numbers=left|firstnumber=-?\d+)", k)]
+        counter["highlighted_code"] = counter.get("highlighted_code", 0) + 1
+        return "\\begin{lstlisting}[%s]\n%s\n\\end{lstlisting}" % (",".join(options), code)
+    text = HIGHLIGHTED_BLOCK.sub(block, text)
+    spans = skip_spans(text)
+
+    def inline(m):
+        if in_spans(m.start(), spans):
+            return m.group(0)
+        counter["highlighted_inline"] = counter.get("highlighted_inline", 0) + 1
+        return verb(code_text(m.group(1)))
+    return HIGHLIGHTED_INLINE.sub(inline, text)
+
+
 def repair_text(text, counter, math_macros=(), counters=()):
     """The rewrites every file of the copy gets: booleans as toggles,
     \\input braced, artifact images marked, and the rest. math_macros: the
     names of the macros formulas use (math_macros); counters, the book's
     counters' names (book_counters)."""
+    # First, so no rewrite after takes the code for LaTeX: an lstlisting
+    # and \verb are verbatim to them all.
+    text = highlighted_code(text, counter)
     text = substitute(BOOLEAN_IF, text, lambda m: "\\iftoggle{%s}" % m.group(1),
                       counter, "ifthenelse")
     text = substitute(BOOLEAN_NEW, text, lambda m: "\\newtoggle{%s}" % m.group(1),

@@ -23,6 +23,9 @@
 -- command, on \MakeLowercase and \copyright, and on \hfill, \vspace,
 -- and \index (below).
 --
+-- And a code block latexsource.py made of Pandoc's highlighted code is
+-- given the language the latex target wrote beside it (below).
+--
 -- Copyright 2026 Robert Szarka
 --
 -- This program is free software: you can redistribute it and/or modify
@@ -328,4 +331,19 @@ function Table(tbl)
   return tbl
 end
 
-return { { Image = Image, Math = Math, Div = Div, Table = Table } }
+-- A code block latexsource.py made of Pandoc's highlighted code, as its
+-- listing's textbookimprovercode key says: the language the latex target
+-- wrote beside it (latex-target.lua) is its first class, the one the
+-- writer highlights it by, and the keys the listing left that its
+-- classes, its id, and startFrom say already are dropped.
+local CODE_KEY = 'textbookimprovercode'
+
+function CodeBlock(block)
+  local language = block.attributes[CODE_KEY]
+  if language == nil then return nil end
+  for _, key in ipairs({ CODE_KEY, 'numbers', 'label' }) do block.attributes[key] = nil end
+  if language ~= '' then block.classes:insert(1, language) end
+  return block
+end
+
+return { { Image = Image, Math = Math, Div = Div, Table = Table, CodeBlock = CodeBlock } }

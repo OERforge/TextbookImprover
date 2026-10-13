@@ -24,7 +24,7 @@ on another `bin/` script.
 | `safe-media.lua` | Rewrites a page's local media references at render time to names that need no encoding in a link, matching what `convert.py` copies beside the page. |
 | `math-repair.lua` | At the filter stage, after `figures-and-tables.lua`: equations Word's editor wrote in the wrong characters repaired, and math typed as text made equations, with `math-keep.csv` to leave any as it was; where each repair was, recorded so a `source` target can write it into the author's Word file. |
 | `target-blocks.lua` | At render time, keeps a passage marked for some targets and drops it for the rest, and applies `title_block`. |
-| `latex-source.lua` | When a LaTeX source is read: an image's alt text as LaTeX gives it (none for Pandoc's "image", decorative for `artifact`), and a formula as texmath can read it. |
+| `latex-source.lua` | When a LaTeX source is read: an image's alt text as LaTeX gives it (none for Pandoc's "image", decorative for `artifact`), a formula as texmath can read it, and a code block `latexsource.py` made of Pandoc's highlighted code given its language. |
 | `asciidoc-source.lua` | When an AsciiDoc source is read: `imagesdir` applied, sections moved below the title, Asciidoctor's own settings dropped from the metadata. |
 | `markdown-html.lua` | When a Markdown source is read: raw HTML reassembled a tag with its match, read as HTML, and cleaned by `html-raw.lua` and `html-source.lua`, loaded from their files. |
 | `html-source.lua` | When an HTML source is read: what the page says about its tables becomes a declaration, and what an earlier run derived (the title block, a table's scroll wrapper) is taken out. |
@@ -80,6 +80,7 @@ on another `bin/` script.
 | `build-epub.py` | Assembles the filtered intermediates into one EPUB3, ordered by `project.contents`, with accessibility claims computed from the build. |
 | `build-pdf.py` | Assembles the same way into one tagged PDF through Pandoc's LaTeX writer and LuaLaTeX: roles as division commands, the metadata file's YAML for the writer, and the macros `pdf-target.lua` uses. |
 | `pdf-target.lua` | What the LaTeX writer can't be told: a declared header column as row headers, a decorative image as an artifact, each link's `/Contents`, a cell spanning rows as `table/multirow`, a quotation in a table cell unwrapped, a table in a table cell written as a `tabular` with its head declared for tagging (as lines, only when a cell spans rows), and a footnote in a definition list's term moved to its definition. |
+| `latex-target.lua` | When a book's LaTeX is written as the `latex` target: a code block's language, which the LaTeX doesn't keep, in a comment before it, for reading the LaTeX back. |
 | `footnote-code.lua` | When a PDF is written, a book's or a deck's: a code block in a footnote, which LaTeX's tagged footnote can't read as its text, written to a file of its own from the preamble and read where it stood. |
 | `schema-conversion.yaml` | Declares every conversion setting, its type, default, and meaning. |
 

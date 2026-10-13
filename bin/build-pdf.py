@@ -803,7 +803,8 @@ def write_latex(base, name, resolved, project, document, out_dir):
             json.dump(document, fh)
         filters = ["--lua-filter", os.path.join(HERE, "target-blocks.lua"),
                    "--lua-filter", os.path.join(HERE, "footnote-code.lua"),
-                   "--lua-filter", os.path.join(HERE, "pdf-target.lua")] + highlighting.ARGS
+                   "--lua-filter", os.path.join(HERE, "pdf-target.lua"),
+                   "--lua-filter", os.path.join(HERE, "latex-target.lua")] + highlighting.ARGS
         environment = dict(os.environ, TARGET_NAME=name,
                            TITLE_BLOCK=str(resolved["title_block"]))
         done = subprocess.run(["pandoc", "-f", "json", "-t", "latex", "-s", book_json]

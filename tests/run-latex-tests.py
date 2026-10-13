@@ -1682,6 +1682,10 @@ def case_review_macros(work):
     ]
 
 
+# Every printable character of ASCII.
+ASCII = "".join(chr(c) for c in range(33, 127))
+
+
 def case_latex_target(work):
     """The latex target: a Markdown book written as LaTeX, a master and a
     file per chapter, read back as a LaTeX source to the same pages."""
@@ -1695,7 +1699,11 @@ def case_latex_target(work):
         fh.write("# Shapes\n\nA square:\n\n![A gray square.](img/square.png)\n\n"
                  "The area is $s^2$,[^area] and the next chapter has [circles](two.md#circles).\n\n"
                  "| Shape | Sides |\n|---|---|\n| Square | 4 |\n| Triangle | 3 |\n\n"
-                 "[^area]: Computed so:\n\n    ```\n    area = s * s\n    ```\n")
+                 "Measured:\n\n```{#area-code .python .numberLines startFrom=\"3\"}\n"
+                 "area = s * s  # in square units\nif area > 10 and s[0] != '{':\n"
+                 "    print(\"big\\n\")\n```\n\n"
+                 "Called as `area(s[0])`{.python}, after [the code](#area-code).\n\n"
+                 "[^area]: Computed so:\n\n    ```python\n    area = s * s  # 100%\n    ```\n")
     with open(os.path.join(work, "two.md"), "w", encoding="utf-8") as fh:
         fh.write("# Circles {#circles}\n\n![A black circle.](img/circle.svg)\n\n"
                  "Its area is $\\pi r^2$.\n\n1. Draw it.\n2. Measure it.\n\n"
@@ -1716,7 +1724,10 @@ def case_latex_target(work):
                  "<table><thead><tr><th>Name</th><th colspan=\"2\">Values</th></tr></thead>"
                  "<tbody><tr><td>a</td><td>1</td><td>2</td></tr></tbody></table>\n\n"
                  "<table><thead><tr><th>Proof: first,<br>then second.<br>Q.E.D.</th></tr>"
-                 "</thead></table>\n")
+                 "</thead></table>\n\n"
+                 # Every character of ASCII, each of those the writer escapes.
+                 "```python\nx = %s  # every character\n```\n\nAnd inline: `%s`{.python}.\n"
+                 % (ASCII, ASCII.replace("`", "")))
     with open(os.path.join(work, "three.md"), "w", encoding="utf-8") as fh:
         fh.write("# Figures\n\nSee [the triangle](#pascal).\n\n"
                  "<figure id=\"pascal\"><table><tbody><tr><td>1</td></tr><tr><td>1</td>"
@@ -1744,13 +1755,34 @@ def case_latex_target(work):
         comment = json.load(fh)["text-styles"]["Comment"]["text-color"]
     comment_rgb = ",".join("%.2f" % (int(comment[i:i + 2], 16) / 255) for i in (1, 3, 5))
 
+    back = os.path.join(work, "back")
+    read_back = []
+
+    def reading():
+        """The latex target read back as a LaTeX source, once."""
+        if not read_back:
+            shutil.copytree(out, back)
+            with open(os.path.join(back, "conversion.yaml"), "w") as fh:
+                fh.write("defaults:\n  latex:\n    main: shapes.tex\n"
+                         "targets:\n  html:\n    format: html\n")
+            read_back.append(convert(back))
+        return read_back[0]
+
+    def page(folder, stem):
+        path = os.path.join(folder, "html", stem + ".html")
+        return read(folder, "html", stem + ".html") if os.path.exists(path) else ""
+
+    def code_texts(text):
+        return [html_module.unescape(re.sub(r"<[^>]+>", "", c))
+                for c in re.findall(r"<pre\b[^>]*>(.*?)</pre>", text, re.S)]
+
+    def inline_texts(text):
+        text = re.sub(r"<pre\b.*?</pre>", "", text, flags=re.S)
+        return [html_module.unescape(re.sub(r"<[^>]+>", "", c))
+                for c in re.findall(r"<code\b[^>]*>(.*?)</code>", text, re.S)]
+
     def round_trip():
-        back = os.path.join(work, "back")
-        shutil.copytree(out, back)
-        with open(os.path.join(back, "conversion.yaml"), "w") as fh:
-            fh.write("defaults:\n  latex:\n    main: shapes.tex\n"
-                     "targets:\n  html:\n    format: html\n")
-        convert(back)
+        reading()
         compare = os.path.join(HERE, "..", "util", "compare-output.py")
         same = []
         for stem in ("one", "two"):
@@ -1835,6 +1867,21 @@ def case_latex_target(work):
          lambda: "\\newcommand{\\CommentTok}[1]{\\textcolor[rgb]{%s}" % comment_rgb in master
          and "\\begin{Highlighting}" in three),
         ("read back as a LaTeX source, each chapter gives the same page", round_trip),
+        # Pandoc's reader made a highlighted block a paragraph and stopped
+        # on inline code holding a bracket (latexsource.highlighted_code).
+        ("and highlighted code is code again: a block with its language, numbered from 3, "
+         "and its id, a footnote's, and inline code, the text of each as written, every "
+         "character of ASCII in it",
+         lambda: reading()
+         and re.search(r'<div class="sourceCode" id="[^"]*area-code"[^>]*><pre\s+class="sourceCode '
+                       r'numberSource python numberLines"><code class="sourceCode python" '
+                       r'style="counter-reset: source-line 2;">', page(back, "one"))
+         and re.search(r'<li id="fn1">.*?<pre\s+class="sourceCode python">', page(back, "one"), re.S)
+         and all(code_texts(page(back, s)) == code_texts(page(work, s))
+                 and inline_texts(page(back, s)) == inline_texts(page(work, s)) for s in ("one", "two"))
+         and "if area > 10 and s[0] != '{':" in code_texts(page(back, "one"))[0]
+         and ASCII in code_texts(page(back, "two"))[0]
+         and "<code>area(s[0])</code>" in page(back, "one")),
         ("it builds with latexmk and LuaLaTeX", builds),
     ]
 

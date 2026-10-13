@@ -787,7 +787,7 @@ HEADS = """<!DOCTYPE html><html lang="en"><head><title>Heads</title></head>
 <tbody><tr><td>Yes</td><td>12</td></tr><tr><td>No</td><td>3</td></tr>
 <tr><td>Maybe</td><td>5</td></tr></tbody></table>
 <p>Table 3.6</p>
-<table><thead><tr><th colspan="2">Answers</th></tr><tr><th>Answer</th><th>Count</th></tr></thead>
+<table><thead><tr><th colspan="2">Answers</th></tr><tr id="answer-row"><th id="answer">Answer</th><th id="count">Count</th></tr></thead>
 <tbody><tr><td colspan="2"><b>Group A</b></td></tr><tr><td>Yes</td><td>12</td></tr>
 <tr><td>No</td><td>3</td></tr><tr><td colspan="2"><b>Group B</b></td></tr>
 <tr><td>Yes</td><td>7</td></tr><tr><td>No</td><td>9</td></tr></tbody></table>
@@ -949,11 +949,65 @@ def case_bands(work):
          "the header row heads each part",
          lambda: [c for c in captions(heads) if c.startswith("Table 3.6")]
          == ["Table 3.6 Answers: Group A", "Table 3.6 Answers: Group B"]
-         and len(re.findall(r'<th scope="col">(?:<strong>)?Answer<', heads)) == 2
+         and len(re.findall(r'<th scope="col">(?:<span id="answer">'
+                            r'</span>)?(?:<strong>)?Answer<', heads)) == 2
          and "colspan" not in heads),
+        # Each part's copy of the header row kept its ids.
+        ("a header row's ids, and its cells', stay with the first part, not "
+         "repeated in the next",
+         lambda: all(heads.count(f'id="{name}"') == 1
+                     for name in ("answer-row", "answer", "count"))
+         and re.search(r'Group A(?:</strong>)?</caption>\s*<thead>\s*'
+                       r'<tr id="answer-row">',
+                       heads)
+         and "<span></span>" not in heads),
         ("and read back from Markdown or HTML, they split into the same captions",
          lambda: captions(heads) and captions(heads_again) == captions(heads)
          and captions(read(fixed, "html", "heads.html")) == captions(heads)),
+    ]
+
+
+# A table whose groups each open with a header row of their own, the first
+# row's but for its first cell, as in OpenStax's economics books, its
+# caption and each group's first cell holding an id, as a book unpacked
+# from CNXML has them.
+GROUP_HEADS = """<!DOCTYPE html><html lang="en"><head><title>Aggregates</title></head>
+<body><main><h1>Aggregates</h1>
+<table id="money"><caption><span id="money-cap"></span>Table 3.7 Money</caption>
+<tbody><tr><td id="m1"><b>Elements of M1</b></td><td><b>Millions</b></td></tr>
+<tr><td>Cash</td><td>350</td></tr><tr><td>Deposits</td><td>1210</td></tr>
+<tr><td id="m2"><b>Elements of M2</b></td><td><b>Millions</b></td></tr>
+<tr><td>M1</td><td>1560</td></tr><tr><td>Savings</td><td>562</td></tr></tbody></table>
+</main></body></html>
+"""
+
+
+def case_group_heads(work):
+    """A table split where each group's own header row begins, the words
+    of the row's first cell in its part's caption and the table's caption
+    in every part's: what's copied keeps no id, which the row and the
+    first part's caption keep."""
+    os.makedirs(work)
+    with open(os.path.join(work, "money.html"), "w", encoding="utf-8") as fh:
+        fh.write(GROUP_HEADS)
+    with open(os.path.join(work, "conversion.yaml"), "w",
+              encoding="utf-8") as fh:
+        fh.write("targets:\n  html:\n    format: html\n")
+    run_in(work, "  contents:\n    - money\n")
+    page = read(work, "html", "money.html") if exists(
+        work, "html", "money.html") else ""
+    captions = [" ".join(re.sub(r"<[^>]+>", "", c).split())
+                for c in re.findall(r"<caption>(.*?)</caption>", page, re.S)]
+    return [
+        # The ids went with the words into the captions: the table's
+        # caption's into the second part's, each row's into its part's.
+        ("a group's own header row's ids, and the table's caption's, aren't "
+         "repeated in the parts' captions",
+         lambda: captions == ["Table 3.7 Money: Elements of M1",
+                              "Table 3.7 Money: Elements of M2"]
+         and all(page.count(f'id="{name}"') == 1
+                 for name in ("money-cap", "m1", "m2"))
+         and "<span></span>" not in page),
     ]
 
 
@@ -4250,6 +4304,7 @@ CASES = [
     ("a menu for pages posted as a site", case_menu),
     ("raw HTML in a Markdown source", case_markdown_html),
     ("title rows and bands, split and grouped", case_bands),
+    ("a group's own header row, split", case_group_heads),
     ("compare-output sees lists and blockquotes", case_compare_blocks),
     ("a web archive converted directly", case_warc_direct),
     ("a Common Cartridge", case_cartridge),

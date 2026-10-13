@@ -1618,6 +1618,51 @@ local function clone_rows(rows)
   return out
 end
 
+-- What a split table repeats, its ids taken out: a head row over a later
+-- part, whose ids and its cells' stay with the first part's, which a link
+-- names; the table's caption in a later part's caption; and the words of
+-- a part's header row in its caption, where the row keeps them. Repeated,
+-- an id is invalid HTML (the Nu checker's "Duplicate ID") and an EPUB's
+-- file fails epubcheck (RSC-005): a source whose header cells carry ids
+-- (an HTML page's, a CNX book's) had one copy of each per part.
+local function clear_identifier(el)
+  if el.identifier ~= nil and el.identifier ~= '' then
+    el.identifier = ''
+    return el
+  end
+end
+
+-- An anchor, a span that held nothing but its id, goes with it.
+local function clear_span(el)
+  if el.identifier == '' then return nil end
+  if #el.content == 0 and #el.classes == 0 and #el.attributes == 0 then
+    return {}
+  end
+  return clear_identifier(el)
+end
+
+local ID_HOLDERS = {
+  Span = clear_span, Div = clear_identifier, Link = clear_identifier,
+  Image = clear_identifier, Code = clear_identifier,
+  CodeBlock = clear_identifier, Header = clear_identifier,
+  Figure = clear_identifier, Table = clear_identifier,
+}
+
+local function inlines_without_ids(inlines)
+  return pandoc.Inlines(inlines):walk(ID_HOLDERS)
+end
+
+local function without_ids(row)
+  local cells = pandoc.List()
+  for _, cell in ipairs(row.cells) do
+    cells:insert(pandoc.Cell(pandoc.Blocks(cell.contents):walk(ID_HOLDERS),
+      cell.alignment, cell.row_span, cell.col_span,
+      pandoc.Attr('', cell.attr.classes, cell.attr.attributes)))
+  end
+  return pandoc.Row(cells,
+    pandoc.Attr('', row.attr.classes, row.attr.attributes))
+end
+
 local function compose_part_caption(base, band_inlines, band_text, given, part_no)
   if given and given ~= '' then
     return text_to_inlines(given), given
@@ -1777,7 +1822,7 @@ local function split_table(tbl, bands, part_captions, apply, head_leads)
         own_head = band
         local corner = band.cells[1]
         if corner then
-          inlines = trim_inlines(cell_inlines(corner))
+          inlines = inlines_without_ids(trim_inlines(cell_inlines(corner)))
           text = normalize(pandoc.utils.stringify(inlines))
         end
       end
@@ -1792,7 +1837,8 @@ local function split_table(tbl, bands, part_captions, apply, head_leads)
     end
     local band_text = table.concat(texts, ': ')
     local caption_inlines, caption_text = compose_part_caption(
-      base, band_inlines, band_text, part_captions and part_captions[i], i)
+      i > 1 and base and inlines_without_ids(base) or base, band_inlines,
+      band_text, part_captions and part_captions[i], i)
 
     -- The first part keeps the table's own id, which a link to the table
     -- names (an HTML source's <table id>); the others are numbered from 2.
@@ -1800,8 +1846,13 @@ local function split_table(tbl, bands, part_captions, apply, head_leads)
       tbl.attr.identifier ~= '' and (i == 1 and tbl.attr.identifier
                                      or (tbl.attr.identifier .. '-' .. i)) or '',
       tbl.attr.classes, {})
-    local head_rows = clone_rows(head_kept)
-    if lead then head_rows[#head_rows + 1] = lead:clone() end
+    local head_rows = {}
+    for _, row in ipairs(head_kept) do
+      head_rows[#head_rows + 1] = i == 1 and row:clone() or without_ids(row)
+    end
+    if lead then
+      head_rows[#head_rows + 1] = i == 1 and lead:clone() or without_ids(lead)
+    end
     if own_head then head_rows[#head_rows + 1] = own_head end
     local head = pandoc.TableHead(head_rows, tbl.head.attr)
     local body = pandoc.TableBody(segment, {},

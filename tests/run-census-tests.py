@@ -67,9 +67,16 @@ def row(cells, header=False):
     return "<w:tr>%s%s</w:tr>" % (pr, "".join(cells))
 
 
-def table(rows):
-    doc = '<w:document %s><w:body><w:tbl><w:tblPr/>%s</w:tbl></w:body></w:document>'
-    body = ET.fromstring(doc % (W, "".join(rows))).find(tc.q("body"))
+# Word's table look as Word sets it on a table it inserts: it formats the
+# first row, which Pandoc's reader makes the table's head.
+LOOK = ('<w:tblPr><w:tblLook w:val="04A0" w:firstRow="1" w:lastRow="0" '
+        'w:firstColumn="1" w:lastColumn="0" w:noHBand="0" w:noVBand="1"/></w:tblPr>')
+
+
+def table(rows, look=False):
+    doc = '<w:document %s><w:body><w:tbl>%s%s</w:tbl></w:body></w:document>'
+    body = ET.fromstring(doc % (W, LOOK if look else "<w:tblPr/>",
+                                "".join(rows))).find(tc.q("body"))
     return next(tc.all_tables(body))[0]
 
 
@@ -403,6 +410,80 @@ def part_checks():
            "short labels is its header row", got[0] == "first-row", str(got[:2]))
 
 
+def structure_checks():
+    """guess_table's plan, (caption-rows, split-at), for a table whose
+    merged first row is over a header row, with bands below."""
+    def band(text, width=2, header=False):
+        return row([cell(text, bold=True, span=width)], header=header)
+    titled = [band("Answers"), row([cell("Answer", bold=True), cell("Count", bold=True)]),
+              band("Group A"), row([cell("Yes"), cell("12")]), row([cell("No"), cell("3")]),
+              band("Group B"), row([cell("Yes"), cell("7")]), row([cell("No"), cell("9")])]
+    # Nothing marks the header row; Word's table look makes the title the
+    # table's head, or nothing does. The title had been taken for the first
+    # band, so the first part was the header row alone, and the guess read
+    # the parts without it.
+    for look in (False, True):
+        got = tc.guess_table(table(titled, look))
+        yield ("a title over a header row nothing marks, with the first band "
+               "right under it, is a caption row, and each part is guessed "
+               "under the header row" + (", with Word's table look" if look else ""),
+               got[2] == ("1", "3,6") and got[0] == "both", str(got))
+    # A band over one row of data, then another band, is the first band:
+    # that row doesn't read as a header row.
+    single = [band("Group A"), row([cell("Apples"), cell("12")]),
+              band("Group B"), row([cell("Pears"), cell("7")]),
+              row([cell("Plums"), cell("3")])]
+    got = tc.guess_table(table(single))
+    yield ("a band over one row of data, then another band, is the first band",
+           got[2] == ("", "1,3"), str(got[2]))
+
+    # A band and a header row both marked to repeat, the table's head.
+    def headed(title, header, rest):
+        return ([band(title, 3, header=True), row([cell(t) for t in header], header=True)]
+                + rest)
+    shared = headed("A patient with chest pain", ("Medical", "Nursing", "Collaborative"),
+                    [row([cell("Infarction"), cell("Pain"), cell("Dysrhythmias")]),
+                     band("Who treats each", 3),
+                     row([cell("Laboratory"), cell("Monitoring"), cell("The team")])])
+    got = tc.guess_table(table(shared, look=True))
+    yield ("a band in the head over a header row every group shares is the title",
+           got[2] == ("1", "4"), str(got[2]))
+    # Bold that every row of a group has sets no row of it apart.
+    bold = headed("Example A", ("Technology", "Labor", "Total"),
+                  [row([cell("One"), cell("$400"), cell("$560")]), band("Example B", 3)]
+                  + [row([cell(t, bold=True) for t in r])
+                     for r in (("Two", "$550", "$710"), ("Three", "$385", "$705"))])
+    got = tc.guess_table(table(bold, look=True))
+    yield ("and so is one where a later band's rows are all bold",
+           got[2] == ("1", "4"), str(got[2]))
+    # The first band, though, where a later band has a header row of its
+    # own; the guess had made it the title, and the split headed every part
+    # with the first part's header row.
+    own = [
+        ("its cells elsewhere",
+         [row([cell("Gauge"), cell("Composition", span=2)]),
+          row([cell("20G"), cell("Aqueous", span=2)])]),
+        ("the header row again, a word changed",
+         [row([cell("Technology"), cell("Labor"), cell("Totals")]),
+          row([cell("Two"), cell("$550"), cell("$710")])]),
+        ("bold, as the rows under it aren't",
+         [row([cell("Customer", bold=True), cell("Name", bold=True), cell("City", bold=True)]),
+          row([cell("1"), cell("John Doe"), cell("Boston")])]),
+        ("words over numbers",
+         [row([cell("Year"), cell("Sales"), cell("Costs")]),
+          row([cell("2019"), cell("1200"), cell("800")]),
+          row([cell("2020"), cell("1350"), cell("900")])]),
+    ]
+    for what, rest in own:
+        rows = headed("Example A", ("Technology", "Labor", "Total"),
+                      [row([cell("One"), cell("$400"), cell("$560")]),
+                       band("Example B", 3)] + rest)
+        got = tc.guess_table(table(rows, look=True))
+        yield ("a band in the head over a header row is the first band where a "
+               "later band has its own header row: " + what,
+               got[2] == ("", "1,4"), str(got[2]))
+
+
 def key_checks():
     """Each returns (name, ok, detail)."""
     base = [row([cell("Year"), cell("GDP")]),
@@ -494,17 +575,31 @@ def pandoc_checks():
         yield name, got == expect, f"guess={got}, expected {expect}"
     # Title rows and bands, (caption-rows, split-at), where the head and the
     # foot of an HTML table matter: a band over the header row in the head
-    # stays there, over every part's header row, and the foot comes after
-    # the last part, so neither is split at.
-    group = ("<tbody><tr><td colspan='2'><b>Group A</b></td></tr>"
-             "<tr><td>Yes</td><td>12</td></tr>"
-             "<tr><td colspan='2'><b>Group B</b></td></tr>"
-             "<tr><td>Yes</td><td>7</td></tr></tbody>")
+    # is the table's title where that row heads every group, and the first
+    # band where the band below has a header row of its own; and the foot
+    # comes after the last part, so no row of it is split at.
+    groups = ("<tr><td colspan='2'><b>Group A</b></td></tr>"
+              "<tr><td>Yes</td><td>12</td></tr>"
+              "<tr><td colspan='2'><b>Group B</b></td></tr>"
+              "<tr><td>Yes</td><td>7</td></tr>")
+    group = "<tbody>" + groups + "</tbody>"
     structures = [
         ("html: a title over the header row in the head is a caption row, "
          "not a band", ("1", "3,5"),
          "<thead><tr><th colspan='2'>Answers</th></tr>"
          "<tr><th>Answer</th><th>Count</th></tr></thead>" + group),
+        ("html: and so is one over a header row nothing marks, with the first "
+         "band right under it", ("1", "3,5"),
+         "<tr><td colspan='2'>Answers</td></tr>"
+         "<tr><td><b>Answer</b></td><td><b>Count</b></td></tr>" + groups),
+        ("html: but one in the head over a header row the band below repeats "
+         "is the first band", ("", "1,4"),
+         "<thead><tr><th colspan='2'>Example A</th></tr>"
+         "<tr><th>Technology</th><th>Cost</th></tr></thead>"
+         "<tbody><tr><td>One</td><td>$560</td></tr>"
+         "<tr><td colspan='2'>Example B</td></tr>"
+         "<tr><td>Technology</td><td>Cost</td></tr>"
+         "<tr><td>One</td><td>$710</td></tr></tbody>"),
         ("html: no row of a table's foot is a band, though one over a row "
          "of totals looks it", ("", "2,4"),
          "<thead><tr><th>Answer</th><th>Count</th></tr></thead>" + group
@@ -630,7 +725,8 @@ def script_checks():
 def main():
     failures = 0
     for name, ok, detail in (list(key_checks()) + list(pandoc_checks())
-                             + list(script_checks()) + list(part_checks())):
+                             + list(script_checks()) + list(part_checks())
+                             + list(structure_checks())):
         if ok:
             print("  ok    %s" % name)
         else:
@@ -651,7 +747,7 @@ def main():
             print("          evidence: %s" % "; ".join(ev))
     total = len(CASES) + sum(1 for _ in key_checks()) + \
         sum(1 for _ in pandoc_checks()) + sum(1 for _ in script_checks()) + \
-        sum(1 for _ in part_checks())
+        sum(1 for _ in part_checks()) + sum(1 for _ in structure_checks())
     print("")
     if failures:
         print("%d of %d census checks failed." % (failures, total),

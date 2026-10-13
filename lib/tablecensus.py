@@ -1258,6 +1258,67 @@ def head_rows(v):
     return n
 
 
+def cell_starts(row):
+    """The grid columns a row's cells begin at, a merged cell once."""
+    starts, last = [], None
+    for i, c in enumerate(row):
+        if c is not last:
+            starts.append(i)
+        last = c
+    return tuple(starts)
+
+
+def repeats_row(row, header):
+    """Whether a row is a header row again: its cells where the header
+    row's are, and half of them or more the same words. Economics 3e
+    repeats "Labor Cost | Machine Cost | Total Cost" under each of its
+    bands; the information systems book repeats its column names with
+    one changed ("Products", then "Product")."""
+    if cell_starts(row) != cell_starts(header):
+        return False
+    texts = lambda r: [r[i].text for i in cell_starts(r)]
+    same = sum(1 for a, b in zip(texts(row), texts(header)) if a and a == b)
+    return 2 * same >= len(cell_starts(header))
+
+
+def reads_as_header_row(row, below):
+    """Whether a row nothing marks reads as a header row over the rows
+    below it, by the signals explain() takes for one: every cell filled
+    and uniformly bold or shaded, where the rows below aren't all; or
+    words over numbers."""
+    if (looks_like_header_band(row, allow_blank_corner=True)
+            and not all(looks_like_header_band(r, allow_blank_corner=True)
+                        for r in below)):
+        return True
+    return text_row_over_numbers([row] + below)
+
+
+def heads_every_group(grid, h, bands, foot=()):
+    """Whether row h, a header row above bands, heads every group of rows
+    below it: each row has its cells where row h has them, and no band has
+    a header row of its own, its first row repeating row h or reading as a
+    header row over the rest. Where each band has its own (Economics 3e's
+    cost tables, the nursing book's laboratory tests), or a band's rows
+    have their cells elsewhere (the nursing book's needle lengths over its
+    needle gauges, two tables in one), row h is the first group's, and a
+    merged row over it is that group's band."""
+    later = [b for b in bands if b > h]
+    if not later:
+        return False
+    starts = cell_starts(grid[h])
+    edges = [h] + later + [len(grid)]
+    for k in range(len(edges) - 1):
+        rows = [grid[i] for i in range(edges[k] + 1, edges[k + 1]) if i not in foot]
+        if any(cell_starts(r) != starts for r in rows):
+            return False
+        # The rows under row h are its own; a band right over another has
+        # none.
+        if k > 0 and rows and (repeats_row(rows[0], grid[h])
+                               or reads_as_header_row(rows[0], rows[1:])):
+            return False
+    return True
+
+
 def inferred_structure(grid, foot=(), head=0):
     """(caption-rows, split-at) as the sidecar strings.
 
@@ -1269,18 +1330,21 @@ def inferred_structure(grid, foot=(), head=0):
     first band, not a title -- 7-5-costs-in-the-long-run.docx opens with
     "Example A", then "Example B" at row 6, each with its own header row
     beneath -- unless another band is right under it: then it heads no
-    rows of its own, and it's the title. So is one in the table's head
-    (the first `head` rows) over a header row there, which the split
-    leaves in every part's head with that row, and any other band over a
-    header row in the head stays there too. A band heads the rows under
-    it, so one with nothing under it but bands, if anything, isn't one: a
-    note one cell across a table's foot ("Source: ..."), which the split
-    keeps a row of the table; nor is any row of the table's foot, which
-    comes after the last part. Elsewhere, a band right over another names
-    a group of groups, and the split puts both in the caption of the part
-    below; where the table has such a pair below, a pair at its top is one
-    too, not a title over a band. Written into the prefilled row so the
-    plan is visible."""
+    rows of its own, and it's the title. It's the title, too, over a header
+    row every group shares (heads_every_group): one in the table's head
+    (the first `head` rows), or, where nothing marks it, one that reads as
+    a header row with the first group's band right under it. One in the
+    head over the first group's own header row is the first band, as it
+    would be in the body, and the split takes both from the head for the
+    first part; any other band over a header row in the head stays there.
+    A band heads the rows under it, so one with nothing under it but
+    bands, if anything, isn't one: a note one cell across a table's foot
+    ("Source: ..."), which the split keeps a row of the table; nor is any
+    row of the table's foot, which comes after the last part. Elsewhere, a
+    band right over another names a group of groups, and the split puts
+    both in the caption of the part below; where the table has such a pair
+    below, a pair at its top is one too, not a title over a band. Written
+    into the prefilled row so the plan is visible."""
     bands = [i for i in band_rows(grid) if i not in foot]
     headers = [i for i in range(head) if i not in bands]
     over_header = [i for i in bands if headers and i < headers[-1]]
@@ -1288,7 +1352,11 @@ def inferred_structure(grid, foot=(), head=0):
     data = [i for i in range(len(grid)) if i not in bands and i not in foot]
     bands = [i for i in bands if data and i < data[-1]]
     if 0 in over_header:
-        return "1", ",".join(str(i + 1) for i in bands)
+        if heads_every_group(grid, headers[-1], bands, foot):
+            return "1", ",".join(str(i + 1) for i in bands)
+        # Otherwise it's read as any band at the top is: with bands below,
+        # the first group's, over its own header row; alone, the title.
+        bands = [0] + bands
     if not bands:
         repeated = [i for i in repeated_header_rows(grid) if i not in foot]
         if repeated:
@@ -1296,6 +1364,13 @@ def inferred_structure(grid, foot=(), head=0):
         return "", ""
     if 0 in bands and 1 in bands and not any(i + 1 in bands for i in bands if i > 0):
         return "1", ",".join(str(i + 1) for i in bands if i > 0)
+    # A title over a header row nothing marks: the head is the title, if
+    # anything.
+    if 0 in bands and 1 not in bands and 2 in bands and head < 2:
+        rows = [r for i, r in enumerate(grid)
+                if i > 1 and i not in foot and not is_full_width_band(r)]
+        if reads_as_header_row(grid[1], rows) and heads_every_group(grid, 1, bands, foot):
+            return "1", ",".join(str(i + 1) for i in bands if i > 0)
     below = [i for i in bands if i > 0]
     if not below:
         return "1", ""
@@ -1304,7 +1379,7 @@ def inferred_structure(grid, foot=(), head=0):
     return "", ",".join(str(i + 1) for i in below)
 
 
-def guess_by_parts(tbl, split_at, whole_value, whole_reason):
+def guess_by_parts(tbl, split_at, whole_value, whole_reason, caption_rows=()):
     """The guess for a table that will be split, taken part by part.
     The bands break every rule when the table is read whole -- a blank
     corner matrix's first column has band text in it, a key column has
@@ -1317,9 +1392,11 @@ def guess_by_parts(tbl, split_at, whole_value, whole_reason):
     with each part, as the filter copies them: the rows Pandoc reads as the
     table's head (row 1 when Word's table look sets its first-row flag, and
     rows marked to repeat), or, when there are none, the one row above the
-    first band of a table whose whole guess has a header row. A part too
-    small to judge abstains, and a tie goes to the whole table's guess,
-    then to a value over none."""
+    first band of a table whose whole guess has a header row. Title rows
+    at the top (caption_rows, 1-based) go to the caption, so they're no
+    part's, and the rows counted from there. A part too small to judge
+    abstains, and a tie goes to the whole table's guess, then to a value
+    over none."""
     v = view(tbl)
     grid = v.grid
     cuts = sorted(set(i - 1 for i in split_at if 0 < i <= len(grid)))
@@ -1327,11 +1404,14 @@ def guess_by_parts(tbl, split_at, whole_value, whole_reason):
         return whole_value, whole_reason
     marked = set(v.marked)
     first_row = bool(v.look.get("firstRow"))
-    shared = 0
+    start = 0
+    while start + 1 in caption_rows:
+        start += 1
+    shared = start
     while shared < cuts[0] and (shared in marked or (shared == 0 and first_row)):
         shared += 1
-    if shared == 0 and cuts[0] == 1 and whole_value in ("first-row", "both"):
-        shared = 1
+    if shared == start and cuts[0] == start + 1 and whole_value in ("first-row", "both"):
+        shared = start + 1
     is_band = {c: is_full_width_band(grid[c]) and len(grid[c]) > 1 for c in cuts}
     edges = [shared] + cuts + [len(grid)]
     bounds = []
@@ -1341,11 +1421,12 @@ def guess_by_parts(tbl, split_at, whole_value, whole_reason):
             lo = cuts[k - 1] + 1
         if hi > lo:
             bounds.append((lo, hi))
-    head_marks = [i for i in range(shared) if i in marked or (i == 0 and first_row)]
+    head_marks = [i - start for i in range(start, shared)
+                  if i in marked or (i == 0 and first_row)]
     votes = []
     for lo, hi in bounds:
-        part = View(grid[:shared] + grid[lo:hi], v.look, v.style,
-                    head_marks + [shared + i - lo for i in range(lo, hi)
+        part = View(grid[start:shared] + grid[lo:hi], v.look, v.style,
+                    head_marks + [shared - start + i - lo for i in range(lo, hi)
                                   if i in marked])
         part.titled = lo > 0 and (lo - 1) in is_band and is_band[lo - 1]
         kind, ev, _, _ = classify(part)
@@ -1376,7 +1457,8 @@ def guess_table(tbl, kind=None, ev=None):
     value, reason = explain(v, kind, ev)
     inferred = inferred_structure(v.grid, v.foot, head_rows(v))
     if inferred[1] and value is not None:
-        value, reason = guess_by_parts(v, rows_list(inferred[1]), value, reason)
+        value, reason = guess_by_parts(v, rows_list(inferred[1]), value, reason,
+                                       rows_list(inferred[0]))
     return value, reason, inferred
 
 def book_files(args):

@@ -175,9 +175,13 @@ Beyond the Word-to-HTML translation, each page gets:
   pair at its top is one too. A table's foot comes after its last part,
   and no row of it is inferred as a band. A band at the end of the
   table's head, where Pandoc's Word reader puts a first row Word's table
-  look formats (Word's default), heads the first part alone; one above a
-  header row there stays in every part's head with it, and at the top
-  it's the table's title, inferred as `caption-rows=1`.
+  look formats (Word's default), heads the first part alone. A merged
+  first row over a header row every part shares, in the head or with
+  nothing marking the header row and the first band right under it, is
+  the table's title, inferred as `caption-rows=1`; over a header row of
+  the first part's own, it's the first band, and from the head it takes
+  that row to the first part with it. Any other band above a header row
+  in the head stays in every part's head with it.
 - **Tables get the headers they were declared to have.** `table-headers.csv`
   says, per table, whether the headers are in the first row, the first
   column, both, or nowhere (see [Sidecar files](sidecars.md#sidecar-files)), and for a

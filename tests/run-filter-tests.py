@@ -465,6 +465,50 @@ def case_split(work):
     look = ('<w:tblPr><w:tblLook w:val="04A0" w:firstRow="1" w:lastRow="0" '
             'w:firstColumn="1" w:lastColumn="0" w:noHBand="0" w:noVBand="1"/></w:tblPr>')
     looked = hb.table(block("A", 40) + block("B", 55)).replace("<w:tblPr/>", look)
+    # A title over a header row every band's rows share, nothing marking
+    # the header row, with Word's table look, which makes the title the
+    # table's head, and without. The guess had taken the title for the
+    # first band, so the first part held the header row alone, as data,
+    # and no other part had one.
+    def responses(counts):
+        rows = [hb.row([hb.cell("Responses", bold=True, span=2)]),
+                hb.row([hb.cell("Response", bold=True), hb.cell("Count", bold=True)])]
+        for letter, (yes, no) in zip("AB", counts):
+            rows += [hb.row([hb.cell("Group " + letter, bold=True, span=2)]),
+                     hb.row([hb.cell("Yes"), hb.cell(yes)]),
+                     hb.row([hb.cell("No"), hb.cell(no)])]
+        return rows
+    answered = hb.table(responses([("12", "3"), ("7", "9")])).replace("<w:tblPr/>", look)
+    unlooked = hb.table(responses([("14", "1"), ("6", "8")]))
+    # A band and the header row under it marked to repeat, both the table's
+    # head, over a band whose rows have a header row of their own, their
+    # cells elsewhere: the nursing book's needle lengths over its needle
+    # gauges. The guess had made the first band the table's title, and its
+    # header row headed both parts, over the second part's own.
+    needles = hb.table([
+        hb.row([hb.cell("Length of Required Needle", span=3)], header=True),
+        hb.row([hb.cell("Length of Needle"), hb.cell("Patient Weight"),
+                hb.cell("Adipose Tissue")], header=True),
+        hb.row([hb.cell("5/8 in"), hb.cell("Under 130 lbs"), hb.cell("Minimal")]),
+        hb.row([hb.cell("1 in"), hb.cell("130 to 260 lbs"), hb.cell("Normal")]),
+        hb.row([hb.cell("Diameter of Required Needle", span=3)]),
+        hb.row([hb.cell("Gauge of Needle"), hb.cell("Medication Composition", span=2)]),
+        hb.row([hb.cell("20G to 25G"), hb.cell("Aqueous solution", span=2)]),
+        hb.row([hb.cell("18G to 21G"), hb.cell("Viscous solution", span=2)]),
+    ]).replace("<w:tblPr/>", look)
+    # The same marks over a header row the band below shares: the first row
+    # is the table's title, and the header row heads both parts.
+    diagnosed = hb.table([
+        hb.row([hb.cell("A patient in the emergency room with a heart attack", span=3)],
+               header=True),
+        hb.row([hb.cell("Medical Diagnosis"), hb.cell("Nursing Diagnosis"),
+                hb.cell("Collaborative Problem")], header=True),
+        hb.row([hb.cell("Myocardial infarction"), hb.cell("Altered perfusion"),
+                hb.cell("Dysrhythmias")]),
+        hb.row([hb.cell("Who treats each", span=3)]),
+        hb.row([hb.cell("Laboratory testing"), hb.cell("Continuous monitoring"),
+                hb.cell("The whole team")]),
+    ]).replace("<w:tblPr/>", look)
     os.makedirs(work, exist_ok=True)
     hb.docx(os.path.join(work, "banded.docx"),
             [hb.para("Table 7.14 Total cost with rising labor costs"), banded,
@@ -493,6 +537,14 @@ def case_split(work):
              hb.para("Table 3.4 Plans"), planned,
              hb.para("Costs as Word lays them out next."),
              hb.para("Table 7.15 Costs in Word's layout"), looked,
+             hb.para("Responses next."),
+             hb.para("Table 1.4 Survey by group"), answered,
+             hb.para("Responses without Word's look next."),
+             hb.para("Table 1.5 Survey again"), unlooked,
+             hb.para("Needles next."),
+             hb.para("Table 12.2 Needles"), needles,
+             hb.para("Diagnoses next."),
+             hb.para("Table 4.4 Diagnoses"), diagnosed,
              hb.para("Then a table right after one labeled above it."),
              hb.para("Table 4.3 Prices"),
              hb.table([hb.row([hb.cell("Year", bold=True), hb.cell("Price", bold=True)]),
@@ -579,6 +631,9 @@ def case_split(work):
     labeled = lambda label: [t for t in everything if caption_of(t).startswith(label)]
     halves_new = [r for r in new if r["label"] == "Table 3.3"]
     planned_new = [r for r in new if r["label"] == "Table 3.4"]
+    surveyed_new = [r for r in new if r["label"] in ("Table 1.4", "Table 1.5")]
+    needles_new = [r for r in new if r["label"] == "Table 12.2"]
+    diagnosed_new = [r for r in new if r["label"] == "Table 4.4"]
     organizer_new = [r for r in new if r["label"] == "Table 2.1"]
     noted_new = [r for r in new if r["label"] == "Table 11.1"]
     titled_new = [r for r in new if r["label"] == "Table 3.1"]
@@ -589,6 +644,9 @@ def case_split(work):
     grouped_heads = [re.search(r"<thead>.*?</thead>", t, re.S) for t in grouped_parts]
     grouped_new = [r for r in new if r["label"] == "Table 7.2"]
     flat = lambda t: " ".join(re.sub(r"<[^>]+>", " ", t).split())
+    head_of = lambda t: flat(re.search(r"<thead>.*?</thead>", t, re.S).group(0)) \
+        if "<thead>" in t else ""
+    uncaptioned = lambda t: flat(re.sub(r"<caption>.*?</caption>", "", t, flags=re.S))
     caps = [" ".join(re.sub(r"<[^>]+>", "",
                             re.search(r"<caption>(.*?)</caption>", t, re.S).group(1)).split())
             if "<caption>" in t else "" for t in tables]
@@ -696,7 +754,8 @@ def case_split(work):
              "Prose between the tables, as there always is.", "More prose.", "And more.",
              "Last.", "Even more.", "And still more.",
              "Then two tables with only their labels between.", "Halves next.",
-             "Plans next.", "Costs as Word lays them out next.",
+             "Plans next.", "Costs as Word lays them out next.", "Responses next.",
+             "Responses without Word's look next.", "Needles next.", "Diagnoses next.",
              "Then a table right after one labeled above it."))),
         ("and two tables with only their labels between are each captioned "
          "by their own",
@@ -723,6 +782,39 @@ def case_split(work):
          and all(re.search(r"<thead>(?:(?!</thead>).)*Labor Cost", t, re.S)
                  and flat(t).count("Example A") == (1 if n == 0 else 0)
                  for n, t in enumerate(labeled("Table 7.15")))),
+        ("a title over a header row nothing marks, the first band right under "
+         "it, is the table's title, with Word's table look or without, and the "
+         "header row heads every part",
+         lambda: len(surveyed_new) == 2
+                 and all((r["caption-rows"], r["split-at"]) == ("1", "3,6")
+                         for r in surveyed_new)
+                 and [caption_of(t) for t in labeled("Table 1.4") + labeled("Table 1.5")]
+                 == ["Table 1.4 Survey by group. Responses: Group A",
+                     "Table 1.4 Survey by group. Responses: Group B",
+                     "Table 1.5 Survey again. Responses: Group A",
+                     "Table 1.5 Survey again. Responses: Group B"]
+                 and all(head_of(t) == "Response Count" and "Responses" not in uncaptioned(t)
+                         for t in labeled("Table 1.4") + labeled("Table 1.5"))),
+        ("and the guess reads each part under that header row",
+         lambda: [r["headers"] for r in surveyed_new] == ["both", "both"]),
+        ("a band and its own header row in the table's head head the first "
+         "part alone, and the next part has its own",
+         lambda: needles_new
+                 and (needles_new[0]["caption-rows"], needles_new[0]["split-at"]) == ("", "1,5")
+                 and [(caption_of(t), head_of(t)) for t in labeled("Table 12.2")]
+                 == [("Table 12.2 Needles: Length of Required Needle",
+                      "Length of Needle Patient Weight Adipose Tissue"),
+                     ("Table 12.2 Needles: Diameter of Required Needle",
+                      "Gauge of Needle Medication Composition")]),
+        ("but a band in the head over a header row the band below shares is "
+         "the table's title, and the header row heads both parts",
+         lambda: diagnosed_new
+                 and (diagnosed_new[0]["caption-rows"], diagnosed_new[0]["split-at"]) == ("1", "4")
+                 and len(labeled("Table 4.4")) == 2
+                 and all(head_of(t) == "Medical Diagnosis Nursing Diagnosis Collaborative Problem"
+                         and "emergency room" in caption_of(t)
+                         and "emergency room" not in uncaptioned(t)
+                         for t in labeled("Table 4.4"))),
         ("a table right after one whose label is above it is kept",
          lambda: labeled("Table 4.3 Prices") and any("Hours" in t for t in everything)),
         ("grouped, both head the part's body, in order",

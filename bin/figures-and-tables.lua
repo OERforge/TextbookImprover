@@ -1666,21 +1666,23 @@ local function split_table(tbl, bands, part_captions, apply, head_leads)
   -- Flatten every body's rows in order, its own head rows first (a band
   -- the source grouped by is one), keeping the first body's settings
   -- for the parts.
-  -- A band at the end of the table's head labels the rows under it as any
-  -- band does, so it leaves the head and heads the first part: Pandoc's
-  -- Word reader makes a table's first row its head when Word's table look
-  -- formats the first row, as its default does, and an HTML table's band
-  -- can be its <thead>. Copied into every part's head, the first band had
-  -- headed them all (Plan A over Plan B's rows too). A band above a header
-  -- row in the head stays there, over every part's header row.
+  -- A band in the table's head labels the rows under it as any band does,
+  -- the head's rows after it among them, so it leaves the head with them
+  -- and heads the first part: Pandoc's Word reader makes a table's first
+  -- row its head when Word's table look formats the first row, as its
+  -- default does, along with the rows after it marked to repeat, and an
+  -- HTML table's band can be its <thead>. Copied into every part's head,
+  -- the first band had headed them all (Plan A over Plan B's rows too),
+  -- and the first part's own header row with it (the nursing book's
+  -- needle lengths over its needle gauges). The head's rows before it
+  -- head every part. A title over a header row every group shares is no
+  -- band: the pre-pass makes it a caption row, and the header row stays.
   local model = tbl.bodies[1]
   local rows, head_kept = {}, {}
-  local last_header = 0
-  for i, row in ipairs(tbl.head.rows) do
-    if not is_band[row] then last_header = i end
-  end
-  for i, row in ipairs(tbl.head.rows) do
-    if i > last_header then rows[#rows + 1] = row else head_kept[#head_kept + 1] = row end
+  local moved = false
+  for _, row in ipairs(tbl.head.rows) do
+    moved = moved or is_band[row] == true
+    if moved then rows[#rows + 1] = row else head_kept[#head_kept + 1] = row end
   end
   for _, body in ipairs(tbl.bodies) do
     for _, row in ipairs(body.head) do rows[#rows + 1] = row end
@@ -1706,9 +1708,8 @@ local function split_table(tbl, bands, part_captions, apply, head_leads)
       is_band[row] = nil
     end
   end
-  -- What it was asked to split at and won't: those, any in the table's
-  -- head above its header row, and any in its foot, which comes after the
-  -- last part.
+  -- What it was asked to split at and won't: those, and any in the table's
+  -- foot, which comes after the last part.
   local unused, present = {}, {}
   for _, row in ipairs(rows) do present[row] = true end
   for _, row in ipairs(bands) do

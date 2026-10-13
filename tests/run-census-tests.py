@@ -492,6 +492,28 @@ def pandoc_checks():
         table = next(b for b in doc["blocks"] if b["t"] == "Table")
         got = tc.guess(tc.view_from_pandoc(table))
         yield name, got == expect, f"guess={got}, expected {expect}"
+    # Title rows and bands, (caption-rows, split-at), where the foot of an
+    # HTML table matters: it comes after the last part, so no row of it is
+    # split at.
+    group = ("<tbody><tr><td colspan='2'><b>Group A</b></td></tr>"
+             "<tr><td>Yes</td><td>12</td></tr>"
+             "<tr><td colspan='2'><b>Group B</b></td></tr>"
+             "<tr><td>Yes</td><td>7</td></tr></tbody>")
+    structures = [
+        ("html: no row of a table's foot is a band, though one over a row "
+         "of totals looks it", ("", "2,4"),
+         "<thead><tr><th>Answer</th><th>Count</th></tr></thead>" + group
+         + "<tfoot><tr><td colspan='2'>Totals</td></tr>"
+           "<tr><td>All</td><td>19</td></tr></tfoot>"),
+    ]
+    for name, expect, rows in structures:
+        doc = json.loads(subprocess.run(
+            ["pandoc", "-f", "html", "-t", "json"],
+            input=f"<table>{rows}</table>", capture_output=True, text=True,
+            check=True).stdout)
+        table = next(b for b in doc["blocks"] if b["t"] == "Table")
+        got = tc.guess_table(tc.view_from_pandoc(table))[2]
+        yield name, got == expect, f"inferred={got}, expected {expect}"
     doc = json.loads(subprocess.run(
         ["pandoc", "-f", "html", "-t", "json"],
         input="<table><tr><td rowspan='2'>A</td><td>1</td><td>2</td></tr>"

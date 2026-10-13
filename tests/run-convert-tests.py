@@ -768,7 +768,8 @@ BANDED = """<!DOCTYPE html><html lang="en"><head><title>Bands</title></head>
 <table><tbody><tr><th colspan="2" scope="rowgroup">Group one</th></tr>
 <tr><td>a</td><td>1</td></tr></tbody>
 <tbody><tr><th colspan="2" scope="rowgroup">Group two</th></tr>
-<tr><td>b</td><td>2</td></tr></tbody></table>
+<tr><td>b</td><td>2</td></tr></tbody>
+<tfoot><tr><td colspan="2">Source: a survey made up for the test</td></tr></tfoot></table>
 </main></body></html>
 """
 
@@ -776,7 +777,8 @@ BANDED = """<!DOCTYPE html><html lang="en"><head><title>Bands</title></head>
 def case_bands(work):
     """An HTML source's title rows and bands: split for an HTML target,
     kept as one grouped table for a Markdown one, and the grouped table
-    read back splits the same way. And a page with no title stays one."""
+    read back splits the same way, a table's foot kept in each. And a page
+    with no title stays one."""
     os.makedirs(work)
     with open(os.path.join(work, "bands.html"), "w", encoding="utf-8") as fh:
         fh.write(BANDED)
@@ -887,6 +889,18 @@ def case_bands(work):
              column_again, "html", "bands.html")) == cells(in_column)),
         ("converting the HTML output again gives the same tables",
          lambda: captions(read(fixed, "html", "bands.html")) == captions(page)),
+        # A table's foot went with every part it was split into, and with
+        # the table grouped or in a column.
+        ("a split table's foot comes after its last part, grouped or in a "
+         "column, and read back",
+         lambda: all(text.count("Source: a survey made up for the test") == 1
+                     for text in (page, md, again, in_column))
+                 and re.search(r"Group two</caption>.*?<tfoot>.*?Source: a survey",
+                               page, re.S)
+                 and not re.search(r"Group one</caption>(?:(?!</table>).)*<tfoot>",
+                                   page, re.S)
+                 and re.search(r'<tfoot>\s*<tr>\s*<td colspan="3"[^>]*>Source: a survey',
+                               in_column)),
     ]
 
 

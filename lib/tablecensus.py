@@ -318,13 +318,15 @@ def build_grid(tbl):
 class View:
     """What classify() and explain() read of a table, whichever reader
     built it: the grid of cells, Word's table-look flags and style name
-    (empty for anything but Word), and the rows marked to repeat as a
-    header. The rules are the same for every source; only this differs."""
-    __slots__ = ("grid", "look", "style", "marked", "titled")
+    (empty for anything but Word), the rows marked to repeat as a header,
+    and the rows of the table's foot (an HTML table's <tfoot>; a Word table
+    has none). The rules are the same for every source; only this differs."""
+    __slots__ = ("grid", "look", "style", "marked", "titled", "foot")
 
-    def __init__(self, grid, look=None, style="", marked=()):
+    def __init__(self, grid, look=None, style="", marked=(), foot=()):
         self.grid, self.look, self.style = grid, look or {}, style
         self.marked = list(marked)
+        self.foot = list(foot)
         # A part of a banded table that opens under a band: the band is
         # its title, though it isn't in the grid.
         self.titled = False
@@ -377,6 +379,7 @@ def view_from_pandoc(table):
     marked = list(range(len(rows)))
     for body in bodies:
         rows += body[2] + body[3]
+    foot_rows = list(range(len(rows), len(rows) + len(foot[1])))
     rows += foot[1]
     grid, pending = [], {}          # column -> rows still covered
     for row in rows:
@@ -407,7 +410,7 @@ def view_from_pandoc(table):
                     pending[column + offset] = rowspan - 1
             column += colspan
         grid.append(out)
-    return View(grid, marked=marked)
+    return View(grid, marked=marked, foot=foot_rows)
 
 
 def _keyed_text_pandoc(blocks):
@@ -1243,7 +1246,7 @@ def repeated_header_rows(grid):
     return rows
 
 
-def inferred_structure(grid):
+def inferred_structure(grid, foot=()):
     """(caption-rows, split-at) as the sidecar strings.
 
     A merged full-width row with text is one of two things. Alone at the
@@ -1254,13 +1257,15 @@ def inferred_structure(grid):
     first band, not a title -- 7-5-costs-in-the-long-run.docx opens with
     "Example A", then "Example B" at row 6, each with its own header row
     beneath. Written into the prefilled row so the plan is visible."""
-    bands = band_rows(grid)
+    bands = [i for i in band_rows(grid) if i not in foot]
     # A band with nothing under it before the next band or the table's
     # end heads no rows, and the split keeps it a row of the table: a
-    # note one cell across a table's foot ("Source: …") isn't a band.
-    bands = [i for i in bands if i + 1 < len(grid) and i + 1 not in bands]
+    # note one cell across a table's foot ("Source: …") isn't a band. Nor
+    # is any row of the table's foot, which comes after the last part.
+    bands = [i for i in bands if i + 1 < len(grid) and i + 1 not in bands
+             and i + 1 not in foot]
     if not bands:
-        repeated = repeated_header_rows(grid)
+        repeated = [i for i in repeated_header_rows(grid) if i not in foot]
         if repeated:
             return "", ",".join(str(i + 1) for i in repeated)
         return "", ""
@@ -1342,7 +1347,7 @@ def guess_table(tbl, kind=None, ev=None):
     if kind is None:
         kind, ev, _, _ = classify(v)
     value, reason = explain(v, kind, ev)
-    inferred = inferred_structure(v.grid)
+    inferred = inferred_structure(v.grid, v.foot)
     if inferred[1] and value is not None:
         value, reason = guess_by_parts(v, rows_list(inferred[1]), value, reason)
     return value, reason, inferred

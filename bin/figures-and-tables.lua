@@ -1750,10 +1750,15 @@ local function split_table(tbl, bands, part_captions, apply, head_leads)
     local head = pandoc.TableHead(head_rows, tbl.head.attr)
     local body = pandoc.TableBody(segment, {},
       model and model.row_head_columns or 0, pandoc.Attr())
+    -- The table's foot, its notes and sources, comes after its last part,
+    -- where every part had lost it.
+    local foot = i == #segments
+      and pandoc.TableFoot(clone_rows(tbl.foot.rows), tbl.foot.attr)
+      or pandoc.TableFoot({})
     local part = pandoc.Table(
       #caption_inlines > 0 and mk_caption({ pandoc.Plain(caption_inlines) })
         or pandoc.Caption(),
-      tbl.colspecs, head, { body }, pandoc.TableFoot({}), attr)
+      tbl.colspecs, head, { body }, foot, attr)
     apply(part)
     parts[#parts + 1] = { table = part,
                           label = caption_text ~= '' and caption_text or nil,
@@ -1831,8 +1836,28 @@ local function group_parts(parts, tbl, label)
   end
   return pandoc.Table(caption, first.colspecs,
     shared and first.head or pandoc.TableHead({}, first.head.attr),
-    bodies, pandoc.TableFoot({}),
+    bodies, tbl.foot,
     pandoc.Attr(tbl.attr.identifier, tbl.attr.classes, {}))
+end
+
+-- A table's foot beside the column the bands' names take at its left: a
+-- row one cell across the table spans that column too, and any other
+-- row gets an empty cell there.
+local function widened_foot(foot, width)
+  local rows = {}
+  for _, row in ipairs(foot.rows) do
+    local first = row.cells[1]
+    local cells = pandoc.List({})
+    if #row.cells == 1 and (first.col_span or 1) >= width then
+      cells:insert(pandoc.Cell(first.contents, first.alignment, first.row_span,
+        (first.col_span or 1) + 1, first.attr))
+    else
+      cells:insert(pandoc.Cell({}, 'AlignDefault', 1, 1, pandoc.Attr()))
+      for _, cell in ipairs(row.cells) do cells:insert(cell) end
+    end
+    rows[#rows + 1] = pandoc.Row(cells, row.attr)
+  end
+  return pandoc.TableFoot(rows, foot.attr)
 end
 
 -- tables.bands: column. The parts joined into one table whose first
@@ -1886,7 +1911,7 @@ local function column_parts(parts, tbl, label)
     caption = mk_caption({ pandoc.Plain(text_to_inlines(label)) })
   end
   return pandoc.Table(caption, specs, pandoc.TableHead(head_rows,
-    first.head.attr), bodies, pandoc.TableFoot({}),
+    first.head.attr), bodies, widened_foot(tbl.foot, #first.colspecs),
     pandoc.Attr(tbl.attr.identifier, tbl.attr.classes, {}))
 end
 

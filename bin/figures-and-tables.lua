@@ -155,6 +155,16 @@ local function char_len(text)
   return (utf8 and utf8.len(text)) or #text
 end
 
+-- The first n characters of text, not bytes: a count of bytes can end
+-- inside a character (a minus sign is three), and a report's row holding
+-- half of one isn't UTF-8, which stopped convert.py reading it back.
+local function head_chars(text, n)
+  local count = utf8 and utf8.len(text)
+  if not count then return text:sub(1, n) end
+  if count <= n then return text end
+  return text:sub(1, utf8.offset(text, n + 1) - 1)
+end
+
 -- Wrap data tables in a scrollable div. Pandoc's own stylesheet sets
 -- `table { display: block; overflow-x: auto }`, and changing a table's
 -- display property strips its role from the browser accessibility tree --
@@ -653,7 +663,7 @@ local function table_excerpt(tbl)
     end
   end
   text = text or ''
-  if #text > 60 then text = text:sub(1, 57) .. '...' end
+  if char_len(text) > 60 then text = head_chars(text, 57) .. '...' end
   return text
 end
 

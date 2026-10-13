@@ -2959,6 +2959,38 @@ def case_fidelity_writers(work):
     ]
 
 
+def case_cut_characters(work):
+    """What a report quotes of a page, cut short, is cut between two
+    characters, not inside one: a minus sign is three bytes, and the
+    first of them alone isn't UTF-8, which stopped the run reading the
+    report's rows back."""
+    os.makedirs(work, exist_ok=True)
+    cell = "a" * 56 + "−" + "b" * 10
+    note = "c" * 59 + "−" + "d"
+    example = "e" * 59 + "−" + "f"
+    with open(os.path.join(work, "cut.md"), "w", encoding="utf-8") as fh:
+        fh.write("---\ntitle: Cut\nlang: en\n---\n\n# Cut\n\n"
+                 f"| {cell} | Count |\n|---|---|\n| Yes | 12 |\n\n"
+                 f"A claim.[^1]\n\n[^1]: {note}\n\n    A second paragraph.\n\n"
+                 f"(@) {example}\n(@) Another.\n")
+    with open(os.path.join(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
+        fh.write("targets:\n  html:\n    format: html\n  md:\n    format: markdown\n"
+                 "  adoc:\n    format: asciidoc\n")
+    run = run_in(work, "  contents:\n    - cut\n")
+    missing = read(work, "table-captions-missing.csv") if exists(
+        work, "table-captions-missing.csv") else ""
+    report = read(work, "fidelity.csv") if exists(work, "fidelity.csv") else ""
+    return [
+        ("a table's excerpt in the captions report is cut between characters, "
+         "and the run reads it back",
+         lambda: run.returncode == 0
+         and "a" * 56 + "−..." in missing),
+        ("and so is what fidelity.csv quotes of a footnote or an example",
+         lambda: run.returncode == 0
+         and "adoc,cut,footnote-paragraphs," + "c" * 59 + "−" in report
+         and "md,cut,example-list," + "e" * 59 + "−" in report),
+    ]
+
 def case_fidelity_epub(work):
     """fidelity.csv for an EPUB target, and a frame in Word: what the
     target filter turns into a link or text as it writes."""
@@ -4431,6 +4463,7 @@ CASES = [
     ("format: source for Markdown", case_markdown_source),
     ("fidelity.csv for markdown and asciidoc targets", case_fidelity_writers),
     ("fidelity.csv for an EPUB target", case_fidelity_epub),
+    ("a report's quotation cut between characters", case_cut_characters),
     ("a hand-written page", case_hand_written),
     ("several targets", case_targets),
 ]

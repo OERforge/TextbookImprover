@@ -38,6 +38,16 @@
 -- each note on the terminal below is a row there too, its kind and a
 -- detail, separated by a tab.
 local FIDELITY_FILE = os.getenv('FIDELITY_FOUND')
+-- The first n characters of text, not bytes: a count of bytes can end
+-- inside a character, and a row holding half of one isn't UTF-8, which
+-- stopped convert.py reading the rows back.
+local function head_chars(text, n)
+  local count = utf8.len(text)
+  if not count then return text:sub(1, n) end
+  if count <= n then return text end
+  return text:sub(1, utf8.offset(text, n + 1) - 1)
+end
+
 local function lost(kind, detail)
   if not FIDELITY_FILE or FIDELITY_FILE == '' then return end
   local fh = io.open(FIDELITY_FILE, 'a')
@@ -658,10 +668,10 @@ function Note(note)
   if not ADOC then return nil end
   local words = inlines_of(note.content)
   if #note.content > 1 then
-    lost('footnote-paragraphs', pandoc.utils.stringify(words):sub(1, 60))
+    lost('footnote-paragraphs', head_chars(pandoc.utils.stringify(words), 60))
     io.stderr:write(('markdown-source: a footnote of %d paragraphs is written '
       .. 'as one: %s\n'):format(#note.content,
-        pandoc.utils.stringify(words):sub(1, 60)))
+        head_chars(pandoc.utils.stringify(words), 60)))
   end
   words = words:walk({
     Str = bracketed,
@@ -1139,7 +1149,7 @@ end
 -- already a number. Reported, not changed.
 function OrderedList(list)
   if not ADOC and list.listAttributes.style == 'Example' then
-    lost('example-list', pandoc.utils.stringify(list.content[1] or {}):sub(1, 60))
+    lost('example-list', head_chars(pandoc.utils.stringify(list.content[1] or {}), 60))
   end
 end
 

@@ -986,18 +986,31 @@ def case_group_heads(work):
     """A table split where each group's own header row begins, the words
     of the row's first cell in its part's caption and the table's caption
     in every part's: what's copied keeps no id, which the row and the
-    first part's caption keep."""
+    first part's caption keep. And a Markdown target, which keeps the
+    table whole, keeps its groups and the rows that head them."""
     os.makedirs(work)
     with open(os.path.join(work, "money.html"), "w", encoding="utf-8") as fh:
         fh.write(GROUP_HEADS)
-    with open(os.path.join(work, "conversion.yaml"), "w",
-              encoding="utf-8") as fh:
-        fh.write("targets:\n  html:\n    format: html\n")
-    run_in(work, "  contents:\n    - money\n")
+    def run_with(where, config):
+        with open(os.path.join(where, "conversion.yaml"), "w",
+                  encoding="utf-8") as fh:
+            fh.write(config)
+        return run_in(where, "  contents:\n    - money\n")
+    run_with(work, "targets:\n  html:\n    format: html\n"
+                   "  md:\n    format: markdown\n")
     page = read(work, "html", "money.html") if exists(
         work, "html", "money.html") else ""
+    md = read(work, "md", "money.md") if exists(work, "md", "money.md") else ""
+    back = work + "-from-md"
+    shutil.copytree(os.path.join(work, "md"), back)
+    run_with(back, "targets:\n  html:\n    format: html\n")
+    again = read(back, "html", "money.html") if exists(
+        back, "html", "money.html") else ""
     captions = [" ".join(re.sub(r"<[^>]+>", "", c).split())
                 for c in re.findall(r"<caption>(.*?)</caption>", page, re.S)]
+    headed = lambda text, n: re.search(
+        r'<tbody>\s*<tr>\s*<th>(?:<span id="m%d"></span>)?(?:<strong>)?'
+        r'Elements of M%d' % (n, n), text)
     return [
         # The ids went with the words into the captions: the table's
         # caption's into the second part's, each row's into its part's.
@@ -1008,6 +1021,13 @@ def case_group_heads(work):
          and all(page.count(f'id="{name}"') == 1
                  for name in ("money-cap", "m1", "m2"))
          and "<span></span>" not in page),
+        # Pandoc's Markdown writer makes a body's head an ordinary row of
+        # one body: the groups went, and the rows that headed them, so the
+        # table read back had neither.
+        ("a Markdown target keeps the groups, each headed by its own header "
+         "row, and they read back so",
+         lambda: md.count("<tbody>") == 2 and again.count("<tbody>") == 2
+         and all(headed(text, n) for text in (md, again) for n in (1, 2))),
     ]
 
 

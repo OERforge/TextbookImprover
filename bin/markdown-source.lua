@@ -334,13 +334,27 @@ local function adoc_html_table(tbl)
                                   { html_math_method = 'mathml' }))
 end
 
+-- A body with a head of its own: a group's header row, in a table split
+-- at such rows and kept whole for a source target (the sociology book's
+-- groups, each headed by a row like the first but for its first cell),
+-- or a <tbody> an HTML page opens with a row of <th>.
+local function has_body_heads(tbl)
+  for _, body in ipairs(tbl.bodies) do
+    if #body.head > 0 then return true end
+  end
+  return false
+end
+
 function Table(tbl)
   tbl = clean_table(tbl)
   if ADOC then return cell_math(tbl) end
   -- Pandoc's Markdown has no cell spans, and its writer drops them
   -- silently. A merged-cell table is written as HTML instead, which the
-  -- reading filter turns back into a table, spans and all.
-  if has_spans(tbl) then
+  -- reading filter turns back into a table, spans and all. So is a table
+  -- whose bodies have heads of their own, which the writer makes ordinary
+  -- rows of one body: the groups went, and which rows headed them, as
+  -- AsciiDoc's writer flattens them (adoc_html_table).
+  if has_spans(tbl) or has_body_heads(tbl) then
     return pandoc.RawBlock('html',
       pandoc.write(pandoc.Pandoc({ tbl }), 'html',
                    { html_math_method = 'mathml' }))

@@ -493,7 +493,7 @@ def tables(everything):
 def links(reader):
     out = []
     for page in reader.pages:
-        for annot in page.get("/Annots") or []:
+        for annot in resolve(page.get("/Annots")) or []:
             annot = resolve(annot)
             if annot.get("/Subtype") != "/Link":
                 continue
@@ -513,9 +513,9 @@ def font_names(reader):
         if resources is None:
             return
         resources = resources.get_object()
-        for ref in (resources.get("/Font") or {}).values():
+        for ref in (resolve(resources.get("/Font")) or {}).values():
             names.add(str(ref.get_object().get("/BaseFont", "")))
-        for ref in (resources.get("/XObject") or {}).values():
+        for ref in (resolve(resources.get("/XObject")) or {}).values():
             xobject = ref.get_object()
             if xobject.get("/Subtype") == "/Form":
                 walk(xobject.get("/Resources"))

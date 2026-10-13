@@ -122,7 +122,11 @@ def unembedded_fonts(path):
             if resources is None:
                 return
             resources = resources.get_object()
-            for ref in (resources.get("/Font") or {}).values():
+            # What .get() returns can be a reference, which pypdf before
+            # 4.1 doesn't follow when it's read from: Ubuntu 24.04's is
+            # 4.0.2.
+            fonts, xobjects = resources.get("/Font"), resources.get("/XObject")
+            for ref in (fonts.get_object() if fonts is not None else {}).values():
                 font = ref.get_object()
                 if id(font) in seen:
                     continue
@@ -136,7 +140,7 @@ def unembedded_fonts(path):
                 descriptor = descriptor.get_object() if descriptor is not None else {}
                 if not any(k in descriptor for k in ("/FontFile", "/FontFile2", "/FontFile3")):
                     names.add(str(font.get("/BaseFont", "")).lstrip("/"))
-            for ref in (resources.get("/XObject") or {}).values():
+            for ref in (xobjects.get_object() if xobjects is not None else {}).values():
                 xobject = ref.get_object()
                 if xobject.get("/Subtype") == "/Form" and id(xobject) not in seen:
                     seen.add(id(xobject))

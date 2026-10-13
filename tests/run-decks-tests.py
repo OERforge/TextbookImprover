@@ -1333,6 +1333,15 @@ def text_of(path):
     return " ".join(page.extract_text() or "" for page in pypdf.PdfReader(path).pages)
 
 
+def holds(text, phrase):
+    """Whether text extracted from a PDF holds phrase, its spaces aside:
+    where the font changes, pypdf before 5.1 infers a space that later
+    releases don't, so Ubuntu 24.04's (4.0.2) gives "per unit ." for
+    "per unit." and "= >" for a title's "=>", whose ">" another face
+    supplies."""
+    return re.sub(r"\s+", "", phrase) in re.sub(r"\s+", "", text)
+
+
 def shape_of(path):
     box = pypdf.PdfReader(path).pages[0].mediabox
     return float(box.width) / float(box.height)
@@ -1865,7 +1874,7 @@ def case_pdf(work):
          and len(within(headings, "/FENote", ".*")) == 4),
         ("a section's footnote is set on its slide after its heading, its link with its"
          " text for /Contents, as any link has",
-         lambda: "1Marginal revenue" in agenda_text and "Each is per unit." in agenda_text
+         lambda: holds(agenda_text, "1Marginal revenue") and holds(agenda_text, "Each is per unit.")
          and link_contents(agenda).get("https://example.org/unit") == "per unit"),
         ("a slide's earlier steps have no links, and nothing left untagged holds any, and"
          " the run notes the links taken out, and from which deck",
@@ -1907,7 +1916,7 @@ def case_pdf(work):
          lambda: "Ask what the class would pay" not in flat_text
          and "Notes for part two" not in sectioned_text),
         ("a title with > keeps it: the bold face lacks it, and another face supplies it",
-         lambda: "Specialization => Growth" in flat_text and "Missing character" not in out
+         lambda: holds(flat_text, "Specialization => Growth") and "Missing character" not in out
          and "missing from the PDF" not in out),
         ("4:3 for a deck that names a theme, 16:10 for its aspectratio",
          lambda: abs(shape_of(flat) - 4 / 3) < 0.01 and abs(shape_of(sectioned) - 1.6) < 0.01
@@ -1970,7 +1979,7 @@ def case_pdf(work):
          and within(shaded_notes, "/Code", "/FENote") == ["/Code"] * 2),
         ("and highlighted code in a section's footnote, the deck's only, is set, and the"
          " deck's own header-includes, one or a list, kept beside the code's files",
-         lambda: re.search(r"Computed by mc\(q\), and tabled", text_of(code_notes))
+         lambda: holds(text_of(code_notes), "Computed by mc(q), and tabled")
          and footnote_ties(code_notes) == (3, 0, 0, 0, 0)
          and footnote_ties(shaded_notes) == (2, 0, 0, 0, 0)
          and document_info(code_notes, "/Subject") == "Code in notes"

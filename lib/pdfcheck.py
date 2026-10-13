@@ -448,7 +448,7 @@ def inspect(path):
         try:
             resources = page.get("/Resources")
             resources = resources.get_object() if resources is not None else {}
-            for _, font in (resources.get("/Font") or {}).items():
+            for _, font in (_resolved(resources.get("/Font")) or {}).items():
                 font = font.get_object()
                 base = _text(font.get("/BaseFont", "")).lstrip("/")
                 fonts.add(base)

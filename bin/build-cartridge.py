@@ -173,7 +173,8 @@ def pdf_outline(path):
         from pypdf import PdfReader
     except ImportError:
         sys.exit("Reading a PDF outline needs pypdf. Install it with:\n"
-                 "    pip3 install pypdf")
+                 "    sudo apt install python3-pypdf\n"
+                 "or, on Ubuntu 22.04, pip3 install --user pypdf")
 
     reader = PdfReader(path)
     if not reader.outline:

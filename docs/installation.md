@@ -2,7 +2,7 @@
 
 How to get the tools, what they need, and how to check the result. There's no initial configuration step for the tools themselves: `convert.py` finds its filters, schemas, and the shared library by path relative to itself, so they work from wherever you put them.
 
-This version is developed and tested on Ubuntu 24.04 with Pandoc 3.12.1 and 3.12: on Windows under WSL 2, which is what the maintainer runs, and in an Ubuntu container, which is where the test suites run before a release. Its suites pass too with Ubuntu 22.04's Python (3.10) and the versions of its packages that 22.04 ships, pypdf aside ([Which Ubuntu you have](#which-ubuntu-you-have)). Nothing here is Windows-specific or WSL-specific, and the same commands work on a Linux machine or on macOS with Homebrew in place of `apt`.
+This version is developed and tested on Ubuntu 24.04 with Pandoc 3.12.1 and 3.12: on Windows under WSL 2, which is what the maintainer runs, and in an Ubuntu container, which is where the test suites run before a release, both with the Python packages Ubuntu 24.04 ships (Python 3.12, pypdf 4.0.2, pikepdf 8.7.1) and with newer ones (pypdf 5.9, pikepdf 10.13). Its suites pass too with Ubuntu 22.04's Python (3.10) and the versions of its packages that 22.04 ships, pypdf aside ([Which Ubuntu you have](#which-ubuntu-you-have)). Nothing here is Windows-specific or WSL-specific, and the same commands work on a Linux machine or on macOS with Homebrew in place of `apt`.
 
 ## On Windows: WSL first
 

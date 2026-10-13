@@ -1704,8 +1704,9 @@ TEXT_FRAGMENT = ("https://example.org/apple#:~:text=Now%20worth%20a%20cool%20"
 
 def case_html_ids(work):
     """An id with a space in it -- Scribble writes them -- becomes one
-    without, and every link to it follows, from its own page or another;
-    a link to another site's fragment is left as it is."""
+    without, and every link to it follows, from its own page or another,
+    its escaped letters decoded and its other escapes kept; a link to
+    another site's fragment, by its scheme or its host, is left as it is."""
     import importlib.util
     if not (importlib.util.find_spec("html5lib") or importlib.util.find_spec("lxml")):
         return [("skip: HTML sources need html5lib or lxml", lambda: True)]
@@ -1714,10 +1715,15 @@ def case_html_ids(work):
         fh.write('<html lang="en"><head><title>A</title></head><body><h1>A</h1>'
                  '<h2 id="section 15">Fifteen</h2><p>See <a href="#section 15">here</a> '
                  'and <a href="#section%2015">there</a>, and <a href="' + TEXT_FRAGMENT
-                 + '">a site</a>.</p></body></html>')
+                 + '">a site</a>, and <a href="' + TEXT_FRAGMENT[len("https:"):]
+                 + '">the site by its host</a>.</p>'
+                 '<h2 id="caf\u00e9 1">Caf\u00e9</h2><p>To <a href="#caf%C3%A9%201">the '
+                 'caf\u00e9</a>.</p><h2 id="na\u00efve">Na\u00efve</h2></body></html>')
     with open(os.path.join(work, "b.html"), "w", encoding="utf-8") as fh:
         fh.write('<html lang="en"><head><title>B</title></head><body><h1>B</h1>'
-                 '<p>Back to <a href="a.html#section 15">fifteen</a>.</p></body></html>')
+                 '<p>Back to <a href="a.html#section 15">fifteen</a>, to <a '
+                 'href="a.html#caf%C3%A9%201">the caf\u00e9</a>, and to <a '
+                 'href="a.html#na%C3%AFve">the na\u00efve</a>.</p></body></html>')
     with open(os.path.join(work, "conversion.yaml"), "w") as fh:
         fh.write("targets:\n  html:\n    format: html\n  epub:\n    format: epub3\n")
     with open(os.path.join(work, "project.yaml"), "w") as fh:
@@ -1729,14 +1735,43 @@ def case_html_ids(work):
     checked = open(os.path.join(work, "output-check.csv")).read() if exists(
         work, "output-check.csv") else ""
     validated = epubcheck(os.path.join(work, "epub", "org.example.ids.epub"))
+    # An escaped percent sign beside a space, in a book of its own, since an
+    # id holding a % isn't one an EPUB takes.
+    percent = work + "-percent"
+    os.makedirs(percent)
+    with open(os.path.join(percent, "c.html"), "w", encoding="utf-8") as fh:
+        fh.write('<html lang="en"><head><title>C</title></head><body><h1>C</h1>'
+                 '<h2 id="100% done">Done</h2><p>All <a href="#100%25%20done">done</a>.'
+                 '</p></body></html>')
+    with open(os.path.join(percent, "conversion.yaml"), "w") as fh:
+        fh.write("targets:\n  html:\n    format: html\n")
+    with open(os.path.join(percent, "project.yaml"), "w") as fh:
+        fh.write("project:\n  identifier: org.example.percent\n  title: Percent\n")
+    subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
+                   cwd=percent, capture_output=True, text=True, stdin=subprocess.DEVNULL)
+    c = read(percent, "html", "c.html") if exists(percent, "html", "c.html") else ""
+    c_checked = open(os.path.join(percent, "output-check.csv")).read() if exists(
+        percent, "output-check.csv") else ""
     return [
         ("an id's whitespace becomes a hyphen",
          lambda: 'id="section-15"' in a and 'id="section 15"' not in a),
         ("links to it follow, encoded or not, from its page or another",
          lambda: a.count('href="#section-15"') == 2
          and 'href="a.html#section-15"' in b),
-        ("a link to another site's fragment is left as it is, escapes and all",
-         lambda: 'href="' + TEXT_FRAGMENT + '"' in a),
+        ("a link to another site's fragment is left as it is, escapes and all, "
+         "by its scheme or its host",
+         lambda: 'href="' + TEXT_FRAGMENT + '"' in a
+         and 'href="' + TEXT_FRAGMENT[len("https:"):] + '"' in a),
+        ("a link's escaped letters are decoded, as the id holds them, from its "
+         "page or another, a space among them or not",
+         lambda: re.search(r'id="caf(?:\u00e9|&#xE9;|&#233;)-1"', a)
+         and re.search(r'href="#caf(?:\u00e9|&#xE9;|&#233;)-1"', a)
+         and re.search(r'href="a\.html#caf(?:\u00e9|&#xE9;|&#233;)-1"', b)
+         and re.search(r'href="a\.html#na(?:\u00ef|&#xEF;|&#239;)ve"', b)),
+        ("its other escapes stay as written: a %25 beside a space is still one, "
+         "and the output check finds its id",
+         lambda: 'href="#100%25-done"' in c and 'id="100%-done"' in c
+         and "missing-fragment" not in c_checked),
         ("nothing is reported missing, and epubcheck has no complaint",
          lambda: exists(work, "epub", "org.example.ids.epub") and "missing-fragment" not in checked
          and (validated == [] if validated is not None else True)),

@@ -1495,6 +1495,13 @@ local function row_as_caption(row)
   return out, text
 end
 
+-- A row's number as the sidecar gave it, which reaches Lua through JSON as
+-- a float: 3, not 3.0, in what the run says.
+local function row_number(n)
+  local whole = math.tointeger(tonumber(n))
+  return whole and tostring(whole) or tostring(n)
+end
+
 -- caption-rows=N,M from the sidecar, or caption-rows=1 inferred by the
 -- pre-pass for a merged full-width first row. Two halves, because the
 -- caption search has to see the table intact: pending_caption_rows works
@@ -1514,7 +1521,7 @@ local function pending_caption_rows(tbl, entry)
     local at = rows[tonumber(n)]
     if at == nil then
       warn(('table-headers: caption-rows names row %s of a %d-row table in %s; ignored')
-        :format(tostring(n), #rows, source_stem()))
+        :format(row_number(n), #rows, source_stem()))
     else
       pending.targets[#pending.targets + 1] = at.row
       local inlines, text = row_as_caption(at.row)
@@ -1575,7 +1582,7 @@ end
 -- already groups by -- a body whose head row is one cell across the
 -- table, as HTML writes a <tbody> headed by a row-group header.
 local function band_targets(tbl, entry)
-  local out, seen = {}, {}
+  local out, seen, declared = {}, {}, {}
   local function add(row)
     if not seen[row] then seen[row] = true; out[#out + 1] = row end
   end
@@ -1589,18 +1596,20 @@ local function band_targets(tbl, entry)
     end
   end
   local wanted = entry and entry.split_at
-  if type(wanted) ~= 'table' or #wanted == 0 then return out end
+  if type(wanted) ~= 'table' or #wanted == 0 then return out, declared end
   local rows = all_rows(tbl)
   for _, n in ipairs(wanted) do
     local at = rows[tonumber(n)]
     if at == nil then
       warn(('table-headers: split-at names row %s of a %d-row table in %s; ignored')
-        :format(tostring(n), #rows, source_stem()))
+        :format(row_number(n), #rows, source_stem()))
     else
       add(at.row)
+      -- Named in a person's row of the sidecar, not guessed.
+      if entry.split_at_declared then declared[at.row] = n end
     end
   end
-  return out
+  return out, declared
 end
 
 local function clone_rows(rows)
@@ -1649,7 +1658,8 @@ end
 
 -- Returns a list of tables, or nil when there is nothing to split.
 local function split_table(tbl, bands, part_captions, apply, head_leads)
-  if #bands == 0 then return nil end
+  if #bands == 0 then return nil, {} end
+  local width = #tbl.colspecs
   local is_band = {}
   for _, row in ipairs(bands) do is_band[row] = true end
 
@@ -1677,35 +1687,54 @@ local function split_table(tbl, bands, part_captions, apply, head_leads)
     for _, row in ipairs(body.body) do rows[#rows + 1] = row end
   end
 
-  -- A band with no row under it before the next band or the table's end
-  -- heads no part, and a part of no rows would take the band with it:
-  -- it stays a row of the table. Every row of a graphic organizer had
-  -- been guessed a group's header (the Writing Guide's Table 15.2), and
-  -- the whole table went.
-  for i, row in ipairs(rows) do
-    if is_band[row] and (rows[i + 1] == nil or is_band[rows[i + 1]]) then
+  -- A band heads the rows under it. One with none under it but bands, if
+  -- anything, before the table's end heads nothing, and a part of no rows
+  -- would take it with it: it stays a row of the table, as a note one cell
+  -- across a table's foot does (the conclusion of Economics 3e's Table
+  -- 11.1). So does a header row with another band right under it: every
+  -- row of a graphic organizer had been guessed a group's header (the
+  -- Writing Guide's Table 15.2), and the whole table went. A band one cell
+  -- across right over another names a group of groups: it goes into the
+  -- caption of the part below, with the band under it.
+  local data_below = false
+  for i = #rows, 1, -1 do
+    local row = rows[i]
+    if not is_band[row] then
+      data_below = true
+    elseif not data_below
+        or (not is_band_row(row, width) and is_band[rows[i + 1]]) then
       is_band[row] = nil
     end
   end
+  -- What it was asked to split at and won't: those, any in the table's
+  -- head above its header row, and any in its foot, which comes after the
+  -- last part.
+  local unused, present = {}, {}
+  for _, row in ipairs(rows) do present[row] = true end
+  for _, row in ipairs(bands) do
+    if not (present[row] and is_band[row]) then unused[#unused + 1] = row end
+  end
 
   local segments, current, band_for = {}, {}, {}
-  local pending_band = nil
+  local pending, banded = {}, false
   for _, row in ipairs(rows) do
     if is_band[row] then
       if #current > 0 then
         segments[#segments + 1] = current
-        band_for[#segments] = pending_band
+        band_for[#segments] = pending
+        current, pending = {}, {}
       end
-      current, pending_band = {}, row
+      pending[#pending + 1] = row
+      banded = true
     else
       current[#current + 1] = row
     end
   end
   if #current > 0 then
     segments[#segments + 1] = current
-    band_for[#segments] = pending_band
+    band_for[#segments] = pending
   end
-  if #segments < 2 and pending_band == nil then return nil end
+  if #segments < 2 and not banded then return nil, unused end
 
   -- One header row above the first band, not marked as the table's head
   -- (a bold row in HTML, an unmarked one in Word), heads every part: it
@@ -1713,42 +1742,54 @@ local function split_table(tbl, bands, part_captions, apply, head_leads)
   -- header row and that row is all that comes before the first band.
   local lead = nil
   if head_leads and #head_kept == 0 and #segments > 1
-      and band_for[1] == nil and #segments[1] == 1 then
+      and #band_for[1] == 0 and #segments[1] == 1 then
     lead = segments[1][1]
     table.remove(segments, 1)
-    local shifted = {}
-    for i = 2, #segments + 1 do shifted[i - 1] = band_for[i] end
-    band_for = shifted
+    table.remove(band_for, 1)
   end
 
   local base = nil
   if #tbl.caption.long > 0 then
     base = pandoc.utils.blocks_to_inlines(tbl.caption.long)
   end
-  local width = #tbl.colspecs
   local parts = {}
   for i, segment in ipairs(segments) do
-    local band = band_for[i]
-    local band_inlines, band_text = pandoc.Inlines({}), ''
+    -- The part's bands, a group of groups' first: their words, a colon
+    -- between, are the part's name in its caption.
+    local band_inlines, texts, merged = pandoc.Inlines({}), {}, {}
     local own_head = nil
-    if band and is_band_row(band, width) then
-      band_inlines, band_text = row_as_caption(band)
-      -- A band centered by hand is padded with non-breaking spaces (forty
-      -- of them before "Front Matter" in one book); a caption isn't.
-      local cleaned = band_text:gsub('\u{00A0}', ' '):gsub('%s+', ' ')
-        :gsub('^ ', ''):gsub(' $', '')
-      if cleaned ~= band_text then
-        band_text, band_inlines = cleaned, text_to_inlines(cleaned)
+    for _, band in ipairs(band_for[i]) do
+      local inlines, text = pandoc.Inlines({}), ''
+      if is_band_row(band, width) then
+        inlines, text = row_as_caption(band)
+        -- A band centered by hand is padded with non-breaking spaces (forty
+        -- of them before "Front Matter" in one book); a caption isn't.
+        local cleaned = text:gsub('\u{00A0}', ' '):gsub('%s+', ' ')
+          :gsub('^ ', ''):gsub(' $', '')
+        if cleaned ~= text then
+          text, inlines = cleaned, text_to_inlines(cleaned)
+        end
+        merged[#merged + 1] = band
+      else
+        -- A header row, the last of the part's bands: it heads this part,
+        -- and its corner cell names it.
+        own_head = band
+        local corner = band.cells[1]
+        if corner then
+          inlines = trim_inlines(cell_inlines(corner))
+          text = normalize(pandoc.utils.stringify(inlines))
+        end
       end
-    elseif band then
-      -- A header row: it heads this part, and its corner cell names it.
-      own_head = band
-      local corner = band.cells[1]
-      if corner then
-        band_inlines = trim_inlines(cell_inlines(corner))
-        band_text = normalize(pandoc.utils.stringify(band_inlines))
+      if text ~= '' then
+        if #texts > 0 then
+          band_inlines:insert(pandoc.Str(':'))
+          band_inlines:insert(pandoc.Space())
+        end
+        band_inlines:extend(inlines)
+        texts[#texts + 1] = text
       end
     end
+    local band_text = table.concat(texts, ': ')
     local caption_inlines, caption_text = compose_part_caption(
       base, band_inlines, band_text, part_captions and part_captions[i], i)
 
@@ -1776,15 +1817,15 @@ local function split_table(tbl, bands, part_captions, apply, head_leads)
     apply(part)
     parts[#parts + 1] = { table = part,
                           label = caption_text ~= '' and caption_text or nil,
-                          band = (band and is_band_row(band, width)) and band
-                                 or nil }
+                          bands = merged }
   end
-  return parts
+  return parts, unused
 end
 
 local TABLE_BANDS = (os.getenv('TABLE_BANDS') or 'split'):lower()
 local CAPTION_ROWS_ATTR = 'data-caption-rows'
 local SPLIT_AT_ATTR = 'data-split-at'
+local SPLIT_AT_DECLARED_ATTR = 'data-split-at-declared'
 local PART_CAPTIONS_ATTR = 'data-part-captions'
 
 local function part_caption_list(value)
@@ -1830,11 +1871,9 @@ local function group_parts(parts, tbl, label)
   local bodies = {}
   for _, part in ipairs(parts) do
     local head_rows = {}
-    if part.band then
-      -- The band heads its body, as HTML's reader and writer express a
-      -- row group and as Word's merged row reads back.
-      head_rows[#head_rows + 1] = part.band
-    end
+    -- The bands head their body, as HTML's reader and writer express a row
+    -- group and as Word's merged row reads back.
+    for _, band in ipairs(part.bands) do head_rows[#head_rows + 1] = band end
     if not shared then
       for _, row in ipairs(part.table.head.rows) do
         head_rows[#head_rows + 1] = row
@@ -1883,7 +1922,7 @@ end
 local function column_parts(parts, tbl, label)
   local first = parts[1].table
   for _, part in ipairs(parts) do
-    if not part.band then return nil end
+    if #part.bands == 0 then return nil end
     local a, b = part.table.head.rows, first.head.rows
     if #a ~= #b then return nil end
     for i = 1, #a do
@@ -1905,7 +1944,11 @@ local function column_parts(parts, tbl, label)
     local body = part.table.bodies[1]
     local rows = body.body
     if #rows > 0 then
-      local text = pandoc.utils.stringify(part.band.cells[1].contents)
+      local texts = {}
+      for _, band in ipairs(part.bands) do
+        texts[#texts + 1] = pandoc.utils.stringify(band.cells[1].contents)
+      end
+      local text = table.concat(texts, ': ')
         :gsub('\u{00A0}', ' '):gsub('%s+', ' '):gsub('^ ', ''):gsub(' $', '')
       local group = pandoc.Cell({ pandoc.Plain(text_to_inlines(text)) },
         'AlignDefault', #rows, 1,
@@ -1939,6 +1982,7 @@ local function resolved_for(tbl)
     return { headers = marked,
              caption_rows = row_numbers(tbl.attr.attributes[CAPTION_ROWS_ATTR]),
              split_at = row_numbers(tbl.attr.attributes[SPLIT_AT_ATTR]),
+             split_at_declared = tbl.attr.attributes[SPLIT_AT_DECLARED_ATTR] == '1',
              part_captions = part_caption_list(
                tbl.attr.attributes[PART_CAPTIONS_ATTR]),
              anchors = {} }
@@ -1999,9 +2043,10 @@ local function caption_data_table(tbl, next_block, after_next, after_after, out)
   tbl.attr.attributes['data-latex-table'] = nil
   tbl.attr.attributes[CAPTION_ROWS_ATTR] = nil
   tbl.attr.attributes[SPLIT_AT_ATTR] = nil
+  tbl.attr.attributes[SPLIT_AT_DECLARED_ATTR] = nil
   tbl.attr.attributes[PART_CAPTIONS_ATTR] = nil
   local pending = pending_caption_rows(tbl, entry)
-  local bands = band_targets(tbl, entry)
+  local bands, declared = band_targets(tbl, entry)
 
   if #tbl.caption.long > 0 then
     -- Already captioned: reuse that text to name the scroll region. A
@@ -2100,9 +2145,23 @@ local function caption_data_table(tbl, next_block, after_next, after_after, out)
   local folded = fold_caption_rows(tbl, pending)
   if folded then label = folded end
 
-  local parts = split_table(tbl, bands, entry and entry.part_captions,
+  local parts, unused = split_table(tbl, bands, entry and entry.part_captions,
     function(part) apply_headers(part, label, entry) end,
     entry and (entry.headers == 'first-row' or entry.headers == 'both'))
+  for _, row in ipairs(unused) do
+    if declared[row] then
+      warn(('table-headers: split-at names row %s of a table in %s, which heads no rows of '
+            .. 'its own, so the table isn\'t split there')
+        :format(row_number(declared[row]), source_stem()))
+    end
+  end
+  local given = entry and entry.part_captions
+  if parts and type(given) == 'table' and #given > 0 and #given ~= #parts then
+    warn(('table-headers: part-captions gives %d caption(s) for the %d part(s) of a table '
+          .. 'in %s, which split-at makes of it: a part without one is captioned by its band, '
+          .. 'and any beyond the last part are left out')
+      :format(#given, #parts, source_stem()))
+  end
   if parts and TABLE_BANDS == 'group' and #parts > 1 then
     return { wrap_table(group_parts(parts, tbl, label), label) }, consumed
   end

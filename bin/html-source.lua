@@ -582,24 +582,37 @@ end
 -- (Scribble writes <a name="section 15">), and Pandoc keeps it: epubcheck
 -- then rejects every one (RSC-005, 469 times in one book). Whitespace in
 -- an id becomes a hyphen, and so does whitespace in a link's #fragment,
--- decoded first, so a link to it -- here or from another page -- still
--- finds it. A link to another site is left as it is: its fragment names
--- nothing here, and a text fragment (#:~:text=Now%20worth%20%242) means
--- its spaces and escapes as written, where decoded and hyphenated it
--- matched nothing and, its %25 now a lone %, wasn't a valid address.
+-- written or escaped (%20), so a link to it -- here or from another page
+-- -- still finds it. A fragment is matched to an id as written where pages
+-- are split and an EPUB's chapters are made, and an id holds its letters,
+-- so the fragment's escaped letters are decoded too (%C3%A9 is é); an
+-- escape of any other ASCII character stays as written, since decoded it
+-- may not be valid in an address (a %25 decoded was a lone %), and where
+-- decoding leaves no valid UTF-8, only the spaces are. A link to another
+-- site, which names a scheme (https:) or a host (//example.org), is left as
+-- it is: its fragment names nothing here, and a text fragment
+-- (#:~:text=Now%20worth%20%242) means its spaces and escapes as written,
+-- where hyphenated it matched nothing.
 local function unspaced(id)
   return (id:gsub('%s+', '-'))
 end
 
 local function fix_fragment(target)
-  if target:match('^%a[%w+.-]*:') then return target end
+  if target:match('^%a[%w+.-]*:') or target:match('^//') then return target end
   local path, fragment = target:match('^([^#]*)#(.*)$')
   if not fragment then return target end
-  local decoded = fragment:gsub('%%(%x%x)', function(hex)
-    return string.char(tonumber(hex, 16))
-  end)
-  if not decoded:match('%s') then return target end
-  return path .. '#' .. unspaced(decoded)
+  local function decoded(letters)
+    return (fragment:gsub('%%(%x%x)', function(hex)
+      local byte = tonumber(hex, 16)
+      local char = string.char(byte)
+      if char:match('%s') or (letters and byte >= 0x80) then return char end
+    end))
+  end
+  local plain = decoded(true)
+  if not utf8.len(plain) then plain = decoded(false) end
+  plain = unspaced(plain)
+  if plain == fragment then return target end
+  return path .. '#' .. plain
 end
 
 local function fix_ids(el)

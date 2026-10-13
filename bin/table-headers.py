@@ -191,6 +191,7 @@ def no_header_text(grid):
 MARKER = "data-th-marker"
 CAPTION_ROWS = "data-caption-rows"
 SPLIT_AT = "data-split-at"
+SPLIT_AT_DECLARED = "data-split-at-declared"
 PART_CAPTIONS = "data-part-captions"
 
 
@@ -268,7 +269,7 @@ def apply_to_json(infos):
         for info in entries:
             attr = tables[info["index"]]["c"][0]
             pairs = [p for p in attr[2] if p[0] not in
-                     (MARKER, CAPTION_ROWS, SPLIT_AT, PART_CAPTIONS)]
+                     (MARKER, CAPTION_ROWS, SPLIT_AT, SPLIT_AT_DECLARED, PART_CAPTIONS)]
             if info["in-effect"]:
                 pairs.append([MARKER, info["in-effect"]])
             # Title rows and bands, as the filter reads them for a Word
@@ -278,6 +279,9 @@ def apply_to_json(infos):
                                (SPLIT_AT, info["split-at-in-effect"])):
                 if rows:
                     pairs.append([name, ",".join(str(r) for r in rows)])
+            # Whether a person named those split rows, or the guess did.
+            if info.get("split-at-declared"):
+                pairs.append([SPLIT_AT_DECLARED, "1"])
             # A person's caption for each part, "|" between them, as the
             # sidecar's part-captions column has them.
             if info.get("part-captions-in-effect"):
@@ -468,6 +472,7 @@ def main():
             info["caption-rows-in-effect"] = caption_rows_in_effect(info, row)
             info["split-at-in-effect"], info["part-captions-in-effect"] = \
                 split_in_effect(info, row)
+            info["split-at-declared"] = row is not None and bool(info["split-at-in-effect"])
         # Keyed by stem, not filename: the filter runs on the JSON
         # intermediate named after the .docx, and knows only the stem.
         caption_rows = caption_rows_in_effect(info, row)
@@ -476,6 +481,9 @@ def main():
             "index": info["index"], "headers": in_effect(info, row),
             "caption_rows": caption_rows,
             "split_at": split_at, "part_captions": part_captions,
+            # A person's split rows, from the sidecar, which the filter names
+            # when it can't split at one; it says nothing of the guess's.
+            "split_at_declared": row is not None and bool(split_at),
             "rows": info["rows"], "cols": info["cols"], "first": info["first"],
             "anchors": info.get("anchors", []),
             # Who decided: "sidecar" for a person's row, "source" for the
@@ -493,6 +501,7 @@ def main():
                 "index": info["index"], "headers": in_effect(info, row),
                 "caption_rows": caption_rows,
                 "split_at": split_at, "part_captions": part_captions,
+                "split_at_declared": row is not None and bool(split_at),
                 "rows": info["rows"], "cols": info["cols"], "first": info["first"],
                 "anchors": info.get("anchors", []),
                 # Who decided: "sidecar" for a person's row, "source" for

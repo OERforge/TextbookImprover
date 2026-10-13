@@ -350,9 +350,12 @@ DEFINITIONS_NOTE = (
 DEFINES = re.compile(r"\\(?:(?:(?:re)?newcommand|providecommand)\*?|def)\b")
 # The keys the copy writes stop a build where nothing defines them, which
 # without tagging is: a picture's before LaTeX 2026-06-01, whose \picture
-# took no options; a tikzpicture's always, since latex-lab's tikz module,
-# loaded only by tagging, defines them; and artifact before graphicx 1.2e
-# (2024-12-31), TeX Live 2023's stopping at it. This block, before the
+# took no options; a tikzpicture's before pgf 3.1.12 (2026-08-01), which
+# defines both as keys that do nothing, waiting for tagging, where only
+# latex-lab's tikz module, loaded by tagging, had defined them; and artifact
+# before graphicx 1.2e (2024-12-31), TeX Live 2023's stopping at it. The LaTeX
+# suite builds the block against those older definitions, so it's checked
+# whatever the TeX that runs it. This block, before the
 # master's \begin{document}, gives each a key that does nothing where it's
 # missing, at the end of the preamble, when every package is loaded, and
 # leaves the kernel's \picture alone unless it's the one that took no

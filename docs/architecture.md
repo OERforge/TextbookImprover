@@ -164,15 +164,20 @@ Beyond the Word-to-HTML translation, each page gets:
   declaration applied on its own. Where the bands each sit over their own
   header row, as in the cost tables of Economics 3e, each part keeps its
   own. `part-captions` in the sidecar overrides the composed captions.
-  A merged row with no row under it before the next band or the table's
-  end, a note across a table's foot, heads nothing and stays a row of
-  the table, whether inferred or named in `split-at`. A table's foot
-  comes after its last part, and no row of it is inferred as a band. A
-  band at the end of the table's head, where Pandoc's Word reader puts a
-  first row Word's table look formats (Word's default), heads the first
-  part alone; one above a header row there stays in every part's head
-  with it, and at the top it's the table's title, inferred as
-  `caption-rows=1`.
+  A band heads the rows under it: a merged row with nothing but bands
+  under it to the table's end, a note across a table's foot, stays a row
+  of the table, whether inferred or named in `split-at` (where the run
+  names it), as does a header row named there right over another band.
+  A merged first row right over another band is the table's title,
+  inferred as `caption-rows=1`; a band right over another names a group
+  of groups, both going into the caption of the part below ("Table 3.2:
+  Part Two: Group B"), and where a table has such a pair partway down, a
+  pair at its top is one too. A table's foot comes after its last part,
+  and no row of it is inferred as a band. A band at the end of the
+  table's head, where Pandoc's Word reader puts a first row Word's table
+  look formats (Word's default), heads the first part alone; one above a
+  header row there stays in every part's head with it, and at the top
+  it's the table's title, inferred as `caption-rows=1`.
 - **Tables get the headers they were declared to have.** `table-headers.csv`
   says, per table, whether the headers are in the first row, the first
   column, both, or nowhere (see [Sidecar files](sidecars.md#sidecar-files)), and for a

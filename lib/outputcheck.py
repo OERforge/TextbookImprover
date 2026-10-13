@@ -478,9 +478,16 @@ def check_links(pages, findings, base_of=None):
                     continue
             else:
                 name = page.name
-            if fragment and fragment not in ids[name]:
+            if fragment and not names_id(fragment, ids[name]):
                 findings.append(Finding(page.name, "link-to-missing-fragment",
                                         href))
+
+
+def names_id(fragment, ids):
+    """Whether a link's fragment names one of ids, as a browser finds it:
+    as written, else percent-decoded (HTML's "find a potential indicated
+    element"), so #caf%C3%A9 names the id café."""
+    return fragment in ids or unquote(fragment) in ids
 
 
 def check_html_files(paths):
@@ -616,7 +623,7 @@ def check_links_among(pages, files, findings):
                     continue
             else:
                 name = page.name
-            if fragment and fragment not in files[name]:
+            if fragment and not names_id(fragment, files[name]):
                 findings.append(Finding(page.name, "link-to-missing-fragment",
                                         href))
 

@@ -1268,21 +1268,25 @@ def inferred_structure(grid, foot=(), head=0):
     And when row 1 is merged *and* there are bands below it, row 1 is the
     first band, not a title -- 7-5-costs-in-the-long-run.docx opens with
     "Example A", then "Example B" at row 6, each with its own header row
-    beneath -- unless it's in the table's head (the first `head` rows)
-    over a header row there: the split leaves it in every part's head with
-    that row, so it's the title, and any other band over a header row in
-    the head stays there too. Written into the prefilled row so the plan
-    is visible."""
+    beneath -- unless another band is right under it: then it heads no
+    rows of its own, and it's the title. So is one in the table's head
+    (the first `head` rows) over a header row there, which the split
+    leaves in every part's head with that row, and any other band over a
+    header row in the head stays there too. A band heads the rows under
+    it, so one with nothing under it but bands, if anything, isn't one: a
+    note one cell across a table's foot ("Source: ..."), which the split
+    keeps a row of the table; nor is any row of the table's foot, which
+    comes after the last part. Elsewhere, a band right over another names
+    a group of groups, and the split puts both in the caption of the part
+    below; where the table has such a pair below, a pair at its top is one
+    too, not a title over a band. Written into the prefilled row so the
+    plan is visible."""
     bands = [i for i in band_rows(grid) if i not in foot]
     headers = [i for i in range(head) if i not in bands]
     over_header = [i for i in bands if headers and i < headers[-1]]
     bands = [i for i in bands if i not in over_header]
-    # A band with nothing under it before the next band or the table's
-    # end heads no rows, and the split keeps it a row of the table: a
-    # note one cell across a table's foot ("Source: …") isn't a band. Nor
-    # is any row of the table's foot, which comes after the last part.
-    bands = [i for i in bands if i + 1 < len(grid) and i + 1 not in bands
-             and i + 1 not in foot]
+    data = [i for i in range(len(grid)) if i not in bands and i not in foot]
+    bands = [i for i in bands if data and i < data[-1]]
     if 0 in over_header:
         return "1", ",".join(str(i + 1) for i in bands)
     if not bands:
@@ -1290,6 +1294,8 @@ def inferred_structure(grid, foot=(), head=0):
         if repeated:
             return "", ",".join(str(i + 1) for i in repeated)
         return "", ""
+    if 0 in bands and 1 in bands and not any(i + 1 in bands for i in bands if i > 0):
+        return "1", ",".join(str(i + 1) for i in bands if i > 0)
     below = [i for i in bands if i > 0]
     if not below:
         return "1", ""

@@ -75,6 +75,7 @@ class Converted:
         self.work = work
         self.pages = {}
         self.reports = {}
+        self.warnings = ""
 
         environment = dict(os.environ)
         environment.update({
@@ -109,7 +110,7 @@ class Converted:
             # The filter writes JSON and the writer reads it, as in
             # convert.py, so the filtered intermediate is what the EPUB
             # assembler will see and what case_intermediate checks.
-            self._pandoc([
+            self.warnings += self._pandoc([
                 "-f", "json", "-t", "json", name + ".json",
                 "-o", name + ".filtered.json",
                 "--lua-filter", os.path.join(BIN, "figures-and-tables.lua"),
@@ -185,6 +186,7 @@ class Converted:
                                 stdin=subprocess.DEVNULL)
         if result.returncode:
             raise RuntimeError("pandoc failed: " + result.stderr[-400:])
+        return result.stderr
 
     # -- things the assertions ask about -----------------------------------
 
@@ -412,6 +414,41 @@ def case_split(work):
         hb.row([hb.cell("Auto Glass Doctor"), hb.cell("10%")]),
         hb.row([hb.cell("Source: a survey of shops", span=2)]),
     ])
+    # A merged first row right over a band is the table's title, which the
+    # split had dropped with the empty part it headed: a caption row.
+    titled = hb.table([
+        hb.row([hb.cell("Survey results", bold=True, span=2)]),
+        hb.row([hb.cell("Group A", bold=True, span=2)]),
+        hb.row([hb.cell("Yes"), hb.cell("12")]),
+        hb.row([hb.cell("No"), hb.cell("3")]),
+        hb.row([hb.cell("Group B", bold=True, span=2)]),
+        hb.row([hb.cell("Yes"), hb.cell("7")]),
+        hb.row([hb.cell("No"), hb.cell("9")]),
+    ])
+    # A band right over another names a group of groups, which the split
+    # had dropped the same way: both are the caption of the part below.
+    stacked = hb.table([
+        hb.row([hb.cell("Answer", bold=True), hb.cell("Count", bold=True)]),
+        hb.row([hb.cell("Group A", bold=True, span=2)]),
+        hb.row([hb.cell("Yes"), hb.cell("12")]),
+        hb.row([hb.cell("No"), hb.cell("3")]),
+        hb.row([hb.cell("Part Two", bold=True, span=2)]),
+        hb.row([hb.cell("Group B", bold=True, span=2)]),
+        hb.row([hb.cell("Yes"), hb.cell("7")]),
+        hb.row([hb.cell("No"), hb.cell("9")]),
+    ])
+    # A table that opens with a group of groups and has another below: the
+    # pair at its top is one too, not a title over a band.
+    halves = hb.table([
+        hb.row([hb.cell("Part One", bold=True, span=2)]),
+        hb.row([hb.cell("Group A", bold=True, span=2)]),
+        hb.row([hb.cell("Yes"), hb.cell("12")]),
+        hb.row([hb.cell("No"), hb.cell("3")]),
+        hb.row([hb.cell("Part Two", bold=True, span=2)]),
+        hb.row([hb.cell("Group B", bold=True, span=2)]),
+        hb.row([hb.cell("Yes"), hb.cell("7")]),
+        hb.row([hb.cell("No"), hb.cell("9")]),
+    ])
     # A band in the table's head, where Pandoc's Word reader puts a row
     # marked to repeat: it had headed every part, Plan B's too.
     planned = hb.table([
@@ -439,6 +476,10 @@ def case_split(work):
              hb.para("Table 2.1 Organizational structure"), organizer,
              hb.para("Last."),
              hb.para("Table 11.1 Market shares"), noted,
+             hb.para("Even more."),
+             hb.para("Table 3.1 Survey answers"), titled,
+             hb.para("And still more."),
+             hb.para("Table 3.2 Answers in two parts"), stacked,
              hb.para("Then two tables with only their labels between."),
              hb.para("Table 4.1 Rents"),
              hb.table([hb.row([hb.cell("Year", bold=True), hb.cell("Rent", bold=True)]),
@@ -446,6 +487,8 @@ def case_split(work):
              hb.para("Table 4.2 Wages"),
              hb.table([hb.row([hb.cell("Year", bold=True), hb.cell("Wage", bold=True)]),
                        hb.row([hb.cell("2020"), hb.cell("$15")])]),
+             hb.para("Halves next."),
+             hb.para("Table 3.3 Answers in two halves"), halves,
              hb.para("Plans next."),
              hb.para("Table 3.4 Plans"), planned,
              hb.para("Costs as Word lays them out next."),
@@ -466,21 +509,33 @@ def case_split(work):
                     "--resolved", resolved],
                    cwd=work, capture_output=True, text=True, stdin=subprocess.DEVNULL)
     with open(os.path.join(work, "table-headers-new.csv"), newline="", encoding="utf-8") as fh:
-        new = list(csv.DictReader(fh))
+        reader = csv.DictReader(fh)
+        new = list(reader)
+        columns = reader.fieldnames
     out = Converted(work, ["banded"], {"TABLE_HEADERS_RESOLVED": resolved})
     everything = out.tables("banded")
-    # And a person's split at rows with nothing between them: none heads a
-    # part, so none is a split, and every row stays.
+    # Then a person's sidecar rows, the prefilled ones changed. The sidecar
+    # is read by position, so each row keeps every column in its place.
+    changes = {
+        # A split at rows with nothing between them: none heads a part, so
+        # none is a split, and every row stays.
+        "Table 2.1": {"headers": "none", "split-at": "1,2,3,4"},
+        # A header row with another band right under it heads nothing:
+        # row 4, Conflict theory's, over row 5, named a band too.
+        "Table 7.2": {"split-at": "4,5"},
+        # Three captions for the two parts the bands make.
+        "Table 3.2": {"part-captions": "First | Second | Third"},
+    }
     declared_dir = os.path.join(work, "declared")
     os.makedirs(declared_dir, exist_ok=True)
     shutil.copy(os.path.join(work, "banded.docx"), declared_dir)
     with open(os.path.join(declared_dir, "table-headers.csv"), "w",
               newline="", encoding="utf-8") as fh:
-        writer = csv.writer(fh)
-        writer.writerow(["key", "headers", "split-at", "label"])
+        writer = csv.DictWriter(fh, fieldnames=columns)
+        writer.writeheader()
         for row in new:
-            if row["label"] == "Table 2.1":
-                writer.writerow([row["key"], "none", "1,2,3,4", row["label"]])
+            if row["label"] in changes:
+                writer.writerow({**row, **changes[row["label"]]})
     declared_resolved = os.path.join(declared_dir, "table-headers.json")
     subprocess.run([sys.executable, tool, "banded.docx",
                     "--sidecar", os.path.join(declared_dir, "table-headers.csv"),
@@ -491,14 +546,43 @@ def case_split(work):
                    stdin=subprocess.DEVNULL)
     declared = Converted(declared_dir, ["banded"],
                          {"TABLE_HEADERS_RESOLVED": declared_resolved})
-    declared_tables = declared.tables("banded")[7:8]
+    # And the guess's plan with a row it names that heads nothing, the note
+    # across Table 11.1's foot: the table isn't split there, and since no
+    # person asked for it, the run doesn't say so.
+    guessed_dir = os.path.join(work, "guessed")
+    os.makedirs(guessed_dir, exist_ok=True)
+    shutil.copy(os.path.join(work, "banded.docx"), guessed_dir)
+    with open(resolved, encoding="utf-8") as fh:
+        plan = json.load(fh)
+    for entry in plan["banded"]:
+        if entry["first"] == "Firm":
+            entry["split_at"] = [4]
+    guessed_resolved = os.path.join(guessed_dir, "table-headers.json")
+    with open(guessed_resolved, "w", encoding="utf-8") as fh:
+        json.dump(plan, fh)
+    guessed = Converted(guessed_dir, ["banded"], {"TABLE_HEADERS_RESOLVED": guessed_resolved})
+    forms = {}
+    for form in ("group", "column"):
+        here = os.path.join(work, form)
+        os.makedirs(here, exist_ok=True)
+        shutil.copy(os.path.join(work, "banded.docx"), here)
+        forms[form] = next((t for t in Converted(
+            here, ["banded"], {"TABLE_HEADERS_RESOLVED": resolved, "TABLE_BANDS": form}
+        ).tables("banded") if "Part Two" in t), "")
+    declared_tables = [t for t in declared.tables("banded") if "Criterion 1" in t]
+    declared_grouped = [t for t in declared.tables("banded")
+                        if "Strain theory" in t or "Unequal system" in t]
     tables, headed_parts, grouped_parts = everything[:3], everything[3:5], everything[5:7]
     organized, noted_out = everything[7:8], everything[8:9]
-    back_to_back = everything[9:11]
+    titled_parts, stacked_parts = everything[9:11], everything[11:13]
+    back_to_back = everything[13:15]
     labeled = lambda label: [t for t in everything if caption_of(t).startswith(label)]
+    halves_new = [r for r in new if r["label"] == "Table 3.3"]
     planned_new = [r for r in new if r["label"] == "Table 3.4"]
     organizer_new = [r for r in new if r["label"] == "Table 2.1"]
     noted_new = [r for r in new if r["label"] == "Table 11.1"]
+    titled_new = [r for r in new if r["label"] == "Table 3.1"]
+    stacked_new = [r for r in new if r["label"] == "Table 3.2"]
     caption_of = lambda t: " ".join(re.sub(r"<[^>]+>", "", re.search(
         r"<caption>(.*?)</caption>", t, re.S).group(1)).split()) if "<caption>" in t else ""
     headed_heads = [re.search(r"<thead>.*?</thead>", t, re.S) for t in headed_parts]
@@ -562,6 +646,47 @@ def case_split(work):
          lambda: len(declared_tables) == 1
                  and all("Criterion %d" % n in declared_tables[0]
                          for n in range(1, 5))),
+        ("and the run names each row it was told to split at and didn't",
+         lambda: all("split-at names row %d of a table in banded, which heads no rows"
+                     % n in declared.warnings for n in range(1, 5))),
+        ("but not a row the guess named",
+         lambda: "split-at names row" not in out.warnings
+                 and "split-at names row" not in guessed.warnings
+                 and any("Source: a survey of shops" in t
+                         for t in guessed.tables("banded"))),
+        ("and it names part captions in a number other than the parts'",
+         lambda: "part-captions gives 3 caption(s) for the 2 part(s) of a table in banded"
+                 in declared.warnings),
+        ("but gives each part its own, the one beyond the last left out",
+         lambda: [caption_of(t) for t in declared.tables("banded")
+                  if "<strong>Answer</strong>" in t] == ["First", "Second"]
+                 and "Third" not in declared.pages["banded"]),
+        ("a header row a person named, with another band right under it, "
+         "stays a row, and the band under it heads its part",
+         lambda: len(declared_grouped) == 2
+                 and flat(" ".join(declared_grouped)).count("Conflict theory") == 1
+                 and "Conflict theory" in flat(declared_grouped[0])
+                 and "Unequal system" in caption_of(declared_grouped[1])),
+        ("a merged first row right over a band is the title: a caption row, "
+         "the bands below split at",
+         lambda: titled_new and titled_new[0]["caption-rows"] == "1"
+                 and titled_new[0]["split-at"] == "2,5"),
+        ("and every part's caption carries it, before the part's band, "
+         "where it had gone with an empty part",
+         lambda: len(titled_parts) == 2
+                 and caption_of(titled_parts[0]).startswith("Table 3.1 Survey answers. Survey results")
+                 and caption_of(titled_parts[0]).endswith(": Group A")
+                 and caption_of(titled_parts[1]).endswith(": Group B")
+                 and all(flat(t).count("Survey results") == 1 for t in titled_parts)),
+        ("a band right over another is split at with it",
+         lambda: stacked_new and stacked_new[0]["split-at"] == "2,5,6"),
+        ("and both are the caption of the part below, in order, where the "
+         "first had gone with an empty part",
+         lambda: len(stacked_parts) == 2
+                 and caption_of(stacked_parts[0]) == "Table 3.2 Answers in two parts: Group A"
+                 and caption_of(stacked_parts[1])
+                 == "Table 3.2 Answers in two parts: Part Two: Group B"
+                 and "Part Two" not in flat(stacked_parts[0])),
         # A label above its table is taken from what came before it; the
         # filter had passed over the block after the table too, as if it
         # were a label below, so the text after each table here was lost,
@@ -569,13 +694,21 @@ def case_split(work):
         ("the text after a table whose label is above it is kept",
          lambda: all(text in out.pages["banded"] for text in (
              "Prose between the tables, as there always is.", "More prose.", "And more.",
-             "Last.", "Then two tables with only their labels between.",
+             "Last.", "Even more.", "And still more.",
+             "Then two tables with only their labels between.", "Halves next.",
              "Plans next.", "Costs as Word lays them out next.",
              "Then a table right after one labeled above it."))),
         ("and two tables with only their labels between are each captioned "
          "by their own",
          lambda: [caption_of(t) for t in back_to_back]
                  == ["Table 4.1 Rents", "Table 4.2 Wages"]),
+        ("a table that opens with a group of groups and has another below "
+         "composes both, not a title over a band",
+         lambda: halves_new and halves_new[0]["caption-rows"] == ""
+                 and halves_new[0]["split-at"] == "1,2,5,6"
+                 and [caption_of(t) for t in labeled("Table 3.3")]
+                 == ["Table 3.3 Answers in two halves: Part One: Group A",
+                     "Table 3.3 Answers in two halves: Part Two: Group B"]),
         ("a band in the table's head heads the first part, not every part",
          lambda: planned_new and planned_new[0]["split-at"] == "1,4"
                  and [caption_of(t) for t in labeled("Table 3.4")]
@@ -592,6 +725,11 @@ def case_split(work):
                  for n, t in enumerate(labeled("Table 7.15")))),
         ("a table right after one whose label is above it is kept",
          lambda: labeled("Table 4.3 Prices") and any("Hours" in t for t in everything)),
+        ("grouped, both head the part's body, in order",
+         lambda: re.search(r"Group A.*Yes.*12.*Part Two.*Group B.*Yes.*7", flat(forms["group"]))
+                 and forms["group"].count("<caption>") == 1),
+        ("in a column of its own, both name the part's rows",
+         lambda: re.search(r'scope="rowgroup"[^>]*>\s*Part Two: Group B', forms["column"])),
         ("with the table's caption and the band as each part's caption",
          lambda: len(headed_parts) == 2
                  and all("Table 1.1 Report parts:" in " ".join(

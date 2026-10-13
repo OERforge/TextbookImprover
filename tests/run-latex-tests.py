@@ -995,19 +995,70 @@ def case_source(work):
         done = subprocess.run([engine, "-interaction=nonstopmode", "notes.tex"],
                               cwd=build, capture_output=True, text=True, timeout=120)
         return done.returncode == 0
+
+    def keys_skipped_against_older():
+        """The block on its own, with the keys and \\picture defined as older
+        releases have them: \\picture taking no options (LaTeX before
+        2026-06-01), TikZ's alt and artifact undefined (pgf before 3.1.12),
+        and graphicx's too (before 1.2e). A document using every key the
+        copy writes, and a picture without them, builds with the block and
+        stops without it, whatever the TeX: an up-to-date TeX Live 2026
+        needs the block for none of them, so the book's copy can't show it."""
+        engine = shutil.which("pdflatex")
+        if not engine:
+            return skip("no pdflatex to build the block against older definitions")
+        sys.path.insert(0, os.path.join(ROOT, "lib"))
+        import texremediate
+        here = os.path.join(work, "keys-older")
+        os.makedirs(here, exist_ok=True)
+        shutil.copy(os.path.join(work, "sq.png"), here)
+        older = ("\\makeatletter\n"
+                 "\\long\\def\\picture#1{\\pictur@#1}\n"
+                 "\\expandafter\\let\\csname pgfk@/tikz/alt/.@cmd\\endcsname\\@undefined\n"
+                 "\\expandafter\\let\\csname pgfk@/tikz/artifact/.@cmd\\endcsname\\@undefined\n"
+                 "\\expandafter\\let\\csname KV@Gin@alt\\endcsname\\@undefined\n"
+                 "\\expandafter\\let\\csname KV@Gin@artifact\\endcsname\\@undefined\n"
+                 "\\makeatother\n")
+        body = ("\\begin{document}\n"
+                "\\includegraphics[alt={A square},width=1cm]{sq.png}\n"
+                "\\includegraphics[artifact,width=1cm]{sq.png}\n"
+                "\\begin{picture}[alt={Two boxes}](40,20)\\put(0,0){\\framebox(40,20){two}}"
+                "\\end{picture}\n"
+                "\\begin{picture}(40,20)\\put(0,0){\\framebox(40,20){plain}}\\end{picture}\n"
+                "\\begin{tikzpicture}[alt={A rising line}]\\draw (0,0) -- (2,1);"
+                "\\end{tikzpicture}\n"
+                "\\begin{tikzpicture}[artifact]\\draw (0,0) -- (1,1);\\end{tikzpicture}\n"
+                "\\end{document}\n")
+        built = {}
+        for name, block in (("with", texremediate.KEYS_SKIPPED), ("without", "")):
+            with open(os.path.join(here, name + ".tex"), "w", encoding="utf-8") as fh:
+                fh.write("\\documentclass{article}\n\\usepackage{graphicx}\n"
+                         "\\usepackage{tikz}\n" + older + block + body)
+            done = subprocess.run([engine, "-interaction=nonstopmode", "-halt-on-error",
+                                   name + ".tex"], cwd=here, capture_output=True,
+                                  text=True, timeout=120, stdin=subprocess.DEVNULL)
+            built[name] = done.returncode == 0
+            if name == "with":
+                built_or_why(built[name], done.stdout)
+        return built["with"] and not built["without"]
     return [
         ("an image's alt text joins its own keys, escaped",
          lambda: "\\includegraphics[alt={A gray square: 50\\% shaded},width=1cm]{sq}"
          in notes),
         ("a drawing in the text gets its alt text",
          lambda: "\\begin{picture}[alt={Two boxes}](40,20)" in notes),
-        # pdfLaTeX stops on a tikzpicture's key without tagging, and on a
-        # picture's before LaTeX 2026-06-01; builds() below builds the copy.
+        # pdfLaTeX stops on a tikzpicture's key without tagging with pgf
+        # before 3.1.12, and on a picture's before LaTeX 2026-06-01; builds()
+        # below builds the copy, and the block is built against those older
+        # definitions on its own.
         ("a tikzpicture too, and a block before \\begin{document} skips a key the "
          "LaTeX building the copy doesn't know, and the run says so",
          lambda: "\\begin{tikzpicture}[alt={A rising line}]" in notes
          and 0 < notes.find("\\long\\def\\TIQkernelpicture") < notes.find("\\begin{document}")
          and notes.count("\\TIQatcode") == 2 and "skips any key" in said),
+        ("against the keys and \\picture as older releases define them, a document "
+         "using every key builds with the block and stops without it",
+         keys_skipped_against_older),
         ("decorative is the artifact key",
          lambda: "\\includegraphics[artifact,height=2pt]{figures/f.png}" in notes),
         ("fig2dev's pair: alt text on the first picture, the labels an artifact",
@@ -1035,7 +1086,8 @@ def case_source(work):
         ("the run says which are in files the book's own build makes",
          lambda: "own build" in said and "writes over them" in said),
         ("the author's files are untouched by the source target",
-         lambda: fingerprint(work, skip_dirs=("fixed", "tagged", "kept", "plainmath", "build")) == before),
+         lambda: fingerprint(work, skip_dirs=("fixed", "tagged", "kept", "plainmath", "build",
+                                           "keys-older")) == before),
         ("the remediated copy builds with pdfLaTeX, as the author's does", builds),
         ("tagging: \\DocumentMetadata, the book's language, pdfTeX's option and setting out",
          lambda: tagged.startswith("\\DocumentMetadata{lang=en, pdfstandard=ua-2, tagging=on}\n"

@@ -42,76 +42,16 @@ import os
 import re
 from collections import Counter
 
+import alttext
 import findings as fl
 import pptxfonts
 import pptxorder
 
-ALT_MAX_CHARS = 120
-IMAGE_EXTENSIONS = r"png|jpe?g|jpe|jfif|gif|bmp|tiff?|svgz?|emf|wmf|webp|heic|heif|avif|ico|eps|pdf"
-# A file name or extension anywhere in the alt text, which PowerPoint's
-# checker counts as missing alt text: its rule is that "the alt text doesn't
-# contain image names or file extensions" (Microsoft, Rules for the
-# Accessibility Checker). Not a name's label before another (www.jpeg.org).
-FILE_NAME = re.compile(r"\.(%s)(?!\w|\.\w)" % IMAGE_EXTENSIONS, re.I)
-# What says nothing about an image, matched against the whole alt text
-# with its case, surrounding space, and closing punctuation ignored.
-GENERIC_WORDS = {
-    "image", "images", "picture", "pic", "img", "photo", "photograph", "graphic",
-    "graphics", "figure", "chart", "diagram", "icon", "logo", "illustration",
-    "drawing", "clip art", "clipart", "screenshot", "screen shot", "placeholder",
-    "alt", "alt text", "alternative text", "alt tag", "description", "untitled",
-    "insert alt text", "add alt text", "null", "none", "n/a", "na", "tbd", "todo",
-    "object", "shape", "group",
-}
-GENERIC_PATTERNS = [
-    ("a clip-art id", re.compile(r"[a-z]{1,3}\d{5,}_?", re.I)),     # j0309720, bd20069_
-    ("a camera's or tool's name for a file",
-     re.compile(r"(img|dsc|dscn|dcim|pict?|image|photo|screenshot|screen ?shot)[ _-]?\d+[\w-]*",
-                re.I)),
-    ("a default shape name",
-     re.compile(r"(picture|content placeholder|graphic|image|chart|diagram|object|group|"
-                r"text ?box|rectangle|oval|freeform|straight connector|line|google shape)"
-                r"[\s;]*[\d;p]*", re.I)),
-]
-# Office's generated descriptions: "Description automatically generated"
-# after the description, and "A picture containing" before it, in older
-# versions; "AI-generated content may be incorrect." after it, in newer ones.
-AUTO_GENERATED = re.compile(r"description automatically generated|^a picture containing\b|"
-                            r"ai-generated content may be incorrect", re.I)
-# Alt text copied from a web page with its picture: the page's title, or a
-# stock site's caption. A stock or clip-art site's name, or its words,
-# anywhere; or, at the end, a site's name after a pipe, or a one-word name
-# or a domain after a dash, a title cut off with an ellipsis, or a search
-# engine's title's "- What Is It"; or a numbered section's title followed
-# by its book's. Words a description uses too are left out (a vector
-# image, a flat design, high-quality images). OpenStax's alt text, 2,478
-# descriptions in eight of its book repositories, matches none of these.
-STOCK_SITES = re.compile(
-    r"\b(?:freepik|vectorstock|shutterstock|istock(?:photo)?|getty ?images|dreamstime|"
-    r"depositphotos|123rf|alamy|adobe ?stock|vecteezy|pixabay|pexels|unsplash|flaticon|icons8|"
-    r"iconfinder|noun ?project|rawpixel|storyblocks|pond5|bigstock(?:photo)?|can ?stock ?photo|"
-    r"fotolia|stocksy|picfair|png(?:tree|wing|egg|item|img)|(?:kind|stick|seek|fav|clean|nice)png|"
-    r"hiclipart|clipart(?:max| ?library))\b", re.I)
-STOCK_WORDS = re.compile(
-    r"\broyalty[- ]free\b|\bstock (?:photo|image|vector|illustration|footage|picture)s?\b|"
-    r"\bfree (?:download|vectors?|png|svg|clip ?art|icons?)\b|\bdownload free\b|"
-    r"\bhigh[- ]quality (?:vectors?|png)\b|\bpremium vector\b|"
-    r"\b(?:png|svg) (?:images?|files?|icons?|clip ?art|graphics?|download|transparent)\b|"
-    r"\btransparent (?:png|background)\b|\bvector (?:illustration|concept|art)s?\b|"
-    r"\bflat (?:concept|vector)s?\b|\bflat (?:design |style )?icons?\b|\bconcept icon\b|"
-    r"\bisolated on (?:a )?white\b", re.I)
-PAGE_TITLE = (
-    # "Marketing Mix Explained | Quizlet", "Woman with a tablet | Premium Vector"
-    re.compile(r"\s\|\s+[^|()]{1,40}$"),
-    # "Why Do Supply Chains Fail? - Examplepedia", "... - example.com"
-    re.compile(r"\s[-\u2013\u2014]\s*(?:[A-Z][\w&']*|[\w-]+\.(?:com|org|net|edu|gov|io|co))$"),
-    # "Robot Shaking Hands With A Person ..."
-    re.compile(r"\s(?:\.\.\.|\u2026)$"),
-    # "Opportunity Cost - What Is It and Why It Matters"
-    re.compile(r"[-\u2013\u2014:|]\s*what (?:is|are) (?:it|they)\b", re.I),
-    # "4.3 Demand and Supply Together - Introductory Economics"
-    re.compile(r"^\d+(?:\.\d+)+\s+\S.*\s[-\u2013\u2014|]\s"),
-)
+# The alt text rules, a book's too (alttext.py), named here as they were.
+from alttext import (  # noqa: E402,F401
+    ALT_MAX_CHARS, IMAGE_EXTENSIONS, FILE_NAME, GENERIC_WORDS, GENERIC_PATTERNS,
+    AUTO_GENERATED, STOCK_SITES, STOCK_WORDS, PAGE_TITLE, placeholder_rules, page_title)
+
 # Copies of an image cropped alike, to within a twentieth of the image on
 # every side (pptxparse._crop's units), show the same part of it.
 CROP_SLACK = 5000
@@ -122,8 +62,7 @@ SECTION_DEFAULTS = re.compile(r"(default section|untitled section|section \d+)$"
 DRAWN_SHAPES = 8
 
 
-def _clean(text):
-    return re.sub(r"[\s.!?;:,]+$", "", " ".join((text or "").split())).lower()
+_clean = alttext.clean
 
 
 def same_title(title):
@@ -132,52 +71,22 @@ def same_title(title):
     return _clean(title)
 
 
-def placeholder_rules(extra=()):
-    """The project's own patterns from images.alt_placeholders: plain
-    text matched as a whole, case aside; "re:" for a regular expression."""
-    words, patterns = set(), []
-    for item in extra or ():
-        item = str(item)
-        if item.startswith("re:"):
-            patterns.append(re.compile(item[3:], re.I))
-        elif item.strip():
-            words.add(_clean(item))
-    return words, patterns
-
-
-def page_title(text):
-    """Whether alt text looks copied from a web page with its picture: the
-    page's title, or a stock site's caption (STOCK_SITES, STOCK_WORDS,
-    PAGE_TITLE)."""
-    return bool(STOCK_SITES.search(text) or STOCK_WORDS.search(text)
-                or any(p.search(text) for p in PAGE_TITLE))
-
-
 def alt_problem(alt, name=None, rules=None, limit=ALT_MAX_CHARS):
-    """(check, reason) for an alt text that needs a person, or None.
-    rules: placeholder_rules() of the project's own patterns."""
+    """(check, detail) for an alt text that needs a person, or None
+    (alttext.problem). rules: placeholder_rules() of the project's own
+    patterns."""
     text = " ".join((alt or "").split())
-    if not text:
+    found = alttext.problem(text, rules, limit)
+    if found is None:
         return None
-    words, patterns = rules or (set(), [])
-    cleaned = _clean(text)
-    if FILE_NAME.search(text):
-        return ("pptx-alt-is-file-name", "a file name or extension: %s" % text)
-    if not re.search(r"\w", text):
-        return ("pptx-alt-placeholder", "punctuation only: %s" % text)
-    if cleaned in GENERIC_WORDS or cleaned in words \
-            or any(p.fullmatch(text) or p.fullmatch(cleaned) for p in patterns):
-        return ("pptx-alt-placeholder", "says nothing: %s" % text)
-    for kind, pattern in GENERIC_PATTERNS:
-        if pattern.fullmatch(cleaned):
-            return ("pptx-alt-placeholder", "%s: %s" % (kind, text))
-    if AUTO_GENERATED.search(text):
-        return ("pptx-alt-auto-generated", text)
-    if page_title(text):
-        return ("pptx-alt-page-title", text)
-    if limit and len(text) > limit:
-        return ("pptx-alt-too-long", "%d characters (limit %d)" % (len(text), limit))
-    return None
+    kind, reason = found
+    if kind in ("auto-generated", "page-title"):
+        detail = text
+    elif kind == "too-long":
+        detail = reason
+    else:
+        detail = "%s: %s" % (reason, text)
+    return ("pptx-alt-" + kind, detail)
 
 
 def needs_alt(shape):

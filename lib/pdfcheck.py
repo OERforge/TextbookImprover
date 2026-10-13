@@ -33,6 +33,7 @@ import re
 import subprocess
 from collections import Counter
 
+import alttext
 from findings import Finding, describe_input
 
 try:
@@ -429,6 +430,14 @@ def inspect(path):
         elif alt is not None and alt.strip() in LATEX_PLACEHOLDERS:
             out.append(Finding(name, "pdf-figure-alt-is-placeholder", alt,
                                file=name, kind="pdf"))
+        elif alt is not None:
+            # By the rules a deck's pictures are judged by (alttext.py).
+            found = alttext.problem(alt, limit=None)
+            if found:
+                check = {"placeholder": "pdf-figure-alt-is-placeholder",
+                         "is-file-name": "pdf-figure-alt-is-file-name"}.get(
+                    found[0], "pdf-figure-alt-" + found[0])
+                out.append(Finding(name, check, alt, file=name, kind="pdf"))
     try:
         depth, count = _outline_depth(reader.outline)
     except Exception:

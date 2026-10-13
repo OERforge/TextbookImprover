@@ -35,6 +35,7 @@ import os
 import re
 import subprocess
 
+import alttext
 from findings import Finding
 
 EXTERNAL = ("http://", "https://", "mailto:", "tel:", "#", "//")
@@ -193,6 +194,16 @@ def check(path, kind, markers=("matrix", "row-headers")):
                 out.append(Finding(f"image {image_index[0]}",
                                    "source-image-no-alt", os.path.basename(src),
                                    file=name, kind=kind))
+            elif not decorative:
+                # By the rules a deck's pictures are judged by (alttext.py).
+                found = alttext.problem(text_of(alt), limit=None)
+                if found:
+                    out.append(Finding(f"image {image_index[0]}",
+                                       "source-image-alt-" + found[0],
+                                       "%s: %r%s" % (os.path.basename(src), text_of(alt).strip(),
+                                                     " (%s)" % found[1]
+                                                     if found[0] == "placeholder" else ""),
+                                       file=name, kind=kind))
         elif t == "Link":
             attr, inner, (target, _) = node["c"]
             label = text_of(inner).strip()

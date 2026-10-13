@@ -105,6 +105,11 @@ local MISSING_FILE = os.getenv('TABLE_CAPTIONS_MISSING')
 -- decorative case has to be stated rather than inferred from emptiness.
 local ALT_FILE = os.getenv('IMAGE_ALT') or 'image-alt.csv'
 local ALT_MISSING_FILE = os.getenv('IMAGE_ALT_MISSING')
+-- The alt text an author gave, one row an image (its key, its page, the
+-- text), which convert.py judges by the rules a deck's pictures are
+-- judged by (lib/alttext.py): a word such as "image", a camera's name for
+-- a file, a description Office generated, and the like.
+local ALT_SEEN_FILE = os.getenv('IMAGE_ALT_SEEN')
 
 -- What the table-headers pre-pass decided for each data table: the
 -- sidecar's value where one was declared, the guess otherwise. Keyed by
@@ -1115,6 +1120,7 @@ function Image(img)
     record_alt(img.src, 'missing', '')
     warn('image has no alt text: ' .. img.src)
   else
+    append_row(ALT_SEEN_FILE, { qualify_media(img.src), source_stem(), alt })
     local length = char_len(alt)
     if length > ALT_MAX_CHARS then
       local reason = ('too long (%d characters)'):format(length)

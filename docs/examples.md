@@ -185,7 +185,7 @@ cp table-headers-new.csv table-headers.csv
 
 Each guess says `TI` in its `drafted-by` column, since TextbookImprover made it. It's used as it stands, and once you've checked a row, your initials in its `reviewed` column say so ([Who drafted a value](sidecars.md#who-drafted-a-value-and-whether-its-been-reviewed)).
 
-**Alt text.** `image-alt-missing.csv` names each image whose description is missing or too long, with the reason and the description it has now:
+**Alt text.** `image-alt-missing.csv` names each image whose description is missing, too long, or says nothing about it, with the reason and the description it has now:
 
 ```
 Image,Alt,Source,Reason,CurrentAlt,Drafted by,Reviewed

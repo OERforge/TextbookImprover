@@ -58,6 +58,8 @@ OTHER = """<!DOCTYPE html><html lang="en"><head><title>Other</title></head>
 BAD = """<!DOCTYPE html><html><head><title></title></head>
 <body><h1 id="a">A</h1><h3 id="a">Skipped</h3><h2 id="two words"></h2>
 <img src="p.png"><img src="q.png" alt=""><img src="media/db-locked.png" alt="db locked">
+<img src="r.png" alt="IMG_2041"><img src="s.png" alt="A dog on a lawn Description automatically generated">
+<img src="t.png" alt="Marketing Mix Explained | Quizlet"><img src="u.png" alt="Figure 2 (fig2.png)">
 <table><tr><td>1</td></tr></table>
 <div class="table-wrapper" tabindex="0" role="region" aria-label="Demand">
 <table><caption>Demand</caption><tr><th scope="col"><math display="inline"><semantics><msub><mi>q</mi><mi>d</mi></msub><annotation encoding="application/x-tex">q_d</annotation></semantics></math></th>
@@ -151,7 +153,8 @@ def main():
                  "heading-skips-level",
                  "empty-heading", "image-without-alt",
                  "image-empty-alt-not-decorative",
-                 "image-alt-is-file-name",
+                 "image-alt-is-file-name", "image-alt-is-file-name",
+                 "image-alt-placeholder", "image-alt-auto-generated", "image-alt-page-title",
                  "link-label-without-text",
                  "table-without-headers-or-caption",
                  "table-not-in-scroll-region",
@@ -159,6 +162,12 @@ def main():
                  "link-to-missing-fragment", "formula-shown-as-tex",
                  "table-header-is-formula", "table-header-is-formula",
                  "table-header-is-formula"])),
+            # By the rules a deck's pictures are judged by (alttext.py).
+            ("alt text that says nothing is named with why, and so is one holding a file's name",
+             lambda: [f.detail for f in bad if f.check == "image-alt-placeholder"]
+             == ["r.png: 'IMG_2041' (a camera's or tool's name for a file)"]
+             and [f.detail for f in bad if f.check == "image-alt-is-file-name"]
+             == ["media/db-locked.png: 'db locked'", "u.png: 'Figure 2 (fig2.png)'"]),
             ("a header cell holding only a formula is named by its table and TeX, "
              "and one with no TeX by its table",
              lambda: sorted(f.detail for f in bad if f.check == "table-header-is-formula")

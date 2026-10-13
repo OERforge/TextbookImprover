@@ -77,6 +77,7 @@ from urllib.parse import unquote
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(HERE), "lib"))
 try:
+    import alttext
     import docxrepair
     import docxremediate
     import htmlremediate
@@ -4777,6 +4778,40 @@ def copy_media(base, output_dir, pages, safe=True):
 # 5. reports
 # --------------------------------------------------------------------------
 
+def judge_alt_text(seen_file, rows_file, placeholders=()):
+    """The alt text an author gave (the filter's IMAGE_ALT_SEEN rows),
+    judged by the rules a deck's pictures are judged by (alttext.py), and
+    each that needs a person added to the report's rows: a file name, a
+    word such as "image", a camera's name for a file, a description Office
+    generated, a web page's title. One the filter reported as too long
+    gets the reason beside that one."""
+    if not os.path.exists(seen_file):
+        return
+    rules = alttext.placeholder_rules(placeholders)
+    with open(seen_file, encoding="utf-8", newline="") as fh:
+        seen = sorted({tuple(row[:3]) for row in csv.reader(fh) if len(row) >= 3})
+    rows = []
+    if os.path.exists(rows_file):
+        with open(rows_file, encoding="utf-8", newline="") as fh:
+            rows = [row for row in csv.reader(fh) if any(row)]
+    changed = False
+    for image, source, alt in seen:
+        found = alttext.problem(alt, rules, limit=None)
+        if found is None:
+            continue
+        why = alttext.reason(*found)
+        same = [row for row in rows if len(row) >= 5 and (row[0], row[2], row[4])
+                == (image, source, alt)]
+        for row in same:
+            row[3] += "; " + why
+        if not same:
+            rows.append([image, "", source, why, alt, "", ""])
+        changed = True
+    if changed:
+        with open(rows_file, "w", encoding="utf-8", newline="") as fh:
+            csv.writer(fh, lineterminator="\n").writerows(rows)
+
+
 def write_report(rows_file, report, header, noun, sidecar=None, hint=None):
     """Sort and deduplicate the collected rows into a report, or remove a
     stale report when nothing is outstanding -- the file existing at all
@@ -5049,7 +5084,7 @@ def main():
     work = tempfile.mkdtemp(prefix="convert-")
     try:
         collected = {key: os.path.join(work, key) for key in
-                     ("captions_missing", "alt_missing", "spacers",
+                     ("captions_missing", "alt_missing", "alt_seen", "spacers",
                       "media_unresolved", "bare_links", "captions_applied",
                       "math", "math_places", "math_kept", "title_numbers")}
         env = dict(os.environ)
@@ -5059,6 +5094,7 @@ def main():
             "BOOK_TITLE": str(project.get("title") or ""),
             "TABLE_CAPTIONS_MISSING": collected["captions_missing"],
             "IMAGE_ALT_MISSING": collected["alt_missing"],
+            "IMAGE_ALT_SEEN": collected["alt_seen"],
             "BARE_LINKS_FOUND": collected["bare_links"],
             "CAPTIONS_APPLIED": collected["captions_applied"],
             "SPACER_LOG": collected["spacers"],
@@ -5302,6 +5338,8 @@ def main():
             collected["captions_missing"], reports["table_captions_missing"],
             "Label,Description,Source,Excerpt,Drafted by,Reviewed",
             "table(s) needing a description", paths["table_captions"])
+        judge_alt_text(collected["alt_seen"], collected["alt_missing"],
+                       first["images.alt_placeholders"] or ())
         write_report(
             collected["alt_missing"], reports["image_alt_missing"],
             "Image,Alt,Source,Reason,CurrentAlt,Drafted by,Reviewed",

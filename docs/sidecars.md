@@ -121,10 +121,12 @@ rather than a file.
 | text | Use this instead of the Word alt text |
 | *(blank)* | Reviewed; keep what Word supplied |
 | `[decorative]` | Emit `alt=""` so assistive technology skips it |
-| *(no row)* | Unreviewed; reported if absent or over the length limit |
+| *(no row)* | Unreviewed; reported if absent, over the length limit, or saying nothing about the image |
 
 A blank cell deliberately doesn't mean decorative. "I checked this and it
 is fine" and "this image carries no meaning" are different decisions.
+
+Alt text that says nothing about its image is reported as a missing one is, by the rules a deck's pictures are judged by ([Slides](slides.md#whats-checked), `lib/alttext.py`), with the reason in the `Reason` column: a file name or extension (`chart.png`), punctuation alone, a word such as "image" or "picture", a camera's or tool's name for a file (`IMG_2041`), a shape's default name (`Picture 3`), a clip-art id, a description Office generated ("Description automatically generated", which Office asks a person to review), a web page's title copied with the picture (`Marketing Mix Explained | Quizlet`), or a pattern the project lists in `images.alt_placeholders`. A row with a blank `Alt` says the alt text was reviewed and stands, and the image isn't reported again.
 
 `table-captions.csv` keys on the table's label, such as `Table 2.1`,
 whether the label is a paragraph beside the table or the table's own

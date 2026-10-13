@@ -2790,6 +2790,9 @@ def case_web_titles(work):
         "A camera that takes high-quality images, beside a phone.",
         "A website with a flat design and a menu at the top.",
         "The Golden Gate Bridge at dusk - San Francisco Bay",
+        # A label: a word or two, and a name after a dash.
+        "Attribution - By",
+        "Knowledge Check - Memo",
     ]
     found = [pptxcheck.alt_problem(t, limit=0) for t in fine]
     yield "a description that only shares a pipe, a dash, or a word with a page's title isn't", \
@@ -2801,10 +2804,14 @@ def case_web_titles(work):
                       "content may be incorrect.") \
         and pptxcheck.alt_problem("A dog Description automatically generated")[0] \
         == "pptx-alt-auto-generated", generated
-    yield "the report says why: a web page's title", \
+    yield "the report says why: a web page's title, or that it says nothing and why, " \
+        "in the words a book's report uses", \
         deckrun.reason_of("pptx-alt-page-title", examples[0]) == "a web page's title" \
         and deckrun.reason_of("pptx-alt-same-for-crops", "Two icons") \
-        == "shared with a copy showing another part", ""
+        == "shared with a copy showing another part" \
+        and deckrun.reason_of(*pptxcheck.alt_problem("Image.")) == "says nothing" \
+        and deckrun.reason_of(*pptxcheck.alt_problem("j0309720")) \
+        == "says nothing (a clip-art id)", ""
 
 
 def app_xml(fonts, titles, names=("Fonts Used", "Theme", "Slide Titles")):

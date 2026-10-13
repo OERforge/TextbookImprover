@@ -63,8 +63,18 @@ CHECKS = OrderedDict([
      ("an img has alt=\"\" but is not marked decorative", "warning",
       "WCAG 2.0 SC 1.1.1 (A)", "sidecar")),
     ("image-alt-is-file-name",
-     ("an img's alt only repeats its file name", "warning",
+     ("an img's alt repeats its file name, or holds a file name or extension", "warning",
       "WCAG 2.0 SC 1.1.1 (A)", "sidecar")),
+    ("image-alt-placeholder",
+     ("an img's alt says nothing about the image: punctuation, a word such as \"image\", a "
+      "camera's or tool's name for a file, a default shape name, a clip-art id", "warning",
+      "WCAG 2.0 SC 1.1.1 (A)", "sidecar")),
+    ("image-alt-auto-generated",
+     ("an img's alt is a description Office generated, for a person to review", "warning",
+      "WCAG 2.0 SC 1.1.1 (A)", "sidecar")),
+    ("image-alt-page-title",
+     ("an img's alt looks copied from a web page with the picture, the page's title or a stock "
+      "site's caption", "warning", "WCAG 2.0 SC 1.1.1 (A)", "sidecar")),
     ("no-lang", ("the html element declares no language", "error",
                  "WCAG 2.0 SC 3.1.1 (A)", "source")),
     ("no-title", ("the page has no title", "error", "WCAG 2.0 SC 2.4.2 (A)", "source")),
@@ -109,6 +119,19 @@ CHECKS = OrderedDict([
     # source: what a Word or Markdown file says about itself
     ("source-image-no-alt", ("an image with no alt text and no decorative "
                              "marker", "error", "WCAG 2.0 SC 1.1.1 (A)", "source")),
+    ("source-image-alt-is-file-name", ("an image whose alt text holds a file name or "
+                                       "extension", "warning", "WCAG 2.0 SC 1.1.1 (A)",
+                                       "source")),
+    ("source-image-alt-placeholder", ("an image whose alt text says nothing about it: "
+                                      "punctuation, a word such as \"image\", a camera's or "
+                                      "tool's name for a file, a default shape name, a clip-art "
+                                      "id", "warning", "WCAG 2.0 SC 1.1.1 (A)", "source")),
+    ("source-image-alt-auto-generated", ("an image whose alt text is a description Office "
+                                         "generated, for a person to review", "warning",
+                                         "WCAG 2.0 SC 1.1.1 (A)", "source")),
+    ("source-image-alt-page-title", ("an image whose alt text looks copied from a web page "
+                                     "with the picture, the page's title or a stock site's "
+                                     "caption", "warning", "WCAG 2.0 SC 1.1.1 (A)", "source")),
     ("source-table-no-headers", ("a table with no header row, no marker, "
                                  "and no keying first column", "warning",
                                  "WCAG 2.0 SC 1.3.1 (A)", "sidecar")),
@@ -235,7 +258,17 @@ CHECKS = OrderedDict([
       "WCAG 2.0 SC 1.1.1 (A)", "sidecar")),
     ("pdf-figure-alt-is-placeholder",
      ("a figure's alternative text in the PDF is the placeholder LaTeX "
-      "writes for a drawing that has none", "error",
+      "writes for a drawing that has none, or says nothing about the figure "
+      "otherwise: punctuation, a word such as \"image\", a camera's name for a "
+      "file, a default name", "error",
+      "WCAG 2.0 SC 1.1.1 (A)", "sidecar")),
+    ("pdf-figure-alt-auto-generated",
+     ("a figure's alternative text in the PDF is a description Office "
+      "generated, for a person to review", "warning",
+      "WCAG 2.0 SC 1.1.1 (A)", "sidecar")),
+    ("pdf-figure-alt-page-title",
+     ("a figure's alternative text in the PDF looks copied from a web page "
+      "with the picture, the page's title or a stock site's caption", "warning",
       "WCAG 2.0 SC 1.1.1 (A)", "sidecar")),
     ("pdf-table-header-is-formula",
      ("a header cell (TH) holding only a formula: NVDA reads it in the "

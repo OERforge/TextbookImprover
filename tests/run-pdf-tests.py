@@ -134,6 +134,8 @@ A rule between paragraphs: ![](assets/rule.png){.decorative}
 
 ![](assets/blank.png)
 
+![IMG_2041](assets/photo.png)
+
 | Year | Price |
 |------|-------|
 | 2020 | 10    |
@@ -301,6 +303,7 @@ def write_book(work):
     png(os.path.join(work, "assets", "red.png"), (200, 0, 0))
     png(os.path.join(work, "assets", "rule.png"), (0, 0, 0))
     png(os.path.join(work, "assets", "blank.png"), (255, 255, 255))
+    png(os.path.join(work, "assets", "photo.png"), (0, 120, 0))
 
 
 # --------------------------------------------------------------------------
@@ -766,10 +769,15 @@ def checks(work, jobs=1):
          lambda: any(str(f.get("/Alt")) == "A small red square"
                      for f in figures)),
         ("the decorative image is no figure",
-         lambda: len(figures) == 2),
+         lambda: len(figures) == 3),
         ("an image with no alt text is reported by the output check",
          lambda: [r["Check"] for r in pdf_rows].count(
              "pdf-figure-alt-is-file-name") == 1),
+        # By the rules a deck's pictures are judged by (alttext.py).
+        ("and one whose alt text says nothing, a camera's name for a file",
+         lambda: [(r["Check"], r["Detail"]) for r in pdf_rows
+                  if r["Check"] == "pdf-figure-alt-is-placeholder"]
+         == [("pdf-figure-alt-is-placeholder", "IMG_2041")]),
         # NVDA announces no column header for a cell holding only a
         # formula, and announces the words beside one (round 5).
         ("a header cell holding only a formula is reported, in the PDF and on its "

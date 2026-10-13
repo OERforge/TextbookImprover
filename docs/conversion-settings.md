@@ -102,7 +102,7 @@ Alt text longer than this is reported so it can be shortened, with the detail mo
 
 **`images.alt_placeholders`**—`list`; default `[]`
 
-Alt text that says nothing about an image, besides what's always reported (punctuation alone, a file name, a word such as image or picture, a clip-art id, a default shape name, Office's generated descriptions). Each entry is matched against the whole alt text, case, surrounding spaces, and closing punctuation aside; one starting re: is a regular expression the whole alt text must match. Read for PowerPoint decks for now.
+Alt text that says nothing about an image, besides what's always reported (punctuation alone, a file name, a word such as image or picture, a clip-art id, a default shape name, Office's generated descriptions). Each entry is matched against the whole alt text, case, surrounding spaces, and closing punctuation aside; one starting re: is a regular expression the whole alt text must match. Read for a deck's pictures and a book's images (image-alt-missing.csv); the output check and the audit go by the built-in rules alone.
 
 **`images.responsive`**—`bool`; default `true`
 

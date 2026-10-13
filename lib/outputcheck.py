@@ -43,6 +43,8 @@ import zipfile
 from html.parser import HTMLParser
 from urllib.parse import unquote, urlsplit
 
+import alttext
+
 # What a link names that isn't a file of the set, a scheme in any case
 # ("Http://", as a source typed it) compared lowercased.
 EXTERNAL = ("http:", "https:", "mailto:", "tel:", "data:", "javascript:",
@@ -407,6 +409,12 @@ def check_page(page, findings):
         elif alt_is_file_name(alt, src):
             findings.append(Finding(where, "image-alt-is-file-name",
                                     f"{src}: {alt!r}"))
+        elif not decorative:
+            # By the rules a deck's pictures are judged by (alttext.py).
+            found = alttext.problem(alt, limit=None)
+            if found:
+                findings.append(Finding(where, "image-alt-" + found[0], f"{src}: {alt!r}" + (
+                    f" ({found[1]})" if found[0] == "placeholder" else "")))
     for label, text in page.labeled_links:
         # WCAG 2.5.3: a speech user says what's on screen, so the name has
         # to contain it. An aria-label replaces the name a link's text
@@ -663,7 +671,12 @@ DESCRIPTIONS = {
         "a link's aria-label doesn't contain its visible text (WCAG 2.5.3)",
     "image-empty-alt-not-decorative":
         "alt is empty but the image is not marked aria-hidden=\"true\"",
-    "image-alt-is-file-name": "an img's alt only repeats its file name",
+    "image-alt-is-file-name": "an img's alt repeats its file name, or holds a file name or "
+                              "extension",
+    "image-alt-placeholder": "an img's alt says nothing: punctuation, a word such as "
+                             "\"image\", a camera's name for a file, a default name",
+    "image-alt-auto-generated": "an img's alt is a description Office generated",
+    "image-alt-page-title": "an img's alt looks copied from a web page with the picture",
     "heading-skips-level": "a heading is more than one level below the last",
     "empty-heading": "a heading with no text",
     "duplicate-id": "an id used more than once in one document",

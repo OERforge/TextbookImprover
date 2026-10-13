@@ -45,7 +45,11 @@ title: A Page
 Text with a bare [https://example.org/](https://example.org/) link and
 an image ![](nothing.png) with no alt, one that is
 ![](spacer.png){.decorative} decorative, and one described
-![A pipe](pipe.png).
+![A pipe](pipe.png). And alt text that says nothing, ![Picture 3](shape.png),
+one Office generated, ![A dog on a lawn Description automatically
+generated](dog.png), one copied from a web page with its picture,
+![Marketing Mix Explained | Quizlet](mix.png), and one holding a file's
+name, ![Figure 2 (fig2.png)](fig2.png).
 
 And one whose scheme is in capitals,
 [HTTPS://example.org/report](HTTPS://example.org/report).
@@ -97,6 +101,13 @@ def case_sources():
     return [
         ("an image with no alt and no decorative marker is found, once",
          lambda: c.count("source-image-no-alt") == 1),
+        # By the rules a deck's pictures are judged by (alttext.py).
+        ("and alt text that says nothing, why named, one Office generated, one copied from a "
+         "web page, and one holding a file's name, each once",
+         lambda: [f.detail for f in md if f.check == "source-image-alt-placeholder"]
+         == ["shape.png: 'Picture 3' (a default shape name)"]
+         and [c.count("source-image-alt-" + k) for k in ("auto-generated", "page-title",
+                                                          "is-file-name")] == [1, 1, 1]),
         ("a bare-URL link is found",
          lambda: "source-link-bare-url" in c),
         # Compared as written, a scheme in capitals wasn't a scheme.

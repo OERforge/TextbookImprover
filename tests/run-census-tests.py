@@ -492,14 +492,19 @@ def pandoc_checks():
         table = next(b for b in doc["blocks"] if b["t"] == "Table")
         got = tc.guess(tc.view_from_pandoc(table))
         yield name, got == expect, f"guess={got}, expected {expect}"
-    # Title rows and bands, (caption-rows, split-at), where the foot of an
-    # HTML table matters: it comes after the last part, so no row of it is
-    # split at.
+    # Title rows and bands, (caption-rows, split-at), where the head and the
+    # foot of an HTML table matter: a band over the header row in the head
+    # stays there, over every part's header row, and the foot comes after
+    # the last part, so neither is split at.
     group = ("<tbody><tr><td colspan='2'><b>Group A</b></td></tr>"
              "<tr><td>Yes</td><td>12</td></tr>"
              "<tr><td colspan='2'><b>Group B</b></td></tr>"
              "<tr><td>Yes</td><td>7</td></tr></tbody>")
     structures = [
+        ("html: a title over the header row in the head is a caption row, "
+         "not a band", ("1", "3,5"),
+         "<thead><tr><th colspan='2'>Answers</th></tr>"
+         "<tr><th>Answer</th><th>Count</th></tr></thead>" + group),
         ("html: no row of a table's foot is a band, though one over a row "
          "of totals looks it", ("", "2,4"),
          "<thead><tr><th>Answer</th><th>Count</th></tr></thead>" + group

@@ -24,7 +24,8 @@ nothing, which is the test.
     every row agrees (Readers/HTML/Table.hs); without a declaration the
     filter would set it back to none, because a Word table never has
     one to keep. A table with no <th> anywhere is left undeclared, and
-    the run reports it like any other.
+    the run reports it like any other. A head row that is one cell
+    across the table is its title or a band, not a header row.
   - A header row written inside <tbody>, which is where Pressbooks and
     most editors put one, is read as that body's own head rows
     (pTableBody's bodyheads) and would be written back inside the
@@ -310,6 +311,15 @@ local function split_at_header_rows(tbl)
   return parts
 end
 
+-- A head row that is one cell across a table of several columns is the
+-- table's title or its first band, which the pre-pass makes a caption row
+-- or splits at: it heads no column. Counted as a header row, it declared
+-- one, and the first row of data was made the header row once the title
+-- or the band had gone to the caption.
+local function spans_table(row, width)
+  return width > 1 and #row.cells == 1 and (row.cells[1].col_span or 1) >= width
+end
+
 local function drop_scopes(tbl)
   -- scope="col" on a cell below the header rows: Pandoc can't place it,
   -- and the writer would put it on a <td>. Other scopes stay: the filter
@@ -342,7 +352,10 @@ function Table(tbl)
   drop_empty_columns(tbl)
   if tbl.attr.attributes[MARKER_ATTR] then return tbl end
   lift_body_head(tbl)
-  local row = #tbl.head.rows > 0
+  local row = false
+  for _, head_row in ipairs(tbl.head.rows) do
+    if not spans_table(head_row, #tbl.colspecs) then row = true end
+  end
   local column = header_columns(tbl) > 0
   local value = (row and column and 'both') or (row and 'first-row')
     or (column and 'first-column') or nil

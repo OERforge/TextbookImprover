@@ -1246,7 +1246,19 @@ def repeated_header_rows(grid):
     return rows
 
 
-def inferred_structure(grid, foot=()):
+def head_rows(v):
+    """How many rows Pandoc reads as a table's head: an HTML table's
+    <thead>, or a Word table's first row when its table look formats it,
+    and the rows marked to repeat as a header from the top."""
+    marked = set(v.marked)
+    first_row = bool(v.look.get("firstRow"))
+    n = 0
+    while n < len(v.grid) and (n in marked or (n == 0 and first_row)):
+        n += 1
+    return n
+
+
+def inferred_structure(grid, foot=(), head=0):
     """(caption-rows, split-at) as the sidecar strings.
 
     A merged full-width row with text is one of two things. Alone at the
@@ -1256,14 +1268,23 @@ def inferred_structure(grid, foot=()):
     And when row 1 is merged *and* there are bands below it, row 1 is the
     first band, not a title -- 7-5-costs-in-the-long-run.docx opens with
     "Example A", then "Example B" at row 6, each with its own header row
-    beneath. Written into the prefilled row so the plan is visible."""
+    beneath -- unless it's in the table's head (the first `head` rows)
+    over a header row there: the split leaves it in every part's head with
+    that row, so it's the title, and any other band over a header row in
+    the head stays there too. Written into the prefilled row so the plan
+    is visible."""
     bands = [i for i in band_rows(grid) if i not in foot]
+    headers = [i for i in range(head) if i not in bands]
+    over_header = [i for i in bands if headers and i < headers[-1]]
+    bands = [i for i in bands if i not in over_header]
     # A band with nothing under it before the next band or the table's
     # end heads no rows, and the split keeps it a row of the table: a
     # note one cell across a table's foot ("Source: …") isn't a band. Nor
     # is any row of the table's foot, which comes after the last part.
     bands = [i for i in bands if i + 1 < len(grid) and i + 1 not in bands
              and i + 1 not in foot]
+    if 0 in over_header:
+        return "1", ",".join(str(i + 1) for i in bands)
     if not bands:
         repeated = [i for i in repeated_header_rows(grid) if i not in foot]
         if repeated:
@@ -1347,7 +1368,7 @@ def guess_table(tbl, kind=None, ev=None):
     if kind is None:
         kind, ev, _, _ = classify(v)
     value, reason = explain(v, kind, ev)
-    inferred = inferred_structure(v.grid, v.foot)
+    inferred = inferred_structure(v.grid, v.foot, head_rows(v))
     if inferred[1] and value is not None:
         value, reason = guess_by_parts(v, rows_list(inferred[1]), value, reason)
     return value, reason, inferred

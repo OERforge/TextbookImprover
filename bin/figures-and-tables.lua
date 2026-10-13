@@ -1656,8 +1656,22 @@ local function split_table(tbl, bands, part_captions, apply, head_leads)
   -- Flatten every body's rows in order, its own head rows first (a band
   -- the source grouped by is one), keeping the first body's settings
   -- for the parts.
+  -- A band at the end of the table's head labels the rows under it as any
+  -- band does, so it leaves the head and heads the first part: Pandoc's
+  -- Word reader makes a table's first row its head when Word's table look
+  -- formats the first row, as its default does, and an HTML table's band
+  -- can be its <thead>. Copied into every part's head, the first band had
+  -- headed them all (Plan A over Plan B's rows too). A band above a header
+  -- row in the head stays there, over every part's header row.
   local model = tbl.bodies[1]
-  local rows = {}
+  local rows, head_kept = {}, {}
+  local last_header = 0
+  for i, row in ipairs(tbl.head.rows) do
+    if not is_band[row] then last_header = i end
+  end
+  for i, row in ipairs(tbl.head.rows) do
+    if i > last_header then rows[#rows + 1] = row else head_kept[#head_kept + 1] = row end
+  end
   for _, body in ipairs(tbl.bodies) do
     for _, row in ipairs(body.head) do rows[#rows + 1] = row end
     for _, row in ipairs(body.body) do rows[#rows + 1] = row end
@@ -1698,7 +1712,7 @@ local function split_table(tbl, bands, part_captions, apply, head_leads)
   -- isn't a part of its own. Only when the declaration says there is a
   -- header row and that row is all that comes before the first band.
   local lead = nil
-  if head_leads and #tbl.head.rows == 0 and #segments > 1
+  if head_leads and #head_kept == 0 and #segments > 1
       and band_for[1] == nil and #segments[1] == 1 then
     lead = segments[1][1]
     table.remove(segments, 1)
@@ -1744,7 +1758,7 @@ local function split_table(tbl, bands, part_captions, apply, head_leads)
       tbl.attr.identifier ~= '' and (i == 1 and tbl.attr.identifier
                                      or (tbl.attr.identifier .. '-' .. i)) or '',
       tbl.attr.classes, {})
-    local head_rows = clone_rows(tbl.head.rows)
+    local head_rows = clone_rows(head_kept)
     if lead then head_rows[#head_rows + 1] = lead:clone() end
     if own_head then head_rows[#head_rows + 1] = own_head end
     local head = pandoc.TableHead(head_rows, tbl.head.attr)

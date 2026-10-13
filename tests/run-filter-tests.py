@@ -412,6 +412,22 @@ def case_split(work):
         hb.row([hb.cell("Auto Glass Doctor"), hb.cell("10%")]),
         hb.row([hb.cell("Source: a survey of shops", span=2)]),
     ])
+    # A band in the table's head, where Pandoc's Word reader puts a row
+    # marked to repeat: it had headed every part, Plan B's too.
+    planned = hb.table([
+        hb.row([hb.cell("Plan A", bold=True, span=2)], header=True),
+        hb.row([hb.cell("Rent"), hb.cell("$900")]),
+        hb.row([hb.cell("Food"), hb.cell("$400")]),
+        hb.row([hb.cell("Plan B", bold=True, span=2)]),
+        hb.row([hb.cell("Rent"), hb.cell("$700")]),
+        hb.row([hb.cell("Food"), hb.cell("$500")]),
+    ])
+    # The first shape as Word lays out a table it inserts: its table look
+    # formats the first row, which Pandoc's reader makes the table's head.
+    # Example A had headed both parts, and their own header rows were data.
+    look = ('<w:tblPr><w:tblLook w:val="04A0" w:firstRow="1" w:lastRow="0" '
+            'w:firstColumn="1" w:lastColumn="0" w:noHBand="0" w:noVBand="1"/></w:tblPr>')
+    looked = hb.table(block("A", 40) + block("B", 55)).replace("<w:tblPr/>", look)
     os.makedirs(work, exist_ok=True)
     hb.docx(os.path.join(work, "banded.docx"),
             [hb.para("Table 7.14 Total cost with rising labor costs"), banded,
@@ -430,6 +446,10 @@ def case_split(work):
              hb.para("Table 4.2 Wages"),
              hb.table([hb.row([hb.cell("Year", bold=True), hb.cell("Wage", bold=True)]),
                        hb.row([hb.cell("2020"), hb.cell("$15")])]),
+             hb.para("Plans next."),
+             hb.para("Table 3.4 Plans"), planned,
+             hb.para("Costs as Word lays them out next."),
+             hb.para("Table 7.15 Costs in Word's layout"), looked,
              hb.para("Then a table right after one labeled above it."),
              hb.para("Table 4.3 Prices"),
              hb.table([hb.row([hb.cell("Year", bold=True), hb.cell("Price", bold=True)]),
@@ -476,6 +496,7 @@ def case_split(work):
     organized, noted_out = everything[7:8], everything[8:9]
     back_to_back = everything[9:11]
     labeled = lambda label: [t for t in everything if caption_of(t).startswith(label)]
+    planned_new = [r for r in new if r["label"] == "Table 3.4"]
     organizer_new = [r for r in new if r["label"] == "Table 2.1"]
     noted_new = [r for r in new if r["label"] == "Table 11.1"]
     caption_of = lambda t: " ".join(re.sub(r"<[^>]+>", "", re.search(
@@ -549,11 +570,26 @@ def case_split(work):
          lambda: all(text in out.pages["banded"] for text in (
              "Prose between the tables, as there always is.", "More prose.", "And more.",
              "Last.", "Then two tables with only their labels between.",
+             "Plans next.", "Costs as Word lays them out next.",
              "Then a table right after one labeled above it."))),
         ("and two tables with only their labels between are each captioned "
          "by their own",
          lambda: [caption_of(t) for t in back_to_back]
                  == ["Table 4.1 Rents", "Table 4.2 Wages"]),
+        ("a band in the table's head heads the first part, not every part",
+         lambda: planned_new and planned_new[0]["split-at"] == "1,4"
+                 and [caption_of(t) for t in labeled("Table 3.4")]
+                 == ["Table 3.4 Plans: Plan A", "Table 3.4 Plans: Plan B"]
+                 and all(flat(t).count("Plan A") == (1 if n == 0 else 0)
+                         for n, t in enumerate(labeled("Table 3.4")))),
+        ("and in a table Word's table look gives a head, each part is headed by "
+         "its own header row",
+         lambda: [caption_of(t) for t in labeled("Table 7.15")]
+         == ["Table 7.15 Costs in Word's layout: Example A: workers cost $40",
+             "Table 7.15 Costs in Word's layout: Example B: workers cost $55"]
+         and all(re.search(r"<thead>(?:(?!</thead>).)*Labor Cost", t, re.S)
+                 and flat(t).count("Example A") == (1 if n == 0 else 0)
+                 for n, t in enumerate(labeled("Table 7.15")))),
         ("a table right after one whose label is above it is kept",
          lambda: labeled("Table 4.3 Prices") and any("Hours" in t for t in everything)),
         ("with the table's caption and the band as each part's caption",

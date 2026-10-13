@@ -167,7 +167,12 @@ Beyond the Word-to-HTML translation, each page gets:
   A merged row with no row under it before the next band or the table's
   end, a note across a table's foot, heads nothing and stays a row of
   the table, whether inferred or named in `split-at`. A table's foot
-  comes after its last part, and no row of it is inferred as a band.
+  comes after its last part, and no row of it is inferred as a band. A
+  band at the end of the table's head, where Pandoc's Word reader puts a
+  first row Word's table look formats (Word's default), heads the first
+  part alone; one above a header row there stays in every part's head
+  with it, and at the top it's the table's title, inferred as
+  `caption-rows=1`.
 - **Tables get the headers they were declared to have.** `table-headers.csv`
   says, per table, whether the headers are in the first row, the first
   column, both, or nowhere (see [Sidecar files](sidecars.md#sidecar-files)), and for a

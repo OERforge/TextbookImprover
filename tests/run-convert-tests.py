@@ -773,27 +773,54 @@ BANDED = """<!DOCTYPE html><html lang="en"><head><title>Bands</title></head>
 </main></body></html>
 """
 
+# Tables whose head is one cell across: a band, a title, and a title over
+# the header row.
+HEADS = """<!DOCTYPE html><html lang="en"><head><title>Heads</title></head>
+<body><main><h1>Heads</h1>
+<p>Table 3.4 Plans</p>
+<table><thead><tr><th colspan="2">Plan A</th></tr></thead>
+<tbody><tr><td>Rent</td><td>$900</td></tr><tr><td>Food</td><td>$400</td></tr>
+<tr><td colspan="2"><b>Plan B</b></td></tr>
+<tr><td>Rent</td><td>$700</td></tr><tr><td>Food</td><td>$500</td></tr></tbody></table>
+<p>Table 3.5</p>
+<table><thead><tr><th colspan="2">Survey results</th></tr></thead>
+<tbody><tr><td>Yes</td><td>12</td></tr><tr><td>No</td><td>3</td></tr>
+<tr><td>Maybe</td><td>5</td></tr></tbody></table>
+<p>Table 3.6</p>
+<table><thead><tr><th colspan="2">Answers</th></tr><tr><th>Answer</th><th>Count</th></tr></thead>
+<tbody><tr><td colspan="2"><b>Group A</b></td></tr><tr><td>Yes</td><td>12</td></tr>
+<tr><td>No</td><td>3</td></tr><tr><td colspan="2"><b>Group B</b></td></tr>
+<tr><td>Yes</td><td>7</td></tr><tr><td>No</td><td>9</td></tr></tbody></table>
+</main></body></html>
+"""
+
 
 def case_bands(work):
     """An HTML source's title rows and bands: split for an HTML target,
     kept as one grouped table for a Markdown one, and the grouped table
-    read back splits the same way, a table's foot kept in each. And a page
-    with no title stays one."""
+    read back splits the same way, a table's foot kept in each, and a head
+    that is one cell across, a band or a title. And a page with no title
+    stays one."""
     os.makedirs(work)
     with open(os.path.join(work, "bands.html"), "w", encoding="utf-8") as fh:
         fh.write(BANDED)
+    with open(os.path.join(work, "heads.html"), "w", encoding="utf-8") as fh:
+        fh.write(HEADS)
     with open(os.path.join(work, "untitled.html"), "w", encoding="utf-8") as fh:
         fh.write('<!DOCTYPE html><html lang="en"><head></head><body>'
                  "<p>No title here.</p></body></html>\n")
+    pages = ("bands.html", "heads.html", "untitled.html")
     def run_with(where, config):
         with open(os.path.join(where, "conversion.yaml"), "w",
                   encoding="utf-8") as fh:
             fh.write(config)
-        return run_in(where, "  contents:\n    - bands\n    - untitled\n")
+        return run_in(where, "  contents:\n    - bands\n    - heads\n    - untitled\n")
     run_with(work, "targets:\n  html:\n    format: html\n"
                    "  md:\n    format: markdown\n")
     page = read(work, "html", "bands.html") if exists(
         work, "html", "bands.html") else ""
+    heads = read(work, "html", "heads.html") if exists(
+        work, "html", "heads.html") else ""
     md = read(work, "md", "bands.md") if exists(work, "md", "bands.md") else ""
     captions = lambda text: [" ".join(re.sub(r"<[^>]+>", "", c).split())
                              for c in re.findall(r"<caption>(.*?)</caption>",
@@ -803,6 +830,8 @@ def case_bands(work):
     run_with(back, "targets:\n  html:\n    format: html\n")
     again = read(back, "html", "bands.html") if exists(
         back, "html", "bands.html") else ""
+    heads_again = read(back, "html", "heads.html") if exists(
+        back, "html", "heads.html") else ""
     # A person's part captions, in the row the run prefilled for the table.
     captioned = work + "-captioned"
     shutil.copytree(work, captioned, ignore=shutil.ignore_patterns(
@@ -833,15 +862,16 @@ def case_bands(work):
         column, "html", "bands.html") else ""
     column_again = column + "-again"
     os.makedirs(column_again)
-    for name in ("bands.html", "untitled.html"):
+    for name in pages:
         shutil.copy(os.path.join(column, "html", name), column_again)
     run_with(column_again, column_config)
     cells = lambda text: re.findall(r"<t[hd][^>]*>[^<]*", text)
     fixed = work + "-from-html"
     os.makedirs(fixed)
-    for name in ("bands.html", "untitled.html"):
+    for name in pages:
         shutil.copy(os.path.join(work, "html", name), fixed)
     run_with(fixed, "targets:\n  html:\n    format: html\n")
+    flat = lambda text: " ".join(re.sub(r"<[^>]+>", " ", text).split())
     return [
         ("a merged title row is the caption, and the header row beneath it "
          "is the header row",
@@ -901,6 +931,29 @@ def case_bands(work):
                                    page, re.S)
                  and re.search(r'<tfoot>\s*<tr>\s*<td colspan="3"[^>]*>Source: a survey',
                                in_column)),
+        # A band that was the table's head headed every part, the first
+        # captioned "Part 1"; a title there declared a header row, which the
+        # first row of data became once the title was the caption.
+        ("a band that is a table's head heads the first part alone, and the "
+         "rows under it stay data",
+         lambda: [c for c in captions(heads) if c.startswith("Table 3.4")]
+         == ["Table 3.4 Plans: Plan A", "Table 3.4 Plans: Plan B"]
+         and flat(heads).count("Plan A") == 1
+         and not re.search(r'<th scope="col">(<strong>)?(Rent|\$)', heads)),
+        ("a title that is a table's head is its caption, and the row under it "
+         "stays data",
+         lambda: "Table 3.5 Survey results" in captions(heads)
+         and not re.search(r'<th scope="col">(<strong>)?(Yes|12)', heads)
+         and re.search(r'<th scope="row">(<strong>)?Yes', heads)),
+        ("a title over the header row in a table's head is its caption, and "
+         "the header row heads each part",
+         lambda: [c for c in captions(heads) if c.startswith("Table 3.6")]
+         == ["Table 3.6 Answers: Group A", "Table 3.6 Answers: Group B"]
+         and len(re.findall(r'<th scope="col">(?:<strong>)?Answer<', heads)) == 2
+         and "colspan" not in heads),
+        ("and read back from Markdown or HTML, they split into the same captions",
+         lambda: captions(heads) and captions(heads_again) == captions(heads)
+         and captions(read(fixed, "html", "heads.html")) == captions(heads)),
     ]
 
 

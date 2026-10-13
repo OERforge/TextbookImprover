@@ -2014,7 +2014,10 @@ local function caption_data_table(tbl, next_block, after_next, after_after, out)
       end
     end
     if label then
-      consumed = 1
+      -- A label below the table is the block after it, taken; one above
+      -- was taken from what came before, and the block after the table is
+      -- the text that follows it, or the next table's label.
+      consumed = label_side == 'after' and 1 or 0
       local inlines = text_to_inlines(label)
       local description = description_for(label, position_key(ordinal))
       if description and description ~= '' then

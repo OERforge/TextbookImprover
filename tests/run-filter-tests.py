@@ -422,7 +422,20 @@ def case_split(work):
              hb.para("And more."),
              hb.para("Table 2.1 Organizational structure"), organizer,
              hb.para("Last."),
-             hb.para("Table 11.1 Market shares"), noted])
+             hb.para("Table 11.1 Market shares"), noted,
+             hb.para("Then two tables with only their labels between."),
+             hb.para("Table 4.1 Rents"),
+             hb.table([hb.row([hb.cell("Year", bold=True), hb.cell("Rent", bold=True)]),
+                       hb.row([hb.cell("2020"), hb.cell("$900")])]),
+             hb.para("Table 4.2 Wages"),
+             hb.table([hb.row([hb.cell("Year", bold=True), hb.cell("Wage", bold=True)]),
+                       hb.row([hb.cell("2020"), hb.cell("$15")])]),
+             hb.para("Then a table right after one labeled above it."),
+             hb.para("Table 4.3 Prices"),
+             hb.table([hb.row([hb.cell("Year", bold=True), hb.cell("Price", bold=True)]),
+                       hb.row([hb.cell("2020"), hb.cell("$3")])]),
+             hb.table([hb.row([hb.cell("Week", bold=True), hb.cell("Hours", bold=True)]),
+                       hb.row([hb.cell("1"), hb.cell("40")])])])
 
     tool = os.path.join(BIN, "table-headers.py")
     resolved = os.path.join(work, "table-headers.json")
@@ -460,9 +473,13 @@ def case_split(work):
                          {"TABLE_HEADERS_RESOLVED": declared_resolved})
     declared_tables = declared.tables("banded")[7:8]
     tables, headed_parts, grouped_parts = everything[:3], everything[3:5], everything[5:7]
-    organized, noted_out = everything[7:8], everything[8:]
+    organized, noted_out = everything[7:8], everything[8:9]
+    back_to_back = everything[9:11]
+    labeled = lambda label: [t for t in everything if caption_of(t).startswith(label)]
     organizer_new = [r for r in new if r["label"] == "Table 2.1"]
     noted_new = [r for r in new if r["label"] == "Table 11.1"]
+    caption_of = lambda t: " ".join(re.sub(r"<[^>]+>", "", re.search(
+        r"<caption>(.*?)</caption>", t, re.S).group(1)).split()) if "<caption>" in t else ""
     headed_heads = [re.search(r"<thead>.*?</thead>", t, re.S) for t in headed_parts]
     grouped_heads = [re.search(r"<thead>.*?</thead>", t, re.S) for t in grouped_parts]
     grouped_new = [r for r in new if r["label"] == "Table 7.2"]
@@ -524,6 +541,21 @@ def case_split(work):
          lambda: len(declared_tables) == 1
                  and all("Criterion %d" % n in declared_tables[0]
                          for n in range(1, 5))),
+        # A label above its table is taken from what came before it; the
+        # filter had passed over the block after the table too, as if it
+        # were a label below, so the text after each table here was lost,
+        # and the next table's label where only labels stood between.
+        ("the text after a table whose label is above it is kept",
+         lambda: all(text in out.pages["banded"] for text in (
+             "Prose between the tables, as there always is.", "More prose.", "And more.",
+             "Last.", "Then two tables with only their labels between.",
+             "Then a table right after one labeled above it."))),
+        ("and two tables with only their labels between are each captioned "
+         "by their own",
+         lambda: [caption_of(t) for t in back_to_back]
+                 == ["Table 4.1 Rents", "Table 4.2 Wages"]),
+        ("a table right after one whose label is above it is kept",
+         lambda: labeled("Table 4.3 Prices") and any("Hours" in t for t in everything)),
         ("with the table's caption and the band as each part's caption",
          lambda: len(headed_parts) == 2
                  and all("Table 1.1 Report parts:" in " ".join(

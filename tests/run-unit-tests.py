@@ -1165,30 +1165,71 @@ def check_drawings_without_preview():
 
 def check_tlmgr_command():
     """A tlmgr command the run suggests has sudo before it where the TeX
-    tree isn't the user's to write (TeX Live installed for the whole
-    system), and none where it is (TinyTeX in the home folder) or where
-    there's no TeX to ask."""
+    tree isn't the user's to write (TeX Live installed with sudo), and
+    tlmgr named by its path, the one beside kpsewhich, since sudo looks
+    for a program in folders of its own (Ubuntu's secure_path); and none
+    where it is (TinyTeX in the home folder) or where there's no TeX to
+    ask."""
     import latexbuild
     work = tempfile.mkdtemp(prefix="tex-root-")
+    bin_dir = os.path.join(work, "tex live", "bin")
+    os.makedirs(bin_dir)
+    for name in ("kpsewhich", "tlmgr"):
+        open(os.path.join(bin_dir, name), "w").close()
     saved_root, saved_access = list(latexbuild._TEX_ROOT), os.access
+    saved_which = latexbuild.shutil.which
     try:
         latexbuild._TEX_ROOT[:] = [work]
         own = latexbuild.tlmgr_command("install preview")
         os.access = lambda path, mode: False
+        # A distribution's tlmgr first on the path, as sudo would find it,
+        # and TeX Live's beside the kpsewhich that named the tree.
+        latexbuild.shutil.which = lambda name: {"kpsewhich": os.path.join(bin_dir, name),
+                                                "tlmgr": "/usr/bin/tlmgr"}.get(name)
         system = latexbuild.tlmgr_command("install preview")
+        latexbuild.shutil.which = lambda name: None
+        unfound = latexbuild.tlmgr_command("install preview")
         latexbuild._TEX_ROOT[:] = [""]
         unknown = latexbuild.tlmgr_command("install preview")
     finally:
         latexbuild._TEX_ROOT[:] = saved_root
         os.access = saved_access
+        latexbuild.shutil.which = saved_which
         shutil.rmtree(work, ignore_errors=True)
     return [
         ("a TeX the user can write is managed without sudo",
          lambda: own == "tlmgr install preview"),
-        ("one installed for the whole system with sudo",
-         lambda: system == "sudo tlmgr install preview"),
+        ("one installed with sudo gets sudo, and tlmgr by its path, the one beside "
+         "kpsewhich, quoted",
+         lambda: system == "sudo '%s' install preview" % os.path.join(bin_dir, "tlmgr")),
+        ("and by its name where it can't be found",
+         lambda: unfound == "sudo tlmgr install preview"),
         ("and with no TeX to ask, the plain command",
          lambda: unknown == "tlmgr install preview"),
+    ]
+
+
+def check_tex_packages():
+    """The installation page's commands for TeX install every package the
+    run and the suites check for, a deck's PDF's and the LaTeX suite's
+    books', each line a command of its own: copied, two names at a line
+    break had once run together ("soultabto-ltx")."""
+    page = open(os.path.join(ROOT, "docs", "installation.md"), encoding="utf-8").read()
+    section = page.split("### Everything at once", 1)[-1].split("\n### ", 1)[0]
+    block = re.search(r"```bash\n(.*?)```", section, re.S)
+    lines = block.group(1).splitlines() if block else []
+    named = {word for line in lines if line.startswith("tlmgr install ")
+             for word in line.split()[2:]}
+    suite = open(os.path.join(HERE, "run-latex-tests.py"), encoding="utf-8").read()
+    listed = re.search(r"^SUITE_TEX = \[(.*?)\]$", suite, re.S | re.M)
+    books = re.findall(r'\("([\w-]+)", "[^"]+"\)', listed.group(1)) if listed else []
+    import decks
+    talk = [package for _, package in decks.LTX_TALK_FILES]
+    return [
+        ("the installation page installs every TeX package a deck's PDF and the LaTeX "
+         "suite's books need", lambda: books and set(books + talk) <= named),
+        ("each line of it a command of its own",
+         lambda: named and not any(line.rstrip().endswith("\\") for line in lines)),
     ]
 
 
@@ -1298,6 +1339,7 @@ GROUPS = [
     ("a PDF read without pypdf's warnings", check_pdf_read_quietly),
     ("the PDF findings in the output check's summary", check_pdf_summary),
     ("tlmgr, with sudo where it needs it", check_tlmgr_command),
+    ("the installation page's TeX packages", check_tex_packages),
     ("drawings without the preview package", check_drawings_without_preview),
     ("layout tables", check_layout_tables),
     ("unique ids", check_unique_ids),

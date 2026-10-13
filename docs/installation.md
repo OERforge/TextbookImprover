@@ -194,7 +194,7 @@ lualatex --version | head -1
 
 - Nothing found: there's no TeX yet. Install one of the two below.
 - A path under your home folder, `~/.TinyTeX/bin/...`, and TeX Live 2026: TinyTeX, as below. Go on to [`tlmgr` and `sudo`](#tlmgr-and-sudo).
-- A path under `/usr/local/texlive/`, and TeX Live 2026: a TeX Live from its own installer, for the whole system. Go on to [`tlmgr` and `sudo`](#tlmgr-and-sudo); its `tlmgr` needs `sudo`. TeX Live 2025 there is too old: its LaTeX stopped at 2025-11-01, so install 2026 as below.
+- A path under `/usr/local/texlive/`, and TeX Live 2026: a TeX Live from its own installer. Go on to [`tlmgr` and `sudo`](#tlmgr-and-sudo), which says what to do if it was installed with `sudo`. TeX Live 2025 there is too old: its LaTeX stopped at 2025-11-01, so install 2026 as below.
 - `/usr/bin/lualatex` and "TeX Live 2023/Debian" (2021 on Ubuntu 22.04): Ubuntu's own `texlive` packages, too old to tag a book. A build stops on anything older than LaTeX 2026-06-01, saying which release it found. Install one of the two below; you can leave Ubuntu's in place, since whichever comes first on your path is the one used, and the installation steps put the new one first. The `tlmgr` that comes with Ubuntu's packages can't add to them: it runs in a user mode that isn't set up, and installs nothing.
 
 **Installing one.** Two ways, both TeX Live 2026:
@@ -209,14 +209,15 @@ lualatex --version | head -1
   lualatex --version | head -1
   ```
 
-- **TeX Live 2026 from its own installer**, [as the TeX Live project describes it](https://tug.org/texlive/quickinstall.html): everything in TeX Live, several gigabytes, for the whole system, so it needs none of the packages below but its `tlmgr` needs `sudo`. The download and installation can take an hour or more.
+- **TeX Live 2026 from its own installer**, [as the TeX Live project describes it](https://tug.org/texlive/quickinstall.html): everything in TeX Live, several gigabytes, so it needs none of the packages below. It goes in `/usr/local/texlive`, which the second line makes yours first, so that you install it as yourself, as the TeX Live project recommends, and its `tlmgr` needs no `sudo`, as TinyTeX's doesn't. The download and installation can take an hour or more.
 
   ```bash
   cd /tmp
+  sudo mkdir -p /usr/local/texlive && sudo chown -R "$USER" /usr/local/texlive
   curl -L -o install-tl-unx.tar.gz https://mirror.ctan.org/systems/texlive/tlnet/install-tl-unx.tar.gz
   zcat < install-tl-unx.tar.gz | tar xf -
   cd install-tl-*
-  sudo perl ./install-tl --no-interaction
+  perl ./install-tl --no-interaction
   export PATH="/usr/local/texlive/2026/bin/x86_64-linux:$PATH"    # and add this line to ~/.bashrc
   lualatex --version | head -1
   ```
@@ -225,29 +226,40 @@ Either way, `which lualatex` should now name the one you installed, and `lualate
 
 ### `tlmgr` and `sudo`
 
-`tlmgr` is TeX Live's package manager, which installs the packages below. TinyTeX lives in your home folder, so its `tlmgr` needs no `sudo`, and this page writes the commands that way. A TeX Live installed for the whole system, under `/usr/local/texlive`, needs `sudo` before every `tlmgr install` and `tlmgr update`: `sudo tlmgr install preview` where this page says `tlmgr install preview`. If `sudo` then answers `tlmgr: command not found`, which happens because `sudo` uses a shorter list of folders to find programs in than you do, `sudo "$(which tlmgr)" install preview` works. The commands the run itself suggests have `sudo` in them where your TeX needs it.
+`tlmgr` is TeX Live's package manager, which installs the packages below. TinyTeX, in your home folder, and a TeX Live installed as above are yours, so their `tlmgr` needs no `sudo`, and this page writes the commands that way.
+
+A TeX Live installed with `sudo` (`sudo perl ./install-tl`) belongs to root, so its `tlmgr` can't change it without `sudo`. And `sudo tlmgr` fails too: `sudo` looks for programs in a list of folders of its own (Ubuntu's `secure_path`), which TeX Live's isn't in, so it answers `sudo: tlmgr: command not found`, or runs Ubuntu's own `tlmgr` where Ubuntu's `texlive` packages are installed as well. Either of these works:
+
+- Make it yours, once, and every command on this page works as written:
+
+  ```bash
+  sudo chown -R "$USER" /usr/local/texlive
+  ```
+
+- Or keep it root's, and give `sudo` the path to `tlmgr` each time: `sudo "$(which tlmgr)" update --self --all` where this page says `tlmgr update --self --all`. That's all it needs, since `tlmgr` puts its own folder first on the path for the programs it runs; `sudo env "PATH=$PATH" tlmgr update --self --all` works as well. The commands the run itself suggests are written this way, with the path, where your TeX needs `sudo`.
 
 Before installing anything, bring `tlmgr` itself up to date, since it refuses to install once TeX Live has released a newer version of it:
 
 ```bash
-tlmgr update --self          # sudo tlmgr update --self for a whole-system TeX Live
+tlmgr update --self
 ```
 
 `tlmgr` downloads from a CTAN mirror chosen for you. On a network that only allows named hosts, set a fixed one first, since the chooser redirects: `tlmgr option repository https://ctan.math.illinois.edu/systems/texlive/tlnet` is the one used here.
 
 ### Everything at once
 
-This installs every TeX package and program anything in the project uses, the test suites' books included, so nothing below has to be installed piece by piece. On a full TeX Live the `tlmgr` line finds them all there already and does nothing, which does no harm.
+This installs every TeX package and program anything in the project uses, the test suites' books included, so nothing below has to be installed piece by piece. A full TeX Live, from its own installer, has every one of the TeX packages already, so it needs only the last line; TinyTeX needs them all.
 
 ```bash
-tlmgr install latex-lab tagpdf luamml luatexbase selnolig luacolor lua-ul footnotehyper xurl multirow \
-  luatex85 placeins latex-tagging-status preview ltx-talk lua-unicode-math newcomputermodern \
-  amsfonts amsmath babel-english caption fancyhdr framed geometry grfext mdframed pgf soul \
-  tabto-ltx tex-gyre titlesec tools ulem wasysym wrapfig
+tlmgr install latex-lab tagpdf luamml luatexbase selnolig luacolor lua-ul footnotehyper xurl multirow placeins
+tlmgr install luatex85 preview latex-tagging-status
+tlmgr install ltx-talk lua-unicode-math newcomputermodern
+tlmgr install amsfonts amsmath babel-english caption fancyhdr framed geometry grfext mdframed
+tlmgr install pgf soul tabto-ltx tex-gyre titlesec tools ulem wasysym wrapfig
 sudo apt install librsvg2-bin poppler-utils ghostscript fonts-dejavu-core python3-pikepdf
 ```
 
-With `sudo tlmgr` in the first line for a whole-system TeX Live. The rest of this section says what each is for.
+The rest of this section says what each is for.
 
 ### What each is for
 
@@ -259,7 +271,7 @@ A LaTeX book's PDF is built from the book's own LaTeX ([LaTeX sources](latex.md#
 
 `ltx-talk`, `lua-unicode-math`, and `newcomputermodern` are for a deck's PDF: ltx-talk is the presentation class a deck written in Markdown is built with, and it loads the other two, the math and the fonts it sets a deck in, which TinyTeX doesn't install with it. It needs LaTeX 2026-06-01 or later, TeX Live 2026 ([Slides](slides.md#the-pdf)).
 
-The rest of the TeX packages in the line, from `amsfonts` on, are what the LaTeX suite's small books load (`tests/run-latex-tests.py`). Its first checks name a LaTeX too old for the PDF target and any of them that are missing, with the line that installs them, and `rsvg-convert` too. It has one check of Ghostscript's way of embedding fonts, which skips without Ghostscript.
+The TeX packages in the last two `tlmgr` lines are what the LaTeX suite's small books load (`tests/run-latex-tests.py`), with `luatex85` and `preview`. Its first checks name a LaTeX too old for the PDF target and any of them that are missing, with the line that installs them, and `rsvg-convert` too. It has one check of Ghostscript's way of embedding fonts, which skips without Ghostscript.
 
 Two more kinds of package, depending on the book. A book with passages in another language needs that language's `babel-` and `hyphen-` packages (`tlmgr install babel-german hyphen-german` for German), or LuaLaTeX stops with babel's `Unknown option`. And whatever a `pdf.metadata` file's `header-includes` loads, and whatever else a book of your own loads, has to be installed too (`hanging`, say). When LuaLaTeX stops on `File 'something.sty' not found`, `tlmgr search --global --file /something.sty` names the package to install, and the run says so.
 

@@ -21,6 +21,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import tempfile
@@ -525,8 +526,14 @@ _TEX_ROOT = []
 def tlmgr_command(words):
     """tlmgr and its arguments as they're to be typed here: with sudo
     before them when the TeX tree tlmgr manages isn't the user's to write,
-    as a TeX Live installed for the whole system (/usr/local/texlive)
-    isn't, where TinyTeX, in the home folder, is."""
+    as a TeX Live installed with sudo (/usr/local/texlive) isn't, where
+    TinyTeX, in the home folder, is. After sudo, tlmgr is named by its
+    path, the one beside the kpsewhich asked: sudo looks for a program in
+    a list of folders of its own (Ubuntu's secure_path), which TeX Live's
+    isn't in, so `sudo tlmgr` isn't found, or runs a distribution's tlmgr
+    in its place; and tlmgr puts its own folder first on the path of the
+    programs it runs (tlmgr.pl's BEGIN block), so its path is all sudo
+    needs."""
     if not _TEX_ROOT:
         root = ""
         if shutil.which("kpsewhich"):
@@ -538,8 +545,13 @@ def tlmgr_command(words):
                 root = ""
         _TEX_ROOT.append(root)
     root = _TEX_ROOT[0]
-    sudo = bool(root) and os.path.isdir(root) and not os.access(root, os.W_OK)
-    return ("sudo " if sudo else "") + "tlmgr " + words
+    if not (root and os.path.isdir(root) and not os.access(root, os.W_OK)):
+        return "tlmgr " + words
+    found = shutil.which("kpsewhich")
+    path = os.path.join(os.path.dirname(found), "tlmgr") if found else ""
+    if not os.path.isfile(path):
+        path = shutil.which("tlmgr") or ""
+    return "sudo " + (shlex.quote(path) if path else "tlmgr") + " " + words
 
 
 def failure_advice(log):

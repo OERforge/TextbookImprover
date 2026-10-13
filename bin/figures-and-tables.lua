@@ -1692,6 +1692,95 @@ local function compose_part_caption(base, band_inlines, band_text, given, part_n
   return out, text
 end
 
+-- A part's columns that no cell begins in, where a group is laid out on
+-- fewer columns than the table, each of its cells across two: the
+-- Customers and Addresses of Foundations of Information Systems' Table
+-- 3.7, two columns each in a table of four. Alone in a part, such a
+-- column is invalid HTML (the Nu checker's "Table column 2 established
+-- by element th has no cells beginning in it"). It's closed up: a cell
+-- across it spans one column fewer, and its width goes to the column
+-- before it. A cell spanning rows takes its columns in the rows below,
+-- within its row group.
+local function close_empty_columns(tbl)
+  local width = #tbl.colspecs
+  local begins = {}
+  local function place(rows)
+    local taken, at = {}, {}
+    for r, row in ipairs(rows) do
+      local column, starts = 1, {}
+      for i, cell in ipairs(row.cells) do
+        while taken[r .. ':' .. column] do column = column + 1 end
+        local across = cell.col_span or 1
+        starts[i] = column
+        begins[column] = true
+        for dr = 0, (cell.row_span or 1) - 1 do
+          for dc = 0, across - 1 do
+            taken[(r + dr) .. ':' .. (column + dc)] = true
+          end
+        end
+        column = column + across
+      end
+      at[r] = starts
+    end
+    return at
+  end
+  local function body_rows(body)
+    local rows = {}
+    for _, row in ipairs(body.head) do rows[#rows + 1] = row end
+    for _, row in ipairs(body.body) do rows[#rows + 1] = row end
+    return rows
+  end
+  local head_at, foot_at, body_at = place(tbl.head.rows), nil, {}
+  for b, body in ipairs(tbl.bodies) do body_at[b] = place(body_rows(body)) end
+  foot_at = place(tbl.foot.rows)
+  local gone, any = {}, false
+  for c = 2, width do
+    if not begins[c] then gone[c], any = true, true end
+  end
+  if not any then return tbl end
+
+  local function narrowed(rows, at, offset)
+    local out = {}
+    for r, row in ipairs(rows) do
+      local cells = pandoc.List()
+      for i, cell in ipairs(row.cells) do
+        local start, across = at[r + offset][i], cell.col_span or 1
+        local span = across
+        for c = start + 1, start + across - 1 do
+          if gone[c] then span = span - 1 end
+        end
+        cells:insert(pandoc.Cell(cell.contents, cell.alignment,
+          cell.row_span, span, cell.attr))
+      end
+      out[#out + 1] = pandoc.Row(cells, row.attr)
+    end
+    return out
+  end
+  local specs = {}
+  for c, spec in ipairs(tbl.colspecs) do
+    if not gone[c] then
+      specs[#specs + 1] = { spec[1], spec[2] }
+    elseif type(spec[2]) == 'number' and type(specs[#specs][2]) == 'number' then
+      specs[#specs][2] = specs[#specs][2] + spec[2]
+    end
+  end
+  local bodies = {}
+  for b, body in ipairs(tbl.bodies) do
+    local heads = narrowed(body.head, body_at[b], 0)
+    local rows = narrowed(body.body, body_at[b], #body.head)
+    local row_heads = body.row_head_columns or 0
+    for c = 2, body.row_head_columns or 0 do
+      if gone[c] then row_heads = row_heads - 1 end
+    end
+    bodies[b] = pandoc.TableBody(rows, heads, row_heads, body.attr)
+  end
+  return pandoc.Table(tbl.caption, specs,
+    pandoc.TableHead(narrowed(tbl.head.rows, head_at, 0), tbl.head.attr),
+    bodies,
+    pandoc.TableFoot(narrowed(tbl.foot.rows, foot_at, 0), tbl.foot.attr),
+    tbl.attr)
+end
+
 -- A split row that is one merged cell across the table is a band: it
 -- leaves the table and its text becomes the caption. A split row with
 -- several cells cannot be a caption, so it is the part's own header row
@@ -2224,7 +2313,8 @@ local function caption_data_table(tbl, next_block, after_next, after_after, out)
   if parts then
     local blocks = {}
     for _, part in ipairs(parts) do
-      blocks[#blocks + 1] = wrap_table(part.table, part.label or label)
+      blocks[#blocks + 1] = wrap_table(close_empty_columns(part.table),
+                                       part.label or label)
     end
     return blocks, consumed
   end

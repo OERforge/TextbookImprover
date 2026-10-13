@@ -1031,6 +1031,50 @@ def case_group_heads(work):
     ]
 
 
+# A table split at its bands whose second group is laid out on half its
+# columns, each cell across two, as Foundations of Information Systems'
+# normal forms are.
+NARROW_GROUP = """<!DOCTYPE html><html lang="en"><head><title>Forms</title></head>
+<body><main><h1>Forms</h1>
+<table><caption>Table 3.7 Third Normal Form</caption>
+<colgroup><col style="width: 10%"><col style="width: 40%"><col style="width: 20%">
+<col style="width: 30%"></colgroup>
+<thead><tr><th colspan="4">Orders</th></tr></thead>
+<tbody><tr><td>OrderID</td><td>Product</td><td>Price</td><td>CustomerID</td></tr>
+<tr><td>101</td><td>Shirt</td><td>$75</td><td>1</td></tr>
+<tr><td>102</td><td>Hat</td><td>$50</td><td>2</td></tr>
+<tr><td colspan="4">Customers</td></tr>
+<tr><td colspan="2">CustomerID</td><td colspan="2">CustomerName</td></tr>
+<tr><td colspan="2">1</td><td colspan="2">John Doe</td></tr>
+<tr><td colspan="2">2</td><td colspan="2">Jane Smith</td></tr></tbody></table>
+</main></body></html>
+"""
+
+
+def case_narrow_group(work):
+    """A part of a split table laid out on fewer columns than the table:
+    a column no cell of the part begins in is closed up."""
+    os.makedirs(work)
+    with open(os.path.join(work, "forms.html"), "w", encoding="utf-8") as fh:
+        fh.write(NARROW_GROUP)
+    with open(os.path.join(work, "conversion.yaml"), "w",
+              encoding="utf-8") as fh:
+        fh.write("targets:\n  html:\n    format: html\n")
+    run_in(work, "  contents:\n    - forms\n")
+    page = read(work, "html", "forms.html") if exists(
+        work, "html", "forms.html") else ""
+    parts = re.findall(r"<table.*?</table>", page, re.S)
+    return [
+        # The second part's cells each spanned two columns, columns 2 and 4
+        # began in no cell: the Nu checker's "Table column 2 established
+        # by element th has no cells beginning in it".
+        ("a part laid out on fewer columns than the table spans none it "
+         "doesn't begin a cell in, each column's width the two's",
+         lambda: len(parts) == 2 and "colspan" not in parts[1]
+         and re.findall(r'<col style="width: (\d+)%"', parts[1]) == ["50", "50"]
+         and len(re.findall(r"<col ", parts[0])) == 4),
+    ]
+
 def case_compare_blocks(work):
     """compare-output.py sees a quotation that became a paragraph and a
     list that lost an item, which change no heading, table, or image."""
@@ -4325,6 +4369,7 @@ CASES = [
     ("raw HTML in a Markdown source", case_markdown_html),
     ("title rows and bands, split and grouped", case_bands),
     ("a group's own header row, split", case_group_heads),
+    ("a part laid out on fewer columns", case_narrow_group),
     ("compare-output sees lists and blockquotes", case_compare_blocks),
     ("a web archive converted directly", case_warc_direct),
     ("a Common Cartridge", case_cartridge),

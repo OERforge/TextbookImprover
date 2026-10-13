@@ -47,6 +47,9 @@ an image ![](nothing.png) with no alt, one that is
 ![](spacer.png){.decorative} decorative, and one described
 ![A pipe](pipe.png).
 
+And one whose scheme is in capitals,
+[HTTPS://example.org/report](HTTPS://example.org/report).
+
 | a | b |
 |---|---|
 | 1 | 2 |
@@ -96,6 +99,10 @@ def case_sources():
          lambda: c.count("source-image-no-alt") == 1),
         ("a bare-URL link is found",
          lambda: "source-link-bare-url" in c),
+        # Compared as written, a scheme in capitals wasn't a scheme.
+        ("and so is one whose scheme is in capitals",
+         lambda: [f.detail for f in md if f.check == "source-link-bare-url"]
+         == ["https://example.org/", "HTTPS://example.org/report"]),
         # The keyed one's first column names each row once; the found
         # one's doesn't.
         ("a headerless table is found, a marked one and a keyed one are not",

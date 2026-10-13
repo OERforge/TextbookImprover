@@ -1824,7 +1824,7 @@ def portable_media_paths(path, base, name):
         if isinstance(node, dict):
             if node.get("t") == "Image":
                 ref = node["c"][2][0]
-                better = None if ref.startswith(EXTERNAL_REF) \
+                better = None if ref.lower().startswith(EXTERNAL_REF) \
                     else candidate(ref)
                 if better:
                     fixed.append((ref,) + better)
@@ -2087,6 +2087,8 @@ def read_to_json(base, docs, env, work):
 
 
 LOCAL_REF = re.compile(r'\b(?:src|href)\s*=\s*"([^"]+)"', re.I)
+# Not a file of the book's, a scheme in any case ("Http://") compared
+# lowercased.
 EXTERNAL_REF = ("http://", "https://", "//", "data:", "mailto:", "tel:", "#",
                 "javascript:")
 
@@ -2133,7 +2135,8 @@ def local_references(path):
     refs = []
     for raw in LOCAL_REF.findall(markup):
         ref = raw.strip().split("#", 1)[0].split("?", 1)[0]
-        if ref and not ref.startswith(EXTERNAL_REF) and ref not in refs:
+        if ref and not ref.lower().startswith(EXTERNAL_REF) \
+                and ref not in refs:
             refs.append(ref)
     return refs
 
@@ -2299,7 +2302,8 @@ def media_references(path):
     with open(path, encoding="utf-8") as fh:
         walk(json.load(fh))
     return sorted(r for r in set(refs)
-                  if not r.startswith(("http://", "https://", "//", "data:")))
+                  if not r.lower().startswith(("http://", "https://", "//",
+                                               "data:")))
 
 
 def media_gate(base, stems, media_rows, report_path, safe=True):

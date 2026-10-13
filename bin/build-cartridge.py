@@ -90,7 +90,8 @@ FILE_LIST_NAME = "cartridge-files.txt"
 
 CRLF = "\r\n"
 
-# src/href values that are not local files.
+# src/href values that are not local files, a scheme in any case
+# ("Http://", as a source typed it) compared lowercased.
 EXTERNAL = ("http://", "https://", "//", "data:", "mailto:", "tel:", "#",
             "javascript:")
 
@@ -150,7 +151,7 @@ def page_references(path, base_dir):
     found, seen = [], set()
     for raw in SRC_RE.findall(markup):
         ref = html_module.unescape(raw).strip()
-        if not ref or ref.startswith(EXTERNAL):
+        if not ref or ref.lower().startswith(EXTERNAL):
             continue
         # A file name with a space is written %20 in a page, as a link
         # must be; what is on disk, and what goes in the archive, has the

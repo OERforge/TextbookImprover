@@ -43,6 +43,8 @@ import zipfile
 from html.parser import HTMLParser
 from urllib.parse import unquote, urlsplit
 
+# What a link names that isn't a file of the set, a scheme in any case
+# ("Http://", as a source typed it) compared lowercased.
 EXTERNAL = ("http:", "https:", "mailto:", "tel:", "data:", "javascript:",
             "//")
 XHTML = "{http://www.w3.org/1999/xhtml}"
@@ -458,7 +460,7 @@ def check_links(pages, findings, base_of=None):
     ids = {page.name: set(page.ids) for page in pages.values()}
     for page in pages.values():
         for href in page.links:
-            if href.startswith(EXTERNAL) or not href:
+            if href.lower().startswith(EXTERNAL) or not href:
                 continue
             target, _, fragment = href.partition("#")
             if not target:
@@ -610,7 +612,7 @@ def check_epub(path):
 def check_links_among(pages, files, findings):
     for page in pages.values():
         for href in page.links:
-            if href.startswith(EXTERNAL) or not href:
+            if href.lower().startswith(EXTERNAL) or not href:
                 continue
             target, _, fragment = href.partition("#")
             target = unquote(urlsplit(target).path)

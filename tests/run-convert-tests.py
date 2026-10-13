@@ -1075,6 +1075,35 @@ def case_narrow_group(work):
          and len(re.findall(r"<col ", parts[0])) == 4),
     ]
 
+def case_scheme_case(work):
+    """A link whose scheme is in capitals, as a source may type it, is a
+    link to another site, not a file of the book's."""
+    os.makedirs(work)
+    with open(os.path.join(work, "caps.html"), "w", encoding="utf-8") as fh:
+        fh.write('<!DOCTYPE html><html lang="en"><head><title>Capitals</title>'
+                 '</head><body><main><h1>Capitals</h1><p>The <a href='
+                 '"Http://example.org/study.pdf">study</a>, <a href='
+                 '"HTTPS://example.org/">its site</a>, and <a href='
+                 '"MAILTO:a@example.org">its authors</a>.</p><p><img src='
+                 '"Http://example.org/chart.png" alt="A chart of the study\'s '
+                 'findings"></p></main></body></html>\n')
+    with open(os.path.join(work, "conversion.yaml"), "w",
+              encoding="utf-8") as fh:
+        fh.write("targets:\n  html:\n    format: html\n")
+    run = run_in(work, "  contents:\n    - caps\n")
+    check = read(work, "output-check.csv") if exists(
+        work, "output-check.csv") else ""
+    return [
+        # Each was taken for a file the book lacks: the output check's
+        # link-to-missing-file, and the packager stopped the run.
+        ("a link or a picture whose scheme is in capitals names no missing "
+         "file, and the run packages the book",
+         lambda: run.returncode == 0 and "link-to-missing-file" not in check
+         and "not on disk" not in run.stdout + run.stderr
+         and 'href="Http://example.org/study.pdf"' in read(
+             work, "html", "caps.html")),
+    ]
+
 def case_compare_blocks(work):
     """compare-output.py sees a quotation that became a paragraph and a
     list that lost an item, which change no heading, table, or image."""
@@ -4370,6 +4399,7 @@ CASES = [
     ("title rows and bands, split and grouped", case_bands),
     ("a group's own header row, split", case_group_heads),
     ("a part laid out on fewer columns", case_narrow_group),
+    ("a link's scheme in capitals", case_scheme_case),
     ("compare-output sees lists and blockquotes", case_compare_blocks),
     ("a web archive converted directly", case_warc_direct),
     ("a Common Cartridge", case_cartridge),

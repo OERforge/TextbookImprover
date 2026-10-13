@@ -197,7 +197,8 @@ def check(path, kind, markers=("matrix", "row-headers")):
             attr, inner, (target, _) = node["c"]
             label = text_of(inner).strip()
             if label and label == target or label.rstrip("/") == target.rstrip("/"):
-                if target.startswith(("http://", "https://")) and \
+                # A scheme in any case: "HTTPS://", as an author may type it.
+                if target.lower().startswith(("http://", "https://")) and \
                         "aria-label" not in dict(attr[2]):
                     out.append(Finding(name, "source-link-bare-url", target[:80],
                                        file=name, kind=kind))

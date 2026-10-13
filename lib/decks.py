@@ -53,6 +53,7 @@ import subprocess
 import tempfile
 from urllib.parse import unquote
 
+import highlighting
 import latexbuild
 
 # The intermediate's record of the slide level, which also says the page
@@ -956,7 +957,8 @@ def build_pdf(intermediate, base, out_pdf, *, template, filters, language,
                    "-M", f"lang={language}",
                    "-V", f"aspect-ratio={shape}", "-V", f"frametitle-tag={tag}",
                    "-V", "math-setup=" + latexbuild.math_setup(standards, ua1_math),
-                   "-V", "oer-macros=" + macros, "-V", "code-spaces=" + latexbuild.CODE_SPACES]
+                   "-V", "oer-macros=" + macros, "-V", "code-spaces=" + latexbuild.CODE_SPACES
+                   ] + highlighting.ARGS
         for standard in standards:
             command += ["-M", f"pdfstandard={standard}"]
         if ua1:

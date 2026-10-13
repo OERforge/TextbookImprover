@@ -6,12 +6,54 @@
    familiar "accessible gray" #767676 is only 4.47:1 here -- it is computed
    against pure white, and Pandoc's background is not pure white.
    Pandoc 3.12's stylesheet follows the reader's dark mode, with a #1a1a1a
-   background, where #555 is 2.33:1; #b6b6b6 there is 8.58:1. A browser
-   without light-dark() keeps the first declaration. */
+   background, where #555 is 2.33:1; #b6b6b6 there is 8.58:1, and 7.50:1
+   on the #232629 of an EPUB's dark mode. A browser without light-dark()
+   keeps the first declaration. */
 figcaption,
 table caption {
   color: #555;
   color: light-dark(#555, #b6b6b6);
+}
+
+/* Highlighted code -- WCAG 1.4.3, light and dark.
+   Every writer is given bin/highlighting.theme (lib/highlighting.py):
+   Pandoc's pygments colors, those under 4.5:1 darkened. Pandoc writes
+   them as fixed colors, which the dark mode of its 3.12 stylesheets
+   leaves on a page's #1a1a1a or an EPUB's #232629, where a variable's
+   #19177c is 1.21:1 and 1.05:1. So each token gets the theme's color
+   for light mode and, for dark, one lightened to 4.6:1 on #232629, the
+   lighter of the two. A browser without light-dark() keeps Pandoc's,
+   the theme's. */
+code span.al { color: light-dark(#e90503, #ff4e3e); } /* Alert */
+code span.an { color: light-dark(#3c7c8c, #60a0b0); } /* Annotation */
+code span.at { color: light-dark(#697b06, #829630); } /* Attribute */
+code span.bn { color: light-dark(#1d8456, #40a070); } /* BaseN */
+code span.bu { color: light-dark(#008000, #38a233); } /* BuiltIn */
+code span.cf { color: light-dark(#007020, #45a04f); } /* ControlFlow */
+code span.ch { color: light-dark(#4070a0, #6192c4); } /* Char */
+code span.cn { color: light-dark(#880000, #e56656); } /* Constant */
+code span.co { color: light-dark(#3c7c8c, #60a0b0); } /* Comment */
+code span.cv { color: light-dark(#3c7c8c, #60a0b0); } /* CommentVar */
+code span.do { color: light-dark(#ba2121, #f25a51); } /* Documentation */
+code span.dt { color: light-dark(#902000, #df6b4f); } /* DataType */
+code span.dv { color: light-dark(#1d8456, #40a070); } /* DecVal */
+code span.er { color: light-dark(#e90503, #ff4e3e); } /* Error */
+code span.fl { color: light-dark(#1d8456, #40a070); } /* Float */
+code span.fu { color: light-dark(#06287e, #5f8cea); } /* Function */
+code span.im { color: light-dark(#008000, #38a233); } /* Import */
+code span.in { color: light-dark(#3c7c8c, #60a0b0); } /* Information */
+code span.kw { color: light-dark(#007020, #45a04f); } /* Keyword */
+code span.op { color: light-dark(#666666, #8e8e8e); } /* Operator */
+code span.ot { color: light-dark(#007020, #45a04f); } /* Other */
+code span.pp { color: light-dark(#a06803, #c28010); } /* Preprocessor */
+code span.sc { color: light-dark(#4070a0, #6192c4); } /* SpecialChar */
+code span.ss { color: light-dark(#ac597b, #c97395); } /* SpecialString */
+code span.st { color: light-dark(#4070a0, #6192c4); } /* String */
+code span.va { color: light-dark(#19177c, #6f86f1); } /* Variable */
+code span.vs { color: light-dark(#4070a0, #6192c4); } /* VerbatimString */
+code span.wa { color: light-dark(#3c7c8c, #60a0b0); } /* Warning */
+pre.numberSource code > span > a:first-child::before {
+  color: light-dark(#737373, #aaaaaa);
 }
 
 /* Footnote numbers the EPUB assembler adds; Pandoc's HTML writer numbers

@@ -152,6 +152,8 @@ A deck written in Pandoc's slide Markdown, in a folder with `project.kind: slide
 
 ## The outputs, and how each is packaged
 
+Code with a language is highlighted in the same colors in every output that colors it (a page, an EPUB, a PDF, a Word file, a PowerPoint file, and a reveal.js presentation), each with 4.5:1 or more against the page; a page or an EPUB in dark mode lightens each to 4.5:1 or more against its dark background ([Contrast](checking.md#contrast)).
+
 ### HTML
 
 A directory of pages, one per target (`output_dir`), each page's images and linked files copied beside it under names that need no encoding in a link. `menu: on` adds a menu for posting the pages as a site. Packaged by [`build-cartridge.py`](packaging.md), which `convert.py` runs at the end of every run, and which builds once `project.yaml` names the book:

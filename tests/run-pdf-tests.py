@@ -44,6 +44,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 import argparse
 import concurrent.futures
 import csv
+import json
 import os
 import re
 import shutil
@@ -64,6 +65,7 @@ except ImportError:
     pypdf = None
 
 sys.path.insert(0, os.path.join(ROOT, "lib"))
+import highlighting  # noqa: E402
 import pdfparagraphs  # noqa: E402
 sys.path.insert(0, HERE)
 import parallel  # noqa: E402
@@ -524,6 +526,22 @@ def font_names(reader):
     return names
 
 
+def fill_colors(reader):
+    """The fill colors the pages' content sets, as LaTeX writes them."""
+    found = set()
+    for page in reader.pages:
+        content = page.get_contents()
+        if content is not None:
+            found |= set(re.findall(rb"([\d.]+ [\d.]+ [\d.]+) rg", content.get_data()))
+    return {color.decode() for color in found}
+
+
+def latex_color(color):
+    """A #rrggbb color as Pandoc's highlighting macros give it LaTeX,
+    and LaTeX the PDF."""
+    return " ".join("%.2f" % (int(color[i:i + 2], 16) / 255) for i in (1, 3, 5))
+
+
 def font_installed(name):
     """Whether TeX finds the font file."""
     if not shutil.which("kpsewhich"):
@@ -858,6 +876,15 @@ def checks(work, jobs=1):
                   lambda: pdftext.code_lines(pdf_path)[-3:]
                   == ["def supply(p):", "    return 2 * p  # 100%", "q   = 10"]
                   and len(inside(tree, "/footnote", "/codeline")) == 3))
+    # In the theme every writer is given (lib/highlighting.py), whose
+    # colors clear 4.5:1 where pygments' didn't: a number in the text's
+    # code, a comment in a footnote's.
+    with open(highlighting.THEME, encoding="utf-8") as fh:
+        theme = json.load(fh)["text-styles"]
+    items.append(("highlighted code is drawn in the theme's colors, a number in the text's "
+                  "code and a comment in a footnote's",
+                  lambda: {latex_color(theme["DecVal"]["text-color"]),
+                           latex_color(theme["Comment"]["text-color"])} <= fill_colors(reader)))
     return items
 
 

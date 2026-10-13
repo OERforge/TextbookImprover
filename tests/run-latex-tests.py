@@ -1723,7 +1723,8 @@ def case_latex_target(work):
                  "<td>1</td></tr></tbody></table><figcaption>The first rows of Pascal's "
                  "triangle</figcaption></figure>\n\n<figure id=\"outer\"><figure>"
                  "<img src=\"img/square.png\" alt=\"A flowchart.\"></figure>"
-                 "<figcaption>A small example</figcaption></figure>\n")
+                 "<figcaption>A small example</figcaption></figure>\n\n"
+                 "```python\nsides = 3  # a triangle\n```\n")
     with open(os.path.join(work, "project.yaml"), "w") as fh:
         fh.write("project:\n  identifier: shapes\n  title: Shapes\n  language: en\n"
                  "  contents:\n  - one\n  - two\n  - three\n")
@@ -1739,6 +1740,9 @@ def case_latex_target(work):
     two = read(work, "latex", "two.tex") if os.path.exists(os.path.join(out, "two.tex")) else ""
     three = read(work, "latex", "three.tex") \
         if os.path.exists(os.path.join(out, "three.tex")) else ""
+    with open(os.path.join(BIN, "highlighting.theme"), encoding="utf-8") as fh:
+        comment = json.load(fh)["text-styles"]["Comment"]["text-color"]
+    comment_rgb = ",".join("%.2f" % (int(comment[i:i + 2], 16) / 255) for i in (1, 3, 5))
 
     def round_trip():
         back = os.path.join(work, "back")
@@ -1827,6 +1831,9 @@ def case_latex_target(work):
         ("and a code block in a footnote, read from a file the master's preamble writes",
          lambda: "\\OERCodeFile{oer-code-1.tex}" in one
          and "\\begin{filecontents*}[overwrite]{oer-code-1.tex}" in master),
+        ("highlighted code's macros are in the theme's colors (lib/highlighting.py)",
+         lambda: "\\newcommand{\\CommentTok}[1]{\\textcolor[rgb]{%s}" % comment_rgb in master
+         and "\\begin{Highlighting}" in three),
         ("read back as a LaTeX source, each chapter gives the same page", round_trip),
         ("it builds with latexmk and LuaLaTeX", builds),
     ]

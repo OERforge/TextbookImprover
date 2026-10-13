@@ -83,6 +83,7 @@ try:
     import mdremediate
     import texremediate
     import docxtarget
+    import highlighting
     import htmlrepair
     import mathjax
     import notes as notes_lib
@@ -4156,7 +4157,7 @@ def render_markdown(target, pages, base, work, project, env, losses=None):
             if os.path.exists(found):
                 os.remove(found)
             run(["pandoc", "-f", "json", "-t", "docx", page, "-o", out,
-                 "--lua-filter=" + TARGET_FILTER],
+                 "--lua-filter=" + TARGET_FILTER] + highlighting.ARGS,
                 env=dict(env, FIDELITY_FOUND=found, TITLE_WRITER="docx"), cwd=base)
             collect_losses(found, target.name, stem, losses)
             for key, n in docxtarget.finish(out, page, keep).items():
@@ -4296,7 +4297,7 @@ def render_html(target, pages, base, fragments, language, env):
         stem = os.path.basename(page)[:-len(INTERMEDIATE)]
         out = os.path.join(target.output_dir, stem + ".html")
         command = ["pandoc", "-f", "json", "-t", "html5", page, "-o", out,
-                   "--standalone", "--ascii", "--math-method=mathml"] + deck + [
+                   "--standalone", "--ascii", "--math-method=mathml"] + deck + highlighting.ARGS + [
                    "--lua-filter=" + TARGET_FILTER,
                    "--lua-filter=" + SAFE_MEDIA_FILTER,
                    "--lua-filter=" + HEADER_FILTER, "-M", f"lang={language}"]

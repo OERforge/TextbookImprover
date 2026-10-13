@@ -56,6 +56,7 @@ sys.path.insert(0, os.path.join(ROOT, "lib"))
 import parallel  # noqa: E402
 import pdftext  # noqa: E402
 import decks  # noqa: E402
+import highlighting  # noqa: E402
 
 try:
     import pikepdf
@@ -591,7 +592,7 @@ Where it turns up.[^m]
 
 Its text.
 
-[^s]: Computed by `mc(q)`{.python}, and tabled:
+[^s]: Computed by `mc(2)`{.python}, and tabled:
 
     ```
     q   mc
@@ -1248,13 +1249,29 @@ def empty_paragraphs(path):
         os.remove(copy)
 
 
-def colors(path, page):
-    """The fill colors a page's content sets."""
+def colors(path, page=None):
+    """The fill colors a page's content sets, or every page's."""
+    found = set()
     with pikepdf.open(path) as pdf:
-        content = pdf.pages[page].Contents
-        data = b"".join(c.read_bytes() for c in (
-            content if isinstance(content, pikepdf.Array) else [content]))
-    return set(re.findall(rb"([\d.]+ [\d.]+ [\d.]+) rg", data))
+        for number in range(len(pdf.pages)) if page is None else [page]:
+            content = pdf.pages[number].Contents
+            data = b"".join(c.read_bytes() for c in (
+                content if isinstance(content, pikepdf.Array) else [content]))
+            found |= set(re.findall(rb"([\d.]+ [\d.]+ [\d.]+) rg", data))
+    return found
+
+
+def highlight_color(token):
+    """A token's #rrggbb in the theme every writer is given
+    (lib/highlighting.py)."""
+    with open(highlighting.THEME, encoding="utf-8") as fh:
+        return json.load(fh)["text-styles"][token]["text-color"]
+
+
+def latex_color(color):
+    """A #rrggbb color as Pandoc's highlighting macros give it LaTeX, and
+    LaTeX a PDF's content."""
+    return " ".join("%.2f" % (int(color[i:i + 2], 16) / 255) for i in (1, 3, 5)).encode()
 
 
 def figures(path):
@@ -1979,11 +1996,18 @@ def case_pdf(work):
          and within(shaded_notes, "/Code", "/FENote") == ["/Code"] * 2),
         ("and highlighted code in a section's footnote, the deck's only, is set, and the"
          " deck's own header-includes, one or a list, kept beside the code's files",
-         lambda: holds(text_of(code_notes), "Computed by mc(q), and tabled")
+         lambda: holds(text_of(code_notes), "Computed by mc(2), and tabled")
          and footnote_ties(code_notes) == (3, 0, 0, 0, 0)
          and footnote_ties(shaded_notes) == (2, 0, 0, 0, 0)
          and document_info(code_notes, "/Subject") == "Code in notes"
          and document_info(shaded_notes, "/Keywords") == "notes, code"),
+        # In the theme every writer is given (lib/highlighting.py): in the
+        # writer's macros for a slide's code, and in those deck-pdf.lua
+        # writes for inline code in a section's footnote, the deck's only.
+        ("highlighted code is drawn in the theme's colors, a slide's and a section's "
+         "footnote's alike",
+         lambda: latex_color(highlight_color("DecVal")) in colors(sectioned)
+         and latex_color(highlight_color("DecVal")) in colors(code_notes)),
         ("each heading's words, its footnote's mark not among them",
          lambda: heading_texts(headings) == [
              (1, "A List"), (2, "In an item"), (1, "A Table"), (2, "In a cell"),
@@ -2730,6 +2754,7 @@ def case_pptx(work):
     space = slide_titled(hd, "Space")
     space_again = slide_titled(hd, "Space Again")
     space_top = slide_titled(hd, "Space Top")
+    code = slide_titled(sd, "Some Code")
 
     def number(slide):
         return hd.slides.index(slide) + 1 if slide in hd.slides else None
@@ -2941,6 +2966,9 @@ def case_pptx(work):
          and "Its source." in sd.slides[-1].shapes[1].text),
         ("a passage in another language is named in the run's notes",
          lambda: "1 passage(s) in another language in 1 deck(s)" in out),
+        ("a slide's highlighted code is in the theme's colors (lib/highlighting.py)",
+         lambda: code is not None and 'srgbClr val="%s"' % highlight_color("DecVal")[1:].upper()
+         in sp[code.part]),
     ]
     return checks
 
@@ -3720,7 +3748,7 @@ def case_revealjs(work):
 def case_revealjs_settings(work):
     """slides.notes visible and omitted, slides.aspect_ratio, slides.size and
     slides.reference_doc said unread, a book's revealjs target, no
-    reveal.js, reveal.js 5, and a Pandoc too old."""
+    reveal.js, reveal.js 5, a Pandoc too old, and highlighted code."""
     problem = revealjs_ready()
     if problem:
         print(f"  skip  {problem}")
@@ -3739,6 +3767,10 @@ def case_revealjs_settings(work):
     omitted = convert(omitted_dir, "--quick")
     left = read(os.path.join(omitted_dir, "present", "presented.html")) \
         if omitted.returncode == 0 else ""
+    coded_dir = folder(os.path.join(work, "coded"), REVEALJS, decks_given={"code.md": SECTIONED})
+    coded = convert(coded_dir, "--quick")
+    code_page = read(os.path.join(coded_dir, "present", "code.html")) \
+        if coded.returncode == 0 else ""
     book = os.path.join(work, "book")
     os.makedirs(book)
     write(os.path.join(book, "one.md"), "# A Page\n\nText.\n")
@@ -3795,6 +3827,8 @@ def case_revealjs_settings(work):
         ("a Pandoc older than 3.12 is refused, its version named",
          lambda: old.returncode != 0 and "Pandoc 3.11.0 is too old for target present's "
          "presentations; 3.12 or later" in old.stderr),
+        ("a slide's highlighted code is in the theme's colors (lib/highlighting.py)",
+         lambda: "code span.dv { color: %s; }" % highlight_color("DecVal") in code_page),
     ]
 
 

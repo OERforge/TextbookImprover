@@ -3017,6 +3017,96 @@ def case_fidelity_epub(work):
     ]
 
 
+def contrast(first, second):
+    """WCAG 2's contrast ratio of two #rrggbb colors."""
+    def luminance(color):
+        channels = [int(color[i:i + 2], 16) / 255 for i in (1, 3, 5)]
+        r, g, b = (c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4 for c in channels)
+        return 0.2126 * r + 0.7152 * g + 0.0722 * b
+    light, dark = sorted((luminance(first), luminance(second)), reverse=True)
+    return (light + 0.05) / (dark + 0.05)
+
+
+def case_highlighting(work):
+    """Highlighted code in bin/highlighting.theme's colors in a page, an
+    EPUB, and a Word file (lib/highlighting.py), and page.css's color for
+    each token after Pandoc's, clearing 4.5:1 on the backgrounds the
+    page's and the EPUB's own stylesheets give, light and dark."""
+    os.makedirs(work)
+    with open(os.path.join(work, "page.md"), "w", encoding="utf-8") as fh:
+        fh.write("# Code\n\n```{.python .numberLines}\ntotal = 0  # a running sum\n```\n")
+    with open(os.path.join(work, "project.yaml"), "w", encoding="utf-8") as fh:
+        fh.write("project:\n  title: Code\n  identifier: org.example.code\n  language: en-US\n")
+    with open(os.path.join(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
+        fh.write("targets:\n  html:\n    format: html\n  epub:\n    format: epub3\n"
+                 "  word:\n    format: docx\n")
+    subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick"], cwd=work,
+                   capture_output=True, text=True, stdin=subprocess.DEVNULL)
+    with open(os.path.join(BIN, "highlighting.theme"), encoding="utf-8") as fh:
+        theme = json.load(fh)
+    comment = theme["text-styles"]["Comment"]["text-color"]
+    number = theme["text-styles"]["DecVal"]["text-color"]
+    page = read(work, "html", "page.html") if exists(work, "html", "page.html") else ""
+    chapter = sheet = styles = ""
+    if exists(work, "epub", "org.example.code.epub"):
+        with zipfile.ZipFile(os.path.join(work, "epub", "org.example.code.epub")) as z:
+            chapter = next((z.read(n).decode("utf-8") for n in z.namelist()
+                            if n.endswith(".xhtml") and b'class="sourceCode' in z.read(n)), "")
+            sheet = "".join(z.read(n).decode("utf-8") for n in z.namelist() if n.endswith(".css"))
+    if exists(work, "word", "page.docx"):
+        with zipfile.ZipFile(os.path.join(work, "word", "page.docx")) as z:
+            styles = z.read("word/styles.xml").decode("utf-8")
+
+    def pandocs(text):
+        """The colors Pandoc's highlighting CSS gives a comment, a number,
+        and a line's number, and where the CSS ends (-1 if there's none)."""
+        start = text.find("/* CSS for syntax highlighting */")
+        if start < 0:
+            return [], -1
+        end = text.find("</style>", start)
+        block = text[start:end]
+        found = [re.search(r"code span\.%s \{ color: (#[0-9a-f]{6});" % c, block) for c in ("co", "dv")]
+        found.append(re.search(r"a:first-child::before\s*\{[^}]*?color: (#[0-9a-f]{6});", block))
+        return [f.group(1) if f else None for f in found], end
+
+    def ours(text):
+        """page.css's colors for the tokens, light and dark, and where they start."""
+        return (re.findall(r"code span\.\w\w \{ color: light-dark\((#[0-9a-f]{6}), (#[0-9a-f]{6})\); \}",
+                           text), text.find("code span.al { color: light-dark("))
+
+    def backgrounds(text):
+        """The light and dark backgrounds a stylesheet gives the document;
+        an EPUB's transparent one is the reading system's, white as a rule."""
+        found = re.search(r"html \{[^}]*background-color: light-dark\((transparent|#[0-9a-f]{6}), "
+                          r"(#[0-9a-f]{6})\)", text)
+        return [("#ffffff" if c == "transparent" else c) for c in found.groups()] if found else []
+
+    def word_color(style):
+        found = re.search(r'<w:style [^>]*w:styleId="%s">(?:(?!</w:style>).)*?<w:color w:val="([0-9a-fA-F]{6})"'
+                          % style, styles, re.S)
+        return "#" + found.group(1).lower() if found else None
+    page_pairs, page_ours = ours(page)
+    sheet_pairs = ours(sheet)[0]
+    return [
+        ("a page's highlighted comment and number, and its lines' numbers, are in the theme's colors",
+         lambda: pandocs(page)[0] == [comment, number, theme["line-number-color"]]),
+        ("and page.css's colors for its tokens come after Pandoc's, so they're the ones a browser uses",
+         lambda: len(page_pairs) == 28 and page_ours > pandocs(page)[1] > 0),
+        ("an EPUB's are in the theme's colors, and its stylesheet, with page.css's, linked after them",
+         lambda: pandocs(chapter)[0] == [comment, number, theme["line-number-color"]]
+         and chapter.find('<link rel="stylesheet"') > pandocs(chapter)[1] > 0
+         and sheet_pairs == page_pairs),
+        ("page.css's colors clear 4.5:1 on the backgrounds the page's stylesheet and the "
+         "EPUB's give, light and dark",
+         lambda: len(backgrounds(page)) == len(backgrounds(sheet)) == 2 and all(
+             contrast(light, page_bg) >= 4.5 and contrast(dark, dark_bg) >= 4.5
+             for light, dark in page_pairs
+             for page_bg, dark_bg in (backgrounds(page), backgrounds(sheet)))),
+        ("a Word file's token styles are in the theme's colors",
+         lambda: word_color("CommentTok") == comment and word_color("DecValTok") == number),
+    ]
+
+
 def case_remediate_docx(work):
     """A remediated copy of a Word file: the pre-pass's table declarations,
     and alt text from the image-alt sidecar, written into the author's own
@@ -4464,6 +4554,7 @@ CASES = [
     ("fidelity.csv for markdown and asciidoc targets", case_fidelity_writers),
     ("fidelity.csv for an EPUB target", case_fidelity_epub),
     ("a report's quotation cut between characters", case_cut_characters),
+    ("highlighted code's colors in a page, an EPUB, and a Word file", case_highlighting),
     ("a hand-written page", case_hand_written),
     ("several targets", case_targets),
 ]

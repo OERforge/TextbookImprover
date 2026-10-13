@@ -37,7 +37,7 @@ Each finding says where (the page or archive member), which check, and what (the
 
 ## Contrast
 
-No checker here measures color contrast on the rendered page; Ace, axe, and Panorama do. What the pipeline controls is its own stylesheet, and that is checked where it's decided: a unit test computes the ratio of every text color `page.css` sets against Pandoc's page background and against white, and fails below 4.5:1 (the caption color is held to 7:1).
+No checker here measures color contrast on the rendered page; Ace, axe, and Panorama do. What the pipeline controls is its own stylesheet and the colors it highlights code in, and those are checked where they're decided. A unit test computes the ratio of every text color `page.css` sets against Pandoc's page background and against white, and fails below 4.5:1 (the caption color is held to 7:1), and the ratio of each color it gives dark mode against a page's background there, `#1a1a1a`, and an EPUB's, `#232629`. Code is highlighted in `bin/highlighting.theme`, which every writer is given: Pandoc's pygments style, each of its colors under 4.5:1 darkened to 4.6:1 or more (a comment's `#60a0b0` was 2.89:1, and is `#3c7c8c`), so a page, an EPUB, a PDF, a Word file, a PowerPoint file, and a reveal.js presentation have the same colors. The unit suite holds the theme to 4.5:1 on Pandoc's background and on white, and `page.css`'s light colors for code to the theme's; the convert suite holds `page.css`'s colors to the backgrounds the stylesheets Pandoc writes give, light and dark, so a Pandoc that changes them fails there. A PowerPoint reference document of your own with a dark background (`slides.reference_doc`) would put the code's colors on it, which isn't checked.
 
 ## The full validators
 

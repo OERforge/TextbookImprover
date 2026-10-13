@@ -193,8 +193,10 @@ def expand(color):
 
 def check_page_css():
     """Pandoc's background is #fdfdfd, and #1a1a1a in the dark mode its
-    3.12 stylesheet follows. Every color page.css gives text has to clear
-    WCAG AA against the background it lands on, in both."""
+    3.12 stylesheet follows. page.css is an EPUB's too, whose stylesheet
+    leaves the light background to the reading system, white as a rule,
+    and gives dark mode #232629. Every color page.css gives text has to
+    clear WCAG AA against the background it lands on, in each."""
     import re as _re
     with open(os.path.join(ROOT, "bin", "page.css"), encoding="utf-8") as fh:
         css = _re.sub(r"/\*.*?\*/", "", fh.read(), flags=_re.S)
@@ -203,14 +205,60 @@ def check_page_css():
     fixed = _re.findall(r"(?<![-\w])color:\s*(#[0-9a-fA-F]{3,6})\s*;", screen)
     outlines = _re.findall(r"outline:[^;]*?(#[0-9a-fA-F]{3,6})", screen)
     return [
-        ("each light-dark() color clears 4.5:1 in light and dark mode",
-         lambda: pairs and all(contrast(expand(l), "#fdfdfd") >= 4.5
-                               and contrast(expand(d), "#1a1a1a") >= 4.5
-                               for l, d in pairs)),
+        ("each light-dark() color clears 4.5:1 in light and dark mode, a page's and an EPUB's",
+         lambda: pairs and all(contrast(expand(l), light) >= 4.5
+                               and contrast(expand(d), dark) >= 4.5
+                               for l, d in pairs
+                               for light, dark in (("#fdfdfd", "#1a1a1a"), ("#ffffff", "#232629")))),
         ("a fixed text color has a light-dark() form beside it",
          lambda: all(any(expand(c) == expand(l) for l, _ in pairs) for c in fixed)),
         ("no outline is a fixed color that dark mode's background matches",
          lambda: not outlines),
+    ]
+
+
+# Pandoc's class for each of skylighting's token types, as its CSS names them.
+TOKEN_CLASSES = {
+    "Alert": "al", "Annotation": "an", "Attribute": "at", "BaseN": "bn", "BuiltIn": "bu",
+    "ControlFlow": "cf", "Char": "ch", "Constant": "cn", "Comment": "co", "CommentVar": "cv",
+    "Documentation": "do", "DataType": "dt", "DecVal": "dv", "Error": "er", "Extension": "ex",
+    "Float": "fl", "Function": "fu", "Import": "im", "Information": "in", "Keyword": "kw",
+    "Operator": "op", "Other": "ot", "Preprocessor": "pp", "SpecialChar": "sc",
+    "SpecialString": "ss", "String": "st", "Variable": "va", "VerbatimString": "vs",
+    "Warning": "wa"}
+
+
+def check_highlighting():
+    """The theme every writer highlights code in (lib/highlighting.py)
+    clears 4.5:1 on a white page and on Pandoc's #fdfdfd, and page.css
+    gives each token the theme's color for light mode, with the dark
+    one check_page_css holds to a page's and an EPUB's dark mode."""
+    import re as _re
+    with open(os.path.join(ROOT, "bin", "highlighting.theme"), encoding="utf-8") as fh:
+        theme = json.load(fh)
+    colors = {name: style["text-color"] for name, style in theme["text-styles"].items()
+              if style.get("text-color")}
+    with open(os.path.join(ROOT, "bin", "page.css"), encoding="utf-8") as fh:
+        css = _re.sub(r"/\*.*?\*/", "", fh.read(), flags=_re.S).split("@media print")[0]
+    pairs = dict(_re.findall(r"code span\.(\w+) \{ color: light-dark\((#[0-9a-f]{6}), #[0-9a-f]{6}\); \}",
+                             css))
+    numbers = _re.search(r"pre\.numberSource code > span > a:first-child::before \{\s*"
+                         r"color: light-dark\((#[0-9a-f]{6}),", css)
+    import highlighting
+    return [
+        ("every token's color, and a line number's, clears 4.5:1 on white and on #fdfdfd",
+         lambda: colors and all(contrast(c, page) >= 4.5 for c in
+                                list(colors.values()) + [theme["line-number-color"]]
+                                for page in ("#ffffff", "#fdfdfd"))),
+        ("page.css gives each colored token the theme's color for light mode",
+         lambda: all(pairs.get(TOKEN_CLASSES[name]) == color for name, color in colors.items())
+         and len(pairs) == len(colors)),
+        ("and a line number its color",
+         lambda: numbers and numbers.group(1) == theme["line-number-color"]),
+        ("the writers are given the theme",
+         lambda: highlighting.ARGS == ["--syntax-highlighting="
+                                       + os.path.join(ROOT, "bin", "highlighting.theme")]
+         and os.path.isfile(highlighting.THEME)),
     ]
 
 
@@ -1357,6 +1405,7 @@ GROUPS = [
     ("the content prefix", check_content_prefix),
     ("the wrapper module's name", check_wrapper_title),
     ("the page stylesheet's contrast, light and dark", check_page_css),
+    ("highlighted code's colors", check_highlighting),
     ("one file per chapter", check_one_file_chapters),
     ("identifiers", check_identifiers),
     ("facts written down twice", check_consistency),

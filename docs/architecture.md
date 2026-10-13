@@ -71,8 +71,10 @@ on another `bin/` script.
 | `lib/deckrun.py` | A slides run, for `convert.py`: each deck checked, its reports written, its copies written and checked. |
 | `lib/sidecars.py` | What a sidecar's values mean, read alike by every part that reads them: the decorative marker. |
 | `lib/names.py` | The one rule for a safe file name, shared with `safe-media.lua`. |
+| `lib/highlighting.py` | The option that gives each Pandoc writer `highlighting.theme`, for every target that highlights code. |
 | `split-pages.py` | Cuts filtered intermediates into one page per heading, names the pieces, rewrites links between them and links into them from the book's other pages, and records where each came from. |
-| `page.css` | The rules every page carries beyond Pandoc's own stylesheet: caption contrast, real table display, the scroll wrapper. |
+| `page.css` | The rules every page carries beyond Pandoc's own stylesheet: caption contrast, highlighted code's colors in dark mode, real table display, the scroll wrapper. |
+| `highlighting.theme` | The colors every writer highlights code in: Pandoc's pygments style, each of its colors under 4.5:1 darkened. |
 | `read-conversion-config.py` | Resolves `conversion.yaml` into settings `convert.py` reads. |
 | `check-output.py` | Checks the pages, EPUBs, and PDFs a run wrote for dead links, missing alt text, skipped headings, and the like; the command line over `lib/outputcheck.py`. |
 | `build-epub.py` | Assembles the filtered intermediates into one EPUB3, ordered by `project.contents`, with accessibility claims computed from the build. |
@@ -214,6 +216,7 @@ Beyond the Word-to-HTML translation, each page gets:
   which Pandoc 3.12's stylesheet follows with a `#1a1a1a` background,
   captions are `#b6b6b6` (8.58:1), and a focused table's outline is the
   text's own color.
+- **Highlighted code** is in colors that clear 4.5:1, `highlighting.theme`'s: Pandoc's pygments style, its comments, numbers, attributes, preprocessor lines, special strings, errors, and line numbers darkened. Pandoc's stylesheet leaves them as they are in dark mode, where a variable's `#19177c` is 1.21:1, so `page.css` gives each kind of token a lighter color there.
 - **The leading H1 becomes the page title**, giving a meaningful `<title>`
   instead of a filename slug, and one H1 rather than two.
 

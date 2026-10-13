@@ -62,6 +62,7 @@ except ImportError:
     sys.exit("Cannot find the configuration library. It should be in a "
              "lib/ directory beside bin/.")
 from bookcontents import number_tree, is_generated, PAGE_TYPES  # noqa: E402
+import highlighting  # noqa: E402
 from bookassembly import (  # noqa: E402
     INTERMEDIATE, page_id, load_page, inlines, header, Assembly, meta_text,
     load_documents, targets_of, plan_book, wants_title_page,
@@ -758,7 +759,7 @@ def build(base, name, resolved, keep, intermediates=None):
             json.dump(document, fh)
         command = [
             "pandoc", "-f", "json", "-t", "epub3", book_json,
-            "-o", os.path.abspath(out_path),
+            "-o", os.path.abspath(out_path), *highlighting.ARGS,
             "--template", chapter_template(work),
             "--css", stylesheet(work),
             # One file per page: split at every level a page heading uses.

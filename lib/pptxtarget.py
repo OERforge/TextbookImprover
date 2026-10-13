@@ -127,6 +127,7 @@ from urllib.parse import unquote
 
 import decks
 import docxtarget
+import highlighting
 import pptxorder
 import pptxparse
 import pptxremediate
@@ -471,7 +472,7 @@ def build(intermediate, base, out, *, filters, reference, level, language, title
         record_path, log_path = os.path.join(work, "record.json"), os.path.join(work, "log.json")
         command = ["pandoc", "-f", "json", "-t", "pptx", source, "-o", out,
                    "--reference-doc", reference, "--slide-level", str(level),
-                   "--log", log_path]
+                   "--log", log_path] + highlighting.ARGS
         for path in filters:
             command += ["--lua-filter", path]
         os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)

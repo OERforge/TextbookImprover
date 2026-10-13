@@ -65,6 +65,7 @@ from bookassembly import (  # noqa: E402
     page_title, stringify, wants_title_page,
 )
 from bookcontents import flatten_pages, is_generated, role_of  # noqa: E402
+import highlighting  # noqa: E402
 import latexbuild  # noqa: E402
 from latexbuild import (  # noqa: E402
     ENGINE, PDF_MACROS as HEADER, UA1_LINKS, is_ua1, math_setup,
@@ -732,7 +733,7 @@ def build(base, name, resolved, keep, intermediates=None, latex_only=False,
             json.dump(document, fh)
         filters = ["--lua-filter", os.path.join(HERE, "target-blocks.lua"),
                    "--lua-filter", os.path.join(HERE, "footnote-code.lua"),
-                   "--lua-filter", os.path.join(HERE, "pdf-target.lua")]
+                   "--lua-filter", os.path.join(HERE, "pdf-target.lua")] + highlighting.ARGS
         environment = dict(os.environ, TARGET_NAME=name,
                            TITLE_BLOCK=str(resolved["title_block"]))
         if keep or latex_only:
@@ -802,7 +803,7 @@ def write_latex(base, name, resolved, project, document, out_dir):
             json.dump(document, fh)
         filters = ["--lua-filter", os.path.join(HERE, "target-blocks.lua"),
                    "--lua-filter", os.path.join(HERE, "footnote-code.lua"),
-                   "--lua-filter", os.path.join(HERE, "pdf-target.lua")]
+                   "--lua-filter", os.path.join(HERE, "pdf-target.lua")] + highlighting.ARGS
         environment = dict(os.environ, TARGET_NAME=name,
                            TITLE_BLOCK=str(resolved["title_block"]))
         done = subprocess.run(["pandoc", "-f", "json", "-t", "latex", "-s", book_json]

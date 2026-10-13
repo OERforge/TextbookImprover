@@ -371,11 +371,13 @@ end
 
 -- Pandoc's highlighting macros, as the writer would give them a deck with
 -- highlighted code, for one whose only highlighted code is in a section's
--- footnotes: the template variable, which the writer leaves as it's set.
+-- footnotes: the template variable, which the writer leaves as it's set,
+-- in the colors the writer was given (lib/highlighting.py's theme).
 local function highlighting_macros()
   local code = pandoc.Pandoc({ pandoc.Plain({ pandoc.Code('x', pandoc.Attr('', { 'c' })) }) })
   local macros = pandoc.write(code, 'latex',
-    { template = pandoc.template.compile('$highlighting-macros$') })
+    { template = pandoc.template.compile('$highlighting-macros$'),
+      highlight_method = PANDOC_WRITER_OPTIONS.highlight_method })
   return pandoc.MetaBlocks({ pandoc.RawBlock('latex', macros) })
 end
 

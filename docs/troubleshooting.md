@@ -70,8 +70,9 @@ keys on the media path ignoring its extension.
   every downstream format. Where the header text is
   there and only unmarked, a value in `table-headers.csv` is enough.
 - **Equation images stay images.** Rejoining MathSpeak identifiers is a
-  mitigation. The real fix is authoring them as Word equations, which
-  convert to MathML.
+  mitigation. The real fix is authoring them as equations in the source (a
+  Word equation, TeX math in LaTeX or Markdown, MathML in an HTML page),
+  which convert to MathML.
 - **Identical files in different media directories are separate files.**
   Each page gets its own copy from Word. Content-level deduplication would
   require rewriting page markup, which would break the read-only guarantee.

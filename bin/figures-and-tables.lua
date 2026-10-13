@@ -1105,8 +1105,10 @@ function Image(img)
     img.caption = pandoc.Inlines({ pandoc.Str(alt) })
     warn('equation image -- alt text was MathSpeak, letters rejoined: '
       .. img.src)
-    warn('  consider re-authoring this as a real equation in the DOCX so it '
-      .. 'converts to MathML')
+    -- Whatever the source: a Word equation, TeX math in LaTeX or
+    -- Markdown, and MathML in an HTML page all become MathML.
+    warn('  consider re-authoring this as a real equation in the source (a '
+      .. 'Word equation, TeX math, or MathML) so it converts to MathML')
   end
 
   if alt == '' then

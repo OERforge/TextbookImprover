@@ -941,6 +941,11 @@ def case_math(work):
          lambda: "|" in text),
         ("a MathSpeak description is rejoined into readable text",
          lambda: any("sigma" in alt for alt in out.alt_texts("math"))),
+        # It said to re-author it "in the DOCX", whatever the source.
+        ("and the advice to re-author it as an equation isn't for Word alone",
+         lambda: "equation image -- alt text was MathSpeak" in out.warnings
+         and "real equation in the source" in out.warnings
+         and "in the DOCX" not in out.warnings),
         ("a hair-thin image is marked decorative rather than described",
          lambda: "" in out.alt_texts("math")),
         ("spacers are logged so the setting is discoverable",

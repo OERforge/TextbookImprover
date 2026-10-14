@@ -4928,6 +4928,10 @@ def main():
         return min(run_cases([CASES[arguments.case_index]], arguments.keep), parallel.MOST)
     cases = [(label, case) for label, case in CASES
              if not arguments.case or any(c in label for c in arguments.case)]
+    # A part of a label no case has would run nothing, and pass.
+    unmatched = [c for c in arguments.case if not any(c in label for label, _ in CASES)]
+    if unmatched:
+        sys.exit("no case's label holds " + ", ".join(repr(c) for c in unmatched))
     failed = 0
     for lacking in tex_ready():
         print(f"  FAIL  {lacking}")

@@ -37,7 +37,7 @@ The suites' runs of `convert.py` pass `--quick`, so the output check's validator
 | `run-audit-tests.py` | The audit on one file of each kind, the shared findings format, the cache, and that the source check and the filter agree about what an image without alt text is. Needs Pandoc. |
 | `run-epub-tests.py` | `build-epub.py` against the same fixtures: the nav mirrors `contents`, each page is its own file titled by its heading, a declared row header survives assembly, ids stay distinct across pages, and the package document claims `alternativeText` only once every image has it. Same Pandoc requirement. |
 
-`run-latex-tests.py`, `run-convert-tests.py`, and `run-decks-tests.py` take `--case LABEL`, repeatable, to run only the cases with those labels, as the scripts' `CASES` lists name them (the LaTeX suite takes any part of a label).
+`run-latex-tests.py`, `run-convert-tests.py`, and `run-decks-tests.py` take `--case LABEL`, repeatable, to run only the cases with those labels, as the scripts' `CASES` lists name them (the LaTeX suite takes any part of a label). A label no case has stops the suite, rather than running nothing.
 
 `run-all.sh` ends with `All suites passed.` or with the names of the suites that failed and their `FAIL` and `ERROR` lines repeated, so the reason is at the bottom rather than somewhere in ten suites of output. A check that runs one of the full validators says what the validator returned when it fails, since the usual cause is the tool, not the page.
 

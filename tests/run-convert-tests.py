@@ -981,43 +981,83 @@ GROUP_HEADS = """<!DOCTYPE html><html lang="en"><head><title>Aggregates</title><
 </main></body></html>
 """
 
+# The same table as a page can group it, each group a <tbody> opening
+# with a row of <th>, as a Markdown target writes it.
+GROUPED_BY_PAGE = """<!DOCTYPE html><html lang="en"><head><title>Aggregates</title></head>
+<body><main><h1>Aggregates</h1>
+<table id="money"><caption><span id="money-cap"></span>Table 3.7 Money</caption>
+<tbody><tr><th><span id="m1"></span><b>Elements of M1</b></th><th><b>Millions</b></th></tr>
+<tr><th>Cash</th><td>350</td></tr><tr><th>Deposits</th><td>1210</td></tr></tbody>
+<tbody><tr><th><span id="m2"></span><b>Elements of M2</b></th><th><b>Millions</b></th></tr>
+<tr><th>M1</th><td>1560</td></tr><tr><th>Savings</th><td>562</td></tr></tbody></table>
+</main></body></html>
+"""
+
+
+# Bands one cell across, each over a group's own header row, the first's
+# but for its first cell: the guess splits at the bands and makes each
+# part's first row its header row, and its first column a header column.
+BANDED_HEADS = """<!DOCTYPE html><html lang="en"><head><title>Measures</title></head>
+<body><main><h1>Measures</h1>
+<table id="measures"><caption>Table 3.8 Money</caption>
+<tbody><tr><td colspan="2"><b>Narrow money</b></td></tr>
+<tr><td><b>Elements of M1</b></td><td><b>Millions</b></td></tr>
+<tr><td>Cash</td><td>350</td></tr><tr><td>Deposits</td><td>1210</td></tr>
+<tr><td colspan="2"><b>Broad money</b></td></tr>
+<tr><td><b>Elements of M2</b></td><td><b>Millions</b></td></tr>
+<tr><td>M1</td><td>1560</td></tr><tr><td>Savings</td><td>562</td></tr></tbody></table>
+</main></body></html>
+"""
+
 
 def case_group_heads(work):
     """A table split where each group's own header row begins, the words
     of the row's first cell in its part's caption and the table's caption
     in every part's: what's copied keeps no id, which the row and the
     first part's caption keep. And a Markdown target, which keeps the
-    table whole, keeps its groups and the rows that head them."""
+    table whole, keeps its groups and the rows that head them, which split
+    it again when it's read back, as they do a page's that groups it so,
+    and as they do under bands."""
     os.makedirs(work)
-    with open(os.path.join(work, "money.html"), "w", encoding="utf-8") as fh:
-        fh.write(GROUP_HEADS)
-    def run_with(where, config):
+    for name, text in (("money", GROUP_HEADS), ("measures", BANDED_HEADS)):
+        with open(os.path.join(work, name + ".html"), "w", encoding="utf-8") as fh:
+            fh.write(text)
+    def run_with(where, config, pages=("money", "measures")):
         with open(os.path.join(where, "conversion.yaml"), "w",
                   encoding="utf-8") as fh:
             fh.write(config)
-        return run_in(where, "  contents:\n    - money\n")
-    run_with(work, "targets:\n  html:\n    format: html\n"
-                   "  md:\n    format: markdown\n")
-    page = read(work, "html", "money.html") if exists(
-        work, "html", "money.html") else ""
-    md = read(work, "md", "money.md") if exists(work, "md", "money.md") else ""
+        return run_in(where, "  contents:\n"
+                      + "".join(f"    - {name}\n" for name in pages))
+    def output(where, target, name):
+        ext = "md" if target == "md" else "html"
+        return read(where, target, f"{name}.{ext}") if exists(
+            where, target, f"{name}.{ext}") else ""
+    both = "targets:\n  html:\n    format: html\n  md:\n    format: markdown\n"
+    run_with(work, both)
+    page, md = output(work, "html", "money"), output(work, "md", "money")
     back = work + "-from-md"
     shutil.copytree(os.path.join(work, "md"), back)
-    run_with(back, "targets:\n  html:\n    format: html\n")
-    again = read(back, "html", "money.html") if exists(
-        back, "html", "money.html") else ""
-    captions = [" ".join(re.sub(r"<[^>]+>", "", c).split())
-                for c in re.findall(r"<caption>(.*?)</caption>", page, re.S)]
+    run_with(back, both)
+    grouped = work + "-grouped"
+    os.makedirs(grouped)
+    with open(os.path.join(grouped, "money.html"), "w", encoding="utf-8") as fh:
+        fh.write(GROUPED_BY_PAGE)
+    run_with(grouped, "targets:\n  html:\n    format: html\n", ("money",))
+    body = lambda text: text[text.find("<body>"):]
+    captions = lambda text: [" ".join(re.sub(r"<[^>]+>", "", c).split())
+                             for c in re.findall(r"<caption>(.*?)</caption>",
+                                                 text, re.S)]
     headed = lambda text, n: re.search(
         r'<tbody>\s*<tr>\s*<th>(?:<span id="m%d"></span>)?(?:<strong>)?'
         r'Elements of M%d' % (n, n), text)
+    measures = output(work, "html", "measures")
     return [
         # The ids went with the words into the captions: the table's
         # caption's into the second part's, each row's into its part's.
         ("a group's own header row's ids, and the table's caption's, aren't "
          "repeated in the parts' captions",
-         lambda: captions == ["Table 3.7 Money: Elements of M1",
-                              "Table 3.7 Money: Elements of M2"]
+         lambda: captions(page) == ["Table 3.7 Money: Elements of M1",
+                                    "Table 3.7 Money: Elements of M2"]
          and all(page.count(f'id="{name}"') == 1
                  for name in ("money-cap", "m1", "m2"))
          and "<span></span>" not in page),
@@ -1025,9 +1065,28 @@ def case_group_heads(work):
         # one body: the groups went, and the rows that headed them, so the
         # table read back had neither.
         ("a Markdown target keeps the groups, each headed by its own header "
-         "row, and they read back so",
-         lambda: md.count("<tbody>") == 2 and again.count("<tbody>") == 2
-         and all(headed(text, n) for text in (md, again) for n in (1, 2))),
+         "row",
+         lambda: md.count("<tbody>") == 2
+         and all(headed(md, n) for n in (1, 2))),
+        # Read back, a row heading a group was a band only one cell across,
+        # so the HTML was one table, grouped, where the page's was split;
+        # and a page grouping the table so, its <th> cells declaring a
+        # header column alone, split it into parts with no header row.
+        ("read back, and from a page that groups the table so, the groups "
+         "split as they did, and a Markdown target writes them again as it did",
+         lambda: "<thead>" in page and body(output(back, "html", "money")) == body(page)
+         and body(output(grouped, "html", "money")) == body(page)
+         and output(back, "md", "money") == md),
+        # Under its band, a group's header row read back was a row of data,
+        # or, declared with the header column alone, a part's header row
+        # moved into its body: the parts had no header row, and the copy no
+        # groups.
+        ("so do groups under bands, each part headed by its group's header row",
+         lambda: captions(measures) == ["Table 3.8 Money: Narrow money",
+                                        "Table 3.8 Money: Broad money"]
+         and len(re.findall(r'<thead>\s*<tr>\s*<th scope="col">', measures)) == 2
+         and body(output(back, "html", "measures")) == body(measures)
+         and output(back, "md", "measures") == output(work, "md", "measures")),
     ]
 
 

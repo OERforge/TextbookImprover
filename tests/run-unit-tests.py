@@ -924,6 +924,40 @@ def check_layout_tables():
          lambda: "<table" in with_text),
     ]
 
+
+# A table of two bodies, each headed by a row of <th>: its group's own
+# header row, the group's name in its corner, then the same with another
+# word in the second cell, and with the same corner.
+def grouped_table(second="Millions", corner="M2"):
+    return ('<table><tbody><tr><th>Elements of M1</th><th>Millions</th></tr>'
+            '<tr><td>Cash</td><td>350</td></tr></tbody>'
+            f'<tbody><tr><th>Elements of {corner}</th><th>{second}</th></tr>'
+            '<tr><td>Savings</td><td>562</td></tr></tbody></table>')
+
+
+def check_group_heads():
+    """A table whose bodies are each headed by a row like the others but
+    for the group's name in its first cell is split there, each part
+    headed by its row; rows that differ in another cell too, or are alike
+    in their first cells as well, group nothing, and the table stays
+    whole."""
+    def tables(markup):
+        out = subprocess.run(
+            ["pandoc", "-f", "html", "-t", "html", "--lua-filter",
+             os.path.join(ROOT, "bin", "figures-and-tables.lua")],
+            input=markup, capture_output=True, text=True).stdout
+        return out.count("<table"), out
+    split, parts = tables(grouped_table())
+    other, _ = tables(grouped_table(second="Billions"))
+    same, _ = tables(grouped_table(corner="M1"))
+    return [
+        ("a group's own header row heading each body splits the table there",
+         lambda: split == 2 and parts.count("<thead>") == 2),
+        ("rows that differ in another cell too don't", lambda: other == 1),
+        ("nor does a header row repeated, its first cell and all", lambda: same == 1),
+    ]
+
+
 DUPLICATE_IDS = ('<h4 id="site-selection">One</h4>'
                  '<p><span id="term-1" class="anchor"></span></p>'
                  '<h4 id="site-selection-1">Two</h4>'
@@ -1399,6 +1433,7 @@ GROUPS = [
     ("the installation page's TeX packages", check_tex_packages),
     ("drawings without the preview package", check_drawings_without_preview),
     ("layout tables", check_layout_tables),
+    ("a group's own header rows", check_group_heads),
     ("unique ids", check_unique_ids),
     ("front and back matter by name", check_matter_by_name),
     ("types by title", check_types_by_title),

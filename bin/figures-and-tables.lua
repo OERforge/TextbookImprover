@@ -1596,9 +1596,38 @@ end
 -- neither renumbers the other.
 -- ---------------------------------------------------------------------------
 
+-- A group's own header row, the group's name in its corner, as the whole
+-- head of each body: rows alike but for their first cells, in a table of
+-- two or more such bodies with no head of its own. It's what a table split
+-- at such rows becomes kept whole (tables.bands: group), and so a Markdown
+-- or AsciiDoc target's table read back, and an HTML page can group one so.
+-- Rows alike in their corners too are a header row repeated, which groups
+-- nothing. Under a band, such a row is the header row the band's part had
+-- (split_table), which is what the guess makes of a band over one.
+local function group_heads(tbl)
+  if #tbl.head.rows > 0 or #tbl.bodies < 2 then return {} end
+  local rows, rest, corners = {}, nil, {}
+  for _, body in ipairs(tbl.bodies) do
+    local row = body.head[1]
+    if #body.head ~= 1 or #row.cells < 2 then return {} end
+    local words = {}
+    for i = 2, #row.cells do
+      words[#words + 1] = normalize(pandoc.utils.stringify(row.cells[i].contents))
+    end
+    local key = table.concat(words, '\n')
+    local corner = normalize(pandoc.utils.stringify(row.cells[1].contents))
+    if rest == nil then rest = key end
+    if key ~= rest or corner == '' or corners[corner] then return {} end
+    corners[corner] = true
+    rows[#rows + 1] = row
+  end
+  return rows
+end
+
 -- The band rows: those the declaration names, and those the source
 -- already groups by -- a body whose head row is one cell across the
--- table, as HTML writes a <tbody> headed by a row-group header.
+-- table, as HTML writes a <tbody> headed by a row-group header, and a
+-- group's own header row heading each body (group_heads).
 local function band_targets(tbl, entry)
   local out, seen, declared = {}, {}, {}
   local function add(row)
@@ -1613,6 +1642,7 @@ local function band_targets(tbl, entry)
       end
     end
   end
+  for _, row in ipairs(group_heads(tbl)) do add(row) end
   local wanted = entry and entry.split_at
   if type(wanted) ~= 'table' or #wanted == 0 then return out, declared end
   local rows = all_rows(tbl)
@@ -1836,8 +1866,16 @@ local function split_table(tbl, bands, part_captions, apply, head_leads)
     moved = moved or is_band[row] == true
     if moved then rows[#rows + 1] = row else head_kept[#head_kept + 1] = row end
   end
+  -- A body's head rows that aren't bands are header rows, which head the
+  -- part they open: a group's own header row under its band, where a table
+  -- kept whole (tables.bands: group) and read back has the header row the
+  -- band's part had.
+  local body_head = {}
   for _, body in ipairs(tbl.bodies) do
-    for _, row in ipairs(body.head) do rows[#rows + 1] = row end
+    for _, row in ipairs(body.head) do
+      rows[#rows + 1] = row
+      if not is_band[row] then body_head[row] = true end
+    end
     for _, row in ipairs(body.body) do rows[#rows + 1] = row end
   end
 
@@ -1961,6 +1999,11 @@ local function split_table(tbl, bands, part_captions, apply, head_leads)
       head_rows[#head_rows + 1] = i == 1 and lead:clone() or without_ids(lead)
     end
     if own_head then head_rows[#head_rows + 1] = own_head end
+    local headed = own_head ~= nil
+    while #segment > 1 and body_head[segment[1]] do
+      head_rows[#head_rows + 1] = table.remove(segment, 1)
+      headed = true
+    end
     local head = pandoc.TableHead(head_rows, tbl.head.attr)
     local body = pandoc.TableBody(segment, {},
       model and model.row_head_columns or 0, pandoc.Attr())
@@ -1973,7 +2016,7 @@ local function split_table(tbl, bands, part_captions, apply, head_leads)
       #caption_inlines > 0 and mk_caption({ pandoc.Plain(caption_inlines) })
         or pandoc.Caption(),
       tbl.colspecs, head, { body }, foot, attr)
-    apply(part)
+    apply(part, headed)
     parts[#parts + 1] = { table = part,
                           label = caption_text ~= '' and caption_text or nil,
                           bands = merged }
@@ -2160,12 +2203,16 @@ local function resolved_for(tbl)
   return entry
 end
 
-local function apply_headers(tbl, label, entry)
+-- headed: a part of a split table that its group's own header row heads,
+-- as it does whatever the table's declaration says of its head. Declared
+-- with a header column alone, as an HTML page's <th> cells declare a
+-- table whose bodies are headed by those rows, the part had lost it.
+local function apply_headers(tbl, label, entry, headed)
   local value = entry and tostring(entry.headers or '') or ''
 
   if value == 'first-row' or value == 'both' then
     promote_first_row(tbl)
-  elseif value == 'none' or value == 'first-column' then
+  elseif (value == 'none' or value == 'first-column') and not headed then
     -- Declared headers in the first column only, or none: a header row
     -- the reader built from a repeat-header setting is not what the
     -- person said this table has.
@@ -2305,7 +2352,7 @@ local function caption_data_table(tbl, next_block, after_next, after_after, out)
   if folded then label = folded end
 
   local parts, unused = split_table(tbl, bands, entry and entry.part_captions,
-    function(part) apply_headers(part, label, entry) end,
+    function(part, headed) apply_headers(part, label, entry, headed) end,
     entry and (entry.headers == 'first-row' or entry.headers == 'both'))
   for _, row in ipairs(unused) do
     if declared[row] then

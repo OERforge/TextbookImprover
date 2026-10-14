@@ -3989,8 +3989,8 @@ def case_notes(work):
     notes.numbering says, so the builds that gather them say page. A
     note with code, on the chapter's second page and in the second
     chapter, takes its code's ids and CSS where it goes, which on the
-    chapter's last page is beside code of the page's own; and one ends
-    in a numbered list."""
+    chapter's last page is beside code of the page's own, and its link to
+    its page; and one ends in a numbered list."""
     import zipfile
     code = "    ```{.python .numberLines}\n    x = 1\n    ```\n"
 
@@ -3998,7 +3998,8 @@ def case_notes(work):
         d = os.path.join(work, sub)
         os.makedirs(d, exist_ok=True)
         with open(os.path.join(d, "ch1.md"), "w", encoding="utf-8") as fh:
-            fh.write(NOTED.replace("[^c]: Note C.\n", "[^c]: Note C.\n\n" + code + "\n")
+            fh.write(NOTED.replace("[^c]: Note C.\n", "[^c]: Note C, on [this section]"
+                                   "(#first-section).\n\n" + code + "\n")
                      .replace("Another.[^d]\n", "Another.[^d]\n\n```python\ny = 2\n```\n")
                      .replace("[^b]: Note B.\n", "[^b]: Note B, in steps:\n\n    1. One.\n"
                               "    2. Two.\n\n"))
@@ -4134,6 +4135,10 @@ def case_notes(work):
          and read(gb, "html", "notes.html").count("<h2>") == 2
          and re.findall(r'<li id="(g\d+-fn\d+)"', read(gb, "html", "notes.html"))
          == ["g1-fn1", "g1-fn2", "g1-fn3", "g1-fn4", "g2-fn1"]),
+        ("a note's link to an id on its page names the page where the note goes",
+         lambda: 'href="ch1--first-section.html#first-section"' in read(
+             gg, "html", "ch1--second-section.html")
+         and 'href="ch1--first-section.html#first-section"' in read(gb, "html", "notes.html")),
         ("on it, two chapters' notes with code keep ids of their own, and the page has the "
          "code's CSS",
          lambda: all(f'id="{note}-cb1"' in read(gb, "html", "notes.html")

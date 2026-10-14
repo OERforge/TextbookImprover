@@ -26,7 +26,8 @@ rewritten in the output: the reference's visible number, the note's
 number, and the ids that tie them, which stay unique within whichever
 page ends up holding the note. So do the ids of a moved note's code,
 which Pandoc counts per page, and the page it moves to gets the CSS
-Pandoc writes only on a page that holds code when it writes it.
+Pandoc writes only on a page that holds code when it writes it. A
+moved note's link to an id on its page names the page.
 
 Copyright 2026 Robert Szarka
 
@@ -63,6 +64,8 @@ BACK = re.compile(r'href="([^"]*?)#fnref(\d+)"')
 # Pandoc's ids for a code block and its lines (cb3, cb3-1), and a line's
 # link to itself. Each page counts its code from cb1.
 CODE_ID = re.compile(r'(\sid="|\shref="#)(cb\d+(?:-\d+)?)"')
+ID = re.compile(r'\sid="([^"]+)"')
+FRAGMENT = re.compile(r'(\shref=")#([^"]+)"')
 NUMBER_SPAN = re.compile(r'<span class="footnote-number">\d+\.</span>')
 
 
@@ -146,6 +149,10 @@ def renumber(page, offset, dest, prefix=""):
             # two pages would each bring a cb1, and the page's own code
             # may have one.
             body = CODE_ID.sub(lambda m: f'{m.group(1)}{prefix}fn{new}-{m.group(2)}"', body)
+            # And a link to an id on its page is a link to the page now.
+            own = set(ID.findall(body))
+            body = FRAGMENT.sub(lambda m: m.group(0) if m.group(2) in own
+                                else f'{m.group(1)}{page.name}#{m.group(2)}"', body)
         rebuilt.append((new, body))
     page.notes = rebuilt
     return page

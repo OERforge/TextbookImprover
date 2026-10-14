@@ -999,13 +999,15 @@ def layout_styles(layout):
 def body_height(piece, levels, width, scale=1.0, reduction=0.0):
     """How tall a shape's text is, in EMU, its paragraphs at their
     levels' sizes and margins and space before them (levels: _merged's),
-    or their own, wrapped at width EMU inside the insets, at a fontScale
-    and lnSpcReduction (fractions). A display equation holding a fraction,
-    a sum or integral, a stack, or a matrix takes a line more."""
-    total, first = CELL_ENDS, True
+    or their own, and any space after them of their own, wrapped at width
+    EMU inside the insets, at a fontScale and lnSpcReduction (fractions). A
+    display equation holding a fraction, a sum or integral, a stack, or a
+    matrix takes a line more."""
+    total = CELL_ENDS
     body = re.search(r"<p:txBody>(.*?)</p:txBody>", piece, re.S)
     respected = bool(body and FIRST_LAST.search(body.group(1)))
-    for paragraph in PARAGRAPH.finditer(body.group(1) if body else ""):
+    paragraphs = list(PARAGRAPH.finditer(body.group(1) if body else ""))
+    for k, paragraph in enumerate(paragraphs):
         inner = paragraph.group(1) or ""
         props = PARAGRAPH_PROPERTIES.search(inner)
         attrs = props.group(1) if props else ""
@@ -1017,6 +1019,8 @@ def body_height(piece, levels, width, scale=1.0, reduction=0.0):
         spaced = SPACE_BEFORE_PERCENT.search(_paragraph_properties(inner))
         if spaced:
             before = int(spaced.group(1)) / 100000
+        spaced = SPACE_AFTER_PERCENT.search(_paragraph_properties(inner))
+        after = int(spaced.group(1)) / 100000 if spaced else 0.0
         sizes = [int(v) / 100 for v in re.findall(r'<a:rPr\b[^>]*?\ssz="(\d+)"', inner)]
         size = max(sizes) if sizes else size
         wide = MONOSPACED if "<a:latin " in inner else CHARACTER
@@ -1026,11 +1030,11 @@ def body_height(piece, levels, width, scale=1.0, reduction=0.0):
             text = "".join(html.unescape(a or b) for a, b in SHOWN_TEXT.findall(part))
             lines += max(1, math.ceil(len(text) * wide * size * scale / room))
         line = LINE * size * scale * EMU_PER_POINT
-        # PowerPoint puts no space before a text body's first paragraph,
-        # unless the body says to (spcFirstLastPara).
-        total += lines * line * (1 - reduction) + (0 if first and not respected
-                                                   else before * line)
-        first = False
+        # PowerPoint puts no space before a text body's first paragraph, nor
+        # after its last, unless the body says to (spcFirstLastPara).
+        total += lines * line * (1 - reduction) \
+            + (0 if k == 0 and not respected else before * line) \
+            + (0 if k == len(paragraphs) - 1 and not respected else after * line)
     return int(total)
 
 
@@ -1048,6 +1052,12 @@ def body_height(piece, levels, width, scale=1.0, reduction=0.0):
 # body's first paragraph, whose space before PowerPoint leaves out unless
 # the body says to respect it (spcFirstLastPara), which it's then told to.
 # Space that comes to less than none is none, as close as PowerPoint comes.
+# PowerPoint leaves out the space before a paragraph holding a display
+# equation: one given 1.3 lines showed none, where text given less showed
+# its own. So a display equation's space goes after the paragraph above it
+# instead (spcAft), in that paragraph's lines, and its own is none, as
+# PowerPoint shows it, whatever its level's. Whether PowerPoint shows the
+# space after an equation, where one follows another, is untried.
 DISPLAY_SPACE = 50000
 SPACE_MARK = "\ue002"
 VSPACE_MARK = "\ue003"
@@ -1061,6 +1071,8 @@ OMATH_PARA = re.compile(r"<m:oMathPara\b")
 TALL_MATH = re.compile(r"<m:(?:f|nary|eqArr|m)\b")
 SPACE_BEFORE = re.compile(r"<a:spcBef>.*?</a:spcBef>", re.S)
 SPACE_BEFORE_PERCENT = re.compile(r'<a:spcBef>\s*<a:spcPct\s+val="(\d+)"')
+SPACE_AFTER = re.compile(r"<a:spcAft>.*?</a:spcAft>", re.S)
+SPACE_AFTER_PERCENT = re.compile(r'<a:spcAft>\s*<a:spcPct\s+val="(\d+)"')
 LINE_SPACING = re.compile(r"<a:lnSpc>.*?</a:lnSpc>", re.S)
 TEXT_BODY = re.compile(r"(<p:txBody>)(.*?)(</p:txBody>)", re.S)
 RUN = re.compile(r"<a:r>.*?</a:r>", re.S)
@@ -1093,40 +1105,76 @@ def _unspaced(inner):
     return MATH_RUN.sub(run, RUN.sub(run, inner))
 
 
+def _level(inner, levels):
+    """A paragraph's (what <a:p> holds) level's (size, margin, space
+    before) in levels (_merged's)."""
+    own = _paragraph_properties(inner)
+    attrs = PARAGRAPH_PROPERTIES.match(own).group(1) if own else ""
+    return levels.get(min(max(int(_attr_value(attrs, "lvl") or 0), 0), 8), (18, 0, 0))
+
+
+def _paragraph_size(inner, levels):
+    """The size of a paragraph's (what <a:p> holds) text, in points: its
+    largest run's, or its level's in levels (_merged's)."""
+    sizes = [int(v) / 100 for v in re.findall(r'<a:rPr\b[^>]*?\ssz="([1-9]\d*)"', inner)]
+    return max(sizes) if sizes else _level(inner, levels)[0]
+
+
 def _space_now(inner, levels):
     """The space before a paragraph (what <a:p> holds) it has as it is, in
     lines: its own, or its level's in levels (_merged's)."""
     own = _paragraph_properties(inner)
-    attrs = PARAGRAPH_PROPERTIES.match(own).group(1) if own else ""
-    level = min(max(int(_attr_value(attrs, "lvl") or 0), 0), 8)
-    size, _margin, before = levels.get(level, (18, 0, 0))
     percent = SPACE_BEFORE_PERCENT.search(own)
     if percent:
         return int(percent.group(1)) / 100000
     points = SPACE_BEFORE_POINTS.search(own)
     if points:
-        sizes = [int(v) / 100 for v in re.findall(r'<a:rPr\b[^>]*?\ssz="(\d+)"', inner)]
-        return int(points.group(1)) / 100 / (LINE * (max(sizes) if sizes else size))
-    return before
+        return int(points.group(1)) / 100 / (LINE * _paragraph_size(inner, levels))
+    return _level(inner, levels)[2]
+
+
+def _spaced(inner, element, amount, after=()):
+    """A paragraph's insides (what <a:p> holds) with amount of space in
+    its properties' element (spcBef or spcAft), a spcPct value, in place
+    of any it had: after its line spacing and the elements after names,
+    which the schema puts before it."""
+    own = _paragraph_properties(inner)
+    spacing = '<a:%s><a:spcPct val="%d"/></a:%s>' % (element, amount, element)
+    old = re.compile(r"<a:%s>.*?</a:%s>" % (element, element), re.S)
+    if not own:
+        return "<a:pPr>%s</a:pPr>" % spacing + inner
+    if old.search(own):
+        new = old.sub(lambda _m: spacing, own, count=1)
+    elif own.endswith("/>"):
+        new = own[:-2].rstrip() + ">%s</a:pPr>" % spacing
+    else:
+        at = PARAGRAPH_PROPERTIES.match(own).end()
+        for before in (LINE_SPACING,) + tuple(after):
+            found = before.match(own, at)
+            at = found.end() if found else at
+        new = own[:at] + spacing + own[at:]
+    return new + inner[len(own):]
 
 
 def _space_before(inner, amount):
     """A paragraph's insides (what <a:p> holds) with amount of space before
     it, a spcPct value, in place of any it had."""
-    own = _paragraph_properties(inner)
-    spacing = '<a:spcBef><a:spcPct val="%d"/></a:spcBef>' % amount
-    if not own:
-        return "<a:pPr>%s</a:pPr>" % spacing + inner
-    if SPACE_BEFORE.search(own):
-        new = SPACE_BEFORE.sub(lambda _m: spacing, own, count=1)
-    elif own.endswith("/>"):
-        new = own[:-2].rstrip() + ">%s</a:pPr>" % spacing
-    else:
-        start = PARAGRAPH_PROPERTIES.match(own).end()
-        line = LINE_SPACING.match(own, start)
-        at = line.end() if line else start
-        new = own[:at] + spacing + own[at:]
-    return new + inner[len(own):]
+    return _spaced(inner, "spcBef", amount)
+
+
+def _space_after(inner, amount):
+    """A paragraph's insides (what <a:p> holds) with amount of space after
+    it, a spcPct value, in place of any it had."""
+    return _spaced(inner, "spcAft", amount, (SPACE_BEFORE,))
+
+
+def _whole(paragraph, change):
+    """A paragraph, <a:p>…</a:p> or <a:p/>, with change made to what it
+    holds."""
+    found = PARAGRAPH.fullmatch(paragraph)
+    if found.group(1) is None:
+        return paragraph[:-2].rstrip() + ">" + change("") + "</a:p>"
+    return paragraph[:found.start(1)] + change(found.group(1)) + "</a:p>"
 
 
 def _space_amount(spaces, character):
@@ -1143,40 +1191,52 @@ def paragraph_spacing(xml, counts, spaces=(), levels=None):
     one, DISPLAY_SPACE, but the first paragraph of a shape's text, which
     has no text above it to be set off from, as a display equation has
     after a slide's title or where a slide is cut; and the deck's own space
-    added. spaces: record["spaces"]; levels: the master's body text's
+    added. A display equation's space goes after the paragraph above it.
+    spaces: record["spaces"]; levels: the master's body text's
     (_merged's). counts["displays"] counts the equations given space,
     counts["spaces"] the deck's spaces given."""
     levels = levels or {}
 
     def body(match):
-        state = {"first": True, "respected": False}
-
-        def paragraph(found):
-            inner, opening = found.group(1), state["first"]
-            state["first"] = False
+        found = list(PARAGRAPH.finditer(match.group(2)))
+        out = [paragraph.group(0) for paragraph in found]
+        respected = False
+        for k, paragraph in enumerate(found):
+            inner = paragraph.group(1)
             if inner is None or not SPACE_CHARACTERS.search(inner):
-                return found.group(0)
+                continue
             shown = "".join(re.findall(r">([^<]*)<", ">" + inner + "<"))
             given = [_space_amount(spaces, c) for c in SPACE_INDEX.findall(shown)]
             set_off = SPACE_MARK in shown
-            start = found.group(0)[:found.start(1) - found.start()]
+            start = paragraph.group(0)[:paragraph.start(1) - paragraph.start()]
             inner = _unspaced(inner)
-            if opening and not given:
-                return start + inner + "</a:p>"
-            if set_off and not opening:
+            if k == 0 and not given:
+                out[k] = start + inner + "</a:p>"
+                continue
+            if set_off and k > 0:
                 counts["displays"] += 1 if OMATH_PARA.search(inner) else 0
             counts["spaces"] += len(given)
-            if opening:
-                state["respected"] = True
+            if k == 0:
+                respected = True
                 base = 0.0
             elif set_off:
                 base = DISPLAY_SPACE / 100000
             else:
                 base = _space_now(inner, levels)
-            amount = int(round(max(0.0, base + sum(given)) * 100000))
-            return start + _space_before(inner, amount) + "</a:p>"
-        inside = PARAGRAPH.sub(paragraph, match.group(2))
-        if state["respected"]:
+            amount = max(0.0, base + sum(given))
+            if k > 0 and OMATH_PARA.search(inner):
+                above = PARAGRAPH.fullmatch(out[k - 1]).group(1) or ""
+                after = int(round(amount * _paragraph_size(inner, levels)
+                                  / _paragraph_size(above, levels) * 100000))
+                out[k - 1] = _whole(out[k - 1], lambda held: _space_after(held, after))
+                amount = 0.0
+            out[k] = start + _space_before(inner, int(round(amount * 100000))) + "</a:p>"
+        pieces, at = [], 0
+        for paragraph, new in zip(found, out):
+            pieces += [match.group(2)[at:paragraph.start()], new]
+            at = paragraph.end()
+        inside = "".join(pieces) + match.group(2)[at:]
+        if respected:
             inside = BODY_PROPERTIES.sub(lambda m: "<a:bodyPr%s%s>" % (
                 _set_attr(m.group(1), "spcFirstLastPara", "1"), m.group(2)), inside, count=1)
         return match.group(1) + inside + match.group(3)

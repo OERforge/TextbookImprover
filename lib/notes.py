@@ -56,8 +56,8 @@ import highlighting
 REF = re.compile(r'<a\s+href="([^"]*?)#fn(\d+)"\s+class="footnote-ref"\s+'
                  r'id="fnref(\d+)"([^>]*)>(<sup>)?(\d+)(</sup>)?</a>')
 SECTION = re.compile(r'<section id="footnotes"[^>]*>.*?</section>\s*', re.S)
-LI = re.compile(r'<li id="fn(\d+)"[^>]*>(.*?)</li>\s*(?=<li id="fn|</ol>)',
-                re.S)
+# A note's own item: no item of a list in a note has an id.
+NOTE_ITEM = re.compile(r'<li id="fn(\d+)"[^>]*>')
 ASIDE = re.compile(r'<aside[^>]*\bid="fn(\d+)"[^>]*>(.*?)</aside>\s*', re.S)
 BACK = re.compile(r'href="([^"]*?)#fnref(\d+)"')
 # Pandoc's ids for a code block and its lines (cb3, cb3-1), and a line's
@@ -83,10 +83,26 @@ class Page:
         if not match:
             return
         section = match.group(0)
-        items = LI.findall(section) if self.flavor == "html" \
+        items = note_items(section) if self.flavor == "html" \
             else ASIDE.findall(section)
         self.notes = [(int(n), body) for n, body in items]
         self.text = self.text[:match.start()] + self.text[match.end():]
+
+
+def note_items(section):
+    """(number, body) for each note in the HTML writer's notes section:
+    from a note's own item to the next one's, or to the section's last
+    </ol>, less its closing </li>. So a list in a note ends where it
+    ends: taken to the first </li> before an </ol>, a note holding a
+    numbered list was cut off after the list's last item, its way back
+    lost and the next note left inside its list."""
+    starts = list(NOTE_ITEM.finditer(section))
+    end = section.rfind("</ol>")
+    items = []
+    for index, start in enumerate(starts):
+        stop = starts[index + 1].start() if index + 1 < len(starts) else end
+        items.append((start.group(1), re.sub(r"</li>\s*$", "", section[start.end():stop])))
+    return items
 
 
 def renumber(page, offset, dest, prefix=""):

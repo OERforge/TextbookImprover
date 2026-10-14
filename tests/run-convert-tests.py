@@ -3989,7 +3989,8 @@ def case_notes(work):
     notes.numbering says, so the builds that gather them say page. A
     note with code, on the chapter's second page and in the second
     chapter, takes its code's ids and CSS where it goes, which on the
-    chapter's last page is beside code of the page's own."""
+    chapter's last page is beside code of the page's own; and one ends
+    in a numbered list."""
     import zipfile
     code = "    ```{.python .numberLines}\n    x = 1\n    ```\n"
 
@@ -3998,7 +3999,9 @@ def case_notes(work):
         os.makedirs(d, exist_ok=True)
         with open(os.path.join(d, "ch1.md"), "w", encoding="utf-8") as fh:
             fh.write(NOTED.replace("[^c]: Note C.\n", "[^c]: Note C.\n\n" + code + "\n")
-                     .replace("Another.[^d]\n", "Another.[^d]\n\n```python\ny = 2\n```\n"))
+                     .replace("Another.[^d]\n", "Another.[^d]\n\n```python\ny = 2\n```\n")
+                     .replace("[^b]: Note B.\n", "[^b]: Note B, in steps:\n\n    1. One.\n"
+                              "    2. Two.\n\n"))
         with open(os.path.join(d, "ch2.md"), "w", encoding="utf-8") as fh:
             fh.write("# Chapter Two\n\nTwo.[^e]\n\n[^e]: Note E.\n\n" + code)
         r = convert(d, "defaults:\n  pages:\n    split_level: 2\n  notes:\n"
@@ -4053,6 +4056,30 @@ def case_notes(work):
                                     first.group(1), re.S)
         return found.group(1).rstrip() if found else None
 
+    def well_formed(*parts):
+        """Every element of a page closed, in the order it was opened: a
+        note moved whole, and nothing of the notes' list left in it."""
+        from html.parser import HTMLParser
+        void = {"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta",
+                "source", "track", "wbr"}
+        stack, stray = [], []
+
+        class Nesting(HTMLParser):
+            def handle_starttag(self, tag, attrs):
+                if tag not in void:
+                    stack.append(tag)
+
+            def handle_startendtag(self, tag, attrs):
+                pass                # <hr />, closed as it opens
+
+            def handle_endtag(self, tag):
+                if stack and stack[-1] == tag:
+                    stack.pop()
+                else:
+                    stray.append(tag)
+        Nesting().feed(read(*parts))
+        return not stack and not stray
+
     def notes_chapter(d):
         """The EPUB's Notes chapter."""
         with zipfile.ZipFile(os.path.join(d, "epub", "org.example.fixtures.epub")) as z:
@@ -4078,6 +4105,14 @@ def case_notes(work):
          and "footnotes" not in read(gg, "html", "ch1.html")
          and re.findall(r'<li id="(fn\d+)"', read(gg, "html", "ch1--second-section.html"))
          == ["fn1", "fn2", "fn3", "fn4"]),
+        ("a note that ends in a numbered list goes whole, its way back with it, and the "
+         "page it goes to is well formed",
+         lambda: read(gg, "html", "ch1--second-section.html").count('class="footnote-back"') == 4
+         and well_formed(gg, "html", "ch1--second-section.html")
+         and well_formed(gb, "html", "notes.html")
+         and read(gb, "html", "notes.html").count('class="footnote-back"') == 5
+         and re.search(r'<li>Two\.</li>\s*</ol>\s*(<p>)?<a href="ch1\.html#g1-fnref2"',
+                       read(gb, "html", "notes.html"))),
         ("a note's code goes with it, its ids named for the note beside the page's own, and "
          "the page has the CSS Pandoc wrote for it on its own, once, a page left with no code "
          "none",

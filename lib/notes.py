@@ -13,6 +13,10 @@ chapter alike:
                       group  gathered at the end of the group's last page
                       book   gathered on one Notes page, a heading per group
 
+Notes gathered from several pages share a list, so they're numbered
+across their group whatever notes.numbering says: page, which restarts
+on every page, would number two notes in one list 1.
+
 A group is whatever the split made of a source: a chapter file's
 sections, an H1's sections in a single-file book. A page that was not
 split is a group of one.
@@ -20,7 +24,9 @@ split is a group of one.
 Pandoc cannot be asked to start numbering at 7, so the numbers are
 rewritten in the output: the reference's visible number, the note's
 number, and the ids that tie them, which stay unique within whichever
-page ends up holding the note.
+page ends up holding the note. So do the ids of a moved note's code,
+which Pandoc counts per page, and the page it moves to gets the CSS
+Pandoc writes only on a page that holds code when it writes it.
 
 Copyright 2026 Robert Szarka
 
@@ -41,6 +47,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 import html
 import re
 
+import highlighting
+
 # Pandoc's HTML writer and its EPUB writer mark the same things in the
 # same classes; they differ in the container (an ol of li, or asides).
 # Pandoc wraps a long tag's attributes across lines, so whitespace
@@ -52,6 +60,9 @@ LI = re.compile(r'<li id="fn(\d+)"[^>]*>(.*?)</li>\s*(?=<li id="fn|</ol>)',
                 re.S)
 ASIDE = re.compile(r'<aside[^>]*\bid="fn(\d+)"[^>]*>(.*?)</aside>\s*', re.S)
 BACK = re.compile(r'href="([^"]*?)#fnref(\d+)"')
+# Pandoc's ids for a code block and its lines (cb3, cb3-1), and a line's
+# link to itself. Each page counts its code from cb1.
+CODE_ID = re.compile(r'(\sid="|\shref="#)(cb\d+(?:-\d+)?)"')
 NUMBER_SPAN = re.compile(r'<span class="footnote-number">\d+\.</span>')
 
 
@@ -113,6 +124,12 @@ def renumber(page, offset, dest, prefix=""):
                       if "aria-label" not in m.group(1) else m.group(0), body)
         body = NUMBER_SPAN.sub(
             f'<span class="footnote-number">{new}.</span>', body)
+        if dest != page.name:
+            # A note leaving its page takes its code's ids with it, named
+            # for the note, so they're unique where it lands: notes from
+            # two pages would each bring a cb1, and the page's own code
+            # may have one.
+            body = CODE_ID.sub(lambda m: f'{m.group(1)}{prefix}fn{new}-{m.group(2)}"', body)
         rebuilt.append((new, body))
     page.notes = rebuilt
     return page
@@ -164,6 +181,8 @@ def arrange(pages, numbering, placement, notes_page=None):
             groups.append((page.group, page.group_title, []))
         groups[-1][2].append(page)
 
+    # Notes gathered in one list are numbered across their group.
+    continuing = numbering == "group" or placement != "page"
     book_sections = []
     for index, (_, title, members) in enumerate(groups, 1):
         offset = 0
@@ -172,11 +191,11 @@ def arrange(pages, numbering, placement, notes_page=None):
         dest = members[-1].name if placement == "group" else \
             (notes_page.name if placement == "book" else None)
         for page in members:
-            page_offset = offset if numbering == "group" else 0
+            page_offset = offset if continuing else 0
             renumber(page, page_offset, dest or page.name, prefix)
             if page.notes:
                 changed.append(page)
-            if numbering == "group":
+            if continuing:
                 offset += len(page.notes)
             if placement == "page":
                 page.text = insert_before_end(
@@ -198,4 +217,6 @@ def arrange(pages, numbering, placement, notes_page=None):
         notes_page.text = insert_before_end(
             notes_page.text, "".join(book_sections), notes_page.flavor)
         changed.append(notes_page)
+    for page in changed:
+        page.text = highlighting.with_page_css(page.text)
     return changed

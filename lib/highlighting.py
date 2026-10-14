@@ -20,6 +20,10 @@ light-dark(): this theme's color, then one lightened the same way to
 to each other and both to 4.5:1, and the convert suite holds them to
 the backgrounds the stylesheets Pandoc writes give.
 
+Pandoc writes the CSS that lays out highlighted code and colors it only
+on a page that holds code when it writes it, so a page given code
+afterwards, a note notes.py moved there, gets it from with_page_css.
+
 Copyright 2026 Robert Szarka
 
 This program is free software: you can redistribute it and/or modify
@@ -37,9 +41,58 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
 import os
+import re
+import subprocess
 
 THEME = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                       os.pardir, "bin", "highlighting.theme"))
 
 # Pandoc 3.8's option, which the oldest Pandoc the run takes (3.9) has.
 ARGS = ["--syntax-highlighting=" + THEME]
+
+# What Pandoc writes before the CSS for highlighted code, in the style
+# element of a page or an EPUB's chapter file.
+CSS_MARK = "/* CSS for syntax highlighting */"
+_PAGE_CSS = []
+
+
+def page_css():
+    """The CSS Pandoc's HTML and EPUB writers put in a page that holds
+    highlighted code, in this theme's colors: how a line of code and a
+    line's number are laid out, and each token's color. A page with none
+    gets none, so a page whose code arrives after Pandoc has written it
+    (a note notes.placement moved there) is given it (with_page_css).
+    Asked of Pandoc once, from a page of one line of code; "" if it
+    can't be."""
+    if not _PAGE_CSS:
+        try:
+            done = subprocess.run(["pandoc", "-f", "markdown", "-t", "html5", "--standalone",
+                                   "--metadata", "title=code"] + ARGS,
+                                  input="```python\nx = 1\n```\n", capture_output=True,
+                                  text=True)
+            found = re.search(re.escape(CSS_MARK) + r"\n(.*?)\s*</style>", done.stdout, re.S)
+            _PAGE_CSS.append(found.group(1) if found else "")
+        except OSError:
+            _PAGE_CSS.append("")
+    return _PAGE_CSS[0]
+
+
+def with_page_css(text):
+    """A page, or an EPUB's chapter file, with page_css() at the end of
+    its first style element, where Pandoc writes it on a page holding
+    code, when it holds highlighted code and hasn't the CSS; else as it
+    is. A page with no style element is given one."""
+    if 'class="sourceCode' not in text or CSS_MARK in text:
+        return text
+    css = page_css()
+    head = text.find("</head>")
+    if not css or head < 0:
+        return text
+    block = "\n    " + CSS_MARK + "\n" + css
+    end = text.find("</style>", 0, head)
+    if end < 0:
+        return text[:head] + "  <style>" + block + "\n  </style>\n" + text[head:]
+    start = end
+    while start and text[start - 1] in " \t\r\n":
+        start -= 1
+    return text[:start] + block + text[start:]

@@ -150,11 +150,11 @@ Where footnotes go and how they count, once a source has been cut into pages. Pa
 
 **`notes.numbering`**—one of `page`, `group`; default `page`
 
-page restarts the numbers on every page. group continues them across the pages of the enclosing group, in reading order, whatever a group is called; a page that was not split is a group of one.
+page restarts the numbers on every page. group continues them across the pages of the enclosing group, in reading order, whatever a group is called; a page that was not split is a group of one. Notes that placement gathers are numbered across their group whatever this says, since they share a list.
 
 **`notes.placement`**—one of `page`, `group`, `book`; default `page`
 
-page keeps each page's notes at its end. group gathers a group's notes at the end of its last page. book gathers every note on one Notes page at the end, with a heading for each group, numbered per group. A reference always links to its note wherever it went, and the note links back.
+page keeps each page's notes at its end. group gathers a group's notes at the end of its last page, numbered across the group. book gathers every note on one Notes page at the end, with a heading for each group, numbered per group. A reference always links to its note wherever it went, and the note links back, and a note's code goes with it, highlighted as it was.
 
 ## slides
 

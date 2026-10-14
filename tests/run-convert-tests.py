@@ -3984,16 +3984,23 @@ Another.[^d]
 
 
 def case_notes(work):
-    """notes.numbering and notes.placement, on a chapter cut into pages."""
+    """notes.numbering and notes.placement, on a chapter cut into pages.
+    Notes gathered in one list are numbered across their group whatever
+    notes.numbering says, so the builds that gather them say page. A
+    note with code, on the chapter's second page and in the second
+    chapter, takes its code's ids and CSS where it goes, which on the
+    chapter's last page is beside code of the page's own."""
     import zipfile
+    code = "    ```{.python .numberLines}\n    x = 1\n    ```\n"
 
     def build(sub, numbering, placement):
         d = os.path.join(work, sub)
         os.makedirs(d, exist_ok=True)
         with open(os.path.join(d, "ch1.md"), "w", encoding="utf-8") as fh:
-            fh.write(NOTED)
+            fh.write(NOTED.replace("[^c]: Note C.\n", "[^c]: Note C.\n\n" + code + "\n")
+                     .replace("Another.[^d]\n", "Another.[^d]\n\n```python\ny = 2\n```\n"))
         with open(os.path.join(d, "ch2.md"), "w", encoding="utf-8") as fh:
-            fh.write("# Chapter Two\n\nTwo.[^e]\n\n[^e]: Note E.\n")
+            fh.write("# Chapter Two\n\nTwo.[^e]\n\n[^e]: Note E.\n\n" + code)
         r = convert(d, "defaults:\n  pages:\n    split_level: 2\n  notes:\n"
                        f"    numbering: {numbering}\n    placement: "
                        f"{placement}\ntargets:\n  html:\n    format: html\n"
@@ -4037,9 +4044,24 @@ def case_notes(work):
         return links and refs and all(i in ids.get(t, ()) for t, i in links) \
             and all(back(*r) for r in refs)
 
+    def code_css(*parts):
+        """The CSS for highlighted code in a page's first style element,
+        Pandoc's own, before the stylesheet's: where Pandoc writes it on a
+        page that holds code. None if it isn't there."""
+        first = re.search(r"<style>(.*?)</style>", read(*parts), re.S)
+        found = first and re.search(r"/\* CSS for syntax highlighting \*/\n(.*)",
+                                    first.group(1), re.S)
+        return found.group(1).rstrip() if found else None
+
+    def notes_chapter(d):
+        """The EPUB's Notes chapter."""
+        with zipfile.ZipFile(os.path.join(d, "epub", "org.example.fixtures.epub")) as z:
+            return next((t for t in (z.read(n).decode("utf-8") for n in z.namelist()
+                                     if "/text/" in n) if 'id="page-notes"' in t), "")
+
     gp, r1, _ = build("group-page", "group", "page")
-    gg, r2, _ = build("group-group", "group", "group")
-    gb, r3, nav = build("group-book", "group", "book")
+    gg, r2, _ = build("page-group", "page", "group")
+    gb, r3, nav = build("page-book", "page", "book")
     return [
         ("group numbering continues across a chapter's pages",
          lambda: r1.returncode == 0
@@ -4048,23 +4070,48 @@ def case_notes(work):
          and 'id="fn1"' in read(gp, "html", "ch2.html")),
         ("with a value on each item so the browser numbers agree",
          lambda: 'value="4"' in read(gp, "html", "ch1--second-section.html")),
-        ("group placement gathers the notes on the chapter's last page",
+        ("a note that stays on its page keeps its code's ids as Pandoc wrote them",
+         lambda: 'id="cb1"' in read(gp, "html", "ch1--first-section.html")),
+        ("group placement gathers the notes on the chapter's last page, numbered across "
+         "the chapter",
          lambda: r2.returncode == 0
          and "footnotes" not in read(gg, "html", "ch1.html")
-         and read(gg, "html", "ch1--second-section.html").count('<li id="fn')
-         == 4),
+         and re.findall(r'<li id="(fn\d+)"', read(gg, "html", "ch1--second-section.html"))
+         == ["fn1", "fn2", "fn3", "fn4"]),
+        ("a note's code goes with it, its ids named for the note beside the page's own, and "
+         "the page has the CSS Pandoc wrote for it on its own, once, a page left with no code "
+         "none",
+         lambda: 'id="fn3-cb1"' in read(gg, "html", "ch1--second-section.html")
+         and 'id="cb1"' in read(gg, "html", "ch1--second-section.html")
+         and 'href="#fn3-cb1-1"' in read(gg, "html", "ch1--second-section.html")
+         and code_css(gg, "html", "ch1--second-section.html") is not None
+         and code_css(gg, "html", "ch1--second-section.html")
+         == code_css(gg, "html", "ch1--first-section.html")
+         and code_css(gg, "html", "ch1.html") is None),
         ("and references cross to them, notes link back",
          lambda: 'href="ch1--second-section.html#fn1"' in read(gg, "html",
                                                                 "ch1.html")
          and 'href="ch1.html#fnref1"' in read(gg, "html",
                                               "ch1--second-section.html")),
         # Both chapters have notes, so each has its heading there.
-        ("book placement makes a Notes page with a heading per group",
+        ("book placement makes a Notes page with a heading per group, numbered per group",
          lambda: r3.returncode == 0
          and read(gb, "html", "notes.html").count("<h2>") == 2
-         and re.search(r'id="g\d+-fn1"', read(gb, "html", "notes.html"))),
-        ("and the EPUB gets a Notes chapter",
-         lambda: ">Notes<" in nav),
+         and re.findall(r'<li id="(g\d+-fn\d+)"', read(gb, "html", "notes.html"))
+         == ["g1-fn1", "g1-fn2", "g1-fn3", "g1-fn4", "g2-fn1"]),
+        ("on it, two chapters' notes with code keep ids of their own, and the page has the "
+         "code's CSS",
+         lambda: all(f'id="{note}-cb1"' in read(gb, "html", "notes.html")
+                     for note in ("g1-fn3", "g2-fn1"))
+         and code_css(gb, "html", "notes.html") is not None
+         and code_css(gb, "html", "notes.html") == code_css(gb, "html", "ch2.html")),
+        ("and the EPUB gets a Notes chapter, its notes' code the same",
+         lambda: ">Notes<" in nav
+         and all(f'id="{note}-cb1"' in notes_chapter(gb) for note in ("g1-fn3", "g2-fn1"))
+         and "/* CSS for syntax highlighting */" in notes_chapter(gb).split("</style>")[0]),
+        ("a note's way back, a symbol labeled with what it does, isn't a link whose label "
+         "leaves out its text",
+         lambda: not any("link-label-without-text" in r.stderr for r in (r1, r2, r3))),
         ("no reference or return link is left dangling in any of them",
          lambda: not any(re.search(r"link-to-missing|duplicate-id",
                                    r.stderr) for r in (r1, r2, r3))),

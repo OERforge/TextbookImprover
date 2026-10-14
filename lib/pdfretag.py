@@ -96,11 +96,19 @@ def tables(root):
     return found
 
 
+def tagged(path):
+    """Whether the PDF at path has a structure tree: LaTeX tags a PDF only
+    under PDF/UA, so one built to no such standard has none."""
+    with pikepdf.open(path) as pdf:
+        return "/StructTreeRoot" in pdf.Root
+
+
 def retag(path, captioned):
     """Repair the PDF at path in place. captioned: for each table of the
     book, in order, whether the book gave it a caption. Returns counts:
     captions retagged, empty artifacts taken out, artifacts left (with
-    content), and whether the tables could be matched at all."""
+    content), and whether the tables could be matched at all. The PDF is
+    tagged (tagged())."""
     counts = {"captions": 0, "artifacts": 0, "artifacts_left": 0, "matched": False}
     with pikepdf.open(path, allow_overwriting_input=True) as pdf:
         found = tables(pdf.Root.StructTreeRoot)

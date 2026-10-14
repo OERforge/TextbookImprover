@@ -596,6 +596,18 @@ def captioned_tables(blocks):
     return found
 
 
+def repair(path, resolved, blocks):
+    """The repairs after LaTeX that the target's settings ask for, on a
+    tagged PDF. One built to no PDF/UA standard isn't tagged, so has no
+    tags to repair; the retagging had stopped the run on it."""
+    if not pdfretag.tagged(path):
+        return
+    if resolved["pdf.repair_captions"]:
+        repair_tables(path, blocks)
+    if resolved["pdf.remove_empty_paragraphs"]:
+        remove_empty_paragraphs(path)
+
+
 def repair_tables(path, blocks):
     """pdf.repair_captions, after LaTeX: see lib/pdfretag.py."""
     if pdfretag.pikepdf is None:
@@ -771,10 +783,7 @@ def build(base, name, resolved, keep, intermediates=None, latex_only=False,
                   "the empty paragraph elements LaTeX leaves stay (pip install "
                   "pikepdf, or sudo apt install python3-pikepdf).", file=sys.stderr)
         elif repairs:
-            if resolved["pdf.repair_captions"]:
-                repair_tables(os.path.abspath(out_path), assembly.blocks)
-            if resolved["pdf.remove_empty_paragraphs"]:
-                remove_empty_paragraphs(os.path.abspath(out_path))
+            repair(os.path.abspath(out_path), resolved, assembly.blocks)
         if result.returncode != 0:
             for advice in latexbuild.failure_advice(result.stderr):
                 print(advice, file=sys.stderr)

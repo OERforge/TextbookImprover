@@ -44,7 +44,9 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import argparse
 import concurrent.futures
+import contextlib
 import csv
+import io
 import json
 import os
 import re
@@ -440,6 +442,27 @@ def languages(path):
     return out
 
 
+def untagged_repairs(work):
+    """build-pdf.py's repairs after LaTeX on a PDF with no structure tree,
+    as one built to no PDF/UA standard has none: (whether it's taken for
+    tagged, what the repairs said, what they raised)."""
+    path = os.path.join(work, "untagged.pdf")
+    pdf = pdfparagraphs.pikepdf.new()
+    pdf.add_blank_page()
+    pdf.save(path)
+    spec = importlib.util.spec_from_file_location("build_pdf", os.path.join(BIN, "build-pdf.py"))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    said, raised = io.StringIO(), None
+    try:
+        with contextlib.redirect_stderr(said):
+            module.repair(path, {"pdf.repair_captions": True,
+                                 "pdf.remove_empty_paragraphs": True}, [])
+    except Exception as exc:
+        raised = repr(exc)
+    return module.pdfretag.tagged(path), said.getvalue(), raised
+
+
 def ua1_formulas(path):
     """Each Formula's alt text, its attribute owners, and its kids' kinds."""
     pdf = pdfparagraphs.pikepdf.open(path)
@@ -705,6 +728,7 @@ def checks(work, jobs=1):
     ua1_math = [f for f in ua1_math if f[0] != "roles"]
     pdf_path = os.path.join(work, "pdf", "org.example.pdf.pdf")
     declared = languages(pdf_path)
+    untagged = untagged_repairs(work)
     root = reader.trailer["/Root"]
     tree = elements(root["/StructTreeRoot"])
     kinds = [kind(e) for e in tree]
@@ -768,6 +792,11 @@ def checks(work, jobs=1):
                  if "own language" in text)),
         ("and a PDF/UA-1 file's span too",
          lambda: ("/Span", "en-GB", "flat", None) in ua1_languages),
+        # The retagging stopped the run on an untagged PDF, which LaTeX
+        # makes for a pdf.standard with no PDF/UA in it.
+        ("a PDF with no structure tree, as one built to no PDF/UA standard is, is left as "
+         "LaTeX made it, the repairs saying nothing",
+         lambda: untagged == (False, "", None)),
         ("it claims PDF/UA-2 in its metadata",
          lambda: re.search(r"pdfuaid:part[^0-9]{1,5}2",
                            resolve(root["/Metadata"]).get_data().decode(

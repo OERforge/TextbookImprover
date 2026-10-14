@@ -805,6 +805,42 @@ def case_declared_types(work):
     ]
 
 
+def case_one_page_notes(work):
+    """A book of one page is one group of notes, though the writer cuts it
+    into a chapter file per top-level heading: notes.numbering group
+    numbers its notes across them, as the book's one page numbers them,
+    and notes.placement book gathers them on the Notes chapter, which
+    had been left empty, with the notes where the writer put them."""
+    def book(name, notes):
+        folder = os.path.join(work, name)
+        os.makedirs(folder)
+        markdown_page(folder, "book", "# Preface\n\nWhy.[^1]\n\n[^1]: A note on why.\n\n"
+                                      "# Chapter one\n\nText.[^2] More.[^3]\n\n"
+                                      "[^2]: A second note.\n[^3]: A third note.\n\n"
+                                      "# Chapter two\n\nPlain.\n")
+        write_config(folder, "    - book\n", extra_epub="    notes:\n" + notes)
+        return Built(folder)
+    numbered = book("numbered", "      numbering: group\n")
+    gathered = book("gathered", "      placement: book\n")
+
+    def notes_in(built):
+        """Each chapter file's title and the ids of the notes it holds."""
+        return [(re.search(r"<title>([^<]*)</title>", built.files[n]).group(1),
+                 re.findall(r'<aside\b[^>]*\bid="([^"]+)"', built.files[n]))
+                for n in built.chapters()]
+    return [
+        ("notes.numbering group numbers a one-page book's notes across its chapter files",
+         lambda: numbered.status == 0 and notes_in(numbered) == [
+             ("Preface", ["fn1"]), ("Chapter one", ["fn2", "fn3"]), ("Chapter two", [])]),
+        ("notes.placement book gathers them on the Notes chapter, where each reference "
+         "links to its note",
+         lambda: gathered.status == 0 and notes_in(gathered) == [
+             ("Preface", []), ("Chapter one", []), ("Chapter two", []),
+             ("Notes", ["g1-fn1", "g1-fn2", "g1-fn3"])]
+         and 'href="ch004.xhtml#g1-fn2"' in gathered.files.get("EPUB/text/ch002.xhtml", "")),
+    ]
+
+
 CASES = [
     ("the shape of the book", case_structure),
     ("the table of contents read back", case_outline),
@@ -815,6 +851,7 @@ CASES = [
     ("rewriting a page for the book", case_rewriting),
     ("divisions and landmarks", case_divisions),
     ("types declared in contents", case_declared_types),
+    ("a one-page book's notes", case_one_page_notes),
 ]
 
 

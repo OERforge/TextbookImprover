@@ -442,6 +442,9 @@ class Assembly:
             except ValueError:
                 pass
         count_images(blocks, self.found)
+        # The book's one group of notes, which the EPUB's writer cuts
+        # into a chapter file per top-level heading.
+        self.groups[stem] = ("top-0", title)
         self.pages.append((stem, title, 1))
         self.blocks.extend(blocks)
 

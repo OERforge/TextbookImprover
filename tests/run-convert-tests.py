@@ -2515,6 +2515,8 @@ def case_word_equations(work):
                                   ["expression", "", "\u03b2 = 7"]])
     kept_result, kept = build("")
     kept_said = kept_result.stdout + kept_result.stderr
+    off_kept_result, _ = build("    math:\n      repair_equations: false\n")
+    off_kept_said = off_kept_result.stdout + off_kept_result.stderr
     return [
         # As a conversion reads it back: \mu for the Greek letter, - for the
         # minus, and \bar for the accent of the macron, which Narrator reads
@@ -2544,6 +2546,10 @@ def case_word_equations(work):
         ("a row of the keep sidecar that keeps nothing is warned about",
          lambda: "1 row(s) of math-keep.csv kept nothing" in kept_said
          and "expression,,\u03b2 = 7" in kept_said),
+        ("but not an equation's with math.repair_equations off, since it couldn't keep "
+         "anything; text's still is",
+         lambda: "1 row(s) of math-keep.csv kept nothing" in off_kept_said
+         and "expression,,\u03b2 = 7" in off_kept_said and "equation,eq," not in off_kept_said),
     ]
 
 

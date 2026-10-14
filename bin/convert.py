@@ -93,6 +93,8 @@ try:
                               is_generated, toc_blocks, stem_title, declared_titles,
                               expand_split_sources, contents_from_tree, opener_types)
     from names import safe_path, safe_stem, is_safe
+    import sidecars
+    from sidecars import math_keep_rows
 except ImportError:
     sys.exit("Cannot find the configuration library. It should be in a "
              "lib/ directory beside bin/.")
@@ -2855,19 +2857,6 @@ def noheader(text):
     return "\n".join(out)
 
 
-def math_keep_rows(path):
-    """The keep sidecar's rows, (kind, page, before), each once."""
-    rows = []
-    if path and os.path.exists(path):
-        with open(path, encoding="utf-8-sig", newline="") as fh:
-            for n, row in enumerate(csv.reader(fh)):
-                if n == 0 and row and row[0].strip().lower() == "kind":
-                    continue
-                if len(row) >= 3 and row[2]:
-                    rows.append((row[0], row[1], row[2]))
-    return list(dict.fromkeys(rows))
-
-
 # Where each sidecar keeps its value, and its Drafted by and Reviewed
 # columns, by position, since the readers read by position: the report
 # a sidecar's rows are pasted from puts them last.
@@ -2932,9 +2921,10 @@ def warn_title_numbers(found):
             "titles them with the number.")
 
 
-def warn_math_keep(sidecar, kept_file):
+def warn_math_keep(sidecar, kept_file, off=()):
     """A row of the keep sidecar that kept nothing in this run: the text it
-    names isn't in the book any more, or no longer reads that way."""
+    names isn't in the book any more, or no longer reads that way. off: the
+    math settings no target has on, whose rows couldn't keep anything."""
     rows = math_keep_rows(sidecar)
     if not rows:
         return
@@ -2942,12 +2932,9 @@ def warn_math_keep(sidecar, kept_file):
     if os.path.exists(kept_file):
         with open(kept_file, encoding="utf-8", newline="") as fh:
             matched = {tuple(r[:3]) for r in csv.reader(fh) if len(r) >= 3}
-    stale = [r for r in rows if r not in matched]
-    if stale:
-        say(f"WARNING: {len(stale)} row(s) of {os.path.basename(sidecar)} kept nothing in "
-            "this run; the math they name isn't in the book as written there:")
-        for kind, page, before in stale[:10]:
-            say(f"  {kind},{page},{before}")
+    for line in sidecars.keep_warning(os.path.basename(sidecar),
+                                      [r for r in rows if r not in matched], off=off):
+        say(line)
 
 
 def remediate_sources(target, base, docs, paths, env, html_stems=(), language=None,
@@ -5348,7 +5335,9 @@ def main():
             "meaning.")
         write_bare_links(collected["bare_links"], reports["bare_links_new"],
                          paths["bare_links"])
-        warn_math_keep(paths["math_keep"], collected["math_kept"])
+        warn_math_keep(paths["math_keep"], collected["math_kept"],
+                       [key for key in set(sidecars.MATH_SETTINGS.values())
+                        if not any(t[key] for t in targets)])
         warn_unreviewed(paths)
         warn_title_numbers(collected["title_numbers"])
         write_report(collected["math"], reports["math_repaired"],

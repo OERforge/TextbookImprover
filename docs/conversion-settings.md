@@ -324,7 +324,7 @@ What to do with each bare link, one whose text is its own address, keyed on the 
 
 **`sidecars.math_keep`**—`path`; default `math-keep.csv`
 
-Math the math settings would change, kept as it was: rows copied from the math_repaired report (Kind, Page, Before; the After column is ignored), each keeping that equation unrepaired or that text as text. A blank Page keeps it on every page. A row that keeps nothing, since the source changed, is warned about.
+Math the math settings would change, kept as it was: rows copied from the math_repaired report (Kind, Page, Before; the After column is ignored), each keeping that equation unrepaired or that text as text. A blank Page keeps it on every page, or in every deck. A row that keeps nothing, since the source changed, is warned about.
 
 **`sidecars.table_headers`**—`path`; default `table-headers.csv`
 
@@ -398,4 +398,4 @@ Spacer images found, and what was done with each.
 
 **`reports.math_repaired`**—`path`; default `math-repaired.csv`
 
-Each change the math settings made: an equation's characters repaired, or text made an equation, with the page and the text before and after.
+Each change the math settings made: an equation's characters repaired, or text made an equation, with the page and the text before and after. A deck's equation is written out in one line, much as PowerPoint's linear format writes it, its Page the deck's name.

@@ -30,7 +30,10 @@ each deck (pptxremediate.py). The reports:
   a book's report has them, for the bare-links sidecar a book's run reads;
 - slides-check.csv: every finding, in the output check's format; and,
   once a source target has written its copies, output-check.csv, what's
-  left to do in them.
+  left to do in them, and math-repaired.csv, each equation they repaired
+  (math.repair_equations), in a book's columns, written out in one line
+  (pptxremediate.equation_text) as the rows of math-keep.csv name one to
+  keep as it was.
 
 A report is written only when it has rows, and a stale one is removed:
 the file being there says there's work to do.
@@ -64,6 +67,7 @@ import pptxorder
 import pptxparse
 import pptxremediate
 import pptxtitle
+import sidecars
 import tablecensus
 
 ALT_COLUMNS = ["Image", "Alt", "Source", "Reason", "CurrentAlt", "Drafted by", "Reviewed"]
@@ -72,6 +76,7 @@ TABLE_COLUMNS = ["key", "headers", "split-at", "caption-rows", "part-captions", 
 TITLE_COLUMNS = ["Slide", "Title", "Source", "Drafted by", "Reviewed"]
 ORDER_COLUMNS = ["Slide", "Order", "Source", "Shapes", "Note", "Drafted by", "Reviewed"]
 LINK_COLUMNS = ["URL", "Replacement", "Title", "Source", "Context", "Drafted by", "Reviewed"]
+MATH_COLUMNS = ["Kind", "Page", "Before", "After"]
 # The alt-text findings that ask a person for a decision.
 DECIDE = ("pptx-object-no-alt", "pptx-shape-no-alt", "pptx-alt-is-file-name",
           "pptx-alt-placeholder", "pptx-alt-auto-generated", "pptx-alt-page-title",
@@ -289,11 +294,13 @@ def summarize(lead, found, say):
 
 
 def report(path, columns, rows, noun, sidecar, say, hint=None):
-    """A report and what to do with it, said as a book's run says it."""
+    """A report and what to do with it, said as a book's run says it: one
+    with no sidecar (None) records what was done."""
     if not write_rows(path, columns, rows):
         return
     say("Wrote %s (%d %s)." % (path, len(rows), noun))
-    say("Fill in the second column, then append the rows to %s." % sidecar)
+    if sidecar:
+        say("Fill in the second column, then append the rows to %s." % sidecar)
     if hint:
         say(hint)
 
@@ -310,6 +317,7 @@ def run(base, decks, targets, paths, reports, language=None, alt_max_chars=120,
             "treated as blank" % (paths.get("table_headers"), value))
     titles = pptxremediate.title_rows(paths.get("slide_titles"))
     links = pptxremediate.link_rows(paths.get("bare_links"))
+    keep = sidecars.math_keep_rows(paths.get("math_keep"))
     bad = []
     orders = pptxremediate.order_rows(paths.get("reading_order"), bad)
     for key, token in bad:
@@ -513,6 +521,8 @@ def run(base, decks, targets, paths, reports, language=None, alt_max_chars=120,
     if check_only:
         return 1 if failed else 0
     copies = []
+    math_rows = OrderedDict()   # (kind, deck, before, after), each repair once
+    kept, repairing = set(), False  # the keep rows that kept an equation
     for target in targets:
         if target.format != "source":
             say("NOTE: target %s is format %s, which isn't written for PowerPoint decks yet; "
@@ -530,12 +540,26 @@ def run(base, decks, targets, paths, reports, language=None, alt_max_chars=120,
                     % (target.name, name))
                 failed += 1
                 continue
-            problems = []
+            problems, repairs = [], []
+            dname = pptxremediate.deck_name(path)
+            # A row with a blank Page keeps its equation in every deck.
+            named = [row for row in keep if row[0] == "equation" and row[1] in ("", dname)]
+            equations = setting(target, "math.repair_equations")
+            repairing = repairing or equations
             counts = pptxremediate.remediate(path, destination, alts, tables, titles,
-                                             language, deck=pptxremediate.deck_name(path),
-                                             orders=orders, problems=problems, links=links,
-                                             equations=setting(target, "math.repair_equations"),
-                                             fonts=plan, replaced=replaced)
+                                             language, deck=dname, orders=orders,
+                                             problems=problems, links=links,
+                                             equations=equations, fonts=plan, replaced=replaced,
+                                             keep_equations={row[2] for row in named},
+                                             repairs=repairs)
+            for before, after in repairs:
+                if after is None:
+                    # The deck's own row keeps it, as a page's does a book's,
+                    # else the row for every deck.
+                    rows = [row for row in named if row[2] == before]
+                    kept.update([row for row in rows if row[1]] or rows)
+                else:
+                    math_rows.setdefault(("equation", dname, before, after), None)
             for key, why in problems:
                 if key == pptxremediate.deck_name(path):
                     say("WARNING: %s: in %s, %s." % (target.name, name, why))
@@ -544,8 +568,10 @@ def run(base, decks, targets, paths, reports, language=None, alt_max_chars=120,
                         target.name, key, why))
             totals.update(counts)
             written += 1
+            # What was left as it was isn't a change.
             changed += any(n for key, n in counts.items()
-                           if key not in ("skipped", "orders_refused"))
+                           if key not in ("skipped", "orders_refused", "titles_kept",
+                                          "equations_kept"))
             copies.append((target, name, destination))
         say("%s: %d deck(s) written, %d of them changed: %d picture(s) and object(s) given alt "
             "text and %d marked decorative, %d header row(s) and %d header column(s) marked, "
@@ -560,10 +586,14 @@ def run(base, decks, targets, paths, reports, language=None, alt_max_chars=120,
             say("%s: %d bare link(s) given a ScreenTip and %d a replacement, as %s says." % (
                 target.name, totals["links"], totals["replaced"],
                 os.path.basename(paths.get("bare_links") or "bare-links.csv")))
-        if totals["equations_repaired"]:
+        if totals["equations_repaired"] or totals["equations_kept"]:
             say("%s: %d equation(s) given the characters they mean, %d character(s) in all "
-                "(math.repair_equations)." % (target.name, totals["equations_repaired"],
-                                              totals["equation_characters"]))
+                "(math.repair_equations)%s." % (
+                    target.name, totals["equations_repaired"], totals["equation_characters"],
+                    "; %d kept as they were, as %s says" % (
+                        totals["equations_kept"],
+                        os.path.basename(paths.get("math_keep") or "math-keep.csv"))
+                    if totals["equations_kept"] else ""))
         if totals["retitled"]:
             say("%s: %d slide(s) given the title %s gives in place of one another slide has." % (
                 target.name, totals["retitled"],
@@ -584,6 +614,18 @@ def run(base, decks, targets, paths, reports, language=None, alt_max_chars=120,
             say("WARNING: %s: %d decision(s) not written, for shapes whose id their slide "
                 "repeats, which PowerPoint repairs when it opens and saves the deck."
                 % (target.name, totals["skipped"]))
+    if reports.get("math_repaired"):
+        report(reports["math_repaired"], MATH_COLUMNS, list(math_rows), "math repair(s)", None,
+               say, "Each is an equation's characters repaired, Before and After written out "
+               "in one line, much as PowerPoint's linear format writes an equation; "
+               "math.repair_equations turns them off.")
+    if paths.get("math_keep"):
+        # Only a run that repairs equations can keep one.
+        off = () if repairing else ("math.repair_equations",)
+        for line in sidecars.keep_warning(os.path.basename(paths["math_keep"]),
+                                          [row for row in keep if row not in kept],
+                                          "these decks", off + ("math.from_text",)):
+            say(line)
     if copies and reports.get("output_check"):
         failed += check_copies(copies, reports["output_check"], tables, alt_max_chars,
                                alt_placeholders, say, orders, links, restricted)

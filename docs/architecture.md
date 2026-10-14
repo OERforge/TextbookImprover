@@ -69,7 +69,7 @@ on another `bin/` script.
 | `lib/revealtarget.py` | A deck's reveal.js presentation: Pandoc's writer run with the deck's shape and footnotes on their slides, and what it wrote put right (reveal.js loaded from a copy beside it, `src` for each picture, loaded with the page, a viewport that zooms, headings at the page's levels, a section's slides in one row, reveal.js's own scroll view off), and the copy of reveal.js 6 from `REVEALJS_DIR`. |
 | `lib/decks.py` | A deck written in Markdown: its slide level, recorded once, one-item lists read as values, its untitled slides, and its PDF through ltx-talk, its headings renumbered as LaTeX's sections and the LaTeX the beamer writer gives put right where ltx-talk reads it differently. |
 | `lib/deckrun.py` | A slides run, for `convert.py`: each deck checked, its reports written, its copies written and checked. |
-| `lib/sidecars.py` | What a sidecar's values mean, read alike by every part that reads them: the decorative marker. |
+| `lib/sidecars.py` | What a sidecar's values mean, read alike by every part that reads them: the decorative marker, and `math-keep.csv`'s rows and what a run says of one that kept nothing. |
 | `lib/names.py` | The one rule for a safe file name, shared with `safe-media.lua`. |
 | `lib/alttext.py` | Alt text that says nothing about its image, by one set of rules for a deck's pictures, a book's images, the output check, and the audit: a file name, a word such as "image", a camera's name for a file, a description Office generated, a web page's title, and the project's own patterns. |
 | `lib/highlighting.py` | The option that gives each Pandoc writer `highlighting.theme`, for every target that highlights code. |

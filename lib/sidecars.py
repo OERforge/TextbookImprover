@@ -25,6 +25,8 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
+import csv
+import os
 import re
 
 # Accepted spellings of the decorative marker, matched case-insensitively
@@ -49,3 +51,39 @@ def is_address(value):
     figures-and-tables.lua's web_scheme tells: a scheme it names, then ://."""
     match = re.match(r"([A-Za-z][A-Za-z0-9+.-]*)://", (value or "").strip())
     return bool(match) and match.group(1).lower() in ADDRESS_SCHEMES
+
+
+# The setting that makes each kind of math-repaired.csv's rows, and so
+# each kind of math-keep.csv's.
+MATH_SETTINGS = {"equation": "math.repair_equations", "expression": "math.from_text",
+                 "symbol": "math.from_text"}
+
+
+def math_keep_rows(path):
+    """The keep sidecar's rows, (kind, page, before), each once: math a run
+    would repair, kept as it was (math-keep.csv, its rows copied from
+    math-repaired.csv)."""
+    rows = []
+    if path and os.path.exists(path):
+        with open(path, encoding="utf-8-sig", newline="") as fh:
+            for n, row in enumerate(csv.reader(fh)):
+                if n == 0 and row and row[0].strip().lower() == "kind":
+                    continue
+                if len(row) >= 3 and row[2]:
+                    rows.append((row[0], row[1], row[2]))
+    return list(dict.fromkeys(rows))
+
+
+def keep_warning(name, stale, where="the book", off=()):
+    """What a run says of the keep sidecar's rows that kept nothing: the
+    math they name isn't in the book, or the decks, as written there, or
+    the repairs wouldn't change it. A row of a kind only a setting the run
+    has off makes (off: those settings, MATH_SETTINGS) couldn't keep
+    anything, and isn't said."""
+    stale = [row for row in stale if MATH_SETTINGS.get(row[0]) not in off]
+    if not stale:
+        return []
+    return (["WARNING: %d row(s) of %s kept nothing in this run; the math they name isn't in "
+             "%s as written there, or the repairs wouldn't change it:"
+             % (len(stale), name, where)]
+            + ["  %s,%s,%s" % tuple(row) for row in stale[:10]])

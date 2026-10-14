@@ -33,7 +33,9 @@ docxremediate.py does for Word:
   docxremediate.py repairs a Word file's, since PowerPoint's equations are
   the same Office math, except that a bar written as an upper limit stays
   one, a macron in place of an en dash: NVDA reads a deck's equations by
-  their characters, and the limit's macron was the only bar it read;
+  their characters, and the limit's macron was the only bar it read; an
+  equation a row of math-keep.csv names, by the line it's written out in
+  (equation_text), stays as it was;
 - the language, on text that declares none, when the project declares one;
 - the title in the file's core properties, when they have none;
 - another font in place of one a license restricts, or one named for
@@ -77,6 +79,7 @@ import posixpath
 import re
 import shutil
 import tempfile
+import xml.etree.ElementTree as ET
 import zipfile
 from collections import Counter
 
@@ -501,6 +504,161 @@ TEXT = re.compile(r"(<a:t(?:\s[^>]*)?>)([^<]*)(</a:t>)")
 # A Word equation is an m:oMath with nothing on its tag; PowerPoint's can
 # declare its namespace there.
 OMATH = r"<m:oMath\b[^>]*>(?:(?!</m:oMath>).)*</m:oMath>"
+MATH_NS = "{http://schemas.openxmlformats.org/officeDocument/2006/math}"
+# What an equation's prefixes can be bound to, declared around it for
+# reading it alone: PowerPoint's runs hold DrawingML properties.
+EQUATION_ROOT = ('<root xmlns:m="http://schemas.openxmlformats.org/officeDocument/2006/math" '
+                 'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" '
+                 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" '
+                 'xmlns:a14="http://schemas.microsoft.com/office/drawing/2010/main" '
+                 'xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006">'
+                 '%s</root>')
+# The marks UnicodeMath writes a structure's parts with.
+SCRIPTS = {"sSub": (("e", ""), ("sub", "_")), "sSup": (("e", ""), ("sup", "^")),
+           "sSubSup": (("e", ""), ("sub", "_"), ("sup", "^")),
+           "sPre": (("sub", "_"), ("sup", "^"), ("e", "")),
+           "limUpp": (("e", ""), ("lim", "\u2534")), "limLow": (("e", ""), ("lim", "\u252c"))}
+# One piece: a character with any marks combined with it, or a number.
+ATOM = re.compile(r".[\u0300-\u036f\u20d0-\u20ff]*|\d+(?:[.,]\d+)*", re.S)
+
+
+def equation_text(omml):
+    """An equation written out in one line, as math-repaired.csv shows a
+    deck's and math-keep.csv names one, where a book's show Pandoc's TeX:
+    a slides run reads a deck without Pandoc. The line is near the linear
+    format PowerPoint shows an equation in when it's switched to Linear
+    (UnicodeMath): its characters as they are, so a repaired one shows,
+    with a fraction's slash, a script's _ or ^, a root's sign, an
+    accent's character after what it's over, and parentheses round a part
+    of more than one piece. One that can't be read as XML alone is its
+    characters in order."""
+    try:
+        root = ET.fromstring(EQUATION_ROOT % omml)
+    except ET.ParseError:
+        return _equation_characters(omml)
+    return "".join(_linear(el) for el in root)
+
+
+def _math_tag(el):
+    return el.tag[len(MATH_NS):] if el.tag.startswith(MATH_NS) else ""
+
+
+def _math_property(el, prop, name, default):
+    """m:val of a structure's property, as m:<prop>/m:<name> gives it, or
+    default."""
+    holder = el.find(MATH_NS + prop)
+    found = holder.find(MATH_NS + name) if holder is not None else None
+    if found is None:
+        return default
+    return found.get(MATH_NS + "val", default)
+
+
+def _math_flag(el, prop, name):
+    """Whether a structure's on/off property is on: there, with an m:val
+    that isn't 0 or off, or none."""
+    holder = el.find(MATH_NS + prop)
+    found = holder.find(MATH_NS + name) if holder is not None else None
+    return found is not None and found.get(MATH_NS + "val", "on") not in ("0", "off", "false")
+
+
+def _math_part(el, name):
+    """A structure's part (m:e, m:num, ...) written out, "" when it has
+    none."""
+    part = el.find(MATH_NS + name)
+    return "".join(_linear(kid) for kid in part) if part is not None else ""
+
+
+def _math_operand(el, name):
+    """A part as an operand: in parentheses when it's more than one piece
+    and doesn't bring its own (a delimiter's)."""
+    part = el.find(MATH_NS + name)
+    text = _math_part(el, name)
+    kids = [k for k in part if not _math_tag(k).endswith("Pr")] if part is not None else []
+    if not text or ATOM.fullmatch(text) or (len(kids) == 1 and _math_tag(kids[0]) == "d"):
+        return text
+    return "(" + text + ")"
+
+
+def _linear(el):
+    """An element of an equation written out, as equation_text() writes
+    the whole: a run's text, and any other element's what's in it, so a
+    structure's properties, and a run's, give nothing."""
+    tag = _math_tag(el)
+    if tag == "t":
+        return el.text or ""
+    if tag == "f":
+        bar = "\u00a6" if _math_property(el, "fPr", "type", "bar") == "noBar" else "/"
+        return _math_operand(el, "num") + bar + _math_operand(el, "den")
+    if tag in SCRIPTS:
+        out = ""
+        for name, mark in SCRIPTS[tag]:
+            operand = _math_operand(el, name)
+            out += mark + operand if operand else ""
+        return out
+    if tag == "func":
+        return _math_part(el, "fName") + _math_operand(el, "e")
+    if tag == "rad":
+        degree = _math_part(el, "deg")
+        hidden = _math_flag(el, "radPr", "degHide")
+        sign = "\u221a" if hidden or not degree else {"3": "\u221b", "4": "\u221c"}.get(degree)
+        if sign is None:
+            return "\u221a(" + degree + "&" + _math_part(el, "e") + ")"
+        return sign + _math_operand(el, "e")
+    if tag == "d":
+        separator = _math_property(el, "dPr", "sepChr", "|")
+        return (_math_property(el, "dPr", "begChr", "(")
+                + separator.join("".join(_linear(k) for k in e) for e in el.findall(MATH_NS + "e"))
+                + _math_property(el, "dPr", "endChr", ")"))
+    if tag == "nary":
+        out = _math_property(el, "naryPr", "chr", "\u222b")
+        for name, mark in (("sub", "_"), ("sup", "^")):
+            operand = _math_operand(el, name)
+            out += mark + operand if operand else ""
+        return out + "\u2592" + _math_operand(el, "e")
+    if tag == "acc":
+        return _math_operand(el, "e") + _math_property(el, "accPr", "chr", "\u0302")
+    if tag == "bar":
+        top = _math_property(el, "barPr", "pos", "bot") == "top"
+        return ("\u00af" if top else "\u2581") + _math_operand(el, "e")
+    if tag == "groupChr":
+        return _math_property(el, "groupChrPr", "chr", "\u23df") + _math_operand(el, "e")
+    if tag == "eqArr":
+        return "\u2588(" + "@".join("".join(_linear(k) for k in e)
+                                   for e in el.findall(MATH_NS + "e")) + ")"
+    if tag == "m":
+        return "\u25a0(" + "@".join(
+            "&".join("".join(_linear(k) for k in e) for e in row.findall(MATH_NS + "e"))
+            for row in el.findall(MATH_NS + "mr")) + ")"
+    return "".join(_linear(kid) for kid in el)
+
+
+EQUATION_PIECE = re.compile(r"<m:t(?:\s[^>]*)?>([^<]*)</m:t>|<(/?)m:acc>|<m:e>"
+                            r"|<m:chr\s+m:val\s*=\s*\"([^\"]*)\"")
+
+
+def _equation_characters(omml):
+    """An equation's characters in order, for one that isn't XML alone:
+    each run's text, an accent's character after what it's over (U+0302
+    where it names none, as Office takes it), and another structure's
+    character where it stands."""
+    out, accents = [], []    # each accent: [its character, before its base]
+    for m in EQUATION_PIECE.finditer(omml):
+        text, closing, character = m.group(1), m.group(2), m.group(3)
+        if text is not None:
+            out.append(text)
+        elif closing == "":
+            accents.append(["\u0302", True])
+        elif closing == "/":
+            if accents:
+                out.append(accents.pop()[0])
+        elif character is None:            # <m:e>: an accent's base begins
+            if accents:
+                accents[-1][1] = False
+        elif accents and accents[-1][1]:
+            accents[-1][0] = character
+        else:
+            out.append(character)
+    return html.unescape("".join(out))
 
 
 def _attr_value(attrs, name):
@@ -811,7 +969,8 @@ def repair_part(xml):
 
 def remediate(source, destination, alts=None, tables=None, titles=None, language=None,
               core_title=True, deck=None, orders=None, problems=None, links=None,
-              equations=False, fonts=None, replaced=None):
+              equations=False, fonts=None, replaced=None, keep_equations=(),
+              repairs=None):
     """Write source's decisions into destination; counts of what was
     written. alts, tables, titles, orders, links as alt_rows(),
     header_rows(), title_rows(), order_rows(), and link_rows() read them;
@@ -827,7 +986,10 @@ def remediate(source, destination, alts=None, tables=None, titles=None, language
     license that lets it be edited}, for the fonts to replace where the
     deck uses or embeds them; replaced, a list, is told (typeface, the font in
     its place, the elements changed, whether the deck embedded it) for
-    each one replaced."""
+    each one replaced. keep_equations: equations to leave as they are,
+    each as equation_text() writes it out, where equations would change
+    them; repairs, a list, is told (before, after), so written, for each
+    equation repaired, and (before, None) for each kept."""
     alts, tables, titles, orders = alts or {}, tables or {}, titles or {}, orders or {}
     links = links or {}
     deck = deck or deck_name(source)
@@ -839,6 +1001,7 @@ def remediate(source, destination, alts=None, tables=None, titles=None, language
               "titles": 0, "titles_in_place": 0, "language": 0, "core_title": 0, "repaired": 0,
               "skipped": 0, "orders": 0, "orders_refused": 0, "retitled": 0, "titles_kept": 0,
               "links": 0, "replaced": 0, "equations_repaired": 0, "equation_characters": 0,
+              "equations_kept": 0,
               "fonts_replaced": 0, "fonts_unembedded": 0}
     # A titled slide's row replaces its title only when another slide in
     # the deck has it too: a title the author gave since stands.
@@ -915,8 +1078,22 @@ def remediate(source, destination, alts=None, tables=None, titles=None, language
                     counts["links"] += n_titles
                     counts["replaced"] += n_replaced
         if slide is not None and equations:
-            xml, found = docxremediate.remediate_equations(text_of(part), pattern=OMATH,
+            # An equation math-keep.csv names is kept only where it would
+            # change, as a book's is: a row naming one that needs nothing
+            # keeps nothing.
+            old_xml = text_of(part)
+            xml, found = docxremediate.remediate_equations(old_xml, pattern=OMATH,
                                                            macron_bars=True)
+            pairs = list(zip(re.findall(OMATH, old_xml, re.S), re.findall(OMATH, xml, re.S)))
+            skip = {n for n, (old, new) in enumerate(pairs)
+                    if old != new and equation_text(old) in keep_equations}
+            if skip:
+                xml, found = docxremediate.remediate_equations(old_xml, skip=skip, pattern=OMATH,
+                                                               macron_bars=True)
+            counts["equations_kept"] += len(skip)
+            if repairs is not None:
+                repairs += [(equation_text(old), None if n in skip else equation_text(new))
+                            for n, (old, new) in enumerate(pairs) if old != new]
             if found["equations_repaired"]:
                 texts[part] = xml
                 for key, n in found.items():

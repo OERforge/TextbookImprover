@@ -2593,6 +2593,152 @@ def case_links(work):
         and "pptx-link-bare-url" not in left, (said, left)
 
 
+# A fraction with an en dash and the micro sign in it, a root that needs
+# nothing, and the increment sign, which looks like Delta.
+Z_OMML = ('<m:r><m:t>z=</m:t></m:r><m:f><m:num><m:r><m:t>x–µ</m:t></m:r></m:num><m:den><m:r>'
+          '<m:t>σ</m:t></m:r></m:den></m:f>')
+ROOT_OMML = ('<m:r><m:t>σ=</m:t></m:r><m:rad><m:radPr><m:degHide m:val="1"/></m:radPr><m:deg/>'
+             '<m:e><m:r><m:t>npq</m:t></m:r></m:e></m:rad>')
+DELTA_OMML = '<m:r><m:t>∆x=2</m:t></m:r>'
+
+
+def omml(body):
+    return ('<m:oMath xmlns:m="http://schemas.openxmlformats.org/officeDocument/2006/math">%s'
+            '</m:oMath>' % body)
+
+
+def mr(text):
+    return '<m:r><a:rPr lang="en-US" i="1"/><m:t>%s</m:t></m:r>' % text
+
+
+def case_math_keep(work):
+    """math-keep.csv for decks: an equation named by the line it's written
+    out in, as math-repaired.csv shows it, kept as it was."""
+    written = {
+        "a fraction, its parts in parentheses": (
+            '<m:f><m:fPr><m:ctrlPr/></m:fPr><m:num>%s</m:num><m:den>%s</m:den></m:f>'
+            % (mr("a+b"), mr("2")), "(a+b)/2"),
+        "scripts": ('<m:sSubSup><m:e>%s</m:e><m:sub>%s</m:sub><m:sup>%s</m:sup></m:sSubSup>'
+                    % (mr("x"), mr("i"), mr("2")), "x_i^2"),
+        "a root, its degree hidden": (ROOT_OMML, "σ=√(npq)"),
+        "a cube root": ('<m:rad><m:deg>%s</m:deg><m:e>%s</m:e></m:rad>' % (mr("3"), mr("x")),
+                        "∛x"),
+        "another root": ('<m:rad><m:deg>%s</m:deg><m:e>%s</m:e></m:rad>' % (mr("n"), mr("x")),
+                         "√(n&x)"),
+        "a root whose degree is hidden, though it has one": (
+            '<m:rad><m:radPr><m:degHide/></m:radPr><m:deg>%s</m:deg><m:e>%s</m:e>'
+            '</m:rad>' % (mr("3"), mr("x")), "√x"),
+        "a sum": ('<m:nary><m:naryPr><m:chr m:val="∑"/></m:naryPr><m:sub>%s</m:sub><m:sup>%s'
+                  '</m:sup><m:e>%s</m:e></m:nary>' % (mr("i=1"), mr("n"), mr("x")), "∑_(i=1)^n▒x"),
+        "an accent, Office's circumflex where it names none": (
+            '<m:acc><m:accPr/><m:e>%s</m:e></m:acc>' % mr("y"), "y" + chr(0x302)),
+        "delimiters, their own parentheses kept": (
+            '<m:sSup><m:e><m:d><m:dPr><m:ctrlPr/></m:dPr><m:e>%s</m:e></m:d></m:e><m:sup>%s'
+            '</m:sup></m:sSup>' % (mr("a+b"), mr("2")), "(a+b)^2"),
+        "a delimiter's separator": (
+            '<m:d><m:dPr><m:sepChr m:val=","/></m:dPr><m:e>%s</m:e><m:e>%s</m:e></m:d>'
+            % (mr("a"), mr("b")), "(a,b)"),
+        "a function": ('<m:func><m:fName>%s</m:fName><m:e>%s</m:e></m:func>'
+                       % (mr("log"), mr("2x")), "log(2x)"),
+        "a bar over": ('<m:bar><m:barPr><m:pos m:val="top"/></m:barPr><m:e>%s</m:e></m:bar>'
+                       % mr("x"), "¯x"),
+        "a matrix": ('<m:m><m:mr><m:e>%s</m:e><m:e>%s</m:e></m:mr><m:mr><m:e>%s</m:e><m:e>%s'
+                     '</m:e></m:mr></m:m>' % (mr("a"), mr("b"), mr("c"), mr("d")), "■(a&b@c&d)"),
+        "limits": (BAR_OMML, "x┴¯–µy┴–"),
+        "one that isn't XML alone": ('<m:r><x:rPr/><m:t>q</m:t></m:r>', "q"),
+    }
+    for name, (body, line) in written.items():
+        got = rem.equation_text(omml(body))
+        yield "an equation written out in one line: %s" % name, got == line, (got, line)
+    folder = os.path.join(work, "decks")
+    os.makedirs(folder)
+    deck(os.path.join(folder, "maths.pptx"), [
+        {"shapes": [title(2, "Means"), equation(4, BAR_OMML)]},
+        {"shapes": [title(2, "Scores"), equation(4, Z_OMML)]},
+        {"shapes": [title(2, "Spread"), equation(4, ROOT_OMML)]},
+        {"shapes": [title(2, "Change"), equation(4, DELTA_OMML)]}])
+    deck(os.path.join(folder, "other.pptx"),
+         [{"shapes": [title(2, "Scores"), equation(4, Z_OMML)]}])
+    reports = {k: os.path.join(folder, v) for k, v in (
+        ("image_alt_missing", "a.csv"), ("table_headers_new", "t.csv"),
+        ("slide_titles_new", "s.csv"), ("slides_check", "check.csv"),
+        ("output_check", "output-check.csv"), ("math_repaired", "math-repaired.csv"))}
+    paths = {k: os.path.join(folder, v) for k, v in (
+        ("image_alt", "image-alt.csv"), ("table_headers", "table-headers.csv"),
+        ("slide_titles", "slide-titles.csv"), ("math_keep", "math-keep.csv"))}
+
+    def target(on=True):
+        return type("Target", (), {"format": "source", "name": "fixed",
+                                   "output_dir": os.path.join(folder, "fixed"),
+                                   "__getitem__": lambda self, key:
+                                   on and key == "math.repair_equations"})()
+
+    def run(on=True):
+        said = []
+        code = deckrun.run(folder, ["maths.pptx", "other.pptx"], [target(on)], paths, reports,
+                           say=said.append)
+        return code, said
+    code, said = run()
+    first = rows_of(reports["math_repaired"])
+    yield "a run's math repairs are a report, a book's columns, each equation written out " \
+        "in one line, once a deck", code == 0 and first == [
+            ["equation", "maths", "x┴¯–µy┴–", "x┴¯−μy┴¯"],
+            ["equation", "maths", "z=(x–µ)/σ", "z=(x−μ)/σ"],
+            ["equation", "maths", "∆x=2", "Δx=2"],
+            ["equation", "other", "z=(x–µ)/σ", "z=(x−μ)/σ"]] \
+        and "Wrote %s (4 math repair(s))." % reports["math_repaired"] in said \
+        and not any("Fill in the second column" in s and "math" in s for s in said), (first, said)
+    with open(paths["math_keep"], "w", encoding="utf-8", newline="") as fh:
+        csv.writer(fh).writerows([["Kind", "Page", "Before", "After"],
+                                  ["equation", "maths", "z=(x–µ)/σ", "z=(x−μ)/σ"],
+                                  ["equation", "maths", "x┴¯–µy┴–", "x┴¯−μy┴¯"],
+                                  ["equation", "", "x┴¯–µy┴–", ""],
+                                  ["equation", "", "∆x=2"],
+                                  ["equation", "", "σ=√(npq)"],
+                                  ["equation", "gone", "q"],
+                                  ["expression", "", "z=(x–µ)/σ"]])
+    # A row for a slide with its own title, which no other slide has, is
+    # left as it was, as the kept equations are: neither is a change.
+    spread = rem.slide_key("maths", pptxparse.read(os.path.join(folder, "maths.pptx")).slides[2])
+    with open(paths["slide_titles"], "w", encoding="utf-8", newline="") as fh:
+        csv.writer(fh).writerows([deckrun.TITLE_COLUMNS, [spread, "Another title"]])
+    code, said = run()
+    maths, other = (os.path.join(folder, "fixed", n) for n in ("maths.pptx", "other.pptx"))
+    source = os.path.join(folder, "maths.pptx")
+    yield "a row copied from the report keeps its equation as it was, in the deck it names, " \
+        "or in every deck with a blank Page", code == 0 \
+        and all(read_part(maths, "ppt/slides/slide%d.xml" % n)
+                == read_part(source, "ppt/slides/slide%d.xml" % n) for n in (1, 2, 3, 4)) \
+        and "<m:t>x−μ</m:t>" in read_part(other, "ppt/slides/slide1.xml") \
+        and rows_of(reports["math_repaired"]) == [["equation", "other", "z=(x–µ)/σ",
+                                                    "z=(x−μ)/σ"]], rows_of(reports["math_repaired"])
+    yield "the run says so, and a deck whose only change was kept isn't counted changed", \
+        "fixed: 1 equation(s) given the characters they mean, 2 character(s) in all " \
+        "(math.repair_equations); 3 kept as they were, as math-keep.csv says." in said \
+        and any(s.startswith("fixed: 2 deck(s) written, 1 of them changed:") for s in said), said
+    yield "a row that keeps nothing is warned about, one naming an equation that needs " \
+        "nothing too, and a blank Page's where the deck's own row kept it, as a page's does " \
+        "a book's; not one of a kind decks don't have, which keeps nothing in them", \
+        "WARNING: 3 row(s) of math-keep.csv kept nothing in this run; the math they name " \
+        "isn't in these decks as written there, or the repairs wouldn't change it:" in said \
+        and "  equation,,x┴¯–µy┴–" in said and "  equation,,σ=√(npq)" in said \
+        and "  equation,gone,q" in said and not any("expression" in s for s in said), said
+    with open(paths["math_keep"], "a", encoding="utf-8", newline="") as fh:
+        csv.writer(fh).writerow(["equation", "other", "z=(x–µ)/σ"])
+    code, said = run()
+    yield "with every equation kept, the run says so, and the report is gone", code == 0 \
+        and "fixed: 0 equation(s) given the characters they mean, 0 character(s) in all " \
+        "(math.repair_equations); 4 kept as they were, as math-keep.csv says." in said \
+        and not os.path.exists(reports["math_repaired"]), said
+    code, said = run(on=False)
+    yield "with math.repair_equations off, nothing repaired, the report gone, and no row " \
+        "warned about, since none could keep anything", code == 0 \
+        and not os.path.exists(reports["math_repaired"]) \
+        and read_part(other, "ppt/slides/slide1.xml") == read_part(
+            os.path.join(folder, "other.pptx"), "ppt/slides/slide1.xml") \
+        and not any("kept nothing" in s for s in said), said
+
+
 # ---------------------------------------------------------------------------
 # pictures cropped differently, alt text copied from the web, and the
 # file's lists of fonts and slide titles
@@ -3251,6 +3397,7 @@ CASES = [("reading a deck", case_parse), ("the checks", case_check),
          ("a heading made a slide's title", case_set_title),
          ("fonts a license restricts", case_fonts),
          ("links and equations", case_links),
+         ("math kept as it was", case_math_keep),
          ("pictures cropped differently", case_crops),
          ("alt text copied from a web page", case_web_titles),
          ("the file's lists of fonts and titles", case_app_properties),

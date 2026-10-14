@@ -16,6 +16,7 @@ The checks are the class of defect that has reached this project's output before
 |---|---|
 | `link-to-missing-file` | A link names a page or file that isn't in the set being checked. |
 | `link-to-missing-fragment` | A link's `#fragment` matches no `id` in the page it points at. |
+| `link-label-without-text` | A link whose `aria-label` doesn't contain its visible text, which fails [WCAG 2.5.3](https://www.w3.org/WAI/WCAG21/Understanding/label-in-name.html) (Label in Name): a speech-input user follows a link by saying the words on it. Text used as a symbol, with no letter or digit in it, isn't a visible label to the criterion, so a note's way back, `↩︎` labeled "Back to reference 3", isn't reported. |
 | `image-without-alt` | An `img` has no `alt` attribute, so a screen reader announces the file name. |
 | `image-empty-alt-not-decorative` | `alt=""` without `aria-hidden="true"`: the image was neither described nor declared decorative. In an EPUB this is the usual form of a missing description, since Pandoc's writer gives every image an `alt`. |
 | `image-alt-is-file-name` | The `alt` is the image's file name (`db locked` for `db-locked.png`, as Asciidoctor writes one the author didn't give), or holds a file name or extension. |

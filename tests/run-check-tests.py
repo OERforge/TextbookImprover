@@ -49,7 +49,7 @@ GOOD = """<!DOCTYPE html><html lang="en"><head><title>A page</title></head>
 <th scope="col"><img src="h.png" alt="Height"> <math><mi>h</mi></math></th><th scope="col"><math><mi>q</mi></math> per day</th></tr></table></div>
 <table role="presentation"><tr><th><math><mi>z</mi></math></th><td>layout</td></tr></table>
 <a href="#top">up</a><a href="other.html#there">over</a>
-<a href="https://example.org/#x">out</a><p>A formula <math><mi>x</mi></math>, and one in MathJax's form <span class="math inline">\\(y\\)</span>.</p><p><a href="other.html" aria-label="Read more about cats">Read more</a> <a href="other.html" aria-label="Chart of sales, larger"><img src="c.png" alt="Chart of sales"></a> <a href="other.html">no label</a></p>
+<a href="https://example.org/#x">out</a><p>A formula <math><mi>x</mi></math>, and one in MathJax's form <span class="math inline">\\(y\\)</span>.</p><p><a href="other.html" aria-label="Read more about cats">Read more</a> <a href="other.html" aria-label="Chart of sales, larger"><img src="c.png" alt="Chart of sales"></a> <a href="other.html">no label</a> <a href="other.html" class="footnote-back" aria-label="Back to reference 1">&#x21A9;&#xFE0E;</a></p>
 </body></html>"""
 
 OTHER = """<!DOCTYPE html><html lang="en"><head><title>Other</title></head>
@@ -67,6 +67,7 @@ BAD = """<!DOCTYPE html><html><head><title></title></head>
 <tr><th scope="row"><math><mi>r</mi></math><th scope="row">Rate</th></tr></table></div>
 <a href="#nowhere">x</a><a href="gone.html">y</a><a href="other.html#no">z</a>
 <a href="other.html" aria-label="DOI for Klein and Stern 2005">https://doi.org/10/b8xx35</a>
+<a href="other.html" aria-label="Note two">2</a>
 <p><span class="math inline">$x_{2}\\text{\\cdot}x_{n}$</span></p>
 </body></html>"""
 
@@ -80,6 +81,12 @@ NESTED = """<html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><title>N<
 xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mi>y</mi><annotation
 encoding="application/x-tex">y</annotation></semantics></math></th></tr></table></td></tr></table>
 <table role="presentation"><tr><th><math xmlns="http://www.w3.org/1998/Math/MathML"><mi>z</mi></math></th></tr></table>
+</body></html>"""
+
+# A link in an EPUB document whose words are a picture's and the text
+# after it, some in an element inside another.
+LABELED = """<html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><title>L</title></head>
+<body><p><a href="x.xhtml" aria-label="Sales"><img src="c.png" alt="Chart"/> of <span><em>sales</em></span></a></p>
 </body></html>"""
 
 # The formula Pandoc couldn't convert, on a page whose script may render it.
@@ -155,7 +162,7 @@ def main():
                  "image-empty-alt-not-decorative",
                  "image-alt-is-file-name", "image-alt-is-file-name",
                  "image-alt-placeholder", "image-alt-auto-generated", "image-alt-page-title",
-                 "link-label-without-text",
+                 "link-label-without-text", "link-label-without-text",
                  "table-without-headers-or-caption",
                  "table-not-in-scroll-region",
                  "link-to-missing-fragment", "link-to-missing-file",
@@ -177,6 +184,17 @@ def main():
             ("in XHTML too, each header its own table's",
              lambda: outputcheck.read_xhtml("n.xhtml", NESTED).formula_headers
              == [(2, "y")]),
+            ("and a link's text is read as it's shown, a picture's alt text in its place",
+             lambda: outputcheck.read_xhtml("l.xhtml", LABELED).labeled_links
+             == [("Sales", "Chart of sales")]),
+            # WCAG 2.5.3, where W3C's Understanding document says text used
+            # as a symbol isn't a visible label: the good page's note has a
+            # way back, a symbol named "Back to reference 1".
+            ("a link whose label leaves out its text is named, when the text is words or a "
+             "number, not a symbol",
+             lambda: [f.detail for f in bad if f.check == "link-label-without-text"]
+             == ["'https://doi.org/10/b8xx35' named 'DOI for Klein and Stern 2005'",
+                 "'2' named 'Note two'"]),
             ("a formula shown as TeX is named by its TeX",
              lambda: any(f.check == "formula-shown-as-tex"
                          and f.detail == "$x_{2}\\text{\\cdot}x_{n}$" for f in bad)),
@@ -217,6 +235,10 @@ def main():
                         data = data.replace(b"</h1>", b'</h1><table><tr><th><math '
                                             b'xmlns="http://www.w3.org/1998/Math/MathML">'
                                             b'<mi>x</mi></math></th></tr></table>', 1)
+                        data = data.replace(b"</body>", b'<p><a href="ch002.xhtml" aria-label='
+                                            b'"Chapter two">2</a> <a href="ch002.xhtml" '
+                                            b'aria-label="Back to reference 1">&#x21A9;&#xFE0E;'
+                                            b'</a></p></body>')
                     dst.writestr(info, data)
             damaged = outputcheck.check_epub(broken)
             cases += [
@@ -230,6 +252,9 @@ def main():
                 ("and a header cell holding only a formula",
                  lambda: [f.detail for f in damaged if f.check == "table-header-is-formula"]
                  == ["table 1"]),
+                ("and a link whose label leaves out its text, not one whose text is a symbol",
+                 lambda: [f.detail for f in damaged if f.check == "link-label-without-text"]
+                 == ["'2' named 'Chapter two'"]),
                 ("the EPUB's own structure is read: manifest, spine, nav",
                  lambda: not any(c.startswith(("manifest", "spine", "no-nav",
                                                "file-not", "mimetype"))

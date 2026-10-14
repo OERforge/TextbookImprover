@@ -38,6 +38,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+import unicodedata
 import xml.etree.ElementTree as ET
 import zipfile
 from html.parser import HTMLParser
@@ -310,6 +311,19 @@ def read_html(name, markup):
     return page
 
 
+def shown(element):
+    """An element's text as it reads on screen, each image's alt text in
+    its place, as the HTML collector gathers a link's."""
+    parts = [element.text or ""]
+    for child in element:
+        if child.tag.replace(XHTML, "") == "img":
+            parts.append(" " + (child.get("alt") or "") + " ")
+        else:
+            parts.append(shown(child))
+        parts.append(child.tail or "")
+    return "".join(parts)
+
+
 def read_xhtml(name, markup):
     """Strict: an EPUB's content documents must be XML."""
     page = Page(name)
@@ -328,6 +342,8 @@ def read_xhtml(name, markup):
             page.title = " ".join("".join(el.itertext()).split())
         elif tag == "a" and el.get("href") is not None:
             page.links.append(el.get("href"))
+            if el.get("aria-label") is not None:
+                page.labeled_links.append((el.get("aria-label"), " ".join(shown(el).split())))
         elif tag == "span" and el.get("data-file"):
             page.dropped_files.append(el.get("data-file"))
         elif tag == "span" and "math-lost" in (el.get("class") or "").split():
@@ -418,8 +434,12 @@ def check_page(page, findings):
     for label, text in page.labeled_links:
         # WCAG 2.5.3: a speech user says what's on screen, so the name has
         # to contain it. An aria-label replaces the name a link's text
-        # would give it.
-        if text and text.casefold() not in " ".join(label.split()).casefold():
+        # would give it. Text used as a symbol, with no letter or digit in
+        # it (a note's way back, ↩︎), isn't a visible label to the
+        # criterion (W3C's Understanding 2.5.3), and its name says what it
+        # does: notes.py names it "Back to reference 1".
+        if text and any(unicodedata.category(c)[0] in "LN" for c in text) \
+                and text.casefold() not in " ".join(label.split()).casefold():
             findings.append(Finding(where, "link-label-without-text",
                                     f"{text[:60]!r} named {label[:80]!r}"))
     last = 0

@@ -134,7 +134,7 @@ Put that `export` line in `~/.bashrc` (see [below](#optional-the-full-validators
 | The `ltx-talk`, `lua-unicode-math`, and `newcomputermodern` packages | A `pdf` target for decks written in Markdown ([Slides](slides.md#the-pdf)), which also needs LaTeX 2026-06-01 or later; without them, the run says what to install | `tlmgr install ltx-talk lua-unicode-math newcomputermodern` |
 | pdfLaTeX or LuaLaTeX, LaTeX's `preview` package, and `pdftocairo` | A LaTeX source with drawings or PDF images, which become SVG ([LaTeX sources](latex.md)); without them they're left out of the pages | TeX Live (`tlmgr install preview` where it's missing); `sudo apt install poppler-utils` |
 | TeX's `latex-tagging-status` package | A LaTeX source's copy made for tagging, whose class and packages are checked against the tagging project's status list ([LaTeX sources](latex.md#the-source-target)); without it, the run says how to install it and checks nothing | `tlmgr install latex-tagging-status`; MiKTeX installs it on demand |
-| reveal.js 6 | A `revealjs` target for decks written in Markdown ([Slides](slides.md#the-revealjs-presentation)), which also needs Pandoc 3.12 or later; without it, the run says how to get it | its package, unpacked, and `REVEALJS_DIR` set to its folder; see [below](#for-a-revealjs-target-revealjs) |
+| reveal.js 6 | A `revealjs` target for decks written in Markdown ([Slides](slides.md#the-revealjs-presentation)), which also needs Pandoc 3.12 or later | nothing: the repository has a copy, and `REVEALJS_DIR` can name another; see [below](#for-a-revealjs-target-revealjs) |
 | Python's Playwright and its Chromium | Optional, and for the test suites only: twelve of the decks suite's checks try a reveal.js presentation in a browser with them, and skip without them | in a virtual environment; see [below](#optional-for-the-suites-playwright-and-its-chromium) |
 | `zip` | Only if you package with the printed command instead of `--zip` | `sudo apt install zip` |
 
@@ -291,7 +291,9 @@ The run finds it through `VERAPDF` or as `verapdf` on the path. veraPDF chooses 
 
 ## For a revealjs target: reveal.js
 
-A deck's reveal.js presentation loads reveal.js from a copy beside it, which the run takes from the folder `REVEALJS_DIR` names: reveal.js 6, which Pandoc 3.12's template is written for. reveal.js is a set of files ready to use, with nothing to build, and getting it needs no Node.js: its package on the npm registry, unpacked, is the folder.
+Nothing to install. A deck's reveal.js presentation loads reveal.js from a copy beside it, which the run takes from the repository's own copy of reveal.js 6.0.2, in `vendor/reveal.js`: the release the script that makes the presentations readable with a screen reader is written against and tested with. The README there says where it came from and how it's updated.
+
+Another release of reveal.js 6, one with a fix the repository's copy doesn't have yet, say, takes its place when `REVEALJS_DIR` names its folder. That's its package from the npm registry, unpacked, which needs no Node.js (with the release you want in place of 6.0.2):
 
 ```bash
 mkdir -p ~/tools && cd ~/tools
@@ -300,23 +302,17 @@ mkdir -p reveal.js-6.0.2
 tar xzf reveal.js-6.0.2.tgz -C reveal.js-6.0.2 --strip-components=1    # gives ~/tools/reveal.js-6.0.2
 ```
 
-Then tell the run where it is, with this line in `~/.bashrc`, as for the validators ([above](#optional-the-full-validators)):
+and then this line in `~/.bashrc`, as for the validators ([above](#optional-the-full-validators)), or before a run:
 
 ```bash
 export REVEALJS_DIR="$HOME/tools/reveal.js-6.0.2"
 ```
 
-Open a new terminal (or run `source ~/.bashrc`) and check that it names reveal.js:
-
-```bash
-ls "$REVEALJS_DIR/dist/reveal.js" && grep -m1 '"version"' "$REVEALJS_DIR/package.json"
-```
-
-If you have Node.js's `npm` already, `npm install reveal.js@6` in a folder of your own does the same, and `REVEALJS_DIR` is then that folder's `node_modules/reveal.js`. A later 6.x works as well: the run checks the major version, and the files it copies. reveal.js is MIT-licensed, and its license goes with each copy.
+With `npm`, `npm install reveal.js@6` in a folder of your own does the same, `REVEALJS_DIR` then being that folder's `node_modules/reveal.js`. The run checks that it's reveal.js 6, with the files it copies, and notes a release other than the repository's, since the presentations' script relies on reveal.js's workings, which a release can change; unset, the repository's copy is used again. reveal.js is MIT-licensed, and the font its white theme embeds is under the SIL Open Font License: both licenses go with each copy.
 
 ### Optional, for the suites: Playwright and its Chromium
 
-Nothing here needs these but twelve of the decks suite's checks. With `REVEALJS_DIR` set, the suite builds presentations and checks what was written; the twelve then open them in a browser, to see what the presentation does there (focus moving to a slide's title, slides fitted, a narrow window's page), through Python's Playwright and the Chromium it installs. Without them, those twelve skip, saying so, and everything else runs. They're worth installing to work on the presentations themselves, and can otherwise be left out: together they take about 570 MB.
+Nothing here needs these but twelve of the decks suite's checks. The suite builds presentations and checks what was written; the twelve then open them in a browser, to see what the presentation does there (focus moving to a slide's title, slides fitted, a narrow window's page), through Python's Playwright and the Chromium it installs. Without them, those twelve skip, saying so, and everything else runs. They're worth installing to work on the presentations themselves, and can otherwise be left out: together they take about 570 MB.
 
 Ubuntu doesn't package Playwright, and Ubuntu 24.04's Python won't take a package from pip ([above](#requirements)), so it goes in a virtual environment that sees Ubuntu's own packages too (`--system-site-packages`), and the suites run with that environment's Python:
 
@@ -342,7 +338,7 @@ bash tests/run-all.sh
 
 Activating it lasts for that terminal (`deactivate` ends it early). Add `source ~/venv/bin/activate` to `~/.bashrc` to have it in every terminal; the tools run the same in it, since the environment's Python is Ubuntu's, with Playwright added. Playwright supports Ubuntu 22.04 and 24.04 and WSL ([its system requirements](https://playwright.dev/python/docs/intro#system-requirements)); on Ubuntu 22.04, `pip3 install --user playwright` and then `python3 -m playwright install --with-deps --only-shell chromium` work as well, without the environment, as pypdf does there.
 
-When reveal.js or these are missing, the decks suite says what and how to install it, and `run-all.sh` counts what was skipped and lists why at its end: without `REVEALJS_DIR`, both reveal.js cases skip; without Playwright, or with a Chromium that doesn't start, the twelve checks in a browser do, in one line saying how many it stands for.
+When these are missing, the decks suite says what and how to install it, and `run-all.sh` counts what was skipped and lists why at its end: without Playwright, or with a Chromium that doesn't start, the twelve checks in a browser skip, in one line saying how many it stands for.
 
 ## Checking the whole setup
 

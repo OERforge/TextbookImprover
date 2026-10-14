@@ -3399,10 +3399,34 @@ The step at its end.
 
 
 def revealjs_ready():
-    """Why a presentation can't be built here, or None: REVEALJS_DIR is
-    where reveal.js 6 is."""
+    """Why a presentation can't be built here, or None: the repository's
+    copy of reveal.js, or REVEALJS_DIR's, is what it loads."""
     import revealtarget
-    return revealtarget.revealjs_problem(os.environ.get("REVEALJS_DIR", "").strip())
+    return revealtarget.revealjs_problem(revealtarget.revealjs_folder())
+
+
+def vendored_problem(missing):
+    """What the run says of the repository's copy of reveal.js with the
+    file missing taken out of a copy of it."""
+    import revealtarget
+    copy = tempfile.mkdtemp(prefix="vendored-")
+    kept = revealtarget.VENDORED
+    try:
+        shutil.copytree(kept, os.path.join(copy, "reveal.js"))
+        os.remove(os.path.join(copy, "reveal.js", missing))
+        revealtarget.VENDORED = os.path.join(copy, "reveal.js")
+        return revealtarget.revealjs_problem(revealtarget.revealjs_folder({}))
+    finally:
+        revealtarget.VENDORED = kept
+        shutil.rmtree(copy, ignore_errors=True)
+
+
+def vendored_version():
+    """The version vendor/reveal.js/README.md's title gives, and its
+    package.json's."""
+    import revealtarget
+    title = read(os.path.join(revealtarget.VENDORED, "README.md")).split("\n", 1)[0]
+    return title.replace("# reveal.js ", "", 1), revealtarget.revealjs_version(revealtarget.VENDORED)
 
 
 def browser_problem():
@@ -3659,8 +3683,8 @@ def note_steps(page):
 def case_revealjs(work):
     problem = revealjs_ready()
     if problem:
-        print(f"  skip  {problem}")
-        return []
+        return [("a copy of reveal.js to build the presentations with: " + problem,
+                 lambda: False)]
     decks_dir = folder(work, REVEALJS, decks_given={"presented.md": PRESENTED,
                                                     "no-title.md": NO_TITLE_SLIDE})
     png(os.path.join(decks_dir, "img", "big.png"), 200, 120, 40, size=600)
@@ -3686,12 +3710,13 @@ def case_revealjs(work):
         "() => [Reveal.getCurrentSlide().style.top, Reveal.getCurrentSlide().scrollHeight]"))[1],
         late_fonts=True) if tried else {}
     checks = [
-        ("a presentation of each deck, beside a copy of reveal.js and its license and the "
-         "deck's pictures, nothing loaded from elsewhere",
+        ("a presentation of each deck, beside a copy of reveal.js, its license and its "
+         "theme's font's, and the deck's pictures, nothing loaded from elsewhere",
          lambda: result.returncode == 0 and "Wrote 2 presentation(s)" in result.stderr
          and all(os.path.isfile(os.path.join(out, "reveal.js", name)) for name in (
              "dist/reveal.js", "dist/reveal.css", "dist/reset.css", "dist/theme/white.css",
-             "dist/plugin/notes.js", "dist/plugin/search.js", "dist/plugin/zoom.js", "LICENSE"))
+             "dist/plugin/notes.js", "dist/plugin/search.js", "dist/plugin/zoom.js", "LICENSE",
+             "css/theme/fonts/source-sans-pro/LICENSE"))
          and os.path.isfile(os.path.join(out, "img", "chart.png"))
          and "unpkg" not in page and 'href="reveal.js/dist/theme/white.css"' in page),
         ("the deck's language, a viewport a reader can zoom, and every picture's address src, "
@@ -3812,12 +3837,14 @@ def case_revealjs(work):
 
 def case_revealjs_settings(work):
     """slides.notes visible and omitted, slides.aspect_ratio, slides.size and
-    slides.reference_doc said unread, a book's revealjs target, no
-    reveal.js, reveal.js 5, a Pandoc too old, and highlighted code."""
+    slides.reference_doc said unread, a book's revealjs target, the
+    repository's copy of reveal.js and REVEALJS_DIR's in its place, a
+    later release, reveal.js 5, and an empty folder, a Pandoc too old, and
+    highlighted code."""
     problem = revealjs_ready()
     if problem:
-        print(f"  skip  {problem}")
-        return []
+        return [("a copy of reveal.js to build the presentations with: " + problem,
+                 lambda: False)]
     visible_dir = folder(os.path.join(work, "visible"), "defaults:\n  pages:\n    "
                          "split_level: 2\n" + REVEALJS + "    slides:\n      "
                          "notes: visible\n      aspect_ratio: \"4:3\"\n      size: "
@@ -3843,10 +3870,20 @@ def case_revealjs_settings(work):
           "project:\n  identifier: org.example.book\n  title: A Book\n")
     write(os.path.join(book, "conversion.yaml"), REVEALJS + "  pages:\n    format: html\n")
     as_book = convert(book, "--quick")
+    import revealtarget
     plain = folder(os.path.join(work, "plain"), REVEALJS, decks_given={"one.md": UNTITLED})
     unset = convert(plain, "--quick", env=dict(os.environ, REVEALJS_DIR=""))
+    copied = sorted(os.path.relpath(os.path.join(root, name), os.path.join(
+        plain, "present", "reveal.js")) for root, _, names in os.walk(
+        os.path.join(plain, "present", "reveal.js")) for name in names) \
+        if unset.returncode == 0 else []
+    later = os.path.join(work, "reveal-later")
+    shutil.copytree(revealtarget.VENDORED, later)
+    write(os.path.join(later, "package.json"), '{"name": "reveal.js", "version": "6.9.0"}\n')
+    shutil.rmtree(os.path.join(plain, "present"), ignore_errors=True)
+    newer = convert(plain, "--quick", env=dict(os.environ, REVEALJS_DIR=later))
     five = os.path.join(work, "reveal5")
-    shutil.copytree(os.environ["REVEALJS_DIR"], five)
+    shutil.copytree(revealtarget.VENDORED, five)
     write(os.path.join(five, "package.json"), '{"name": "reveal.js", "version": "5.2.1"}\n')
     older = convert(plain, "--quick", env=dict(os.environ, REVEALJS_DIR=five))
     empty = os.path.join(work, "empty")
@@ -3878,17 +3915,38 @@ def case_revealjs_settings(work):
          lambda: as_book.returncode == 0 and "target present is format revealjs, which is "
          "written for decks written in Markdown" in as_book.stderr
          and not os.path.exists(os.path.join(book, "present"))),
-        ("without REVEALJS_DIR the run stops, saying how to install reveal.js",
-         lambda: unset.returncode != 0 and "REVEALJS_DIR, the folder of one, isn't set: "
-         "unpack reveal.js 6's package from the npm registry, or `npm install reveal.js@6`, "
-         "and set REVEALJS_DIR to its folder (see docs/installation.md" in unset.stderr),
-        ("so does a folder that isn't reveal.js, what's missing named",
+        ("without REVEALJS_DIR the repository's copy of reveal.js goes beside the "
+         "presentations, its license and its theme's font's with it, and nothing is noted",
+         lambda: unset.returncode == 0 and "through Pandoc's reveal.js writer and reveal.js "
+         "6.0.2, copied beside them" in unset.stderr and "NOTE: the presentations load"
+         not in unset.stderr
+         and copied == sorted(revealtarget.REVEALJS_FILES) == sorted(
+             os.path.relpath(os.path.join(root, name), revealtarget.VENDORED)
+             for root, _, names in os.walk(revealtarget.VENDORED) for name in names
+             if name not in ("README.md", "package.json"))),
+        ("the repository's copy is reveal.js as its README names it, and one missing a file "
+         "stops the run, saying a checkout has it and REVEALJS_DIR can name another",
+         lambda: vendored_version() == ("6.0.2", "6.0.2")
+         and vendored_problem("dist/plugin/zoom.js") == (
+             "The repository's copy of reveal.js, vendor/reveal.js, is missing "
+             "dist/plugin/zoom.js: a checkout of TextbookImprover has reveal.js 6 there, and "
+             "REVEALJS_DIR can name the folder of another copy (see docs/installation.md).")
+         and vendored_problem("package.json").startswith(
+             "The repository's copy of reveal.js, vendor/reveal.js, is missing package.json:")),
+        ("REVEALJS_DIR's copy takes its place, and a release other than the repository's is "
+         "noted, with the one the presentations' script was written against",
+         lambda: newer.returncode == 0 and "and reveal.js 6.9.0, copied beside them" in newer.stderr
+         and "NOTE: the presentations load REVEALJS_DIR's reveal.js 6.9.0, where the script "
+         "that makes them readable with a screen reader (oer-reveal.js) was written against "
+         "6.0.2, the repository's own copy" in newer.stderr),
+        ("a folder that isn't reveal.js stops the run, what's missing named",
          lambda: nothing.returncode != 0 and f"REVEALJS_DIR is {empty}, which isn't a copy of "
          "reveal.js: it has no dist/reveal.js, dist/reveal.css, dist/reset.css, ..."
-         in nothing.stderr),
+         in nothing.stderr and "Unset, the repository's own copy is used." in nothing.stderr),
         ("reveal.js 5 stops it too, its version named",
          lambda: older.returncode != 0 and "REVEALJS_DIR's reveal.js is 5.2.1, and the "
-         "presentations are written for reveal.js 6" in older.stderr),
+         "presentations are written for reveal.js 6" in older.stderr
+         and "unset, the repository's own copy of reveal.js 6.0.2 is used" in older.stderr),
         ("a Pandoc older than 3.12 is refused, its version named",
          lambda: old.returncode != 0 and "Pandoc 3.11.0 is too old for target present's "
          "presentations; 3.12 or later" in old.stderr),

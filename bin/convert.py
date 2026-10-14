@@ -3993,10 +3993,10 @@ def deck_presentations(target, stems, base, language):
     """Each deck's reveal.js presentation, through Pandoc's reveal.js writer
     and what revealtarget puts right in it (see deck-revealjs.lua and
     revealtarget), a page per deck named as its page is, beside a copy of
-    reveal.js (REVEALJS_DIR's) and the pictures it shows: stems are the
-    decks' pages. Its slides are the shape a deck's PDF's are
-    (slides.aspect_ratio). Returns the pages' paths; a deck Pandoc
-    couldn't write stops the run, once every deck has been tried."""
+    reveal.js (the repository's, or REVEALJS_DIR's) and the pictures it
+    shows: stems are the decks' pages. Its slides are the shape a deck's
+    PDF's are (slides.aspect_ratio). Returns the pages' paths; a deck
+    Pandoc couldn't write stops the run, once every deck has been tried."""
     import concurrent.futures
     import decks as decklib
     import revealtarget
@@ -4006,11 +4006,13 @@ def deck_presentations(target, stems, base, language):
         die(f"Pandoc {version} is too old for target {target.name}'s presentations; "
             + ".".join(map(str, REVEALJS_PANDOC)) + " or later loads reveal.js 6, whose copy "
             "goes beside them.")
-    folder = os.environ.get("REVEALJS_DIR", "").strip()
-    folder = os.path.abspath(os.path.expanduser(folder)) if folder else ""
+    folder = revealtarget.revealjs_folder()
     problem = revealtarget.revealjs_problem(folder)
     if problem:
         die(problem)
+    note = revealtarget.revealjs_note(folder)
+    if note:
+        say(note)
     ratio = str(target["slides.aspect_ratio"] or "auto").strip()
     if ratio != "auto" and not decklib.RATIO.match(ratio):
         die(f"slides.aspect_ratio is {ratio!r} for target {target.name}; it's auto, or a "

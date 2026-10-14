@@ -10,6 +10,8 @@ tests/fixtures/_dot.png
 *.json
 # ... except test fixtures, which are data, not intermediates.
 !tests/fixtures/mathjax/*.json
+# ... and reveal.js's, which names its version (vendor/reveal.js/README.md).
+!vendor/reveal.js/package.json
 *.imscc
 settings.sh
 table-captions.csv

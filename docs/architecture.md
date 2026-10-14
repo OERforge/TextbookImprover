@@ -66,7 +66,7 @@ on another `bin/` script.
 | `lib/pptxremediate.py` | A `source` target on a deck: the sidecars' decisions written into a copy, edited as text, the rest byte for byte. |
 | `lib/pptxorder.py` | A slide's reading order: the shapes at the top of its tree as text spans, which pairs overlap, an order drafted from the layout, and an order written only where it keeps what's drawn over what. |
 | `lib/pptxtarget.py` | A deck's PowerPoint file: the reference document made the deck's shape at PowerPoint's size, its tables a style with enough contrast, Pandoc's writer run, and what it wrote put right: alt text, the decorative mark, unique ids, a table's header column and its caption above it, tables and text fitted to their slides, an incremental list's animation on its shape, bars as a Word file's, display equations set off by space (the space above one after the paragraph above it, which PowerPoint shows), equations' fallbacks, the language, the file's properties, and an SVG beside its PNG. |
-| `lib/revealtarget.py` | A deck's reveal.js presentation: Pandoc's writer run with the deck's shape and footnotes on their slides, and what it wrote put right (reveal.js loaded from a copy beside it, `src` for each picture, loaded with the page, a viewport that zooms, headings at the page's levels, a section's slides in one row, reveal.js's own scroll view off), and the copy of reveal.js 6 from `REVEALJS_DIR`. |
+| `lib/revealtarget.py` | A deck's reveal.js presentation: Pandoc's writer run with the deck's shape and footnotes on their slides, and what it wrote put right (reveal.js loaded from a copy beside it, `src` for each picture, loaded with the page, a viewport that zooms, headings at the page's levels, a section's slides in one row, reveal.js's own scroll view off), and the copy of reveal.js 6 beside it, the repository's or `REVEALJS_DIR`'s. |
 | `lib/decks.py` | A deck written in Markdown: its slide level, recorded once, one-item lists read as values, its untitled slides, and its PDF through ltx-talk, its headings renumbered as LaTeX's sections and the LaTeX the beamer writer gives put right where ltx-talk reads it differently. |
 | `lib/deckrun.py` | A slides run, for `convert.py`: each deck checked, its reports written, its copies written and checked. |
 | `lib/sidecars.py` | What a sidecar's values mean, read alike by every part that reads them: the decorative marker, and `math-keep.csv`'s rows and what a run says of one that kept nothing. |
@@ -102,6 +102,11 @@ on another `bin/` script.
 
 **`schemas/cc11/`** holds the IMS Common Cartridge 1.1 schemas, unmodified
 and redistributed under their own terms. See the README there.
+
+**`vendor/reveal.js/`** holds what a `revealjs` target's presentations load
+of reveal.js 6.0.2, unmodified and redistributed under its MIT license and
+its theme's font's SIL Open Font License. See the README there, which
+says how it's updated.
 
 **`lib/` — shared**
 

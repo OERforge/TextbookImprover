@@ -43,7 +43,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 TEXT = (".md", ".py", ".lua", ".yaml", ".yml", ".sh", ".css", ".txt")
-SKIP_DIRS = ("util/contrib/", "schemas/")
+SKIP_DIRS = ("util/contrib/", "schemas/", "vendor/")
 
 # UK spellings, as word pieces. -ise verbs are listed by stem so that
 # "precise", "otherwise", and "exercise" never match.

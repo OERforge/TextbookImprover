@@ -2,3 +2,7 @@
 *.imscc binary
 *.xsd text eol=lf
 *.sh text eol=lf
+# reveal.js as published, byte for byte (vendor/reveal.js/README.md)
+vendor/reveal.js/** -text
+vendor/reveal.js/dist/** -diff
+vendor/reveal.js/README.md text

@@ -5,13 +5,19 @@ Pandoc's reveal.js writer writes it from the deck's intermediate, after
 deck-revealjs.lua and target-blocks.lua, with Pandoc's own template
 (build); here is what's put right in what it wrote (finish), read in
 Writers/HTML.hs and data/templates/default.revealjs at 3.12.1, and the
-copy of reveal.js it loads (copy_revealjs, from REVEALJS_DIR):
+copy of reveal.js it loads (copy_revealjs, from the repository's own,
+vendor/reveal.js, or REVEALJS_DIR's):
 
 - reveal.js is loaded from a copy beside the presentations, reveal.js 6,
   for which Pandoc 3.12's template is written, where the template loads
   it from unpkg.com with ^6 in each address, which the Nu checker calls
   an illegal character, and which an LMS or a reader offline may not
-  reach. reveal.js is MIT-licensed; its license goes with the copy;
+  reach. The copy is the repository's, 6.0.2, the release oer-reveal.js
+  was written against (vendor/reveal.js/README.md says why and how to
+  update it), or that of the folder REVEALJS_DIR names, for another
+  release of reveal.js 6, which the run notes. reveal.js is MIT-licensed,
+  and the font its white theme embeds is under the SIL Open Font
+  License; both licenses go with the copy;
 - each image's address is src again, where the writer gives reveal.js's
   data-src, for it to load the image when its slide is near: without the
   script there's no picture, and the Nu checker reports each as missing
@@ -83,6 +89,9 @@ import highlighting
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 BIN = os.path.join(os.path.dirname(HERE), "bin")
+# The repository's copy of reveal.js, which the presentations load unless
+# REVEALJS_DIR names another (vendor/reveal.js/README.md).
+VENDORED = os.path.join(os.path.dirname(HERE), "vendor", "reveal.js")
 STYLESHEET = os.path.join(BIN, "oer-reveal.css")
 SCRIPT = os.path.join(BIN, "oer-reveal.js")
 
@@ -93,11 +102,13 @@ REVEALJS_MAJOR = 6
 # (a beamer theme, as often as not): reveal.js's white, its text #222 on
 # white, over which oer-reveal.css sets the rest.
 THEME = "white"
-# What the template loads of reveal.js, and its license, copied beside
-# the presentations under the name the template's revealjs-url gives.
+# What the template loads of reveal.js, its license, and the license of
+# the font the theme embeds, copied beside the presentations under the
+# name the template's revealjs-url gives.
 REVEALJS_FILES = ("dist/reveal.js", "dist/reveal.css", "dist/reset.css",
                   f"dist/theme/{THEME}.css", "dist/plugin/notes.js",
-                  "dist/plugin/search.js", "dist/plugin/zoom.js", "LICENSE")
+                  "dist/plugin/search.js", "dist/plugin/zoom.js", "LICENSE",
+                  "css/theme/fonts/source-sans-pro/LICENSE")
 REVEALJS_URL = "reveal.js"
 # A slide's height, in reveal.js's pixels; its width follows the deck's
 # shape.
@@ -124,28 +135,54 @@ LEVELED = re.compile(r'<h([1-6])(\b[^>]*?)\sdata-oer-level="([1-6])"([^>]*)>(.*?
 LEVEL_ATTRIBUTE = re.compile(r'\sdata-oer-level="[1-6]"')
 
 
+def revealjs_folder(environ=None):
+    """The folder of the reveal.js the presentations load: REVEALJS_DIR's,
+    made absolute, when it's set, else the repository's (VENDORED)."""
+    given = (environ if environ is not None else os.environ).get("REVEALJS_DIR", "").strip()
+    return os.path.abspath(os.path.expanduser(given)) if given else VENDORED
+
+
 def revealjs_problem(folder):
-    """Why folder, REVEALJS_DIR, isn't a copy of reveal.js the
-    presentations can load, or None."""
-    if not folder:
-        return ("A revealjs target's presentations load reveal.js from a copy beside them, and "
-                f"REVEALJS_DIR, the folder of one, isn't set: unpack reveal.js {REVEALJS_MAJOR}'s "
-                f"package from the npm registry, or `npm install reveal.js@{REVEALJS_MAJOR}`, and "
-                "set REVEALJS_DIR to its folder (see docs/installation.md, For a revealjs "
-                "target).")
-    missing = [name for name in REVEALJS_FILES if not os.path.isfile(os.path.join(folder, name))]
+    """Why folder, the repository's copy of reveal.js or REVEALJS_DIR's,
+    isn't one the presentations can load, or None."""
+    missing = [name for name in REVEALJS_FILES + ("package.json",)
+               if not os.path.isfile(os.path.join(folder, name))]
+    if os.path.realpath(folder) == os.path.realpath(VENDORED):
+        version = revealjs_version(folder)
+        if not missing and version.startswith(f"{REVEALJS_MAJOR}."):
+            return None
+        return ("The repository's copy of reveal.js, vendor/reveal.js, is "
+                + ("missing " + ", ".join(missing[:3]) + (", ..." if len(missing) > 3 else "")
+                   if missing else f"reveal.js {version or 'of no version'}")
+                + ": a checkout of TextbookImprover has reveal.js "
+                f"{REVEALJS_MAJOR} there, and REVEALJS_DIR can name the folder of another copy "
+                "(see docs/installation.md).")
     if missing:
         return (f"REVEALJS_DIR is {folder}, which isn't a copy of reveal.js: it has no "
                 + ", ".join(missing[:3]) + (", ..." if len(missing) > 3 else "")
                 + " (the folder reveal.js's package unpacks to, or npm's "
-                "node_modules/reveal.js, holds dist and package.json; see docs/installation.md).")
+                "node_modules/reveal.js, holds dist and package.json; see docs/installation.md). "
+                "Unset, the repository's own copy is used.")
     version = revealjs_version(folder)
     if not version or not version.startswith(f"{REVEALJS_MAJOR}."):
         return (f"REVEALJS_DIR's reveal.js is {version or 'of no version package.json gives'}, and "
                 f"the presentations are written for reveal.js {REVEALJS_MAJOR}, whose plugins "
-                f"Pandoc's template loads: docs/installation.md says how to get reveal.js "
-                f"{REVEALJS_MAJOR}.")
+                f"Pandoc's template loads: unset, the repository's own copy of reveal.js "
+                f"{revealjs_version(VENDORED)} is used (see docs/installation.md).")
     return None
+
+
+def revealjs_note(folder):
+    """A note for a copy of reveal.js other than the release the
+    repository carries, which oer-reveal.js was written against and the
+    suites test, or None."""
+    version, vendored = revealjs_version(folder), revealjs_version(VENDORED)
+    if os.path.realpath(folder) == os.path.realpath(VENDORED) or version == vendored:
+        return None
+    return (f"NOTE: the presentations load REVEALJS_DIR's reveal.js {version}, where the "
+            f"script that makes them readable with a screen reader (oer-reveal.js) was written "
+            f"against {vendored}, the repository's own copy, and is tested with it; unset "
+            "REVEALJS_DIR to use that one.")
 
 
 def revealjs_version(folder):

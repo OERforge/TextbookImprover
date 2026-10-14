@@ -7,7 +7,12 @@
  *    screen reader takes for an application rather than a page to read:
  *    NVDA read a slide's formulas as their letters and its tables cell by
  *    cell. The role goes, so the slide shown is read as a page is, in
- *    browse mode; reveal.js hides the others (aria-hidden, inert).
+ *    browse mode; reveal.js hides the others (aria-hidden, inert). Its
+ *    progress bar, a strip a mouse can click to go to a slide, is hidden
+ *    from a screen reader too: Chrome gives an element that listens for
+ *    clicks a click action, and NVDA shows one with nothing in it as a
+ *    space (nvdaHelper's gecko_ia2.cpp), likely the one it read after the
+ *    controls.
  * 2. reveal.js announces each slide, and each step of one, in a live
  *    region whose text is the slide's text run together, which loses a
  *    formula's and a table's structure; that region is silenced. As a
@@ -182,6 +187,8 @@
       status.removeAttribute('aria-live');
       status.setAttribute('aria-hidden', 'true');
     }
+    var progress = presentation.querySelector('.progress');
+    if (progress) { progress.setAttribute('aria-hidden', 'true'); }
     deck.configure({ keyboardCondition: function (event) { return !scrolling(event); } });
     deck.on('slidechanged', function (event) {
       if (paged()) { window.scrollTo(0, 0); }

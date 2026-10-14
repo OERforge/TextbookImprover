@@ -3507,10 +3507,22 @@ FITTED = """() => Reveal.getSlides().map(s => {
   s.style.display = shown; return out; })"""
 
 
+def left_out(page, selector):
+    """Whether Chromium leaves the element selector names out of the
+    accessibility tree a screen reader reads."""
+    cdp = page.context.new_cdp_session(page)
+    root = cdp.send("DOM.getDocument")["root"]["nodeId"]
+    node = cdp.send("DOM.querySelector", {"nodeId": root, "selector": selector})["nodeId"]
+    return cdp.send("Accessibility.getPartialAXTree",
+                    {"nodeId": node, "fetchRelatives": False})["nodes"][0].get("ignored", False)
+
+
 def presentation_steps(page):
     found = {"role": page.evaluate("() => document.querySelector('.reveal').getAttribute('role')"),
              "live": page.evaluate("() => { const s = document.querySelector('.aria-status');"
                                    " return [s.getAttribute('aria-live'), s.getAttribute('aria-hidden')]; }"),
+             "progress": left_out(page, ".reveal .progress"),
+             "controls": left_out(page, ".reveal .controls"),
              "fitted": page.evaluate(FITTED)}
     page.keyboard.press("ArrowRight")
     page.wait_for_timeout(300)
@@ -3716,10 +3728,12 @@ def case_revealjs(work):
          == [("no-title.html", "vnu:warning")] and "Section lacks heading" in check[0][2]),
     ]
     in_browser_checks = [
-        ("in a browser, reveal.js's role and its live region go, and a slide's title takes "
-         "focus as it's shown, outlined as no keyboard focus is, a step's content as it "
-         "appears, and nothing in the overview",
+        ("in a browser, reveal.js's role and its live region go, its progress bar, which a "
+         "mouse can click and NVDA reads as a space, is left out of what a screen reader reads, "
+         "its controls not, and a slide's title takes focus as it's shown, outlined as no "
+         "keyboard focus is, a step's content as it appears, and nothing in the overview",
          lambda: browsed.get("role") is None and browsed.get("live") == [None, "true"]
+         and browsed.get("progress") is True and browsed.get("controls") is False
          and browsed.get("first") == ["H2", "Agenda"] and browsed.get("outline") == "none"
          and browsed.get("title") == ["H3", "Steps"] and browsed.get("step") == ["DIV", "Later."]
          and browsed.get("overview") == ["DIV", "Later."]),

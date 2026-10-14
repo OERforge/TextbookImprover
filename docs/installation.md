@@ -273,7 +273,7 @@ A LaTeX book's PDF is built from the book's own LaTeX ([LaTeX sources](latex.md#
 
 The TeX packages in the last two `tlmgr` lines are what the LaTeX suite's small books load (`tests/run-latex-tests.py`), with `luatex85` and `preview`. Its first checks name a LaTeX too old for the PDF target and any of them that are missing, with the line that installs them, and `rsvg-convert` too. It has one check of Ghostscript's way of embedding fonts, which skips without Ghostscript.
 
-Two more kinds of package, depending on the book. A book with passages in another language needs that language's `babel-` and `hyphen-` packages (`tlmgr install babel-german hyphen-german` for German), or LuaLaTeX stops with babel's `Unknown option`. And whatever a `pdf.metadata` file's `header-includes` loads, and whatever else a book of your own loads, has to be installed too (`hanging`, say). When LuaLaTeX stops on `File 'something.sty' not found`, `tlmgr search --global --file /something.sty` names the package to install, and the run says so.
+Two more kinds of package, depending on the book. A book with passages in another language needs that language's `babel-` and `hyphen-` packages (`tlmgr install babel-german hyphen-german` for German), or LuaLaTeX stops with babel's `Unknown option`, and the run says how to find the package. And whatever a `pdf.metadata` file's `header-includes` loads, and whatever else a book of your own loads, has to be installed too (`hanging`, say). When LuaLaTeX stops on `File 'something.sty' not found`, `tlmgr search --global --file /something.sty` names the package to install, and the run says so.
 
 ## Optional: veraPDF
 

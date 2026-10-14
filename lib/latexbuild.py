@@ -43,6 +43,9 @@ MINIMUM_LATEX = "2026-06-01"
 MISSING_FILE = re.compile(r"File `([^']+)' not found")
 MISSING = re.compile(r"Missing character: There is no (\S+)")
 CAPACITY = re.compile(r"TeX capacity exceeded, sorry \[([^\]=]+)")
+# A language babel hasn't installed, which Pandoc's template names for a
+# passage in it (french, ngerman), as a class option babel reads.
+BABEL_UNKNOWN = re.compile(r"Package babel Error: Unknown option [`']([^'`\s]+)'")
 
 
 def latex_release():
@@ -587,7 +590,7 @@ def tlmgr_command(words):
 
 def failure_advice(log):
     """What to do about a failed build, from its log: a file LaTeX can't
-    find, or one of TeX's tables outgrown."""
+    find, a language babel hasn't, or one of TeX's tables outgrown."""
     said = []
     # tlmgr only manages a TeX Live installed from tug.org or as TinyTeX;
     # Debian's and Ubuntu's texlive packages come with a tlmgr that runs in
@@ -600,6 +603,16 @@ def failure_advice(log):
                     "installs that. For a distribution's texlive packages, "
                     "its package manager does (`apt-file search "
                     f"{name}` on Debian and Ubuntu).")
+    # A passage's language, which babel reads from a file of the language's
+    # name (ngerman.ldf, in babel-german); its hyphenation patterns are in
+    # the language's hyphen- package.
+    for name in dict.fromkeys(BABEL_UNKNOWN.findall(log)):
+        said.append(f"babel has no language {name}, which a passage of the book is in. For "
+                    f"TinyTeX or TeX Live from tug.org, "
+                    f"`{tlmgr_command('search --global --file /' + name + '.ldf')}` names the "
+                    "package that has it (babel-german for ngerman), and the language's "
+                    f"hyphen- package has its hyphenation; `{tlmgr_command('install')}` "
+                    "installs both. A full TeX Live has every language.")
     # A tagged book can outgrow TeX's tables: tagging keeps every structure
     # element, and a large book runs out of strings, hash, or memory
     # (Prescott, TUGboat 47:2; pdfLaTeX on GIAM's tagged copy ran out of

@@ -2902,6 +2902,11 @@ def case_pieces(work):
          lambda: flat_alt == "\\fig[A first paragraph.\nA second one,\na third]{sq}\\fig[One]{sq}\n"
          and commented_alt == "\\fig[A first. % to reword\nA second.]{sq}\n"
          and flat_counts.get("alt_paragraphs") == 1),
+        ("a language babel hasn't installed is named, with how to find its package",
+         lambda: any("babel has no language ngerman" in advice and "/ngerman.ldf" in advice
+                     for advice in latexbuild.failure_advice(
+                         "! Package babel Error: Unknown option 'ngerman'.\n"
+                         "(babel)                Suggested actions:\n"))),
         ("LaTeX's first error is found when its file's name has spaces",
          lambda: latexbuild.first_errors(log)
          and "titlesec Error" in latexbuild.first_errors(log)[0]

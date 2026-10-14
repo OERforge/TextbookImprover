@@ -1090,6 +1090,94 @@ def case_group_heads(work):
     ]
 
 
+# Headings the page gives no id, whose ids Pandoc makes from their words:
+# one over a table with the same id, which a link names, and one inside a
+# div with its own. And headings given an id of the page's: by a section,
+# whose id the reader moves to its heading when the two agree, and by an
+# anchor in a heading the reader left with none; each over a table with
+# the same.
+HEADING_IDS = """<!DOCTYPE html><html lang="en"><head><title>Costs</title></head>
+<body><main><h1>Costs</h1>
+<p>See <a href="#costs">the table</a> and <a href="#notes">the notes</a>.</p>
+<h2>Prices</h2>
+<table id="costs"><caption>Table 1.1 Costs</caption><tr><th>Item</th><th>Cost</th></tr>
+<tr><td>Rent</td><td>900</td></tr></table>
+<div id="notes"><p>Two notes.</p><h2>Notes</h2><p>The first.</p></div>
+<section id="sources"><h2>Sources</h2><p>A list.</p></section>
+<table id="sources"><caption>Table 1.2 Sources</caption><tr><th>Name</th><th>Year</th></tr>
+<tr><td>A survey</td><td>2020</td></tr></table>
+<section id="faq"><h2><a id="questions"></a>FAQ</h2><p>Ask.</p></section>
+<table id="questions"><caption>Table 1.3 Questions</caption><tr><th>Question</th><th>Answer</th></tr>
+<tr><td>Why?</td><td>Because.</td></tr></table>
+</main></body></html>
+"""
+
+# A Markdown heading over a table with its id: [Prices] links to the
+# heading by the id Pandoc gives it.
+HEADING_IDS_MD = """# Prices
+
+See [the table](#prices) and [Prices].
+
+| Item | Cost |
+|------|------|
+| Rent | 900  |
+
+: Table 2.1 Prices {#prices}
+"""
+
+
+def case_heading_ids(work):
+    """A heading an HTML page gave no id, whose id Pandoc makes from its
+    words, gives way to a table's or a div's, before it or around it,
+    which an author's link names. One with an id of the page's keeps it
+    and the table after it is renamed, as a Markdown heading keeps its,
+    and each such rename is a row of ids-renamed.csv."""
+    os.makedirs(work)
+    with open(os.path.join(work, "costs.html"), "w", encoding="utf-8") as fh:
+        fh.write(HEADING_IDS)
+    with open(os.path.join(work, "prices.md"), "w", encoding="utf-8") as fh:
+        fh.write(HEADING_IDS_MD)
+    with open(os.path.join(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
+        fh.write("targets:\n  html:\n    format: html\n  md:\n    format: markdown\n")
+    run_in(work, "  contents:\n    - costs\n    - prices\n")
+    def output(target, name):
+        ext = "md" if target == "md" else "html"
+        return read(work, target, f"{name}.{ext}") if exists(
+            work, target, f"{name}.{ext}") else ""
+    costs, prices = output("html", "costs"), output("html", "prices")
+    rows = []
+    if exists(work, "ids-renamed.csv"):
+        with open(os.path.join(work, "ids-renamed.csv"), encoding="utf-8",
+                  newline="") as fh:
+            rows = list(csv.reader(fh))
+    tag = lambda text, name: (re.search(r'<(\w+)[^>]*\bid="%s"' % name, text)
+                              or [None, None])[1]
+    return [
+        ("a heading whose id is from its words gives way to the table's and "
+         "the div's, so the links reach them",
+         lambda: tag(costs, "costs") == "table" and tag(costs, "notes") == "div"
+         and tag(costs, "costs-1") == "h1" and tag(costs, "notes-1") == "h2"
+         and 'href="#costs"' in costs),
+        ("one with an id of the page's keeps it, as a Markdown heading does, "
+         "and the table renamed is reported",
+         lambda: tag(costs, "sources") == "h2" and tag(costs, "sources-1") == "table"
+         and tag(costs, "questions") == "h2"
+         and tag(costs, "questions-1") == "table"
+         and tag(prices, "prices") == "h1" and tag(prices, "prices-1") == "table"
+         and rows == [["Page", "Id", "Kept by", "Renamed", "New id"],
+                      ["costs", "questions", "heading: FAQ",
+                       "table: Table 1.3 Questions", "questions-1"],
+                      ["costs", "sources", "heading: Sources",
+                       "table: Table 1.2 Sources", "sources-1"],
+                      ["prices", "prices", "heading: Prices",
+                       "table: Table 2.1 Prices", "prices-1"]]),
+        ("and the mark htmlrepair.py puts on a heading with no id is gone",
+         lambda: costs and all("ti-auto-id" not in text for text in
+                               (costs, prices, output("md", "costs"),
+                                output("md", "prices")))),
+    ]
+
+
 # A table split at its bands whose second group is laid out on half its
 # columns, each cell across two, as Foundations of Information Systems'
 # normal forms are.
@@ -4720,6 +4808,7 @@ CASES = [
     ("raw HTML in a Markdown source", case_markdown_html),
     ("title rows and bands, split and grouped", case_bands),
     ("a group's own header row, split", case_group_heads),
+    ("a heading's id from its words gives way", case_heading_ids),
     ("a part laid out on fewer columns", case_narrow_group),
     ("a link's scheme in capitals", case_scheme_case),
     ("compare-output sees lists and blockquotes", case_compare_blocks),

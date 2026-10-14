@@ -399,3 +399,7 @@ Spacer images found, and what was done with each.
 **`reports.math_repaired`**—`path`; default `math-repaired.csv`
 
 Each change the math settings made: an equation's characters repaired, or text made an equation, with the page and the text before and after. A deck's equation is written out in one line, much as PowerPoint's linear format writes it, its Page the deck's name.
+
+**`reports.ids_renamed`**—`path`; default `ids-renamed.csv`
+
+Each id that two elements on a page had, which one of them kept and the other lost: the page, the id, the element that kept it, the one renamed, and its new id. A link to the id reaches the one that kept it, so where a link meant the other, give one of them another id in the source. An HTML page's heading with no id of its own gives way to anything else's without a row, since Pandoc made its id from its words and nothing can link to it.

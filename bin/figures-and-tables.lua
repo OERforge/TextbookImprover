@@ -2857,17 +2857,30 @@ local function figure_div(div)
   return pandoc.Figure(image, caption and { long = caption } or {}, attr)
 end
 
--- No two elements on a page may carry the same id, and a Word export can
--- produce them: OpenStax names a bookmark for a repeated heading the way
--- Pandoc numbers an auto id ("site-selection", "site-selection-1"), so
--- uniqueIdent's next candidate for the second heading is a name already
--- taken (Readers/Docx.hs 589, Shared.hs 616). The later element is
--- renumbered; links are left pointing where they pointed, since a
--- browser resolves a repeated id to the first one anyway. Pandoc walks
--- every inline before any block, so an anchor keeps its name and a
--- heading is what gets renumbered, which is the right way round: an
--- anchor is a link target another file may name, and a heading's auto
+-- No two elements on a page may carry the same id, and a page can have
+-- two: a Word export's bookmark named as Pandoc numbers an auto id, a
+-- repeated heading's at OpenStax ("site-selection", "site-selection-1"),
+-- so uniqueIdent's next candidate for the second heading is a name already
+-- taken (Readers/Docx.hs 589, Shared.hs 616), and a heading of an HTML or
+-- Markdown source given an id from its words that a table or div after it
+-- has too: the reader checks only the headings before it (registerHeader,
+-- in Parsing/General.hs). Of the elements that share one, the first the
+-- walk reaches keeps it, which is what a browser takes a link to it for,
+-- and the rest are renamed; a link is left pointing where it pointed.
+-- Pandoc walks every inline before any block, so an anchor keeps its name
+-- and a Word heading is what gets renamed, which is the right way round:
+-- an anchor is a link target another file may name, and a heading's auto
 -- id is Pandoc's own invention.
+--
+-- So is the id of an HTML page's heading that has none of its own, which
+-- htmlrepair.py marks before Pandoc reads it (data-ti-auto-id): nothing
+-- on the page can link to it, so it gives way to any other element's
+-- wherever it stands, and isn't reported. A Markdown heading's can't:
+-- [Costs] links to the heading Costs by its id. Every other rename is a
+-- row of the ids-renamed report, naming the element that kept the id and
+-- the one renamed, since a link meant for the second reaches the first.
+-- A new id is free on the whole page, so no element later on loses its
+-- own to one.
 --
 -- A LaTeX label in a caption (\caption{A\label{a}}) is the one exception:
 -- the reader gives its name both to the figure or table and to an empty
@@ -2891,25 +2904,93 @@ local function caption_labels(doc)
   return doc:walk({ Figure = strip, Table = strip })
 end
 
+local IDS_RENAMED = os.getenv('IDS_RENAMED')
+local AUTO_ID = 'ti-auto-id'
+
+local ID_KINDS = { Header = 'heading', Table = 'table', Figure = 'figure',
+                   Div = 'div', CodeBlock = 'code block', Span = 'span',
+                   Image = 'image', Link = 'link', Code = 'code' }
+
+-- What a row of the report says an element is: what kind, and the start of
+-- its words, its caption's for a table or a figure. An empty span or div
+-- is an anchor.
+local function described(el)
+  local kind, text = ID_KINDS[el.t] or el.t:lower(), ''
+  if el.t == 'Table' or el.t == 'Figure' then
+    text = pandoc.utils.stringify(el.caption.long)
+    if text == '' and el.t == 'Table' then text = table_excerpt(el) end
+  elseif el.t == 'Image' then
+    text = pandoc.utils.stringify(el.caption)
+    if text == '' then text = el.src end
+  elseif el.t == 'Code' or el.t == 'CodeBlock' then
+    text = el.text
+  elseif el.content then
+    text = pandoc.utils.stringify(el.content)
+  end
+  text = normalize(text)
+  if text == '' then
+    return (el.t == 'Span' or el.t == 'Div') and 'anchor' or kind
+  end
+  if char_len(text) > 50 then text = head_chars(text, 47) .. '...' end
+  return kind .. ': ' .. text
+end
+
 local function make_ids_unique(doc)
   doc = caption_labels(doc)
-  local seen, renamed = {}, 0
-  local function fix(el)
+  -- Every element with an id, in the order the walk reaches them.
+  local found, count = {}, {}
+  local function census(el)
     local id = el.identifier
     if id == nil or id == '' then return nil end
-    if not seen[id] then
-      seen[id] = true
-      return nil
-    end
-    local base = id:gsub('%-%d+$', '')
-    local n = 1
-    while seen[base .. '-' .. n] do n = n + 1 end
-    el.identifier = base .. '-' .. n
-    seen[el.identifier] = true
-    renamed = renamed + 1
-    return el
+    found[#found + 1] = { id = id, el = el,
+                          auto = el.t == 'Header' and el.attributes[AUTO_ID] ~= nil }
+    count[id] = (count[id] or 0) + 1
   end
-  doc = doc:walk({ Block = fix, Inline = fix })
+  doc:walk({ Block = census, Inline = census })
+  local owner, taken, new = {}, {}, {}
+  for k, entry in ipairs(found) do
+    taken[entry.id] = true
+    local first = owner[entry.id]
+    if count[entry.id] > 1
+        and (first == nil or (found[first].auto and not entry.auto)) then
+      owner[entry.id] = k
+    end
+  end
+  local renamed = 0
+  for k, entry in ipairs(found) do
+    local first = owner[entry.id]
+    if first and first ~= k then
+      local base = entry.id:gsub('%-%d+$', '')
+      local n = 1
+      while taken[base .. '-' .. n] do n = n + 1 end
+      new[k] = base .. '-' .. n
+      taken[new[k]] = true
+      if not entry.auto then
+        renamed = renamed + 1
+        append_row(IDS_RENAMED, { source_stem(), entry.id,
+                                  described(found[first].el), described(entry.el),
+                                  new[k] })
+      end
+    end
+  end
+  local k = 0
+  local function apply(el)
+    local changed = false
+    if el.t == 'Header' and el.attributes[AUTO_ID] then
+      el.attributes[AUTO_ID] = nil
+      changed = true
+    end
+    local id = el.identifier
+    if id ~= nil and id ~= '' then
+      k = k + 1
+      if new[k] then
+        el.identifier = new[k]
+        changed = true
+      end
+    end
+    return changed and el or nil
+  end
+  doc = doc:walk({ Block = apply, Inline = apply })
   if renamed > 0 then
     warn(('%d duplicate id(s) on this page were renumbered'):format(renamed))
   end

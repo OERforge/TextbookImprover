@@ -5058,7 +5058,7 @@ def main():
                            "table_headers_new", "table_headers_report",
                            "page_names_new", "page_names_report",
                            "media_unresolved", "spacer_images",
-                           "output_check", "math_repaired",
+                           "output_check", "math_repaired", "ids_renamed",
                            "slide_titles_new", "reading_order_new", "slides_check")}
     if slides and not DECK_RUN:
         return slides_run(base, decks, targets, project, paths, reports, args, first)
@@ -5077,7 +5077,8 @@ def main():
         collected = {key: os.path.join(work, key) for key in
                      ("captions_missing", "alt_missing", "alt_seen", "spacers",
                       "media_unresolved", "bare_links", "captions_applied",
-                      "math", "math_places", "math_kept", "title_numbers")}
+                      "math", "math_places", "math_kept", "title_numbers",
+                      "ids_renamed")}
         env = dict(os.environ)
         env.update({
             # For html-source.lua: a page's <title> that repeats the
@@ -5089,6 +5090,7 @@ def main():
             "BARE_LINKS_FOUND": collected["bare_links"],
             "CAPTIONS_APPLIED": collected["captions_applied"],
             "SPACER_LOG": collected["spacers"],
+            "IDS_RENAMED": collected["ids_renamed"],
             "MATH_REPAIRED": collected["math"],
             "MATH_PLACES": collected["math_places"],
             "MATH_KEPT": collected["math_kept"],
@@ -5241,7 +5243,7 @@ def main():
         # has nothing to report. Doing it here rather than at the top means
         # a run that stops at the gate leaves the previous reports intact.
         for key in ("table_captions_missing", "image_alt_missing",
-                    "spacer_images", "math_repaired"):
+                    "spacer_images", "math_repaired", "ids_renamed"):
             if os.path.exists(reports[key]):
                 os.remove(reports[key])
 
@@ -5351,6 +5353,12 @@ def main():
                      "and math.from_text turn them off.")
         write_report(collected["spacers"], reports["spacer_images"],
                      "Image,Source,Width,Action", "spacer image(s) handled")
+        write_report(collected["ids_renamed"], reports["ids_renamed"],
+                     "Page,Id,Kept by,Renamed,New id", "id(s) renamed", None,
+                     "Two elements on one page had each of these ids, and a "
+                     "link to one reaches the element that kept it; where a "
+                     "link meant the other, give one of them another id in "
+                     "the source.")
         labels = {row[0] for row in missing}
         if missing and len(labels) < len(missing):
             # The sidecar is keyed on the label alone, so one description

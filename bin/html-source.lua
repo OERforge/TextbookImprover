@@ -433,12 +433,18 @@ function Meta(meta)
 end
 
 
+-- htmlrepair.py's mark on a heading the page gave no id, which the reader
+-- gave one from its words; see figures-and-tables.lua's make_ids_unique.
+-- Off a heading given an id of the page's own here.
+local AUTO_ID = 'ti-auto-id'
+
 local function open_up(div)
   local blocks = pandoc.List(div.content)
   if div.identifier ~= '' then
     local first = blocks[1]
     if first and first.t == 'Header' and first.identifier == '' then
       first.identifier = div.identifier
+      first.attributes[AUTO_ID] = nil
     else
       blocks:insert(1, pandoc.Div({}, pandoc.Attr(div.identifier,
                                                   { 'anchor' })))
@@ -496,7 +502,9 @@ function Header(h)
   h.content = kept
   local before = {}
   for _, id in ipairs(ids) do
-    if h.identifier == '' then h.identifier = id
+    if h.identifier == '' then
+      h.identifier = id
+      h.attributes[AUTO_ID] = nil
     else before[#before + 1] = pandoc.Div({}, pandoc.Attr(id, { 'anchor' })) end
   end
   before[#before + 1] = h

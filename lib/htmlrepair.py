@@ -102,7 +102,7 @@ def repaired(markup):
     markup = _BEFORE.sub(before, markup)
     markup, marked = decorative_images(markup)
     markup, titled = title_block_id(markup)
-    return markup, count + marked + titled
+    return auto_id_headings(markup), count + marked + titled
 
 
 _IMG = re.compile(r"<img\b((?:[^<>\"']|\"[^\"]*\"|'[^']*')*)>", re.I)
@@ -159,6 +159,31 @@ def title_block_id(markup):
     page's metadata on reading, so the id goes no further."""
     new, n = _TITLE_H1.subn(r'\1 id="title-block-title"\2', markup, count=1)
     return new, n
+
+
+AUTO_ID = "data-ti-auto-id"
+_HEADING = re.compile(r"<(h[1-6])\b((?:[^<>\"']|\"[^\"]*\"|'[^']*')*)>", re.I)
+_ATTRIBUTE = re.compile(r"""([^\s"'<>/=]+)(?:\s*=\s*("[^"]*"|'[^']*'|[^\s"'=<>`]+))?""")
+
+
+def auto_id_headings(markup):
+    """The page with each heading that has no id of its own marked
+    data-ti-auto-id. Pandoc's reader makes such a heading's id from its
+    words, checking only the headings before it (registerHeader, in
+    Parsing/General.hs), so a table or a div after it can carry the same
+    one: <h1>Money</h1> over <table id="money">. Nothing on an HTML page
+    can have meant an id its author never wrote, so the filter's
+    uniqueness pass renames the heading, wherever it stands, and the id
+    stays where the author's link points. The mark goes there too, and
+    html-source.lua takes it off a heading it gives an id of the page's
+    own. Not counted: nothing has moved."""
+    def mark(match):
+        tag, attributes = match.groups()
+        for name, value in _ATTRIBUTE.findall(attributes):
+            if name.lower() == "id" and value.strip("\"'").strip():
+                return match.group(0)
+        return f'<{tag} {AUTO_ID}=""{attributes}>'
+    return _HEADING.sub(mark, markup)
 
 
 def repaired_copy(source, destination):

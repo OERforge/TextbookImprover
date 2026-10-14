@@ -1106,3 +1106,15 @@ keys:
           before and after. A deck's equation is written out in one line,
           much as PowerPoint's linear format writes it, its Page the deck's
           name.
+
+      ids_renamed:
+        type: path
+        default: ids-renamed.csv
+        description: >
+          Each id that two elements on a page had, which one of them kept
+          and the other lost: the page, the id, the element that kept it,
+          the one renamed, and its new id. A link to the id reaches the one
+          that kept it, so where a link meant the other, give one of them
+          another id in the source. An HTML page's heading with no id of its
+          own gives way to anything else's without a row, since Pandoc made
+          its id from its words and nothing can link to it.

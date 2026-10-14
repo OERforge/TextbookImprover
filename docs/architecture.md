@@ -49,7 +49,7 @@ on another `bin/` script.
 | `lib/texremediate.py` | A `source` target on a LaTeX book: the sidecars' decisions written into a copy of the author's files where each element is, and, with `tagging: "on"`, the copy made to build with LaTeX's own tagging. |
 | `lib/latexbuild.py` | What a LaTeX build of a tagged PDF needs and what its log means, for both of the PDF target's routes: LaTeX's release checked, its first errors found, and advice for a missing file or a table TeX filled. |
 | `lib/taggingstatus.py` | A LaTeX book's class and packages checked against the tagging project's status list, from TeX's `latex-tagging-status` package, as advice. |
-| `lib/htmlrepair.py` | What an HTML source needs done to it before Pandoc reads it, on a copy: an id on a paragraph, a list item, a cell, or an inline mark moves onto an anchor the reader keeps. |
+| `lib/htmlrepair.py` | What an HTML source needs done to it before Pandoc reads it, on a copy: an id on a paragraph, a list item, a cell, or an inline mark moves onto an anchor the reader keeps, and a heading with no id is marked, so that the id Pandoc makes for it gives way to one the page gave another element. |
 | `lib/docxrepair.py` | What a `.docx` needs done to it before Pandoc reads it, on a copy: bookmarks moved to where the reader keeps them, invisible links so bookmarks only other files point at survive, an item's second paragraph kept in its list, and, in a file a `docx` target wrote, the lists, paragraphs, and code in quotations marked with their depth. After Pandoc reads the copy, what its reader drops or misreads is put back: ScreenTips as link titles, Word's decorative mark, terms with no definition, quotations nested and joined, the ids Pandoc renamed, code's numbering and language. |
 | `lib/wordrepairs.py` | The repairs that change what reading a Word file means, `word.headings` and `word.tracked_deletions`, applied alike to the copy Pandoc reads and to a `source` target's copy. |
 | `lib/docxtarget.py` | What a `docx` target adds to Pandoc's Word file: compatibility mode 15, ScreenTips, Word's decorative mark, the First Column flag and the bookmarks JAWS reads as a table's headers, quotations indented by depth with the lists and code inside them, numbered code, the map of ids Pandoc renamed, and only the bookmarks something uses. |
@@ -249,6 +249,7 @@ environment, which is how `convert.py` passes settings from
 | `IMAGE_ALT_MISSING` | unset | Where to append rows for images needing alt text |
 | `TABLE_HEADERS_RESOLVED` | unset | JSON from `table-headers.py --resolved`: the header value to apply per table |
 | `SPACER_LOG` | unset | Where to append rows for spacer images handled |
+| `IDS_RENAMED` | unset | Where to append rows for ids two elements on a page had, one of them renamed |
 | `SPACER_BELOW` | `0` (off) | Width under which an image is a spacer |
 | `STRIP_SPACER` | `false` | Remove spacers rather than marking them decorative |
 | `ALT_MAX_CHARS` | `120` | Alt text longer than this is reported |
@@ -256,10 +257,10 @@ environment, which is how `convert.py` passes settings from
 | `FIGURE_LABEL_PREFIXES` | `Figure` | The same for figures |
 | `TABLE_MARKERS` | `matrix=both,row-headers=first-column` | What a fenced div's class declares about a Markdown table's headers |
 
-The `*_MISSING` and `SPACER_LOG` files are appended to, not truncated, and
-carry no header row — `convert.py` collects them across a whole run, sorts
-and deduplicates, then writes the header. Point them at a temporary file if
-you're running the filter yourself.
+The `*_MISSING`, `SPACER_LOG`, and `IDS_RENAMED` files are appended to,
+not truncated, and carry no header row — `convert.py` collects them across
+a whole run, sorts and deduplicates, then writes the header. Point them at
+a temporary file if you're running the filter yourself.
 
 ```bash
 TABLE_CAPTIONS_MISSING=/tmp/rows.csv SPACER_BELOW=0.3in \

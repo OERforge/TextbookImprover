@@ -964,13 +964,43 @@ DUPLICATE_IDS = ('<h4 id="site-selection">One</h4>'
                  '<h4 id="site-selection-1">Three</h4>')
 
 
+# Headings an HTML page gave no id, marked so by htmlrepair.py, one before
+# a table and one inside a div that have the id Pandoc gave the heading
+# from its words; an anchor with the id renaming the first would take; and
+# a table and a heading the page gave the same id.
+GIVES_WAY = ('<h2 data-ti-auto-id="">Money</h2>'
+             '<table id="money"><tr><th>A</th></tr><tr><td>1</td></tr></table>'
+             '<div id="notes"><p>Intro.</p><h2 data-ti-auto-id="">Notes</h2></div>'
+             '<p><span id="money-1"></span></p>'
+             '<table id="costs"><caption>Costs</caption><tr><th>A</th></tr>'
+             '<tr><td>1</td></tr></table>'
+             '<h2 id="costs">Costs</h2>')
+
+
 def check_unique_ids():
-    """No id twice on a page, and an anchor keeps its name."""
+    """No id twice on a page, and an anchor keeps its name. A heading whose
+    id Pandoc made from its words on an HTML page gives way to anything
+    else's, unreported, and any other rename is a row of the report."""
     out = subprocess.run(
         ["pandoc", "-f", "html", "-t", "html", "--lua-filter",
          os.path.join(ROOT, "bin", "figures-and-tables.lua")],
         input=DUPLICATE_IDS, capture_output=True, text=True)
     ids = re.findall(r'id="([^"]*)"', out.stdout)
+    work = scratch("unique-ids-")
+    with open(os.path.join(work, "page.html"), "w", encoding="utf-8") as fh:
+        fh.write(GIVES_WAY)
+    report = os.path.join(work, "renamed.csv")
+    given = subprocess.run(
+        ["pandoc", "-f", "html", "-t", "html", "page.html", "--lua-filter",
+         os.path.join(ROOT, "bin", "figures-and-tables.lua")],
+        capture_output=True, text=True, cwd=work,
+        env=dict(os.environ, IDS_RENAMED=report))
+    tags = dict((m.group(2), m.group(1)) for m in
+                re.finditer(r'<(\w+)[^>]*\bid="([^"]*)"', given.stdout))
+    rows = []
+    if os.path.exists(report):
+        with open(report, encoding="utf-8", newline="") as fh:
+            rows = list(csv.reader(fh))
     return [
         ("every id on the page is unique",
          lambda: len(ids) == len(set(ids))),
@@ -979,6 +1009,17 @@ def check_unique_ids():
         ("the repeated heading is the one renumbered",
          lambda: ids.count("site-selection-1") == 1
          and "site-selection-2" in ids),
+        ("a heading whose id Pandoc made gives way to a table's and a div's, "
+         "before them or inside, to an id nothing on the page has",
+         lambda: tags.get("money") == "table" and tags.get("notes") == "div"
+         and tags.get("money-2") == "h2" and tags.get("notes-1") == "h2"
+         and tags.get("money-1") == "span"),
+        ("an id the page gave twice stays with the first, and the rename is "
+         "the report's one row",
+         lambda: tags.get("costs") == "table" and tags.get("costs-1") == "h2"
+         and rows == [["page", "costs", "table: Costs", "heading: Costs",
+                       "costs-1"]]),
+        ("and the mark goes", lambda: given.stdout and "ti-auto-id" not in given.stdout),
     ]
 
 

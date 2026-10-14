@@ -46,6 +46,7 @@ import struct
 import subprocess
 import sys
 import tempfile
+import warnings
 import zlib
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -756,7 +757,8 @@ def tidy_fixture(path, ghost=True):
     mark, its link and its marked content; a note whose /Ref names its own
     mark, that one, and (ghost) a mark the tree doesn't hold; a mark with no
     note; and an Artifact holding a form field's annotation, which is no
-    link."""
+    link, the field in the document's form, as hyperref puts one: pikepdf
+    warns on saving a widget no form reaches."""
     pdf = pikepdf.new()
     pdf.add_blank_page()
     name = pikepdf.Name
@@ -772,8 +774,10 @@ def tidy_fixture(path, ghost=True):
 
     tagged, binned, repeated = link(0), link(1), link(3)
     widget = pdf.make_indirect(pikepdf.Dictionary(Type=name.Annot, Subtype=name.Widget,
-                                                  Rect=[0, 20, 10, 30], StructParent=2))
+                                                  Rect=[0, 20, 10, 30], StructParent=2,
+                                                  FT=name.Tx, T=pikepdf.String("field")))
     pdf.pages[0].obj.Annots = pikepdf.Array([tagged, binned, widget, repeated])
+    pdf.Root.AcroForm = pdf.make_indirect(pikepdf.Dictionary(Fields=pikepdf.Array([widget])))
     repeated_link = element("/Link", [pikepdf.Dictionary(Type=name.OBJR, Obj=repeated)])
     own, untied, lost = (element("/footnotemark", [n]) for n in (0, 3, 2))
     kept = element("/footnotemark", [pikepdf.Dictionary(Type=name.MCR, MCID=1,
@@ -875,17 +879,22 @@ def case_pieces(work):
     else:
         bins, only = os.path.join(work, "bins.pdf"), os.path.join(work, "only-bins.pdf")
         os.makedirs(work, exist_ok=True)
-        tidy_fixture(bins)
-        tidy_fixture(only, ghost=False)
-        tidy_counts, only_counts = decks.tidy(bins), decks.tidy(only)
+        # Nothing of pikepdf's on the terminal: its warning on saving a
+        # widget no form reaches came out in the middle of the suite's own.
+        with warnings.catch_warnings(record=True) as warned:
+            warnings.simplefilter("always")
+            tidy_fixture(bins)
+            tidy_fixture(only, ghost=False)
+            tidy_counts, only_counts = decks.tidy(bins), decks.tidy(only)
         left = (["/P", "/Artifact", "/P", "/footnote", "/Artifact"], [0, 1],
                 ["https://example.org/0", "/Widget", "https://example.org/3"], [0, 2, 3], ["note"])
         extra.append((
             "tidy takes out a link bin, its link, and their entries in the parent tree and the"
             " ID tree, leaves an artifact with content of its own, a link in it too, or a form"
             " field, drops a /Ref to an element the tree doesn't hold, and counts a mark tied"
-            " to no note; a bin alone to take out is taken out too",
+            " to no note; a bin alone to take out is taken out too, and nothing is warned of",
             lambda: tidy_counts == {"step_links": 1, "ghost_refs": 1, "untied_marks": 1}
+            and not warned
             and tidied(bins) == left
             and only_counts == {"step_links": 1, "ghost_refs": 0, "untied_marks": 1}
             and tidied(only) == left))

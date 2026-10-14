@@ -39,6 +39,7 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
+import atexit
 import importlib.util
 import subprocess
 import os
@@ -60,6 +61,14 @@ except ImportError:
     sys.exit("This needs PyYAML:\n    sudo apt install python3-yaml")
 
 import oerconfig                                     # noqa: E402
+
+
+def scratch(prefix="unit-tests-"):
+    """A temporary folder, removed when the suite ends, since some checks
+    read it when they're run, after their case has returned."""
+    path = tempfile.mkdtemp(prefix=prefix)
+    atexit.register(shutil.rmtree, path, ignore_errors=True)
+    return path
 
 
 def load(path, name):
@@ -400,7 +409,7 @@ def check_sidecar_paths():
     directly here.
     """
     convert = load(os.path.join(ROOT, "bin", "convert.py"), "convert")
-    base = tempfile.mkdtemp(prefix="sidecar-paths-")
+    base = scratch("sidecar-paths-")
 
     import contextlib
     import io
@@ -815,7 +824,7 @@ def check_project_sample():
                  oerconfig.load_schema(os.path.join(ROOT, "bin", "schema-packaging.yaml")),
                  schema, oerconfig.resolve(
                      oerconfig.load_schema(os.path.join(ROOT, "bin", "schema-packaging.yaml")),
-                     schema, []), {}, os.path.join(tempfile.mkdtemp(), "s.yaml"),
+                     schema, []), {}, os.path.join(scratch(), "s.yaml"),
                  include_project={"language": "de"})))),
     ]
 
@@ -978,7 +987,7 @@ def check_shortdoi():
             self.wfile.write(data)
     server = http.server.HTTPServer(("127.0.0.1", 0), Service)
     threading.Thread(target=server.serve_forever, daemon=True).start()
-    work = tempfile.mkdtemp(prefix="shortdoi-")
+    work = scratch("shortdoi-")
     sidecar = os.path.join(work, "bare-links.csv")
     with open(sidecar, "w", encoding="utf-8", newline="") as fh:
         fh.write("URL,Replacement,Title\n"

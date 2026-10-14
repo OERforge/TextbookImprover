@@ -1077,10 +1077,12 @@ def main():
             print(("  ok    " if passed else "  FAIL  ") + name)
             failed += not passed
     finally:
+        # The PDF/UA-1 book is built beside the book (build_ua1).
         if arguments.keep:
-            print(f"\nOutput left in {work}")
+            print(f"\nOutput left in {work} and {work}-ua1")
         else:
             shutil.rmtree(work, ignore_errors=True)
+            shutil.rmtree(work + "-ua1", ignore_errors=True)
     print(f"\n{failed} check(s) failed" if failed
           else "\nall PDF checks passed")
     return 1 if failed else 0

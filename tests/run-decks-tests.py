@@ -2575,6 +2575,14 @@ Say hello in French.
   - A smaller point
 
 $$p = q$$
+
+# Display Top
+
+\\vspace{1em}
+
+$$z = 1$$
+
+After it.
 """
 
 
@@ -2706,15 +2714,35 @@ def display_spaces(xml):
     return out
 
 
-def text_height(*paragraphs, respected=False):
+def text_height(*paragraphs, respected=False, top=None):
     """pptxtarget's estimate of a text box's height holding paragraphs
     (what each <a:p> holds), at 24 points with a fifth of a line before
     each, as Pandoc's master has its body text; respected, the box told to
-    respect its first paragraph's space before and its last one's after."""
+    respect its first paragraph's space before and its last one's after;
+    top, its top inset."""
     import pptxtarget
-    return pptxtarget.body_height("<p:sp><p:txBody><a:bodyPr%s/>%s</p:txBody></p:sp>" % (
-        ' spcFirstLastPara="1"' if respected else "",
+    return pptxtarget.body_height("<p:sp><p:txBody><a:bodyPr%s%s/>%s</p:txBody></p:sp>" % (
+        ' spcFirstLastPara="1"' if respected else "", ' tIns="%d"' % top if top else "",
         "".join("<a:p>%s</a:p>" % p for p in paragraphs)), {0: (24, 0, 0.2)}, 8000000)
+
+
+def inset_of(head, layout, master):
+    """pptxtarget's inset a shape takes from its placeholder, head its XML
+    before its text body, layout and master the XML of a layout's and a
+    master's placeholders."""
+    import pptxtarget
+    return pptxtarget.inherited_inset(head, pptxtarget.placeholder_insets(layout),
+                                      pptxtarget.placeholder_insets(master))
+
+
+INSET_LAYOUT = ('<p:sp><p:nvSpPr><p:nvPr><p:ph idx="13"/></p:nvPr></p:nvSpPr>'
+                '<p:txBody><a:bodyPr tIns="1000"/></p:txBody></p:sp>'
+                '<p:sp><p:nvSpPr><p:nvPr><p:ph type="title"/></p:nvPr></p:nvSpPr>'
+                '<p:txBody><a:bodyPr anchor="b"/></p:txBody></p:sp>')
+INSET_MASTER = ('<p:sp><p:nvSpPr><p:nvPr><p:ph type="body" idx="1"/></p:nvPr></p:nvSpPr>'
+                '<p:txBody><a:bodyPr tIns="2000"/></p:txBody></p:sp>'
+                '<p:sp><p:nvSpPr><p:nvPr><p:ph type="title"/></p:nvPr></p:nvSpPr>'
+                '<p:txBody><a:bodyPr tIns="3000"/></p:txBody></p:sp>')
 
 
 def spaced_after(paragraph):
@@ -2781,6 +2809,7 @@ def case_pptx(work):
     space_again = slide_titled(hd, "Space Again")
     space_top = slide_titled(hd, "Space Top")
     after_list = slide_titled(hd, "Display After a List")
+    top_math = slide_titled(hd, "Display Top")
     code = slide_titled(sd, "Some Code")
 
     def number(slide):
@@ -2914,7 +2943,7 @@ def case_pptx(work):
              (False, "122243", None, "A Heading"), (False, "123897", None, "Last words.")]
          and "\ue003" not in every and not re.search("[\U000F0000-\U000FFFFD]", every)
          and "vfill" not in every and "vspace" not in every
-         and "10 vertical space(s) the decks give in raw LaTeX given before the text after "
+         and "11 vertical space(s) the decks give in raw LaTeX given before the text after "
          "them" in out
          and "Pandoc's PowerPoint writer left out 3 block(s) of 1 deck(s) (shapes 3)" in out),
         ("space the deck gives at the top of a slide's text is given there, and the text body "
@@ -2923,9 +2952,16 @@ def case_pptx(work):
              (False, "161029", None, "Pushed down."), (False, None, None, "Not pushed.")]
          and re.search(r'<a:bodyPr\b[^>]*\sspcFirstLastPara="1"', hp[space_top.part])
          and "".join(pptx_slides(hp)).count("spcFirstLastPara") == 1),
+        ("above an equation at the top of a slide's text, whose space before PowerPoint "
+         "doesn't show however the body is told, the deck's space widens the text body's top "
+         "inset, over the master's, in the equation's lines, the text after it set off",
+         lambda: top_math is not None and display_spaces(hp[top_math.part]) == [
+             (True, "0", None, ""), (False, "50000", None, "After it.")]
+         and re.findall(r"<p:txBody><a:bodyPr([^>]*)>", hp[top_math.part])[1:]
+         == [' tIns="%d"/' % (60960 + round(10.95 / 13.6 * 1.2 * 32 * 12700))] * 2),
         ("text set to fit counts a paragraph's own space before it and after it, the first "
-         "one's before and the last one's after when its box respects them, and a display "
-         "equation with a fraction a line taller",
+         "one's before and the last one's after when its box respects them, a display "
+         "equation with a fraction a line taller, and the text body's own top inset",
          lambda: text_height(WORDS, SPACED_WORDS) > text_height(WORDS, WORDS)
          and text_height(WORDS_SPACED, WORDS) > text_height(WORDS, WORDS)
          == text_height(WORDS, WORDS_SPACED)
@@ -2933,7 +2969,15 @@ def case_pptx(work):
          > text_height(WORDS, WORDS, respected=True)
          and text_height(WORDS, TALL_DISPLAY) > text_height(WORDS, FLAT_DISPLAY)
          and text_height(SPACED_WORDS, respected=True) > text_height(SPACED_WORDS)
-         == text_height(WORDS)),
+         == text_height(WORDS)
+         and abs(text_height(WORDS, top=500000) - text_height(WORDS) - (500000 - 45720)) <= 1),
+        ("a text body's top inset is its placeholder's in its layout, by index and then by "
+         "type, else its master's by type, else a twentieth of an inch",
+         lambda: [inset_of('<p:nvSpPr><p:nvPr>%s</p:nvPr></p:nvSpPr>' % ph, INSET_LAYOUT,
+                           INSET_MASTER) for ph in (
+             '<p:ph idx="13"/>', '<p:ph idx="1"/>', '<p:ph type="title"/>',
+             '<p:ph type="subTitle" idx="2"/>', '<p:ph type="dt" idx="10"/>', '')]
+         == [1000, 1000, 3000, 2000, 45720, 45720]),
         ("a table's cells keep their words, spaces, and formatting, the marker taken out",
          lambda: formatted is not None
          and [s.text for s in formatted.shapes if s.kind == "graphicFrame"]

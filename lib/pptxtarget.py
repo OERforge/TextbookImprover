@@ -118,6 +118,7 @@ import io
 import json
 import math
 import os
+import posixpath
 import re
 import shutil
 import subprocess
@@ -764,6 +765,31 @@ def _svg_blip(piece, rid):
     return piece[:blip.end()] + inner + piece[blip.end():]
 
 
+RELATIONSHIP = re.compile(r"<Relationship\b([^>]*?)/?>")
+
+
+def _related(part, rels, kind):
+    """The package path of a part's first internal relationship of a kind
+    (its type's last word, as slideLayout), from its relationships' XML,
+    or None."""
+    folder = posixpath.dirname(part)
+    for found in RELATIONSHIP.finditer(rels or ""):
+        attrs = found.group(1)
+        if (_attr_value(attrs, "Type") or "").rsplit("/", 1)[-1] != kind \
+                or _attr_value(attrs, "TargetMode") == "External":
+            continue
+        target = _attr_value(attrs, "Target") or ""
+        return target.lstrip("/") if target.startswith("/") \
+            else posixpath.normpath(posixpath.join(folder, target))
+    return None
+
+
+def _rels_part(part):
+    """A part's relationships' part."""
+    folder, name = posixpath.split(part)
+    return posixpath.join(folder, "_rels", name + ".rels")
+
+
 def _next_rid(rels):
     numbers = [int(n) for n in re.findall(r'\sId="rId(\d+)"', rels)]
     return "rId%d" % (max(numbers, default=0) + 1)
@@ -996,16 +1022,52 @@ def layout_styles(layout):
     return out
 
 
+def placeholder_insets(xml):
+    """{("idx", n) or ("type", t): the top inset its text body gives, in
+    EMU} for a layout's or a master's placeholders that give one."""
+    out = {}
+    for shape in PLACEHOLDER_SHAPE.finditer(xml or ""):
+        ph = re.search(r"<p:ph\b([^>]*)", shape.group(0))
+        body = BODY_PROPERTIES.search(shape.group(0))
+        inset = _attr_value(body.group(1), "tIns") if body else None
+        if ph is None or inset is None or not re.fullmatch(r"\d+", inset):
+            continue
+        out.setdefault(("idx", _attr_value(ph.group(1), "idx") or "0"), int(inset))
+        out.setdefault(("type", _attr_value(ph.group(1), "type") or "obj"), int(inset))
+    return out
+
+
+def inherited_inset(head, layout, master):
+    """The top inset a shape's text body takes from its placeholder, in EMU
+    (head: the shape's XML up to its text body; layout and master:
+    placeholder_insets'), as fit_text finds a placeholder's style: its
+    layout's placeholder by index, else by type, then its master's by its
+    base type; a text box, ECMA-376's default."""
+    ph = re.search(r"<p:ph\b([^>]*)", head)
+    if ph is None:
+        return CELL_ENDS // 2
+    kind = _attr_value(ph.group(1), "type") or "obj"
+    for key in (("idx", _attr_value(ph.group(1), "idx") or "0"), ("type", kind)):
+        if key in layout:
+            return layout[key]
+    return master.get(("type", pptxparse._base_type(kind)), master.get(("type", kind),
+                                                                       CELL_ENDS // 2))
+
+
 def body_height(piece, levels, width, scale=1.0, reduction=0.0):
     """How tall a shape's text is, in EMU, its paragraphs at their
     levels' sizes and margins and space before them (levels: _merged's),
     or their own, and any space after them of their own, wrapped at width
-    EMU inside the insets, at a fontScale and lnSpcReduction (fractions). A
-    display equation holding a fraction, a sum or integral, a stack, or a
-    matrix takes a line more."""
-    total = CELL_ENDS
+    EMU inside the insets, at a fontScale and lnSpcReduction (fractions),
+    with the top and bottom insets its text body gives, or a twentieth of
+    an inch each. A display equation holding a fraction, a sum or
+    integral, a stack, or a matrix takes a line more."""
     body = re.search(r"<p:txBody>(.*?)</p:txBody>", piece, re.S)
     respected = bool(body and FIRST_LAST.search(body.group(1)))
+    own = BODY_PROPERTIES.search(body.group(1)) if body else None
+    total = sum(int(value) if value and re.fullmatch(r"\d+", value) else CELL_ENDS // 2
+                for value in ((_attr_value(own.group(1), side) if own else None)
+                              for side in ("tIns", "bIns")))
     paragraphs = list(PARAGRAPH.finditer(body.group(1) if body else ""))
     for k, paragraph in enumerate(paragraphs):
         inner = paragraph.group(1) or ""
@@ -1054,10 +1116,13 @@ def body_height(piece, levels, width, scale=1.0, reduction=0.0):
 # Space that comes to less than none is none, as close as PowerPoint comes.
 # PowerPoint leaves out the space before a paragraph holding a display
 # equation: one given 1.3 lines showed none, where text given less showed
-# its own. So a display equation's space goes after the paragraph above it
-# instead (spcAft), in that paragraph's lines, and its own is none, as
-# PowerPoint shows it, whatever its level's. Whether PowerPoint shows the
-# space after an equation, where one follows another, is untried.
+# its own, and a probe showed none given in lines or in points, at the top
+# of a text body told to respect it or below text, where an equation's
+# space after showed, before text or another equation. So a display
+# equation's space goes after the paragraph above it instead (spcAft), in
+# that paragraph's lines, and its own is none, as PowerPoint shows it,
+# whatever its level's; and the deck's space above one opening a text
+# body goes into the body's top inset (tIns), over the one it inherits.
 DISPLAY_SPACE = 50000
 SPACE_MARK = "\ue002"
 VSPACE_MARK = "\ue003"
@@ -1184,15 +1249,18 @@ def _space_amount(spaces, character):
     return float(spaces[n - 1]) if 1 <= n <= len(spaces) else 0.0
 
 
-def paragraph_spacing(xml, counts, spaces=(), levels=None):
+def paragraph_spacing(xml, counts, spaces=(), levels=None, top_inset=None):
     """A slide whose paragraphs deck-pptx.lua marked, each given the space
     before it the marks call for (see DISPLAY_SPACE), the marks taken out,
     as is any mark elsewhere: a display equation, and the paragraph after
     one, DISPLAY_SPACE, but the first paragraph of a shape's text, which
     has no text above it to be set off from, as a display equation has
     after a slide's title or where a slide is cut; and the deck's own space
-    added. A display equation's space goes after the paragraph above it.
-    spaces: record["spaces"]; levels: the master's body text's
+    added. A display equation's space goes after the paragraph above it,
+    and the deck's space above one opening a shape's text into the text
+    body's top inset, over what its placeholder gives it (top_inset, a
+    function of the shape's XML before its text body, or a twentieth of an
+    inch). spaces: record["spaces"]; levels: the master's body text's
     (_merged's). counts["displays"] counts the equations given space,
     counts["spaces"] the deck's spaces given."""
     levels = levels or {}
@@ -1200,7 +1268,7 @@ def paragraph_spacing(xml, counts, spaces=(), levels=None):
     def body(match):
         found = list(PARAGRAPH.finditer(match.group(2)))
         out = [paragraph.group(0) for paragraph in found]
-        respected = False
+        respected, inset = False, 0
         for k, paragraph in enumerate(found):
             inner = paragraph.group(1)
             if inner is None or not SPACE_CHARACTERS.search(inner):
@@ -1216,6 +1284,11 @@ def paragraph_spacing(xml, counts, spaces=(), levels=None):
             if set_off and k > 0:
                 counts["displays"] += 1 if OMATH_PARA.search(inner) else 0
             counts["spaces"] += len(given)
+            if k == 0 and OMATH_PARA.search(inner):
+                inset = int(round(max(0.0, sum(given)) * LINE * _paragraph_size(inner, levels)
+                                  * EMU_PER_POINT))
+                out[k] = start + _space_before(inner, 0) + "</a:p>"
+                continue
             if k == 0:
                 respected = True
                 base = 0.0
@@ -1239,6 +1312,18 @@ def paragraph_spacing(xml, counts, spaces=(), levels=None):
         if respected:
             inside = BODY_PROPERTIES.sub(lambda m: "<a:bodyPr%s%s>" % (
                 _set_attr(m.group(1), "spcFirstLastPara", "1"), m.group(2)), inside, count=1)
+        if inset:
+            def widened(found):
+                own = _attr_value(found.group(1), "tIns")
+                if own and re.fullmatch(r"\d+", own):
+                    top = int(own)
+                else:
+                    head = match.string[match.string.rfind("<p:nvSpPr", 0, match.start()):
+                                        match.start()]
+                    top = top_inset(head) if top_inset else CELL_ENDS // 2
+                return "<a:bodyPr%s%s>" % (_set_attr(found.group(1), "tIns", str(top + inset)),
+                                           found.group(2))
+            inside = BODY_PROPERTIES.sub(widened, inside, count=1)
         return match.group(1) + inside + match.group(3)
     return SPACE_CHARACTERS.sub("", TEXT_BODY.sub(body, xml))
 
@@ -1665,6 +1750,20 @@ def finish(path, record, *, language, title, svgs=None, notes=None):
     slide_parts = sorted((n for n in parts if re.match(r"ppt/slides/slide\d+\.xml$", n)),
                          key=lambda n: int(re.search(r"(\d+)\.xml$", n).group(1)))
     notes_parts = [n for n in parts if re.match(r"ppt/notesSlides/notesSlide\d+\.xml$", n)]
+    insets = {}
+
+    def top_inset(slide_part):
+        """inherited_inset for a slide's shapes, from its layout and the
+        layout's master."""
+        layout = _related(slide_part, text(_rels_part(slide_part))
+                          if _rels_part(slide_part) in parts else "", "slideLayout")
+        if layout not in insets:
+            master_part = _related(layout, text(_rels_part(layout)), "slideMaster") \
+                if layout in parts and _rels_part(layout) in parts else None
+            insets[layout] = (placeholder_insets(text(layout)) if layout in parts else {},
+                              placeholder_insets(text(master_part)) if master_part in parts
+                              else {})
+        return lambda head: inherited_inset(head, *insets[layout])
     for name in slide_parts + notes_parts:
         xml, removed, declared = pptxremediate.repair_part(text(name))
         counts["repaired"] += removed + len(declared)
@@ -1692,7 +1791,7 @@ def finish(path, record, *, language, title, svgs=None, notes=None):
             xml, n = unique_ids(xml)
             counts["ids"] += n
             xml = animation_targets(xml, counts)
-            xml = paragraph_spacing(xml, counts, spaces, body_levels)
+            xml = paragraph_spacing(xml, counts, spaces, body_levels, top_inset(name))
         xml = math_fallbacks(xml, counts)
         if language:
             xml, _ = relanguage(xml, language)

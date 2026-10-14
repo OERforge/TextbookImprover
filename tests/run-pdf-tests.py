@@ -20,8 +20,9 @@ artifact rather than a figure, every link's /Contents its visible text
 with any description after it and nothing left over for a link LaTeX
 makes on its own, the division commands written once each from the
 roles, the page the metadata file made given no heading, every
-formula's MathML both as structure and as an attached file, and a code
-block in a footnote set in its note. The book is small
+formula's MathML both as structure and as an attached file, a code
+block in a footnote set in its note, and a passage in another language
+tagged with it. The book is small
 because a LaTeX run is slow; it holds one of each thing, and two of the
 things that come in kinds.
 
@@ -221,6 +222,33 @@ And code in a footnote, which LaTeX reads as the footnote's text.[^code]
 A heading below a subsection is run in to the text after it, and two of
 them followed by a section had left LaTeX's paragraph tagging one short.
 
+Some [tea and biscuits]{lang=en-GB} as in Britain, and a
+[link in it](https://example.org/tea){lang=en-GB}.
+
+::: {lang=en-GB}
+A paragraph in British English, about the lift and the flat.
+
+### Holiday
+
+- A list in it, of the post and the queue.
+
+::: {lang=en-AU}
+### Mate
+
+A passage inside it in a language of its own.
+:::
+
+And a paragraph after the heading, and a table with row headers.
+
+::: matrix
+|        | Shade |
+|--------|-------|
+| Plain  | grey  |
+:::
+:::
+
+Back in the book's own language.
+
 ## A section whose title runs longer than the line a running head has beside the page number, as a topic's can
 
 Words that fill the pages under a long title, so that its running head is set on a page of its own, beside the page's number, where the book class would set it in one line however long it is. Words that fill the pages under a long title, so that its running head is set on a page of its own, beside the page's number, where the book class would set it in one line however long it is. Words that fill the pages under a long title, so that its running head is set on a page of its own, beside the page's number, where the book class would set it in one line however long it is. Words that fill the pages under a long title, so that its running head is set on a page of its own, beside the page's number, where the book class would set it in one line however long it is.
@@ -348,7 +376,7 @@ UA1_PAGE = r"""# Old Standard
 ## A section
 
 A [described link](https://example.org/ "Example, a test site") and a
-formula, $a^2 + b^2 = c^2$, with a note.[^1]
+formula, $a^2 + b^2 = c^2$, with a note.[^1] Its [flat]{lang=en-GB} too.
 
 [^1]: The note.
 """
@@ -374,6 +402,42 @@ def build_ua1(work):
         with open(report, encoding="utf-8", newline="") as fh:
             rows = list(csv.DictReader(fh))
     return os.path.join(work, "pdf", "org.example.ua1.pdf"), converted.stdout + converted.stderr, rows
+
+
+def languages(path):
+    """(tag, /Lang, its text and its children's, the /Lang of the element
+    holding it) for each structure element that declares a language, and
+    for each whose text holds a phrase of the book's own language."""
+    pikepdf = pdftext.pikepdf
+    texts = pdftext.marked_text(path)
+    out = []
+    with pikepdf.open(path) as pdf:
+        pages = {page.objgen: n for n, page in enumerate(pdf.pages)}
+
+        def kids(element):
+            found = element.get("/K")
+            return list(found) if isinstance(found, pikepdf.Array) else [found]
+
+        def whole(element):
+            text = pdftext.own_text(element, texts, pages)
+            for kid in kids(element):
+                if isinstance(kid, pikepdf.Dictionary) and "/S" in kid:
+                    text += whole(kid)
+            return text
+
+        def walk(element, above):
+            if not isinstance(element, pikepdf.Dictionary) or "/S" not in element:
+                return
+            lang = str(element.Lang) if "/Lang" in element else None
+            text = whole(element)
+            if lang or "own language" in text:
+                out.append((str(element.S), lang, " ".join(text.split()), above))
+            for kid in kids(element):
+                walk(kid, lang or above)
+
+        for kid in kids(pdf.Root.StructTreeRoot):
+            walk(kid, None)
+    return out
 
 
 def ua1_formulas(path):
@@ -637,8 +701,10 @@ def checks(work, jobs=1):
     ua1_math, ua1_version, ua1_links = ua1_formulas(ua1_path) if os.path.exists(ua1_path) \
         else ([], "", [])
     ua1_roles = dict(f for f in ua1_math if f[0] == "roles").get("roles", [])
+    ua1_languages = languages(ua1_path) if os.path.exists(ua1_path) else []
     ua1_math = [f for f in ua1_math if f[0] != "roles"]
     pdf_path = os.path.join(work, "pdf", "org.example.pdf.pdf")
+    declared = languages(pdf_path)
     root = reader.trailer["/Root"]
     tree = elements(root["/StructTreeRoot"])
     kinds = [kind(e) for e in tree]
@@ -674,6 +740,34 @@ def checks(work, jobs=1):
          "scaled to fit there, not run past the margin",
          lambda: head_sizes(reader, "SECTION WHOSE TITLE RUNS")
          and all(size < 9.5 for size in head_sizes(reader, "SECTION WHOSE TITLE RUNS"))),
+        # babel's commands set a passage's hyphenation and tag nothing;
+        # pdf-target.lua's \\oerlang and oerlanguage give it its /Lang.
+        ("a span in another language is a Span with its /Lang, and so is a link in one",
+         lambda: ("/Span", "en-GB", "tea and biscuits", None) in declared
+         and any(s == "/Span" and lang == "en-GB" and text == "link in it"
+                 for s, lang, text, _ in declared)),
+        ("a passage's paragraphs and list take its /Lang, and a heading in it is its words "
+         "in a Span, the heading and its section declaring nothing",
+         lambda: any(lang == "en-GB" and text == "A paragraph in British English, about the "
+                     "lift and the flat." and s != "/Span" for s, lang, text, _ in declared)
+         and any(lang == "en-GB" and text.endswith("A list in it, of the post and the queue.")
+                 for s, lang, text, _ in declared)
+         and any(lang == "en-GB" and text == "And a paragraph after the heading, and a table "
+                 "with row headers." for s, lang, text, _ in declared)
+         and any(s == "/Table" and lang == "en-GB" for s, lang, text, _ in declared)
+         and ("/Span", "en-GB", "Holiday", None) in declared),
+        ("a passage inside it in a language of its own, with a heading, is its own language's",
+         lambda: ("/Span", "en-AU", "Mate", None) in declared
+         and any(lang == "en-AU" and above is None and text == "A passage inside it in a "
+                 "language of its own." for s, lang, text, above in declared)),
+        ("the text after the passage, in the section its heading began, is in the book's "
+         "language: nothing around it declares another",
+         lambda: any(text.startswith("Back in the book") and text.endswith("own language.")
+                     for _, _, text, _ in declared)
+         and all(lang is None and above is None for _, lang, text, above in declared
+                 if "own language" in text)),
+        ("and a PDF/UA-1 file's span too",
+         lambda: ("/Span", "en-GB", "flat", None) in ua1_languages),
         ("it claims PDF/UA-2 in its metadata",
          lambda: re.search(r"pdfuaid:part[^0-9]{1,5}2",
                            resolve(root["/Metadata"]).get_data().decode(
@@ -682,9 +776,11 @@ def checks(work, jobs=1):
         # first cell of each body row TH-row only if pdf-target.lua set
         # table/header-columns around it.
         ("the matrix table's first column is row headers",
-         lambda: len(tabled) == 9 and row_headers(tabled[0]) == 2),
+         lambda: len(tabled) == 10 and row_headers(tabled[0]) == 2),
+        ("and so is a table's in a passage in another language that holds a heading",
+         lambda: len(tabled) == 10 and row_headers(tabled[9]) == 1),
         ("the plain table has header cells and no row headers",
-         lambda: len(tabled) == 9 and row_headers(tabled[1]) == 0
+         lambda: len(tabled) == 10 and row_headers(tabled[1]) == 0
          and any(kind(e) == "/TH" for e in tabled[1])),
         # LaTeX writes a longtable's caption as a first row of one header
         # cell, and leaves the empty copy of the head it repeats inside the

@@ -295,28 +295,12 @@ $oer-macros$
   { \typeout { oer:~block~titles~not~tagged~as~headings } }
 % A passage in another language (deck-pdf.lua): its words, and everything
 % in a block of it, tagged with its language, which a screen reader
-% speaks it in. babel, which the writer would load for it, marks no
-% language in the tags. A passage the writer marks for babel itself
-% stands unmarked.
-\NewDocumentCommand \oerlang { m +m }
-  {
-    % In the paragraph: a passage that begins one would otherwise begin
-    % before it, and hold it.
-    \mode_leave_vertical:
-    \tag_mc_end_push:
-    \tag_struct_begin:n { tag = Span , lang = #1 }
-    \tag_mc_begin:n { }
-    #2
-    \tag_mc_end:
-    \tag_struct_end:
-    \tag_mc_begin_pop:n { }
-  }
-\NewDocumentEnvironment { oerlanguage } { m }
-  { \par \tagpdfsetup { text / lang = #1 } }
-  { \par }
-% A slide's title in another language: its words in its structure
-% element's title and its bookmark, the language left out.
-\text_declare_purify_equivalent:Nn \oerlang { \use_ii:nn }
+% speaks it in, by \oerlang and oerlanguage, which a book's PDF uses too
+% (oer-macros, latexbuild's PDF_MACROS). babel, which the writer would
+% load for it, marks no language in the tags. A passage the writer marks
+% for babel itself stands unmarked. A slide's title in another language:
+% its words in its structure element's title and its bookmark, the
+% language left out.
 \pdfstringdefDisableCommands
   {
     \cs_set:Npn \oerlang #1#2 {#2}

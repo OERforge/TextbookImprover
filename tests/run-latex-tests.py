@@ -1735,7 +1735,9 @@ def case_latex_target(work):
                  "triangle</figcaption></figure>\n\n<figure id=\"outer\"><figure>"
                  "<img src=\"img/square.png\" alt=\"A flowchart.\"></figure>"
                  "<figcaption>A small example</figcaption></figure>\n\n"
-                 "```python\nsides = 3  # a triangle\n```\n")
+                 "```python\nsides = 3  # a triangle\n```\n\n"
+                 "Its [lorry]{lang=en-GB} is grey.\n\n"
+                 "::: {lang=en-GB}\nA paragraph spelt so.\n\n## Holiday\n\nIts fortnight.\n:::\n")
     with open(os.path.join(work, "project.yaml"), "w") as fh:
         fh.write("project:\n  identifier: shapes\n  title: Shapes\n  language: en\n"
                  "  contents:\n  - one\n  - two\n  - three\n")
@@ -1857,6 +1859,16 @@ def case_latex_target(work):
          and "A & B & A and B \\\\\n\\hline\n" in two and "T & F & F \\\\" in two),
         ("what the PDF target's filter writes is there too: a link's /Contents",
          lambda: "\\OERLinkContents{" in one and "\\OERLinkContents" in master),
+        ("and a passage's language, tagged around babel's own command",
+         lambda: "\\oerlang{en-GB}{\\foreignlanguage{british}{lorry}}" in three
+         and "\\begin{oerlanguage}{en-GB}" in three
+         and "\\oerlang{en-GB}{Holiday}" in three and "\\NewDocumentCommand \\oerlang" in master),
+        ("read back, a passage's language is babel's again, none of its tags printed",
+         lambda: reading()
+         and '<span lang="en-GB">lorry</span>' in page(back, "three")
+         and re.search(r'<div lang="en-GB">\s*<p>A paragraph spelt so\.</p>', page(back, "three"))
+         and re.search(r'<h2[^>]*>Holiday</h2>', page(back, "three"))
+         and not re.search(r"oerlang|text / lang|en-GB}", page(back, "three"))),
         # LaTeX's tagged footnote can't read a code block's verbatim as its
         # text (footnote-code.lua); read back, Pandoc's reader takes the file
         # the preamble writes.
@@ -2708,7 +2720,23 @@ def case_pieces(work):
         "/nonexistent", "a.tex", "\\fig[A first. % to reword\n\nA second.]{sq}\n", {}, [],
         macros={"fig": {"file": "#2", "arguments": 2, "default": "", "alt": 1,
                         "keyed": False, "options": None}})
+    language_counts = {}
+    languages = latexsource.language_marks(
+        "A \\oerlang{fr}{\\foreignlanguage{french}{une {phrase}}} and "
+        "\\oerlang{fr} {\\href{https://example.org}{lien}}.\n\\begin{oerlanguage}{fr}\n\n"
+        "Un paragraphe.\n\\end{oerlanguage}\n\\section{\\texorpdfstring{\\oerlang{fr}{Une "
+        "\\oerlang{fr}{\\foreignlanguage{french}{en}}}}{Une en}}\n% \\oerlang{fr}{kept}\n"
+        "\\verb|\\oerlang{x}{y}| and \\oerlang{fr} alone.\n", language_counts)
     return [
+        ("the PDF target's language tags are taken out, babel's commands inside them kept, "
+         "nothing in a comment or \\verb, nor a tag not as the target writes it",
+         lambda: languages == (
+             "A \\foreignlanguage{french}{une {phrase}} and "
+             "\\href{https://example.org}{lien}.\n\nUn paragraphe.\n"
+             "\\section{\\texorpdfstring{Une \\foreignlanguage{french}{en}}{Une en}}\n"
+             "% \\oerlang{fr}{kept}\n\\verb|\\oerlang{x}{y}| and \\oerlang{fr} alone.\n")
+         and language_counts == {"language_spans": 4, "language_passages": 1,
+                                 "language_passages_end": 1}),
         ("natbib's punctuation is natbib.sty's: plainnat's preset, its own defaults for a "
          "style it has none for or once an option has set any, \\bibpunct, \\setcitestyle, "
          "and \\citestyle, its options in the order it declares them; LaTeX's own \\cite "

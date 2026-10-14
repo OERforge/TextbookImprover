@@ -494,6 +494,37 @@ PDF_MACROS = r"""\ExplSyntaxOn
     \IfPackageLoadedT { caption }
       { \captionsetup [ none ] { labelformat = empty , labelsep = none } }
   }
+% A passage in another language (pdf-target.lua): a span or a link a Span
+% with its /Lang, opened in the paragraph, and a div's blocks in
+% oerlanguage, whose structure elements take its /Lang; untagged, the
+% words alone. babel's own commands, inside them, set its hyphenation and
+% tag nothing. Its words alone in a structure element's title and a
+% bookmark.
+\NewDocumentCommand \oerlang { m +m }
+  {
+    \cs_if_exist:NTF \tag_mc_end_push:
+      {
+        \mode_leave_vertical:
+        \tag_mc_end_push:
+        \tag_struct_begin:n { tag = Span , lang = #1 }
+        \tag_mc_begin:n { }
+        #2
+        \tag_mc_end:
+        \tag_struct_end:
+        \tag_mc_begin_pop:n { }
+      }
+      { #2 }
+  }
+\NewDocumentEnvironment { oerlanguage } { m }
+  {
+    \par
+    \keys_if_exist:nnT { __tag / setup } { text / lang }
+      { \tagpdfsetup { text / lang = #1 } }
+  }
+  { \par }
+\text_declare_purify_equivalent:Nn \oerlang { \use_ii:nn }
+\AddToHook { package / hyperref / after }
+  { \pdfstringdefDisableCommands { \cs_set:Npn \oerlang #1#2 {#2} } }
 \ExplSyntaxOff
 """
 

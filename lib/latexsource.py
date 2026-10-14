@@ -1973,6 +1973,40 @@ TITLESEC_COMMANDS = (("titleformat*", "mm"), ("titleformat", "mommmmo"),
                      ("titlespacing", "mmmmo"), ("titlelabel", "m"))
 
 
+# The PDF target's tagging of a passage in another language (pdf-target.lua,
+# latexbuild's \oerlang and oerlanguage), whose definitions the reader
+# would print as text where a passage is marked.
+LANGUAGE_MARK = re.compile(r"\\oerlang\s*\{")
+LANGUAGE_PASSAGE = re.compile(r"^[ \t]*\\begin\s*\{oerlanguage\}\s*\{[^{}\n]*\}[ \t]*\n?",
+                              re.M)
+LANGUAGE_PASSAGE_END = re.compile(r"^[ \t]*\\end\s*\{oerlanguage\}[ \t]*\n?", re.M)
+
+
+def language_marks(text, counter):
+    """The PDF target's tags for a passage in another language taken out,
+    in code: \\oerlang{lang}{X} as X, where braces would be a span to the
+    reader, and oerlanguage's \\begin and \\end; babel's own command,
+    inside each, gives the reader the language."""
+    spans = skip_spans(text)
+    while True:
+        found = [m for m in LANGUAGE_MARK.finditer(text) if not in_spans(m.start(), spans)]
+        if not found:
+            break
+        m = found[-1]
+        first = matching_brace(text, m.end() - 1)
+        second = re.compile(r"\s*\{").match(text, first) if first >= 0 else None
+        close = matching_brace(text, second.end() - 1) if second else -1
+        if close < 0:
+            # Not as the target writes it: left for the reader.
+            spans = sorted(spans + [(m.start(), m.end())])
+            continue
+        text = text[:m.start()] + text[second.end():close - 1] + text[close:]
+        counter["language_spans"] = counter.get("language_spans", 0) + 1
+        spans = skip_spans(text)
+    text = substitute(LANGUAGE_PASSAGE, text, lambda m: "", counter, "language_passages")
+    return substitute(LANGUAGE_PASSAGE_END, text, lambda m: "", counter, "language_passages_end")
+
+
 def unwrap(text, command, counter, key):
     """\\command{X} as X, in code: for a wrapper the reader doesn't know
     and drops with what it holds, as Pandoc's LaTeX writer's
@@ -2173,6 +2207,7 @@ def repair_text(text, counter, math_macros=(), counters=()):
     text = substitute(MULTICOLUMN_EDGE, text,
                       lambda m: m.group(1) + re.sub(r"@\{[^{}]*\}", "", m.group(2)) + "}",
                       counter, "multicolumn_edge")
+    text = language_marks(text, counter)
     text = drop(text, "OERLinkContents", counter, "link_contents")
     text = stacked_lines(text, counter)
     text = minipage_breaks(text, counter)

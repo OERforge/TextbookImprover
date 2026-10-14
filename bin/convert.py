@@ -1095,6 +1095,10 @@ LATEX_READ_CHANGES = (
     ("highlighted_inline", "inline code Pandoc highlighted (\\VERB) read as the code it shows, "
      "where a bracket or a parenthesis in it stopped the reader"),
     ("link_contents", "link's /Contents for the PDF left out"),
+    ("language_spans", "span's or link's language tag for the PDF (\\oerlang) left out, "
+     "babel's command inside it read"),
+    ("language_passages", "passage's language tag for the PDF (oerlanguage) left out, "
+     "babel's environment around it read"),
     ("stacked_lines", "table cell's lines stacked in \\vtop read as lines"),
     ("minipage_breaks", "line break in a minipage read as \\newline"),
     ("multicolumn_edge", "\\multicolumn's edge spacing (@{...}) left out, so its table is read"),

@@ -49,6 +49,18 @@
 --    LaTeX 2026-06-01). It goes at the head of the term's definition, where
 --    the writer gives it as a footnote, as it does in a paragraph.
 --
+-- 8. A passage in another language, a span, a link, or a div with a lang
+--    attribute, which the writer marks for babel, whose commands set its
+--    hyphenation and tag nothing: the PDF had /Lang in its catalog alone,
+--    where PDF/UA-1 wants every change of language declared (ISO 14289-1,
+--    7.2). A span or a link is tagged a Span with its language
+--    (latexbuild's \oerlang), and a div's blocks are each in an
+--    oerlanguage environment, whose structure elements take it, as a
+--    deck's PDF tags them (deck-pdf.lua); babel's command is kept inside.
+--    A div holding a heading has the blocks between its headings so
+--    marked, the heading's words in \oerlang, so no section's element,
+--    which goes on past the div's end, takes the language.
+--
 -- Copyright 2026 Robert Szarka
 --
 -- This program is free software: you can redistribute it and/or modify
@@ -574,6 +586,91 @@ local function equation(span)
   return out
 end
 
+-- 8. A language tag the PDF can carry: BCP 47's letters, digits, and
+-- hyphens, nothing a PDF string would read otherwise.
+local function language(attr)
+  local lang = attr.attributes.lang
+  if lang and lang:match('^%a%a?%a?%a?%a?%a?%a?%a?[%-%w]*$') and not lang:match('%-%-')
+      and not lang:match('%-$') then
+    return lang
+  end
+end
+
+local function marked(lang, inlines)
+  local out = pandoc.Inlines({ pandoc.RawInline('latex', '\\oerlang{' .. lang .. '}{') })
+  out:extend(inlines)
+  out:insert(pandoc.RawInline('latex', '}'))
+  return out
+end
+
+-- A span or a link in another language, its attribute kept for babel.
+local function inline_language(element)
+  local lang = language(element.attr)
+  if lang then
+    return marked(lang, { element })
+  end
+end
+
+local function holds_heading(blocks)
+  for _, block in ipairs(blocks) do
+    if block.t == 'Header' or (block.t == 'Div' and holds_heading(block.content)) then
+      return true
+    end
+  end
+  return false
+end
+
+-- A div's blocks in its language: all in one environment, or, where they
+-- hold a heading, the blocks between headings in one each, so the latex
+-- target's passage reads as one, the heading's words marked, a div inside
+-- in a language of its own left to that.
+local function in_language(blocks, lang)
+  local opening = pandoc.RawBlock('latex', '\\begin{oerlanguage}{' .. lang .. '}')
+  local closing = pandoc.RawBlock('latex', '\\end{oerlanguage}')
+  local out, run = pandoc.Blocks({}), pandoc.Blocks({})
+  local function flush()
+    if #run > 0 then
+      out:insert(opening)
+      out:extend(run)
+      out:insert(closing)
+      run = pandoc.Blocks({})
+    end
+  end
+  if not holds_heading(blocks) then
+    run = blocks
+    flush()
+    return out
+  end
+  for _, block in ipairs(blocks) do
+    if block.t == 'Header' then
+      flush()
+      if #block.content > 0 then
+        block.content = marked(lang, block.content)
+      end
+      out:insert(block)
+    elseif block.t == 'Div' and language(block.attr) then
+      flush()
+      out:insert(block)
+    elseif block.t == 'Div' and holds_heading(block.content) then
+      flush()
+      block.content = in_language(block.content, lang)
+      out:insert(block)
+    else
+      run:insert(block)
+    end
+  end
+  flush()
+  return out
+end
+
+local function div_language(div)
+  local lang = language(div.attr)
+  if lang then
+    div.content = in_language(div.content, lang)
+    return div
+  end
+end
+
 local function term_notes(list)
   local items, moved_any = pandoc.List({}), false
   for _, item in ipairs(list.content) do
@@ -615,4 +712,5 @@ return {
   { Figure = Figure },
   { Para = line_breaks, Plain = line_breaks },
   { Table = Table, Image = Image, Link = Link, Math = Math },
+  { Span = inline_language, Link = inline_language, Div = div_language },
 }

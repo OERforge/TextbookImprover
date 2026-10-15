@@ -72,6 +72,7 @@ import copy
 import subprocess
 import sys
 import tempfile
+from collections import Counter
 from urllib.parse import unquote
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -584,12 +585,14 @@ def book_sources(base):
                   and os.path.basename(p).lower() not in REPOSITORY_FILES)
 
 
-def slides_run(base, decks, targets, project, paths, reports, args, first):
+def slides_run(base, decks, targets, project, paths, reports, args, first, archive=True):
     """A folder of PowerPoint decks: each checked, the decisions it needs
     written to the reports, and each format: source target given a copy of
     each deck with the decisions made so far written in (deckrun.py), the
-    copies then checked. No pages and no cartridge: those come with the
-    slides' later phases (ROADMAP.md)."""
+    copies then checked. A target of another format converts the decks
+    after it (main, PPTX_RUN), which archives every target at its end;
+    archive is off then. No cartridge: slides aren't packaged yet
+    (ROADMAP.md)."""
     import deckrun
     if not decks:
         die("project.kind is slides, but there's no deck here: no PowerPoint deck "
@@ -600,9 +603,10 @@ def slides_run(base, decks, targets, project, paths, reports, args, first):
             + ", ".join(others[:4]) + (", ..." if len(others) > 4 else "")
             + "): this folder is slides (project.kind), and a slides run reads "
             "decks, PowerPoint or Markdown.")
-    say(f"Slides: {len(decks)} PowerPoint deck(s), each checked and remediated on its own"
-        + (" (project.kind)." if KIND_DECLARED == "slides" else
-           ", since they're all this folder holds."))
+    say(f"Slides: {len(decks)} PowerPoint deck(s), each checked"
+        + (" and remediated" if any(t.format == "source" for t in targets) else "")
+        + " on its own" + (" (project.kind)." if KIND_DECLARED == "slides" else
+                           ", since they're all this folder holds."))
     code = deckrun.run(
         base, decks, targets, paths, reports,
         # Written into a copy only when the project declares it, as a
@@ -612,6 +616,8 @@ def slides_run(base, decks, targets, project, paths, reports, args, first):
         alt_placeholders=first["images.alt_placeholders"] or (),
         check_only=args.check_only, say=say)
     warn_unreviewed(paths)
+    if not archive:
+        return code
     if not args.check_only and code == 0:
         archive_targets([t for t in targets if t.format == "source"], base)
     elif not args.check_only and any(str(t["archive"] or "none") != "none" for t in targets):
@@ -683,6 +689,11 @@ def load_targets(base, allow_unknown, decks_only=False, pptx_decks=False,
     # Pandoc's slide Markdown is ordinary Markdown. A folder of both kinds
     # of deck is stopped once the targets are read.
     DECK_RUN = KIND_DECLARED == "slides" and markdown_decks and not pptx_decks
+    # A folder of PowerPoint decks, slides when project.kind says so or
+    # when they're all it holds: each deck checked and remediated, and
+    # converted for a target of another format (pptxsource.py).
+    pptx_slides = pptx_decks and not markdown_decks and (
+        KIND_DECLARED == "slides" or (KIND_DECLARED is None and decks_only))
     if not declared and pptx_decks and (KIND_DECLARED == "slides"
                                         or (KIND_DECLARED is None and decks_only)):
         # The target a slides folder means when it names none: a copy of
@@ -735,10 +746,30 @@ def load_targets(base, allow_unknown, decks_only=False, pptx_decks=False,
             targets.append(Target(name, resolved, base))
     except oerconfig.ConfigError as exc:
         die(str(exc))
-    # A PowerPoint file and a reveal.js presentation are written of a deck
-    # written in Markdown: a book's pages have no slides, and a PowerPoint
-    # deck's copy is format source.
-    if not DECK_RUN and any(t.format in ("pptx", "revealjs") for t in targets):
+    # A PowerPoint deck's own PowerPoint file is its copy, format source,
+    # which keeps its design. A pptx target rebuilds the deck from what the
+    # reader keeps, through Pandoc's PowerPoint writer, which keeps none of
+    # it, so it's for moving decks onto a template, and is written only on
+    # one (slides.reference_doc).
+    if pptx_slides and any(t.format == "pptx" for t in targets):
+        for target in targets:
+            if target.format == "pptx" and not str(target["slides.reference_doc"] or "").strip():
+                say(f"WARNING: target {target.name} is format pptx, and nothing is written for "
+                    "it: a PowerPoint deck's own PowerPoint file is a format: source target's "
+                    "copy, the deck with the sidecars' decisions written in, which keeps its "
+                    "design. A pptx target rebuilds each deck on a template, which "
+                    "slides.reference_doc names, keeping its text, tables, pictures, equations, "
+                    "and notes, and losing its design (docs/slides.md).")
+        targets = [t for t in targets if t.format != "pptx"
+                   or str(t["slides.reference_doc"] or "").strip()]
+        if not targets:
+            die("Every target here is format pptx, with no slides.reference_doc to rebuild the "
+                "decks on; format: source is a copy of each deck with the sidecars' decisions "
+                "written in, its design kept.")
+    # A PowerPoint file and a reveal.js presentation are written of a deck:
+    # a book's pages have no slides.
+    if not DECK_RUN and not pptx_slides and any(t.format in ("pptx", "revealjs")
+                                                for t in targets):
         for target in targets:
             if target.format in ("pptx", "revealjs"):
                 say(f"WARNING: target {target.name} is format {target.format}, which is written "
@@ -763,7 +794,7 @@ def load_targets(base, allow_unknown, decks_only=False, pptx_decks=False,
         die("Every target here is a format that is NOT YET IMPLEMENTED "
             f"({', '.join(NOT_YET_IMPLEMENTED)}); add an html, epub3, or "
             "markdown target to conversion.yaml.")
-    if DECK_RUN:
+    if DECK_RUN or pptx_slides:
         # What a deck is written as: a page, a PDF, a PowerPoint file,
         # Markdown again, or a copy of its source. An EPUB or a Word file
         # of one isn't.
@@ -864,8 +895,14 @@ LATEX_MACROS = "latex-conversion-macros.tex"
 LANGUAGE_DECLARED = False
 KIND_DECLARED = None        # project.kind as a file gives it, if one does
 # A slides run of decks written in Markdown: each .md a deck, read and
-# filtered as a page is, and written by the formats a deck has.
+# filtered as a page is, and written by the formats a deck has; or of
+# PowerPoint decks converted for a target of another format than source,
+# each read by pptxsource.py, then likewise (PPTX_RUN).
 DECK_RUN = False
+PPTX_RUN = False
+# Each deck's source file by its page's name, which names a PDF or a
+# PowerPoint file whose deck has no title.
+DECK_SOURCES = {}
 DECK_FORMATS = ("html", "pdf", "pptx", "revealjs", "markdown", "source")
 # The Pandoc whose PowerPoint writer keeps a table and the text around it
 # on one slide (3.10.1, #11433), which deck-pptx.lua's cutting of slides
@@ -1969,8 +2006,51 @@ def read_markdown_to_json(base, docs, env, decks=False):
             env=env, cwd=base)
         settle_markdown(os.path.join(base, stem + ".json"), base, name, decks)
         stems.append(stem)
+        if decks:
+            DECK_SOURCES[stem] = name
     if decks:
         report_decks()
+    return stems
+
+
+def read_pptx_to_json(base, decks, env, work, paths):
+    """Each PowerPoint deck read into the intermediate a deck written in
+    Markdown has (pptxsource.py), its pictures written to media/ under
+    their keys, its equations read by Pandoc's Word reader, and the
+    decisions its sidecars hold for its copy applied: alt text and the
+    decorative mark, a table's headers, a slide's title, its reading
+    order. A deck that can't be read was named by its checks; it's left
+    out here too. Returns the decks' page names."""
+    import pptxremediate
+    import pptxsource
+    alts = pptxremediate.alt_rows(paths.get("image_alt"))
+    tables = pptxremediate.header_rows(paths.get("table_headers"))
+    titles = pptxremediate.title_rows(paths.get("slide_titles"))
+    orders = pptxremediate.order_rows(paths.get("reading_order"))
+    version = pptxsource.api_version()
+    stems, records = [], []
+    for name in decks:
+        stem = safe_stem(name[:-5])
+        try:
+            doc, record = pptxsource.read(os.path.join(base, name), base, work, alts, tables,
+                                          titles, orders, api_version=version, env=env)
+        except Exception:               # its checks said why
+            continue
+        with open(os.path.join(base, stem + ".json"), "w", encoding="utf-8") as fh:
+            json.dump(doc, fh)
+        DECK_SOURCES[stem] = name
+        records.append((name, record))
+        stems.append(stem)
+    if TRACE:
+        counts = Counter()
+        for _name, record in records:
+            counts.update(record.counts)
+        say(f"# {len(stems)} deck(s) read: {counts['slides']} slide(s), {counts['pictures']} "
+            f"picture(s) and {counts['decorative']} marked decorative, {counts['tables']} "
+            f"table(s), {counts['equations']} equation(s), {counts['lists']} list(s), "
+            f"{counts['links']} link(s), and speaker notes on {counts['notes']} slide(s)")
+    for line in pptxsource.loss_lines(records):
+        say(line)
     return stems
 
 
@@ -2508,6 +2588,13 @@ def filter_env(target, base, paths, env):
         # every rendering.
         out["PROMOTE_H1_TO_TITLE"] = "never"
         out["AUTHOR_BYLINE"] = "visible"
+    if PPTX_RUN:
+        # A PowerPoint deck's pictures have the alt text its sidecar
+        # decides already, by the keys its copy finds them by, which the
+        # filter, keying a picture on its path, would only apply again; and
+        # its pictures and tables were reported from the deck itself.
+        out["IMAGE_ALT"] = ""
+        out["DECK_REPORTED"] = "1"
     return out
 
 
@@ -5045,7 +5132,7 @@ def write_bare_links(rows_file, report, sidecar):
 # --------------------------------------------------------------------------
 
 def main():
-    global TRACE
+    global TRACE, DECK_RUN, PPTX_RUN
     parser = argparse.ArgumentParser(
         description="Convert the .docx files here, one output per target.",
         epilog="Anything else is passed to build-cartridge.py: --zip, "
@@ -5102,9 +5189,9 @@ def main():
             + "): a deck isn't a page of a book. In a folder of their own, decks "
             "are slides, each checked and remediated (project.kind: slides).")
     if slides and decks and markdown_here:
-        # One run reads PowerPoint decks itself and Markdown through Pandoc,
-        # and the two would write the same reports; until PowerPoint decks
-        # are converted as Markdown ones are, a folder holds one kind.
+        # The two kinds' runs write the same reports, PowerPoint decks'
+        # from the decks themselves (deckrun.py) and Markdown decks' from
+        # the filter, so a folder holds one kind.
         die(f"This folder is slides, with {len(decks)} PowerPoint deck(s) and "
             f"{len(markdown_here)} written in Markdown ({decks[0]}, {markdown_here[0]}). "
             "Put each kind in a folder of its own: a slides run reads one kind of deck "
@@ -5113,14 +5200,20 @@ def main():
     # versions accept most of the command line and quietly do something
     # else: 3.6 and older write grid tables without cell spans, so a table
     # with merged cells loses them without any warning. A slides run of
-    # PowerPoint decks reads and writes them itself, and needs no Pandoc.
-    if not slides or DECK_RUN:
+    # PowerPoint decks reads and writes them itself, and needs no Pandoc,
+    # unless a target of another format than source converts them.
+    converting = [t for t in targets if t.format != "source"] \
+        if slides and not DECK_RUN and not args.check_only else []
+    if not slides or DECK_RUN or converting:
+        why = (" Target(s) " + ", ".join(t.name for t in converting) + " convert the "
+               "PowerPoint decks, through Pandoc; a run whose targets are all format "
+               "source needs none.") if converting else ""
         if shutil.which("pandoc") is None:
-            die("pandoc not found. Version 3.9 or later is required.")
+            die("pandoc not found. Version 3.9 or later is required." + why)
         version = subprocess.run(["pandoc", "--version"], capture_output=True,
                                  text=True).stdout.split()[1]
         if tuple(int(p) for p in re.findall(r"\d+", version)[:3]) < (3, 9):
-            die(f"Pandoc {version} is too old; 3.9 or later is required.")
+            die(f"Pandoc {version} is too old; 3.9 or later is required." + why)
     global PASSTHROUGH
     PASSTHROUGH = str(project.get("passthrough", "_pt") or "").strip("/")
     for target in targets:
@@ -5168,9 +5261,18 @@ def main():
                            "media_unresolved", "spacer_images",
                            "output_check", "math_repaired", "ids_renamed",
                            "slide_titles_new", "reading_order_new", "slides_check")}
+    pptx_code, pptx_targets = 0, targets
     if slides and not DECK_RUN:
-        return slides_run(base, decks, targets, project, paths, reports, args, first)
-    if DECK_RUN:
+        code = slides_run(base, decks, targets, project, paths, reports, args, first,
+                          archive=not converting)
+        if not converting:
+            return code
+        # The decks converted, as decks written in Markdown are, but read by
+        # pptxsource.py; their copies are written, and their reports are
+        # deckrun's, about the decks themselves.
+        DECK_RUN = PPTX_RUN = True
+        pptx_code, targets = code, converting
+    if DECK_RUN and not PPTX_RUN:
         others = [n for n in book_sources(base) if not n.lower().endswith(".md")]
         if latex_book_here(base):
             others.append("its LaTeX")
@@ -5226,8 +5328,11 @@ def main():
         # ---- 1. read ----------------------------------------------------------
         # Every file that becomes a page is found before any is read, so
         # two that would be one page stop the run before either is.
-        markdown = markdown_sources(base, fragment_files, decks=DECK_RUN)
-        if DECK_RUN:
+        markdown = [] if PPTX_RUN else markdown_sources(base, fragment_files, decks=DECK_RUN)
+        if PPTX_RUN:
+            say(f"Slides: {len(decks)} PowerPoint deck(s), each converted on its own: "
+                + ", ".join(f"{t.name} ({t.format})" for t in targets) + ".")
+        elif DECK_RUN:
             say(f"Slides: {len(markdown)} deck(s) written in Markdown (project.kind), "
                 "each converted on its own: " + ", ".join(
                     f"{t.name} ({t.format})" for t in targets) + ".")
@@ -5240,9 +5345,12 @@ def main():
         hand = [] if DECK_RUN else hand_pages(base, named)
         web = [] if DECK_RUN else html_sources(base, named, set(hand))
         check_page_names([docs, markdown, adoc, web,
-                          [f"{PASSTHROUGH}/{h}.html" for h in hand]])
+                          [f"{PASSTHROUGH}/{h}.html" for h in hand]]
+                         + ([decks] if PPTX_RUN else []))
         stems = read_to_json(base, docs, env, work)
-        stems += read_markdown_to_json(base, markdown, env, decks=DECK_RUN)
+        stems += read_markdown_to_json(base, markdown, env, decks=DECK_RUN and not PPTX_RUN)
+        if PPTX_RUN:
+            stems += read_pptx_to_json(base, decks, env, work, paths)
         adoc_stems = read_asciidoc_to_json(base, adoc, env, imagesdir)
         resolve_asciidoc_xrefs(base, adoc_stems)
         stems += adoc_stems
@@ -5352,8 +5460,11 @@ def main():
         # one left behind by an earlier run cannot survive into a run that
         # has nothing to report. Doing it here rather than at the top means
         # a run that stops at the gate leaves the previous reports intact.
-        for key in ("table_captions_missing", "image_alt_missing",
-                    "spacer_images", "math_repaired", "ids_renamed"):
+        # A PowerPoint deck's own reports were written before it was
+        # converted (deckrun.py), and are this run's.
+        for key in (("spacer_images", "ids_renamed") if PPTX_RUN else (
+                "table_captions_missing", "image_alt_missing", "spacer_images",
+                "math_repaired", "ids_renamed")):
             if os.path.exists(reports[key]):
                 os.remove(reports[key])
 
@@ -5437,30 +5548,35 @@ def main():
                              hand_stems, work)
 
         # ---- 5. reports, once per book ----------------------------------------
-        missing = write_report(
+        # A PowerPoint deck's are its checks', about the deck itself, written
+        # before it was converted (deckrun.py); what the filter finds in its
+        # intermediate is the same deck's, and isn't reported again.
+        missing = [] if PPTX_RUN else write_report(
             collected["captions_missing"], reports["table_captions_missing"],
             "Label,Description,Source,Excerpt,Drafted by,Reviewed",
             "table(s) needing a description", paths["table_captions"])
-        judge_alt_text(collected["alt_seen"], collected["alt_missing"],
-                       first["images.alt_placeholders"] or (), base, DECK_RUN)
-        write_report(
-            collected["alt_missing"], reports["image_alt_missing"],
-            "Image,Alt,Source,Reason,CurrentAlt,Drafted by,Reviewed",
-            "image(s) needing alt text", paths["image_alt"],
-            "Use [decorative] in the Alt column for images that carry no "
-            "meaning.")
-        write_bare_links(collected["bare_links"], reports["bare_links_new"],
-                         paths["bare_links"])
-        warn_math_keep(paths["math_keep"], collected["math_kept"],
-                       [key for key in set(sidecars.MATH_SETTINGS.values())
-                        if not any(t[key] for t in targets)])
-        warn_unreviewed(paths)
+        if not PPTX_RUN:
+            judge_alt_text(collected["alt_seen"], collected["alt_missing"],
+                           first["images.alt_placeholders"] or (), base, DECK_RUN)
+            write_report(
+                collected["alt_missing"], reports["image_alt_missing"],
+                "Image,Alt,Source,Reason,CurrentAlt,Drafted by,Reviewed",
+                "image(s) needing alt text", paths["image_alt"],
+                "Use [decorative] in the Alt column for images that carry no "
+                "meaning.")
+            write_bare_links(collected["bare_links"], reports["bare_links_new"],
+                             paths["bare_links"])
+            warn_math_keep(paths["math_keep"], collected["math_kept"],
+                           [key for key in set(sidecars.MATH_SETTINGS.values())
+                            if not any(t[key] for t in targets)])
+            warn_unreviewed(paths)
         warn_title_numbers(collected["title_numbers"])
-        write_report(collected["math"], reports["math_repaired"],
-                     "Kind,Page,Before,After", "math repair(s)", None,
-                     "Each is an equation's characters repaired, or math "
-                     "typed as text made an equation; math.repair_equations "
-                     "and math.from_text turn them off.")
+        if not PPTX_RUN:
+            write_report(collected["math"], reports["math_repaired"],
+                         "Kind,Page,Before,After", "math repair(s)", None,
+                         "Each is an equation's characters repaired, or math "
+                         "typed as text made an equation; math.repair_equations "
+                         "and math.from_text turn them off.")
         write_report(collected["spacers"], reports["spacer_images"],
                      "Image,Source,Width,Action", "spacer image(s) handled")
         write_report(collected["ids_renamed"], reports["ids_renamed"],
@@ -5512,8 +5628,7 @@ def main():
             if DECK_RUN:
                 # A PDF per deck, not one of the whole folder.
                 pdfs += deck_pdfs(target, [s for s in stems if s not in hand_stems],
-                                  {safe_stem(os.path.basename(n)[:-3]): n for n in markdown},
-                                  base, language)
+                                  DECK_SOURCES, base, language)
                 continue
             # A LaTeX book's own build titles its PDF as its \title does.
             own_build = master and str(target["pdf.from"]) == "book"
@@ -5540,9 +5655,19 @@ def main():
         pptxs = []
         for target in targets:
             if target.format == "pptx":
+                if PPTX_RUN:
+                    say(f"WARNING: target {target.name} rebuilds {len(stems)} PowerPoint "
+                        f"deck(s) on slides.reference_doc, "
+                        f"{os.path.basename(str(target['slides.reference_doc']))}, from what "
+                        "the conversion keeps of each (its slides' titles, text, lists, "
+                        "tables, pictures and their alt text, equations, and notes) through "
+                        "Pandoc's PowerPoint writer: its design is lost, its theme, layouts, "
+                        "backgrounds, and where each shape sits, with its animations and "
+                        "transitions, and what the conversion leaves out of every target. "
+                        "It's for moving decks onto a template; a format: source target's "
+                        "copy is the deck itself, its design kept.")
                 pptxs += deck_pptxs(target, [s for s in stems if s not in hand_stems],
-                                    {safe_stem(os.path.basename(n)[:-3]): n for n in markdown},
-                                    base, language, work)
+                                    DECK_SOURCES, base, language, work)
         # ---- 5.62 reveal.js presentations, per revealjs target -----------
         presentations = []
         for target in targets:
@@ -5574,14 +5699,20 @@ def main():
         # run: the output exists, and the list is what to work through.
         command = ["python3", CHECK_TOOL, "--report", reports["output_check"]] \
             + (["--quick"] if args.quick else [])
+        # A PowerPoint deck's copies were checked before it was converted,
+        # into the same report, which keeps their findings.
+        copies_found = []
+        if PPTX_RUN and any(t.format == "source" for t in pptx_targets) \
+                and os.path.exists(reports["output_check"]):
+            import findings
+            copies_found = findings.read_csv(reports["output_check"])
         for pages in written.values():
             command += [p for p in pages if p.endswith(".html")]
         command += presentations
         if DECK_RUN:
             # Each deck a document of its own, its pages its pieces.
             command += ["--documents", deck_documents(
-                [p for p in command if p.endswith(".html")],
-                [safe_stem(os.path.basename(n)[:-3]) for n in markdown], work)]
+                [p for p in command if p.endswith(".html")], list(DECK_SOURCES), work)]
         for epub in epubs:
             command += ["--epub", epub]
         for pdf in pdfs:
@@ -5590,9 +5721,20 @@ def main():
             command += ["--pptx", pptx]
         if os.path.isfile(CHECK_TOOL):
             run(command, check=False)
+        if copies_found:
+            import findings
+            findings.write_csv(reports["output_check"], copies_found + (
+                findings.read_csv(reports["output_check"])
+                if os.path.exists(reports["output_check"]) else []))
     finally:
         shutil.rmtree(work, ignore_errors=True)
-    archive_targets(targets, base)
+    if not PPTX_RUN:
+        archive_targets(targets, base)
+    elif pptx_code == 0:
+        archive_targets(pptx_targets, base)
+    elif any(str(t["archive"] or "none") != "none" for t in pptx_targets):
+        say("NOTE: nothing was archived, since a deck couldn't be read or a copy couldn't be "
+            "read back; what was written is in each target's folder.")
 
     # ---- 6. the cartridge --------------------------------------------------
     # Handed off to build-cartridge.py, which is read-only with respect to
@@ -5606,7 +5748,7 @@ def main():
         # Decks are packaged beside a book, or as a course of their own,
         # once a package can hold more than one target (ROADMAP.md).
         say("Slides aren't packaged yet; each target's folder holds its decks.")
-        return unnamed
+        return unnamed or pptx_code
     html_targets = [t for t in targets if t.format == "html"]
     if not os.path.isfile(CARTRIDGE_TOOL) or not html_targets:
         say(f"No {CARTRIDGE_TOOL}, so skipping the manifest."

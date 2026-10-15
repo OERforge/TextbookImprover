@@ -257,7 +257,8 @@ class Shape:
     __slots__ = ("kind", "frame", "id", "name", "descr", "title", "hidden", "decorative",
                  "ph_type", "ph_idx", "text", "paragraphs", "box", "children", "image",
                  "links", "table", "prog_id", "media", "depth", "alternate", "math",
-                 "malformed", "rotation", "stroke", "extent", "tracks", "styled", "crop")
+                 "malformed", "rotation", "stroke", "extent", "tracks", "styled", "crop",
+                 "element")
 
     def __init__(self, kind):
         self.kind = kind            # sp, pic, graphicFrame, grpSp, cxnSp, contentPart
@@ -294,6 +295,9 @@ class Shape:
         self.styled = False
         # The part of its image a picture or picture fill shows (_crop).
         self.crop = None
+        # Its element in the part's tree, for reading its text as the
+        # deck's converter does (pptxsource.py).
+        self.element = None
 
     @property
     def placeholder(self):
@@ -318,7 +322,7 @@ class Shape:
 
 class Slide:
     __slots__ = ("number", "part", "slide_id", "hidden", "layout", "layout_part", "shapes",
-                 "notes", "section")
+                 "notes", "notes_part", "section")
 
     def __init__(self, number, part, slide_id):
         self.number, self.part, self.slide_id = number, part, slide_id
@@ -326,6 +330,7 @@ class Slide:
         self.layout = self.layout_part = None
         self.shapes = []
         self.notes = ""
+        self.notes_part = None
         self.section = None
 
     def all_shapes(self):
@@ -787,7 +792,7 @@ class _Reader:
 
     def shape(self, el, kind, depth, mapper, alternate):
         shape = Shape(kind)
-        shape.depth, shape.alternate = depth, alternate
+        shape.depth, shape.alternate, shape.element = depth, alternate, el
         nv = next((c for c in el if c.tag.startswith("{%s}nv" % NS["p"])), None)
         cnvpr = nv.find(q("p:cNvPr")) if nv is not None else None
         if cnvpr is not None:
@@ -982,6 +987,7 @@ def read(path):
             slide.shapes = reader.shapes(tree) if tree is not None else []
             notes = rel_target(rels, "notesSlide")
             if notes:
+                slide.notes_part = notes
                 try:
                     nroot = part_xml(notes)
                     texts = []

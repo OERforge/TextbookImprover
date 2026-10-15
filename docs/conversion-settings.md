@@ -182,7 +182,7 @@ How large a 16:9 deck's PowerPoint slides are: widescreen is PowerPoint's Widesc
 
 **`slides.reference_doc`**—`path`; default `""` (empty)
 
-A PowerPoint file whose look a deck's PowerPoint file takes, as Pandoc's reference-doc option takes it: its slide size, its slide master and layouts, its fonts, its colors, and its default table style, the layouts named as Pandoc's manual says (Title Slide, Title and Content, Section Header, Two Content, Comparison, Content with Caption, Blank), as an absolute path or one relative to the folder converted. A default table style whose header row has too little contrast is warned of. Left empty, the look is Pandoc's own, its slides the shape aspect_ratio says at the size size says, its tables PowerPoint's Light Style 1 - Accent 1. A path that doesn't exist stops the run.
+A PowerPoint file whose look a deck's PowerPoint file takes, as Pandoc's reference-doc option takes it: its slide size, its slide master and layouts, its fonts, its colors, and its default table style, the layouts named as Pandoc's manual says (Title Slide, Title and Content, Section Header, Two Content, Comparison, Content with Caption, Blank), as an absolute path or one relative to the folder converted. A default table style whose header row has too little contrast is warned of. Left empty, the look is Pandoc's own, its slides the shape aspect_ratio says at the size size says, its tables PowerPoint's Light Style 1 - Accent 1. A path that doesn't exist stops the run. A PowerPoint deck's pptx target is written only on one: it rebuilds each deck on the template, losing the deck's design, which its copy (format: source) keeps; left empty, the target writes nothing, and the run says why.
 
 ## epub
 

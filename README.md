@@ -16,7 +16,7 @@ Reads a book's sources, one file per page (Word, Markdown, AsciiDoc, or HTML, or
 
 **LaTeX as a source is new, and needs more testing**: every path from it is rated NEEDS MORE TESTING on [the formats page](docs/formats.md#at-a-glance), since each book read so far has turned up something the others hadn't ([LaTeX sources](docs/latex.md)).
 
-**PowerPoint decks are newer still**: a folder of them is slides, each deck checked as PowerPoint's own Accessibility Checker checks it and for more, the decisions it needs reported, and a copy of each written with the decisions made so far ([Slides](docs/slides.md)). A deck written in Markdown becomes a page, a tagged PDF, a PowerPoint file, and a reveal.js presentation of its own; converting a PowerPoint deck to other formats comes later.
+**PowerPoint decks are newer still**: a folder of them is slides, each deck checked as PowerPoint's own Accessibility Checker checks it and for more, the decisions it needs reported, and a copy of each written with the decisions made so far ([Slides](docs/slides.md)). A PowerPoint deck becomes a page, a tagged PDF, a reveal.js presentation, and Markdown too, as a deck written in Markdown does, which also becomes a PowerPoint file.
 
 **Every run checks what it wrote**: dead links and fragments, missing alt text, heading order, invalid ids, tables without headers or caption, and, when the validators are installed, epubcheck, the Nu HTML checker, and veraPDF. The same checks, plus what a Word, Markdown, PowerPoint, or PDF file says about itself, run on any file without converting it: `audit.py` writes a findings CSV and a report.
 

@@ -1,18 +1,24 @@
 #!/usr/bin/env python3
 """
 run-slides-tests.py -- PowerPoint decks: reading one, checking it, writing
-a person's decisions into a copy, and a run of convert.py over a folder
-of them.
+a person's decisions into a copy, converting it, and a run of convert.py
+over a folder of them.
 
     python3 tests/run-slides-tests.py
 
 Builds small decks as PresentationML with the standard library, so every
 shape a check or a decision is about is there on purpose, and reads back
 what the code wrote. A slides run of PowerPoint decks needs no Pandoc,
-and runs here without one on the PATH too; only the case of a deck
-beside a book's pages, whose book needs Pandoc 3.9 or later, skips
-without it. The rest needs nothing but the standard library, and PyYAML
-where it runs convert.py.
+and runs here without one on the PATH too; the case of a deck beside a
+book's pages, whose book needs Pandoc 3.9 or later, and the cases that
+convert a deck skip without it, a deck's PDF without LuaLaTeX and
+ltx-talk too. The rest needs nothing but the standard library, and
+PyYAML where it runs convert.py.
+
+A deck converted is held to a round trip: to Markdown, back to
+PowerPoint through a Markdown deck's pptx target, and compared with
+what it was, slide by slide (lib/deckcompare.py), the comparison shown
+to see each kind of change and to match what the trip changes by design.
 
 WHY THESE EXIST
 
@@ -354,10 +360,11 @@ def notes_xml(text):
 
 
 def deck(path, slides, default_lang="en-US", core_title="A Deck", sections=None, logo=False,
-         style=True, styles_lang=None, layout=None, master=None):
+         style=True, styles_lang=None, layout=None, master=None, notes_master=None):
     """A deck: each slide a dict of shapes, and its images, links, charts,
     notes, and whether it's hidden, by relationship id. layout and master:
-    the XML of its one layout and its master, when not the usual ones."""
+    the XML of its one layout and its master, when not the usual ones;
+    notes_master, the XML of a notes master its notes slides have."""
     types = ['<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.'
              'relationships+xml"/>', '<Default Extension="xml" ContentType="application/xml"/>',
              '<Default Extension="png" ContentType="image/png"/>',
@@ -391,6 +398,11 @@ def deck(path, slides, default_lang="en-US", core_title="A Deck", sections=None,
               rels([("rId1", "slideMaster", "../slideMasters/slideMaster1.xml", False)]))]
     if logo:
         parts.append(("ppt/media/logo.png", BLUE))
+    if notes_master:
+        parts.append(("ppt/notesMasters/notesMaster1.xml", notes_master))
+        types.append('<Override PartName="/ppt/notesMasters/notesMaster1.xml" ContentType="'
+                     'application/vnd.openxmlformats-officedocument.presentationml.'
+                     'notesMaster+xml"/>')
     for number, spec in enumerate(slides, 1):
         entries = [("rId1", "slideLayout", "../slideLayouts/slideLayout1.xml", False)]
         for rid, data in sorted(spec.get("images", {}).items()):
@@ -399,6 +411,8 @@ def deck(path, slides, default_lang="en-US", core_title="A Deck", sections=None,
             entries.append((rid, "image", "../media/" + os.path.basename(name), False))
         for rid, url in sorted(spec.get("links", {}).items()):
             entries.append((rid, "hyperlink", url, True))
+        for rid, target in sorted(spec.get("slide_links", {}).items()):
+            entries.append((rid, "slide", "slide%d.xml" % target, False))
         for rid in sorted(spec.get("charts", ())):
             name = "ppt/charts/chart%d%s.xml" % (number, rid)
             parts.append((name, '<?xml version="1.0"?><c:chartSpace xmlns:c="http://schemas.'
@@ -407,9 +421,16 @@ def deck(path, slides, default_lang="en-US", core_title="A Deck", sections=None,
         for rid in sorted(spec.get("videos", ())):
             entries.append((rid, "video", "https://example.org/talk.mp4", True))
         if spec.get("notes"):
-            parts.append(("ppt/notesSlides/notesSlide%d.xml" % number, notes_xml(spec["notes"])))
+            # The notes' text, or their slide's XML whole.
+            parts.append(("ppt/notesSlides/notesSlide%d.xml" % number,
+                          spec["notes"] if spec["notes"].startswith("<?xml")
+                          else notes_xml(spec["notes"])))
             entries.append(("rId99", "notesSlide", "../notesSlides/notesSlide%d.xml" % number,
                             False))
+            if notes_master:
+                parts.append(("ppt/notesSlides/_rels/notesSlide%d.xml.rels" % number,
+                              rels([("rId1", "notesMaster", "../notesMasters/notesMaster1.xml",
+                                     False)])))
             types.append('<Override PartName="/ppt/notesSlides/notesSlide%d.xml" ContentType="'
                          'application/vnd.openxmlformats-officedocument.presentationml.'
                          'notesSlide+xml"/>' % number)
@@ -3500,6 +3521,922 @@ def case_no_pandoc(work):
         in result.stderr, result.stderr[-300:]
 
 
+# ---------------------------------------------------------------------------
+# A deck converted: read as a deck written in Markdown is (pptxsource.py)
+# ---------------------------------------------------------------------------
+
+BULLETED = ('<a:lvl1pPr marL="342900" indent="-342900"><a:buFont typeface="Arial"/>'
+            '<a:buChar char="&#8226;"/><a:defRPr sz="2800"/></a:lvl1pPr>'
+            '<a:lvl2pPr marL="742950" indent="-285750"><a:buFont typeface="Arial"/>'
+            '<a:buChar char="&#8211;"/><a:defRPr sz="2400"/></a:lvl2pPr>')
+M_NS = 'xmlns:m="http://schemas.openxmlformats.org/officeDocument/2006/math"'
+A14_CHOICE = ('<mc:AlternateContent xmlns:mc="http://schemas.openxmlformats.org/markup-'
+              'compatibility/2006"><mc:Choice xmlns:a14="http://schemas.microsoft.com/office/'
+              'drawing/2010/main" Requires="a14">%s</mc:Choice><mc:Fallback>%s</mc:Fallback>'
+              '</mc:AlternateContent>')
+PLAIN = '<a:pPr marL="0" indent="0"><a:buNone/></a:pPr>'
+BREAK = '<a:br><a:rPr lang="en-US"/></a:br>'
+GRAY, GOLD, PINK = png(120, 120, 120), png(200, 160, 0), png(240, 120, 160)
+SLIDE_ID = 255     # a slide's id is this and its number, as presentation_xml() gives them
+
+
+def bulleted_master():
+    """The usual master, its body text bulleted at two levels, as a
+    master PowerPoint makes is."""
+    plain = '<p:bodyStyle><a:lvl1pPr><a:defRPr sz="2800"/></a:lvl1pPr></p:bodyStyle>'
+    xml = master_xml()
+    assert xml.count(plain) == 1
+    return xml.replace(plain, "<p:bodyStyle>%s</p:bodyStyle>" % BULLETED)
+
+
+def r(text, click="", **props):
+    """A run, props its a:rPr's attributes, click an a:hlinkClick."""
+    attrs = "".join(' %s="%s"' % (k, v) for k, v in props.items())
+    return '<a:r><a:rPr lang="en-US"%s>%s</a:rPr><a:t>%s</a:t></a:r>' % (attrs, click, esc(text))
+
+
+def p(*pieces, ppr=""):
+    return "<a:p>%s%s</a:p>" % (ppr, "".join(pieces))
+
+
+def lvl(n, bullet=""):
+    return '<a:pPr lvl="%d">%s</a:pPr>' % (n, bullet)
+
+
+def shape(shape_id, name, paragraphs, ph=None, box=None):
+    """A shape holding paragraphs as written: a placeholder, placed by its
+    layout unless box says, or a text box."""
+    sppr = ('<p:spPr>%s<a:prstGeom prst="rect"><a:avLst/></a:prstGeom></p:spPr>' % xfrm(*box)
+            if box else "<p:spPr/>")
+    return ("<p:sp>%s%s<p:txBody><a:bodyPr/><a:lstStyle/>%s</p:txBody></p:sp>"
+            % (nv("sp", shape_id, name, ph=ph), sppr, "".join(paragraphs)))
+
+
+def math(body, display=False):
+    """Office math in a paragraph, as PowerPoint writes it."""
+    if display:
+        return '<a14:m><m:oMathPara %s><m:oMath>%s</m:oMath></m:oMathPara></a14:m>' % (M_NS, body)
+    return "<a14:m><m:oMath %s>%s</m:oMath></a14:m>" % (M_NS, body)
+
+
+def in_a14(xml, shape_id):
+    """A shape holding an equation, in AlternateContent as PowerPoint wraps
+    one, its Fallback another shape with the same id."""
+    return A14_CHOICE % (xml, rect(shape_id, "Fallback %d" % shape_id, (0, 0, 914400, 914400)))
+
+
+def notes_of(paragraphs):
+    """A notes slide whose body holds paragraphs as written."""
+    return ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<p:notes %s><p:cSld>'
+            '<p:spTree><p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/>'
+            '</p:nvGrpSpPr><p:grpSpPr/><p:sp>%s<p:spPr/><p:txBody><a:bodyPr/><a:lstStyle/>%s'
+            '</p:txBody></p:sp></p:spTree></p:cSld></p:notes>'
+            % (NS, nv("sp", 3, "Notes Placeholder 2", ph='<p:ph type="body" idx="1"/>'),
+               "".join(paragraphs)))
+
+
+def bulleted_notes_master():
+    """A notes master whose notes style bullets its first two levels, and
+    whose body placeholder's list style takes the second's away."""
+    return ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<p:notesMaster %s>'
+            '<p:cSld><p:spTree><p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/>'
+            '</p:nvGrpSpPr><p:grpSpPr/><p:sp>%s<p:spPr/><p:txBody><a:bodyPr/><a:lstStyle>'
+            '<a:lvl2pPr><a:buNone/></a:lvl2pPr></a:lstStyle><a:p/></p:txBody></p:sp>'
+            '</p:spTree></p:cSld><p:notesStyle><a:lvl1pPr marL="171450" indent="-171450">'
+            '<a:buFont typeface="Arial"/><a:buChar char="&#8226;"/></a:lvl1pPr>'
+            '<a:lvl2pPr marL="628650" indent="-171450"><a:buFont typeface="Arial"/>'
+            '<a:buChar char="&#8226;"/></a:lvl2pPr></p:notesStyle></p:notesMaster>'
+            % (NS, nv("sp", 2, "Notes Placeholder 1", ph='<p:ph type="body" idx="1"/>')))
+
+
+def linked_pic(shape_id, rid, link_rid, box, descr):
+    """A picture that is a link, as its own properties say."""
+    return pic(shape_id, rid, box, descr).replace(
+        'descr="%s"/>' % esc(descr), 'descr="%s"><a:hlinkClick r:id="%s"/></p:cNvPr>'
+        % (esc(descr), link_rid))
+
+
+def tc(paragraphs, attrs=""):
+    """A table cell holding paragraphs as written."""
+    return ("<a:tc%s><a:txBody><a:bodyPr/><a:lstStyle/>%s</a:txBody><a:tcPr/></a:tc>"
+            % (attrs, "".join(paragraphs) or "<a:p/>"))
+
+
+BAR = '<m:acc><m:accPr><m:chr m:val="&#175;"/></m:accPr><m:e><m:r><m:t>x</m:t></m:r></m:e></m:acc>'
+FIELD = "https://example.org/data"
+WIDE = (457200, 1600200, 8229600, 900000)
+LOW = (457200, 3000000, 8229600, 900000)
+
+
+def reader_deck(path):
+    """A deck holding what the reader reads, on a master whose body text is
+    bulleted: a title slide, two sections, formatting, lists inherited and
+    numbered, links of every kind, tables, pictures, equations, notes, a
+    slide with no title, a hidden one, objects it can't convert, a title
+    from the sidecar, and a reading order from it."""
+    return deck(path, [
+        # 1, the title slide
+        {"shapes": [title(2, "A Course of Talks", "ctrTitle", box=TITLE_BOX),
+                    shape(3, "Subtitle 2", [p(r("Week one")), p(r("Second line"))],
+                          ph='<p:ph type="subTitle" idx="1"/>'),
+                    pic(4, "rId2", (457200, 4000000, 1000000, 1000000), "A lecture hall")],
+         "images": {"rId2": PINK}, "notes": "Welcome everyone."},
+        # 2
+        {"shapes": [title(2, "Formatting"), shape(3, "Content Placeholder 2", [
+            p(r("Plain "), r("bold", b="1"), r(" and "), r("italic", i="1"), r(" and "),
+              r("under", u="sng"), r(" and "), r("struck", strike="sngStrike"), r(" and "),
+              r("caps", cap="small"), r(" H"), r("2", baseline="-25000"), r("O, x"),
+              r("2", baseline="30000"), r("."), ppr=PLAIN),
+            p(r("H", i="1"), r("0", i="1", baseline="-25000"), r(" holds."), ppr=PLAIN),
+            p(r("First line "), BREAK, r("second line"), ppr=PLAIN),
+            p(r("Bold st", b="1"), r("ill bold", b="1"), ppr=PLAIN)],
+            ph='<p:ph idx="1"/>')],
+         "notes": notes_of([p(r("Ask "), r("who", b="1"), r(" paid.")),
+                            p(r("One"), ppr='<a:pPr><a:buChar char="&#8226;"/></a:pPr>'),
+                            p(r("Two"), ppr='<a:pPr><a:buChar char="&#8226;"/></a:pPr>')])},
+        # 3
+        {"shapes": [title(2, "Lists"), shape(3, "Content Placeholder 2", [
+            p(r("Apples")), p(r("Pears")), p(r("Green"), ppr=lvl(1)), p(r("Red"), ppr=lvl(1)),
+            p(r("Plums")), p(r("Then:"), ppr=PLAIN),
+            p(r("Third"), ppr=lvl(0, '<a:buAutoNum type="alphaLcParenR" startAt="3"/>')),
+            p(r("Fourth"), ppr=lvl(0, '<a:buAutoNum type="alphaLcParenR" startAt="3"/>')),
+            p(r("More about the fourth."), ppr=lvl(1, "<a:buNone/>")), p()],
+            ph='<p:ph idx="1"/>')]},
+        # 4
+        {"shapes": [title(2, "Links"), shape(3, "TextBox 2", [
+            p(r("See "), r("the source", click='<a:hlinkClick r:id="rId3" tooltip="Where the '
+                                               'data are"/>'), r(".")),
+            p(r("Back to "), r("formatting", click='<a:hlinkClick r:id="rId4" action="ppaction'
+                                                    '://hlinksldjump"/>'), r(".")),
+            p(r("Run "), r("a macro", click='<a:hlinkClick r:id="" action="ppaction://macro?'
+                                            'name=Hello"/>'), r(".")),
+            p(r("Next", click='<a:hlinkClick r:id="" action="ppaction://hlinkshowjump?'
+                              'jump=nextslide"/>')),
+            p(r("See "), r("the hidden one", click='<a:hlinkClick r:id="rId6" action="ppaction'
+                                                    '://hlinksldjump"/>'), r("."))], box=WIDE),
+            linked_pic(4, "rId5", "rId3", (457200, 4000000, 1000000, 1000000), "A chart")],
+         "links": {"rId3": FIELD}, "slide_links": {"rId4": 2, "rId6": 9},
+         "images": {"rId5": GRAY}},
+        # 5, Part Two
+        {"shapes": [title(2, "A Table"),
+                    table(3, [["Name", "Value", "Note"], ["x", "both", ""], ["y", "1", "a b"]],
+                          WIDE, first_row=True, first_col=True,
+                          cells={0: [cell("Name", True), cell("Value", True), cell("Note", True)],
+                                 1: [cell("x"), tc([p(r("both"))], ' gridSpan="2"'),
+                                     tc([], ' hMerge="1"')],
+                                 2: [cell("y"), cell("1"), tc([p(r("a")), p(r("b"))])]}),
+                    table(4, [["Year", "Rate"], ["2020", "3"]], LOW)]},
+        # 6
+        {"shapes": [title(2, "Pictures"),
+                    pic(3, "rId2", SPOT, "A red square"), pic(4, "rId3", SPOT2, decorative=True),
+                    pic(5, "rId4", SPOT3, "Old words"), pic(6, "rId5", SPOT4, "Its own words"),
+                    cropped(7, "rId6", (6000000, 4000000, 1000000, 1000000), LEFT, "...")],
+         "images": {"rId2": RED, "rId3": GREEN, "rId4": BLUE, "rId5": GOLD, "rId6": GRAY}},
+        # 7
+        {"shapes": [title(2, "Equations"),
+                    in_a14(shape(3, "TextBox 2", [
+                        p(r("The mean "), math(BAR + "<m:r><m:t>=1</m:t></m:r>"), r(" is shown.")),
+                        p(math("<m:r><m:t>y=2</m:t></m:r>", display=True))], box=WIDE), 3),
+                    in_a14(table(4, [["Term", "z=3"]], LOW, first_row=True, cells={0: [
+                        cell("Term"), tc([p(math("<m:r><m:t>z=3</m:t></m:r>"))])]}), 4)]},
+        # 8, no title
+        {"shapes": [shape(2, "TextBox 1", [p(r("No title here."))], box=WIDE)]},
+        # 9, hidden
+        {"shapes": [title(2, "Hidden"), content(3, ["Not shown."])], "hidden": True},
+        # 10
+        {"shapes": [title(2, "Objects"), chart(3, "rId2", WIDE, "Sales by year"),
+                    group(4, [shape(5, "TextBox 4", [p(r("Left box"))], box=(0, 0, 100, 100)),
+                              shape(6, "TextBox 5", [p(r("Right box"))], box=(100, 0, 100, 100))],
+                          LOW, descr="Two boxes"),
+                    video(7, "rId3", SPOT4)],
+         "charts": ("rId2",), "videos": ("rId3",)},
+        # 11, its heading a text box the sidecar makes its title
+        {"shapes": [shape(2, "TextBox 1", [p(r("A Heading"))], box=TITLE_BOX),
+                    shape(3, "TextBox 2", [p(r("Body text."))], box=WIDE)]},
+        # 12, read in the order the sidecar gives
+        {"shapes": [title(2, "Order"), shape(4, "TextBox 3", [p(r("Second words"))], box=LOW),
+                    shape(3, "TextBox 2", [p(r("First words"))], box=WIDE)]},
+    ], sections=[("Part One", [0, 1, 2, 3]), ("Part Two", list(range(4, 12)))],
+        master=bulleted_master())
+
+
+def inline_text(inlines):
+    """Inlines as text, formatting aside."""
+    out = []
+    for inline in inlines:
+        kind = inline["t"]
+        if kind == "Str":
+            out.append(inline["c"])
+        elif kind in ("Space", "LineBreak"):
+            out.append(" ")
+        elif kind == "Math":
+            out.append("$%s$" % inline["c"][1])
+        elif kind in ("Link", "Image", "Span"):
+            out.append(inline_text(inline["c"][1]))
+        elif isinstance(inline.get("c"), list):
+            out.append(inline_text(inline["c"]))
+    return "".join(out)
+
+
+def slide_blocks(doc, heading):
+    """A slide's blocks, after its heading (its text) to the next heading
+    or rule; none for no such heading."""
+    blocks = doc["blocks"]
+    for i, block in enumerate(blocks):
+        if block["t"] == "Header" and inline_text(block["c"][2]) == heading:
+            out = []
+            for later in blocks[i + 1:]:
+                if later["t"] in ("Header", "HorizontalRule"):
+                    break
+                out.append(later)
+            return out
+    return []
+
+
+def walk_json(node):
+    if isinstance(node, dict):
+        yield node
+        for value in node.values():
+            yield from walk_json(value)
+    elif isinstance(node, list):
+        for value in node:
+            yield from walk_json(value)
+
+
+def of_kind(node, kind):
+    return [n for n in walk_json(node) if n.get("t") == kind]
+
+
+def S(text):
+    return {"t": "Str", "c": text}
+
+
+SP = {"t": "Space"}
+
+
+def reader_sidecars(folder, path):
+    """The sidecars for reader_deck's decisions: a picture's alt text by its
+    image and another's by its shape, over its image's in the deck, the
+    header row of the table that has none, the title of the slide whose
+    heading is a text box, and the reading order of the slide whose shapes
+    are out of order."""
+    deck_ = pptxparse.read(path)
+    blue = next(s for s in deck_.slides[5].all_shapes() if s.id == "5").image[1]
+    gold = next(s for s in deck_.slides[5].all_shapes() if s.id == "6").image[1]
+    plain = next(s for s in deck_.slides[4].all_shapes() if s.id == "4").table.key()
+    files = {"image-alt.csv": "Image,Alt\n%s.png,New words\nReader/slide-%d/shape-6,Shape words\n"
+                              "%s.png,The image's words\n"
+                              % (rem.image_key(blue), SLIDE_ID + 6, rem.image_key(gold, "Reader")),
+             "table-headers.csv": "key,headers\n%s,first-row\n" % plain,
+             "slide-titles.csv": "Slide,Title\nReader/slide-%d,A Heading\n" % (SLIDE_ID + 11),
+             "reading-order.csv": "Slide,Order\nReader/slide-%d,2 3 4\n" % (SLIDE_ID + 12)}
+    for name, text in files.items():
+        with open(os.path.join(folder, name), "w", encoding="utf-8") as fh:
+            fh.write(text)
+    return blue
+
+
+def case_reader(work):
+    """A PowerPoint deck read into the intermediate a deck written in
+    Markdown has, as pptxsource.read() reads it, its equations through
+    Pandoc's Word reader."""
+    if not pandoc_ok():
+        return
+    import pptxsource
+    folder = os.path.join(work, "decks")
+    os.makedirs(folder)
+    path = reader_deck(os.path.join(folder, "Reader.pptx"))
+    blue = reader_sidecars(folder, path)
+    doc, record = pptxsource.read(
+        path, folder, work, rem.alt_rows(os.path.join(folder, "image-alt.csv")),
+        rem.header_rows(os.path.join(folder, "table-headers.csv")),
+        rem.title_rows(os.path.join(folder, "slide-titles.csv")),
+        rem.order_rows(os.path.join(folder, "reading-order.csv")),
+        api_version=pptxsource.api_version())
+    meta, blocks = doc["meta"], doc["blocks"]
+    headings = [(b["c"][0], inline_text(b["c"][2]), b["c"][1][0]) for b in blocks
+                if b["t"] == "Header"]
+    losses = {}
+    for kind, where in record.losses:
+        losses.setdefault(kind, []).append(where)
+    yield "the title slide is the deck's title and subtitle, its paragraphs as lines", \
+        inline_text(meta["title"]["c"]) == "A Course of Talks" \
+        and meta["subtitle"]["c"] == [S("Week"), SP, S("one"), {"t": "LineBreak"}, S("Second"),
+                                      SP, S("line")], meta.get("subtitle")
+    yield "its notes come first, before any heading, where Pandoc's writer gives them the title " \
+        "slide", blocks[0]["t"] == "Div" and blocks[0]["c"][0][1] == ["notes"] \
+        and inline_text(blocks[0]["c"][1][0]["c"]) == "Welcome everyone.", blocks[0]
+    yield "and the rest of the title slide, its picture, is left out and said to be", \
+        losses.get("title-slide") == ["Reader.pptx slide 1: a picture"], losses
+    yield "sections are headings at level 1 and slides at 2, with the ids Pandoc's reader gives", \
+        headings == [(1, "Part One", "part-one"), (2, "Formatting", "formatting"),
+                     (2, "Lists", "lists"), (2, "Links", "links"), (1, "Part Two", "part-two"),
+                     (2, "A Table", "a-table"), (2, "Pictures", "pictures"),
+                     (2, "Equations", "equations"), (2, "Objects", "objects"),
+                     (2, "A Heading", "a-heading"), (2, "Order", "order")], headings
+    yield "the slide level is recorded, 2, and the deck's language", \
+        meta.get("deck-slide-level") == {"t": "MetaString", "c": "2"} \
+        and meta.get("lang") == {"t": "MetaString", "c": "en-US"} and "slide-level" not in meta, \
+        sorted(meta)
+    formatting = slide_blocks(doc, "Formatting") + [{"t": None, "c": [None]}] * 5
+    first = formatting[0]["c"]
+    expected = [S("Plain"), SP, {"t": "Strong", "c": [S("bold")]}, SP, S("and"), SP,
+                {"t": "Emph", "c": [S("italic")]}, SP, S("and"), SP,
+                {"t": "Underline", "c": [S("under")]}, SP, S("and"), SP,
+                {"t": "Strikeout", "c": [S("struck")]}, SP, S("and"), SP,
+                {"t": "SmallCaps", "c": [S("caps")]}, SP, S("H"),
+                {"t": "Subscript", "c": [S("2")]}, S("O,"), SP, S("x"),
+                {"t": "Superscript", "c": [S("2")]}, S(".")]
+    yield "a run's own bold, italic, underline, strikethrough, small capitals, and scripts", \
+        first == expected, first
+    yield "runs that share a format are one element of it, an italic H and its italic subscript", \
+        formatting[1]["c"][0] == {"t": "Emph", "c": [S("H"), {"t": "Subscript", "c": [S("0")]}]}, \
+        formatting[1]["c"]
+    yield "a line break, the space before it gone", \
+        formatting[2]["c"] == [S("First"), SP, S("line"), {"t": "LineBreak"}, S("second"), SP,
+                               S("line")], formatting[2]["c"]
+    yield "runs of the same formatting joined, a word split between them one word", \
+        formatting[3]["c"] == [{"t": "Strong", "c": [S("Bold"), SP, S("still"), SP, S("bold")]}], \
+        formatting[3]["c"]
+    notes = next((b for b in formatting if b["t"] == "Div"), {"t": None, "c": [[None, []], []]})
+    yield "a slide's notes are a notes div after its content, read as its text is", \
+        notes["t"] == "Div" and notes["c"][0][1] == ["notes"] \
+        and notes["c"][1][0]["c"] == [S("Ask"), SP, {"t": "Strong", "c": [S("who")]}, SP,
+                                      S("paid.")] \
+        and [b["t"] for b in notes["c"][1]] == ["Para", "BulletList"], notes
+    lists = slide_blocks(doc, "Lists")
+    bullets, then, numbered = (lists + [{"t": None, "c": [None, None]}] * 3)[:3]
+    yield "bullets the master gives the body inherited, nested by level", \
+        bullets == {"t": "BulletList", "c": [
+            [{"t": "Plain", "c": [S("Apples")]}],
+            [{"t": "Plain", "c": [S("Pears")]}, {"t": "BulletList", "c": [
+                [{"t": "Plain", "c": [S("Green")]}], [{"t": "Plain", "c": [S("Red")]}]]}],
+            [{"t": "Plain", "c": [S("Plums")]}]]}, bullets
+    yield "a paragraph whose own pPr says no bullet ends the list", \
+        then == {"t": "Para", "c": [S("Then:")]}, then
+    yield "numbering from its scheme and start, and a paragraph with no number under an item " \
+        "a paragraph of the item, the list loose", \
+        numbered["t"] == "OrderedList" and numbered["c"][0] == [
+            3, {"t": "LowerAlpha"}, {"t": "OneParen"}] \
+        and numbered["c"][1] == [[{"t": "Para", "c": [S("Third")]}],
+                                 [{"t": "Para", "c": [S("Fourth")]},
+                                  {"t": "Para", "c": [S("More"), SP, S("about"), SP, S("the"), SP,
+                                                      S("fourth.")]}]], numbered
+    links = slide_blocks(doc, "Links")
+    found = [(inline_text(l["c"][1]), l["c"][2]) for l in of_kind(links, "Link")]
+    yield "a link to an address, its ScreenTip its title; to a slide, its heading's id; a jump " \
+        "to the next slide shown, that slide's; and a picture that is a link", \
+        found == [("the source", [FIELD, "Where the data are"]), ("formatting", ["#formatting", ""]),
+                  ("Next", ["#a-table", ""]), ("A chart", [FIELD, ""])], found
+    yield "a link that runs a macro is its words, and said to be", \
+        "a macro" in inline_text(links[2]["c"]) and not of_kind(links[2], "Link") \
+        and any("runs macro" in w for w in losses.get("link", [])), losses.get("link")
+    yield "and one to a hidden slide, which isn't shown, where it is", \
+        inline_text(links[4]["c"]) == "See the hidden one." and not of_kind(links[4], "Link") \
+        and "Reader.pptx slide 4: a link to a slide with no title, or to none shown" \
+        in losses.get("link", []), (links[4:5], losses.get("link"))
+    tables = slide_blocks(doc, "A Table")
+    head, body = tables[0]["c"][3], tables[0]["c"][4][0]
+    yield "a table's header row and column as the deck flags them", \
+        len(head[1]) == 1 and body[1] == 1, (len(head[1]), body[1])
+    spanned = body[3][0][1][1]
+    yield "a merged cell spans its columns, and the cell it covers isn't a cell", \
+        spanned[3] == 2 and len(body[3][0][1]) == 2, body[3][0]
+    two = body[3][1][1][2][4]
+    yield "a cell of two paragraphs is two paragraphs, a cell of one plain", \
+        [b["t"] for b in two] == ["Para", "Para"] and body[3][1][1][0][4][0]["t"] == "Plain", two
+    yield "the table-headers sidecar's header row for the table that has none", \
+        len(tables[1]["c"][3][1]) == 1 and tables[1]["c"][4][0][1] == 0, tables[1]["c"][3]
+    pictures = [i["c"] for i in of_kind(slide_blocks(doc, "Pictures"), "Image")]
+    alts = [("decorative" if "decorative" in a[0][1] else inline_text(a[1])) for a in pictures]
+    yield "pictures with their alt text, the decorative mark as a class, and the sidecar's " \
+        "decisions by image and by shape", \
+        alts == ["A red square", "decorative", "New words", "Shape words", "..."], alts
+    srcs = [a[2][0] for a in pictures]
+    yield "each image written once to media/ under its key, the report's path for it", \
+        srcs[2] == rem.image_key(blue) + ".png" \
+        and all(os.path.isfile(os.path.join(folder, s)) for s in srcs) \
+        and len(os.listdir(os.path.join(folder, "media"))) == 5, srcs
+    yield "a picture shown cropped is shown whole, and said to be", \
+        losses.get("crop") == ["Reader.pptx slide 6: a picture shown whole, which the slide "
+                               "shows cropped"], losses.get("crop")
+    equations = slide_blocks(doc, "Equations")
+    maths = [(m["c"][0]["t"], m["c"][1]) for m in of_kind(equations, "Math")]
+    yield "equations through Pandoc's Word reader, in their places, a display one display math", \
+        len(maths) == 3 and maths[0][0] == "InlineMath" and maths[1] == ("DisplayMath", "y = 2") \
+        and inline_text(equations[0]["c"]).startswith("The mean $") \
+        and inline_text(equations[0]["c"]).endswith("$ is shown."), maths
+    yield "a bar accent of the macron is \\bar, as a Word file's is read", \
+        [m[1].replace(" ", "") for m in maths[:1]] == ["\\bar{x}=1"], maths[:1]
+    yield "an equation in a table's cell, the table read from mc:AlternateContent's Choice", \
+        maths[2:] == [("InlineMath", "z = 3")] and equations[-1]["t"] == "Table", maths[2:]
+    rules = [i for i, b in enumerate(blocks) if b["t"] == "HorizontalRule"]
+    yield "a slide with no title begins with a horizontal rule, as Pandoc begins one", \
+        len(rules) == 1 and inline_text(blocks[rules[0] + 1]["c"]) == "No title here.", rules
+    yield "a hidden slide is left out, and said to be", \
+        "Hidden" not in [h[1] for h in headings] and losses.get("hidden") == [
+            "Reader.pptx slide 9"], losses.get("hidden")
+    objects = slide_blocks(doc, "Objects")
+    yield "a group's pieces are read in turn, and its alt text said to be left out", \
+        [inline_text(b["c"]) for b in objects] == ["Left box", "Right box"] \
+        and losses.get("group") == ["Reader.pptx slide 10: a group described as 'Two boxes'"], \
+        objects
+    yield "a chart and a video are left out, and said to be", \
+        losses.get("chart") == ["Reader.pptx slide 10: a chart"] \
+        and losses.get("media") == ["Reader.pptx slide 10: a video"], losses
+    yield "the slide-titles sidecar's title for a slide whose heading is a text box, the text " \
+        "box its heading and not its text", \
+        [inline_text(b["c"]) for b in slide_blocks(doc, "A Heading")] == ["Body text."], \
+        slide_blocks(doc, "A Heading")
+    yield "the reading-order sidecar's order", \
+        [inline_text(b["c"]) for b in slide_blocks(doc, "Order")] == ["First words",
+                                                                     "Second words"], \
+        slide_blocks(doc, "Order")
+    counts = record.counts
+    yield "what it read, counted", \
+        (counts["slides"], counts["pictures"], counts["decorative"], counts["tables"],
+         counts["equations"], counts["notes"]) == (11, 5, 1, 3, 3, 2), dict(counts)
+    unread, unread_record = pptxsource.read(path, os.path.join(work, "again"), work,
+                                            pandoc=os.path.join(work, "no-pandoc"))
+    yield "without Pandoc, an equation is its characters, as PowerPoint's linear format writes " \
+        "it, and said to be", \
+        not of_kind(unread, "Math") and "y=2" in inline_text(slide_blocks(unread, "Equations")[1][
+            "c"]) and len([k for k, _ in unread_record.losses if k == "equation"]) == 3, \
+        unread_record.losses
+    ids = [pptxsource.identifier(t, {"a-table"}) for t in (
+        "A Table", "1. Intro: the Basics", "", "Café au lait", "x.y_z-w")]
+    yield "a heading's id is Pandoc's: lowercased, its punctuation and what's before its first " \
+        "letter dropped, numbered after one used, \"section\" for none", \
+        ids == ["a-table-1", "intro-the-basics", "section", "café-au-lait", "x.y_z-w"], ids
+    small = deck(os.path.join(work, "Small.pptx"), [
+        # 1, its title not a title slide's
+        {"shapes": [title(2, "Notes"), content(3, ["Shown."]),
+                    shape(4, "Footer 3", [p(r("A footer"))],
+                          ph='<p:ph type="ftr" sz="quarter" idx="11"/>'),
+                    shape(5, "Slide Number 4", [p(r("1"))],
+                          ph='<p:ph type="sldNum" sz="quarter" idx="12"/>'),
+                    textbox(6, "Hidden 5", ["Not shown."], LOW).replace(
+                        'name="Hidden 5"', 'name="Hidden 5" hidden="1"')],
+         "notes": notes_of([p(r("Said."), ppr="<a:pPr><a:buNone/></a:pPr>"), p(r("A point")),
+                            p(r("Under it"), ppr=lvl(1)), p(r("Next point"))])},
+        # 2 and 3, a title they share; 4, its own
+        {"shapes": [title(2, "Same"), content(3, ["One."])]},
+        {"shapes": [title(2, "Same"), content(3, ["Two."])]},
+        {"shapes": [title(2, "Other"), content(3, ["Three."])]},
+        # 5, two pictures with one id
+        {"shapes": [title(2, "Twins"), pic(3, "rId2", SPOT, "Its own"),
+                    pic(3, "rId3", SPOT2, "Its twin's")],
+         "images": {"rId2": RED, "rId3": GREEN}},
+        # 6, a shared title whose shape's id the slide repeats; 7, a heading so
+        {"shapes": [title(2, "Same"), content(2, ["Three."])]},
+        {"shapes": [textbox(3, "TextBox 2", ["A heading"], TITLE_BOX),
+                    textbox(3, "TextBox 3", ["Body."], WIDE)]}],
+        notes_master=bulleted_notes_master())
+    small_doc, _ = pptxsource.read(
+        small, folder, work,
+        {"Small/slide-%d/shape-3" % (SLIDE_ID + 5): "Decided"},
+        titles={"Small/slide-%d" % (SLIDE_ID + 3): "Same, again",
+                "Small/slide-%d" % (SLIDE_ID + 4): "Changed",
+                "Small/slide-%d" % (SLIDE_ID + 6): "Same, a third time",
+                "Small/slide-%d" % (SLIDE_ID + 7): "A heading"})
+    small_notes = of_kind(small_doc["blocks"], "Div")
+    yield "notes take the bullets their notes master gives, its body placeholder's over its " \
+        "notes style", \
+        small_notes and small_notes[0]["c"][1] == [
+            {"t": "Para", "c": [S("Said.")]},
+            {"t": "BulletList", "c": [[{"t": "Para", "c": [S("A"), SP, S("point")]},
+                                       {"t": "Para", "c": [S("Under"), SP, S("it")]}],
+                                      [{"t": "Para", "c": [S("Next"), SP, S("point")]}]]}], \
+        small_notes
+    shown = slide_blocks(small_doc, "Notes")
+    yield "a slide's footer and number, and a shape hidden on it, are left out", \
+        [b["t"] for b in shown] == ["Para", "Div"] and inline_text(shown[0]["c"]) == "Shown.", \
+        shown
+    yield "a deck whose first slide isn't a title slide has no title but its file's, which is " \
+        "its title-meta, and that slide is its first", \
+        "title" not in small_doc["meta"] and small_doc["meta"].get("title-meta") == {
+            "t": "MetaString", "c": "A Deck"} and small_doc["blocks"][0]["t"] == "Header", \
+        small_doc["meta"]
+    small_headings = [inline_text(b["c"][2]) for b in small_doc["blocks"] if b["t"] == "Header"]
+    yield "the slide-titles sidecar's title replaces one another slide has too, but not one " \
+        "the slide has alone, as the copy's does", \
+        small_headings[:5] == ["Notes", "Same", "Same, again", "Other", "Twins"], small_headings
+    twins = [inline_text(i["c"][1]) for i in of_kind(slide_blocks(small_doc, "Twins"), "Image")]
+    headed = [inline_text(b["c"]) for b in slide_blocks(small_doc, "A heading")]
+    yield "and a decision for a shape whose id its slide repeats is skipped, as the copy skips " \
+        "it: a picture's alt text, a title in place of a shared one, and a heading made the " \
+        "title, which is the title above the slide instead, the heading kept", \
+        twins == ["Its own", "Its twin's"] and small_headings[5:] == ["Same", "A heading"] \
+        and headed == ["A heading", "Body."], (twins, small_headings, headed)
+    linked = deck(os.path.join(work, "Linked.pptx"), [
+        {"shapes": [title(2, "Linked", "ctrTitle", box=TITLE_BOX),
+                    shape(3, "Subtitle 2", [p(r("See "), r("the second", click='<a:hlinkClick '
+                                                'r:id="rId2" action="ppaction://hlinksldjump"/>'),
+                                              r(" and "), r("the hidden", click='<a:hlinkClick '
+                                                'r:id="rId3" action="ppaction://hlinksldjump"/>'))],
+                          ph='<p:ph type="subTitle" idx="1"/>')],
+         "slide_links": {"rId2": 2, "rId3": 3}},
+        {"shapes": [title(2, "Second"), content(3, ["Shown."])]},
+        {"shapes": [title(2, "Third"), content(3, ["Not shown."])], "hidden": True}])
+    linked_doc, linked_record = pptxsource.read(linked, folder, work)
+    subtitle = linked_doc["meta"].get("subtitle", {}).get("c", [])
+    yield "a link in the title slide's subtitle goes to its slide, and one to a hidden slide is " \
+        "its words", \
+        [(inline_text(l["c"][1]), l["c"][2][0]) for l in of_kind(subtitle, "Link")] == [
+            ("the second", "#second")] and inline_text(subtitle) == "See the second and the hidden" \
+        and ("link", "Linked.pptx slide 1: a link to a slide with no title, or to none shown") \
+        in linked_record.losses, (subtitle, linked_record.losses)
+    lines = deck(os.path.join(work, "Lines.pptx"), [
+        {"shapes": [title(2, "Lines"), shape(3, "TextBox 2", [
+            p(r("First", b="1"), r(" "), BREAK, r("   "), r("second", b="1"), ppr=PLAIN)],
+            box=WIDE)]}])
+    lined = [b["c"] for b in slide_blocks(pptxsource.read(lines, folder, work)[0], "Lines")]
+    yield "two bold lines are one bold holding their line break: the plain white space beside " \
+        "the break, which goes, doesn't part them", \
+        lined == [[{"t": "Strong", "c": [S("First"), {"t": "LineBreak"}, S("second")]}]], lined
+
+
+CONVERTING = """\
+targets:
+  pages:
+    format: html
+  md:
+    format: markdown
+  copy:
+    format: source
+  again:
+    format: pptx
+"""
+
+
+def converted_folder(work, config=CONVERTING):
+    """A folder holding reader_deck, its sidecars, and a configuration."""
+    folder = os.path.join(work, "decks")
+    os.makedirs(folder)
+    reader_deck(os.path.join(folder, "Reader.pptx"))
+    reader_sidecars(folder, os.path.join(folder, "Reader.pptx"))
+    with open(os.path.join(folder, "conversion.yaml"), "w") as fh:
+        fh.write(config)
+    return folder
+
+
+def page_headings(page):
+    return [(int(level), " ".join(re.sub(r"<[^>]+>", "", text).split()))
+            for level, text in re.findall(r"<h([1-6])[^>]*>(.*?)</h\1>", page, re.S)]
+
+
+def case_converting(work):
+    """convert.py on a folder of PowerPoint decks with targets of other
+    formats than source: each deck checked and copied as before, then
+    read (pptxsource.py) and written as a page and as Markdown, as a deck
+    written in Markdown is; a pptx target refused without a template."""
+    if not pandoc_ok():
+        return
+    folder = converted_folder(work)
+    result = convert(folder, "--quick")
+    out = result.stderr
+    read = lambda *names: open(os.path.join(folder, *names), encoding="utf-8").read()  # noqa
+    yield "the decks are checked and copied, then converted, as the run says", \
+        result.returncode == 0 and "Slides: 1 PowerPoint deck(s), each checked and remediated" \
+        in out and "Slides: 1 PowerPoint deck(s), each converted on its own: pages (html), " \
+        "md (markdown)." in out and os.path.isfile(os.path.join(folder, "copy", "Reader.pptx")), \
+        out[-800:]
+    yield "a pptx target on a PowerPoint deck writes nothing without a template, and says what " \
+        "the copy is and what a template would do", \
+        "target again is format pptx, and nothing is written for it" in out \
+        and "slides.reference_doc names" in out and not os.path.exists(
+            os.path.join(folder, "again")), out[:1200]
+    page = read("pages", "Reader.html")
+    flat = " ".join(page.split())
+    yield "the page is titled by the title slide, its sections and slides below it", \
+        page_headings(page)[:5] == [(1, "A Course of Talks"), (2, "Part One"), (3, "Formatting"),
+                                    (3, "Lists"), (3, "Links")] \
+        and '<p class="subtitle">Week one<br />' in page, page_headings(page)
+    yield "the formatting, the lists, and the links, as HTML has them", \
+        all(s in flat for s in ("<strong>bold</strong>", "<em>italic</em>", "<u>under</u>",
+                                "<del>struck</del>", '<span class="smallcaps">caps</span>',
+                                "H<sub>2</sub>O", '<ol start="3" type="a">',
+                                '<a href="https://example.org/data" title="Where the data are">',
+                                '<a href="#formatting">')), page[:300]
+    missing = [s for s in ('<th scope="col"><strong>Name</strong></th>', '<th scope="row">x</th>',
+                           'colspan="2"', 'alt="New words"', 'alt="Shape words"',
+                           'alt="" aria-hidden="true"', "<math") if s not in flat]
+    yield "a table's header row and column, its merged cell, a picture's alt text, its shape's " \
+        "over its image's, a decorative one hidden, and equations as MathML", not missing, missing
+    yield "the notes under their slide, in a closed disclosure", \
+        re.search(r'<details class="notes">\s*<summary>Speaker notes</summary>\s*<p>Ask '
+                  r'<strong>who</strong> paid\.</p>', page) is not None, ""
+    md = read("md", "Reader.md")
+    yield "the Markdown is a deck written in Markdown: its title block, slides as ## headings, " \
+        "notes divs", \
+        'title: A Course of Talks' in md and "## Formatting" in md and "# Part One" in md \
+        and "::: notes" in md and "deck-slide-level" not in md, md[:400]
+    yield "its formatting, a decorative picture's class, its equations' TeX, and its pictures " \
+        "beside it", \
+        all(s in md for s in ("**bold**", "*italic*", "~2~", "^2^", "{.decorative}",
+                              "$\\bar{x} = 1$")) \
+        and os.path.isdir(os.path.join(folder, "md", "media")), md[:600]
+    alt = rows_of(os.path.join(folder, "image-alt-missing.csv"))
+    yield "the reports are the deck's, as its checks write them, not the filter's of the " \
+        "intermediate", \
+        alt and all(row[2].startswith("Reader.pptx slide") for row in alt) \
+        and not os.path.exists(os.path.join(folder, "table-captions-missing.csv")), alt
+    checks = {row[1] for row in rows_of(os.path.join(folder, "output-check.csv"))}
+    yield "the output check holds the copy's findings and the page's", \
+        any(c.startswith("pptx-") for c in checks) \
+        and any(not c.startswith("pptx-") for c in checks), sorted(checks)
+    yield "what the conversion leaves out is said: the title slide's picture, a hidden slide, a " \
+        "chart, a video, a group's alt text, a crop, a macro's link", \
+        all(s in out for s in ("1 title slide(s) holding more than a title and a subtitle",
+                               "1 hidden slide(s) in 1 deck(s) are left out",
+                               "1 chart(s) in 1 deck(s) aren't converted yet",
+                               "1 video(s) and sound(s)", "1 group(s) of shapes",
+                               "1 picture(s) a slide shows cropped",
+                               "link(s) that don't go to an address or to a slide shown")), out
+    yield "and the filter says nothing again of the deck's pictures and tables", \
+        "[figures-and-tables]" not in out, out[-600:]
+    checked = convert(folder, "--check-only")
+    yield "a check-only run converts nothing", \
+        checked.returncode == 0 and "each converted on its own" not in checked.stderr, \
+        checked.stderr[-300:]
+    alone = converted_folder(os.path.join(work, "alone"), "targets:\n  pages:\n    format: html\n")
+    paged = convert(alone, "--quick")
+    yield "with no format: source target, the decks are checked and converted, and no copy " \
+        "is made", \
+        paged.returncode == 0 and "Slides: 1 PowerPoint deck(s), each checked on its own, since " \
+        "they're all this folder holds." in paged.stderr \
+        and os.path.isfile(os.path.join(alone, "pages", "Reader.html")) \
+        and sorted(n for n in os.listdir(alone) if n.endswith(".pptx")) == ["Reader.pptx"] \
+        and not os.path.exists(os.path.join(alone, "remediated")), paged.stderr[:400]
+    zipped = converted_folder(os.path.join(work, "zipped"), "targets:\n  pages:\n    format: html\n"
+                              "    archive: zip\n  copy:\n    format: source\n    archive: zip\n")
+    packed = convert(zipped, "--quick")
+    names = []
+    for name in ("pages.zip", "copy.zip"):
+        if os.path.isfile(os.path.join(zipped, name)):
+            with zipfile.ZipFile(os.path.join(zipped, name)) as z:
+                names += z.namelist()
+    yield "archive: zip packs the copy's folder and the page's when the decks are converted", \
+        packed.returncode == 0 and "copy/Reader.pptx" in names and "pages/Reader.html" in names, \
+        (names, packed.stderr[-300:])
+    for name in ("pages.zip", "copy.zip"):
+        os.remove(os.path.join(zipped, name))
+    with open(os.path.join(zipped, "broken.pptx"), "wb") as fh:
+        fh.write(b"not a deck")
+    broken = convert(zipped, "--quick")
+    yield "and with a deck that can't be read, the others are converted, nothing is archived, " \
+        "and the run says so once", \
+        broken.returncode == 1 and os.path.isfile(os.path.join(zipped, "pages", "Reader.html")) \
+        and not any(os.path.exists(os.path.join(zipped, n)) for n in ("pages.zip", "copy.zip")) \
+        and broken.stderr.count("nothing was archived") == 1, broken.stderr[-400:]
+
+
+def case_converting_more(work):
+    """A PowerPoint deck's PDF, through ltx-talk, and its reveal.js
+    presentation, as a deck written in Markdown has them."""
+    if not pandoc_ok():
+        return
+    import decks
+    problem = decks.ltx_talk_problem()
+    if problem:
+        print("  skip  %s; a PowerPoint deck's PDF isn't checked" % problem)
+    version = subprocess.run(["pandoc", "--version"], capture_output=True,
+                             text=True).stdout.split()[1]
+    present = tuple(int(n) for n in re.findall(r"\d+", version)[:3]) >= (3, 12)
+    if not present:
+        print("  skip  Pandoc %s writes no reveal.js presentation; 3.12 or later does" % version)
+    if problem and not present:
+        return
+    folder = converted_folder(work, "targets:\n" + ("" if problem else "  pdf:\n    format: pdf\n")
+                              + ("  present:\n    format: revealjs\n" if present else ""))
+    result = convert(folder, "--quick")
+    out = result.stderr
+    yield "the decks are converted as the targets say", result.returncode == 0, out[-600:]
+    if not problem:
+        sys.path.insert(0, HERE)
+        import pdftext
+        pdf = os.path.join(folder, "pdf", "Reader.pdf")
+        text = " ".join(pdftext.marked_text(pdf).values()) \
+            if os.path.isfile(pdf) and pdftext.pikepdf is not None else ""
+        yield "a pdf target writes each deck's PDF through ltx-talk, its slides the deck's: " \
+            "its title slide, a slide for each section, and the slides shown, no notes", \
+            "Wrote 1 PDF(s)" in out and "through ltx-talk: 13 page(s)" in out \
+            and "A Course of Talks" in text and "Ask who paid" not in text \
+            and "Not shown." not in text, out[-600:]
+    if present:
+        page = os.path.join(folder, "present", "Reader.html")
+        shown = open(page, encoding="utf-8").read() if os.path.isfile(page) else ""
+        yield "a revealjs target writes each deck's presentation, its slides the deck's, its " \
+            "notes in the speaker view", \
+            "Wrote 1 presentation(s)" in out and '<aside class="notes">' in shown \
+            and "Ask <strong>who</strong> paid." in shown and "Not shown." not in shown, \
+            out[-600:]
+
+
+def reference_deck(path):
+    """Pandoc's own reference document, a template to rebuild on."""
+    with open(path, "wb") as fh:
+        fh.write(subprocess.run(["pandoc", "--print-default-data-file", "reference.pptx"],
+                                capture_output=True).stdout)
+    return path
+
+
+def case_rebuild(work):
+    """A pptx target on a PowerPoint deck, given a template, rebuilds the
+    deck on it, and says what that loses."""
+    if not pandoc_ok():
+        return
+    folder = converted_folder(work, "targets:\n  again:\n    format: pptx\n    slides:\n"
+                                    "      reference_doc: template.pptx\n  plain:\n"
+                                    "    format: pptx\n")
+    reference_deck(os.path.join(folder, "template.pptx"))
+    result = convert(folder, "--quick")
+    out = result.stderr
+    rebuilt = os.path.join(folder, "again", "Reader.pptx")
+    yield "the deck is rebuilt on the template, and the run says what's lost and what it's for", \
+        result.returncode == 0 and os.path.isfile(rebuilt) and "rebuilds 1 PowerPoint deck(s) " \
+        "on slides.reference_doc, template.pptx" in out and "It's for moving decks onto a " \
+        "template" in out, out[-900:]
+    titles = [s.title for s in pptxparse.read(rebuilt).slides] if os.path.isfile(rebuilt) else []
+    yield "its slides are the deck's, the title slide first", \
+        titles[:3] == ["A Course of Talks", "Part One", "Formatting"], titles
+    yield "and the target without one writes nothing", \
+        "target plain is format pptx, and nothing is written for it" in out \
+        and not os.path.exists(os.path.join(folder, "plain")), out[:600]
+    alone = os.path.join(work, "alone")
+    os.makedirs(alone)
+    clean_deck(os.path.join(alone, "clean.pptx"))
+    with open(os.path.join(alone, "conversion.yaml"), "w") as fh:
+        fh.write("targets:\n  again:\n    format: pptx\n")
+    result = convert(alone)
+    yield "a run whose only target is a pptx target with no template stops, nothing written", \
+        result.returncode != 0 and "Every target here is format pptx" in result.stderr \
+        and not os.path.exists(os.path.join(alone, "slides-check.csv")), result.stderr[-400:]
+
+
+def pptx_pandoc_ok():
+    """Whether a deck written in Markdown can be written as PowerPoint here:
+    Pandoc 3.10.1 or later (convert.py's PPTX_PANDOC)."""
+    if not pandoc_ok():
+        return False
+    version = subprocess.run(["pandoc", "--version"], capture_output=True,
+                             text=True).stdout.split()[1]
+    if tuple(int(p) for p in re.findall(r"\d+", version)[:3]) < (3, 10, 1):
+        print(f"  skip  Pandoc {version} writes no deck's PowerPoint file; 3.10.1 or later does")
+        return False
+    return True
+
+
+def case_round_trip(work):
+    """The reader's check: a deck through the markdown target, that
+    Markdown through a Markdown deck's pptx target, and the two decks
+    compared slide by slide (deckcompare.py)."""
+    import deckcompare
+    yield "TeX is compared without the white space TeX doesn't read, a Greek letter's command " \
+        "as the letter", \
+        [deckcompare.tex_text(t) for t in ("\\sigma_{1}^{2} = \\sigma _ {2}^{2}",
+                                           "\\mathrm{d} x", "\\alpha\\,\\beta")] \
+        == ["σ_{1}^{2}=σ_{2}^{2}", "\\mathrm{d}x", "α\\,β"], None
+    empty = {"t": "Table", "c": [["", [], []], [None, []], [], [["", [], []], [[["", [], []], [
+        [["", [], []], {"t": "AlignDefault"}, 1, 1, []]]]]], [[["", [], []], 0, [], [[["", [], []], [
+            [["", [], []], {"t": "AlignDefault"}, 1, 1, [{"t": "Plain", "c": [S("x")]}]]]]]]],
+        [["", [], []], []]]}
+    yield "and a table's empty header row, which a Markdown table can't hold, is none", \
+        deckcompare.table(empty, {}) == ("table", 0, 0, [["x"]], ""), deckcompare.table(empty, {})
+
+    def made(title, *texts):
+        slide = deckcompare.Slide(title, 0)
+        slide.items = [("text", t) for t in texts]
+        return slide
+
+    def held(pairs):
+        return [(slide and slide.title, [[t for _k, t in part.items] for part in parts])
+                for slide, parts in pairs]
+    untitled, titled = made("", "a", "b"), made("T", "a", "b")
+    parted = [held(deckcompare.aligned([untitled], [made("", "a"), made("", "c")])),
+              held(deckcompare.aligned([untitled], [made("", "a"), made("U", "b")])),
+              held(deckcompare.aligned([titled], [made("T", "a"), made("", "b")]))]
+    yield "a slide with no title has as its parts the untitled slides after it that go on with " \
+        "what it holds, not another, nor a titled one; and a titled slide no untitled part", \
+        parted == [[("", [["a"]]), (None, [["c"]])], [("", [["a"]]), (None, [["b"]])],
+                   [("T", [["a"]]), (None, [["b"]])]], parted
+    if not pptx_pandoc_ok():
+        return
+    folder = converted_folder(work, "targets:\n  md:\n    format: markdown\n")
+    # Beside it, a deck the trip changes on its way, by design: a slide with
+    # no title that the pptx target cuts after its picture, then two of
+    # their own, one holding only notes, a title of two lines, and two bold
+    # lines a plain indent parts.
+    deck(os.path.join(folder, "Cut.pptx"), [
+        {"shapes": [title(2, "Cut Apart", "ctrTitle", box=TITLE_BOX)]},
+        {"shapes": [pic(2, "rId2", SPOT, "A red square"),
+                    shape(3, "TextBox 2", [p(r("Words after it."))], box=SPOT4)],
+         "images": {"rId2": RED}, "notes": "Said of both."},
+        {"shapes": [], "notes": "A pause."},
+        {"shapes": [shape(2, "TextBox 1", [p(r("Its own slide, before "), r("the results", click=(
+            '<a:hlinkClick r:id="rId2" action="ppaction://hlinksldjump"/>')), r("."))], box=WIDE)],
+         "slide_links": {"rId2": 5}},
+        {"shapes": [shape(2, "Title 1", [p(r("Results"), BREAK, r("(Panel)"))],
+                          ph='<p:ph type="title"/>'),
+                    shape(3, "TextBox 2", [p(r("First", b="1"), r(" "), BREAK, r("   "),
+                                             r("second", b="1"), ppr=PLAIN)], box=WIDE)]}])
+    first = convert(folder, "--quick")
+    trip = os.path.join(work, "trip")
+    shutil.copytree(os.path.join(folder, "md"), trip)
+    with open(os.path.join(trip, "project.yaml"), "w") as fh:
+        fh.write("project:\n  identifier: org.example.trip\n  title: Trip\n  kind: slides\n")
+    with open(os.path.join(trip, "conversion.yaml"), "w") as fh:
+        fh.write("targets:\n  decks:\n    format: pptx\n")
+    second = convert(trip, "--quick")
+    original = os.path.join(folder, "Reader.pptx")
+    tripped = os.path.join(trip, "decks", "Reader.pptx")
+    yield "the deck goes to Markdown and back to PowerPoint", \
+        first.returncode == 0 and second.returncode == 0 and os.path.isfile(tripped), \
+        (first.stderr + second.stderr)[-600:]
+    if not os.path.isfile(tripped):
+        return
+    # The original as its conversion read it, with its sidecars' decisions.
+    a = deckcompare.read(original, work, alts=rem.alt_rows(os.path.join(folder, "image-alt.csv")),
+                         tables=rem.header_rows(os.path.join(folder, "table-headers.csv")),
+                         titles=rem.title_rows(os.path.join(folder, "slide-titles.csv")),
+                         orders=rem.order_rows(os.path.join(folder, "reading-order.csv")))
+    b = deckcompare.read(tripped, work)
+    found = deckcompare.compare(a, b)
+    what = sorted((d.where, d.what) for d in found)
+    yield "slide for slide, the same titles, text and its formatting, lists, tables, pictures " \
+        "and their alt text, equations, and notes, but for what Pandoc's PowerPoint writer " \
+        "doesn't write: a merged cell, and a link's ScreenTip", \
+        what == [("slide 4 (Links)", "content"), ("slide 5 (A Table)", "content")], found
+    links = next((d for d in found if d.where == "slide 4 (Links)"), None)
+    shown = links and deckcompare.first_difference(links.first, links.second)
+    yield "the link's difference is its ScreenTip alone", \
+        shown == ('See <a href="https://example.org/data" title="Where the data are">the '
+                  'source</a>.', 'See <a href="https://example.org/data">the source</a>.'), shown
+    cells = next((d for d in found if d.where == "slide 5 (A Table)"), None)
+    yield "and the table's, its merged cell", \
+        cells is not None and cells.first[0][-1] == "spans" and cells.second[0][-1] == "", \
+        cells
+    cut_trip = os.path.join(trip, "decks", "Cut.pptx")
+    cut_b = deckcompare.read(cut_trip, work) if os.path.isfile(cut_trip) else {"blocks": []}
+    cut_found = deckcompare.compare(deckcompare.read(os.path.join(folder, "Cut.pptx"), work),
+                                    cut_b)
+    cut_titles = [s.title for s in deckcompare.slides_of(cut_b)[3]]
+    yield "a deck the trip changes by design comes back the same: a slide with no title that " \
+        "the target cut in two one slide again, and the slides after it their own, one holding " \
+        "only notes; a title's line break a space, a link to its slide too; two bold lines one " \
+        "bold either way", \
+        cut_titles == ["", "", "", "", "Results (Panel)"] and not cut_found, (cut_titles, cut_found)
+    # The comparison sees what it's for: each of these changed in the deck
+    # that made the trip is a difference, where it was made.
+    changes = [("a picture's alt text", b'descr="New words"', b'descr="Other words"',
+                ("slide 6 (Pictures)", "content")),
+               ("a word's bold", b'<a:rPr b="1" lang="en"/><a:t>bold</a:t>',
+                b'<a:rPr lang="en"/><a:t>bold</a:t>', ("slide 2 (Formatting)", "content")),
+               ("a list's item", b"<a:t>Pears</a:t>", b"<a:t>Peers</a:t>",
+                ("slide 3 (Lists)", "content")),
+               ("a list's numbering", b'type="alphaLcParenR"', b'type="arabicPeriod"',
+                ("slide 3 (Lists)", "content")),
+               ("a table's cell", b"<a:t>2020</a:t>", b"<a:t>2021</a:t>",
+                ("slide 5 (A Table)", "content")),
+               ("an equation", b"<m:t>2</m:t>", b"<m:t>5</m:t>", ("slide 7 (Equations)", "content")),
+               ("a word of the notes", b"<a:t> paid.</a:t>", b"<a:t> paused.</a:t>",
+                ("slide 2 (Formatting)", "notes")),
+               ("the subtitle", b"<a:t>Second line</a:t>", b"<a:t>Third line</a:t>",
+                ("the title slide", "subtitle")),
+               ("a slide's title", b"<a:t>Order</a:t>", b"<a:t>Sequence</a:t>",
+                ("slide 11 (Order)", "a slide only the first deck has"),
+                ("slide 18 of the second deck", "a slide only it has"))]
+    before = {(d.where, d.what, repr(d.second)) for d in found}
+    seen = []
+    for n, (label, old, replacement, *where) in enumerate(changes):
+        changed = os.path.join(work, "changed-%d.pptx" % n)
+        made = 0
+        with zipfile.ZipFile(tripped) as zin, zipfile.ZipFile(changed, "w") as zout:
+            for info in zin.infolist():
+                data = zin.read(info.filename)
+                if re.match(r"ppt/(slides|notesSlides)/\w+\.xml$", info.filename):
+                    made += data.count(old)
+                    data = data.replace(old, replacement)
+                zout.writestr(info, data)
+        after = {(d.where, d.what, repr(d.second))
+                 for d in deckcompare.compare(a, deckcompare.read(changed, work))}
+        seen.append((label, made > 0, sorted({(w, k) for w, k, _ in after - before})))
+    # util/round-trip-decks.py makes the same trip of a folder's decks.
+    tool = subprocess.run(["python3", os.path.join(ROOT, "util", "round-trip-decks.py"), folder,
+                           "--keep", os.path.join(work, "kept")], capture_output=True, text=True)
+    yield "util/round-trip-decks.py makes the trip of a folder's decks and reports the same", \
+        tool.returncode == 1 and "Reader.pptx: 2 difference(s)" in tool.stdout \
+        and "Cut.pptx: the same" in tool.stdout and "slide 4 (Links), content:" in tool.stdout \
+        and "slide 5 (A Table), content:" in tool.stdout \
+        and os.path.isfile(os.path.join(work, "kept", "trip", "decks", "Reader.pptx")), \
+        (tool.stdout + tool.stderr)[-600:]
+    yield "and each of these changed in the trip is a difference where it is: a picture's alt " \
+        "text, a word's bold, a list's item and its numbering, a table's cell, an equation, a " \
+        "word of the notes, the subtitle; and a slide's title changed leaves its slide " \
+        "unmatched in each deck", \
+        seen == [(label, True, sorted(where)) for label, _o, _n, *where in changes], seen
+
+
 CASES = [("reading a deck", case_parse), ("the checks", case_check),
          ("captions on video and audio", case_captions),
          ("the copy", case_remediate), ("the copy, more", case_remediate_more),
@@ -3518,7 +4455,12 @@ CASES = [("reading a deck", case_parse), ("the checks", case_check),
          ("the file's lists of fonts and titles", case_app_properties),
          ("convert.py on decks", case_convert),
          ("folders, archives, and tools", case_folders),
-         ("no Pandoc", case_no_pandoc)]
+         ("no Pandoc", case_no_pandoc),
+         ("a deck read for converting", case_reader),
+         ("convert.py converting decks", case_converting),
+         ("a converted deck's PDF and presentation", case_converting_more),
+         ("a deck rebuilt on a template", case_rebuild),
+         ("the round trip", case_round_trip)]
 
 
 def main():

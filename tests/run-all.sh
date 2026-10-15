@@ -32,10 +32,12 @@
 #                          that matches nothing set aside, the run going on.
 #   run-unpack-tests.py    unpack-epub.py and unpack-jekyll.py, and an
 #                          unpacked book converted.
-#   run-slides-tests.py    PowerPoint decks read, checked, and remediated,
-#                          and convert.py on folders of them, which needs
-#                          no Pandoc (a deck in a book's folder skipped
-#                          without Pandoc 3.9).
+#   run-slides-tests.py    PowerPoint decks read, checked, remediated, and
+#                          converted, and convert.py on folders of them,
+#                          which needs no Pandoc but to convert (a deck
+#                          converted, or in a book's folder, skipped
+#                          without Pandoc 3.9; a deck's PDF without
+#                          LuaLaTeX and ltx-talk).
 #   run-site-tests.py      unpack-site.py on saves, WARCs, and captures.
 #   run-mathjax-tests.py   formulas as MathJax 2, 3, and 4 drew them.
 #

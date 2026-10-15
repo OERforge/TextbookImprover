@@ -317,6 +317,15 @@ local function warn(msg)
   io.stderr:write('[figures-and-tables] ' .. msg .. '\n')
 end
 
+-- A PowerPoint deck's run (DECK_REPORTED) has reported its pictures' alt
+-- text and its tables' headers from the deck itself, and a deck's table
+-- takes no description; the warnings about each in its intermediate say
+-- it again, and aren't written.
+local DECK_REPORTED = os.getenv('DECK_REPORTED') == '1'
+local function warn_unreported(msg)
+  if not DECK_REPORTED then warn(msg) end
+end
+
 if not BYLINE_MODES[AUTHOR_BYLINE] then
   warn(('AUTHOR_BYLINE=%q is not one of meta, visible, drop; using meta')
     :format(AUTHOR_BYLINE))
@@ -1130,7 +1139,7 @@ function Image(img)
 
   if alt == '' then
     record_alt(img.src, 'missing', '')
-    warn('image has no alt text: ' .. img.src)
+    warn_unreported('image has no alt text: ' .. img.src)
   else
     append_row(ALT_SEEN_FILE, { qualify_media(img.src), source_stem(), alt, img.src })
     local length = char_len(alt)
@@ -1138,7 +1147,7 @@ function Image(img)
       local reason = ('too long (%d characters)'):format(length)
       if is_equation then reason = reason .. '; equation image' end
       record_alt(img.src, reason, alt)
-      warn(('alt text is %d characters (limit %d): %s')
+      warn_unreported(('alt text is %d characters (limit %d): %s')
         :format(length, ALT_MAX_CHARS, img.src))
     end
   end
@@ -2240,7 +2249,7 @@ local function apply_headers(tbl, label, entry, headed)
     mark_column_headers(tbl)
   elseif value == '' then
     local rows, columns = table_shape(tbl)
-    warn(('data table has no header row and no declaration: %s (%d rows x %d columns)')
+    warn_unreported(('data table has no header row and no declaration: %s (%d rows x %d columns)')
       :format(label or '(unlabeled)', rows, columns))
   end
 end
@@ -2300,7 +2309,7 @@ local function caption_data_table(tbl, next_block, after_next, after_after, out)
                                               'caption', label, description })
         elseif description == nil and pending.text == '' then
           record_missing(label, table_excerpt(tbl))
-          warn('no description for "' .. label .. '"')
+          warn_unreported('no description for "' .. label .. '"')
         end
       end
     end
@@ -2340,7 +2349,7 @@ local function caption_data_table(tbl, next_block, after_next, after_after, out)
         else
           -- Absent from the sidecar and the label says nothing but a number.
           record_missing(label, table_excerpt(tbl))
-          warn('no description for "' .. label .. '"')
+          warn_unreported('no description for "' .. label .. '"')
         end
       end
       tbl.caption = mk_caption({ pandoc.Plain(inlines) })
@@ -2354,7 +2363,7 @@ local function caption_data_table(tbl, next_block, after_next, after_after, out)
         label = pending.text
       elseif description == nil then
         record_missing(key, table_excerpt(tbl))
-        warn('data table has no caption or label: ' .. key)
+        warn_unreported('data table has no caption or label: ' .. key)
       elseif description ~= '' then
         label = description
         tbl.caption = mk_caption({ pandoc.Plain(text_to_inlines(label)) })

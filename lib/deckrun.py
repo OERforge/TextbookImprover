@@ -544,10 +544,7 @@ def run(base, decks, targets, paths, reports, language=None, alt_max_chars=120,
     kept, repairing = set(), False  # the keep rows that kept an equation
     for target in targets:
         if target.format != "source":
-            say("NOTE: target %s is format %s, which isn't written for PowerPoint decks yet; "
-                "format: source is, a copy of each deck with the sidecars' decisions written "
-                "in (ROADMAP.md, slides)." % (target.name, target.format))
-            continue
+            continue                # a conversion's, after this (convert.py)
         os.makedirs(target.output_dir, exist_ok=True)
         totals = Counter()
         written = changed = 0

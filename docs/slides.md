@@ -1,10 +1,10 @@
 # Slides
 
-A folder of PowerPoint decks is slides. Each deck is checked as PowerPoint's own Accessibility Checker checks it, and for more besides; what needs a person's decision goes into the reports, as a book's does, keyed so one decision covers every place it applies; and a `source` target writes the decisions made so far into a copy of each deck, changing nothing else. The run never guesses into a deck: a copy holds only what a person decided in the sidecars and the settings, apart from two things it takes from the project and the deck, and two repairs of XML PowerPoint can't read, below.
+A folder of PowerPoint decks is slides. Each deck is checked as PowerPoint's own Accessibility Checker checks it, and for more besides; what needs a person's decision goes into the reports, as a book's does, keyed so one decision covers every place it applies; and a `source` target writes the decisions made so far into a copy of each deck, changing nothing else. The run never guesses into a deck: a copy holds only what a person decided in the sidecars and the settings, apart from two things it takes from the project and the deck, and two repairs of XML PowerPoint can't read, below. A target of another format converts each deck, with the same decisions, to a page, a tagged PDF, a reveal.js presentation, or Markdown ([Converting a PowerPoint deck](#converting-a-powerpoint-deck)).
 
 So is a folder of decks written in Markdown, when `project.yaml` says so: each deck is read and filtered as a book's page is, and becomes a page, a tagged PDF, a PowerPoint file, or a reveal.js presentation of its own, as its targets say ([Decks written in Markdown](#decks-written-in-markdown)).
 
-Converting a PowerPoint deck to a page, a PDF, or Markdown, and packaging decks beside a book, come later ([ROADMAP.md](../ROADMAP.md#3-slides-and-test-banks)).
+Packaging decks beside a book comes later ([ROADMAP.md](../ROADMAP.md#3-slides-and-test-banks)).
 
 Testing with assistive technology has been limited. Where this page says what a screen reader did, it's NVDA in PowerPoint, in Acrobat, and in Chrome, and as far as it was tried Firefox, and Narrator in PowerPoint, on small decks made for the purpose and a few real ones. Reports of how these outputs work with other screen readers, browsers, and readers are welcome ([How the paths are rated](formats.md#how-the-paths-are-rated)).
 
@@ -17,7 +17,7 @@ cd stats-slides
 python3 $T/bin/convert.py
 ```
 
-A slides run of PowerPoint decks needs Python and PyYAML from the [requirements](installation.md#requirements), and not Pandoc, which a book's run reads its sources with; decks written in Markdown need Pandoc, as a book does.
+A slides run of PowerPoint decks needs Python and PyYAML from the [requirements](installation.md#requirements), and not Pandoc, which a book's run reads its sources with, unless a target converts the decks; decks written in Markdown need Pandoc, as a book does.
 
 On OpenStax's 13 decks for _Introductory Business Statistics 2e_, the run begins:
 
@@ -156,6 +156,48 @@ Some findings ask for work in PowerPoint itself, and the copy doesn't change the
 - **Media captions**, for a clip reported as having none, go in through PowerPoint's Insert Captions, from a WebVTT file. Captions burned into the video's picture can't be seen in the file, so a clip that has only those is reported too.
 - **An old Equation Editor object** (`Equation.3`) is a picture of a formula to a screen reader. It needs alt text now, and retyping in PowerPoint's own equation editor later.
 
+## Converting a PowerPoint deck
+
+A target of another format than `source` converts each deck once it's checked and copied: an `html` target makes it a page, a `pdf` target a tagged PDF, a `revealjs` target a reveal.js presentation, and a `markdown` target a deck written in Markdown, each as a deck written in Markdown is made one ([below](#decks-written-in-markdown)). The deck is read into the intermediate a deck written in Markdown is read into (`lib/pptxsource.py`), and the filter and the writers take it from there. Its pictures are written beside the decks, in `media/`, each image once, under the name the alt-text report gives it. Converting needs Pandoc, as a book does, and a `pdf` target LuaLaTeX and ltx-talk ([The PDF](#the-pdf)).
+
+```yaml
+targets:
+  remediated:
+    format: source
+  pages:
+    format: html
+  pdf:
+    format: pdf
+```
+
+The sidecars' decisions are the conversion's, as they're the copy's, and taken as the copy takes them: a picture's alt text or decorative mark, a table's header row and column, a slide's title (replacing a title only where another slide has it too), and a slide's reading order, which the conversion follows even where the copy won't write it, since a page or a PDF draws no shape over another. A decision for a shape whose id its slide repeats is skipped in both. The reports are the decks' own, from their checks ([What's checked](#whats-checked)): what the filter would report of the intermediate is the same deck's, and isn't reported again.
+
+What's read:
+
+- **The slides** in the presentation's order, a hidden one left out, as PowerPoint leaves it out of a show and out of a PDF it exports; PowerPoint's sections as the deck's sections; and each slide's title as its heading. A slide with no title begins with a rule, as Pandoc's slide writers begin one. The first slide, when its title is a Title Slide layout's, is the deck's title and subtitle, its notes kept, and anything else on it, a picture or a logo, is left out, since a deck's title slide is its title and subtitle in every format a deck has.
+- **Text**, with its runs' own bold, italic, underline, strikethrough, small capitals, superscripts, and subscripts, its line breaks, and its links: to an address, its ScreenTip the link's title, or to another slide, the next or the previous one too, which goes to the slide's heading. What a placeholder's text takes from its layout or master, a title's bold, say, is the deck's design, and isn't read as emphasis. A slide's date, footer, and number, and a shape hidden on it, are left out.
+- **Lists**, as PowerPoint shows them: a paragraph's own bullet or number, else its shape's list style's, else what its placeholder inherits from the layout, the master, and the presentation, nested by level, a numbered list in its scheme and from its start, and a paragraph with no bullet under an item a paragraph of the item. Speaker notes' lists take their bullets from the notes master too.
+- **Tables**, with their header row and first column (PowerPoint's Header Row and First Column, or the table-headers sidecar's decision), declared to the filter as a page's header cells are, and their merged cells.
+- **Pictures**, with their alt text, or as decorative. A picture shown cropped is shown whole.
+- **Equations**, PowerPoint's own Office math, read by Pandoc's Word reader, since a deck keeps them in the OMML a Word file does: TeX, a display equation display math, and a bar over a letter `\bar`, as in a Word file.
+- **Speaker notes**, as the slide's notes, read as its text is.
+
+What can't be kept is said, by deck and slide. A chart, a SmartArt graphic, video, and sound aren't converted yet, and are left out, as are an embedded object with no picture, ink, and a picture linked from outside the file. A group with alt text of its own is read a piece at a time, as a screen reader reads it in a show, its alt text left out. A picture in a format a browser doesn't show (an EMF, say) is kept as it is, and a page shows nothing for it. A link that runs a macro, ends the show, or goes to a slide that's hidden or has no title is its words; a numbering scheme Pandoc has no style for (circled numbers, say) is numbered 1, 2, 3; and an equation Pandoc's Word reader can't read is its characters. Where each shape sits, the theme, the layouts, and the animations and transitions don't carry over: the outputs look as a deck written in Markdown's do, in the project's language (`project.language`), as theirs are.
+
+On OpenStax's 13 decks, a run with all four targets wrote 13 pages, 13 PDFs of 322 pages, each passing veraPDF's PDF/UA-2 profile, 13 presentations of 322 slides, and 13 decks written in Markdown, and noted the picture each title slide holds, left out. The output check found what the decks hold: alt text that says nothing (`...`), one alt text on different pictures, header cells holding only a formula, five tables whose header row is empty, which a page writes as no header row, and text the Nu checker warns isn't in Unicode's composed form (a `y` and a combining circumflex for `ŷ`).
+
+A `pptx` target rebuilds each deck through Pandoc's PowerPoint writer, from what's read, on the template `slides.reference_doc` names, as a deck written in Markdown is made a PowerPoint file ([The PowerPoint file](#the-powerpoint-file)), and only on one: a PowerPoint deck's own PowerPoint file is its copy, which keeps its design. The rebuilt deck loses its theme, its layouts and backgrounds, where each shape sits, and its animations and transitions, with what the conversion leaves out of every format, and a link's ScreenTip and a merged cell, which Pandoc's writer doesn't write: so it's for moving decks onto a template, and the run says what's lost. Without `slides.reference_doc`, a `pptx` target writes nothing, and the run says why; a run whose only targets are such stops. Rebuilt on Pandoc's own reference document, OpenStax's decks are 350 slides, 28 more than they have, where a slide is cut in two, and the check finds in them what it finds in the decks.
+
+```yaml
+targets:
+  rebuilt:
+    format: pptx
+    slides:
+      reference_doc: department-template.pptx
+```
+
+The reader is held to a round trip: `util/round-trip-decks.py` converts a folder's decks to Markdown, makes that Markdown a PowerPoint file again, and compares each deck with its trip, slide by slide, for its titles, text and its formatting, lists, tables, pictures and their alt text, equations, and notes ([Tools](#tools)). On OpenStax's 13 decks nothing differs, in 322 slides, 188 pictures, 95 tables, 73 equations, and the notes of 185 slides. What the trip changes by design isn't a difference: a slide the `pptx` target cuts in two, titled or not, is one again, and a title's line break, which a Markdown heading can't hold, is a space, as the Markdown has it. Other decks differ where the trip loses something: a merged cell, a link's ScreenTip, and a link in the speaker notes, none of which Pandoc's PowerPoint writer writes; a numbered list in another that starts past its first number (`b.` under `5.`), which Pandoc's Markdown writer writes and its reader, since 3.11, reads back as text; and a quotation inside a quotation in the same marks, or four periods, which its Markdown writer and reader don't agree on.
+
 ## Decks written in Markdown
 
 A deck written in Pandoc's slide Markdown, a slide at each heading of the slide level and its speaker notes in `::: notes` divs, is read, filtered, and reported on as a page of a book is: the same sidecars decide its pictures' alt text, its tables' headers and captions, and its bare links, and the same reports ask for them. Nothing in a Markdown file says it's a deck rather than a page, so the folder has to: `project.kind: slides`.
@@ -278,7 +320,7 @@ Each presentation gets the output check a page gets ([What's checked](#whats-che
 
 ### Markdown again, and the source
 
-A `markdown` target writes each deck as slide Markdown, its notes divs and its title in its YAML as they were, with what the filter decided written in, as for a book's page ([Markdown](markdown.md)). A `source` target writes the sidecars' decisions into a copy of each deck, as it does a book's Markdown files.
+A `markdown` target writes each deck as slide Markdown, its notes divs and its title in its YAML as they were, with what the filter decided written in, as for a book's page ([Markdown](markdown.md)); a PowerPoint deck's slide title of two lines is one, since a Markdown heading can't hold a line break. A `source` target writes the sidecars' decisions into a copy of each deck, as it does a book's Markdown files.
 
 ### What the run says about the decks
 
@@ -305,3 +347,9 @@ python3 $T/util/remediate.py *.pptx --alt image-alt.csv --table-headers table-he
 ```
 
 It reads neither `math-keep.csv` nor the `fonts` settings, so a copy that keeps an equation as it was, or uses another font in a restricted one's place, comes from a run of `convert.py`.
+
+`util/round-trip-decks.py` makes the round trip the deck reader is held to ([Converting a PowerPoint deck](#converting-a-powerpoint-deck)): a folder's decks, with its sidecars and its `project.yaml`, converted to Markdown by `convert.py`, that Markdown made PowerPoint files again, and each deck compared with its trip, slide by slide. It writes the trip in a folder of its own, leaving the decks' folder as it was, and with `--keep` keeps it there. Each difference is named by its slide and what differs, the two decks' versions beside each other, and the exit status is 1 when a deck differs:
+
+```bash
+python3 $T/util/round-trip-decks.py stats-slides --keep trip
+```

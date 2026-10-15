@@ -1,5 +1,6 @@
 """
-pptxtarget.py -- a deck written in Markdown made a PowerPoint file.
+pptxtarget.py -- a deck written in Markdown made a PowerPoint file, or a
+PowerPoint deck rebuilt on a template from what pptxsource.py reads.
 
 Pandoc's PowerPoint writer writes it from the deck's intermediate, after
 target-blocks.lua and deck-pptx.lua, which works around what the writer

@@ -123,7 +123,7 @@ Put that `export` line in `~/.bashrc` (see [below](#optional-the-full-validators
 
 | Tool | Needed for | Install |
 |---|---|---|
-| `pandoc` | Everything but PowerPoint decks ([Slides](slides.md)). **Version 3.9 or later**; see below, because Ubuntu's own package is older. | from Pandoc's release page |
+| `pandoc` | Everything but a PowerPoint deck's checks and copy ([Slides](slides.md)). **Version 3.9 or later**; see below, because Ubuntu's own package is older. | from Pandoc's release page |
 | `python3` | Required, 3.9 or later. Runs the driver and every script. | present on Ubuntu |
 | PyYAML | Reading configuration | `sudo apt install python3-yaml` |
 | `file` | Detecting real image types | present on Ubuntu |
@@ -146,7 +146,7 @@ sudo apt install ./pandoc-3.12.1-1-amd64.deb
 pandoc --version | head -1
 ```
 
-Pandoc 3.9 is a hard requirement for a book, checked before the book is read; a folder of PowerPoint decks needs no Pandoc, a deck's PowerPoint file (a `pptx` target) needs 3.10.1, whose PowerPoint writer keeps a table and the text around it on one slide, and a deck's reveal.js presentation (a `revealjs` target) needs 3.12, whose template loads reveal.js 6's plugins. Versions above it still differ in ways that show up here — newer releases read Word caption paragraphs into table captions, older ones don't — so the same document can produce different reports on different machines. Neither is wrong; the sidecar files absorb the difference.
+Pandoc 3.9 is a hard requirement for a book, checked before the book is read; a folder of PowerPoint decks needs none unless a target converts them, a deck's PowerPoint file (a `pptx` target) needs 3.10.1, whose PowerPoint writer keeps a table and the text around it on one slide, and a deck's reveal.js presentation (a `revealjs` target) needs 3.12, whose template loads reveal.js 6's plugins. Versions above it still differ in ways that show up here — newer releases read Word caption paragraphs into table captions, older ones don't — so the same document can produce different reports on different machines. Neither is wrong; the sidecar files absorb the difference.
 
 **Python packages come from `apt`, not `pip`.** Ubuntu 24.04 manages its Python installation, so `pip3 install pypdf` stops with `error: externally-managed-environment` (and on a fresh WSL install `pip3` isn't there to begin with). The `python3-*` packages in the table are the ones to use. Ubuntu 22.04 doesn't stop pip, and its one gap, pypdf, comes from pip there, as [above](#which-ubuntu-you-have). If you need a version newer than Ubuntu ships, or a package it doesn't ship at all, make a virtual environment that sees Ubuntu's packages as well (`python3 -m venv --system-site-packages ~/venv && ~/venv/bin/pip install pypdf`) and run the tools with that interpreter. The one package anything here takes from pip is Playwright, which only the test suites use, and they don't need it ([below](#optional-for-the-suites-playwright-and-its-chromium)).
 

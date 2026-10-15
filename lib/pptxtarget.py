@@ -83,6 +83,11 @@ writer's output:
 - an SVG image, which the writer embeds as it is, where PowerPoint shows a
   picture that has a PNG beside its SVG, is a PNG with the SVG beside it,
   as PowerPoint itself inserts an SVG;
+- a bulleted list in a slide's notes has the bullets the master gives a
+  slide's list, hanging as the writer hangs a numbered one: the writer
+  gives a list's paragraph no bullet of its own, for the style it inherits
+  to give, and a notes master's gives none, so the list was shown, and
+  read, as paragraphs (notes_bullets);
 - a shape or table holding an equation has a fallback, which a program
   that reads no PowerPoint equations shows (LibreOffice, for one), each
   equation written there as a line of text (x̄ = 1/n∑xᵢ): the writer gives
@@ -1525,6 +1530,72 @@ def _math_run(fragment):
     return "<a:r><a:rPr/><a:t>%s</a:t></a:r>" % pptxremediate._text(text)
 
 
+NOTES_BODY = re.compile(r"<p:sp>(?:(?!</p:sp>).)*?<p:ph\b[^>]*?\stype=\"body\".*?</p:sp>", re.S)
+NOTES_PARAGRAPH_PROPERTIES = re.compile(r"<a:pPr" + ATTRS + r"(?:/>|>(.*?)</a:pPr>)", re.S)
+# What comes before a bullet in a paragraph's properties (CT_TextParagraphProperties).
+BEFORE_BULLET = re.compile(r"\s*(?:<a:(lnSpc|spcBef|spcAft)>.*?</a:\1>|<a:(?:buClrTx|buSzTx|"
+                           r"buFontTx)" + ATTRS + r"/>|<a:buClr>.*?</a:buClr>|<a:buSz(?:Pct|Pts)"
+                           + ATTRS + r"/>)", re.S)
+
+
+def body_bullets(master):
+    """{level, 0 to 8: (font, character)} of the bullets a master's body
+    text style gives its levels: a slide's list's."""
+    found = re.search(r"<p:bodyStyle>(.*?)</p:bodyStyle>", master, re.S)
+    out = {}
+    for match in LEVEL_STYLE.finditer(found.group(1) if found else ""):
+        inner = match.group(3) or ""
+        char = re.search(r"<a:buChar\b[^>]*?\schar=\"([^\"]*)\"", inner)
+        if char:
+            font = re.search(r"<a:buFont\b[^>]*?\stypeface=\"([^\"]*)\"", inner)
+            out[int(match.group(1)) - 1] = (html.unescape(font.group(1)) if font else None,
+                                            html.unescape(char.group(1)))
+    return out
+
+
+def notes_bullets(xml, bullets, margins, counts):
+    """A notes slide's paragraphs of a bulleted list given the bullets the
+    master gives a slide's list (bullets, body_bullets'): the writer gives
+    such a paragraph none of its own, for the style it inherits to give,
+    and a notes master's gives none (Pandoc's, nor those of the decks we
+    have, made in PowerPoint and in Google Slides, whose bulleted notes
+    have bullets of their own), so the list was shown and read as
+    paragraphs. A list's paragraph is one whose properties hold no bullet,
+    the writer giving every other buNone or numbering, and it hangs as the
+    writer hangs a numbered one (paragraphToElement): its margin the next
+    level's in the master's otherStyle (margins), its first line this
+    level's. counts["notes_bullets"] counts them."""
+    def paragraph(match):
+        attrs, inner = match.group(1), match.group(2) or ""
+        if "<a:bu" in inner:
+            return match.group(0)
+        try:
+            level = min(8, max(0, int(_attr_value(attrs, "lvl") or 0)))
+        except ValueError:
+            level = 0
+        font, char = bullets.get(level, ("Arial", "\u2022"))
+        this = margins.get(level)
+        after = margins.get(level + 1)
+        this = 457200 * level if this is None else this
+        after = this + 457200 if after is None else after
+        attrs = _set_attr(_set_attr(attrs, "marL", str(after)), "indent", str(this - after))
+        lead = 0
+        while True:
+            more = BEFORE_BULLET.match(inner, lead)
+            if more is None:
+                break
+            lead = more.end()
+        counts["notes_bullets"] += 1
+        return "<a:pPr%s>%s%s<a:buChar char=\"%s\"/>%s</a:pPr>" % (
+            attrs, inner[:lead],
+            '<a:buFont typeface="%s"/>' % html.escape(font) if font else "",
+            html.escape(char), inner[lead:])
+
+    def body(match):
+        return NOTES_PARAGRAPH_PROPERTIES.sub(paragraph, match.group(0))
+    return NOTES_BODY.sub(body, xml, count=1)
+
+
 def math_fallbacks(xml, counts):
     """A slide with a fallback for each shape the writer wrapped in
     mc:AlternateContent for its equations (a Choice alone), and each table
@@ -1724,7 +1795,7 @@ def finish(path, record, *, language, title, svgs=None, notes=None):
               "first_columns": 0, "table_captions": 0, "captions_taller": 0,
               "tables_fitted": 0, "tables_overflow": 0, "text_fitted": 0, "text_overflow": 0,
               "bars": 0, "math_fallbacks": 0, "ids": 0, "animations": 0, "repaired": 0,
-              "svgs": 0, "properties": 0, "displays": 0, "spaces": 0}
+              "svgs": 0, "properties": 0, "displays": 0, "spaces": 0, "notes_bullets": 0}
     with zipfile.ZipFile(path) as zin:
         infos = zin.infolist()
         parts = {info.filename: zin.read(info.filename) for info in infos}
@@ -1740,6 +1811,9 @@ def finish(path, record, *, language, title, svgs=None, notes=None):
                    if re.match(r"ppt/slideMasters/slideMaster\d+\.xml$", n)), "")
     styles = text_styles(master)
     body_levels = _merged(styles["body"])
+    bullets = body_bullets(master)
+    other_margins = {level: values[1] for level, values in styles["other"].items()
+                     if values[1] is not None}
     spaces = record.get("spaces") or []
     size = styles["other"].get(0, (None,))[0] or 18
     # A caption the writer makes takes the body's size (createCaption's
@@ -1792,6 +1866,8 @@ def finish(path, record, *, language, title, svgs=None, notes=None):
             counts["ids"] += n
             xml = animation_targets(xml, counts)
             xml = paragraph_spacing(xml, counts, spaces, body_levels, top_inset(name))
+        else:
+            xml = notes_bullets(xml, bullets, other_margins, counts)
         xml = math_fallbacks(xml, counts)
         if language:
             xml, _ = relanguage(xml, language)

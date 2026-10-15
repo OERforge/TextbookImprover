@@ -2608,6 +2608,20 @@ Shown words.
 Only for the speaker.
 :::
 
+# Listed Notes
+
+Words shown.
+
+::: notes
+Two points:
+
+- First
+    - Under it
+- Second
+
+1. Numbered
+:::
+
 # Notes First
 
 ::: notes
@@ -2785,6 +2799,25 @@ def notes_of(parts, slide):
     return parts.get("ppt/notesSlides/" + found.group(1), "") if found else ""
 
 
+def notes_list(xml):
+    """(text, level, first line's indent, bullet) of each paragraph of
+    a notes slide's text holding text, the bullet its character, "number",
+    or "none"."""
+    out = []
+    for p in re.findall(r"<a:p>(.*?)</a:p>", xml, re.S):
+        words = "".join(re.findall(r"<a:t>([^<]*)</a:t>", p))
+        props = re.search(r"<a:pPr\b([^>]*?)(?:/>|>(.*?)</a:pPr>)", p, re.S)
+        if not words or props is None:
+            continue
+        inner = props.group(2) or ""
+        char = re.search(r'<a:buChar char="([^"]*)"', inner)
+        out.append((words, re.search(r'lvl="(\d+)"', props.group(1)).group(1),
+                    (re.search(r'indent="(-?\d+)"', props.group(1)) or [None, None])[1]
+                    if char or "buAutoNum" in inner else None,
+                    char.group(1) if char else "number" if "buAutoNum" in inner else "none"))
+    return out
+
+
 def shape_id(xml, words):
     """The id of the shape on a slide whose text holds words."""
     for piece in re.findall(r"<p:sp>.*?</p:sp>", xml, re.S):
@@ -2941,6 +2974,7 @@ def case_pptx(work):
     stacked = slide_titled(hd, "Table and Text")
     pair = slide_titled(hd, "Figure Pair (2)")
     private = slide_titled(hd, "Private Notes")
+    listed = slide_titled(hd, "Listed Notes")
     notes_first = slide_titled(hd, "Notes First")
     display = slide_titled(hd, "Display")
     kept = slide_titled(hd, "Display Kept")
@@ -3148,6 +3182,13 @@ def case_pptx(work):
         ("a notes div with another class too is the slide's notes, not shown on it",
          lambda: private is not None and "Only for the speaker." not in hp[private.part]
          and "Only for the speaker." in notes_of(hp, private)),
+        ("a list in a slide's notes has the bullets the master gives a slide's list, hanging as "
+         "a numbered one does, where the writer gave none, and the run says",
+         lambda: listed is not None and notes_list(notes_of(hp, listed)) == [
+             ("Two points:", "0", None, "none"), ("First", "0", "-457200", "\u2022"),
+             ("Under it", "1", "-457200", "\u2013"), ("Second", "0", "-457200", "\u2022"),
+             ("Numbered", "0", "-457200", "number")]
+         and "3 paragraph(s) of lists in speaker notes given their bullets" in out),
         ("notes between a slide's heading and its columns stay with the slide",
          lambda: notes_first is not None and notes_first.layout == "Two Content"
          and slide_titled(hd, "Notes First (2)") is None

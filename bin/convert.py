@@ -3938,6 +3938,9 @@ def deck_pptxs(target, stems, names, base, language, work):
             + (f", {counts['math_fallbacks']} shape(s) holding equations given their text "
                "for programs that show no PowerPoint equation" if counts["math_fallbacks"]
                else "")
+            + (f", {counts['notes_bullets']} paragraph(s) of lists in speaker notes given their "
+               "bullets, which Pandoc's writer leaves to a notes master that gives none"
+               if counts["notes_bullets"] else "")
             + (f", {counts['repaired']} repair(s) of XML PowerPoint can't read as Pandoc "
                "wrote it" if counts["repaired"] else "") + ".")
     if found["cut"]:

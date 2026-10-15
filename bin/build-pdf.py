@@ -580,12 +580,16 @@ def count_math(blocks):
 
 
 def captioned_tables(blocks):
-    """For each table in the book, in order, whether it has a caption."""
+    """For each table in the book, in order, whether it has a caption. Not
+    a layout table, which pdf-target.lua tags as a division of paragraphs,
+    so the PDF has no Table for it; a table inside one is a table."""
     found = []
 
     def walk(node):
         if isinstance(node, dict):
-            if node.get("t") == "Table":
+            if node.get("t") == "Table" and not any(
+                    k == "role" and v in ("presentation", "none")
+                    for k, v in node["c"][0][2]):
                 found.append(bool(node["c"][1][1]))
             for value in node.values():
                 walk(value)

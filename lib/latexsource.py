@@ -2030,8 +2030,13 @@ def declare_headers(text, counter):
     """A table preceded by its tagging's header declaration, wrapped in an
     environment the reader keeps as a div naming the declaration. Only a
     first row, a first column, or both: what the pipeline's declarations
-    say (table-headers.csv's first-row, first-column, both)."""
+    say (table-headers.csv's first-row, first-column, both). And a table
+    tagged as a division of paragraphs (table/tagging=div), as the PDF
+    target tags a layout table: table-headers.csv's layout, which
+    latex-source.lua makes role="presentation". A box (box_tables) tagged
+    so, as the source copy writes one, stays a box."""
     spans = skip_spans(text)
+    boxes = {start for start, _ in box_tables(text)}
     out, last = [], 0
     for m in HEADER_SETUP.finditer(text):
         if in_spans(m.start(), spans) or m.start() < last:
@@ -2049,16 +2054,21 @@ def declare_headers(text, counter):
         head_row = m.group(3) == "longtable" and one_row_head(text[begin:end])
         key = (bool(rows and rows.group(1).strip() == "1") or head_row,
                bool(cols and cols.group(1).strip() == "1"))
-        if key not in DECLARATIONS:
+        if re.search(r"table/tagging\s*=\s*div\b", keys):
+            if begin in boxes:
+                continue
+            name, kind = "TextbookImproverHeadersLayout", "layout_declared"
+        elif key not in DECLARATIONS:
             if (rows and rows.group(1).strip()) or (cols and cols.group(1).strip()):
                 counter["header_other"] = counter.get("header_other", 0) + 1
             continue
-        name = "TextbookImproverHeaders" + DECLARATIONS[key]
+        else:
+            name, kind = "TextbookImproverHeaders" + DECLARATIONS[key], "header_declared"
         out.append(text[last:m.start()] + re.sub(r"\\fi\b", "", m.group(2))
                    + "\\begin{%s}" % name
                    + text[begin:end] + "\\end{%s}" % name)
         last = end
-        counter["header_declared"] = counter.get("header_declared", 0) + 1
+        counter[kind] = counter.get(kind, 0) + 1
     out.append(text[last:])
     return "".join(out)
 

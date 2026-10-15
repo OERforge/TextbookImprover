@@ -39,6 +39,12 @@ the sidecar without them to a sample beside it, ready to adopt, and the
 report lists the unmatched rows beside the tables no row claimed, so a
 person can see "that is my row, the table changed."
 
+`layout` says a table only lines things up, as a page says with
+role="presentation": the filter asks no caption of it, and every target
+writes it as one. A table the page marks so is listed with that value,
+the page's own declaration, as a table whose <th> cells declare its
+headers is; a sidecar row naming its headers makes it a data table.
+
 A `headers` value the reader does not recognize is warned about once and
 treated as blank. That is what lets `manual`, `list`, and `caption-rows` be
 declared before anything acts on them, and what keeps a sidecar written
@@ -74,9 +80,11 @@ sys.path.insert(0, os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "lib"))
 import tablecensus as tc  # noqa: E402
 
-# The values a sidecar may carry, and what each means to the pipeline.
+# The values a sidecar may carry, and what each means to the pipeline:
+# where a data table's headers are (none, a data table with nothing to
+# declare), or layout, a table that only lines things up.
 ALIASES = {"matrix": "both", "grid": "none"}
-ACTING = {"first-row", "first-column", "both", "none"}
+ACTING = {"first-row", "first-column", "both", "none", "layout"}
 RESERVED = {"manual", "list"}
 KNOWN = ACTING | RESERVED
 
@@ -222,13 +230,25 @@ def tables_in_json(path):
     found = []
     for index, table in enumerate(pandoc_tables(doc["blocks"], [])):
         attributes = dict(table["c"][0][2])
-        if attributes.get("role") in ("presentation", "none"):
-            continue                  # a layout table, and says so
         view = tc.view_from_pandoc(table)
         kind, ev, nrows, ncols = tc.classify(view)
-        value, reason, inferred = tc.guess_table(view, kind, ev)
         source = attributes.get(MARKER)
-        if source:
+        # A layout table the page marks so, which html-source.lua declared
+        # (role="presentation", or "none" made "presentation"), or
+        # latex-source.lua did (a LaTeX page's table/tagging=div): listed, so
+        # a person sees it and a sidecar row can make it a data table, with
+        # nothing guessed. Not one the census counts no table at all, as it
+        # counts an empty one, one cell, or pictures alone, which the filter
+        # makes a figure: no row would change what it is.
+        if source == "layout" or attributes.get("role") in ("presentation", "none"):
+            if tc.guess_table(view, kind, ev)[0] is None:
+                continue
+            source = "layout"
+            value, reason, inferred = source, (
+                "the page marks it a layout table (role=\"presentation\")"), ("", "")
+        else:
+            value, reason, inferred = tc.guess_table(view, kind, ev)
+        if source and source != "layout":
             value, reason = source, "the page marks its header cells (<th>)"
         if value is None:
             continue
@@ -460,10 +480,12 @@ def main():
     resolved = {}
     resolved_html = {}
     claimed = set()
+    layout = 0
     for info in tables:
         row = sidecar.get(info["key"])
         if row is not None:
             claimed.add(info["key"])
+        layout += in_effect(info, row) == "layout"
         declared, supplier, status, note = decide(info, row)
         if info.get("from-source") and supplier == "guess":
             supplier = "source"
@@ -576,7 +598,9 @@ def main():
     for row in report:
         counts[row["status"]] = counts.get(row["status"], 0) + 1
     summary = ", ".join("%d %s" % (n, s) for s, n in sorted(counts.items()))
-    print("table-headers: %d data table(s): %s" % (len(tables), summary),
+    print("table-headers: %d data table(s)%s: %s"
+          % (len(tables) - layout,
+             " and %d layout table(s)" % layout if layout else "", summary),
           file=sys.stderr)
     if new_rows:
         print("table-headers: %d table(s) have no sidecar row; prefilled "

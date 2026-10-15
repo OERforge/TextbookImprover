@@ -131,6 +131,13 @@ def main(argv=None):
              totals.get("skipped", 0), totals.get("undecided", 0), totals.get("described", 0),
              totals.get("decorative", 0),
              totals.get("links", 0), totals.get("compat", 0)), file=sys.stderr)
+    if totals.get("layout_tables") or totals.get("layout_undone"):
+        print("remediate: %d table(s) marked as a layout table, %d layout table(s) made a "
+              "data table." % (totals.get("layout_tables", 0), totals.get("layout_undone", 0)),
+              file=sys.stderr)
+    if totals.get("layout_unwritten"):
+        print("remediate: %d layout table decision(s) not written into a Word file: Word "
+              "records nothing of a layout table." % totals["layout_unwritten"], file=sys.stderr)
     if any(p.lower().endswith(".pptx") for p in args.files):
         print("remediate: slides: %d slide(s) given the heading they show as their title, in "
               "place, %d title(s) added above their slides, %d slide(s) put in "

@@ -1568,21 +1568,26 @@ def _complete_metadata(text, m, language, claim):
 
 HEADER_KEYS = {"first-row": "table/header-rows={1}",
                "first-column": "table/header-columns={1}",
-               "both": "table/header-rows={1},table/header-columns={1}"}
+               "both": "table/header-rows={1},table/header-columns={1}",
+               # A layout table, tagged as a division of paragraphs, as the
+               # PDF target tags one and a box is (BOX_OPEN).
+               "layout": "table/tagging=div"}
 
 
 def declare(texts, files, decisions):
     """texts: {name: text}, changed in place. decisions: {place: headers},
     a place as latexsource.table_place names a table (its file's index
     among files, its own among the file's tables) and headers one of
-    table-headers.csv's first-row, first-column, both. Each table gets
-    its declaration just before it, in a group of its own, since
+    table-headers.csv's first-row, first-column, both, or layout (tagged
+    as a division of paragraphs). Each table gets its declaration just
+    before it, in a group of its own, since
     \\tagpdfsetup holds until it's changed, and only where it's defined,
     since it isn't without tagging and the book may yet be built without:
     {\\ifdefined\\tagpdfsetup\\tagpdfsetup{...}\\fi\\begin{tabular}...\\end{tabular}}.
     A table the author declared already is left.
     Returns counts."""
-    counts = {"header_rows": 0, "header_columns": 0, "declared_already": 0}
+    counts = {"header_rows": 0, "header_columns": 0, "declared_already": 0,
+              "layout_tables": 0}
     by_file = {}
     for place, headers in decisions.items():
         m = re.fullmatch(r"F(\d+)N(\d+)", place)
@@ -1606,6 +1611,7 @@ def declare(texts, files, decisions):
                           % HEADER_KEYS[headers], False))
             counts["header_rows"] += int(headers in ("first-row", "both"))
             counts["header_columns"] += int(headers in ("first-column", "both"))
+            counts["layout_tables"] += int(headers == "layout")
         # As in remediate_file: where one table ends and the next begins,
         # the first one's closing goes in front of the next one's opening.
         for at, piece, _ in sorted(edits, key=lambda e: (e[0], not e[2]), reverse=True):

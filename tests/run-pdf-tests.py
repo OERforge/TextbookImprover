@@ -369,6 +369,22 @@ NOTES_CELLS = r"""# Cells
 
 After the tables, a note.[^h]
 
+Two layout tables, the second holding a data table:
+
+<table id="solve" role="presentation"><tr><td>Subtract 3 from each side.</td><td>x = 4</td></tr><tr><td>Divide each side by 2.</td><td>x = 2</td></tr></table>
+
+<table role="presentation"><tr><td>Read the price off the table.</td><td><table><tr><th>Year</th><th>Price</th></tr><tr><td>2020</td><td>10</td></tr></table></td></tr></table>
+
+And one with a caption:
+
+<table id="steps" role="presentation"><caption>Steps to solve</caption><tr><td>Add 1 to each side.</td><td>x = 5</td></tr><tr><td>Halve each side.</td><td>x = 2.5</td></tr></table>
+
+And one whose first row is in its head, as Pandoc's Word reader puts a row Word repeats as a header:
+
+<table role="presentation"><thead><tr><th>Diploma in game design</th><th>Sept. 2015 to Apr. 2018</th></tr></thead><tbody><tr><td>Certificate in illustration</td><td>Sept. 2014 to Apr. 2015</td></tr></tbody></table>
+
+As [the first steps](#solve) and [the second](#steps) show.
+
 [^d]: Note d, above the inner table.
 [^e]: Note e, in the inner table.
 [^f]: Note f, in the inner table too.
@@ -633,6 +649,29 @@ def linked_notes(marks, letters, first):
         == [(str(n), ["%d%s" % (n, letter)]) for n, letter in enumerate(letters, first)]
 
 
+def text_paths(path, words):
+    """For each structure element whose own text holds words, the kinds
+    of the elements from the root down to it."""
+    if not os.path.exists(path):
+        return []
+    texts = pdftext.marked_text(path)
+    pdf = pdfparagraphs.pikepdf.open(path)
+    pages = {page.objgen: n for n, page in enumerate(pdf.pages)}
+    found = []
+
+    def walk(element, above):
+        if not pdfparagraphs.is_struct_elem(element):
+            return
+        here = above + [str(element["/S"])]
+        if words in " ".join(pdftext.own_text(element, texts, pages).split()):
+            found.append(here)
+        for kid in pdfparagraphs.kids_of(element):
+            walk(kid, here)
+    for kid in pdfparagraphs.kids_of(pdf.Root.StructTreeRoot):
+        walk(kid, [])
+    return found
+
+
 def untagged_repairs(work):
     """build-pdf.py's repairs after LaTeX on a PDF with no structure tree,
     as one built to no PDF/UA standard has none: (whether it's taken for
@@ -791,6 +830,35 @@ def links(reader):
                         str(annot["/Contents"]) if "/Contents" in annot
                         else None))
     return out
+
+
+def goes_to(path, contents):
+    """The page each internal link described as contents goes to, in
+    order: None where the PDF doesn't define its destination."""
+    if not os.path.exists(path):
+        return []
+    reader = pypdf.PdfReader(path)
+    named = reader.named_destinations
+    out = []
+    for page in reader.pages:
+        for annot in resolve(page.get("/Annots")) or []:
+            annot = resolve(annot)
+            action = resolve(annot.get("/A")) if "/A" in annot else {}
+            if annot.get("/Subtype") == "/Link" and action.get("/S") == "/GoTo" \
+                    and str(annot.get("/Contents")) == contents:
+                dest = named.get(str(action.get("/D")))
+                out.append(reader.get_destination_page_number(dest) if dest else None)
+    return out
+
+
+def page_holding(path, words):
+    """The first page whose text holds the words, or None."""
+    if not os.path.exists(path):
+        return None
+    for n, page in enumerate(pypdf.PdfReader(path).pages):
+        if says(page.extract_text() or "", words):
+            return n
+    return None
 
 
 def font_names(reader):
@@ -1156,6 +1224,53 @@ def checks(work, jobs=1):
         ("an untagged PDF of a book with a table with a header column, and one in a "
          "table's cell with a head, is built, as LaTeX stopped on \\tagpdfsetup",
          lambda: os.path.exists(notes_plain) and "Undefined control sequence" not in notes_said),
+        # pdf-target.lua: a layout table (role="presentation") tagged
+        # table/tagging=div, in a group, only where tagging is; a data table
+        # inside one set back to a table, its plugs a table's again.
+        ("a layout table is a division of paragraphs, not a table, a data table "
+         "inside one a table with its header cells, a caption a paragraph before "
+         "it, no table's and unnumbered, the PDF's captions still lined up with "
+         "the book's tables, and an untagged book has its words",
+         lambda: (lambda steps, year: steps and year
+                  and all("/Div" in p and "/Table" not in p and "/TD" not in p for p in steps)
+                  and all("/Div" in p and "/TH" in p for p in year))(
+             text_paths(notes_path, "Subtract 3 from each side."),
+             text_paths(notes_path, "Year"))
+         and (lambda caption, steps: caption and steps
+              and all(p[-1] in ("/P", "/text") and "/TH" not in p and "/Table" not in p
+                      and "/Caption" not in p and "/Div" not in p for p in caption)
+              and all("/Div" in p and "/Table" not in p for p in steps))(
+             text_paths(notes_path, "Steps to solve"),
+             text_paths(notes_path, "Add 1 to each side."))
+         and says(notes_plain_text, "Steps to solve")
+         and not re.search(r"Table\s+\d+:\s*Steps to solve", notes_text + notes_plain_text)
+         and "{\\ifdefined\\tagpdfsetup\\tagpdfsetup{table/tagging=div}\\fi" in notes_source
+         and "\\tagpdfsetup{table/tagging=on,table/header-rows={1}}"
+             "\\AssignTaggingSocketPlug{tbl/hmode/begin}{Table}" in notes_source
+         and "don't line up" not in notes_said
+         and says(notes_plain_text, "Subtract 3 from each side.")
+         and says(notes_plain_text, "Read the price off the table.")),
+        # On the table, the writer gave a layout table's id an empty caption
+        # to hold its \label, which LaTeX numbered ("Table 1") in the
+        # longtable's head, tagged a header cell with no row.
+        ("and its id is an anchor before it, which a link goes to, not an empty "
+         "caption LaTeX numbers, tagged or untagged",
+         lambda: not re.search(r"Table\s*\d", notes_text + notes_plain_text)
+         and (lambda first, second: first is not None and second is not None
+              and goes_to(notes_path, "the first steps") == [first]
+              and goes_to(notes_path, "the second") == [second])(
+             page_holding(notes_path, "Subtract 3 from each side."),
+             page_holding(notes_path, "Steps to solve"))),
+        # figures-and-tables.lua: a layout table's head rows are body rows,
+        # since LaTeX's tagging made a longtable's head header cells even
+        # tagged as a division, a TH outside any TR, which PDF/UA-2 rejects
+        # (ISO 32005, Sect-TH), as a Word table's repeating header row read.
+        ("a layout table's head is rows like the others, no header cells",
+         lambda: (lambda head, body: head and body
+                  and all("/Div" in p and "/TH" not in p and "/Table" not in p
+                          for p in head + body))(
+             text_paths(notes_path, "Diploma in game design"),
+             text_paths(notes_path, "Certificate in illustration"))),
         ("a table whose first header row is one spanning cell, with no "
          "caption, keeps that row",
          lambda: shape(table_elements[3])[:2] == [1, 2]

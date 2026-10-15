@@ -5,7 +5,9 @@ saved from a platform is better fixed in the platform.
 
 - **Tables.** A header declaration from the table-headers sidecar, never a
   guess (see docxremediate): a header row's cells become <th scope="col">,
-  a header column's <th scope="row">. A table is found by its position
+  a header column's <th scope="row">. A table the sidecar says is a layout
+  table gets role="presentation", and one it gives headers, or none, loses
+  a layout role the page had given it. A table is found by its position
   among the page's tables, as Pandoc numbers them, and changed only when
   its row count and first cell are what the pre-pass saw.
 - **Images.** Alt text from the image-alt sidecar, matched by the image's
@@ -38,6 +40,10 @@ from names import case_match
 TABLE_TAG = re.compile(r"<table\b[^>]*>|</table\s*>", re.I)
 ROW_TAG = re.compile(r"<table\b[^>]*>|</table\s*>|<tr\b[^>]*>|</tr\s*>", re.I)
 CELL = re.compile(r"<(td|th)\b([^>]*)>(.*?)</\1\s*>", re.I | re.S)
+# A table's role, any, and a layout table's: presentation, or none, ARIA's
+# other name for it.
+ROLE = re.compile(r"""\srole\s*=\s*("[^"]*"|'[^']*'|[^\s"'=<>`]+)""", re.I)
+LAYOUT_ROLE = re.compile(r"""\srole\s*=\s*(["']?)\s*(?:presentation|none)\s*\1(?=[\s/>])""", re.I)
 
 
 def table_spans(page):
@@ -90,10 +96,22 @@ def _row_cells(row, scope, first_only):
     return CELL.sub(one, row)
 
 
+def _with_role(table, layout):
+    """A table's markup with role="presentation" on its start tag, any
+    other role it had gone, or, not layout, with a layout role gone."""
+    tag = TABLE_TAG.match(table).group(0)
+    if layout:
+        new = re.sub(r"^<table\b", '<table role="presentation"', ROLE.sub("", tag), flags=re.I)
+    else:
+        new = LAYOUT_ROLE.sub("", tag)
+    return new + table[len(tag):]
+
+
 def remediate_tables(page, resolved):
-    """Each table's sidecar declaration written into its cells. Returns
-    (page, counts)."""
-    counts = {"header_rows": 0, "header_columns": 0, "skipped": 0, "undecided": 0}
+    """Each table's sidecar declaration written into its cells, or for
+    layout, its start tag. Returns (page, counts)."""
+    counts = {"header_rows": 0, "header_columns": 0, "skipped": 0, "undecided": 0,
+              "layout_tables": 0, "layout_undone": 0}
     spans = table_spans(page)
     edits = []
     for entry in resolved:
@@ -102,7 +120,7 @@ def remediate_tables(page, resolved):
             counts["undecided"] += entry.get("supplier") == "guess" and value in (
                 "first-row", "first-column", "both")
             continue
-        if value not in ("first-row", "first-column", "both"):
+        if value not in ("first-row", "first-column", "both", "none", "layout"):
             continue
         index = entry.get("index")
         if not isinstance(index, int) or index >= len(spans):
@@ -116,8 +134,15 @@ def remediate_tables(page, resolved):
                 first and _text(first.group(3)).startswith(entry["first"][:30]))):
             counts["skipped"] += 1
             continue
+        if value == "layout":
+            new = _with_role(table, True)
+            if new != table:
+                counts["layout_tables"] += 1
+                edits.append((start, end, new))
+            continue
         head = len(entry.get("caption_rows") or [])
-        new = table
+        new = _with_role(table, False)
+        counts["layout_undone"] += new != table
         for i, (r_start, r_end) in reversed(list(enumerate(rows))):
             row = new[r_start:r_end]
             if value in ("first-row", "both") and i == head:
@@ -127,7 +152,8 @@ def remediate_tables(page, resolved):
             new = new[:r_start] + row + new[r_end:]
         counts["header_rows"] += value in ("first-row", "both")
         counts["header_columns"] += value in ("first-column", "both")
-        edits.append((start, end, new))
+        if new != table:
+            edits.append((start, end, new))
     for start, end, new in sorted(edits, reverse=True):
         page = page[:start] + new + page[end:]
     return page, counts

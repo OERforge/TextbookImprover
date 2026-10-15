@@ -85,6 +85,35 @@ table {
   outline: 2px solid currentColor;
   outline-offset: 2px;
 }
+/* A layout table (role="presentation"), which only lines things up, has
+   no scroll region: on a narrow screen its cells stack instead, each
+   row's one under another, in the order they're read. WCAG 1.4.10
+   (Reflow) lets a data table keep its two dimensions and scroll, not a
+   layout table, whose role already says it has no grid to keep. Its
+   caption is a line of its own after the cells, where a wide screen puts
+   it: left a table's caption in a table made a block, it was a column as
+   wide as its longest word ("Table" over "3.2", Chromium). */
+@media (max-width: 36em) {
+  table[role="presentation"] {
+    display: flex;
+    flex-direction: column;
+  }
+  table[role="presentation"] > thead,
+  table[role="presentation"] > tbody,
+  table[role="presentation"] > tfoot,
+  table[role="presentation"] > * > tr,
+  table[role="presentation"] > * > tr > td,
+  table[role="presentation"] > * > tr > th {
+    display: block;
+  }
+  table[role="presentation"] > caption {
+    display: block;
+    order: 1;
+  }
+  table[role="presentation"] > colgroup {
+    display: none;
+  }
+}
 
 /* Word puts the "Table 2.1" label below the table; keep it there. */
 table caption {

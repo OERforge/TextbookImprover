@@ -1126,6 +1126,7 @@ LATEX_READ_CHANGES = (
     ("unbraced_input", "\\input without braces braced"),
     ("partial_rule", "\\cline or \\cmidrule read as a whole rule"),
     ("header_declared", "table header declaration for tagging read as the pipeline's"),
+    ("layout_declared", "table tagged as a division of paragraphs read as a layout table"),
     ("longtable_head", "longtable's head of one row read as its header row"),
     ("repeated_head", "longtable's head repeated for later pages read once"),
     ("longtable_head_rows", "longtable's head of more than one row left to the census"),
@@ -3218,6 +3219,9 @@ def remediate_sources(target, base, docs, paths, env, html_stems=(), language=No
             + (f" {counts.get('header_rows', 0)} table(s) declared with a header row and "
                f"{counts.get('header_columns', 0)} with a header column, from the sidecar."
                if counts.get("header_rows") or counts.get("header_columns") else "")
+            + (f" {counts['layout_tables']} table(s) declared a layout table, from the "
+               "sidecar, tagged as a division of paragraphs."
+               if counts.get("layout_tables") else "")
             + (f" {counts['declared_already']} table(s) the book declares already were left."
                if counts.get("declared_already") else "")
             + (f" {counts['headers_untagged']} table header decision(s) weren't written: "
@@ -3324,9 +3328,16 @@ def remediate_sources(target, base, docs, paths, env, html_stems=(), language=No
                if totals.get("text_equations") else "")
             + (f", {totals['equations_kept']} equation(s) kept as they were by the "
                "math-keep sidecar" if totals.get("equations_kept") else "")
+            + (f", {totals['layout_tables']} table(s) marked as a layout table"
+               if totals.get("layout_tables") else "")
+            + (f", {totals['layout_undone']} layout table(s) made a data table"
+               if totals.get("layout_undone") else "")
             + (f"; {totals['skipped']} table(s) skipped as changed since the pre-pass"
                if totals.get("skipped") else "")
             + ".")
+    if totals.get("layout_unwritten"):
+        say(f"{target.name}: {totals['layout_unwritten']} layout table decision(s) not "
+            "written into the Word file: Word records nothing of a layout table.")
     if totals.get("text_equations_left"):
         say(f"{target.name}: {totals['text_equations_left']} equation(s) the pages make of "
             "math typed as text not written into the Word file: its runs there aren't "
@@ -3651,6 +3662,8 @@ def latex_book_pdf(target, base, latex_parts, paths, work, language, project, ta
             f"marked artifact, {counts.get('header_rows', 0)} table(s) with a header row "
             f"and {counts.get('header_columns', 0)} with a header column declared, a "
             "person's or the census's, "
+            + (f"{counts['layout_tables']} layout table(s) tagged as a division of "
+               "paragraphs, " if counts.get("layout_tables") else "")
             + ("each formula with its MathML, " if counts.get("tag_math") or
                counts.get("tag_math_setup") else "")
             + ("its figures and tables tagged where the text has them, "

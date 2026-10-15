@@ -11,7 +11,10 @@
   This filter rewrites any table whose entire content is one or more images
   (and no text) into a native Pandoc Figure, which the HTML5 writer emits as
   <figure> / <img> / <figcaption>. Tables containing text are real data
-  tables and are left alone.
+  tables and are left alone, unless the source or table-headers.csv says
+  a table only lines things up: a layout table, written as it is with
+  role="presentation", no caption asked of it and no scroll region
+  around it (is_layout, layout_table).
 
   - A following "Figure N.N ..." paragraph is absorbed as the caption.
   - The id of the empty anchor span that DOCX cross-references point at is
@@ -2280,6 +2283,81 @@ local function apply_headers(tbl, label, entry, headed)
   end
 end
 
+-- A layout table, one that only lines things up: a page says so with
+-- role="presentation", or role="none", ARIA's other name for it (an HTML
+-- page's is made presentation as it's read, html-source.lua; a table a
+-- Markdown target wrote as HTML is read back here); a LaTeX book with its
+-- tagging's table/tagging=div (latex-source.lua); and table-headers.csv
+-- with layout. The header pre-pass writes the value in effect as the
+-- table's marker, or in the resolved file for a Word table. A value
+-- naming headers makes it a data table, whatever the page's role says: a
+-- person's row in the sidecar outranks the page.
+local LAYOUT_ROLES = { presentation = true, none = true }
+
+local function is_layout(tbl, entry)
+  local value = entry and tostring(entry.headers or '') or ''
+  if value == 'layout' then return true end
+  if value ~= '' then return false end
+  return LAYOUT_ROLES[tbl.attr.attributes.role] ~= nil
+end
+
+-- A layout table is written as it is, with role="presentation": no
+-- caption asked of it, no header row looked for, nothing split, and no
+-- scroll region around it. WCAG 1.4.10 lets a data table keep its two
+-- dimensions and scroll, not a layout table, whose cells page.css stacks
+-- on a narrow screen instead. It keeps its place in its page's count of
+-- tables, so the key of every table after it is what it was. A description
+-- the captions sidecar has for it isn't used, and the run says so.
+local LAYOUT_DROPPED = { ORDINAL_ATTR, TH_INDEX_ATTR, MARKER_ATTR, 'data-latex-table',
+                         CAPTION_ROWS_ATTR, SPLIT_AT_ATTR, SPLIT_AT_DECLARED_ATTR,
+                         PART_CAPTIONS_ATTR }
+
+-- A layout table has no header cells, so every row is a body row, in the
+-- order it's read, and no cell heads a column or a row: Pandoc's Word
+-- reader puts row 1 in the head when Word's table look formats it, an
+-- HTML page may give one a <thead> or <th>, and LaTeX's tagging takes a
+-- longtable's head for header cells even when it tags the table as a
+-- division of paragraphs, a TH outside any TR, which PDF/UA-2 rejects.
+local function layout_rows(tbl)
+  local rows = {}
+  local function add(list)
+    for _, row in ipairs(list or {}) do rows[#rows + 1] = row end
+  end
+  add(tbl.head.rows)
+  for _, body in ipairs(tbl.bodies) do
+    add(body.head)
+    add(body.body)
+  end
+  add(tbl.foot.rows)
+  for _, row in ipairs(rows) do
+    for _, cell in ipairs(row.cells) do cell.attr.attributes.scope = nil end
+  end
+  local attr = tbl.bodies[1] and tbl.bodies[1].attr or pandoc.Attr()
+  tbl.head = pandoc.TableHead({}, tbl.head.attr)
+  tbl.foot = pandoc.TableFoot({}, tbl.foot.attr)
+  tbl.bodies = { pandoc.TableBody(rows, {}, 0, attr) }
+end
+
+local function layout_table(tbl)
+  local ordinal = tbl.attr.attributes[ORDINAL_ATTR]
+  for _, name in ipairs(LAYOUT_DROPPED) do
+    tbl.attr.attributes[name] = nil
+  end
+  tbl.attr.attributes.role = 'presentation'
+  layout_rows(tbl)
+  if ordinal then
+    local key = position_key(ordinal)
+    local label = normalize(pandoc.utils.stringify(tbl.caption.long))
+    local description = description_for(label ~= '' and label or key, key)
+    if description and description ~= '' then
+      warn(('%s is a layout table, so its description in the captions sidecar '
+        .. 'is not used; a row in table-headers.csv can make it a data table')
+        :format(label ~= '' and ('"' .. label .. '"') or key))
+    end
+  end
+  return tbl
+end
+
 local function caption_data_table(tbl, next_block, after_next, after_after, out)
   local consumed = 0
   local label = nil
@@ -2302,6 +2380,9 @@ local function caption_data_table(tbl, next_block, after_next, after_after, out)
   tbl.attr.attributes[SPLIT_AT_ATTR] = nil
   tbl.attr.attributes[SPLIT_AT_DECLARED_ATTR] = nil
   tbl.attr.attributes[PART_CAPTIONS_ATTR] = nil
+  -- A data table by a row in table-headers.csv that names its headers,
+  -- which the page's role had said was a layout table.
+  if LAYOUT_ROLES[tbl.attr.attributes.role] then tbl.attr.attributes.role = nil end
   local pending = pending_caption_rows(tbl, entry)
   local bands, declared = band_targets(tbl, entry)
 
@@ -2446,6 +2527,7 @@ function Blocks(blocks)
   while i <= #blocks do
     local block = blocks[i]
     local images, anchor = nil, nil
+    local layout = false
 
     if block.t == 'Table' then
       images, anchor = image_only_table(block)
@@ -2461,8 +2543,12 @@ function Blocks(blocks)
       for _, name in ipairs(entry and entry.anchors or {}) do
         out:insert(pandoc.Div({}, pandoc.Attr(name, { 'table-anchor' })))
       end
+      layout = is_layout(block, entry)
     end
-    if images == nil then
+    if images == nil and layout then
+      out:insert(layout_table(block))
+      i = i + 1
+    elseif images == nil then
       if block.t == 'Table' then
         -- Not a layout table, so it is a real data table: give it a
         -- <caption>, mark its column headers, wrap it for scrolling.

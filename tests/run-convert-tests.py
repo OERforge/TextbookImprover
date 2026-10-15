@@ -771,6 +771,247 @@ def case_html_headers(work):
     ]
 
 
+LAYOUT = """<!DOCTYPE html><html lang="en"><head><title>Steps</title></head>
+<body><h1>Steps</h1>
+<p>Marked presentation:</p>
+<table role="presentation"><tr><td>Subtract 3 from each side.</td><td>x = 4</td></tr>
+<tr><td>Divide each side by 2.</td><td>x = 2</td></tr></table>
+<p>Marked none, ARIA's other name for it:</p>
+<table role="none"><tr><td>Add 5 to each side.</td><td>x = 9</td></tr>
+<tr><td>Divide each side by 3.</td><td>x = 3</td></tr></table>
+<p>Not marked:</p>
+<table><tr><td>Multiply each side by 4.</td><td>x = 8</td></tr>
+<tr><td>Subtract 1 from each side.</td><td>x = 7</td></tr></table>
+<p>A layout table holding a data table:</p>
+<table role="presentation"><tr><td>Read the price off the table.</td><td>
+<table><tr><th>Year</th><th>Price</th></tr><tr><td>2020</td><td>10</td></tr></table>
+</td></tr></table>
+</body></html>
+"""
+
+
+LAYOUT_NOT_TABLES = """<!DOCTYPE html><html lang="en"><head><title>Checks</title></head>
+<body><h1>Checks</h1>
+<table role="presentation"><tr><td>Add 2 to each side.</td><td>x = 6</td></tr>
+<tr><td>Halve each side.</td><td>x = 3</td></tr></table>
+<p>Check:</p>
+<table role="presentation"><tr><td>2 \u00b7 3 = 6</td></tr></table>
+<table role="presentation"><tr><td><img src="dot.png" alt=""></td>
+<td><img src="dot.png" alt=""></td></tr></table>
+</body></html>
+"""
+
+
+def narrow_layout_rules(page):
+    """The page's narrow-screen rules for a layout table: the @media block
+    whose first rule is for one, braces counted."""
+    m = re.search(r'@media \(max-width: 36em\) \{\s*table\[role="presentation"\]', page)
+    if not m:
+        return ""
+    depth = 0
+    for i in range(m.start(), len(page)):
+        if page[i] == "{":
+            depth += 1
+        elif page[i] == "}":
+            depth -= 1
+            if depth == 0:
+                return page[m.start():i + 1]
+    return ""
+
+
+def case_layout_tables(work):
+    """A table the page marks as layout, role="presentation" or "none", is
+    one in every target and every check, and a row in table-headers.csv
+    makes a table one, or a data table again, in the pages and in a
+    remediated copy."""
+    import csv
+    os.makedirs(work)
+    with open(os.path.join(work, "steps.html"), "w", encoding="utf-8") as fh:
+        fh.write(LAYOUT)
+    with open(os.path.join(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
+        fh.write("targets:\n  html:\n    format: html\n  md:\n    format: markdown\n"
+                 "  docx:\n    format: docx\n")
+    first = run_in(work, "")
+    said = first.stdout + first.stderr
+
+    def rows(name):
+        path = os.path.join(work, name)
+        if not os.path.exists(path):
+            return []
+        with open(path, encoding="utf-8", newline="") as fh:
+            return list(csv.DictReader(fh))
+
+    def tables(*parts):
+        page = read(*parts) if exists(*parts) else ""
+        return re.findall(r'(<div class="table-wrapper"[^>]*>\s*)?<table([^>]*)>', page)
+
+    missing = sorted(r["Label"] for r in rows("table-captions-missing.csv"))
+    new = rows("table-headers-new.csv")
+    report = rows("table-headers-report.csv")
+    # The page as html-source.lua read it, the pre-pass's marks in it: each
+    # table's role and mark.
+    read_as = []
+    if exists(work, "steps.json"):
+        with open(os.path.join(work, "steps.json"), encoding="utf-8") as fh:
+            def walk(node):
+                if isinstance(node, dict):
+                    if node.get("t") == "Table":
+                        found = dict(node["c"][0][2])
+                        read_as.append((found.get("role"), found.get("data-th-marker")))
+                    for value in node.values():
+                        walk(value)
+                elif isinstance(node, list):
+                    for value in node:
+                        walk(value)
+            walk(json.load(fh))
+    # The filter on its own, on the page as Pandoc reads it, with no pre-pass
+    # and no reading filter: the role alone says what's a layout table.
+    alone = subprocess.run(
+        "pandoc -f html -t json steps.html | pandoc -f json -t html5 --lua-filter="
+        + os.path.join(BIN, "figures-and-tables.lua"), shell=True, cwd=work,
+        capture_output=True, text=True).stdout
+    alone = re.findall(r'(<div class="table-wrapper"[^>]*>\s*)?<table([^>]*)>', alone)
+    checked = rows("output-check.csv")
+    page = tables(work, "html", "steps.html")
+    markdown = read(work, "md", "steps.md") if exists(work, "md", "steps.md") else ""
+    fidelity = [r for r in rows("fidelity.csv") if "layout" in str(r)]
+    # The Markdown target's page, read back as a book.
+    back = os.path.join(work, "back")
+    os.makedirs(back)
+    if markdown:
+        with open(os.path.join(back, "steps.md"), "w", encoding="utf-8") as fh:
+            fh.write(markdown)
+    run_in(back, "")
+    again = tables(back, "html", "steps.html")
+    # A person's rows: the unmarked table is layout, and the first one, which
+    # the page marks so, a data table with nothing to declare.
+    keys = {r["preview"][:8]: r["key"] for r in new}
+    with open(os.path.join(work, "table-headers.csv"), "w", encoding="utf-8") as fh:
+        fh.write("key,headers\n%s,layout\n%s,none\n"
+                 % (keys.get("Multiply", "x"), keys.get("Subtract", "y")))
+    with open(os.path.join(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
+        fh.write("targets:\n  html:\n    format: html\n  copy:\n    format: source\n")
+    second = run_in(work)
+    decided = tables(work, "html", "steps.html")
+    copied = read(work, "copy", "steps.html") if exists(work, "copy", "steps.html") else ""
+    missing_after = sorted(r["Label"] for r in rows("table-captions-missing.csv"))
+    # A page whose layout tables include what the census counts no table: one
+    # cell, and pictures alone.
+    others = os.path.join(work, "others")
+    os.makedirs(others)
+    with open(os.path.join(others, "checks.html"), "w", encoding="utf-8") as fh:
+        fh.write(LAYOUT_NOT_TABLES)
+    with open(os.path.join(others, "dot.png"), "wb") as fh:
+        fh.write(ONE_PIXEL)
+    with open(os.path.join(others, "conversion.yaml"), "w", encoding="utf-8") as fh:
+        fh.write("targets:\n  html:\n    format: html\n")
+    run_in(others, "")
+    listed = []
+    if os.path.exists(os.path.join(others, "table-headers-new.csv")):
+        with open(os.path.join(others, "table-headers-new.csv"), encoding="utf-8",
+                  newline="") as fh:
+            listed = [(r["preview"], r["headers"]) for r in csv.DictReader(fh)]
+    return [
+        ("a table marked as layout, role presentation or none, is asked no caption, "
+         "where one marked nothing and a data table inside a layout table are",
+         lambda: missing == ["steps#table-3", "steps#table-5"]),
+        ("each is a row of table-headers-new.csv with the value layout, the page "
+         "its supplier, and the run counts them apart",
+         lambda: [r["headers"] for r in new] == ["layout", "layout", "", "layout", "first-row"]
+         and [r["supplier"] for r in report if r["guess"] == "layout"] == ["source"] * 3
+         and "2 data table(s) and 3 layout table(s)" in said),
+        ("on the page it has role presentation, none made so, and no scroll "
+         "region; a data table does, inside a layout table too",
+         lambda: [(bool(w), a) for w, a in page]
+         == [(False, ' role="presentation"'), (False, ' role="presentation"'),
+             (True, ""), (False, ' role="presentation"'), (True, "")]),
+        # page.css: the cells stacked on a narrow screen, and the caption a
+        # line of its own after them, where a wide screen puts it; left a
+        # table's caption in a table made a block, it was a column as wide
+        # as its longest word (Chromium, "Table" over "3.2").
+        ("on a narrow screen its cells stack, and its caption is a line of its "
+         "own after them",
+         lambda: (lambda narrow: re.search(r'table\[role="presentation"\] \{\s*display: flex;'
+                                           r'\s*flex-direction: column;', narrow)
+                  and re.search(r'table\[role="presentation"\] > caption \{\s*display: block;'
+                                r'\s*order: 1;', narrow))(
+             narrow_layout_rules(read(work, "html", "steps.html")
+                                 if exists(work, "html", "steps.html") else ""))),
+        ("read, a table marked none is marked presentation and declared a layout "
+         "table, as one marked presentation is, so every step after sees one mark",
+         lambda: read_as[:2] == [("presentation", "layout")] * 2),
+        ("the filter run on its own, with no pre-pass, takes the role as the mark",
+         lambda: [(bool(w), a) for w, a in alone][:1] == [(False, ' role="presentation"')]
+         and bool(alone[2][0])),
+        ("the output check finds only the unmarked table",
+         lambda: [r["Detail"] for r in checked if r["Check"].startswith("table-")]
+         == ["table 3"]),
+        ("the Markdown target writes it as HTML with its role, and read back "
+         "it's a layout table again",
+         lambda: markdown.count('role="presentation"') == 3
+         and [a for _, a in again] == [a for _, a in page]
+         and [bool(w) for w, _ in again] == [bool(w) for w, _ in page]),
+        ("the Word target notes each as what it can't carry, none too",
+         lambda: len(fidelity) == 3),
+        ("a row in table-headers.csv makes a table layout, or a data table "
+         "with no role, whatever the page says",
+         lambda: second.returncode == 0
+         and [(bool(w), a) for w, a in decided]
+         == [(True, ""), (False, ' role="presentation"'), (False, ' role="presentation"'),
+             (False, ' role="presentation"'), (True, "")]
+         and missing_after == ["steps#table-1", "steps#table-5"]),
+        ("a layout table the census counts no table, one cell or pictures alone, "
+         "isn't listed, as an unmarked one isn't",
+         lambda: listed == [("Add 2 to each side. | x = 6", "layout")]),
+        ("and a remediated page has both decisions, the page's own role left on "
+         "a table no row decides",
+         lambda: re.findall(r"<table[^>]*>", copied)
+         == ["<table>", '<table role="none">', '<table role="presentation">',
+             '<table role="presentation">', "<table>"]),
+    ]
+
+
+def case_layout_word_head(work):
+    """A Word table a person declares a layout table, whose first row Word
+    repeats as a header, which Pandoc's reader puts in the table's head:
+    every row is a body row, and no cell a header cell, on the page and in
+    the Markdown target's copy."""
+    import csv
+    os.makedirs(work)
+    with open(os.path.join(work, "src.md"), "w", encoding="utf-8") as fh:
+        fh.write("# Resume\n\n| Diploma in game design | Sept. 2015 to Apr. 2018 |\n"
+                 "|---|---|\n| Certificate in illustration | Sept. 2014 to Apr. 2015 |\n")
+    subprocess.run(["pandoc", "src.md", "-o", "resume.docx"], cwd=work, check=True)
+    os.remove(os.path.join(work, "src.md"))
+    with open(os.path.join(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
+        fh.write("targets:\n  html:\n    format: html\n  md:\n    format: markdown\n")
+    run_in(work, "")
+    keys = []
+    if exists(work, "table-headers-new.csv"):
+        with open(os.path.join(work, "table-headers-new.csv"), encoding="utf-8",
+                  newline="") as fh:
+            keys = [r["key"] for r in csv.DictReader(fh)]
+    with open(os.path.join(work, "table-headers.csv"), "w", encoding="utf-8") as fh:
+        fh.write("key,headers\n%s,layout\n" % (keys[0] if keys else "x"))
+    second = run_in(work)
+    page = read(work, "html", "resume.html") if exists(work, "html", "resume.html") else ""
+    markdown = read(work, "md", "resume.md") if exists(work, "md", "resume.md") else ""
+    table = re.search(r"<table\b.*?</table>", page, re.S)
+    table = table.group(0) if table else ""
+    copy = re.search(r"<table\b.*?</table>", markdown, re.S)
+    copy = copy.group(0) if copy else ""
+    return [
+        ("a Word table declared layout, its repeating header row in Pandoc's head, "
+         "is written with no head and no header cell, its rows in order",
+         lambda: second.returncode == 0 and len(keys) == 1
+         and re.match(r'<table\b[^>]*\brole="presentation"', table)
+         and "<th" not in table and "<thead" not in table
+         and table.index("Diploma in game design") < table.index("Certificate in illustration")),
+        ("and the Markdown target's copy too",
+         lambda: 'role="presentation"' in copy and "<th" not in copy and "<thead" not in copy),
+    ]
+
+
 def case_menu(work):
     """menu: on gives every rendered page the book's contents and a
     previous/next pager; a pass-through page is left as it stands."""
@@ -3601,7 +3842,25 @@ def case_remediate_docx(work):
     if exists(work, "resolved.json"):
         entries = json.loads(read(work, "resolved.json")).get("ch1", [])
         resolved = entries[0]["headers"] if entries else ""
+    # A person's row saying the table is a layout table, which Word can't hold.
+    key = next((line.split(",")[0] for line in read(work, "new.csv").splitlines()[1:]),
+               "x") if exists(work, "new.csv") else "x"
+    with open(os.path.join(work, "layout.csv"), "w", encoding="utf-8") as fh:
+        fh.write("key,headers\n%s,layout\n" % key)
+    run_tool(work, ["table-headers.py", "ch1.docx", "--sidecar", "layout.csv",
+                    "--new", "new2.csv", "--report", "report2.csv",
+                    "--resolved", "layout.json"])
+    layout = run_tool(work, ["remediate.py", "ch1.docx", "--resolved", "layout.json",
+                             "--out", "layout"], util=True)
+    layout_xml = ""
+    if os.path.exists(os.path.join(work, "layout", "ch1.docx")):
+        with zipfile.ZipFile(os.path.join(work, "layout", "ch1.docx")) as z:
+            layout_xml = z.read("word/document.xml").decode("utf-8")
     return [
+        ("a person's layout table isn't written into a Word file, which records nothing "
+         "of one, and the run says so",
+         lambda: layout.returncode == 0 and "<w:tblHeader/>" not in layout_xml
+         and "1 layout table decision(s) not written into a Word file" in layout.stderr),
         ("with no sidecar row, the table is left alone, and the guess counted as left",
          lambda: plain.returncode == 0 and "1 left to their guess" in plain.stderr
          and not re.search(r'w:name="(?:Column|Row)?Title_\d+"', plain_xml)),
@@ -5335,6 +5594,8 @@ CASES = [
     ("a link to a file in another case, or with backslashes", case_linked_paths),
     ("adopting a split book's pages", case_adopt),
     ("an HTML source's tables and the header sidecar", case_html_headers),
+    ("layout tables, marked and decided", case_layout_tables),
+    ("a Word layout table with a repeating header row", case_layout_word_head),
     ("a menu for pages posted as a site", case_menu),
     ("raw HTML in a Markdown source", case_markdown_html),
     ("title rows and bands, split and grouped", case_bands),

@@ -81,10 +81,10 @@ run rather than converting the book and discarding every correction in
 the file, which is what happened before v0.2 when an absolute path was
 given.
 
-`table-headers.csv` says where each data table's headers are, and is the
-one sidecar the run helps you write. Its `headers` column takes
-`first-row`, `first-column`, `both`, or `none`; `matrix` and `grid` are
-accepted for `both` and `none`. The key is a hash of the table's content
+`table-headers.csv` says where each data table's headers are, or that a
+table is a layout table, and is the one sidecar the run helps you write.
+Its `headers` column takes `first-row`, `first-column`, `both`, `none`, or
+`layout`; `matrix` and `grid` are accepted for `both` and `none`. The key is a hash of the table's content
 and shape, so a row survives anything the pipeline does to the table and
 detaches only when the source table itself changes. You never type a key:
 the first run writes `table-headers-new.csv` with a prefilled row for every
@@ -103,6 +103,8 @@ start carrying them. The value in effect—the sidecar's where one was declared,
 otherwise—is applied when the page is built.
 
 The guess is `none` only with evidence that a table has no headers: every filled cell is a number or an amount, or the cells are a list laid out in columns, reading in order down each one. Where no rule recognizes a table's headers and nothing shows it has none, the guess is `unknown`, the reason says so, and the table is converted as the source marks it, so the report sends a person to look rather than claiming to know. Across the nine books in the test corpus, 20 of 1,045 data tables are `unknown`: payoff matrices, tables laid on their side, and formula glossaries, among others.
+
+`layout` says a table only lines things up: a worked example's steps beside their results, say, or a picture beside its words. It has no headers to declare and no caption to write, and every target writes it as one. It has no header cells either: a head it comes with, a row Word repeats as a header, say, which Pandoc's reader puts in the table's head, is written as rows like the others. The pages and the EPUB give it `role="presentation"`, with no scroll region around it, which only a data table needs, and on a narrow screen its cells stack, each row's one under another; the PDF tags it as a division of paragraphs, a row's cells in turn, not a table (LaTeX's `table/tagging=div`), its caption, if it has one, a paragraph before it; and a Markdown target writes it as HTML with its role, so it reads back as one. Nothing asks a description of it, and the output check doesn't count it as a table without headers. It keeps its place among its page's tables, so the keys `table-captions.csv` gives the tables after it don't move; a description that file has for it isn't used, and the run says so. A page can say so itself, with `role="presentation"` or `role="none"` on the table (ARIA's two names for the same thing), and so can a LaTeX book, with `\tagpdfsetup{table/tagging=div}` before it: such a table is in `table-headers-new.csv` as `layout`, the report naming `source` as the supplier, and a row naming its headers, `none` among them, makes it a data table. One the header guess counts no table at all isn't listed, as an unmarked one isn't: a single cell, or pictures alone, which become a figure. Word records nothing for its "Mark as layout table" ([Troubleshooting](troubleshooting.md)), so a Word table is one only by a row here. A `source` target writes a row's `layout` into an HTML page, as its role, and into a LaTeX book, as its tagging, but can't into a Word file, and says so. A deck's tables don't take it.
 
 A Word table can declare its own headers too, with the bookmarks [Freedom Scientific documents for JAWS](https://doccenter.freedomscientific.com/doccenter/archives/training/samplefiles/usethebookmarkfeatureinwordfortableheaders-oldertechnique.htm): `Title` for a header row and a header column, `ColumnTitle` for a header row, `RowTitle` for a header column, anything after it keeping the name unique (`ColumnTitle_2`), in one of the table's cells. Such a table is declared, not guessed, and the report names `source` as the supplier. A Word target writes them, so its tables read back as declared. What JAWS does with them is documented, on a page that calls the method an older technique, and not tested here.
 

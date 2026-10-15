@@ -247,10 +247,14 @@ end
 -- A table's header declaration for LaTeX's tagging, which latexsource.py
 -- turned into an environment the reader keeps as a div: the pipeline's
 -- own declaration, set on the table as a Markdown source's marker sets
--- it (figures-and-tables.lua's data-th-marker), and the div gone.
+-- it (figures-and-tables.lua's data-th-marker), and the div gone. A
+-- table tagged as a division of paragraphs (table/tagging=div), as the
+-- PDF target tags a layout table, is a layout table: role="presentation",
+-- as an HTML page's is once html-source.lua has read it.
 local DECLARED = { TextbookImproverHeadersFirstRow = 'first-row',
   TextbookImproverHeadersFirstColumn = 'first-column',
-  TextbookImproverHeadersBoth = 'both' }
+  TextbookImproverHeadersBoth = 'both',
+  TextbookImproverHeadersLayout = 'layout' }
 
 function Div(div)
   -- A box, a tabular of one paragraph column holding prose, which
@@ -276,6 +280,9 @@ function Div(div)
       for _, block in ipairs(div.content) do
         if block.t == 'Table' then
           block.attr.attributes['data-th-marker'] = declaration
+          if declaration == 'layout' then
+            block.attr.attributes.role = 'presentation'
+          end
         end
       end
       return div.content

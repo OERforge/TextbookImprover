@@ -16,7 +16,9 @@ What it changes, all of it decided elsewhere in the pipeline:
   Freedom Scientific documents for JAWS (`Title`, `ColumnTitle`,
   `RowTitle`), which the census reads back as the table's declaration. A
   table is found by its position among the file's tables and changed only
-  when its row count and first cell are what the pre-pass saw.
+  when its row count and first cell are what the pre-pass saw. A layout
+  table isn't written: Word records nothing of one, so the decision is
+  counted and the run says so.
 - **Images.** Alt text from the image-alt sidecar, as the drawing's
   description, and Word's "Mark as decorative" for `[decorative]`. A
   sidecar row names an image as Pandoc extracts it, `<stem>/media/rIdN`,
@@ -174,7 +176,7 @@ def remediate_tables(xml, resolved, guesses=False):
     guesses, the census's guess too. resolved is the pre-pass's list for
     this file. Returns (xml, counts)."""
     counts = {"header_rows": 0, "header_columns": 0, "titles": 0, "skipped": 0,
-              "undecided": 0}
+              "undecided": 0, "layout_unwritten": 0}
     spans = table_spans(xml)
     edits = []
     for entry in resolved:
@@ -183,6 +185,9 @@ def remediate_tables(xml, resolved, guesses=False):
             counts["undecided"] += entry.get("supplier") == "guess" and value in (
                 "first-row", "first-column", "both")
             continue
+        # A layout table: Word records nothing of one, so a person's
+        # decision is counted, not written (docs/troubleshooting.md).
+        counts["layout_unwritten"] += value == "layout"
         if value not in ("first-row", "first-column", "both"):
             continue
         index = entry.get("index")

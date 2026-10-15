@@ -17,6 +17,12 @@ nothing, which is the test.
     the block is Pandoc's template's and has one form.
   - A table's scroll wrapper (<div class="table-wrapper">) is unwrapped;
     the filter wraps every data table itself.
+  - A layout table, role="presentation" or role="none" (ARIA's other
+    name for the same thing), is declared as one: role="presentation"
+    and data-th-marker="layout", which the header pre-pass and the
+    filter read as they read a header declaration, so every step after
+    this one sees one mark. Its <th> cells declare nothing, and it isn't
+    split at header rows: the role says it has none.
   - A table that has a header row, or whose body rows each open with a
     <th>, is declared: data-th-marker says first-row, first-column, or
     both, exactly as a ::: matrix div does for a Markdown table. The
@@ -336,8 +342,11 @@ local function drop_scopes(tbl)
   rows(tbl.foot.rows)
 end
 
+local LAYOUT_ROLES = { presentation = true, none = true }
+
 function Table(tbl)
-  local parts = split_at_header_rows(tbl)
+  local layout = LAYOUT_ROLES[tbl.attr.attributes.role] ~= nil
+  local parts = not layout and split_at_header_rows(tbl)
   if parts then
     local out = pandoc.Blocks({})
     for _, part in ipairs(parts) do
@@ -350,6 +359,11 @@ function Table(tbl)
   drop_scopes(tbl)
   drop_obsolete(tbl)
   drop_empty_columns(tbl)
+  if layout then
+    tbl.attr.attributes.role = 'presentation'
+    tbl.attr.attributes[MARKER_ATTR] = 'layout'
+    return tbl
+  end
   if tbl.attr.attributes[MARKER_ATTR] then return tbl end
   lift_body_head(tbl)
   local row = false

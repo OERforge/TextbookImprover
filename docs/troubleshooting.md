@@ -97,7 +97,10 @@ keys on the media path ignoring its extension.
   If a table genuinely presents data with nothing to relate—a grid of
   measurements laid out to fit the page—it needs no header cells to
   conform, and the useful thing to add is a caption, not a layout
-  marking.
+  marking. A table that only lines things up, with no data in it at
+  all, is a layout table by a row of `table-headers.csv` saying
+  `layout` ([Sidecars](sidecars.md)), which every target honors; a
+  remediated copy of the Word file can't hold it either.
 - **Two PAC errors on a tagged PDF are the validator's, not the file's.**
   They're worth recognizing rather than chasing. *Table header cell has no
   associated subcells* is raised because `latex-lab` sets `Scope` through

@@ -90,6 +90,13 @@ LABELED = """<html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><title>L
 <body><p><a href="x.xhtml" aria-label="Sales"><img src="c.png" alt="Chart"/> of <span><em>sales</em></span></a></p>
 </body></html>"""
 
+# Two layout tables marked role="none", ARIA's other name for
+# presentation: one with no header cell or caption, one whose header cell
+# is a formula, neither in a scroll region.
+LAYOUT_NONE = OTHER.replace("</h1>", '</h1><table role="none"><tr><td>Subtract 3.</td>'
+                            '<td>x = 4</td></tr></table><table role="none"><tr><th><math>'
+                            '<mi>z</mi></math></th><td>layout</td></tr></table>')
+
 # The formula Pandoc couldn't convert, on a page whose script may render it.
 SCRIPTED = OTHER.replace("</h1>", "</h1><p><span class=\"math inline\">$x_{2}\\text{\\cdot}$"
                          "</span></p><script src=\"mathjax.js\"></script>")
@@ -137,6 +144,9 @@ def main():
         titled = outputcheck.check_html_files([os.path.join(work, n) for n in named])
         bad = outputcheck.check_html_files(
             [os.path.join(work, "bad.html"), os.path.join(work, "other.html")])
+        with open(os.path.join(work, "none.html"), "w", encoding="utf-8") as fh:
+            fh.write(LAYOUT_NONE)
+        none = outputcheck.check_html_files([os.path.join(work, "none.html")])
         with open(os.path.join(work, "scripted.html"), "w", encoding="utf-8") as fh:
             fh.write(SCRIPTED)
         scripted = outputcheck.check_html_files([os.path.join(work, "scripted.html")])
@@ -230,6 +240,11 @@ def main():
             ("in XHTML too, each header its own table's",
              lambda: outputcheck.read_xhtml("n.xhtml", NESTED).formula_headers
              == [(2, "y")]),
+            ("a layout table marked role none, as one marked presentation, is checked for "
+             "neither headers, a scroll region, nor a formula as its header, in HTML and XHTML",
+             lambda: expect(checks(none) == [], none)
+             and outputcheck.read_xhtml("n.xhtml", NESTED.replace(
+                 'role="presentation"', 'role="none"')).formula_headers == [(2, "y")]),
             ("and a link's text is read as it's shown, a picture's alt text in its place",
              lambda: outputcheck.read_xhtml("l.xhtml", LABELED).labeled_links
              == [("Sales", "Chart of sales")]),

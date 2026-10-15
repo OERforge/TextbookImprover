@@ -70,6 +70,12 @@ class Finding:
 # what a page says about itself
 # --------------------------------------------------------------------------
 
+# A layout table, which only lines things up: role="presentation", or
+# role="none", ARIA's other name for it. Checked for neither headers nor a
+# scroll region, which only a data table needs.
+LAYOUT_ROLES = ("presentation", "none")
+
+
 def is_decorative(attributes):
     """Declared decorative: aria-hidden="true", which is what the filter
     writes, or role="presentation", which it used to and which some
@@ -194,7 +200,7 @@ class _Collector(HTMLParser):
         if self._header is not None and tag in ("th", "td", "tr"):
             self._end_header()
         if tag == "th":
-            if not (self._table and self._table[2] == "presentation"):
+            if not (self._table and self._table[2] in LAYOUT_ROLES):
                 self._header = {"words": [], "tex": [], "math": 0,
                                 "found": False, "annotation": False}
         elif self._header is None:
@@ -362,7 +368,7 @@ def read_xhtml(name, markup):
             page.headings.append((int(tag[1]), " ".join(
                 ("".join(el.itertext()) + " " + alts).split())))
         elif tag == "table":
-            if el.get("role") != "presentation":
+            if el.get("role") not in LAYOUT_ROLES:
                 for cell in own_header_cells(el):
                     tex = header_formula(cell)
                     if tex is not None:
@@ -453,7 +459,7 @@ def check_page(page, findings):
         last = level
     for index, (has_th, has_caption, role, wrapped) in enumerate(page.tables,
                                                                  1):
-        if role == "presentation":
+        if role in LAYOUT_ROLES:
             continue
         if not has_th and not has_caption:
             findings.append(Finding(where, "table-without-headers-or-caption",

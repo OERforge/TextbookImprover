@@ -738,6 +738,51 @@ def case_masters(work):
     ]
 
 
+def case_layout_tables(work):
+    """A table tagged as a division of paragraphs (table/tagging=div), as
+    the PDF target and the latex target tag a layout table, is read as a
+    layout table; a box tagged so, as a source copy writes one, is still a
+    box, and a table tagged nothing is a data table."""
+    os.makedirs(work)
+    with open(os.path.join(work, "steps.tex"), "w", encoding="utf-8") as fh:
+        fh.write("\\documentclass{article}\n\\usepackage{longtable}\n\\begin{document}\n"
+                 "Steps:\n\n"
+                 "{\\ifdefined\\tagpdfsetup\\tagpdfsetup{table/tagging=div}\\fi\n\n"
+                 "{\\def\\LTcaptype{none} % do not increment counter\n"
+                 "\\begin{longtable}[]{@{}ll@{}}\n\\toprule\\noalign{}\n\\endhead\n"
+                 "\\bottomrule\\noalign{}\n\\endlastfoot\n"
+                 "Subtract 3 from each side. & $x = 4$ \\\\\n"
+                 "Divide each side by 2. & $x = 2$ \\\\\n\\end{longtable}\n}\n\n}\n\n"
+                 "{\\ifdefined\\tagpdfsetup\\tagpdfsetup{table/tagging=div}\\fi"
+                 "\\begin{tabular}{p{4in}}\n\\textbf{Example} \\\\\n"
+                 "A box around a passage, long enough that it reads as a passage of prose. \\\\\n"
+                 "\\end{tabular}}\n\n"
+                 "\\begin{tabular}{ll}\nMultiply each side by 4. & $x = 8$ \\\\\n"
+                 "Subtract 1 from each side. & $x = 7$ \\\\\n\\end{tabular}\n"
+                 "\\end{document}\n")
+    with open(os.path.join(work, "conversion.yaml"), "w") as fh:
+        fh.write("targets:\n  html:\n    format: html\n")
+    result = convert(work)
+    said = result.stdout + result.stderr
+    page = read(work, "html", "steps.html") \
+        if os.path.exists(os.path.join(work, "html", "steps.html")) else ""
+    missing = read(work, "table-captions-missing.csv") \
+        if os.path.exists(os.path.join(work, "table-captions-missing.csv")) else ""
+    tables = re.findall(r"(<div class=\"table-wrapper\"[^>]*>\s*)?<table([^>]*)>(.*?)</table>",
+                        page, re.S)
+    return [
+        ("a table tagged as a division of paragraphs is a layout table: role "
+         "presentation, no scroll region, no caption asked of it, and the run says so",
+         lambda: [(bool(w), a, "Subtract 3" in t) for w, a, t in tables]
+         == [(False, ' role="presentation"', True), (True, "", False)]
+         and "Subtract 3" not in missing and "Multiply" in missing
+         and "1 table tagged as a division of paragraphs read as a layout table" in said),
+        ("a box tagged so, as a source copy writes one, is still a box",
+         lambda: re.search(r'<div class="box">\s*<p><strong>Example</strong>', page)
+         is not None),
+    ]
+
+
 def case_single(work):
     """A document that \\include-s nothing is one page."""
     os.makedirs(work)
@@ -865,7 +910,9 @@ def case_source(work):
     rows = list(csv.DictReader(open(new, encoding="utf-8-sig"))) if os.path.exists(new) else []
     with open(os.path.join(work, "table-headers.csv"), "w", encoding="utf-8") as fh:
         fh.write("key,headers\n" + "".join("%s,first-row\n" % r["key"] for r in rows
-                                            if "Name" in r.get("preview", "")))
+                                            if "Name" in r.get("preview", ""))
+                 + "".join("%s,layout\n" % r["key"] for r in rows
+                           if "Item" in r.get("preview", "")))
     before = fingerprint(work, skip_dirs=("fixed", "tagged", "kept", "plainmath", "build"))
     result = convert(work)
     said = result.stdout + result.stderr
@@ -1100,7 +1147,13 @@ def case_source(work):
          and "\\begin{center}\n\\leavevmode\\[" in tagged),
         ("tagging: a person's header row declared for the table, in a group of its own",
          lambda: "{\\ifdefined\\tagpdfsetup\\tagpdfsetup{table/header-rows={1}}\\fi"
-         "\\begin{tabular}{cc}" in tagged and tagged.count("\\tagpdfsetup{table/") == 1),
+         "\\begin{tabular}{cc}" in tagged and tagged.count("\\tagpdfsetup{table/header") == 1),
+        ("tagging: a person's layout table declared as a division of paragraphs, in a "
+         "group of its own, and the run says so",
+         lambda: "{\\ifdefined\\tagpdfsetup\\tagpdfsetup{table/tagging=div}\\fi"
+         "\\begin{tabular}{cc}\nItem" in tagged
+         and tagged.count("\\tagpdfsetup{table/tagging=div}") == 1
+         and "1 table(s) declared a layout table" in said),
         ("untagged, the decision isn't written, and the run says why",
          lambda: "\\tagpdfsetup" not in notes and "need" in said and "tagging" in said),
         ("the definitions file is written after the copy's preamble, as it's read",
@@ -4851,6 +4904,7 @@ def case_floats(work):
 
 CASES = [("a LaTeX book", case_book), ("two masters", case_masters),
          ("one file", case_single), ("an unbuilt book", case_unbuilt),
+         ("a table tagged as a division of paragraphs", case_layout_tables),
          ("the source target", case_source), ("a book with fonts of its own", case_own_fonts),
          ("a LaTeX book's PDF, from its own LaTeX", case_book_pdf),
          ("the PDF build's copy of the book", case_pdf_copy),

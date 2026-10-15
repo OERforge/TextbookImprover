@@ -363,8 +363,10 @@ function Table(tbl)
   -- reading filter turns back into a table, spans and all. So is a table
   -- whose bodies have heads of their own, which the writer makes ordinary
   -- rows of one body: the groups went, and which rows headed them, as
-  -- AsciiDoc's writer flattens them (adoc_html_table).
-  if has_spans(tbl) or has_body_heads(tbl) then
+  -- AsciiDoc's writer flattens them (adoc_html_table). And so is a table
+  -- with a role: a layout table is role="presentation", which a pipe
+  -- table has nowhere to keep, and would come back a data table.
+  if has_spans(tbl) or has_body_heads(tbl) or tbl.attr.attributes.role ~= nil then
     return pandoc.RawBlock('html',
       pandoc.write(pandoc.Pandoc({ tbl }), 'html',
                    { html_math_method = 'mathml' }))

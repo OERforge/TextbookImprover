@@ -336,7 +336,7 @@ Math the math settings would change, kept as it was: rows copied from the math_r
 
 **`sidecars.table_headers`**—`path`; default `table-headers.csv`
 
-Where each table's headers are, keyed on a hash of the table's content: first-row, first-column, both, or none. A first run writes prefilled rows to the table_headers_new report; rename or paste them here. Values this version doesn't act on yet (manual, list) are accepted and kept. A row whose key matches no table, since the table changed or is gone, is warned about and written to table-headers-unmatched.csv, with the sidecar without it as table-headers-sample.csv, to adopt.
+Where each table's headers are, keyed on a hash of the table's content: first-row, first-column, both, or none; or layout, a table that only lines things up, which every target writes as one and nothing asks a caption of. A first run writes prefilled rows to the table_headers_new report; rename or paste them here. Values this version doesn't act on yet (manual, list) are accepted and kept. A row whose key matches no table, since the table changed or is gone, is warned about and written to table-headers-unmatched.csv, with the sidecar without it as table-headers-sample.csv, to adopt.
 
 **`sidecars.page_names`**—`path`; default `page-names.csv`
 

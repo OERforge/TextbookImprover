@@ -84,6 +84,10 @@
 -- 12. A footnote in a table inside a table's cell (4), which was a
 --    minipage's (below).
 --
+-- 13. A layout table (figures-and-tables.lua's role="presentation"), which
+--    LaTeX's tagging made a Table: tagged a division of paragraphs, a
+--    row's cells in turn, its caption a paragraph before it (below).
+--
 -- Copyright 2026 Robert Szarka
 --
 -- This program is free software: you can redistribute it and/or modify
@@ -182,6 +186,27 @@ local unquote = {BlockQuote = function(quote) return quote.content end}
 -- PDF (pdf.standard: []) has no \tagpdfsetup, and LaTeX stopped on one.
 local function tagging_setup(keys)
   return '\\ifdefined\\tagpdfsetup\\tagpdfsetup{' .. keys .. '}\\fi'
+end
+
+-- A layout table, which only lines things up: figures-and-tables.lua
+-- writes one with role="presentation", whatever said it was one. Tagged a
+-- division of paragraphs, a row's cells in turn, not a table, by
+-- latex-lab-testphase-table's table/tagging=div, as the LaTeX source copy
+-- tags a box (texremediate.BOX_OPEN), the setting kept to the table by a
+-- group. Its other layout setting, table/tagging=presentation, keeps
+-- Table, TR, and TD and adds the ARIA role presentation, which a reader may
+-- not honor, and PDF/UA-2 says a role shall not contradict its structure
+-- element's meaning (ISO 14289-2, 8.2.6.4), which a Table "presentation"
+-- arguably does. A data table inside a layout table is set back to a
+-- table: tagging on, and the two plugs div leaves set to a layout table's
+-- set to a table's again (texremediate.DATA_OPEN).
+local LAYOUT_ROLES = { presentation = true, none = true }
+local LAYOUT_OPEN = '{' .. tagging_setup('table/tagging=div')
+local TABLE_PLUGS = '\\AssignTaggingSocketPlug{tbl/hmode/begin}{Table}'
+  .. '\\AssignTaggingSocketPlug{tbl/vmode/begin}{Table}'
+
+local function is_layout(tbl)
+  return LAYOUT_ROLES[tbl.attr.attributes.role] ~= nil
 end
 
 -- A cell spanning rows is set with \multirow, which LaTeX's tagging code
@@ -309,7 +334,8 @@ local function with_notes(latex, notes)
   return pandoc.Div({ pandoc.Plain(inlines) })
 end
 
-local function as_tabular(inner)
+-- in_layout: the table this one is in is a layout table.
+local function as_tabular(inner, in_layout)
   local head_rows = #inner.head.rows
   local head_columns = 0
   for _, body in ipairs(inner.bodies) do
@@ -350,13 +376,21 @@ local function as_tabular(inner)
     for i = 1, head_columns do list[#list + 1] = tostring(i) end
     keys[#keys + 1] = 'table/header-columns={' .. table.concat(list, ',') .. '}'
   end
+  local setup = #keys > 0 and tagging_setup(table.concat(keys, ',')) or ''
+  if is_layout(inner) then
+    setup = tagging_setup('table/tagging=div')
+  elseif in_layout then
+    table.insert(keys, 1, 'table/tagging=on')
+    setup = tagging_setup(table.concat(keys, ',')):gsub('\\fi$', TABLE_PLUGS .. '\\fi')
+  end
   return with_notes(
-    '{' .. (#keys > 0 and (tagging_setup(table.concat(keys, ','))) or '')
+    '{' .. setup
     .. '\\begin{tabular}[t]{' .. table.concat(spec) .. '}\n'
     .. table.concat(lines, '\n') .. '\n\\end{tabular}}', notes)
 end
 
 local function flatten_nested(tbl)
+  local layout = is_layout(tbl)
   for _, row in ipairs(rows_of(tbl)) do
     for _, cell in ipairs(row.cells) do
       cell.contents = cell.contents:walk({
@@ -364,7 +398,7 @@ local function flatten_nested(tbl)
           -- The innermost first: a table in this one's cells is written
           -- before this one is.
           flatten_nested(inner)
-          local tabular = as_tabular(inner)
+          local tabular = as_tabular(inner, layout)
           if tabular then
             return tabular
           end
@@ -394,6 +428,29 @@ function Table(tbl)
     if body.row_head_columns > columns then
       columns = body.row_head_columns
     end
+  end
+  if is_layout(tbl) then
+    -- No table's caption, since the PDF has no table: a paragraph before
+    -- it, which LaTeX doesn't number as a table's, and which a longtable's
+    -- head, tagged as a division's, would have held as a header cell with
+    -- no row (TH in a NonStruct). Its id is a div's, an anchor before it:
+    -- the writer gives a table with an id and no caption an empty one to
+    -- hold its \label (Writers/LaTeX/Table.hs, 3.12), which LaTeX numbered
+    -- ("Table 3") in that head.
+    local blocks = {}
+    for _, block in ipairs(tbl.caption and tbl.caption.long or {}) do
+      blocks[#blocks + 1] = block.t == 'Plain' and pandoc.Para(block.content) or block
+    end
+    tbl.caption = pandoc.Caption()
+    local id = tbl.identifier
+    tbl.identifier = ''
+    blocks[#blocks + 1] = pandoc.RawBlock('latex', LAYOUT_OPEN)
+    blocks[#blocks + 1] = tbl
+    blocks[#blocks + 1] = pandoc.RawBlock('latex', '}')
+    if id ~= '' then
+      return pandoc.Div(blocks, pandoc.Attr(id))
+    end
+    return blocks
   end
   local own = own_label(tbl.caption, TABLE_WORDS)
   if columns == 0 then

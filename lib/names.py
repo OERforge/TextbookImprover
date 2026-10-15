@@ -6,7 +6,9 @@ an LMS as hrefs. Percent-encoding a space is correct and not enough: at
 least one LMS takes the href literally and finds no file. So the files
 an output holds get names that need no encoding, derived from the
 source's names by one rule, applied identically in Python and in the
-Lua filter that rewrites a page's references at render time.
+Lua filter that rewrites a page's references at render time. With
+media.lowercase, the names a target copies files under are lowercased
+too, the ASCII letters only, as Lua lowercases them.
 
 Copyright 2026 Robert Szarka
 
@@ -26,6 +28,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import os
 import re
+import string
 
 # What may stay: ASCII letters and digits, dot, underscore, hyphen, and
 # the slash that separates directories. Everything else -- spaces, %,
@@ -43,6 +46,18 @@ def _segment(part):
 def safe_path(path):
     """A path with every segment made safe; a directory stays one."""
     return "/".join(_segment(part) for part in path.split("/"))
+
+
+ASCII_LOWER = str.maketrans(string.ascii_uppercase, string.ascii_lowercase)
+
+
+def output_path(path, safe=True, lower=False):
+    """The name a file a page names is copied under, beside the page: its
+    safe name (safe_path) beside a page, its own beside a Markdown or
+    AsciiDoc copy; lower, with media.lowercase, its ASCII letters
+    lowercased."""
+    path = safe_path(path) if safe else path
+    return path.translate(ASCII_LOWER) if lower else path
 
 
 def safe_stem(stem):

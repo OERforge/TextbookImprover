@@ -896,6 +896,44 @@ def check_one_file_chapters():
     ]
 
 
+def check_output_names():
+    """The names a target copies the files a page names under
+    (names.output_path) are the names safe-media.lua writes into the page:
+    safe or the author's own, lowercased or not (media.lowercase), the
+    letters A to Z alone."""
+    import json
+    from urllib.parse import unquote
+    import names
+    refs = ["Assets/Fig 1.PNG", "Assets/My%20Pic.png", "Über/Été.JPG", "a/b.png"]
+    api = json.loads(subprocess.run(["pandoc", "-f", "markdown", "-t", "json"], input="",
+                                    capture_output=True, text=True).stdout)["pandoc-api-version"]
+    doc = {"pandoc-api-version": api, "meta": {}, "blocks": [
+        {"t": "Para", "c": [{"t": "Image", "c": [["", [], []], [], [ref, ""]]} for ref in refs]}]}
+    found = {}
+    for safe in (True, False):
+        for lower in (True, False):
+            env = dict(os.environ, MEDIA_SAFE="1" if safe else "0",
+                       MEDIA_LOWERCASE="1" if lower else "")
+            result = subprocess.run(["pandoc", "-f", "json", "-t", "json", "--lua-filter",
+                                     os.path.join(ROOT, "bin", "safe-media.lua")],
+                                    input=json.dumps(doc), capture_output=True, text=True,
+                                    env=env)
+            written = [i["c"][2][0] for i in json.loads(result.stdout)["blocks"][0]["c"]]
+            found[(safe, lower)] = [(unquote(w) if not safe else w,
+                                     names.output_path(unquote(r), safe, lower))
+                                    for w, r in zip(written, refs)]
+    return [
+        ("Python and the Lua filter name each file alike, every way",
+         lambda: all(w == p for pairs in found.values() for w, p in pairs)
+         or print("    %r" % found)),
+        ("lowercased, a safe name is ASCII, and the author's keeps its other letters",
+         lambda: [p for _w, p in found[(True, True)]] == [
+             "assets/fig-1.png", "assets/my-pic.png", "ber/t.jpg", "a/b.png"]
+         and [p for _w, p in found[(False, True)]] == [
+             "assets/fig 1.png", "assets/my pic.png", "Über/Été.jpg", "a/b.png"]),
+    ]
+
+
 def check_notes_heading():
     """An HTML page's notes section, as Pandoc's writer leaves it, headed
     after its rule, once however often it's given one, the heading's text
@@ -1600,6 +1638,7 @@ GROUPS = [
     ("one file per chapter", check_one_file_chapters),
     ("a page's notes group", check_notes_groups),
     ("a page's notes heading", check_notes_heading),
+    ("the names a target copies files under", check_output_names),
     ("identifiers", check_identifiers),
     ("facts written down twice", check_consistency),
     ("sidecar paths", check_sidecar_paths),

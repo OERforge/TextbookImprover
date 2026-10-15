@@ -40,7 +40,7 @@ One file per top-level entry of the book's [contents](configuration.md#contents)
 
 What merging follows is the book's declared structure, so it's worth declaring it: with no `contents`, the guess is used, and for a single source cut into pages that is mostly a flat list, which gives one file per page and merges little. Declare the chapters as groups and each becomes a file.
 
-Media travel under the names the author gave them, since what a markdown target writes is source; every other target copies them under names that need no encoding in a link.
+Media travel under the names the author gave them, since what a markdown target writes is source; every other target copies them under names that need no encoding in a link. With `media.lowercase`, each target copies them under their names in lowercase, the letters A to Z, and the pages and the copy name them so; two files whose names differ only in case then stop the run before anything is written, as two that one safe name would cover do. A `source` target's copies keep the author's references, since they name the author's own files.
 
 Links follow: a link to a page now in the same file becomes a link to its anchor, one to a page in another file names that file, and a link naming a file that no longer has a page of its own points at the file. Each merged page keeps an anchor of its own name, so a link can still reach it. Where two pages of a chapter used the same id (the export numbers some anchors per file), the later one is renamed and the links in that page follow it, which can only be done here, while the page boundary is still known.
 

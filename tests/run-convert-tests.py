@@ -426,6 +426,96 @@ def case_asciidoc(work):
     ]
 
 
+def case_lowercase_names(work):
+    """media.lowercase: each file a page names copied under its name in
+    lowercase and named so, beside an html target's pages and in a
+    markdown target's copy, where the rest of each name is the author's;
+    a target without it keeps the names; and two files whose names
+    differ only in case stop the run before anything is written."""
+    def book(name, files, targets="  html:\n    format: html\n  md:\n    format: markdown\n"
+                                   "  plain:\n    format: html\n    media:\n"
+                                   "      lowercase: false\n"):
+        where = os.path.join(work, name)
+        for path, data in files.items():
+            os.makedirs(os.path.dirname(os.path.join(where, path)), exist_ok=True)
+            with open(os.path.join(where, path), "wb") as fh:
+                fh.write(data)
+        return where, convert(where, "defaults:\n  media:\n    lowercase: true\ntargets:\n"
+                              + targets, fixtures=())
+    a, run = book("lower", {
+        "page.md": b"# Page\n\n![A rising line](Assets/Fig1.PNG)\n\n![Two dots](Assets/My%20Pic.png)"
+                   b"\n\nThe [handout](Docs/Handout.PDF).\n",
+        "Assets/Fig1.PNG": ONE_PIXEL, "Assets/My Pic.png": ONE_PIXEL + b"\0",
+        "Docs/Handout.PDF": b"%PDF-1.4\n%%EOF\n"})
+    b, clash = book("clash", {
+        "page.md": b"# Page\n\n![One](Assets/Fig1.PNG)\n\n![Two](Assets/fig1.png)\n",
+        "Assets/Fig1.PNG": ONE_PIXEL, "Assets/fig1.png": ONE_PIXEL + b"\0"})
+    # Two files a page links to, as a target copies them too.
+    e, linked = book("linked", {
+        "page.md": b"# Page\n\nThe [first data](Data/Results.csv) and the "
+                   b"[second](Data/results.csv).\n",
+        "Data/Results.csv": b"a,b\n", "Data/results.csv": b"x,y\n"})
+    # A target that copies no files under their names: nothing to stop.
+    f, unnamed = book("epub-only", {
+        "page.md": b"# Page\n\n![One](Assets/Fig1.PNG)\n\n![Two](Assets/fig1.png)\n",
+        "Assets/Fig1.PNG": ONE_PIXEL, "Assets/fig1.png": ONE_PIXEL + b"\0"},
+        "  book:\n    format: epub3\n")
+    page = read(a, "html", "page.html") if exists(a, "html", "page.html") else ""
+    copy = read(a, "md", "page.md") if exists(a, "md", "page.md") else ""
+    plain = read(a, "plain", "page.html") if exists(a, "plain", "page.html") else ""
+    # Pages written beside the sources, where the name in lowercase is
+    # the source's own file, as a file system that ignores case finds it,
+    # and the page names it both ways: a second name for the file stands
+    # in for such a file system here.
+    c = os.path.join(work, "beside")
+    os.makedirs(os.path.join(c, "Assets"))
+    os.makedirs(os.path.join(c, "assets"))
+    with open(os.path.join(c, "Assets", "Fig1.PNG"), "wb") as fh:
+        fh.write(ONE_PIXEL)
+    os.link(os.path.join(c, "Assets", "Fig1.PNG"), os.path.join(c, "assets", "fig1.png"))
+    with open(os.path.join(c, "page.md"), "w", encoding="utf-8") as fh:
+        fh.write("# Page\n\n![A rising line](Assets/Fig1.PNG)\n\n![Again](assets/fig1.png)\n")
+    with open(os.path.join(c, "more.md"), "w", encoding="utf-8") as fh:
+        fh.write("# More\n\n![A rising line](Assets/Fig1.PNG)\n")
+    beside = convert(c, "defaults:\n  media:\n    lowercase: true\ntargets:\n  html:\n"
+                        "    format: html\n    output_dir: .\n", fixtures=())
+    return [
+        ("an html target copies each file a page names under its name in lowercase, and names "
+         "it so",
+         lambda: run.returncode == 0
+         and all(exists(a, "html", *p.split("/"))
+                 for p in ("assets/fig1.png", "assets/my-pic.png", "docs/handout.pdf"))
+         and all(f'="{p}"' in page
+                 for p in ("assets/fig1.png", "assets/my-pic.png", "docs/handout.pdf"))),
+        ("a markdown target too, the rest of each name the author's",
+         lambda: all(exists(a, "md", *p.split("/"))
+                     for p in ("assets/fig1.png", "assets/my pic.png", "docs/handout.pdf"))
+         and all(f"({p})" in copy
+                 for p in ("assets/fig1.png", "assets/my%20pic.png", "docs/handout.pdf"))),
+        ("a target without it keeps the names",
+         lambda: exists(a, "plain", "Assets", "Fig1.PNG") and 'src="Assets/Fig1.PNG"' in plain
+         and not exists(a, "plain", "assets")),
+        ("where the name in lowercase is the source's own file beside the pages, it's one "
+         "file, left as it is, and the run says a server that tells case apart won't find it",
+         lambda: beside.returncode == 0
+         and "WARNING: 1 file(s)" in beside.stdout + beside.stderr
+         and "(Assets/Fig1.PNG)" in beside.stdout + beside.stderr
+         and "a server that doesn't ignore case won't find them" in beside.stdout + beside.stderr
+         and os.path.samefile(os.path.join(c, "Assets", "Fig1.PNG"),
+                              os.path.join(c, "assets", "fig1.png"))),
+        ("two files whose names differ only in case stop the run, nothing written, files a "
+         "page links to as well as its images",
+         lambda: clash.returncode != 0
+         and "would both be written as assets/fig1.png" in clash.stdout + clash.stderr
+         and not exists(b, "html")
+         and linked.returncode != 0
+         and "would both be written as data/results.csv" in linked.stdout + linked.stderr
+         and not exists(e, "html")),
+        ("but not in a run whose targets copy no files under their names",
+         lambda: unnamed.returncode == 0 and exists(f, "book")),
+    ]
+
+
 def case_stem_collisions(work):
     """Two files that would be one page stop the run, and an image's alt
     text isn't lent to a file that merely shares its stem. (An .md beside
@@ -5023,6 +5113,7 @@ CASES = [
     ("an HTML source", case_html_source),
     ("an AsciiDoc source", case_asciidoc),
     ("two files, one page", case_stem_collisions),
+    ("file names lowercased", case_lowercase_names),
     ("adopting a split book's pages", case_adopt),
     ("an HTML source's tables and the header sidecar", case_html_headers),
     ("a menu for pages posted as a site", case_menu),

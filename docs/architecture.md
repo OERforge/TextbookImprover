@@ -21,7 +21,7 @@ on another `bin/` script.
 | `convert.py` | Runs the pipeline: each source (`.docx` through a repaired copy, `.md` as it is) → JSON → filtered JSON → (split) → every target's output, then hands off to the packaging side. Every setting comes from `conversion.yaml` through the schema. |
 | `figures-and-tables.lua` | Pandoc filter doing the accessibility work on each page. |
 | `media-extensions.lua` | Pandoc filter naming extracted images by their real content type. |
-| `safe-media.lua` | Rewrites a page's local media references at render time to names that need no encoding in a link, matching what `convert.py` copies beside the page. |
+| `safe-media.lua` | Rewrites a page's local media references at render time to names that need no encoding in a link, matching what `convert.py` copies beside the page, and in lowercase with `media.lowercase`, for a Markdown or AsciiDoc copy too. |
 | `math-repair.lua` | At the filter stage, after `figures-and-tables.lua`: equations Word's editor wrote in the wrong characters repaired, and math typed as text made equations, with `math-keep.csv` to leave any as it was; where each repair was, recorded so a `source` target can write it into the author's Word file. |
 | `target-blocks.lua` | At render time, keeps a passage marked for some targets and drops it for the rest, and applies `title_block`. |
 | `latex-source.lua` | When a LaTeX source is read: an image's alt text as LaTeX gives it (none for Pandoc's "image", decorative for `artifact`), a formula as texmath can read it, and a code block `latexsource.py` made of Pandoc's highlighted code given its language. |

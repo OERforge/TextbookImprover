@@ -1095,6 +1095,30 @@ def case_shared_alt(work):
     ]
 
 
+def case_lowercase_names(work):
+    """media.lowercase in a deck's presentation and its page alike: the
+    picture copied under its name in lowercase, and named so."""
+    problem = revealjs_ready()
+    if problem:
+        return [("a copy of reveal.js to build the presentations with: " + problem,
+                 lambda: False)]
+    work = folder(work, "defaults:\n  media:\n    lowercase: true\ntargets:\n  pages:\n"
+                        "    format: html\n  show:\n    format: revealjs\n",
+                  decks_given={"one.md": "---\ntitle: One\n---\n\n# First\n\n"
+                                         "![A rising line](Img/Rising.PNG)\n"})
+    png(os.path.join(work, "Img", "Rising.PNG"), 10, 20, 30)
+    result = convert(work, "--quick")
+    shown = {name: read(os.path.join(work, name, "one.html"))
+             if os.path.exists(os.path.join(work, name, "one.html")) else ""
+             for name in ("pages", "show")}
+    return [
+        ("each copies the picture under its name in lowercase, and names it so",
+         lambda: result.returncode == 0
+         and all(os.path.isfile(os.path.join(work, name, "img", "rising.png"))
+                 and 'src="img/rising.png"' in shown[name] for name in shown)),
+    ]
+
+
 def case_implied(work):
     work = folder(work, None, decks_given={"one.md": UNTITLED})
     result = convert(work, "--quick")
@@ -4038,6 +4062,7 @@ def case_revealjs_settings(work):
 CASES = [("the pieces", case_pieces),
          ("a folder of decks", case_folder),
          ("one alt text on a deck's different pictures", case_shared_alt),
+         ("file names lowercased", case_lowercase_names),
          ("the headings' levels on a page", case_levels),
          ("the implied target, and a book's Markdown", case_implied),
          ("pages per slide, and the notes", case_split),

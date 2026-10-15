@@ -92,7 +92,7 @@ try:
     from bookcontents import (guess_contents, walk_contents, number_tree,
                               is_generated, toc_blocks, stem_title, declared_titles,
                               expand_split_sources, contents_from_tree, opener_types)
-    from names import safe_path, safe_stem, is_safe
+    from names import safe_path, safe_stem, is_safe, output_path
     import sidecars
     from sidecars import math_keep_rows
 except ImportError:
@@ -109,6 +109,9 @@ NOT_YET_IMPLEMENTED = ()
 # Targets whose output is written to be a source again: what the author
 # decided, and not what the filter derived from it.
 SOURCE_TARGETS = ("markdown", "asciidoc")
+# The targets that copy the files a page names, whose names media.lowercase
+# lowercases.
+LOWERCASED = ("html", "revealjs", "markdown", "asciidoc")
 TARGET_FILTER = os.path.join(HERE, "target-blocks.lua")
 DECK_HTML_FILTER = os.path.join(HERE, "deck-html.lua")
 DECK_PDF_FILTER = os.path.join(HERE, "deck-pdf.lua")
@@ -2318,7 +2321,7 @@ def media_references(path):
                                                "data:")))
 
 
-def media_gate(base, stems, media_rows, report_path, safe=True):
+def media_gate(base, stems, media_rows, report_path, namings=((True, False),)):
     """A dead image link is invisible in the generated HTML -- Pandoc
     emits an <embed> rather than an <img> for an extension it does not
     recognize. Stopping here is deliberate: broken output that looks fine
@@ -2330,27 +2333,41 @@ def media_gate(base, stems, media_rows, report_path, safe=True):
     it guards against is silent, and because the media filter still
     cannot identify every format Word stores: EMF and WMF have no
     browser-renderable equivalent and have to go back to the author.
+
+    namings: (safe, lower) for each way the run's targets name the files
+    they copy (names.output_path).
     """
     problems, rows = [], []
-    # Two files an HTML target would copy to one name: "a b.png" and
-    # "a-b.png" are both written as a-b.png, and the second copy would
-    # replace the first under every page that shows either.
-    written = {}
+    # Two files a target would copy to one name: "a b.png" and "a-b.png"
+    # are both written as a-b.png by an HTML target, Fig.png and fig.png
+    # as fig.png with media.lowercase, and the second copy would replace
+    # the first under every page that shows either. A file is told from
+    # another as the file system tells it, so one named in two ways, as a
+    # file system that ignores case finds it, is one.
+    written = {naming: {} for naming in namings if any(naming)}
     for stem in stems:
-        for ref in media_references(os.path.join(base, stem + ".json")):
+        intermediate = os.path.join(base, stem + ".json")
+        images = media_references(intermediate)
+        # The files a page links to are copied with it, so they're named
+        # alike; their being there isn't checked (linked_files).
+        for ref in images + [r for r in linked_files(intermediate) if r not in images]:
             # A Markdown source writes a space in a file name as %20, as a
             # link must; the file on disk has the space.
             path = os.path.join(base, unquote(ref))
-            if safe and os.path.isfile(path):
-                name = safe_path(unquote(ref))
-                real = os.path.realpath(path)
-                other = written.setdefault(name, (real, unquote(ref)))
-                if other[0] != real:
-                    problems.append(f"UNRESOLVED: {other[1]} and "
-                                    f"{unquote(ref)} would both be written "
-                                    f"as {name}.")
-                    rows.append(f"{ref},{stem}.json,,would be written as "
-                                f"{name}, the name {other[1]} is written as")
+            if written and os.path.isfile(path):
+                found = os.stat(path)
+                real = (found.st_dev, found.st_ino)
+                for (safe, lower), names in written.items():
+                    name = output_path(unquote(ref), safe, lower)
+                    other = names.setdefault(name, (real, unquote(ref)))
+                    problem = (f"UNRESOLVED: {other[1]} and {unquote(ref)} would both be "
+                               f"written as {name}.")
+                    if other[0] != real and problem not in problems:
+                        problems.append(problem)
+                        rows.append(f"{ref},{stem}.json,,would be written as "
+                                    f"{name}, the name {other[1]} is written as")
+            if ref not in images:
+                continue
             if not os.path.isfile(path):
                 problems.append(f"UNRESOLVED: {stem}.json references "
                                 f"missing {ref}.")
@@ -4033,7 +4050,8 @@ def deck_presentations(target, stems, base, language):
             level = decklib.slide_level(doc.get("blocks", []))
         shape, why = decklib.aspect_ratio(doc.get("meta") or {}, ratio)
         jobs.append((stem, intermediate, level, shape, why))
-    env = dict(os.environ, TARGET_NAME=target.name, TITLE_BLOCK=str(target["title_block"]))
+    env = dict(os.environ, TARGET_NAME=target.name, TITLE_BLOCK=str(target["title_block"]),
+               MEDIA_LOWERCASE="1" if target["media.lowercase"] else "")
     os.makedirs(target.output_dir, exist_ok=True)
     notes = str(target["slides.notes"])
 
@@ -4065,7 +4083,8 @@ def deck_presentations(target, stems, base, language):
         copy_media(base, target.output_dir,
                    [os.path.join(target.pages_dir, stem + INTERMEDIATE)
                     for stem in stems if os.path.join(
-                        target.output_dir, stem + ".html") in written])
+                        target.output_dir, stem + ".html") in written],
+                   lower=bool(target["media.lowercase"]))
         say(f"Wrote {len(written)} presentation(s) in {target.output_dir}, one for each deck, "
             f"through Pandoc's reveal.js writer and reveal.js "
             f"{revealtarget.revealjs_version(folder)}, copied beside them: {slides} slide(s); "
@@ -4096,6 +4115,13 @@ def render_markdown(target, pages, base, work, project, env, losses=None):
     env = dict(env, TARGET_NAME=target.name)
     os.makedirs(target.output_dir, exist_ok=True)
     jobs = [(os.path.basename(p)[:-len(INTERMEDIATE)], p) for p in pages]
+    # media.lowercase: the copy's references to its files lowercased, the
+    # rest of each the author's, before markdown-source.lua writes any into
+    # a fenced HTML block.
+    lowered = []
+    if target["media.lowercase"]:
+        lowered = ["--lua-filter=" + SAFE_MEDIA_FILTER]
+        env = dict(env, MEDIA_SAFE="0", MEDIA_LOWERCASE="1")
     # bookmarks: linked keeps the bookmarks a link anywhere in the book goes
     # to, within its page or from another, and the Word target's own.
     keep = None
@@ -4172,7 +4198,7 @@ def render_markdown(target, pages, base, work, project, env, losses=None):
                 os.remove(found)
             run(["pandoc", "-f", "json", "-t", "asciidoc", page, "-o", out,
                  "--standalone", "--wrap=none",
-                 "--lua-filter=" + TARGET_FILTER,
+                 "--lua-filter=" + TARGET_FILTER] + lowered + [
                  "--lua-filter=" + MARKDOWN_FILTER],
                 env=dict(env, FIDELITY_FOUND=found, TITLE_WRITER="asciidoc"),
                 cwd=base)
@@ -4198,7 +4224,7 @@ def render_markdown(target, pages, base, work, project, env, losses=None):
              "-t", "markdown-simple_tables-multiline_tables-raw_html",
              page, "-o", out,
              "--standalone", "--wrap=none", "--markdown-headings=atx",
-             "--lua-filter=" + TARGET_FILTER,
+             "--lua-filter=" + TARGET_FILTER] + lowered + [
              "--lua-filter=" + MARKDOWN_FILTER],
             env=dict(env, FIDELITY_FOUND=found, TITLE_WRITER="markdown"), cwd=base)
         collect_losses(found, target.name, stem, losses)
@@ -4213,7 +4239,8 @@ def render_markdown(target, pages, base, work, project, env, losses=None):
             + (f", {added['bars']} bar accent(s) given the macron, which Narrator reads"
                if added.get("bars") else "") + ".")
         return written
-    copy_media(base, target.output_dir, pages, safe=False)
+    copy_media(base, target.output_dir, pages, safe=False,
+               lower=bool(target["media.lowercase"]))
     return written
 
 
@@ -4260,7 +4287,8 @@ def number_page_headings(target, tree, titles):
 
 def render_html(target, pages, base, fragments, language, env):
     env = dict(env, TARGET_NAME=target.name,
-               TITLE_BLOCK=str(target["title_block"]), TITLE_WRITER="html")
+               TITLE_BLOCK=str(target["title_block"]), TITLE_WRITER="html",
+               MEDIA_LOWERCASE="1" if target["media.lowercase"] else "")
     """--lua-filter figures-and-tables ran already; what remains is the
     writer. -M lang sets the html lang attribute (WCAG 3.1.1), from the
     project's declared language. v0.1 hardcoded "en" while the manifest
@@ -4312,7 +4340,7 @@ def render_html(target, pages, base, fragments, language, env):
             with open(out, "w", encoding="utf-8") as fh:
                 fh.write(headed)
         written.append(out)
-    copy_media(base, target.output_dir, pages)
+    copy_media(base, target.output_dir, pages, lower=bool(target["media.lowercase"]))
     return written
 
 
@@ -4740,13 +4768,15 @@ def linked_files(path):
     return sorted(out)
 
 
-def copy_media(base, output_dir, pages, safe=True):
+def copy_media(base, output_dir, pages, safe=True, lower=False):
     """Every local image a page refers to, copied beside the page at the
     same relative path: <source>/media/... for what was extracted from a
     .docx, assets/... or wherever for what a Markdown source names. A
     copy keeps the target's pages self-contained, which is what the
-    packager assumes. So are the local files a page links to."""
-    copied = set()
+    packager assumes. So are the local files a page links to. lower
+    (media.lowercase): under its name lowercased, as safe-media.lua writes
+    it into the page."""
+    copied, kept = set(), []
     for page in pages:
         for ref in media_references(page) + linked_files(page):
             if ref in copied:
@@ -4757,14 +4787,25 @@ def copy_media(base, output_dir, pages, safe=True):
             # Under the safe name safe-media.lua wrote into the page;
             # a markdown target writes source, whose references are the
             # author's, so its copies keep the author's names.
-            dest = os.path.join(output_dir,
-                                safe_path(unquote(ref)) if safe
-                                else unquote(ref))
+            dest = os.path.join(output_dir, output_path(unquote(ref), safe, lower))
             if os.path.abspath(dest) == os.path.abspath(src):
+                continue
+            if os.path.exists(dest) and os.path.samefile(src, dest):
+                # The author's own file, named in another case, where the
+                # target writes beside the sources on a file system that
+                # ignores case: copied, it would be renamed.
+                kept.append(unquote(ref))
+                copied.add(ref)
                 continue
             os.makedirs(os.path.dirname(dest), exist_ok=True)
             shutil.copy2(src, dest)
             copied.add(ref)
+    if kept:
+        say(f"WARNING: {len(kept)} file(s) the pages name lowercased (media.lowercase) are "
+            f"the sources' own beside them, which this file system finds in any case, and "
+            f"keep their names ({', '.join(kept[:3])}{', ...' if len(kept) > 3 else ''}): "
+            "a server that doesn't ignore case won't find them. Write the target to a "
+            "folder of its own.")
 
 
 # --------------------------------------------------------------------------
@@ -5273,7 +5314,9 @@ def main():
         # ---- 2. the gate ------------------------------------------------------
         media_gate(base, stems, collected["media_unresolved"],
                    reports["media_unresolved"],
-                   safe=any(t.format not in SOURCE_TARGETS for t in targets))
+                   {(t.format not in SOURCE_TARGETS,
+                     bool(t["media.lowercase"]) and t.format in LOWERCASED)
+                    for t in targets})
 
         # Past the gate, this run will finish and the reports at the end
         # will be written with whatever is outstanding. Clear them now so

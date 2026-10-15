@@ -260,6 +260,10 @@ How media extracted from the source is handled.
 
 Abort as soon as an image can't be identified, rather than collecting every such image and stopping once at the gate.
 
+**`media.lowercase`**—`bool`; default `false`
+
+Copy each image and file a page names under its name in lowercase, the letters A to Z, and name it so in the page: in an html target, a revealjs target, and a markdown or asciidoc target, whose references are otherwise the author's own, with forward slashes. A server that tells case apart then finds what a page names however the source spelled it. Two files whose names differ only in case stop the run before anything is written. A source target's copies keep the author's references, since they name the author's files, which the run doesn't rename; nor do the files in an EPUB, a PDF, a Word file, or a PowerPoint file have names a reader sees.
+
 ## fonts
 
 Fonts whose license keeps a PowerPoint deck from being edited where they aren't installed. Read for PowerPoint decks for now.

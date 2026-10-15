@@ -3228,6 +3228,85 @@ def case_alt_text(work):
     ]
 
 
+def case_alt_shared(work):
+    """Alt text that is only a credit, and one alt text on different
+    images of a book: each in image-alt-missing.csv, the images told
+    apart by their files' bytes, so the same picture in two files, or in
+    two Word files' media, is one; alt text a sidecar decided is compared
+    but not reported."""
+    book = os.path.join(work, "md")
+    os.makedirs(os.path.join(book, "img"))
+    for name, rgb in (("s", (1, 1, 1)), ("up", (2, 2, 2)), ("up-copy", (2, 2, 2)),
+                      ("down", (3, 3, 3)), ("dots", (4, 4, 4)), ("fall", (5, 5, 5)),
+                      ("kept", (6, 6, 6))):
+        solid_png(os.path.join(book, "img", name + ".png"), rgb=rgb)
+    with open(os.path.join(book, "one.md"), "w", encoding="utf-8") as fh:
+        fh.write("# One\n\n![Source: Roe and Doe (2020)](img/s.png)\n\n![A rising line](img/up.png)"
+                 "\n\n![A rising line](img/up-copy.png)\n\n![Two dots](img/dots.png)\n\n"
+                 "![A falling line](img/fall.png)\n")
+    with open(os.path.join(book, "two.md"), "w", encoding="utf-8") as fh:
+        fh.write("# Two\n\n![a rising line.](img/down.png)\n\n![Two dots](img/dots.png)\n\n"
+                 "![A falling line](img/kept.png)\n")
+    with open(os.path.join(book, "project.yaml"), "w", encoding="utf-8") as fh:
+        fh.write("project:\n  title: Alike\n  identifier: org.example.alike\n  language: en-US\n")
+    with open(os.path.join(book, "image-alt.csv"), "w", encoding="utf-8") as fh:
+        fh.write("Image,Alt\nimg/kept.png,\n")
+
+    def fail(found):
+        raise AssertionError(repr(found)[:800])
+
+    def reasons(where):
+        subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick"], cwd=where,
+                       capture_output=True, text=True, stdin=subprocess.DEVNULL)
+        if not exists(where, "image-alt-missing.csv"):
+            return []
+        with open(os.path.join(where, "image-alt-missing.csv"), encoding="utf-8",
+                  newline="") as fh:
+            return sorted((r["Image"], r["Source"], r["Reason"]) for r in csv.DictReader(fh))
+    md = reasons(book)
+    # Two Word files holding one picture, with one alt text, then each
+    # its own picture.
+    word = os.path.join(work, "word")
+    os.makedirs(word)
+    with zipfile.ZipFile(os.path.join(FIXTURES, "media-a.docx")) as z:
+        alt = re.search(r'descr="([^"]*)"', z.read("word/document.xml").decode("utf-8")).group(1)
+    for name in ("media-a", "media-b"):
+        with zipfile.ZipFile(os.path.join(FIXTURES, name + ".docx")) as src, \
+                zipfile.ZipFile(os.path.join(word, name + ".docx"), "w") as dst:
+            for info in src.infolist():
+                data = src.read(info.filename)
+                if info.filename == "word/document.xml":
+                    data = re.sub(rb'descr="[^"]*"', b'descr="%s"' % alt.encode("utf-8"), data)
+                dst.writestr(info, data)
+    with open(os.path.join(word, "project.yaml"), "w", encoding="utf-8") as fh:
+        fh.write("project:\n  title: Alike\n  identifier: org.example.word\n  language: en-US\n")
+    one = [r for r in reasons(word) if "shared" in r[2]]
+    with zipfile.ZipFile(os.path.join(word, "media-b.docx")) as src:
+        entries = [(info, src.read(info.filename)) for info in src.infolist()]
+    solid_png(os.path.join(work, "other.png"), width=1, height=1, rgb=(9, 9, 9))
+    with open(os.path.join(work, "other.png"), "rb") as fh:
+        other = fh.read()
+    with zipfile.ZipFile(os.path.join(word, "media-b.docx"), "w") as dst:
+        for info, data in entries:
+            dst.writestr(info, other if info.filename == "word/media/image1.png" else data)
+    two = [r for r in reasons(word) if "shared" in r[2]]
+    return [
+        ("alt text that is only a credit is reported, and one alt text on different pictures "
+         "on each, case and closing punctuation aside; not the same picture in two files, nor "
+         "the one a sidecar row decided, which is compared",
+         lambda: md == [
+             ("img/down.png", "two", "shared with 1 other image"),
+             ("img/fall.png", "one", "shared with 1 other image"),
+             ("img/s.png", "one", "a credit or a source"),
+             ("img/up-copy.png", "one", "shared with 1 other image"),
+             ("img/up.png", "one", "shared with 1 other image")] or fail(md)),
+        ("two Word files' media holding one picture are one picture, and two aren't",
+         lambda: one == [] and [r[0] for r in two] == ["media-a/media/image1.png",
+                                                       "media-b/media/image1.png"]
+         or fail((one, two))),
+    ]
+
+
 def case_highlighting(work):
     """Highlighted code in bin/highlighting.theme's colors in a page, an
     EPUB, and a Word file (lib/highlighting.py), and page.css's color for
@@ -4947,6 +5026,7 @@ CASES = [
     ("a report's quotation cut between characters", case_cut_characters),
     ("highlighted code's colors in a page, an EPUB, and a Word file", case_highlighting),
     ("alt text that says nothing, in a book", case_alt_text),
+    ("alt text that is a credit, or another image's, in a book", case_alt_shared),
     ("a hand-written page", case_hand_written),
     ("several targets", case_targets),
 ]

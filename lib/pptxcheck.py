@@ -80,7 +80,7 @@ def alt_problem(alt, name=None, rules=None, limit=ALT_MAX_CHARS):
     if found is None:
         return None
     kind, reason = found
-    if kind in ("auto-generated", "page-title"):
+    if kind in ("auto-generated", "page-title", "credit"):
         detail = text
     elif kind == "too-long":
         detail = reason
@@ -294,6 +294,30 @@ def crop_items(deck, flagged=frozenset()):
                 yield slide, shape, "pptx-alt-same-for-crops", " ".join(shape.descr.split())
 
 
+def shared_items(deck, flagged=frozenset(), alt_of=None):
+    """(slide, shape, check, detail) for each copy of a picture on a deck's
+    slides whose alt text a different picture has too, its image's
+    content another (alttext.shared): a description copied to a picture
+    it may not fit, or the same picture in two files. flagged: the ids of
+    shapes whose alt text another finding names already. alt_of(slide,
+    shape): a picture's alt text as a sidecar decides it, None for one
+    decided decorative; its own, if not given."""
+    copies = []
+    for slide in deck.slides:
+        for shape in slide.all_shapes():
+            if not (shape.image and shape.image[1]) or id(shape) in flagged:
+                continue
+            alt = alt_of(slide, shape) if alt_of else (None if shape.decorative
+                                                       else shape.descr)
+            if (alt or "").strip():
+                copies.append((slide, shape, " ".join(alt.split())))
+    found = alttext.shared([(shape.image[1], alt) for _slide, shape, alt in copies])
+    for index, others in sorted(found.items()):
+        slide, shape, alt = copies[index]
+        yield slide, shape, "pptx-alt-shared", "%s: %s" % (
+            alttext.shared_reason(others, "picture"), alt)
+
+
 def loose_pieces(slide):
     """The pieces of a slide's drawn diagram, or none."""
     pieces = drawn(slide)
@@ -369,6 +393,9 @@ def check(deck, name=None, kind="source-pptx", alt_max_chars=ALT_MAX_CHARS,
                     ", ".join(s.name or s.id or "?" for s in read)[:200],
                     ", ".join(s.name or s.id or "?" for s in visual)[:200]))
     for slide, shape, check_, detail in crop_items(deck, flagged):
+        add(where(slide, shape), check_, detail)
+        flagged.add(id(shape))
+    for slide, shape, check_, detail in shared_items(deck, flagged):
         add(where(slide, shape), check_, detail)
     for title, count in titles.items():
         if count > 1:

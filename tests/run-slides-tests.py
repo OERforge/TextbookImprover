@@ -2972,6 +2972,105 @@ def case_web_titles(work):
         == "says nothing (a clip-art id)", ""
 
 
+def case_credits(work):
+    # Made up, in the forms a credit takes: Wikimedia Commons' attribution,
+    # a work and its author, a license and an address, a source, a byline,
+    # a courtesy line, a copyright line, and a caption's credit line.
+    credits = [
+        "By Jane Roe - Own work, CC BY-SA 4.0, https://commons.wikimedia.org/w/index.php?curid=1",
+        "From _A Book of Networks_ by Jo Smith, Licensed CC-BY-SA 4.0",
+        "Public Domain, https://commons.wikimedia.org/w/index.php?curid=2",
+        "Source: Roe and Doe (2020, 41)",
+        "Photo by Jane Roe on Flickr",
+        "Image courtesy of the Example Archive",
+        "© 2021 Jane Roe",
+        "(c) 2021 Jane Roe",
+        "Credit: Jane Roe/Example Agency",
+    ]
+    found = [pptxcheck.alt_problem(t, limit=0) for t in credits]
+    yield "alt text that is only a credit is found, the detail its text", \
+        found == [("pptx-alt-credit", t) for t in credits], list(zip(found, credits))
+    fine = [
+        # A license's badge.
+        "Public Domain",
+        "CC BY 4.0",
+        "Creative Commons Attribution-ShareAlike graphic",
+        "Painting by Claude Monet of water lilies on a pond",
+        "By World War I, women had entered the workforce in large numbers.",
+        "By May 1945, the war in Europe had ended.",
+        "A car being charged at a station. (credit: Jane Roe, Flickr)",
+        "Debits and credits in a T-account: Cash on the left, Revenue on the right.",
+    ]
+    found = [pptxcheck.alt_problem(t, limit=0) for t in fine]
+    yield "a license's badge, a byline going on to say what the picture shows, a sentence " \
+        "opening with By and a capital, and a description with a credit after it aren't", \
+        found == [None] * len(fine), list(zip(found, fine))
+    yield "the report says so, in the words a book's report uses", \
+        deckrun.reason_of(*pptxcheck.alt_problem(credits[0])) == "a credit or a source", ""
+
+
+UP, DOWN, CAMERA, CAMERA2 = png(1, 2, 3), png(4, 5, 6), png(7, 8, 9), png(11, 12, 13)
+
+
+def case_shared_alt(work):
+    path = deck(os.path.join(work, "alike.pptx"), [
+        {"shapes": [title(2, "One"), pic(3, "rId2", SPOT, "A rising line"),
+                    pic(4, "rId3", SPOT2, "A rising line.")],
+         "images": {"rId2": UP, "rId3": DOWN}},
+        {"shapes": [title(2, "Two"), pic(3, "rId2", SPOT, "a rising line"),
+                    pic(4, "rId3", SPOT2, "Credit: Jane Roe"),
+                    pic(5, "rId4", SPOT3, "A rising line", decorative=True)],
+         "images": {"rId2": UP, "rId3": GREEN, "rId4": RED}},
+        {"shapes": [title(2, "Three"), pic(3, "rId2", SPOT, "Two dots"),
+                    pic(4, "rId3", SPOT2, "Two dots")],
+         "images": {"rId2": DOTS, "rId3": DOTS}},
+        {"shapes": [title(2, "Four"), pic(3, "rId2", SPOT, "IMG_2041"),
+                    pic(4, "rId3", SPOT2, "IMG_2041")],
+         "images": {"rId2": CAMERA, "rId3": CAMERA2}}])
+    found = sorted((f.where, f.check, f.detail) for f in pptxcheck.check(pptxparse.read(path))
+                   if f.check.startswith("pptx-alt"))
+    yield "one alt text on different pictures is found on each copy, case and closing " \
+        "punctuation aside, with how many others have it; not on copies of one picture in two " \
+        "parts, a decorative one, or one another finding names", found == [
+            ("slide 1, Picture 3", "pptx-alt-shared", "shared with 1 other picture: A rising line"),
+            ("slide 1, Picture 4", "pptx-alt-shared",
+             "shared with 1 other picture: A rising line."),
+            ("slide 2, Picture 3", "pptx-alt-shared", "shared with 1 other picture: a rising line"),
+            ("slide 2, Picture 4", "pptx-alt-credit", "Credit: Jane Roe"),
+            ("slide 4, Picture 3", "pptx-alt-placeholder",
+             "a camera's or tool's name for a file: IMG_2041"),
+            ("slide 4, Picture 4", "pptx-alt-placeholder",
+             "a camera's or tool's name for a file: IMG_2041")], found
+    folder = os.path.join(work, "alike")
+    os.makedirs(folder)
+    shutil.copy(path, folder)
+    run = convert(folder, "--check-only")
+    alt = {r[0]: r for r in rows_of(os.path.join(folder, "image-alt-missing.csv"))}
+    up, down, green, camera, camera2 = (rem.image_key(hashlib.sha256(data).hexdigest()) + ".png"
+                                        for data in (UP, DOWN, GREEN, CAMERA, CAMERA2))
+    yield "each picture has a row that says why, one for every copy of it", \
+        run.returncode == 0 and sorted(alt) == sorted([up, down, green, camera, camera2]) \
+        and alt[up][2:4] == ["alike.pptx slide 1; alike.pptx slide 2",
+                             "shared with 1 other picture"] \
+        and alt[down][3] == "shared with 1 other picture" \
+        and alt[green][3] == "a credit or a source", (sorted(alt.values()), run.stderr[-400:])
+    with open(os.path.join(folder, "image-alt.csv"), "w", encoding="utf-8", newline="") as fh:
+        csv.writer(fh).writerows([["Image", "Alt"], [down, "A falling line"]])
+    again = convert(folder, "--check-only")
+    left = sorted(r[0] for r in rows_of(os.path.join(folder, "image-alt-missing.csv")))
+    yield "a row describing one of them leaves the other's alt text its own, so it has no row", \
+        again.returncode == 0 and left == sorted([green, camera, camera2]), \
+        (left, again.stderr[-400:])
+    with open(os.path.join(folder, "image-alt.csv"), "w", encoding="utf-8", newline="") as fh:
+        csv.writer(fh).writerows([["Image", "Alt"], [down, "A falling line"],
+                                  [camera, "A rising line"]])
+    third = convert(folder, "--check-only")
+    rows = {r[0]: r for r in rows_of(os.path.join(folder, "image-alt-missing.csv"))}
+    yield "and a row giving a picture whose own alt text said nothing another's alt text is " \
+        "compared as given", third.returncode == 0 and sorted(rows) == sorted([up, green, camera2]) \
+        and rows[up][3] == "shared with 1 other picture", (sorted(rows.values()), third.stderr[-400:])
+
+
 def app_xml(fonts, titles, names=("Fonts Used", "Theme", "Slide Titles")):
     """docProps/app.xml as PowerPoint writes it: the fonts a deck uses, its
     theme, and its slides' titles, each list counted in HeadingPairs and
@@ -3412,6 +3511,8 @@ CASES = [("reading a deck", case_parse), ("the checks", case_check),
          ("math kept as it was", case_math_keep),
          ("pictures cropped differently", case_crops),
          ("alt text copied from a web page", case_web_titles),
+         ("alt text that is only a credit", case_credits),
+         ("one alt text on different pictures", case_shared_alt),
          ("the file's lists of fonts and titles", case_app_properties),
          ("convert.py on decks", case_convert),
          ("folders, archives, and tools", case_folders),

@@ -21,12 +21,14 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
 import csv
+import hashlib
 import os
 import re
 import shutil
 import subprocess
 import sys
 import tempfile
+import zipfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -49,7 +51,10 @@ an image ![](nothing.png) with no alt, one that is
 one Office generated, ![A dog on a lawn Description automatically
 generated](dog.png), one copied from a web page with its picture,
 ![Marketing Mix Explained | Quizlet](mix.png), and one holding a file's
-name, ![Figure 2 (fig2.png)](fig2.png).
+name, ![Figure 2 (fig2.png)](fig2.png). One that is only a credit,
+![Source: Roe and Doe (2020)](roe.png), and one alt text on two pictures,
+![A rising line](up.png) and ![A rising line](up-2.png), which are one
+picture, and ![A rising line.](down.png), which isn't.
 
 And one whose scheme is in capitals,
 [HTTPS://example.org/report](HTTPS://example.org/report).
@@ -107,7 +112,18 @@ def case_sources():
          lambda: [f.detail for f in md if f.check == "source-image-alt-placeholder"]
          == ["shape.png: 'Picture 3' (a default shape name)"]
          and [c.count("source-image-alt-" + k) for k in ("auto-generated", "page-title",
-                                                          "is-file-name")] == [1, 1, 1]),
+                                                          "is-file-name", "credit")]
+         == [1, 1, 1, 1]),
+        ("and one alt text on different pictures, told apart by their files' bytes, so "
+         "two files holding one picture are one",
+         lambda: [f.detail for f in md if f.check == "source-image-alt-shared"] == [
+             "up.png: 'A rising line' (shared with 1 other image)",
+             "up-2.png: 'A rising line' (shared with 1 other image)",
+             "down.png: 'A rising line.' (shared with 1 other image)"]),
+        ("a Word file's image is told apart by its file in the archive",
+         lambda: sourcecheck.picture(os.path.join(FIXTURES, "media-a.docx"), "source-docx")(
+             "media/image1.png") == hashlib.sha256(zipfile.ZipFile(os.path.join(
+                 FIXTURES, "media-a.docx")).read("word/media/image1.png")).hexdigest()),
         ("a bare-URL link is found",
          lambda: "source-link-bare-url" in c),
         # Compared as written, a scheme in capitals wasn't a scheme.
@@ -218,6 +234,9 @@ def main():
     WORK = tempfile.mkdtemp(prefix="audit-tests-")
     with open(os.path.join(WORK, "page.md"), "w", encoding="utf-8") as fh:
         fh.write(MARKDOWN)
+    for name, data in (("up.png", b"up"), ("up-2.png", b"up"), ("down.png", b"down")):
+        with open(os.path.join(WORK, name), "wb") as fh:
+            fh.write(data)
     with open(os.path.join(WORK, "page.html"), "w", encoding="utf-8") as fh:
         fh.write(HTML)
     shutil.copy(os.path.join(FIXTURES, "media-a.docx"), WORK)

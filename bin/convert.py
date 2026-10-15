@@ -4752,28 +4752,64 @@ def copy_media(base, output_dir, pages, safe=True):
 # 5. reports
 # --------------------------------------------------------------------------
 
-def judge_alt_text(seen_file, rows_file, placeholders=()):
+def deck_documents(pages, decks, work):
+    """A JSON file of the deck each page is part of, for the output
+    check: a deck's page, its presentation, or a piece the split cut
+    from it, named for the deck and what the split named it after two
+    hyphens (one--part-a.html). Returns its path."""
+    documents = {}
+    for page in pages:
+        stem = os.path.splitext(os.path.basename(page))[0]
+        documents[page] = max((d for d in decks if stem == d or stem.startswith(d + "--")),
+                              key=len, default=stem)
+    path = os.path.join(work, "documents.json")
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump(documents, fh)
+    return path
+
+
+def judge_alt_text(seen_file, rows_file, placeholders=(), base=".", per_source=False):
     """The alt text an author gave (the filter's IMAGE_ALT_SEEN rows),
     judged by the rules a deck's pictures are judged by (alttext.py), and
     each that needs a person added to the report's rows: a file name, a
     word such as "image", a camera's name for a file, a description Office
-    generated, a web page's title. One the filter reported as too long
-    gets the reason beside that one."""
+    generated, a web page's title, a credit. So is alt text no rule names
+    that a different image has too, in the book or, for decks
+    (per_source), the deck, the alt text the sidecar decided compared but
+    not reported: images are told apart by their files' bytes, found from
+    base as the media are, so one picture in two pages' files is one. One
+    the filter reported as too long gets the reason beside that one."""
     if not os.path.exists(seen_file):
         return
     rules = alttext.placeholder_rules(placeholders)
     with open(seen_file, encoding="utf-8", newline="") as fh:
-        seen = sorted({tuple(row[:3]) for row in csv.reader(fh) if len(row) >= 3})
+        seen = sorted({tuple((row + ["", ""])[:5]) for row in csv.reader(fh) if len(row) >= 3})
     rows = []
     if os.path.exists(rows_file):
         with open(rows_file, encoding="utf-8", newline="") as fh:
             rows = [row for row in csv.reader(fh) if any(row)]
+    found = {}
+    for index, (image, source, alt, src, decided) in enumerate(seen):
+        if not decided:
+            found[index] = alttext.problem(alt, rules, limit=None)
+    files = {image: os.path.join(base, unquote(src or image))
+             for image, _source, _alt, src, _decided in seen}
+    groups = {}
+    for index, (image, source, alt, src, decided) in enumerate(seen):
+        if found.get(index) is None:
+            groups.setdefault(source if per_source else "", []).append(index)
+    for indexes in groups.values():
+        shared = alttext.shared([(seen[i][0], seen[i][2]) for i in indexes],
+                                lambda image: alttext.digest(files[image], image))
+        for at, others in shared.items():
+            if not seen[indexes[at]][4]:
+                found[indexes[at]] = ("shared", alttext.shared_reason(others))
     changed = False
-    for image, source, alt in seen:
-        found = alttext.problem(alt, rules, limit=None)
-        if found is None:
+    for index, problem in sorted(found.items()):
+        if problem is None:
             continue
-        why = alttext.reason(*found)
+        image, source, alt = seen[index][:3]
+        why = alttext.reason(*problem)
         same = [row for row in rows if len(row) >= 5 and (row[0], row[2], row[4])
                 == (image, source, alt)]
         for row in same:
@@ -5315,7 +5351,7 @@ def main():
             "Label,Description,Source,Excerpt,Drafted by,Reviewed",
             "table(s) needing a description", paths["table_captions"])
         judge_alt_text(collected["alt_seen"], collected["alt_missing"],
-                       first["images.alt_placeholders"] or ())
+                       first["images.alt_placeholders"] or (), base, DECK_RUN)
         write_report(
             collected["alt_missing"], reports["image_alt_missing"],
             "Image,Alt,Source,Reason,CurrentAlt,Drafted by,Reviewed",
@@ -5450,6 +5486,11 @@ def main():
         for pages in written.values():
             command += [p for p in pages if p.endswith(".html")]
         command += presentations
+        if DECK_RUN:
+            # Each deck a document of its own, its pages its pieces.
+            command += ["--documents", deck_documents(
+                [p for p in command if p.endswith(".html")],
+                [safe_stem(os.path.basename(n)[:-3]) for n in markdown], work)]
         for epub in epubs:
             command += ["--epub", epub]
         for pdf in pdfs:

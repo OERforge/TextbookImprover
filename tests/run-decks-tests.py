@@ -1059,6 +1059,36 @@ def case_folder(work):
     ]
 
 
+def case_shared_alt(work):
+    """One alt text on different pictures is looked for within a deck, in
+    its report and in the output check alike, its pages and its
+    presentation one document; two decks' pictures are each their own."""
+    decks_given = {
+        "one.md": "---\ntitle: One\n---\n\n# Part A\n\n## First\n\n![A rising line](img/a.png)\n\n"
+                  "# Part B\n\n## Second\n\n![A rising line](img/b.png)\n",
+        "two.md": "---\ntitle: Two\n---\n\n# First\n\n![Two dots](img/c.png)\n",
+        "three.md": "---\ntitle: Three\n---\n\n# First\n\n![Two dots](img/d.png)\n"}
+    work = folder(work, "targets:\n  pages:\n    format: html\n    pages:\n      split_level: 1\n"
+                        "  show:\n    format: revealjs\n", decks_given=decks_given)
+    for name, color in (("a", 10), ("b", 20), ("c", 30), ("d", 40)):
+        png(os.path.join(work, "img", name + ".png"), color, color, color)
+    result = convert(work, "--quick")
+    rows = sorted((r[0], r[2], r[3]) for r in rows_of(os.path.join(work, "image-alt-missing.csv")))
+    found = sorted((r[0], r[2].split(":")[0]) for r in rows_of(os.path.join(work, "output-check.csv"))
+                   if r[1] == "image-alt-shared")
+    return [
+        ("a deck's pictures sharing alt text each have a row, and two decks' don't",
+         lambda: result.returncode == 0 and rows == [
+             ("img/a.png", "one", "shared with 1 other image"),
+             ("img/b.png", "one", "shared with 1 other image")]),
+        ("the output check names them on the deck's pieces and in its presentation, and "
+         "not the other decks'",
+         lambda: found == [("pages/one--part-a.html", "img/a.png"),
+                           ("pages/one--part-b.html", "img/b.png"),
+                           ("show/one.html", "img/a.png"), ("show/one.html", "img/b.png")]),
+    ]
+
+
 def case_implied(work):
     work = folder(work, None, decks_given={"one.md": UNTITLED})
     result = convert(work, "--quick")
@@ -4001,6 +4031,7 @@ def case_revealjs_settings(work):
 
 CASES = [("the pieces", case_pieces),
          ("a folder of decks", case_folder),
+         ("one alt text on a deck's different pictures", case_shared_alt),
          ("the headings' levels on a page", case_levels),
          ("the implied target, and a book's Markdown", case_implied),
          ("pages per slide, and the notes", case_split),

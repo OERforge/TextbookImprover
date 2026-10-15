@@ -9,8 +9,10 @@ nothing (punctuation, a word such as "image", a clip-art id, a camera's
 name for a file, a shape's default name, or a pattern a project lists in
 images.alt_placeholders); a description Office generated, which Office
 asks a person to review; alt text copied from a web page with its
-picture (the page's title, or a stock site's caption); and alt text over
-images.alt_max_chars.
+picture (the page's title, or a stock site's caption); alt text that is
+only a credit (who made the picture, its license, where it's from); and
+alt text over images.alt_max_chars. And, among a document's pictures,
+one alt text on different pictures (shared).
 
 Copyright 2026 Robert Szarka
 
@@ -28,6 +30,7 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
+import hashlib
 import re
 
 ALT_MAX_CHARS = 120
@@ -116,6 +119,41 @@ PAGE_TITLE = (
     # "4.3 Demand and Supply Together - Introductory Economics"
     re.compile(r"^\d+(?:\.\d+)+\s+\S.*\s[-\u2013\u2014|]\s"),
 )
+# Alt text that is only a credit: who made the picture, under what
+# license, or where it's from, and nothing of what it shows, as a
+# caption's credit line or Wikimedia Commons' attribution copied in. Each
+# of its sentences opens with a credit's label ("Source:", "Credit:",
+# "Courtesy of", "Copyright 2021", a copyright sign, "Photographer:"), or
+# is a list of bylines ("By" and a name, "Photo by" one, "From" a work
+# "by" its author), licenses, "Own work", and addresses, a byline or an
+# address among them. A license alone isn't one: it's what a license's
+# badge is called. Nor is a byline that goes on to say what the picture
+# shows ("Painting by Claude Monet of water lilies"), or a sentence that
+# opens with "By" and a capital and isn't one ("By World War I, women had
+# entered the workforce"). None of OpenStax's 45,427 alt texts is only a
+# credit, though many end with one; two of the Word books' 2,462 are, one
+# credit on two pictures.
+URL = re.compile(r"\bhttps?://\S+|\bwww\.\S+", re.I)
+MARKDOWN_LINK = re.compile(r"\[([^\]]*)\]\([^)]*\)")
+KINDS = (r"(?i:(?:photo(?:graph)?|image|picture|illustration|graphic|drawing|painting|map|"
+         r"art(?:work)?|figure|screenshot|video)s?\s+)")
+CREDIT_LABEL = re.compile(
+    KINDS + r"?(?:(?i:credits?)\s*[:\-\u2013\u2014]|(?i:courtesy)\s+(?:(?i:of)\b|[A-Z])|"
+    r"(?i:sources?)\s*:|(?i:copyright)\s*(?:\u00a9|\((?i:c)\)|:|\d{4}|(?i:by)\b)|\u00a9|"
+    r"\((?i:c)\)\s*\d|(?i:photographer)\s*:)")
+# A name: capitalized words, and the small words a name has between them.
+NAME = (r"[A-Z\u00c0-\u024f][^\s,;]*(?:\s+(?:[A-Z\u00c0-\u024f&][^\s,;]*|"
+        r"(?:and|of|the|de|van|von|der|da|di|du|la|le|y)\b))*")
+BYLINE = re.compile(
+    KINDS + r"?(?:(?i:from)\s+.+?\s+)?(?i:by)\s+(?!(?:the|a|an)\b)" + NAME
+    + r"(?:\s+(?i:on|via|for|at|from)\s+" + NAME + r")?")
+LICENSE = re.compile(
+    r"(?:licen[cs]ed\s+(?:under\s+)?(?:(?:an?|the)\s+)?)?"
+    r"(?:cc[\s-]?(?:by|0|zero)(?:[\s-](?:sa|nc|nd))*(?:[\s-]?\d(?:\.\d)?)?"
+    r"(?:\s+(?:international|unported|generic))?(?:\s+licen[cs]e)?|"
+    r"creative commons(?:\s+[\w.-]+){0,6}?|public domain|gfdl|"
+    r"gnu free documentation licen[cs]e|all rights reserved)", re.I)
+OWN_WORK = re.compile(r"own work", re.I)
 
 
 def clean(text):
@@ -145,12 +183,36 @@ def page_title(text):
                 or len(text) <= TITLE_MAX_CHARS and any(p.search(text) for p in PAGE_TITLE))
 
 
+def credit(text):
+    """Whether alt text is only a credit (CREDIT_LABEL, BYLINE, LICENSE):
+    who made the picture, its license, and where it's from."""
+    marked = bool(URL.search(text))
+    plain = URL.sub(" ", MARKDOWN_LINK.sub(r"\1", text))
+    for sentence in re.split(r"(?<=[.;])\s+", plain):
+        sentence = sentence.strip(" ,;:.-\u2013\u2014")
+        # A credit in parentheses, "(credit: ...)", but not "(c) 2021".
+        if sentence.startswith("(") and sentence.endswith(")"):
+            sentence = sentence[1:-1].strip(" ,;:.-\u2013\u2014")
+        if not sentence:
+            continue
+        if CREDIT_LABEL.match(sentence):
+            marked = True
+            continue
+        for piece in re.split(r",|\s[-\u2013\u2014]\s", sentence):
+            piece = piece.strip(" ()")
+            if BYLINE.fullmatch(piece) or OWN_WORK.fullmatch(piece):
+                marked = True
+            elif piece and not LICENSE.fullmatch(piece):
+                return False
+    return marked
+
+
 def problem(alt, rules=None, limit=ALT_MAX_CHARS):
     """(kind, rule) for alt text that needs a person, or None: kind is
-    is-file-name, placeholder, auto-generated, page-title, or too-long
-    (over limit characters; none, for no limit), and rule which of its
-    rules it broke, in words. rules: placeholder_rules() of the project's
-    own patterns."""
+    is-file-name, placeholder, auto-generated, page-title, credit, or
+    too-long (over limit characters; none, for no limit), and rule which
+    of its rules it broke, in words. rules: placeholder_rules() of the
+    project's own patterns."""
     text = " ".join((alt or "").split())
     if not text:
         return None
@@ -170,6 +232,8 @@ def problem(alt, rules=None, limit=ALT_MAX_CHARS):
         return ("auto-generated", "generated by Office")
     if page_title(text):
         return ("page-title", "a web page's title")
+    if credit(text):
+        return ("credit", "a credit or a source")
     if limit and len(text) > limit:
         return ("too-long", "%d characters (limit %d)" % (len(text), limit))
     return None
@@ -184,3 +248,45 @@ def reason(kind, rule):
     if kind == "too-long":
         return "too long (%s)" % rule.split(" (")[0]
     return rule
+
+
+def shared(items, identity=None):
+    """{index: how many other pictures have its alt text} for each of
+    items, [(key, alt)], whose alt text another picture of a document
+    has too, case, spacing, and closing punctuation aside (clean): a
+    description copied to a picture it may not fit, or the same picture
+    in two files. A key names an image, and identity(key) is what tells
+    two apart, a digest of its bytes (digest), so two files holding one
+    image are one picture; it's asked only of keys whose alt text
+    another key has. Empty alt text is no picture's."""
+    keys = {}
+    for key, alt in items:
+        text = clean(alt)
+        if text:
+            keys.setdefault(text, []).append(key)
+    others = {}
+    for text, named in keys.items():
+        named = list(dict.fromkeys(named))
+        if len(named) > 1:
+            pictures = {identity(key) if identity else key for key in named}
+            if len(pictures) > 1:
+                others[text] = len(pictures) - 1
+    return {index: others[clean(alt)] for index, (_key, alt) in enumerate(items)
+            if clean(alt) in others}
+
+
+def shared_reason(others, noun="image"):
+    """The Reason column for alt text shared() finds: "shared with 2 other
+    images"."""
+    return "shared with %d other %s%s" % (others, noun, "" if others == 1 else "s")
+
+
+def digest(path, fallback=None):
+    """What tells one image from another (shared): a digest of a file's
+    bytes, as a deck's pictures are keyed, or fallback for a file that
+    can't be read, or a path that names none (a%00.png)."""
+    try:
+        with open(path, "rb") as fh:
+            return hashlib.sha256(fh.read()).hexdigest()
+    except (OSError, ValueError):
+        return fallback

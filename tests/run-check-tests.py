@@ -60,6 +60,7 @@ BAD = """<!DOCTYPE html><html><head><title></title></head>
 <img src="p.png"><img src="q.png" alt=""><img src="media/db-locked.png" alt="db locked">
 <img src="r.png" alt="IMG_2041"><img src="s.png" alt="A dog on a lawn Description automatically generated">
 <img src="t.png" alt="Marketing Mix Explained | Quizlet"><img src="u.png" alt="Figure 2 (fig2.png)">
+<img src="v.png" alt="By Jane Roe - Own work, CC BY-SA 4.0, https://commons.wikimedia.org/w/index.php?curid=1">
 <table><tr><td>1</td></tr></table>
 <div class="table-wrapper" tabindex="0" role="region" aria-label="Demand">
 <table><caption>Demand</caption><tr><th scope="col"><math display="inline"><semantics><msub><mi>q</mi><mi>d</mi></msub><annotation encoding="application/x-tex">q_d</annotation></semantics></math></th>
@@ -151,6 +152,32 @@ def main():
             fh.write(OTHER.replace("</body>", '<a href="#/there">1</a></body>'))
         presented = outputcheck.check_html_files([os.path.join(work, "presented.html")])
         routed = outputcheck.check_html_files([os.path.join(work, "routed.html")])
+        # One alt text on three images, two of them one picture in two
+        # files, and on a picture another check names; a picture and its
+        # copy with one alt text; a decorative image; an image elsewhere.
+        os.makedirs(os.path.join(work, "pics", "m"))
+        for name, data in (("a.png", b"one"), ("m/b.png", b"two"), ("c.png", b"one"),
+                           ("d.png", b"three"), ("e.png", b"three")):
+            with open(os.path.join(work, "pics", name), "wb") as fh:
+                fh.write(data)
+        for name, body in (
+                ("one.html", '<img src="a.png" alt="A rising line"><img src="m/b.png" '
+                             'alt="a rising line."><img src="d.png" alt="Two dots">'
+                             '<img src="r.png" alt="IMG_2041"><img src="f.png" alt="IMG_2041">'),
+                ("two.html", '<img src="c.png" alt="A rising line"><img src="e.png" '
+                             'alt="Two dots"><img src="g.png" alt="A rising line" '
+                             'aria-hidden="true"><img src="https://example.org/h.png" '
+                             'alt="Two dots">')):
+            with open(os.path.join(work, "pics", name), "w", encoding="utf-8") as fh:
+                fh.write(OTHER.replace("</h1>", "</h1>" + body).replace(
+                    'id="there"', 'id="t-%s"' % name[:3]))
+        alike = outputcheck.check_html_files([os.path.join(work, "pics", n)
+                                              for n in ("one.html", "two.html")])
+        # A name no file system takes, which can't be read to be compared.
+        with open(os.path.join(work, "pics", "nul.html"), "w", encoding="utf-8") as fh:
+            fh.write(OTHER.replace("</h1>", '</h1><img src="a%00.png" alt="A falling line">'
+                                   '<img src="b.png" alt="A falling line">'))
+        unnamed = outputcheck.check_html_files([os.path.join(work, "pics", "nul.html")])
         cases = [
             ("a correct pair of pages produces no finding",
              lambda: checks(good) == []),
@@ -162,6 +189,7 @@ def main():
                  "image-empty-alt-not-decorative",
                  "image-alt-is-file-name", "image-alt-is-file-name",
                  "image-alt-placeholder", "image-alt-auto-generated", "image-alt-page-title",
+                 "image-alt-credit",
                  "link-label-without-text", "link-label-without-text",
                  "table-without-headers-or-caption",
                  "table-not-in-scroll-region",
@@ -175,6 +203,24 @@ def main():
              == ["r.png: 'IMG_2041' (a camera's or tool's name for a file)"]
              and [f.detail for f in bad if f.check == "image-alt-is-file-name"]
              == ["media/db-locked.png: 'db locked'", "u.png: 'Figure 2 (fig2.png)'"]),
+            ("alt text that is only a credit is named",
+             lambda: [f.detail.split(":")[0] for f in bad if f.check == "image-alt-credit"]
+             == ["v.png"]),
+            ("one alt text on different pictures is named on each page it's on, case and "
+             "closing punctuation aside, with how many others have it; not on copies of one "
+             "picture, a decorative image, or alt text another check names",
+             lambda: expect(sorted((os.path.basename(f.where), f.detail) for f in alike
+                                   if f.check == "image-alt-shared") == [
+                 ("one.html", "a.png: 'A rising line' (shared with 1 other image)"),
+                 ("one.html", "d.png: 'Two dots' (shared with 1 other image)"),
+                 ("one.html", "m/b.png: 'a rising line.' (shared with 1 other image)"),
+                 ("two.html", "c.png: 'A rising line' (shared with 1 other image)"),
+                 ("two.html", "e.png: 'Two dots' (shared with 1 other image)"),
+                 ("two.html", "https://example.org/h.png: 'Two dots' "
+                              "(shared with 1 other image)")], alike)),
+            ("and on one no file system can name, by its name",
+             lambda: [f.detail.split(":")[0] for f in unnamed if f.check == "image-alt-shared"]
+             == ["a%00.png", "b.png"]),
             ("a header cell holding only a formula is named by its table and TeX, "
              "and one with no TeX by its table",
              lambda: sorted(f.detail for f in bad if f.check == "table-header-is-formula")
@@ -239,7 +285,24 @@ def main():
                                             b'"Chapter two">2</a> <a href="ch002.xhtml" '
                                             b'aria-label="Back to reference 1">&#x21A9;&#xFE0E;'
                                             b'</a></p></body>')
+                        # One picture in two files, with one alt text, and a
+                        # picture with another's.
+                        data = data.replace(b"</body>", b'<p><img src="../media/one.png" alt='
+                                            b'"A falling line"/><img src="../media/same.png" '
+                                            b'alt="A falling line"/><img src="../media/three.png" '
+                                            b'alt="Two dots."/></p></body>')
+                    if info.filename.endswith("ch002.xhtml"):
+                        data = data.replace(b"</body>", b'<p><img src="../media/two.png" alt='
+                                            b'"Two dots"/></p></body>')
+                    if info.filename.endswith("content.opf"):
+                        data = data.replace(b"</manifest>", b"".join(
+                            b'<item id="%s" href="media/%s.png" media-type="image/png"/>'
+                            % (n, n) for n in (b"one", b"same", b"two", b"three"))
+                            + b"</manifest>")
                     dst.writestr(info, data)
+                for name, picture in (("one", b"1"), ("same", b"1"), ("two", b"2"),
+                                      ("three", b"3")):
+                    dst.writestr("EPUB/media/%s.png" % name, picture)
             damaged = outputcheck.check_epub(broken)
             cases += [
                 ("a Pandoc EPUB passes apart from its known omissions",
@@ -255,6 +318,12 @@ def main():
                 ("and a link whose label leaves out its text, not one whose text is a symbol",
                  lambda: [f.detail for f in damaged if f.check == "link-label-without-text"]
                  == ["'2' named 'Chapter two'"]),
+                ("and one alt text on different pictures, told apart by the archive's files, "
+                 "not on one picture in two of them",
+                 lambda: expect(sorted((f.where.split("/")[-1], f.detail.split(":")[0])
+                                       for f in damaged if f.check == "image-alt-shared") == [
+                     ("ch001.xhtml", "../media/three.png"), ("ch002.xhtml", "../media/two.png")],
+                     damaged)),
                 ("the EPUB's own structure is read: manifest, spine, nav",
                  lambda: not any(c.startswith(("manifest", "spine", "no-nav",
                                                "file-not", "mimetype"))

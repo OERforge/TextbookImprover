@@ -75,6 +75,13 @@ CHECKS = OrderedDict([
     ("image-alt-page-title",
      ("an img's alt looks copied from a web page with the picture, the page's title or a stock "
       "site's caption", "warning", "WCAG 2.0 SC 1.1.1 (A)", "sidecar")),
+    ("image-alt-credit",
+     ("an img's alt is only a credit: who made the picture, its license, or where it's from, "
+      "and nothing of what it shows", "warning", "WCAG 2.0 SC 1.1.1 (A)", "sidecar")),
+    ("image-alt-shared",
+     ("one alt text on different images, which may be a description copied to a picture it "
+      "doesn't fit, or the same picture in two files", "note", "WCAG 2.0 SC 1.1.1 (A)",
+      "sidecar")),
     ("no-lang", ("the html element declares no language", "error",
                  "WCAG 2.0 SC 3.1.1 (A)", "source")),
     ("no-title", ("the page has no title", "error", "WCAG 2.0 SC 2.4.2 (A)", "source")),
@@ -132,6 +139,13 @@ CHECKS = OrderedDict([
     ("source-image-alt-page-title", ("an image whose alt text looks copied from a web page "
                                      "with the picture, the page's title or a stock site's "
                                      "caption", "warning", "WCAG 2.0 SC 1.1.1 (A)", "source")),
+    ("source-image-alt-credit", ("an image whose alt text is only a credit: who made the "
+                                 "picture, its license, or where it's from", "warning",
+                                 "WCAG 2.0 SC 1.1.1 (A)", "source")),
+    ("source-image-alt-shared", ("an image whose alt text a different image in the file has "
+                                 "too, which may be a description copied to a picture it "
+                                 "doesn't fit, or the same picture in two files", "note",
+                                 "WCAG 2.0 SC 1.1.1 (A)", "source")),
     ("source-table-no-headers", ("a table with no header row, no marker, "
                                  "and no keying first column", "warning",
                                  "WCAG 2.0 SC 1.3.1 (A)", "sidecar")),
@@ -183,9 +197,15 @@ CHECKS = OrderedDict([
                              "page's title or a stock site's caption: a site's name after a pipe "
                              "or a dash, a stock site's words, or a title cut off with an ellipsis",
                              "warning", "WCAG 2.0 SC 1.1.1 (A)", "sidecar")),
+    ("pptx-alt-credit", ("alt text that is only a credit: who made the picture, its license, "
+                         "or where it's from (a byline, \"Source:\", \"Own work\", an address)",
+                         "warning", "WCAG 2.0 SC 1.1.1 (A)", "sidecar")),
     ("pptx-alt-same-for-crops", ("the same alt text on copies of a picture cropped to show "
                                  "different parts of it, which a picture copied and cropped again "
                                  "keeps", "warning", "WCAG 2.0 SC 1.1.1 (A)", "sidecar")),
+    ("pptx-alt-shared", ("the same alt text on different pictures in a deck, which may be a "
+                         "description copied to a picture it doesn't fit, or the same picture "
+                         "in two files", "note", "WCAG 2.0 SC 1.1.1 (A)", "sidecar")),
     ("pptx-shape-no-alt", ("a group, or a shape with no text, with no alt text that isn't "
                            "marked decorative", "warning", "WCAG 2.0 SC 1.1.1 (A)", "sidecar")),
     ("pptx-alt-is-file-name", ("alt text holding a file name or extension, which "
@@ -269,6 +289,10 @@ CHECKS = OrderedDict([
     ("pdf-figure-alt-page-title",
      ("a figure's alternative text in the PDF looks copied from a web page "
       "with the picture, the page's title or a stock site's caption", "warning",
+      "WCAG 2.0 SC 1.1.1 (A)", "sidecar")),
+    ("pdf-figure-alt-credit",
+     ("a figure's alternative text in the PDF is only a credit: who made "
+      "the picture, its license, or where it's from", "warning",
       "WCAG 2.0 SC 1.1.1 (A)", "sidecar")),
     ("pdf-table-header-is-formula",
      ("a header cell (TH) holding only a formula: NVDA reads it in the "

@@ -1505,8 +1505,49 @@ def check_cased_images_in_copies():
     ]
 
 
+def check_alt_text_rules():
+    """Every kind of alt text lib/alttext.py finds has its finding in each
+    checker that applies its rules, declared in lib/findings.py; and one
+    alt text on different pictures is found by what tells them apart,
+    asked only of pictures whose alt text another has."""
+    import alttext
+    import findings as findings_lib
+    source = open(os.path.join(ROOT, "lib", "alttext.py"), encoding="utf-8").read()
+    kinds = set(re.findall(r'return \("([a-z-]+)", ', source))
+    pdf = {"placeholder": "pdf-figure-alt-is-placeholder"}
+    wanted = {"pptx-alt-" + k for k in kinds} | {"pptx-alt-shared"}
+    for prefix in ("image-alt-", "source-image-alt-"):
+        wanted |= {prefix + k for k in kinds - {"too-long"}} | {prefix + "shared"}
+    wanted |= {pdf.get(k, "pdf-figure-alt-" + k) for k in kinds - {"too-long"}}
+    asked = []
+
+    def identity(key):
+        asked.append(key)
+        return {"a": 1, "b": 2, "c": 1}.get(key, key)
+    found = alttext.shared([("a", "A line"), ("b", "a line."), ("c", "A line"), ("d", "Dots"),
+                            ("e", "Dots"), ("f", "Alone"), ("g", "")], identity)
+    copies = alttext.shared([("a", "A line"), ("c", "A line")], identity)
+    return [
+        ("a picture's name no file system takes is its own identity, not a crash",
+         lambda: alttext.digest("a\x00.png", "a\x00.png") == "a\x00.png"),
+        ("each kind's finding is declared, for pages, sources, decks, and PDFs",
+         lambda: "credit" in kinds and not wanted - set(findings_lib.CHECKS)
+         or print("    undeclared: %s" % sorted(wanted - set(findings_lib.CHECKS)))),
+        ("one alt text on different pictures, case and closing punctuation aside, is "
+         "found with how many others have it; identity is asked only of pictures sharing one",
+         lambda: found == {0: 1, 1: 1, 2: 1, 3: 1, 4: 1} and sorted(asked[:5]) == [
+             "a", "b", "c", "d", "e"]),
+        ("two files holding one picture are one picture",
+         lambda: copies == {}),
+        ("the reason says how many, in the report's words",
+         lambda: alttext.shared_reason(1) == "shared with 1 other image"
+         and alttext.shared_reason(2, "picture") == "shared with 2 other pictures"),
+    ]
+
+
 GROUPS = [
     ("a report's rows", check_report_rows),
+    ("alt text's rules, and their findings", check_alt_text_rules),
     ("a PDF read without pypdf's warnings", check_pdf_read_quietly),
     ("the PDF findings in the output check's summary", check_pdf_summary),
     ("tlmgr, with sudo where it needs it", check_tlmgr_command),

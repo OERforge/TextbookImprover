@@ -31,6 +31,7 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
+import hashlib
 import json
 import os
 import posixpath
@@ -520,12 +521,41 @@ def names_id(fragment, ids):
     return fragment in ids or unquote(fragment) in ids
 
 
-def check_html_files(paths):
+def check_shared_alt(pages, findings, locate, identity):
+    """One alt text on different images among pages checked together
+    (image-alt-shared, a note): an img's alt that no other check names,
+    and that an img showing another image has too. locate(page, src) is
+    the image's key, its file, and identity(key) what tells two apart,
+    its bytes' digest, so two files holding one picture are one
+    (alttext.shared). An image in a data: address or at another site is
+    its address."""
+    items, places = [], []
+    for page in pages.values():
+        for has_alt, alt, decorative, src in page.images:
+            if not has_alt or decorative or not alt.strip() or alt_is_file_name(alt, src) \
+                    or alttext.problem(alt, limit=None):
+                continue
+            local = src and not src.lower().startswith(EXTERNAL)
+            items.append((locate(page, src) if local else src, alt))
+            places.append((page.name, src, alt))
+    said = set()
+    for index, others in sorted(alttext.shared(items, identity).items()):
+        where, src, alt = places[index]
+        if (where, src) not in said:
+            said.add((where, src))
+            findings.append(Finding(where, "image-alt-shared", "%s: %r (%s)" % (
+                src, alt, alttext.shared_reason(others))))
+
+
+def check_html_files(paths, documents=None):
     """The pages a run wrote, checked as a set so links between them
     count. Names are the file names, so a link to another page is
-    resolved among them."""
+    resolved among them. documents: {path: name} of the document each
+    page is part of, a deck's in a run of decks, within which one alt
+    text on different images is looked for; the pages are one without
+    it."""
     findings = []
-    pages = {}
+    pages, folders, parts = {}, {}, {}
     for path in paths:
         # Named by their path below the working directory, so a run with
         # several targets can tell print/tables.html from tables.html;
@@ -535,9 +565,17 @@ def check_html_files(paths):
             else os.path.basename(path)
         with open(path, encoding="utf-8", errors="replace") as fh:
             pages[name] = read_html(name, fh.read())
+        folders[name] = os.path.dirname(os.path.abspath(path))
+        parts.setdefault((documents or {}).get(path, ""), {})[name] = pages[name]
     for page in pages.values():
         check_page(page, findings)
     check_links(pages, findings)
+    for part in parts.values():
+        check_shared_alt(
+            part, findings,
+            lambda page, src: os.path.normpath(os.path.join(
+                folders[page.name], unquote(urlsplit(src).path))),
+            lambda key: alttext.digest(key, key))
     return findings
 
 
@@ -634,6 +672,20 @@ def check_epub(path):
         all_files = {n: set() for n in names}
         all_files.update({n: set(p.ids) for n, p in pages.items()})
         check_links_among(pages, all_files, findings)
+        members = set(names)
+
+        def identity(key):
+            if key not in members:
+                return key
+            try:
+                return hashlib.sha256(archive.read(key)).hexdigest()
+            except Exception:       # a damaged member; the archive's checks name it
+                return key
+        check_shared_alt(
+            pages, findings,
+            lambda page, src: posixpath.normpath(posixpath.join(
+                posixpath.dirname(page.name), unquote(urlsplit(src).path))),
+            identity)
     return findings
 
 
@@ -697,6 +749,9 @@ DESCRIPTIONS = {
                              "\"image\", a camera's name for a file, a default name",
     "image-alt-auto-generated": "an img's alt is a description Office generated",
     "image-alt-page-title": "an img's alt looks copied from a web page with the picture",
+    "image-alt-credit": "an img's alt is only a credit: who made the picture, its license, "
+                        "or where it's from",
+    "image-alt-shared": "one alt text on different images",
     "heading-skips-level": "a heading is more than one level below the last",
     "empty-heading": "a heading with no text",
     "duplicate-id": "an id used more than once in one document",

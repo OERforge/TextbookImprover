@@ -30,10 +30,13 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
+import hashlib
 import json
 import os
 import re
 import subprocess
+import zipfile
+from urllib.parse import unquote
 
 import alttext
 from findings import Finding
@@ -98,6 +101,25 @@ def table_has_header_row(table):
     return bool(head[1])
 
 
+
+
+def picture(path, kind):
+    """What tells a source's images apart (alttext.shared): a digest of
+    the file an image names, in a Word file's archive (Pandoc's
+    media/image1.png is its word/media/image1.png) or beside a Markdown
+    file, or the name when there's no file to read."""
+    def identity(src):
+        if kind == "source-docx":
+            try:
+                with zipfile.ZipFile(path) as archive:
+                    return hashlib.sha256(archive.read("word/" + src)).hexdigest()
+            except (OSError, KeyError, zipfile.BadZipFile):
+                return src
+        if src.lower().startswith(EXTERNAL):
+            return src
+        return alttext.digest(os.path.join(os.path.dirname(os.path.abspath(path)),
+                                           unquote(src)), src)
+    return identity
 
 
 def book_language(path):
@@ -183,6 +205,7 @@ def check(path, kind, markers=("matrix", "row-headers")):
                                    kind=kind))
 
     image_index = [0]
+    described = []      # (image n, src, alt) for alt text no rule names
 
     def on_inline(node):
         t = node["t"]
@@ -204,6 +227,8 @@ def check(path, kind, markers=("matrix", "row-headers")):
                                                      " (%s)" % found[1]
                                                      if found[0] == "placeholder" else ""),
                                        file=name, kind=kind))
+                else:
+                    described.append((image_index[0], src, text_of(alt).strip()))
         elif t == "Link":
             attr, inner, (target, _) = node["c"]
             label = text_of(inner).strip()
@@ -220,6 +245,11 @@ def check(path, kind, markers=("matrix", "row-headers")):
                                    body[-40:], file=name, kind=kind))
 
     walk(doc["blocks"], on_block, on_inline)
+    shared = alttext.shared([(src, alt) for _n, src, alt in described], picture(path, kind))
+    for index, others in sorted(shared.items()):
+        number, src, alt = described[index]
+        out.append(Finding(f"image {number}", "source-image-alt-shared", "%s: %r (%s)" % (
+            os.path.basename(src), alt, alttext.shared_reason(others)), file=name, kind=kind))
 
     last = None
     for level, text in headings:

@@ -44,6 +44,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
 import argparse
+import json
 import os
 import sys
 
@@ -69,6 +70,10 @@ def main():
                         help="a PDF to check (repeatable)")
     parser.add_argument("--pptx", action="append", default=[],
                         help="a PowerPoint file to check (repeatable)")
+    parser.add_argument("--documents",
+                        help="a JSON file naming each page's document, {page: name}: one alt "
+                             "text on different images is looked for within a document, and "
+                             "the pages are one without it")
     parser.add_argument("--report", help="write findings here as CSV")
     parser.add_argument("--quick", action="store_true",
                         help="skip epubcheck, the Nu checker, and veraPDF "
@@ -86,9 +91,13 @@ def main():
                     pages.append(line)
     pages = [p for p in pages if os.path.exists(p)]
 
+    documents = None
+    if args.documents:
+        with open(args.documents, encoding="utf-8") as fh:
+            documents = json.load(fh)
     findings = []
     if pages:
-        findings += outputcheck.check_html_files(pages)
+        findings += outputcheck.check_html_files(pages, documents)
     epubs = [p for p in args.epub if os.path.exists(p)]
     for path in epubs:
         findings += outputcheck.check_epub(path)

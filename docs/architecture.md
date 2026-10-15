@@ -71,7 +71,7 @@ on another `bin/` script.
 | `lib/deckrun.py` | A slides run, for `convert.py`: each deck checked, its reports written, its copies written and checked. |
 | `lib/sidecars.py` | What a sidecar's values mean, read alike by every part that reads them: the decorative marker, and `math-keep.csv`'s rows and what a run says of one that kept nothing. |
 | `lib/names.py` | The one rule for a safe file name, shared with `safe-media.lua`. |
-| `lib/alttext.py` | Alt text that says nothing about its image, by one set of rules for a deck's pictures, a book's images, the output check, and the audit: a file name, a word such as "image", a camera's name for a file, a description Office generated, a web page's title, and the project's own patterns. |
+| `lib/alttext.py` | Alt text that says nothing about its image, by one set of rules for a deck's pictures, a book's images, the output check, and the audit: a file name, a word such as "image", a camera's name for a file, a description Office generated, a web page's title, a credit, and the project's own patterns; and one alt text on different pictures, told apart by their content. |
 | `lib/highlighting.py` | The option that gives each Pandoc writer `highlighting.theme`, for every target that highlights code. |
 | `split-pages.py` | Cuts filtered intermediates into one page per heading, names the pieces, rewrites links between them and links into them from the book's other pages, and records where each came from. |
 | `page.css` | The rules every page carries beyond Pandoc's own stylesheet: caption contrast, highlighted code's colors in dark mode, real table display, the scroll wrapper. |

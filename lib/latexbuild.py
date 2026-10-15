@@ -561,6 +561,27 @@ PDF_MACROS = r"""\ExplSyntaxOn
       { \captionsetup { labelformat = empty , labelsep = none } }
       { \tl_set:Nn \LTcaptype { } }
   }
+% A footnote's mark in a figure's caption took a number for each time
+% LaTeX set the caption: a tagged PDF's figure caption is set twice
+% (latex-lab-testphase-float.sty's \@makecaption sets it in a box, its
+% tagging suspended, to measure it, then again), as an untagged one too
+% long for its line is where the caption package isn't loaded, and the
+% mark stepped the footnote counter both times, so the note took the
+% second number and the first went to none. pdf-target.lua opens a
+% caption holding a note with \OERCaptionNotes and a number of its own:
+% the first time the caption is set, the counter is noted, and each time
+% after, it's set back.
+\int_new:N \g__oer_caption_notes_int
+\int_new:N \g__oer_caption_footnote_int
+\NewDocumentCommand \OERCaptionNotes { m }
+  {
+    \int_compare:nNnTF {#1} = { \g__oer_caption_notes_int }
+      { \int_gset_eq:cN { c@footnote } \g__oer_caption_footnote_int }
+      {
+        \int_gset:Nn \g__oer_caption_notes_int {#1}
+        \int_gset_eq:Nc \g__oer_caption_footnote_int { c@footnote }
+      }
+  }
 % A passage in another language (pdf-target.lua): a span or a link a Span
 % with its /Lang, opened in the paragraph, and a div's blocks in
 % oerlanguage, whose structure elements take its /Lang; untagged, the

@@ -10,7 +10,8 @@
 --    ordinary cells, so a table the header pre-pass declared with a
 --    header column comes out with none. latex-lab's table code takes
 --    the columns from \tagpdfsetup{table/header-columns=...}, set
---    before the table and cleared after it. Header rows need nothing:
+--    before the table and cleared after it, where there's tagging (an
+--    untagged PDF has no \tagpdfsetup). Header rows need nothing:
 --    the writer puts the head in longtable's \endfirsthead and \endhead,
 --    and latex-lab tags those rows TH.
 --
@@ -32,9 +33,10 @@
 --
 -- 4. A table inside a table's cell. The writer makes each a longtable,
 --    and LaTeX stops on a longtable inside another ("Extra alignment tab";
---    jgm/pandoc#3586). The inner table is written as its rows, one line
---    each, its cells' text side by side: GIAM's long division, a layout,
---    is the case this was measured on.
+--    jgm/pandoc#3586). The inner table is written as a tabular, its head
+--    declared for tagging, or, where a cell spans rows, as its rows, one
+--    line each, its cells' text side by side: GIAM's long division, a
+--    layout, is the case this was first measured on.
 --
 -- 5. An eqnarray* formula, which the writer wraps in \[ \] where it writes
 --    an eqnarray as it is, and LaTeX stops on: written as it is. And \pmb,
@@ -75,6 +77,12 @@
 --
 -- 10. A formula with an alignment in it (a matrix, an array, cases) in a
 --    table's cell or caption, set in braces (below).
+--
+-- 11. A footnote in a figure's caption, whose mark took a number for each
+--    time LaTeX set the caption, so a tagged PDF's skipped one (below).
+--
+-- 12. A footnote in a table inside a table's cell (4), which was a
+--    minipage's (below).
 --
 -- Copyright 2026 Robert Szarka
 --
@@ -170,6 +178,12 @@ end
 -- way, five blocks of it, indented as quotations.
 local unquote = {BlockQuote = function(quote) return quote.content end}
 
+-- LaTeX's tagging told something, where there is tagging: an untagged
+-- PDF (pdf.standard: []) has no \tagpdfsetup, and LaTeX stopped on one.
+local function tagging_setup(keys)
+  return '\\ifdefined\\tagpdfsetup\\tagpdfsetup{' .. keys .. '}\\fi'
+end
+
 -- A cell spanning rows is set with \multirow, which LaTeX's tagging code
 -- doesn't follow (the tagging project lists multirow as incompatible): it
 -- tags the cell as one row's and the rows below as having an empty cell
@@ -177,8 +191,8 @@ local unquote = {BlockQuote = function(quote) return quote.content end}
 -- RowSpan and leaves the cells it covers untagged.
 local function mark_row_span(cell)
   if (cell.row_span or 1) <= 1 then return end
-  local raw = pandoc.RawInline('latex', string.format(
-    '\\ifdefined\\tagpdfsetup\\tagpdfsetup{table/multirow=%d}\\fi ', cell.row_span))
+  local raw = pandoc.RawInline('latex',
+    tagging_setup(string.format('table/multirow=%d', cell.row_span)) .. ' ')
   local first = cell.contents[1]
   if first and (first.t == 'Plain' or first.t == 'Para') then
     first.content:insert(1, raw)
@@ -247,19 +261,52 @@ end
 -- A table inside a table's cell as a tabular, which LaTeX nests where it
 -- can't nest a longtable, with its head declared for tagging (a header
 -- row, and a column where the pre-pass gave one) in a group of its own,
--- since \tagpdfsetup holds until it's changed. Tagging makes it a Table
--- inside the cell's TD, which veraPDF passes (measured, LaTeX 2026-06-01).
--- A cell spanning rows needs multirow, which isn't loaded: such a table
--- is written as lines of text, as every inner table once was.
+-- since \tagpdfsetup holds until it's changed, and only where it's
+-- defined: an untagged PDF has no \tagpdfsetup, and LaTeX stopped on it
+-- (pdf.standard: [], LaTeX 2026-06-01). Tagging makes it a Table inside
+-- the cell's TD, which veraPDF passes (measured, LaTeX 2026-06-01). A cell
+-- spanning rows needs multirow, which isn't loaded: such a table is
+-- written as lines of text, as every inner table once was.
+--
+-- A footnote in such a table's cell stays a note, between the tabular's
+-- pieces in a div, so the writer gives it as it gives one in the outer
+-- table's cells: its mark (\footnotemark) in the cell, its text after
+-- the outer table, with the outer table's own, in their order. Written
+-- with the cell's text, as \footnote, it was a minipage's note in the
+-- outer cell, lettered, where its text took a number another note had.
+-- The writer puts a cell holding a div in a minipage, as it did the raw
+-- block before.
 local ALIGN = { AlignLeft = 'l', AlignCenter = 'c', AlignRight = 'r' }
+local NOTE_MARK = 'OERINNERNOTE'
 
-local function cell_latex(cell)
-  local text = pandoc.write(pandoc.Pandoc(cell.contents), 'latex')
+local function cell_latex(cell, notes)
+  local contents = cell.contents:walk({
+    Note = function(note)
+      notes[#notes + 1] = note
+      return pandoc.Str(NOTE_MARK .. #notes .. 'X')
+    end,
+  })
+  local text = pandoc.write(pandoc.Pandoc(contents), 'latex')
   text = text:gsub('%s+$', ''):gsub('^%s+', ''):gsub('\n%s*\n', ' ')
   if cell.col_span > 1 then
     text = '\\multicolumn{' .. cell.col_span .. '}{c}{' .. text .. '}'
   end
   return text
+end
+
+-- The tabular's LaTeX, its notes put back where their marks stand.
+local function with_notes(latex, notes)
+  if #notes == 0 then
+    return pandoc.RawBlock('latex', latex)
+  end
+  local inlines, last = pandoc.Inlines{}, 1
+  for first, n, after in latex:gmatch('()' .. NOTE_MARK .. '(%d+)X()') do
+    inlines:insert(pandoc.RawInline('latex', latex:sub(last, first - 1)))
+    inlines:insert(notes[tonumber(n)])
+    last = after
+  end
+  inlines:insert(pandoc.RawInline('latex', latex:sub(last)))
+  return pandoc.Div({ pandoc.Plain(inlines) })
 end
 
 local function as_tabular(inner)
@@ -281,11 +328,11 @@ local function as_tabular(inner)
   for _, colspec in ipairs(inner.colspecs) do
     spec[#spec + 1] = ALIGN[colspec[1]] or 'l'
   end
-  local lines = {}
+  local lines, notes = {}, {}
   for i, row in ipairs(rows_of(inner)) do
     local cells = {}
     for _, cell in ipairs(row.cells) do
-      cells[#cells + 1] = cell_latex(cell)
+      cells[#cells + 1] = cell_latex(cell, notes)
     end
     lines[#lines + 1] = table.concat(cells, ' & ') .. ' \\\\'
     if i == head_rows then
@@ -303,10 +350,10 @@ local function as_tabular(inner)
     for i = 1, head_columns do list[#list + 1] = tostring(i) end
     keys[#keys + 1] = 'table/header-columns={' .. table.concat(list, ',') .. '}'
   end
-  return pandoc.RawBlock('latex',
-    '{' .. (#keys > 0 and ('\\tagpdfsetup{' .. table.concat(keys, ',') .. '}') or '')
+  return with_notes(
+    '{' .. (#keys > 0 and (tagging_setup(table.concat(keys, ','))) or '')
     .. '\\begin{tabular}[t]{' .. table.concat(spec) .. '}\n'
-    .. table.concat(lines, '\n') .. '\n\\end{tabular}}')
+    .. table.concat(lines, '\n') .. '\n\\end{tabular}}', notes)
 end
 
 local function flatten_nested(tbl)
@@ -357,10 +404,10 @@ function Table(tbl)
     list[#list + 1] = tostring(i)
   end
   local blocks = {
-    pandoc.RawBlock("latex", "\\tagpdfsetup{table/header-columns={"
-                    .. table.concat(list, ",") .. "}}"),
+    pandoc.RawBlock("latex", tagging_setup("table/header-columns={"
+                    .. table.concat(list, ",") .. "}")),
     tbl,
-    pandoc.RawBlock("latex", "\\tagpdfsetup{table/header-columns={}}"),
+    pandoc.RawBlock("latex", tagging_setup("table/header-columns={}")),
   }
   return own and without_label(blocks) or blocks
 end
@@ -477,6 +524,35 @@ local function only_table(fig)
   return tables[1]
 end
 
+-- A footnote in a figure's caption (11), whose mark LaTeX numbered as
+-- often as it set the caption, and a tagged PDF's figure caption is set
+-- twice (latexbuild's PDF_MACROS): the caption opens with
+-- \OERCaptionNotes and a number of its own, and the caption the list of
+-- figures takes, which the writer makes of the caption without its notes,
+-- is given, without it too.
+local caption_notes = 0
+
+local function numbered_notes(fig)
+  local long, held = caption_blocks(fig.caption), false
+  long:walk({ Note = function() held = true end })
+  if not held then return fig end
+  caption_notes = caption_notes + 1
+  local caption = fig.caption
+  if not caption.short or #caption.short == 0 then
+    caption.short = pandoc.utils.blocks_to_inlines(long):walk({
+      Note = function() return {} end })
+  end
+  local mark = pandoc.RawInline('latex', '\\OERCaptionNotes{' .. caption_notes .. '}')
+  if long[1].t == 'Plain' or long[1].t == 'Para' then
+    long[1].content:insert(1, mark)
+  else
+    long:insert(1, pandoc.Plain({ mark }))
+  end
+  caption.long = long
+  fig.caption = caption
+  return fig
+end
+
 function Figure(fig)
   fig = unnest(fig)
   local tbl = only_table(fig)
@@ -485,7 +561,9 @@ function Figure(fig)
     if tbl.identifier == '' then tbl.identifier = fig.identifier end
     return tbl
   end
-  if own_label(fig.caption, FIGURE_WORDS) or unnumbered(fig) then
+  local unlabeled = own_label(fig.caption, FIGURE_WORDS) or unnumbered(fig)
+  fig = numbered_notes(fig)
+  if unlabeled then
     return without_label({ fig })
   end
   return fig

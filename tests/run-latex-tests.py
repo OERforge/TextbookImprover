@@ -1854,8 +1854,10 @@ def case_latex_target(work):
          lambda: re.search(r"\\multicolumn\{2\}\{[^}]*@\{\}\}", two) is not None),
         ("a display formula comes out of the emphasis around it, which tagging can't take",
          lambda: "C = 2 \\pi r" in two and "\\emph{\\[" not in two),
-        ("a table in a table's cell is a tabular, its head declared for tagging and ruled off",
-         lambda: "{\\tagpdfsetup{table/header-rows={1}}\\begin{tabular}[t]{" in two
+        ("a table in a table's cell is a tabular, its head declared for tagging, where "
+         "there's tagging, and ruled off",
+         lambda: "{\\ifdefined\\tagpdfsetup\\tagpdfsetup{table/header-rows={1}}\\fi"
+         "\\begin{tabular}[t]{" in two
          and "A & B & A and B \\\\\n\\hline\n" in two and "T & F & F \\\\" in two),
         ("what the PDF target's filter writes is there too: a link's /Contents",
          lambda: "\\OERLinkContents{" in one and "\\OERLinkContents" in master),

@@ -69,6 +69,8 @@ except ImportError:
 
 sys.path.insert(0, os.path.join(ROOT, "lib"))
 import highlighting  # noqa: E402
+import outputcheck  # noqa: E402
+import pdfcheck  # noqa: E402
 import pdfparagraphs  # noqa: E402
 sys.path.insert(0, HERE)
 import parallel  # noqa: E402
@@ -307,15 +309,71 @@ UNTAGGED_PAGE = r"""# Figures
 
 Three figures whose captions carry their own labels, the second too
 long for one line and the third labeled by a word the book's settings
-name, and one whose caption doesn't.
+name, and one whose caption doesn't. Two captions too long for a line
+hold a footnote, as this paragraph does.[^u1]
 
 ![Figure 7.3 A red square the book labels itself](assets/red.png)
 
 ![A red square with no label of its own](assets/red.png)
 
-![Figure 7.4 A caption the book labels itself, long enough to run past the width of its line and be set as a paragraph of its own](assets/red.png)
+![Figure 7.4 A caption the book labels itself, long enough to run past the width of its line and be set as a paragraph of its own.[^u2]](assets/red.png)
 
 ![Exhibit 2.1 A red square labeled as an exhibit](assets/red.png)
+
+![A red square whose caption, long enough to run past the width of its line and be set as a paragraph of its own, holds a note.[^u3]](assets/red.png)
+
+[^u1]: The first note, in the text.
+[^u2]: The second note, in a labeled caption.
+[^u3]: The third note, in a caption.
+"""
+
+# Footnotes where LaTeX numbered them wrong, in a book built tagged and
+# untagged, its notes numbered through its two chapters: in a figure's
+# caption, whose mark took a number each time LaTeX set the caption, and
+# in a table inside a table's cell, which was a minipage's; with a table
+# with a header column, and the table in the cell with a head, whose
+# \tagpdfsetup stopped LaTeX untagged.
+NOTES_CAPTIONS = r"""# Captions
+
+Text with a note.[^a]
+
+![A figure whose caption has a note.[^b]](assets/red.png)
+
+![A figure whose caption, long enough to run past the width of its line and be set as a paragraph of its own, has a note.[^c]](assets/red.png)
+
+[^a]: Note a, in the text.
+[^b]: Note b, in a caption.
+[^c]: Note c, in a long caption.
+"""
+
+NOTES_CELLS = r"""# Cells
+
+::: matrix
+|      | Left | Right |
+|------|------|-------|
+| Up   | 1    | 3     |
+| Down | 2    | 4     |
+:::
+
++--------------------------+--------------------------+
+| Outer                    | Right                    |
++==========================+==========================+
+| Above it, a note.[^d]    | A plain cell.            |
++--------------------------+--------------------------+
+| +-------+-------+        | Beside it, a note.[^g]   |
+| | In    | Out   |        |                          |
+| +=======+=======+        |                          |
+| | x[^e] | y[^f] |        |                          |
+| +-------+-------+        |                          |
++--------------------------+--------------------------+
+
+After the tables, a note.[^h]
+
+[^d]: Note d, above the inner table.
+[^e]: Note e, in the inner table.
+[^f]: Note f, in the inner table too.
+[^g]: Note g, beside the inner table.
+[^h]: Note h, after the tables.
 """
 
 PROJECT = """project:
@@ -492,6 +550,87 @@ def languages(path):
         for kid in kids(pdf.Root.StructTreeRoot):
             walk(kid, None)
     return out
+
+
+def build_notes(work):
+    """NOTES_CAPTIONS and NOTES_CELLS, built tagged, to PDF/UA-2, with a
+    list of figures, and untagged: (the tagged PDF's path, the untagged
+    one's, what the run said, the tagged one's LaTeX)."""
+    os.makedirs(os.path.join(work, "assets"))
+    png(os.path.join(work, "assets", "red.png"), (200, 0, 0))
+    for name, text in (("captions.md", NOTES_CAPTIONS), ("cells.md", NOTES_CELLS),
+                       ("meta.md", "---\nlof: true\n---\n")):
+        with open(os.path.join(work, name), "w", encoding="utf-8") as fh:
+            fh.write(text)
+    with open(os.path.join(work, "project.yaml"), "w", encoding="utf-8") as fh:
+        fh.write("project:\n  title: Notes\n  identifier: org.example.notes\n"
+                 "  language: en-US\n  contents:\n    - captions\n    - cells\n")
+    with open(os.path.join(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
+        fh.write("targets:\n  pdf:\n    format: pdf\n    pdf:\n      metadata: meta.md\n"
+                 "  plain:\n    format: pdf\n    pdf:\n      standard: []\n")
+    converted = subprocess.run(["python3", os.path.join(BIN, "convert.py")], cwd=work,
+                               capture_output=True, text=True, stdin=subprocess.DEVNULL)
+    run(["python3", os.path.join(BIN, "build-pdf.py"), "--latex-only", "--target", "pdf"],
+        work)
+    tex = os.path.join(work, "pdf", "book.tex")
+    source = ""
+    if os.path.exists(tex):
+        with open(tex, encoding="utf-8") as fh:
+            source = fh.read()
+    return (os.path.join(work, "pdf", "org.example.notes.pdf"),
+            os.path.join(work, "plain", "org.example.notes.pdf"),
+            converted.stdout + converted.stderr, source)
+
+
+def footnote_marks(path):
+    """Each footnote mark of a tagged PDF, in order: its text, and the text
+    of each note its /Ref links it to."""
+    texts = pdftext.marked_text(path)
+    pdf = pdfparagraphs.pikepdf.open(path)
+    pages = {page.objgen: n for n, page in enumerate(pdf.pages)}
+
+    def text_of(element):
+        text = pdftext.own_text(element, texts, pages)
+        for kid in pdfparagraphs.kids_of(element):
+            if pdfparagraphs.is_struct_elem(kid):
+                text += text_of(kid)
+        return text
+    found = []
+
+    def walk(element):
+        if not pdfparagraphs.is_struct_elem(element):
+            return
+        if str(element["/S"]) == "/footnotemark":
+            found.append((text_of(element), [text_of(note) for note in element.get("/Ref") or []]))
+        for kid in pdfparagraphs.kids_of(element):
+            walk(kid)
+    for kid in pdfparagraphs.kids_of(pdf.Root.StructTreeRoot):
+        walk(kid)
+    return found
+
+
+# Where each chapter of the notes book has its notes' marks, in order.
+CAPTION_MARKS = [r"with\s+a\s+note\.\s*1", r"caption\s+has\s+a\s+note\.\s*2",
+                 r"own,\s+has\s+a\s+note\.\s*3"]
+CELL_MARKS = [r"Above\s+it,\s+a\s+note\.\s*4", r"x\s*5\s*y\s*6",
+              r"Beside\s+it,\s+a\s+note\.\s*7", r"tables,\s+a\s+note\.\s*8"]
+
+
+def numbered_notes(text, letters, first, marks):
+    """Whether the PDF's text has the notes lettered letters (NOTES_CAPTIONS,
+    NOTES_CELLS) numbered from first, in order, and each mark beside its
+    words."""
+    return all(re.search(r"(?<![\d.])%d\s*Note\s+%s," % (n, letter), text)
+               for n, letter in enumerate(letters, first)) \
+        and all(re.search(mark, text) for mark in marks)
+
+
+def linked_notes(marks, letters, first):
+    """Whether footnote_marks's marks are numbered from first, in order,
+    each linked to the note of its number, lettered letters in order."""
+    return [(mark, [re.sub(r"^(\d+)\s*Note (\w),.*", r"\1\2", note) for note in notes])
+            for mark, notes in marks] \
+        == [(str(n), ["%d%s" % (n, letter)]) for n, letter in enumerate(letters, first)]
 
 
 def untagged_repairs(work):
@@ -774,13 +913,24 @@ def checks(work, jobs=1):
             book = pool.submit(build, work)
             ua1 = pool.submit(build_ua1, work + "-ua1")
             plain = pool.submit(build_untagged, work + "-untagged")
+            noted = pool.submit(build_notes, work + "-notes")
             reader, source, rows, log, placements = book.result()
             ua1_path, ua1_said, ua1_rows = ua1.result()
             untagged_path, untagged_said = plain.result()
+            notes_path, notes_plain, notes_said, notes_source = noted.result()
     else:
         reader, source, rows, log, placements = build(work)
         ua1_path, ua1_said, ua1_rows = build_ua1(work + "-ua1")
         untagged_path, untagged_said = build_untagged(work + "-untagged")
+        notes_path, notes_plain, notes_said, notes_source = build_notes(work + "-notes")
+
+    def page_text(path):
+        return "".join(page.extract_text() or "" for page in pypdf.PdfReader(path).pages) \
+            if os.path.exists(path) else ""
+    notes_text, notes_plain_text = page_text(notes_path), page_text(notes_plain)
+
+    def notes_marks():
+        return footnote_marks(notes_path) if os.path.exists(notes_path) else []
     untagged_text = "".join(page.extract_text() or "" for page in
                             pypdf.PdfReader(untagged_path).pages) \
         if os.path.exists(untagged_path) else ""
@@ -969,6 +1119,43 @@ def checks(work, jobs=1):
          and not re.search(r":\s*(Figure\s*7\.[34]|Exhibit)", untagged_text)
          and re.search(r"Figure\s*2\s*:\s*A red square with no label", untagged_text)
          and "/StructTreeRoot" not in pypdf.PdfReader(untagged_path).trailer["/Root"]),
+        # LaTeX's classes set a caption too long for its line twice, and
+        # TextbookImprover's own for a caption without its label, and a
+        # footnote's mark in it took a number each time.
+        ("and a footnote in a caption too long for its line is numbered once, there and in "
+         "one without its label",
+         lambda: re.search(r"as\s+this\s+paragraph\s+does\.\s*1", untagged_text)
+         and re.search(r"of\s+its\s+own\.\s*2", untagged_text)
+         and re.search(r"holds\s+a\s+note\.\s*3", untagged_text)
+         and all(re.search(r"(?<!\d)%d\s*The\s+%s\s+note" % (n, word), untagged_text)
+                 for n, word in ((1, "first"), (2, "second"), (3, "third")))),
+        # A tagged PDF's figure caption is set twice, and an untagged one
+        # too long for its line where there's no caption package (latexbuild's
+        # \\OERCaptionNotes).
+        ("a footnote in a figure's caption is numbered once, a long caption's too, "
+         "tagged and untagged: each mark beside its words, numbered in order as its note is",
+         lambda: numbered_notes(notes_text, "abc", 1, CAPTION_MARKS)
+         and numbered_notes(notes_plain_text, "abc", 1, CAPTION_MARKS)),
+        ("and its mark is linked to its note",
+         lambda: linked_notes(notes_marks()[:3], "abc", 1)),
+        # The list of figures' caption is given, as the writer would make
+        # it of the caption without its notes, so it doesn't hold the
+        # command, which would set the counter back there.
+        ("the list of figures' caption doesn't hold the command, the caption does",
+         lambda: re.search(r"\\caption\[[^\]]*OERCaptionNotes", notes_source) is None
+         and len(re.findall(r"\\caption\[[^\]]*\]\{\\OERCaptionNotes\{[12]\}",
+                            notes_source)) == 2),
+        # Written with the cell's text, a minipage's note, lettered, its
+        # text taking a number another note had (pdf-target.lua).
+        ("a footnote in a table inside a table's cell is numbered among the outer "
+         "table's, in order, tagged and untagged, its text after the outer table",
+         lambda: numbered_notes(notes_text, "defgh", 4, CELL_MARKS)
+         and numbered_notes(notes_plain_text, "defgh", 4, CELL_MARKS)),
+        ("and its mark is linked to its note",
+         lambda: linked_notes(notes_marks()[3:], "defgh", 4)),
+        ("an untagged PDF of a book with a table with a header column, and one in a "
+         "table's cell with a head, is built, as LaTeX stopped on \\tagpdfsetup",
+         lambda: os.path.exists(notes_plain) and "Undefined control sequence" not in notes_said),
         ("a table whose first header row is one spanning cell, with no "
          "caption, keeps that row",
          lambda: shape(table_elements[3])[:2] == [1, 2]
@@ -1088,6 +1275,9 @@ def checks(work, jobs=1):
         items.append(("and so the claims aren't reported as unverified",
                       lambda: not [r for r in pdf_rows if r["Check"]
                                    == "pdf-claims-unverified"]))
+        items.append(("veraPDF finds nothing in the notes book's tagged PDF",
+                      lambda: os.path.exists(notes_path) and not pdfcheck.run_verapdf(
+                          outputcheck.find_validator("verapdf"), notes_path)))
     else:
         print("  skip  veraPDF not found (set VERAPDF); its verdict is "
               "not checked")
@@ -1182,14 +1372,15 @@ def main():
             print(("  ok    " if passed else "  FAIL  ") + name)
             failed += not passed
     finally:
-        # The PDF/UA-1 and untagged books are built beside the book
-        # (build_ua1, build_untagged).
+        # The PDF/UA-1, untagged, and notes books are built beside the book
+        # (build_ua1, build_untagged, build_notes).
         if arguments.keep:
-            print(f"\nOutput left in {work}, {work}-ua1, and {work}-untagged")
+            print(f"\nOutput left in {work}, {work}-ua1, {work}-untagged, and {work}-notes")
         else:
             shutil.rmtree(work, ignore_errors=True)
             shutil.rmtree(work + "-ua1", ignore_errors=True)
             shutil.rmtree(work + "-untagged", ignore_errors=True)
+            shutil.rmtree(work + "-notes", ignore_errors=True)
     print(f"\n{failed} check(s) failed" if failed
           else "\nall PDF checks passed")
     return 1 if failed else 0

@@ -537,16 +537,18 @@ def check_word_equation_text():
     characters that are characters for others, as math-repair.lua gives
     \\text{} only those."""
     import docxremediate
-    math = ('<m:oMath><m:r><m:t>ŷ=µ</m:t></m:r>'
-            '<m:r><m:rPr><m:nor /></m:rPr><m:t>ŷ 1–5 µ</m:t></m:r></m:oMath>')
+    math = ('<m:oMath><m:r><m:t>ŷ=µ·x</m:t></m:r>'
+            '<m:r><m:rPr><m:nor /></m:rPr><m:t>ŷ 1–5 µ·</m:t></m:r></m:oMath>')
     fixed, counts = docxremediate.remediate_equations(math)
     return [
-        ("a y-hat in math is a hat over y, and the micro sign mu",
-         lambda: fixed.startswith('<m:oMath><m:acc>') and "<m:t>=μ</m:t>" in fixed),
-        ("in normal text the y-hat and the en dash stay, and the micro sign is mu",
-         lambda: "<m:t>ŷ 1–5 μ</m:t>" in fixed and fixed.count("<m:acc>") == 1),
+        ("a y-hat in math is a hat over y, the micro sign mu, and a middle dot the "
+         "dot operator Pandoc writes for \\cdot",
+         lambda: fixed.startswith('<m:oMath><m:acc>') and "<m:t>=μ⋅x</m:t>" in fixed),
+        ("in normal text the y-hat, the en dash, and the middle dot stay, and the micro "
+         "sign is mu",
+         lambda: "<m:t>ŷ 1–5 μ·</m:t>" in fixed and fixed.count("<m:acc>") == 1),
         ("each character changed is counted",
-         lambda: counts == {"equations_repaired": 1, "equation_characters": 3}),
+         lambda: counts == {"equations_repaired": 1, "equation_characters": 4}),
     ]
 
 

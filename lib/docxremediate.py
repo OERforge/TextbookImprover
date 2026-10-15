@@ -395,9 +395,10 @@ def _repair_run(m, counts):
     fixed = text
     for old, new in EQUATION_CHARACTERS.items():
         fixed = fixed.replace(old, new)
-    # An en dash is a minus, except in normal text.
+    # An en dash is a minus, and a middle dot the product's dot operator,
+    # which Pandoc writes for the \cdot the pages get, except in normal text.
     if not normal:
-        fixed = fixed.replace("\u2013", "\u2212")
+        fixed = fixed.replace("\u2013", "\u2212").replace("\u00b7", "\u22c5")
     counts["equation_characters"] += sum(a != b for a, b in zip(text, fixed))
     if normal or ("\u0177" not in fixed and "\u0176" not in fixed):
         return start + props + t_open + fixed + t_close + end
@@ -510,7 +511,8 @@ def equation_texs(parts, name):
 def remediate_equations(xml, skip=(), pattern=None, macron_bars=False):
     """The characters of each of Word's equations, as math.repair_equations
     repairs them in the pages: mu for the micro sign, Delta for the
-    increment sign, a minus for an en dash, a bar for an upper limit that
+    increment sign, a minus for an en dash, the dot operator for a middle
+    dot, a bar for an upper limit that
     is a macron or an en dash, a hat over y for the one-character y-hat,
     and 0 for a subscript's slashed O. Only inside m:oMath; the text around
     an equation is left to math.from_text. pattern: the regular expression

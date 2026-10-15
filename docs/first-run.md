@@ -10,7 +10,7 @@ A cartridge needs the pages in the book's order, grouped into modules. Three sou
 2. **The filenames**, with `--includeallhtml`: a page named `3-2-something` is placed under chapter 3 without guessing. Pages with no chapter in their name are left for you to sort.
 3. **A guess**, which is what a bare first run does and says so in the sample.
 
-Whichever you use, the result goes to `project-sample.yaml` for review, and anything you then list under `contents` stays where you put it. [Building the cartridge](packaging.md#ordering-from-the-books-own-table-of-contents) has the detail.
+Whichever you use, the result goes to `project-sample.yaml` for review (to `packaging-sample.yaml` for a book named in `packaging.yaml`'s own `project:` block), and anything you then list under `contents` stays where you put it. [Building the cartridge](packaging.md#ordering-from-the-books-own-table-of-contents) has the detail.
 
 ## Quick start
 
@@ -227,4 +227,4 @@ already written by that point.
 
 ## Next
 
-[Worked examples](examples.md) takes two real books through these steps from start to finish: an OpenStax book from its Word files to a course cartridge, and a book website from a WARC to an EPUB.
+[Worked examples](examples.md) takes three real books through these steps from start to finish: an OpenStax book from its Word files to a course cartridge, a book website from a WARC to an EPUB, and a LaTeX book from its repository to a tagged PDF.

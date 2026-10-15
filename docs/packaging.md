@@ -48,7 +48,9 @@ skipped, and an entry holding a page's worth of text (one in the corpus
 does) is skipped with a warning rather than matched.
 Run `--toc` before adopting the sample, or delete `contents` from
 `project.yaml` and run it again. The result goes to
-`project-sample.yaml` for review, and outline entries matching no page
+`project-sample.yaml` for review (`packaging-sample.yaml` for a book
+named in `packaging.yaml`'s own `project:` block), and outline entries
+matching no page
 are reported.
 
 Note that it follows the book faithfully. If the PDF puts per-chapter

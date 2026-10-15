@@ -49,8 +49,12 @@
 #   run-latex-tests.py     LaTeX as a source, and the copies and PDFs
 #                          made from it; its drawings need a TeX.
 #   run-decks-tests.py     decks written in Markdown: each deck's page,
-#                          its copies, and its PDF through ltx-talk, which
-#                          needs LuaLaTeX and ltx-talk (skipped without).
+#                          its copies, its PDF through ltx-talk, which
+#                          needs LuaLaTeX and ltx-talk (skipped without),
+#                          its PowerPoint file, and its reveal.js
+#                          presentation, twelve of whose checks open it
+#                          in a browser with the optional Playwright and
+#                          its Chromium (skipped without).
 #
 # Copyright 2026 Robert Szarka
 #

@@ -19,7 +19,7 @@ The security textbook is published as an Asciidoctor EPUB and its source is publ
 
 ## AsciiDoc as a target
 
-A target with `format: asciidoc` writes the book as AsciiDoc to be read again as a source, the way a `markdown` target writes Markdown: what the author decided, and nothing the filter derived from it. It writes one `.adoc` per page, or with `merge: groups` one per top-level group of the book's contents. Its media keep the author's names, and a banded table stays one table (`tables.bands: group`). It's written in modern AsciiDoc as Asciidoctor reads it, and read back through Pandoc's reader, which is what the round trip is measured with: converting the written files gives the same pages as converting the book, and writing them again gives the same files.
+A target with `format: asciidoc` writes the book as AsciiDoc to be read again as a source, the way a `markdown` target writes Markdown: what the author decided, and nothing the filter derived from it. It writes one `.adoc` per page, or with `merge: groups` one per top-level group of the book's contents. Its media keep the author's names (lowercased with `media.lowercase`), and a banded table stays one table (`tables.bands: group`). It's written in modern AsciiDoc as Asciidoctor reads it, and read back through Pandoc's reader, which is what the round trip is measured with: converting the written files gives the same pages as converting the book, and writing them again gives the same files.
 
 Pandoc's AsciiDoc writer and reader disagree with each other in many places, and with Asciidoctor in some, so much of what the target writes it writes itself. Each form below reads back to what was written, in Pandoc's reader and in Asciidoctor:
 

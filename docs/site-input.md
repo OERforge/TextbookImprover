@@ -25,7 +25,7 @@ A `.zip` of saved pages, or a WARC or WACZ, left alone in a book's directory, is
 
 A link to a page of the book becomes a link to its file, fragment kept; an image or stylesheet becomes a reference to its copy under `assets/`. Anything not held keeps the URL it had, and the report says so when that matters. A **link** to another site is only a link and isn't reported, but a link to a page of the book's own site that nobody saved is (`page-not-saved`). A **resource** (anything a page fetches to show itself: an image, a stylesheet, a script, a frame) that isn't held is reported (`resource-not-held`), wherever it lives, unless its host serves other people's frameworks and fonts. A short list of those is built in (cdnjs, jsDelivr, unpkg, Google Fonts, and a few more); `--third-party HOST` adds one.
 
-Fragments and ids are brought to one form on both sides. Racket's Scribble writes `<a name="(part._my-len)">` and links to `#%28part._my-len%29`, and names some anchors `section 5.2`. A browser decodes a fragment before looking for it; epubcheck and our own check don't, and no id may hold a space. Decoded, with whitespace made underscores, both ends agree.
+Fragments and ids are brought to one form on both sides. Racket's Scribble writes `<a name="(part._my-len)">` and links to `#%28part._my-len%29`, and names some anchors `section 5.2`. A browser decodes a fragment before looking for it, and so does our own check; epubcheck doesn't, and no id may hold a space. Decoded, with whitespace made underscores, both ends agree.
 
 ## The generator, recognized
 

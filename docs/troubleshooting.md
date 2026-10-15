@@ -78,9 +78,9 @@ keys on the media path ignoring its extension.
   require rewriting page markup, which would break the read-only guarantee.
 - **Cross-page links aren't rewritten** for the LMS's internal link
   format, so links between sections may not resolve after import.
-- **Strikethrough conveys meaning visually.** `<del>` isn't announced by
-  most screen readers by default, so a before-and-after table should say so
-  in its column heading or caption.
+- **Strikethrough conveys meaning visually.** A screen reader may not
+  announce `<del>`, so a before-and-after table should say so in its
+  column heading or caption.
 - **Complex tables are reported, not fixed.** A table with stacked column
   headers, or with a header row and a header column, needs `headers`/`id`
   associations that no current setting can express. See the roadmap.
@@ -116,9 +116,11 @@ keys on the media path ignoring its extension.
   watch. A PDF this pipeline makes takes that empty repeated head out of
   the table (`pdf.repair_captions`), so it may not show the second error
   at all.
-- **One conversion target, one package.** The configuration is shaped for
-  several of each, and the tools resolve them correctly, but only `html`
-  and `common-cartridge` are implemented.
+- **One package, from one target.** The configuration is shaped for
+  several packages, each holding several targets, and the tools resolve
+  them correctly, but the packager builds from the first `html` target's
+  pages alone: a package whose `includes` name another target, an EPUB
+  or a PDF beside the pages, or decks, is on the roadmap.
 - **`cartridge-files.txt` can't build a prefixed package.** `zip -@`
   names each member after the path it read, so it can't place files under
   a directory. Use `--zip`; the file list says so in its header when a

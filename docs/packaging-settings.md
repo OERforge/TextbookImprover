@@ -14,7 +14,7 @@ The archive to write. Left empty it's worked out afresh on every run from the bo
 
 **`includes`**—`list`; default `[]`; *target only*
 
-Conversion targets whose output goes into this package, named as they are named in the conversion config. Order doesn't matter: anything listed is built first. A package of HTML pages that also ships an EPUB and a print PDF lists all three.
+Conversion targets whose output goes into this package, named as they are named in the conversion config. Order doesn't matter: anything listed is built first. A package of HTML pages that also ships an EPUB and a print PDF lists all three. Not acted on yet: the packager builds from the first html target's pages alone, and a package listing more holds those pages without the rest (see ROADMAP.md).
 
 ## organization
 

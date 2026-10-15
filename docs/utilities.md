@@ -76,6 +76,8 @@ remediate.py *.pptx --alt image-alt.csv --table-headers table-headers.csv \
     --links bare-links.csv --repair-equations --language en-US --out remediated
 ```
 
+It reads neither `math-keep.csv` nor the `fonts` settings, so a copy that keeps an equation as it was, or uses another font in a restricted one's place, comes from a run of `convert.py`.
+
 ## Repairing tracked deletions in the source
 
 Some authors use Word's tracked-deletion mark as *content* — a

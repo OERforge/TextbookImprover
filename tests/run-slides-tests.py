@@ -8,9 +8,11 @@ of them.
 
 Builds small decks as PresentationML with the standard library, so every
 shape a check or a decision is about is there on purpose, and reads back
-what the code wrote. The parts that run convert.py need Pandoc 3.9 or
-later, which convert.py requires of every run, and are skipped without
-it; the rest needs nothing but the standard library.
+what the code wrote. A slides run of PowerPoint decks needs no Pandoc,
+and runs here without one on the PATH too; only the case of a deck
+beside a book's pages, whose book needs Pandoc 3.9 or later, skips
+without it. The rest needs nothing but the standard library, and PyYAML
+where it runs convert.py.
 
 WHY THESE EXIST
 

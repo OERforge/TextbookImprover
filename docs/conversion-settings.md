@@ -6,7 +6,7 @@ How the book is rendered into one output format.
 
 **`format`**—one of `html`, `epub3`, `pdf`, `latex`, `docx`, `pptx`, `revealjs`, `markdown`, `asciidoc`, `source`; default `html`; *target only*
 
-What this target produces. markdown and asciidoc write source again: what the author decided, which the pipeline reads back to the same book. docx writes Word files from the same pages, in compatibility mode 15 with ScreenTips and Word's decorative marker. pdf writes one tagged PDF of the whole book through LaTeX, which needs LuaLaTeX (see the installation page), or one of each deck in a folder of decks written in Markdown. pptx writes a PowerPoint file of each such deck, and nothing for a book, and revealjs a reveal.js presentation of each, which needs a copy of reveal.js 6 (see the installation page). latex writes the LaTeX the pdf target builds from, as a master file that \include-s a file per chapter, with its images beside them, for an author to go on working in.
+What this target produces. markdown and asciidoc write source again: what the author decided, which the pipeline reads back to the same book. docx writes Word files from the same pages, in compatibility mode 15 with ScreenTips and Word's decorative marker. pdf writes one tagged PDF of the whole book through LaTeX, which needs LuaLaTeX (see the installation page), or one of each deck in a folder of decks written in Markdown. pptx writes a PowerPoint file of each such deck, and nothing for a book, and revealjs a reveal.js presentation of each, beside a copy of reveal.js 6, the repository's own unless REVEALJS_DIR names another (see the installation page). latex writes the LaTeX the pdf target builds from, as a master file that \include-s a file per chapter, with its images beside them, for an author to go on working in.
 
 **`output_dir`**—`path`; default `""` (empty); *target only*
 
@@ -46,7 +46,7 @@ For a target with format epub3 or pdf: whether the book opens with a title page,
 
 **`bookmarks`**—one of `linked`, `all`; default `linked`
 
-For a target with format docx: which of Pandoc's bookmarks a Word file keeps. Pandoc's writer bookmarks every heading and section, and NVDA announces "bookmark" at each one, hidden or not. linked keeps those a link somewhere in the book goes to, the table header bookmarks JAWS reads, and the bookmarks that carry a code block's language; all keeps every one.
+For a target with format docx: which of Pandoc's bookmarks a Word file keeps. Pandoc's writer bookmarks every heading and section, and NVDA announces "bookmark" at each one, hidden or not. linked keeps those a link somewhere in the book goes to, the table header bookmarks Freedom Scientific documents for JAWS, and the bookmarks that carry a code block's language; all keeps every one.
 
 **`title_block`**—one of `on`, `off`; default `on`
 
@@ -102,7 +102,7 @@ Alt text longer than this is reported so it can be shortened, with the detail mo
 
 **`images.alt_placeholders`**—`list`; default `[]`
 
-Alt text that says nothing about an image, besides what's always reported (punctuation alone, a file name, a word such as image or picture, a clip-art id, a default shape name, Office's generated descriptions). Each entry is matched against the whole alt text, case, surrounding spaces, and closing punctuation aside; one starting re: is a regular expression the whole alt text must match. Read for a deck's pictures and a book's images (image-alt-missing.csv); the output check and the audit go by the built-in rules alone.
+Alt text that says nothing about an image, besides what's always reported (punctuation alone, a file name, a word such as image or picture, a clip-art id, a default shape name, Office's generated descriptions). Each entry is matched against the whole alt text, case, surrounding spaces, and closing punctuation aside; one starting re: is a regular expression the whole alt text must match. Read for a deck's pictures and a book's images (image-alt-missing.csv), and by a slides run's check of its copies; the audit, and the output check of pages, EPUBs, PDFs, and a pptx target's files, go by the built-in rules alone.
 
 **`images.responsive`**—`bool`; default `true`
 
@@ -122,7 +122,7 @@ Put wide tables in a focusable scroll container so a long table doesn't force th
 
 **`tables.markers`**—`opaque`; default `{matrix: both, row-headers: first-column}`
 
-What a fenced div around a table in a Markdown source declares about its headers, class by class: "::: matrix" means both a header row and a header column, "::: row-headers" a header column and no header row, unless this says otherwise. The values are the ones table-headers.csv takes (first-row, first-column, both, none); a header row alone and no headers need no marker, since a pipe or grid table says those itself. An open block in an AsciiDoc source ([.matrix] then --) declares the same way. A Markdown or AsciiDoc target writes these markers back. A Markdown table with no marker is left as Pandoc read it; the guess and the report run only on Word sources.
+What a fenced div around a table in a Markdown source declares about its headers, class by class: "::: matrix" means both a header row and a header column, "::: row-headers" a header column and no header row, unless this says otherwise. The values are the ones table-headers.csv takes (first-row, first-column, both, none); a header row alone and no headers need no marker, since a pipe or grid table says those itself. An open block in an AsciiDoc source ([.matrix] then --) declares the same way. A Markdown or AsciiDoc target writes these markers back. A Markdown table with no marker is left as Pandoc read it; the guess and the report run on Word, HTML, and LaTeX sources, not on Markdown or AsciiDoc.
 
 ## pages
 
@@ -158,7 +158,7 @@ page keeps each page's notes at its end. group gathers a group's notes at the en
 
 **`notes.title`**—`string`; default `Notes`
 
-The heading over the notes on an HTML page, in the page's language, where a screen reader can move to them as to any heading (Pandoc writes none, and the Nu checker says the notes' section lacks one); empty, they have none. It's the title of the Notes page placement book makes, in the pages and the EPUB alike, where each group's notes are headed by the group's title. An EPUB's notes at the end of a chapter have no heading, since a reading system may show each note beside its reference.
+The heading over the notes on an HTML page, in the page's language, where a screen reader can move to them as to any heading (Pandoc writes none, and the Nu checker says the notes' section lacks one); empty, they have none. It's the title of the Notes page placement book makes (Notes when this is empty), in the pages and the EPUB alike, where each group's notes are headed by the group's title. An EPUB's notes at the end of a chapter have no heading, since a reading system may show each note beside its reference.
 
 ## slides
 
@@ -246,11 +246,11 @@ How table and figure labels are recognized in the source.
 
 **`captions.table_prefixes`**—`list`; default `[Table]`
 
-Words that begin a table label. Books that say Exhibit rather than Table need this.
+Words that begin a table label. Books that say Exhibit rather than Table need this. In a PDF, a caption that opens with one of these words and a number gets no label of LaTeX's, since it carries its own.
 
 **`captions.figure_prefixes`**—`list`; default `[Figure]`
 
-Words that begin a figure label.
+Words that begin a figure label. In a PDF, a caption that opens with one of these words and a number gets no label of LaTeX's, since it carries its own.
 
 ## media
 
@@ -262,7 +262,7 @@ Abort as soon as an image can't be identified, rather than collecting every such
 
 **`media.lowercase`**—`bool`; default `false`
 
-Copy each image and file a page names under its name in lowercase, the letters A to Z, and name it so in the page: in an html target, a revealjs target, and a markdown or asciidoc target, whose references are otherwise the author's own, with forward slashes. A server that tells case apart then finds what a page names however the source spelled it. Two files whose names differ only in case stop the run before anything is written. A source target's copies keep the author's references, since they name the author's files, which the run doesn't rename; nor do the files in an EPUB, a PDF, a Word file, or a PowerPoint file have names a reader sees.
+Copy each image and file a page names under its name in lowercase, the letters A to Z, and name it so in the page: in an html target, a revealjs target, and a markdown or asciidoc target, whose references are otherwise the author's own, with forward slashes. A server that tells case apart then finds what a page names however the source spelled it. Two files whose names differ only in case stop the run before anything is written. A source target's copies keep the author's references, since they name the author's files, which the run doesn't rename; nor do the files in an EPUB, a PDF, a Word file, or a PowerPoint file have names a reader sees. A target written into the folder that holds the sources, on a file system that ignores case, as macOS's and Windows's do, finds a source's own file under its lowercase name and leaves it as it's named, which a server that tells case apart won't find; the run warns of it, and a folder of the target's own is the fix.
 
 ## fonts
 
@@ -316,11 +316,11 @@ Descriptive captions, keyed on the table's label. A bare label is a valid captio
 
 **`sidecars.image_alt`**—`path`; default `image-alt.csv`
 
-Alt text, keyed on the image path with the extension ignored. Use [decorative] for an image that carries no meaning. A PowerPoint deck's picture is keyed on its image's content, media/ and the first 16 characters of its SHA-256, so one row covers every copy of the image in every deck (deck/media/... for one deck's copies alone); any other object on a slide, a chart or a group, on deck/slide-N/shape-M, N and M the ids PowerPoint gave the slide and the shape.
+Alt text, keyed on the image path with the extension ignored. Use [decorative] for an image that carries no meaning. A PowerPoint deck's picture is keyed on its image's content, media/ and the first 16 characters of its SHA-256, so one row covers every copy of the image in every deck (deck/media/... for one deck's copies alone); any other object on a slide, a chart or a group, on deck/slide-N/shape-M, N and M the ids PowerPoint gave the slide and the shape. A copy of a picture cropped to show another part of its image than the image's other copies show is keyed on its shape too.
 
 **`sidecars.slide_titles`**—`path`; default `slide-titles.csv`
 
-Titles for a PowerPoint deck's slides, keyed on deck/slide-N, N the id PowerPoint gave the slide. A source target writes an untitled slide's above the slide, read by a screen reader and not seen, as PowerPoint's Add Hidden Slide Title does, and the title of a slide whose title another slide in its deck has in place of that title, on the slide.
+Titles for a PowerPoint deck's slides, keyed on deck/slide-N, N the id PowerPoint gave the slide. A source target makes an untitled slide's heading its title, in place, as PowerPoint's Set as Slide Title does, when the row's title is that heading's text, or that text with a number added; writes any other title for an untitled slide above the slide, read by a screen reader and not seen, as PowerPoint's Add Hidden Slide Title does; and puts the title of a slide whose title another slide in its deck has in place of that title, on the slide.
 
 **`sidecars.reading_order`**—`path`; default `reading-order.csv`
 
@@ -354,11 +354,11 @@ Tables whose caption is a bare label with no description.
 
 **`reports.image_alt_missing`**—`path`; default `image-alt-missing.csv`
 
-Images with no alt text, or with alt text over the length limit.
+Images, and a deck's pictures and other objects, with no alt text, or with alt text that holds a file name, says nothing, was generated by Office, is a web page's title or only a credit, is shared with a different image, or runs over the length limit.
 
 **`reports.slide_titles_new`**—`path`; default `slide-titles-new.csv`
 
-A PowerPoint deck's slides with no title, and those whose title an earlier slide has, each drafted with its number (Title (2)), for slide-titles.csv.
+A PowerPoint deck's slides with no title, each drafted from the heading it shows where it shows one, and those whose title an earlier slide has, drafted with a number (Title (2)), for slide-titles.csv.
 
 **`reports.reading_order_new`**—`path`; default `reading-order-new.csv`
 
@@ -394,7 +394,7 @@ Every page split_level wrote this run: its source, the heading it was cut at, it
 
 **`reports.output_check`**—`path`; default `output-check.csv`
 
-What the output check found wrong with the pages and any EPUB this run wrote: links and fragments that resolve to nothing, images with no alt attribute, headings that skip a level, duplicate ids, tables with neither header cells nor a caption, pages with no language or title. Written when there are any findings and removed when there are none. The run isn't stopped by them; they're a list to work through.
+What the output check found wrong with what this run wrote, its pages and any EPUB, PDF, PowerPoint file, or reveal.js presentation: links and fragments that resolve to nothing, images with no alt attribute, headings that skip a level, duplicate ids, tables with neither header cells nor a caption, pages with no language or title. Written when there are any findings and removed when there are none. The run isn't stopped by them; they're a list to work through.
 
 **`reports.media_unresolved`**—`path`; default `media-unresolved.csv`
 

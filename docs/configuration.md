@@ -35,7 +35,11 @@ directory the tools are in, run in the book's directory:
 
 A run also writes `project-sample.yaml` for review when it worked out the
 contents itself: guessed from the file names, taken from a master file's
-order, or read from an outline with `--toc`. `--pages` names the directory
+order, read from an outline with `--toc`, or resolved from a page the
+split cut. For an order the packager works out, guessed or read with
+`--toc`, a book named in `packaging.yaml`'s own `project:` block gets
+`packaging-sample.yaml` instead, the contents in its block, since that's
+where the book is named. `--pages` names the directory
 the pages are in, `html/` unless an HTML target says otherwise, which
 `--init` needs only for the contents it guesses into a project sample.
 [Project settings](project-settings.md), [conversion
@@ -55,9 +59,10 @@ all a book that uses one half needs:
   `conversion.yaml`'s block too.
 - A book named in `conversion.yaml`'s block alone gets its EPUB and its
   pages. With no `packaging.yaml` either, it isn't packaged, and the run
-  says so and isn't an error; with a `packaging.yaml` that doesn't name
-  it, packaging stops, and its `project-sample.yaml` carries the block's
-  values.
+  says so and isn't an error, unless an option meant for the packager
+  (`--zip`, `--toc`) asks for a package; with that, or with a
+  `packaging.yaml` that doesn't name it, packaging stops, and its
+  `project-sample.yaml` carries the block's values.
 - A book named in both blocks gets everything, and the run notes that
   `project.yaml` would say it once.
 
@@ -106,8 +111,8 @@ Every target is built, each into its own `output_dir`, named after the
 target unless it says otherwise: `html/` for the one implied when no
 configuration exists, and several HTML renderings with different
 headers, footers, or options, an EPUB, and whatever else the schema's
-`format` lists when they're declared: `html`, `epub3`, and `markdown`
-build today. The content directory keeps the sources, the
+`format` lists when they're declared. The content directory keeps the
+sources, the
 intermediates, the sidecars, and the reports. A page you wrote by hand
 (an `.html` there with no source behind it) is copied into every HTML
 target with the local files it refers to, and read into an intermediate
@@ -243,7 +248,14 @@ footnotes are grouped by its entries, not as a whole, so with
 isn't inherited, since a chapter isn't a glossary because its Key Terms
 page is one, and a top-level entry with no `role` is in the part of the
 book its type implies: a glossary page at the end needs `type: glossary`
-and not `role: back` too, and it's unnumbered as back matter is. A
+and not `role: back` too, and it's unnumbered as back matter is. The
+front matter's types are `preface`, `foreword`, `dedication`, `epigraph`,
+`acknowledgments`, `prologue`, `abstract`, `introduction`, and
+`copyright-page`; the main matter's `part`, `chapter`, `conclusion`, and
+`epilogue`; `appendix` is an appendix; and the rest are back matter, so
+a book's Introduction chapter typed `introduction` is unnumbered front
+matter unless it says `role: main` too. Any other type is warned of and
+ignored. A
 type on a page that a split cut into pieces, or on a group's opening
 page (titled as the group is), is the group's: the glossary its pieces
 make up. A

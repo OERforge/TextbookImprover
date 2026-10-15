@@ -15,7 +15,7 @@ targets:
 
 `output_dir` defaults to the target's name and `filename` to the book's identifier with `.epub` added, so the block above writes `epub/org.example.book.epub` and nothing else needs saying. The settings an `epub3` target reads beyond the shared ones are under `epub:` in the [conversion settings](conversion-settings.md): `toc_depth` and `accessibility_summary`.
 
-The book's own details come from `project.yaml`: `title`, `language`, `identifier` (the EPUB's identifier too, so a rebuilt edition is recognized as the same book rather than a new one), `publisher`, `description`, and `authors`, which becomes one creator entry each.
+The book's own details come from `project.yaml`, or from `conversion.yaml`'s own `project:` block, since an EPUB can't see `packaging.yaml`'s ([Where the book is named](configuration.md#where-the-book-is-named)): `title`, `language`, `identifier` (the EPUB's identifier too, so a rebuilt edition is recognized as the same book rather than a new one), `publisher`, `description`, and `authors`, which becomes one creator entry each.
 
 ## What goes in, and in what order
 
@@ -32,7 +32,7 @@ contents:
       - 1-2-scarcity
 ```
 
-the nav lists *Preface* and *Unit 1 Foundations* at the first level and the two sections under the unit, and `toc_depth: 2` (the default, passed straight to Pandoc) is what makes it stop there. A book whose files were split at a different depth reads the same way once its tree says where each page sits. What the tree can't do yet is reach inside a file: a source that arrived as one `.docx` is one page, and its chapters appear as that page's internal headings. Splitting pages at a heading level is [planned](../ROADMAP.md).
+the nav lists *Preface* and *Unit 1 Foundations* at the first level and the two sections under the unit, and `toc_depth: 2` (the default, passed straight to Pandoc) is what makes it stop there. A book whose files were split at a different depth reads the same way once its tree says where each page sits. A source that arrived as one `.docx` is one page, its chapters that page's internal headings, unless `pages.split_level` cuts it into a page per heading at that level, and then its pieces sit in the tree as the split groups them ([Splitting](splitting.md)).
 
 Pages on disk that `contents` doesn't place are named on stderr and left out, as the cartridge leaves them out; a page `contents` names that doesn't exist is a warning. With no `contents` at all the order is guessed from the filenames, the same guess the packager makes, and the run says so. A `contents` that is a single page is taken to be the book itself: nothing is added above its headings, and the page's own title heading stays its first.
 

@@ -2939,10 +2939,22 @@ def case_web_titles(work):
         # A label: a word or two, and a name after a dash.
         "Attribution - By",
         "Knowledge Check - Memo",
+        # Made up, in the shapes a book's descriptions take that ended as
+        # a title does: a matrix's row and a set's condition after a pipe,
+        # a sequence going on, a long description's quotation and its
+        # author, a word processor's button, a figure on a white ground.
+        "An augmented matrix whose second row is [0 1 1 | 2].",
+        "The solution set {x | x > 2} shaded on a number line.",
+        "A sequence of multiples of 3: 3, 6, 9, 12, ...",
+        "The counting numbers 1, 2, 3 …",
+        "A stone plaque beside the entrance to a library, carved in capitals, that reads, "
+        "THE PUBLIC LIBRARY IS OPEN TO EVERY READER - FOUNDER",
+        "The Insert Pictures menu: This Device, Stock Images, and Online Pictures.",
+        "The number seven isolated on a white background.",
     ]
     found = [pptxcheck.alt_problem(t, limit=0) for t in fine]
-    yield "a description that only shares a pipe, a dash, or a word with a page's title isn't", \
-        found == [None] * len(fine), list(zip(found, fine))
+    yield "a description that only shares a pipe, a dash, an ellipsis, or a word with a page's " \
+        "title isn't", found == [None] * len(fine), list(zip(found, fine))
     generated = pptxcheck.alt_problem("A clipboard with a paper on it\n\nAI-generated content may "
                                       "be incorrect.")
     yield "Office's generated description is found in its newer wording as in its older ones", \

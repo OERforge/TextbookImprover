@@ -31,6 +31,11 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 import re
 
 ALT_MAX_CHARS = 120
+# A web page's title is short. The patterns that read the end of alt text
+# as a title's end (PAGE_TITLE) read alt text no longer than this, since a
+# long description's last sentence can end as a title does: a quotation,
+# a dash, and its author.
+TITLE_MAX_CHARS = 120
 IMAGE_EXTENSIONS = r"png|jpe?g|jpe|jfif|gif|bmp|tiff?|svgz?|emf|wmf|webp|heic|heif|avif|ico|eps|pdf"
 # A file name or extension anywhere in the alt text, which PowerPoint's
 # checker counts as missing alt text: its rule is that "the alt text doesn't
@@ -63,15 +68,19 @@ GENERIC_PATTERNS = [
 AUTO_GENERATED = re.compile(r"description automatically generated|^a picture containing\b|"
                             r"ai-generated content may be incorrect", re.I)
 # Alt text copied from a web page with its picture: the page's title, or a
-# stock site's caption. A stock or clip-art site's name, or its words,
-# anywhere; or, at the end, a site's name after a pipe, a domain after a
-# dash, or a one-word name after a dash and a title of three words or
-# more, a title cut off with an ellipsis, or a search engine's title's
-# "- What Is It"; or a numbered section's title followed by its book's.
-# Words a description uses too are left out (a vector image, a flat
-# design, high-quality images). OpenStax's alt text, 2,478 descriptions in
-# eight of its book repositories, matches none of these, nor does a corpus
-# of Word books' 2,462.
+# stock site's caption. A stock or clip-art site's name anywhere, or its
+# words: "royalty-free" and the like anywhere, and "stock photo" and its
+# kin at the end or before a dash or a pipe, where a stock site puts them,
+# not as a word processor's Stock Images button is named in a description
+# of a screenshot. Or, at the end of alt text no longer than
+# TITLE_MAX_CHARS: a site's name after a pipe, a domain after a dash, or a
+# one-word name after a dash and a title of three words or more, a title
+# cut off with an ellipsis, or a search engine's title's "- What Is It";
+# or a numbered section's title followed by its book's. Words a
+# description uses too are left out (a vector image, a flat design,
+# high-quality images, a figure isolated on a white background).
+# OpenStax's alt text, 45,427 in 49 of its book repositories, matches none
+# of these, nor does a corpus of Word books' 2,462.
 STOCK_SITES = re.compile(
     r"\b(?:freepik|vectorstock|shutterstock|istock(?:photo)?|getty ?images|dreamstime|"
     r"depositphotos|123rf|alamy|adobe ?stock|vecteezy|pixabay|pexels|unsplash|flaticon|icons8|"
@@ -79,16 +88,18 @@ STOCK_SITES = re.compile(
     r"fotolia|stocksy|picfair|png(?:tree|wing|egg|item|img)|(?:kind|stick|seek|fav|clean|nice)png|"
     r"hiclipart|clipart(?:max| ?library))\b", re.I)
 STOCK_WORDS = re.compile(
-    r"\broyalty[- ]free\b|\bstock (?:photo|image|vector|illustration|footage|picture)s?\b|"
+    r"\broyalty[- ]free\b|"
+    r"\bstock (?:photo|image|vector|illustration|footage|picture)s?(?=\s*(?:$|[-\u2013\u2014|]))|"
     r"\bfree (?:download|vectors?|png|svg|clip ?art|icons?)\b|\bdownload free\b|"
     r"\bhigh[- ]quality (?:vectors?|png)\b|\bpremium vector\b|"
     r"\b(?:png|svg) (?:images?|files?|icons?|clip ?art|graphics?|download|transparent)\b|"
     r"\btransparent (?:png|background)\b|\bvector (?:illustration|concept|art)s?\b|"
-    r"\bflat (?:concept|vector)s?\b|\bflat (?:design |style )?icons?\b|\bconcept icon\b|"
-    r"\bisolated on (?:a )?white\b", re.I)
+    r"\bflat (?:concept|vector)s?\b|\bflat (?:design |style )?icons?\b|\bconcept icon\b", re.I)
 PAGE_TITLE = (
-    # "Marketing Mix Explained | Quizlet", "Woman with a tablet | Premium Vector"
-    re.compile(r"\s\|\s+[^|()]{1,40}$"),
+    # "Marketing Mix Explained | Quizlet", "Woman with a tablet | Premium Vector":
+    # a name, capitalized, with no bracket in it, not a matrix's row
+    # ([1 2 | 3]) or a set's condition ({x | x > 2}).
+    re.compile(r"\s\|\s+[A-Z][^|(){}\[\]]{0,39}$"),
     # "Why Do Supply Chains Fail? - Examplepedia": a one-word name after a
     # title of three words or more. A word or two and a name after a dash
     # is as often a label: Creative Commons' "Attribution - By" and
@@ -97,8 +108,9 @@ PAGE_TITLE = (
     re.compile(r"^(?:\S+\s+){3,}[-\u2013\u2014]\s*[A-Z][\w&']*$"),
     # "Ten Tips for Better Slides - example.com"
     re.compile(r"\s[-\u2013\u2014]\s*[\w-]+\.(?:com|org|net|edu|gov|io|co)$"),
-    # "Robot Shaking Hands With A Person ..."
-    re.compile(r"\s(?:\.\.\.|\u2026)$"),
+    # "Robot Shaking Hands With A Person ...", not a sequence going on
+    # (3, 6, 9, ...), whose ellipsis follows a comma or a number.
+    re.compile(r"(?<![\d,])\s(?:\.\.\.|\u2026)$"),
     # "Opportunity Cost - What Is It and Why It Matters"
     re.compile(r"[-\u2013\u2014:|]\s*what (?:is|are) (?:it|they)\b", re.I),
     # "4.3 Demand and Supply Together - Introductory Economics"
@@ -130,7 +142,7 @@ def page_title(text):
     page's title, or a stock site's caption (STOCK_SITES, STOCK_WORDS,
     PAGE_TITLE)."""
     return bool(STOCK_SITES.search(text) or STOCK_WORDS.search(text)
-                or any(p.search(text) for p in PAGE_TITLE))
+                or len(text) <= TITLE_MAX_CHARS and any(p.search(text) for p in PAGE_TITLE))
 
 
 def problem(alt, rules=None, limit=ALT_MAX_CHARS):

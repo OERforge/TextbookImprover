@@ -896,6 +896,32 @@ def check_one_file_chapters():
     ]
 
 
+def check_notes_heading():
+    """An HTML page's notes section, as Pandoc's writer leaves it, headed
+    after its rule, once however often it's given one, the heading's text
+    escaped; none, given no heading."""
+    import htmlrepair
+    import notes
+    page = ('<p>Text.</p>\n<section id="footnotes" class="footnotes footnotes-end-of-document"\n'
+            'role="doc-endnotes">\n<hr />\n<ol>\n<li id="fn1"><p>A note.</p></li>\n</ol>\n'
+            '</section>\n')
+    once = notes.titled(page, "Notes & <More>")
+    return [
+        ("the heading goes after the rule, its text escaped",
+         lambda: '<hr />\n<h2 class="footnotes-title">Notes &amp; &lt;More&gt;</h2>\n<ol>'
+         in once),
+        ("a section with its heading isn't given another",
+         lambda: notes.titled(once, "Notes & <More>") == once),
+        ("an empty title gives none",
+         lambda: notes.titled(page, "") == page),
+        # Pandoc's reader keeps a heading in the notes' section, and the
+        # section around it, so a page converted again had both.
+        ("a page read again loses the heading the run gave its notes, and keeps any other",
+         lambda: htmlrepair.repaired(once)[0] == htmlrepair.repaired(page)[0]
+         and "<h2" in htmlrepair.repaired(page.replace("<hr />", "<hr />\n<h2>Sources</h2>"))[0]),
+    ]
+
+
 def check_notes_groups():
     """A page's notes group, the same for the HTML pages and the EPUB:
     the top-level entry of the contents holding it, a chapter however
@@ -1573,6 +1599,7 @@ GROUPS = [
     ("highlighted code's colors", check_highlighting),
     ("one file per chapter", check_one_file_chapters),
     ("a page's notes group", check_notes_groups),
+    ("a page's notes heading", check_notes_heading),
     ("identifiers", check_identifiers),
     ("facts written down twice", check_consistency),
     ("sidecar paths", check_sidecar_paths),

@@ -681,6 +681,7 @@ def build(base, name, resolved, keep, intermediates=None, latex_only=False,
         toc_depth = int(resolved["pdf.toc_depth"])
     assembly = PdfAssembly(
         pages_dir, placed, tree, titles, title_page=title_page,
+        notes_title=" ".join(str(resolved["notes.title"] or "").split()) or "Notes",
         book_title=meta_plain(meta.get("title")),
         divisions=document_class(meta) in FRONTMATTER_CLASSES,
         toc_depth=toc_depth, mark_files=as_latex)

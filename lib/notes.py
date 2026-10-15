@@ -27,6 +27,16 @@ be what the split made of a source, so a page that was a file of its
 own was a group of one, and the EPUB a top-level entry, so a part was
 one.
 
+An HTML page's notes are headed after their rule, notes.title saying
+the word (titled, and render_notes as they're arranged): Pandoc writes
+no heading, so a screen reader had none to move to them by, and the Nu
+checker says their section lacks one. On the Notes page, in the pages
+and the EPUB alike, each group's notes are headed by the group's title.
+An EPUB's notes at the end of a chapter have none, since a reading
+system may show a note beside its reference. The heading's class,
+footnotes-title, is how htmlrepair knows it on a page read again, where
+Pandoc's reader would keep it and the section around it.
+
 Pandoc cannot be asked to start numbering at 7, so the numbers are
 rewritten in the output: the reference's visible number, the note's
 number, and the ids that tie them, which stay unique within whichever
@@ -74,6 +84,11 @@ CODE_ID = re.compile(r'(\sid="|\shref="#)(cb\d+(?:-\d+)?)"')
 ID = re.compile(r'\sid="([^"]+)"')
 FRAGMENT = re.compile(r'(\shref=")#([^"]+)"')
 NUMBER_SPAN = re.compile(r'<span class="footnote-number">\d+\.</span>')
+# A notes section's rule, as Pandoc's HTML writer writes it, with no
+# heading after it yet.
+UNTITLED = re.compile(r'(<section id="footnotes"[^>]*>\s*<hr\s*/>)(?!\s*<h2\b)')
+HEADING = '<h2 class="footnotes-title">%s</h2>'
+
 
 
 def groups(tree, titles):
@@ -197,22 +212,32 @@ def renumber(page, offset, dest, prefix=""):
     return page
 
 
-def render_notes(notes, flavor, prefix=""):
-    """The notes as one footnotes section in the writer's own shape."""
+def render_notes(notes, flavor, prefix="", heading=None):
+    """The notes as one footnotes section in the writer's own shape, with
+    a heading after its rule if one is given."""
     if not notes:
         return ""
+    head = HEADING % html.escape(heading) + "\n" if heading else ""
     if flavor == "html":
         items = "\n".join(f'<li id="{prefix}fn{n}" value="{n}">{body}</li>'
                           for n, body in notes)
         return (f'<section id="{prefix}footnotes" class="footnotes '
                 'footnotes-end-of-document" role="doc-endnotes">\n<hr />\n'
-                f'<ol>\n{items}\n</ol>\n</section>\n')
+                f'{head}<ol>\n{items}\n</ol>\n</section>\n')
     items = "\n".join(
         f'<aside epub:type="footnote" role="doc-footnote" '
         f'id="{prefix}fn{n}">{body}</aside>' for n, body in notes)
     return (f'<section id="{prefix}footnotes" class="footnotes '
             'footnotes-end-of-document" epub:type="footnotes">\n<hr />\n'
-            f'{items}\n</section>\n')
+            f'{head}{items}\n</section>\n')
+
+
+def titled(text, title):
+    """An HTML page with its notes section headed (notes.title), as
+    Pandoc's writer leaves it without a heading."""
+    if not title:
+        return text
+    return UNTITLED.sub(lambda m: m.group(1) + "\n" + HEADING % html.escape(title), text)
 
 
 def insert_before_end(text, block, flavor):
@@ -224,12 +249,14 @@ def insert_before_end(text, block, flavor):
     return text[:at] + block + text[at:] if at >= 0 else text + block
 
 
-def arrange(pages, numbering, placement, notes_page=None):
+def arrange(pages, numbering, placement, notes_page=None, title=None):
     """Apply the two settings to a book's pages, in reading order.
 
     pages: [Page]; notes_page: a Page to hold everything when placement
-    is "book" (its text gets the sections and a heading per group).
-    Returns the pages whose text changed.
+    is "book" (its text gets the sections, each headed by its group).
+    title: the heading of each page's notes (notes.title), given for HTML
+    pages and not for an EPUB's chapter files. Returns the pages whose
+    text changed.
     """
     if numbering == "page" and placement == "page":
         return []
@@ -246,7 +273,7 @@ def arrange(pages, numbering, placement, notes_page=None):
     # Notes gathered in one list are numbered across their group.
     continuing = numbering == "group" or placement != "page"
     book_sections = []
-    for index, (_, title, members) in enumerate(groups, 1):
+    for index, (_, group_title, members) in enumerate(groups, 1):
         offset = 0
         gathered = []
         prefix = f"g{index}-" if placement == "book" else ""
@@ -261,20 +288,19 @@ def arrange(pages, numbering, placement, notes_page=None):
                 offset += len(page.notes)
             if placement == "page":
                 page.text = insert_before_end(
-                    page.text, render_notes(page.notes, page.flavor),
+                    page.text, render_notes(page.notes, page.flavor, heading=title),
                     page.flavor)
             else:
                 gathered.extend(page.notes)
         if placement == "group" and gathered:
             last = members[-1]
             last.text = insert_before_end(
-                last.text, render_notes(gathered, last.flavor), last.flavor)
+                last.text, render_notes(gathered, last.flavor, heading=title), last.flavor)
             if last not in changed:
                 changed.append(last)
         elif placement == "book" and gathered:
-            heading = f"<h2>{html.escape(title)}</h2>\n"
-            book_sections.append(heading + render_notes(
-                gathered, notes_page.flavor, prefix))
+            book_sections.append(render_notes(
+                gathered, notes_page.flavor, prefix, heading=group_title))
     if placement == "book" and notes_page is not None and book_sections:
         notes_page.text = insert_before_end(
             notes_page.text, "".join(book_sections), notes_page.flavor)

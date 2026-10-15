@@ -4304,6 +4304,13 @@ def render_html(target, pages, base, fragments, language, env):
         if footer:
             command.append("--include-after-body=" + footer)
         run(command, env=env, cwd=base)
+        # The notes' heading, which Pandoc's writer doesn't write.
+        with open(out, encoding="utf-8") as fh:
+            text = fh.read()
+        headed = notes_lib.titled(text, " ".join(str(target["notes.title"] or "").split()))
+        if headed != text:
+            with open(out, "w", encoding="utf-8") as fh:
+                fh.write(headed)
         written.append(out)
     copy_media(base, target.output_dir, pages)
     return written
@@ -4641,6 +4648,7 @@ def arrange_notes(target, pages, base, work, fragments, language, env,
     the rest."""
     numbering = str(target["notes.numbering"])
     placement = str(target["notes.placement"])
+    heading = " ".join(str(target["notes.title"] or "").split())
     if numbering == "page" and placement == "page":
         return []
     stems = [os.path.basename(p)[:-len(INTERMEDIATE)] for p in pages]
@@ -4659,13 +4667,24 @@ def arrange_notes(target, pages, base, work, fragments, language, env,
                                           title, "html"))
     notes_page = None
     if placement == "book":
-        source = os.path.join(work, "notes.md")
+        source = os.path.join(work, "notes.json")
+        api = json.loads(subprocess.run(
+            ["pandoc", "-f", "markdown", "-t", "json"], input="",
+            capture_output=True, text=True, check=True).stdout)["pandoc-api-version"]
+        words = [{"t": "Str", "c": w} for w in (heading or "Notes").split()]
         with open(source, "w", encoding="utf-8") as fh:
-            fh.write("# Notes\n")
+            # The title as it's given, not read as Markdown (quotes made
+            # curly, an @ a citation), and its id the same whatever it
+            # says, as in the EPUB.
+            json.dump({"pandoc-api-version": api, "meta": {}, "blocks": [
+                {"t": "Header", "c": [1, ["notes", [], []], [
+                    item for i, w in enumerate(words) for item in ([{"t": "Space"}] if i else [])
+                    + [w]]]}]}, fh)
         out = os.path.join(target.output_dir, "notes.html")
-        command = ["pandoc", "-f", "markdown", "-t", "html5", source,
+        command = ["pandoc", "-f", "json", "-t", "html5", source,
                    "-o", out, "--standalone", "--ascii",
-                   "--lua-filter=" + HEADER_FILTER, "-M", f"lang={language}"]
+                   "--lua-filter=" + HEADER_FILTER, "-M", f"lang={language}",
+                   "-M", "pagetitle=" + (heading or "Notes")]
         header, footer = fragments
         if header:
             command.append("--include-before-body=" + header)
@@ -4674,8 +4693,8 @@ def arrange_notes(target, pages, base, work, fragments, language, env,
         run(command, env=env, cwd=base)
         with open(out, encoding="utf-8") as fh:
             notes_page = notes_lib.Page("notes.html", fh.read(), "notes",
-                                        "Notes", "html")
-    changed = notes_lib.arrange(records, numbering, placement, notes_page)
+                                        heading or "Notes", "html")
+    changed = notes_lib.arrange(records, numbering, placement, notes_page, heading)
     written = []
     for page in changed:
         path = os.path.join(target.output_dir, page.name)

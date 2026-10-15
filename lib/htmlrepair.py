@@ -102,6 +102,7 @@ def repaired(markup):
     markup = _BEFORE.sub(before, markup)
     markup, marked = decorative_images(markup)
     markup, titled = title_block_id(markup)
+    markup = NOTES_HEADING.sub("", markup)
     return auto_id_headings(markup), count + marked + titled
 
 
@@ -159,6 +160,15 @@ def title_block_id(markup):
     page's metadata on reading, so the id goes no further."""
     new, n = _TITLE_H1.subn(r'\1 id="title-block-title"\2', markup, count=1)
     return new, n
+
+
+# The heading the run gives a page's notes (notes.py), which Pandoc's
+# reader would keep, with the section around it, on a page converted
+# again: the page's own notes come back as notes, and get the heading the
+# run gives them, so converting the run's pages changes nothing.
+NOTES_HEADING = re.compile(
+    r"""<(h[1-6])\b(?:[^<>"']|"[^"]*"|'[^']*')*\bclass\s*=\s*["']footnotes-title["']"""
+    r"""(?:[^<>"']|"[^"]*"|'[^']*')*>.*?</\1\s*>\s*""", re.I | re.S)
 
 
 AUTO_ID = "data-ti-auto-id"

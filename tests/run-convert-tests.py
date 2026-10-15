@@ -30,6 +30,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import argparse
 import csv
+import html as html_lib
 import glob
 import json
 import os
@@ -4220,7 +4221,7 @@ def case_notes(work):
     import zipfile
     code = "    ```{.python .numberLines}\n    x = 1\n    ```\n"
 
-    def build(sub, numbering, placement):
+    def build(sub, numbering, placement, title=None):
         d = os.path.join(work, sub)
         os.makedirs(d, exist_ok=True)
         with open(os.path.join(d, "ch1.md"), "w", encoding="utf-8") as fh:
@@ -4233,7 +4234,8 @@ def case_notes(work):
             fh.write("# Chapter Two\n\nTwo.[^e]\n\n[^e]: Note E.\n\n" + code)
         r = convert(d, "defaults:\n  pages:\n    split_level: 2\n  notes:\n"
                        f"    numbering: {numbering}\n    placement: "
-                       f"{placement}\ntargets:\n  html:\n    format: html\n"
+                       f"{placement}\n" + (f"    title: {title}\n" if title else "")
+                       + "targets:\n  html:\n    format: html\n"
                        "  epub:\n    format: epub3\n", fixtures=())
         nav = ""
         e = os.path.join(d, "epub", "org.example.fixtures.epub")
@@ -4313,10 +4315,48 @@ def case_notes(work):
             return next((t for t in (z.read(n).decode("utf-8") for n in z.namelist()
                                      if "/text/" in n) if 'id="page-notes"' in t), "")
 
+    def chapters(d):
+        """The EPUB's chapter files' text, together."""
+        with zipfile.ZipFile(os.path.join(d, "epub", "org.example.fixtures.epub")) as z:
+            return "".join(z.read(n).decode("utf-8") for n in z.namelist() if "/text/ch" in n)
+
+    def headed(text, heading):
+        """Each notes section's heading, after its rule: none for a
+        section without one."""
+        return [h for _, h in re.findall(r'<section id="([\w-]*footnotes)"[^>]*>\s*<hr ?/>\s*'
+                                         r'(?:<h2 class="footnotes-title">(.*?)</h2>)?', text)] \
+            == heading
+
     gp, r1, _ = build("group-page", "group", "page")
     gg, r2, _ = build("page-group", "page", "group")
     gb, r3, nav = build("page-book", "page", "book")
+    pp, r4, _ = build("page-page", "page", "page", "Anmerkungen")
+    # Quotes and an @, which Markdown would read as curly quotes and a
+    # citation, and the title is given as it's written.
+    tb, r5, tnav = build("page-book-titled", "page", "book", "'Translator''s \"Notes\" @home'")
     return [
+        ("a page's notes are headed, Pandoc's own as the notes arranged, in the word "
+         "notes.title gives",
+         lambda: r4.returncode == 0
+         and headed(read(pp, "html", "ch1--first-section.html"), ["Anmerkungen"])
+         and headed(read(gp, "html", "ch1--first-section.html"), ["Notes"])
+         and headed(read(gg, "html", "ch1--second-section.html"), ["Notes"])),
+        ("an EPUB chapter's own notes have none, as Pandoc wrote them or arranged, since a "
+         "reading system may show a note beside its reference",
+         lambda: all(chapters(d).count('epub:type="footnotes"') >= 2
+                     and headed(chapters(d), [""] * chapters(d).count('epub:type="footnotes"'))
+                     for d in (pp, gp))),
+        ("the Notes page heads each group's notes with the group's title, in its section, "
+         "and the EPUB's Notes chapter does too",
+         lambda: headed(read(gb, "html", "notes.html"), ["Chapter One", "Chapter Two"])
+         and headed(notes_chapter(gb), ["Chapter One", "Chapter Two"])),
+        ("the Notes page is titled with notes.title as it's written, in the pages and the EPUB",
+         lambda: r5.returncode == 0 and "<title>Notes</title>" in read(gb, "html", "notes.html")
+         and """<title>Translator's "Notes" @home</title>""" in read(tb, "html", "notes.html")
+         and """<h1 id="notes">Translator's "Notes" @home</h1>"""
+         in read(tb, "html", "notes.html")
+         and """>Translator's "Notes" @home<""" in html_lib.unescape(tnav)
+         and ">Notes<" not in tnav),
         ("group numbering continues across a chapter's pages",
          lambda: r1.returncode == 0
          and 'id="fn3"' in read(gp, "html", "ch1--first-section.html")
@@ -4358,7 +4398,7 @@ def case_notes(work):
         # Both chapters have notes, so each has its heading there.
         ("book placement makes a Notes page with a heading per group, numbered per group",
          lambda: r3.returncode == 0
-         and read(gb, "html", "notes.html").count("<h2>") == 2
+         and read(gb, "html", "notes.html").count('<h2 class="footnotes-title">') == 2
          and re.findall(r'<li id="(g\d+-fn\d+)"', read(gb, "html", "notes.html"))
          == ["g1-fn1", "g1-fn2", "g1-fn3", "g1-fn4", "g2-fn1"]),
         ("a note's link to an id on its page names the page where the note goes",

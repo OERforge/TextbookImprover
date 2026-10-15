@@ -723,8 +723,11 @@ def convert(work, *flags, env=None):
 
 
 def headings(page):
-    """(level, text) of each heading on a page, the title block's too."""
+    """(level, text) of each heading on a page, the title block's too, but
+    the one over its notes, which the run gives a page's notes, not the
+    deck."""
     found = []
+    page = re.sub(r'<h2 class="footnotes-title">.*?</h2>', "", page, flags=re.S)
     for level, text in re.findall(r"<h([1-6])[^>]*>(.*?)</h\1>", page, re.S):
         found.append((int(level), " ".join(html.unescape(re.sub(r"<[^>]+>", "", text)).split())))
     return found
@@ -1031,6 +1034,9 @@ def case_folder(work):
         ("a deck with no title: its one heading is a slide's, an H1, not made its title",
          lambda: headings(page("untitled.html")) == [(1, "Only Slide")]
          and "<title>untitled</title>" in page("untitled.html")),
+        ("a deck's page heads its notes, as a book's page does",
+         lambda: re.search(r'<section id="footnotes"[^>]*>\s*<hr />\s*'
+                           r'<h2 class="footnotes-title">Notes</h2>', sectioned) is not None),
         ("the authors are on the page, as on a title slide",
          lambda: '<p class="author">A. Lecturer</p>' in flat
          and '<p class="author">C. Speaker</p>' in sectioned),

@@ -156,6 +156,10 @@ page restarts the numbers on every page. group continues them across the pages o
 
 page keeps each page's notes at its end. group gathers a group's notes at the end of its last page, numbered across the group. book gathers every note on one Notes page at the end, with a heading for each group, in the contents' order, numbered per group. A reference always links to its note wherever it went, and the note links back, and a note's code goes with it, highlighted as it was.
 
+**`notes.title`**—`string`; default `Notes`
+
+The heading over the notes on an HTML page, in the page's language, where a screen reader can move to them as to any heading (Pandoc writes none, and the Nu checker says the notes' section lacks one); empty, they have none. It's the title of the Notes page placement book makes, in the pages and the EPUB alike, where each group's notes are headed by the group's title. An EPUB's notes at the end of a chapter have no heading, since a reading system may show each note beside its reference.
+
 ## slides
 
 Settings read only for decks written in Markdown, in a folder that project.kind says is slides: each deck a page of its own in an html target, a PDF of its own in a pdf target, through the ltx-talk presentation class, a PowerPoint file of its own in a pptx target, through Pandoc's PowerPoint writer, and a reveal.js presentation of its own in a revealjs target.

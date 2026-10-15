@@ -627,7 +627,7 @@ def arrange_epub_notes(path, assembly, numbering, placement):
         ident = first.group(1) if first else ""
         short = name.rsplit("/", 1)[1]
         if ident == page_id("notes"):
-            notes_page = notes_lib.Page(short, text, "notes", "Notes", "xhtml")
+            notes_page = notes_lib.Page(short, text, "notes", assembly.notes_title, "xhtml")
             continue
         # The page whose id this is, or the page whose section it is, the
         # longest such: ch1--a's own section is page-ch1--a, not ch1's.
@@ -731,7 +731,9 @@ def build(base, name, resolved, keep, intermediates=None):
     if numbered:
         number_tree(tree, titles)
 
-    assembly = EpubAssembly(pages_dir, placed, tree, titles)
+    assembly = EpubAssembly(pages_dir, placed, tree, titles,
+                            notes_title=" ".join(str(resolved["notes.title"] or "").split())
+                            or "Notes")
     if len(tree) == 1 and tree[0][0] == "page":
         assembly.add_single_page(tree[0][1], tree[0][2])
     else:
@@ -744,7 +746,7 @@ def build(base, name, resolved, keep, intermediates=None):
             and not assembly.notes_placed:
         # A chapter of its own for the notes, filled after the writer runs.
         assembly.mark_notes()
-        assembly.blocks.append(header(1, inlines("Notes"), page_id("notes")))
+        assembly.blocks.append(header(1, inlines(assembly.notes_title), page_id("notes")))
 
     document = {
         "pandoc-api-version": load_page(pages_dir,

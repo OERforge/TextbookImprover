@@ -488,6 +488,19 @@ keys:
           always links to its note wherever it went, and the note links
           back, and a note's code goes with it, highlighted as it was.
 
+      title:
+        type: string
+        default: Notes
+        description: >
+          The heading over the notes on an HTML page, in the page's
+          language, where a screen reader can move to them as to any
+          heading (Pandoc writes none, and the Nu checker says the notes'
+          section lacks one); empty, they have none. It's the title of the
+          Notes page placement book makes, in the pages and the EPUB alike,
+          where each group's notes are headed by the group's title. An
+          EPUB's notes at the end of a chapter have no heading, since a
+          reading system may show each note beside its reference.
+
   slides:
     stage: render
     description: >

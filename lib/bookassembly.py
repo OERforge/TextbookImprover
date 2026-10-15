@@ -278,8 +278,9 @@ def wants_title_page(setting, tree, assembly):
 class Assembly:
     """The book being built: blocks, and what was learned building them."""
 
-    def __init__(self, base, pages, tree=(), titles=None):
+    def __init__(self, base, pages, tree=(), titles=None, notes_title="Notes"):
         self.base = base
+        self.notes_title = notes_title  # the Notes chapter's, unless contents names it
         self.tree = tree
         self.titles = titles or {}
         self.book_pages = frozenset(pages)   # stems a link may point at
@@ -302,7 +303,7 @@ class Assembly:
                     os.path.join(self.base, "notes" + INTERMEDIATE)):
                 # The Notes chapter, placed where contents lists it and
                 # filled after the writer runs.
-                self.blocks.append(header(depth, inlines(b or "Notes"),
+                self.blocks.append(header(depth, inlines(b or self.notes_title),
                                           page_id("notes")))
                 self.notes_placed = True
                 continue

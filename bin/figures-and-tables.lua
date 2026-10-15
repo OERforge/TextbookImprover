@@ -1733,21 +1733,25 @@ local function compose_part_caption(base, band_inlines, band_text, given, part_n
     out:extend(base)
     text = normalize(pandoc.utils.stringify(base))
   end
+  -- After a caption that ends a sentence, the part's words follow a space,
+  -- not a colon, which had made "one value per field.: Beginning Data".
+  local joint = text:match('[.!?]$') and ' ' or ': '
+  local function join(inlines, words)
+    if joint == ': ' then out:insert(pandoc.Str(':')) end
+    out:insert(pandoc.Space())
+    out:extend(inlines)
+    text = text .. joint .. words
+  end
   if band_text ~= '' then
     if #out > 0 then
-      out:insert(pandoc.Str(':'))
-      out:insert(pandoc.Space())
-      text = text .. ': ' .. band_text
+      join(band_inlines, band_text)
     else
+      out:extend(band_inlines)
       text = band_text
     end
-    out:extend(band_inlines)
   elseif #out > 0 and part_no then
     local suffix = 'Part ' .. tostring(part_no)
-    out:insert(pandoc.Str(':'))
-    out:insert(pandoc.Space())
-    out:insert(pandoc.Str(suffix))
-    text = text .. ': ' .. suffix
+    join({ pandoc.Str(suffix) }, suffix)
   end
   return out, text
 end

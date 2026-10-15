@@ -951,6 +951,10 @@ HEADS = """<!DOCTYPE html><html lang="en"><head><title>Heads</title></head>
 <tbody><tr><td colspan="2"><b>Group A</b></td></tr><tr><td>Yes</td><td>12</td></tr>
 <tr><td>No</td><td>3</td></tr><tr><td colspan="2"><b>Group B</b></td></tr>
 <tr><td>Yes</td><td>7</td></tr><tr><td>No</td><td>9</td></tr></tbody></table>
+<p>Table 3.7 Each field holds one value.</p>
+<table><thead><tr><th>Field</th><th>Value</th></tr></thead>
+<tbody><tr><td colspan="2"><b>Before</b></td></tr><tr><td>Name</td><td>Ada</td></tr>
+<tr><td colspan="2"><b>After</b></td></tr><tr><td>Name</td><td>Grace</td></tr></tbody></table>
 </main></body></html>
 """
 
@@ -1121,6 +1125,11 @@ def case_bands(work):
                        r'<tr id="answer-row">',
                        heads)
          and "<span></span>" not in heads),
+        ("a part's words follow a caption that ends a sentence after a space, not a "
+         "colon",
+         lambda: [c for c in captions(heads) if c.startswith("Table 3.7")]
+         == ["Table 3.7 Each field holds one value. Before",
+             "Table 3.7 Each field holds one value. After"]),
         ("and read back from Markdown or HTML, they split into the same captions",
          lambda: captions(heads) and captions(heads_again) == captions(heads)
          and captions(read(fixed, "html", "heads.html")) == captions(heads)),

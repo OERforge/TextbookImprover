@@ -170,7 +170,8 @@ Beyond the Word-to-HTML translation, each page gets:
  —labels the rows beneath it, and no header markup expresses that in
   every format. The run infers `split-at` for those rows, writes it into
   the prefilled sidecar row, and splits there: each part gets the band as
-  its caption, composed onto the table's own ("Table 17.4: Year 2"), a
+  its caption, composed onto the table's own ("Table 17.4: Year 2", or
+  after a space where the table's own ends a sentence), a
   copy of the header row where the table had one marked, and the header
   declaration applied on its own. Where the bands each sit over their own
   header row, as in the cost tables of Economics 3e, each part keeps its

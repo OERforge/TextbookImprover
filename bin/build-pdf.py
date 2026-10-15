@@ -748,7 +748,8 @@ def build(base, name, resolved, keep, intermediates=None, latex_only=False,
                    "--lua-filter", os.path.join(HERE, "footnote-code.lua"),
                    "--lua-filter", os.path.join(HERE, "pdf-target.lua")] + highlighting.ARGS
         environment = dict(os.environ, TARGET_NAME=name,
-                           TITLE_BLOCK=str(resolved["title_block"]))
+                           TITLE_BLOCK=str(resolved["title_block"]),
+                           **label_prefixes(resolved))
         if keep or latex_only:
             # The LaTeX as the PDF was made from it, for reading when
             # something needs explaining; not needed to build.
@@ -800,6 +801,14 @@ def build(base, name, resolved, keep, intermediates=None, latex_only=False,
     return 0
 
 
+def label_prefixes(resolved):
+    """The words that begin a caption's own label, for pdf-target.lua,
+    which sets such a caption without a label of LaTeX's: the captions
+    settings figures-and-tables.lua reads them from."""
+    return {"TABLE_LABEL_PREFIXES": ",".join(map(str, resolved["captions.table_prefixes"])),
+            "FIGURE_LABEL_PREFIXES": ",".join(map(str, resolved["captions.figure_prefixes"]))}
+
+
 def write_latex(base, name, resolved, project, document, out_dir):
     """The latex target: the LaTeX the PDF target builds from, as a master
     file that \\include-s a file per top-level entry, with the images it
@@ -816,7 +825,8 @@ def write_latex(base, name, resolved, project, document, out_dir):
                    "--lua-filter", os.path.join(HERE, "pdf-target.lua"),
                    "--lua-filter", os.path.join(HERE, "latex-target.lua")] + highlighting.ARGS
         environment = dict(os.environ, TARGET_NAME=name,
-                           TITLE_BLOCK=str(resolved["title_block"]))
+                           TITLE_BLOCK=str(resolved["title_block"]),
+                           **label_prefixes(resolved))
         done = subprocess.run(["pandoc", "-f", "json", "-t", "latex", "-s", book_json]
                               + filters, cwd=base, env=environment,
                               capture_output=True, text=True)

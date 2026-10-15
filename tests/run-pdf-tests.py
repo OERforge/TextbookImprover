@@ -282,7 +282,40 @@ APPENDIX = r"""\appendix
 
 # Tables of Values
 
-Nothing more than a heading and this.
+Figures and a table whose captions carry their own labels, as a book
+whose captions number themselves has them, the second figure's too long
+for one line.
+
+![Figure 7.3 A red square the book labels itself](assets/red.png)
+
+![Figure 7.5 A red square again, whose caption the book labels itself, long enough to run past the width of its line and be set as a paragraph of its own](assets/red.png)
+
+And a figure it doesn't number, as OpenStax doesn't a chapter's opening picture.
+
+![A red square the book leaves unnumbered](assets/red.png){.unnumbered}
+
+| Year | Rate |
+|------|------|
+| 2020 | 4    |
+
+Table: Table 7.4 Rates the book labels itself
+"""
+
+# An untagged book, built to no PDF/UA standard, with figures and no
+# table, so no caption package: its figures are set by LaTeX's classes.
+UNTAGGED_PAGE = r"""# Figures
+
+Three figures whose captions carry their own labels, the second too
+long for one line and the third labeled by a word the book's settings
+name, and one whose caption doesn't.
+
+![Figure 7.3 A red square the book labels itself](assets/red.png)
+
+![A red square with no label of its own](assets/red.png)
+
+![Figure 7.4 A caption the book labels itself, long enough to run past the width of its line and be set as a paragraph of its own](assets/red.png)
+
+![Exhibit 2.1 A red square labeled as an exhibit](assets/red.png)
 """
 
 PROJECT = """project:
@@ -404,6 +437,25 @@ def build_ua1(work):
         with open(report, encoding="utf-8", newline="") as fh:
             rows = list(csv.DictReader(fh))
     return os.path.join(work, "pdf", "org.example.ua1.pdf"), converted.stdout + converted.stderr, rows
+
+
+def build_untagged(work):
+    """A book built to no PDF/UA standard, UNTAGGED_PAGE: (the PDF's path,
+    what the run said)."""
+    os.makedirs(os.path.join(work, "assets"))
+    png(os.path.join(work, "assets", "red.png"), (200, 0, 0))
+    with open(os.path.join(work, "figures.md"), "w", encoding="utf-8") as fh:
+        fh.write(UNTAGGED_PAGE)
+    with open(os.path.join(work, "project.yaml"), "w", encoding="utf-8") as fh:
+        fh.write("project:\n  title: No Standard\n  identifier: org.example.untagged\n"
+                 "  language: en-US\n")
+    with open(os.path.join(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
+        fh.write("defaults:\n  captions:\n    figure_prefixes: [Figure, Exhibit]\n"
+                 "targets:\n  pdf:\n    format: pdf\n    pdf:\n      standard: []\n")
+    converted = subprocess.run(["python3", os.path.join(BIN, "convert.py")], cwd=work,
+                               capture_output=True, text=True, stdin=subprocess.DEVNULL)
+    return (os.path.join(work, "pdf", "org.example.untagged.pdf"),
+            converted.stdout + converted.stderr)
 
 
 def languages(path):
@@ -555,6 +607,11 @@ def quoted_cells(path):
     for kid in pdfparagraphs.kids_of(pdf.Root.StructTreeRoot):
         walk(kid, False)
     return found
+
+
+def says(text, words):
+    """Whether the PDF's text holds the words, any space between them."""
+    return re.search(r"\s+".join(map(re.escape, words.split())), text) is not None
 
 
 def children(element):
@@ -716,11 +773,17 @@ def checks(work, jobs=1):
         with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
             book = pool.submit(build, work)
             ua1 = pool.submit(build_ua1, work + "-ua1")
+            plain = pool.submit(build_untagged, work + "-untagged")
             reader, source, rows, log, placements = book.result()
             ua1_path, ua1_said, ua1_rows = ua1.result()
+            untagged_path, untagged_said = plain.result()
     else:
         reader, source, rows, log, placements = build(work)
         ua1_path, ua1_said, ua1_rows = build_ua1(work + "-ua1")
+        untagged_path, untagged_said = build_untagged(work + "-untagged")
+    untagged_text = "".join(page.extract_text() or "" for page in
+                            pypdf.PdfReader(untagged_path).pages) \
+        if os.path.exists(untagged_path) else ""
     ua1_math, ua1_version, ua1_links = ua1_formulas(ua1_path) if os.path.exists(ua1_path) \
         else ([], "", [])
     ua1_roles = dict(f for f in ua1_math if f[0] == "roles").get("roles", [])
@@ -805,11 +868,11 @@ def checks(work, jobs=1):
         # first cell of each body row TH-row only if pdf-target.lua set
         # table/header-columns around it.
         ("the matrix table's first column is row headers",
-         lambda: len(tabled) == 10 and row_headers(tabled[0]) == 2),
+         lambda: len(tabled) == 11 and row_headers(tabled[0]) == 2),
         ("and so is a table's in a passage in another language that holds a heading",
-         lambda: len(tabled) == 10 and row_headers(tabled[9]) == 1),
+         lambda: len(tabled) == 11 and row_headers(tabled[9]) == 1),
         ("the plain table has header cells and no row headers",
-         lambda: len(tabled) == 10 and row_headers(tabled[1]) == 0
+         lambda: len(tabled) == 11 and row_headers(tabled[1]) == 0
          and any(kind(e) == "/TH" for e in tabled[1])),
         # LaTeX writes a longtable's caption as a first row of one header
         # cell, and leaves the empty copy of the head it repeats inside the
@@ -870,6 +933,42 @@ def checks(work, jobs=1):
          lambda: "Cost by year" in text
          and not re.search(r"Table\s*\d+\s*:\s*Cost by year", text)
          and shape(table_elements[8])[:1] == ["/Caption"]),
+        # A caption that carries its own label, or an unnumbered figure's:
+        # pdf-target.lua sets its figure or table with \OERNoCaptionLabel, and
+        # LaTeX gives it no label of its own.
+        # Words matched with any space between, pypdf before 5.1 giving a
+        # justified line's spaces as two.
+        ("a figure's and a long table's caption that carry their own label "
+         "aren't numbered again, a figure's too long for one line too",
+         lambda: says(text, "Figure 7.3 A red square the book labels itself")
+         and says(text, "Table 7.4 Rates the book labels itself")
+         and says(text, "Figure 7.5 A red square again")
+         and not re.search(r":\s*(Figure\s*7\.[35]|Table\s*7\.4)", text)
+         and body.count("{\\OERNoCaptionLabel") == 4),
+        ("and a figure marked unnumbered gets no number",
+         lambda: says(text, "A red square the book leaves unnumbered")
+         and not re.search(r"Figure\s*\d+\s*:\s*A\s+red\s+square\s+the\s+book\s+leaves", text)),
+        ("and captions that don't carry one keep LaTeX's",
+         lambda: re.search(r"Figure\s*1\s*:\s*A small red square", text)
+         and re.search(r"Table\s*1\s*:\s*Price by year", text)),
+        # LaTeX's caption/label socket gives the label nothing, and the two
+        # around it switch paragraph tagging off and on with no Lbl between.
+        ("such a figure's Caption holds its words and no Lbl, where the others "
+         "hold a Lbl and their words",
+         lambda: sorted([kind(k) for k in children(e)] for e in tree
+                        if kind(e) == "/Caption"
+                        and [kind(k) for k in children(e)][:1] != ["/Div"])
+         == [["/Lbl", "/text"], ["/Lbl", "/text"], ["/text"], ["/text"], ["/text"]]),
+        # Untagged and with no table, so no caption package: LaTeX's classes
+        # set its figures, a caption too long for a line as a paragraph.
+        ("so in an untagged book with no table, a short caption and a long one, "
+         "and one labeled by a word captions.figure_prefixes names",
+         lambda: says(untagged_text, "Figure 7.3 A red square the book labels itself")
+         and says(untagged_text, "Figure 7.4 A caption the book labels itself")
+         and says(untagged_text, "Exhibit 2.1 A red square labeled as an exhibit")
+         and not re.search(r":\s*(Figure\s*7\.[34]|Exhibit)", untagged_text)
+         and re.search(r"Figure\s*2\s*:\s*A red square with no label", untagged_text)
+         and "/StructTreeRoot" not in pypdf.PdfReader(untagged_path).trailer["/Root"]),
         ("a table whose first header row is one spanning cell, with no "
          "caption, keeps that row",
          lambda: shape(table_elements[3])[:2] == [1, 2]
@@ -894,7 +993,7 @@ def checks(work, jobs=1):
          lambda: any(str(f.get("/Alt")) == "A small red square"
                      for f in figures)),
         ("the decorative image is no figure",
-         lambda: len(figures) == 3),
+         lambda: len(figures) == 6),
         ("an image with no alt text is reported by the output check",
          lambda: [r["Check"] for r in pdf_rows].count(
              "pdf-figure-alt-is-file-name") == 1),
@@ -1077,12 +1176,14 @@ def main():
             print(("  ok    " if passed else "  FAIL  ") + name)
             failed += not passed
     finally:
-        # The PDF/UA-1 book is built beside the book (build_ua1).
+        # The PDF/UA-1 and untagged books are built beside the book
+        # (build_ua1, build_untagged).
         if arguments.keep:
-            print(f"\nOutput left in {work} and {work}-ua1")
+            print(f"\nOutput left in {work}, {work}-ua1, and {work}-untagged")
         else:
             shutil.rmtree(work, ignore_errors=True)
             shutil.rmtree(work + "-ua1", ignore_errors=True)
+            shutil.rmtree(work + "-untagged", ignore_errors=True)
     print(f"\n{failed} check(s) failed" if failed
           else "\nall PDF checks passed")
     return 1 if failed else 0

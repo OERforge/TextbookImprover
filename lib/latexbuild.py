@@ -497,6 +497,57 @@ PDF_MACROS = r"""\ExplSyntaxOn
     \IfPackageLoadedT { caption }
       { \captionsetup [ none ] { labelformat = empty , labelsep = none } }
   }
+% A caption that carries its own label, "Figure 1.1 The real number line",
+% which LaTeX numbered again ("Figure 1: Figure 1.1 ..."), and an
+% unnumbered figure's, which LaTeX numbered: pdf-target.lua sets such a
+% figure or table in a group with \OERNoCaptionLabel, and its caption gets
+% no label. Tagged, a figure's caption is LaTeX's own
+% (latex-lab-testphase-float.sty): its label is the caption/label socket's,
+% "#1:~", which the caption package doesn't reach, between two tagging
+% sockets that switch paragraph tagging off, open a Lbl, and close it and
+% switch paragraph tagging on again. Here the label is nothing, and the
+% two only switch paragraph tagging off, starting the paragraph as the
+% label would have, and on, so the caption's Caption holds its paragraph
+% and no empty Lbl; made noop, they had left LaTeX's paragraph tagging one
+% short at a caption too long to center. A long table's caption, and an
+% untagged figure's, is the caption package's, when the template loads it
+% (for a book with tables), told to give none; an untagged figure's without
+% it is set as LaTeX's standard classes set one, without the label.
+\socket_if_exist:nT { tagsupport / caption / label / begin }
+  {
+    \NewTaggingSocketPlug { caption / label / begin } { oer-own-label }
+      { \tagpdfparaOff \mode_leave_vertical: }
+    \NewTaggingSocketPlug { caption / label / end } { oer-own-label }
+      { \tagpdfparaOn }
+  }
+\box_new:N \l__oer_caption_box
+\cs_new_protected:Npn \__oer_unlabeled_caption:nn #1 #2
+  {
+    \skip_vertical:N \abovecaptionskip
+    \hbox_set:Nn \l__oer_caption_box {#2}
+    \dim_compare:nNnTF { \box_wd:N \l__oer_caption_box } > \hsize
+      { #2 \par }
+      {
+        \tex_global:D \use:c { @minipagefalse }
+        \hbox_to_wd:nn \hsize { \hfil \box_use:N \l__oer_caption_box \hfil }
+      }
+    \skip_vertical:N \belowcaptionskip
+  }
+\NewDocumentCommand \OERNoCaptionLabel { }
+  {
+    \socket_if_exist:nTF { caption / label }
+      {
+        \socket_assign_plug:nn { caption / label } { noop }
+        \AssignTaggingSocketPlug { caption / label / begin } { oer-own-label }
+        \AssignTaggingSocketPlug { caption / label / end } { oer-own-label }
+      }
+      {
+        \IfPackageLoadedF { caption }
+          { \cs_set_eq:cN { @makecaption } \__oer_unlabeled_caption:nn }
+      }
+    \IfPackageLoadedT { caption }
+      { \captionsetup { labelformat = empty , labelsep = none } }
+  }
 % A passage in another language (pdf-target.lua): a span or a link a Span
 % with its /Lang, opened in the paragraph, and a div's blocks in
 % oerlanguage, whose structure elements take its /Lang; untagged, the

@@ -61,6 +61,18 @@
 --    marked, the heading's words in \oerlang, so no section's element,
 --    which goes on past the div's end, takes the language.
 --
+-- 9. A caption that carries its own label, "Figure 1.1 The real number
+--    line", as a book whose captions number themselves has (OpenStax's),
+--    which LaTeX numbered again: "Figure 1: Figure 1.1 The real number
+--    line". And a figure the book marks unnumbered (class unnumbered, as
+--    OpenStax marks a chapter's opening picture), which LaTeX numbered:
+--    "Figure 1: Credit: …". Such a figure or table is set in a group with
+--    \OERNoCaptionLabel (latexbuild's PDF_MACROS), and its caption gets no
+--    label of LaTeX's, as an unnumbered table's has none. A caption's own
+--    label is one of the words the captions.figure_prefixes or
+--    captions.table_prefixes setting names, on a word boundary, then a
+--    number.
+--
 -- Copyright 2026 Robert Szarka
 --
 -- This program is free software: you can redistribute it and/or modify
@@ -94,6 +106,59 @@ end
 
 local function squash(s)
   return (s:gsub("%s+", " "):gsub("^ ", ""):gsub(" $", ""))
+end
+
+-- The words that begin a caption's own label (9), from the captions.*
+-- settings build-pdf.py passes on, lowercased.
+local function label_words(name, fallback)
+  local list = {}
+  for word in (os.getenv(name) or fallback):gmatch('[^,]+') do
+    word = word:match('^%s*(.-)%s*$')
+    if word ~= '' then list[#list + 1] = word:lower() end
+  end
+  return list
+end
+
+local FIGURE_WORDS = label_words('FIGURE_LABEL_PREFIXES', 'Figure')
+local TABLE_WORDS = label_words('TABLE_LABEL_PREFIXES', 'Table')
+
+-- Whether a caption opens with its own label (9): one of the words, then
+-- a space or a no-break space, then a number ("Figure 1.1", "Table A.2:").
+-- "Tables 1 and 2" doesn't, its word running on.
+local function own_label(caption, words)
+  local blocks = caption and caption.long or {}
+  if #blocks == 0 then return false end
+  local text = stringify(blocks[1]):gsub('\194\160', ' '):gsub('^%s+', '')
+  local lower = text:lower()
+  for _, word in ipairs(words) do
+    if lower:sub(1, #word) == word then
+      local number = text:sub(#word + 1):match('^%s+(%S+)')
+      if number and number:find('%d') then return true end
+    end
+  end
+  return false
+end
+
+-- A figure the book marks unnumbered (9): the class on the figure, as an
+-- HTML page gives it, or on its one image, where the Markdown reader puts
+-- an implicit figure's attributes.
+local function unnumbered(fig)
+  if fig.classes:includes('unnumbered') then return true end
+  local only = #fig.content == 1 and fig.content[1]
+  if only and (only.t == 'Plain' or only.t == 'Para') and #only.content == 1
+      and only.content[1].t == 'Image' then
+    return only.content[1].classes:includes('unnumbered')
+  end
+  return false
+end
+
+-- A figure's or a table's blocks in a group with \OERNoCaptionLabel,
+-- which holds to the group's end.
+local function without_label(blocks)
+  local out = pandoc.Blocks{ pandoc.RawBlock('latex', '{\\OERNoCaptionLabel') }
+  out:extend(blocks)
+  out:insert(pandoc.RawBlock('latex', '}'))
+  return out
 end
 
 -- A quotation inside a table cell is unwrapped to what it holds: a PDF's
@@ -264,19 +329,21 @@ function Table(tbl)
       columns = body.row_head_columns
     end
   end
+  local own = own_label(tbl.caption, TABLE_WORDS)
   if columns == 0 then
-    return tbl
+    return own and without_label({ tbl }) or tbl
   end
   local list = {}
   for i = 1, columns do
     list[#list + 1] = tostring(i)
   end
-  return {
+  local blocks = {
     pandoc.RawBlock("latex", "\\tagpdfsetup{table/header-columns={"
                     .. table.concat(list, ",") .. "}}"),
     tbl,
     pandoc.RawBlock("latex", "\\tagpdfsetup{table/header-columns={}}"),
   }
+  return own and without_label(blocks) or blocks
 end
 
 local function decorative(img)
@@ -398,6 +465,9 @@ function Figure(fig)
     tbl.caption = fig.caption
     if tbl.identifier == '' then tbl.identifier = fig.identifier end
     return tbl
+  end
+  if own_label(fig.caption, FIGURE_WORDS) or unnumbered(fig) then
+    return without_label({ fig })
   end
   return fig
 end

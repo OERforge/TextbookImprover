@@ -183,7 +183,7 @@ The distinction between the two matters more than either case. A table whose rea
 
 ## Done, recorded here because the roadmap named it
 
-**File names in lowercase** shipped as `media.lowercase`: each image and file a page names copied under its name in lowercase and named so, in an html, revealjs, markdown, or asciidoc target, two files whose names differ only in case stopping the run ([Markdown](docs/markdown.md)). An image a source names in another case than its file's, which macOS and Windows find, is read as the file whatever the setting, as one named with Windows's backslashes is.
+**File names in lowercase** shipped as `media.lowercase`: each image and file a page names copied under its name in lowercase and named so, in an html, revealjs, markdown, or asciidoc target, two files whose names differ only in case stopping the run ([Markdown](docs/markdown.md)). An image or a linked file a source names in another case than its file's, which macOS and Windows find, is read as the file whatever the setting, as one named with Windows's backslashes is.
 
 **Compatibility mode, carried rather than silently upgraded.** A `docx` target writes compatibility mode 15, without which Word won't run its Accessibility Checker, and a `source` target keeps the mode its author's file has unless `compatibility_mode: "15"` says to upgrade it; `util/docx-compat.py` reads and sets it on any file.
 

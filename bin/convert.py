@@ -1799,7 +1799,12 @@ def portable_media_paths(path, base, name):
     it, where the source was likely written, and so does TeX Live on Linux
     (kpathsea's casefolding search), so a PDF built from the source has the
     image, but Pandoc looks a name up as written. Anything else is left
-    for the media gate."""
+    for the media gate.
+
+    A link to a local file that isn't a page (linked_file), which a target
+    copies beside its pages as it does an image, is found the same way,
+    its fragment or query kept: one that names no file as written was
+    copied by no target, and its page linked to nothing."""
     from names import case_match
     with open(path, encoding="utf-8") as fh:
         doc = json.load(fh)
@@ -1842,8 +1847,15 @@ def portable_media_paths(path, base, name):
                 better = None if ref.lower().startswith(EXTERNAL_REF) \
                     else candidate(ref)
                 if better:
-                    fixed.append((ref,) + better)
+                    fixed.append(("image", ref, better[0], better[0], better[1]))
                     node["c"][2][0] = better[0]
+            elif node.get("t") == "Link":
+                ref = node["c"][2][0]
+                parts = linked_file(ref)
+                better = candidate(parts[0]) if parts else None
+                if better:
+                    fixed.append(("link", ref, better[0] + parts[1], better[0], better[1]))
+                    node["c"][2][0] = better[0] + parts[1]
             for value in node.values():
                 walk(value)
         elif isinstance(node, list):
@@ -1853,16 +1865,18 @@ def portable_media_paths(path, base, name):
     if fixed:
         with open(path, "w", encoding="utf-8") as fh:
             json.dump(doc, fh)
-        for ref, better, how in fixed:
+        for kind, ref, better, file, how in fixed:
+            names = f"names an image {ref}" if kind == "image" else f"links to {ref}"
             if how == "case":
-                say(f"WARNING: {name} names an image {ref}, and the file is {better}, "
-                    "a name in another case, which macOS and Windows find and Pandoc "
-                    f"doesn't; read as {better}. Changing it in the source is the fix.")
+                missed = "Pandoc doesn't" if kind == "image" \
+                    else "a server that tells case apart doesn't"
+                say(f"WARNING: {name} {names}, and the file is {file}, a name in another "
+                    f"case, which macOS and Windows find and {missed}; read as {better}. "
+                    "Changing it in the source is the fix.")
             else:
-                say(f"WARNING: {name} names an image {ref}, a path only "
-                    f"Windows resolves; read as {better}. Changing it in the "
-                    "source is the fix.")
-    return [(ref, better) for ref, better, _ in fixed]
+                say(f"WARNING: {name} {names}, a path only Windows resolves; read as "
+                    f"{better}. Changing it in the source is the fix.")
+    return [(ref, better) for _, ref, better, _, _ in fixed]
 
 
 def settle_markdown(path, base, name, decks=False, report=True):
@@ -2095,6 +2109,8 @@ def read_to_json(base, docs, env, work):
         docxrepair.apply_list_tables(repaired, os.path.join(base, stem + ".json"))
         # Numbered code a Word target wrote, numbered again.
         docxrepair.apply_number_lines(repaired, os.path.join(base, stem + ".json"))
+        # A link to a file beside the document, in another case.
+        portable_media_paths(os.path.join(base, stem + ".json"), base, name)
         if tips and TRACE:
             say(f"# {name}: {tips} ScreenTip(s) kept as link titles")
         stems.append(stem)
@@ -2238,6 +2254,7 @@ def read_variants(base, target, work, env):
                                          if not os.path.isabs(out) else out)
             docxrepair.apply_number_lines(repaired, os.path.join(base, out)
                                           if not os.path.isabs(out) else out)
+            portable_media_paths(out, base, name)
         elif name.endswith((".adoc", ".asciidoc")):
             run(["pandoc", "-f", "asciidoc", "-t", "json", path, "-o", out,
                  "--lua-filter=" + MARKDOWN_HTML_FILTER,
@@ -2251,6 +2268,7 @@ def read_variants(base, target, work, env):
                  repaired, "-o", out, "--lua-filter=" + HTML_RAW_FILTER,
                  "--lua-filter=" + HTML_SOURCE_FILTER,
                  "--lua-filter=" + MEDIA_FILTER], env=env, cwd=base)
+            portable_media_paths(out, base, name)
         else:
             run(["pandoc", "-f", "markdown", "-t", "json", path, "-o", out,
                  "--lua-filter=" + MARKDOWN_HTML_FILTER,
@@ -4760,15 +4778,20 @@ def linked_files(path):
                 walk(value)
     with open(path, encoding="utf-8") as fh:
         walk(json.load(fh))
-    out = set()
-    for ref in refs:
-        if re.match(r"^[a-zA-Z][\w+.-]*:|^//|^#", ref):
-            continue
-        target = re.split(r"[#?]", ref, maxsplit=1)[0]
-        if re.search(r"\.\w+$", target) and not re.search(r"\.x?html?$",
-                                                        target.lower()):
-            out.add(target)
-    return sorted(out)
+    return sorted({parts[0] for parts in map(linked_file, refs) if parts})
+
+
+def linked_file(ref):
+    """A link's target as (the local file it names, the fragment or query
+    after it), when that's a file that isn't a page; or None: a page
+    (.html) is the split's and the packager's, a target with no extension
+    names no file, and one with a scheme isn't the book's."""
+    if re.match(r"^[a-zA-Z][\w+.-]*:|^//|^#", ref):
+        return None
+    target, rest = re.match(r"([^#?]*)(.*)", ref, re.S).groups()
+    if re.search(r"\.\w+$", target) and not re.search(r"\.x?html?$", target.lower()):
+        return target, rest
+    return None
 
 
 def copy_media(base, output_dir, pages, safe=True, lower=False):

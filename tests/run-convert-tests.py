@@ -516,6 +516,75 @@ def case_lowercase_names(work):
     ]
 
 
+def case_linked_paths(work):
+    """A link to a file beside the pages that names it with backslashes,
+    as only Windows resolves it, or in another case, as macOS and Windows
+    find it, is read as the file, as an image is, from a Markdown, an
+    HTML, an AsciiDoc, and a Word source, and an HTML page's variant for a
+    target: the file is copied beside the page and the page links to it,
+    its fragment kept, and the run says so. On a295ec3, the packager
+    stopped the run, the files not found."""
+    os.makedirs(os.path.join(work, "Docs"))
+    os.makedirs(os.path.join(work, "Data"))
+    files = {"Docs/Handout.pdf": b"%PDF-1.4\n%%EOF\n", "Data/Results.csv": b"a,b\n",
+             "notes.pdf": b"%PDF-1.4\n%%EOF\n"}
+    pages = {
+        "md.md": "# Markdown\n\nThe [handout](docs/handout.PDF), its [second page]"
+                 "(docs/handout.PDF#page=2), the [data](Data\\Results.csv), and the "
+                 "[notes](notes.pdf). And [the HTML page](html.html).\n",
+        "html.html": '<!DOCTYPE html><html lang="en"><head><title>HTML</title></head><body>'
+                     '<h1>HTML</h1><p>The <a href="Docs\\Handout.pdf">handout</a> and the '
+                     '<a href="DATA/results.csv">data</a>.</p></body></html>\n',
+        "adoc.adoc": "= AsciiDoc\n\nThe link:DOCS/HANDOUT.pdf[handout].\n",
+        "html.print.html": '<!DOCTYPE html><html lang="en"><head><title>HTML</title></head>'
+                           '<body><h1>HTML</h1><p>The printed <a href="docs/HANDOUT.pdf">'
+                           'handout</a>.</p></body></html>\n',
+    }
+    for path, data in files.items():
+        with open(os.path.join(work, path), "wb") as fh:
+            fh.write(data)
+    for path, text in pages.items():
+        with open(os.path.join(work, path), "w", encoding="utf-8") as fh:
+            fh.write(text)
+    subprocess.run(["pandoc", "-f", "markdown", "-o", os.path.join(work, "word.docx")],
+                   input="# Word\n\nThe [handout](docs/HANDOUT.PDF).\n", text=True,
+                   capture_output=True)
+    result = convert(work, "targets:\n  html:\n    format: html\n  print:\n    format: html\n",
+                     fixtures=())
+    page = {stem: read(work, "html", stem + ".html") if exists(work, "html", stem + ".html")
+            else "" for stem in ("md", "html", "adoc", "word")}
+    printed = read(work, "print", "html.html") if exists(work, "print", "html.html") else ""
+    said = result.stdout + result.stderr
+    return [
+        ("the run succeeds", lambda: result.returncode == 0),
+        ("each source's link to a file named in another case, or with backslashes, links "
+         "to the file, which is copied beside the pages",
+         lambda: all('href="Docs/Handout.pdf"' in page[stem] for stem in page)
+         and 'href="Data/Results.csv"' in page["md"] and 'href="Data/Results.csv"' in page["html"]
+         and exists(work, "html", "Docs", "Handout.pdf")
+         and exists(work, "html", "Data", "Results.csv")),
+        ("a variant's too, for its target",
+         lambda: 'href="Docs/Handout.pdf"' in printed and "The printed" in printed
+         and exists(work, "print", "Docs", "Handout.pdf")),
+        ("a link's fragment is kept",
+         lambda: 'href="Docs/Handout.pdf#page=2"' in page["md"]),
+        ("a link that names its file is as it was",
+         lambda: 'href="notes.pdf"' in page["md"] and exists(work, "html", "notes.pdf")),
+        # A page is the split's and the packager's: copied as a file, the
+        # source would replace the page made of it.
+        ("and a link to a page is to the page, not a copy of its source",
+         lambda: 'href="html.html"' in page["md"]
+         and 'name="generator" content="pandoc' in page["html"]),
+        ("the run names each link it read so",
+         lambda: said.count(", a path only Windows resolves; read as ") == 2
+         and said.count(", a name in another case, which macOS and Windows find and a "
+                        "server that tells case apart doesn't") == 6
+         and "md.md links to docs/handout.PDF#page=2, and the file is Docs/Handout.pdf" in said
+         and "word.docx links to docs/HANDOUT.PDF" in said
+         and "html.print.html links to docs/HANDOUT.pdf" in said),
+    ]
+
+
 def case_stem_collisions(work):
     """Two files that would be one page stop the run, and an image's alt
     text isn't lent to a file that merely shares its stem. (An .md beside
@@ -5114,6 +5183,7 @@ CASES = [
     ("an AsciiDoc source", case_asciidoc),
     ("two files, one page", case_stem_collisions),
     ("file names lowercased", case_lowercase_names),
+    ("a link to a file in another case, or with backslashes", case_linked_paths),
     ("adopting a split book's pages", case_adopt),
     ("an HTML source's tables and the header sidecar", case_html_headers),
     ("a menu for pages posted as a site", case_menu),

@@ -17,9 +17,15 @@ Notes gathered from several pages share a list, so they're numbered
 across their group whatever notes.numbering says: page, which restarts
 on every page, would number two notes in one list 1.
 
-A group is whatever the split made of a source: a chapter file's
-sections, an H1's sections in a single-file book. A page that was not
-split is a group of one.
+A group is a top-level entry of the book's contents, the tree the HTML
+pages and the EPUB are both built from (groups): a chapter, with every
+page under it however deep, or a page on its own, a preface, a chapter
+of one page, an appendix, or a book of one page. A part (type: part)
+isn't one: each entry in it is, as at the top level. The groups and
+their pages go in the contents' order. The HTML had taken a group to
+be what the split made of a source, so a page that was a file of its
+own was a group of one, and the EPUB a top-level entry, so a part was
+one.
 
 Pandoc cannot be asked to start numbering at 7, so the numbers are
 rewritten in the output: the reference's visible number, the note's
@@ -49,6 +55,7 @@ import html
 import re
 
 import highlighting
+from bookcontents import is_generated, numbered_title
 
 # Pandoc's HTML writer and its EPUB writer mark the same things in the
 # same classes; they differ in the container (an ol of li, or asides).
@@ -67,6 +74,38 @@ CODE_ID = re.compile(r'(\sid="|\shref="#)(cb\d+(?:-\d+)?)"')
 ID = re.compile(r'\sid="([^"]+)"')
 FRAGMENT = re.compile(r'(\shref=")#([^"]+)"')
 NUMBER_SPAN = re.compile(r'<span class="footnote-number">\d+\.</span>')
+
+
+def groups(tree, titles):
+    """[(stem, key, title)] for each page the book's tree places, in
+    reading order: its notes group's key, shared by the group's pages,
+    and the group's title, numbered when the tree is. tree is the
+    contents as bookcontents builds them, titles each page's own."""
+    found = []
+
+    def pages(entries):
+        for entry in entries:
+            if is_generated(entry):
+                continue
+            if entry[0] == "group":
+                yield from pages(entry[2])
+            else:
+                yield entry[1]
+
+    def walk(entries, path):
+        for index, entry in enumerate(entries):
+            kind, a, b = entry
+            if is_generated(entry):
+                continue
+            key = path + (index,)
+            if kind == "group" and getattr(entry, "type", None) == "part":
+                walk(b, key)
+            elif kind == "group":
+                found.extend((stem, key, numbered_title(entry, a)) for stem in pages(b))
+            else:
+                found.append((a, key, numbered_title(entry, b or titles.get(a) or a)))
+    walk(tree, ())
+    return found
 
 
 class Page:

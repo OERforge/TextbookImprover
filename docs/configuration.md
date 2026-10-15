@@ -236,7 +236,10 @@ A group or page can also carry a `type`, what it is: `preface`,
 `glossary`, `index`, or `colophon`, as EPUB's structural semantics name
 them. The EPUB marks it on the entry's section with its ARIA role and
 names a book-level bibliography, glossary, or index in its landmarks
-([Building an EPUB](epub.md#what-goes-in-and-in-what-order)). A type
+([Building an EPUB](epub.md#what-goes-in-and-in-what-order)). A part's
+footnotes are grouped by its entries, not as a whole, so with
+`notes.numbering: group` each chapter in it is numbered on its own
+([Footnotes across pages](splitting.md#footnotes-across-pages)). A type
 isn't inherited, since a chapter isn't a glossary because its Key Terms
 page is one, and a top-level entry with no `role` is in the part of the
 book its type implies: a glossary page at the end needs `type: glossary`

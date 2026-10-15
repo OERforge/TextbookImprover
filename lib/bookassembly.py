@@ -287,13 +287,12 @@ class Assembly:
         self.depth = 1              # deepest heading level a page sits at
         self.pages = []
         self.found = {"images": 0, "without_alt": 0, "math": 0, "notes": 0}
-        self.groups = {}             # page stem -> (group key, group title)
         self.notes_placed = False    # the Notes chapter, where contents put it
         self.title_preceded = False  # a one-page book's title heading had something before it
         self.aliases = {}            # a page heading's own id -> the page's id
 
     def add_tree(self, tree, depth=1):
-        for index, entry in enumerate(tree):
+        for entry in tree:
             kind, a, b = entry
             self.before_entry(entry, depth)
             if is_generated(entry):
@@ -307,16 +306,6 @@ class Assembly:
                                           page_id("notes")))
                 self.notes_placed = True
                 continue
-            if depth == 1:
-                # A top-level group is a notes group; so is a top-level
-                # page, on its own.
-                key = f"top-{index}"
-                if kind == "group":
-                    for stem in flatten_pages([(kind, a, b)]):
-                        self.groups[stem] = (key, a)
-                else:
-                    doc = load_page(self.base, a)
-                    self.groups[a] = (key, b or page_title(doc, a))
             if kind == "group":
                 # A group whose first page bears its own title -- a
                 # heading's introduction, placed under it by the split --
@@ -442,9 +431,6 @@ class Assembly:
             except ValueError:
                 pass
         count_images(blocks, self.found)
-        # The book's one group of notes, which the EPUB's writer cuts
-        # into a chapter file per top-level heading.
-        self.groups[stem] = ("top-0", title)
         self.pages.append((stem, title, 1))
         self.blocks.extend(blocks)
 

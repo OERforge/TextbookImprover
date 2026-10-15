@@ -896,6 +896,45 @@ def check_one_file_chapters():
     ]
 
 
+def check_notes_groups():
+    """A page's notes group, the same for the HTML pages and the EPUB:
+    the top-level entry of the contents holding it, a chapter however
+    deep its pages sit, a page on its own, or a group of pages, or in a
+    part (type: part) the part's entry holding it; the generated contents
+    page left out; and titles numbered as the tree is."""
+    import notes
+    contents = [
+        "preface", {"generate": "toc"},
+        {"title": "Part One", "type": "part", "items": [
+            "opening",
+            {"title": "Chapter 1", "items": [
+                "c1", {"title": "Deeper", "items": ["c1-a", "c1-b"]}, "c1-z"]},
+            {"title": "Chapter 2", "items": ["c2"]}]},
+        {"title": "Unit Two", "items": [{"title": "Chapter 3", "items": ["c3"]}]},
+        {"page": "extra", "role": "appendix"}]
+    stems = {"preface", "opening", "c1", "c1-a", "c1-b", "c1-z", "c2", "c3", "extra"}
+    titles = {stem: stem.capitalize() for stem in stems}
+
+    def tree():
+        return bookcontents.walk_contents(contents, stems, set(), [])
+    found = notes.groups(tree(), titles)
+    numbered = notes.groups(bookcontents.number_tree(tree(), titles), titles)
+    return [
+        ("every page in reading order, the generated contents page not among them",
+         lambda: [stem for stem, _, _ in found]
+         == ["preface", "opening", "c1", "c1-a", "c1-b", "c1-z", "c2", "c3", "extra"]),
+        ("a chapter in a part is a group with all its pages, a group in it too, the part's "
+         "own page one of its own, and a group that isn't a part is one whole",
+         lambda: [(key, title) for _, key, title in found] == [
+             ((0,), "Preface"), ((2, 0), "Opening"), ((2, 1), "Chapter 1"),
+             ((2, 1), "Chapter 1"), ((2, 1), "Chapter 1"), ((2, 1), "Chapter 1"),
+             ((2, 2), "Chapter 2"), ((3,), "Unit Two"), ((4,), "Extra")]),
+        ("a group's title numbered as the tree is",
+         lambda: [title for _, _, title in numbered][:2] == ["1 Preface", "2.1 Opening"]
+         and [title for _, _, title in numbered][-2:] == ["3 Unit Two", "A Extra"]),
+    ]
+
+
 LIST_WRAPPED = ('<table><tr><td><ul><li><img src="x.png" alt="An eye"></li>'
                 '</ul></td></tr></table>')
 PLAIN_CELL = '<table><tr><td><img src="x.png" alt="An eye"></td></tr></table>'
@@ -1492,6 +1531,7 @@ GROUPS = [
     ("the page stylesheet's contrast, light and dark", check_page_css),
     ("highlighted code's colors", check_highlighting),
     ("one file per chapter", check_one_file_chapters),
+    ("a page's notes group", check_notes_groups),
     ("identifiers", check_identifiers),
     ("facts written down twice", check_consistency),
     ("sidecar paths", check_sidecar_paths),

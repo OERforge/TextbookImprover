@@ -4364,33 +4364,6 @@ def html_escape(text):
             .replace(">", "&gt;"))
 
 
-def page_group(intermediate):
-    """(group key, group title) for a page, from the provenance a split
-    left in it. A chapter file's sections share the source; a single-file
-    book's sections share the H1 above them; a page that was not split
-    is a group of one."""
-    with open(intermediate, encoding="utf-8") as fh:
-        meta = json.load(fh).get("meta", {})
-
-    def text(key):
-        value = meta.get(key)
-        if not value:
-            return ""
-        if value.get("t") == "MetaString":
-            return value["c"]
-        return " ".join("".join(i.get("c", " ") if i["t"] == "Str" else " "
-                                for i in value.get("c", [])).split())
-    source = text("source-page")
-    parents = [p.get("c", "") for p in
-               meta.get("page-parents", {}).get("c", [])]
-    stem = os.path.basename(intermediate)[:-len(INTERMEDIATE)]
-    if not source:
-        return stem, text("title") or stem
-    if parents:
-        return (source, parents[0]), parents[0]
-    return source, text("source-title") or source
-
-
 def inlines_text(node):
     """The text of an inline tree, as Pandoc's stringify gives it: what's
     inside a Span or an Emph too (a title set in \\textrm, FINC 308's)."""
@@ -4659,20 +4632,28 @@ def write_generated(target, tree, titles, api, base, work, fragments,
     return written
 
 
-def arrange_notes(target, pages, base, work, fragments, language, env):
+def arrange_notes(target, pages, base, work, fragments, language, env,
+                  tree, titles):
     """Apply notes.numbering and notes.placement to a target's rendered
-    pages, and write the Notes page when placement is book."""
+    pages, grouped and ordered as the book's tree has them, as the EPUB
+    groups them (notes.groups), and write the Notes page when placement
+    is book. A page the tree leaves out is a group of its own, after
+    the rest."""
     numbering = str(target["notes.numbering"])
     placement = str(target["notes.placement"])
     if numbering == "page" and placement == "page":
         return []
+    stems = [os.path.basename(p)[:-len(INTERMEDIATE)] for p in pages]
+    rendered = set(stems)
+    placed = [g for g in notes_lib.groups(tree, titles) if g[0] in rendered]
+    found = {stem for stem, _, _ in placed}
+    placed += [(stem, ("unplaced", stem), titles.get(stem) or stem)
+               for stem in stems if stem not in found]
     records = []
-    for intermediate in pages:
-        stem = os.path.basename(intermediate)[:-len(INTERMEDIATE)]
+    for stem, group, title in placed:
         path = os.path.join(target.output_dir, stem + ".html")
         if not os.path.exists(path):
             continue
-        group, title = page_group(intermediate)
         with open(path, encoding="utf-8") as fh:
             records.append(notes_lib.Page(stem + ".html", fh.read(), group,
                                           title, "html"))
@@ -5321,7 +5302,7 @@ def main():
                     fragments[target.name], language, renv)
                 for path in arrange_notes(target, rendered, base, work,
                                           fragments[target.name], language,
-                                          renv):
+                                          renv, tree, titles):
                     if path not in written[target.name]:
                         written[target.name].append(path)
                 if target["menu"] == "on":

@@ -603,16 +603,23 @@ def mark_divisions(path, divisions, contents_id):
 
 
 def arrange_epub_notes(path, assembly, numbering, placement):
-    """notes.numbering and notes.placement, applied to the chapter files.
+    """notes.numbering and notes.placement, applied to the chapter files,
+    grouped as the book's tree groups its pages, as the HTML pages are
+    (notes.groups).
 
     Each chapter file opens with the section the writer made of its
     heading, whose id says what it is: page-<stem>, group-N-..., or
-    book-notes. Links between chapter files are by file name, since they
-    share a directory."""
+    book-notes; a page's own sections cut into files of their own, a
+    one-page book's chapters, carry page-<stem>-- and their own ids.
+    Links between chapter files are by file name, since they share a
+    directory."""
     with zipfile.ZipFile(path) as archive:
         names = sorted(n for n in archive.namelist()
                        if "/text/ch" in n and n.endswith(".xhtml"))
         texts = {n: archive.read(n).decode("utf-8") for n in names}
+    groups = {stem: (key, title) for stem, key, title
+              in notes_lib.groups(assembly.tree, assembly.titles)}
+    by_id = {page_id(stem): stem for stem in groups}
     pages, notes_page = [], None
     for name in names:
         text = texts[name]
@@ -622,15 +629,14 @@ def arrange_epub_notes(path, assembly, numbering, placement):
         if ident == page_id("notes"):
             notes_page = notes_lib.Page(short, text, "notes", "Notes", "xhtml")
             continue
-        stem = None
-        for candidate, (key, title) in assembly.groups.items():
-            if ident == page_id(candidate) or ident.startswith(
-                    page_id(candidate) + "--"):
-                stem = candidate
-                break
+        # The page whose id this is, or the page whose section it is, the
+        # longest such: ch1--a's own section is page-ch1--a, not ch1's.
+        stem = by_id.get(ident) or max(
+            (s for s in groups if ident.startswith(page_id(s) + "--")),
+            key=len, default=None)
         if stem is None:
             continue                    # a group heading's own chapter
-        key, title = assembly.groups[stem]
+        key, title = groups[stem]
         pages.append(notes_lib.Page(short, text, key, title, "xhtml"))
     changed = notes_lib.arrange(pages, numbering, placement, notes_page)
     if not changed:

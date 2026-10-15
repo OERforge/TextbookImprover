@@ -4307,6 +4307,107 @@ def case_notes(work):
     ]
 
 
+def case_notes_groups(work):
+    """notes.* group a book's pages as its contents do, in the HTML pages
+    and the EPUB alike: a book of a file per page, named in another order
+    than its contents', its chapters in a part (type: part) with a page
+    of its own, and a page the contents leave out, a group of its own
+    after the rest in the pages; one file cut at its H1s, H2s, and H3s,
+    each chapter's own page in its group; and chapter files cut so too.
+    The HTML had taken a
+    page's group to be what the split made of its source, so a file of
+    its own was a group of one, a chapter's own page was apart from its
+    sections, and so were a section's subsections; the EPUB a top-level
+    entry, so a part was one."""
+    import zipfile
+
+    def page(title, count, level=1):
+        return (f"{'#' * level} {title}\n\n"
+                + "".join(f"{title}, claim {i}.[^{i}]\n\n" for i in range(1, count + 1))
+                + "".join(f"[^{i}]: {title}, note {i}.\n\n" for i in range(1, count + 1)))
+
+    def build(sub, files, settings, contents=""):
+        d = os.path.join(work, sub)
+        os.makedirs(d, exist_ok=True)
+        for name, text in files.items():
+            with open(os.path.join(d, name), "w", encoding="utf-8") as fh:
+                fh.write(text)
+        with open(os.path.join(d, "project.yaml"), "w", encoding="utf-8") as fh:
+            fh.write("project:\n  identifier: org.example.fixtures\n"
+                     "  title: The Fixture Book\n" + contents)
+        r = convert(d, "defaults:\n" + settings + "targets:\n  html:\n    format: html\n"
+                       "  epub:\n    format: epub3\n", project=False, fixtures=())
+        return d, r
+
+    def outputs(d):
+        """For the HTML pages and for the EPUB's chapter files: each
+        page's title with its references' numbers and the ids of the notes
+        it holds, and the Notes page's headings and notes."""
+        with zipfile.ZipFile(os.path.join(d, "epub", "org.example.fixtures.epub")) as z:
+            epub = [z.read(n).decode("utf-8") for n in sorted(z.namelist()) if "/text/ch" in n]
+        html = [read(p) for p in sorted(glob.glob(os.path.join(d, "html", "*.html")))]
+        found = []
+        for texts in (html, epub):
+            pages, notes = {}, None
+            for text in texts:
+                title = re.search(r"<title>([^<]*)</title>", text).group(1)
+                held = re.findall(r'<(?:li|aside)\b[^>]*\bid="((?:g\d+-)?fn\d+)"', text)
+                if title == "Notes" or title == "notes":
+                    notes = (re.findall(r"<h2[^>]*>([^<]*)</h2>", text), held)
+                    continue
+                refs = re.findall(r'class="footnote-ref"[^>]*>(?:<sup>)?(\d+)', text)
+                if refs or held:
+                    pages[title] = (refs, held)
+            found.append((pages, notes))
+        return found
+
+    files = {"preface.md": page("Preface", 1), "opening.md": page("Opening", 1),
+             "zebra.md": page("Zebra", 2), "mango.md": page("Mango", 1),
+             "apple.md": page("Apple", 2), "stray.md": page("Stray", 1)}
+    contents = ("  contents:\n    - preface\n    - title: Part One\n      type: part\n"
+                "      items:\n        - opening\n        - title: Chapter 1\n"
+                "          items: [zebra, mango]\n        - title: Chapter 2\n"
+                "          items: [apple]\n")
+    pages_dir, r1 = build("files", files, "  notes:\n    placement: book\n", contents)
+    one = page("Chapter One", 1) + page("Section A", 1, 2) + page("Section A.1", 1, 3) \
+        + page("Section B", 1, 2) + page("Chapter Two", 1) + page("Section C", 1, 2)
+    one_dir, r2 = build("one-file", {"book.md": one},
+                        "  pages:\n    split_level: 3\n  notes:\n    placement: group\n")
+    chapters_dir, r3 = build("chapter-files", {
+        "ch1.md": page("Chapter One", 1) + page("Section A", 1, 2)
+        + page("Section A.1", 1, 3) + page("Section B", 1, 2),
+        "ch2.md": page("Chapter Two", 1) + page("Section C", 1, 2)},
+        "  pages:\n    split_level: 3\n  notes:\n    numbering: group\n")
+    expected_files = ({"Preface": (["1"], []), "Opening": (["1"], []),
+                       "Zebra": (["1", "2"], []), "Mango": (["3"], []),
+                       "Apple": (["1", "2"], [])},
+                      (["Preface", "Opening", "Chapter 1", "Chapter 2"],
+                       ["g1-fn1", "g2-fn1", "g3-fn1", "g3-fn2", "g3-fn3", "g4-fn1", "g4-fn2"]))
+    # The page contents leave out is a page all the same, but not in the EPUB.
+    expected_pages = ({**expected_files[0], "Stray": (["1"], [])},
+                      (expected_files[1][0] + ["Stray"], expected_files[1][1] + ["g5-fn1"]))
+    expected_one = {"Chapter One": (["1"], []), "Section A": (["2"], []),
+                    "Section A.1": (["3"], []),
+                    "Section B": (["4"], ["fn1", "fn2", "fn3", "fn4"]),
+                    "Chapter Two": (["1"], []), "Section C": (["2"], ["fn1", "fn2"])}
+    expected_chapters = {"Chapter One": (["1"], ["fn1"]), "Section A": (["2"], ["fn2"]),
+                         "Section A.1": (["3"], ["fn3"]), "Section B": (["4"], ["fn4"]),
+                         "Chapter Two": (["1"], ["fn1"]), "Section C": (["2"], ["fn2"])}
+    return [
+        ("a book of a file per page is numbered per chapter, a part's own page on its own, "
+         "and its Notes page has a heading per chapter, in the contents' order, in the "
+         "pages and the EPUB alike, a page the contents leave out last in the pages",
+         lambda: r1.returncode == 0
+         and outputs(pages_dir) == [expected_pages, expected_files]),
+        ("a file cut at its H1s, H2s, and H3s gathers each chapter's notes on its last "
+         "page, its own page's and its subsections' with the rest, numbered across it",
+         lambda: r2.returncode == 0 and outputs(one_dir) == [(expected_one, None)] * 2),
+        ("chapter files cut so number across each chapter, its sections' subsections too",
+         lambda: r3.returncode == 0
+         and outputs(chapters_dir) == [(expected_chapters, None)] * 2),
+    ]
+
+
 BOOK = {
     "_preamble.md": "---\ntitle: The Book\n---\n\nAn epigraph.\n\n\\frontmatter\n\n"
                     "# To the Reader\n\nHello.\n\n# Thanks\n\nTo all.\n\n"
@@ -4798,6 +4899,7 @@ CASES = [
     ("two editions from one directory", case_editions),
     ("roles, numbering, and a contents page", case_structure),
     ("footnote numbering and placement", case_notes),
+    ("footnotes grouped as the contents group the pages", case_notes_groups),
     ("a Markdown source", case_markdown),
     ("an HTML source", case_html_source),
     ("an AsciiDoc source", case_asciidoc),

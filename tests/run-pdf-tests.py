@@ -129,7 +129,7 @@ And amssymb's squares, which unicode-math has no names for: $\square \blacksquar
 | Year | Output |
 |------|--------|
 | 2020 | 5      |
-| 2021 | 6      |
+| 2021 | $\begin{matrix} 5 & + & 1 \end{matrix}$ |
 
 ![A small red square](assets/red.png)
 
@@ -144,7 +144,7 @@ A rule between paragraphs: ![](assets/rule.png){.decorative}
 | 2020 | 10    |
 | 2021 | 12    |
 
-Table: Price by year
+Table: Price by year, $\begin{matrix} p & q \end{matrix}$
 
 +----------------------+
 | Both columns         |
@@ -1046,9 +1046,15 @@ def checks(work, jobs=1):
         # \pmb, on which LuaTeX's tagging of the formula stopped.
         ("every formula, an eqnarray* and a \\pmb among them, has MathML structure "
          "elements and a MathML file",
-         lambda: len(formulas) == 7
+         lambda: len(formulas) == 9
          and all("/AF" in f for f in formulas)
          and "/math" in kinds),
+        # LaTeX stopped on a matrix's & in a cell or a caption, which TeX
+        # took for the table's while the tagging read the formula whole.
+        ("a formula with an alignment in a table's cell, and in its caption, "
+         "is a Formula there",
+         lambda: len(inside(tree, "/TD", "/Formula")) == 1
+         and len(inside(tree, "/Caption", "/Formula")) == 1),
         # Once each in the whole file: the template's own are switched
         # off, the book opens in the front matter from the preamble, and
         # the source's \frontmatter and \appendix are dropped.

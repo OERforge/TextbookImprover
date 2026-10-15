@@ -73,6 +73,9 @@
 --    captions.table_prefixes setting names, on a word boundary, then a
 --    number.
 --
+-- 10. A formula with an alignment in it (a matrix, an array, cases) in a
+--    table's cell or caption, set in braces (below).
+--
 -- Copyright 2026 Robert Szarka
 --
 -- This program is free software: you can redistribute it and/or modify
@@ -183,6 +186,21 @@ local function mark_row_span(cell)
     cell.contents:insert(1, pandoc.Plain({raw}))
   end
 end
+
+-- A formula with an alignment in it, in a table's cell or caption: its &
+-- in braces. LaTeX's tagging reads a formula whole, as a macro's argument,
+-- before setting it, and TeX takes an & it reads at the table's own level,
+-- in an argument too, as the end of the cell; LaTeX stopped ("Forbidden
+-- control sequence found while scanning use of
+-- \__math_grab_inline_delim:w"). OpenStax's dev-math books check a
+-- solution so in their worked examples' steps, an array of its equations
+-- inline in a cell; a caption stopped LaTeX the same way, in nameref's
+-- reading of its title. In braces, the & aren't the table's.
+local braced_math = {Math = function(math)
+  if math.text:find('&', 1, true) then
+    return {pandoc.RawInline('latex', '{'), math, pandoc.RawInline('latex', '}')}
+  end
+end}
 
 local function unquote_cells(rows)
   for _, row in ipairs(rows) do
@@ -316,6 +334,7 @@ local function flatten_nested(tbl)
 end
 
 function Table(tbl)
+  tbl = tbl:walk(braced_math)
   flatten_nested(tbl)
   unquote_cells(tbl.head.rows)
   for _, body in ipairs(tbl.bodies) do

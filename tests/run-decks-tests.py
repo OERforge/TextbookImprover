@@ -2109,6 +2109,61 @@ title: Captioned
 [^h]: The head's note.
 """
 
+# Captions that carry their own labels, one by a word the settings name, a
+# figure marked unnumbered, and a figure and a table whose captions don't,
+# which keep ltx-talk's label, "Figure:" or "Table:".
+LABELS = """---
+title: Labels
+---
+
+# Labeled
+
+![Figure 1.1 A blue square the deck labels itself](img/chart.png)
+
+# Unnumbered
+
+![A blue square the deck leaves unnumbered](img/chart.png){.unnumbered}
+
+# Plain
+
+![A blue square with no label of its own](img/chart.png)
+
+# An Exhibit
+
+![Exhibit 3 A blue square labeled as an exhibit](img/chart.png)
+
+# A Labeled Table
+
+| Year | Rate |
+|------|------|
+| 2020 | 4    |
+
+: Table 2.1 Rates the deck labels itself
+
+# A Plain Table
+
+| Year | Count |
+|------|-------|
+| 2021 | 7     |
+
+: Counts by year
+"""
+
+
+def figure_captions(path):
+    """The standard roles of each figure's Caption's elements, in order: a
+    Lbl for ltx-talk's label, then its paragraph."""
+    pdf, found = structure(path)
+    standard = resolver(pdf.Root.StructTreeRoot)
+    captions = []
+    for element, role, above in found:
+        if role == "/Caption" and above and above[-1] != "/Table":
+            kids = element.get("/K")
+            kids = list(kids) if isinstance(kids, pikepdf.Array) else [kids]
+            captions.append([standard(k)[1:] for k in kids
+                             if isinstance(k, pikepdf.Dictionary) and "/S" in k])
+    return captions
+
 
 def case_pdf_settings(work):
     problem = pdf_ready()
@@ -2120,12 +2175,19 @@ def case_pdf_settings(work):
     unrepaired = convert(plain)
     captioned = os.path.join(plain, "pdf", "captioned.pdf")
     plain_check = rows_of(os.path.join(plain, "output-check.csv"))
-    work = folder(os.path.join(work, "ua1"), "targets:\n  pdf:\n    format: pdf\n    pdf:\n"
+    work = folder(os.path.join(work, "ua1"), "defaults:\n  captions:\n"
+                  "    figure_prefixes: [Figure, Exhibit]\n"
+                  "targets:\n  pdf:\n    format: pdf\n    pdf:\n"
                   "      standard: [ua-1]\n    slides:\n      aspect_ratio: \"5:4\"\n",
-                  decks_given={"sectioned.md": SECTIONED, "agenda.md": AGENDA})
+                  decks_given={"sectioned.md": SECTIONED, "agenda.md": AGENDA,
+                               "labels.md": LABELS})
     result = convert(work)
     built = os.path.join(work, "pdf", "sectioned.pdf")
     agenda = os.path.join(work, "pdf", "agenda.pdf")
+    labels = os.path.join(work, "pdf", "labels.pdf")
+    # Its words with no spaces, which pypdf before 5.1 infers where the
+    # font changes (holds).
+    labels_text = re.sub(r"\s+", "", text_of(labels)) if os.path.exists(labels) else ""
     check = rows_of(os.path.join(work, "output-check.csv"))
     ran = verapdf()
     if not ran:
@@ -2150,6 +2212,23 @@ def case_pdf_settings(work):
          and footnote_ties(captioned)[1:] == (0, 0, 0, 0)),
         ("decks with no slide shown in steps have no note of links taken out",
          lambda: "on the earlier steps" not in result.stderr + unrepaired.stderr),
+        # pdf-target.lua sets them with \OERNoCaptionLabel: a figure's
+        # caption through LaTeX's caption sockets, a long table's through
+        # an empty \LTcaptype, ltx-talk loading no caption package.
+        ("a figure's and a table's caption that carry their own label lose ltx-talk's "
+         "label, and so does an unnumbered figure's, where the others keep it",
+         lambda: "Figure1.1Abluesquare" in labels_text
+         and "Figure:Figure1.1" not in labels_text
+         and "Table2.1Rates" in labels_text and "Table:Table2.1" not in labels_text
+         and "Abluesquarethedeckleavesunnumbered" in labels_text
+         and "Figure:Abluesquarethedeckleaves" not in labels_text
+         and "Figure:Abluesquarewithnolabel" in labels_text
+         and "Table:Countsbyyear" in labels_text),
+        ("and the words are the captions settings', as for a book's PDF",
+         lambda: "Exhibit3Abluesquare" in labels_text
+         and "Figure:Exhibit3" not in labels_text),
+        ("such a figure's Caption holds its paragraph and no Lbl",
+         lambda: figure_captions(labels) == [["P"], ["P"], ["Lbl", "P"], ["P"]]),
     ]
     if ran:
         checks.insert(1, ("veraPDF passes them as PDF/UA-1: the footnote's mark no link, "

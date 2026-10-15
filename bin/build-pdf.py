@@ -68,7 +68,7 @@ from bookcontents import flatten_pages, is_generated, role_of  # noqa: E402
 import highlighting  # noqa: E402
 import latexbuild  # noqa: E402
 from latexbuild import (  # noqa: E402
-    ENGINE, PDF_MACROS as HEADER, UA1_LINKS, is_ua1, math_setup,
+    ENGINE, PDF_MACROS as HEADER, UA1_LINKS, is_ua1, label_prefixes, math_setup,
 )
 import pdfparagraphs  # noqa: E402
 import pdfretag  # noqa: E402
@@ -799,14 +799,6 @@ def build(base, name, resolved, keep, intermediates=None, latex_only=False,
           f"{found['images']} image(s), {found['without_alt']} without "
           "alternative text.", file=sys.stderr)
     return 0
-
-
-def label_prefixes(resolved):
-    """The words that begin a caption's own label, for pdf-target.lua,
-    which sets such a caption without a label of LaTeX's: the captions
-    settings figures-and-tables.lua reads them from."""
-    return {"TABLE_LABEL_PREFIXES": ",".join(map(str, resolved["captions.table_prefixes"])),
-            "FIGURE_LABEL_PREFIXES": ",".join(map(str, resolved["captions.figure_prefixes"]))}
 
 
 def write_latex(base, name, resolved, project, document, out_dir):

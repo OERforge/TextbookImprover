@@ -3607,7 +3607,10 @@ def deck_pdfs(target, stems, names, base, language):
     # which writes a table in a table's cell as LaTeX, its footnotes too,
     # where deck-pdf.lua counts them.
     filters = [TARGET_FILTER, FOOTNOTE_CODE_FILTER, DECK_PDF_FILTER, PDF_TARGET_FILTER]
-    env = dict(os.environ, TARGET_NAME=target.name, TITLE_BLOCK=str(target["title_block"]))
+    # The captions settings' words, which tell pdf-target.lua a caption
+    # that carries its own label, as for a book's PDF.
+    env = dict(os.environ, TARGET_NAME=target.name, TITLE_BLOCK=str(target["title_block"]),
+               **latexbuild.label_prefixes(target.resolved))
     os.makedirs(target.output_dir, exist_ok=True)
 
     def one(stem):

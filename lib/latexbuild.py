@@ -434,6 +434,15 @@ def is_ua1(standards):
         not any(s.lower().startswith("ua-2") for s in standards)
 
 
+def label_prefixes(resolved):
+    """The words that begin a caption's own label, for pdf-target.lua,
+    which sets such a caption without a label of LaTeX's, in a book's PDF
+    and a deck's: the captions settings figures-and-tables.lua reads them
+    from."""
+    return {"TABLE_LABEL_PREFIXES": ",".join(map(str, resolved["captions.table_prefixes"])),
+            "FIGURE_LABEL_PREFIXES": ",".join(map(str, resolved["captions.figure_prefixes"]))}
+
+
 # Written into a tagged PDF's preamble, by build-pdf.py after the metadata
 # file's own header-includes, and by a deck's template (decks.py).
 # math/setup names both forms of MathML luamml makes (it needs
@@ -512,7 +521,10 @@ PDF_MACROS = r"""\ExplSyntaxOn
 % short at a caption too long to center. A long table's caption, and an
 % untagged figure's, is the caption package's, when the template loads it
 % (for a book with tables), told to give none; an untagged figure's without
-% it is set as LaTeX's standard classes set one, without the label.
+% it is set as LaTeX's standard classes set one, without the label. A long
+% table's without it, as in a deck's PDF, where ltx-talk's label is
+% "Table:", is longtable's, which an empty \LTcaptype sets with no label
+% and no number (longtable 4.27).
 \socket_if_exist:nT { tagsupport / caption / label / begin }
   {
     \NewTaggingSocketPlug { caption / label / begin } { oer-own-label }
@@ -545,8 +557,9 @@ PDF_MACROS = r"""\ExplSyntaxOn
         \IfPackageLoadedF { caption }
           { \cs_set_eq:cN { @makecaption } \__oer_unlabeled_caption:nn }
       }
-    \IfPackageLoadedT { caption }
+    \IfPackageLoadedTF { caption }
       { \captionsetup { labelformat = empty , labelsep = none } }
+      { \tl_set:Nn \LTcaptype { } }
   }
 % A passage in another language (pdf-target.lua): a span or a link a Span
 % with its /Lang, opened in the paragraph, and a div's blocks in

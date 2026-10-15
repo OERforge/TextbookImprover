@@ -10,6 +10,8 @@ Every source format the pipeline reads, the ways a book in that format can arriv
 - **NOT YET IMPLEMENTED**: an output the configuration names but nothing produces yet. A target declaring it is skipped with a warning. None is, now.
 - **Not available**: an output no one has planned.
 
+Testing with assistive technology has been limited. Where these pages say how a screen reader reads an output, that's NVDA, mostly in Chrome and in Acrobat, with a few things tried in Firefox, and NVDA and Narrator in Word and PowerPoint. Other screen readers (JAWS, VoiceOver, TalkBack, Orca) and other browsers and readers have had little testing or none, and reports of how the outputs work in them are welcome.
+
 ## At a glance
 
 | Input | HTML | EPUB | Markdown | AsciiDoc | PDF | Word | LaTeX | Round trip to itself |

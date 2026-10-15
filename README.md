@@ -20,6 +20,8 @@ Reads a book's sources, one file per page (Word, Markdown, AsciiDoc, or HTML, or
 
 **Every run checks what it wrote**: dead links and fragments, missing alt text, heading order, invalid ids, tables without headers or caption, and, when the validators are installed, epubcheck, the Nu HTML checker, and veraPDF. The same checks, plus what a Word, Markdown, or PDF file says about itself, run on any file without converting it: `audit.py` writes a findings CSV and a report.
 
+**Testing with assistive technology has been limited**, mostly to NVDA in Chrome and in Acrobat, so reports of how the outputs work with other screen readers, browsers, and readers are welcome ([how far each path has been tested](docs/formats.md#how-the-paths-are-rated)).
+
 Everything a run decides is written down: reports name what to fix, sidecar files hold what you decided, and the configuration file lists every setting with a sentence explaining it.
 
 ## Quick start

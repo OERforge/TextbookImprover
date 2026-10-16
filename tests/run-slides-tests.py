@@ -4307,6 +4307,10 @@ def case_round_trip(work):
         [["", [], []], []]]}
     yield "and a table's empty header row, which a Markdown table can't hold, is none", \
         deckcompare.table(empty, {}) == ("table", 0, 0, [["x"]], ""), deckcompare.table(empty, {})
+    broken = deckcompare.heading([S("Thanks"), {"t": "LineBreak"}, {"t": "LineBreak"},
+                                  {"t": "Space"}, {"t": "LineBreak"}, S("Questions")], {})
+    yield "a title's line breaks in a row are one space, as the Markdown's are when read back", \
+        broken == "Thanks Questions", broken
 
     def made(title, *texts):
         slide = deckcompare.Slide(title, 0)

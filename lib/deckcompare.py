@@ -200,9 +200,10 @@ class Slide:
 
 
 def heading(inlines, ids):
-    """A heading's marked text, a line break a space: a Markdown heading
-    can't hold one, and Pandoc's Markdown writer writes one as a space."""
-    return re.sub(r"\s*<br>\s*", " ", marked(inlines, ids))
+    """A heading's marked text, a line break a space, and line breaks in a
+    row one: a Markdown heading can't hold one, and Pandoc's Markdown
+    writer writes each as a space, which its reader reads as one."""
+    return re.sub(r"(?:\s*<br>)+\s*", " ", marked(inlines, ids))
 
 
 def slides_of(doc):

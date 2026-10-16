@@ -2455,6 +2455,8 @@ title: Shapes
 author: A. Lecturer
 institute: Shepherd University
 date: 2026
+notes: |
+  Welcome. The plan is at [the site](https://example.org/plan).
 ---
 
 # Picture and Text
@@ -2736,6 +2738,18 @@ $$p = q$$
 $$z = 1$$
 
 After it.
+
+# Linked Notes
+
+Words shown.
+
+::: notes
+See [the *source*](https://example.org/data "Where the data & more are") and
+<https://example.org/two?a=1&b=2>, then [the first](#listed-notes), [this
+one](#linked-notes), and [`the code`](https://example.org/data).
+
+- A point at <someone@example.org>
+:::
 """
 
 
@@ -2797,6 +2811,42 @@ def notes_of(parts, slide):
     """The XML of a slide's notes."""
     found = re.search(r'Target="\.\./notesSlides/(notesSlide\d+\.xml)"', slide_rels(parts, slide))
     return parts.get("ppt/notesSlides/" + found.group(1), "") if found else ""
+
+
+def notes_links(xml):
+    """(words, relationship id, ScreenTip) of each run of a notes slide's
+    text that is a link."""
+    out = []
+    for rpr, words in re.findall(r"<a:r>(<a:rPr\b[^>]*?(?:/>|>.*?</a:rPr>))<a:t>([^<]*)</a:t>",
+                                 xml, re.S):
+        click = re.search(r'<a:hlinkClick r:id="([^"]*)"(?: tooltip="([^"]*)")?', rpr)
+        if click:
+            out.append((words, click.group(1), click.group(2)))
+    return out
+
+
+def unrecorded_link():
+    """pptxtarget's notes slide, a link's marks around words with no link
+    recorded for them, its relationships, and the links it counts."""
+    import pptxtarget
+    counts = {"notes_links": 0}
+    xml, rels = pptxtarget.notes_links(
+        '<a:p><a:r><a:rPr lang="en"/><a:t>See \ue004\U000f0001the data\ue005.</a:t></a:r></a:p>',
+        "<Relationships></Relationships>", [], counts)
+    return xml, rels, counts["notes_links"]
+
+
+def notes_rels(parts, slide):
+    """The relationships of a slide's notes slide."""
+    found = re.search(r'Target="\.\./notesSlides/(notesSlide\d+\.xml)"', slide_rels(parts, slide))
+    return parts.get("ppt/notesSlides/_rels/%s.rels" % found.group(1), "") if found else ""
+
+
+def rel_target(rels, rid):
+    """The target of a part's relationship rid, if it's an external one."""
+    found = re.search(r'<Relationship Id="%s"[^>]*?Target="([^"]*)"[^>]*TargetMode="External"'
+                      % re.escape(rid), rels)
+    return found.group(1) if found else None
 
 
 def notes_list(xml):
@@ -2975,6 +3025,11 @@ def case_pptx(work):
     pair = slide_titled(hd, "Figure Pair (2)")
     private = slide_titled(hd, "Private Notes")
     listed = slide_titled(hd, "Listed Notes")
+    linked_notes = slide_titled(hd, "Linked Notes")
+    linked_xml = notes_of(hp, linked_notes) if linked_notes else ""
+    linked_rels = notes_rels(hp, linked_notes) if linked_notes else ""
+    marks = [n for n, x in hp.items() if isinstance(x, str)
+             and re.search("[\ue004\ue005\U000f0000-\U000fffff]", x)]
     notes_first = slide_titled(hd, "Notes First")
     display = slide_titled(hd, "Display")
     kept = slide_titled(hd, "Display Kept")
@@ -3188,7 +3243,33 @@ def case_pptx(work):
              ("Two points:", "0", None, "none"), ("First", "0", "-457200", "\u2022"),
              ("Under it", "1", "-457200", "\u2013"), ("Second", "0", "-457200", "\u2022"),
              ("Numbered", "0", "-457200", "number")]
-         and "3 paragraph(s) of lists in speaker notes given their bullets" in out),
+         and "4 paragraph(s) of lists in speaker notes given their bullets" in out),
+        ("a link in a slide's notes is a link, which the writer took out: its words linked, a "
+         "word formatted inside it too, code too, its ScreenTip its title, each address a "
+         "relationship of the notes slide's; one to a place in the deck its words, and the run "
+         "says both",
+         lambda: [(w, rel_target(linked_rels, r), tip) for w, r, tip in notes_links(linked_xml)]
+         == [("the ", "https://example.org/data", "Where the data &amp; more are"),
+             ("source", "https://example.org/data", "Where the data &amp; more are"),
+             ("https://example.org/two?a=1&amp;b=2", "https://example.org/two?a=1&amp;b=2", None),
+             ("the code", "https://example.org/data", None),
+             ("someone@example.org", "mailto:someone@example.org", None)]
+         and linked_rels.count("relationships/hyperlink") == 3
+         and re.search(r'<a:latin typeface="[^"]*" ?/><a:hlinkClick r:id="[^"]*"/></a:rPr>'
+                       r'<a:t>the code</a:t>', linked_xml)
+         and "the first" in linked_xml and "this one" in linked_xml and not marks
+         and "5 link(s) in speaker notes put back" in out
+         and "2 link(s) in the speaker notes of 1 deck(s) to a place in the deck aren't links "
+             "in the PowerPoint files" in out),
+        ("and marks with no link recorded leave their words, unlinked",
+         lambda: unrecorded_link() == (
+             '<a:p><a:r><a:rPr lang="en"/><a:t>See </a:t></a:r><a:r><a:rPr lang="en"/>'
+             '<a:t>the data</a:t></a:r><a:r><a:rPr lang="en"/><a:t>.</a:t></a:r></a:p>',
+             "<Relationships></Relationships>", 0)),
+        ("and a link in the title slide's notes, which the metadata's notes field holds",
+         lambda: [(w, rel_target(notes_rels(hp, hd.slides[0]), r), tip)
+                  for w, r, tip in notes_links(notes_of(hp, hd.slides[0]))]
+         == [("the site", "https://example.org/plan", None)]),
         ("notes between a slide's heading and its columns stay with the slide",
          lambda: notes_first is not None and notes_first.layout == "Two Content"
          and slide_titled(hd, "Notes First (2)") is None
@@ -3367,6 +3448,7 @@ def case_pptx_settings(work):
 EDGES = """\
 ---
 title: Edges
+notes: "Said [aloud](https://example.org/aloud)."
 ---
 
 # Stacked
@@ -3514,6 +3596,11 @@ def case_pptx_edges(work):
          lambda: "Pandoc's PowerPoint writer warned of 1 thing(s) writing the PowerPoint files:"
          in result.stderr and "  edges: Could not convert TeX math \\begin{nope} x \\end{nope}"
          in result.stderr),
+        ("a link in the title slide's notes, a line in the metadata, is a link",
+         lambda: deck is not None
+         and [(w, rel_target(notes_rels(parts, deck.slides[0]), r), tip)
+              for w, r, tip in notes_links(notes_of(parts, deck.slides[0]))]
+         == [("aloud", "https://example.org/aloud", None)]),
         ("an SVG is a PNG with the SVG beside it, as PowerPoint inserts one",
          lambda: vector is not None and "asvg:svgBlip" in parts[vector.part]
          and re.search(r'Target="\.\./media/oer-svg1\.svg"', rels)

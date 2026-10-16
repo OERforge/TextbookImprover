@@ -70,6 +70,11 @@
 --    the rest) is left out: each is taken out and its amount marked on the
 --    paragraph of text after it, for pptxtarget.py to add to the space
 --    before it, in proportion to the deck's PDF.
+-- 14. The writer takes every link out of the speaker notes
+--    (removeParaLinks), so each link there to an address is its words
+--    between marks, its target recorded, for pptxtarget.py to make the
+--    words the link again. One to a place in the deck stays its words, as
+--    the writer leaves it, and is counted.
 --
 -- Copyright 2026 Robert Szarka
 --
@@ -101,7 +106,7 @@ local KEPT_DIVS = { 'notes', 'columns', 'column', 'incremental', 'nonincremental
 local record = {
   pictures = {}, tables = {}, inline_images = 0, pauses = 0, languages = 0,
   retargeted = 0, unlinked = 0, notes = 0, institute = false, cut = 0, added = 0,
-  continued = 0, column_blocks = 0, spaces = {},
+  continued = 0, column_blocks = 0, spaces = {}, notes_links = {}, notes_unlinked = 0,
 }
 local pictures, tables = 0, 0
 
@@ -209,6 +214,11 @@ local SPACE_MARK = '\u{E002}'
 -- or the end of a slide, the writer leaves out, and logs, as before.
 local VSPACE_MARK = '\u{E003}'
 local SPACE_BASE = 0xF0000
+
+-- A link in the speaker notes: NOTES_LINK and a character naming its place
+-- in record.notes_links (U+F0001 the first) before its words, NOTES_LINK_END
+-- after them, the words between the link's in pptxtarget.py.
+local NOTES_LINK, NOTES_LINK_END = '\u{E004}', '\u{E005}'
 local LATEX_LINE = 13.6
 local UNITS = {
   pt = 1, bp = 72.27 / 72, px = 72.27 / 72, ['in'] = 72.27, cm = 72.27 / 2.54,
@@ -919,6 +929,22 @@ local function keep_id(div)
   end
 end
 
+-- A link in the speaker notes, which the writer would take out, as its
+-- words between marks, its address and title recorded (14, above); one to
+-- a place in the deck left to the writer.
+local function notes_link(link)
+  if link.target:sub(1, 1) == '#' then
+    record.notes_unlinked = record.notes_unlinked + 1
+    return nil
+  end
+  table.insert(record.notes_links, { link.target, link.title })
+  local words = pandoc.Inlines({
+    pandoc.Str(NOTES_LINK .. utf8.char(SPACE_BASE + #record.notes_links)) })
+  words:extend(link.content)
+  words:insert(pandoc.Str(NOTES_LINK_END))
+  return words
+end
+
 -- A metadata value as a list of its entries.
 local function entries(value)
   if value == nil then return pandoc.List({}) end
@@ -1003,6 +1029,19 @@ function Pandoc(doc)
     doc.blocks = restructure(doc.blocks)
     doc = retarget(doc)
   end
+  -- The speaker notes' links, after any to a place in the deck has been
+  -- pointed at its slide's heading: the title slide's, if the notes field
+  -- of the metadata holds them, and each slide's.
+  local title_notes = pandoc.utils.type(doc.meta.notes)
+  if title_notes == 'Blocks' or title_notes == 'Inlines' then
+    doc.meta.notes = doc.meta.notes:walk({ Link = notes_link })
+  end
+  doc.blocks = doc.blocks:walk({
+    traverse = 'topdown',
+    Div = function(div)
+      if is_notes(div) then return div:walk({ Link = notes_link }), false end
+    end,
+  })
   -- Tables, the images left in lines of text, and the passages in other
   -- languages, speaker notes aside.
   doc.blocks = doc.blocks:walk({

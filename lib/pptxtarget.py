@@ -1597,6 +1597,87 @@ def notes_bullets(xml, bullets, margins, counts):
     return NOTES_BODY.sub(body, xml, count=1)
 
 
+# A link in a slide's speaker notes, which Pandoc's writer takes out of
+# them (removeParaLinks in speakerNotesBody, Output.hs; its commit,
+# 07f3aa1, says PowerPoint offers no way to put one there), though a
+# deck's notes hold links as its slides do, Google Slides' exports' and
+# decks PowerPoint 2011 for Mac saved alike: deck-pptx.lua puts
+# NOTES_LINK and a character naming the link's place in
+# record["notes_links"] (U+F0001 the first) before its words, and
+# NOTES_LINK_END after them.
+NOTES_LINK, NOTES_LINK_END = "\ue004", "\ue005"
+NOTES_LINK_MARK = re.compile("%s(.)|%s" % (NOTES_LINK, NOTES_LINK_END), re.S)
+NOTES_PARAGRAPH = re.compile(r"<a:p>.*?</a:p>", re.S)
+NOTES_RUN = re.compile(r"<a:r>(<a:rPr\b[^>]*?(?:/>|>.*?</a:rPr>))<a:t>([^<]*)</a:t></a:r>", re.S)
+HYPERLINK_RELATIONSHIP = ("http://schemas.openxmlformats.org/officeDocument/2006/"
+                          "relationships/hyperlink")
+
+
+def _clicked(rpr, rid, title):
+    """A run's properties with an a:hlinkClick to rid, its ScreenTip title,
+    last: what the writer puts in a run's properties, a color and a code
+    font, comes before it (CT_TextCharacterProperties)."""
+    click = '<a:hlinkClick r:id="%s"%s/>' % (
+        rid, ' tooltip="%s"' % html.escape(title) if title else "")
+    if rpr.endswith("/>"):
+        return rpr[:-2].rstrip() + ">" + click + "</a:rPr>"
+    return rpr[:-len("</a:rPr>")] + click + "</a:rPr>"
+
+
+def notes_links(xml, rels, links, counts):
+    """A notes slide (xml) and its relationships (rels), each marked link
+    a link again: a run between its marks, cut where a mark falls inside
+    it, given an a:hlinkClick to a hyperlink relationship of the notes
+    slide's, its ScreenTip the link's title; links, record["notes_links"],
+    [address, title] each. A mark with no link recorded leaves its words
+    as they are. counts["notes_links"] counts the links made."""
+    if NOTES_LINK not in xml:
+        return xml, rels
+    made = {}       # an address: its relationship's id
+    linked = set()  # the links made, by their places
+
+    def rid_for(address):
+        nonlocal rels
+        if address not in made:
+            made[address] = _next_rid(rels)
+            rels = rels.replace("</Relationships>", '<Relationship Id="%s" Type="%s" Target="%s" '
+                                'TargetMode="External"/></Relationships>'
+                                % (made[address], HYPERLINK_RELATIONSHIP,
+                                   html.escape(address)), 1)
+        return made[address]
+
+    def paragraph(match):
+        place = [None]          # the link the runs are in, by its place
+
+        def run(run_match):
+            rpr, content = run_match.group(1), run_match.group(2)
+            pieces, at = [], 0
+            for mark in NOTES_LINK_MARK.finditer(content):
+                pieces.append((content[at:mark.start()], place[0]))
+                if mark.group(1):
+                    place[0] = ord(mark.group(1)) - SPACE_BASE
+                else:
+                    place[0] = None
+                at = mark.end()
+            pieces.append((content[at:], place[0]))
+            out = []
+            for words, index in pieces:
+                if not words:
+                    continue
+                if index is not None and 0 < index <= len(links):
+                    address, title = links[index - 1]
+                    linked.add(index)
+                    out.append("<a:r>%s<a:t>%s</a:t></a:r>"
+                               % (_clicked(rpr, rid_for(address), title), words))
+                else:
+                    out.append("<a:r>%s<a:t>%s</a:t></a:r>" % (rpr, words))
+            return "".join(out)
+        return NOTES_RUN.sub(run, match.group(0))
+    xml = NOTES_PARAGRAPH.sub(paragraph, xml)
+    counts["notes_links"] += len(linked)
+    return xml, rels
+
+
 def math_fallbacks(xml, counts):
     """A slide with a fallback for each shape the writer wrapped in
     mc:AlternateContent for its equations (a Choice alone), and each table
@@ -1796,7 +1877,8 @@ def finish(path, record, *, language, title, svgs=None, notes=None):
               "first_columns": 0, "table_captions": 0, "captions_taller": 0,
               "tables_fitted": 0, "tables_overflow": 0, "text_fitted": 0, "text_overflow": 0,
               "bars": 0, "math_fallbacks": 0, "ids": 0, "animations": 0, "repaired": 0,
-              "svgs": 0, "properties": 0, "displays": 0, "spaces": 0, "notes_bullets": 0}
+              "svgs": 0, "properties": 0, "displays": 0, "spaces": 0, "notes_bullets": 0,
+              "notes_links": 0}
     with zipfile.ZipFile(path) as zin:
         infos = zin.infolist()
         parts = {info.filename: zin.read(info.filename) for info in infos}
@@ -1869,6 +1951,10 @@ def finish(path, record, *, language, title, svgs=None, notes=None):
             xml = paragraph_spacing(xml, counts, spaces, body_levels, top_inset(name))
         else:
             xml = notes_bullets(xml, bullets, other_margins, counts)
+            rels_name = _rels_part(name)
+            if rels_name in parts:
+                xml, texts[rels_name] = notes_links(xml, text(rels_name),
+                                                    record.get("notes_links") or [], counts)
         xml = math_fallbacks(xml, counts)
         if language:
             xml, _ = relanguage(xml, language)

@@ -3958,7 +3958,7 @@ def deck_pptxs(target, stems, names, base, language, work):
     written, failed, slides, ratios, layouts = [], [], 0, {}, set()
     counts, found = Counter(), {key: [] for key in (
         "cut", "pauses", "inline_images", "languages", "unlinked", "column_blocks", "notes",
-        "not_rendered", "overlaps", "small", "overflow", "warnings")}
+        "notes_unlinked", "not_rendered", "overlaps", "small", "overflow", "warnings")}
     left_out = Counter()
     for (stem, _intermediate, _level, shape, why), result in results:
         if not result["ok"]:
@@ -3982,7 +3982,7 @@ def deck_pptxs(target, stems, names, base, language, work):
         counts.update(result["counts"])
         record = result["record"]
         for key in ("cut", "pauses", "inline_images", "languages", "unlinked", "column_blocks",
-                    "notes"):
+                    "notes", "notes_unlinked"):
             if record.get(key):
                 found[key].append((stem, record[key] if key != "cut" else record.get("added")))
         if result["not_rendered"]:
@@ -4028,6 +4028,8 @@ def deck_pptxs(target, stems, names, base, language, work):
             + (f", {counts['notes_bullets']} paragraph(s) of lists in speaker notes given their "
                "bullets, which Pandoc's writer leaves to a notes master that gives none"
                if counts["notes_bullets"] else "")
+            + (f", {counts['notes_links']} link(s) in speaker notes put back, which Pandoc's "
+               "writer takes out of them" if counts["notes_links"] else "")
             + (f", {counts['repaired']} repair(s) of XML PowerPoint can't read as Pandoc "
                "wrote it" if counts["repaired"] else "") + ".")
     if found["cut"]:
@@ -4058,6 +4060,12 @@ def deck_pptxs(target, stems, names, base, language, work):
             f"{len(found['unlinked'])} deck(s) to a place on a slide with no heading aren't "
             "links in the PowerPoint files, their words kept (" + named_decks(found["unlinked"])
             + "): PowerPoint links to a slide, which Pandoc's writer finds by a heading on it.")
+    if found["notes_unlinked"]:
+        say(f"NOTE: {sum(n for _, n in found['notes_unlinked'])} link(s) in the speaker notes "
+            f"of {len(found['notes_unlinked'])} deck(s) to a place in the deck aren't links in "
+            "the PowerPoint files, their words kept (" + named_decks(found["notes_unlinked"])
+            + "): Pandoc's writer takes every link out of the notes, and a link to an address "
+            "alone is put back.")
     if found["notes"]:
         say(f"NOTE: slides.notes is omitted for target {target.name}, so the speaker notes of "
             f"{len(found['notes'])} deck(s) are left out of their PowerPoint files too.")

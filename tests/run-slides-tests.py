@@ -363,7 +363,8 @@ def notes_xml(text):
 def deck(path, slides, default_lang="en-US", core_title="A Deck", sections=None, logo=False,
          style=True, styles_lang=None, layout=None, master=None, notes_master=None):
     """A deck: each slide a dict of shapes, and its images, links, charts,
-    notes, and whether it's hidden, by relationship id. layout and master:
+    notes and their links, and whether it's hidden, by relationship id.
+    layout and master:
     the XML of its one layout and its master, when not the usual ones;
     notes_master, the XML of a notes master its notes slides have."""
     types = ['<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.'
@@ -428,10 +429,12 @@ def deck(path, slides, default_lang="en-US", core_title="A Deck", sections=None,
                           else notes_xml(spec["notes"])))
             entries.append(("rId99", "notesSlide", "../notesSlides/notesSlide%d.xml" % number,
                             False))
-            if notes_master:
+            if notes_master or spec.get("notes_links"):
                 parts.append(("ppt/notesSlides/_rels/notesSlide%d.xml.rels" % number,
-                              rels([("rId1", "notesMaster", "../notesMasters/notesMaster1.xml",
-                                     False)])))
+                              rels(([("rId1", "notesMaster", "../notesMasters/notesMaster1.xml",
+                                      False)] if notes_master else [])
+                                   + [(rid, "hyperlink", url, True) for rid, url
+                                      in sorted(spec.get("notes_links", {}).items())])))
             types.append('<Override PartName="/ppt/notesSlides/notesSlide%d.xml" ContentType="'
                          'application/vnd.openxmlformats-officedocument.presentationml.'
                          'notesSlide+xml"/>' % number)
@@ -4329,7 +4332,8 @@ def case_round_trip(work):
     # their own, one holding only notes, a title of two lines, two bold
     # lines a plain indent parts, and lists going on from a slide before,
     # each nested in an item and starting past one, one in the notes, which
-    # the Markdown target writes from one with its start beside it.
+    # the Markdown target writes from one with its start beside it; and a
+    # link in the notes, which Pandoc's PowerPoint writer takes out.
     deck(os.path.join(folder, "Cut.pptx"), [
         {"shapes": [title(2, "Cut Apart", "ctrTitle", box=TITLE_BOX)]},
         {"shapes": [pic(2, "rId2", SPOT, "A red square"),
@@ -4353,7 +4357,10 @@ def case_round_trip(work):
             ph='<p:ph idx="1"/>')],
          "notes": notes_of([p(r("Ask about"), ppr=lvl(0, '<a:buAutoNum type="arabicPeriod"/>')),
                             p(r("the third"), ppr=lvl(1, '<a:buAutoNum type="alphaLcPeriod" '
-                                                         'startAt="3"/>'))])}],
+                                                         'startAt="3"/>')),
+                            p(r("Source: "), r("the data", click='<a:hlinkClick r:id="rId3"/>',
+                                               u="sng"), r("."), ppr=PLAIN)]),
+         "notes_links": {"rId3": FIELD}}],
         master=bulleted_master())
     first = convert(folder, "--quick")
     trip = os.path.join(work, "trip")
@@ -4399,7 +4406,8 @@ def case_round_trip(work):
     yield "a deck the trip changes by design comes back the same: a slide with no title that " \
         "the target cut in two one slide again, and the slides after it their own, one holding " \
         "only notes; a title's line break a space, a link to its slide too; two bold lines one " \
-        "bold either way; and lists nested in an item and starting past one, as they were", \
+        "bold either way; lists nested in an item and starting past one, as they were; and a " \
+        "link in the notes", \
         cut_titles == ["", "", "", "", "Results (Panel)", "Continued"] and not cut_found, \
         (cut_titles, cut_found)
     cut_md = ""
@@ -4412,6 +4420,8 @@ def case_round_trip(work):
         and "    a.  []{start=\"2\"}Labor" in cut_md and "B.  Pluralism" in cut_md \
         and "    a.  []{start=\"3\"}the third" in cut_md \
         and "5.  Regulation" in cut_md and "i.  Hiring" in cut_md, cut_md[-400:]
+    yield "and the link in the notes as a link, underlined as Google Slides writes one", \
+        "Source: [[the data]{.underline}](%s)." % FIELD in cut_md, cut_md[-400:]
     read_back = {}
     if os.path.isfile(os.path.join(trip, "Cut.filtered.json")):
         with open(os.path.join(trip, "Cut.filtered.json"), encoding="utf-8") as fh:

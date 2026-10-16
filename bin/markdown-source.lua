@@ -1119,8 +1119,80 @@ local function written_meta(doc)
   return true
 end
 
+-- A numbered list inside a list's item that starts past its first number
+-- (5., then b. under it; B., then 3. under it, a list going on from the
+-- slide before): Pandoc's Markdown reader reads one as text since 3.10.1
+-- ("ordered sublists must start with 1", #11735), where its writer still
+-- writes its own start. So it's written from its first number, its start
+-- an empty span at the head of its first item, 1.  []{start="3"}, which
+-- the reading filter puts back (figures-and-tables.lua). The reader reads a
+-- definition as it reads an item, so a list there is marked too; a list
+-- in neither starts where it likes.
+local function start_marked(list)
+  local start = list.listAttributes.start
+  if start == 1 then return end
+  local mark = pandoc.Span({}, pandoc.Attr('', {}, { start = tostring(start) }))
+  local items = list.content
+  local first = items[1] or pandoc.Blocks({})
+  if #first > 0 and (first[1].t == 'Plain' or first[1].t == 'Para') then
+    first[1].content = pandoc.Inlines({ mark }) .. first[1].content
+  else
+    -- An item that opens with code or a list: the mark a paragraph of its
+    -- own, which the writer parts from what follows by a blank line (a
+    -- Plain would run into an indented code block), so the list reads
+    -- back loose, its items paragraphs.
+    first = pandoc.Blocks({ pandoc.Para({ mark }) }) .. first
+  end
+  items[1] = first
+  list.content = items
+  list.listAttributes = pandoc.ListAttributes(1, list.listAttributes.style,
+                                              list.listAttributes.delimiter)
+end
+
+-- The lists an item holds, or a definition, as the reader reads them, in a
+-- div or a quotation there too: each that starts past one given its mark.
+local function item_lists(blocks)
+  for i, block in ipairs(blocks) do
+    if block.t == 'OrderedList' then
+      start_marked(block)
+      blocks[i] = block
+    elseif block.t == 'Div' or block.t == 'BlockQuote' then
+      block.content = item_lists(block.content)
+      blocks[i] = block
+    end
+  end
+  return blocks
+end
+
+-- Each list's items and each definition, wherever they are: in a
+-- footnote or a table's cell too.
+local function marked_items(list)
+  local content = list.content
+  for k, item in ipairs(content) do
+    content[k] = item_lists(item)
+  end
+  list.content = content
+  return list
+end
+
+local function marked_definitions(list)
+  local content = list.content
+  for _, entry in ipairs(content) do
+    local held = entry[2]
+    for k, definition in ipairs(held) do
+      held[k] = item_lists(definition)
+    end
+    entry[2] = held
+  end
+  list.content = content
+  return list
+end
+
 function Pandoc(doc)
-  if not ADOC then return nil end
+  if not ADOC then
+    return doc:walk({ OrderedList = marked_items, BulletList = marked_items,
+                      DefinitionList = marked_definitions })
+  end
   local changed = written_meta(doc)
   if doc.meta.title == nil then return changed and doc or nil end
   local lowest = math.huge

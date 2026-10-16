@@ -1006,6 +1006,32 @@ function Para(para)
 end
 function Plain(plain) return drop_figure_mark(plain) end
 
+-- A numbered list a Markdown target wrote from its first number, because
+-- Pandoc's reader takes a list inside a list's item only when it starts
+-- there: its own start is an empty span at the head of its first item,
+-- 1.  []{start="3"} (markdown-source.lua). The start goes back on the
+-- list, and the span, which has done its job, comes off; a paragraph that
+-- held only the span, before code, goes with the other empty ones (Para).
+local function list_start(list)
+  local first = list.content[1]
+  local block = first and first[1]
+  if not block or (block.t ~= 'Plain' and block.t ~= 'Para') then return nil end
+  local mark = block.content[1]
+  local start = mark and mark.t == 'Span' and #mark.content == 0
+                and math.tointeger(tonumber(mark.attributes.start or ''))
+  if not start then return nil end
+  local rest = block.content
+  rest:remove(1)
+  block.content = rest
+  first[1] = block
+  local items = list.content
+  items[1] = first
+  list.content = items
+  list.listAttributes = pandoc.ListAttributes(start, list.listAttributes.style,
+                                              list.listAttributes.delimiter)
+  return list
+end
+
 -- A table a Markdown target wrote as HTML because it has merged cells,
 -- or a figure it wrote that way because it carries an id: read back
 -- into the block it was, so the rest of the filter can work on it.
@@ -3025,8 +3051,9 @@ end
 return {
   -- A table or figure written as HTML, or a figure written as a div, by
   -- a Markdown target: the block it was, before anything counts or
-  -- numbers tables and figures.
-  { RawBlock = RawBlock, Div = figure_div },
+  -- numbers tables and figures; and a numbered list it wrote from one,
+  -- its own start again.
+  { RawBlock = RawBlock, Div = figure_div, OrderedList = list_start },
   {
     Pandoc = function(doc)
       local state = { n = 0, all = 0, above = 0, below = 0 }

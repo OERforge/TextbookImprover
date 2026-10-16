@@ -4913,6 +4913,145 @@ def case_markdown_target(work):
     ]
 
 
+LIST_STARTS = """\
+# Continued Lists
+
+A list going on from the page before, its item repeated.
+
+<ol type="A" start="2"><li>Pluralism<ol start="3"><li>Third question</li>\
+<li>Fourth question</li></ol></li></ol>
+
+And one whose letters go on, under a number.
+
+<ol start="5"><li>Regulation<ol type="a" start="2"><li>Labor<ol type="i">\
+<li>Hiring</li></ol></li></ol></li></ol>
+
+<blockquote><ol><li>Quoted<ol start="3"><li>Third, quoted</li></ol></li></ol></blockquote>
+
+A definition holds a list as an item does.
+
+<dl><dt>Defined</dt><dd><ol start="6"><li>Sixth, defined</li></ol></dd></dl>
+
+A list in a note.[^listed]
+
+[^listed]: <ol><li>Noted<ol start="7"><li>Seventh, noted</li></ol></li></ol>
+
+And one in a table's cell.
+
+<table><tr><td><ol><li>Celled<ol start="8"><li>Eighth, in a cell</li></ol></li></ol></td></tr>\
+</table>
+
+And lists in a quotation and a div that an item holds, which the reader reads as the item's.
+
+<ol><li>Quoting<blockquote><ol start="9"><li>Ninth, quoted in an item</li></ol></blockquote>\
+</li><li>Holding<div class="aside"><ol start="10"><li>Tenth, in an item's div</li></ol></div>\
+</li></ol>
+
+And one under a bullet.
+
+<ul><li>Bulleted<ol start="11"><li>Eleventh, under a bullet</li></ol></li></ul>
+"""
+
+# A nested list whose first item opens with code, which the target can't
+# mark in a paragraph of the item's own: the mark a paragraph before it.
+# And spans an author wrote that only look like the mark, one whose start
+# is no whole number and one holding words, which stay the author's.
+LIST_STARTS_CODE = """\
+# Code First
+
+<ol><li>Steps<ol start="4"><li><pre><code>make all</code></pre></li>\
+<li>Then the rest.</li></ol></li></ol>
+
+1.  Odd
+    1.  []{start="3.5"}A start that isn't whole
+2.  Spanned
+    1.  [Kept words]{start="2"} and more
+"""
+
+
+def case_list_starts(work):
+    """A numbered list nested in a list's item and starting past its first
+    number, which Pandoc's Markdown reader reads as text since 3.10.1, through
+    a Markdown target and back: written from one, its start an empty span
+    beside it, it gives the same HTML, and the second write is the first."""
+    import filecmp
+    first = os.path.join(work, "first")
+    os.makedirs(first)
+    with open(os.path.join(first, "lists.md"), "w", encoding="utf-8") as fh:
+        fh.write(LIST_STARTS)
+    result = convert(first, "targets:\n  html:\n    format: html\n"
+                            "  src:\n    format: markdown\n", fixtures=())
+    copies = []
+    for name in ("second", "third"):
+        folder = os.path.join(work, name)
+        os.makedirs(folder)
+        source = copies[-1] if copies else first
+        if os.path.isfile(os.path.join(source, "src", "lists.md")):
+            shutil.copy(os.path.join(source, "src", "lists.md"), folder)
+        for config in ("project.yaml", "conversion.yaml"):
+            shutil.copy(os.path.join(first, config), folder)
+        run_in(folder)
+        copies.append(folder)
+    compare = subprocess.run(
+        ["python3", os.path.join(ROOT, "util", "compare-output.py"),
+         os.path.join(first, "html"), os.path.join(copies[0], "html")],
+        capture_output=True, text=True)
+    md = read(first, "src", "lists.md") if exists(first, "src", "lists.md") else ""
+    page = read(copies[0], "html", "lists.html") if exists(copies[0], "html",
+                                                              "lists.html") else ""
+    coded = os.path.join(work, "coded")
+    os.makedirs(coded)
+    with open(os.path.join(coded, "code.md"), "w", encoding="utf-8") as fh:
+        fh.write(LIST_STARTS_CODE)
+    coded_run = convert(coded, "targets:\n  src:\n    format: markdown\n", fixtures=())
+    coded_back = os.path.join(work, "coded-back")
+    os.makedirs(coded_back)
+    if exists(coded, "src", "code.md"):
+        shutil.copy(os.path.join(coded, "src", "code.md"), coded_back)
+    shutil.copy(os.path.join(coded, "project.yaml"), coded_back)
+    with open(os.path.join(coded_back, "conversion.yaml"), "w") as fh:
+        fh.write("targets:\n  html:\n    format: html\n")
+    run_in(coded_back)
+    code_md = read(coded, "src", "code.md") if exists(coded, "src", "code.md") else ""
+    code_page = read(coded_back, "html", "code.html") if exists(coded_back, "html",
+                                                                  "code.html") else ""
+    return [
+        ("the Markdown writes a nested list that starts past one from one, its start an "
+         "empty span at its first item, and a list in no item from its own start",
+         lambda: result.returncode == 0 and "1.  []{start=\"3\"}Third question" in md
+         and "a.  []{start=\"2\"}Labor" in md and "B.  Pluralism" in md
+         and "5.  Regulation" in md and "i.  Hiring" in md),
+        ("and one in a definition, one nested in a note's list or a cell's, one in a quotation "
+         "or a div an item holds, and one under a bullet, as the reader reads them as an item's",
+         lambda: "1.  []{start=\"6\"}Sixth, defined" in md
+         and "1.  []{start=\"7\"}Seventh, noted" in md
+         and "1.  []{start=\"8\"}Eighth, in a cell" in md
+         and "1.  []{start=\"9\"}Ninth, quoted in an item" in md
+         and "1.  []{start=\"10\"}Tenth, in an item's div" in md
+         and "1.  []{start=\"11\"}Eleventh, under a bullet" in md),
+        ("read back as a book, each list starts where it did, the span gone, a quoted one's "
+         "too, and those in a definition, a note, a cell, and a quotation and a div in an item",
+         lambda: page.count('start="3"') == 2 and 'start="2"' in page
+         and all('<ol start="%d"' % n in page for n in (6, 7, 8, 9, 10, 11))
+         and "<span start=" not in page),
+        ("an item that opens with code has the mark as a paragraph before the code, and read "
+         "back the list starts where it did, the code its first item's, the mark gone",
+         lambda: re.search(r'1\.  \[\]\{start="4"\}\n\n +make all', code_md) is not None
+         and re.search(r'<ol start="4"[^>]*>\s*<li>\s*<pre', code_page) is not None
+         and '<span start="4"' not in code_page and "<p></p>" not in code_page),
+        ("an author's span with a start that isn't a whole number, or with words in it, is "
+         "no mark, and stays",
+         lambda: coded_run.returncode == 0 and '<span start="3.5"></span>' in code_page
+         and '<span start="2">Kept words</span>' in code_page),
+        ("and the Markdown gives the same HTML",
+         lambda: "Runs agree" in compare.stdout),
+        ("the second write is the fixed point: the third equals it",
+         lambda: filecmp.cmp(os.path.join(copies[0], "src", "lists.md"),
+                             os.path.join(copies[1], "src", "lists.md"), shallow=False)
+         if exists(copies[1], "src", "lists.md") else False),
+    ]
+
+
 MERGE_BOOK = {
     "ch1.md": ("# Chapter One\n\nIntro.\n\n## First\n\nA. See "
                "[Second](ch1--second.html) and [Two](ch2.html).\n\n"
@@ -5183,6 +5322,7 @@ CASES = [
     ("where the book is named", case_book_name),
     ("a markdown target that merges", case_merge),
     ("a Markdown target, round trip", case_markdown_target),
+    ("a nested list that starts past one, through Markdown", case_list_starts),
     ("two editions from one directory", case_editions),
     ("roles, numbering, and a contents page", case_structure),
     ("footnote numbering and placement", case_notes),

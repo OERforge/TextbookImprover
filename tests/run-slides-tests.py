@@ -51,6 +51,7 @@ import csv
 import hashlib
 import html
 import io
+import json
 import os
 import re
 import shutil
@@ -4325,8 +4326,10 @@ def case_round_trip(work):
     folder = converted_folder(work, "targets:\n  md:\n    format: markdown\n")
     # Beside it, a deck the trip changes on its way, by design: a slide with
     # no title that the pptx target cuts after its picture, then two of
-    # their own, one holding only notes, a title of two lines, and two bold
-    # lines a plain indent parts.
+    # their own, one holding only notes, a title of two lines, two bold
+    # lines a plain indent parts, and lists going on from a slide before,
+    # each nested in an item and starting past one, one in the notes, which
+    # the Markdown target writes from one with its start beside it.
     deck(os.path.join(folder, "Cut.pptx"), [
         {"shapes": [title(2, "Cut Apart", "ctrTitle", box=TITLE_BOX)]},
         {"shapes": [pic(2, "rId2", SPOT, "A red square"),
@@ -4339,7 +4342,19 @@ def case_round_trip(work):
         {"shapes": [shape(2, "Title 1", [p(r("Results"), BREAK, r("(Panel)"))],
                           ph='<p:ph type="title"/>'),
                     shape(3, "TextBox 2", [p(r("First", b="1"), r(" "), BREAK, r("   "),
-                                             r("second", b="1"), ppr=PLAIN)], box=WIDE)]}])
+                                             r("second", b="1"), ppr=PLAIN)], box=WIDE)]},
+        {"shapes": [title(2, "Continued"), shape(3, "Content Placeholder 2", [
+            p(r("Pluralism"), ppr=lvl(0, '<a:buAutoNum type="alphaUcPeriod" startAt="2"/>')),
+            p(r("Third question"), ppr=lvl(1, '<a:buAutoNum type="arabicPeriod" startAt="3"/>')),
+            p(r("Fourth question"), ppr=lvl(1, '<a:buAutoNum type="arabicPeriod" startAt="3"/>')),
+            p(r("Regulation"), ppr=lvl(0, '<a:buAutoNum type="arabicPeriod" startAt="5"/>')),
+            p(r("Labor"), ppr=lvl(1, '<a:buAutoNum type="alphaLcPeriod" startAt="2"/>')),
+            p(r("Hiring"), ppr=lvl(2, '<a:buAutoNum type="romanLcPeriod"/>'))],
+            ph='<p:ph idx="1"/>')],
+         "notes": notes_of([p(r("Ask about"), ppr=lvl(0, '<a:buAutoNum type="arabicPeriod"/>')),
+                            p(r("the third"), ppr=lvl(1, '<a:buAutoNum type="alphaLcPeriod" '
+                                                         'startAt="3"/>'))])}],
+        master=bulleted_master())
     first = convert(folder, "--quick")
     trip = os.path.join(work, "trip")
     shutil.copytree(os.path.join(folder, "md"), trip)
@@ -4384,8 +4399,29 @@ def case_round_trip(work):
     yield "a deck the trip changes by design comes back the same: a slide with no title that " \
         "the target cut in two one slide again, and the slides after it their own, one holding " \
         "only notes; a title's line break a space, a link to its slide too; two bold lines one " \
-        "bold either way", \
-        cut_titles == ["", "", "", "", "Results (Panel)"] and not cut_found, (cut_titles, cut_found)
+        "bold either way; and lists nested in an item and starting past one, as they were", \
+        cut_titles == ["", "", "", "", "Results (Panel)", "Continued"] and not cut_found, \
+        (cut_titles, cut_found)
+    cut_md = ""
+    if os.path.isfile(os.path.join(folder, "md", "Cut.md")):
+        with open(os.path.join(folder, "md", "Cut.md"), encoding="utf-8") as fh:
+            cut_md = fh.read()
+    yield "the Markdown writes such a list from one, its start an empty span at its first item, " \
+        "and a list in no item from its own start", \
+        "    1.  []{start=\"3\"}Third question" in cut_md \
+        and "    a.  []{start=\"2\"}Labor" in cut_md and "B.  Pluralism" in cut_md \
+        and "    a.  []{start=\"3\"}the third" in cut_md \
+        and "5.  Regulation" in cut_md and "i.  Hiring" in cut_md, cut_md[-400:]
+    read_back = {}
+    if os.path.isfile(os.path.join(trip, "Cut.filtered.json")):
+        with open(os.path.join(trip, "Cut.filtered.json"), encoding="utf-8") as fh:
+            read_back = json.load(fh)
+    starts = [(b["c"][0][0], b["c"][0][1]["t"]) for b in of_kind(read_back, "OrderedList")]
+    left = [s for s in of_kind(read_back, "Span") if any(k == "start" for k, _v in s["c"][0][2])]
+    yield "and reading it back puts each start on its list and takes the span off", \
+        starts == [(2, "UpperAlpha"), (3, "Decimal"), (5, "Decimal"), (2, "LowerAlpha"),
+                   (1, "LowerRoman"), (1, "Decimal"), (3, "LowerAlpha")] and not left, \
+        (starts, left)
     # The comparison sees what it's for: each of these changed in the deck
     # that made the trip is a difference, where it was made.
     changes = [("a picture's alt text", b'descr="New words"', b'descr="Other words"',

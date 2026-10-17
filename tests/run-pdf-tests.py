@@ -21,8 +21,9 @@ with any description after it and nothing left over for a link LaTeX
 makes on its own, the division commands written once each from the
 roles, the page the metadata file made given no heading, every
 formula's MathML both as structure and as an attached file, a code
-block in a footnote set in its note, and a passage in another language
-tagged with it. The book is small
+block in a footnote set in its note, a passage in another language
+tagged with it, and a heading inside a list, a quotation, a table's
+cell, a figure, or a footnote tagged where it stands. The book is small
 because a LaTeX run is slow; it holds one of each thing, and two of the
 things that come in kinds.
 
@@ -411,6 +412,63 @@ And two whose cells, side by side, are longer than a line:
 [^h]: Note h, after the tables.
 """
 
+# Headings where the writer's sectioning command opened a section LaTeX's
+# tagging couldn't close, so that every section after a list's was tagged
+# inside the list: in a list's item (OpenStax puts a note with a title in
+# one), a numbered item, a definition, a quotation, a table's cell, a
+# figure, and a footnote; with a link to one, and a section after them.
+NOTES_HEADINGS = r"""# Headings
+
+- An item before it.
+
+  ### Heading in an item {#in-an-item}
+
+  A note's words, as OpenStax puts a note with a title in a list's item.
+
+- The item after it.
+
+1. A numbered item.
+
+   ### Heading in a numbered item
+
+   Its words.
+
+Term
+:   A definition.
+
+    ### Heading in a definition
+
+    Its words.
+
+> A quotation.
+>
+> ### Heading in a quotation
+>
+> Its words.
+
++-----------------------------+-------------+
+| Kind                        | Words       |
++=============================+=============+
+| ### Heading in a cell       | Its words.  |
+|                             |             |
+| More of the cell.           |             |
++-----------------------------+-------------+
+
+<figure><h3>Heading in a figure</h3><p>A figure's words.</p><figcaption>A figure with a heading.</figcaption></figure>
+
+Text with a note.[^i] As [the heading in the item](#in-an-item) says.
+
+[^i]: Note i, with a heading.
+
+    ### Heading in a note
+
+    More of note i.
+
+## A section after them
+
+Its words.
+"""
+
 PROJECT = """project:
   identifier: org.example.pdf
   title: The Test Book
@@ -588,18 +646,18 @@ def languages(path):
 
 
 def build_notes(work):
-    """NOTES_CAPTIONS and NOTES_CELLS, built tagged, to PDF/UA-2, with a
-    list of figures, and untagged: (the tagged PDF's path, the untagged
-    one's, what the run said, the tagged one's LaTeX)."""
+    """NOTES_CAPTIONS, NOTES_CELLS, and NOTES_HEADINGS, built tagged, to
+    PDF/UA-2, with a list of figures, and untagged: (the tagged PDF's path,
+    the untagged one's, what the run said, the tagged one's LaTeX)."""
     os.makedirs(os.path.join(work, "assets"))
     png(os.path.join(work, "assets", "red.png"), (200, 0, 0))
     for name, text in (("captions.md", NOTES_CAPTIONS), ("cells.md", NOTES_CELLS),
-                       ("meta.md", "---\nlof: true\n---\n")):
+                       ("headings.md", NOTES_HEADINGS), ("meta.md", "---\nlof: true\n---\n")):
         with open(os.path.join(work, name), "w", encoding="utf-8") as fh:
             fh.write(text)
     with open(os.path.join(work, "project.yaml"), "w", encoding="utf-8") as fh:
         fh.write("project:\n  title: Notes\n  identifier: org.example.notes\n"
-                 "  language: en-US\n  contents:\n    - captions\n    - cells\n")
+                 "  language: en-US\n  contents:\n    - captions\n    - cells\n    - headings\n")
     with open(os.path.join(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
         fh.write("targets:\n  pdf:\n    format: pdf\n    pdf:\n      metadata: meta.md\n"
                  "  plain:\n    format: pdf\n    pdf:\n      standard: []\n")
@@ -1239,7 +1297,7 @@ def checks(work, jobs=1):
          lambda: numbered_notes(notes_text, "defgh", 4, CELL_MARKS)
          and numbered_notes(notes_plain_text, "defgh", 4, CELL_MARKS)),
         ("and its mark is linked to its note",
-         lambda: linked_notes(notes_marks()[3:], "defgh", 4)),
+         lambda: linked_notes(notes_marks()[3:8], "defgh", 4)),
         ("an untagged PDF of a book with a table with a header column, and one in a "
          "table's cell with a head, is built, as LaTeX stopped on \\tagpdfsetup",
          lambda: os.path.exists(notes_plain) and "Undefined control sequence" not in notes_said),
@@ -1303,6 +1361,34 @@ def checks(work, jobs=1):
          and all(any(marker in chunk and "p{(\\linewidth" in chunk.split("\\endhead")[0]
                      for chunk in notes_source.split("\\begin{longtable}"))
                  for marker in ("twelve", "eleven"))),
+        # pdf-target.lua: a heading where the writer's sectioning command
+        # opened a section LaTeX's tagging couldn't close, every section
+        # after a list's tagged inside the list.
+        ("a heading inside a list's item, a numbered item, a definition, a "
+         "quotation, a table's cell, or a figure is tagged as the heading it is, "
+         "where it stands, and one in a footnote, which holds no heading, as a "
+         "paragraph",
+         lambda: all((lambda paths: len(paths) == 1 and paths[0][-1] == "/H3"
+                      and holder in paths[0])(text_paths(notes_path, words))
+                     for words, holder in (("Heading in an item", "/itembody"),
+                                           ("Heading in a numbered item", "/itembody"),
+                                           ("Heading in a definition", "/itembody"),
+                                           ("Heading in a quotation", "/quote"),
+                                           ("Heading in a cell", "/TD"),
+                                           ("Heading in a figure", "/float")))
+         and (lambda paths: len(paths) == 1 and paths[0][-1] == "/text"
+              and "/footnote" in paths[0])(text_paths(notes_path, "Heading in a note"))),
+        ("and the section after them is the chapter's, not inside one of them",
+         lambda: (lambda paths: len(paths) == 1 and paths[0][-1] == "/section"
+                  and not {"/itemize", "/enumerate", "/description", "/quote",
+                           "/Table", "/float", "/footnote"} & set(paths[0]))(
+             [p for p in text_paths(notes_path, "A section after them") if "/TOC" not in p])),
+        ("a link to the heading inside the list's item goes to it, and an untagged "
+         "book has the heading's words",
+         lambda: (lambda page: page is not None
+                  and goes_to(notes_path, "the heading in the item") == [page])(
+             page_holding(notes_path, "Heading in an item"))
+         and says(notes_plain_text, "Heading in an item")),
         # figures-and-tables.lua: a layout table's head rows are body rows,
         # since LaTeX's tagging made a longtable's head header cells even
         # tagged as a division, a TH outside any TR, which PDF/UA-2 rejects

@@ -96,6 +96,11 @@
 --    cells are each a paragraph, which the writer set in columns that
 --    don't wrap: given widths (below).
 --
+-- 16. A heading inside a list, a quotation, a table, a figure, or a
+--    footnote, which the writer makes a sectioning command there, and
+--    LaTeX's tagging couldn't close the section it opened: a paragraph
+--    tagged as a heading (below).
+--
 -- Copyright 2026 Robert Szarka
 --
 -- This program is free software: you can redistribute it and/or modify
@@ -923,6 +928,43 @@ local function heading(header)
   end
 end
 
+-- 16. A heading inside a list, a quotation, a table, a figure, or a note,
+-- which the writer makes a sectioning command where it stands: \paragraph
+-- in an \item, as OpenStax puts a note with a title in a list's item. LaTeX's
+-- tagging can't close the section it opens inside the environment ("The
+-- structure Sect can not be closed"), so every section after it was tagged
+-- inside the list, which PDF/UA-2 fails (an L holds no Sect, an LBody no
+-- LI): 27 sections of Principles of Marketing. It's set as a paragraph
+-- tagged as the heading it is, H1 to H6 by its level, as LaTeX's tagging
+-- tags a chapter H1, bold and kept with what follows (\nobreak, since
+-- longtable makes \nopagebreak its own, which stopped LaTeX in a cell), its
+-- id an anchor; the contents and the bookmarks don't list it, as they'd
+-- list a section. In a footnote it's a paragraph tagged as any other is,
+-- since a PDF's footnote holds no heading (ISO/TS 32005, which veraPDF
+-- reports as FENote-Hn). Untagged, it's the same bold paragraph.
+local function heading_paragraph(header, tagged)
+  local inlines = pandoc.Inlines({ pandoc.RawInline('latex', '{'
+    .. (tagged and tagging_setup('para/tag=H' .. math.min(header.level, 6)) or '')
+    .. '\\noindent') })
+  if header.identifier ~= '' then
+    inlines:insert(pandoc.Span({}, {id = header.identifier}))
+  end
+  inlines:insert(pandoc.RawInline('latex', '\\textbf{'))
+  inlines:extend(header.content)
+  inlines:insert(pandoc.RawInline('latex', '}\\par\\nobreak}'))
+  return pandoc.Para(inlines)
+end
+
+-- A footnote's are made first, since Pandoc's filter visits every inline
+-- element, a Note among them, before any block.
+local function headings_in_note(note)
+  return note:walk({ Header = function(header) return heading_paragraph(header, false) end })
+end
+
+local function headings_inside(element)
+  return element:walk({ Header = function(header) return heading_paragraph(header, true) end })
+end
+
 -- A display formula a LaTeX book numbers (latexsource.resolve_counters):
 -- its TeX holds each row's number as a \tag, which LaTeX sets, so the
 -- numbers set beside it for the pages go. Its labels stay in its TeX, for a
@@ -1086,6 +1128,9 @@ local function term_notes(list)
 end
 
 return {
+  { BulletList = headings_inside, OrderedList = headings_inside,
+    DefinitionList = headings_inside, BlockQuote = headings_inside,
+    Table = headings_inside, Figure = headings_inside, Note = headings_in_note },
   { DefinitionList = term_notes },
   { Span = equation },
   { Inlines = lift_display, Header = heading },

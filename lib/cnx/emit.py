@@ -102,9 +102,10 @@ class Emitter:
         self.language = language
         self.report = report
         self.by_name = {p.name: p for p in pages}
-        # (page, label, caption text, summary, place, excerpt): place is
-        # the table's number among its page's tables as TextbookImprover
-        # counts them, the key it reports a table with no label under.
+        # (page, label, caption text, summary, layout, the words of its
+        # body's cells by row, place, excerpt): place is the table's number
+        # among its page's tables as TextbookImprover counts them, the key
+        # it reports a table with no label under.
         self.tables = []
         self._placing = []       # this page's: (index in tables, element)
 
@@ -811,7 +812,9 @@ class Emitter:
         self._placing.append((len(self.tables), out))
         self.tables.append((page.name, label,
                             text_of(caption) if caption is not None else "",
-                            table[0].get("data-summary") or "", layout))
+                            table[0].get("data-summary") or "", layout,
+                            [[text_of(cell) for cell in row if cell.tag in ("td", "th")]
+                             for row in out.xpath("./tbody/tr | ./tr | ./tfoot/tr")]))
         dst.append(out)
 
     def _layout(self, out, source, page, captioned):

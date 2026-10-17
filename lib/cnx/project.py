@@ -40,6 +40,7 @@ import csv
 import os
 import re
 import shutil
+import unicodedata
 
 import alttext
 
@@ -180,16 +181,23 @@ def says_nothing(summary):
 # than saying what the table shows: "Two rows and five columns. The first
 # row is labeled, “x”, and the second is labeled, “g(x)”. The values of x
 # are 2, 4, 6, and 8", "Top left cell reads: Essential Knowledge", "Reading
-# the columns as ordered pairs, we have: (1, 31), (2, 28)…". Drafted as a
-# caption, it's read before the table it repeats. Of the 4,610 summaries
-# that say something in 41 of OpenStax's repositories (June 2026), these
-# rules name 1,580, 1,056 of them on a table with no title, whose summary
-# is drafted; 70 of them were read, and every one reads its table out. They leave
+# the columns as ordered pairs, we have: (1, 31), (2, 28)…", "Row 2 has
+# “Big Bang” and 10 to the 68", "f(1)=6, f(2)=8, f(3)=3, and f(4)=1", or
+# the table's cells in words of its own ("Washington 67, J. Adams 90,
+# Jefferson 83…", repeats). Drafted as a caption, it's read before the
+# table it repeats. Of the 4,610 summaries that say something in 41 of
+# OpenStax's repositories (June 2026), these rules name 1,941, 1,283 of
+# them on a table with no title, whose summary is drafted: 1,609 by their
+# words, and 332 more by the cells they repeat. Read: 99 of the first (the
+# 29 a numbered row or column, a header's numbers, or a function's values
+# names, and 70 others), and every one reads its table out; 50 of the
+# second, and 49 do, the other a stem-and-leaf plot's stems. They leave
 # out one that names the columns and not their cells ("This table
 # presents the year in the first column and percent of workers paid
-# hourly rates in the second column"), and some that read a table out in
-# words they don't know ("Row 2 describes…", "rows two through five
-# contain…").
+# hourly rates in the second column"), or one column's cells, its rows'
+# names; and miss some that read a table out in words they don't know,
+# with its numbers written as its cells don't have them ("10 to the power
+# minus 3", "eight"), or in English beside a table in Polish.
 _NUMBER = (r"(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|"
            r"thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|\d+)")
 _NUMBER_PL = (r"(?:jedn\w*|dw\w+|trzy|trzech|czter\w+|pię\w+|sześ\w+|siedem\w*|"
@@ -211,23 +219,60 @@ _A_ROW_READ = re.compile(
     r"|\bfrom (?:left to right|top to bottom|bottom to top)\b"
     r"|\bunder (?:the|it|this)\b[^.]{0,60}?\b(?:are|is|reads?|lists?)\b"
     r"|\b(?:wiersz\w*|komórk\w*)\b[^.]{0,40}?\bzawiera\b|\bkolejno\b"
-    r"|\bnagłówek\b[^.]{0,80}\bwpis\w*", re.I)
+    r"|\bnagłówek\b[^.]{0,80}\bwpis\w*"
+    r"|\b(?:rows?|columns?)\s+" + _NUMBER + r"(?:\s*(?:-|–|through|to|and)\s*" + _NUMBER
+    + r")?\s+(?:has|have|had|reads?|contains?|shows?|lists?|gives?|describes?|is|are)\s+"
+    r"(?:for\s+\w+\s+)?(?:the\s+(?:following|values|entries)\b|[“\"'‘]|minus\b|-?\$?\d)"
+    r"|\bare the (?:numbers|values)\s*:", re.I)
 _A_COLUMN_NAMED = re.compile(r"\bcolumn\s+(?:\d+|one|two|three)\s+(?:lists?|shows?|"
                              r"is labell?ed|contains?|has)\b", re.I)
 _VALUES = re.compile(
     r"-?\$?\d[\d,]*(?:\.\d+)?%?(?:\s*[,;]\s*(?:and\s+|i\s+)?-?\$?\d[\d,]*(?:\.\d+)?%?){3,}"
-    r"|(?:[“\"'‘][^”\"'’]{1,60}[”\"'’]\s*[,;]?\s*(?:and\s+|i\s+)?){3,}"
-    r"|(?:[\w)]\s*=\s*-?\$?\d[^.;]*?[.;,]\s*){3,}", re.I)
+    r"|(?:[“\"'‘][^”\"'’]{1,60}[”\"'’]\s*[,;]?\s*(?:and\s+|i\s+)?){3,}", re.I)
+_EQUATIONS = re.compile(
+    r"(?:(?:\w+\([^()]{0,20}\)|[\w)])\s*=\s*-?\$?\d+(?:\.\d+)?[^.;]*?[.;,]\s*(?:and\s+)?){3,}")
+_HYPHENS = dict.fromkeys(map(ord, "\u2010\u2011\u2012\u2013\u2014\u2212"), "-")
+_QUOTES = dict.fromkeys(map(ord, "\u201c\u201d\u201e\u201f\"\u2018\u2019\u201a\u201b'"), None)
 
 
-def reads_out(summary):
+def _comparable(text):
+    """Text as a summary and its table's cells are compared: in its
+    compatibility forms, a dash a hyphen, without quotation marks, in
+    lowercase, its spaces one."""
+    text = unicodedata.normalize("NFKC", text).translate(_HYPHENS).translate(_QUOTES)
+    return " ".join(text.lower().split())
+
+
+def repeats(summary, rows):
+    """Whether a summary repeats its table: the words of six or more of
+    the cells in its body's rows, or five if they're half of them, from
+    two or more columns. The same words in two cells are counted once; a
+    letter alone isn't counted, a digit is."""
+    said = _comparable(summary)
+    cells = {}       # a cell's words: the columns they're in
+    for row in rows:
+        for column, cell in enumerate(row):
+            words = _comparable(cell).strip(" .,;:")
+            if len(words) > 1 or words.isdigit():
+                cells.setdefault(words, set()).add(column)
+    found = [where for words, where in cells.items()
+             if re.search(r"(?<![\w.])" + re.escape(words) + r"(?!\w|\.\d)", said)]
+    return (len(found) >= 6 or len(found) == 5 and len(cells) <= 10) \
+        and len(set().union(*found)) >= 2
+
+
+def reads_out(summary, rows=()):
     """Whether a table's summary reads the table out, a row or a cell at a
     time: its rows or columns as ordered pairs, a row's or a cell's words,
-    or its shape or a column's name and then its values."""
-    if _PAIRS.search(summary) or _A_ROW_READ.search(summary):
+    its shape or a column's name and then its values, a function's values,
+    or, given the words of its body's cells by row, the table (repeats)."""
+    if _PAIRS.search(summary) or _A_ROW_READ.search(summary) \
+            or _EQUATIONS.search(summary):
         return True
-    return bool((_SHAPE.search(summary) or _A_COLUMN_NAMED.search(summary))
-                and _VALUES.search(summary))
+    if (_SHAPE.search(summary) or _A_COLUMN_NAMED.search(summary)) \
+            and _VALUES.search(summary):
+        return True
+    return repeats(summary, rows)
 
 
 def write_captions(out, tables, report=None):
@@ -238,18 +283,20 @@ def write_captions(out, tables, report=None):
     in the report, for a person to put what the table shows in its place.
     cnx-table-summaries.csv, every summary, and which read their tables
     out. `tables` is the emitter's: (page, label, caption text, summary,
-    layout, place, excerpt). Returns (prefilled, summaries, summaries that
-    say nothing, drafted summaries that read their tables out)."""
+    layout, the words of its body's cells by row, place, excerpt). Returns
+    (prefilled, summaries, summaries that say nothing, drafted summaries
+    that read their tables out)."""
     prefilled = empty = read_out = 0
     rows = []
     summaries = []
-    for page, label, caption, summary, layout, place, excerpt in tables:
+    for page, label, caption, summary, layout, cells, place, excerpt in tables:
         if not summary:
             continue
         caption, summary, excerpt = (
             (text or "").translate(C1_AS_WINDOWS_1252)
             for text in (caption, summary, excerpt))
-        reading = reads_out(summary)
+        reading = reads_out(summary, [[cell.translate(C1_AS_WINDOWS_1252) for cell in row]
+                                      for row in cells])
         summaries.append((page, label or "", caption, summary, "yes" if reading else ""))
         if says_nothing(summary):
             empty += 1

@@ -1358,6 +1358,13 @@ PLAIN_TABLES = """
 <row><entry>Virginia</entry><entry>2 shillings</entry></row>
 <row><entry>Maryland</entry><entry>3 shillings</entry></row>
 </tbody></tgroup></table>
+<table id="crops" class="unnumbered" summary="Virginia grew tobacco and charged 2 shillings,
+ Maryland grew corn and charged 3 shillings, and Georgia grew rice.">
+<tgroup cols="3"><tbody>
+<row><entry>Virginia</entry><entry>tobacco</entry><entry>2 shillings</entry></row>
+<row><entry>Maryland</entry><entry>corn</entry><entry>3 shillings</entry></row>
+<row><entry>Georgia</entry><entry>rice</entry><entry>4 shillings</entry></row>
+</tbody></tgroup></table>
 </section>
 <section id="ke3" class="key-equations"><title>Key Equations</title>
 <table id="growth" class="unnumbered unstyled" summary="This table has two columns and two
@@ -1469,18 +1476,80 @@ def case_layout_kinds(work):
         # rewrite it where it stands, and named, so they can find it.
         ("a summary that reads its table out is drafted as any other is, and "
          "named in the report and in cnx-table-summaries.csv, where one that says "
-         "what its table shows isn't",
+         "what its table shows isn't; one that repeats its table's cells in words "
+         "of its own reads it out",
          lambda: "Reading the columns as ordered pairs" in drafted["tiny-history"]
          and "The tolls each colony" in drafted["tiny-history"]
+         and "Virginia grew tobacco" in drafted["tiny-history"]
          and [r["Detail"].split(":")[0] for r in reports["tiny-history"]
-              if r["Check"] == "table-summary-reads-out"] == ["1-1-the-colonies#table-3"]
+              if r["Check"] == "table-summary-reads-out"]
+         == ["1-1-the-colonies#table-3", "1-1-the-colonies#table-5"]
          and {r["Summary"].split(".")[0]: r["Reads out"] for r in summaries["tiny-history"]}
          == {"Who wrote it": "", "A worksheet": "", "Two rows and three columns": "yes",
              "The tolls each colony charged on goods from England": "",
+             "Virginia grew tobacco and charged 2 shillings, Maryland grew corn and "
+             "charged 3 shillings, and Georgia grew rice": "yes",
              "This table has two columns and two rows": "yes"}
-         and "1 of them read the table out" in said["tiny-history"]),
+         and "2 of them read the table out" in said["tiny-history"]),
     ]
 
+
+# Which summaries read their tables out ------------------------------------
+
+def case_read_out(work):
+    from cnx.project import reads_out
+    colonies = [["Virginia", "tobacco"], ["Maryland", "corn"], ["Georgia", "rice"],
+                ["Carolina", "indigo"], ["New York", "furs"], ["Delaware", "wheat"]]
+    digits = [["1", "2"], ["3", "4"], ["5", "6"]]
+    # Each of six cells the summary has only as the comparison has it: in
+    # capitals and without its period, a hyphen for its dash, a straight
+    # apostrophe for its curly one, "fi" for its ligature, a hyphen for its
+    # minus sign, one space for its two; six more it hasn't.
+    unlike = [["Virginia.", "1\u20132 shillings"], ["Newton\u2019s law", "\ufb01ne print"],
+              ["\u22123", "two  words"], ["alpha", "beta"], ["gamma", "delta"],
+              ["epsilon", "zeta"]]
+    return [
+        ("a summary that reads a numbered row's or column's cells reads its table "
+         "out, where one that names a column, or rows, by number doesn't",
+         lambda: reads_out("The first row is a header row. Row 2 has “Big Bang” and 10 "
+                           "to the 68.")
+         and reads_out("Column 1 has the values: 0 to 0.1, 0.1 to 1, and 2.")
+         and reads_out("Rows two through five contain “theta subscript f equals theta”.")
+         and reads_out("Row one is for grades 49.5-59.5 and the frequency is 2.")
+         and not reads_out("Column 1 lists types of measurements. Column two contains "
+                           "their units.")
+         and not reads_out("Rows 4 and 5 show the options for Firm A.")),
+        ("so does one that lists a header's numbers",
+         lambda: reads_out("To the right of the header, “Rate,” are the numbers: 0.10, "
+                           "0.20, and 0.30.")),
+        ("and one that gives a function's values, whole numbers or not",
+         lambda: reads_out("The values of f(x) are: f(1)=3, f(2)=2, and f(5)=5.")
+         and reads_out("When x=3, g(3)=2, f(g(3))=8, f(3)=3, and g(f(3))=2.")
+         and reads_out("Its values: f(1)=1.5, f(2)=2.5, and f(3)=3.5.")),
+        ("and one that repeats six of its table's cells, from two columns, in words "
+         "of its own",
+         lambda: reads_out("Virginia grew tobacco, Maryland corn, and Georgia rice.",
+                           colonies)),
+        ("or five, where they're half of its cells, but not five of twelve",
+         lambda: reads_out("Virginia grew tobacco, Maryland corn, and Georgia much else.",
+                           colonies[:5])
+         and not reads_out("Virginia grew tobacco, Maryland corn, and Georgia much else.",
+                           colonies)),
+        ("but not one that names one column's cells, its rows' names",
+         lambda: not reads_out("The crops of Virginia, Maryland, Georgia, Carolina, New "
+                               "York, and Delaware.", colonies)),
+        ("a cell of a letter alone isn't counted, one of a digit is",
+         lambda: not reads_out("Graphs a, b, c, d, e, and f, each a scatter plot.",
+                               [["A", "B"], ["C", "D"], ["E", "F"]])
+         and reads_out("x is 1, 3, and 5, and y is 2, 4, and 6.", digits)),
+        ("a number inside another isn't a cell's: 1 in 0.1, 11, or 1.5",
+         lambda: not reads_out("Near 0.1, 0.2, 0.3, 0.4, 0.5, and 0.6; 11, 22, 33, 44, 55, "
+                               "and 66; 1.5, 2.5, 3.5, 4.5, 5.5, and 6.5.", digits)),
+        ("a cell is found whatever its case, its dashes, its quotation marks, its "
+         "ligatures, its spacing, or a period after it",
+         lambda: reads_out("VIRGINIA charged 1-2 shillings under Newton's law, in the "
+                           "fine print, at -3, in two words.", unlike)),
+    ]
 
 
 # The collation glossaries and indexes are sorted by -----------------------
@@ -1813,6 +1882,7 @@ CASES = [
     ("a worked example's steps in a table, a layout table", case_step_tables),
     ("a grid of key terms, a corequisite book's steps, Key Equations, and a box "
      "of one cell, layout tables, and summaries that read a table out", case_layout_kinds),
+    ("which summaries read their tables out", case_read_out),
     ("the collation", case_collation),
     ("baking's steps, one at a time", case_steps),
     ("cookbook's own sample books", case_cookbook),

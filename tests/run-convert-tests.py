@@ -1012,6 +1012,87 @@ def case_layout_word_head(work):
     ]
 
 
+def word_with_body(path, body):
+    """A Word file Pandoc writes, its body replaced by the OOXML given, so
+    it has Pandoc's styles and namespaces and exactly that body."""
+    subprocess.run(["pandoc", "-o", path], input="# Title\n\nText.\n", text=True,
+                   check=True)
+    with zipfile.ZipFile(path) as z:
+        items = [(i, z.read(i.filename)) for i in z.infolist()]
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as z:
+        for info, data in items:
+            if info.filename == "word/document.xml":
+                data = re.sub(r"<w:body>.*?(<w:sectPr>)", lambda m: "<w:body>" + body + m.group(1),
+                              data.decode("utf-8"), count=1, flags=re.S).encode("utf-8")
+            z.writestr(info, data)
+
+
+def ooxml_paragraph(*parts):
+    return "<w:p>%s</w:p>" % "".join(
+        p if p.startswith("<") else '<w:r><w:t xml:space="preserve">%s</w:t></w:r>' % p
+        for p in parts)
+
+
+def ooxml_table(rows):
+    """rows: lists of cells, each a list of paragraphs' OOXML."""
+    width = max(len(row) for row in rows)
+    return "<w:tbl><w:tblPr/><w:tblGrid>%s</w:tblGrid>%s</w:tbl>" % (
+        '<w:gridCol w:w="2400"/>' * width,
+        "".join("<w:tr>%s</w:tr>" % "".join("<w:tc>%s</w:tc>" % "".join(cell) for cell in row)
+                for row in rows))
+
+
+def case_word_table_matching(work):
+    """A row of table-headers.csv reaches the Word table it names when the
+    table's first cell holds a no-break space, two paragraphs, or a
+    formula: the filter, finding the table the pre-pass listed, compared
+    the cell's first 20 bytes with the pre-pass's, which takes a no-break
+    space for a space, as Lua's %s doesn't, and a paragraph's end for one,
+    as stringify doesn't, and reads a formula's letters where the filter
+    read its TeX, so each declaration was set aside with a warning."""
+    import csv
+    os.makedirs(work)
+    p, table = ooxml_paragraph, ooxml_table
+    formula = ('<m:oMath><m:sSub><m:e><m:r><m:t>x</m:t></m:r></m:e>'
+               '<m:sub><m:r><m:t>n</m:t></m:r></m:sub></m:sSub></m:oMath>')
+    word_with_body(os.path.join(work, "kinds.docx"), "".join([
+        p("Burns by depth:"),
+        table([[[p("Burn type")], [p("Depth")]],
+               [[p("Superficial")], [p("Epidermis")]],
+               [[p("Partial")], [p("Dermis")]]]),
+        p("A message, outlined:"),
+        table([[[p("Message"), p("Outline")], [p("Draft")]],
+               [[p("Interested")], [p("Our details")]],
+               [[p("Closing")], [p("Thanks")]]]),
+        p("A sequence's terms:"),
+        table([[[p(formula, " is the nth term")], [p("Rule")]],
+               [[p("First")], [p("Start at one")]],
+               [[p("Next")], [p("Add two")]]]),
+    ]))
+    with open(os.path.join(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
+        fh.write("targets:\n  html:\n    format: html\n")
+    run_in(work, "")
+    keys = []
+    if exists(work, "table-headers-new.csv"):
+        with open(os.path.join(work, "table-headers-new.csv"), encoding="utf-8",
+                  newline="") as fh:
+            keys = [r["key"] for r in csv.DictReader(fh)]
+    with open(os.path.join(work, "table-headers.csv"), "w", encoding="utf-8") as fh:
+        fh.write("key,headers\n" + "".join("%s,layout\n" % k for k in keys))
+    second = run_in(work)
+    page = read(work, "html", "kinds.html") if exists(work, "html", "kinds.html") else ""
+    tables = re.findall(r"<table\b.*?</table>", page, re.S)
+    return [
+        ("a Word table declared layout is one whatever its first cell holds: a "
+         "no-break space, two paragraphs, a formula",
+         lambda: len(keys) == 3 and len(tables) == 3
+         and all(re.match(r'<table\b[^>]*\brole="presentation"', t) for t in tables)),
+        ("and the run says nothing of a table that doesn't match the pre-pass",
+         lambda: second.returncode == 0
+         and "does not match the pre-pass" not in second.stdout + second.stderr),
+    ]
+
+
 def case_menu(work):
     """menu: on gives every rendered page the book's contents and a
     previous/next pager; a pass-through page is left as it stands."""
@@ -5596,6 +5677,7 @@ CASES = [
     ("an HTML source's tables and the header sidecar", case_html_headers),
     ("layout tables, marked and decided", case_layout_tables),
     ("a Word layout table with a repeating header row", case_layout_word_head),
+    ("a Word table's declaration whatever its first cell holds", case_word_table_matching),
     ("a menu for pages posted as a site", case_menu),
     ("raw HTML in a Markdown source", case_markdown_html),
     ("title rows and bands, split and grouped", case_bands),

@@ -1439,24 +1439,54 @@ local function set_row_headers(tbl, on)
   end
 end
 
+-- The spaces Python's str.split() takes for spaces that Lua's %s, which
+-- is ASCII's, doesn't: U+001C to U+001F, U+0085, U+00A0 (a no-break
+-- space), U+1680, U+2000 to U+200A, U+2028, U+2029, U+202F, U+205F, and
+-- U+3000, as UTF-8.
+local WIDE_SPACES = { '[\28-\31]', '\194[\133\160]', '\225\154\128',
+                      '\226\128[\128-\138\168\169\175]', '\226\129\159',
+                      '\227\128\128' }
+
+-- A cell's words as the header pre-pass reads them from the file
+-- (tablecensus.cell_text, then " ".join(text.split())): its paragraphs
+-- apart, which stringify runs together, and every space a space. Only
+-- what comes before a formula, which the pre-pass reads as the formula's
+-- characters and stringify as its TeX; the second value says the words
+-- were cut there.
+local FORMULA_MARK = '\0'
+
+local function cell_words(cell)
+  local parts = {}
+  for _, block in ipairs(cell.contents) do
+    parts[#parts + 1] = pandoc.utils.stringify(block:walk({
+      Math = function() return pandoc.Str(FORMULA_MARK) end }))
+  end
+  local text = table.concat(parts, ' ')
+  local cut = text:find(FORMULA_MARK, 1, true)
+  if cut then text = text:sub(1, cut - 1) end
+  for _, pattern in ipairs(WIDE_SPACES) do text = text:gsub(pattern, ' ') end
+  return (text:gsub('%s+', ' '):gsub('^ ', ''):gsub(' $', '')), cut ~= nil
+end
+
 -- The pre-pass counted rows and columns from the file; the AST may have
 -- had a title row absorbed or a spacer dropped, so this compares shape
 -- and first cell loosely and refuses on a clear mismatch rather than
--- putting a declaration on the wrong table.
+-- putting a declaration on the wrong table. The first cell's first 20
+-- bytes are compared, or as many as come before a formula.
 local function matches_entry(tbl, entry)
   local rows, columns = table_shape(tbl)
   rows = rows + #tbl.head.rows
   if columns ~= tonumber(entry.cols) then return false end
   if math.abs(rows - tonumber(entry.rows)) > 1 then return false end
-  local first = ''
+  local first, cut = '', false
   local row = tbl.head.rows[1] or (first_body(tbl) and first_body(tbl).body[1])
   if row and row.cells[1] then
-    first = pandoc.utils.stringify(row.cells[1].contents)
-    first = first:gsub('%s+', ' '):gsub('^ ', ''):gsub(' $', ''):sub(1, 40)
+    first, cut = cell_words(row.cells[1])
   end
   local expected = tostring(entry.first or '')
   if expected == '' or first == '' then return true end
-  return first:sub(1, 20) == expected:sub(1, 20)
+  local length = cut and math.min(20, #first) or 20
+  return first:sub(1, length) == expected:sub(1, length)
 end
 
 -- Every row of the table in source order: the head's rows, then each
@@ -2228,6 +2258,8 @@ local function column_parts(parts, tbl, label)
     pandoc.Attr(tbl.attr.identifier, tbl.attr.classes, {}))
 end
 
+local mismatched = {}
+
 local function resolved_for(tbl)
   -- A marker in the source outranks nothing: it is the author's own
   -- declaration, and a Markdown source has no pre-pass to disagree.
@@ -2249,9 +2281,23 @@ local function resolved_for(tbl)
   local entry = by_doc[index]
   if entry == nil then return nil end
   if not matches_entry(tbl, entry) then
-    warn(('table-headers: table %d of %s does not match the pre-pass '
-      .. '(shape or first cell differ); declaration %q not applied')
-      :format(index, source_stem(), tostring(entry.headers)))
+    -- Said once, though a table's entry is looked for twice: for the
+    -- bookmarks before it and for its declaration.
+    if not mismatched[index] then
+      mismatched[index] = true
+      local lost = {}
+      if tostring(entry.headers or '') ~= '' then
+        lost[#lost + 1] = ('declaration %q'):format(tostring(entry.headers))
+      end
+      if entry.anchors and #entry.anchors > 0 then
+        lost[#lost + 1] = 'the bookmarks before it (' .. table.concat(entry.anchors, ', ') .. ')'
+      end
+      warn(('table-headers: table %d of %s does not match the pre-pass '
+        .. '(shape or first cell differ); %s')
+        :format(index, source_stem(), #lost > 0
+                and 'not applied: ' .. table.concat(lost, ', ')
+                or 'what the pre-pass says of it is not applied'))
+    end
     return nil
   end
   return entry

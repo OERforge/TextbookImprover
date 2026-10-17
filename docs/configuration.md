@@ -323,8 +323,7 @@ finished book.
 
 ### Header and footer
 
-Injected into every page, as the first and last thing in `<body>`. Either
-inline Markdown or the name of a Markdown file:
+Injected into every page an HTML target writes (a page from the pass-through directory is left as it stands): the header in a `<header>` before the page's own content, and the footer in a `<footer>` after it. A screen reader lists them as the page's banner and content information, landmarks apart from its `<main>`, which holds the page's own content, header or no header. A setting that's a `<header>` or a `<footer>` already is used as it stands. With `menu: on`, the menu goes between the header and `<main>`, and the pager between `<main>` and the footer, each a navigation landmark. A page's own `include-before` and `include-after`, an epigraph in a Markdown source's metadata, say, are inside `<main>`. Either inline Markdown or the name of a Markdown file:
 
 ```yaml
 # in conversion.yaml

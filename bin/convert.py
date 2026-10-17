@@ -2538,17 +2538,63 @@ def fragment_source(text, base, work, key):
 
 
 def render_fragment(source, out):
-    """Pandoc's --include-before-body and --include-after-body take HTML,
-    so Markdown from the config is rendered once here and reused for every
-    page. The fragment is inserted by the template, after the Lua filter
-    has run, which is why promoting the leading H1 to the page title still
+    """A page's header and footer go in as HTML, so Markdown from the
+    config is rendered once here and reused for every page. The fragment
+    is inserted by the template, from header-includes.lua, the last
+    filter, which is why promoting the leading H1 to the page title still
     works -- but also why nothing in the fragment is processed by the
-    filter. Author its images with explicit alt text."""
+    filters. Author its images with explicit alt text."""
     if not source:
         return None
     run(["pandoc", "-f", "markdown-implicit_figures", "-t", "html5",
          "--ascii", source, "-o", out])
     return out
+
+
+def landmark_fragments(header, footer, work, name):
+    """What goes before and after each page's content, as the HTML a
+    page's template takes: the header setting's in a <header>, a banner
+    landmark, then <main> around the page's own content, then </main>
+    and the footer setting's in a <footer>, a contentinfo landmark.
+    Without them a page had no landmark at all (WAVE's "No page
+    regions"), and a screen reader nothing to move to past what every
+    page repeats. Each is a <header> or <footer> as a child of <body>,
+    which is what makes it a landmark."""
+    before = os.path.join(work, f"{name}-before.html")
+    after = os.path.join(work, f"{name}-after.html")
+    with open(before, "w", encoding="utf-8") as fh:
+        if header:
+            fh.write(landmark(header, "header"))
+        fh.write("<main>\n")
+    with open(after, "w", encoding="utf-8") as fh:
+        fh.write("</main>\n")
+        if footer:
+            fh.write(landmark(footer, "footer"))
+    return before, after
+
+
+def landmark(path, tag):
+    """A rendered header or footer setting in its element, unless the
+    setting is that element already: a footer written as raw HTML in a
+    <footer>, the one way a page had a landmark before every page had
+    them, which wrapped again would be a footer in a footer."""
+    with open(path, encoding="utf-8") as fh:
+        text = fh.read().strip("\n")
+    if re.match(rf"<{tag}[\s>]", text) and text.endswith(f"</{tag}>") \
+            and text.count(f"<{tag}") == 1:
+        return text + "\n"
+    return f"<{tag}>\n{text}\n</{tag}>\n"
+
+
+def with_fragments(env, fragments):
+    """The environment from which header-includes.lua puts what goes
+    before a page's content and after it (landmark_fragments) around the
+    page's own include-before and include-after. Pandoc's
+    --include-before-body and --include-after-body would take their place:
+    a page's epigraph, given in its metadata, was lost on a target with a
+    header."""
+    before, after = fragments
+    return dict(env, INCLUDE_BEFORE_FILE=before or "", INCLUDE_AFTER_FILE=after or "")
 
 
 # --------------------------------------------------------------------------
@@ -4443,7 +4489,7 @@ def render_html(target, pages, base, fragments, language, env):
     at <page>/media/... instead.
     """
     os.makedirs(target.output_dir, exist_ok=True)
-    header, footer = fragments
+    env = with_fragments(env, fragments)
     written = []
     # A deck's page: its headings under its title, and its notes where
     # slides.notes says (deck-html.lua, which passes any other page by).
@@ -4459,10 +4505,6 @@ def render_html(target, pages, base, fragments, language, env):
                    "--lua-filter=" + TARGET_FILTER,
                    "--lua-filter=" + SAFE_MEDIA_FILTER,
                    "--lua-filter=" + HEADER_FILTER, "-M", f"lang={language}"]
-        if header:
-            command.append("--include-before-body=" + header)
-        if footer:
-            command.append("--include-after-body=" + footer)
         run(command, env=env, cwd=base)
         # The notes' heading, which Pandoc's writer doesn't write.
         with open(out, encoding="utf-8") as fh:
@@ -4519,9 +4561,16 @@ def add_menu(target, tree, titles, written, hand, work):
                  + "\n".join(steps) + "\n</nav>\n") if steps else ""
         with open(path, encoding="utf-8") as fh:
             page = fh.read()
-        page = re.sub(r"(<body[^>]*>\n?)", lambda m: m.group(1) + menu,
-                      page, count=1)
-        page = page.replace("</body>", pager + "</body>", 1)
+        # Between the page's banner and its main landmark, and between
+        # that and its footer, each a landmark of its own.
+        if "<main>" in page and "</main>" in page:
+            page = page.replace("<main>", menu + "<main>", 1)
+            at = page.rfind("</main>") + len("</main>")
+            page = page[:at] + "\n" + pager.rstrip("\n") + page[at:] if pager else page
+        else:
+            page = re.sub(r"(<body[^>]*>\n?)", lambda m: m.group(1) + menu,
+                          page, count=1)
+            page = page.replace("</body>", pager + "</body>", 1)
         with open(path, "w", encoding="utf-8") as fh:
             fh.write(page)
 
@@ -4789,12 +4838,7 @@ def write_generated(target, tree, titles, api, base, work, fragments,
         command = ["pandoc", "-f", "json", "-t", "html5", source, "-o", out,
                    "--standalone", "--ascii",
                    "--lua-filter=" + HEADER_FILTER, "-M", f"lang={language}"]
-        header, footer = fragments
-        if header:
-            command.append("--include-before-body=" + header)
-        if footer:
-            command.append("--include-after-body=" + footer)
-        run(command, env=env, cwd=base)
+        run(command, env=with_fragments(env, fragments), cwd=base)
         written.append(out)
     return written
 
@@ -4845,12 +4889,7 @@ def arrange_notes(target, pages, base, work, fragments, language, env,
                    "-o", out, "--standalone", "--ascii",
                    "--lua-filter=" + HEADER_FILTER, "-M", f"lang={language}",
                    "-M", "pagetitle=" + (heading or "Notes")]
-        header, footer = fragments
-        if header:
-            command.append("--include-before-body=" + header)
-        if footer:
-            command.append("--include-after-body=" + footer)
-        run(command, env=env, cwd=base)
+        run(command, env=with_fragments(env, fragments), cwd=base)
         with open(out, encoding="utf-8") as fh:
             notes_page = notes_lib.Page("notes.html", fh.read(), "notes",
                                         heading or "Notes", "html")
@@ -5344,7 +5383,7 @@ def main():
                     fragment_files.add(source)
                 pair.append(render_fragment(
                     source, os.path.join(work, f"{target.name}-{key}.html")))
-            fragments[target.name] = tuple(pair)
+            fragments[target.name] = landmark_fragments(*pair, work, target.name)
 
         # ---- 1. read ----------------------------------------------------------
         # Every file that becomes a page is found before any is read, so

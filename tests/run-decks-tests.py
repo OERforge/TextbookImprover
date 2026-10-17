@@ -4164,8 +4164,11 @@ def case_revealjs_settings(work):
     visible = convert(visible_dir, "--quick")
     shown = read(os.path.join(visible_dir, "present", "presented.html")) \
         if visible.returncode == 0 else ""
+    # This deck has an include-after of its own, a closing line.
     omitted_dir = folder(os.path.join(work, "omitted"), REVEALJS + "    slides:\n      "
-                         "notes: omitted\n", decks_given={"presented.md": PRESENTED})
+                         "notes: omitted\n", decks_given={"presented.md": PRESENTED.replace(
+                             "author: A. Lecturer\n", "author: A. Lecturer\n"
+                             "include-after: A closing line of the deck itself.\n")})
     png(os.path.join(omitted_dir, "img", "big.png"), 200, 120, 40, size=400)
     omitted = convert(omitted_dir, "--quick")
     left = read(os.path.join(omitted_dir, "present", "presented.html")) \
@@ -4222,6 +4225,11 @@ def case_revealjs_settings(work):
         ("slides.notes omitted leaves the notes out, and the run says so",
          lambda: omitted.returncode == 0 and left and '<aside class="notes">' not in left
          and "speaker notes left out" in omitted.stderr),
+        ("a deck's own include-after is kept, the script after it, where Pandoc's option "
+         "for the script had taken its place",
+         lambda: "A closing line of the deck itself." in left
+         and left.index("Reveal.initialize(") < left.index("A closing line of the deck itself.")
+         < left.index("function pageView")),
         ("a book's revealjs target is refused, the rest written",
          lambda: as_book.returncode == 0 and "target present is format revealjs, which is "
          "written for decks written in Markdown" in as_book.stderr

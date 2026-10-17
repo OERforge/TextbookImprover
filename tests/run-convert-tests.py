@@ -56,6 +56,7 @@ targets:
     output_dir: .
   print:
     format: html
+    header: "A *course* banner."
     footer: "Printed edition."
   wide:
     format: html
@@ -216,6 +217,21 @@ def case_targets(work):
         ("with its footer",
          lambda: "Printed edition." in read(work, "print", "tables.html")
          and "Printed edition." not in read(work, "tables.html")),
+        ("a page's own content is its main landmark, its header setting a "
+         "banner before it and its footer setting a contentinfo landmark "
+         "after it, and a page with neither has its main landmark alone",
+         lambda: re.search(r"<body>\s*<header>\s*<p>A <em>course</em> banner\.</p>"
+                           r"\s*</header>\s*<main>\s*<h1", read(work, "print", "tables.html"))
+         and re.search(r"</main>\s*<footer>\s*<p>Printed edition\.</p>\s*</footer>"
+                       r"\s*</body>", read(work, "print", "tables.html"))
+         and re.search(r"<body>\s*<main>\s*<h1", read(work, "tables.html"))
+         and re.search(r"</main>\s*</body>", read(work, "tables.html"))
+         and all(read(*parts).count("<main>") == 1 for parts in (
+             (work, "print", "tables.html"), (work, "tables.html")))),
+        ("and the banner looks as it did as a paragraph, not centered over a "
+         "wide space as Pandoc's stylesheet has a header",
+         lambda: re.search(r"body > header \{\s*margin-bottom: 0;\s*text-align: inherit;",
+                           read(work, "print", "tables.html"))),
         ("and its media beside its pages",
          lambda: exists(work, "print", "media-a", "media", "image1.png")),
         ("a target whose filter settings agree shares the intermediate",
@@ -1142,18 +1158,26 @@ def case_word_box_anchor(work):
 
 def case_menu(work):
     """menu: on gives every rendered page the book's contents and a
-    previous/next pager; a pass-through page is left as it stands."""
+    previous/next pager; a pass-through page is left as it stands. The
+    target has a header and a footer too, and a page its own epigraph and
+    closing line, in its metadata."""
     os.makedirs(os.path.join(work, "_pt"))
     with open(os.path.join(work, "ch1.md"), "w", encoding="utf-8") as fh:
         fh.write("# Chapter One\n\nOpening.\n\n## First Part\n\nA.\n\n"
                  "## Second Part\n\nB.\n")
+    with open(os.path.join(work, "ch2.md"), "w", encoding="utf-8") as fh:
+        fh.write("---\ntitle: Chapter Two\ninclude-before: |\n  > A line before the "
+                 "chapter.\ninclude-after: A closing line.\n---\n\n# Chapter Two\n\nTwo.\n")
     with open(os.path.join(work, "_pt", "about.html"), "w",
               encoding="utf-8") as fh:
         fh.write(HAND.replace("Front Matter", "About"))
     result = convert(work, "defaults:\n  pages:\n    split_level: 2\n"
                            "targets:\n  html:\n    format: html\n"
                            "    menu: \"on\"\n"
-                           "  plain:\n    format: html\n", fixtures=())
+                           "    header: \"Course site.\"\n"
+                           "    footer: \"Shared under CC BY.\"\n"
+                           "  plain:\n    format: html\n"
+                           "    footer: \"<footer>Ours already.</footer>\"\n", fixtures=())
     first = read(work, "html", "ch1--first-part.html") if exists(
         work, "html", "ch1--first-part.html") else ""
     checks = read(work, "output-check.csv") if exists(
@@ -1170,6 +1194,26 @@ def case_menu(work):
          lambda: 'rel="prev" href="ch1.html"' in first
          and 'rel="next" href="ch1--second-part.html">Next: Second Part'
          in first),
+        ("the menu between the page's banner and its main landmark, and the "
+         "pager between that and its footer, each a landmark of its own",
+         lambda: all(tag in first for tag in ("<header>", "<main>", "<footer>"))
+         and first.index("<header>") < first.index('<nav class="book-menu"')
+         < first.index("<main>") < first.index("</main>")
+         < first.index('<nav class="book-pager"') < first.index("<footer>")),
+        ("a page's own include-before and include-after, an epigraph its metadata "
+         "gives, are on it beside the target's header and footer, inside its main "
+         "landmark, and without them",
+         lambda: all(re.search(r"<main>\s*<blockquote>\s*<p>A line before the chapter\.</p>"
+                               r"\s*</blockquote>\s*<h1[^>]*>Chapter Two</h1>.*"
+                               r"A closing line\.\s*</main>", read(work, name, "ch2.html"), re.S)
+                     for name in ("html", "plain") if exists(work, name, "ch2.html"))
+         and exists(work, "plain", "ch2.html")
+         and "Course site." in read(work, "html", "ch2.html")),
+        ("a footer setting that is a <footer> already, as one had to be to make a "
+         "landmark, is the page's footer as it stands, not a footer in a footer",
+         lambda: re.search(r"</main>\s*<footer>\s*Ours already\.\s*</footer>\s*</body>",
+                           read(work, "plain", "ch1--first-part.html"))
+         and read(work, "plain", "ch1--first-part.html").count("<footer") == 1),
         ("every link the menu adds leads somewhere",
          lambda: "link-to-missing" not in checks),
         ("a pass-through page is left as it stands",
@@ -4653,6 +4697,35 @@ def case_html_source(work):
                            "    - bookname\n")
     web = read(mixed, "html", "web.html") if exists(
         mixed, "html", "web.html") else ""
+    # Main elements the reader keeps whole: a <main> with an id and a
+    # class, as WordPress writes it, and a div with role="main", as
+    # Sphinx's is. Each page has a <main> of its own; read back, a page
+    # with two had its text twice.
+    mains = work + "-mains"
+    os.makedirs(mains)
+    with open(os.path.join(mains, "press.html"), "w", encoding="utf-8") as fh:
+        fh.write('<!DOCTYPE html><html lang="en"><head><title>Press</title></head><body>'
+                 '<nav><a href="#main">Skip to the content</a></nav>'
+                 '<main id="main" class="site-main"><h1>Press</h1><p>Said once.</p>'
+                 '<p><a href="#main">Back to the top</a></p></main></body></html>\n')
+    with open(os.path.join(mains, "sphinx.html"), "w", encoding="utf-8") as fh:
+        fh.write('<!DOCTYPE html><html lang="en"><head><title>Sphinx</title></head><body>'
+                 '<div class="document"><div class="body" role="main"><h1>Sphinx</h1>'
+                 '<p>Also said once.</p></div></div><div class="sphinxsidebar">'
+                 '<p>A sidebar.</p></div></body></html>\n')
+    mains_run = run_in(mains, "  contents:\n    - press\n    - sphinx\n")
+    mains_back = mains + "-back"
+    if exists(mains, "html", "press.html"):
+        shutil.copytree(os.path.join(mains, "html"), mains_back)
+        run_in(mains_back, "  contents:\n    - press\n    - sphinx\n")
+
+    def one_main(*parts):
+        """The page one main landmark, its text once."""
+        if not exists(*parts):
+            return False
+        page = read(*parts)
+        return page.count("<main") == 1 and 'role="main"' not in page \
+            and page.count("<p>Said once.</p>") + page.count("<p>Also said once.</p>") == 1
     # The same page with promote_h1_to_title: shorter, which takes the H1 as
     # the title when the <title> is it plus the site's name, and a format
     # source copy, which keeps the author's own <title> whatever that says.
@@ -4714,6 +4787,14 @@ def case_html_source(work):
          in read(mixed, "html", "elsewhere.html")
          and "<title>The Fixture Book</title>"
          in read(mixed, "html", "bookname.html")),
+        ("a main element the reader keeps whole, a <main> with an id and a class or a "
+         "div with role=\"main\", is opened up, its id an anchor, so the page has one "
+         "main landmark, its own, and the page read back has its text once",
+         lambda: mains_run.returncode == 0
+         and all(one_main(d, "html", n + ".html") for d in (mains, mains_back)
+                 for n in ("press", "sphinx"))
+         and 'id="main"' in read(mains, "html", "press.html")
+         and "A sidebar." not in read(mains, "html", "sphinx.html")),
         ("a page beside the sources is converted",
          lambda: marked.returncode in (0, 1)
          and 'class="table-wrapper"' in web),
@@ -4776,7 +4857,7 @@ def case_notes(work):
     import zipfile
     code = "    ```{.python .numberLines}\n    x = 1\n    ```\n"
 
-    def build(sub, numbering, placement, title=None):
+    def build(sub, numbering, placement, title=None, footer=None):
         d = os.path.join(work, sub)
         os.makedirs(d, exist_ok=True)
         with open(os.path.join(d, "ch1.md"), "w", encoding="utf-8") as fh:
@@ -4791,7 +4872,8 @@ def case_notes(work):
                        f"    numbering: {numbering}\n    placement: "
                        f"{placement}\n" + (f"    title: {title}\n" if title else "")
                        + "targets:\n  html:\n    format: html\n"
-                       "  epub:\n    format: epub3\n", fixtures=())
+                       + (f"    footer: {footer}\n" if footer else "")
+                       + "  epub:\n    format: epub3\n", fixtures=())
         nav = ""
         e = os.path.join(d, "epub", "org.example.fixtures.epub")
         if os.path.exists(e):
@@ -4875,6 +4957,15 @@ def case_notes(work):
         with zipfile.ZipFile(os.path.join(d, "epub", "org.example.fixtures.epub")) as z:
             return "".join(z.read(n).decode("utf-8") for n in z.namelist() if "/text/ch" in n)
 
+    def in_main(*parts):
+        """The page's notes in its main landmark, the last of its content,
+        with its footer, if it has one, after them."""
+        main = re.search(r"<body>\s*<main>(.*)</main>\s*(<footer>.*</footer>\s*)?</body>",
+                         read(*parts), re.S)
+        return bool(main) and bool(re.search(r'<section id="[\w-]*footnotes" class="footnotes',
+                                             main.group(1))) \
+            and main.group(1).rstrip().endswith("</section>")
+
     def headed(text, heading):
         """Each notes section's heading, after its rule: none for a
         section without one."""
@@ -4883,8 +4974,8 @@ def case_notes(work):
             == heading
 
     gp, r1, _ = build("group-page", "group", "page")
-    gg, r2, _ = build("page-group", "page", "group")
-    gb, r3, nav = build("page-book", "page", "book")
+    gg, r2, _ = build("page-group", "page", "group", footer="Course pages.")
+    gb, r3, nav = build("page-book", "page", "book", footer="Course pages.")
     pp, r4, _ = build("page-page", "page", "page", "Anmerkungen")
     # Quotes and an @, which Markdown would read as curly quotes and a
     # citation, and the title is given as it's written.
@@ -4927,6 +5018,13 @@ def case_notes(work):
          and "footnotes" not in read(gg, "html", "ch1.html")
          and re.findall(r'<li id="(fn\d+)"', read(gg, "html", "ch1--second-section.html"))
          == ["fn1", "fn2", "fn3", "fn4"]),
+        ("the notes gathered on a chapter's last page or on the Notes page go in its main "
+         "landmark, at the end of its content, before its footer, and a page's own notes "
+         "are there too",
+         lambda: in_main(gg, "html", "ch1--second-section.html")
+         and in_main(gb, "html", "notes.html") and in_main(pp, "html", "ch1--first-section.html")
+         and "Course pages." in read(gg, "html", "ch1--second-section.html")
+         and "Course pages." in read(gb, "html", "notes.html")),
         ("a note that ends in a numbered list goes whole, its way back with it, and the "
          "page it goes to is well formed",
          lambda: read(gg, "html", "ch1--second-section.html").count('class="footnote-back"') == 4

@@ -163,6 +163,14 @@ figcaption {
   }
 }
 
+/* The header setting, a banner landmark before the page's main one: as
+   it looked when it was a paragraph. Pandoc's stylesheet centers every
+   header, with a wide space under it, which is for its title block. */
+body > header {
+  margin-bottom: 0;
+  text-align: inherit;
+}
+
 /* The book's menu and pager, when a target turns menu on. */
 nav.book-menu { margin: 0 0 1.5em; }
 nav.book-menu summary { cursor: pointer; font-weight: bold; }

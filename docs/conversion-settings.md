@@ -58,11 +58,11 @@ Whether this target shows the book's structure numbered (see project.numbering).
 
 **`header`**—`text`; default `""` (empty)
 
-Markdown placed at the top of every page, or the path to a file holding it. Inserted by the template after the filters have run, so nothing in it's processed: give any image explicit alt text.
+Markdown placed at the top of every page, or the path to a file holding it: the page's banner landmark, before its main content. Inserted by the template after the filters have run, so nothing in it's processed: give any image explicit alt text.
 
 **`footer`**—`text`; default `""` (empty)
 
-Markdown placed at the bottom of every page, or the path to a file holding it. The usual use is an attribution line. Same caveat as header: it isn't processed by the filters.
+Markdown placed at the bottom of every page, or the path to a file holding it: the page's content information landmark, after its main content. The usual use is an attribution line. Same caveat as header: it isn't processed by the filters.
 
 **`promote_h1_to_title`**—one of `always`, `if-absent`, `longer`, `shorter`, `never`; default `if-absent`
 

@@ -159,7 +159,7 @@ Code with a language is highlighted in the same colors in every output that colo
 
 ### HTML
 
-A directory of pages, one per target (`output_dir`), each page's images and linked files copied beside it under names that need no encoding in a link, and in lowercase with `media.lowercase`, for a server that tells case apart. `menu: on` adds a menu for posting the pages as a site. Packaged by [`build-cartridge.py`](packaging.md), which `convert.py` runs at the end of every run, and which builds once `project.yaml` names the book:
+A directory of pages, one per target (`output_dir`), each page's images and linked files copied beside it under names that need no encoding in a link, and in lowercase with `media.lowercase`, for a server that tells case apart. Each page the run writes has its own content in `<main>`, and the `header` and `footer` settings are a `<header>` before it and a `<footer>` after it, so a screen reader can move among them ([Header and footer](configuration.md#header-and-footer)). `menu: on` adds a menu for posting the pages as a site. Packaged by [`build-cartridge.py`](packaging.md), which `convert.py` runs at the end of every run, and which builds once `project.yaml` names the book:
 
 - **A Common Cartridge** (`format: common-cartridge`), written to the 1.1 profile, which every major LMS imports. `--zip` builds the `.imscc`; without it, the manifest is written with the `zip` command that would build it. A cartridge this pipeline builds converts back to the same pages and files.
 - **The same package named `.zip`** (`format: zip`): the manifest and the pages as in the cartridge, in an archive named `.zip`.

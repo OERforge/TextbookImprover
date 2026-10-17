@@ -82,7 +82,7 @@ What Pandoc does, as read from its source or established by test, for the questi
 
 ## The HTML reader
 
-**One `<main>` is the whole document.** `extractMain` keeps only the contents of the element with `role="main"` (a `<main>` gets that role on read) when the page has exactly one, and everything otherwise (`Readers/HTML.hs`, after `parseDoc`). Read from the source; measured on 60 just-the-docs pages, where the site navigation is gone with no work from us. A generator that marks its content with a `div` and a class gets no such help.
+**A `<main>` is the whole document.** `extractMain` (`Readers/HTML.hs`, after `parseDoc`) finds every `Div` with `role="main"` (a `<main>` gets that role on read, unless it has a role of its own): when there's one, with no id and no class, the document is its contents; when there's one with an id or a class, or more than one, the document is those `Div`s, whole, and nothing outside them; when there's none, it's everything. Read from the source (3.12.1, 2026-10-17; this entry had said one main gives its contents and anything else everything); measured on 60 just-the-docs pages, where the site navigation is gone with no work from us, and on a page with WordPress's `<main id="main" class="site-main">`, which is a `Div` with the id, the class, and the role. A generator that marks its content with a `div` and a class gets no such help.
 
 **A row of `th` partway down a `tbody` is read as a body row.** Pandoc has no header cells within a body, so the cells become ordinary cells, with the source's `scope="col"` left as an attribute, which the writer puts on a `td`. Measured on EdTech Books tables that repeat their header row; `html-source.lua` splits such a table at the row.
 
@@ -278,7 +278,9 @@ Measured on 3.11 by writing each case with Pandoc's `asciidoc` writer and readin
 
 ## The HTML writer
 
-**Emits a bare `<th>` for a row-header column** (`row_head_columns`), never `<th scope="row">`; scope is the filter's to add. **`--include-in-header` replaces the `header-includes` metadata field** rather than merging. **`$title$` in a template renders inlines**, so a heading's `<em>` lands inside `<title>`. **Small lengths are written in scientific notation** (`5.0e-2in`). All measured.
+**Emits a bare `<th>` for a row-header column** (`row_head_columns`), never `<th scope="row">`; scope is the filter's to add. **`--include-in-header` replaces the `header-includes` metadata field** rather than merging, and `--include-before-body` and `--include-after-body` replace `include-before` and `include-after` the same way, so a page's epigraph, given in its metadata, was lost on a target with a header (measured at 3.12.1; `header-includes.lua` adds all three to the metadata instead). **`$title$` in a template renders inlines**, so a heading's `<em>` lands inside `<title>`. **Small lengths are written in scientific notation** (`5.0e-2in`). All measured.
+
+**The default stylesheet centers every `<header>`, with 4em under it** (`header { margin-bottom: 4em; text-align: center; }` in `templates/styles.html`), meant for the title block, `<header id="title-block-header">`; it applies to a banner `<header>` given in `include-before` just the same, which `page.css` sets aside with `body > header`. Read at 3.12.1. The template writes `include-before` before the title block and `$body$`, and `include-after` after them, so a `<main>` opened in one and closed in the other holds the title block and the page. Measured.
 
 **With no title, the page's `<title>` is the input file's name.** Rendering `costs.filtered.json`, a page without a title gets `<title>costs.filtered</title>`. Measured; `target-blocks.lua` sets `pagetitle` to the page's own name first.
 

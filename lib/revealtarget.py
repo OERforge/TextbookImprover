@@ -253,7 +253,11 @@ def build(intermediate, base, out, *, filters, level, language, shape, notes="co
     """One deck's presentation, out, from its filtered intermediate: Pandoc's
     reveal.js writer with filters, at the deck's slide level, its slides
     shape, then finish(). notes is slides.notes. Returns a dict: ok; log,
-    Pandoc's errors; warnings, its others; slides, how many."""
+    Pandoc's errors; warnings, its others; slides, how many. filters
+    ends with header-includes.lua, which adds the stylesheet to the
+    deck's header-includes and the script after its include-after, where
+    Pandoc's --include-in-header and --include-after-body would take
+    their place."""
     result = {"ok": False, "log": "", "warnings": [], "slides": 0, "html": out}
     work = tempfile.mkdtemp(prefix="deck-reveal-")
     try:
@@ -269,7 +273,7 @@ def build(intermediate, base, out, *, filters, level, language, shape, notes="co
         width, height = frame(shape)
         command = ["pandoc", "-f", "json", "-t", "revealjs", "-s", intermediate, "-o", out,
                    "--math-method=mathml", "--slide-level", str(level),
-                   "--reference-location=section", "--include-after-body", script,
+                   "--reference-location=section",
                    "-V", f"revealjs-url={REVEALJS_URL}", "-V", f"theme={THEME}",
                    "-V", f"width={width}", "-V", f"height={height}",
                    "-V", "controlsTutorial=false", "-V", "controlsBackArrows=visible",
@@ -281,6 +285,7 @@ def build(intermediate, base, out, *, filters, level, language, shape, notes="co
         os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
         done = subprocess.run(command, cwd=base, capture_output=True, text=True,
                               env=dict(env or os.environ, HEADER_INCLUDES_FILE=style,
+                                       INCLUDE_AFTER_FILE=script,
                                        DECK_NOTES=str(notes), DECK_LEVELS_ONLY="1"))
         if done.returncode:
             result["log"] = done.stderr

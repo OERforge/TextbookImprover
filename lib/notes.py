@@ -241,8 +241,12 @@ def titled(text, title):
 
 
 def insert_before_end(text, block, flavor):
-    """Put a block at the end of the page's content."""
-    marker = "</body>" if flavor == "html" else "</section>\n</body>"
+    """Put a block at the end of the page's content: in a page's main
+    landmark, before its footer, where it has one."""
+    if flavor == "html":
+        marker = "</main>" if "</main>" in text else "</body>"
+    else:
+        marker = "</section>\n</body>"
     at = text.rfind(marker)
     if at < 0:
         at = text.rfind("</body>")

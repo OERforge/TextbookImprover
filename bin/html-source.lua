@@ -46,6 +46,15 @@ nothing, which is the test.
     declared. The reader moves a heading's id onto the section when the
     two agree (pDiv), so the id goes back on the heading; any other id
     a section had is kept as an empty anchor.
+  - So is a page's main element when the reader keeps it whole: a
+    <main> with an id or a class (WordPress's <main id="main"
+    class="site-main">) or any element with role="main" (Sphinx's
+    <div class="body" role="main">). The reader takes out the contents
+    of a lone <main> with neither, and keeps the element otherwise
+    (extractMain, Readers/HTML.hs). Every page convert.py writes has a
+    <main> of its own, so one kept inside it was a second main landmark,
+    which a page may not have, and read back, the page twice over: with
+    two, the reader keeps both.
   - An empty span holding an id inside a heading (an anchor, like the
     <a name> Scribble puts in every heading) moves out of it: the id
     becomes the heading's when it has none, and an empty anchor before
@@ -543,7 +552,8 @@ function Div(div)
   if div.identifier == 'title-block-header' then return {} end
   if div.attributes.href then div.attributes.href = nil end
   drop_obsolete(div)
-  if div.classes:includes('section') or div.classes:includes('header') then
+  if div.classes:includes('section') or div.classes:includes('header')
+      or div.attributes.role == 'main' then
     return open_up(div)
   end
   if div.classes:includes('table-wrapper') and #div.content == 1

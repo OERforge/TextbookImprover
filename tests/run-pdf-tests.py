@@ -385,6 +385,14 @@ And one whose first row is in its head, as Pandoc's Word reader puts a row Word 
 
 As [the first steps](#solve) and [the second](#steps) show.
 
+Two data tables with an id and no caption, the second of a class the book doesn't number:
+
+<table id="rates"><thead><tr><th>Rate</th><th>Term</th></tr></thead><tbody><tr><td>Four percent</td><td>Ten years</td></tr></tbody></table>
+
+<table id="fees" class="unnumbered"><thead><tr><th>Fee</th><th>When</th></tr></thead><tbody><tr><td>Five dollars</td><td>Monthly</td></tr></tbody></table>
+
+As [the rates](#rates) and [the fees](#fees) show.
+
 [^d]: Note d, above the inner table.
 [^e]: Note e, in the inner table.
 [^f]: Note f, in the inner table too.
@@ -1261,6 +1269,17 @@ def checks(work, jobs=1):
               and goes_to(notes_path, "the second") == [second])(
              page_holding(notes_path, "Subtract 3 from each side."),
              page_holding(notes_path, "Steps to solve"))),
+        # The writer held a data table's id in an empty caption too, which
+        # LaTeX numbered, and gave one of class unnumbered no \label at all,
+        # so a link to it went nowhere; both ids are anchors before them.
+        ("a data table with an id and no caption is numbered by nothing, and "
+         "its id is an anchor a link goes to, one the book doesn't number too",
+         lambda: not re.search(r"Table\s*\d", notes_text + notes_plain_text)
+         and (lambda rates, fees: rates is not None and fees is not None
+              and goes_to(notes_path, "the rates") == [rates]
+              and goes_to(notes_path, "the fees") == [fees])(
+             page_holding(notes_path, "Four percent"),
+             page_holding(notes_path, "Five dollars"))),
         # figures-and-tables.lua: a layout table's head rows are body rows,
         # since LaTeX's tagging made a longtable's head header cells even
         # tagged as a division, a TH outside any TR, which PDF/UA-2 rejects

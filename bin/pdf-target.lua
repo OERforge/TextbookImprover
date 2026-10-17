@@ -88,6 +88,10 @@
 --    LaTeX's tagging made a Table: tagged a division of paragraphs, a
 --    row's cells in turn, its caption a paragraph before it (below).
 --
+-- 14. A table's id with no caption to hold it, which the writer put in an
+--    empty caption that LaTeX numbered, or, for a table of class
+--    unnumbered, nowhere: an anchor before the table (below).
+--
 -- Copyright 2026 Robert Szarka
 --
 -- This program is free software: you can redistribute it and/or modify
@@ -452,21 +456,34 @@ function Table(tbl)
     end
     return blocks
   end
+  -- A data table's id with no caption to hold it is a div's too, an anchor
+  -- before the table: the writer's empty caption numbered a table the book
+  -- never numbered ("Table 3"), and one of class unnumbered, which gets no
+  -- caption, got no \label either, so a link to it went nowhere.
+  local id = nil
+  if tbl.identifier ~= '' and #tbl.caption.long == 0
+      and not (tbl.caption.short and #tbl.caption.short > 0) then
+    id = tbl.identifier
+    tbl.identifier = ''
+  end
   local own = own_label(tbl.caption, TABLE_WORDS)
-  if columns == 0 then
-    return own and without_label({ tbl }) or tbl
+  local blocks = { tbl }
+  if columns > 0 then
+    local list = {}
+    for i = 1, columns do
+      list[#list + 1] = tostring(i)
+    end
+    blocks = {
+      pandoc.RawBlock("latex", tagging_setup("table/header-columns={"
+                      .. table.concat(list, ",") .. "}")),
+      tbl,
+      pandoc.RawBlock("latex", tagging_setup("table/header-columns={}")),
+    }
   end
-  local list = {}
-  for i = 1, columns do
-    list[#list + 1] = tostring(i)
-  end
-  local blocks = {
-    pandoc.RawBlock("latex", tagging_setup("table/header-columns={"
-                    .. table.concat(list, ",") .. "}")),
-    tbl,
-    pandoc.RawBlock("latex", tagging_setup("table/header-columns={}")),
-  }
-  return own and without_label(blocks) or blocks
+  if own then blocks = without_label(blocks) end
+  if id then return pandoc.Div(blocks, pandoc.Attr(id)) end
+  if columns == 0 and not own then return tbl end
+  return blocks
 end
 
 local function decorative(img)
@@ -564,11 +581,14 @@ local function unnest(fig)
   return fig
 end
 
+-- The table, and an id a div around it holds: the table's own, which
+-- Table above moved there for want of a caption.
 local function only_table(fig)
-  local tables, other = {}, 0
+  local tables, other, id = {}, 0, ''
   for _, block in ipairs(fig.content) do
     -- The table-wrapper div the HTML gets, or any div holding one block.
     while block.t == 'Div' and #block.content == 1 do
+      if id == '' then id = block.identifier end
       block = block.content[1]
     end
     if block.t == 'Table' then
@@ -578,7 +598,7 @@ local function only_table(fig)
     end
   end
   if #tables ~= 1 or other > 0 then return nil end
-  return tables[1]
+  return tables[1], id
 end
 
 -- A footnote in a figure's caption (11), whose mark LaTeX numbered as
@@ -612,10 +632,12 @@ end
 
 function Figure(fig)
   fig = unnest(fig)
-  local tbl = only_table(fig)
+  local tbl, id = only_table(fig)
   if tbl and #caption_blocks(tbl.caption) == 0 and #caption_blocks(fig.caption) > 0 then
     tbl.caption = fig.caption
-    if tbl.identifier == '' then tbl.identifier = fig.identifier end
+    if tbl.identifier == '' then
+      tbl.identifier = id ~= '' and id or fig.identifier
+    end
     return tbl
   end
   local unlabeled = own_label(fig.caption, FIGURE_WORDS) or unnumbered(fig)

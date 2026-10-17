@@ -336,10 +336,21 @@ def tables_in(path):
         jaws, mark = tc.jaws_declaration(tbl)
         if jaws:
             value, reason = jaws, f"the table's {mark} bookmark declares its headers (JAWS's bookmark convention)"
-        if value is None:
+        anchors = tc.anchors_before(body, tbl) if depth == 0 else []
+        if value is None and not anchors:
             continue
         grid = tc.build_grid(tbl)
         first = grid[0][0].text if grid and grid[0] else ""
+        if value is None:
+            # One the census counts no table, one cell or pictures alone,
+            # isn't listed, but the bookmarks before it go to the filter as
+            # a listed table's do: a link to a boxed note, which is a table
+            # of one cell, goes to them.
+            found.append({"anchors-only": True, "rows": nrows, "cols": ncols,
+                          "first": " ".join(first.split())[:40],
+                          "source": os.path.basename(path), "index": index,
+                          "anchors": anchors})
+            continue
         found.append({
             "key": tc.table_key(tbl, keys),
             "rows": nrows,
@@ -353,7 +364,7 @@ def tables_in(path):
             "reason": reason,
             "caption-rows": inferred[0],
             "split-at": inferred[1],
-            "anchors": tc.anchors_before(body, tbl) if depth == 0 else [],
+            "anchors": anchors,
             "needs-source": value == "none" and no_header_text(grid),
             "summary-row": "trailing row with no label" in reason,
             "from-source": bool(jaws),
@@ -475,9 +486,20 @@ def main():
                           else tables_in(path))
         except RuntimeError as exc:
             warn(str(exc))
+    # A table that isn't listed, with bookmarks before it: only those, for
+    # the filter, and nothing in the reports.
+    unlisted = [info for info in tables if info.get("anchors-only")]
+    tables = [info for info in tables if not info.get("anchors-only")]
 
     report, new_rows = [], []
     resolved = {}
+    for info in unlisted:
+        resolved.setdefault(os.path.splitext(info["source"])[0], []).append({
+            "index": info["index"], "headers": "", "caption_rows": [],
+            "split_at": [], "part_captions": [], "split_at_declared": False,
+            "rows": info["rows"], "cols": info["cols"], "first": info["first"],
+            "anchors": info["anchors"], "supplier": "",
+        })
     resolved_html = {}
     claimed = set()
     layout = 0

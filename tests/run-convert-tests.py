@@ -1093,6 +1093,53 @@ def case_word_table_matching(work):
     ]
 
 
+def case_word_box_anchor(work):
+    """A bookmark between blocks before a Word table the header guess
+    doesn't list, a box of one cell, as OpenStax's export bookmarks every
+    table and links to a box, which Pandoc's reader drops: the pre-pass
+    handed the filter those before a listed table only, so a link to the
+    box went nowhere."""
+    import csv
+    os.makedirs(work)
+    p, table = ooxml_paragraph, ooxml_table
+    word_with_body(os.path.join(work, "box.docx"), "".join([
+        p("As ", '<w:hyperlink w:anchor="save-note"><w:r><w:t>the note</w:t></w:r>'
+              "</w:hyperlink>", " says, save often."),
+        '<w:bookmarkStart w:id="1" w:name="save-note"/><w:bookmarkEnd w:id="1"/>',
+        table([[[p("Remember to save your work.")]]]),
+        p("And a data table:"),
+        '<w:bookmarkStart w:id="2" w:name="costs"/><w:bookmarkEnd w:id="2"/>',
+        table([[[p("Year")], [p("Cost")]], [[p("2020")], [p("10")]], [[p("2021")], [p("12")]]]),
+        p("As ", '<w:hyperlink w:anchor="costs"><w:r><w:t>the costs</w:t></w:r></w:hyperlink>',
+          " show."),
+    ]))
+    with open(os.path.join(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
+        fh.write("targets:\n  html:\n    format: html\n")
+    result = run_in(work, "")
+    page = read(work, "html", "box.html") if exists(work, "html", "box.html") else ""
+    checked = []
+    if exists(work, "output-check.csv"):
+        with open(os.path.join(work, "output-check.csv"), encoding="utf-8", newline="") as fh:
+            checked = [r["Check"] for r in csv.DictReader(fh)]
+    listed = []
+    if exists(work, "table-headers-new.csv"):
+        with open(os.path.join(work, "table-headers-new.csv"), encoding="utf-8",
+                  newline="") as fh:
+            listed = [r["preview"] for r in csv.DictReader(fh)]
+
+    def before(anchor, words):
+        return anchor in page and words in page and page.index(anchor) < page.index(words)
+    return [
+        ("a box of one cell keeps the bookmark before it, which a link goes to",
+         lambda: result.returncode == 0 and 'href="#save-note"' in page
+         and before('id="save-note"', "Remember to save your work.")
+         and "link-to-missing-fragment" not in checked),
+        ("as a data table does, and the box still isn't listed",
+         lambda: 'href="#costs"' in page and before('id="costs"', "2020")
+         and len(listed) == 1 and "Year" in listed[0]),
+    ]
+
+
 def case_menu(work):
     """menu: on gives every rendered page the book's contents and a
     previous/next pager; a pass-through page is left as it stands."""
@@ -5678,6 +5725,7 @@ CASES = [
     ("layout tables, marked and decided", case_layout_tables),
     ("a Word layout table with a repeating header row", case_layout_word_head),
     ("a Word table's declaration whatever its first cell holds", case_word_table_matching),
+    ("a Word box's bookmark, which a link goes to", case_word_box_anchor),
     ("a menu for pages posted as a site", case_menu),
     ("raw HTML in a Markdown source", case_markdown_html),
     ("title rows and bands, split and grouped", case_bands),

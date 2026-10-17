@@ -346,6 +346,11 @@ Text with a note.[^a]
 [^c]: Note c, in a long caption.
 """
 
+# The longer cell of each of two tables NOTES_CELLS has whose cells, side
+# by side, are longer than a line.
+WIDE_CELLS = ("The temperature warmed up twelve degrees from seven degrees below zero by noon today.",
+              "The snow fell for eleven days without stopping, and the rivers froze from bank to bank.")
+
 NOTES_CELLS = r"""# Cells
 
 ::: matrix
@@ -392,6 +397,12 @@ Two data tables with an id and no caption, the second of a class the book doesn'
 <table id="fees" class="unnumbered"><thead><tr><th>Fee</th><th>When</th></tr></thead><tbody><tr><td>Five dollars</td><td>Monthly</td></tr></tbody></table>
 
 As [the rates](#rates) and [the fees](#fees) show.
+
+And two whose cells, side by side, are longer than a line:
+
+<table role="presentation"><tr><td>Write a phrase for the temperature.</td><td>The temperature warmed up twelve degrees from seven degrees below zero by noon today.</td></tr></table>
+
+<table><thead><tr><th>Season</th><th>What the weather did</th></tr></thead><tbody><tr><td>Winter</td><td>The snow fell for eleven days without stopping, and the rivers froze from bank to bank.</td></tr></tbody></table>
 
 [^d]: Note d, above the inner table.
 [^e]: Note e, in the inner table.
@@ -1280,6 +1291,18 @@ def checks(work, jobs=1):
               and goes_to(notes_path, "the fees") == [fees])(
              page_holding(notes_path, "Four percent"),
              page_holding(notes_path, "Five dollars"))),
+        # pdf-target.lua: a table whose columns have no widths and whose
+        # cells are each a paragraph the writer set in l columns, which
+        # don't wrap, and its longer cell ran past the page's edge.
+        ("a table whose cells, side by side, are longer than a line wraps "
+         "them, a layout table and a data table alike, tagged or untagged",
+         lambda: all(says(re.sub(r"-\n", "", text), words)
+                     and not any(words in line for line in text.splitlines())
+                     for text in (notes_text, notes_plain_text)
+                     for words in (WIDE_CELLS[0], WIDE_CELLS[1]))
+         and all(any(marker in chunk and "p{(\\linewidth" in chunk.split("\\endhead")[0]
+                     for chunk in notes_source.split("\\begin{longtable}"))
+                 for marker in ("twelve", "eleven"))),
         # figures-and-tables.lua: a layout table's head rows are body rows,
         # since LaTeX's tagging made a longtable's head header cells even
         # tagged as a division, a TH outside any TR, which PDF/UA-2 rejects

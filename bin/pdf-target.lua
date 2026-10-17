@@ -92,6 +92,10 @@
 --    empty caption that LaTeX numbered, or, for a table of class
 --    unnumbered, nowhere: an anchor before the table (below).
 --
+-- 15. A table wider than a line whose columns have no widths and whose
+--    cells are each a paragraph, which the writer set in columns that
+--    don't wrap: given widths (below).
+--
 -- Copyright 2026 Robert Szarka
 --
 -- This program is free software: you can redistribute it and/or modify
@@ -418,6 +422,135 @@ local function flatten_nested(tbl)
   end
 end
 
+-- A table the writer sets in l, c, or r columns, which don't wrap: one
+-- whose columns have no widths, each of whose cells is one paragraph
+-- with no line break, or none (isSimpleTable and colDescriptors,
+-- Writers/LaTeX/Table.hs, 3.12.1), as an HTML page's table without a
+-- <colgroup> is. A long cell ran past the page's edge: Prealgebra 2e's
+-- Table 3.2, a worked example's steps. One wider than a line is given
+-- widths, which the writer sets as p columns, which wrap: each column's
+-- in proportion to its longest cell, and no narrower than its longest
+-- word or formula. One whose longest words alone are wider than a line
+-- is left as it is, since no widths would fit it either.
+local LINE = 70   -- characters in a line of the book class's 10pt type, about
+local GAP = 3     -- the space between two columns, in characters
+
+local function simple_cell(cell)
+  local blocks = cell.contents
+  if #blocks == 0 then return true end
+  if #blocks > 1 or (blocks[1].t ~= 'Plain' and blocks[1].t ~= 'Para') then
+    return false
+  end
+  local broken = false
+  blocks[1]:walk({ LineBreak = function() broken = true end })
+  return not broken
+end
+
+-- A cell's length and its longest word, in characters: a formula as many
+-- as its TeX shows, and two more for each operator or relation, which
+-- TeX sets with space around it, as one word; a picture, which the writer
+-- scales to its column, a line, and no word.
+local SPACED = { times = true, cdot = true, div = true, pm = true, mp = true,
+                 le = true, leq = true, ge = true, geq = true, ne = true,
+                 neq = true, approx = true, equiv = true, to = true,
+                 rightarrow = true, Rightarrow = true }
+
+local function cell_size(cell)
+  local text = stringify(cell.contents:walk({
+    Math = function(math_)
+      local tex = math_.text
+      local shown = tex:gsub('\\%a+', '#'):gsub('[%s{}^_\\&]', '')
+      local spaced = select(2, tex:gsub('[-+=<>]', ''))
+        + select(2, tex:gsub('\226\136\146', '')) + select(2, tex:gsub('\195[\151\183]', ''))
+      for name in tex:gmatch('\\(%a+)') do
+        if SPACED[name] then spaced = spaced + 1 end
+      end
+      local length = (utf8.len(shown) or #shown) + 2 * spaced
+      return pandoc.Str(('m'):rep(math.max(1, length)))
+    end,
+    Image = function() return pandoc.Str((' '):rep(LINE)) end,
+  }))
+  local longest = 0
+  for word in text:gmatch('%S+') do
+    longest = math.max(longest, utf8.len(word) or #word)
+  end
+  return utf8.len(text) or #text, longest
+end
+
+local function fit_to_line(tbl)
+  local count = #tbl.colspecs
+  if count < 2 then return end
+  for _, spec in ipairs(tbl.colspecs) do
+    if spec[2] then return end
+  end
+  local need, word = {}, {}
+  for j = 1, count do need[j], word[j] = 1, 1 end
+  local spanning = {}  -- cells across columns: { first, last, length, longest }
+  local covered = {}   -- grid column -> rows a cell spanning rows still covers
+  for _, row in ipairs(rows_of(tbl)) do
+    local column = 1
+    for _, cell in ipairs(row.cells) do
+      if not simple_cell(cell) then return end
+      while (covered[column] or 0) > 0 do column = column + 1 end
+      local span = cell.col_span or 1
+      local length, longest = cell_size(cell)
+      if span == 1 and column <= count then
+        need[column] = math.max(need[column], length)
+        word[column] = math.max(word[column], longest)
+      elseif column <= count then
+        spanning[#spanning + 1] = { column, math.min(count, column + span - 1),
+                                    length, longest }
+      end
+      for c = column, column + span - 1 do
+        covered[c] = math.max(covered[c] or 0, cell.row_span or 1)
+      end
+      column = column + span
+    end
+    for c, left in pairs(covered) do covered[c] = left - 1 end
+  end
+  -- A cell across columns needs as much of them together as it holds,
+  -- shared among them where they'd hold less.
+  for _, cell in ipairs(spanning) do
+    local first, last, length, longest = table.unpack(cell)
+    local columns, held = last - first + 1, GAP * (last - first)
+    for j = first, last do held = held + need[j] end
+    for j = first, last do
+      if held < length then need[j] = need[j] + (length - held) / columns end
+      word[j] = math.max(word[j], longest / columns)
+    end
+  end
+  local room, total = LINE - GAP * (count - 1), 0
+  for j = 1, count do total = total + need[j] end
+  if total <= room then return end
+  local least, sum = {}, 0
+  for j = 1, count do
+    least[j] = word[j] / room
+    sum = sum + least[j]
+  end
+  if sum > 1 then return end
+  -- Shares by need, a column whose share is less than its least held at
+  -- its least, and the rest shared again among the others.
+  local share, held = {}, {}
+  repeat
+    local held_total, free_need = 0, 0
+    for j = 1, count do
+      if held[j] then held_total = held_total + least[j] else free_need = free_need + need[j] end
+    end
+    local again = false
+    for j = 1, count do
+      if held[j] then
+        share[j] = least[j]
+      else
+        share[j] = (1 - held_total) * need[j] / free_need
+        if share[j] < least[j] then held[j], again = true, true end
+      end
+    end
+  until not again
+  for j = 1, count do
+    tbl.colspecs[j] = { tbl.colspecs[j][1], share[j] }
+  end
+end
+
 function Table(tbl)
   tbl = tbl:walk(braced_math)
   flatten_nested(tbl)
@@ -427,6 +560,7 @@ function Table(tbl)
     unquote_cells(body.body)
   end
   unquote_cells(tbl.foot.rows)
+  fit_to_line(tbl)
   local columns = 0
   for _, body in ipairs(tbl.bodies) do
     if body.row_head_columns > columns then

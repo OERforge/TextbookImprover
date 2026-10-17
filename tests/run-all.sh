@@ -39,6 +39,9 @@
 #                          without Pandoc 3.9; a deck's PDF without
 #                          LuaLaTeX and ltx-talk).
 #   run-site-tests.py      unpack-site.py on saves, WARCs, and captures.
+#   run-cnx-tests.py       unpack-cnx.py on books written in CNXML, baked
+#                          as OpenStax bakes them, and one converted, which
+#                          needs Pandoc 3.9 (skipped without).
 #   run-mathjax-tests.py   formulas as MathJax 2, 3, and 4 drew them.
 #
 #   With Pandoc 3.9 or later:
@@ -158,6 +161,7 @@ run run-headers-tests.py
 run run-unpack-tests.py
 run run-slides-tests.py
 run run-site-tests.py
+run run-cnx-tests.py
 run run-mathjax-tests.py
 
 # These convert real documents, so they need Pandoc. Skipping is

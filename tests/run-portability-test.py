@@ -97,8 +97,9 @@ LATER_SYNTAX = [
 
 
 def sources():
-    for folder in ("bin", "lib", "util", os.path.join("util", "contrib"),
-                   "tests"):
+    for folder in ("bin", "lib", os.path.join("lib", "cnx"),
+                   os.path.join("lib", "cnx", "bake"), "util",
+                   os.path.join("util", "contrib"), "tests"):
         yield from sorted(glob.glob(os.path.join(ROOT, folder, "*.py")))
 
 

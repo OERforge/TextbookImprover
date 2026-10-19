@@ -252,6 +252,21 @@ keys:
       read for a deck, whose headings are its slides and sections, and
       whose title is its YAML's.
 
+  heading_levels:
+    type: enum
+    values: [outline, source]
+    default: outline
+    description: >
+      What a heading that skips a level, more than one below the heading
+      before it, becomes. outline lifts it to one level below the heading
+      it's under, and what's under it with it, so none skips and the
+      outline keeps its shape: under the page's title, a page's first
+      headings are H2 at the deepest. A heading that skips nothing keeps
+      its level, and none goes deeper; the run says how many it moved.
+      source keeps every heading at the source's level. Not read for a
+      deck, whose headings are its slides and sections, or by a Word
+      file's own copy (format source), which keeps its styles.
+
   author_byline:
     type: enum
     values: [meta, visible, drop]

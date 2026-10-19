@@ -433,7 +433,11 @@ And two whose cells, side by side, are longer than a line:
 # inside the list: in a list's item (OpenStax puts a note with a title in
 # one), a numbered item, a definition, a quotation, a table's cell, a
 # figure, and a footnote; with a link to one, and a section after them.
+# The headings are a level below a section's, so none skips a level,
+# which heading_levels would lift.
 NOTES_HEADINGS = r"""# Headings
+
+## In a list, a quotation, a table, a figure, and a note
 
 - An item before it.
 

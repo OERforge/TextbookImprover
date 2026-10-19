@@ -1875,6 +1875,102 @@ See [the table](#prices) and [Prices].
 """
 
 
+# Headings that skip levels, as LibreTexts sets a box's legend and its
+# solution under a section's heading: a page with a title, and one without.
+LEVELS_TITLED = """# The Page
+
+Text.
+
+### A Section
+
+#### Its Subsection
+
+##### Deeper
+
+## Second
+
+Text.
+
+###### A Legend
+
+::: box
+##### Example 2.1
+
+A question.
+
+###### Solution
+
+An answer.
+:::
+
+### Third
+"""
+
+LEVELS_UNTITLED = """## Only Second
+
+#### Fourth
+"""
+
+
+def case_heading_levels(work):
+    """heading_levels: outline, the default, lifts a heading that skips a
+    level to one below the heading it's under, and what's under it with
+    it, a page's first under its title to H2, a box's legend too; one that
+    skips nothing keeps its level; the run says how many moved; the output
+    check finds no skip; and source keeps the source's levels."""
+    def book(name, setting=""):
+        where = os.path.join(work, name)
+        os.makedirs(where)
+        for stem, text in (("levels", LEVELS_TITLED), ("untitled", LEVELS_UNTITLED)):
+            with open(os.path.join(where, stem + ".md"), "w", encoding="utf-8") as fh:
+                fh.write(text)
+        result = convert(where, setting + "targets:\n  html:\n    format: html\n"
+                                          "  md:\n    format: markdown\n",
+                         fixtures=())
+        pages = {stem: read(where, "html", stem + ".html")
+                 if exists(where, "html", stem + ".html") else ""
+                 for stem in ("levels", "untitled")}
+        check = os.path.join(where, "output-check.csv")
+        skips = 0
+        if os.path.exists(check):
+            with open(check, encoding="utf-8", newline="") as fh:
+                skips = sum(1 for row in csv.DictReader(fh)
+                            if row["Check"] == "heading-skips-level"
+                            or row["Check"] == "vnu:error" and "skipping" in row["Detail"])
+        return where, result, pages, skips
+
+    def levels(page):
+        return [(int(level), html_lib.unescape(re.sub(r"<[^>]+>", "", text)).strip())
+                for level, text in re.findall(r"<h([1-6])[^>]*>(.*?)</h\1>", page, re.S)]
+    a, outline, pages, skips = book("outline")
+    said = outline.stdout + outline.stderr
+    b, source, kept, kept_skips = book("source", "defaults:\n  heading_levels: source\n")
+    return [
+        ("a heading that skips a level is lifted to one below the heading it's under, what's "
+         "under it with it, a page's first under its title to H2, and a box's legend too",
+         lambda: outline.returncode == 0
+         and levels(pages["levels"]) == [(1, "The Page"), (2, "A Section"),
+                                         (3, "Its Subsection"), (4, "Deeper"),
+                                         (2, "Second"), (3, "A Legend"), (3, "Example 2.1"),
+                                         (4, "Solution"), (3, "Third")]),
+        ("a page without a title keeps its first heading's level, and what's under it closes up",
+         lambda: levels(pages["untitled"])[-2:] == [(2, "Only Second"), (3, "Fourth")]),
+        ("the run says how many moved, and the output check finds no skip",
+         lambda: "7 heading(s) on 2 page(s) moved up to close the levels they skipped" in said
+         and "(levels: h3 to h2 (A Section))" in said
+         and skips == 0),
+        ("heading_levels: source keeps the source's levels, and the output check names "
+         "each skip",
+         lambda: source.returncode == 0
+         and levels(kept["levels"]) == [(1, "The Page"), (3, "A Section"),
+                                        (4, "Its Subsection"), (5, "Deeper"),
+                                        (2, "Second"), (6, "A Legend"), (5, "Example 2.1"),
+                                        (6, "Solution"), (3, "Third")]
+         and "moved up to close" not in source.stdout + source.stderr
+         and kept_skips == 3),
+    ]
+
+
 def case_heading_ids(work):
     """A heading an HTML page gave no id, whose id Pandoc makes from its
     words, gives way to a table's or a div's, before it or around it,
@@ -3076,7 +3172,10 @@ def case_asciidoc_target(work):
 
     def carry(src, dst):
         shutil.copytree(src, dst, ignore=shutil.ignore_patterns("intermediates"))
-    both = "targets:\n  html:\n    format: html\n  adoc:\n    format: asciidoc\n"
+    # The source's levels, so a page whose headings skip one is written
+    # as AsciiDoc that says so (heading_levels: outline closes the gap).
+    both = ("defaults:\n  heading_levels: source\n"
+            "targets:\n  html:\n    format: html\n  adoc:\n    format: asciidoc\n")
     convert_in(work, both)
     back, again = work + "-back", work + "-again"
     if exists(work, "adoc"):
@@ -3084,7 +3183,8 @@ def case_asciidoc_target(work):
         convert_in(back, both)
     if exists(back, "adoc"):
         carry(os.path.join(back, "adoc"), again)
-        convert_in(again, "targets:\n  adoc:\n    format: asciidoc\n")
+        convert_in(again, "defaults:\n  heading_levels: source\n"
+                          "targets:\n  adoc:\n    format: asciidoc\n")
     rich = read(work, "adoc", "rich.adoc") if exists(work, "adoc", "rich.adoc") else ""
     meta = read(work, "adoc", "metadata.adoc") if exists(work, "adoc", "metadata.adoc") else ""
     front = read(work, "adoc", "front.adoc") if exists(work, "adoc", "front.adoc") else ""
@@ -6039,6 +6139,7 @@ CASES = [
     ("title rows and bands, split and grouped", case_bands),
     ("a group's own header row, split", case_group_heads),
     ("a heading's id from its words gives way", case_heading_ids),
+    ("headings that skip a level", case_heading_levels),
     ("a part laid out on fewer columns", case_narrow_group),
     ("a link's scheme in capitals", case_scheme_case),
     ("compare-output sees lists and blockquotes", case_compare_blocks),

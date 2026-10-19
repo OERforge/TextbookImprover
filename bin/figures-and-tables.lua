@@ -3180,6 +3180,66 @@ local function make_ids_unique(doc)
   return doc
 end
 
+-- ---------------------------------------------------------------------------
+-- Heading levels (heading_levels)
+--
+-- A heading more than one level below the heading before it skips a
+-- level: a screen reader's list of headings, and an EPUB's or a PDF's
+-- outline, have a gap there, which WCAG's technique G141 advises against
+-- (headings "properly nested") and the Nu checker counts as an error.
+-- LibreTexts sets each box's legend
+-- ("Example 1.4.1", "Note") as an h5, and its "Solution" as an h6, under
+-- sections that are h2s and h3s: 136 headings of Instrumental Analysis.
+--
+-- outline, the default, lifts each such heading to one level below the
+-- heading it's under, and what's under it with it, so the outline keeps
+-- its shape and nothing skips: a heading's parent is the nearest heading
+-- before it at a shallower level, in the source, and under the page's
+-- title, which every output shows as an H1, a page's first headings are
+-- H2 at the deepest. A heading that skips nothing keeps its level, and
+-- none goes deeper. source keeps the source's levels. A deck's headings
+-- are its slides and sections, and keep theirs.
+local HEADING_LEVELS = (os.getenv('HEADING_LEVELS') or 'outline'):lower()
+
+local function close_heading_gaps(doc)
+  if HEADING_LEVELS ~= 'outline' or doc.meta['deck-slide-level'] ~= nil then
+    return nil
+  end
+  local titled = doc.meta['title-heading'] ~= nil or doc.meta.title ~= nil
+  local open = {}              -- { the source's level, the level now }
+  local moved, example = 0, nil
+  doc = doc:walk({
+    traverse = 'topdown',
+    Header = function(heading)
+      while #open > 0 and open[#open][1] >= heading.level do
+        table.remove(open)
+      end
+      local level = heading.level
+      if #open > 0 then
+        level = math.min(level, open[#open][2] + 1)
+      elseif titled then
+        level = math.min(level, 2)
+      end
+      open[#open + 1] = { heading.level, level }
+      if level == heading.level then return nil end
+      moved = moved + 1
+      example = example or ('h%d to h%d (%s)'):format(heading.level, level,
+        pandoc.utils.stringify(heading.content))
+      heading.level = level
+      return heading
+    end,
+  })
+  local found = os.getenv('HEADINGS_MOVED')
+  if moved > 0 and found and found ~= '' then
+    local handle = io.open(found, 'a')
+    if handle then
+      handle:write(source_stem() .. '\t' .. moved .. '\t' .. example .. '\n')
+      handle:close()
+    end
+  end
+  return doc
+end
+
 return {
   -- A table or figure written as HTML, or a figure written as a div, by
   -- a Markdown target: the block it was, before anything counts or
@@ -3209,4 +3269,7 @@ return {
     Blocks = Blocks,
     Pandoc = Pandoc,
   },
+  -- Last, once the title is the page's and every heading is where it
+  -- ends up.
+  { Pandoc = close_heading_gaps },
 }

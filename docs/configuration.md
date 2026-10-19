@@ -339,6 +339,22 @@ The fragment is inserted after the Pandoc filter has run, so nothing in it
 is processed — no alt checking, no spacer rule. Write its markup correctly
 by hand, and list any images it uses under `common_files`.
 
+### Headings that skip a level
+
+```yaml
+# in conversion.yaml
+defaults:
+  heading_levels: source    # outline, the default, closes the gaps
+```
+
+A heading more than one level below the heading before it skips a level: a screen reader's list of headings, and an EPUB's or a PDF's outline, have a gap there. WCAG's technique for headings asks for headings "properly nested", an `h2` followed by an `h2` or an `h3` ([G141](https://www.w3.org/WAI/WCAG22/Techniques/general/G141), advisory under 1.3.1), and the Nu checker reports a skip as an error. Sites skip levels for the look of a heading's size: LibreTexts sets the legend of each Example, Exercise, or Note box as an `h5`, and a Solution under it as an `h6`, under sections that are `h2`s and `h3`s, and DCIC sets a page's sections at the third level under its title.
+
+With `heading_levels: outline`, the default, the run lifts each such heading to one level below the heading it's under, and what's under it with it, so nothing skips and every heading keeps its place in the outline. A heading's parent is the nearest heading before it at a shallower level in the source; a page's title, which every output shows as its H1, is above them all, so a page's first headings are H2 at the deepest. A heading that skips nothing keeps its level, and none goes deeper. The run says how many headings it moved, on how many pages, and the first. With `source`, every heading keeps the source's level, and the output check names each skip (`heading-skips-level`).
+
+The headings move in the pages the run writes, and so in every target and in a `markdown` target's copy; a Word file's own copy (`format: source`) keeps its styles. A deck's headings are its slides and sections, and keep their levels. A page cut at its headings (`pages.split_level`) is cut after they've moved, so a page's sections set a level too deep are cut where they now are.
+
+Verified here: on *Instrumental Analysis*, the 136 headings the output check found skipping a level, and the Nu checker's 68 errors, were all box legends and solutions, and none is left (the run moved 139 headings on 45 pages, a solution under its legend among them); the convert suite checks a page with a title and one without, a box's legend, and `source`.
+
 ### Caption labels
 
 ```yaml

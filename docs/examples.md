@@ -304,7 +304,7 @@ project:
           title: "II Introduction to Programming"
 ```
 
-It's yours to edit. Because it names the book, this first run doesn't stop at packaging. The 40 headings that skip a level are how DCIC's pages are built (a page's title, then its sections at the third level), which the check reports and leaves as they are. The reports are worked through as in the first example.
+It's yours to edit. Because it names the book, this first run doesn't stop at packaging. The 40 headings that skip a level are how DCIC's pages are built (a page's title, then its sections at the third level). That's the output of a run before `heading_levels`, whose default now lifts each page's sections to the second level, what's under them with them, and says how many headings it moved in place of the check's 40 findings ([Configuration](configuration.md#headings-that-skip-a-level)). The reports are worked through as in the first example.
 
 ### 2. An EPUB
 
@@ -329,7 +329,7 @@ Output check: 80 page(s) and 1 EPUB(s), 80 finding(s):
      80  heading-skips-level: a heading is more than one level below the last
 ```
 
-The EPUB is named for the identifier, and the claims are the accessibility metadata it declares, each checked against what the book holds. The EPUB passes [epubcheck](https://www.w3.org/publishing/epubcheck/) with no message at all, which the run checks for itself when epubcheck is installed ([Installation](installation.md#optional-the-full-validators) says how). With an EPUB target, the output check reads the EPUB's pages as well as the HTML, so the 40 headings are counted twice, once in each.
+The EPUB is named for the identifier, and the claims are the accessibility metadata it declares, each checked against what the book holds. The EPUB passes [epubcheck](https://www.w3.org/publishing/epubcheck/) with no message at all, which the run checks for itself when epubcheck is installed ([Installation](installation.md#optional-the-full-validators) says how). With an EPUB target, the output check reads the EPUB's pages as well as the HTML, so the 40 headings were counted twice, once in each, before `heading_levels` lifted them.
 
 ### 3. The round trip
 

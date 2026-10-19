@@ -2630,6 +2630,7 @@ def filter_env(target, base, paths, env):
                                               r["captions.figure_prefixes"])),
         "AUTHOR_BYLINE": str(r["author_byline"]),
         "PROMOTE_H1_TO_TITLE": str(r["promote_h1_to_title"]),
+        "HEADING_LEVELS": str(r["heading_levels"]),
         "TABLE_BANDS": str(target["tables.bands"]),
         "MATH_REPAIR_EQUATIONS": "true" if r["math.repair_equations"] else "false",
         "MATH_FROM_TEXT": "true" if r["math.from_text"] else "false",
@@ -3102,6 +3103,24 @@ def warn_title_numbers(found):
             f"heading puts before it (\"{heading}\" is titled \"{title}\"), in <title> "
             "and in the names a cartridge gives its pages; promote_h1_to_title: always "
             "titles them with the number.")
+
+
+def say_headings_moved(found):
+    """Headings the filter lifted to close the levels they skipped
+    (heading_levels: outline), said once: how many, on how many pages,
+    and the first."""
+    if not os.path.exists(found):
+        return
+    with open(found, encoding="utf-8") as fh:
+        rows = [line.rstrip("\n").split("\t", 2) for line in fh if line.count("\t") >= 2]
+    pages = {}
+    for stem, moved, example in rows:
+        pages.setdefault(stem, (int(moved), example))
+    if pages:
+        first = next(iter(pages.items()))
+        say(f"{sum(n for n, _ in pages.values())} heading(s) on {len(pages)} page(s) moved up "
+            f"to close the levels they skipped, each one below the heading it's under "
+            f"({first[0]}: {first[1][1]}); heading_levels: source keeps the source's levels.")
 
 
 def warn_math_keep(sidecar, kept_file, off=()):
@@ -5415,7 +5434,7 @@ def main():
                      ("captions_missing", "alt_missing", "alt_seen", "spacers",
                       "media_unresolved", "bare_links", "captions_applied",
                       "math", "math_places", "math_kept", "title_numbers",
-                      "ids_renamed")}
+                      "ids_renamed", "headings_moved")}
         env = dict(os.environ)
         env.update({
             # For html-source.lua: a page's <title> that repeats the
@@ -5432,6 +5451,7 @@ def main():
             "MATH_PLACES": collected["math_places"],
             "MATH_KEPT": collected["math_kept"],
             "TITLE_NUMBERS": collected["title_numbers"],
+            "HEADINGS_MOVED": collected["headings_moved"],
             "MEDIA_UNRESOLVED": collected["media_unresolved"],
             "MEDIA_STRICT": "1" if first["media.strict"] else "",
         })
@@ -5707,6 +5727,7 @@ def main():
                             if not any(t[key] for t in targets)])
             warn_unreviewed(paths)
         warn_title_numbers(collected["title_numbers"])
+        say_headings_moved(collected["headings_moved"])
         if not PPTX_RUN:
             write_report(collected["math"], reports["math_repaired"],
                          "Kind,Page,Before,After", "math repair(s)", None,

@@ -49,6 +49,7 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
+import html
 import re
 
 INSIDE = ("p|li|dt|dd|td|th|caption|figcaption|blockquote|em|strong|b|i|u|s|"
@@ -103,6 +104,7 @@ def repaired(markup):
     markup, marked = decorative_images(markup)
     markup, titled = title_block_id(markup)
     markup = NOTES_HEADING.sub("", markup)
+    markup = words_as_text(markup)[0]
     return auto_id_headings(markup), count + marked + titled
 
 
@@ -194,6 +196,57 @@ def auto_id_headings(markup):
                 return match.group(0)
         return f'<{tag} {AUTO_ID}=""{attributes}>'
     return _HEADING.sub(mark, markup)
+
+
+# The names texmath, Pandoc's math reader, keeps whole in an <mi>: LaTeX's
+# named operators, which it writes as \sin, \log, and the rest.
+OPERATOR_NAMES = frozenset(
+    "arccos arcsin arctan arg cos cosh cot coth csc deg det dim exp gcd hom "
+    "inf ker lg lim liminf limsup ln log max min Pr sec sin sinh sup tan "
+    "tanh".split())
+_MI = re.compile(r"<((?:[A-Za-z_][\w.-]*:)?)mi(\s(?:[^<>\"']|\"[^\"]*\"|'[^']*')*)?>"
+                 r"([^<]*)</\1mi\s*>", re.I)
+
+
+def words_as_text(markup):
+    """(markup, count): each word or unit a formula holds as an identifier
+    (<mi>Value</mi>, <mi>MeV</mi>) made the text it is, an <mtext>. MathML
+    sets an <mi> of more than one letter whole and upright, but Pandoc's
+    reader reads it as letters and writes each back as an italic identifier
+    of its own, which a screen reader spells out: "Value = Benefits/Price",
+    in Principles of Marketing, came out as italic letters. An <mtext> is
+    \\text{Value}, whole and upright.
+
+    Only an <mi> of more than two letters, and of nothing but letters and
+    spaces: one of two is as likely a product (dx, xy) as a unit (cm), and
+    stays as it is. So do a name the reader keeps whole (sin, log, lim),
+    one letter over and over (xxxxx, x to the fifth written out, in College
+    Algebra with Corequisite Support), and an <mi> styled other than normal
+    or bold, which would be \\textit{} or the like, and \\textit{\\textbf{}}
+    is TeX the reader can't read back.
+    In sixteen of OpenStax's math and physics books and Marketing, 1,528 in
+    1,130 formulas: units (MeV, mol, rad, atm), names the reader doesn't
+    know (cis, the Polish arctg), words (Revenue, the Polish rok), and
+    labels (net, the y-intercept's int). The one product among them was the
+    repeated letter."""
+    count = 0
+
+    def mark(match):
+        nonlocal count
+        prefix, attributes, text = match.group(1), match.group(2) or "", match.group(3)
+        for name, value in _ATTRIBUTE.findall(attributes):
+            if name.lower() == "mathvariant" \
+                    and value.strip("\"'").strip().lower() not in ("normal", "bold"):
+                return match.group(0)
+        words = html.unescape(text).strip()
+        letters = [c for c in words if c.isalpha()]
+        if len(letters) < 3 or len({c.lower() for c in letters}) < 2 \
+                or words in OPERATOR_NAMES \
+                or not all(c.isalpha() or c.isspace() for c in words):
+            return match.group(0)
+        count += 1
+        return f"<{prefix}mtext{attributes}>{text}</{prefix}mtext>"
+    return _MI.sub(mark, markup), count
 
 
 def repaired_copy(source, destination):

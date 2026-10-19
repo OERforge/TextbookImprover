@@ -1497,6 +1497,54 @@ def check_ua1_math():
     ]
 
 
+def check_math_words():
+    """A word or a unit an HTML page's formula holds as an <mi> of more than
+    two letters is made an <mtext>, which Pandoc reads whole and upright,
+    where it read the <mi> as italic letters. What could be a product, a
+    name Pandoc keeps whole, and a style it would write as TeX it can't read
+    back are left to it."""
+    import htmlrepair
+
+    def made(mi):
+        return htmlrepair.words_as_text("<math>%s</math>" % mi)[0][6:-7]
+
+    page = ('<p><math><mi mathvariant="normal">Value</mi><mo>=</mo><mi>dx</mi>'
+            '</math> and <m:math xmlns:m="http://www.w3.org/1998/Math/MathML">'
+            '<m:mi>MeV</m:mi></m:math></p>')
+    once, count = htmlrepair.words_as_text(page)
+    return [
+        ("a word of more than two letters is text, with what else its tag says",
+         lambda: made('<mi mathvariant="normal">Value</mi>')
+         == '<mtext mathvariant="normal">Value</mtext>'
+         and made('<mi class="unit">MeV</mi>') == '<mtext class="unit">MeV</mtext>'),
+        ("in bold too, which Pandoc writes \\textbf",
+         lambda: made('<mi mathvariant="bold">Total</mi>')
+         == '<mtext mathvariant="bold">Total</mtext>'),
+        ("words with spaces, a no-break space among them, in any letters",
+         lambda: made("<mi>rozpad na sekundę</mi>") == "<mtext>rozpad na sekundę</mtext>"
+         and made("<mi>miliardów&#xa0;lat</mi>") == "<mtext>miliardów&#xa0;lat</mtext>"),
+        ("two letters stay, as a product might be",
+         lambda: made("<mi>dx</mi>") == "<mi>dx</mi>"),
+        ("a name Pandoc keeps whole stays, an operator",
+         lambda: made("<mi>sin</mi>") == "<mi>sin</mi>"
+         and made("<mi>lim</mi>") == "<mi>lim</mi>"),
+        ("one letter over and over stays, a product written out",
+         lambda: made("<mi>xxxxx</mi>") == "<mi>xxxxx</mi>"),
+        ("an italic or bold italic word stays: Pandoc's \\textit{\\textbf{}} is TeX "
+         "it can't read back",
+         lambda: made('<mi mathvariant="italic">Value</mi>') == '<mi mathvariant="italic">Value</mi>'
+         and made('<mi mathvariant="bold-italic">Value</mi>')
+         == '<mi mathvariant="bold-italic">Value</mi>'),
+        ("anything but letters and spaces stays",
+         lambda: made("<mi>(CPA)</mi>") == "<mi>(CPA)</mi>"),
+        ("a prefixed element keeps its prefix, and each is counted once",
+         lambda: '<m:mtext>MeV</m:mtext>' in once and count == 2
+         and htmlrepair.words_as_text(once) == (once, 0)),
+        ("a page's repair does it",
+         lambda: htmlrepair.repaired(page)[0] == once),
+    ]
+
+
 def check_decorative_marker():
     """The decorative marker, read alike by the filter and the Python.
 
@@ -1647,6 +1695,7 @@ GROUPS = [
     ("shortDOIs for a bare-links sidecar", check_shortdoi),
     ("the decorative marker", check_decorative_marker),
     ("PDF/UA-1's math", check_ua1_math),
+    ("a formula's words, in an HTML source", check_math_words),
     ("header cells holding only formulas, in a PDF", check_pdf_formula_headers),
     ("an image named in another case, in a source's copy", check_cased_images_in_copies),
 ]

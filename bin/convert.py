@@ -2112,6 +2112,9 @@ def read_html_to_json(base, docs, env, work):
             markup = fh.read()
         markup, counts = mathjax.rebuilt(markup)
         if any(counts.values()):
+            # The MathML a rendering gave up, from an attribute or rebuilt,
+            # has its words made text as the page's own MathML has.
+            markup = htmlrepair.words_as_text(markup)[0]
             with open(repaired, "w", encoding="utf-8") as fh:
                 fh.write(markup)
             said = {"hidden-mathml": "taken from the MathML MathJax hid "

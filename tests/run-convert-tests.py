@@ -2294,6 +2294,48 @@ def case_mathjax2(work):
     ]
 
 
+MATH_WORDS = """<!DOCTYPE html><html lang="en"><head><title>Value</title></head><body><main><h1>Value</h1>
+<p>Value is <math xmlns="http://www.w3.org/1998/Math/MathML"><mi mathvariant="normal">Value</mi><mo>=</mo><mfrac><mi mathvariant="normal">Benefits</mi><mi mathvariant="normal">Price</mi></mfrac></math>, and the area is <math xmlns="http://www.w3.org/1998/Math/MathML"><mo>&#x222B;</mo><mi>sin</mi><mi>x</mi><mi>dx</mi></math>.</p>
+</main></body></html>
+"""
+MATH_WORDS_MATHJAX = """<!DOCTYPE html><html lang="en"><head><title>Moles</title></head><body><main><h1>Moles</h1>
+<p>A mole is <span class="MathJax" id="MathJax-Element-1-Frame"><nobr><span class="math" id="MathJax-Span-1"><span><span class="mrow" id="MathJax-Span-2"><span class="mn" id="MathJax-Span-3">1</span><span class="mi" id="MathJax-Span-4">mol</span></span></span></span></nobr></span> of it.</p>
+</main></body></html>
+"""
+
+
+def case_math_words(work):
+    """A word in a formula's identifier, an <mi> of more than two letters,
+    is written whole and upright, as the page shows it, where Pandoc made
+    it italic letters; two letters, and a name Pandoc keeps whole, are
+    left to it. A formula MathJax drew gets the same once it's MathML
+    again, on a page of its own, so each is seen to."""
+    import importlib.util
+    if not (importlib.util.find_spec("html5lib") or importlib.util.find_spec("lxml")):
+        return [("skip: HTML sources need html5lib or lxml", lambda: True)]
+    os.makedirs(work)
+    for name, markup in (("value.html", MATH_WORDS), ("moles.html", MATH_WORDS_MATHJAX)):
+        with open(os.path.join(work, name), "w", encoding="utf-8") as fh:
+            fh.write(markup)
+    with open(os.path.join(work, "conversion.yaml"), "w") as fh:
+        fh.write("targets:\n  html:\n    format: html\n")
+    subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
+                   cwd=work, capture_output=True, text=True, stdin=subprocess.DEVNULL)
+    page = read(work, "html", "value.html") if exists(work, "html", "value.html") else ""
+    moles = read(work, "html", "moles.html") if exists(work, "html", "moles.html") else ""
+    return [
+        ("a word is text, whole and upright",
+         lambda: all(re.search(r'<mtext mathvariant="normal">%s</mtext>' % w, page)
+                     for w in ("Value", "Benefits", "Price"))
+         and "<mi>V</mi>" not in page),
+        ("a name Pandoc keeps whole, and two letters, are Pandoc's",
+         lambda: re.search(r"<mi[^>]*>sin</mi>", page)
+         and re.search(r"<mi>d</mi>\s*<mi>x</mi>", page)),
+        ("so is a word in a formula MathJax drew, once it's MathML again",
+         lambda: re.search(r"<mn>1</mn>\s*<mtext[^>]*>mol</mtext>", moles)),
+    ]
+
+
 def case_asciidoc_layout(work):
     """An AsciiDoc block's width and target don't reach an element XHTML
     forbids them on; an image block's size goes to its image."""
@@ -5836,6 +5878,7 @@ CASES = [
     ("a Common Cartridge", case_cartridge),
     ("a plain zip of a book's files", case_zip),
     ("formulas as MathJax 2 drew them", case_mathjax2),
+    ("a formula's words", case_math_words),
     ("AsciiDoc layout attributes", case_asciidoc_layout),
     ("a pdf target without LuaLaTeX", case_pdf_without_latex),
     ("a pdf target with a LaTeX too old to tag", case_pdf_with_old_latex),

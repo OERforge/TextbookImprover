@@ -1112,6 +1112,20 @@ effect="bold">x</emphasis></entry><entry><emphasis effect="bold">y</emphasis></e
 <tgroup cols="2"><thead><row><entry>Fruit</entry><entry>Price</entry></row></thead>
 <tbody><row><entry>Apple</entry><entry>1</entry></row>
 <row><entry>Pear</entry><entry>2</entry></row></tbody></tgroup></table>
+<example id="ex2"><para id="p3">Subtract 7 from 12.</para>
+<table id="steps4">
+<tgroup cols="2"><tbody>
+<row><entry/><entry><m:math><m:mn>12</m:mn><m:mo>&#8722;</m:mo><m:mn>7</m:mn></m:math></entry></row>
+<row><entry>Subtract.</entry><entry><m:math><m:mn>5</m:mn></m:math></entry></row>
+</tbody></tgroup></table>
+</example>
+<table id="days" summary="A stock's changes"
+ aria-label="The table has two columns, the days of the week and the changes.">
+<tgroup cols="2"><tbody>
+<row><entry>Monday</entry><entry><m:math><m:mn>&#8722;504</m:mn></m:math></entry></row>
+<row><entry>Tuesday</entry><entry><m:math><m:mo>+</m:mo><m:mn>142</m:mn></m:math></entry></row>
+<row><entry>Wednesday</entry><entry><m:math><m:mn>&#8722;449</m:mn></m:math></entry></row>
+</tbody></tgroup></table>
 </section>"""
 
 
@@ -1200,6 +1214,14 @@ def case_step_tables(work):
          lambda: result.returncode == 0 and presentation("steps1")
          and presentation("steps2") and presentation("steps3")
          and "Table 1.1" in page and not presentation("data1")),
+        ("and so are steps OpenStax gives no class, as a dev-math book writes "
+         "some, numbered as OpenStax numbers a table of no class",
+         lambda: presentation("steps4") and "Table 1.3" in page),
+        ("but a table of no class that OpenStax labels is a data table, as "
+         "OpenStax's own HTML has it, and isn't reported: such tables are "
+         "tables of values and of data, most of them",
+         lambda: "days" in tables and not presentation("days")
+         and "days" not in kept),
         ("the header guess reads a table as Pandoc gives it to the guess: "
          "a ratio set as a fraction is a formula, not the number 21100 "
          "under a row of words, and a short row is padded, not a band "
@@ -1219,15 +1241,17 @@ def case_step_tables(work):
          and labels == ["steps1, a layout table: In this figure we have "
                         "two columns of steps.",
                         "kinds: The top row of this table, which is a header "
-                        "row, names the kinds."]),
+                        "row, names the kinds.",
+                        "days: The table has two columns, the days of the "
+                        "week and the changes."]),
         ("no description is drafted for a layout table, or from a summary "
          "that says nothing (\"No Summary\", \".\")",
          lambda: set(drafted.values()) == {"Points", "Two tables of values",
-                                           "Prices of fruit"}
+                                           "Prices of fruit", "A stock's changes"}
          and "2 table summary(ies) say nothing" in result.stdout
-         and "3 table(s) that only lay things out" in result.stdout),
-        ("a book of another style keeps its tables of that class data "
-         "tables",
+         and "4 table(s) that only lay things out" in result.stdout),
+        ("a book of another style keeps such tables data tables, of that "
+         "class or of none",
          lambda: other_tables and not any(
              'role="presentation"' in t for t in other_tables.values())),
         ("a formula's TeX is texmath's: an arrow between \\left. and "
@@ -1261,9 +1285,11 @@ def case_step_tables(work):
                        r'role="presentation">\n<caption><span class="os-label">'
                        r'Table 1.1</span></caption>', converted)
          and missing == ["1-1-ratios#table-4"]
-         and guessed == [(" | Polynomial | Terms", "both"),
+         and guessed == [(" | 12 - 7", "layout"),
+                         (" | Polynomial | Terms", "both"),
                          (" | x equals zero | y equals zero", "both"),
                          ("Fruit | Price", "first-row"),
+                         ("Monday | -504", "first-column"),
                          ("Read the problem. | Two values.", "layout"),
                          ("The amount we want to co | 21 out of 100", "layout"),
                          ("Write a phrase. | Seven plus twelve.", "layout"),
@@ -1365,6 +1391,53 @@ PLAIN_TABLES = """
 <row><entry>Maryland</entry><entry>corn</entry><entry>3 shillings</entry></row>
 <row><entry>Georgia</entry><entry>rice</entry><entry>4 shillings</entry></row>
 </tbody></tgroup></table>
+<table id="time">
+<tgroup cols="1"><tbody>
+<row><entry>Estimated completion time: 20 minutes</entry></row>
+</tbody></tgroup></table>
+<table id="tally">
+<title>Survey Results</title>
+<tgroup cols="3"><tbody>
+<row><entry>__________</entry><entry>__________</entry><entry>__________</entry></row>
+<row><entry>__________</entry><entry>__________</entry><entry/></row>
+</tbody></tgroup></table>
+<table id="signed">
+<tgroup cols="2"><tbody>
+<row><entry>Name: __________</entry><entry>Date: __________</entry></row>
+</tbody></tgroup></table>
+<table id="maps" class="unnumbered">
+<tgroup cols="2"><tbody>
+<row><entry><media id="m1" alt="A map of Virginia."><image mime-type="image/png"
+ src="../../media/one.png"/></media><para id="p6">Map A</para></entry><entry><media id="m2"
+ alt="A map of Maryland."><image mime-type="image/png" src="../../media/one.png"/></media>
+<para id="p7">Map B</para></entry></row>
+</tbody></tgroup></table>
+<table id="ports" class="unnumbered">
+<tgroup cols="2"><tbody>
+<row><entry><media id="m3" alt="A wharf."><image mime-type="image/png"
+ src="../../media/one.png"/></media> Ships took tobacco from the rivers of Virginia.</entry>
+<entry><media id="m4" alt="A harbor."><image mime-type="image/png"
+ src="../../media/one.png"/></media> Ships took rice from the harbor of Charleston.</entry></row>
+</tbody></tgroup></table>
+<table id="match1" class="unnumbered unstyled">
+<tgroup cols="2"><tbody>
+<row><entry>___Virginia</entry><entry>A. rice</entry></row>
+<row><entry>___Maryland</entry><entry>B. tobacco</entry></row>
+<row><entry>___Georgia</entry><entry>C. corn</entry></row>
+</tbody></tgroup></table>
+<table id="match2" class="unnumbered unstyled">
+<tgroup cols="2"><tbody>
+<row><entry>A. Virginia</entry><entry>i. corn</entry></row>
+<row><entry>B. Maryland</entry><entry>ii. rice</entry></row>
+<row><entry>C. Georgia</entry><entry>iii. tobacco</entry></row>
+<row><entry/><entry>iv. indigo</entry></row>
+</tbody></tgroup></table>
+<table id="listed" class="unnumbered unstyled">
+<tgroup cols="2"><tbody>
+<row><entry>1. Virginia</entry><entry>4. Delaware</entry></row>
+<row><entry>2. Maryland</entry><entry>5. New York</entry></row>
+<row><entry>3. Georgia</entry><entry>6. Carolina</entry></row>
+</tbody></tgroup></table>
 </section>
 <section id="ke3" class="key-equations"><title>Key Equations</title>
 <table id="growth" class="unnumbered unstyled" summary="This table has two columns and two
@@ -1376,6 +1449,13 @@ PLAIN_TABLES = """
 <row><entry>Decay</entry><entry><m:math><m:mi>P</m:mi><m:mo>=</m:mo><m:msub><m:mi>P</m:mi>
 <m:mn>0</m:mn></m:msub><m:msup><m:mi>e</m:mi><m:mrow><m:mo>&#8722;</m:mo><m:mi>r</m:mi>
 <m:mi>t</m:mi></m:mrow></m:msup></m:math></entry></row>
+</tbody></tgroup></table>
+<table id="halving" class="unnumbered">
+<tgroup cols="2"><tbody>
+<row><entry>Half-life</entry><entry><m:math><m:mi>t</m:mi><m:mo>=</m:mo><m:mfrac><m:mn>0.69</m:mn>
+<m:mi>r</m:mi></m:mfrac></m:math></entry></row>
+<row><entry>Doubling time</entry><entry><m:math><m:mi>t</m:mi><m:mo>=</m:mo><m:mfrac>
+<m:mn>0.69</m:mn><m:mi>r</m:mi></m:mfrac></m:math></entry></row>
 </tbody></tgroup></table>
 </section>"""
 
@@ -1408,6 +1488,9 @@ def build_layout_books(repo):
         module(repo, f"m{first}", f"Introduction to {chapter}", """
 <para id="p1">This chapter opens.</para>""", cls="introduction")
         module(repo, f"m{first + 1}", chapter, content)
+    os.makedirs(os.path.join(repo, "media"), exist_ok=True)
+    with open(os.path.join(repo, "media", "one.png"), "wb") as fh:
+        fh.write(ONE_PIXEL)
 
 
 def case_layout_kinds(work):
@@ -1442,15 +1525,38 @@ def case_layout_kinds(work):
          lambda: known("tiny-physics", "terms", "equations")
          and presentation("tiny-physics", "terms")
          and presentation("tiny-physics", "equations")),
-        ("a table of one cell is a layout table in a book of any style: a formula "
-         "alone in Key Equations, and a byline where the book's tables of more "
-         "cells are data tables",
-         lambda: known("tiny-physics", "alone") and known("tiny-history", "byline", "claims")
+        ("a table of one cell is a layout table in a book of any style, of any "
+         "class: a formula alone in Key Equations, and a byline and an estimate "
+         "of the time a section takes where the book's tables of more cells are "
+         "data tables",
+         lambda: known("tiny-physics", "alone")
+         and known("tiny-history", "byline", "time", "claims")
          and presentation("tiny-physics", "alone")
          and presentation("tiny-history", "byline")
+         and presentation("tiny-history", "time")
          and not presentation("tiny-history", "claims")),
-        ("so is a Key Equations table in a book of any style",
-         lambda: known("tiny-history", "growth") and presentation("tiny-history", "growth")),
+        ("so is a Key Equations table in a book of any style, of any class",
+         lambda: known("tiny-history", "growth", "halving")
+         and presentation("tiny-history", "growth")
+         and presentation("tiny-history", "halving")),
+        ("so is a form of lines to fill in and nothing else, in a book of any "
+         "style, of any class, with a title of its own or none; one with labels "
+         "beside its lines isn't",
+         lambda: known("tiny-history", "tally", "signed")
+         and presentation("tiny-history", "tally")
+         and not presentation("tiny-history", "signed")),
+        ("so are pictures in rows, each with a label at most; pictures each with "
+         "a sentence aren't",
+         lambda: known("tiny-history", "maps", "ports")
+         and presentation("tiny-history", "maps")
+         and not presentation("tiny-history", "ports")),
+        ("so is a matching exercise, two lists side by side, each item opening "
+         "with a mark of its list's series, a blank or a letter beside a letter "
+         "or a roman numeral; a list numbered alike in two columns isn't",
+         lambda: known("tiny-history", "match1", "match2", "listed")
+         and presentation("tiny-history", "match1")
+         and presentation("tiny-history", "match2")
+         and not presentation("tiny-history", "listed")),
         ("College Algebra with Corequisite Support's worked steps are a layout "
          "table, and its Key Equations, and its table the header guess reads a "
          "header row in a data table, reported",
@@ -1463,7 +1569,7 @@ def case_layout_kinds(work):
         ("and the run counts them",
          lambda: "3 table(s) that only lay things out" in said["tiny-physics"]
          and "2 table(s) that only lay things out" in said["tiny-coreq"]
-         and "2 table(s) that only lay things out" in said["tiny-history"]),
+         and "8 table(s) that only lay things out" in said["tiny-history"]),
         ("a layout table's summary isn't drafted as a description, a Key Equations "
          "table's among them, which stays in cnx-table-summaries.csv",
          lambda: "The rules." not in drafted["tiny-coreq"]
@@ -1880,8 +1986,9 @@ CASES = [
     ("a nursing book's references, gathered by chapter", case_references),
     ("a math book, baked as College Algebra is", case_precalculus),
     ("a worked example's steps in a table, a layout table", case_step_tables),
-    ("a grid of key terms, a corequisite book's steps, Key Equations, and a box "
-     "of one cell, layout tables, and summaries that read a table out", case_layout_kinds),
+    ("a grid of key terms, a corequisite book's steps, Key Equations, a box of "
+     "one cell, a form, pictures, and a matching exercise, layout tables, and "
+     "summaries that read a table out", case_layout_kinds),
     ("which summaries read their tables out", case_read_out),
     ("the collation", case_collation),
     ("baking's steps, one at a time", case_steps),

@@ -51,7 +51,7 @@ from .bake.core import (class_test, classes, detach, has_class, prepend,
                         text_of)
 from .cnxml import E, append_text
 from .mathml import MATHML
-from .steptables import HEADED, header_guess, may_be_layout
+from .steptables import HEADED, header_guess, layout_reason
 
 VOID = {"area", "base", "br", "col", "embed", "hr", "img", "input", "link",
         "meta", "source", "track", "wbr"}
@@ -818,10 +818,12 @@ class Emitter:
         dst.append(out)
 
     def _layout(self, out, source, page, captioned):
-        """Whether a table is a layout table, given role="presentation":
-        a worked example's steps, a Key Equations table, a grid of key
-        terms, a box of one cell (cnx.steptables). One the header guess reads a header row in is
-        left a data table, and reported.
+        """Whether a table is a layout table, given role="presentation"
+        (cnx.steptables): for what it holds, a box of one cell, a form of
+        lines to fill in, pictures with their labels, or a matching
+        exercise; for where it stands, a worked example's steps, a Key
+        Equations table, or a grid of key terms, unless the header guess
+        reads a header row in it, which leaves it a data table, reported.
         OpenStax's HTML marks a table so only when it has no label of
         OpenStax's (aria-label), with which a browser would ignore the
         role. The labels, written in 2023 from the tables' summaries,
@@ -832,7 +834,11 @@ class Emitter:
         entering the table, before its caption. Each is in the report."""
         name = out.get("id") or "a table"
         layout = False
-        if may_be_layout(out, source, self.book.style, captioned):
+        reason = layout_reason(out, source, self.book.style, captioned)
+        if reason == "shape":
+            layout = True
+            out.set("role", "presentation")
+        elif reason == "place":
             guess = header_guess(out)
             layout = guess not in HEADED
             if layout:

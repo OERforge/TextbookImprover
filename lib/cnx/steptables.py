@@ -3,48 +3,82 @@ cnx.steptables -- which of a book's tables only lay things out, with
 nothing to head them: layout tables, which unpack-cnx.py marks
 role="presentation". OpenStax's own HTML marks a table so (enki's
 cnxml-to-html5.xsl) when it has no head, no caption or title, and no
-label of OpenStax's, whatever its class. Here it's a table OpenStax
-classes unstyled, with no head and no caption but its number, of one of
-three kinds:
+label of OpenStax's, whatever its class. Here it's a table with no head
+(no thead, no th), for what it holds or for where it stands
+(layout_reason).
 
-- In a book whose style lays things out in such tables (LAYOUT_STYLES):
-  the dev-math books, Prealgebra 2e, Elementary Algebra 2e, and
-  Intermediate Algebra 2e, whose worked examples set out their steps so,
-  each step's words beside its result; College Algebra with Corequisite
-  Support 2e (precalculus-coreq), whose worked examples and corequisite
-  skills do; and Physics (hs-physics), whose sections open with their key
-  terms in a grid.
-- A table of a chapter's Key Equations (in_key_equations), in any book: a
-  formula's name beside the formula, a layout table as OpenStax's own HTML
-  has it. 478 in 16 books, 475 of them layout tables, the header guess
-  reading a header row in the other 3. As data tables with a header
+For what it holds, in any book, of any class, with any caption, and
+whatever the header guess reads:
+
+- One cell (one_cell): a byline in Life, Liberty, and the Pursuit of
+  Happiness, an estimate of the time a section takes in the College
+  Success books, a formula alone in a Chemistry book's Key Equations, a
+  template or a peer-review form in Writing Guide with Handbook. One
+  cell has nothing to head. Of the 453 tables of one cell in the 67
+  books, all but 2 with a head (Entrepreneurship's) are layout tables.
+- Lines to fill in and nothing else (lines_to_fill): the recording
+  sheets of the labs in Statistics (10) and Introductory Statistics 2e
+  (1), blanks in every cell.
+- Pictures, each with a label at most (pictures_alone): graphs and
+  diagrams side by side to compare, most labeled with a letter, in
+  Algebra 1 (10) and Contemporary Mathematics (2). The filter makes a
+  table of pictures and nothing else a figure.
+- Two lists to match (matching_exercise): Microbiology's (13),
+  Principles of Financial Accounting's (10) and Managerial Accounting's
+  (8), Biology 2e's (2), and Algebra 1's (1). A row is no record, since
+  the item beside another isn't its match, so neither column heads the
+  other; the guess read a header column in 23 of the 34, which would
+  have announced each item of the second list under the one beside it.
+
+For where it stands, with no caption but its number, unless the guess
+reads a header row in it (HEADED):
+
+- In a dev-math book (Prealgebra 2e, Elementary Algebra 2e, and
+  Intermediate Algebra 2e), whose worked examples set out their steps
+  so, each step's words beside its result: a table OpenStax classes
+  unstyled, and one of another class with no label of OpenStax's
+  (ANY_CLASS_STYLES), as OpenStax's own HTML has it. Of the 2,541
+  tables those books class unstyled, 2,536 have no head and no caption
+  but a number, and the guess reads a header row in 7 of those: 5
+  tables of data ("Binomial Squares | Product of Conjugates") and 2 of
+  steps it misreads. The other 2,529 are layout tables. Of the 112
+  tables of other classes with no head, no caption but a number, and
+  no label, the guess reads a header row in 2 (Prealgebra 2e's
+  properties of equality in a box, Elementary Algebra 2e's steps across
+  three problems), and the other 110 are steps and boxes of properties
+  written without the class, Elementary Algebra 2e's 103 most of them.
+  The 102 with a label are tables of values and of data most of them
+  ("x | y | (x, y)" under its equation, "Monday | -504"), and stay data
+  tables, as OpenStax's own HTML has them; the guess reads no header
+  row in 22 of those, 12 of them data.
+- In College Algebra with Corequisite Support 2e (precalculus-coreq),
+  whose worked examples and corequisite skills do the same, and Physics
+  (hs-physics), whose sections open with their key terms in a grid, a
+  table OpenStax classes unstyled (LAYOUT_STYLES): 89 of the 93 such
+  tables outside the corequisite book's Key Equations, the other 4
+  having a head, and Physics' 75 grids. The corequisite book's tables
+  of other classes are tables of values and forms.
+- A table of a chapter's Key Equations (in_key_equations), in any book,
+  of any class: a formula's name beside the formula, a layout table as
+  OpenStax's own HTML has it. 480 in 16 books, 477 of them layout
+  tables, the guess reading a header row in the other 3, and 2 of the
+  477 classed unnumbered, not unstyled (University Physics Volume 2's
+  chapter 13 and Volume 3's chapter 10). As data tables with a header
   column, which the review of the layout tables said they could as well
   be, each would want a caption and a row of table-headers.csv.
-- A table of one cell (one_cell), in any book: a byline in Life, Liberty,
-  and the Pursuit of Happiness, an estimate of the time a section takes
-  in the College Success books, a formula in a Chemistry book's Key
-  Equations. A table of one cell has nothing to head.
 
-Other books' tables of that class are left data tables: an accounting
-book's exercises and journal entries, whose debit and credit columns a
-layout table would lose, Microbiology's matching exercises, and the like.
+Other tables are data tables: an accounting book's exercises and journal
+entries, whose debit and credit columns a layout table would lose,
+tables of values, and the like. A table kept as data where its place
+would make it a layout table is reported, for a person to settle with a
+row of table-headers.csv.
 
-A table of the first two kinds that TextbookImprover's header guess reads
-a header row in is left a data table. The guess is lib/tablecensus.py's,
-made as convert.py makes it: of the table's cells as Pandoc's HTML
-reader gives them to it, after html-source.lua (a short row padded, an
-empty column dropped), a picture's text its description and a formula
-its TeX (cnx.mathtex). Of the 2,541 tables the dev-math books class
-unstyled, 2,536 have no head and no caption but a number, and the guess
-reads a header row in 7 of those: 5 tables of data ("Binomial Squares |
-Product of Conjugates") and 2 of steps it misreads. The other 2,529 are
-layout tables. The guess made here is the one convert.py makes for each
-of the 3,011 tables in those books, and for 663 in four more. In
-College Algebra with Corequisite Support 2e, 89 of the 93 such tables
-outside its Key Equations are layout tables, the other 4 having a
-head; in Physics, 75 grids of key terms. Tables of one cell: 259 in
-Life, Liberty, 137 in the three College Success books, and 17 in each
-Chemistry book's Key Equations.
+The guess is lib/tablecensus.py's, made as convert.py makes it: of the
+table's cells as Pandoc's HTML reader gives them to it, after
+html-source.lua (a short row padded, an empty column dropped), a
+picture's text its description and a formula its TeX (cnx.mathtex). The
+guess made here is the one convert.py makes for each of the 3,011 tables
+in the dev-math books, and for 663 in four more.
 
 Copyright 2026 Robert Szarka
 
@@ -62,6 +96,8 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
+import re
+
 from lxml import etree
 
 import tablecensus as tc
@@ -70,6 +106,10 @@ from .bake.core import classes
 from .mathtex import tex
 
 LAYOUT_STYLES = {"dev-math", "precalculus-coreq", "hs-physics"}
+# The books whose tables of any class are laid out, the guess allowing,
+# when OpenStax gave them no label: a dev-math book writes some of its
+# steps without the class.
+ANY_CLASS_STYLES = {"dev-math"}
 
 
 def cell_text(cell):
@@ -249,12 +289,17 @@ def header_guess(table):
 HEADED = ("first-row", "both")
 
 
+def _rows(table):
+    """A table's rows as the emitter writes them, each a list of its cells."""
+    return [[c for c in tr if isinstance(c.tag, str) and c.tag in ("td", "th")]
+            for tr in table.xpath("./tr | ./thead/tr | ./tbody/tr | ./tfoot/tr")]
+
+
 def one_cell(table):
     """Whether a table as the emitter writes it is one cell: one row of
     its own, of one cell."""
-    rows = table.xpath("./tr | ./thead/tr | ./tbody/tr | ./tfoot/tr")
-    return len(rows) == 1 and len([c for c in rows[0]
-                                   if isinstance(c.tag, str) and c.tag in ("td", "th")]) == 1
+    rows = _rows(table)
+    return len(rows) == 1 and len(rows[0]) == 1
 
 
 def in_key_equations(source):
@@ -263,14 +308,117 @@ def in_key_equations(source):
     return any("key-equations" in classes(a) for a in source.iterancestors())
 
 
-def may_be_layout(table, source, style, captioned):
-    """Whether a table as the emitter writes it may only lay things out:
-    classed unstyled by OpenStax (the source table's classes), with no
-    caption of its own (captioned: one besides the number baking gave it)
-    and no head, and of one cell, in a chapter's Key Equations, or in a
-    book of LAYOUT_STYLES. One of more cells is a layout table unless the
-    header guess reads a header row in it (HEADED)."""
-    if (captioned or "unstyled" not in classes(source)
-            or table.find(".//thead") is not None or table.find(".//th") is not None):
+def _holds(cell, *names):
+    return any(etree.QName(e).localname in names
+               for e in cell.iter() if isinstance(e.tag, str) and e is not cell)
+
+
+def lines_to_fill(table):
+    """Whether every cell is empty or a line to write on, and one at least
+    a line: a form to fill in, which has nothing to head."""
+    lines = 0
+    for cell in (c for row in _rows(table) for c in row):
+        if _holds(cell, "img", "math", "code", "pre", "table"):
+            return False
+        text = "".join(cell.itertext())
+        if text.strip(" _\t\n\r\f\v\u00a0"):
+            return False
+        lines += "_" in text
+    return lines > 0
+
+
+# A picture's label beside it, at most: "Graph A".
+LABEL_WORDS = 4
+
+
+def pictures_alone(table):
+    """Whether every cell that holds anything holds a picture, with at most
+    a short label beside it: pictures laid out in rows. The filter makes a
+    table of pictures and nothing else a figure; one with labels is laid
+    out."""
+    pictures = 0
+    for cell in (c for row in _rows(table) for c in row):
+        words = " ".join(cell.itertext()).split()
+        if not _holds(cell, "img"):
+            if words or _holds(cell, "math", "code", "pre", "table"):
+                return False
+            continue
+        if len(words) > LABEL_WORDS or _holds(cell, "math", "code", "pre", "table"):
+            return False
+        pictures += 1
+    return pictures > 0
+
+
+_ROMAN = re.compile(r"(?:x{0,3})(?:ix|iv|v?i{0,3})")
+_MARK = re.compile(r"\s*(?:(_{2,})|\(?([0-9]{1,3}|[A-Za-z]|[ivxIVX]{1,6})[.)])\s*\S")
+
+
+def _series(texts):
+    """The one series of marks every text opens with, a blank to fill or
+    the numbers, capitals, small letters, or roman numerals of a list, or
+    None."""
+    kinds = set()
+    for text in texts:
+        found = _MARK.match(text)
+        if not found:
+            return None
+        blank, mark = found.groups()
+        if blank:
+            kinds.add("blank")
+        elif mark.isdigit():
+            kinds.add("number")
+        elif mark.lower() == mark and _ROMAN.fullmatch(mark) and len(mark) > 1:
+            kinds.add("roman")
+        elif len(mark) == 1:
+            kinds.add("capital" if mark.isupper() else "small")
+        else:
+            return None
+    # A lone i, v, or x is a small letter or a roman numeral, which the
+    # column's other marks decide.
+    if kinds == {"roman", "small"} and all(
+            _ROMAN.fullmatch(_MARK.match(t).group(2) or "") for t in texts):
+        return "roman"
+    return kinds.pop() if len(kinds) == 1 else None
+
+
+def matching_exercise(table):
+    """Whether a table is two lists side by side, each item to be matched
+    with one of the other's: two columns of three items or more, each
+    column's items opening with marks of one series (a blank to fill,
+    numbers, capitals, small letters, roman numerals), the two series
+    different. A row is no record: the item beside another isn't its
+    match, so neither column heads the other."""
+    rows = _rows(table)
+    if len(rows) < 3 or any(len(row) != 2 for row in rows):
         return False
-    return one_cell(table) or in_key_equations(source) or style in LAYOUT_STYLES
+    left = [cell_text(row[0]) for row in rows if cell_text(row[0])]
+    right = [cell_text(row[1]) for row in rows if cell_text(row[1])]
+    if len(left) < 3 or len(right) < 3:
+        return False
+    first, second = _series(left), _series(right)
+    return first is not None and second is not None and first != second
+
+
+def layout_reason(table, source, style, captioned):
+    """Why a table as the emitter writes it is a layout table, if it may be
+    one: "shape" when what it holds says so, whatever the header guess
+    reads (one cell, lines to fill in, pictures with their labels, two
+    lists to match); "place" when where it stands does, unless the guess
+    reads a header row in it (HEADED): a chapter's Key Equations, one
+    OpenStax classes unstyled in a book of LAYOUT_STYLES, and one with no
+    label of OpenStax's in a book of ANY_CLASS_STYLES, each with no
+    caption of its own (captioned: one besides the number baking gave it).
+    None for a data table. A table with a head or a header cell declares
+    its headers, and is one."""
+    if table.find(".//thead") is not None or table.find(".//th") is not None:
+        return None
+    if (one_cell(table) or lines_to_fill(table) or pictures_alone(table)
+            or matching_exercise(table)):
+        return "shape"
+    if captioned:
+        return None
+    if (in_key_equations(source)
+            or style in LAYOUT_STYLES and "unstyled" in classes(source)
+            or style in ANY_CLASS_STYLES and not source.get("data-aria-label")):
+        return "place"
+    return None

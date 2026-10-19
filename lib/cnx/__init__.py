@@ -28,8 +28,9 @@ The steps, each a module:
     pages.py      the baked book cut into pages, named as OpenStax names them
     emit.py       each page as HTML for TextbookImprover's HTML reader
     steptables.py which tables only lay things out (a worked example's
-                  steps, a grid of terms, a box of one cell), layout
-                  tables, by TextbookImprover's header guess
+                  steps, a grid of terms, a box of one cell, a form, a
+                  matching exercise), layout tables, by what they hold
+                  or where they stand and TextbookImprover's header guess
     mathtex.py    a formula's TeX as Pandoc writes it, for the guess
     project.py    project.yaml, the sidecars the source can fill, the report
     unpack.py     the steps in order, for bin/unpack-cnx.py

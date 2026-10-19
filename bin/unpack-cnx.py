@@ -145,8 +145,9 @@ def main():
     if result.layout_tables:
         print(f"{result.layout_tables} table(s) that only lay things out (a worked "
               "example's steps, a Key Equations table, a grid of terms, a box of one "
-              "cell) marked as layout tables (role=\"presentation\"), which ask for "
-              "no description.")
+              "cell, a form of blank lines, pictures with their labels, a matching "
+              "exercise) marked as layout tables (role=\"presentation\"), which ask "
+              "for no description.")
     counts = {}
     for _where, check, _detail in result.notes:
         counts[check] = counts.get(check, 0) + 1

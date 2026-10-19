@@ -335,6 +335,10 @@ hold a footnote, as this paragraph does.[^u1]
 
 ![A red square whose caption, long enough to run past the width of its line and be set as a paragraph of its own, holds a note.[^u3]](assets/red.png)
 
+A band of noise four times as wide in pixels as it's shown, in a line of
+text, which images.downsample scales to twice: ![A wide band of
+noise](assets/wide.png){width=100px}.
+
 [^u1]: The first note, in the text.
 [^u2]: The second note, in a labeled caption.
 [^u3]: The third note, in a caption.
@@ -519,6 +523,36 @@ def png(path, rgb):
                  + chunk(b"IEND", b""))
 
 
+def noise_png(path, width, height):
+    """A PNG of noise, which scaling makes smaller, written without an
+    imaging library."""
+    import random
+    rows = random.Random(7)
+    raw = b"".join(b"\x00" + rows.randbytes(width * 3) for _ in range(height))
+
+    def chunk(kind, data):
+        body = kind + data
+        return (struct.pack(">I", len(data)) + body
+                + struct.pack(">I", zlib.crc32(body) & 0xffffffff))
+    with open(path, "wb") as fh:
+        fh.write(b"\x89PNG\r\n\x1a\n"
+                 + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0))
+                 + chunk(b"IDAT", zlib.compress(raw))
+                 + chunk(b"IEND", b""))
+
+
+def image_pixels(path):
+    """The width and height in pixels of each image a PDF's pages draw."""
+    sizes = []
+    for page in pypdf.PdfReader(path).pages:
+        resources = resolve(page.get("/Resources")) or {}
+        for image in (resolve(resources.get("/XObject")) or {}).values():
+            image = image.get_object()
+            if image.get("/Subtype") == "/Image":
+                sizes.append((int(image["/Width"]), int(image["/Height"])))
+    return sizes
+
+
 def write_book(work):
     os.makedirs(os.path.join(work, "assets"))
     for name, text in (("front.md", FRONT), ("one.md", ONE),
@@ -607,6 +641,7 @@ def build_untagged(work):
     what the run said)."""
     os.makedirs(os.path.join(work, "assets"))
     png(os.path.join(work, "assets", "red.png"), (200, 0, 0))
+    noise_png(os.path.join(work, "assets", "wide.png"), 400, 200)
     with open(os.path.join(work, "figures.md"), "w", encoding="utf-8") as fh:
         fh.write(UNTAGGED_PAGE)
     with open(os.path.join(work, "project.yaml"), "w", encoding="utf-8") as fh:
@@ -614,6 +649,7 @@ def build_untagged(work):
                  "  language: en-US\n")
     with open(os.path.join(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
         fh.write("defaults:\n  captions:\n    figure_prefixes: [Figure, Exhibit]\n"
+                 "  images:\n    downsample: 2\n"
                  "targets:\n  pdf:\n    format: pdf\n    pdf:\n      standard: []\n")
     converted = subprocess.run(["python3", os.path.join(BIN, "convert.py")], cwd=work,
                                capture_output=True, text=True, stdin=subprocess.DEVNULL)
@@ -1315,6 +1351,13 @@ def checks(work, jobs=1):
          and not re.search(r":\s*(Figure\s*7\.[34]|Exhibit)", untagged_text)
          and re.search(r"Figure\s*2\s*:\s*A red square with no label", untagged_text)
          and "/StructTreeRoot" not in pypdf.PdfReader(untagged_path).trailer["/Root"]),
+        # Pandoc reads the PDF's images through its resource path, where
+        # the run puts its scaled copies first.
+        ("images.downsample: the PDF carries an image scaled down to twice the width it's "
+         "shown at, and the run says so",
+         lambda: (200, 100) in image_pixels(untagged_path)
+         and (400, 200) not in image_pixels(untagged_path)
+         and "images.downsample 2: 1 of 2 image(s) scaled down" in untagged_said),
         # LaTeX's classes set a caption too long for its line twice, and
         # TextbookImprover's own for a caption without its label, and a
         # footnote's mark in it took a number each time.

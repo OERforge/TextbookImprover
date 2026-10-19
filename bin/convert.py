@@ -85,6 +85,7 @@ try:
     import mdremediate
     import texremediate
     import docxtarget
+    import downsample
     import highlighting
     import htmlrepair
     import mathjax
@@ -113,6 +114,12 @@ SOURCE_TARGETS = ("markdown", "asciidoc")
 # The targets that copy the files a page names, whose names media.lowercase
 # lowercases.
 LOWERCASED = ("html", "revealjs", "markdown", "asciidoc")
+# The targets whose images images.downsample scales: the rest write
+# copies of the author's sources, which keep the author's files.
+SCALED_FORMATS = ("html", "epub3", "docx", "pdf", "revealjs", "pptx")
+# Each such target's folder of scaled copies, by its name, once the run
+# has made them (prepare_downsampled).
+DOWNSAMPLED = {}
 TARGET_FILTER = os.path.join(HERE, "target-blocks.lua")
 DECK_HTML_FILTER = os.path.join(HERE, "deck-html.lua")
 DECK_PDF_FILTER = os.path.join(HERE, "deck-pdf.lua")
@@ -3777,6 +3784,7 @@ def deck_pdfs(target, stems, names, base, language):
     # The captions settings' words, which tell pdf-target.lua a caption
     # that carries its own label, as for a book's PDF.
     env = dict(os.environ, TARGET_NAME=target.name, TITLE_BLOCK=str(target["title_block"]),
+               DOWNSAMPLED=DOWNSAMPLED.get(target.name, ""),
                **latexbuild.label_prefixes(target.resolved))
     os.makedirs(target.output_dir, exist_ok=True)
 
@@ -4002,7 +4010,8 @@ def deck_pptxs(target, stems, names, base, language, work):
     references = {shape: pptxtarget.reference_doc(shape, os.path.join(
         work, f"reference-{target.name}-{shape.replace(':', 'x')}-{slide_size}.pptx"),
         slide_size) for shape in sorted({job[3] for job in jobs if job[3]})}
-    env = dict(os.environ, TARGET_NAME=target.name, TITLE_BLOCK=str(target["title_block"]))
+    env = dict(os.environ, TARGET_NAME=target.name, TITLE_BLOCK=str(target["title_block"]),
+               DOWNSAMPLED=DOWNSAMPLED.get(target.name, ""))
     os.makedirs(target.output_dir, exist_ok=True)
 
     def one(job):
@@ -4265,7 +4274,8 @@ def deck_presentations(target, stems, base, language):
                    [os.path.join(target.pages_dir, stem + INTERMEDIATE)
                     for stem in stems if os.path.join(
                         target.output_dir, stem + ".html") in written],
-                   lower=bool(target["media.lowercase"]))
+                   lower=bool(target["media.lowercase"]),
+                   scaled=DOWNSAMPLED.get(target.name))
         say(f"Wrote {len(written)} presentation(s) in {target.output_dir}, one for each deck, "
             f"through Pandoc's reveal.js writer and reveal.js "
             f"{revealtarget.revealjs_version(folder)}, copied beside them: {slides} slide(s); "
@@ -4362,7 +4372,8 @@ def render_markdown(target, pages, base, work, project, env, losses=None):
             if os.path.exists(found):
                 os.remove(found)
             run(["pandoc", "-f", "json", "-t", "docx", page, "-o", out,
-                 "--lua-filter=" + TARGET_FILTER] + highlighting.ARGS,
+                 "--lua-filter=" + TARGET_FILTER] + highlighting.ARGS
+                + downsample.resource_args(DOWNSAMPLED.get(target.name)),
                 env=dict(env, FIDELITY_FOUND=found, TITLE_WRITER="docx"), cwd=base)
             collect_losses(found, target.name, stem, losses)
             for key, n in docxtarget.finish(out, page, keep).items():
@@ -4517,7 +4528,8 @@ def render_html(target, pages, base, fragments, language, env):
             with open(out, "w", encoding="utf-8") as fh:
                 fh.write(headed)
         written.append(out)
-    copy_media(base, target.output_dir, pages, lower=bool(target["media.lowercase"]))
+    copy_media(base, target.output_dir, pages, lower=bool(target["media.lowercase"]),
+               scaled=DOWNSAMPLED.get(target.name))
     return written
 
 
@@ -4947,14 +4959,16 @@ def linked_file(ref):
     return None
 
 
-def copy_media(base, output_dir, pages, safe=True, lower=False):
+def copy_media(base, output_dir, pages, safe=True, lower=False, scaled=None):
     """Every local image a page refers to, copied beside the page at the
     same relative path: <source>/media/... for what was extracted from a
     .docx, assets/... or wherever for what a Markdown source names. A
     copy keeps the target's pages self-contained, which is what the
     packager assumes. So are the local files a page links to. lower
     (media.lowercase): under its name lowercased, as safe-media.lua writes
-    it into the page."""
+    it into the page. scaled (images.downsample): a folder holding scaled
+    copies of some, at the same paths, copied in the originals' place;
+    never over an original, where a target writes beside the sources."""
     copied, kept = set(), []
     for page in pages:
         for ref in media_references(page) + linked_files(page):
@@ -4968,6 +4982,13 @@ def copy_media(base, output_dir, pages, safe=True, lower=False):
             # author's, so its copies keep the author's names.
             dest = os.path.join(output_dir, output_path(unquote(ref), safe, lower))
             if os.path.abspath(dest) == os.path.abspath(src):
+                continue
+            smaller = os.path.join(scaled, unquote(ref)) if scaled else None
+            if smaller and os.path.isfile(smaller) and not (
+                    os.path.exists(dest) and os.path.samefile(src, dest)):
+                os.makedirs(os.path.dirname(dest), exist_ok=True)
+                shutil.copy2(smaller, dest)
+                copied.add(ref)
                 continue
             if os.path.exists(dest) and os.path.samefile(src, dest):
                 # The author's own file, named in another case, where the
@@ -4985,6 +5006,49 @@ def copy_media(base, output_dir, pages, safe=True, lower=False):
             f"keep their names ({', '.join(kept[:3])}{', ...' if len(kept) > 3 else ''}): "
             "a server that doesn't ignore case won't find them. Write the target to a "
             "folder of its own.")
+
+
+def scales_images(target, latex_book):
+    """Whether images.downsample applies to a target: one of
+    SCALED_FORMATS, but not a LaTeX book's PDF built from its own files
+    (pdf.from: book), which sets the book's own images as its LaTeX sizes
+    them."""
+    return target.format in SCALED_FORMATS and not (
+        latex_book and target.format == "pdf" and str(target["pdf.from"]) == "book")
+
+
+def prepare_downsampled(targets, pages_by_dir, base, work, latex_book=False):
+    """images.downsample, once per limit: copies of the images wider than
+    that many times the width they're shown at, scaled to it, in a folder
+    of work's, which each target with that limit reads in the originals'
+    place (DOWNSAMPLED, by target name). Where a target that ships images
+    keeps them whole, the run says how many are wider than they're shown,
+    and by how much at most, once."""
+    by_limit, whole = {}, []
+    for target in targets:
+        if not scales_images(target, latex_book):
+            continue
+        limit = downsample.limit_of(target["images.downsample"])
+        if limit:
+            by_limit.setdefault(limit, []).append(target)
+        else:
+            whole.append(target)
+
+    def pages_of(group):
+        return sorted({p for t in group for p in pages_by_dir.get(t.pages_dir, [])})
+    if by_limit and downsample.Image is None:
+        die(downsample.INSTALL)
+    for limit, group in sorted(by_limit.items()):
+        folder = os.path.join(work, f"downsample-{limit:g}")
+        counts = downsample.scale(downsample.measure(base, pages_of(group)), limit, folder)
+        say(downsample.report(counts, limit))
+        for target in group:
+            DOWNSAMPLED[target.name] = folder
+    if whole:
+        line = downsample.warning(downsample.measure(base, pages_of(whole)),
+                                  [t.name for t in whole] if by_limit else ())
+        if line:
+            say(line)
 
 
 # --------------------------------------------------------------------------
@@ -5404,6 +5468,12 @@ def main():
         output_dirs = [t.output_dir for t in targets]
         latex_main = [] if DECK_RUN else latex_masters(base, skip=output_dirs)
         master = latex_main[0] if latex_main else None
+        # images.downsample scales with Pillow: without it, said before a
+        # page is read rather than once they all are.
+        if downsample.Image is None and any(
+                scales_images(t, bool(master)) and downsample.limit_of(t["images.downsample"])
+                for t in targets):
+            die(downsample.INSTALL)
         named = {page_name_of(n) for n in list(docs) + markdown + adoc}
         hand = [] if DECK_RUN else hand_pages(base, named)
         web = [] if DECK_RUN else html_sources(base, named, set(hand))
@@ -5568,6 +5638,9 @@ def main():
                     base, hand, target.pages_dir, env, target.variants)
         hand_stems = set(hand)
 
+        # ---- 4.65 images wider than they're shown (images.downsample) -------
+        prepare_downsampled(targets, pages_by_dir, base, work, latex_book=bool(master))
+
         # ---- 4.7 render, per html target --------------------------------------
         written = {}
         losses = []
@@ -5672,7 +5745,8 @@ def main():
                           "--target", target.name,
                           "--intermediates", target.pages_dir]
                          + (["--title", title] if title else []),
-                         env=dict(os.environ, FIDELITY_FOUND=found),
+                         env=dict(os.environ, FIDELITY_FOUND=found,
+                                  DOWNSAMPLED=DOWNSAMPLED.get(target.name, "")),
                          capture=True, check=False)
             # Its own messages first: a failure's reason is in them.
             sys.stderr.write(result.stderr)
@@ -5708,7 +5782,9 @@ def main():
                           "--target", target.name,
                           "--intermediates", target.pages_dir]
                          + (["--title", title] if title else []),
-                         env=pdf_env(), capture=True, check=False)
+                         env=dict(pdf_env() or os.environ,
+                                  DOWNSAMPLED=DOWNSAMPLED.get(target.name, "")),
+                         capture=True, check=False)
             sys.stderr.write(result.stderr)
             if result.returncode:
                 die(f"The PDF for target {target.name} wasn't built.")

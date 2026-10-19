@@ -108,6 +108,10 @@ Alt text that says nothing about an image, besides what's always reported (punct
 
 Let images shrink on narrow viewports rather than reproducing the source's fixed dimensions (WCAG 1.4.10).
 
+**`images.downsample`**—`int`; default `0`
+
+The most times an image may be as wide in pixels as the width its page shows it at. An image wider than that is scaled down to it, in an html, epub3, docx, pdf, revealjs, or pptx target, unless the copy would be larger than the original; the original stays as it is, and a source, markdown, asciidoc, or latex target, whose copies are the author's, keeps it whole, as does a LaTeX book's PDF built from its own files (pdf.from: book). 0 keeps every image whole, and the run says how many are wider than they're shown and by how much at most. The width an image is shown at is its page's, in CSS pixels, no wider than the pages' column (36em, 576 pixels at a browser's default text size), or its own when its page gives none. A PDF sets an image at that width, 96 CSS pixels an inch, or narrower to fit its line, so each step of 1 keeps at least 96 pixels an inch there: 2 suits screens that show two pixels to a CSS pixel, and 4 keeps 384, more than the 300 printing is usually said to want. Scaling needs Python's Pillow.
+
 ## tables
 
 How data tables are rendered.

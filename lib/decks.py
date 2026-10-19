@@ -53,6 +53,7 @@ import subprocess
 import tempfile
 from urllib.parse import unquote
 
+import downsample
 import highlighting
 import latexbuild
 
@@ -954,6 +955,7 @@ def build_pdf(intermediate, base, out_pdf, *, template, filters, language,
         command = ["pandoc", "-f", "json", "-t", "beamer", "-s", source, "-o", tex,
                    "--template", template, "--slide-level", str(level),
                    "--extract-media", os.path.join(work, "media"),
+                   *downsample.resource_args((env or os.environ).get("DOWNSAMPLED")),
                    "-M", f"lang={language}",
                    "-V", f"aspect-ratio={shape}", "-V", f"frametitle-tag={tag}",
                    "-V", "math-setup=" + latexbuild.math_setup(standards, ua1_math),

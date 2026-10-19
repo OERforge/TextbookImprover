@@ -56,6 +56,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(HERE), "lib"))
 
 try:
+    import downsample
     import oerconfig
 except ImportError:
     sys.exit("Cannot find the configuration library. It should be in a "
@@ -769,6 +770,15 @@ def build(base, name, resolved, keep, intermediates=None, latex_only=False,
         command = ["pandoc", "-f", "json", "-t", "pdf", book_json,
                    "-o", os.path.abspath(out_path),
                    f"--pdf-engine={ENGINE}"] + filters
+        # images.downsample: scaled copies, which Pandoc finds before the
+        # originals, the run's own or made here.
+        try:
+            scaled = downsample.folder_for_build(
+                downsample.limit_of(resolved["images.downsample"]), base, [document], work,
+                lambda line: print(line, file=sys.stderr))
+        except RuntimeError as exc:
+            sys.exit(str(exc))
+        command += downsample.resource_args(scaled)
         # Run in the content directory: image paths in the intermediates
         # are relative to it.
         result = subprocess.run(command, cwd=base, capture_output=True,

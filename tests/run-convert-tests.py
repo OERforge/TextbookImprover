@@ -532,6 +532,173 @@ def case_lowercase_names(work):
     ]
 
 
+def case_downsample(work):
+    """images.downsample: at 0, the default, the run says how many images
+    are wider in pixels than the pages show them, and by how much the
+    widest; set, an html, an EPUB, and a Word target carry copies scaled
+    down to that many times the width shown, which is the page's width, a
+    percentage of the column, or a height and the image's proportions,
+    while a markdown target and the original keep the author's file; and
+    without Pillow, a run with it set stops and says what to install."""
+    import random
+    import struct
+    import zlib
+    try:
+        from PIL import Image
+    except ImportError:
+        Image = None
+    noise = random.Random(7)
+
+    def png(path, width, height, palette=False):
+        """A PNG of noise, which scaling makes smaller, written without an
+        imaging library: RGB, or with a palette of 256 colors."""
+        def chunk(kind, data):
+            return (struct.pack(">I", len(data)) + kind + data
+                    + struct.pack(">I", zlib.crc32(kind + data) & 0xFFFFFFFF))
+        per = 1 if palette else 3
+        raw = b"".join(b"\x00" + noise.randbytes(width * per) for _ in range(height))
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "wb") as fh:
+            fh.write(b"\x89PNG\r\n\x1a\n"
+                     + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8,
+                                                  3 if palette else 2, 0, 0, 0))
+                     + (chunk(b"PLTE", noise.randbytes(768)) if palette else b"")
+                     + chunk(b"IDAT", zlib.compress(raw)) + chunk(b"IEND", b""))
+
+    def size(data):
+        """A PNG's width and height, from its header."""
+        return struct.unpack(">II", data[16:24]) if data[:8] == b"\x89PNG\r\n\x1a\n" else None
+
+    def file_size(*parts):
+        path = os.path.join(*parts)
+        if not os.path.exists(path):
+            return None
+        with open(path, "rb") as fh:
+            return size(fh.read(64))
+
+    def zipped(path, folder):
+        """The width and height of each PNG in a zip's folder."""
+        if not os.path.exists(path):
+            return []
+        with zipfile.ZipFile(path) as z:
+            return [size(z.read(n)) for n in z.namelist()
+                    if n.startswith(folder) and n.endswith(".png")]
+
+    page = ("# Page\n\n![A wide band of noise](assets/big.png){width=100px}\n\n"
+            "![A long strip of noise](assets/strip.png){width=50%}\n\n"
+            "![A small square](assets/small.png)\n")
+    if Image is not None:
+        page += ("\n![Colored noise](assets/colors.png){width=100px}\n\n"
+                 "![A photograph of noise](assets/photo.jpg){height=50px}\n")
+
+    def book(name, config, env=None):
+        where = os.path.join(work, name)
+        png(os.path.join(where, "assets", "big.png"), 400, 200)
+        png(os.path.join(where, "assets", "strip.png"), 800, 100)
+        png(os.path.join(where, "assets", "small.png"), 4, 4)
+        if Image is not None:
+            png(os.path.join(where, "assets", "colors.png"), 400, 200, palette=True)
+            Image.frombytes("RGB", (300, 150), noise.randbytes(300 * 150 * 3)).save(
+                os.path.join(where, "assets", "photo.jpg"), quality=95)
+        with open(os.path.join(where, "page.md"), "w", encoding="utf-8") as fh:
+            fh.write(page)
+        with open(os.path.join(where, "assets", "big.png"), "rb") as fh:
+            original = fh.read()
+        if env is None:
+            return where, original, convert(where, config, fixtures=())
+        with open(os.path.join(where, "conversion.yaml"), "w", encoding="utf-8") as fh:
+            fh.write(config)
+        with open(os.path.join(where, "project.yaml"), "w", encoding="utf-8") as fh:
+            fh.write("project:\n  identifier: org.example.fixtures\n"
+                     "  title: The Fixture Book\n")
+        return where, original, subprocess.run(
+            ["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"], cwd=where,
+            capture_output=True, text=True, stdin=subprocess.DEVNULL, env=env)
+
+    every = ("  html:\n    format: html\n  epub:\n    format: epub3\n"
+             "  word:\n    format: docx\n  md:\n    format: markdown\n")
+    a, _, whole = book("whole", "targets:\n" + every)
+    whole_said = whole.stdout + whole.stderr
+    checks = [
+        ("at 0, the default, the run says how many images are wider than they're shown, and "
+         "the widest for its size, where the setting is documented",
+         lambda: whole.returncode == 0
+         and re.search(r"WARNING: \d image\(s\) are wider in pixels than the pages show them, "
+                       r"\d of them more than twice as wide, up to 4\.0 times \(assets/big\.png, "
+                       r"400 pixels shown 100 wide\); the outputs carry them whole", whole_said)
+         and "docs/configuration.md#images-larger-than-theyre-shown" in whole_said
+         and file_size(a, "html", "assets", "big.png") == (400, 200)),
+    ]
+    if Image is None:
+        print("  skip  Pillow not installed (python3-pil); images aren't scaled")
+        return checks
+
+    # images.responsive drops an image's height, which the pages then show
+    # at its own width: with it off, the height is the photograph's size.
+    b, original, scaled = book("scaled", "defaults:\n  images:\n    downsample: 2\n"
+                                         "    responsive: false\n"
+                                         "targets:\n" + every
+                               + "  full:\n    format: html\n    images:\n"
+                                 "      downsample: 0\n")
+    said = scaled.stdout + scaled.stderr
+    epub = os.path.join(b, "epub", "org.example.fixtures.epub")
+    words = glob.glob(os.path.join(b, "word", "*.docx"))
+
+    def opened(*parts):
+        path = os.path.join(b, *parts)
+        if not os.path.exists(path):
+            return None
+        with Image.open(path) as im:
+            return im.format, im.mode, im.size
+
+    # A Python that can't import Pillow, which a folder named PIL whose
+    # import fails stands in for.
+    blocked = os.path.join(work, "no-pillow")
+    os.makedirs(os.path.join(blocked, "PIL"))
+    with open(os.path.join(blocked, "PIL", "__init__.py"), "w") as fh:
+        fh.write("raise ImportError('Pillow is blocked here')\n")
+    c, _, without = book("without", "defaults:\n  images:\n    downsample: 2\n"
+                                    "targets:\n  html:\n    format: html\n",
+                         env=dict(os.environ, PYTHONPATH=blocked))
+    d, _, unscaled = book("unscaled", "targets:\n  html:\n    format: html\n",
+                          env=dict(os.environ, PYTHONPATH=blocked))
+    return checks + [
+        ("set to 2, an html target carries a copy at twice the width it's shown, a width in "
+         "pixels, a percentage of the column (36em), or a height and the image's proportions",
+         lambda: scaled.returncode == 0
+         and file_size(b, "html", "assets", "big.png") == (200, 100)
+         and file_size(b, "html", "assets", "strip.png") == (576, 72)
+         and opened("html", "assets", "photo.jpg") == ("JPEG", "RGB", (200, 100))),
+        ("an image no wider than that is copied as it is, and a palette's image has a "
+         "palette again",
+         lambda: file_size(b, "html", "assets", "small.png") == (4, 4)
+         and opened("html", "assets", "colors.png") == ("PNG", "P", (200, 100))),
+        ("the EPUB and the Word file carry the copies",
+         lambda: (200, 100) in zipped(epub, "EPUB/media/")
+         and (400, 200) not in zipped(epub, "EPUB/media/")
+         and len(words) == 1
+         and (200, 100) in zipped(words[0], "word/media/")
+         and (400, 200) not in zipped(words[0], "word/media/")),
+        ("the original stays as it is, and so does a markdown target's copy, the author's",
+         lambda: open(os.path.join(b, "assets", "big.png"), "rb").read() == original
+         and open(os.path.join(b, "md", "assets", "big.png"), "rb").read() == original),
+        ("the run says how many it scaled, and a target set to 0 is named as carrying "
+         "them whole",
+         lambda: re.search(r"images\.downsample 2: 4 of 5 image\(s\) scaled down to 2 times "
+                           r"the width they're shown at, [\d.]+ [kM]B to [\d.]+ [kM]B\.", said)
+         and "the outputs (full) carry them whole" in said
+         and file_size(b, "full", "assets", "big.png") == (400, 200)),
+        ("without Pillow, a run with it set stops before writing and says what to install; "
+         "at 0 the run measures without it",
+         lambda: without.returncode != 0
+         and "images.downsample needs Python's Pillow" in without.stdout + without.stderr
+         and "sudo apt install python3-pil" in without.stdout + without.stderr
+         and not exists(c, "html", "page.html")
+         and unscaled.returncode == 0
+         and "up to 4.0 times (assets/big.png" in unscaled.stdout + unscaled.stderr),
+    ]
+
+
 def case_linked_paths(work):
     """A link to a file beside the pages that names it with backslashes,
     as only Windows resolves it, or in another case, as macOS and Windows
@@ -5859,6 +6026,7 @@ CASES = [
     ("an AsciiDoc source", case_asciidoc),
     ("two files, one page", case_stem_collisions),
     ("file names lowercased", case_lowercase_names),
+    ("images scaled down to a set number of times the width shown", case_downsample),
     ("a link to a file in another case, or with backslashes", case_linked_paths),
     ("adopting a split book's pages", case_adopt),
     ("an HTML source's tables and the header sidecar", case_html_headers),

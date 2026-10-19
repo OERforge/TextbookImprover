@@ -408,6 +408,37 @@ which a short equivalent has become a long description, and long
 descriptions belong in the prose where every reader gets them. Raising it
 silences the report rather than fixing anything.
 
+### Images larger than they're shown
+
+```yaml
+# in conversion.yaml
+defaults:
+  images:
+    downsample: 4     # 0, the default, keeps every image as it is
+```
+
+A web page often holds an image much larger than it shows it and leaves the browser to scale it down. *Instrumental Analysis* on LibreTexts shows a photograph 2,150 pixels wide at 180, and 442 of its 483 images are wider in pixels than they're shown, 173 of them more than twice as wide. Every output carries an image whole, so an EPUB, a Word file, or a PDF of such a book weighs what all its originals do: that book's images come to 145 MB, its EPUB was 142 MB, and its zip of Word files 155 MB.
+
+`images.downsample` is the most times an image may be as wide, in pixels, as the width it's shown at. An image wider than that is scaled down to it, and the `html`, `epub3`, `docx`, `pdf`, `revealjs`, and `pptx` targets carry the smaller copy. The original stays as it is, and so do the copies that `source`, `markdown`, `asciidoc`, and `latex` targets write, since those are the author's files; so does a LaTeX book's PDF built from its own files (`pdf.from: book`), which sets the images as its LaTeX does. The run says how many images it scaled and what they weighed before and after. A copy that comes out larger than its original isn't used, and the run counts those too: they're mostly drawings, whose originals' flat colors compress better than a smaller copy's smoothed edges, so the original is smaller as well as sharper.
+
+At 0, the default, nothing is scaled, and when an image is wider than it's shown, the run says so once, with the widest for its size and where to read about the setting. *Instrumental Analysis* gives:
+
+```
+WARNING: 442 image(s) are wider in pixels than the pages show them, 173 of them more than twice as wide, up to 11.9 times (assets/nmr_tube.png, 2150 pixels shown 180 wide); the outputs carry them whole, 143.2 MB in all. images.downsample scales an image down to a set number of times the width it's shown at (docs/configuration.md#images-larger-than-theyre-shown).
+```
+
+A target can have a value of its own, as with any setting, and one left at 0 beside others that scale is named in the warning.
+
+**The width an image is shown at** is the one its page gives it, in CSS pixels: its `width`, or, failing that, its `height` and the image's own proportions, in pixels or any length CSS converts to pixels, a percentage being one of the column. An image with neither is shown at its own width. Either way, it's no wider than the column the pages set their text in, 36em in Pandoc's stylesheet, which is 576 pixels at a browser's default text size. With `images.responsive` on, as it is unless turned off, a page keeps no image's height, so an image sized by its height alone is shown at its own width, and measured so. Only an image a page shows as an image is measured, and only a raster one (PNG, JPEG, GIF, WebP, BMP, or TIFF): an SVG has no pixels to spare, an animated GIF or PNG is left whole, and a picture in a page's raw HTML isn't seen.
+
+**Choosing a value.** A CSS pixel is 1/96 of an inch ([CSS Values and Units](https://www.w3.org/TR/css-values-4/#absolute-lengths)), and a high-density screen draws two or three of its own pixels for each one. A PDF or a Word file sets an image at the width its page gives it, at 96 CSS pixels an inch (Pandoc's [`--dpi`](https://pandoc.org/MANUAL.html#option--dpi)), or narrower to fit the line. So 2 serves most screens, 3 the densest, and 4 leaves a scaled image at least 384 pixels an inch wherever a PDF sets it, more than the 300 usually given for print.
+
+**What a copy keeps.** Its format and its file's name, its color profile, a JPEG's EXIF data, and the size it prints at: its resolution in pixels an inch is scaled with it, so Word and a PDF set it at the original's size. It's resampled with a Lanczos filter; a JPEG is written at quality 90, and a PNG or GIF that had a palette gets one again, of at most 256 colors. Scaling needs [Pillow](https://pillow.readthedocs.io/), Python's imaging library ([Installation](installation.md#requirements)); without it, a run with `images.downsample` set stops before reading a page and says what to install. The warning at 0 needs nothing.
+
+**Where the copies go.** The run makes them once for each value its targets use, in a temporary folder it removes when it's done: an `html` or `revealjs` target copies them beside its pages in the originals' place, and Pandoc, writing an EPUB, a Word file, a PDF, or a deck, finds them before the originals on its [resource path](https://pandoc.org/MANUAL.html#option--resource-path). `build-epub.py` and `build-pdf.py`, run on their own, make their own.
+
+Measured here, on *Instrumental Analysis* at 4: 73 of its 483 images are more than four times as wide as they're shown; 31 were scaled, 83.1 MB to 33.1 MB, and 42 were kept as they were, their copies larger, 8.4 MB in all: 40 drawings, and 2 photographs less than 5.5 times as wide as they're shown. Its EPUB came to 93 MB, its zip of Word files 102 MB, and its PDF 112 MB, where they had been 142, 155, and 165. The suites check that an html target, an EPUB, a Word file, and a PDF carry a copy, and that the original and a `markdown` target's copy don't change.
+
 ### Math
 
 Two repairs, both on unless turned off, and both recorded row by row in `math-repaired.csv` (its kind, the page, and the text before and after).

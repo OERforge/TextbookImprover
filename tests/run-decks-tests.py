@@ -1119,6 +1119,80 @@ def case_lowercase_names(work):
     ]
 
 
+def case_downsample(work):
+    """images.downsample in a deck's presentation, its PowerPoint file,
+    and its PDF: each carries the picture scaled down to twice the width
+    it's shown at, and the deck's own file stays as it is."""
+    problem = revealjs_ready()
+    if problem:
+        return [("a copy of reveal.js to build the presentations with: " + problem,
+                 lambda: False)]
+    unready = pdf_ready()
+    if unready:
+        print(f"  skip  {unready}; a deck's PDF with a scaled picture isn't checked")
+    try:
+        from PIL import Image  # noqa: F401
+    except ImportError:
+        print("  skip  Pillow not installed (python3-pil); a deck's pictures aren't scaled")
+        return []
+    import random
+    import zipfile
+    work = folder(work, "defaults:\n  images:\n    downsample: 2\ntargets:\n"
+                        "  show:\n    format: revealjs\n  slides:\n    format: pptx\n"
+                        + ("" if unready else "  print:\n    format: pdf\n"),
+                  decks_given={"one.md": "---\ntitle: One\n---\n\n# First\n\n"
+                                         "![A wide band of noise](img/wide.png){width=100px}\n"})
+    noise = random.Random(5)
+
+    def chunk(kind, data):
+        return (struct.pack(">I", len(data)) + kind + data
+                + struct.pack(">I", zlib.crc32(kind + data) & 0xFFFFFFFF))
+    raw = b"".join(b"\x00" + noise.randbytes(400 * 3) for _ in range(200))
+    original = (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", 400, 200, 8, 2, 0, 0, 0))
+                + chunk(b"IDAT", zlib.compress(raw)) + chunk(b"IEND", b""))
+    with open(os.path.join(work, "img", "wide.png"), "wb") as fh:
+        fh.write(original)
+    result = convert(work, "--quick")
+
+    def size(data):
+        return struct.unpack(">II", data[16:24]) if data[:8] == b"\x89PNG\r\n\x1a\n" else None
+
+    def file_size(*parts):
+        path = os.path.join(work, *parts)
+        if not os.path.exists(path):
+            return None
+        with open(path, "rb") as fh:
+            return size(fh.read(64))
+
+    def pptx_sizes():
+        path = os.path.join(work, "slides", "one.pptx")
+        if not os.path.exists(path):
+            return []
+        with zipfile.ZipFile(path) as z:
+            return [size(z.read(n)) for n in z.namelist() if n.startswith("ppt/media/")]
+
+    def pdf_sizes():
+        import pypdf
+        found = []
+        for page in pypdf.PdfReader(os.path.join(work, "print", "one.pdf")).pages:
+            for image in (page.get("/Resources", {}).get("/XObject") or {}).values():
+                image = image.get_object()
+                if image.get("/Subtype") == "/Image":
+                    found.append((int(image["/Width"]), int(image["/Height"])))
+        return found
+    checks = [
+        ("a deck's presentation and its PowerPoint file carry the picture scaled down to twice "
+         "the width it's shown at, and the deck's own stays as it is",
+         lambda: result.returncode == 0
+         and file_size("show", "img", "wide.png") == (200, 100)
+         and pptx_sizes() == [(200, 100)]
+         and open(os.path.join(work, "img", "wide.png"), "rb").read() == original),
+    ]
+    if not unready:
+        checks.append(("and so does its PDF", lambda: pdf_sizes() == [(200, 100)]))
+    return checks
+
+
 def case_implied(work):
     work = folder(work, None, decks_given={"one.md": UNTITLED})
     result = convert(work, "--quick")
@@ -4278,6 +4352,7 @@ CASES = [("the pieces", case_pieces),
          ("a folder of decks", case_folder),
          ("one alt text on a deck's different pictures", case_shared_alt),
          ("file names lowercased", case_lowercase_names),
+         ("pictures scaled down to a set number of times the width shown", case_downsample),
          ("the headings' levels on a page", case_levels),
          ("the implied target, and a book's Markdown", case_implied),
          ("pages per slide, and the notes", case_split),

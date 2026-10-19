@@ -89,6 +89,12 @@ It runs in Chrome and in browsers built on Chrome's engine (Edge, Brave). Instal
 
 A site that fetches its sections into one page by script, as OER Commons does, is still one page per section after unpacking: the unpacker takes each section's HTML from the data the page fetched. *Business Communication* on OER Commons came out as its 16 chapters and its title page, with 213 of the pages' 214 images held. The one missing, the title page's cover, has no response in the archive at all, and was missing when the site was viewed as well. Its publisher's EPUB had none of the images: 121 of its "images" are a web server's refusal.
 
+A LibreTexts book ([LibreTexts](site-input.md#libretexts)) asks for two things more. An exercise's answer is hidden until it's opened, and the browser fetches its images only then, so open each Answer before moving on: of the 538 images *Instrumental Analysis*'s pages show, the five missing from its first recording were all in answers left closed. And three pages are drawn by script from data the browser fetches, Table of Contents, Index, and Detailed Licensing: visit each and let it finish drawing, since the unpacker makes the Index and Detailed Licensing from that data.
+
+### What an archive records about you
+
+A browser's archive records what the browser sent as well as what it received, so a WACZ is worth a look before it's shared. In the two that ArchiveWeb.page 0.17.1 wrote of *Instrumental Analysis*, no IP address was recorded, neither in a record's headers nor in any response, and the site saw an anonymous reader. But every request's headers are there, with the browser's user agent, its client hints, and its `Accept-Language`; every cookie the browser sent is there twice, in the request and in a header ArchiveWeb.page adds to the response, Google Analytics' client ID among them, with the time of an earlier visit in it; the analytics beacons are recorded whole, screen and window sizes included; and the archive is signed with a key ArchiveWeb.page keeps for the installation, so two archives from one browser can be told to be from one browser. A browser profile kept only for archiving, signed in to nothing, would leave the earlier visits' cookies out.
+
 These steps say what to do rather than quoting the extension's buttons, whose wording changes between versions; the test capture was made with version 0.17.1.
 
 ## Browsertrix Crawler, for a site built by JavaScript

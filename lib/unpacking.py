@@ -73,21 +73,36 @@ def contents_tree(outline, names, notes):
 
 def write_contents(nodes, lines, indent, flagged, top=True):
     """No group around the whole book: it would push every page a level
-    down in the cartridge and the EPUB's contents."""
+    down in the cartridge and the EPUB's contents. An entry may say its
+    role and type, and an entry with generate is a page the run writes
+    (a contents page), under name."""
     pad = " " * indent
     for node in nodes:
-        page, items = node.get("page"), node["items"]
-        if items:
+        page, items = node.get("page"), node.get("items") or []
+        extra = [f"{pad}  {key}: {node[key]}" for key in ("role", "type")
+                 if node.get(key)]
+        if node.get("generate"):
+            lines.append(f"{pad}- generate: {node['generate']}")
+            if node.get("name"):
+                lines.append(f"{pad}  name: {node['name']}")
+            lines.append(f"{pad}  title: {yaml_string(node['title'])}")
+            lines += extra
+        elif items:
             lines.append(f"{pad}- title: {yaml_string(node['title'])}")
+            if node.get("role"):
+                lines.append(f"{pad}  role: {node['role']}")
             lines.append(f"{pad}  items:")
             if page:
                 lines.append(f"{pad}    - page: {page}")
                 lines.append(f"{pad}      title: {yaml_string(node['title'])}")
+                if node.get("type"):
+                    lines.append(f"{pad}      type: {node['type']}")
             write_contents(items, lines, indent + 4, flagged, False)
         else:
             lines.append(f"{pad}- page: {page}" + (
                 "        # " + flagged[page] if page in flagged else ""))
             lines.append(f"{pad}  title: {yaml_string(node['title'])}")
+            lines += extra
 
 
 def project_yaml(source, meta, tree, flagged, unnamed, title):

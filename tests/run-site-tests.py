@@ -33,6 +33,7 @@ import base64
 import csv
 import io
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -643,6 +644,280 @@ def case_edtech_books(work):
     ]
 
 
+LT = "https://test.libretexts.org/Bookshelves/Area/A_Book_(Test)"
+
+
+def lt_page(path, title, body, page_id):
+    """A page in the shape LibreTexts serves it: the title outside the
+    content, the MathJax setup in the content's footer, and the
+    attribution after it."""
+    name = title.replace('"', '\\"')
+    return f"""<!DOCTYPE html><html lang="en"><head>
+<meta name="generator" content="MindTouch"/>
+<meta property="og:title" content="{title}"/>
+<meta property="og:site_name" content="Test LibreTexts"/>
+<title>{title} - Test LibreTexts</title>
+<script type="application/json" id="mt-global-settings">{{"articleType":"topic","pageId":{page_id}}}</script>
+</head><body><h1 id="title">{title}</h1>
+<div class="mt-author-container"><ul><li class="mt-author-information"><a href="https://example.org/ann">Ann Author</a></li></ul></div>
+<section class="mt-content-container">{body}
+<footer class="mt-content-footer"><script>
+window.PageNum = "auto";
+window.InitialOffset = "false";
+window.PageName = "{name}";
+</script><script>//<!-- MathJax Config -->
+MathJax = {{tex: {{tags: "all"}}}};</script>
+<hr class="autoattribution-divider" /><div class="autoattribution"><p>This page titled {title} is shared under a CC BY license.</p></div>
+<div id="librelens-list"></div></footer>
+</section><footer class="elm-content-footer"><a href="{LT}/{path}?pertable">Print</a></footer>
+</body></html>""".encode()
+
+
+def lt_guide(*entries):
+    return ('<p><div class="mt-guide-content"><div class="noindex"><ul class="mt-topic-hierarchy-'
+            'listings mt-guide-listings">' + "".join(
+                f'<li class="mt-list-topics"><dl class="mt-listing-detailed"><dt class="mt-'
+                f'listing-detailed-title"><a title="{t}" href="{LT}/{p}"><span class="mt-icon-'
+                f'article-topic"></span>{t}</a></dt><dd class="mt-listing-detailed-overview">'
+                f'About {t}.</dd></dl></li>' for p, t in entries) + "</ul></div></div></p>")
+
+
+def case_libretexts(work):
+    """A LibreTexts book as ArchiveWeb.page records one: the pages, the
+    data their scripts draw three of them from, and an image that
+    arrives by a redirect to a name without an extension."""
+    import json
+    import zipfile
+    os.makedirs(work)
+    png = bytes.fromhex("89504e470d0a1a0a0000000d4948445200000001000000010806000000"
+                        "1f15c4890000000d49444154789c6360000002000154a24f5d0000000049454e44ae426082")
+    alpha = (
+        '<p>Figure \\(\\PageIndex{1}\\) shows it, and Table \\( \\PageIndex{ 2 } \\) too.</p>'
+        '<p><img alt="Figure \\(\\PageIndex{3}\\): a plot" src="/@api/deki/files/5/plot.png?revision=1"/></p>'
+        '<p>\\[E = mc^2 \\label{energy}\\]</p>'
+        '<p>\\[a = b \\nonumber \\]</p>'
+        '<p>\\[\\begin{align} x &amp;= 1 \\nonumber \\\\ y &amp;= 2 \\label{why} \\end{align}\\]</p>'
+        '<p>\\[p = \\text{share (%)} \\nonumber\\]</p>'
+        '<p>\\[\\ce{Fe^{3+}} + \\ce{e-} \\ce{&lt;=&gt;} \\ce{Fe^{2+}}\\]</p>'
+        '<p>Unread: \\(\\ce{A -&gt;[x] B}\\), and \\(c \\rightleftharpoons \\\\ d\\).</p>'
+        '<table><tr><th>reaction</th></tr><tr><td>\\(f \\rightleftharpoons \\\\<br>g\\)</td></tr></table>'
+        '<p>By Equation \\ref{energy} and \\eqref{why}, not \\ref{none}.</p>'
+        '<table><tr><th>h</th></tr><tr><td data-th="h">1</td></tr></table>'
+        '<section class="box-example"><header><div class="mt-section"><h5 class="box-legend">'
+        'Example 1.1.1</h5></div></header><p>An example.</p></section>')
+    pages = [
+        ("", "A Book (Test)", 100,
+         '<p>A book about testing.</p><p>Thumbnail: a picture.</p><p><div class="mt-category-'
+         'container"><ul class="mt-sortable-listings-container" data-page-id="100">'
+         + "".join(f'<li class="mt-sortable-listing"><a title="{t}: a summary" class="mt-'
+                   f'sortable-listing-link" href="{LT}/{p}"><span class="mt-sortable-listing-'
+                   f'image"><img src="{LT}/thumb.png"/></span><span class="mt-sortable-listing-'
+                   f'title">{t}</span></a></li>'
+                   for p, t in [("00%3A_Front_Matter", "Front Matter"),
+                                ("01%3A_One", "1: One"),
+                                ("zz%3A_Back_Matter", "Back Matter")])
+         + "</ul></div></p>"),
+        ("00%3A_Front_Matter", "Front Matter", 101, lt_guide(
+            ("00%3A_Front_Matter/01%3A_TitlePage", "TitlePage"),
+            ("00%3A_Front_Matter/03%3A_Table_of_Contents", "Table of Contents"),
+            ("00%3A_Front_Matter/04%3A_Licensing", "Licensing"))),
+        ("00%3A_Front_Matter/01%3A_TitlePage", "TitlePage", 102,
+         '<p>A Book</p><p><canvas id="canvas"></canvas></p>'),
+        ("00%3A_Front_Matter/03%3A_Table_of_Contents", "Table of Contents", 103,
+         '<p><script src="https://cdn.example.net/dynamic-toc.js"></script><div id="dynamicTOC"></div></p>'),
+        ("00%3A_Front_Matter/04%3A_Licensing", "Licensing", 104,
+         '<p><em>See <span id="detailed_link"><strong>Back Matter/Detailed Licensing'
+         '</strong></span></em>.</p>'),
+        ("01%3A_One", "1: One", 105, lt_guide(("01%3A_One/1.01%3A_Alpha", "1.1: Alpha"),
+                                             ("01%3A_One/1.02%3A_Beta", "1.2: Beta"))),
+        ("01%3A_One/1.01%3A_Alpha", "1.1: Alpha", 106, alpha),
+        # CKEditor's magic line, as an edit saved it into a page.
+        ("01%3A_One/1.02%3A_Beta", "1.2: Beta", 107,
+         '<p><span><span contenteditable="false" style="position: absolute; '
+         'border-top-style: dashed;"><span contenteditable="false" style="background:url('
+         'https://a.mtstatic.com/deki/javascript/editor/out/default/ckeditor/plugins/magicline/'
+         'images/hidpi/icon.png) center no-repeat #ff0000;" title="Insert paragraph here">'
+         '↵</span></span></span></p><p>Beta text \\(x\\).</p>'),
+        ("zz%3A_Back_Matter", "Back Matter", 108, lt_guide(
+            ("zz%3A_Back_Matter/10%3A_Index", "Index"),
+            ("zz%3A_Back_Matter/30%3A_Detailed_Licensing", "Detailed Licensing"))),
+        ("zz%3A_Back_Matter/10%3A_Index", "Index", 109,
+         '<script src="https://cdn.example.net/dynamicIndexMaker.js"></script>'),
+        ("zz%3A_Back_Matter/30%3A_Detailed_Licensing", "Detailed Licensing", 110,
+         '<p><div id="dynamicLicensing"></div></p>'),
+    ]
+    records = [warc_record(LT + ("/" + p if p else ""), "200 OK\r\nContent-Type: text/html; "
+                           "charset=utf-8", lt_page(p, t, b, i)) for p, t, i, b in pages]
+
+    def term(name, *paths):
+        return (f'<li class="mt-listing-no-break mt-tag-name-x mt-tags-single"><h5>{name}</h5>'
+                '<ul class="mt-listings-simple">' + "".join(
+                    f'<li><a rel="custom nofollow" href="{LT}/{p}" title="{t}"><span class="mt-'
+                    f'icon-article-topic"></span>{t}</a></li>' for p, t in paths) + "</ul></li>")
+    tags = ('<div class="noindex"><ul class="mt-tag-directory-listings mt-guide-listings">'
+            + term("1H NMR", ("01%3A_One/1.01%3A_Alpha", "1.1: Alpha"))
+            + term("beta decay", ("01%3A_One/1.02%3A_Beta", "1.2: Beta"))
+            + term("Alpha particle", ("01%3A_One/1.01%3A_Alpha", "1.1: Alpha"),
+                   ("01%3A_One/1.02%3A_Beta", "1.2: Beta"))
+            + term("x-ray", ("01%3A_One/1.02%3A_Beta", "1.2: Beta"))
+            + "</ul></div>")
+    cc = {"label": "CC BY", "link": "https://creativecommons.org/licenses/by/4.0/",
+          "raw": "ccby", "version": "4.0"}
+    licenses = {"meta": {"specialRestrictions": [], "licenses": [dict(cc, count=9, percent=100)]},
+                "text": {"license": cc, "url": LT, "title": "A Book (Test)", "totalPages": 9,
+                         "children": [{"license": cc, "url": LT + "/01%3A_One/1.01%3A_Alpha",
+                                       "title": "1.1: Alpha", "children": []}]}}
+    records += [
+        warc_record("https://test.libretexts.org/@api/deki/pages/=Template%253AMindTouch%252F"
+                    "IDF3%252FViews%252FTag_directory/contents?dream.out.format=json&pageid=100",
+                    "200 OK\r\nContent-Type: application/json", json.dumps({"body": tags}).encode()),
+        warc_record("https://api.libretexts.org/endpoint/licensereport/https%3A%2F%2F"
+                    "test.libretexts.org%2FBookshelves%2FArea%2FA_Book_(Test)",
+                    "200 OK\r\nContent-Type: application/json", json.dumps(licenses).encode()),
+        warc_record("https://test.libretexts.org/@api/deki/files/5/plot.png?revision=1",
+                    "302 Found\r\nLocation: https://files.example.com/site/5/0/webview?Expires=1", b""),
+        warc_record("https://files.example.com/site/5/0/webview?Expires=1",
+                    "200 OK\r\nContent-Type: image/png", png),
+    ]
+    wacz = os.path.join(work, "book.wacz")
+    with zipfile.ZipFile(wacz, "w") as z:
+        z.writestr("pages/pages.jsonl", '{"format": "json-pages-1.0"}\n'
+                   + "".join(json.dumps({"url": LT + ("/" + p if p else "")}) + "\n"
+                             for p, *_ in pages))
+        z.writestr("archive/data.warc.gz", b"".join(records))
+    out = os.path.join(work, "out")
+    result = unpack([wacz], out)
+
+    def have(name):
+        return os.path.exists(os.path.join(out, name))
+    project = read(out, "project.yaml") if have("project.yaml") else ""
+    alpha_out = read(out, "1.01-Alpha.html") if have("1.01-Alpha.html") else ""
+    beta_out = read(out, "1.02-Beta.html") if have("1.02-Beta.html") else ""
+    index = read(out, "10-Index.html") if have("10-Index.html") else ""
+    notes = report(out) if have("unpack-report.csv") else []
+    pages_out = sorted(f for f in os.listdir(out) if f.endswith(".html")) \
+        if os.path.isdir(out) else []
+
+    def noted(check, text=""):
+        return any(n["Check"] == check and text in n["Detail"] for n in notes)
+
+    def at(text):
+        return project.index(text) if text in project else -1
+    return [
+        ("the profile is recognized, and the run completes",
+         lambda: result.returncode == 0 and noted("profile", "libretexts")),
+        ("pages are named by their addresses' last parts",
+         lambda: "1.01-Alpha.html" in pages_out and "01-One.html" in pages_out),
+        ("the home page, the matter's own pages, the title page, and the contents "
+         "page aren't written, and the report says why", lambda: not any(
+             p in pages_out for p in ("A_Book_-Test.html", "00-Front_Matter.html",
+                                      "zz-Back_Matter.html", "01-TitlePage.html",
+                                      "03-Table_of_Contents.html"))
+         and noted("left-out", "title page") and noted("generated", "generate: toc")),
+        ("the book's title, author, and description come from its home page, not "
+         "the site's name or the thumbnail's credit",
+         lambda: 'title: "A Book (Test)"' in project and '"Ann Author"' in project
+         and 'description: "A book about testing."' in project),
+        ("the order is the listings', the matter's pages at the top level with their role",
+         lambda: 0 < at("generate: toc") < at("page: 04-Licensing")
+         < at('title: "1: One"') < at("page: 1.01-Alpha") < at("page: 1.02-Beta")
+         < at("page: 10-Index") < at("page: 30-Detailed_Licensing")
+         and "name: 03-Table_of_Contents" in project and "type: index" in project
+         and "role: front" in project and "role: back" in project),
+        ("each page's title is its heading, and its attribution stays, out of its footer",
+         lambda: "<h1>1.1: Alpha</h1>" in alpha_out and "is shared under a CC BY" in alpha_out
+         and "<footer" not in alpha_out and "librelens" not in alpha_out),
+        ("\\PageIndex is the page's number, in text and in alt text",
+         lambda: "Figure 1.1.1 shows" in alpha_out and "Table 1.1.2 too" in alpha_out
+         and 'alt="Figure 1.1.3: a plot"' in alpha_out),
+        ("every display formula is numbered, as MathJax's tags: all does it, set as a "
+         "LaTeX book's numbered formula is", lambda: alpha_out.count('class="equation"') == 3
+         and "E = mc^2" in alpha_out and "\\tag{1.1.1}" in alpha_out
+         and "\\label" not in alpha_out
+         and '<span class="equation-number">(1.1.1)</span>' in alpha_out
+         and '<span id="eq-energy"></span>' in alpha_out),
+        ("an align's rows are numbered each, the environment starred, \\nonumber gone",
+         lambda: "\\begin{align*}" in alpha_out and "\\tag{1.1.2}" in alpha_out
+         and '<span class="equation-number"><br>(1.1.2)</span>' in alpha_out
+         and "\\nonumber" not in alpha_out),
+        ("a % in \\text{} is escaped, so \\nonumber after it still counts",
+         lambda: "share (\\%)" in alpha_out and "(1.1.4)" not in alpha_out),
+        ("\\ref and \\eqref are links to the formula; one to no label is left, and reported",
+         lambda: '<a href="#eq-energy">1.1.1</a>' in alpha_out
+         and '<a href="#eq-why">(1.1.2)</a>' in alpha_out and "\\ref{none}" in alpha_out
+         and noted("libretexts-reference", "\\ref{none}")),
+        ("\\ce is plain TeX, and one mhchem.py doesn't read is left and reported",
+         lambda: "{\\mathrm{Fe}^{3+}}" in alpha_out and "\\rightleftharpoons" in alpha_out
+         and "\\ce{A ->[x] B}" in alpha_out and noted("mhchem-unread", "A ->[x] B")),
+        ("a bare \\\\ in a formula is lines in a gathered environment",
+         lambda: "\\begin{gathered}c \\rightleftharpoons \\\\ d\\end{gathered}" in alpha_out),
+        ("a formula an editor broke with a <br> is one formula, as MathJax reads it",
+         lambda: "\\begin{gathered}f \\rightleftharpoons \\\\\ng\\end{gathered}" in alpha_out
+         and "<br>g" not in alpha_out),
+        ("a table cell's copy of its header goes", lambda: "data-th" not in alpha_out),
+        ("the editor's mark between paragraphs, saved into a page, goes, with the "
+         "paragraph it leaves empty, and the report counts it",
+         lambda: "Beta text" in beta_out and "magicline" not in beta_out
+         and "↵" not in beta_out and "contenteditable" not in beta_out
+         and not re.search(r"<p>\s*(<span>\s*</span>)?\s*</p>", beta_out)
+         and noted("libretexts-editor-marks", "1 mark(s)")),
+        ("a box is a div of class box, which the run doesn't open up as it does a section",
+         lambda: '<div class="box-example box">' in alpha_out and "<section" not in alpha_out),
+        ("an image that came by a redirect is named as the page asked for it",
+         lambda: have(os.path.join("assets", "plot.png")) and 'src="assets/plot.png"' in alpha_out),
+        ("the Index is made from the tag directory, as the site's script filters and sorts it",
+         lambda: 'Alpha particle: <a href="1.01-Alpha.html">' in index
+         and "1H NMR" not in index and "x-ray" not in index
+         and index.index("Alpha particle") < index.index("beta decay")),
+        ("Detailed Licensing is made from the license report",
+         lambda: have("30-Detailed_Licensing.html") and "<h2>By Page</h2>" in read(
+             out, "30-Detailed_Licensing.html") and "CC BY 4.0" in read(out, "30-Detailed_Licensing.html")),
+        ("Licensing's pointer to Detailed Licensing is a link, as its script makes it",
+         lambda: '<a href="30-Detailed_Licensing.html"><strong>' in read(out, "04-Licensing.html")),
+        ("the listings' icons and the site's own footer are gone",
+         lambda: "mt-icon-article-topic" not in read(out, "01-One.html")
+         and "?pertable" not in alpha_out and not noted("page-not-saved")),
+    ]
+
+
+def case_mhchem(work):
+    """mhchem.py, form by form: each expected TeX typesets as mhchemparser
+    4.2.1's own does (its \\vphantom and \\smash aside)."""
+    import mhchem
+    forms = {
+        "Fe(CN)6^{3-}": r"{\mathrm{Fe}(\mathrm{CN})_{6}^{3-}}",
+        "2 e-": r"{2\,\mathrm{e}^{-}}",
+        "CH5+": r"{\mathrm{CH}_{5}^{+}}",
+        "Zn^{2+}(aq)": r"{\mathrm{Zn}^{2+}\,(\mathrm{aq})}",
+        "R–C(=O)–OH": r"{\mathrm{R}{-}\mathrm{C}({=}\mathrm{O}){-}\mathrm{OH}}",
+        "R–C#C–H": r"{\mathrm{R}{-}\mathrm{C}{\equiv}\mathrm{C}{-}\mathrm{H}}",
+        "(NH4)2Ce(NO3)4": r"{(\mathrm{NH}_{4})_{2}\mathrm{Ce}(\mathrm{NO}_{3})_{4}}",
+        "KSbC4H4O6 * 1/2H2O": r"{\mathrm{KSbC}_{4}\mathrm{H}_{4}\mathrm{O}_{6} \cdot "
+                              r"\tfrac{1}{2}\,\mathrm{H}_{2}\mathrm{O}}",
+        "[M + H]^+": r"{[\mathrm{M} + \mathrm{H}]^{+}}",
+        "M^{+•}": r"{\mathrm{M}^{+\bullet}}",
+        "SO4^2-": r"{\mathrm{SO}_{4}^{2-}}",
+        "Na+ + Cl- -> NaCl v": r"{\mathrm{Na}^{+} + \mathrm{Cl}^{-} \longrightarrow "
+                               r"\mathrm{NaCl} \downarrow}",
+        "<=>": r"\rightleftharpoons",
+        " v ": r"\downarrow",
+        "C_nH_{2n+2}": r"{\mathrm{C}_{n}\mathrm{H}_{2n+2}}",
+        "Fe^{III}": r"{\mathrm{Fe}^{\mathrm{III}}}",
+    }
+    unread = ["A ->[H2O] B", "^{14}C", "A <--> B"]
+    rewritten, left = mhchem.rewrite(r"\ce{Ag+} + \ce{e-} \ce{<=>} \ce{Ag}(s) \ce{A ->[x] B}")
+    return [
+        (f"\\ce{{{form}}} is {tex}", lambda form=form, tex=tex: mhchem.ce_tex(form) == tex)
+        for form, tex in forms.items()
+    ] + [
+        ("a form it doesn't read is None, never a guess",
+         lambda: all(mhchem.ce_tex(f) is None for f in unread)),
+        ("rewrite replaces each \\ce it reads and lists the rest",
+         lambda: rewritten == r"{\mathrm{Ag}^{+}} + {\mathrm{e}^{-}} \rightleftharpoons "
+                             r"{\mathrm{Ag}}(s) \ce{A ->[x] B}" and left == ["A ->[x] B"]),
+    ]
+
+
 CASES = [
     ("a browser's saves", case_browser_save),
     ("an MHTML set", case_mhtml),
@@ -650,6 +925,8 @@ CASES = [
     ("a browser's archive of a lesson", case_browser_archive),
     ("the parsers", case_parsers),
     ("EdTech Books", case_edtech_books),
+    ("LibreTexts", case_libretexts),
+    ("mhchem", case_mhchem),
 ]
 
 

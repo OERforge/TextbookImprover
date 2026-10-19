@@ -90,6 +90,17 @@ PROFILES = [
      "detect": [r'<meta name="generator" content="WordPress'],
      "content": ["main", "div#content", "article"],
      "chrome": ["nav", "footer", "aside", "div.sharedaddy"]},
+    # LibreTexts (NICE CXone Expert, formerly MindTouch): libretexts.py
+    # reads the book's order, its scripted pages, and its formulas.
+    {"name": "libretexts",
+     "detect": [r'<meta name="generator" content="MindTouch"',
+                r'<meta property="og:site_name" content="[^"]*LibreTexts"'],
+     "content": ["section.mt-content-container"],
+     "chrome": ["span.mt-icon-article-topic", "span.mt-icon-article-topic-guide",
+                "span.mt-sortable-listing-image", "div#librelens-list",
+                "div#librelens-attribution-list", "canvas"],
+     "names": "leaf",
+     "book": "libretexts"},
     {"name": "generic",
      "detect": [],
      "content": ["main", "[role=main]", "article", "body"],
@@ -320,6 +331,7 @@ class Site:
         self.resources = {}
         self.by_url = {}            # resource URL -> key
         self.redirects = {}         # URL -> where it redirected
+        self.asked = {}             # key -> the name a page asked for it by
         self.notes = []
         self.kind = ""
 
@@ -834,11 +846,28 @@ def load(inputs):
 
 # ---------------------------------------------------------------- naming
 
-def page_names(site):
+def page_names(site, leaf=False):
     """A file name for each page: its URL's path below what every page
     shares, made safe for a link and flat, since convert.py reads the
-    sources of one directory."""
+    sources of one directory. With leaf, the path's last part alone, for
+    a site whose addresses spell out every level (LibreTexts'
+    .../14%3A_Applications/14.04%3A_Quantitative_Applications, which is
+    14.04-Quantitative_Applications: a colon and the underscores beside
+    it one hyphen)."""
     from names import safe_stem
+    if leaf:
+        taken = set()
+        for url, page in site.pages.items():
+            last = unquote(posixpath.basename(urlsplit(url).path.rstrip("/")))
+            stem = safe_stem(re.sub(r"_*:_*", "-", last)) or "page"
+            base, n = stem, 2
+            while stem in taken:
+                stem, n = f"{base}-{n}", n + 1
+            taken.add(stem)
+            page.name = stem
+        paths = [posixpath.dirname(urlsplit(u).path) or "/" for u in site.pages]
+        site.root = posixpath.commonpath(paths) if paths else "/"
+        return
     paths = [urlsplit(u).path for u in site.pages]
     dirs = [posixpath.dirname(p) or "/" for p in paths]
     common = posixpath.commonpath(dirs) if dirs else "/"
@@ -888,15 +917,26 @@ def resource_names(site, used):
     for key in sorted(used):
         data, name = site.resources[key]
         stem, ext = os.path.splitext(name)
+        # Bytes that came by a redirect to a name with no extension (an
+        # image of LibreTexts' at .../files/187981/Figure12.72.png, served
+        # from files.mtstatic.com/site_4334/187981/0/webview?...) take
+        # the name the page asked for them by.
+        asked = site.asked.get(key, "")
+        if not ext and os.path.splitext(asked)[1]:
+            name = asked
+            stem, ext = os.path.splitext(name)
         # An image served under another format's name (a JPEG as .png)
         # takes the name its bytes have; a reading system trusts the
-        # extension, and epubcheck says so.
+        # extension, and epubcheck says so. One with no extension at all
+        # takes its bytes' extension too.
         right = extensions.get(sniff(data) or "")
         if right and ext.lower() in extensions.values() and \
                 ext.lower() not in (right, ".jpeg" if right == ".jpg" else ""):
             site.notes.append((name, "extension-corrected",
                                f"the file is {right[1:].upper()}; written "
                                f"as {stem}{right}"))
+            ext = right
+        elif right and not ext:
             ext = right
         stem = safe_stem(stem) or "file"
         candidate = stem + ext.lower()
@@ -930,6 +970,35 @@ def _tex_parts(text):
     return parts
 
 
+def _open_formula(text):
+    """Whether text ends inside a formula: a delimiter opens one and
+    nothing after it closes it."""
+    rest = TEX.sub("", text)
+    opened = max(rest.rfind("\\("), rest.rfind("\\["))
+    return opened >= 0 and "\\)" not in rest[opened:] and "\\]" not in rest[opened:]
+
+
+def _join_breaks(element):
+    """A <br>, <wbr>, or comment inside a formula, joined into the text
+    around it, a <br> as a newline. MathJax reads the text on either side
+    of one as one string (FindTeX, with includeHtmlTags' default), so a
+    formula may span it: on LibreTexts, an editor's line break after a
+    long reaction's \\\\, \\( A \\rightleftharpoons \\\\<br>B \\)."""
+    run, holder = element.text or "", None
+    for child in list(element):
+        name = hp.local(child.tag) if isinstance(child.tag, str) else "#comment"
+        if name in ("br", "wbr", "#comment") and _open_formula(run):
+            joined = ("\n" if name == "br" else "") + (child.tail or "")
+            if holder is None:
+                element.text = (element.text or "") + joined
+            else:
+                holder.tail = (holder.tail or "") + joined
+            run += joined
+            element.remove(child)
+            continue
+        holder, run = child, child.tail or ""
+
+
 def mathjax_math(content):
     """MathJax's delimiters, as the page's own HTML carries them before
     any script has run, written as the <script type="math/tex"> Pandoc's
@@ -940,14 +1009,20 @@ def mathjax_math(content):
     Only text is looked at, and never inside code: \\( is a character
     pair a programming book may print, and Pandoc's own
     tex_math_single_backslash extension would read it as math there too
-    (measured). Returns how many formulas were found."""
+    (measured). A line break inside a formula is joined into it, as
+    MathJax reads it (_join_breaks). Returns how many formulas were
+    found."""
     found = 0
 
     def script(tex, display):
         el = content.makeelement(
             "script", {"type": "math/tex; mode=display" if display
                        else "math/tex"})
-        el.text = tex
+        # A blank line, which MathJax reads as a space and LaTeX as the
+        # end of a paragraph, stopping it inside a formula ("Missing $
+        # inserted"): one line end. A page's HTML may hold one, laid out
+        # across lines, and a formula joined across a <br> did.
+        el.text = re.sub(r"\n[ \t]*(?:\n[ \t]*)+", "\n", tex)
         return el
 
     def walk(element):
@@ -956,6 +1031,7 @@ def mathjax_math(content):
             return
         for child in list(element):
             walk(child)
+        _join_breaks(element)
         # Each part holds the text before a formula, so that text is the
         # tail of whatever was inserted for the formula before it.
         def append(parts, into):
@@ -1143,6 +1219,7 @@ def localize(site, page, value, origin, base_dir, keep_hosts, used, missing,
                 return PLACEHOLDER + key
     absolute = urljoin(page.url, value)
     target, fragment = urldefrag(absolute)
+    asked = target
     # A redirect may have been recorded for the URL as written or for its
     # canonical form (a directory, before index.html was added).
     target = follow(site, target)
@@ -1156,6 +1233,9 @@ def localize(site, page, value, origin, base_dir, keep_hosts, used, missing,
     key = site.by_url.get(resource_address(target))
     if key:
         used.add(key)
+        if asked != target:
+            site.asked.setdefault(key, unquote(posixpath.basename(
+                urlsplit(asked).path)))
         return PLACEHOLDER + key + ("#" + fragment if fragment else "")
     host = urlsplit(target).netloc
     if is_link:

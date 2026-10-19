@@ -39,6 +39,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import argparse
 import html as html_module
+import importlib
 import os
 import re
 import sys
@@ -113,11 +114,11 @@ def main():
     keep_hosts = set(THIRD_PARTY) | set(args.third_party)
     for page in site.pages.values():
         page.root = hp.parse(page.text)
-    sitesource.page_names(site)
 
     profile = next((p for p in sitesource.PROFILES
                     if p["name"] == args.profile), None) or \
         sitesource.detect_profile([p.text for p in site.pages.values()])
+    sitesource.page_names(site, leaf=profile.get("names") == "leaf")
     notes.append(("site", "profile",
                   f"{profile['name']}: "
                   + ("named with --profile" if args.profile else
@@ -151,16 +152,40 @@ def main():
                     len(titles[url]) > len(sep + name):
                 titles[url] = titles[url][:-len(sep + name)].strip()
 
-    # The order comes from the menus, so it is read before any is removed.
-    entries, how = sitesource.order(site, titles)
-    notes.append(("site", "order", how))
+    # A profile may read the book itself (its order, the pages its scripts
+    # draw, what they do to every page); otherwise the order comes from
+    # the menus, so it is read before any is removed.
+    book = None
+    if profile.get("book") and not args.whole_pages:
+        book = importlib.import_module(profile["book"]).read(site, titles, notes)
+    if book:
+        entries = []
+        titles.update(book.titles)
+        notes.append(("site", "order", "from the pages' listings, from "
+                      f"{site.pages[book.root].name}.html down"))
+        for url, kind in book.generated.items():
+            notes.append((site.pages[url].name + ".html", "generated",
+                          f"drawn by the site's script; the run writes it "
+                          f"(generate: {kind})"))
+        for url, why in book.left_out.items():
+            notes.append((site.pages[url].name + ".html", "left-out", why))
+        for url in book.made:
+            notes.append((site.pages[url].name + ".html", "made-from-data",
+                          "drawn by the site's script; made from the data it "
+                          "fetches, which the archive holds"))
+        contents = book.contents()
+        for url in list(book.left_out) + list(book.generated):
+            site.pages.pop(url, None)
+    else:
+        entries, how = sitesource.order(site, titles)
+        notes.append(("site", "order", how))
 
     # Authors: the profile's element (Scribble writes them as a paragraph
     # on the contents page), else <meta name="author">, from the first
     # page that has either.
-    authors = []
+    authors = list(book.authors) if book else []
     ordered = [e[2] for e in entries] + list(site.pages)
-    for url in ordered:
+    for url in ([] if authors else ordered):
         root = site.pages[url].root
         found = [hp.text_of(e) for s in profile.get("authors", [])
                  for e in hp.select(root, s)]
@@ -213,6 +238,8 @@ def main():
                 changed = getattr(sitesource, profile["transform"])(content)
                 for kind, count in changed.items():
                     transformed[kind] = transformed.get(kind, 0) + count
+            if book:
+                book.transform(page, content)
             # <a name="x"> with no href: an anchor Pandoc's reader drops.
             # Ids and fragments take one form (see fragment_id).
             for element in content.iter():
@@ -271,8 +298,17 @@ def main():
         notes.append((pages[0], kind, f"{target} (from {len(pages)} page(s))"))
 
     by_url = {url: page.name for url, page in site.pages.items()}
-    outline = [(depth, title, url, "") for depth, title, url in entries]
-    tree, named = contents_tree(outline, by_url, notes)
+    if book:
+        tree, named = contents, set()
+
+        def collect(nodes):
+            for node in nodes:
+                named.add(node.get("page"))
+                collect(node.get("items") or [])
+        collect(tree)
+    else:
+        outline = [(depth, title, url, "") for depth, title, url in entries]
+        tree, named = contents_tree(outline, by_url, notes)
     unnamed = [p.name for u, p in site.pages.items() if p.name not in named]
     for name in unnamed:
         notes.append((name + ".html", "not-in-menu",
@@ -288,11 +324,15 @@ def main():
         if m:
             og = html_module.unescape(m.group(1)).strip()
             break
-    title = book_title or og or (titles.get(entries[0][2]) if entries
-                                 else "") or host
+    title = (book.title if book else "") or book_title or og or (
+        titles.get(entries[0][2]) if entries else "") or host
     language = max(languages, key=languages.get) or "en"
     meta = {"title": [title], "language": [language], "creator": authors,
-            "identifier": [host + site.root]}
+            "identifier": [book.identifier if book else host + site.root]}
+    if book and book.description:
+        meta["description"] = [book.description]
+    if book:
+        notes += book.summary(profile["name"])
     if not args.whole_pages:
         with open(os.path.join(out, "project.yaml"), "w",
                   encoding="utf-8") as fh:

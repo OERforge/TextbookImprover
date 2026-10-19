@@ -613,6 +613,21 @@ PDF_MACROS = r"""\ExplSyntaxOn
 \text_declare_purify_equivalent:Nn \oerlang { \use_ii:nn }
 \AddToHook { package / hyperref / after }
   { \pdfstringdefDisableCommands { \cs_set:Npn \oerlang #1#2 {#2} } }
+% A box (a div of class box), set off by a rule above it and one below,
+% each an artifact, kept with the box's first and last lines.
+\NewDocumentCommand \OERBoxRule { m }
+  {
+    \par
+    \str_if_eq:nnTF {#1} { above }
+      { \skip_vertical:N \bigskipamount }
+      { \nobreak \skip_vertical:N \medskipamount }
+    \cs_if_exist:NT \tag_mc_begin:n { \tag_mc_begin:n { artifact } }
+    \hrule height 0.4pt
+    \cs_if_exist:NT \tag_mc_end: { \tag_mc_end: }
+    \str_if_eq:nnTF {#1} { above }
+      { \nobreak \skip_vertical:N \medskipamount }
+      { \skip_vertical:N \bigskipamount }
+  }
 \ExplSyntaxOff
 """
 

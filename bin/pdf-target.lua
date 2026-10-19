@@ -1456,6 +1456,19 @@ local function term_notes(list)
   end
 end
 
+-- A box, a div of class box (a LibreTexts page's Example, Exercise, or
+-- Note; a LaTeX book's passage in a frame), which the pages and the EPUB
+-- draw with a border: set off by a rule above and one below, artifacts
+-- (\OERBoxRule), so where it ends shows too.
+local function box_rules(div)
+  if not div.classes:includes('box') then return nil end
+  return {
+    pandoc.RawBlock('latex', '\\OERBoxRule{above}'),
+    div,
+    pandoc.RawBlock('latex', '\\OERBoxRule{below}'),
+  }
+end
+
 return {
   { BulletList = headings_inside, OrderedList = headings_inside,
     DefinitionList = headings_inside, BlockQuote = headings_inside,
@@ -1467,5 +1480,6 @@ return {
   { Figure = Figure },
   { Para = line_breaks, Plain = line_breaks },
   { Table = Table, Image = Image, Link = Link, Math = Math },
+  { Div = box_rules },
   { Span = inline_language, Link = inline_language, Div = div_language },
 }

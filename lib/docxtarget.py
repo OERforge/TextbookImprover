@@ -247,6 +247,19 @@ CODE_MARK = "tiqLang"
 # and the list, end at the formula when the file is read. The mark carries
 # the list's depth, which becomes the paragraph's numbering level.
 MATH_MARK = "tiqMath"
+# A box: a div of class box (a LibreTexts page's Example, Exercise, or
+# Note; a LaTeX book's framed passage), which the pages draw with a
+# border. Each paragraph in it, outside a table, gets the same border,
+# which Word draws around paragraphs in a row as one; a table in it keeps
+# its own (box_borders).
+BOX_MARK = "tiqBox"
+BOX_BORDER = "".join('<w:%s w:val="single" w:sz="4" w:space="4" w:color="auto" />' % side
+                     for side in ("top", "left", "bottom", "right"))
+# What a paragraph's border comes before among its properties, in the
+# order the schema gives them (ISO/IEC 29500-1, 17.3.1.26).
+AFTER_BORDER = ("w:shd", "w:tabs", "w:suppressAutoHyphens", "w:kinsoku", "w:wordWrap",
+                "w:overflowPunct", "w:topLinePunct", "w:autoSpaceDE", "w:autoSpaceDN",
+                "w:bidi", "w:adjustRightInd", "w:snapToGrid", "w:spacing", "w:ind")
 BASE_LIST_ID = 1000          # Pandoc's numbering with no marker (baseListId)
 # A table or a horizontal rule inside an item of a list that isn't itself
 # in a list. Word can't put a table in a numbered paragraph, and Pandoc's
@@ -354,7 +367,7 @@ def mark_blocks(doc):
     a table. Matching by position went wrong on Pandoc's own output: a
     figure holding two images is a w:tbl too. Returns (doc, marks)."""
     counts = {"quote": 0, "sep": 0, "table": 0, "decorative": 0, "lines": 0, "code": 0,
-              "equations": 0}
+              "equations": 0, "box": 0}
 
     def marked(prefix, kind, inner, block):
         counts[kind] += 1
@@ -400,6 +413,8 @@ def mark_blocks(doc):
                     item = marked(LINES_MARK, "lines", [item], True)
             elif t == "Image" and _decorative(item):
                 item = marked(DECORATIVE_MARK, "decorative", [item], False)
+            elif t == "Div" and "box" in item["c"][0][1]:
+                item = marked(BOX_MARK, "box", [item], True)
             out.append(item)
         return out
 
@@ -1019,6 +1034,51 @@ def _set_indent(paragraph, left, right=None, hanging=None):
     return paragraph[:start] + "<w:pPr>" + props + paragraph[end:]
 
 
+def _set_border(paragraph):
+    """A paragraph with the box's border (BOX_BORDER) among its
+    properties, in their place, in for any border it had."""
+    border = "<w:pBdr>" + BOX_BORDER + "</w:pBdr>"
+    if not re.match(r"<w:p>\s*<w:pPr>", paragraph):
+        return paragraph.replace("<w:p>", "<w:p><w:pPr>" + border + "</w:pPr>", 1)
+    start = paragraph.index("<w:pPr>")
+    end = paragraph.index("</w:pPr>", start)
+    props = paragraph[start + len("<w:pPr>"):end]
+    props = re.sub(r"<w:pBdr>.*?</w:pBdr>", "", props, flags=re.S)
+    at = [props.find("<" + name + c) for name in AFTER_BORDER + AFTER_IND for c in (" ", ">", "/")]
+    at = [i for i in at if i >= 0]
+    cut = min(at) if at else len(props)
+    return paragraph[:start] + "<w:pPr>" + props[:cut] + border + props[cut:] + paragraph[end:]
+
+
+def box_borders(xml):
+    """Each paragraph inside the marked box ranges, outside their tables,
+    given the box's border, and the marks removed; returns (xml, boxes)."""
+    if BOX_MARK not in xml:
+        return xml, 0
+    names = dict(re.findall(r'<w:bookmarkStart w:id="(\d+)" w:name="(_?' + BOX_MARK
+                            + r'\d+)"\s*/>', xml))
+    tokens = re.split(r"(<w:bookmarkStart\b[^>]*/>|<w:bookmarkEnd\b[^>]*/>|"
+                      r"<w:tbl>|</w:tbl>|<w:p>.*?</w:p>)", xml, flags=re.S)
+    open_boxes, tables, out = set(), 0, []
+    for token in tokens:
+        start = re.match(r'<w:bookmarkStart w:id="(\d+)"', token)
+        end = re.match(r'<w:bookmarkEnd w:id="(\d+)"', token)
+        if start and start.group(1) in names:
+            open_boxes.add(start.group(1))
+            continue
+        if end and end.group(1) in names:
+            open_boxes.discard(end.group(1))
+            continue
+        if token == "<w:tbl>":
+            tables += 1
+        elif token == "</w:tbl>":
+            tables -= 1
+        elif open_boxes and not tables and token.startswith("<w:p>"):
+            token = _set_border(token)
+        out.append(token)
+    return "".join(out), len(names)
+
+
 def indent_quotes(xml, levels=None, blanks=None):
     """Each paragraph inside the marked quote ranges indented by its
     depth, a list's items beyond their level's own indent (levels, from
@@ -1301,6 +1361,8 @@ def finish(path, doc, keep=None):
         quoted_items += items
         xml, n = keep_captions(xml)
         counts["captions_kept"] += n
+        xml, n = box_borders(xml)
+        counts["boxes"] = counts.get("boxes", 0) + n
         xml, n = single_alignment(xml)
         counts["alignments"] += n
         xml, n = bar_accents(xml)

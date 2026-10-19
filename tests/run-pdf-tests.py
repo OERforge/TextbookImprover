@@ -314,6 +314,13 @@ And two pictures side by side in one figure, each a figure of its own in
 a row, as a LibreTexts page sets them.
 
 <figure><div class="row"><figure><img src="assets/red.png" alt="A left red square"></figure><figure><img src="assets/photo.png" alt="A right green square"></figure></div><figcaption>Figure 7.7 Two squares side by side</figcaption></figure>
+
+::: box
+A passage set off in a box, as a LibreTexts page's Example is and a
+LaTeX book's framed passage.
+:::
+
+And text after the box.
 """
 
 # An untagged book, built to no PDF/UA standard, with figures and no
@@ -1032,6 +1039,30 @@ def page_holding(path, words):
     return None
 
 
+def artifact_strokes(path, words):
+    """The lengths of the straight lines, in points, that the first page
+    holding words strokes as artifacts."""
+    pikepdf = pdfparagraphs.pikepdf
+    at = page_holding(path, words)
+    if at is None:
+        return []
+    found, marked, path_ = [], [], []
+    with pikepdf.open(path) as pdf:
+        for operands, op in pikepdf.parse_content_stream(pdf.pages[at]):
+            op = str(op)
+            if op in ("BMC", "BDC"):
+                marked.append(str(operands[0]))
+            elif op == "EMC" and marked:
+                marked.pop()
+            elif op in ("m", "l"):
+                path_.append([float(x) for x in operands])
+            elif op == "S":
+                if len(path_) == 2 and "/Artifact" in marked:
+                    found.append(round(abs(path_[1][0] - path_[0][0])))
+                path_ = []
+    return found
+
+
 def font_names(reader):
     """The base font names the PDF's pages draw with, form XObjects too."""
     names = set()
@@ -1404,6 +1435,13 @@ def checks(work, jobs=1):
          lambda: (200, 100) in image_pixels(untagged_path)
          and (400, 200) not in image_pixels(untagged_path)
          and "images.downsample 2: 1 of 2 image(s) scaled down" in untagged_said),
+        # A box, which the pages draw with a border: a rule above it and one
+        # below, across the line, each an artifact.
+        ("a box is set off by a rule above and one below, across the line, artifacts",
+         lambda: "\\OERBoxRule{above}" in source and "\\OERBoxRule{below}" in source
+         and source.index("\\OERBoxRule{above}") < source.index("A passage set off in a box")
+         < source.index("\\OERBoxRule{below}")
+         and artifact_strokes(pdf_path, "A passage set off in a box") == [344, 344]),
         # LaTeX says so in its log, which Pandoc keeps to itself but for
         # its JSON log of the run.
         ("a line wider than the text is named, a display formula, on its page",

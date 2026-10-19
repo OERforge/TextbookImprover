@@ -4364,6 +4364,58 @@ def case_remediate_docx(work):
     ]
 
 
+def case_word_box(work):
+    """A box (a div of class box) in a Word file: each paragraph in it,
+    its legend, a list's item, and a formula's paragraph alike, given the
+    same border, which Word draws around them as one, in its place among
+    the paragraph's properties; a table in it keeps its own, the text
+    outside it has none, and the mark that found it is gone."""
+    os.makedirs(work)
+    with open(os.path.join(work, "page.md"), "w", encoding="utf-8") as fh:
+        fh.write("# Boxes\n\nBefore the box.\n\n::: box\n### Example 1.1\n\nA question.\n\n"
+                 "- a step\n- another\n\n$$x^2 + y^2 = z^2$$\n\n| A | B |\n|---|---|\n| 1 | 2 |\n\n"
+                 "#### Solution\n\nAn answer.\n:::\n\nAfter the box.\n")
+    result = convert(work, "targets:\n  word:\n    format: docx\n", fixtures=())
+    xml = ""
+    if exists(work, "word", "page.docx"):
+        with zipfile.ZipFile(os.path.join(work, "word", "page.docx")) as z:
+            xml = z.read("word/document.xml").decode("utf-8")
+    order = ("pStyle", "keepNext", "keepLines", "pageBreakBefore", "framePr", "widowControl",
+             "numPr", "suppressLineNumbers", "pBdr", "shd", "tabs", "spacing", "ind", "jc",
+             "rPr")
+
+    def paragraphs(inside_tables):
+        found, depth = [], 0
+        for token in re.split(r"(<w:tbl>|</w:tbl>|<w:p>.*?</w:p>)", xml, flags=re.S):
+            if token == "<w:tbl>":
+                depth += 1
+            elif token == "</w:tbl>":
+                depth -= 1
+            elif token.startswith("<w:p>") and (depth > 0) == inside_tables:
+                found.append(("".join(re.findall(r"<w:t[^>]*>([^<]*)</w:t>", token)),
+                              "<w:pBdr>" in token, re.search(r"<w:pPr>(.*?)</w:pPr>", token, re.S)))
+        return found
+
+    def in_order(props):
+        names = [n for n in re.findall(r"<w:(\w+)", props.group(1)) if n in order]
+        return names == sorted(names, key=order.index)
+    outside = paragraphs(False)
+    return [
+        ("each paragraph in a box has its border, its legend, a list's items, and a formula's "
+         "paragraph alike, and the text outside has none",
+         lambda: result.returncode == 0
+         and [text for text, bordered, _ in outside if bordered]
+         == ["Example 1.1", "A question.", "a step", "another", "", "Solution", "An answer."]
+         and all(not bordered for text, bordered, _ in outside
+                 if text in ("Boxes", "Before the box.", "After the box."))),
+        ("in its place among the paragraph's properties, a table in the box keeps its own, and "
+         "the mark is gone",
+         lambda: all(in_order(props) for _, bordered, props in outside if bordered and props)
+         and not any(bordered for _, bordered, _ in paragraphs(True))
+         and "tiqBox" not in xml),
+    ]
+
+
 def case_docx_target(work):
     """A docx target: Pandoc's Word file, then compatibility mode 15,
     ScreenTips, Word's decorative marker, the First Column flag, and a bar
@@ -6166,6 +6218,7 @@ CASES = [
     ("HTML table repairs", case_html_table_repairs),
     ("bare links and their sidecar", case_bare_links),
     ("a docx target", case_docx_target),
+    ("a box in a Word file", case_word_box),
     ("a remediated copy of a Word file", case_remediate_docx),
     ("format: source", case_source_target),
     ("format: source repairs Word's equations", case_word_equations),

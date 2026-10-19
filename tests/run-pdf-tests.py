@@ -134,9 +134,9 @@ And amssymb's squares, which unicode-math has no names for: $\square \blacksquar
 | 2020 | 5      |
 | 2021 | $\begin{matrix} 5 & + & 1 \end{matrix}$ |
 
-![A small red square](assets/red.png)
+![A small red square](assets/red.png){width=800px}
 
-A rule between paragraphs: ![](assets/rule.png){.decorative}
+A rule between paragraphs: ![](assets/rule.png){.decorative width=900px height=2px}
 
 ![](assets/blank.png)
 
@@ -302,6 +302,18 @@ And a figure it doesn't number, as OpenStax doesn't a chapter's opening picture.
 | 2020 | 4    |
 
 Table: Table 7.4 Rates the book labels itself
+
+And a figure set in a table's cell beside words, its caption carrying
+its own label, as a LibreTexts page sets two figures side by side.
+
++--------------------------------------------------------+--------------------------------------------------------+
+| ![Figure 7.6 A red square in a cell](assets/red.png)   | Words beside the figure, in the table's other cell.    |
++--------------------------------------------------------+--------------------------------------------------------+
+
+And two pictures side by side in one figure, each a figure of its own in
+a row, as a LibreTexts page sets them.
+
+<figure><div class="row"><figure><img src="assets/red.png" alt="A left red square"></figure><figure><img src="assets/photo.png" alt="A right green square"></figure></div><figcaption>Figure 7.7 Two squares side by side</figcaption></figure>
 """
 
 # An untagged book, built to no PDF/UA standard, with figures and no
@@ -982,6 +994,35 @@ def font_installed(name):
     return bool(found.stdout.strip())
 
 
+def image_widths(reader):
+    """The width, in points, each image a page draws is drawn at: its
+    matrix's, as the page's q, Q, and cm operators leave it."""
+    import math
+    widths = []
+    for page in reader.pages:
+        resources = resolve(page.get("/Resources")) or {}
+        images = resolve(resources.get("/XObject")) or {}
+        content = page.get_contents()
+        if content is None:
+            continue
+        matrix, saved = (1, 0, 0, 1, 0, 0), []
+        for operands, operator in content.operations:
+            if operator == b"q":
+                saved.append(matrix)
+            elif operator == b"Q" and saved:
+                matrix = saved.pop()
+            elif operator == b"cm":
+                a, b, c, d, e, f = (float(x) for x in operands)
+                A, B, C, D, E, F = matrix
+                matrix = (a * A + b * C, a * B + b * D, c * A + d * C,
+                          c * B + d * D, e * A + f * C + E, e * B + f * D + F)
+            elif operator == b"Do" and operands:
+                image = images.get(operands[0])
+                if image is not None and image.get_object().get("/Subtype") == "/Image":
+                    widths.append(math.hypot(matrix[0], matrix[1]))
+    return widths
+
+
 def head_sizes(reader, words):
     """The size each page's running head holding words is drawn at, its
     font's size as the page scales it."""
@@ -1163,11 +1204,11 @@ def checks(work, jobs=1):
         # first cell of each body row TH-row only if pdf-target.lua set
         # table/header-columns around it.
         ("the matrix table's first column is row headers",
-         lambda: len(tabled) == 11 and row_headers(tabled[0]) == 2),
+         lambda: len(tabled) == 12 and row_headers(tabled[0]) == 2),
         ("and so is a table's in a passage in another language that holds a heading",
-         lambda: len(tabled) == 11 and row_headers(tabled[9]) == 1),
+         lambda: len(tabled) == 12 and row_headers(tabled[9]) == 1),
         ("the plain table has header cells and no row headers",
-         lambda: len(tabled) == 11 and row_headers(tabled[1]) == 0
+         lambda: len(tabled) == 12 and row_headers(tabled[1]) == 0
          and any(kind(e) == "/TH" for e in tabled[1])),
         # LaTeX writes a longtable's caption as a first row of one header
         # cell, and leaves the empty copy of the head it repeats inside the
@@ -1238,8 +1279,17 @@ def checks(work, jobs=1):
          lambda: says(text, "Figure 7.3 A red square the book labels itself")
          and says(text, "Table 7.4 Rates the book labels itself")
          and says(text, "Figure 7.5 A red square again")
-         and not re.search(r":\s*(Figure\s*7\.[35]|Table\s*7\.4)", text)
-         and body.count("{\\OERNoCaptionLabel") == 4),
+         and says(text, "Figure 7.7 Two squares side by side")
+         and not re.search(r":\s*(Figure\s*7\.[357]|Table\s*7\.4)", text)
+         and body.count("{\\OERNoCaptionLabel") == 5),
+        # In a table's cell a figure is no float, so LaTeX numbers no caption
+        # there, and \OERNoCaptionLabel stopped LaTeX in a longtable's cell
+        # ("Misplaced \noalign"); the count of five above leaves them out.
+        ("a figure in a table's cell whose caption carries its own label is "
+         "left as it is",
+         lambda: says(text, "Figure 7.6 A red square in a cell")
+         and says(text, "Words beside the figure")
+         and not re.search(r":\s*Figure\s*7\.6", text)),
         ("and a figure marked unnumbered gets no number",
          lambda: says(text, "A red square the book leaves unnumbered")
          and not re.search(r"Figure\s*\d+\s*:\s*A\s+red\s+square\s+the\s+book\s+leaves", text)),
@@ -1253,7 +1303,8 @@ def checks(work, jobs=1):
          lambda: sorted([kind(k) for k in children(e)] for e in tree
                         if kind(e) == "/Caption"
                         and [kind(k) for k in children(e)][:1] != ["/Div"])
-         == [["/Lbl", "/text"], ["/Lbl", "/text"], ["/text"], ["/text"], ["/text"]]),
+         == [["/Lbl", "/text"], ["/Lbl", "/text"], ["/text"], ["/text"], ["/text"],
+             ["/text"]]),
         # Untagged and with no table, so no caption package: LaTeX's classes
         # set its figures, a caption too long for a line as a paragraph.
         ("so in an untagged book with no table, a short caption and a long one, "
@@ -1423,7 +1474,25 @@ def checks(work, jobs=1):
          lambda: any(str(f.get("/Alt")) == "A small red square"
                      for f in figures)),
         ("the decorative image is no figure",
-         lambda: len(figures) == 6),
+         lambda: len(figures) == 9),
+        # Each inner figure's empty \caption{} was the float's too, three
+        # Captions in one Aside, which veraPDF rejects (ISO 14289-2,
+        # 8.2.5.27).
+        ("two pictures side by side in a figure, each a figure in a row, are one figure "
+         "with one caption, its first or last element",
+         lambda: (lambda shapes: len(shapes) == 1 and shapes[0].count("/Figure") == 2
+                  and shapes[0].count("/Caption") == 1
+                  and shapes[0].index("/Caption") in (0, len(shapes[0]) - 1))(
+             [[kind(k) for k in children(e)] for e in tree
+              if any(str(k.get("/Alt")) == "A left red square" for k in children(e))])),
+        # Its width, 800 pixels, is 600 points at the writer's 96 an inch,
+        # and the decorative rule's 675: no wider than the line now.
+        ("an image whose width is wider than the line is scaled to fit it, "
+         "a decorative one too",
+         lambda: len(re.findall(r"\\protect\\pandocbounded\{\\includegraphics\[width=",
+                                source)) == 2
+         and 0 < max(image_widths(reader))
+         <= 0.75 * float(reader.pages[0].mediabox.width)),
         ("an image with no alt text is reported by the output check",
          lambda: [r["Check"] for r in pdf_rows].count(
              "pdf-figure-alt-is-file-name") == 1),

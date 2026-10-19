@@ -1788,6 +1788,11 @@ def case_latex_target(work):
                  "triangle</figcaption></figure>\n\n<figure id=\"outer\"><figure>"
                  "<img src=\"img/square.png\" alt=\"A flowchart.\"></figure>"
                  "<figcaption>A small example</figcaption></figure>\n\n"
+                 # Two pictures side by side, as LibreTexts sets them.
+                 "<figure id=\"pair\"><div class=\"row\"><figure>"
+                 "<img src=\"img/square.png\" alt=\"A left square.\"></figure><figure>"
+                 "<img src=\"img/square.png\" alt=\"A right square.\"></figure></div>"
+                 "<figcaption>Two squares side by side</figcaption></figure>\n\n"
                  "```python\nsides = 3  # a triangle\n```\n\n"
                  "Its [lorry]{lang=en-GB} is grey.\n\n"
                  "::: {lang=en-GB}\nA paragraph spelt so.\n\n## Holiday\n\nIts fortnight.\n:::\n")
@@ -1898,9 +1903,12 @@ def case_latex_target(work):
                            if os.path.exists(os.path.join(work, "adoc", "three.adoc")) else "")
          is not None and "adoc,three,figure-table," in (read(work, "fidelity.csv")
                          if os.path.exists(os.path.join(work, "fidelity.csv")) else "")),
-        ("a figure in a figure: one figure, one caption",
-         lambda: three.count("\\begin{figure}") == 1
-         and three.count("\\caption{A small example}") == 1 and "\\caption{}" not in three),
+        ("a figure in a figure, or in a div in one: one figure, one caption",
+         lambda: three.count("\\begin{figure}") == 2
+         and three.count("\\caption{A small example}") == 1
+         and three.count("\\caption{Two squares side by side}") == 1
+         and len(re.findall(r"alt=\{A\s+left\s+square\.\}", three)) == 1
+         and "\\caption{}" not in three),
         ("a head cell's lines are broken in a minipage, as the writer breaks them",
          lambda: "\\begin{minipage}[b]{\\linewidth}\\raggedright\nProof: first,\\\\\n" in two),
         ("the writer's \\multicolumn at a table's edge is there to read back",

@@ -73,7 +73,7 @@
 --    label of LaTeX's, as an unnumbered table's has none. A caption's own
 --    label is one of the words the captions.figure_prefixes or
 --    captions.table_prefixes setting names, on a word boundary, then a
---    number.
+--    number. One in a table's cell, which LaTeX doesn't number, is left.
 --
 -- 10. A formula with an alignment in it (a matrix, an array, cases) in a
 --    table's cell or caption, set in braces (below).
@@ -100,6 +100,10 @@
 --    footnote, which the writer makes a sectioning command there, and
 --    LaTeX's tagging couldn't close the section it opened: a paragraph
 --    tagged as a heading (below).
+--
+-- 17. An image with a width or a height, which the writer set at that
+--    size, wider than its line or not: scaled to fit, as one with
+--    neither is (below).
 --
 -- Copyright 2026 Robert Szarka
 --
@@ -178,6 +182,28 @@ local function unnumbered(fig)
     return only.content[1].classes:includes('unnumbered')
   end
   return false
+end
+
+-- A figure or a table in a table's cell is no float: the writer sets such
+-- a figure in a center environment, its caption a paragraph LaTeX doesn't
+-- number, so a caption's own label needs nothing done there, and
+-- \OERNoCaptionLabel stopped LaTeX ("Misplaced \noalign": in a longtable's
+-- cell, \captionsetup is the caption package's form for a caption between
+-- rows), on two figures a LibreTexts page sets side by side in a table.
+-- Each is marked in a pass before Figure's and Table's.
+local IN_CELL = 'oer-in-cell'
+
+local function mark_in_cells(tbl)
+  return tbl:walk({
+    Figure = function(fig) fig.attributes[IN_CELL] = '1'; return fig end,
+    Table = function(inner) inner.attributes[IN_CELL] = '1'; return inner end,
+  })
+end
+
+local function in_cell(element)
+  local marked = element.attributes[IN_CELL] ~= nil
+  element.attributes[IN_CELL] = nil
+  return marked
 end
 
 -- A figure's or a table's blocks in a group with \OERNoCaptionLabel,
@@ -557,6 +583,7 @@ local function fit_to_line(tbl)
 end
 
 function Table(tbl)
+  local cell = in_cell(tbl)
   tbl = tbl:walk(braced_math)
   flatten_nested(tbl)
   unquote_cells(tbl.head.rows)
@@ -605,7 +632,7 @@ function Table(tbl)
     id = tbl.identifier
     tbl.identifier = ''
   end
-  local own = own_label(tbl.caption, TABLE_WORDS)
+  local own = not cell and own_label(tbl.caption, TABLE_WORDS)
   local blocks = { tbl }
   if columns > 0 then
     local list = {}
@@ -628,6 +655,34 @@ end
 local function decorative(img)
   return img.attributes["aria-hidden"] == "true"
     or img.attributes["role"] == "presentation"
+end
+
+-- An image with a width or a height (17): the writer sets it at that
+-- size, where one with neither it scales to fit its line and the page in
+-- \pandocbounded (Writers/LaTeX.hs, 3.12.1). A LibreTexts page gives
+-- each picture its width in pixels, which the writer takes at 96 an
+-- inch: 217 of Instrumental Analysis's were wider than the line, 82 of
+-- them past the page's edge. Such an image is set in the same macro,
+-- which leaves one that fits as it is; \protect before it, as the writer
+-- puts before its own in a heading. A size is one the writer reads
+-- (lengthToDim, Text/Pandoc/ImageSize.hs): a number, then a unit it knows
+-- or none.
+local UNITS = { [""] = true, px = true, cm = true, mm = true, ["in"] = true,
+                inch = true, ["%"] = true, pt = true, pc = true, em = true }
+
+local function size(value)
+  if not value then return false end
+  local number, unit = value:match("^([%d.]*)%s*(.-)$")
+  return (number:match("^%d+$") or number:match("^%d+%.%d+$")) ~= nil
+    and UNITS[unit] == true
+end
+
+local function bounded(img)
+  if size(img.attributes["width"]) or size(img.attributes["height"]) then
+    return { pandoc.RawInline("latex", "\\protect\\pandocbounded{"), img,
+             pandoc.RawInline("latex", "}") }
+  end
+  return { img }
 end
 
 function Image(img)
@@ -656,14 +711,14 @@ function Image(img)
     -- key sets the image back to a figure, whose missing text LaTeX then
     -- fills with the file name.
     img.attributes["alt"] = nil
-    return {
-      pandoc.RawInline("latex", "{\\OERArtifactGraphics"),
-      img,
-      pandoc.RawInline("latex", "}"),
-    }
+    local set = bounded(img)
+    table.insert(set, 1, pandoc.RawInline("latex", "{\\OERArtifactGraphics"))
+    table.insert(set, pandoc.RawInline("latex", "}"))
+    return set
   end
-  if changed then
-    return img
+  local set = bounded(img)
+  if changed or #set > 1 then
+    return set
   end
 end
 
@@ -694,29 +749,39 @@ end
 -- Figures the writer can't make one LaTeX figure of (Writers/LaTeX.hs,
 -- 3.12). A figure inside a figure is written as the inner one's content
 -- with an empty \caption{} of its own before the outer one's, so the PDF
--- numbers two captions in one figure: the
+-- numbers two captions in one figure, and tagged, the figure (an Aside)
+-- holds more than one Caption, not all first or last, which PDF 2.0 and
+-- PDF/UA-2 forbid (ISO 32000-2, 14.8.4.8.4; ISO 14289-2, 8.2.5.27; what
+-- veraPDF reported of Instrumental Analysis's eight such figures): the
 -- inner figure's content stands in the outer one, and its caption, if it
--- had one, as a paragraph under it. A figure holding only a table is
--- written as the table, which can't float, and the figure's caption is
--- dropped: the caption becomes the table's, when the table has none.
+-- had one, as a paragraph under it. So does one in a div inside the
+-- figure, as LibreTexts sets two pictures side by side (<figure><div
+-- class="row"><figure>…), which the writer writes the same way.
+-- A figure holding only a table is written as the table, which can't
+-- float, and the figure's caption is dropped: the caption becomes the
+-- table's, when the table has none.
 local function caption_blocks(caption)
   return caption and caption.long or pandoc.Blocks{}
 end
 
-local function unnest(fig)
+local function opened(blocks)
   local content = pandoc.Blocks{}
-  for _, block in ipairs(fig.content) do
+  for _, block in ipairs(blocks) do
     if block.t == 'Figure' then
-      content:extend(block.content)
-      local long = caption_blocks(block.caption)
-      if #long > 0 then
-        content:extend(long)
-      end
+      content:extend(opened(block.content))
+      content:extend(caption_blocks(block.caption))
+    elseif block.t == 'Div' then
+      block.content = opened(block.content)
+      content:insert(block)
     else
       content:insert(block)
     end
   end
-  fig.content = content
+  return content
+end
+
+local function unnest(fig)
+  fig.content = opened(fig.content)
   return fig
 end
 
@@ -770,6 +835,7 @@ local function numbered_notes(fig)
 end
 
 function Figure(fig)
+  local cell = in_cell(fig)
   fig = unnest(fig)
   local tbl, id = only_table(fig)
   if tbl and #caption_blocks(tbl.caption) == 0 and #caption_blocks(fig.caption) > 0 then
@@ -777,9 +843,10 @@ function Figure(fig)
     if tbl.identifier == '' then
       tbl.identifier = id ~= '' and id or fig.identifier
     end
+    if cell then tbl.attributes[IN_CELL] = '1' end
     return tbl
   end
-  local unlabeled = own_label(fig.caption, FIGURE_WORDS) or unnumbered(fig)
+  local unlabeled = not cell and (own_label(fig.caption, FIGURE_WORDS) or unnumbered(fig))
   fig = numbered_notes(fig)
   if unlabeled then
     return without_label({ fig })
@@ -1134,6 +1201,7 @@ return {
   { DefinitionList = term_notes },
   { Span = equation },
   { Inlines = lift_display, Header = heading },
+  { Table = mark_in_cells },
   { Figure = Figure },
   { Para = line_breaks, Plain = line_breaks },
   { Table = Table, Image = Image, Link = Link, Math = Math },

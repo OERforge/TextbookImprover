@@ -490,6 +490,20 @@ def _coerce(node, value, where, problems):
         return text
 
     if kind == "enum":
+        if isinstance(value, bool):
+            # YAML 1.1 reads an unquoted on and off as booleans too, so
+            # `menu: on`, as the docs write it, was True, and the run
+            # stopped. Where on or off is one of a setting's values, which
+            # word was meant is plain; anywhere else it's the Norway problem.
+            word = "on" if value else "off"
+            for allowed in node.values:
+                if allowed.lower() == word:
+                    return allowed
+            problems.append(
+                f"{where}: {node.path} was read as the boolean "
+                f"{str(value).lower()} because YAML treats yes, no, on and off "
+                "that way. Put it in quotes.")
+            return node.default
         text = str(value).strip().lower()
         for allowed in node.values:
             if allowed.lower() == text:

@@ -190,6 +190,8 @@ rather than silently accepted.
 `on`, and `off` as booleans, so Norwegian becomes `False`. There's no way
 to recover which word was written, so it's refused. Quote it.
 
+A setting with `on` or `off` among its values (`menu`, `title_page`, `merge`, and the rest) is the exception: there the word meant is plain, so `menu: on` is `"on"` and `merge: off` is `"off"`. Any other setting of fixed values refuses a boolean, as `language` does.
+
 **`version: 1.10` is the number 1.1.** The trailing zero is gone before
 any program sees it. Quote it.
 

@@ -1,0 +1,7 @@
+# YAML 1.1 reads an unquoted on and off as booleans, so `menu: on`, as the
+# docs write it, was True, which is none of the setting's values. Where the
+# values are on and off, which word was written is plain.
+target: web
+expect:
+  menu: "on"
+  title_page: "off"

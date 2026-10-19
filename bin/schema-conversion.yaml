@@ -446,9 +446,9 @@ keys:
 
   merge:
     type: enum
-    values: [off, groups]
+    values: ["off", groups]
     stage: render
-    default: off
+    default: "off"
     description: >
       For a markdown, asciidoc, or docx target: off writes one file per page, as the rest
       of the run sees pages. groups writes one file per top-level entry

@@ -1,0 +1,3 @@
+# A setting of other values can't tell which word a boolean was, so it's
+# refused, as a text setting refuses one.
+error: read as the boolean true

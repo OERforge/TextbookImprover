@@ -17,7 +17,7 @@ The suites' runs of `convert.py` pass `--quick`, so the output check's validator
 | Suite | What it pins down |
 |---|---|
 | `run-spelling-tests.py` | US spelling in every tracked text file, prose and names alike, naming file and line, the changelog's released sections included. Needs git. |
-| `run-config-tests.py` | Twenty-seven fixtures over the configuration cascade: what a `false` override means, what an explicit `null` means, whether lists append, which identifiers are valid XML names, what happens when a setting is written twice, a sidecar or report setting inside a target, and what a retired setting or another block's says. |
+| `run-config-tests.py` | Twenty-nine fixtures over the configuration cascade: what a `false` override means, what an explicit `null` means, whether lists append, which identifiers are valid XML names, what happens when a setting is written twice, a sidecar or report setting inside a target, what a retired setting or another block's says, and what an unquoted `on` or `off` means to a setting of fixed values. |
 | `run-roundtrip-test.py` | That writing a configuration and reading it back changes nothing. |
 | `run-unit-tests.py` | The small functions that decide filenames and directory names, the places where one fact is written down twice and could drift apart, and the colors `page.css` and `highlighting.theme` give text, against the backgrounds they land on. |
 | `run-headers-tests.py` | The table-headers pre-pass end to end, on `.docx` files built as OOXML: keys, the sidecar's values and aliases, the new-rows file, the report, and a key that matches nothing set aside, the run going on. |

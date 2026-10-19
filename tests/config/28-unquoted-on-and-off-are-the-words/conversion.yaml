@@ -1,0 +1,5 @@
+targets:
+  web:
+    format: html
+    menu: on
+    title_page: off

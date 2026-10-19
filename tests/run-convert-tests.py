@@ -1287,20 +1287,37 @@ def case_word_box_anchor(work):
     doesn't list, a box of one cell, as OpenStax's export bookmarks every
     table and links to a box, which Pandoc's reader drops: the pre-pass
     handed the filter those before a listed table only, so a link to the
-    box went nowhere."""
+    box went nowhere. And the box is a layout table, as a table of one
+    cell is whatever its source, where the filter made it a data table,
+    wanting a caption and wrapped in a scroll region: one whose cell
+    Word's table look formats as a header row too, which Pandoc's reader
+    puts in the table's head. One whose row is marked to repeat as a
+    header row is declared so, and stays a data table."""
     import csv
     os.makedirs(work)
     p, table = ooxml_paragraph, ooxml_table
+    # Word's table look as Word sets it on a table it inserts.
+    headed = ('<w:tbl><w:tblPr><w:tblLook w:val="04A0" w:firstRow="1" w:lastRow="0" '
+              'w:firstColumn="1" w:lastColumn="0" w:noHBand="0" w:noVBand="1"/></w:tblPr>'
+              '<w:tblGrid><w:gridCol w:w="2400"/></w:tblGrid><w:tr><w:tc>%s</w:tc></w:tr>'
+              '</w:tbl>' % p("Back up your files, too."))
+    # And one whose row the author marked to repeat as a header row.
+    repeated = headed.replace("<w:tr>", "<w:tr><w:trPr><w:tblHeader/></w:trPr>").replace(
+        "Back up your files, too.", "Totals")
     word_with_body(os.path.join(work, "box.docx"), "".join([
         p("As ", '<w:hyperlink w:anchor="save-note"><w:r><w:t>the note</w:t></w:r>'
               "</w:hyperlink>", " says, save often."),
         '<w:bookmarkStart w:id="1" w:name="save-note"/><w:bookmarkEnd w:id="1"/>',
         table([[[p("Remember to save your work.")]]]),
+        p("And another:"),
+        headed,
         p("And a data table:"),
         '<w:bookmarkStart w:id="2" w:name="costs"/><w:bookmarkEnd w:id="2"/>',
         table([[[p("Year")], [p("Cost")]], [[p("2020")], [p("10")]], [[p("2021")], [p("12")]]]),
         p("As ", '<w:hyperlink w:anchor="costs"><w:r><w:t>the costs</w:t></w:r></w:hyperlink>',
           " show."),
+        p("And a header row alone:"),
+        repeated,
     ]))
     with open(os.path.join(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
         fh.write("targets:\n  html:\n    format: html\n")
@@ -1315,6 +1332,13 @@ def case_word_box_anchor(work):
         with open(os.path.join(work, "table-headers-new.csv"), encoding="utf-8",
                   newline="") as fh:
             listed = [r["preview"] for r in csv.DictReader(fh)]
+    missing = []
+    if exists(work, "table-captions-missing.csv"):
+        with open(os.path.join(work, "table-captions-missing.csv"), encoding="utf-8",
+                  newline="") as fh:
+            missing = [r["Label"] for r in csv.DictReader(fh)]
+    tables = re.findall(r'(<div class="table-wrapper"[^>]*>\s*)?<table([^>]*)>', page)
+    boxes = page.split("And a data table")[0]
 
     def before(anchor, words):
         return anchor in page and words in page and page.index(anchor) < page.index(words)
@@ -1326,6 +1350,90 @@ def case_word_box_anchor(work):
         ("as a data table does, and the box still isn't listed",
          lambda: 'href="#costs"' in page and before('id="costs"', "2020")
          and len(listed) == 1 and "Year" in listed[0]),
+        ("and each box is a layout table, one Word's table look heads too: no "
+         "scroll region, no caption asked of it, and no header cell, where the "
+         "data table has a scroll region and is asked a caption",
+         lambda: [(bool(w), 'role="presentation"' in a) for w, a in tables][:3]
+         == [(False, True), (False, True), (True, False)]
+         and "Back up your files, too." in boxes and "<th" not in boxes
+         and missing[:1] == ["box#table-3"]),
+        ("and a box whose row is marked to repeat as a header row is a data table, "
+         "its cell a header cell",
+         lambda: [(bool(w), 'role="presentation"' in a) for w, a in tables][3:]
+         == [(True, False)]
+         and re.search(r"<th[^>]*>\s*Totals", page) is not None
+         and missing == ["box#table-3", "box#table-4"]),
+    ]
+
+
+ONE_CELL_PAGE = """<!DOCTYPE html><html lang="en"><head><title>Boxes</title></head>
+<body><h1>Boxes</h1>
+<p>A box:</p>
+<table><tr><td>Remember to save your work.</td></tr></table>
+<p>A header cell alone:</p>
+<table><tr><th>Totals</th></tr></table>
+<p>Two cells:</p>
+<table><tr><td>Name</td><td>Ann Smith</td></tr></table>
+<p>And data:</p>
+<table><tr><td>Year</td><td>Cost</td></tr><tr><td>2020</td><td>10</td></tr>
+<tr><td>2021</td><td>12</td></tr></table>
+<p>A box with a caption of its own, and one a label names:</p>
+<table><caption>Grades</caption><tr><td>An A is 90 or more.</td></tr></table>
+<table><tr><td>Strength is graded from 0 to 5.</td></tr></table>
+<p>Table 2 Muscle strength</p>
+</body></html>
+"""
+
+
+def case_one_cell_tables(work):
+    """A table of one cell has nothing to head, so it's a layout table
+    whatever its source, as the header guess counts it no table: an HTML
+    page's box, which nothing marks, was a data table, wanting a caption
+    and wrapped in a scroll region. One whose cell the page makes a header
+    cell declares its headers, and stays a data table; so does one with a
+    caption, its own or a label beside it, which its author numbered."""
+    import csv
+    os.makedirs(work)
+    with open(os.path.join(work, "boxes.html"), "w", encoding="utf-8") as fh:
+        fh.write(ONE_CELL_PAGE)
+    with open(os.path.join(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
+        fh.write("targets:\n  html:\n    format: html\n")
+    result = run_in(work, "")
+    page = read(work, "html", "boxes.html") if exists(work, "html", "boxes.html") else ""
+    pattern = r'(<div class="table-wrapper"[^>]*>\s*)?<table([^>]*)>'
+    tables = re.findall(pattern, page)
+    # The filter on its own, with no pre-pass and no reading filter: one
+    # cell is the mark, and two aren't.
+    alone = re.findall(pattern, subprocess.run(
+        "pandoc -f html -t json boxes.html | pandoc -f json -t html5 --lua-filter="
+        + os.path.join(BIN, "figures-and-tables.lua"), shell=True, cwd=work,
+        capture_output=True, text=True).stdout)
+
+    def rows(name, column):
+        if not exists(work, name):
+            return []
+        with open(os.path.join(work, name), encoding="utf-8", newline="") as fh:
+            return [r[column] for r in csv.DictReader(fh)]
+    return [
+        ("an HTML page's box of one cell is a layout table, asked no caption and "
+         "not listed, where a header cell the page declares makes one a data table",
+         lambda: result.returncode == 0
+         and [(bool(w), 'role="presentation"' in a) for w, a in tables][:4]
+         == [(False, True), (True, False), (True, False), (True, False)]
+         and rows("table-captions-missing.csv", "Label")
+         == ["boxes#table-2", "boxes#table-3", "boxes#table-4"]
+         and rows("table-headers-new.csv", "preview")
+         == ["Totals", "Name | Ann Smith", "Year | Cost"]),
+        ("a box with a caption of its own, or a label beside it, stays a data table, "
+         "captioned as its author numbered it",
+         lambda: [(bool(w), 'role="presentation"' in a) for w, a in tables][4:]
+         == [(True, False), (True, False)]
+         and "<caption>Grades</caption>" in page
+         and "<caption>Table 2 Muscle strength</caption>" in page),
+        ("so is a box the filter reads alone, where a header cell, the head Pandoc reads "
+         "a row of them as, two cells, and a box with a caption aren't",
+         lambda: [(bool(w), 'role="presentation"' in a) for w, a in alone]
+         == [(False, True)] + [(True, False)] * 5),
     ]
 
 
@@ -5837,10 +5945,10 @@ A list in a note.[^listed]
 
 [^listed]: <ol><li>Noted<ol start="7"><li>Seventh, noted</li></ol></li></ol>
 
-And one in a table's cell.
+And one in a data table's cell, since a table of one cell is laid out, written as HTML.
 
-<table><tr><td><ol><li>Celled<ol start="8"><li>Eighth, in a cell</li></ol></li></ol></td></tr>\
-</table>
+<table><tr><th>Listed</th></tr><tr><td><ol><li>Celled<ol start="8"><li>Eighth, in a cell</li>\
+</ol></li></ol></td></tr></table>
 
 And lists in a quotation and a div that an item holds, which the reader reads as the item's.
 
@@ -6241,6 +6349,7 @@ CASES = [
     ("a Word layout table with a repeating header row", case_layout_word_head),
     ("a Word table's declaration whatever its first cell holds", case_word_table_matching),
     ("a Word box's bookmark, which a link goes to", case_word_box_anchor),
+    ("a table of one cell, a layout table whatever its source", case_one_cell_tables),
     ("a menu for pages posted as a site", case_menu),
     ("raw HTML in a Markdown source", case_markdown_html),
     ("title rows and bands, split and grouped", case_bands),

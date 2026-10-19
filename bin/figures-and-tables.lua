@@ -2337,14 +2337,53 @@ end
 -- with layout. The header pre-pass writes the value in effect as the
 -- table's marker, or in the resolved file for a Word table. A value
 -- naming headers makes it a data table, whatever the page's role says: a
--- person's row in the sidecar outranks the page.
+-- person's row in the sidecar outranks the page. And a table of one cell,
+-- whatever its source, which has nothing to head: a Word file's box (a
+-- note, a picture with its label), as the header guess counts it, no
+-- table (tablecensus.classify's layout(single-cell)), and as the CNXML
+-- unpacker marks one. A header cell its source gives it declares
+-- headers, a page's as the marker its reading writes says, a LaTeX
+-- longtable's head or a Markdown table's header row as the head Pandoc
+-- reads, and a data table it stays; but not the head Pandoc's Word reader
+-- makes of the row of a box Word's table look formats, as Word formats a
+-- table it inserts, which the box's entry from the pre-pass says
+-- (look_head). And a caption, its own or a label beside it that a data
+-- table would take ("Table 25.5"), is its author presenting it as a
+-- table, numbered as LaTeX numbers one, so a table of one cell with a
+-- caption stays a data table too.
 local LAYOUT_ROLES = { presentation = true, none = true }
 
-local function is_layout(tbl, entry)
+local function one_cell(tbl)
+  local cells = 0
+  local function count(rows)
+    for _, row in ipairs(rows or {}) do cells = cells + #row.cells end
+  end
+  count(tbl.head.rows)
+  for _, body in ipairs(tbl.bodies) do
+    count(body.head)
+    count(body.body)
+  end
+  count(tbl.foot.rows)
+  return cells == 1
+end
+
+-- Whether a table's cells include a header cell: a row of its head, or a
+-- body's, or a body's row-head column.
+local function has_head(tbl)
+  if #tbl.head.rows > 0 then return true end
+  for _, body in ipairs(tbl.bodies) do
+    if #body.head > 0 or (body.row_head_columns or 0) > 0 then return true end
+  end
+  return false
+end
+
+local function is_layout(tbl, entry, labeled)
   local value = entry and tostring(entry.headers or '') or ''
   if value == 'layout' then return true end
   if value ~= '' then return false end
-  return LAYOUT_ROLES[tbl.attr.attributes.role] ~= nil
+  if LAYOUT_ROLES[tbl.attr.attributes.role] then return true end
+  return one_cell(tbl) and #tbl.caption.long == 0 and not labeled
+    and (not has_head(tbl) or (entry ~= nil and entry.look_head == true))
 end
 
 -- A layout table is written as it is, with role="presentation": no
@@ -2586,10 +2625,13 @@ function Blocks(blocks)
     -- table becomes, so the links land and a split table keeps them.
     if block.t == 'Table' then
       local entry = resolved_for(block)
+      -- A label paragraph beside it, below or above, as a data table's
+      -- caption is taken (caption_data_table).
+      local labeled = table_label(blocks[i + 1]) ~= nil or table_label(out[#out]) ~= nil
       for _, name in ipairs(entry and entry.anchors or {}) do
         out:insert(pandoc.Div({}, pandoc.Attr(name, { 'table-anchor' })))
       end
-      layout = is_layout(block, entry)
+      layout = is_layout(block, entry, labeled)
     end
     if images == nil and layout then
       out:insert(layout_table(block))

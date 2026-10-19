@@ -100,7 +100,8 @@ keys on the media path ignoring its extension.
   marking. A table that only lines things up, with no data in it at
   all, is a layout table by a row of `table-headers.csv` saying
   `layout` ([Sidecars](sidecars.md)), which every target honors; a
-  remediated copy of the Word file can't hold it either.
+  remediated copy of the Word file can't hold it either. A box of one
+  cell with no caption is a layout table already.
 - **Two PAC errors on a tagged PDF are the validator's, not the file's.**
   They're worth recognizing rather than chasing. *Table header cell has no
   associated subcells* is raised because `latex-lab` sets `Scope` through

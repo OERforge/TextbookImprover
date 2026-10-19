@@ -337,7 +337,13 @@ def tables_in(path):
         if jaws:
             value, reason = jaws, f"the table's {mark} bookmark declares its headers (JAWS's bookmark convention)"
         anchors = tc.anchors_before(body, tbl) if depth == 0 else []
-        if value is None and not anchors:
+        # A box of one cell whose row Word's table look formats, as Word
+        # formats a table it inserts, and no row is marked to repeat:
+        # Pandoc's reader puts the row in the table's head, which the filter
+        # would take for a header cell its source declares.
+        look_head = (kind == "layout(single-cell)" and "tblLook:firstRow" in ev
+                     and not tc.view(tbl).marked)
+        if value is None and not anchors and not look_head:
             continue
         grid = tc.build_grid(tbl)
         first = grid[0][0].text if grid and grid[0] else ""
@@ -345,11 +351,12 @@ def tables_in(path):
             # One the census counts no table, one cell or pictures alone,
             # isn't listed, but the bookmarks before it go to the filter as
             # a listed table's do: a link to a boxed note, which is a table
-            # of one cell, goes to them.
+            # of one cell, goes to them. So does a box's head that is Word's
+            # table look's.
             found.append({"anchors-only": True, "rows": nrows, "cols": ncols,
                           "first": " ".join(first.split())[:40],
                           "source": os.path.basename(path), "index": index,
-                          "anchors": anchors})
+                          "anchors": anchors, "look-head": look_head})
             continue
         found.append({
             "key": tc.table_key(tbl, keys),
@@ -486,8 +493,9 @@ def main():
                           else tables_in(path))
         except RuntimeError as exc:
             warn(str(exc))
-    # A table that isn't listed, with bookmarks before it: only those, for
-    # the filter, and nothing in the reports.
+    # A table that isn't listed, with bookmarks before it, or a box of one
+    # cell whose head is Word's table look's: only those, for the filter,
+    # and nothing in the reports.
     unlisted = [info for info in tables if info.get("anchors-only")]
     tables = [info for info in tables if not info.get("anchors-only")]
 
@@ -499,6 +507,7 @@ def main():
             "split_at": [], "part_captions": [], "split_at_declared": False,
             "rows": info["rows"], "cols": info["cols"], "first": info["first"],
             "anchors": info["anchors"], "supplier": "",
+            "look_head": info.get("look-head", False),
         })
     resolved_html = {}
     claimed = set()

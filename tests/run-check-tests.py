@@ -43,10 +43,11 @@ GOOD = """<!DOCTYPE html><html lang="en"><head><title>A page</title></head>
 <h2><img src="z.png" alt="A described figure"></h2>
 <img src="x.png" alt="A thing"><img src="y.png" alt="" aria-hidden="true">
 <div class="table-wrapper" tabindex="0" role="region" aria-label="Data">
-<table><caption>Data</caption><tr><th scope="col">H</th></tr></table></div>
+<table><caption>Data</caption><tr><th scope="col">H</th></tr><tr><td>1</td></tr></table></div>
 <div class="table-wrapper" tabindex="0" role="region" aria-label="Revenue">
 <table><caption>Revenue</caption><tr><th scope="col">Revenue, <math><semantics><mi>p</mi><annotation encoding="application/x-tex">p</annotation></semantics></math></th>
-<th scope="col"><img src="h.png" alt="Height"> <math><mi>h</mi></math></th><th scope="col"><math><mi>q</mi></math> per day</th></tr></table></div>
+<th scope="col"><img src="h.png" alt="Height"> <math><mi>h</mi></math></th><th scope="col"><math><mi>q</mi></math> per day</th></tr>
+<tr><td>1</td><td>2</td><td>3</td></tr></table></div>
 <table role="presentation"><tr><th><math><mi>z</mi></math></th><td>layout</td></tr></table>
 <a href="#top">up</a><a href="other.html#there">over</a>
 <a href="https://example.org/#x">out</a><p>A formula <math><mi>x</mi></math>, and one in MathJax's form <span class="math inline">\\(y\\)</span>, as Sphinx writes one <span class="math notranslate nohighlight">\\(z\\)</span>.</p><p><a href="other.html" aria-label="Read more about cats">Read more</a> <a href="other.html" aria-label="Chart of sales, larger"><img src="c.png" alt="Chart of sales"></a> <a href="other.html">no label</a> <a href="other.html" class="footnote-back" aria-label="Back to reference 1">&#x21A9;&#xFE0E;</a></p>
@@ -213,7 +214,7 @@ def main():
                  "image-alt-credit",
                  "link-label-without-text", "link-label-without-text",
                  "table-without-headers-or-caption",
-                 "table-not-in-scroll-region",
+                 "table-not-in-scroll-region", "table-without-data-cells",
                  "link-to-missing-fragment", "link-to-missing-file",
                  "link-to-missing-fragment", "formula-shown-as-tex",
                  "formula-kept-as-text",
@@ -243,6 +244,10 @@ def main():
             ("and on one no file system can name, by its name",
              lambda: [f.detail.split(":")[0] for f in unnamed if f.check == "image-alt-shared"]
              == ["a%00.png", "b.png"]),
+            ("a table whose every cell is a header is named by its place on the page, "
+             "and one with a data cell isn't",
+             lambda: [f.detail for f in bad if f.check == "table-without-data-cells"]
+             == ["table 2"]),
             ("a header cell holding only a formula is named by its table and TeX, "
              "and one with no TeX by its table",
              lambda: sorted(f.detail for f in bad if f.check == "table-header-is-formula")
@@ -361,6 +366,10 @@ def main():
                 ("and a header cell holding only a formula",
                  lambda: [f.detail for f in damaged if f.check == "table-header-is-formula"]
                  == ["table 1"]),
+                ("and a table whose every cell is a header, not one with a data cell",
+                 lambda: expect([f.detail for f in damaged
+                                 if f.check == "table-without-data-cells"] == ["table 1"],
+                                damaged)),
                 ("and a link whose label leaves out its text, not one whose text is a symbol",
                  lambda: [f.detail for f in damaged if f.check == "link-label-without-text"]
                  == ["'2' named 'Chapter two'"]),

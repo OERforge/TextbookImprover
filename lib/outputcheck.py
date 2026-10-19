@@ -277,9 +277,11 @@ class _Collector(HTMLParser):
             self._in_wrapper = True
         elif tag == "table":
             self._table = [False, False, a.get("role"),
-                           getattr(self, "_in_wrapper", False)]
+                           getattr(self, "_in_wrapper", False), False]
         elif tag == "th" and self._table:
             self._table[0] = True
+        elif tag == "td" and self._table:
+            self._table[4] = True
         elif tag == "caption" and self._table:
             self._table[1] = True
 
@@ -401,7 +403,8 @@ def read_xhtml(name, markup):
             has_th = any(c.tag.replace(XHTML, "") == "th" for c in el.iter())
             has_caption = any(c.tag.replace(XHTML, "") == "caption"
                               for c in el.iter())
-            page.tables.append((has_th, has_caption, el.get("role"), None))
+            has_td = any(c.tag.replace(XHTML, "") == "td" for c in el.iter())
+            page.tables.append((has_th, has_caption, el.get("role"), None, has_td))
     return page
 
 
@@ -488,12 +491,17 @@ def check_page(page, findings):
             findings.append(Finding(where, "heading-skips-level",
                                     f"h{last} to h{level}: {text}"))
         last = level
-    for index, (has_th, has_caption, role, wrapped) in enumerate(page.tables,
-                                                                 1):
+    for index, (has_th, has_caption, role, wrapped, has_td) in enumerate(page.tables, 1):
         if role in LAYOUT_ROLES:
             continue
         if not has_th and not has_caption:
             findings.append(Finding(where, "table-without-headers-or-caption",
+                                    f"table {index}"))
+        # Every cell a header: a table with no body, as Pandoc's reader
+        # made one whose <thead> held every row before htmlrepair.py gave
+        # it one, which an accessibility checker reports.
+        if has_th and not has_td:
+            findings.append(Finding(where, "table-without-data-cells",
                                     f"table {index}"))
         if wrapped is False:
             # The filter's own invariant, checked on the output: a data
@@ -797,6 +805,8 @@ DESCRIPTIONS = {
         "a data table with no th and no caption",
     "table-not-in-scroll-region":
         "a data table outside the focusable scroll wrapper (HTML pages)",
+    "table-without-data-cells":
+        "a data table whose every cell is a header (th), with no body",
     "no-lang": "the html element declares no language",
     "no-title": "no title element, or an empty one",
     "title-is-file-name": "the page's title is its file's name",

@@ -628,6 +628,22 @@ PDF_MACROS = r"""\ExplSyntaxOn
       { \nobreak \skip_vertical:N \medskipamount }
       { \skip_vertical:N \bigskipamount }
   }
+% A line too wide in the contents, or in a list of figures or tables, is
+% reported by TeX at a line of the list's own file (book.toc), which the
+% build had looked up in the book's LaTeX: Sociology's front matter's page
+% numbers, too wide for the contents' column, were counted as lines of
+% text. The log marks where each list is set, whatever class or package
+% sets it, for latexbuild.overfull_lines.
+\AddToHook { begindocument / end }
+  {
+    \cs_set_eq:Nc \__oer_start_toc:n { @starttoc }
+    \cs_set_protected:cpn { @starttoc } #1
+      {
+        \typeout { TextbookImprover~list:~#1 }
+        \__oer_start_toc:n {#1}
+        \typeout { TextbookImprover~list~end }
+      }
+  }
 % A fill-in blank (\OERBlank, below): its underscores in a bookmark and in
 % a structure element's title.
 \text_declare_purify_equivalent:Nn \OERBlank { \use:n }
@@ -804,6 +820,11 @@ OVERFULL = re.compile(r"^Overfull \\hbox \((\d+(?:\.\d+)?)pt too wide\) "
 # wide it is now.
 SHORTENED = re.compile(r"^TextbookImprover blank: (\d+(?:\.\d+)?)pt over at line (\d+), "
                        r"now (\d+(?:\.\d+)?)pt", re.M)
+# Where LaTeX sets the contents, or a list of figures or tables, as
+# PDF_MACROS marks it (the list's file's extension, toc for the contents),
+# and where it's done: a line too wide there is the list's, reported at a
+# line of the list's own file.
+LISTS = re.compile(r"^TextbookImprover list(?:: (\S+)| end)$", re.M)
 # How much wider than its text a line has to be to be named: a point or
 # two sits in the margin unseen, but more shows.
 OVERFULL_LEAST = 3.0
@@ -817,7 +838,18 @@ def overfull_lines(output, source, pages):
     line, of a longtable), formula (a display), or text, and page the
     book's page it's on, the last of pages ({label: stem}, its id as
     page_id gives it) whose label is at or before it. A line whose blank
-    was drawn shorter to fit it (SHORTENED) is as wide as it is now."""
+    was drawn shorter to fit it (SHORTENED) is as wide as it is now. A line
+    of the contents is kind contents, and one of another list (LISTS) kind
+    list, on no page."""
+    lists, opened = [], None
+    for m in LISTS.finditer(output):
+        if m.group(1):
+            opened = (m.end(), m.group(1))
+        elif opened:
+            lists.append((opened[0], m.start(), opened[1]))
+            opened = None
+    if opened:
+        lists.append((opened[0], len(output), opened[1]))
     shortened = {}
     for m in SHORTENED.finditer(output):
         shortened.setdefault(int(m.group(2)), []).append((float(m.group(1)), float(m.group(3))))
@@ -842,6 +874,10 @@ def overfull_lines(output, source, pages):
             points = match[1]
         if points <= OVERFULL_LEAST:
             continue
+        listed = next((name for start, end, name in lists if start <= m.start() < end), None)
+        if listed:
+            found.append((points, "contents" if listed == "toc" else "list", None))
+            continue
         line = int(m.group(2) or m.group(4) or m.group(5)) - 1
         if not 0 <= line < len(lines):
             continue
@@ -861,8 +897,10 @@ def overfull_warning(found, where="PDF"):
     if not found:
         return None
     kinds = {"table": "in table(s)", "formula": "display formula(s)",
-             "text": "line(s) of text"}
-    one = {"table": "in a table", "formula": "a display formula", "text": "a line of text"}
+             "text": "line(s) of text", "contents": "in the contents",
+             "list": "in a list of figures or tables"}
+    one = {"table": "in a table", "formula": "a display formula", "text": "a line of text",
+           "contents": "in the contents", "list": "in a list of figures or tables"}
     counts = {}
     for _points, kind, _page in found:
         counts[kind] = counts.get(kind, 0) + 1

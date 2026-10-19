@@ -551,6 +551,13 @@ And blanks underlined, struck out, and highlighted, whose line or
 highlight lua-ul draws before a blank could be drawn shorter, left as
 they are: [________________]{.underline}, ~~________________~~, and
 [________________]{.mark}.
+
+## Sixty-four places of π, 3141592653589793238462643383279502884197169399375105820974944592
+
+A heading too long for a line of the contents, which is narrower than
+the text, and a caption too long for a line of the list of figures:
+
+![Sixty-four places of π, 3141592653589793238462643383279502884197169399375105820974944592](assets/red.png)
 """
 
 PROJECT = """project:
@@ -1773,6 +1780,12 @@ def checks(work, jobs=1):
          and "\\begin{longtable}" in notes_source and "p{(" not in head_of(notes_source, "242.98")
          and re.search(r"WARNING: \d+ line\(s\) of the PDF are more than 3 points wider[^\n]* "
                        r"in table\(s\)", notes_said)),
+        # A line too wide in the contents or the list of figures is reported
+        # by TeX at a line of the list's own file; the build names it as the
+        # list's (PDF_MACROS marks where each list is set).
+        ("a line too wide in the contents or the list of figures is named as the list's",
+         lambda: re.search(r"WARNING: [^\n]* 1 in the contents\b", notes_said)
+         and re.search(r"WARNING: [^\n]* 1 in a list of figures or tables\b", notes_said)),
         # A blank on a line too wide that doesn't reach the line's end is
         # left as it is, and one that reaches past it with too little of it
         # before the margin is drawn three underscores wide, no shorter.

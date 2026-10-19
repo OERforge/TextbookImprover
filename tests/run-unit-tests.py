@@ -1466,6 +1466,19 @@ def check_fitted_blanks():
             "Overfull \\hbox (6.0pt too wide) in paragraph at lines 40--41\n"
             "TextbookImprover blank: 6.0pt over at line 41, now 0.0pt\n")
     found = latexbuild.overfull_lines(said, source, {"page-quiz": "quiz"})
+    # And a line too wide in the contents, and one in a list of figures,
+    # which TeX reports at a line of the list's own file, between the marks
+    # PDF_MACROS has LaTeX write around each list.
+    listed = ("TextbookImprover list: toc\n"
+              "Overfull \\hbox (8.67996pt too wide) detected at line 6\n"
+              " []\\TU/LatinModernRoman(0)/m/n/10 xxviii\n\n"
+              "TextbookImprover list end\n"
+              "TextbookImprover list: lof\n"
+              "Overfull \\hbox (12.0pt too wide) in paragraph at lines 3--3\n"
+              "TextbookImprover list end\n"
+              "Overfull \\hbox (5.0pt too wide) in paragraph at lines 20--22\n")
+    lists = latexbuild.overfull_lines(listed, source, {"page-quiz": "quiz"})
+    warning = latexbuild.overfull_warning(lists) or ""
     macros = latexbuild.PDF_MACROS
     lua = macros[macros.index("\\directlua{") + len("\\directlua{"):]
     lua = lua[:lua.index("\n\\else")]
@@ -1479,6 +1492,13 @@ def check_fitted_blanks():
          "and no other line is taken for it",
          lambda: sorted(found) == [(4.25, "text", "quiz"), (8.0, "text", "quiz"),
                                    (9.0, "text", "quiz")]),
+        ("a line too wide in the contents or a list of figures is the list's, on no page",
+         lambda: sorted(lists, key=lambda f: f[0]) == [
+             (5.0, "text", "quiz"), (8.67996, "contents", None), (12.0, "list", None)]),
+        ("and the warning says so",
+         lambda: "1 line(s) of text, 1 in the contents, 1 in a list of figures or tables; "
+         "the widest is in a list of figures or tables, 12 points too wide; on 1 page(s), "
+         "widest first: quiz." in warning),
         ("the Lua has no percent sign, hash, tilde, or backslash, and no comment",
          lambda: lua.strip() and not re.search(r"[%#~\\]|--", lua)),
     ]

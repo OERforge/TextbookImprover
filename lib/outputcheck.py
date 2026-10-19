@@ -96,6 +96,8 @@ class Page:
         self.dropped_files = []     # files an EPUB's links named, kept as text
         self.lost_formulas = 0      # MathJax renderings nothing could read
         self.tex_formulas = []      # formulas Pandoc couldn't make MathML of
+        self.text_formulas = []     # formulas Pandoc couldn't read, kept as
+                                    # their text
         self.scripts = 0            # <script> elements, any of which may
                                     # render TeX the page holds as text
         self.images = []            # (has_alt, alt, decorative, src)
@@ -114,6 +116,16 @@ def is_math_span(classes):
     only when texmath couldn't read its TeX, or under another math method."""
     tokens = (classes or "").split()
     return "math" in tokens and ("inline" in tokens or "display" in tokens)
+
+
+def is_text_formula(classes):
+    """The span Pandoc's HTML reader keeps a formula in when texmath can't
+    read its MathML, a script or a fraction of the wrong number of parts
+    or an element it doesn't know: class "math" and no other, holding the
+    formula's text (pMath, Readers/HTML.hs), with no word of it in the
+    run's output. The writer's own spans are "math inline" and "math
+    display", and Sphinx's "math notranslate nohighlight"."""
+    return (classes or "").split() == ["math"]
 
 
 MATHML = "{http://www.w3.org/1998/Math/MathML}"
@@ -174,6 +186,14 @@ def add_formula(page, text):
         page.tex_formulas.append(text)
 
 
+def add_text_formula(page, text):
+    """A formula kept as its text, its spaces evened out; one with no text
+    shows nothing."""
+    text = " ".join(text.split())
+    if text:
+        page.text_formulas.append(text)
+
+
 class _Collector(HTMLParser):
     """Tolerant collection from HTML5, where a page need not be XML."""
 
@@ -184,7 +204,8 @@ class _Collector(HTMLParser):
         self._title = None
         self._table = None
         self._link = None
-        self._math = None           # [text parts, depth of spans inside]
+        self._math = None           # [text parts, depth of spans inside,
+                                    # what to do with the text]
         self._header = None         # a th being read: its words, its
                                     # formulas' TeX, and how deep in a math
                                     # element the parser is
@@ -222,7 +243,9 @@ class _Collector(HTMLParser):
         if tag == "span" and self._math is not None:
             self._math[1] += 1
         elif tag == "span" and is_math_span(a.get("class")):
-            self._math = [[], 0]
+            self._math = [[], 0, add_formula]
+        elif tag == "span" and is_text_formula(a.get("class")):
+            self._math = [[], 0, add_text_formula]
         if tag == "script":
             self.page.scripts += 1
         if tag == "div" and "reveal" in (a.get("class") or "").split():
@@ -272,7 +295,7 @@ class _Collector(HTMLParser):
             if self._math[1]:
                 self._math[1] -= 1
             else:
-                add_formula(self.page, "".join(self._math[0]))
+                self._math[2](self.page, "".join(self._math[0]))
                 self._math = None
         if tag == "a" and self._link is not None:
             self.page.labeled_links.append((self._link[0], " ".join(
@@ -357,6 +380,8 @@ def read_xhtml(name, markup):
             page.lost_formulas += 1
         elif tag == "span" and is_math_span(el.get("class")):
             add_formula(page, "".join(el.itertext()))
+        elif tag == "span" and is_text_formula(el.get("class")):
+            add_text_formula(page, "".join(el.itertext()))
         elif tag == "script":
             page.scripts += 1
         elif tag == "img":
@@ -399,6 +424,12 @@ def check_page(page, findings):
         for tex in page.tex_formulas:
             findings.append(Finding(where, "formula-shown-as-tex",
                                     tex if len(tex) <= 80 else tex[:79] + "\u2026"))
+        # And one Pandoc couldn't read from its MathML, kept as its text,
+        # the parts of a fraction or a script run together, of which
+        # Pandoc says nothing at all.
+        for text in page.text_formulas:
+            findings.append(Finding(where, "formula-kept-as-text",
+                                    text if len(text) <= 80 else text[:79] + "\u2026"))
     if page.parse_error:
         findings.append(Finding(where, "not-well-formed", page.parse_error))
     if not page.lang:
@@ -771,6 +802,7 @@ DESCRIPTIONS = {
     "title-is-file-name": "the page's title is its file's name",
     "not-well-formed": "the document could not be parsed",
     "formula-shown-as-tex": "a formula Pandoc couldn't convert, shown as its TeX",
+    "formula-kept-as-text": "a formula Pandoc couldn't read from its MathML, kept as its text",
     "table-header-is-formula":
         "a header cell holding only a formula, which NVDA doesn't announce as its column's header",
 }

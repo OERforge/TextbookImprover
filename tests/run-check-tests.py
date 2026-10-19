@@ -49,7 +49,7 @@ GOOD = """<!DOCTYPE html><html lang="en"><head><title>A page</title></head>
 <th scope="col"><img src="h.png" alt="Height"> <math><mi>h</mi></math></th><th scope="col"><math><mi>q</mi></math> per day</th></tr></table></div>
 <table role="presentation"><tr><th><math><mi>z</mi></math></th><td>layout</td></tr></table>
 <a href="#top">up</a><a href="other.html#there">over</a>
-<a href="https://example.org/#x">out</a><p>A formula <math><mi>x</mi></math>, and one in MathJax's form <span class="math inline">\\(y\\)</span>.</p><p><a href="other.html" aria-label="Read more about cats">Read more</a> <a href="other.html" aria-label="Chart of sales, larger"><img src="c.png" alt="Chart of sales"></a> <a href="other.html">no label</a> <a href="other.html" class="footnote-back" aria-label="Back to reference 1">&#x21A9;&#xFE0E;</a></p>
+<a href="https://example.org/#x">out</a><p>A formula <math><mi>x</mi></math>, and one in MathJax's form <span class="math inline">\\(y\\)</span>, as Sphinx writes one <span class="math notranslate nohighlight">\\(z\\)</span>.</p><p><a href="other.html" aria-label="Read more about cats">Read more</a> <a href="other.html" aria-label="Chart of sales, larger"><img src="c.png" alt="Chart of sales"></a> <a href="other.html">no label</a> <a href="other.html" class="footnote-back" aria-label="Back to reference 1">&#x21A9;&#xFE0E;</a></p>
 </body></html>"""
 
 OTHER = """<!DOCTYPE html><html lang="en"><head><title>Other</title></head>
@@ -70,6 +70,8 @@ BAD = """<!DOCTYPE html><html><head><title></title></head>
 <a href="other.html" aria-label="DOI for Klein and Stern 2005">https://doi.org/10/b8xx35</a>
 <a href="other.html" aria-label="Note two">2</a>
 <p><span class="math inline">$x_{2}\\text{\\cdot}x_{n}$</span></p>
+<p><span class="math" data-display="block">x
+  2</span></p>
 </body></html>"""
 
 # An EPUB document whose table holds another in a cell: the outer
@@ -97,9 +99,18 @@ LAYOUT_NONE = OTHER.replace("</h1>", '</h1><table role="none"><tr><td>Subtract 3
                             '<td>x = 4</td></tr></table><table role="none"><tr><th><math>'
                             '<mi>z</mi></math></th><td>layout</td></tr></table>')
 
-# The formula Pandoc couldn't convert, on a page whose script may render it.
+# The formula Pandoc couldn't convert, and one it couldn't read, on a page
+# whose script may render them.
 SCRIPTED = OTHER.replace("</h1>", "</h1><p><span class=\"math inline\">$x_{2}\\text{\\cdot}$"
-                         "</span></p><script src=\"mathjax.js\"></script>")
+                         "</span> <span class=\"math\">x2</span></p>"
+                         "<script src=\"mathjax.js\"></script>")
+
+# Formulas texmath can't read, a script of one part and a fraction of one,
+# which Pandoc's HTML reader keeps as their text, and one it can read.
+KEPT = """<!DOCTYPE html><html lang="en"><head><title>Kept</title></head>
+<body><h1>Kept</h1><p>Read <math><msup><mi>x</mi></msup></math>, then
+<math display="block"><mfrac><mn>1</mn></mfrac></math> and <math><mi>y</mi></math>.</p>
+</body></html>"""
 
 
 def checks(findings):
@@ -205,6 +216,7 @@ def main():
                  "table-not-in-scroll-region",
                  "link-to-missing-fragment", "link-to-missing-file",
                  "link-to-missing-fragment", "formula-shown-as-tex",
+                 "formula-kept-as-text",
                  "table-header-is-formula", "table-header-is-formula",
                  "table-header-is-formula"])),
             # By the rules a deck's pictures are judged by (alttext.py).
@@ -259,7 +271,10 @@ def main():
             ("a formula shown as TeX is named by its TeX",
              lambda: any(f.check == "formula-shown-as-tex"
                          and f.detail == "$x_{2}\\text{\\cdot}x_{n}$" for f in bad)),
-            ("and isn't found on a page with a script, which may render it",
+            ("a formula Pandoc kept as its text is named by its text, its spaces evened out",
+             lambda: [f.detail for f in bad if f.check == "formula-kept-as-text"]
+             == ["x 2"]),
+            ("and neither is found on a page with a script, which may render them",
              lambda: checks(scripted) == []),
             ("a page titled with its file's name is found, one whose name is a word isn't, "
              "nor one named for its H1",
@@ -319,7 +334,23 @@ def main():
                                       ("three", b"3")):
                     dst.writestr("EPUB/media/%s.png" % name, picture)
             damaged = outputcheck.check_epub(broken)
+            # Pandoc's own page and EPUB from a page whose formulas it
+            # can't all read: the span it keeps one in is found in each.
+            with open(os.path.join(work, "kept.html"), "w", encoding="utf-8") as fh:
+                fh.write(KEPT)
+            for out in ("kept-out.html", "kept.epub"):
+                subprocess.run(["pandoc", "kept.html", "--standalone",
+                                "--math-method=mathml", "-o", out], cwd=work, check=True)
+            kept_page = outputcheck.check_html_files([os.path.join(work, "kept-out.html")])
+            kept_book = outputcheck.check_epub(os.path.join(work, "kept.epub"))
             cases += [
+                ("a formula Pandoc couldn't read from its MathML is found where it kept it, "
+                 "on its page and in its EPUB, and the one it read isn't",
+                 lambda: expect([f.detail for f in kept_page
+                                 if f.check == "formula-kept-as-text"] == ["x", "1"]
+                                and [f.detail for f in kept_book
+                                     if f.check == "formula-kept-as-text"] == ["x", "1"],
+                                kept_page + kept_book)),
                 ("a Pandoc EPUB passes apart from its known omissions",
                  lambda: set(checks(clean)) <= {"no-accessibility-metadata"}
                  or checks(clean) == []),

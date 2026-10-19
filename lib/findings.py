@@ -113,6 +113,10 @@ CHECKS = OrderedDict([
                               "shown as its TeX, which a screen reader reads "
                               "out as typed", "error", "WCAG 2.0 SC 1.3.1 (A)",
                               "source")),
+    ("formula-kept-as-text", ("a formula Pandoc couldn't read from its MathML, "
+                              "kept as its text, the parts of a fraction or a "
+                              "script run together", "error",
+                              "WCAG 2.0 SC 1.3.1 (A)", "source")),
     ("link-to-file-dropped", ("a link to a file an EPUB can't carry; its "
                               "text is kept and the file is only in the "
                               "other targets", "warning", "EPUB 3.3",

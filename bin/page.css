@@ -148,6 +148,22 @@ table caption {
 
 figure { margin: 1.5em 0; }
 figure img { height: auto; }
+
+/* Pictures side by side in one figure, as a page saved from the web lays
+   them out in a row of its grid (<figure><div class="row"><figure>, as
+   LibreTexts sets two, its caption saying which is left and which right):
+   a row here too, each picture its share of it, and one under another
+   where the window is too narrow for them. */
+figure > .row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1em;
+  align-items: flex-end;
+}
+figure > .row > figure {
+  flex: 1 1 12em;
+  margin: 0;
+}
 figcaption {
   font-size: 0.9em;
   line-height: 1.4;

@@ -4364,6 +4364,55 @@ def case_remediate_docx(work):
     ]
 
 
+def case_side_by_side(work):
+    """Pictures in a row in a figure (<figure><div class="row"><figure>, as
+    LibreTexts sets two): in a browser, side by side in a wide window, one
+    under another in a phone's. Needs Playwright and its Chromium, and
+    skips without them."""
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        print("  skip  Playwright not installed; pictures in a row aren't laid out")
+        return []
+    os.makedirs(os.path.join(work, "img"))
+    for name in ("left.png", "right.png"):
+        with open(os.path.join(work, "img", name), "wb") as fh:
+            fh.write(ONE_PIXEL)
+    with open(os.path.join(work, "pair.html"), "w", encoding="utf-8") as fh:
+        fh.write('<!DOCTYPE html><html lang="en"><head><title>Pair</title></head><body>'
+                 "<h1>Pair</h1><figure><div class=\"row\"><figure>"
+                 '<img src="img/left.png" alt="A left square" width="300" height="300"></figure>'
+                 '<figure><img src="img/right.png" alt="A right square" width="300" height="300">'
+                 "</figure></div><figcaption>Two squares, left and right</figcaption></figure>"
+                 "</body></html>")
+    result = convert(work, "targets:\n  html:\n    format: html\n", fixtures=())
+    boxes = {}
+    page = os.path.join(work, "html", "pair.html")
+    if result.returncode == 0 and os.path.exists(page):
+        try:
+            with sync_playwright() as play:
+                browser = play.chromium.launch()
+                for width in (1000, 360):
+                    view = browser.new_page(viewport={"width": width, "height": 800})
+                    view.goto("file://" + page)
+                    boxes[width] = [view.locator(f'img[alt="{alt}"]').bounding_box()
+                                    for alt in ("A left square", "A right square")]
+                    view.close()
+                browser.close()
+        except Exception as exc:
+            print(f"  skip  Playwright's Chromium doesn't start ({str(exc)[:100]})")
+            return []
+    wide, narrow = boxes.get(1000), boxes.get(360)
+    return [
+        ("in a wide window the pictures in a figure's row stand side by side, left and right",
+         lambda: wide and abs(wide[0]["y"] - wide[1]["y"]) < 1
+         and wide[0]["x"] + wide[0]["width"] <= wide[1]["x"]),
+        ("and in a phone's, one under another, each within the window",
+         lambda: narrow and narrow[0]["y"] + narrow[0]["height"] <= narrow[1]["y"]
+         and all(b["x"] + b["width"] <= 360 for b in narrow)),
+    ]
+
+
 def case_word_box(work):
     """A box (a div of class box) in a Word file: each paragraph in it,
     its legend, a list's item, and a formula's paragraph alike, given the
@@ -6219,6 +6268,7 @@ CASES = [
     ("bare links and their sidecar", case_bare_links),
     ("a docx target", case_docx_target),
     ("a box in a Word file", case_word_box),
+    ("pictures side by side in a figure", case_side_by_side),
     ("a remediated copy of a Word file", case_remediate_docx),
     ("format: source", case_source_target),
     ("format: source repairs Word's equations", case_word_equations),

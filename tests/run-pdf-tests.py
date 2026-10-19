@@ -1136,6 +1136,37 @@ def image_widths(reader):
     return widths
 
 
+def image_boxes(reader, words):
+    """(x, y, width) in points of each image drawn on the first page whose
+    text holds words, as the page's q, Q, and cm operators place it."""
+    import math
+    for page in reader.pages:
+        if not says(page.extract_text() or "", words):
+            continue
+        resources = resolve(page.get("/Resources")) or {}
+        images = resolve(resources.get("/XObject")) or {}
+        content = page.get_contents()
+        boxes = []
+        matrix, saved = (1, 0, 0, 1, 0, 0), []
+        for operands, operator in (content.operations if content is not None else []):
+            if operator == b"q":
+                saved.append(matrix)
+            elif operator == b"Q" and saved:
+                matrix = saved.pop()
+            elif operator == b"cm":
+                a, b, c, d, e, f = (float(x) for x in operands)
+                A, B, C, D, E, F = matrix
+                matrix = (a * A + b * C, a * B + b * D, c * A + d * C,
+                          c * B + d * D, e * A + f * C + E, e * B + f * D + F)
+            elif operator == b"Do" and operands:
+                image = images.get(operands[0])
+                if image is not None and image.get_object().get("/Subtype") == "/Image":
+                    boxes.append((round(matrix[4], 1), round(matrix[5], 1),
+                                  round(math.hypot(matrix[0], matrix[1]), 1)))
+        return boxes
+    return []
+
+
 def head_sizes(reader, words):
     """The size each page's running head holding words is drawn at, its
     font's size as the page scales it."""
@@ -1435,6 +1466,14 @@ def checks(work, jobs=1):
          lambda: (200, 100) in image_pixels(untagged_path)
          and (400, 200) not in image_pixels(untagged_path)
          and "images.downsample 2: 1 of 2 image(s) scaled down" in untagged_said),
+        # pdf-target.lua: a figure's pictures in a row, which the pages set
+        # side by side (page.css), are one line of pictures in the PDF too,
+        # each its share of the line, where they had stood one under another.
+        ("two pictures in a figure's row are set side by side, each its share of the line",
+         lambda: (lambda shared: len(shared) == 2 and shared[0][1] == shared[1][1]
+                  and abs(shared[0][0] - shared[1][0]) > 160)(
+             [b for b in image_boxes(reader, "Two squares side by side")
+              if abs(b[2] - 0.48 * 345) < 3])),
         # A box, which the pages draw with a border: a rule above it and one
         # below, across the line, each an artifact.
         ("a box is set off by a rule above and one below, across the line, artifacts",
@@ -1633,18 +1672,26 @@ def checks(work, jobs=1):
         # Each inner figure's empty \caption{} was the float's too, three
         # Captions in one Aside, which veraPDF rejects (ISO 14289-2,
         # 8.2.5.27).
+        # Set side by side, the two pictures are one line, a paragraph of
+        # the float's.
         ("two pictures side by side in a figure, each a figure in a row, are one figure "
          "with one caption, its first or last element",
-         lambda: (lambda shapes: len(shapes) == 1 and shapes[0].count("/Figure") == 2
-                  and shapes[0].count("/Caption") == 1
-                  and shapes[0].index("/Caption") in (0, len(shapes[0]) - 1))(
-             [[kind(k) for k in children(e)] for e in tree
-              if any(str(k.get("/Alt")) == "A left red square" for k in children(e))])),
+         lambda: (lambda floats: len(floats) == 1
+                  and [kind(e) for e in elements(floats[0])].count("/Figure") == 2
+                  and [kind(k) for k in children(floats[0])].count("/Caption") == 1
+                  and [kind(k) for k in children(floats[0])].index("/Caption")
+                  in (0, len(children(floats[0])) - 1))(
+             [e for e in tree if kind(e) in ("/Aside", "/float")
+              and any(str(k.get("/Alt")) == "A left red square" for k in elements(e))])),
+        ("and the two are in one paragraph, a line of the float's",
+         lambda: any(kind(e) in ("/P", "/text-unit")
+                     and [str(k.get("/Alt")) for k in elements(e) if kind(k) == "/Figure"]
+                     == ["A left red square", "A right green square"] for e in tree)),
         # Its width, 800 pixels, is 600 points at the writer's 96 an inch,
         # and the decorative rule's 675: no wider than the line now.
         ("an image whose width is wider than the line is scaled to fit it, "
          "a decorative one too",
-         lambda: len(re.findall(r"\\protect\\pandocbounded\{\\includegraphics\[width=",
+         lambda: len(re.findall(r"\\protect\\pandocbounded\{\\includegraphics\[width=[\d.]+in,",
                                 source)) == 2
          and 0 < max(image_widths(reader))
          <= 0.75 * float(reader.pages[0].mediabox.width)),

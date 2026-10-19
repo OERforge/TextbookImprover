@@ -1026,6 +1026,66 @@ local function caption_blocks(caption)
   return caption and caption.long or pandoc.Blocks{}
 end
 
+-- Pictures side by side, as a page saved from the web sets them in a row
+-- of its grid (a div of class row holding figures, each a picture with no
+-- caption: LibreTexts's two, its caption saying which is left and which
+-- right), are one line of pictures, each its share of the line, less the
+-- space between them, or its own width where that's less; the pages
+-- draw them in a row too (page.css). With a caption of their own, they
+-- stand one under another, each caption under its picture.
+local ROW_GAP = 4         -- percent of the line between two pictures
+local LINE_POINTS = 345   -- the book class's line at 10pt, in points
+local POINTS = { px = 0.75, pt = 1, ['in'] = 72, inch = 72, cm = 72 / 2.54,
+                 mm = 72 / 25.4, pc = 12 }
+
+local function picture_of(block)
+  if block.t ~= 'Figure' or #caption_blocks(block.caption) > 0
+      or #block.content ~= 1
+      or (block.content[1].t ~= 'Plain' and block.content[1].t ~= 'Para') then
+    return nil
+  end
+  local image = nil
+  for _, inline in ipairs(block.content[1].content) do
+    if inline.t == 'Image' and not image then
+      image = inline
+    elseif inline.t ~= 'Space' and inline.t ~= 'SoftBreak' then
+      return nil
+    end
+  end
+  return image
+end
+
+local function narrower(width, share)
+  local number, unit = (width or ''):match('^%s*([%d.]+)%s*(%a*%%?)%s*$')
+  number = tonumber(number)
+  if not number then return false end
+  if unit == '%' then return number <= share end
+  local points = POINTS[unit ~= '' and unit or 'px']
+  return points ~= nil and number * points <= share / 100 * LINE_POINTS
+end
+
+local function side_by_side(div)
+  if not div.classes:includes('row') or #div.content < 2 then return nil end
+  local images = {}
+  for _, block in ipairs(div.content) do
+    images[#images + 1] = picture_of(block)
+    if not images[#images] then return nil end
+  end
+  local share = (100 - ROW_GAP * (#images - 1)) / #images
+  -- A paragraph from the start, so each picture is one of the same line,
+  -- the first not set before it in the float.
+  local line = pandoc.Inlines{ pandoc.RawInline('latex', '\\leavevmode') }
+  for i, image in ipairs(images) do
+    if i > 1 then line:insert(pandoc.RawInline('latex', '\\hfill')) end
+    if not narrower(image.attributes.width, share) then
+      image.attributes.width = ('%.1f%%'):format(share)
+      image.attributes.height = nil
+    end
+    line:insert(image)
+  end
+  return pandoc.Plain(line)
+end
+
 local function opened(blocks)
   local content = pandoc.Blocks{}
   for _, block in ipairs(blocks) do
@@ -1033,7 +1093,8 @@ local function opened(blocks)
       content:extend(opened(block.content))
       content:extend(caption_blocks(block.caption))
     elseif block.t == 'Div' then
-      block.content = opened(block.content)
+      local row = side_by_side(block)
+      block.content = row and pandoc.Blocks{ row } or opened(block.content)
       content:insert(block)
     else
       content:insert(block)

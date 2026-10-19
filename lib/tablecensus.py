@@ -341,18 +341,23 @@ def view(tbl):
                  if repeats_as_header(tr)])
 
 
-def _stringify(node):
+def _stringify(node, alt=True):
+    """A cell's text: its words, a formula's and code's as written, and a
+    picture's alt text, which labels a row or a column as words would;
+    with alt false, not the alt text."""
     if isinstance(node, dict):
         kind, content = node.get("t"), node.get("c")
         if kind == "Str":
             return content
+        if kind == "Image" and not alt:
+            return ""
         if kind in ("Space", "SoftBreak", "LineBreak"):
             return " "
         if kind in ("Code", "Math"):
             return content[-1]
-        return _stringify(content) if content is not None else ""
+        return _stringify(content, alt) if content is not None else ""
     if isinstance(node, list):
-        return "".join(_stringify(n) for n in node)
+        return "".join(_stringify(n, alt) for n in node)
     return ""
 
 
@@ -382,6 +387,7 @@ def view_from_pandoc(table):
     foot_rows = list(range(len(rows), len(rows) + len(foot[1])))
     rows += foot[1]
     grid, pending = [], {}          # column -> rows still covered
+    words = False                   # any text but pictures' alt text
     for row in rows:
         out, column = [], 0
         cells = list(row[1])
@@ -397,6 +403,7 @@ def view_from_pandoc(table):
                 break
             _a, _align, rowspan, colspan, blocks = cells.pop(0)
             text = _stringify(blocks)
+            words = words or bool(_stringify(blocks, alt=False).strip())
             strong = "".join(_stringify(s["c"]) for s in _find(blocks,
                                                                 "Strong"))
             cell = Cell.of(text, bold=bool(text.strip()) and
@@ -410,6 +417,13 @@ def view_from_pandoc(table):
                     pending[column + offset] = rowspan - 1
             column += colspan
         grid.append(out)
+    # A table of nothing but pictures is a figure to the filter
+    # (image_only_table in figures-and-tables.lua), whatever their alt
+    # text says: no text of its own, so the layout rule takes it.
+    if not words:
+        for row in grid:
+            for cell in row:
+                cell.text = ""
     return View(grid, marked=marked, foot=foot_rows)
 
 

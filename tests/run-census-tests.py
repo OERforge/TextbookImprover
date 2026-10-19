@@ -564,6 +564,14 @@ def pandoc_checks():
          "<tr><td>Exports</td><td>$100 billion</td></tr>"),
         ("html: one cell is layout, not data", None,
          "<tr><td>Just a box of text.</td></tr>"),
+        ("html: two pictures side by side and nothing else are layout, whatever their alt "
+         "text says, as the filter makes them a figure", None,
+         "<tr><td><img src='a.png' alt='A left square'></td>"
+         "<td><img src='b.png' alt='A right square'></td></tr>"),
+        ("html: but pictures heading a table's columns are its header row, their alt text "
+         "the cells' words", "first-row",
+         "<tr><td><img src='a.png' alt='Apples'></td><td><img src='b.png' alt='Pears'></td></tr>"
+         "<tr><td>3</td><td>5</td></tr><tr><td>4</td><td>6</td></tr>"),
     ]
     for name, expect, rows in shapes:
         doc = json.loads(subprocess.run(

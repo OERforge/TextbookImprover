@@ -192,6 +192,8 @@ class Emitter:
                     break
         if handler is None and tag == "a":
             handler = self.link
+        if handler is None and tag == "table":
+            handler = self.table_alone
         if handler is None and tag == "cite":
             # A citation's words; Pandoc's reader keeps nothing more of a
             # <cite>.
@@ -815,13 +817,47 @@ class Emitter:
             head_rows(out)
         layout = self._layout(out, table[0], page, caption is not None and " ".join(
             text_of(caption).split()) not in ("", label), organizer)
+        self._record(out, table[0], page, label, layout)
+        dst.append(out)
+
+    def table_alone(self, el, dst, level, page):
+        """A table outside OpenStax's container (div_os_table), where
+        baking leaves it: one of no class, which no recipe numbers or
+        wraps, in an exercise's solution in the answer key (the economics
+        books' 6, Prealgebra 2e's 1, Elementary Algebra 2e's 1); an
+        unnumbered one in a style whose recipe doesn't bake one
+        (BakeUnnumberedTables; 16 styles, among them ap-physics, whose
+        College Physics for AP Courses 2e has 2 in its test prep, the only
+        ones in the 67 books); and CALS's entrytbl, a table in another's
+        cell. Decided and listed as a contained table is, its caption, if
+        it has one, its own, so its summary is drafted as its
+        description."""
+        out = E("table")
+        for key, value in el.attrib.items():
+            if key not in INTERNAL:
+                out.set(key, value)
+        self.convert_children(el, out, level, page)
+        caption = out.find("caption")
+        organizer = organizer_page(self.book.style, page.title)
+        if organizer and symbol_key(out):
+            head_rows(out)
+        layout = self._layout(out, el, page, caption is not None and bool(
+            " ".join(text_of(caption).split())), organizer)
+        self._record(out, el, page, None, layout)
+        dst.append(out)
+
+    def _record(self, out, source, page, label, layout):
+        """A table in the book's list: its caption's text, its summary,
+        whether it's laid out, and its cells' words, for the sidecars the
+        unpacker drafts (cnx.project); its place on the page is counted
+        once the page is whole."""
+        caption = out.find("caption")
         self._placing.append((len(self.tables), out))
         self.tables.append((page.name, label,
                             text_of(caption) if caption is not None else "",
-                            table[0].get("data-summary") or "", layout,
+                            source.get("data-summary") or "", layout,
                             [[text_of(cell) for cell in row if cell.tag in ("td", "th")]
                              for row in out.xpath("./tbody/tr | ./tr | ./tfoot/tr")]))
-        dst.append(out)
 
     def _layout(self, out, source, page, captioned, organizer=False):
         """Whether a table is a layout table, given role="presentation"

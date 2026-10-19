@@ -1726,6 +1726,73 @@ def case_organizers(work):
     ]
 
 
+# A table baking leaves where it stands ----------------------------------
+
+UNWRAPPED_PAGE = """
+<para id="p2">The colonies had grown.</para>
+<table id="byline" class="unnumbered" summary="Who wrote it.">
+<tgroup cols="1"><tbody>
+<row><entry>Written by: A. Historian, A College</entry></row>
+</tbody></tgroup></table>
+<table id="people" class="unnumbered" summary="The colonies' people in 1750."
+ aria-label="A table of two columns, the colony and its people.">
+<tgroup cols="2"><thead><row><entry>Colony</entry><entry>People</entry></row></thead>
+<tbody><row><entry>Virginia</entry><entry>231,000</entry></row>
+<row><entry>Maryland</entry><entry>141,000</entry></row></tbody></tgroup></table>"""
+
+
+def build_unwrapped(repo):
+    """A book of *U.S. History*'s style (history), whose recipe leaves an
+    unnumbered table where it stands, outside the container it bakes a
+    numbered one in."""
+    write(os.path.join(repo, "META-INF", "books.xml"), """<container
+ xmlns="https://openstax.org/namespaces/book-container" version="1">
+<book slug="tiny-usa" style="history"
+ href="../collections/tiny-usa.collection.xml"/>
+</container>""")
+    write(os.path.join(repo, "collections", "tiny-usa.collection.xml"),
+          COLLECTION.format(title="Tiny USA", slug="tiny-usa",
+                            uuid="11111111-2222-4333-8444-acacacacacac",
+                            content="""
+<col:subcollection><md:title>The Colonies</md:title><col:content>
+<col:module document="m61015"/>
+<col:module document="m61016"/>
+</col:content></col:subcollection>"""))
+    module(repo, "m61015", "Introduction", """
+<para id="p1">This chapter opens.</para>""", cls="introduction")
+    module(repo, "m61016", "The Colonies", UNWRAPPED_PAGE)
+
+
+def case_unwrapped(work):
+    repo = os.path.join(work, "osbooks-unwrapped")
+    build_unwrapped(repo)
+    out = os.path.join(work, "tiny-usa")
+    result = unpack(repo, out, "--book", "tiny-usa")
+    page = read(out, "1-1-the-colonies.html") if result.returncode == 0 else ""
+    report = report_of(out) if result.returncode == 0 else []
+    captions = os.path.join(out, "table-captions.csv")
+    drafted = read(captions) if os.path.exists(captions) else ""
+
+    def table(name):
+        found = re.search(r'<table\b[^>]*\bid="%s"[^>]*>' % name, page)
+        return found.group(0) if found else ""
+    return [
+        ("a table baking leaves outside its container, as U.S. History's style "
+         "leaves an unnumbered one, is decided as any other: one of one cell is "
+         "a layout table, and the run counts it",
+         lambda: 'role="presentation"' in table("byline")
+         and "class=\"os-table\"" not in page
+         and "1 table(s) that only lay things out" in result.stdout),
+        ("and its summary is drafted as its description, and OpenStax's label "
+         "for it left out and reported",
+         lambda: table("people") and 'role="presentation"' not in table("people")
+         and "The colonies' people in 1750." in drafted
+         and "aria-label" not in page
+         and [r["Detail"] for r in report if r["Check"] == "table-label-left-out"]
+         == ["people: A table of two columns, the colony and its people."]),
+    ]
+
+
 # Which summaries read their tables out ------------------------------------
 
 def case_read_out(work):
@@ -2116,6 +2183,7 @@ CASES = [
      "one cell, a form, pictures, and a matching exercise, layout tables, and "
      "summaries that read a table out", case_layout_kinds),
     ("an inquiry organizer's key and plan", case_organizers),
+    ("a table baking leaves outside its container", case_unwrapped),
     ("which summaries read their tables out", case_read_out),
     ("the collation", case_collation),
     ("baking's steps, one at a time", case_steps),

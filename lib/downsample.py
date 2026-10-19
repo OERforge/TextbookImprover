@@ -25,6 +25,19 @@ Image is measured (PNG, JPEG, GIF, WebP, BMP, TIFF): an SVG has no pixels
 to spare, an animated GIF or PNG is left whole, and an image a page holds
 in raw HTML isn't seen.
 
+A copy of a drawing gets a palette. An original of few colors, a
+drawing's or a chart's flat ones, compresses well as a PNG, but a copy
+resampled from it holds thousands of colors along its smoothed edges,
+which compress worse: at 2, 77 of Instrumental Analysis's copies came
+out larger than their originals, every one such a drawing, and a larger
+multiple only made a copy larger still. So a PNG copy whose original is in
+RGB or RGBA, with DRAWING_COLORS colors or fewer, is quantized to an
+adaptive palette of PALETTE_COLORS (median cut, or fast octree for a copy
+with transparency, an alpha channel or a transparent color, which median
+cut can't keep). A photograph's copy keeps its colors, since a palette
+speckles a photograph's smooth shades, and so does a copy of an image in
+shades of gray.
+
 Measuring needs nothing but the files' headers; scaling needs Pillow.
 
 Copyright 2026 Robert Szarka
@@ -57,6 +70,14 @@ except ImportError:          # measuring works without it; scaling doesn't
 # names on Image, which every later release keeps too.
 LANCZOS = getattr(getattr(Image, "Resampling", Image), "LANCZOS", None)
 FASTOCTREE = getattr(getattr(Image, "Quantize", Image), "FASTOCTREE", None)
+MEDIANCUT = getattr(getattr(Image, "Quantize", Image), "MEDIANCUT", None)
+
+# A drawing, as against a photograph: an original in RGB or RGBA of this
+# many colors or fewer, whose PNG copy gets a palette of PALETTE_COLORS.
+# Measured on Instrumental Analysis's PNGs: its drawings and charts have 49
+# to 6,705 colors, most under 500, and its photographs more than 65,536.
+DRAWING_COLORS = 4096
+PALETTE_COLORS = 256
 
 # The widest the pages show anything: Pandoc's stylesheet sets the body
 # in a column 36em wide (templates/styles.html, max-width), and a
@@ -291,20 +312,29 @@ def _flat(im):
     return im, False
 
 
+def drawing(im):
+    """Whether an image in RGB or RGBA has DRAWING_COLORS colors or fewer,
+    as a drawing does and a photograph doesn't."""
+    return im.mode in ("RGB", "RGBA") and im.getcolors(DRAWING_COLORS) is not None
+
+
 def scale_one(path, out, factor):
     """A copy of the image at path, its pixels scaled by factor (under 1),
     written to out in the original's format: its color profile, a JPEG's
     EXIF, and the size it prints at kept (its resolution scaled with it).
-    A PNG or GIF that had a palette has one again. Returns the copy's size
-    in bytes, or None when Pillow can't write it or it's animated."""
+    A PNG or GIF that had a palette has one again, and a PNG copy of a
+    drawing in color gets one. Returns the copy's size in bytes, or None
+    when Pillow can't write it or it's animated, and whether it's a drawing
+    given a palette."""
     with Image.open(path) as original:
         if getattr(original, "n_frames", 1) > 1:
-            return None
+            return None, False
         fmt = original.format
         info = dict(original.info)
         exif = original.info.get("exif")
         progressive = bool(original.info.get("progressive") or original.info.get("progression"))
         im, palette = _flat(original)
+        drawn = fmt == "PNG" and not palette and drawing(im)
         width = max(1, round(original.size[0] * factor))
         height = max(1, round(original.size[1] * factor))
         scaled = im.resize((width, height), LANCZOS)
@@ -323,40 +353,49 @@ def scale_one(path, out, factor):
     elif fmt == "PNG":
         if palette:
             scaled = scaled.quantize(colors=256, method=FASTOCTREE)
+        elif drawn:
+            # An RGB original's transparent color (its tRNS chunk) would
+            # stay on the palette copy as a color, which a palette PNG can't
+            # hold and Pillow's writer fails on, so it's transparency first.
+            if "transparency" in scaled.info:
+                scaled = scaled.convert("RGBA")
+            scaled = scaled.quantize(colors=PALETTE_COLORS,
+                                     method=FASTOCTREE if scaled.mode == "RGBA" else MEDIANCUT)
         options["optimize"] = True
     elif fmt == "GIF":
         scaled = scaled.quantize(colors=256, method=FASTOCTREE)
     elif fmt == "WEBP":
         options.update(quality=90)
     elif fmt not in ("BMP", "TIFF"):
-        return None
+        return None, False
     os.makedirs(os.path.dirname(out), exist_ok=True)
     try:
         scaled.save(out, format=fmt, **options)
     except (OSError, ValueError, KeyError):
-        return None
-    return os.path.getsize(out)
+        return None, False
+    return os.path.getsize(out), drawn
 
 
 def scale(measured, limit, folder):
     """Copies, under folder at each image's path, of the images wider than
     limit times their shown width, scaled to that width; one whose copy
     would be larger than the original is left as it is. Returns counts:
-    scaled, bytes before and after, kept (larger scaled), skipped (Pillow
-    couldn't), and the total bytes of every image measured."""
+    scaled, bytes before and after, drawings among them given a palette,
+    kept (larger scaled), skipped (Pillow couldn't), and the total bytes of
+    every image measured."""
     if Image is None:
         raise RuntimeError(INSTALL)
     os.makedirs(folder, exist_ok=True)
     with open(os.path.join(folder, LIMIT_FILE), "w") as fh:
         fh.write(str(limit))
-    counts = {"scaled": 0, "before": 0, "after": 0, "kept": 0, "skipped": 0,
+    counts = {"scaled": 0, "before": 0, "after": 0, "palette": 0, "kept": 0, "skipped": 0,
               "images": len(measured), "total": sum(m.bytes for m in measured)}
     for m in measured:
         if m.ratio <= limit:
             continue
         out = os.path.join(folder, m.src)
         target = limit * m.shown
-        size = scale_one(m.path, out, target / m.pixels[0])
+        size, drawn = scale_one(m.path, out, target / m.pixels[0])
         if size is None:
             counts["skipped"] += 1
             continue
@@ -367,6 +406,7 @@ def scale(measured, limit, folder):
         counts["scaled"] += 1
         counts["before"] += m.bytes
         counts["after"] += size
+        counts["palette"] += drawn
     return counts
 
 
@@ -378,6 +418,9 @@ def report(counts, limit):
     line = (f"images.downsample {limit:g}: {counts['scaled']} of {counts['images']} image(s) "
             f"scaled down to {limit:g} times the width they're shown at, "
             f"{megabytes(counts['before'])} to {megabytes(counts['after'])}")
+    if counts.get("palette"):
+        line += (f", {counts['palette']} of them drawings given a palette of "
+                 f"{PALETTE_COLORS} colors")
     if counts["kept"]:
         line += (f"; {counts['kept']} kept as they were, since a copy at that size was "
                  "larger")

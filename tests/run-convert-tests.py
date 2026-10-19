@@ -544,8 +544,11 @@ def case_downsample(work):
     widest; set, an html, an EPUB, and a Word target carry copies scaled
     down to that many times the width shown, which is the page's width, a
     percentage of the column, or a height and the image's proportions,
-    while a markdown target and the original keep the author's file; and
-    without Pillow, a run with it set stops and says what to install."""
+    while a markdown target and the original keep the author's file; a
+    copy of a drawing, an original of few colors, has a palette of 256,
+    its transparency kept, an alpha channel's or an RGB PNG's transparent
+    color's, and a photograph's its colors; and without
+    Pillow, a run with it set stops and says what to install."""
     import random
     import struct
     import zlib
@@ -595,7 +598,30 @@ def case_downsample(work):
             "![A small square](assets/small.png)\n")
     if Image is not None:
         page += ("\n![Colored noise](assets/colors.png){width=100px}\n\n"
-                 "![A photograph of noise](assets/photo.jpg){height=50px}\n")
+                 "![A photograph of noise](assets/photo.jpg){height=50px}\n\n"
+                 "![A drawing in eight colors](assets/drawing.png){width=100px}\n\n"
+                 "![A drawing half clear](assets/clear.png){width=100px}\n\n"
+                 "![A drawing half in a clear color](assets/key.png){width=100px}\n")
+
+    def drawing(path, clear=False, key=False):
+        """A drawing: squares of two pixels in eight flat colors, which a
+        copy's smoothed edges give thousands, the left half's clear where
+        clear says, in an alpha channel, or where key says, in white, the
+        color an RGB PNG names as transparent (its tRNS chunk)."""
+        from PIL import ImageDraw
+        colors = [(230, 25, 75), (60, 180, 75), (255, 225, 25), (0, 130, 200),
+                  (245, 130, 48), (145, 30, 180), (70, 240, 240), (0, 0, 0)]
+        im = Image.new("RGBA" if clear else "RGB", (400, 200))
+        pen = ImageDraw.Draw(im)
+        for x in range(0, 400, 2):
+            for y in range(0, 200, 2):
+                color = colors[noise.randrange(8)]
+                if clear:
+                    color += (0 if x < 200 else 255,)
+                elif key and x < 200:
+                    color = (255, 255, 255)
+                pen.rectangle((x, y, x + 1, y + 1), fill=color)
+        im.save(path, **({"transparency": (255, 255, 255)} if key else {}))
 
     def book(name, config, env=None):
         where = os.path.join(work, name)
@@ -606,6 +632,9 @@ def case_downsample(work):
             png(os.path.join(where, "assets", "colors.png"), 400, 200, palette=True)
             Image.frombytes("RGB", (300, 150), noise.randbytes(300 * 150 * 3)).save(
                 os.path.join(where, "assets", "photo.jpg"), quality=95)
+            drawing(os.path.join(where, "assets", "drawing.png"))
+            drawing(os.path.join(where, "assets", "clear.png"), clear=True)
+            drawing(os.path.join(where, "assets", "key.png"), key=True)
         with open(os.path.join(where, "page.md"), "w", encoding="utf-8") as fh:
             fh.write(page)
         with open(os.path.join(where, "assets", "big.png"), "rb") as fh:
@@ -657,6 +686,15 @@ def case_downsample(work):
         with Image.open(path) as im:
             return im.format, im.mode, im.size
 
+    def alpha(*parts):
+        """The opacity of a copy's pixels at the left and at the right."""
+        path = os.path.join(b, *parts)
+        if not os.path.exists(path):
+            return None
+        with Image.open(path) as im:
+            im = im.convert("RGBA")
+            return im.getpixel((10, 50))[3], im.getpixel((190, 50))[3]
+
     # A Python that can't import Pillow, which a folder named PIL whose
     # import fails stands in for.
     blocked = os.path.join(work, "no-pillow")
@@ -679,6 +717,17 @@ def case_downsample(work):
          "palette again",
          lambda: file_size(b, "html", "assets", "small.png") == (4, 4)
          and opened("html", "assets", "colors.png") == ("PNG", "P", (200, 100))),
+        ("a drawing's copy has a palette, a drawing's with transparency too, in an alpha "
+         "channel or a transparent color, its clear half still clear, and a photograph's "
+         "keeps its colors",
+         lambda: opened("html", "assets", "drawing.png") == ("PNG", "P", (200, 100))
+         and opened("html", "assets", "clear.png") == ("PNG", "P", (200, 100))
+         and opened("html", "assets", "key.png") == ("PNG", "P", (200, 100))
+         # The palette's opaque colors may hold an edge's alpha in their
+         # average: 254 measured, where the original's is 255.
+         and all((lambda a: a is not None and a[0] < 8 and a[1] > 247)(
+             alpha("html", "assets", name)) for name in ("clear.png", "key.png"))
+         and opened("html", "assets", "big.png") == ("PNG", "RGB", (200, 100))),
         ("the EPUB and the Word file carry the copies",
          lambda: (200, 100) in zipped(epub, "EPUB/media/")
          and (400, 200) not in zipped(epub, "EPUB/media/")
@@ -688,10 +737,11 @@ def case_downsample(work):
         ("the original stays as it is, and so does a markdown target's copy, the author's",
          lambda: open(os.path.join(b, "assets", "big.png"), "rb").read() == original
          and open(os.path.join(b, "md", "assets", "big.png"), "rb").read() == original),
-        ("the run says how many it scaled, and a target set to 0 is named as carrying "
-         "them whole",
-         lambda: re.search(r"images\.downsample 2: 4 of 5 image\(s\) scaled down to 2 times "
-                           r"the width they're shown at, [\d.]+ [kM]B to [\d.]+ [kM]B\.", said)
+        ("the run says how many it scaled and how many of them were drawings given a "
+         "palette, and a target set to 0 is named as carrying them whole",
+         lambda: re.search(r"images\.downsample 2: 7 of 8 image\(s\) scaled down to 2 times "
+                           r"the width they're shown at, [\d.]+ [kM]B to [\d.]+ [kM]B, 3 of "
+                           r"them drawings given a palette of 256 colors\.", said)
          and "the outputs (full) carry them whole" in said
          and file_size(b, "full", "assets", "big.png") == (400, 200)),
         ("without Pillow, a run with it set stops before writing and says what to install; "

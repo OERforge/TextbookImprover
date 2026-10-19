@@ -76,9 +76,10 @@ row of table-headers.csv.
 The guess is lib/tablecensus.py's, made as convert.py makes it: of the
 table's cells as Pandoc's HTML reader gives them to it, after
 html-source.lua (a short row padded, an empty column dropped), a
-picture's text its description and a formula its TeX (cnx.mathtex). The
-guess made here is the one convert.py makes for each of the 3,011 tables
-in the dev-math books, and for 663 in four more.
+picture's text its description and a formula its TeX (cnx.mathtex), and
+a table of nothing but pictures no text at all, as the filter makes it a
+figure. The guess made here is the one convert.py makes for each of the
+3,011 tables in the dev-math books, and for 663 in four more.
 
 Copyright 2026 Robert Szarka
 
@@ -112,10 +113,10 @@ LAYOUT_STYLES = {"dev-math", "precalculus-coreq", "hs-physics"}
 ANY_CLASS_STYLES = {"dev-math"}
 
 
-def cell_text(cell):
+def cell_text(cell, alt=True):
     """A cell's text as tablecensus reads it from Pandoc's AST (_stringify):
-    a picture's description, a line break as a space, a formula as its
-    TeX."""
+    a picture's description (none, with alt false), a line break as a
+    space, a formula as its TeX."""
     parts = []
 
     def walk(el):
@@ -124,7 +125,7 @@ def cell_text(cell):
             parts.append(tex(el))
             return
         if name == "img":
-            parts.append(el.get("alt") or "")
+            parts.append((el.get("alt") or "") if alt else "")
             return
         if name == "br":
             parts.append(" ")
@@ -249,6 +250,7 @@ def view(table):
                     for tr in rows])
     spans = _without_empty_columns(rows)
     grid, pending = [], {}          # column -> rows still covered
+    words = False                   # any text but pictures' descriptions
     for cells in rows:
         out, column = [], 0
         cells = [c for c in cells if c in spans]
@@ -268,12 +270,20 @@ def view(table):
             made = tc.Cell.of(cell_text(cell), bold=_bold(cell),
                               image=cell.find(".//img") is not None, span=span,
                               vmerge="restart" if rowspan > 1 else None)
+            words = words or bool(cell_text(cell, alt=False))
             out.extend([made] * span)
             if rowspan > 1:
                 for offset in range(span):
                     pending[column + offset] = rowspan - 1
             column += span
         grid.append(out)
+    # A table of nothing but pictures has no text of its own, whatever
+    # their descriptions say, as view_from_pandoc reads it: the filter
+    # makes it a figure.
+    if not words:
+        for row in grid:
+            for made in row:
+                made.text = ""
     return tc.View(grid, marked=marked, foot=foot)
 
 

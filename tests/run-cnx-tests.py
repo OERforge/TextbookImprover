@@ -1164,7 +1164,7 @@ def tables_of(html):
 
 def case_step_tables(work):
     from lxml import etree
-    from cnx import mathtex
+    from cnx import mathtex, steptables
     repo = os.path.join(work, "osbooks-steps")
     build_steps(repo)
     out = os.path.join(work, "steps")
@@ -1228,6 +1228,15 @@ def case_step_tables(work):
          "across the table over a part that has a header row",
          lambda: presentation("steps1") and presentation("steps3")
          and not kept & {"steps1", "steps3"}),
+        ("and a table of nothing but pictures has no text of its own, as "
+         "convert.py's census reads it, whatever the pictures' descriptions "
+         "say: the filter makes it a figure",
+         lambda: steptables.header_guess(etree.fromstring(
+             "<table><tbody>" + "".join(
+                 "<tr>%s</tr>" % "".join('<td><img src="a.png" alt="%s"/></td>' % a
+                                         for a in row)
+                 for row in (("Price", "Size"), ("1", "2"), ("3", "4"), ("5", "6")))
+             + "</tbody></table>")) is None),
         ("one the guess reads a header row in is left a data table and "
          "reported: labels along the top beside a blank corner, pictures "
          "whose descriptions label the top, and a header row over two "

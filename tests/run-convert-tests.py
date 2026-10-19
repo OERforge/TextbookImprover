@@ -755,6 +755,70 @@ def case_downsample(work):
     ]
 
 
+def case_white_marks(work):
+    """White space with nothing to show (figures-and-tables.lua): an
+    editor's subscript holding only a space, which Pandoc's HTML reader
+    makes an empty subscript between two spaces, is one space, on the page
+    and in the Word file, which had shown two, as is a link holding only a
+    space, which the filter drops, emphasis holding only such a link, and
+    an emphasized space at a subscript's end, inside bold or not; a
+    superscript holding a no-break space is the space; no mark is emptied
+    to make two spaces one, so a span with a style holding only a space
+    keeps it, while one holding words loses the space at its end beside
+    another, outside it or at the start of the next span; and a table's
+    cell holding only a no-break space is empty, where a PDF had a space
+    character for it."""
+    os.makedirs(work, exist_ok=True)
+    with open(os.path.join(work, "marks.html"), "w", encoding="utf-8") as fh:
+        fh.write("<!DOCTYPE html>\n<html lang=\"en\"><head><title>Marks</title></head><body>\n"
+                 "<h1>Marks</h1>\n"
+                 "<p>Here S<sub>mb</sub><sub><em> </em></sub>= 0, and x<sup>&nbsp;</sup>y.</p>\n"
+                 "<p>As shown in<a href=\"https://example.org/x\"> </a>Figure 2, and "
+                 "<em><a href=\"https://example.org/y\"> </a></em> Figure 3.</p>\n"
+                 "<p>And A<sub><em>SX</em><em> </em></sub>is 0.41, and "
+                 "B<sub><strong><em>SX</em><em> </em></strong></sub>is 0.5.</p>\n"
+                 "<p>The value <span style=\"color:#000000;\"> </span> is 0.6, and "
+                 "<span style=\"color:#000000;\">red </span> is 0.7, <span style=\"color:#000000;\">"
+                 "and so </span><span style=\"color:#000000;\"> on</span>.</p>\n"
+                 "<table><caption>Values</caption>\n"
+                 "<tr><th>z</th><th>0.00</th><th>0.01</th></tr>\n"
+                 "<tr><td>3.0</td><td>0.00135</td><td>&nbsp;</td></tr>\n"
+                 "</table>\n</body></html>\n")
+    result = convert(work, "targets:\n  html:\n    format: html\n"
+                           "  word:\n    format: docx\n", fixtures=())
+    page = read(work, "html", "marks.html") if exists(work, "html", "marks.html") else ""
+    words = glob.glob(os.path.join(work, "word", "*.docx"))
+    said = ""
+    if words:
+        with zipfile.ZipFile(words[0]) as z:
+            xml = z.read("word/document.xml").decode("utf-8")
+        # The Word file's text, a paragraph a line.
+        said = "\n".join("".join(re.findall(r"<w:t(?: [^>]*)?>([^<]*)</w:t>", p))
+                         for p in re.findall(r"<w:p[ >].*?</w:p>", xml, re.S))
+    return [
+        ("a subscript holding only a space is the space alone, on the page",
+         lambda: result.returncode == 0
+         and "S<sub>mb</sub> = 0" in page and "<sub></sub>" not in page
+         and "<sub><em></em></sub>" not in page and "<sup>" not in page
+         and "<em></em>" not in page),
+        ("and in the Word file one space, where Pandoc's writer gave its two a run each, "
+         "and one where a link held only a space, inside emphasis or not, or a subscript "
+         "ended in an emphasized one, inside bold or not",
+         lambda: "Here Smb = 0, and x\u00a0y." in said
+         and "As shown in Figure 2, and Figure 3." in said
+         and "And ASX is 0.41, and BSX is 0.5." in said),
+        ("no mark is emptied to make two spaces one: a span with a style holding only a "
+         "space keeps it, and one holding a word loses the space at its end, beside "
+         "another outside it or at the start of the next span",
+         lambda: re.search(r'<span\s+style="color:#000000;"> </span>', page) is not None
+         and re.search(r'<span\s+style="color:#000000;">red</span> is 0\.7', page) is not None
+         and "and red is 0.7, and so on." in said),
+        ("a table's cell holding only a no-break space is empty",
+         lambda: re.search(r"<td>0\.00135</td>\s*<td></td>", page) is not None
+         and "\u00a0</td>" not in page and "&nbsp;</td>" not in page),
+    ]
+
+
 def case_linked_paths(work):
     """A link to a file beside the pages that names it with backslashes,
     as only Windows resolves it, or in another case, as macOS and Windows
@@ -6392,6 +6456,8 @@ CASES = [
     ("two files, one page", case_stem_collisions),
     ("file names lowercased", case_lowercase_names),
     ("images scaled down to a set number of times the width shown", case_downsample),
+    ("white space with nothing to show: an empty mark, a cell of a no-break space",
+     case_white_marks),
     ("a link to a file in another case, or with backslashes", case_linked_paths),
     ("adopting a split book's pages", case_adopt),
     ("an HTML source's tables and the header sidecar", case_html_headers),

@@ -254,6 +254,15 @@ And a paragraph after the heading, and a table with row headers.
 
 Back in the book's own language.
 
+An editor's marks with nothing in them but the space typed after them
+set nothing: water is H~2~O, S<sub> </sub>= 0, S~\ ~= 0, and *\ *so on.
+
+| z   | 0.00    | 0.01   | 0.02   | 0.03   |
+|-----|---------|--------|--------|--------|
+| 3.0 | 0.00135 | &nbsp; | &nbsp; | &nbsp; |
+
+Table: Values whose row ends in empty cells, each holding a no-break space
+
 ## A section whose title runs longer than the line a running head has beside the page number, as a topic's can
 
 Words that fill the pages under a long title, so that its running head is set on a page of its own, beside the page's number, where the book class would set it in one line however long it is. Words that fill the pages under a long title, so that its running head is set on a page of its own, beside the page's number, where the book class would set it in one line however long it is. Words that fill the pages under a long title, so that its running head is set on a page of its own, beside the page's number, where the book class would set it in one line however long it is. Words that fill the pages under a long title, so that its running head is set on a page of its own, beside the page's number, where the book class would set it in one line however long it is.
@@ -850,6 +859,43 @@ def text_paths(path, words):
     return found
 
 
+def deep_texts(path):
+    """Each structure element's kind, classes, and text, its own and its
+    descendants', in order, with its children's kinds and texts."""
+    if not os.path.exists(path):
+        return []
+    texts = pdftext.marked_text(path)
+    pdf = pdfparagraphs.pikepdf.open(path)
+    pages = {page.objgen: n for n, page in enumerate(pdf.pages)}
+    found = []
+
+    def walk(element):
+        if not pdfparagraphs.is_struct_elem(element):
+            return None
+        at = len(found)
+        found.append(None)
+        text, kids = pdftext.own_text(element, texts, pages), []
+        for kid in pdfparagraphs.kids_of(element):
+            got = walk(kid)
+            if got is not None:
+                kids.append(got)
+                text += got[1]
+        value = element.get("/C")
+        named = [str(v) for v in value] if isinstance(value, pdfparagraphs.pikepdf.Array) \
+            else ([str(value)] if value is not None else [])
+        found[at] = (str(element["/S"]), named, text, kids)
+        return str(element["/S"]), text
+    for kid in pdfparagraphs.kids_of(pdf.Root.StructTreeRoot):
+        walk(kid)
+    return found
+
+
+def row_cells(path, words):
+    """The text of each cell of each table row whose text holds words."""
+    return [[text for kind_, text in kids if kind_ in ("/TD", "/TH")]
+            for kind_, _, text, kids in deep_texts(path) if kind_ == "/TR" and words in text]
+
+
 def untagged_repairs(work):
     """build-pdf.py's repairs after LaTeX on a PDF with no structure tree,
     as one built to no PDF/UA standard has none: (whether it's taken for
@@ -1348,11 +1394,11 @@ def checks(work, jobs=1):
         # first cell of each body row TH-row only if pdf-target.lua set
         # table/header-columns around it.
         ("the matrix table's first column is row headers",
-         lambda: len(tabled) == 12 and row_headers(tabled[0]) == 2),
+         lambda: len(tabled) == 13 and row_headers(tabled[0]) == 2),
         ("and so is a table's in a passage in another language that holds a heading",
-         lambda: len(tabled) == 12 and row_headers(tabled[9]) == 1),
+         lambda: len(tabled) == 13 and row_headers(tabled[9]) == 1),
         ("the plain table has header cells and no row headers",
-         lambda: len(tabled) == 12 and row_headers(tabled[1]) == 0
+         lambda: len(tabled) == 13 and row_headers(tabled[1]) == 0
          and any(kind(e) == "/TH" for e in tabled[1])),
         # LaTeX writes a longtable's caption as a first row of one header
         # cell, and leaves the empty copy of the head it repeats inside the
@@ -1466,6 +1512,19 @@ def checks(work, jobs=1):
          lambda: (200, 100) in image_pixels(untagged_path)
          and (400, 200) not in image_pixels(untagged_path)
          and "images.downsample 2: 1 of 2 image(s) scaled down" in untagged_said),
+        # figures-and-tables.lua's white space with nothing to show: an
+        # editor's mark holding nothing but white space, which LaTeX's
+        # tagging made an empty Span, and a cell holding a no-break space, a
+        # space character in the PDF's text, a row of them a run of spaces
+        # (veraPDF's WCAG 2.2 profile, 4.1.2-17 and 1.3.1-2).
+        ("a mark holding nothing but white space sets nothing, where it was an empty Span, "
+         "and a subscript with something in it is still a Span",
+         lambda: (lambda spans: bool(spans) and all(t.strip() for _, t in spans)
+                  and (["/sub"], "2") in spans)(
+             [(c, t) for k, c, t, _ in deep_texts(pdf_path) if k == "/Span"])),
+        ("a cell holding only a no-break space is empty, not a space character, so its row "
+         "holds no run of spaces",
+         lambda: row_cells(pdf_path, "0.00135") == [["3.0", "0.00135", "", "", ""]]),
         # pdf-target.lua: a figure's pictures in a row, which the pages set
         # side by side (page.css), are one line of pictures in the PDF too,
         # each its share of the line, where they had stood one under another.

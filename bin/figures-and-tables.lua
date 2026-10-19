@@ -3223,6 +3223,192 @@ local function make_ids_unique(doc)
 end
 
 -- ---------------------------------------------------------------------------
+-- White space with nothing to show
+--
+-- Editors leave white space where there's nothing to set: a subscript
+-- holding only the space typed after it (<sub> </sub>), and an empty table
+-- cell holding a no-break space (<td>&nbsp;</td>, which kept an old
+-- browser drawing the cell's border). Pandoc's HTML reader takes a space
+-- at a mark's edge out of it, on each side (extractSpaces, Shared.hs), so
+-- <sub> </sub> is a space, an empty subscript, and a space, which a Word
+-- file shows as two spaces and LaTeX's tagging makes a Span with nothing
+-- in it; and the cell's space is a character in a PDF's text, so a row of
+-- such cells is a run of spaces.
+-- veraPDF's WCAG 2.2 profile, which PDF4WCAG runs, reports the one as a
+-- redundant span (4.1.2-17) and the other as spaces used for formatting
+-- (1.3.1-2): Instrumental Analysis's 12 subscripts, and the 11 rows of its
+-- table of the normal distribution whose last nine cells are empty. So
+-- emphasis, bold, a subscript, a superscript, small capitals, or a span
+-- with no attributes holding nothing but white space is that white space,
+-- and a table's cell holding nothing but white space is empty. Underlining
+-- and striking out show on a space, and go only when they hold nothing at
+-- all; a span with an id, a class, or any other attribute stays. At the
+-- end (white_last), once Link has dropped any link with no text, a mark
+-- left holding nothing but white space is that white space too, and the
+-- two spaces such a mark or such a link leaves side by side are one.
+local SHOWS_NOTHING = { Emph = true, Strong = true, Subscript = true,
+                        Superscript = true, SmallCaps = true }
+
+local function white(text)
+  for _, pattern in ipairs(WIDE_SPACES) do text = text:gsub(pattern, ' ') end
+  return text:match('^%s*$') ~= nil
+end
+
+local function bare_span(el)
+  if el.identifier ~= '' or #el.classes > 0 then return false end
+  for _ in pairs(el.attributes) do return false end
+  return true
+end
+
+local function marks_nothing(el)
+  return SHOWS_NOTHING[el.t] or (el.t == 'Span' and bare_span(el))
+end
+
+local function only_white(inlines)
+  for _, el in ipairs(inlines) do
+    local t = el.t
+    if t == 'Str' then
+      if not white(el.text) then return false end
+    elseif marks_nothing(el) then
+      if not only_white(el.content) then return false end
+    elseif t ~= 'Space' and t ~= 'SoftBreak' and t ~= 'LineBreak' then
+      return false
+    end
+  end
+  return true
+end
+
+-- The white space itself, out of the marks around it.
+local function white_of(inlines)
+  local out = pandoc.Inlines({})
+  for _, el in ipairs(inlines) do
+    if el.content then out:extend(white_of(el.content)) else out:insert(el) end
+  end
+  return out
+end
+
+local function unmark_white(inlines)
+  local out, changed = pandoc.Inlines({}), false
+  for _, el in ipairs(inlines) do
+    if marks_nothing(el) and only_white(el.content) then
+      out:extend(white_of(el.content))
+      changed = true
+    elseif (el.t == 'Underline' or el.t == 'Strikeout') and #el.content == 0 then
+      changed = true
+    else
+      out:insert(el)
+    end
+  end
+  return changed and out or nil
+end
+
+-- Two spaces side by side, which Pandoc's readers never leave (its
+-- builder makes them one) and an element taken from between them does,
+-- are one: the Word writer writes each space as a run of its own, so Word
+-- showed both. So is a space at a mark's edge beside one outside it, or at
+-- the facing edge of the mark beside it, which the readers mostly don't
+-- leave either (extractSpaces, though not for a span) and an empty mark
+-- taken from inside the mark does: 14.4's <sub><em>SX</em><em> </em></sub>.
+-- The mark's own space goes, at any depth of marks, as a reader moves one
+-- out, but only from a list holding something else, so no mark is
+-- emptied: an underline holding only a space keeps it, its line drawn
+-- under it, and so does a span with an attribute.
+local function spacing(el)
+  return el and (el.t == 'Space' or el.t == 'SoftBreak')
+end
+
+local EDGED = { Emph = true, Strong = true, Subscript = true, Superscript = true,
+                SmallCaps = true, Underline = true, Strikeout = true, Span = true }
+
+-- The list holding a mark's first inline, or its last, through the marks
+-- nested at that edge.
+local function edge_of(el, last)
+  local list = el.content
+  while true do
+    local inner = list[last and #list or 1]
+    if not (inner and EDGED[inner.t]) then return list end
+    list = inner.content
+  end
+end
+
+-- Whether an inline is a space, or a mark whose first inline (or last),
+-- however deep, is one.
+local function spaced(el, last)
+  if spacing(el) then return true end
+  if not (el and EDGED[el.t]) then return false end
+  local list = edge_of(el, last)
+  return spacing(list[last and #list or 1]) or false
+end
+
+local function one_space(inlines)
+  local out, changed = pandoc.Inlines({}), false
+  for i, el in ipairs(inlines) do
+    if spacing(el) and spacing(out[#out]) then
+      changed = true
+    else
+      if EDGED[el.t] then
+        local first = edge_of(el, false)
+        if #first > 1 and spacing(first[1]) and spaced(out[#out], true) then
+          first:remove(1)
+          changed = true
+        end
+        local last = edge_of(el, true)
+        if #last > 1 and spacing(last[#last]) and spaced(inlines[i + 1], false) then
+          last:remove(#last)
+          changed = true
+        end
+      end
+      out:insert(el)
+    end
+  end
+  return changed and out or nil
+end
+
+-- At the end, a mark holding nothing but white space is that white space
+-- again, as when Link has taken an empty link out of one, and two spaces
+-- left side by side are one.
+local function white_last(inlines)
+  local unmarked = unmark_white(inlines)
+  return one_space(unmarked or inlines) or unmarked
+end
+
+local function white_cell(cell)
+  if #cell.contents == 0 then return false end
+  for _, block in ipairs(cell.contents) do
+    if (block.t ~= 'Plain' and block.t ~= 'Para') or not only_white(block.content) then
+      return false
+    end
+  end
+  return true
+end
+
+local function empty_white_cells(tbl)
+  local any = false
+  local function emptied(rows)
+    local out = {}
+    for r, row in ipairs(rows) do
+      local cells = pandoc.List()
+      for _, cell in ipairs(row.cells) do
+        local contents = cell.contents
+        if white_cell(cell) then contents, any = pandoc.Blocks({}), true end
+        cells:insert(pandoc.Cell(contents, cell.alignment, cell.row_span, cell.col_span,
+                                 cell.attr))
+      end
+      out[r] = pandoc.Row(cells, row.attr)
+    end
+    return out
+  end
+  local head, foot, bodies = emptied(tbl.head.rows), emptied(tbl.foot.rows), {}
+  for b, body in ipairs(tbl.bodies) do
+    bodies[b] = pandoc.TableBody(emptied(body.body), emptied(body.head),
+                                 body.row_head_columns or 0, body.attr)
+  end
+  if not any then return nil end
+  return pandoc.Table(tbl.caption, tbl.colspecs, pandoc.TableHead(head, tbl.head.attr),
+                      bodies, pandoc.TableFoot(foot, tbl.foot.attr), tbl.attr)
+end
+
+-- ---------------------------------------------------------------------------
 -- Heading levels (heading_levels)
 --
 -- A heading more than one level below the heading before it skips a
@@ -3288,6 +3474,9 @@ return {
   -- numbers tables and figures; and a numbered list it wrote from one,
   -- its own start again.
   { RawBlock = RawBlock, Div = figure_div, OrderedList = list_start },
+  -- White space with nothing to show, before anything reads a table's
+  -- cells or its words.
+  { Inlines = unmark_white, Table = empty_white_cells },
   {
     Pandoc = function(doc)
       local state = { n = 0, all = 0, above = 0, below = 0 }
@@ -3311,6 +3500,9 @@ return {
     Blocks = Blocks,
     Pandoc = Pandoc,
   },
+  -- White space with nothing to show, and two spaces left side by side,
+  -- once everything that takes an element out has.
+  { Inlines = white_last },
   -- Last, once the title is the page's and every heading is where it
   -- ends up.
   { Pandoc = close_heading_gaps },

@@ -425,6 +425,21 @@ And two whose cells, side by side, are longer than a line:
 
 <table><thead><tr><th>Season</th><th>What the weather did</th></tr></thead><tbody><tr><td>Winter</td><td>The snow fell for eleven days without stopping, and the rivers froze from bank to bank.</td></tr></tbody></table>
 
+And four whose longest words, side by side, are wider than a line, or
+wider than the columns their widths give them: a column of reactions,
+which TeX breaks at their relations and operators; two words too long
+for a line together; a word too long for an equal share of a table whose
+cell of two paragraphs gives it equal widths; and a table of numbers
+too wide for a line in any type:
+
+<table><thead><tr><th>Mediator</th><th>Reagent</th><th>Representative reaction</th></tr></thead><tbody><tr><td>Silver</td><td><script type="math/tex">\mathrm{Ag}^{+}\rightleftharpoons\mathrm{Ag}^{2+}+e^{-}</script></td><td><script type="math/tex">\mathrm{H_2C_2O_4}(aq)+2\mathrm{Ag}^{2+}(aq)+2\mathrm{H_2O}(l)\rightleftharpoons 2\mathrm{CO_2}(g)+2\mathrm{Ag}^{+}(aq)+2\mathrm{H_3O}^{+}(aq)</script></td></tr></tbody></table>
+
+<table><thead><tr><th>Long word</th><th>Longer word</th></tr></thead><tbody><tr><td>Supercalifragilisticexpialidocious</td><td>Hippopotomonstrosesquippedaliophobia</td></tr></tbody></table>
+
+<table><thead><tr><th>Organ</th><th>Disease</th><th>Notes</th></tr></thead><tbody><tr><td>Lung</td><td>Pneumonoultramicroscopicsilicovolcanoconiosis</td><td><p>From dust.</p><p>Rare.</p></td></tr></tbody></table>
+
+<table><thead><tr><th>Degrees</th><th>1</th><th>2</th><th>3</th><th>4</th><th>5</th><th>6</th><th>7</th><th>8</th><th>9</th><th>10</th><th>11</th></tr></thead><tbody><tr><td>Critical</td><td>161.45</td><td>199.50</td><td>215.71</td><td>224.58</td><td>230.16</td><td>233.99</td><td>236.77</td><td>238.88</td><td>240.54</td><td>241.88</td><td>242.98</td></tr></tbody></table>
+
 [^d]: Note d, above the inner table.
 [^e]: Note e, in the inner table.
 [^f]: Note f, in the inner table too.
@@ -729,6 +744,29 @@ def build_notes(work):
     return (os.path.join(work, "pdf", "org.example.notes.pdf"),
             os.path.join(work, "plain", "org.example.notes.pdf"),
             converted.stdout + converted.stderr, source)
+
+
+def head_of(source, words):
+    """The LaTeX of the longtable holding words, from its column
+    specification through its first head ("" if none holds them)."""
+    for chunk in source.split("\\begin{longtable}")[1:]:
+        table = chunk.split("\\end{longtable}")[0]
+        if words in table:
+            return table.split("\\endhead")[0]
+    return ""
+
+
+def table_size(source, words):
+    """The type size the longtable holding words is set in, the group
+    pdf-target.lua opens before it ("small", "footnotesize"), "" for the
+    text's own, and None if no table holds them."""
+    parts = source.split("\\begin{longtable}")
+    for i in range(1, len(parts)):
+        if words in parts[i].split("\\end{longtable}")[0]:
+            before = parts[i - 1].split("\\end{longtable}")[-1]
+            found = re.findall(r"\{\\(small|footnotesize)\b", before)
+            return found[-1] if found else ""
+    return None
 
 
 def footnote_marks(path):
@@ -1498,6 +1536,27 @@ def checks(work, jobs=1):
                   and goes_to(notes_path, "the heading in the item") == [page])(
              page_holding(notes_path, "Heading in an item"))
          and says(notes_plain_text, "Heading in an item")),
+        # pdf-target.lua: a formula's longest word is its longest piece TeX
+        # can't break, so a column of reactions, which had counted as one
+        # word too wide for a line, wraps; a table whose longest words
+        # don't fit a line is set smaller; a table with widths gives a
+        # column narrower than its longest word the room it needs; and one
+        # too wide in any type keeps its columns, and the build names it.
+        ("a table of reactions is set in columns that wrap, its formula a word a piece",
+         lambda: "p{(\\linewidth" in head_of(notes_source, "Representative reaction")
+         and table_size(notes_source, "Representative reaction") == ""),
+        ("a table whose longest words don't fit a line is set in \\small",
+         lambda: table_size(notes_source, "Hippopotomonstrosesquippedaliophobia") == "small"),
+        ("a table's equal widths give a word too long for its share the room it needs",
+         lambda: (lambda reals: len(reals) == 3 and reals[1] > 0.5 and reals[1] == max(reals))(
+             [float(r) for r in re.findall(r"\\real\{([\d.]+)\}", head_of(
+                 notes_source, "Pneumonoultramicroscopicsilicovolcanoconiosis"))])),
+        ("a table too wide in any type keeps its columns, in \\footnotesize, and the "
+         "build names it",
+         lambda: table_size(notes_source, "242.98") == "footnotesize"
+         and "\\begin{longtable}" in notes_source and "p{(" not in head_of(notes_source, "242.98")
+         and re.search(r"WARNING: \d+ line\(s\) of the PDF are more than 3 points wider[^\n]* "
+                       r"in table\(s\)", notes_said)),
         # figures-and-tables.lua: a layout table's head rows are body rows,
         # since LaTeX's tagging made a longtable's head header cells even
         # tagged as a division, a TH outside any TR, which PDF/UA-2 rejects

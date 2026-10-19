@@ -461,10 +461,15 @@ end
 -- Table 3.2, a worked example's steps. One wider than a line is given
 -- widths, which the writer sets as p columns, which wrap: each column's
 -- in proportion to its longest cell, and no narrower than its longest
--- word or formula. One whose longest words alone are wider than a line
--- is left as it is, since no widths would fit it either.
+-- word or formula, or a formula's longest piece. One whose longest words
+-- alone are wider than a line is set in smaller type (SMALLER), which
+-- Instrumental Analysis's tables of reactions needed, and one too wide
+-- even then as narrow as it can be.
 local LINE = 70   -- characters in a line of the book class's 10pt type, about
 local GAP = 3     -- the space between two columns, in characters
+-- The type sizes a table too wide for its line is set in, if one fits it,
+-- and the part of a character of 10pt type a character of each is.
+local SMALLER = { { 'small', 0.9 }, { 'footnotesize', 0.8 } }
 
 local function simple_cell(cell)
   local blocks = cell.contents
@@ -479,40 +484,258 @@ end
 
 -- A cell's length and its longest word, in characters: a formula as many
 -- as its TeX shows, and two more for each operator or relation, which
--- TeX sets with space around it, as one word; a picture, which the writer
--- scales to its column, a line, and no word.
+-- TeX sets with space around it; a picture, which the writer scales to
+-- its column, a line, and no word. A formula's words are the pieces TeX
+-- can't break it into (formula_pieces).
 local SPACED = { times = true, cdot = true, div = true, pm = true, mp = true,
                  le = true, leq = true, ge = true, geq = true, ne = true,
                  neq = true, approx = true, equiv = true, to = true,
                  rightarrow = true, Rightarrow = true }
 
-local function cell_size(cell)
-  local text = stringify(cell.contents:walk({
-    Math = function(math_)
-      local tex = math_.text
-      local shown = tex:gsub('\\%a+', '#'):gsub('[%s{}^_\\&]', '')
-      local spaced = select(2, tex:gsub('[-+=<>]', ''))
-        + select(2, tex:gsub('\226\136\146', '')) + select(2, tex:gsub('\195[\151\183]', ''))
-      for name in tex:gmatch('\\(%a+)') do
-        if SPACED[name] then spaced = spaced + 1 end
-      end
-      local length = (utf8.len(shown) or #shown) + 2 * spaced
-      return pandoc.Str(('m'):rep(math.max(1, length)))
-    end,
-    Image = function() return pandoc.Str((' '):rep(LINE)) end,
-  }))
-  local longest = 0
-  for word in text:gmatch('%S+') do
-    longest = math.max(longest, utf8.len(word) or #word)
+-- The relations and binary operators a formula in text breaks after,
+-- outside braces and \left...\right (TeXbook, chapter 18: \relpenalty
+-- and \binoppenalty); a script after ^ or _ is part of its atom, so
+-- Ag^+ doesn't break. An environment's lines (gathered, aligned) don't
+-- break at all, each its own piece. Unicode's minus, times, and division
+-- signs are operators too.
+local BREAK_CHARS = { ['='] = true, ['<'] = true, ['>'] = true, ['+'] = true, ['-'] = true }
+local BREAK_NAMES = {
+  le = true, leq = true, ge = true, geq = true, ne = true, neq = true, approx = true,
+  equiv = true, sim = true, simeq = true, cong = true, propto = true, ll = true, gg = true,
+  to = true, gets = true, rightarrow = true, leftarrow = true, Rightarrow = true,
+  Leftarrow = true, leftrightarrow = true, Leftrightarrow = true, longrightarrow = true,
+  rightleftharpoons = true, leftrightharpoons = true, mapsto = true, ['in'] = true,
+  subset = true, subseteq = true, times = true, cdot = true, div = true, pm = true,
+  mp = true, ast = true, circ = true, bullet = true, oplus = true, otimes = true,
+}
+
+local function formula_pieces(tex)
+  tex = tex:gsub('\226\136\146', '-'):gsub('\195\151', '\\times '):gsub('\195\183', '\\div ')
+  if tex:find('\\begin%s*{') then
+    local body = tex:gsub('\\begin%s*{[^}]*}', ''):gsub('\\end%s*{[^}]*}', '')
+    local pieces = {}
+    for line in (body .. '\\\\'):gmatch('(.-)\\\\') do pieces[#pieces + 1] = line end
+    return pieces
   end
-  return utf8.len(text) or #text, longest
+  local pieces, start, depth, i, n = {}, 1, 0, 1, #tex
+  local function cut(at)
+    pieces[#pieces + 1] = tex:sub(start, at)
+    start = at + 1
+  end
+  while i <= n do
+    local c = tex:sub(i, i)
+    if c == '{' then
+      depth, i = depth + 1, i + 1
+    elseif c == '}' then
+      depth, i = depth - 1, i + 1
+    elseif c == '\\' then
+      local name = tex:match('^%a+', i + 1)
+      if name then
+        local last = i + #name
+        if name == 'left' then
+          depth = depth + 1
+        elseif name == 'right' then
+          depth = depth - 1
+        elseif depth == 0 and BREAK_NAMES[name] then
+          cut(last)
+        end
+        i = last + 1
+      else
+        i = i + 2
+      end
+    elseif c == '^' or c == '_' then
+      local j = i + 1
+      while tex:sub(j, j):match('%s') do j = j + 1 end
+      local d = tex:sub(j, j)
+      if d == '{' then
+        local level = 0
+        repeat
+          local e = tex:sub(j, j)
+          if e == '{' then level = level + 1 elseif e == '}' then level = level - 1 end
+          j = j + 1
+        until level == 0 or j > n
+        i = j
+      elseif d == '\\' then
+        i = j + 1 + #(tex:match('^%a+', j + 1) or 'x')
+      else
+        i = j + 1
+      end
+    elseif depth == 0 and BREAK_CHARS[c] then
+      cut(i)
+      i = i + 1
+    else
+      i = i + 1
+    end
+  end
+  if start <= n then pieces[#pieces + 1] = tex:sub(start) end
+  return pieces
+end
+
+-- How wide a formula is, in characters of text: a character or a symbol
+-- one, a capital letter one and a half (Latin Modern's are about half as
+-- wide again as its small letters, and a chemist's formulas are mostly
+-- capitals), a script's (after ^ or _) seven tenths of that, as TeX sets
+-- it in smaller type, a command that sets type or space rather than
+-- drawing (\mathbf, \text, \left) none, and two for the space around
+-- each operator or relation.
+local DRAWS_NOTHING = {
+  mathbf = true, mathrm = true, mathit = true, mathsf = true, mathtt = true,
+  mathcal = true, mathbb = true, mathfrak = true, mathscr = true, mathnormal = true,
+  text = true, textbf = true, textit = true, textrm = true, textsf = true, texttt = true,
+  textnormal = true, operatorname = true, boldsymbol = true, bm = true,
+  displaystyle = true, textstyle = true, scriptstyle = true, left = true, right = true,
+  big = true, Big = true, bigg = true, Bigg = true, bigl = true, bigr = true,
+  Bigl = true, Bigr = true, biggl = true, biggr = true, limits = true, nolimits = true,
+  mathop = true, mathrel = true, mathbin = true, mathord = true, label = true,
+  tag = true, nonumber = true, notag = true, begin = true, ['end'] = true,
+}
+
+local function formula_length(tex)
+  local length, i, n, script, level = 0, 1, #tex, {}, 0
+  local function weight() return script[level] and 0.7 or 1 end
+  while i <= n do
+    local c = tex:sub(i, i)
+    if c == '{' then
+      level = level + 1
+      i = i + 1
+    elseif c == '}' then
+      script[level] = nil
+      level = math.max(0, level - 1)
+      i = i + 1
+    elseif c == '^' or c == '_' then
+      local j = i + 1
+      while tex:sub(j, j):match('%s') do j = j + 1 end
+      if tex:sub(j, j) == '{' then
+        level = level + 1
+        script[level] = true
+        i = j + 1
+      else
+        local name = tex:sub(j, j) == '\\' and tex:match('^%a+', j + 1)
+        if not (name and DRAWS_NOTHING[name]) then length = length + 0.7 end
+        i = name and j + 1 + #name or j + 1
+      end
+    elseif c == '\\' then
+      local name = tex:match('^%a+', i + 1)
+      if name then
+        if not DRAWS_NOTHING[name] then length = length + weight() end
+        if SPACED[name] then length = length + 2 end
+        i = i + 1 + #name
+      else
+        i = i + 2
+      end
+    elseif c:match('[%s&]') then
+      i = i + 1
+    else
+      local width = c:match('[\192-\247]') and #(tex:match('^[\192-\247][\128-\191]*', i)) or 1
+      length = length + weight() * (c:match('%u') and 1.5 or 1)
+      if c:match('[-+=<>]') or tex:sub(i, i + width - 1):match('^\226\136\146')
+          or tex:sub(i, i + width - 1):match('^\195[\151\183]') then
+        length = length + 2
+      end
+      i = i + width
+    end
+  end
+  return math.ceil(length)
+end
+
+local function cell_size(cell)
+  local length, longest = 0, 0
+  for _, block in ipairs(cell.contents) do
+    local text = stringify(pandoc.Blocks{ block }:walk({
+      Math = function(math_)
+        local words = {}
+        for _, piece in ipairs(formula_pieces(math_.text)) do
+          local size = formula_length(piece)
+          if size > 0 then words[#words + 1] = ('m'):rep(size) end
+        end
+        return pandoc.Str(#words > 0 and table.concat(words, ' ') or 'm')
+      end,
+      Image = function() return pandoc.Str((' '):rep(LINE)) end,
+      LineBreak = function() return pandoc.Str('\n') end,
+    }))
+    for line in (text .. '\n'):gmatch('(.-)\n') do
+      length = math.max(length, utf8.len(line) or #line)
+      for word in line:gmatch('%S+') do
+        longest = math.max(longest, utf8.len(word) or #word)
+      end
+    end
+  end
+  return length, longest
+end
+
+-- The size a table is set in to fit its longest words, and those words'
+-- shares of the line in it, scaled (SMALLER): the first size they fit at,
+-- else the smallest.
+local function smaller_size(least, sum)
+  if sum <= 1 then return nil, sum end
+  local size = SMALLER[#SMALLER]
+  for _, choice in ipairs(SMALLER) do
+    if sum * choice[2] <= 1 then
+      size = choice
+      break
+    end
+  end
+  for j = 1, #least do
+    least[j] = least[j] * size[2]
+  end
+  return size[1], sum * size[2]
+end
+
+-- A table with widths, its source's or ones its reader gave it (Pandoc's
+-- HTML reader gives a table whose cells hold more than a paragraph equal
+-- widths): a column narrower than its longest word or formula, which
+-- LaTeX can't break, ran into the next one, as Instrumental Analysis's
+-- columns of reactions did. Such a column is widened to it, and the
+-- columns with room to spare give it up in proportion to what they
+-- spare; where the longest words together are wider than a line, the
+-- table is set in smaller type, and as narrow as it can be if that's
+-- not enough. Widths that hold their words are left as they are.
+local function widen_to_words(tbl, word)
+  local count = #tbl.colspecs
+  local room = LINE - GAP * (count - 1)
+  local least, sum, short = {}, 0, false
+  for j = 1, count do
+    least[j] = word[j] / room
+    sum = sum + least[j]
+    if least[j] > tbl.colspecs[j][2] then short = true end
+  end
+  if not short then return nil end
+  local smaller
+  smaller, sum = smaller_size(least, sum)
+  if sum > 1 then
+    for j = 1, count do
+      tbl.colspecs[j] = { tbl.colspecs[j][1], least[j] }
+    end
+    return smaller
+  end
+  local deficit, spare = 0, 0
+  for j = 1, count do
+    local width = tbl.colspecs[j][2]
+    if least[j] > width then
+      deficit = deficit + least[j] - width
+    else
+      spare = spare + width - least[j]
+    end
+  end
+  for j = 1, count do
+    local width = tbl.colspecs[j][2]
+    if least[j] > width then
+      tbl.colspecs[j] = { tbl.colspecs[j][1], least[j] }
+    elseif spare > 0 then
+      tbl.colspecs[j] = { tbl.colspecs[j][1],
+                          width - deficit * (width - least[j]) / spare }
+    end
+  end
+  return smaller
 end
 
 local function fit_to_line(tbl)
+  local smaller = nil
   local count = #tbl.colspecs
   if count < 2 then return end
+  local given = tbl.colspecs[1][2] ~= nil
   for _, spec in ipairs(tbl.colspecs) do
-    if spec[2] then return end
+    if (spec[2] ~= nil) ~= given then return end
   end
   local need, word = {}, {}
   for j = 1, count do need[j], word[j] = 1, 1 end
@@ -521,7 +744,7 @@ local function fit_to_line(tbl)
   for _, row in ipairs(rows_of(tbl)) do
     local column = 1
     for _, cell in ipairs(row.cells) do
-      if not simple_cell(cell) then return end
+      if not given and not simple_cell(cell) then return end
       while (covered[column] or 0) > 0 do column = column + 1 end
       local span = cell.col_span or 1
       local length, longest = cell_size(cell)
@@ -550,6 +773,7 @@ local function fit_to_line(tbl)
       word[j] = math.max(word[j], longest / columns)
     end
   end
+  if given then return widen_to_words(tbl, word) end
   local room, total = LINE - GAP * (count - 1), 0
   for j = 1, count do total = total + need[j] end
   if total <= room then return end
@@ -558,7 +782,28 @@ local function fit_to_line(tbl)
     least[j] = word[j] / room
     sum = sum + least[j]
   end
-  if sum > 1 then return end
+  -- Where its longest words are too wide for a line, a table in smaller
+  -- type: a line of LaTeX's \small holds a ninth more, and of
+  -- \footnotesize a quarter more; none smaller, to stay legible. One too
+  -- wide even so is set as narrow as it can be, each column as wide as
+  -- its longest word, which the build names as wider than the text.
+  smaller, sum = smaller_size(least, sum)
+  if sum > 1 then
+    -- Too wide even so: as narrow as it can be. A table with nothing to
+    -- wrap, every cell a word or two, a table of numbers, is narrowest in
+    -- the columns the writer gives it, each as wide as its widest cell;
+    -- one with cells to wrap, in columns as wide as their longest words.
+    local wraps = false
+    for j = 1, count do
+      if need[j] > word[j] then wraps = true end
+    end
+    if wraps then
+      for j = 1, count do
+        tbl.colspecs[j] = { tbl.colspecs[j][1], least[j] }
+      end
+    end
+    return smaller
+  end
   -- Shares by need, a column whose share is less than its least held at
   -- its least, and the rest shared again among the others.
   local share, held = {}, {}
@@ -580,9 +825,26 @@ local function fit_to_line(tbl)
   for j = 1, count do
     tbl.colspecs[j] = { tbl.colspecs[j][1], share[j] }
   end
+  return smaller
 end
 
+local sized_table
+
+-- A table in smaller type (fit_to_line) is set in a group that sets it.
 function Table(tbl)
+  local result, size = sized_table(tbl)
+  if not size then return result end
+  local blocks = pandoc.Blocks{ pandoc.RawBlock('latex', '{\\' .. size) }
+  if result.t then
+    blocks:insert(result)
+  else
+    blocks:extend(result)
+  end
+  blocks:insert(pandoc.RawBlock('latex', '}'))
+  return blocks
+end
+
+sized_table = function(tbl)
   local cell = in_cell(tbl)
   tbl = tbl:walk(braced_math)
   flatten_nested(tbl)
@@ -592,7 +854,7 @@ function Table(tbl)
     unquote_cells(body.body)
   end
   unquote_cells(tbl.foot.rows)
-  fit_to_line(tbl)
+  local smaller = fit_to_line(tbl)
   local columns = 0
   for _, body in ipairs(tbl.bodies) do
     if body.row_head_columns > columns then
@@ -618,9 +880,9 @@ function Table(tbl)
     blocks[#blocks + 1] = tbl
     blocks[#blocks + 1] = pandoc.RawBlock('latex', '}')
     if id ~= '' then
-      return pandoc.Div(blocks, pandoc.Attr(id))
+      return pandoc.Div(blocks, pandoc.Attr(id)), smaller
     end
-    return blocks
+    return blocks, smaller
   end
   -- A data table's id with no caption to hold it is a div's too, an anchor
   -- before the table: the writer's empty caption numbered a table the book
@@ -647,9 +909,9 @@ function Table(tbl)
     }
   end
   if own then blocks = without_label(blocks) end
-  if id then return pandoc.Div(blocks, pandoc.Attr(id)) end
-  if columns == 0 and not own then return tbl end
-  return blocks
+  if id then return pandoc.Div(blocks, pandoc.Attr(id)), smaller end
+  if columns == 0 and not own then return tbl, smaller end
+  return blocks, smaller
 end
 
 local function decorative(img)

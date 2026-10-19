@@ -1560,6 +1560,48 @@ def check_math_words():
     ]
 
 
+
+def check_head_only_tables():
+    """A table whose <thead> holds every row, its rows of data too, is
+    given a body of them before Pandoc reads it, which made every row in a
+    <thead> a header row: from the first row holding a data cell with
+    something in it, a picture or a formula as much as words. A head with a
+    body after it, or holding a table, is left as it is."""
+    import htmlrepair
+
+    def divided(head, after="</table>"):
+        return htmlrepair.body_out_of_head("<table><thead>%s</thead>%s" % (head, after))
+    header = "<tr><th>K</th><th>V</th></tr>"
+    data = "<tr><td>a</td><td>1</td></tr>"
+    return [
+        ("the rows from the first of data are a body after the head",
+         lambda: divided(header + data + data)
+         == ("<table><thead>" + header + "</thead><tbody>" + data + data + "</tbody></table>", 1)),
+        ("a row of header cells with an empty <td> in its corner stays the head, as does "
+         "a second header row, but a row of a <th> and data is the body's",
+         lambda: divided("<tr><td> &nbsp;</td><th>A</th></tr>" + header
+                         + "<tr><th>x</th><td>1</td></tr>")[0]
+         == ("<table><thead><tr><td> &nbsp;</td><th>A</th></tr>" + header
+             + "</thead><tbody><tr><th>x</th><td>1</td></tr></tbody></table>")),
+        ("a data cell holding only a picture or a formula is data",
+         lambda: divided(header + '<tr><td><img src="a.png" alt="A"></td><td></td></tr>')[1] == 1
+         and divided(header + "<tr><td><math><mi>x</mi></math></td></tr>")[1] == 1),
+        ("a head whose first row is data is all body, its attributes kept",
+         lambda: htmlrepair.body_out_of_head('<table><THEAD class="h">' + data + data
+                                             + "</THEAD></table>")
+         == ('<table><tbody class="h">' + data + data + "</tbody></table>", 1)),
+        ("a head with a body after it, or with rows of the table's own, stays as it is",
+         lambda: divided(header + data, "<tbody>" + data + "</tbody></table>")[1] == 0
+         and divided(header + data, data + "</table>")[1] == 0),
+        ("so does a head holding a table, and one of header rows only",
+         lambda: divided("<tr><th><table><tr><td>1</td></tr></table></th></tr>" + data)[1] == 0
+         and divided(header + header)[1] == 0),
+        ("a page's repair does it, to each such table on the page",
+         lambda: htmlrepair.repaired("<table><thead>" + header + data + "</thead></table>"
+                                     "<table><thead>" + header + data + "</thead></table>")[0]
+         .count("<tbody>") == 2),
+    ]
+
 def check_decorative_marker():
     """The decorative marker, read alike by the filter and the Python.
 
@@ -1711,6 +1753,7 @@ GROUPS = [
     ("the decorative marker", check_decorative_marker),
     ("PDF/UA-1's math", check_ua1_math),
     ("a formula's words, in an HTML source", check_math_words),
+    ("a table whose head holds every row, in an HTML source", check_head_only_tables),
     ("header cells holding only formulas, in a PDF", check_pdf_formula_headers),
     ("an image named in another case, in a source's copy", check_cased_images_in_copies),
 ]

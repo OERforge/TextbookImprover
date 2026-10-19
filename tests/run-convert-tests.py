@@ -3610,6 +3610,97 @@ def case_html_table_repairs(work):
     ]
 
 
+
+HEAD_ONLY = """<!DOCTYPE html><html lang="en"><head><title>Heads</title></head><body>
+<h1>Heads</h1>
+<table><caption>Charges</caption><thead>
+<tr><th scope="col">peak</th><th scope="col">m/z</th><th scope="col">Z</th></tr>
+<tr><td>M1</td><td>1112</td><td>9</td></tr>
+<tr><td>M2</td><td>1001</td><td>10</td></tr>
+<tr><td>M3</td><td>910</td><td>&#x2014;</td></tr>
+</thead></table>
+<table><caption>Pennies</caption><thead>
+<tr><th colspan="2">First</th><th colspan="2">Second</th></tr>
+<tr><th>Penny</th><th>Mass</th><th>Penny</th><th>Mass</th></tr>
+<tr><td>1</td><td>3.080</td><td>1</td><td>3.052</td></tr>
+<tr><td>2</td><td>3.094</td><td>2</td><td>3.141</td></tr>
+</thead></table>
+<table><caption>Plates</caption><thead>
+<tr><th></th><th colspan="2">R = 1.00</th><th colspan="2">R = 1.25</th></tr>
+<tr><td>k</td><td>a = 1.05</td><td>a = 1.10</td><td>a = 1.05</td><td>a = 1.10</td></tr>
+</thead><tbody>
+<tr><td>0.5</td><td>63500</td><td>17400</td><td>99200</td><td>27200</td></tr>
+<tr><td>1.0</td><td>28200</td><td>7740</td><td>44100</td><td>12100</td></tr>
+</tbody></table>
+<table><caption>Grid</caption><thead>
+<tr><td></td><th>A</th><th>B</th></tr>
+<tr><th>x</th><td>1</td><td>2</td></tr>
+<tr><th>y</th><td>3</td><td>4</td></tr>
+</thead></table>
+<table><caption>Prices</caption><thead>
+<tr><td>Year</td><td>Price</td></tr>
+<tr><td>2020</td><td>10</td></tr>
+<tr><td>2021</td><td>12</td></tr>
+</thead></table>
+</body></html>
+"""
+
+
+def case_head_only_tables(work):
+    """A table whose <thead> holds every row, its rows of data too, as
+    LibreTexts' editor writes one: Pandoc's reader made every row a header
+    row, so every cell was a <th>, the table had no body, and a Word file
+    repeated every row as a header. Its rows of data are its body now, and
+    its header rows, two of them or one, an empty <td> in a corner among
+    them, its head; a head whose first row is data is all body, which the
+    header guess reads; and a head with a body after it stays as its
+    author divided it, a row of <td> in it a header still."""
+    import importlib.util
+    if not (importlib.util.find_spec("html5lib") or importlib.util.find_spec("lxml")):
+        return [("skip: HTML sources need html5lib or lxml", lambda: True)]
+    os.makedirs(work, exist_ok=True)
+    with open(os.path.join(work, "heads.html"), "w", encoding="utf-8") as fh:
+        fh.write(HEAD_ONLY)
+    result = convert(work, "targets:\n  html:\n    format: html\n"
+                           "  word:\n    format: docx\n", fixtures=())
+    page = read(work, "html", "heads.html") if exists(work, "html", "heads.html") else ""
+
+    def rows(table, part):
+        """How many rows a table of the page holds in its head or its body."""
+        return sum(m.group(0).count("<tr") for m in re.finditer(
+            r"<%s\b.*?</%s>" % (part, part), table, re.S))
+    tables = re.findall(r"<table\b.*?</table>", page, re.S)
+    shape = [(rows(t, "thead"), rows(t, "tbody"), t.count("<td")) for t in tables]
+    words = glob.glob(os.path.join(work, "word", "*.docx"))
+    repeated = []
+    if words:
+        with zipfile.ZipFile(words[0]) as z:
+            xml = z.read("word/document.xml").decode("utf-8")
+        repeated = [len(re.findall(r"<w:tblHeader\b", t))
+                    for t in re.findall(r"<w:tbl>.*?</w:tbl>", xml, re.S)]
+    found = []
+    if exists(work, "output-check.csv"):
+        with open(os.path.join(work, "output-check.csv"), encoding="utf-8") as fh:
+            found = [row["Check"] for row in csv.DictReader(fh)]
+    return [
+        ("a table whose head held every row has a body of its rows of data, its header "
+         "row its head",
+         lambda: result.returncode == 0 and len(shape) == 5 and shape[0] == (1, 3, 9)),
+        ("two header rows stay its head, and so does a header row with an empty <td> in "
+         "its corner, its body's rows headed by a <th> each",
+         lambda: len(shape) == 5 and shape[1] == (2, 2, 8) and shape[3] == (1, 2, 4)
+         and tables[3].count('<th scope="row">') == 2),
+        ("a head whose first row is data is all body, which the header guess reads",
+         lambda: len(shape) == 5 and shape[4][1] >= 2 and shape[4][2] >= 4),
+        ("a head with a body after it is as its author divided it, a row of <td> in it a "
+         "header still",
+         lambda: len(shape) == 5 and shape[2] == (2, 2, 10)),
+        ("and a Word file repeats only the header rows",
+         lambda: repeated[:4] == [1, 2, 2, 1] and len(repeated) == 5 and repeated[4] <= 1),
+        ("the output check finds no table without a data cell",
+         lambda: "table-without-data-cells" not in found),
+    ]
+
 BARE_MD = """# References
 
 Klein and Stern. 2005. "Professors and Their Politics." [https://doi.org/10.1080/08913810508443640](https://doi.org/10.1080/08913810508443640).
@@ -6496,6 +6587,7 @@ CASES = [
     ("a page title that is also a heading", case_title_id),
     ("link titles from every source through every target", case_link_titles),
     ("HTML table repairs", case_html_table_repairs),
+    ("a table whose <thead> holds every row", case_head_only_tables),
     ("bare links and their sidecar", case_bare_links),
     ("a docx target", case_docx_target),
     ("a box in a Word file", case_word_box),

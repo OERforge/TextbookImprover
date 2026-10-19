@@ -105,6 +105,7 @@ def repaired(markup):
     markup, titled = title_block_id(markup)
     markup = NOTES_HEADING.sub("", markup)
     markup = words_as_text(markup)[0]
+    markup = body_out_of_head(markup)[0]
     return auto_id_headings(markup), count + marked + titled
 
 
@@ -267,6 +268,65 @@ def words_as_text(markup):
         count += 1
         return f"<{prefix}mtext{attributes}>{text}</{prefix}mtext>"
     return _MI.sub(mark, markup), count
+
+
+# A table's head that the table ends with: no body after it, nor rows of
+# its own. The head's contents stop at its first </thead>.
+_HEAD_ONLY = re.compile(r"(<thead\b(?:[^<>\"']|\"[^\"]*\"|'[^']*')*>)"
+                        r"((?:(?!</thead\s*>).)*)(</thead\s*>)(?=\s*</table\s*>)", re.I | re.S)
+_ROW = re.compile(r"<tr\b", re.I)
+_CELL = re.compile(r"<(td|th)\b(?:[^<>\"']|\"[^\"]*\"|'[^']*')*>", re.I)
+# What a cell shows besides its text.
+_SHOWN = re.compile(r"<(?:img|math|svg|object|embed|video|audio|iframe|canvas|input)\b", re.I)
+
+
+def _data_row(row):
+    """Whether a row holds a data cell (a <td>) with something in it."""
+    cells = list(_CELL.finditer(row))
+    for cell, after in zip(cells, cells[1:] + [None]):
+        if cell.group(1).lower() != "td":
+            continue
+        content = row[cell.end():after.start() if after else len(row)]
+        if _SHOWN.search(content) or html.unescape(re.sub(r"<[^<>]*>", "", content)).strip():
+            return True
+    return False
+
+
+def body_out_of_head(markup):
+    """(markup, count): each table whose <thead> holds every row, its data
+    rows too, given a body of them. Pandoc's reader makes every row in a
+    <thead> a header row, whatever its cells (pTableHead, in
+    Readers/HTML/Table.hs), so every cell of such a table came out a
+    header: a <th> in a page's or an EPUB's table with no body, which an
+    accessibility checker reports as a table missing its body, a TH in a
+    PDF, and a row Word repeats as a header on every page. LibreTexts'
+    editor writes tables so, 63 of Instrumental Analysis's. The rows from
+    the first holding a data cell (a <td> with something in it) go into a
+    <tbody> after the head, and the rows before it, of header cells, an
+    empty <td> in a corner among them, stay the head; a head whose first
+    row holds data is all body. Only a head the table ends with: a head
+    with a body after it, or rows of the table's own, is its author's
+    division, and a row of <td> in it a header written so (Table 26.4.1's
+    row of values of α, under its columns for each resolution), which
+    stays. A head holding a table of its own is left as it is."""
+    count = 0
+
+    def divide(match):
+        nonlocal count
+        opening, inside, closing = match.groups()
+        if re.search(r"<table\b", inside, re.I):
+            return match.group(0)
+        starts = [m.start() for m in _ROW.finditer(inside)]
+        first = next((n for n, (a, b) in enumerate(zip(starts, starts[1:] + [len(inside)]))
+                      if _data_row(inside[a:b])), None)
+        if first is None:
+            return match.group(0)
+        count += 1
+        if first == 0:              # all body: the head becomes one, attributes and all
+            return re.sub(r"^<thead", "<tbody", opening, flags=re.I) + inside + "</tbody>"
+        return (opening + inside[:starts[first]] + closing
+                + "<tbody>" + inside[starts[first]:] + "</tbody>")
+    return _HEAD_ONLY.sub(divide, markup), count
 
 
 def repaired_copy(source, destination):

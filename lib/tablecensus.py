@@ -512,7 +512,9 @@ def is_full_width_band(row):
     return len(set(id(c) for c in row)) == 1
 
 
-NUMERIC = re.compile(r"^[-+(]?[\d.,]+[)%]?$")
+# A number, signed with a hyphen or a minus sign (U+2212), which OpenStax's
+# books write a negative number with, as QUANTITY and AMOUNT take it.
+NUMERIC = re.compile(r"^[-+(\u2212]?[\d.,]+[)%]?$")
 
 
 def mostly_numeric(cells):
@@ -637,7 +639,7 @@ def parse_number(text):
     if not m:
         return None
     try:
-        return float(re.sub(r"[^\d.-]", "", text) or "x")
+        return float(re.sub(r"[^\d.-]", "", text.replace("\u2212", "-")) or "x")
     except ValueError:
         return None
 

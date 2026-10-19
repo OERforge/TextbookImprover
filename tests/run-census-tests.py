@@ -134,6 +134,26 @@ case("an unordered numeric first column stays first-row", "first-row", [
     row([cell("107"), cell("99"), cell("110")]),
 ])
 
+# A negative number written with a minus sign (U+2212), as OpenStax's books
+# write one, is a number, and its sign counts in the order: a column of
+# them that runs up keys its rows, and one that doesn't stays data, where
+# the minus sign made each a label.
+case("an ordered first column signed with minus signs keys its rows", "both", [
+    row([cell("x"), cell("f(x)")], header=True),
+    row([cell("\u22122"), cell("4")]),
+    row([cell("\u22121"), cell("1")]),
+    row([cell("0"), cell("0")]),
+    row([cell("1"), cell("1")]),
+    row([cell("2"), cell("4")]),
+])
+case("an unordered first column signed with minus signs stays first-row",
+     "first-row", [
+         row([cell("Group A"), cell("Group B"), cell("Group C")], header=True),
+         row([cell("\u22121.4"), cell("0.8"), cell("\u22120.2")]),
+         row([cell("2.3"), cell("\u22121.1"), cell("0.4")]),
+         row([cell("\u22120.7"), cell("0.9"), cell("1.6")]),
+     ])
+
 # A bin column is labels, not numbers, and does not have to be ordered
 # to prove it: most of its values will not parse as numbers at all.
 case("a column of bins is a key column", "both", [
@@ -183,6 +203,14 @@ case("numbers over values with no header row stays none", "none", [
     row([cell("94.2"), cell("75.2"), cell("69.6")]),
     row([cell("77.3"), cell("74.1"), cell("70.2")]),
     row([cell("76.3"), cell("73.8"), cell("71.1")]),
+])
+
+# Nor is a top row of numbers signed with minus signs a header row: they're
+# numbers, not words.
+case("a row of numbers signed with minus signs is no header row", "none", [
+    row([cell("\u22123.2"), cell("\u22125.1"), cell("\u22122.4")]),
+    row([cell("4.1"), cell("1.8"), cell("6.3")]),
+    row([cell("7.0"), cell("2.2"), cell("0.5")]),
 ])
 
 # A blank corner with labels along both edges is a matrix, whatever the

@@ -292,7 +292,7 @@ class PdfAssembly(Assembly):
     and a role is a division command."""
 
     def __init__(self, *args, title_page=None, book_title="",
-                 divisions=True, toc_depth=2, mark_files=False, **kwargs):
+                 divisions=True, toc_depth=2, mark_files=False, contents=True, **kwargs):
         super().__init__(*args, **kwargs)
         # The book opens in the front matter (OPEN_FRONT): its title
         # page, and the contents when the template places them.
@@ -300,6 +300,11 @@ class PdfAssembly(Assembly):
         self.divisions = divisions
         self.toc_depth = toc_depth
         self.toc_placed = False
+        # Whether the book has a contents page: not when the metadata
+        # file says toc: false, which a generated contents page in
+        # project.contents gives way to too (toc_dropped).
+        self.contents = contents
+        self.toc_dropped = False
         # The page made from the metadata file, when its title is the
         # book's: that title is the title block LaTeX draws, so the page
         # gets no heading of its own. A page whose title is its own --
@@ -359,7 +364,9 @@ class PdfAssembly(Assembly):
         self.division = role
 
     def add_generated(self, entry, depth):
-        if entry.generate == "toc":
+        if entry.generate == "toc" and not self.contents:
+            self.toc_dropped = True
+        elif entry.generate == "toc":
             # As the template writes it, depth and all.
             self.blocks.append(raw_latex(
                 f"{{\\setcounter{{tocdepth}}{{{self.toc_depth}}}"
@@ -704,12 +711,15 @@ def build(base, name, resolved, keep, intermediates=None, latex_only=False,
         toc_depth = int(meta_plain(meta.get("toc-depth")))
     except ValueError:
         toc_depth = int(resolved["pdf.toc_depth"])
+    # toc: false in the metadata file: no contents page, the template's or
+    # one project.contents generates.
+    contents = not (meta.get("toc") or {}).get("t") == "MetaBool" or bool(meta["toc"]["c"])
     assembly = PdfAssembly(
         pages_dir, placed, tree, titles, title_page=title_page,
         notes_title=" ".join(str(resolved["notes.title"] or "").split()) or "Notes",
         book_title=meta_plain(meta.get("title")),
         divisions=document_class(meta) in FRONTMATTER_CLASSES,
-        toc_depth=toc_depth, mark_files=as_latex)
+        toc_depth=toc_depth, mark_files=as_latex, contents=contents)
     if len(tree) == 1 and tree[0][0] == "page":
         # The divisions are written where the role changes, between entries,
         # so a book of one page never reached its main matter: numbered i in
@@ -745,6 +755,9 @@ def build(base, name, resolved, keep, intermediates=None, latex_only=False,
         # project.contents put the contents somewhere; it is there, and
         # not also where the template would put it.
         meta["toc"] = meta_bool(False)
+    if assembly.toc_dropped:
+        print("The book has no contents page: the pdf.metadata file says toc: false, and "
+              "the one project.contents generates is left out too.", file=sys.stderr)
     # Without a title page the title is the PDF's metadata only (title-meta,
     # which hyperref makes its /Title and dc:title), and the book's first
     # heading says it.

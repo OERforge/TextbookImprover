@@ -4910,6 +4910,38 @@ def case_floats(work):
     ]
 
 
+def case_no_contents(work):
+    """A pdf.metadata file's toc: false leaves out the contents page that
+    project.contents generates, as it does the template's, in the PDF's
+    own LaTeX (a latex target) as in the PDF; without it the page is
+    there, where contents puts it."""
+    os.makedirs(work)
+    for stem, text in (("one", "# One\n\nText.\n"), ("two", "# Two\n\nMore.\n"),
+                       ("meta", "---\ntoc: false\n---\n")):
+        with open(os.path.join(work, stem + ".md"), "w", encoding="utf-8") as fh:
+            fh.write(text)
+    with open(os.path.join(work, "project.yaml"), "w") as fh:
+        fh.write("project:\n  identifier: shapes\n  title: Shapes\n  language: en\n"
+                 "  contents:\n  - generate: toc\n    name: Contents\n  - one\n  - two\n")
+    with open(os.path.join(work, "conversion.yaml"), "w") as fh:
+        fh.write("targets:\n  latex:\n    format: latex\n    pdf:\n      metadata: meta.md\n"
+                 "  plain:\n    format: latex\n")
+    result = convert(work)
+    said = result.stdout + result.stderr
+
+    def master(target):
+        path = os.path.join(work, target, "shapes.tex")
+        return read(work, target, "shapes.tex") if os.path.exists(path) else ""
+    return [
+        ("toc: false leaves out the contents page project.contents generates, and the run "
+         "says so",
+         lambda: result.returncode == 0 and "\\tableofcontents" not in master("latex")
+         and "the one project.contents generates is left out too" in said),
+        ("without it the page is there, once",
+         lambda: master("plain").count("\\tableofcontents") == 1),
+    ]
+
+
 CASES = [("a LaTeX book", case_book), ("two masters", case_masters),
          ("one file", case_single), ("an unbuilt book", case_unbuilt),
          ("a table tagged as a division of paragraphs", case_layout_tables),
@@ -4927,7 +4959,8 @@ CASES = [("a LaTeX book", case_book), ("two masters", case_masters),
          ("a bibliography placed by its type", case_bibliography_place),
          ("a book's citations and its bibliography", case_bibliography),
          ("floats, classes, and titles as LaTeX has them", case_floats),
-         ("a book set with packages tagging can't take", case_unsupported)]
+         ("a book set with packages tagging can't take", case_unsupported),
+         ("no contents page", case_no_contents)]
 
 
 # The longest cases, started first when they run side by side.

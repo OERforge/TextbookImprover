@@ -151,7 +151,9 @@ reference says which settings are a target's and which are the book's.
 `archive: zip` or `archive: tar.gz` packs a target's folder into one
 file once it's written, beside the folder and named after it
 (`html.zip`), for handing the output on whole; the cartridge is the
-packager's (`--zip`). A folder of PowerPoint decks is slides rather
+packager's (`--zip`). It leaves out the `intermediates` folder a target
+keeps there when its filter settings differ from the first target's,
+which is the run's, not the output. A folder of PowerPoint decks is slides rather
 than a book (`project.kind`), and implies a `remediated` target with
 `format: source` when it declares none ([Slides](slides.md)).
 

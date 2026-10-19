@@ -287,8 +287,16 @@ def archive_targets(targets, base):
             continue
         path = folder + (".zip" if kind == "zip" else ".tar.gz")
         root = os.path.basename(folder)
+        # A target whose filter settings differ from the first's keeps its
+        # filtered pages in its own folder (load_targets): the run's, not
+        # the output, so not in its archive.
+        own = os.path.abspath(target.pages_dir) if target.pages_dir else None
+        if own and not own.startswith(folder + os.sep):
+            own = None
         files = sorted(os.path.relpath(os.path.join(here, name), folder)
-                       for here, dirs, names in os.walk(folder) for name in names)
+                       for here, dirs, names in os.walk(folder)
+                       if not (own and (here == own or here.startswith(own + os.sep)))
+                       for name in names)
         handle, temp = tempfile.mkstemp(prefix=".archive-", dir=os.path.dirname(folder))
         os.close(handle)
         try:

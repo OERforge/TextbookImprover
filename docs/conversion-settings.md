@@ -14,7 +14,7 @@ Where this target writes. Defaults to the target's own name, so two targets in t
 
 **`archive`**—one of `none`, `zip`, `tar.gz`; default `none`
 
-Whether this target's folder is packed into one file too, once it's written: a zip or a tar.gz beside the folder, named after it (remediated.zip), holding the folder. The folder stays, and each run writes both afresh. A Common Cartridge is the packager's (--zip); this is for handing a folder on whole, such as a set of remediated decks.
+Whether this target's folder is packed into one file too, once it's written: a zip or a tar.gz beside the folder, named after it (remediated.zip), holding the folder, less the intermediates folder the run keeps there for a target whose filter settings differ from the first target's. The folder stays, and each run writes both afresh. A Common Cartridge is the packager's (--zip); this is for handing a folder on whole, such as a set of remediated decks.
 
 **`filename`**—`path`; default `""` (empty); *target only*
 

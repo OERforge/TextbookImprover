@@ -60,6 +60,7 @@ targets:
     footer: "Printed edition."
   wide:
     format: html
+    archive: zip
     tables:
       wrap: false
   epub:
@@ -245,6 +246,11 @@ def case_targets(work):
          lambda: 'class="table-wrapper"' not in read(work, "wide",
                                                      "tables.html")
          and 'class="table-wrapper"' in read(work, "tables.html")),
+        ("its archive holds its pages, not the intermediates kept in its folder",
+         lambda: (lambda names: "wide/tables.html" in names
+                  and not any(n.startswith("wide/intermediates") for n in names))(
+             zipfile.ZipFile(os.path.join(work, "wide.zip")).namelist()
+             if exists(work, "wide.zip") else [])),
         ("the epub target builds",
          lambda: exists(work, "epub", "org.example.fixtures.epub")),
         ("the reports are written once, for the book",

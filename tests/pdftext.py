@@ -153,10 +153,35 @@ def _encoding(font):
 
 
 class _Font:
-    """How a font's strings split into codes, and each code's characters."""
+    """How a font's strings split into codes, each code's characters, and
+    each code's width, in thousandths of the font's size."""
 
     def __init__(self, font):
         ranges, self.chars = [], {}
+        self.widths, self.default = {}, 0.0
+        if font is not None and font.get("/Subtype") == "/Type0":
+            descendants = font.get("/DescendantFonts")
+            descendant = descendants[0] if isinstance(descendants, pikepdf.Array) \
+                and len(descendants) else None
+            if isinstance(descendant, pikepdf.Dictionary):
+                self.default = float(descendant.get("/DW", 1000))
+                items, at = list(descendant.get("/W") or []), 0
+                while at + 1 < len(items):
+                    first = int(items[at])
+                    if isinstance(items[at + 1], pikepdf.Array):
+                        for n, width in enumerate(items[at + 1]):
+                            self.widths[first + n] = float(width)
+                        at += 2
+                    elif at + 2 < len(items):
+                        for code in range(first, int(items[at + 1]) + 1):
+                            self.widths[code] = float(items[at + 2])
+                        at += 3
+                    else:
+                        break
+        elif font is not None:
+            first = int(font.get("/FirstChar", 0))
+            for n, width in enumerate(font.get("/Widths") or []):
+                self.widths[first + n] = float(width)
         tounicode = font.get("/ToUnicode") if font is not None else None
         if isinstance(tounicode, pikepdf.Stream):
             ranges, self.chars = _cmap(tounicode.read_bytes())
@@ -173,8 +198,8 @@ class _Font:
                 for code, text in _encoding(font).items():
                     self.chars.setdefault(code, text)
 
-    def text(self, data):
-        """A string's characters, ? for a code with none."""
+    def codes(self, data):
+        """A string's codes, each as a number and its length in bytes."""
         out, at = [], 0
         while at < len(data):
             for size in range(1, 5):
@@ -187,9 +212,13 @@ class _Font:
             else:  # no range holds it: as many bytes as the shortest range's
                 size = min(len(low) for low, _ in self.ranges)
                 code = data[at:at + size]
-            out.append(self.chars.get(int.from_bytes(code, "big"), "?"))
+            out.append((int.from_bytes(code, "big"), size))
             at += size
-        return "".join(out)
+        return out
+
+    def text(self, data):
+        """A string's characters, ? for a code with none."""
+        return "".join(self.chars.get(code, "?") for code, _size in self.codes(data))
 
 
 def marked_text(path):
@@ -254,6 +283,85 @@ def marked_text(path):
         for n, page in enumerate(pdf.pages):
             run(n, page.obj, page.obj.get("/Resources"), [], frozenset())
     return texts
+
+
+def _times(m, n):
+    """The matrix m then n, PDF's [a b c d e f] each."""
+    return [m[0] * n[0] + m[1] * n[2], m[0] * n[1] + m[1] * n[3],
+            m[2] * n[0] + m[3] * n[2], m[2] * n[1] + m[3] * n[3],
+            m[4] * n[0] + m[5] * n[2] + n[4], m[4] * n[1] + m[5] * n[3] + n[5]]
+
+
+def glyph_boxes(path):
+    """[(page index, baseline, left, right, character)] for each glyph a
+    page's own content shows, in the order shown, in points: where it
+    starts and ends along its line, from the text and current matrices,
+    the font's widths, and the spacing operators. For text set upright,
+    as LaTeX sets it; a form XObject's text isn't read."""
+    boxes, fonts = [], {}
+
+    def font_of(font):
+        key = font.objgen if font is not None and font.is_indirect else id(font)
+        if key not in fonts:
+            fonts[key] = (font, _Font(font))
+        return fonts[key][1]
+
+    with pikepdf.open(path) as pdf:
+        for n, page in enumerate(pdf.pages):
+            resources = page.obj.get("/Resources")
+            group = resources.get("/Font") if isinstance(resources, pikepdf.Dictionary) else None
+            state = {"ctm": [1, 0, 0, 1, 0, 0], "font": None, "size": 0.0, "Tc": 0.0,
+                     "Tw": 0.0, "Th": 1.0, "TL": 0.0}
+            saved, tm, line = [], [1, 0, 0, 1, 0, 0], [1, 0, 0, 1, 0, 0]
+            for instruction in pikepdf.parse_content_stream(page.obj):
+                operands, operator = instruction.operands, str(instruction.operator)
+                if operator == "q":
+                    saved.append(dict(state))
+                elif operator == "Q" and saved:
+                    state = saved.pop()
+                elif operator == "cm" and len(operands) == 6:
+                    state["ctm"] = _times([float(x) for x in operands], state["ctm"])
+                elif operator == "BT":
+                    tm, line = [1, 0, 0, 1, 0, 0], [1, 0, 0, 1, 0, 0]
+                elif operator == "Tf" and len(operands) == 2:
+                    found = group.get(operands[0]) if isinstance(group, pikepdf.Dictionary) else None
+                    state["font"], state["size"] = font_of(found), float(operands[1])
+                elif operator in ("Tc", "Tw", "TL") and operands:
+                    state[operator] = float(operands[0])
+                elif operator == "Tz" and operands:
+                    state["Th"] = float(operands[0]) / 100
+                elif operator in ("Td", "TD") and len(operands) == 2:
+                    if operator == "TD":
+                        state["TL"] = -float(operands[1])
+                    line = _times([1, 0, 0, 1, float(operands[0]), float(operands[1])], line)
+                    tm = list(line)
+                elif operator == "Tm" and len(operands) == 6:
+                    tm = [float(x) for x in operands]
+                    line = list(tm)
+                elif operator in ("T*", "'", '"', "Tj", "TJ"):
+                    if operator == '"' and len(operands) == 3:
+                        state["Tw"], state["Tc"] = float(operands[0]), float(operands[1])
+                    if operator in ("T*", "'", '"'):
+                        line = _times([1, 0, 0, 1, 0, -state["TL"]], line)
+                        tm = list(line)
+                    if operator == "T*" or not operands or state["font"] is None:
+                        continue
+                    font, size, scale = state["font"], state["size"], state["Th"]
+                    items = operands[0] if operator == "TJ" else [operands[-1]]
+                    for item in items:
+                        if not isinstance(item, pikepdf.String):
+                            tm = _times([1, 0, 0, 1, -float(item) / 1000 * size * scale, 0], tm)
+                            continue
+                        for code, length in font.codes(bytes(item)):
+                            width = font.widths.get(code, font.default) / 1000
+                            at = _times(tm, state["ctm"])
+                            boxes.append((n, round(at[5], 3), at[4],
+                                          at[4] + width * size * scale * at[0],
+                                          font.chars.get(code, "?")))
+                            space = state["Tw"] if length == 1 and code == 32 else 0
+                            tm = _times([1, 0, 0, 1, (width * size + state["Tc"] + space) * scale, 0],
+                                        tm)
+    return boxes
 
 
 def own_text(element, texts, pages):

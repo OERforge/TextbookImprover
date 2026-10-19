@@ -628,7 +628,111 @@ PDF_MACROS = r"""\ExplSyntaxOn
       { \nobreak \skip_vertical:N \medskipamount }
       { \skip_vertical:N \bigskipamount }
   }
+% A fill-in blank (\OERBlank, below): its underscores in a bookmark and in
+% a structure element's title.
+\text_declare_purify_equivalent:Nn \OERBlank { \use:n }
+\AddToHook { package / hyperref / after }
+  { \pdfstringdefDisableCommands { \cs_set:Npn \OERBlank #1 {#1} } }
 \ExplSyntaxOff
+% A fill-in blank, a run of four or more underscores pdf-target.lua marks
+% (\OERBlank), that runs past the end of its line into the margin: TeX
+% can't break a run of underscores, and Sociology's chapter 19 quiz had a
+% question whose blank ran 24 points past its line. Once a paragraph's
+% lines are made, such a blank is drawn shorter, its underscores
+% overlapping, so it ends where the line does and the line's spaces are
+% their natural width again. Every underscore is still in the text, for a
+% screen reader and for copying, and a blank that fits its line is left as
+% it is. A blank is drawn no shorter than three underscores; a line that
+% leaves less room than that still runs over. TeX has named the line as
+% too wide (overfull) by then, so the log names each line fitted this way
+% too: how much too wide TeX said it was, the line of LaTeX TeX said its
+% paragraph ended on, and how much too wide it is now, which
+% latexbuild.overfull_lines reads. The Lua is written without a percent
+% sign, a hash, a tilde, or a backslash, which TeX would read as its own,
+% and without a comment, which would run on to the end, TeX joining the
+% lines.
+\ifdefined\directlua
+  \newattribute\OERBlankAttribute
+  \NewDocumentCommand\OERBlank{m}
+    {\leavevmode\setattribute\OERBlankAttribute{1}#1\unsetattribute\OERBlankAttribute}
+  \directlua{
+    local attribute = luatexbase.attributes.OERBlankAttribute
+    local GLYPH, GLUE, KERN, HLIST = node.id("glyph"), node.id("glue"), node.id("kern"), node.id("hlist")
+    local function points(s)
+      local out = tostring(s // 65536) .. "."
+      s = 10 * (s - (s // 65536) * 65536) + 5
+      local delta = 10
+      repeat
+        if delta > 65536 then s = s + 32768 - 50000 end
+        out = out .. tostring(s // 65536)
+        s = 10 * (s - (s // 65536) * 65536)
+        delta = delta * 10
+      until s <= delta
+      return out
+    end
+    local function fit(line)
+      local over = node.dimensions(line.glue_set, line.glue_sign, line.glue_order, line.head) - line.width
+      if over <= tex.hfuzz then return end
+      local runs, count, run = {}, 0, nil
+      for n in node.traverse(line.head) do
+        if n.id == GLYPH and n.char == 95 and node.has_attribute(n, attribute) then
+          if run then
+            run.size = run.size + 1
+            run.glyphs[run.size] = n
+          else
+            run = { glyphs = { n }, size = 1 }
+            count = count + 1
+            runs[count] = run
+          end
+        elseif not (n.id == KERN) then
+          run = nil
+        end
+      end
+      if count == 0 then return end
+      local shrink = 0
+      for glue in node.traverse_id(GLUE, line.head) do
+        if glue.shrink_order == 0 then shrink = shrink + glue.shrink end
+      end
+      local need = over + shrink
+      for i = 1, count do
+        run = runs[i]
+        if need > 0 and run.size > 3 and node.dimensions(line.glue_set, line.glue_sign,
+            line.glue_order, line.head, run.glyphs[run.size].next) > line.width then
+          local width = node.dimensions(run.glyphs[1], run.glyphs[run.size].next)
+          local take = math.min(need, width - width * 3 // run.size)
+          local each = take // (run.size - 1)
+          local left = take - each * (run.size - 1)
+          for j = 1, run.size - 1 do
+            local kern = node.new(KERN, 1)
+            kern.kern = 0 - each - ((j <= left) and 1 or 0)
+            node.insert_after(line.head, run.glyphs[j], kern)
+          end
+          need = need - take
+        end
+      end
+      if need == over + shrink then return end
+      if need == 0 then
+        line.glue_set, line.glue_sign, line.glue_order = 0, 0, 0
+      elseif need < shrink then
+        line.glue_set, line.glue_sign, line.glue_order = need / shrink, 2, 0
+      else
+        line.glue_set, line.glue_order = 1, 0
+      end
+      texio.write_nl("term and log", "TextbookImprover blank: " .. points(over)
+        .. "pt over at line " .. tostring(tex.inputlineno) .. ", now "
+        .. points(math.max(0, need - shrink)) .. "pt")
+      texio.write_nl("term and log", "")
+    end
+    luatexbase.add_to_callback("post_linebreak_filter", function(head)
+      for line in node.traverse_id(HLIST, head) do
+        if line.subtype == 1 and not (line.glue_sign == 1) then fit(line) end
+      end
+      return true
+    end, "oer.blanks")
+  }
+\else
+  \NewDocumentCommand\OERBlank{m}{#1}
+\fi
 """
 
 
@@ -692,8 +796,14 @@ def tlmgr_command(words):
 # \hbadness and \hfuzz): where the box came from, a paragraph's lines, an
 # alignment's rows (a table), or a box made whole (a display formula).
 OVERFULL = re.compile(r"^Overfull \\hbox \((\d+(?:\.\d+)?)pt too wide\) "
-                      r"(?:in paragraph at lines (\d+)--\d+|in alignment at lines (\d+)--\d+"
+                      r"(?:in paragraph at lines (\d+)--(\d+)|in alignment at lines (\d+)--\d+"
                       r"|detected at line (\d+))", re.M)
+# A line whose fill-in blank PDF_MACROS drew shorter to fit it, which TeX
+# had already reported: how much too wide TeX said it was, the line of
+# LaTeX its paragraph ended on, as TeX's report names it, and how much too
+# wide it is now.
+SHORTENED = re.compile(r"^TextbookImprover blank: (\d+(?:\.\d+)?)pt over at line (\d+), "
+                       r"now (\d+(?:\.\d+)?)pt", re.M)
 # How much wider than its text a line has to be to be named: a point or
 # two sits in the margin unseen, but more shows.
 OVERFULL_LEAST = 3.0
@@ -706,7 +816,11 @@ def overfull_lines(output, source, pages):
     (output) about its input (source): kind is table (a row, or a cell's
     line, of a longtable), formula (a display), or text, and page the
     book's page it's on, the last of pages ({label: stem}, its id as
-    page_id gives it) whose label is at or before it."""
+    page_id gives it) whose label is at or before it. A line whose blank
+    was drawn shorter to fit it (SHORTENED) is as wide as it is now."""
+    shortened = {}
+    for m in SHORTENED.finditer(output):
+        shortened.setdefault(int(m.group(2)), []).append((float(m.group(1)), float(m.group(3))))
     lines = source.split("\n")
     owner, current, table, inside = [], None, [], False
     for text in lines:
@@ -721,14 +835,19 @@ def overfull_lines(output, source, pages):
     found = []
     for m in OVERFULL.finditer(output):
         points = float(m.group(1))
+        fitted = shortened.get(int(m.group(3) or 0), [])
+        match = next((f for f in fitted if abs(f[0] - points) < 0.001), None)
+        if match:
+            fitted.remove(match)
+            points = match[1]
         if points <= OVERFULL_LEAST:
             continue
-        line = int(m.group(2) or m.group(3) or m.group(4)) - 1
+        line = int(m.group(2) or m.group(4) or m.group(5)) - 1
         if not 0 <= line < len(lines):
             continue
-        if m.group(3) or table[line]:
+        if m.group(4) or table[line]:
             kind = "table"
-        elif m.group(4) and re.search(r"\\\[|\\\]|\\(?:begin|end)\{(?:equation|align|gather|multline)",
+        elif m.group(5) and re.search(r"\\\[|\\\]|\\(?:begin|end)\{(?:equation|align|gather|multline)",
                                       "\n".join(lines[max(0, line - 3):line + 1])):
             kind = "formula"
         else:

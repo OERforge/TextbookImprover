@@ -1446,6 +1446,44 @@ def check_tlmgr_command():
     ]
 
 
+def check_fitted_blanks():
+    """The build's count of lines too wide for their text, read from what
+    LaTeX said: a line whose fill-in blank PDF_MACROS drew shorter to fit,
+    which LaTeX had reported as too wide, is as wide as it is now, matched
+    by the width LaTeX gave and the line of LaTeX its paragraph ended on;
+    and the Lua that draws it has nothing TeX would read as its own, since
+    TeX reads it before Lua does, its lines joined."""
+    import latexbuild
+    source = "\n".join(["\\label{page-quiz}"] + ["Words."] * 60)
+    said = ("Overfull \\hbox (24.27022pt too wide) in paragraph at lines 10--13\n"
+            "[]\\TU/LatinModernRoman(0)/m/n/10 The Rat-ing ... ________________ \n"
+            "TextbookImprover blank: 24.27022pt over at line 13, now 0.0pt\n\n"
+            "Overfull \\hbox (12.5pt too wide) in paragraph at lines 20--22\n"
+            "TextbookImprover blank: 12.5pt over at line 22, now 4.25pt\n\n"
+            "Overfull \\hbox (8.0pt too wide) in paragraph at lines 30--33\n"
+            "TextbookImprover blank: 8.0pt over at line 34, now 0.0pt\n\n"
+            "Overfull \\hbox (9.0pt too wide) in paragraph at lines 40--41\n"
+            "Overfull \\hbox (6.0pt too wide) in paragraph at lines 40--41\n"
+            "TextbookImprover blank: 6.0pt over at line 41, now 0.0pt\n")
+    found = latexbuild.overfull_lines(said, source, {"page-quiz": "quiz"})
+    macros = latexbuild.PDF_MACROS
+    lua = macros[macros.index("\\directlua{") + len("\\directlua{"):]
+    lua = lua[:lua.index("\n\\else")]
+    return [
+        ("a line whose blank was drawn shorter to fit it isn't counted",
+         lambda: not any(points == 24.27022 for points, _kind, _page in found)),
+        ("one still too wide is counted as wide as it is now",
+         lambda: (4.25, "text", "quiz") in found
+         and not any(points == 12.5 for points, _kind, _page in found)),
+        ("a fitted line is matched by its paragraph's last line and its width, "
+         "and no other line is taken for it",
+         lambda: sorted(found) == [(4.25, "text", "quiz"), (8.0, "text", "quiz"),
+                                   (9.0, "text", "quiz")]),
+        ("the Lua has no percent sign, hash, tilde, or backslash, and no comment",
+         lambda: lua.strip() and not re.search(r"[%#~\\]|--", lua)),
+    ]
+
+
 def check_tex_packages():
     """The installation page's commands for TeX install every package the
     run and the suites check for, a deck's PDF's and the LaTeX suite's
@@ -1722,6 +1760,7 @@ GROUPS = [
     ("a PDF read without pypdf's warnings", check_pdf_read_quietly),
     ("the PDF findings in the output check's summary", check_pdf_summary),
     ("tlmgr, with sudo where it needs it", check_tlmgr_command),
+    ("a PDF's lines too wide, and its fitted blanks", check_fitted_blanks),
     ("the installation page's TeX packages", check_tex_packages),
     ("drawings without the preview package", check_drawings_without_preview),
     ("layout tables", check_layout_tables),

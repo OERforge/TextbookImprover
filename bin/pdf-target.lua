@@ -105,6 +105,11 @@
 --    size, wider than its line or not: scaled to fit, as one with
 --    neither is (below).
 --
+-- 18. A fill-in blank, a run of four or more underscores, which TeX can't
+--    break, so a line ending in one ran into the margin: marked, for
+--    latexbuild's PDF_MACROS to draw shorter where it runs past its line
+--    (below).
+--
 -- Copyright 2026 Robert Szarka
 --
 -- This program is free software: you can redistribute it and/or modify
@@ -1530,6 +1535,35 @@ local function box_rules(div)
   }
 end
 
+-- A fill-in blank, a run of four or more underscores in the text (Sociology's
+-- quiz asks "Core nations are also known as __________________"): the
+-- writer's \_ each, in \OERBlank, which marks them, so that PDF_MACROS
+-- can draw a blank that runs past the end of its line shorter, to end
+-- where the line does. A run of three or fewer is never drawn shorter, so
+-- it isn't marked. Last, so the text the other passes read (a link's
+-- /Contents) has the underscores. Not in a link's text, an image's
+-- description, a heading, or the metadata, whose plain text the writer
+-- takes as well (a bare address's \url, alt=, a bookmark's
+-- \texorpdfstring, pdftitle), and where the mark, raw LaTeX, would leave
+-- the underscores out. Nor in what lua-ul draws a line under or through
+-- or a highlight behind (\ul, \st, \hl), which it draws as the line is
+-- made, before the blank could be drawn shorter: the line would still
+-- run past the margin.
+local function blanks(str)
+  if not str.text:find('____', 1, true) then return nil end
+  local out, rest = pandoc.Inlines{}, str.text
+  while true do
+    local first, last = rest:find('____+')
+    if not first then break end
+    if first > 1 then out:insert(pandoc.Str(rest:sub(1, first - 1))) end
+    out:insert(pandoc.RawInline('latex',
+      '\\OERBlank{' .. ('\\_'):rep(last - first + 1) .. '}'))
+    rest = rest:sub(last + 1)
+  end
+  if rest ~= '' then out:insert(pandoc.Str(rest)) end
+  return out
+end
+
 return {
   { BulletList = headings_inside, OrderedList = headings_inside,
     DefinitionList = headings_inside, BlockQuote = headings_inside,
@@ -1543,4 +1577,13 @@ return {
   { Table = Table, Image = Image, Link = Link, Math = Math },
   { Div = box_rules },
   { Span = inline_language, Link = inline_language, Div = div_language },
+  { Pandoc = function(doc)
+      local skip = function(element) return element, false end
+      doc.blocks = doc.blocks:walk{
+        traverse = 'topdown', Image = skip, Header = skip, Link = skip,
+        Underline = skip, Strikeout = skip,
+        Span = function(span) if span.classes:includes('mark') then return span, false end end,
+        Str = blanks }
+      return doc
+    end },
 }

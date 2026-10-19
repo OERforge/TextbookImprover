@@ -330,6 +330,20 @@ LaTeX book's framed passage.
 :::
 
 And text after the box.
+
+## Fill in the ________
+
+Two questions that end in a fill-in blank, as Sociology's quiz asks
+them, the first too long for what's left of its line, which TeX can't
+break:
+
+The Rating of Perceived Exertion (RPE) is an example of ________________
+
+Core nations are also known as __________________
+
+And underscores in code, which aren't a blank: `a____b`. And in a bare
+address, <https://example.org/fill____in>, and a picture's description:
+![A red square over a line to write on, ________](assets/red.png).
 """
 
 # An untagged book, built to no PDF/UA standard, with figures and no
@@ -522,6 +536,21 @@ Text with a note.[^i] As [the heading in the item](#in-an-item) says.
 ## A section after them
 
 Its words.
+
+Two fill-in blanks joined to a number too long for any line by a space
+that doesn't break: the first doesn't reach the line's end, so it's left
+as it is, and the second reaches past it with too little of it before the
+margin to be drawn whole, so it's drawn no shorter than three
+underscores.
+
+________\ 31415926535897932384626433832795028841971693993751058209749445923078164062862089986280
+
+2718281828459045235360287471352662497757247093699959574966967627724\ ____
+
+And blanks underlined, struck out, and highlighted, whose line or
+highlight lua-ul draws before a blank could be drawn shorter, left as
+they are: [________________]{.underline}, ~~________________~~, and
+[________________]{.mark}.
 """
 
 PROJECT = """project:
@@ -1014,6 +1043,29 @@ def quoted_cells(path):
 def says(text, words):
     """Whether the PDF's text holds the words, any space between them."""
     return re.search(r"\s+".join(map(re.escape, words.split())), text) is not None
+
+
+def blank_on_line(path, words):
+    """For the line whose text holds words and a run of underscores: how
+    far the run's last underscore ends from where the line's first glyph
+    starts, how many underscores it has, whether any overlaps the one
+    before it, how wide the run is drawn, how wide one underscore is, and
+    how far apart the closest two words are, from where the space between
+    them starts (a tagged PDF's text has its spaces); None for no such
+    line."""
+    lines = {}
+    for page, baseline, left, right, char in pdftext.glyph_boxes(path):
+        lines.setdefault((page, baseline), []).append((left, right, char))
+    for glyphs in lines.values():
+        if words in "".join(g[2] for g in glyphs):
+            run = [g for g in glyphs if g[2] == "_"]
+            if run:
+                return (run[-1][1] - glyphs[0][0], len(run),
+                        any(b[0] < a[1] - 0.01 for a, b in zip(run, run[1:])),
+                        run[-1][1] - run[0][0], run[0][1] - run[0][0],
+                        min((b[0] - a[0] for a, b in zip(glyphs, glyphs[1:]) if a[2] == " "),
+                            default=None))
+    return None
 
 
 def children(element):
@@ -1540,6 +1592,34 @@ def checks(work, jobs=1):
          and source.index("\\OERBoxRule{above}") < source.index("A passage set off in a box")
          < source.index("\\OERBoxRule{below}")
          and artifact_strokes(pdf_path, "A passage set off in a box") == [344, 344]),
+        # pdf-target.lua's \OERBlank and latexbuild's PDF_MACROS: a fill-in
+        # blank that runs past the end of its line, which TeX can't break,
+        # is drawn shorter, its underscores overlapping, to end where the
+        # line of 345 points does, its spaces their natural width (3.32
+        # points, where TeX had shrunk them to 2.21), and the build doesn't
+        # name the line, which LaTeX had reported as too wide; every
+        # underscore is in the text still. A blank that fits is left as it
+        # is.
+        ("a fill-in blank that runs past its line ends where the line does, its spaces "
+         "their natural width, and the build doesn't name the line",
+         lambda: (lambda found: found is not None and abs(found[0] - 345) < 1
+                  and found[1] == 16 and found[2] and found[5] is not None
+                  and found[5] > 3.2)(blank_on_line(pdf_path, "Exertion"))
+         and not re.search(r"more than 3 points wider[^\n]*appendix", log)),
+        ("and every underscore of it is in the text, for a screen reader",
+         lambda: "The Rating of Perceived Exertion (RPE) is an example of " + "_" * 16
+         in [" ".join(t.split()) for t in pdftext.element_texts(pdf_path, "/text")]),
+        ("a blank that fits its line is left as it is",
+         lambda: (lambda found: found is not None and found[1] == 18 and not found[2])(
+             blank_on_line(pdf_path, "Core nations"))
+         and "\\OERBlank{" + "\\_" * 18 + "}" in source),
+        ("and underscores in code, a bare address, a picture's description, or a "
+         "heading aren't a blank, its bookmark keeping them",
+         lambda: "\\texttt{a\\_\\_\\_\\_b}" in source
+         and "\\url{https://example.org/fill____in}" in source
+         and any(str(f.get("/Alt")) == "A red square over a line to write on, ________"
+                 for f in figures)
+         and "Fill in the ________" in outline_titles(reader)),
         # LaTeX says so in its log, which Pandoc keeps to itself but for
         # its JSON log of the run.
         ("a line wider than the text is named, a display formula, on its page",
@@ -1693,6 +1773,21 @@ def checks(work, jobs=1):
          and "\\begin{longtable}" in notes_source and "p{(" not in head_of(notes_source, "242.98")
          and re.search(r"WARNING: \d+ line\(s\) of the PDF are more than 3 points wider[^\n]* "
                        r"in table\(s\)", notes_said)),
+        # A blank on a line too wide that doesn't reach the line's end is
+        # left as it is, and one that reaches past it with too little of it
+        # before the margin is drawn three underscores wide, no shorter.
+        ("a blank on a line too wide that doesn't reach the line's end is left as it is",
+         lambda: (lambda found: found is not None and found[1] == 8 and not found[2])(
+             blank_on_line(notes_path, "3141592653589793238462643383279502884197169399"))),
+        ("and one with too little room before the margin is drawn no shorter than "
+         "three underscores",
+         lambda: (lambda found: found is not None and found[1] == 4 and found[2]
+                  and abs(found[3] - 3 * found[4]) < 0.05)(
+             blank_on_line(notes_path, "2718281828459045235360287471352662497757247093"))),
+        ("and a blank underlined, struck out, or highlighted isn't marked, lua-ul drawing "
+         "its line first",
+         lambda: all("\\%s{%s}" % (command, "\\_" * 16) in notes_source
+                     for command in ("ul", "st", "hl"))),
         # figures-and-tables.lua: a layout table's head rows are body rows,
         # since LaTeX's tagging made a longtable's head header cells even
         # tagged as a division, a TH outside any TR, which PDF/UA-2 rejects
@@ -1727,7 +1822,7 @@ def checks(work, jobs=1):
          lambda: any(str(f.get("/Alt")) == "A small red square"
                      for f in figures)),
         ("the decorative image is no figure",
-         lambda: len(figures) == 9),
+         lambda: len(figures) == 10),
         # Each inner figure's empty \caption{} was the float's too, three
         # Captions in one Aside, which veraPDF rejects (ISO 14289-2,
         # 8.2.5.27).

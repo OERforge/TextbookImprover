@@ -51,7 +51,8 @@ from .bake.core import (class_test, classes, detach, has_class, prepend,
                         text_of)
 from .cnxml import E, append_text
 from .mathml import MATHML
-from .steptables import HEADED, header_guess, layout_reason
+from .steptables import (HEADED, head_rows, header_guess, layout_reason,
+                         organizer_page, symbol_key)
 
 VOID = {"area", "base", "br", "col", "embed", "hr", "img", "input", "link",
         "meta", "source", "track", "wbr"}
@@ -807,8 +808,13 @@ class Emitter:
             if isinstance(child.tag, str) and child.tag != "caption":
                 self.convert(child, out, level, page)
         caption = out.find("caption")
+        # An inquiry organizer's key to the emoji in its book's page titles
+        # is headed by them, row by row; the organizer itself is laid out.
+        organizer = organizer_page(self.book.style, page.title)
+        if organizer and symbol_key(out):
+            head_rows(out)
         layout = self._layout(out, table[0], page, caption is not None and " ".join(
-            text_of(caption).split()) not in ("", label))
+            text_of(caption).split()) not in ("", label), organizer)
         self._placing.append((len(self.tables), out))
         self.tables.append((page.name, label,
                             text_of(caption) if caption is not None else "",
@@ -817,13 +823,14 @@ class Emitter:
                              for row in out.xpath("./tbody/tr | ./tr | ./tfoot/tr")]))
         dst.append(out)
 
-    def _layout(self, out, source, page, captioned):
+    def _layout(self, out, source, page, captioned, organizer=False):
         """Whether a table is a layout table, given role="presentation"
         (cnx.steptables): for what it holds, a box of one cell, a form of
         lines to fill in, pictures with their labels, or a matching
-        exercise; for where it stands, a worked example's steps, a Key
-        Equations table, or a grid of key terms, unless the header guess
-        reads a header row in it, which leaves it a data table, reported.
+        exercise; for the page it's on, an inquiry organizer (organizer);
+        for where it stands, a worked example's steps, a Key Equations
+        table, or a grid of key terms, unless the header guess reads a
+        header row in it, which leaves it a data table, reported.
         OpenStax's HTML marks a table so only when it has no label of
         OpenStax's (aria-label), with which a browser would ignore the
         role. The labels, written in 2023 from the tables' summaries,
@@ -834,8 +841,8 @@ class Emitter:
         entering the table, before its caption. Each is in the report."""
         name = out.get("id") or "a table"
         layout = False
-        reason = layout_reason(out, source, self.book.style, captioned)
-        if reason == "shape":
+        reason = layout_reason(out, source, self.book.style, captioned, organizer)
+        if reason in ("shape", "page"):
             layout = True
             out.set("role", "presentation")
         elif reason == "place":

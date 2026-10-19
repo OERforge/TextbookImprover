@@ -1609,6 +1609,123 @@ def case_layout_kinds(work):
     ]
 
 
+# An inquiry organizer: a key to the emoji, and the chapter's plan --------
+
+ORGANIZER_KEY = """<tgroup cols="3"><tbody>
+<row><entry>\U0001F4CE </entry><entry>Inquiry Organizer</entry><entry>Summary of chapter
+objectives and resources</entry></row>
+<row><entry>\U0001F50E </entry><entry>Narratives</entry><entry>Shorter essays on a dramatic
+story or individual</entry></row>
+<row><entry>✒️ </entry><entry>Primary Sources</entry><entry>Firsthand accounts
+from the time period</entry></row>
+</tbody></tgroup></table>"""
+
+ORGANIZER_PAGE = """
+<para id="p2">What this chapter asks.</para>
+<table id="key" class="unnumbered" summary="No Summary">
+""" + ORGANIZER_KEY + """
+<table id="plan" class="unnumbered" summary="No Summary">
+<tgroup cols="2"><colspec colnum="1" colname="c1"/><colspec colnum="2" colname="c2"/>
+<tbody>
+<row><entry namest="c1" nameend="c2"><emphasis effect="bold">Chapter 1
+(1763&#8211;1789)</emphasis></entry></row>
+<row><entry namest="c1" nameend="c2"><emphasis effect="bold">Compelling Question: Why
+did the colonies declare their independence?</emphasis></entry></row>
+<row><entry><emphasis effect="bold">Supporting Question 1:</emphasis> What did the
+colonists object to?</entry><entry><emphasis effect="bold">Resources:</emphasis> The
+Stamp Act, a narrative</entry></row>
+<row><entry><emphasis effect="bold">Supporting Question 2:</emphasis> Who led
+them?</entry><entry><emphasis effect="bold">Resources:</emphasis> Samuel Adams, a
+primary source</entry></row>
+</tbody></tgroup></table>"""
+
+NARRATIVE_PAGE = """
+<para id="p3">The colonists objected to the tax.</para>
+<table id="marks" class="unnumbered" summary="No Summary">
+""" + ORGANIZER_KEY
+
+
+def build_organizers(repo):
+    """Two books with a page titled as *Life, Liberty, and the Pursuit of
+    Happiness* titles its inquiry organizers, each with a key to the emoji
+    and the chapter's plan, and a narrative page holding the same key: one
+    of that book's style (ap-history), and one of a style that sets its
+    tables as that one does, in the containers baking makes (precalculus;
+    *U.S. History*'s doesn't)."""
+    books = (("tiny-liberty", "ap-history", "Tiny Liberty", "ffffffffffff", 61007),
+             ("tiny-other", "precalculus", "Tiny Other", "abababababab", 61011))
+    write(os.path.join(repo, "META-INF", "books.xml"), """<container
+ xmlns="https://openstax.org/namespaces/book-container" version="1">
+""" + "".join(f"""<book slug="{slug}" style="{style}"
+ href="../collections/{slug}.collection.xml"/>
+""" for slug, style, *_ in books) + "</container>")
+    for slug, _style, title, uuid, first in books:
+        write(os.path.join(repo, "collections", f"{slug}.collection.xml"),
+              COLLECTION.format(title=title, slug=slug,
+                                uuid=f"11111111-2222-4333-8444-{uuid}",
+                                content=f"""
+<col:subcollection><md:title>1763&#8211;1789</md:title><col:content>
+<col:module document="m{first}"/>
+<col:module document="m{first + 1}"/>
+<col:module document="m{first + 2}"/>
+</col:content></col:subcollection>"""))
+        module(repo, f"m{first}", "Introduction", """
+<para id="p1">This chapter opens.</para>""", cls="introduction")
+        module(repo, f"m{first + 1}", "\U0001F4CE Inquiry Organizer", ORGANIZER_PAGE)
+        module(repo, f"m{first + 2}", "\U0001F50E The Stamp Act", NARRATIVE_PAGE)
+
+
+def case_organizers(work):
+    from lxml import etree
+    from cnx import steptables
+    repo = os.path.join(work, "osbooks-organizers")
+    build_organizers(repo)
+    pages, said = {}, {}
+    for slug in ("tiny-liberty", "tiny-other"):
+        out = os.path.join(work, slug)
+        result = unpack(repo, out, "--book", slug)
+        said[slug] = result.stdout + result.stderr
+        pages[slug] = [read(out, name) for name in sorted(os.listdir(out))
+                       if name.endswith(".html")] if result.returncode == 0 else []
+
+    def table(slug, name):
+        for page in pages[slug]:
+            found = re.search(r'<table\b[^>]*\bid="%s".*?</table>' % name, page, re.S)
+            if found:
+                return found.group(0)
+        return ""
+
+    def key(rows):
+        return steptables.symbol_key(etree.fromstring(
+            "<table><tbody>%s</tbody></table>" % rows))
+
+    def untouched(slug, name):
+        markup = table(slug, name)
+        return bool(markup) and "<th" not in markup and "role=" not in markup
+    return [
+        ("on an inquiry organizer, the key to the emoji the book's page titles "
+         "carry is a data table whose rows its emoji head, and the chapter's "
+         "plan, its questions and their resources, is a layout table",
+         lambda: table("tiny-liberty", "key").count('<th scope="row">') == 3
+         and table("tiny-liberty", "key").count("<td") == 6
+         and "role=" not in table("tiny-liberty", "key")
+         and 'role="presentation"' in table("tiny-liberty", "plan")
+         and "1 table(s) that only lay things out" in said["tiny-liberty"]),
+        ("the same key on another page of the book is left as it is",
+         lambda: untouched("tiny-liberty", "marks")),
+        ("a key opens every row with a symbol alone, words beside it: a "
+         "first column of words, or a symbol with nothing beside it, is none",
+         lambda: key("<tr><td>\U0001F4CE </td><td>Inquiry Organizer</td></tr>"
+                     "<tr><td>\u270f\ufe0f</td><td>Unit Essay Activity</td></tr>")
+         and not key("<tr><td>Narratives</td><td>Shorter essays</td></tr>"
+                     "<tr><td>Lessons</td><td>Handouts</td></tr>")
+         and not key("<tr><td>\U0001F4CE</td><td></td></tr>"
+                     "<tr><td>\U0001F50E</td><td> </td></tr>")),
+        ("and so are an organizer's tables in a book of another style",
+         lambda: untouched("tiny-other", "key") and untouched("tiny-other", "plan")),
+    ]
+
+
 # Which summaries read their tables out ------------------------------------
 
 def case_read_out(work):
@@ -1998,6 +2115,7 @@ CASES = [
     ("a grid of key terms, a corequisite book's steps, Key Equations, a box of "
      "one cell, a form, pictures, and a matching exercise, layout tables, and "
      "summaries that read a table out", case_layout_kinds),
+    ("an inquiry organizer's key and plan", case_organizers),
     ("which summaries read their tables out", case_read_out),
     ("the collation", case_collation),
     ("baking's steps, one at a time", case_steps),

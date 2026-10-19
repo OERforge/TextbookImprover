@@ -67,6 +67,16 @@ reads a header row in it (HEADED):
   column, which the review of the layout tables said they could as well
   be, each would want a caption and a row of table-headers.csv.
 
+And for the page it's on, an inquiry organizer (organizer_page), each
+chapter's first in Life, Liberty, and the Pursuit of Happiness, which
+marks each kind of page with an emoji in its title: its key to the emoji
+(symbol_key), each row an emoji, the kind's name, and what it's for, has
+its first column declared as row headers (head_rows), the emoji heading
+the row it explains; the organizer itself, the chapter's question and
+objectives across it and each supporting question beside its resources,
+is a layout table. 16 of each, and a person's description to write for
+each key, as for any data table without a caption.
+
 Other tables are data tables: an accounting book's exercises and journal
 entries, whose debit and credit columns a layout table would lose,
 tables of values, and the like. A table kept as data where its place
@@ -98,6 +108,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
 import re
+import unicodedata
 
 from lxml import etree
 
@@ -409,22 +420,69 @@ def matching_exercise(table):
     return first is not None and second is not None and first != second
 
 
-def layout_reason(table, source, style, captioned):
+# The style of Life, Liberty, and the Pursuit of Happiness, which marks
+# each kind of page with an emoji in its title and opens each chapter with
+# an inquiry organizer: a key to the emoji, and a table of the chapter's
+# question, its objectives, and its supporting questions beside their
+# resources.
+ORGANIZER_STYLES = {"ap-history"}
+_ORGANIZER = re.compile(r"(?:^|\s)Inquiry Organizer$")
+
+
+def organizer_page(style, title):
+    """Whether a page is an inquiry organizer, by its title, which is all
+    that marks one: "10.1 📎 Inquiry Organizer"."""
+    return style in ORGANIZER_STYLES and bool(
+        _ORGANIZER.search(" ".join((title or "").split())))
+
+
+def _symbol(text):
+    """Whether a text is a symbol alone: an emoji or another of Unicode's
+    symbols, with the variation selectors and joiners that dress one."""
+    text = "".join(text.split())
+    return 0 < len(text) <= 8 and \
+        any(unicodedata.category(c) == "So" for c in text) and \
+        all(unicodedata.category(c) in ("So", "Sk", "Mn", "Cf") for c in text)
+
+
+def symbol_key(table):
+    """Whether a table is a key to symbols: two rows or more, each opening
+    with a cell that holds a symbol alone, beside words. Its first column
+    heads its rows, the symbol being what each row explains."""
+    rows = _rows(table)
+    return len(rows) >= 2 and all(
+        len(row) >= 2 and not _holds(row[0], "img", "math", "table")
+        and _symbol("".join(row[0].itertext()))
+        and any(cell_text(c) for c in row[1:]) for row in rows)
+
+
+def head_rows(table):
+    """Make each row's first cell its row header, as a key's symbol is."""
+    for row in _rows(table):
+        row[0].tag = "th"
+        row[0].set("scope", "row")
+
+
+def layout_reason(table, source, style, captioned, organizer=False):
     """Why a table as the emitter writes it is a layout table, if it may be
     one: "shape" when what it holds says so, whatever the header guess
     reads (one cell, lines to fill in, pictures with their labels, two
-    lists to match); "place" when where it stands does, unless the guess
-    reads a header row in it (HEADED): a chapter's Key Equations, one
-    OpenStax classes unstyled in a book of LAYOUT_STYLES, and one with no
-    label of OpenStax's in a book of ANY_CLASS_STYLES, each with no
-    caption of its own (captioned: one besides the number baking gave it).
-    None for a data table. A table with a head or a header cell declares
-    its headers, and is one."""
+    lists to match); "page" when it's on an inquiry organizer (organizer),
+    the organizer itself, its key having its row headers declared;
+    "place" when where it stands says so, unless the guess reads a header
+    row in it (HEADED): a chapter's Key Equations, one OpenStax classes
+    unstyled in a book of LAYOUT_STYLES, and one with no label of
+    OpenStax's in a book of ANY_CLASS_STYLES, each with no caption of its
+    own (captioned: one besides the number baking gave it). None for a
+    data table. A table with a head or a header cell declares its
+    headers, and is one."""
     if table.find(".//thead") is not None or table.find(".//th") is not None:
         return None
     if (one_cell(table) or lines_to_fill(table) or pictures_alone(table)
             or matching_exercise(table)):
         return "shape"
+    if organizer:
+        return "page"
     if captioned:
         return None
     if (in_key_equations(source)

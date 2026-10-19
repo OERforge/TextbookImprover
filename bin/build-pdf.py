@@ -63,7 +63,7 @@ except ImportError:
              "lib/ directory beside bin/.")
 from bookassembly import (  # noqa: E402
     INTERMEDIATE, Assembly, load_documents, targets_of, plan_book, load_page,
-    page_title, stringify, wants_title_page,
+    page_id, page_title, stringify, wants_title_page,
 )
 from bookcontents import flatten_pages, is_generated, role_of  # noqa: E402
 import highlighting  # noqa: E402
@@ -658,6 +658,26 @@ def pdf_targets(schema, project_schema, documents, requested, allow_unknown):
 
 # --------------------------------------------------------------------------
 
+def latex_said(log_path):
+    """(what LaTeX's last run said, the LaTeX it read) from Pandoc's JSON
+    log of a PDF build (--log), its makePDF messages; empty when the log
+    has neither."""
+    try:
+        with open(log_path, encoding="utf-8") as fh:
+            messages = json.load(fh)
+    except (OSError, ValueError):
+        return "", ""
+    said = source = ""
+    for message in messages:
+        if message.get("type") != "MakePDFInfo":
+            continue
+        if message.get("description") == "LaTeX output":
+            said = message.get("contents") or ""
+        elif message.get("description") == "Source:":
+            source = message.get("contents") or ""
+    return said, source
+
+
 def build(base, name, resolved, keep, intermediates=None, latex_only=False,
           as_latex=False):
     project = resolved.project
@@ -779,10 +799,19 @@ def build(base, name, resolved, keep, intermediates=None, latex_only=False,
         except RuntimeError as exc:
             sys.exit(str(exc))
         command += downsample.resource_args(scaled)
+        # Pandoc's log, as JSON: LaTeX's input and what each run of it said,
+        # which names the lines it couldn't fit (overfull_lines).
+        log_path = os.path.join(work, "pandoc-log.json")
+        command += ["--log", log_path]
         # Run in the content directory: image paths in the intermediates
         # are relative to it.
         result = subprocess.run(command, cwd=base, capture_output=True,
                                 text=True, env=environment)
+        if result.returncode == 0:
+            line = latexbuild.overfull_warning(latexbuild.overfull_lines(
+                *latex_said(log_path), {page_id(stem): stem for stem, _t, _d in assembly.pages}))
+            if line:
+                print(line, file=sys.stderr)
         missing, others = latexbuild.missing_characters(result.stderr.splitlines())
         if others:
             print("\n".join(others), file=sys.stderr)

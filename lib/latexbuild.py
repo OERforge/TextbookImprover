@@ -673,6 +673,79 @@ def tlmgr_command(words):
     return "sudo " + (shlex.quote(path) if path else "tlmgr") + " " + words
 
 
+# LaTeX's report of a line it couldn't fit to its width (TeXbook ch. 14,
+# \hbadness and \hfuzz): where the box came from, a paragraph's lines, an
+# alignment's rows (a table), or a box made whole (a display formula).
+OVERFULL = re.compile(r"^Overfull \\hbox \((\d+(?:\.\d+)?)pt too wide\) "
+                      r"(?:in paragraph at lines (\d+)--\d+|in alignment at lines (\d+)--\d+"
+                      r"|detected at line (\d+))", re.M)
+# How much wider than its text a line has to be to be named: a point or
+# two sits in the margin unseen, but more shows.
+OVERFULL_LEAST = 3.0
+LABEL = re.compile(r"\\label\{(page-[^}]*)\}")
+
+
+def overfull_lines(output, source, pages):
+    """[(points, kind, page)] for each line LaTeX set wider than its text,
+    or a table's column, by more than OVERFULL_LEAST points, from what a LaTeX run said
+    (output) about its input (source): kind is table (a row, or a cell's
+    line, of a longtable), formula (a display), or text, and page the
+    book's page it's on, the last of pages ({label: stem}, its id as
+    page_id gives it) whose label is at or before it."""
+    lines = source.split("\n")
+    owner, current, table, inside = [], None, [], False
+    for text in lines:
+        for label in LABEL.findall(text):
+            current = pages.get(label, current)
+        owner.append(current)
+        if "\\begin{longtable}" in text:
+            inside = True
+        table.append(inside)
+        if "\\end{longtable}" in text:
+            inside = False
+    found = []
+    for m in OVERFULL.finditer(output):
+        points = float(m.group(1))
+        if points <= OVERFULL_LEAST:
+            continue
+        line = int(m.group(2) or m.group(3) or m.group(4)) - 1
+        if not 0 <= line < len(lines):
+            continue
+        if m.group(3) or table[line]:
+            kind = "table"
+        elif m.group(4) and re.search(r"\\\[|\\\]|\\(?:begin|end)\{(?:equation|align|gather|multline)",
+                                      "\n".join(lines[max(0, line - 3):line + 1])):
+            kind = "formula"
+        else:
+            kind = "text"
+        found.append((points, kind, owner[line]))
+    return found
+
+
+def overfull_warning(found, where="PDF"):
+    """One line for what overfull_lines found, or None."""
+    if not found:
+        return None
+    kinds = {"table": "in table(s)", "formula": "display formula(s)",
+             "text": "line(s) of text"}
+    one = {"table": "in a table", "formula": "a display formula", "text": "a line of text"}
+    counts = {}
+    for _points, kind, _page in found:
+        counts[kind] = counts.get(kind, 0) + 1
+    widest = max(found, key=lambda f: f[0])
+    pages = list(dict.fromkeys(page for _points, _kind, page in
+                               sorted(found, key=lambda f: -f[0]) if page))
+    return (f"WARNING: {len(found)} line(s) of the {where} are more than "
+            f"{OVERFULL_LEAST:g} points wider than the text or table column they're set in, "
+            f"so they run into the margin, past the page's edge, or into the next column: "
+            + ", ".join(f"{counts[k]} {kinds[k]}" for k in kinds if k in counts)
+            + f"; the widest is {one[widest[1]]}" + (f" on {widest[2]}" if widest[2] else "")
+            + f", {widest[0]:,.0f} points too wide"
+            + (f"; on {len(pages)} page(s), widest first: " + ", ".join(pages[:6])
+               + (f", and {len(pages) - 6} more" if len(pages) > 6 else "") if pages else "")
+            + ".")
+
+
 def failure_advice(log):
     """What to do about a failed build, from its log: a file LaTeX can't
     find, a language babel hasn't, or one of TeX's tables outgrown."""

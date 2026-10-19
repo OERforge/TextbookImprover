@@ -339,6 +339,10 @@ A band of noise four times as wide in pixels as it's shown, in a line of
 text, which images.downsample scales to twice: ![A wide band of
 noise](assets/wide.png){width=100px}.
 
+A formula too wide for its line, which LaTeX can't break:
+
+$$y_{0}+y_{1}+y_{2}+y_{3}+y_{4}+y_{5}+y_{6}+y_{7}+y_{8}+y_{9}+y_{10}+y_{11}+y_{12}+y_{13}+y_{14}+y_{15}+y_{16}+y_{17}+y_{18}+y_{19}+y_{20}+y_{21}+y_{22}+y_{23}+y_{24}+y_{25}+y_{26}+y_{27}+y_{28}+y_{29}$$
+
 [^u1]: The first note, in the text.
 [^u2]: The second note, in a labeled caption.
 [^u3]: The third note, in a caption.
@@ -1362,6 +1366,13 @@ def checks(work, jobs=1):
          lambda: (200, 100) in image_pixels(untagged_path)
          and (400, 200) not in image_pixels(untagged_path)
          and "images.downsample 2: 1 of 2 image(s) scaled down" in untagged_said),
+        # LaTeX says so in its log, which Pandoc keeps to itself but for
+        # its JSON log of the run.
+        ("a line wider than the text is named, a display formula, on its page",
+         lambda: re.search(r"WARNING: 1 line\(s\) of the PDF are more than 3 points wider "
+                           r"than the text or table column they're set in.*: 1 display "
+                           r"formula\(s\); the widest is a display "
+                           r"formula on figures, \d+ points too wide", untagged_said)),
         # LaTeX's classes set a caption too long for its line twice, and
         # TextbookImprover's own for a caption without its label, and a
         # footnote's mark in it took a number each time.

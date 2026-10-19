@@ -1499,10 +1499,10 @@ def check_ua1_math():
 
 def check_math_words():
     """A word or a unit an HTML page's formula holds as an <mi> of more than
-    two letters is made an <mtext>, which Pandoc reads whole and upright,
-    where it read the <mi> as italic letters. What could be a product, a
-    name Pandoc keeps whole, and a style it would write as TeX it can't read
-    back are left to it."""
+    two letters, or of two set upright or applied as a function, is made an
+    <mtext>, which Pandoc reads whole and upright, where it read the <mi> as
+    italic letters. What could be a product, a name Pandoc keeps whole, and
+    a style it would write as TeX it can't read back are left to it."""
     import htmlrepair
 
     def made(mi):
@@ -1523,8 +1523,23 @@ def check_math_words():
         ("words with spaces, a no-break space among them, in any letters",
          lambda: made("<mi>rozpad na sekundę</mi>") == "<mtext>rozpad na sekundę</mtext>"
          and made("<mi>miliardów&#xa0;lat</mi>") == "<mtext>miliardów&#xa0;lat</mtext>"),
-        ("two letters stay, as a product might be",
-         lambda: made("<mi>dx</mi>") == "<mi>dx</mi>"),
+        ("two letters stay, as a product might be, in bold too",
+         lambda: made("<mi>dx</mi>") == "<mi>dx</mi>"
+         and made("<mi>dx</mi><mo>+</mo>") == "<mi>dx</mi><mo>+</mo>"
+         and made('<mi mathvariant="bold">AB</mi>') == '<mi mathvariant="bold">AB</mi>'),
+        ("but two set upright are text, as a unit or an element's symbol is, "
+         "one letter twice among them",
+         lambda: made('<mi mathvariant="normal">kg</mi>')
+         == '<mtext mathvariant="normal">kg</mtext>'
+         and made('<mi mathvariant="normal">mm</mi>')
+         == '<mtext mathvariant="normal">mm</mtext>'),
+        ("and so are two applied as a function, the Polish tangent",
+         lambda: made("<mi>tg</mi> <mo> \u2061 </mo><mi>x</mi>")
+         == "<mtext>tg</mtext> <mo> \u2061 </mo><mi>x</mi>"
+         and made('<mi>tg</mi><mo form="prefix">&#x2061;</mo>')
+         == '<mtext>tg</mtext><mo form="prefix">&#x2061;</mo>'
+         and made("<mi>tg</mi><mo>&ApplyFunction;</mo>")
+         == "<mtext>tg</mtext><mo>&ApplyFunction;</mo>"),
         ("a name Pandoc keeps whole stays, an operator",
          lambda: made("<mi>sin</mi>") == "<mi>sin</mi>"
          and made("<mi>lim</mi>") == "<mi>lim</mi>"),

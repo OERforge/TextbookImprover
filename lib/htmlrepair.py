@@ -206,6 +206,11 @@ OPERATOR_NAMES = frozenset(
     "tanh".split())
 _MI = re.compile(r"<((?:[A-Za-z_][\w.-]*:)?)mi(\s(?:[^<>\"']|\"[^\"]*\"|'[^']*')*)?>"
                  r"([^<]*)</\1mi\s*>", re.I)
+# A function applied: MathML's U+2061 in an <mo> after its name, written
+# as the character or a reference to it.
+_APPLIED = re.compile(r"\s*<((?:[A-Za-z_][\w.-]*:)?)mo(?:\s(?:[^<>\"']|\"[^\"]*\"|'[^']*')*)?>"
+                      r"\s*(?:\u2061|&#x0*2061;|&#0*8289;|&ApplyFunction;|&af;)\s*"
+                      r"</\1mo\s*>", re.I)
 
 
 def words_as_text(markup):
@@ -219,30 +224,45 @@ def words_as_text(markup):
 
     Only an <mi> of more than two letters, and of nothing but letters and
     spaces: one of two is as likely a product (dx, xy) as a unit (cm), and
-    stays as it is. So do a name the reader keeps whole (sin, log, lim),
-    one letter over and over (xxxxx, x to the fifth written out, in College
-    Algebra with Corequisite Support), and an <mi> styled other than normal
-    or bold, which would be \\textit{} or the like, and \\textit{\\textbf{}}
-    is TeX the reader can't read back.
+    stays as it is, unless the source sets it upright (mathvariant="normal"),
+    as a unit or an element's symbol is and a product of variables isn't, or
+    applies it as a function (the Polish tg, before U+2061). So do a name
+    the reader keeps whole (sin, log, lim), one letter over and over
+    (xxxxx, x to the fifth written out, in College Algebra with Corequisite
+    Support) but for two set upright (mm), and an <mi> styled other than
+    normal or bold, which would be \\textit{} or the like, and
+    \\textit{\\textbf{}} is TeX the reader can't read back.
     In sixteen of OpenStax's math and physics books and Marketing, 1,528 in
     1,130 formulas: units (MeV, mol, rad, atm), names the reader doesn't
     know (cis, the Polish arctg), words (Revenue, the Polish rok), and
     labels (net, the y-intercept's int). The one product among them was the
-    repeated letter."""
+    repeated letter. Of two letters, in OpenStax's 49 public repositories,
+    4,154 set upright and 17 applied, all in Fizyka dla szkół wyższych but
+    14: units (cm, kg, eV, µF, the Polish zł), elements' symbols (He), and
+    words (or, in); of the 988 others, most are products (rω, mc, w = mg in
+    College Physics), and some are units (mg, mL, and cm in the nursing and
+    math books), which nothing tells from a product, and stay."""
     count = 0
 
     def mark(match):
         nonlocal count
         prefix, attributes, text = match.group(1), match.group(2) or "", match.group(3)
+        upright = False
         for name, value in _ATTRIBUTE.findall(attributes):
-            if name.lower() == "mathvariant" \
-                    and value.strip("\"'").strip().lower() not in ("normal", "bold"):
-                return match.group(0)
+            if name.lower() == "mathvariant":
+                style = value.strip("\"'").strip().lower()
+                if style not in ("normal", "bold"):
+                    return match.group(0)
+                upright = style == "normal"
         words = html.unescape(text).strip()
         letters = [c for c in words if c.isalpha()]
-        if len(letters) < 3 or len({c.lower() for c in letters}) < 2 \
-                or words in OPERATOR_NAMES \
+        if words in OPERATOR_NAMES \
                 or not all(c.isalpha() or c.isspace() for c in words):
+            return match.group(0)
+        if len(letters) == 2:
+            if not upright and not _APPLIED.match(match.string, match.end()):
+                return match.group(0)
+        elif len(letters) < 3 or len({c.lower() for c in letters}) < 2:
             return match.group(0)
         count += 1
         return f"<{prefix}mtext{attributes}>{text}</{prefix}mtext>"

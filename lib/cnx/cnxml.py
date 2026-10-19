@@ -310,11 +310,18 @@ class Converter:
         self.children(src, dst)
 
     def formula(self, el):
-        """A formula, its MathML unprefixed, its forced line breaks made
+        """A formula, its MathML unprefixed, a script of the wrong number
+        of parts made a base and its script, its forced line breaks made
         rows (centered in an equation), and made presentation MathML
-        where it's written in content MathML; a formula that can't be is
-        reported."""
+        where it's written in content MathML; a script so made is
+        reported, and a formula that can't be made presentation MathML."""
         math = mathml.copy(el)
+        for name, parts in mathml.repair_scripts(math):
+            text = " ".join("".join(math.itertext()).split())
+            made = "its base alone" if parts == 1 else "a base and its script"
+            self.note("script-repaired", f"an <{name}> of {parts} "
+                      f"part{'s' if parts > 1 else ''} made {made}: "
+                      f"{text[:80]}")
         parent = el.getparent()
         mathml.lines_as_rows(math, center=el.get("display") == "block" or (
             parent is not None and local(parent) == "equation"))

@@ -263,6 +263,13 @@ goods for goods</meaning></definition></glossary>""")
 <para id="p5">Steps: <m:math><m:mrow><m:mi>x</m:mi><m:mo>=</m:mo><m:mn>1</m:mn>
 <m:mspace linebreak="newline" indentalign="id"/><m:mi>y</m:mi><m:mo>=</m:mo>
 <m:mn>2</m:mn><m:mspace linebreak="newline"/></m:mrow></m:math>.</para>
+<para id="p6">Scripts of the wrong number of parts: <m:math><m:mn>0,006</m:mn>
+<m:msup><m:mi mathvariant="normal">°</m:mi><m:mi mathvariant="normal">C</m:mi>
+<m:mrow><m:mo>−</m:mo><m:mn>1</m:mn></m:mrow></m:msup></m:math>, <m:math>
+<m:mfrac><m:msup><m:mn>2,00</m:mn><m:mi>t</m:mi><m:mn>2</m:mn></m:msup>
+<m:mn>3</m:mn></m:mfrac></m:math>, <m:math><m:msub><m:mi>R</m:mi><m:mn>0</m:mn>
+<m:mspace width="0.2em"/></m:msub><m:mi>Ω</m:mi></m:math>, and <m:math><m:mrow>
+<m:msup><m:mi>N</m:mi></m:msup></m:mrow></m:math>.</para>
 <section id="s2"><title/><para id="p2">Untitled.</para>
 <section id="s3"><title>Inside</title><para id="p4">Within.</para></section>
 </section>
@@ -382,6 +389,29 @@ def case_trade(work):
          "</mi><mo>+</mo><mn>1</mn></mrow><mo>)</mo></mrow><mo>\u00d7"
          "</mo><mi>x</mi></mrow>" in read(out, "a-some-math.html")
          and [r["Check"] for r in report].count("content-mathml") == 1),
+        ("a script of the wrong number of parts, which texmath rejects, is "
+         "a base and its script, what's before them set before them and a "
+         "space after them after, in a row where it stood for an argument; "
+         "one of one part is its base alone; each is reported",
+         lambda: all(part in re.sub(r">\s+<", "><", read(out, "a-some-math.html"))
+                     for part in (
+             '<mn>0,006</mn><mi mathvariant="normal">°</mi><msup><mi '
+             'mathvariant="normal">C</mi><mrow><mo>−</mo><mn>1</mn></mrow>'
+             '</msup></math>',
+             '<mfrac><mrow><mn>2,00</mn><msup><mi>t</mi><mn>2</mn></msup>'
+             '</mrow><mn>3</mn></mfrac>',
+             '<msub><mi>R</mi><mn>0</mn></msub><mspace width="0.2em"/>'
+             '<mi>Ω</mi>',
+             '<mrow><mi>N</mi></mrow></math>'))
+         and [r["Check"] for r in report].count("script-repaired") == 4),
+        ("and Pandoc reads each as a formula, where it kept their text",
+         lambda: re.search(r"parts: \\\(0,006\S*C\^\{- ?1\}\\\), \\\(\\frac\{"
+                           r"2,00t\^\{2\}\}\{3\}\\\), \\\(R_\{0\}\S* \\Omega\\\), "
+                           r"and \\\(N\\\)\.", " ".join(subprocess.run(
+                               ["pandoc", "-f", "html", "-t", "latex",
+                                os.path.join(out, "a-some-math.html")],
+                               capture_output=True, text=True).stdout.split()))
+         if shutil.which("pandoc") else True),
         ("a formula's forced line breaks make its lines the rows of a "
          "table of one column, centered in an equation and set at the left "
          "in a paragraph, a break at the end no row",

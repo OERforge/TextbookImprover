@@ -361,6 +361,52 @@ def lines_as_rows(math, center=False):
     return len(holders)
 
 
+# A script of the wrong number of parts. An msup or msub is a base and
+# its script, and texmath rejects one of any other number of children
+# (Readers/MathML.hs, checkArgs2), so Pandoc keeps the whole formula as
+# its text, in a span of class math. Fizyka dla szkół wyższych has 20
+# such superscripts, the only scripts of the wrong number in OpenStax's
+# 49 public repositories: 12 of three parts, a degree sign before C⁻¹
+# (10), a coefficient before t² ("2,00", t, 2), and 10⁷ with a space
+# after it; and 8 of one, a letter alone (N, G, a prime), whose script,
+# if it had one, the source lost (its unit of angular momentum is
+# kg⋅m/s, the English edition's kg·m²/s). A script sits on the symbol
+# just before it, so of three parts or more, the last is the script and
+# the one before it the base; what's before those is set before them,
+# and a space at the end after them, in an mrow where the script stood
+# in place of an argument (a fraction's numerator). One part is its base
+# alone.
+SCRIPTS = {"msup", "msub"}
+
+
+def repair_scripts(math):
+    """The formula's msup and msub elements of other than two children
+    made a base and its script, in place. Returns each one's name and how
+    many children it had."""
+    repaired = []
+    for el in [el for el in math.iter(f"{{{MATHML}}}*")
+               if etree.QName(el).localname in SCRIPTS]:
+        parts = [child for child in el if isinstance(child.tag, str)]
+        if len(parts) in (0, 2):
+            continue
+        repaired.append((etree.QName(el).localname, len(parts)))
+        if len(parts) == 1:
+            el.getparent().replace(el, parts[0])
+            continue
+        after = []
+        while len(parts) > 2 and etree.QName(parts[-1]).localname == "mspace":
+            after.insert(0, parts.pop())
+        if etree.QName(el.getparent()).localname not in ROW_LIKE:
+            row = etree.Element(f"{{{MATHML}}}mrow")
+            el.addprevious(row)
+            row.append(el)
+        for part in parts[:-2]:
+            el.addprevious(part)
+        for part in reversed(after):
+            el.addnext(part)
+    return repaired
+
+
 def to_presentation(math):
     """The formula's content MathML made presentation MathML, in place,
     where it's one of the simple forms. Returns what couldn't be made

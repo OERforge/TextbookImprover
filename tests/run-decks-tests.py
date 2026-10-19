@@ -1173,9 +1173,15 @@ def case_downsample(work):
 
     def pdf_sizes():
         import pypdf
+
+        def resolved(entry):
+            # A page's resources can be an indirect object, which pypdf 5
+            # reads as what it names and pypdf 4, Ubuntu 24.04's, doesn't.
+            return entry.get_object() if hasattr(entry, "get_object") else entry
         found = []
         for page in pypdf.PdfReader(os.path.join(work, "print", "one.pdf")).pages:
-            for image in (page.get("/Resources", {}).get("/XObject") or {}).values():
+            resources = resolved(page.get("/Resources")) or {}
+            for image in (resolved(resources.get("/XObject")) or {}).values():
                 image = image.get_object()
                 if image.get("/Subtype") == "/Image":
                     found.append((int(image["/Width"]), int(image["/Height"])))

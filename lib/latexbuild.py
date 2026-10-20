@@ -614,7 +614,17 @@ PDF_MACROS = r"""\ExplSyntaxOn
 \AddToHook { package / hyperref / after }
   { \pdfstringdefDisableCommands { \cs_set:Npn \oerlang #1#2 {#2} } }
 % A box (a div of class box), set off by a rule above it and one below,
-% each an artifact, kept with the box's first and last lines.
+% each an artifact, kept with the box's first and last lines. Above, LaTeX
+% is left as a heading leaves it (\@afterheading), so a heading that opens
+% the box, as a box's legend does, isn't preceded by the place to break a
+% page every heading has: the rule had stayed at a page's foot, its box on
+% the next page. A paragraph that opens the box is indented, where the
+% book indents them, as it was before. Below, that's ended, if nothing in
+% the box began a paragraph, as a figure alone doesn't: the heading after
+% it had lost its space above. Neither touches \everypar while a list's
+% item, a quotation's, or a definition's label waits for the item's first
+% paragraph, which an untagged build sets it beside from \everypar: a box
+% that opened one had stopped LaTeX ("perhaps a missing \item").
 \NewDocumentCommand \OERBoxRule { m }
   {
     \par
@@ -625,8 +635,16 @@ PDF_MACROS = r"""\ExplSyntaxOn
     \hrule height 0.4pt
     \cs_if_exist:NT \tag_mc_end: { \tag_mc_end: }
     \str_if_eq:nnTF {#1} { above }
-      { \nobreak \skip_vertical:N \medskipamount }
-      { \skip_vertical:N \bigskipamount }
+      {
+        \nobreak \skip_vertical:N \medskipamount
+        \legacy_if:nF { @inlabel }
+          { \use:c { @afterindenttrue } \use:c { @afterheading } }
+      }
+      {
+        \skip_vertical:N \bigskipamount
+        \use:c { @nobreakfalse } \clubpenalty = \use:c { @clubpenalty }
+        \legacy_if:nF { @inlabel } { \everypar { } }
+      }
   }
 % A line too wide in the contents, or in a list of figures or tables, is
 % reported by TeX at a line of the list's own file (book.toc), which the

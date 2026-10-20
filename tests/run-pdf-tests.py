@@ -358,6 +358,9 @@ address, <https://example.org/fill____in>, and a picture's description:
 
 # An untagged book, built to no PDF/UA standard, with figures and no
 # table, so no caption package: its figures are set by LaTeX's classes.
+# And boxes that open a list's item, a quotation, and a definition, whose
+# label LaTeX sets untagged from \everypar, which a box's rule had taken
+# over.
 UNTAGGED_PAGE = r"""# Figures
 
 Three figures whose captions carry their own labels, the second too
@@ -382,6 +385,30 @@ noise](assets/wide.png){width=100px}.
 A formula too wide for its line, which LaTeX can't break:
 
 $$y_{0}+y_{1}+y_{2}+y_{3}+y_{4}+y_{5}+y_{6}+y_{7}+y_{8}+y_{9}+y_{10}+y_{11}+y_{12}+y_{13}+y_{14}+y_{15}+y_{16}+y_{17}+y_{18}+y_{19}+y_{20}+y_{21}+y_{22}+y_{23}+y_{24}+y_{25}+y_{26}+y_{27}+y_{28}+y_{29}$$
+
+Boxes that open a list's items, a quotation, and a definition, the
+second item's holding a figure alone:
+
+1.  ::: box
+    Boxed words at the first item's start.
+    :::
+
+    More of the first item.
+
+2.  ::: box
+    ![A black square alone in a box](assets/red.png){height=0.5in}
+    :::
+
+    The second item's words after its box.
+
+> ::: box
+> Boxed words at a quotation's start.
+> :::
+
+A term
+:   ::: box
+    Boxed words at a definition's start.
+    :::
 
 [^u1]: The first note, in the text.
 [^u2]: The second note, in a labeled caption.
@@ -866,6 +893,20 @@ def build_footer(work):
 SIZED_LAYOUT = "fontsize: 13.5pt\nragged-right: false\nclassoption: [oneside]\n"
 THOUSANDTH = "```{=latex}\n\\setcounter{page}{1000}\n```\n\n"
 SIZED_SECTION = "\n## Its section\n\nThe section's words.\n"
+# A box that opens with a heading, as a box's legend does, too tall for
+# what's left of its page, 60 points, room for its rule and its heading:
+# on a one-sided page, which can end anywhere, a heading's place to break
+# a page (a penalty the class gives it) had left the rule above the box at
+# the page's foot. A figure alone after the legend, which begins no
+# paragraph, and a heading after the box, which had lost its space above,
+# where one after a box of a paragraph alone keeps it.
+SIZED_BOX = ("".join("\n" + FOOTER_WORDS * 4 + "\n" for _ in range(2))
+             + "\n```{=latex}\n\\par\\vspace{\\dimexpr\\pagegoal-\\pagetotal-60pt\\relax}\n```\n"
+             "\n::: {#legend .box}\n## The box's legend\n\n"
+             "![A tall black square in a box](cc.png){height=4in}\n:::\n"
+             "\n## After the figure's box\n\nThe words after it.\n"
+             "\n::: box\nA paragraph alone in a box.\n:::\n"
+             "\n## After the paragraph's box\n\nThe words after that.\n")
 # A list after a paragraph, at that size, its items spaced and indented as
 # at the class's own: a loose list, its items paragraphs, which parskip
 # sets as far apart as the paragraphs around them.
@@ -878,13 +919,15 @@ def build_sized(work):
     metadata file changes it: (the PDF's path, what the run said)."""
     os.makedirs(work)
     for name, text in (("one.md", FOOTER_ONE),
-                       ("two.md", THOUSANDTH + FOOTER_TWO + SIZED_LIST + SIZED_SECTION),
+                       ("two.md", THOUSANDTH + FOOTER_TWO + SIZED_LIST + SIZED_SECTION
+                        + SIZED_BOX),
                        ("sized.yaml", SIZED_LAYOUT)):
         with open(os.path.join(work, name), "w", encoding="utf-8") as fh:
             fh.write(text)
     with open(os.path.join(work, "project.yaml"), "w", encoding="utf-8") as fh:
         fh.write("project:\n  title: Sized\n  identifier: org.example.sized\n"
                  "  language: en-US\n  contents:\n    - one\n    - two\n")
+    png(os.path.join(work, "cc.png"), (0, 0, 0))
     with open(os.path.join(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
         fh.write("targets:\n  pdf:\n    format: pdf\n    pdf:\n      metadata: sized.yaml\n")
     converted = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick"],
@@ -1352,6 +1395,39 @@ def page_holding(path, words):
     return None
 
 
+def artifact_rules(path):
+    """{page index: [the height of each straight line the page strokes as
+    an artifact]}, in points from the page's foot, as the current matrix
+    places it."""
+    pikepdf = pdfparagraphs.pikepdf
+    found = {}
+    if not os.path.exists(path):
+        return found
+    with pikepdf.open(path) as pdf:
+        for n, page in enumerate(pdf.pages):
+            ctm, saved, marked, heights = [1, 0, 0, 1, 0, 0], [], [], []
+            for operands, op in pikepdf.parse_content_stream(page):
+                op = str(op)
+                if op == "q":
+                    saved.append(ctm)
+                elif op == "Q" and saved:
+                    ctm = saved.pop()
+                elif op == "cm" and len(operands) == 6:
+                    ctm = pdftext._times([float(x) for x in operands], ctm)
+                elif op in ("BMC", "BDC"):
+                    marked.append(str(operands[0]))
+                elif op == "EMC" and marked:
+                    marked.pop()
+                elif op in ("m", "l") and len(operands) == 2:
+                    x, y = (float(v) for v in operands)
+                    heights.append(ctm[1] * x + ctm[3] * y + ctm[5])
+                elif op == "S":
+                    if len(heights) == 2 and "/Artifact" in marked:
+                        found.setdefault(n, []).append(round(heights[0], 2))
+                    heights = []
+    return found
+
+
 def artifact_strokes(path, words):
     """The lengths of the straight lines, in points, that the first page
     holding words strokes as artifacts."""
@@ -1713,6 +1789,8 @@ def sized_checks(sized_path, sized_said):
     opening = page_holding(sized_path, "The first chapter opens")
     body = text_lines(lines, opening + 1) if opening is not None else []
     listed = page_holding(sized_path, "The paragraph before a list")
+    boxed = page_holding(sized_path, "A tall black square in a box")
+    rules = artifact_rules(sized_path) if reader else {}
 
     def baseline(page, pattern):
         """The baseline of the page's first line whose text, spaces aside,
@@ -1734,6 +1812,13 @@ def sized_checks(sized_path, sized_said):
         shown = sorted(g[2] for g in pdftext.glyph_boxes(sized_path)
                        if g[0] == listed and g[1] == at and g[4].strip())
         return shown[1] - 72 if len(shown) > 1 else None
+
+    def rule_over(pattern):
+        """How far the nearest rule above a line of the box's page is above
+        its baseline, the line the pattern finds."""
+        under = baseline(boxed, pattern)
+        above = [y - under for y in rules.get(boxed, []) if under is not None and y > under]
+        return min(above) if above else None
     return [
         ("a metadata file changes the default page a field at a time: 13.5pt type, a "
          "size the book class hasn't, on the default's Letter paper an inch in from its "
@@ -1769,6 +1854,15 @@ def sized_checks(sized_path, sized_said):
         ("a page number of four digits fits its line of the contents",
          lambda: re.search(r"Its section\W*100\d", contents)
          and "in the contents" not in sized_said),
+        ("a box that opens with a heading takes the rule above it to the next page with it",
+         lambda: rule_over(r"Thebox.slegend") is not None and rule_over(r"Thebox.slegend") < 60),
+        # A figure alone begins no paragraph, which had left the heading
+        # after its box without its space above, as one at a box's top is.
+        ("a heading after a box is as far below it whatever the box ends with, a figure "
+         "or a paragraph",
+         lambda: rule_over("Afterthefigure") is not None
+         and rule_over("Aftertheparagraph") is not None
+         and abs(rule_over("Afterthefigure") - rule_over("Aftertheparagraph")) < 0.5),
     ]
 
 
@@ -2073,6 +2167,16 @@ def checks(work, jobs=1):
          and not re.search(r":\s*(Figure\s*7\.[34]|Exhibit)", untagged_text)
          and re.search(r"Figure\s*2\s*:\s*A red square with no label", untagged_text)
          and "/StructTreeRoot" not in pypdf.PdfReader(untagged_path).trailer["/Root"]),
+        # A box's rule above it leaves LaTeX as a heading does, which took
+        # over the \everypar that sets an item's label untagged, and the
+        # rule below ends it: a box that opened an item had stopped LaTeX
+        # ("perhaps a missing \item").
+        ("untagged, a box that opens a list's item, a quotation, or a definition is set, "
+         "the item's number beside its first paragraph",
+         lambda: re.search(r"1\.\s*Boxed\s+words\s+at\s+the\s+first\s+item", untagged_text)
+         and re.search(r"2\.\s*The\s+second\s+item", untagged_text)
+         and says(untagged_text, "Boxed words at a quotation")
+         and says(untagged_text, "Boxed words at a definition")),
         # Pandoc reads the PDF's images through its resource path, where
         # the run puts its scaled copies first.
         ("images.downsample: the PDF carries an image scaled down to twice the width it's "

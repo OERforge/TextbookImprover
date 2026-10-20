@@ -246,7 +246,7 @@ Remove the paragraph structure elements LaTeX's tagging code leaves empty: aroun
 
 **`pdf.toc_depth`**—`int`; default `2`
 
-How many levels the printed table of contents shows, counted as the EPUB's are: a group at the top of project.contents is level 1. The bookmarks a PDF viewer shows follow the same depth. The metadata file's toc-depth, when it sets one, wins.
+How many levels the printed table of contents shows, counted as the EPUB's are: a group at the top of project.contents is level 1. The bookmarks a PDF viewer shows follow the same depth. The metadata file's toc-depth, when it sets one, wins, and is LaTeX's own count, in which a chapter is 0 and a section 1.
 
 ## captions
 

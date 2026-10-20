@@ -82,6 +82,11 @@ DIVISIONS = {"front": "\\frontmatter", "main": "\\mainmatter",
 # roles write only \appendix.
 FRONTMATTER_CLASSES = ("memoir", "book", "scrbook", "extbook", "tufte-book",
                        "ctexbook", "elegantbook")
+# The classes Pandoc's LaTeX writer knows to have chapters (chaptersClasses in
+# Writers/LaTeX.hs, 3.12.1), where a top-level heading is a \chapter.
+CHAPTER_CLASSES = ("memoir", "book", "report", "scrreprt", "scrreport", "scrbook",
+                   "extreport", "extbook", "tufte-book", "ctexrep", "ctexbook",
+                   "elegantbook")
 # Pandoc's template brackets the title and contents with \frontmatter and
 # \mainmatter and puts \backmatter after the body, so a front page in
 # the body would begin the front matter a second time and number its
@@ -428,7 +433,6 @@ def book_metadata(project, resolved, base, numbered):
                                "c": [meta_string(s) for s in standards]}
     meta["numbersections"] = meta_bool(numbered)
     meta["toc"] = meta_bool(True)
-    meta["toc-depth"] = meta_string(int(resolved["pdf.toc_depth"]))
     # A LaTeX book's own layout, as its preamble gives it (convert.py
     # passes it on): its type size, paper, margins, line spacing, and
     # paragraph indents, where Pandoc's defaults would have 10pt type in
@@ -439,6 +443,19 @@ def book_metadata(project, resolved, base, numbered):
     setting = str(resolved["pdf.metadata"] or "").strip()
     if setting:
         meta.update(metadata_file(base, setting))
+    if "toc-depth" not in meta:
+        # pdf.toc_depth counts levels as the EPUB's contents do, an entry at
+        # the top of project.contents being level 1, and the template hands
+        # toc-depth to LaTeX's tocdepth, which counts a chapter as 0. So a
+        # class with chapters takes one less, as Pandoc's writer gives its
+        # own --toc-depth (Writers/LaTeX.hs), which a field set here skips:
+        # at 2 a book's contents and bookmarks went three levels deep, a
+        # page's subsections too (1,030 entries in Sociology's, 24 pages,
+        # where its EPUB's contents have the 295 of two levels).
+        depth = int(resolved["pdf.toc_depth"])
+        if document_class(meta) in CHAPTER_CLASSES:
+            depth -= 1
+        meta["toc-depth"] = meta_string(depth)
     # Ours come after the author's, so the author's packages are loaded
     # first; a list either way.
     includes = meta.get("header-includes")

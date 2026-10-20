@@ -1395,6 +1395,8 @@ def checks(work, jobs=1):
     verapdf_ran = shutil.which("verapdf") or os.environ.get("VERAPDF")
     body = source.split("\\begin{document}", 1)[-1]
     text = "".join(page.extract_text() or "" for page in reader.pages)
+    contents_page = next((t for t in (page.extract_text() or "" for page in reader.pages)
+                          if says(t, "Contents") and says(t, "One")), "")
 
     def division(command):
         return len(re.findall(re.escape(command) + r"(?![a-zA-Z])", source))
@@ -1941,6 +1943,13 @@ def checks(work, jobs=1):
         ("the page the metadata file made has no heading of its own",
          lambda: "The Test Book" not in outline_titles(reader)
          and {"Preface", "Acknowledgements"} <= set(outline_titles(reader))),
+        # pdf.toc_depth counts as the EPUB's contents do, LaTeX's tocdepth
+        # a chapter as 0: at 2, a page's subsections had come in too.
+        ("the contents and the bookmarks go as deep as pdf.toc_depth says, "
+         "a page and its sections and not their subsections",
+         lambda: {"One", "First", "After the run-in headings"} <= set(outline_titles(reader))
+         and "Deep" not in outline_titles(reader)
+         and says(contents_page, "First") and not says(contents_page, "Deep")),
         # A roman i on the title page and again on the preface was what
         # the template's \mainmatter before a front page produced.
         ("no page label is used twice",

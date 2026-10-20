@@ -478,15 +478,14 @@ def case_trade(work):
         ("an OpenStax book's pages carry the attribution OpenStax asks for, in its "
          "words, not a link",
          lambda: conversion["defaults"]["footer"] == "Access for free at openstax.org."),
-        ("its PDF has OpenStax's paper and margins, with 12pt type on lines 1.5 times "
-         "its size apart, set ragged right, the footer in the bottom margin",
+        ("its PDF has the PDF target's default page, OpenStax's paper and margins with "
+         "12pt type, copied into the book's folder to be changed there, every setting "
+         "the default's, under a comment saying where it came from",
          lambda: conversion["defaults"]["pdf"] == {"metadata": "pdf-layout.yaml"}
-         and {k: layout.get(k) for k in ("fontsize", "linestretch", "papersize", "geometry")}
-         == {"fontsize": "12pt", "linestretch": 1.25, "papersize": "letter",
-             "geometry": ["left=1in", "right=1in", "top=0.8in", "bottom=0.8in",
-                          "footskip=0.3in"]}
-         and "\\AtBeginDocument{\\raggedright}" in (layout.get("header-includes")
-                                                    or [""])[0]),
+         and layout == yaml.safe_load(read(BIN, "pdf-layout.yaml"))
+         and layout["fontsize"] == "12pt" and layout["ragged-right"] is True
+         and read(out, "pdf-layout.yaml").startswith("# Written by unpack-cnx.py from ")
+         and "# copied here to be changed for this book" in read(out, "pdf-layout.yaml")),
         ("its notes are numbered through each chapter, as OpenStax numbers "
          "them, and its captions' words are TextbookImprover's own",
          lambda: "  notes:\n    numbering: group\n" in read(out, "conversion.yaml")
@@ -838,7 +837,20 @@ effect="italics">myśli</emphasis></para></meaning></definition>
     out = os.path.join(work, "psychologia")
     result = unpack(repo, out)
     from cnx.project import openstax_pdf_layout
+    import cnx.project
+    import yaml
     section = read(out, "1-1-czym-jest-psychologia.html")
+    # The default as someone might edit it, its opening comment gone and
+    # its paper unset.
+    edited = os.path.join(work, "edited", "pdf-layout.yaml")
+    write(edited, "fontsize: 11pt\n\nlinestretch: 1\n")
+    saved = cnx.project.DEFAULT_PDF_LAYOUT
+    try:
+        cnx.project.DEFAULT_PDF_LAYOUT = edited
+        copies = [yaml.safe_load(openstax_pdf_layout("a test", style))
+                  for style in ("sociology", "pl-nursing")]
+    finally:
+        cnx.project.DEFAULT_PDF_LAYOUT = saved
 
     def index(name):
         return read(out, f"{name}.html")
@@ -855,6 +867,10 @@ effect="italics">myśli</emphasis></para></meaning></definition>
          lambda: "papersize: letter\n" in read(out, "pdf-layout.yaml")
          and all("papersize: a4\n" in openstax_pdf_layout("a test", style)
                  for style in ("pl-nursing", "pl-u-physics"))),
+        ("a default someone has edited, its opening comment gone and its paper unset, "
+         "is copied whole, and put on A4 for those books",
+         lambda: copies == [{"fontsize": "11pt", "linestretch": 1},
+                            {"fontsize": "11pt", "linestretch": 1, "papersize": "a4"}]),
         ("a link names its target in the case its sentence wants, the "
          "nominative where it names none",
          lambda: 'Na <a href="#f1">Ilustracji 1.1</a> widać mózg, a '
@@ -2216,7 +2232,7 @@ def case_convert(work):
          and "\\usepackage[left=1in,right=1in,top=0.8in,bottom=0.8in,footskip=0.3in]"
              "{geometry}" in latex
          and "\\setstretch{1.25}" in latex
-         and "\\AtBeginDocument{\\raggedright}" in latex
+         and "\\AtBeginDocument{\\@rightskip\\@flushglue\\rightskip\\@rightskip}" in latex
          and "\\newcommand\\OERFooterText{Access for free at openstax.org.}" in latex),
         ("its footnote is a note again, nothing left of the markup",
          lambda: "footnote" in html and "doc-endnotes" in html

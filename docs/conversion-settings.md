@@ -226,7 +226,7 @@ The standards the PDF declares, as Pandoc's pdfstandard variable takes them: ua-
 
 **`pdf.metadata`**—`path`; default `""` (empty)
 
-A YAML file, or a Markdown file that opens with a YAML block, whose metadata goes to Pandoc's LaTeX writer: documentclass, classoption, header-includes, include-before, fonts, geometry, and the rest of Pandoc's LaTeX variables. A book written for a Pandoc PDF build names the file that held its YAML (a _preamble.md, say), and its settings carry over. What it sets wins over what project.yaml says; what it leaves out comes from project.yaml and from these settings. A path that doesn't exist stops the build.
+A YAML file, or a Markdown file that opens with a YAML block, whose metadata goes to Pandoc's LaTeX writer: documentclass, classoption, header-includes, include-before, fonts, geometry, and the rest of Pandoc's LaTeX variables, and ragged-right, TextbookImprover's own. A book written for a Pandoc PDF build names the file that held its YAML (a _preamble.md, say), and its settings carry over. What it sets wins, a field at a time, over the PDF target's default page (bin/pdf-layout.yaml, or a LaTeX book's own layout) and over what project.yaml says; what it leaves out comes from those and from these settings. A path that doesn't exist stops the build.
 
 **`pdf.figures`**—one of `in_place`, `section`, `float`; default `in_place`
 

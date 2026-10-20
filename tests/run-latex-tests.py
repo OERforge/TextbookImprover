@@ -1293,7 +1293,10 @@ def case_book_pdf(work):
     books = {}
     for name, extra, targets in (
             ("book", "", "  pdf:\n    format: pdf\n"),
-            ("pages", "", "  pdf:\n    format: pdf\n    pdf:\n      from: pages\n"),
+            # Its preamble gives no layout: parskip's paragraphs, not
+            # indented ones, and no size, paper, or margins.
+            ("pages", "\\usepackage{parskip}\n",
+             "  pdf:\n    format: pdf\n    pdf:\n      from: pages\n"),
             # Builds with pdfLaTeX, as the conversion reads it, and stops
             # with LuaLaTeX, as the PDF target builds it.
             ("broken", "\\ifdefined\\directlua\\TIQundefined\\fi\n", "  pdf:\n    format: pdf\n")):
@@ -1386,6 +1389,28 @@ def case_book_pdf(work):
             return skip("no pdftotext to read the PDF")
         return books["pages"][1] == 0 and "built by LaTeX from the book's own files" \
             not in books["pages"][2] and "sets" in found and "Index" not in found
+
+    def class_page_kept():
+        """The book's preamble gives no layout, so its PDF from the pages
+        has the book class's own page, not the PDF target's default: its
+        words in 10pt type (9.96 of the PDF's points), not 12pt, as much
+        as 3% either way where microtype's font expansion justifies a
+        line. convert.py passes on the empty layout, as it does any."""
+        try:
+            import pypdf
+        except ImportError:
+            return skip("no pypdf to read the PDF")
+        import math
+        path = os.path.join(books["pages"][0], "pdf", "book.pdf")
+        if not os.path.exists(path):
+            return False
+        found = []
+        for page in pypdf.PdfReader(path).pages:
+            def visit(text, cm, tm, font, size):
+                if "Some text about" in text:
+                    found.append(size * math.hypot(tm[0], tm[1]) * math.hypot(cm[0], cm[1]))
+            page.extract_text(visitor_text=visit)
+        return bool(found) and all(abs(size / 9.96 - 1) < 0.03 for size in found)
     return [
         ("a LaTeX book's PDF is built from its own LaTeX: its index is there", built_from_book),
         ("its figure has the sidecar's alt text, its formulas MathML, its figure in place, "
@@ -1395,6 +1420,8 @@ def case_book_pdf(work):
         ("the output check reports LaTeX's placeholder alt text for a drawing with none",
          placeholder_reported),
         ("pdf.from: pages builds it from the pages, which have no index", built_from_pages),
+        ("and, its preamble giving no layout, on the book class's own page, not the PDF "
+         "target's default: 10pt type", class_page_kept),
         ("a book that won't build with tagging stops the run, with LaTeX's error and the way out",
          lambda: books["broken"][1] != 0 and "TIQundefined" in books["broken"][2]
          and "wasn't built" in books["broken"][2] and "pdf.from: pages" in books["broken"][2]),

@@ -22,8 +22,10 @@ makes on its own, the division commands written once each from the
 roles, the page the metadata file made given no heading, every
 formula's MathML both as structure and as an attached file, a code
 block in a footnote set in its note, a passage in another language
-tagged with it, and a heading inside a list, a quotation, a table's
-cell, a figure, or a footnote tagged where it stands. The book is small
+tagged with it, a heading inside a list, a quotation, a table's cell, a
+figure, or a footnote tagged where it stands, and the default page
+(bin/pdf-layout.yaml), which a metadata file changes a field at a time,
+its rag reaching footnotes and captions. The book is small
 because a LaTeX run is slow; it holds one of each thing, and two of the
 things that come in kinds.
 
@@ -76,15 +78,19 @@ import pdfparagraphs  # noqa: E402
 sys.path.insert(0, HERE)
 import parallel  # noqa: E402
 import pdftext  # noqa: E402
-try:  # the CNX unpacker's, which needs lxml
-    from cnx.project import openstax_pdf_layout  # noqa: E402
-except ImportError:
-    openstax_pdf_layout = None
+
+# The book class's own page, where the PDF target's default would have
+# its own (bin/pdf-layout.yaml): 10pt type, justified, in the class's
+# margins, which the checks of the book and the notes book measure lines
+# 345 points long in. The footer book and the default book, the book
+# again, have the default page, and the sized book the default as a
+# metadata file changes it.
+CLASS_PAGE = "fontsize: 10pt\ngeometry: []\nlinestretch: 1\nragged-right: false\n"
 
 FRONT = r"""---
 title: The Test Book
 subtitle: A book for checking the PDF target
----
+""" + CLASS_PAGE + r"""---
 
 \frontmatter
 
@@ -779,7 +785,8 @@ def build_notes(work):
     os.makedirs(os.path.join(work, "assets"))
     png(os.path.join(work, "assets", "red.png"), (200, 0, 0))
     for name, text in (("captions.md", NOTES_CAPTIONS), ("cells.md", NOTES_CELLS),
-                       ("headings.md", NOTES_HEADINGS), ("meta.md", "---\nlof: true\n---\n")):
+                       ("headings.md", NOTES_HEADINGS),
+                       ("meta.md", "---\nlof: true\n" + CLASS_PAGE + "---\n")):
         with open(os.path.join(work, name), "w", encoding="utf-8") as fh:
             fh.write(text)
     with open(os.path.join(work, "project.yaml"), "w", encoding="utf-8") as fh:
@@ -802,47 +809,88 @@ def build_notes(work):
             converted.stdout + converted.stderr, source)
 
 
-# Words long enough that a justified line, or ragged2e's, would break one.
+# Words long enough that a justified line, or ragged2e's, would break one,
+# and a footnote's and a caption's of their own, each ending in a word of
+# its own, to find their lines by.
 FOOTER_WORDS = ("Each sentence of this chapter runs on about internationalization, "
                 "characteristically interdisciplinary counterrevolutionaries, and "
                 "institutionalization, so that its lines are long. ")
+FOOTER_NOTE = ("Each sentence of this note runs on about decentralization, "
+               "compartmentalization, and electroencephalography, so that its "
+               "lines are long. ")
+FOOTER_CAPTION = ("Each sentence of this caption runs on about photosynthesis, "
+                  "chlorofluorocarbons, and thermoregulation, so that its lines "
+                  "are long. ")
 FOOTER_ONE = ("# One\n\nThe first chapter opens with a note.[^1]\n\n"
-              "[^1]: The note.\n\n"
+              "[^1]: The note. " + FOOTER_NOTE * 3 + "Thereafter.\n\n"
               + "".join(FOOTER_WORDS * 4 + "\n\n" for _ in range(14)))
 FOOTER_TWO = "# Two\n\nThe second chapter.\n"
 
 
-# The footer book's page where lib/cnx's isn't to be had: 12pt type on
-# lines 1.25 times as far apart as the class sets them, which the
-# footer's own spacing mustn't take.
-FOOTER_LAYOUT = "fontsize: 12pt\nlinestretch: 1.25\n"
+# Two lines of a paragraph, and of a caption, with a break between them.
+FOOTER_VERSE = "\nA line of a verse,\\\nand its next line, one paragraph.\n"
+FOOTER_BREAK = "\\\nAnd a line of its own."
 
 
 def build_footer(work):
     """A book of two chapters with a footer, a link and a picture in it,
-    laid out as unpack-cnx.py lays out an OpenStax book's PDF
-    (pdf-layout.yaml) where lxml is installed for lib/cnx, and otherwise
-    in FOOTER_LAYOUT: (the PDF's path, whether the layout is the
-    unpacker's)."""
+    on the PDF target's default page (bin/pdf-layout.yaml), which no
+    metadata file changes, a line break and a figure with a long caption
+    in its second chapter: the PDF's path."""
     os.makedirs(work)
-    for name, text in (("one.md", FOOTER_ONE), ("two.md", FOOTER_TWO)):
+    for name, text in (("one.md", FOOTER_ONE),
+                       ("two.md", FOOTER_TWO + FOOTER_VERSE + "\n![" + FOOTER_CAPTION * 3
+                        + "Henceforth." + FOOTER_BREAK + "](cc.png)\n")):
         with open(os.path.join(work, name), "w", encoding="utf-8") as fh:
             fh.write(text)
     with open(os.path.join(work, "project.yaml"), "w", encoding="utf-8") as fh:
         fh.write("project:\n  title: Footed\n  identifier: org.example.footer\n"
                  "  language: en-US\n  contents:\n    - one\n    - two\n")
     png(os.path.join(work, "cc.png"), (0, 0, 0))
-    with open(os.path.join(work, "pdf-layout.yaml"), "w", encoding="utf-8") as fh:
-        fh.write(openstax_pdf_layout("the PDF suite", "sociology")
-                 if openstax_pdf_layout is not None else FOOTER_LAYOUT)
     with open(os.path.join(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
         fh.write('defaults:\n  footer: "Read *this book* free at '
                  '[example.net](https://example.net). ![CC BY](cc.png)"\n'
-                 "targets:\n  pdf:\n    format: pdf\n"
-                 "    pdf:\n      metadata: pdf-layout.yaml\n")
+                 "targets:\n  pdf:\n    format: pdf\n")
     subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick"], cwd=work,
                    capture_output=True, text=True, stdin=subprocess.DEVNULL)
-    return os.path.join(work, "pdf", "org.example.footer.pdf"), openstax_pdf_layout is not None
+    return os.path.join(work, "pdf", "org.example.footer.pdf")
+
+
+# The default page changed a field at a time: a type size the book class
+# hasn't, which KOMA-Script's scrextend sets, and justified text, the
+# default's paper, margins, and line spacing kept; one-sided, so a page's
+# paragraphs aren't spread to fill it. The second chapter is on page
+# 1,000 or after, for a page number of four digits in the contents: its
+# section's, since the class sets a chapter's in a box that gives way,
+# which LaTeX doesn't report as too wide.
+SIZED_LAYOUT = "fontsize: 13.5pt\nragged-right: false\nclassoption: [oneside]\n"
+THOUSANDTH = "```{=latex}\n\\setcounter{page}{1000}\n```\n\n"
+SIZED_SECTION = "\n## Its section\n\nThe section's words.\n"
+# A list after a paragraph, at that size, its items spaced and indented as
+# at the class's own: a loose list, its items paragraphs, which parskip
+# sets as far apart as the paragraphs around them.
+SIZED_LIST = ("\nThe paragraph before a list.\n\n- The list's first item.\n\n"
+              "- The list's second item.\n\nThe paragraph after the list.\n")
+
+
+def build_sized(work):
+    """FOOTER_ONE and FOOTER_TWO on the default page as SIZED_LAYOUT's
+    metadata file changes it: (the PDF's path, what the run said)."""
+    os.makedirs(work)
+    for name, text in (("one.md", FOOTER_ONE),
+                       ("two.md", THOUSANDTH + FOOTER_TWO + SIZED_LIST + SIZED_SECTION),
+                       ("sized.yaml", SIZED_LAYOUT)):
+        with open(os.path.join(work, name), "w", encoding="utf-8") as fh:
+            fh.write(text)
+    with open(os.path.join(work, "project.yaml"), "w", encoding="utf-8") as fh:
+        fh.write("project:\n  title: Sized\n  identifier: org.example.sized\n"
+                 "  language: en-US\n  contents:\n    - one\n    - two\n")
+    with open(os.path.join(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
+        fh.write("targets:\n  pdf:\n    format: pdf\n    pdf:\n      metadata: sized.yaml\n")
+    converted = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick"],
+                               cwd=work, capture_output=True, text=True,
+                               stdin=subprocess.DEVNULL)
+    return os.path.join(work, "pdf", "org.example.sized.pdf"), converted.stdout + converted.stderr
 
 
 # A footer from a file of its own, with a heading, on pages in
@@ -850,9 +898,13 @@ def build_footer(work):
 # plain, as a chapter's first page does, selects fancy as well, and each
 # wraps the foot (lib/pagefooter.py). fancyhdr is twoside and the book
 # isn't, so its odd foot, which the class sets on every page, gives its
-# even one on an even page.
+# even one on an even page. And a type size and a paper given as class
+# options, in the class's own margins, which the book class had set at
+# the default page's 12pt and Letter, taking its options in the order it
+# declares them; the size one the class hasn't, which it ignores, so it's
+# the book's fontsize, which scrextend sets.
 FANCY_FOOTER = "## License\n\nShared under [the license](license.md).\n"
-FANCY_LAYOUT = ("classoption: [oneside]\n"
+FANCY_LAYOUT = ("classoption: [oneside, 13.5pt, a4paper]\ngeometry: []\n"
                 "header-includes:\n  - |\n    ```{=latex}\n"
                 "    \\usepackage[twoside]{fancyhdr}\n"
                 "    \\pagestyle{fancy}\n    \\fancyhf{}\n    \\fancyfoot[LE,RO]{\\thepage}\n"
@@ -879,16 +931,61 @@ def build_fancy(work):
     return os.path.join(work, "pdf", "org.example.fancy.pdf")
 
 
+
+# A book written for a Pandoc PDF build, its metadata file loading the
+# packages for its own margins and line spacing, as Pandoc's own page
+# left a book to: the default page's margins and line spacing, which load
+# geometry and setspace first, had stopped LaTeX ("Option clash for
+# package geometry"), and undone a spacing the file set.
+PREAMBLE_META = ("---\nheader-includes:\n  - |\n    ```{=latex}\n"
+                 "    \\usepackage[margin=1.5in]{geometry}\n"
+                 "    \\usepackage[doublespacing]{setspace}\n    ```\n---\n")
+
+
+def build_preamble(work):
+    """A chapter of long paragraphs whose metadata file is PREAMBLE_META:
+    the PDF's path."""
+    os.makedirs(work)
+    for name, text in (("one.md", "# One\n\n" + "".join(FOOTER_WORDS * 4 + "\n\n"
+                                                         for _ in range(6))),
+                       ("_preamble.md", PREAMBLE_META)):
+        with open(os.path.join(work, name), "w", encoding="utf-8") as fh:
+            fh.write(text)
+    with open(os.path.join(work, "project.yaml"), "w", encoding="utf-8") as fh:
+        fh.write("project:\n  title: Preamble\n  identifier: org.example.preamble\n"
+                 "  language: en-US\n  contents:\n    - one\n")
+    with open(os.path.join(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
+        fh.write("targets:\n  pdf:\n    format: pdf\n    pdf:\n      metadata: _preamble.md\n")
+    subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick"], cwd=work,
+                   capture_output=True, text=True, stdin=subprocess.DEVNULL)
+    return os.path.join(work, "pdf", "org.example.preamble.pdf")
+
+def build_default(work):
+    """The book (write_book) on the PDF target's default page, which its
+    checks measure on the class's (CLASS_PAGE): every kind of thing it
+    holds, ragged right, in 12pt type on the default's margins. The PDF's
+    path."""
+    write_book(work)
+    with open(os.path.join(work, "front.md"), "w", encoding="utf-8") as fh:
+        fh.write(FRONT.replace(CLASS_PAGE, ""))
+    subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick"], cwd=work,
+                   capture_output=True, text=True, stdin=subprocess.DEVNULL)
+    return os.path.join(work, "pdf", "org.example.pdf.pdf")
+
+
 def glyph_lines(path):
     """{page index: [(baseline, left, right, text)]}, each page's lines,
     its glyphs grouped by their baseline, from the top of the page down
-    (pdftext.glyph_boxes)."""
+    (pdftext.glyph_boxes): a line begins and ends where its first and last
+    glyphs that aren't a space do, a space after its last word left out."""
     rows = {}
     for page, baseline, left, right, char in pdftext.glyph_boxes(path):
         rows.setdefault(page, {}).setdefault(baseline, []).append((left, right, char))
-    return {page: sorted(((baseline, min(g[0] for g in glyphs), max(g[1] for g in glyphs),
+    return {page: sorted(((baseline, min(g[0] for g in shown), max(g[1] for g in shown),
                            "".join(g[2] for g in glyphs))
-                          for baseline, glyphs in lines.items()), reverse=True)
+                          for baseline, glyphs in lines.items()
+                          for shown in [[g for g in glyphs if g[2].strip()] or glyphs]),
+                         reverse=True)
             for page, lines in rows.items()}
 
 
@@ -1314,6 +1411,25 @@ def latex_color(color):
     return " ".join("%.2f" % (int(color[i:i + 2], 16) / 255) for i in (1, 3, 5))
 
 
+# The TeX packages the suite's books load that a tagged build of any book
+# may not, which a smaller TeX can lack, by a file each holds: the default
+# page's geometry and setspace, scrextend for the sized book's 13.5pt, and
+# multirow for the book's table with a cell spanning rows
+# (docs/installation.md).
+SUITE_TEX = [("geometry", "geometry.sty"), ("setspace", "setspace.sty"),
+             ("koma-script", "scrextend.sty"), ("multirow", "multirow.sty")]
+
+
+def tex_missing():
+    """The packages of SUITE_TEX TeX can't find, none where there's no
+    kpsewhich to ask."""
+    if not shutil.which("kpsewhich"):
+        return []
+    return [package for package, name in SUITE_TEX
+            if not subprocess.run(["kpsewhich", name], capture_output=True, text=True,
+                                  stdin=subprocess.DEVNULL).stdout.strip()]
+
+
 def font_installed(name):
     """Whether TeX finds the font file."""
     if not shutil.which("kpsewhich"):
@@ -1451,17 +1567,46 @@ def build(work):
     return pypdf.PdfReader(pdf), source, rows, converted.stderr, placements
 
 
-def footer_checks(footer_path, unpacker_layout):
+def squeezed(words):
+    """Words without their spaces, which a PDF's text gives as it likes."""
+    return re.sub(r"\s+", "", words)
+
+
+def text_lines(lines, page):
+    """The lines of a page of text alone, between the default page's head
+    and foot, more than 20 characters each: [(baseline, left, right,
+    text)], from the top (glyph_lines)."""
+    return [line for line in lines.get(page, []) if 57.6 < line[0] < 734.4
+            and len(squeezed(line[3])) > 20] if page is not None else []
+
+
+def commonest_leading(lines):
+    """The distance between lines that most of them keep."""
+    gaps = [round(a[0] - b[0], 1) for a, b in zip(lines, lines[1:])]
+    return max(set(gaps), key=gaps.count) if gaps else None
+
+
+def ragged(lines, margin=540):
+    """Whether lines are set ragged right: those before the last don't
+    end together, fewer than half of them reaching the margin, as all but
+    a paragraph's last line of justified text do, and none ends in a
+    broken word. The default page's margin is an inch in from the right
+    of a Letter page."""
+    ends = [line[2] for line in lines[:-1]]
+    return len(ends) > 2 and max(ends) - min(ends) > 3 \
+        and sum(1 for end in ends if end > margin - 0.5) < len(ends) / 2 \
+        and not any(line[3].rstrip().endswith("-") for line in lines)
+
+
+def footer_checks(footer_path):
     """The footer book's checks (build_footer): the footer setting at the
-    foot of every page (lib/pagefooter.py), and, where lxml is installed,
-    the layout unpack-cnx.py gives an OpenStax book (pdf-layout.yaml)."""
+    foot of every page (lib/pagefooter.py), on the PDF target's default
+    page (bin/pdf-layout.yaml)."""
     footer_reader = pypdf.PdfReader(footer_path) if os.path.exists(footer_path) else None
     footer_lines = glyph_lines(footer_path) if footer_reader else {}
     footer_texts = pdftext.marked_text(footer_path) if footer_reader else {}
     opening = page_holding(footer_path, "The first chapter opens")
-
-    def squeezed(words):
-        return re.sub(r"\s+", "", words)
+    captioned = page_holding(footer_path, "The second chapter")
 
     def footer_baselines():
         """Each page's footer's baseline, None on a page without one."""
@@ -1481,15 +1626,19 @@ def footer_checks(footer_path, unpacker_layout):
 
     def body_lines():
         """The lines of the page after the first chapter's opening page, a
-        page of its text alone, between its head and its foot."""
-        return [line for line in footer_lines.get(opening + 1, []) if 57.6 < line[0] < 734.4
-                and len(squeezed(line[3])) > 20] if opening is not None else []
+        page of its text alone."""
+        return text_lines(footer_lines, opening + 1) if opening is not None else []
 
-    def leading():
-        """The distance between the page's lines that most of them keep."""
-        lines = body_lines()
-        gaps = [round(a[0] - b[0], 1) for a, b in zip(lines, lines[1:])]
-        return max(set(gaps), key=gaps.count) if gaps else None
+    def run_of(page, first, last):
+        """The lines of a page from the first holding first to the next
+        holding last, spaces aside."""
+        lines = footer_lines.get(page, []) if page is not None else []
+        start = next((i for i, line in enumerate(lines) if first in squeezed(line[3])), None)
+        if start is None:
+            return []
+        end = next((i for i, line in enumerate(lines[start:], start)
+                    if last in squeezed(line[3])), None)
+        return lines[start:end + 1] if end is not None else []
     items = [
         ("a footer is at the foot of every page, the title page's among them, as an "
          "artifact, a link in it its words and a picture its alternative text, with no "
@@ -1500,7 +1649,8 @@ def footer_checks(footer_path, unpacker_layout):
          and not any("freeat" in squeezed(t) for (n, mcid), t in footer_texts.items()
                      if mcid is not None)
          and not [uri for _, uri, _ in links(footer_reader) if "example.net" in uri]
-         and not any(page.images for page in footer_reader.pages)),
+         and not any(page.images for n, page in enumerate(footer_reader.pages)
+                     if n != captioned)),
         ("it's set in the same size and place on every page, the title page's too",
          lambda: footer_baselines() and None not in footer_baselines()
          and max(footer_baselines()) - min(footer_baselines()) < 0.01
@@ -1508,32 +1658,44 @@ def footer_checks(footer_path, unpacker_layout):
         ("a small line's space under the page number, where the foot has one, whatever "
          "the text's line spacing",
          lambda: opening_gap() is not None and 11 < opening_gap() < 13),
+        ("on the PDF target's default page, the footer is in the bottom margin, a "
+         "quarter inch or more from the paper's edge",
+         lambda: footer_baselines() and None not in footer_baselines()
+         and all(18 <= b < 57.6 - 18 for b in footer_baselines())),
+        ("and the page is OpenStax's: Letter paper, the text 6.5 inches wide from an "
+         "inch in, in 12pt type on lines 1.5 times its size apart",
+         lambda: footer_reader is not None
+         and (float(footer_reader.pages[0].mediabox.width),
+              float(footer_reader.pages[0].mediabox.height)) == (612, 792)
+         and len(body_lines()) > 30
+         and {round(line[1]) for line in body_lines()} == {72}
+         and 530 < max(line[2] for line in body_lines()) < 546
+         and 18 <= commonest_leading(body_lines()) <= 18.3
+         and set(sizes_by_page(footer_reader, "sentence")[opening + 1]) == {11.96}),
+        ("its text is set ragged right, its lines not ending together at the margin, "
+         "and no word broken at a line's end",
+         lambda: ragged(body_lines())),
+        ("and so are a footnote and a caption, which LaTeX sets justified again",
+         lambda: ragged(run_of(opening, "Thenote.", "Thereafter."))
+         and ragged(run_of(captioned, "Eachsentenceofthiscaption", "Henceforth."))),
+        # microtype's font expansion, which justifies a line by drawing its
+        # letters up to 2% narrower or wider, had fitted more on a ragged
+        # line: a caption's 11.75 points of 11.96, a footnote's 9.77 of 9.96.
+        ("no ragged line's letters are drawn narrower or wider to fit more on it: the text, "
+         "a footnote, and a caption are in their type's own sizes, 12pt and 10pt",
+         lambda: footer_reader is not None and captioned is not None
+         and set(s for sizes in sizes_by_page(footer_reader, "sentence") for s in sizes)
+         == {11.96, 9.96}
+         and set(sizes_by_page(footer_reader, "regulation")[captioned]) == {11.96}),
+        # LaTeX's \raggedright makes \\ end the paragraph, which its tagging
+        # made two, and a caption's \\, in the box LaTeX sets it in first,
+        # stopped LaTeX.
+        ("a line break leaves its paragraph one, and a caption's is a line of its caption",
+         lambda: any(squeezed(t) == "Alineofaverse,anditsnextline,oneparagraph."
+                     for t in pdftext.element_texts(footer_path, "/text"))
+         and "Henceforth.Andalineofitsown." in squeezed(
+             footer_reader.pages[captioned].extract_text() or "")),
     ]
-    if unpacker_layout:
-        items += [
-            ("in the layout unpack-cnx.py gives an OpenStax book, the footer is in the "
-             "bottom margin, a quarter inch or more from the paper's edge",
-             lambda: footer_baselines() and None not in footer_baselines()
-             and all(18 <= b < 57.6 - 18 for b in footer_baselines())),
-            ("and the page is OpenStax's: Letter paper, the text 6.5 inches wide from an "
-             "inch in, in 12pt type on lines 1.5 times its size apart",
-             lambda: footer_reader is not None
-             and (float(footer_reader.pages[0].mediabox.width),
-                  float(footer_reader.pages[0].mediabox.height)) == (612, 792)
-             and len(body_lines()) > 30
-             and {round(line[1]) for line in body_lines()} == {72}
-             and 530 < max(line[2] for line in body_lines()) < 546
-             and 18 <= leading() <= 18.3
-             and set(sizes_by_page(footer_reader, "sentence")[opening + 1]) == {11.96}),
-            ("its text is set ragged right, few of its lines reaching the margin, and "
-             "no word broken at a line's end",
-             lambda: body_lines()
-             and sum(1 for line in body_lines() if line[2] >= 539) < len(body_lines()) / 4
-             and not any(line[3].rstrip().endswith("-") for line in body_lines())),
-        ]
-    else:
-        print("  skip  lxml isn't installed for lib/cnx, so the layout unpack-cnx.py "
-              "writes isn't checked")
     if shutil.which("verapdf") or os.environ.get("VERAPDF"):
         items.append(("veraPDF finds nothing in the footer book's PDF",
                       lambda: os.path.exists(footer_path) and not pdfcheck.run_verapdf(
@@ -1541,10 +1703,113 @@ def footer_checks(footer_path, unpacker_layout):
     return items
 
 
+def sized_checks(sized_path, sized_said):
+    """The sized book's checks (build_sized): the default page as a
+    metadata file changes it, a field at a time."""
+    reader = pypdf.PdfReader(sized_path) if os.path.exists(sized_path) else None
+    listing = page_holding(sized_path, "Contents")
+    contents = reader.pages[listing].extract_text() if listing is not None else ""
+    lines = glyph_lines(sized_path) if reader else {}
+    opening = page_holding(sized_path, "The first chapter opens")
+    body = text_lines(lines, opening + 1) if opening is not None else []
+    listed = page_holding(sized_path, "The paragraph before a list")
+
+    def baseline(page, pattern):
+        """The baseline of the page's first line whose text, spaces aside,
+        the pattern finds."""
+        return next((line[0] for line in lines.get(page, [])
+                     if re.search(pattern, squeezed(line[3]))), None)
+
+    def list_gaps():
+        """The distances between the baselines of the paragraph before the
+        list, its two items, and the paragraph after it."""
+        marks = [baseline(listed, p) for p in ("paragraphbeforealist", "firstitem",
+                                               "seconditem", "paragraphafterthelist")]
+        return [a - b for a, b in zip(marks, marks[1:])] if None not in marks else []
+
+    def item_indent():
+        """How far in from the margin the list's first item's words begin,
+        its bullet aside."""
+        at = baseline(listed, "firstitem")
+        shown = sorted(g[2] for g in pdftext.glyph_boxes(sized_path)
+                       if g[0] == listed and g[1] == at and g[4].strip())
+        return shown[1] - 72 if len(shown) > 1 else None
+    return [
+        ("a metadata file changes the default page a field at a time: 13.5pt type, a "
+         "size the book class hasn't, on the default's Letter paper an inch in from its "
+         "edge, on lines 1.5 times its size apart",
+         lambda: reader is not None
+         and (float(reader.pages[0].mediabox.width),
+              float(reader.pages[0].mediabox.height)) == (612, 792)
+         and len(body) > 20 and {round(line[1]) for line in body} == {72}
+         # microtype's font expansion draws a justified line's glyphs as
+         # much as 2% larger or smaller.
+         and sizes_by_page(reader, "sentence")[opening + 1]
+         and all(abs(size / 13.45 - 1) < 0.03
+                 for size in sizes_by_page(reader, "sentence")[opening + 1])
+         and 1.45 * 13.45 < commonest_leading(body) < 1.55 * 13.45),
+        ("and ragged-right: false justifies the text, most of its lines reaching the margin",
+         lambda: len(body) > 20
+         and sum(1 for line in body[:-1] if line[2] >= 539) > len(body) / 2),
+        # 20.18 points of line and 8.07 of parskip's half a line at 13.5pt
+        # (16.2 points), where the class's 10pt had left it 6 points.
+        ("its paragraphs half a line apart at that size, as at the class's own",
+         lambda: (lambda gaps: len(gaps) > 2 and all(27.75 < g < 28.75 for g in gaps))(
+             [a[0] - b[0] for a, b in zip(body, body[1:]) if a[0] - b[0] > 22])),
+        # scrextend sets the size, and its own spacing for lists, where
+        # parskip's had none above a list or between its items but the
+        # space between paragraphs; a list's indents, in ems, and the space
+        # above a page's first line, its type's size, were the class's, at
+        # 10pt.
+        ("a list at that size is spaced as its paragraphs are, its items' words 2.5em in, "
+         "and a page's first line is a line of that type below the top margin",
+         lambda: len(list_gaps()) == 3 and all(27.75 < g < 28.75 for g in list_gaps())
+         and item_indent() is not None and abs(item_indent() - 2.5 * 13.45) < 0.2
+         and len(body) > 20 and abs(body[0][0] - (734.4 - 13.45)) < 0.2),
+        ("a page number of four digits fits its line of the contents",
+         lambda: re.search(r"Its section\W*100\d", contents)
+         and "in the contents" not in sized_said),
+    ]
+
+
+def default_checks(default_path):
+    """The default book's checks (build_default): the book on the page a
+    book gets when nothing changes it."""
+    items = [("the book on the PDF target's default page builds, LaTeX stopping on "
+              "nothing in it", lambda: os.path.exists(default_path))]
+    if shutil.which("verapdf") or os.environ.get("VERAPDF"):
+        items.append(("and veraPDF finds only the character no font has, as on the class's "
+                      "page",
+                      lambda: os.path.exists(default_path) and {
+                          f.check for f in pdfcheck.run_verapdf(
+                              outputcheck.find_validator("verapdf"), default_path)}
+                      == {"verapdf:8.4.5.9-1"}))
+    return items
+
+
+
+def preamble_checks(preamble_path):
+    """The preamble book's checks (build_preamble)."""
+    lines = glyph_lines(preamble_path) if os.path.exists(preamble_path) else {}
+    opening = page_holding(preamble_path, "Each sentence of this chapter")
+    body = text_lines(lines, opening)
+    # setspace's double spacing at 12pt is 1.655 of the class's 14.5
+    # points, 23.91 of the PDF's; the default page's is 18.06.
+    return [
+        ("a metadata file that loads geometry and setspace itself, as a book written for "
+         "Pandoc's page may, has its own margins and line spacing, where the default page "
+         "has its own",
+         lambda: len(body) > 10 and {round(line[1]) for line in body} == {108}
+         and 23.5 < commonest_leading(body) < 24.3),
+    ]
+
 def fancy_checks(fancy_path):
     """The fancy book's checks (build_fancy)."""
     reader = pypdf.PdfReader(fancy_path) if os.path.exists(fancy_path) else None
     texts = pdftext.marked_text(fancy_path) if reader else {}
+    opening = page_holding(fancy_path, "The first chapter opens")
+    body = sizes_by_page(reader, "sentence")[opening + 1] \
+        if opening is not None and opening + 1 < len(reader.pages) else []
 
     def footers(n):
         return re.sub(r"\s+", "", texts.get((n, None), "")).count("LicenseSharedunderthelicense.")
@@ -1557,6 +1822,13 @@ def fancy_checks(fancy_path):
         ("a heading in the footer is a paragraph there, not in the PDF's bookmarks",
          lambda: reader is not None and footers(0) == 1
          and outline_titles(reader) == ["One", "Two"]),
+        # 13.5pt is 13.45 of the PDF's points.
+        ("a type size and a paper a metadata file gives as class options stand, where the "
+         "default page has its own: 13.5pt type, a size the book class hasn't, on A4",
+         lambda: reader is not None
+         and (round(float(reader.pages[0].mediabox.width)),
+              round(float(reader.pages[0].mediabox.height))) == (595, 842)
+         and body and set(body) == {13.45}),
     ]
 
 
@@ -1570,20 +1842,29 @@ def checks(work, jobs=1):
             plain = pool.submit(build_untagged, work + "-untagged")
             noted = pool.submit(build_notes, work + "-notes")
             footed = pool.submit(build_footer, work + "-footer")
+            sized = pool.submit(build_sized, work + "-sized")
             fancied = pool.submit(build_fancy, work + "-fancy")
+            defaulted = pool.submit(build_default, work + "-default")
+            prefaced = pool.submit(build_preamble, work + "-preamble")
             reader, source, rows, log, placements = book.result()
             ua1_path, ua1_said, ua1_rows = ua1.result()
             untagged_path, untagged_said = plain.result()
             notes_path, notes_plain, notes_said, notes_source = noted.result()
-            footer_path, unpacker_layout = footed.result()
+            footer_path = footed.result()
+            sized_path, sized_said = sized.result()
             fancy_path = fancied.result()
+            default_path = defaulted.result()
+            preamble_path = prefaced.result()
     else:
         reader, source, rows, log, placements = build(work)
         ua1_path, ua1_said, ua1_rows = build_ua1(work + "-ua1")
         untagged_path, untagged_said = build_untagged(work + "-untagged")
         notes_path, notes_plain, notes_said, notes_source = build_notes(work + "-notes")
-        footer_path, unpacker_layout = build_footer(work + "-footer")
+        footer_path = build_footer(work + "-footer")
+        sized_path, sized_said = build_sized(work + "-sized")
         fancy_path = build_fancy(work + "-fancy")
+        default_path = build_default(work + "-default")
+        preamble_path = build_preamble(work + "-preamble")
 
     def page_text(path):
         return "".join(page.extract_text() or "" for page in pypdf.PdfReader(path).pages) \
@@ -2182,8 +2463,11 @@ def checks(work, jobs=1):
          lambda: len(reader.page_labels) == len(set(reader.page_labels))),
     ]
 
-    items += footer_checks(footer_path, unpacker_layout)
+    items += footer_checks(footer_path)
+    items += sized_checks(sized_path, sized_said)
     items += fancy_checks(fancy_path)
+    items += default_checks(default_path)
+    items += preamble_checks(preamble_path)
     if verapdf_ran:
         # The one character no font has is drawn as .notdef, which
         # veraPDF reports, and that's the only rule it finds failed.
@@ -2277,6 +2561,13 @@ def main():
 
     work = tempfile.mkdtemp(prefix="pdf-tests-")
     failed = 0
+    missing = tex_missing()
+    if missing:
+        import latexbuild
+        print("  FAIL  TeX has the packages the suite's books load, or the checks that build "
+              "them fail: missing " + ", ".join(missing) + " ("
+              + latexbuild.tlmgr_command("install " + " ".join(missing)) + ")")
+        failed += 1
     try:
         try:
             items = checks(work, arguments.jobs)
@@ -2291,19 +2582,24 @@ def main():
             print(("  ok    " if passed else "  FAIL  ") + name)
             failed += not passed
     finally:
-        # The PDF/UA-1, untagged, notes, footer, and fancy books are built
-        # beside the book (build_ua1, build_untagged, build_notes,
-        # build_footer, build_fancy).
+        # The PDF/UA-1, untagged, notes, footer, sized, fancy, default, and
+        # preamble books are built beside the book (build_ua1,
+        # build_untagged, build_notes, build_footer, build_sized,
+        # build_fancy, build_default, build_preamble).
         if arguments.keep:
             print(f"\nOutput left in {work}, {work}-ua1, {work}-untagged, {work}-notes, "
-                  f"{work}-footer, and {work}-fancy")
+                  f"{work}-footer, {work}-sized, {work}-fancy, {work}-default, and "
+                  f"{work}-preamble")
         else:
             shutil.rmtree(work, ignore_errors=True)
             shutil.rmtree(work + "-ua1", ignore_errors=True)
             shutil.rmtree(work + "-untagged", ignore_errors=True)
             shutil.rmtree(work + "-notes", ignore_errors=True)
             shutil.rmtree(work + "-footer", ignore_errors=True)
+            shutil.rmtree(work + "-sized", ignore_errors=True)
             shutil.rmtree(work + "-fancy", ignore_errors=True)
+            shutil.rmtree(work + "-default", ignore_errors=True)
+            shutil.rmtree(work + "-preamble", ignore_errors=True)
     print(f"\n{failed} check(s) failed" if failed
           else "\nall PDF checks passed")
     return 1 if failed else 0

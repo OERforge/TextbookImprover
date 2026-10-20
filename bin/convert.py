@@ -939,8 +939,10 @@ UNNAMED = []
 # pages, where a formula can still name one (\color{redcards}).
 LATEX_COLORS = []
 # The first master's page layout (latexsource.page_layout), for a PDF
-# built from the pages.
+# built from the pages, and whether the book is LaTeX, whose PDF keeps its
+# own layout, set or not, where any other has the default page.
 LATEX_LAYOUT = {}
+LATEX_BOOK = []
 # A PDF figure written with its fonts embedded (latexbuild.embed_figure_fonts),
 # by its path in the book, for the next copy that needs it.
 EMBEDDED_FIGURES = {}
@@ -1260,7 +1262,8 @@ def read_latex_to_json(base, masters, env, work, titles=None):
                                    if len(masters) > 1 else work, master, say, LATEX_MACROS)
         preps.append(prep)
         LATEX_COLORS.extend(c for c in prep["colors"] if c not in LATEX_COLORS)
-        if not LATEX_LAYOUT:
+        if not LATEX_BOOK:
+            LATEX_BOOK.append(master)
             LATEX_LAYOUT.update(prep["layout"])
         for key, n in prep["counts"].items():
             counts[key] = counts.get(key, 0) + n
@@ -3561,14 +3564,15 @@ def pdf_env():
     """The environment build-pdf.py runs in: this one, and a LaTeX book's
     own colors, which its formulas can name (BOOK_LATEX_COLORS), and the
     layout its preamble gives its pages, as Pandoc's variables
-    (BOOK_LATEX_LAYOUT, JSON)."""
-    if not LATEX_COLORS and not LATEX_LAYOUT:
+    (BOOK_LATEX_LAYOUT, JSON, {} when it gives none, which keeps the
+    default page from a LaTeX book)."""
+    if not LATEX_COLORS and not LATEX_BOOK:
         return None
     env = dict(os.environ)
     if LATEX_COLORS:
         # A statement a line, as build-pdf.py reads them.
         env["BOOK_LATEX_COLORS"] = "\n".join(" ".join(c.split()) for c in LATEX_COLORS)
-    if LATEX_LAYOUT:
+    if LATEX_BOOK:
         env["BOOK_LATEX_LAYOUT"] = json.dumps(LATEX_LAYOUT)
     return env
 

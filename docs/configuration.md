@@ -340,7 +340,7 @@ defaults:
 The footer is on every page of the other formats too, in the way each format has of putting something on every page:
 
 - **EPUB**: the last thing in each content document, the title page among them, after the notes a chapter's file ends with; not on the cover or in the navigation document.
-- **PDF**, and the PDF a `latex` target's master builds: the foot of every page, the title page and each chapter's first page among them, centered in small type under whatever the page style puts there (a chapter's first page has its page number there), and single-spaced whatever the text's line spacing. LaTeX's tagging marks the foot an artifact, outside the document's structure as a page number is, so a link in it would be a link outside the structure: a link is its words. A `pdf.metadata` file that narrows the bottom margin should leave the footer room: geometry's `footskip` sets how far under the text the page number goes, and the footer goes a small line under that. The layout `unpack-cnx.py` writes for an OpenStax book does ([A CNXML book as the source](cnx-input.md)).
+- **PDF**, and the PDF a `latex` target's master builds: the foot of every page, the title page and each chapter's first page among them, centered in small type under whatever the page style puts there (a chapter's first page has its page number there), and single-spaced whatever the text's line spacing. LaTeX's tagging marks the foot an artifact, outside the document's structure as a page number is, so a link in it would be a link outside the structure: a link is its words. A `pdf.metadata` file that narrows the bottom margin should leave the footer room: geometry's `footskip` sets how far under the text the page number goes, and the footer goes a small line under that. The PDF target's default page does ([The PDF's page](#the-pdfs-page)).
 - **Word**: the footer of every page of every file, a paragraph for each of its paragraphs, in Word's Footer style; a link is its words here too.
 - **Markdown and AsciiDoc**: the end of every file's text, a Markdown file's notes after it, in a div of class `oer-footer` (in AsciiDoc, an open block with that role), written as the rest of the file is. Reading the file back as a source takes out a div of that class at its end, whoever wrote it, since the target's own setting puts the footer back.
 
@@ -351,6 +351,83 @@ The header is on an HTML target's pages alone. A deck's PDF, PowerPoint file, an
 On an HTML page the fragment is inserted after the Pandoc filter has run, so nothing in it
 is processed — no alt checking, no spacer rule. Write its markup correctly
 by hand, and list any images it uses under `common_files`.
+
+### The PDF's page
+
+Every book's PDF, and the LaTeX a `latex` target writes, is set on the page `bin/pdf-layout.yaml` gives: US Letter with OpenStax's margins, 1 inch at the sides and 0.8 inch at the top and bottom, 12-point type on lines 1.5 times its size apart, and the text set ragged right, a word never broken at a line's end. The file is the default for every book and the place to read the page's settings. Editing it changes every book's page, but a new version of TextbookImprover brings its own copy, and in a clone `git pull` won't update an edited one, so a copy for a book (below) is the lasting way to change its page:
+
+```yaml
+# The PDF target's default page: every book's PDF has it, unless a
+# pdf.metadata file says otherwise, a field at a time, or the book is
+# LaTeX, whose PDF keeps the book's own layout. To change it for a book,
+# copy this file into the book's folder, change what you like, and name
+# the copy in conversion.yaml (defaults: pdf: metadata: pdf-layout.yaml).
+# A field the copy leaves out keeps its value here.
+
+# OpenStax's paper and margins, which its books' tables were made for,
+# with type larger than OpenStax's 9 points: a full line holds about 88
+# characters. Any size works; the book class's own are 10pt, 11pt, and
+# 12pt, and another, such as 13.5pt, is set with KOMA-Script's scrextend.
+fontsize: 12pt
+papersize: letter
+geometry:
+  - left=1in
+  - right=1in
+  - top=0.8in
+  - bottom=0.8in
+  # The page number, and the footer setting under it, in the bottom
+  # margin: the number this far under the text.
+  - footskip=0.3in
+
+# Lines 1.5 times the type's size apart, as OpenStax sets them: 1.25 times
+# the book class's own spacing, which is about 1.2 times the type's size.
+linestretch: 1.25
+
+# Ragged right, as OpenStax sets its text, and footnotes and captions
+# with it, breaking no word at a line's end. TextbookImprover's own
+# setting, not Pandoc's: false justifies them, as LaTeX does by itself.
+ragged-right: true
+
+# WCAG 1.4.8 (AAA) asks for lines of no more than 80 characters, which
+# either of the first two of these gives, and for paragraphs set further
+# apart than this page sets them, which the third does. Each has its cost
+# (docs/configuration.md, "The PDF's page"):
+#   fontsize: 13.5pt
+#   geometry: [left=1.35in, right=1.35in, top=0.8in, bottom=0.8in, footskip=0.3in]
+#   header-includes: '\setlength{\parskip}{1em plus 2pt}'
+```
+
+To change the page for one book, copy the file into the book's folder, change what you like, and name the copy in `conversion.yaml`:
+
+```yaml
+# in conversion.yaml
+defaults:
+  pdf:
+    metadata: pdf-layout.yaml
+```
+
+A field the copy leaves out keeps the default's value, so a copy can be as short as the one line it changes (`fontsize: 13.5pt`), and a metadata file a book already has, a `_preamble.md` say, changes the page the same way. A file whose own LaTeX sets the margins or the line spacing, loading geometry or setspace in its `header-includes`, or setting `\linespread`, keeps them: the default's `geometry` or `linestretch` gives way. `ragged-right` is TextbookImprover's own; the others are [Pandoc's variables for LaTeX](https://pandoc.org/MANUAL.html#variables-for-latex), and any other of those can go in the file too (`documentclass`, `mainfont`, `header-includes`). An empty list clears a field: `geometry: []` gives the class's own margins. A type size or a paper given as a class option, `classoption: [11pt, a4paper]`, replaces the default's `fontsize` or `papersize`, as either field would. These four lines give the book class's own page, Pandoc's default, 10-point type, justified, in the class's margins, but for the contents, which leave room for a page number of four digits ([PDF](formats.md#pdf)):
+
+```yaml
+fontsize: 10pt
+geometry: []
+linestretch: 1
+ragged-right: false
+```
+
+- **Type size.** The book class has 10, 11, and 12 points; another size, `13.5pt` or `14pt`, is set by KOMA-Script's scrextend ([installation](installation.md#what-each-is-for)), with the class's other type sizes and its spacing at that size: a list's spacing and indents, and the space between paragraphs, are what the class and parskip give them at their own sizes. A class other than `book`, `report`, or `article`, which `documentclass` can name, is given `fontsize` as its own option.
+- **Ragged right** reaches footnotes and captions as well as the text, which LaTeX would set justified whatever the text around them is, and it turns off microtype's font expansion, which justifies a line by drawing its letters a little narrower or wider and which a ragged line doesn't need. `false` justifies them all, as LaTeX does by itself, breaking a word where it must.
+- **A LaTeX book** keeps its own layout: its PDF from its pages has the type size, paper, margins, and line spacing its preamble gives, or the class's own page where it gives none ([LaTeX sources](latex.md#the-pdf-target)). A metadata file still changes that a field at a time. A PDF built from the book's own LaTeX is the author's.
+- **An OpenStax book** gets a copy of the file in its folder from `unpack-cnx.py`, named in its `conversion.yaml`, on A4 for the two Polish books OpenStax prints on it ([A CNXML book as the source](cnx-input.md)). A copy keeps the values it was made with, whatever the default becomes.
+
+**WCAG 1.4.8 (AAA).** [Visual Presentation](https://www.w3.org/WAI/WCAG22/Understanding/visual-presentation.html) asks for five things a reader can have of a block of text, and lets the means be the reader's own PDF viewer ("the mechanism can be provided by the browser or other user agent"). Two are a viewer's whatever the page: colors the reader chooses, and text enlarged to twice its size without scrolling sideways, as a viewer's reflow of a tagged PDF gives it. The default page gives two itself: its text isn't justified, and its lines are 1.5 times the type's size apart, as W3C's technique for line spacing measures it ([C21](https://www.w3.org/WAI/WCAG22/Techniques/css/C21)), a table's too, though a footnote's lines are 1.2 times its type's size, single-spaced as setspace sets them, and so are a caption's in a book with a table, as the caption package sets them. It misses the other two, and the file's last lines say how to give them, each at a cost:
+
+- **Lines of no more than 80 characters**, which W3C's technique for it reads as an average ([C20](https://www.w3.org/WAI/WCAG22/Techniques/css/C20)). The default's full lines average about 88, spaces counted (*Introduction to Sociology 3e*'s; 85 at the 10th percentile and 92 at the 90th). Either of two changes brings them under 80:
+  - `fontsize: 13.5pt`: about 78 (75 to 82). Larger type serves a reader with low vision too, but the book is 16 to 19 percent longer: *Introduction to Sociology 3e* runs to 1,160 pages, where the default gives it 977, and *Introductory Business Statistics 2e* to 1,062, where it's 916. A wide table has fewer characters' room: *Business Statistics* has 81 lines that run into the margin, where the default gives it 54.
+  - Side margins of 1.35 inches (`geometry: [left=1.35in, right=1.35in, top=0.8in, bottom=0.8in, footskip=0.3in]`): about 79 (75 to 82); 1.3 inches comes to just over 80 (80.4 in *Sociology*'s first four chapters, 80.3 in *Business Statistics*'). The type stays at 12 points and the book grows less, *Introduction to Sociology 3e* to 1,040 pages and *Introductory Business Statistics 2e* to 959, but the text is 0.7 inch narrower than the 6.5 inches OpenStax's tables were made for: *Business Statistics* has 81 lines that run into the margin.
+- **Paragraphs set further apart than lines are**: "paragraph spacing is at least 1.5 times larger than the line spacing", which W3C's explanation of the criterion measures from the top of one paragraph's last line to the top of the next one's first, 250% of single spacing. Measured against the type's size, as C21 measures line spacing, the default's paragraphs are 2.1 times it apart, half the class's line apart as parskip sets them (OpenStax's are 2.2), and a space of 1em between them makes it 2.5 (`header-includes: '\setlength{\parskip}{1em plus 2pt}'`), at 44 more pages in *Introduction to Sociology 3e* (1,021, where the default gives it 977).
+
+W3C's explanation counts both from single spacing, the font's own, rather than from the type's size: about 1.2 times the type's size in LaTeX, against which the default's lines are 1.25 times apart. On that count it would take `linestretch: 1.5`, lines 1.8 times the type's size apart, and paragraphs 3 times it, top to top.
 
 ### Headings that skip a level
 

@@ -114,53 +114,42 @@ def project_yaml(source, collection, slug, outline, publisher=None,
 
 
 # The metadata file conversion.yaml names for an OpenStax book's PDF and
-# LaTeX targets (pdf.metadata), and the styles whose page is A4. Every
-# design in OpenStax's ce-styles sets its pages' margins at 1in at the
-# sides and 0.8in at the top and bottom, which the book's tables and
-# formulas were made for, and only the carnival design's Polish pages set
-# a size, A4 (pl-nursing's and pl-u-physics'); the rest are Prince's
-# default, US Letter. OpenStax's type is 9pt (8.25pt in the math books'
-# styles), about 110 characters a line: this keeps TextbookImprover's own
-# type, at 12pt, about 89 characters a line, on lines 1.5 times its size
-# apart and ragged right as OpenStax's are. LaTeX's own \raggedright,
-# whose lines may end anywhere short of the margin, breaks no word at a
-# line's end, where ragged2e's \RaggedRight hyphenates.
+# LaTeX targets (pdf.metadata), a copy of the PDF target's default page,
+# to be changed there, and the styles whose page is A4. Every design in
+# OpenStax's ce-styles sets its pages' margins at 1in at the sides and
+# 0.8in at the top and bottom, which the default page has, and only the
+# carnival design's Polish pages set a size, A4 (pl-nursing's and
+# pl-u-physics'); the rest are Prince's default, US Letter, the default
+# page's.
 PDF_LAYOUT = "pdf-layout.yaml"
+DEFAULT_PDF_LAYOUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir,
+                                  os.pardir, "bin", "pdf-layout.yaml")
 A4_STYLES = ("pl-nursing", "pl-u-physics")
 
 
 def openstax_pdf_layout(source, style):
-    """pdf-layout.yaml for an OpenStax book of the style: Pandoc's LaTeX
-    variables for OpenStax's paper and margins with larger type. The page
-    number and the footer go in the bottom margin, the number 0.3in under
-    the text (footskip), where the book class's 30pt would put the
-    footer's line within a quarter inch of the paper's edge, where some
-    printers can't print."""
-    paper = "a4" if style in A4_STYLES else "letter"
-    return "\n".join([
-        f"# Written by {source}; yours to edit.",
-        "# The PDF's page: OpenStax's paper and margins, with type larger than",
-        "# OpenStax's (12pt, where theirs is 9pt, or 8.25pt in the math books),",
-        "# so a line holds about 89 characters where theirs hold about 110. As",
-        "# in OpenStax's PDFs, the lines are 1.5 times the type's size apart",
-        "# (linestretch), and the text is set ragged right, without breaking",
-        "# words.",
-        "fontsize: 12pt",
-        "linestretch: 1.25",
-        f"papersize: {paper}",
-        "geometry:",
-        "  - left=1in",
-        "  - right=1in",
-        "  - top=0.8in",
-        "  - bottom=0.8in",
-        "  # The page number and the footer, in the bottom margin.",
-        "  - footskip=0.3in",
-        "header-includes:",
-        "  - |",
-        "    ```{=latex}",
-        "    \\AtBeginDocument{\\raggedright}",
-        "    ```",
-    ]) + "\n"
+    """pdf-layout.yaml for an OpenStax book of the style: the PDF target's
+    default page (bin/pdf-layout.yaml), OpenStax's paper and margins with
+    larger type, copied into the book's folder to be changed there, on A4
+    for the styles OpenStax prints on it. The default's opening comment,
+    on being the default, gives way to one saying where the copy came
+    from; a default someone has edited is copied as it is, its comment
+    gone or not, and its paper set or not."""
+    with open(DEFAULT_PDF_LAYOUT, encoding="utf-8") as fh:
+        settings = fh.read()
+    opening, blank, rest = settings.partition("\n\n")
+    if blank and all(line.startswith("#") for line in opening.splitlines()):
+        settings = rest
+    head = [f"# Written by {source}; yours to edit.",
+            "# The PDF's page: the PDF target's default (bin/pdf-layout.yaml),",
+            "# copied here to be changed for this book; a field left out keeps",
+            "# the default's value."]
+    if style in A4_STYLES:
+        settings, found = re.subn(r"(?m)^papersize:.*$", "papersize: a4", settings, count=1)
+        if not found:
+            settings = settings.rstrip("\n") + "\npapersize: a4\n"
+        head.append("# On A4, as OpenStax prints this style's books.")
+    return "\n".join(head) + "\n\n" + settings
 
 
 def openstax_conversion(source, figure_word="Figure", table_word="Table"):
@@ -184,7 +173,7 @@ def openstax_conversion(source, figure_word="Figure", table_word="Table"):
              "  # each unit is a part in project.yaml, so its chapters number apart.",
              "  notes:",
              "    numbering: group",
-             "  # The PDF's page: OpenStax's paper and margins, with larger type.",
+             "  # The PDF's page, the PDF target's default copied here to be changed.",
              "  pdf:",
              f"    metadata: {PDF_LAYOUT}"]
     if figure_word != "Figure" or table_word != "Table":

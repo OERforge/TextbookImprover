@@ -252,10 +252,10 @@ tlmgr update --self
 This installs every TeX package and program anything in the project uses, the test suites' books included, so nothing below has to be installed piece by piece. A full TeX Live, from its own installer, has every one of the TeX packages already, so it needs only the last line; TinyTeX needs them all.
 
 ```bash
-tlmgr install latex-lab tagpdf luamml luatexbase selnolig luacolor lua-ul footnotehyper xurl multirow placeins setspace
+tlmgr install latex-lab tagpdf luamml luatexbase selnolig luacolor lua-ul footnotehyper xurl multirow placeins setspace geometry koma-script
 tlmgr install luatex85 preview latex-tagging-status
 tlmgr install ltx-talk lua-unicode-math newcomputermodern
-tlmgr install amsfonts amsmath babel-english caption fancyhdr framed geometry grfext mdframed
+tlmgr install amsfonts amsmath babel-english caption fancyhdr framed grfext mdframed
 tlmgr install pgf soul tabto-ltx tex-gyre titlesec tools ulem wasysym wrapfig
 sudo apt install librsvg2-bin poppler-utils ghostscript fonts-dejavu-core python3-pikepdf
 ```
@@ -264,7 +264,7 @@ The rest of this section says what each is for.
 
 ### What each is for
 
-The first five TeX packages are the tagging code and what Pandoc's template loads for every book; `luacolor` and `lua-ul` are for underlined or struck-out text (the statistics book has some), and `xurl` lets a long address break anywhere, which the template uses when it's installed. Pandoc 3.11's template also loads `footnotehyper` when it's there; 3.12's writes notes in tables itself and doesn't. `multirow` is for a table with a cell spanning rows, which Pandoc's template loads only when a book has one; the PDF suite's book does. `pdf.figures: section` needs `placeins`, and a `pdf.metadata` file's `linestretch` needs `setspace`, which Pandoc's template loads for it: the layout `unpack-cnx.py` writes for an OpenStax book sets one ([A CNXML book as the source](cnx-input.md)), as the PDF suite's book in that layout does.
+The first five TeX packages are the tagging code and what Pandoc's template loads for every book; `luacolor` and `lua-ul` are for underlined or struck-out text (the statistics book has some), and `xurl` lets a long address break anywhere, which the template uses when it's installed. Pandoc 3.11's template also loads `footnotehyper` when it's there; 3.12's writes notes in tables itself and doesn't. `multirow` is for a table with a cell spanning rows, which Pandoc's template loads only when a book has one; the PDF suite's book does. `pdf.figures: section` needs `placeins`. The PDF target's default page needs `geometry` for its margins and `setspace` for its line spacing, which Pandoc's template loads for them, and a type size the book class hasn't, `fontsize: 13.5pt` say, needs `koma-script`, whose `scrextend` sets it ([The PDF's page](configuration.md#the-pdfs-page)); the PDF suite's sized book has one. The PDF suite's first check names any of `multirow`, `geometry`, `setspace`, and `koma-script` that TeX lacks, with the line that installs them.
 
 A book or a deck with SVG images needs `rsvg-convert` for its PDF, and a deck for its PowerPoint file too (`librsvg2-bin`); the run stops and says so if it's missing. DejaVu Sans, which most Linux desktops have already (`fonts-dejavu-core`), supplies characters Latin Modern lacks, such as the circled digits of an AsciiDoc book's code callouts, and `newcomputermodern`, installed for decks, the circled letters of OpenStax's math books. For the PDF's table captions and empty paragraph elements, and a deck's links on the earlier steps of a slide shown in steps, `pikepdf` (`python3-pikepdf`); without it the run says so and leaves them as LaTeX tags them, and the PDF suite skips.
 
@@ -272,7 +272,7 @@ A LaTeX book's PDF is built from the book's own LaTeX ([LaTeX sources](latex.md#
 
 `ltx-talk`, `lua-unicode-math`, and `newcomputermodern` are for a deck's PDF: ltx-talk is the presentation class a deck written in Markdown is built with, and it loads the other two, the math and the fonts it sets a deck in, which TinyTeX doesn't install with it. It needs LaTeX 2026-06-01 or later, TeX Live 2026 ([Slides](slides.md#the-pdf)).
 
-The TeX packages in the last two `tlmgr` lines are what the LaTeX suite's small books load (`tests/run-latex-tests.py`), with `luatex85` and `preview`. Its first checks name a LaTeX too old for the PDF target and any of them that are missing, with the line that installs them, and `rsvg-convert` too. It has one check of Ghostscript's way of embedding fonts, which skips without Ghostscript.
+The TeX packages in the last two `tlmgr` lines are what the LaTeX suite's small books load (`tests/run-latex-tests.py`), with `luatex85`, `preview`, and `geometry`. Its first checks name a LaTeX too old for the PDF target and any of them that are missing, with the line that installs them, and `rsvg-convert` too. It has one check of Ghostscript's way of embedding fonts, which skips without Ghostscript.
 
 Two more kinds of package, depending on the book. A book with passages in another language needs that language's `babel-` and `hyphen-` packages (`tlmgr install babel-german hyphen-german` for German), or LuaLaTeX stops with babel's `Unknown option`, and the run says how to find the package. And whatever a `pdf.metadata` file's `header-includes` loads, and whatever else a book of your own loads, has to be installed too (`hanging`, say). When LuaLaTeX stops on `File 'something.sty' not found`, `tlmgr search --global --file /something.sty` names the package to install, and the run says so.
 

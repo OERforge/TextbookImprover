@@ -1540,25 +1540,45 @@ def check_fitted_blanks():
 
 def check_tex_packages():
     """The installation page's commands for TeX install every package the
-    run and the suites check for, a deck's PDF's and the LaTeX suite's
-    books', each line a command of its own: copied, two names at a line
-    break had once run together ("soultabto-ltx")."""
+    run and the suites check for, a deck's PDF's and the LaTeX and PDF
+    suites' books', each line a command of its own: copied, two names at a
+    line break had once run together ("soultabto-ltx")."""
     page = open(os.path.join(ROOT, "docs", "installation.md"), encoding="utf-8").read()
     section = page.split("### Everything at once", 1)[-1].split("\n### ", 1)[0]
     block = re.search(r"```bash\n(.*?)```", section, re.S)
     lines = block.group(1).splitlines() if block else []
     named = {word for line in lines if line.startswith("tlmgr install ")
              for word in line.split()[2:]}
-    suite = open(os.path.join(HERE, "run-latex-tests.py"), encoding="utf-8").read()
-    listed = re.search(r"^SUITE_TEX = \[(.*?)\]$", suite, re.S | re.M)
-    books = re.findall(r'\("([\w-]+)", "[^"]+"\)', listed.group(1)) if listed else []
+    books = []
+    for name in ("run-latex-tests.py", "run-pdf-tests.py"):
+        suite = open(os.path.join(HERE, name), encoding="utf-8").read()
+        listed = re.search(r"^SUITE_TEX = \[(.*?)\]$", suite, re.S | re.M)
+        books.append(re.findall(r'\("([\w-]+)", "[^"]+"\)', listed.group(1)) if listed else [])
     import decks
     talk = [package for _, package in decks.LTX_TALK_FILES]
     return [
         ("the installation page installs every TeX package a deck's PDF and the LaTeX "
-         "suite's books need", lambda: books and set(books + talk) <= named),
+         "and PDF suites' books need",
+         lambda: all(books) and set(books[0] + books[1] + talk) <= named),
         ("each line of it a command of its own",
          lambda: named and not any(line.rstrip().endswith("\\") for line in lines)),
+    ]
+
+
+def check_default_page():
+    """The PDF target's default page is written down twice: in
+    bin/pdf-layout.yaml, which build-pdf.py reads and unpack-cnx.py copies
+    into an OpenStax book's folder, and on the configuration page, for a
+    person to read and copy. The two agree, comments and all."""
+    page = open(os.path.join(ROOT, "docs", "configuration.md"), encoding="utf-8").read()
+    section = page.split("\n### The PDF's page\n", 1)[-1].split("\n### ", 1)[0]
+    block = re.search(r"```yaml\n(.*?)```", section, re.S)
+    with open(os.path.join(ROOT, "bin", "pdf-layout.yaml"), encoding="utf-8") as fh:
+        default = fh.read()
+    return [
+        ("the configuration page shows bin/pdf-layout.yaml as it is",
+         lambda: "\n### The PDF's page\n" in page and block is not None
+         and block.group(1) == default),
     ]
 
 
@@ -1846,6 +1866,7 @@ GROUPS = [
     ("sidecar paths", check_sidecar_paths),
     ("shortDOIs for a bare-links sidecar", check_shortdoi),
     ("the decorative marker", check_decorative_marker),
+    ("the PDF target's default page", check_default_page),
     ("PDF/UA-1's math", check_ua1_math),
     ("a formula's words, in an HTML source", check_math_words),
     ("a table whose head holds every row, in an HTML source", check_head_only_tables),

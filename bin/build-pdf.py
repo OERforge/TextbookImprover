@@ -96,6 +96,83 @@ CHAPTER_CLASSES = ("memoir", "book", "report", "scrreprt", "scrreport", "scrbook
 # rest.
 OPEN_FRONT = "\\AddToHook{begindocument/end}{\\frontmatter}\n"
 
+# The page every book's PDF has unless its pdf.metadata file says
+# otherwise, a field at a time, or it's a LaTeX book, whose own layout it
+# keeps (book_layout): Pandoc's LaTeX variables, and ragged-right.
+DEFAULT_LAYOUT = os.path.join(HERE, "pdf-layout.yaml")
+# The classes whose type sizes are 10pt, 11pt, and 12pt alone, as their
+# options: another size goes to KOMA-Script's scrextend, which sets it for
+# any class, with the sizes of the class's other type, its space around a
+# display formula, a float, and a footnote, and its lists' spacing. Its
+# one check of another package, that \@footnotemark is still LaTeX's own,
+# is for an option of its own nothing here uses, and LaTeX's tagging
+# changes \@footnotemark, so it would warn on every build: it's skipped.
+# What it leaves, the class set at the size it loaded with: a list's
+# indents and its label's space (book.cls, in ems), the space above a
+# page's first line (\topskip, the type's size), and a paragraph's indent,
+# which are set again as the class sets them, at this size. parskip, which
+# Pandoc's template loads before, set the space between paragraphs from
+# the class's size (half a line), and the lists' spacing to match, none
+# above a list or between its items but that, which scrextend replaced
+# with its own: at 13.5pt, a list had 14 points more above it and below
+# it than a paragraph, and its items were indented as at 10pt. Both are
+# set again as parskip sets them.
+STANDARD_CLASSES = ("book", "report", "article")
+CLASS_SIZES = ("10pt", "11pt", "12pt")
+TYPE_SIZE = re.compile(r"\d+(?:\.\d+)?pt", re.I)
+SIZE_PACKAGE = ("\\makeatletter\\let\\OER@CheckCommand\\CheckCommand"
+                "\\let\\CheckCommand\\providecommand\n"
+                "\\RequirePackage[fontsize=%s]{scrextend}\n"
+                "\\let\\CheckCommand\\OER@CheckCommand\n"
+                "\\if@twocolumn\\leftmargini2em\\leftmarginv.5em\\leftmarginvi.5em"
+                "\\ifdim\\parindent>\\z@\\parindent1em\\fi\n"
+                "\\else\\leftmargini2.5em\\leftmarginv1em\\leftmarginvi1em"
+                "\\ifdim\\parindent>\\z@\\parindent1.5em\\fi\\fi\n"
+                "\\leftmarginii2.2em\\leftmarginiii1.87em\\leftmarginiv1.7em\\labelsep.5em\n"
+                "\\labelwidth\\leftmargini\\advance\\labelwidth-\\labelsep"
+                "\\tabbingsep\\labelsep\n"
+                "\\topskip\\f@size\\p@\\maxdepth.5\\topskip\n"
+                "\\@ifpackageloaded{parskip}{\\parskip=.5\\baselineskip plus 2pt\\relax\n"
+                "\\def\\@listI{\\leftmargin\\leftmargini\\topsep\\z@\\parsep\\parskip\\itemsep\\z@}"
+                "\\let\\@listi\\@listI\\@listi\n"
+                "\\def\\@listii{\\leftmargin\\leftmarginii\\labelwidth\\leftmarginii"
+                "\\advance\\labelwidth-\\labelsep\\topsep\\z@\\parsep\\parskip\\itemsep\\z@}\n"
+                "\\def\\@listiii{\\leftmargin\\leftmarginiii\\labelwidth\\leftmarginiii"
+                "\\advance\\labelwidth-\\labelsep\\topsep\\z@\\parsep\\parskip\\itemsep\\z@}\n"
+                "\\partopsep\\z@}{}\\makeatother\n")
+# Ragged right, breaking no word at a line's end: the right margin given
+# all the stretch, as LaTeX's \raggedright gives it, from the start of the
+# text and in what LaTeX sets apart from it, a footnote, a float's
+# caption, a minipage, each of which begins by setting its lines justified
+# again (\@parboxrestore). Not \raggedright itself, whose \\ ends the
+# paragraph: LaTeX's tagging made a line break's two lines two paragraphs,
+# and a caption's line break, set in a box first, stopped LaTeX ("Not
+# allowed in LR mode"). ragged2e's \RaggedRight hyphenates. And without
+# microtype's font expansion, which draws a line's letters up to 2%
+# narrower or wider to justify it, and which a ragged line, which needs
+# none, used to fit more on it: in the PDF suite's footer book, a
+# caption's lines had been drawn at 11.75 points of 11.96, and a
+# footnote's at 9.77 of 9.96.
+RAGGED_RIGHT = ("\\makeatletter\n"
+                "\\AtBeginDocument{\\@rightskip\\@flushglue\\rightskip\\@rightskip}\n"
+                "\\g@addto@macro\\@parboxrestore{\\@rightskip\\@flushglue\\rightskip\\@rightskip}\n"
+                "\\ifdefined\\microtypesetup\\microtypesetup{expansion=false}\\fi\n"
+                "\\makeatother\n")
+# Room for a page number of four digits, as a book of a thousand pages
+# has, in the contents and a list of figures: the standard classes leave
+# 1.55em, three digits' room, and a fourth ran into the margin (62 lines
+# of Sociology's contents in 13.5pt type), or over a chapter's title.
+PAGE_NUMBER_ROOM = ("\\makeatletter\\ifdefined\\@pnumwidth"
+                    "\\def\\@pnumwidth{2.5em}\\def\\@tocrmarg{3.5em}\\fi\\makeatother\n")
+# A metadata file's own LaTeX that sets what the page's geometry or
+# linestretch would: loading geometry, and loading setspace or setting the
+# line spacing (book_metadata).
+OWN_GEOMETRY = re.compile(r"\\(?:usepackage|RequirePackage)\s*(?:\[[^\]]*\])?\s*"
+                          r"\{[^}]*\bgeometry\b")
+OWN_SPACING = re.compile(r"\\(?:usepackage|RequirePackage)\s*(?:\[[^\]]*\])?\s*"
+                         r"\{[^}]*\bsetspace\b|\\(?:linespread|setstretch|onehalfspacing"
+                         r"|doublespacing|singlespacing)(?![A-Za-z@])")
+
 # Latin Modern, the template's fonts when none is chosen, has no Greek and
 # few mathematical symbols, and a character its font lacks is drawn blank
 # (.notdef): gone from the page and from the text a screen reader gets. A
@@ -436,14 +513,60 @@ def book_metadata(project, resolved, base, numbered):
     meta["toc"] = meta_bool(True)
     # A LaTeX book's own layout, as its preamble gives it (convert.py
     # passes it on): its type size, paper, margins, line spacing, and
-    # paragraph indents, where Pandoc's defaults would have 10pt type in
-    # the book class's margins. The metadata file still wins.
+    # paragraph indents, where the default page would have its own. Any
+    # other book's is the default page (pdf-layout.yaml). The metadata
+    # file still wins, a field at a time, and the run says what of a
+    # LaTeX book's layout is left.
     layout = book_layout()
-    for key, value in layout.items():
-        meta[key] = meta_value(value)
+    if layout is None:
+        if not os.path.isfile(DEFAULT_LAYOUT):
+            sys.exit(f"The PDF target's default page, {DEFAULT_LAYOUT}, is missing; it comes "
+                     "with TextbookImprover, and docs/configuration.md shows it whole.")
+        page = metadata_file(HERE, DEFAULT_LAYOUT)
+    else:
+        page = {key: meta_value(value) for key, value in layout.items()}
     setting = str(resolved["pdf.metadata"] or "").strip()
-    if setting:
-        meta.update(metadata_file(base, setting))
+    own = metadata_file(base, setting) if setting else {}
+    # A type size or a paper the metadata file gives as a class option is
+    # its choice, as its own fontsize or papersize would be, and replaces
+    # the page's: the book class takes its options in the order it
+    # declares them, not the order they're given, so the default's 12pt
+    # had won over a file's 11pt, and its Letter over a file's a4paper. A
+    # standard class takes 10pt, 11pt, and 12pt alone and ignores another
+    # size, so there the option is the file's fontsize, set as one is
+    # (scrextend, below).
+    options = [o.strip() for o in
+               ",".join(meta_plain(o) for o in meta_items(own.get("classoption"))).split(",")
+               if o.strip()]
+    sizes = [class_option_size(o) for o in options if class_option_size(o)]
+    if "fontsize" not in own and sizes:
+        if (meta_plain(own.get("documentclass")) or document_class(meta)) in STANDARD_CLASSES:
+            own["fontsize"] = meta_string(sizes[-1])
+            own["classoption"] = {"t": "MetaList", "c": [meta_string(o) for o in options
+                                                         if not class_option_size(o)]}
+        else:
+            page.pop("fontsize", None)
+    if "papersize" not in own and any(o.lower().endswith("paper")
+                                      or o.lower().startswith("paper=") for o in options):
+        page.pop("papersize", None)
+    # And margins or line spacing the file's own LaTeX sets, which the
+    # page's fields would load geometry or setspace for first: loaded
+    # again with options of the file's, either stopped LaTeX ("Option
+    # clash for package geometry"), and a spacing the file set was undone
+    # by the page's \setstretch, which comes after it.
+    own_tex = raw_tex(own.get("header-includes"))
+    if "geometry" not in own and OWN_GEOMETRY.search(own_tex):
+        page.pop("geometry", None)
+    if "linestretch" not in own and OWN_SPACING.search(own_tex):
+        page.pop("linestretch", None)
+    meta.update(page)
+    meta.update(own)
+    if layout:
+        carried = layout_words({k: v for k, v in layout.items()
+                                if meta.get(k) == meta_value(v)})
+        if carried:
+            print("The LaTeX book's own layout, from its preamble: "
+                  + "; ".join(carried) + ".", file=sys.stderr)
     if "toc-depth" not in meta:
         # pdf.toc_depth counts levels as the EPUB's contents do, an entry at
         # the top of project.contents being level 1, and the template hands
@@ -458,7 +581,8 @@ def book_metadata(project, resolved, base, numbered):
             depth -= 1
         meta["toc-depth"] = meta_string(depth)
     # Ours come after the author's, so the author's packages are loaded
-    # first; a list either way.
+    # first, but for a type size, which comes before them; a list either
+    # way.
     includes = meta.get("header-includes")
     if includes is None:
         includes = {"t": "MetaList", "c": []}
@@ -477,6 +601,24 @@ def book_metadata(project, resolved, base, numbered):
         ours += "\\PassOptionsToPackage{hyperfootnotes=false}{hyperref}\n" + UA1_LINKS
     ours += FIGURE_PLACEMENT[str(resolved["pdf.figures"])]
     ours += RUNNING_HEADS
+    # A type size the class doesn't have, whose option the class would
+    # ignore, leaving the type 10pt: set through scrextend, ahead of the
+    # author's packages, as the class's option would be. In lowercase, as
+    # the class names its options, which it matches letter for letter:
+    # 12PT had left the type 10pt.
+    size = meta_plain(meta.get("fontsize")).replace(" ", "").lower()
+    if TYPE_SIZE.fullmatch(size):
+        meta["fontsize"] = meta_string(size)
+    if document_class(meta) in STANDARD_CLASSES and TYPE_SIZE.fullmatch(size) \
+            and size not in CLASS_SIZES:
+        del meta["fontsize"]
+        includes["c"].insert(0, {"t": "MetaBlocks", "c": [raw_latex(SIZE_PACKAGE % size)]})
+    if document_class(meta) in STANDARD_CLASSES:
+        ours += PAGE_NUMBER_ROOM
+    # Ragged right, as the default page has it, unless the metadata file
+    # says false.
+    if meta_truth(meta.pop("ragged-right", None)):
+        ours += RAGGED_RIGHT
     # The footer setting at the foot of every page, its words alone
     # (pagefooter: LaTeX's tagging marks the foot an artifact).
     ours += pagefooter.latex_preamble(resolved["footer"], base)
@@ -547,9 +689,14 @@ def meta_value(value):
 
 def book_layout():
     """The layout a LaTeX book's preamble gives its pages, as Pandoc's
-    variables (BOOK_LATEX_LAYOUT, which convert.py sets), or {}."""
+    variables (BOOK_LATEX_LAYOUT, which convert.py sets for a LaTeX book,
+    {} when its preamble says nothing of them), or None for a book of
+    any other source."""
+    text = os.environ.get("BOOK_LATEX_LAYOUT")
+    if text is None:
+        return None
     try:
-        layout = json.loads(os.environ.get("BOOK_LATEX_LAYOUT", "") or "{}")
+        layout = json.loads(text or "{}")
     except ValueError:
         return {}
     return layout if isinstance(layout, dict) else {}
@@ -578,6 +725,46 @@ def layout_words(layout):
     return words
 
 
+def meta_items(value):
+    """A metadata field's items: a list's, or the field itself, or none."""
+    if not value:
+        return []
+    return value["c"] if value.get("t") == "MetaList" else [value]
+
+
+def class_option_size(option):
+    """The type size a class option names, 13.5pt or KOMA-Script's
+    fontsize=13.5pt, in lowercase, or None."""
+    size = option.replace(" ", "").lower()
+    if size.startswith("fontsize="):
+        size = size[len("fontsize="):]
+    return size if TYPE_SIZE.fullmatch(size) else None
+
+
+def raw_tex(value):
+    """The LaTeX a metadata field holds as raw TeX, or as a string, its
+    comments left out."""
+    found = []
+
+    def walk(node):
+        if isinstance(node, dict):
+            if node.get("t") in ("RawBlock", "RawInline") and isinstance(node.get("c"), list):
+                if str(node["c"][0]).lower() in ("latex", "tex"):
+                    found.append(str(node["c"][1]))
+                return
+            if node.get("t") == "MetaString":
+                found.append(str(node.get("c", "")))
+                return
+            for child in node.values():
+                walk(child)
+        elif isinstance(node, list):
+            for child in node:
+                walk(child)
+    walk(value)
+    return "\n".join(re.sub(r"(?<!\\)%.*", "", line)
+                     for text in found for line in text.splitlines())
+
+
 def meta_plain(value):
     """A metadata field's text, whichever form it has."""
     if not value:
@@ -589,6 +776,16 @@ def meta_plain(value):
 
 def document_class(meta):
     return meta_plain(meta.get("documentclass"))
+
+
+def meta_truth(value):
+    """Whether a metadata field is set true: YAML's true, or a word that
+    says so."""
+    if not value:
+        return False
+    if value.get("t") == "MetaBool":
+        return bool(value["c"])
+    return meta_plain(value).lower() in ("true", "yes", "on")
 
 
 def count_math(blocks):
@@ -720,11 +917,6 @@ def build(base, name, resolved, keep, intermediates=None, latex_only=False,
     title_page = safe_stem(os.path.splitext(os.path.basename(setting))[0]) \
         if setting else None
     meta = book_metadata(project, resolved, base, numbered)
-    carried = layout_words({k: v for k, v in book_layout().items()
-                            if meta.get(k) == meta_value(v)})
-    if carried:
-        print("The LaTeX book's own layout, from its preamble: "
-              + "; ".join(carried) + ".", file=sys.stderr)
     claimed = meta.get("pdfstandard")
     claimed = [meta_plain(c) for c in claimed["c"]] if claimed and claimed.get("t") == "MetaList" \
         else ([meta_plain(claimed)] if claimed else [])

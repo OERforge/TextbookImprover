@@ -1,0 +1,38 @@
+# The PDF target's default page: every book's PDF has it, unless a
+# pdf.metadata file says otherwise, a field at a time, or the book is
+# LaTeX, whose PDF keeps the book's own layout. To change it for a book,
+# copy this file into the book's folder, change what you like, and name
+# the copy in conversion.yaml (defaults: pdf: metadata: pdf-layout.yaml).
+# A field the copy leaves out keeps its value here.
+
+# OpenStax's paper and margins, which its books' tables were made for,
+# with type larger than OpenStax's 9 points: a full line holds about 88
+# characters. Any size works; the book class's own are 10pt, 11pt, and
+# 12pt, and another, such as 13.5pt, is set with KOMA-Script's scrextend.
+fontsize: 12pt
+papersize: letter
+geometry:
+  - left=1in
+  - right=1in
+  - top=0.8in
+  - bottom=0.8in
+  # The page number, and the footer setting under it, in the bottom
+  # margin: the number this far under the text.
+  - footskip=0.3in
+
+# Lines 1.5 times the type's size apart, as OpenStax sets them: 1.25 times
+# the book class's own spacing, which is about 1.2 times the type's size.
+linestretch: 1.25
+
+# Ragged right, as OpenStax sets its text, and footnotes and captions
+# with it, breaking no word at a line's end. TextbookImprover's own
+# setting, not Pandoc's: false justifies them, as LaTeX does by itself.
+ragged-right: true
+
+# WCAG 1.4.8 (AAA) asks for lines of no more than 80 characters, which
+# either of the first two of these gives, and for paragraphs set further
+# apart than this page sets them, which the third does. Each has its cost
+# (docs/configuration.md, "The PDF's page"):
+#   fontsize: 13.5pt
+#   geometry: [left=1.35in, right=1.35in, top=0.8in, bottom=0.8in, footskip=0.3in]
+#   header-includes: '\setlength{\parskip}{1em plus 2pt}'

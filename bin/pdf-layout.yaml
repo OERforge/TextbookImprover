@@ -29,10 +29,8 @@ linestretch: 1.25
 # setting, not Pandoc's: false justifies them, as LaTeX does by itself.
 ragged-right: true
 
-# WCAG 1.4.8 (AAA) asks for lines of no more than 80 characters, which
-# either of the first two of these gives, and for paragraphs set further
-# apart than this page sets them, which the third does. Each has its cost
-# (docs/configuration.md, "The PDF's page"):
-#   fontsize: 13.5pt
-#   geometry: [left=1.35in, right=1.35in, top=0.8in, bottom=0.8in, footskip=0.3in]
-#   header-includes: '\setlength{\parskip}{1em plus 2pt}'
+# WCAG 1.4.8 (AAA) asks for lines of no more than 80 characters, and for
+# lines and paragraphs further apart than this page sets them, footnotes
+# and captions too: TextbookImprover's bin/pdf-layout-wcag-aaa.yaml is a
+# page that gives them, for a longer book (docs/configuration.md, "The
+# PDF's page").

@@ -1569,16 +1569,26 @@ def check_default_page():
     """The PDF target's default page is written down twice: in
     bin/pdf-layout.yaml, which build-pdf.py reads and unpack-cnx.py copies
     into an OpenStax book's folder, and on the configuration page, for a
-    person to read and copy. The two agree, comments and all."""
+    person to read and copy. The two agree, comments and all; and so do
+    the page for WCAG 1.4.8 (AAA), bin/pdf-layout-wcag-aaa.yaml, and its
+    copy there. That page is the default with larger type and more space:
+    every field the default sets, the same paper and margins."""
     page = open(os.path.join(ROOT, "docs", "configuration.md"), encoding="utf-8").read()
     section = page.split("\n### The PDF's page\n", 1)[-1].split("\n### ", 1)[0]
-    block = re.search(r"```yaml\n(.*?)```", section, re.S)
+    blocks = re.findall(r"```yaml\n(.*?)```", section, re.S)
     with open(os.path.join(ROOT, "bin", "pdf-layout.yaml"), encoding="utf-8") as fh:
         default = fh.read()
+    with open(os.path.join(ROOT, "bin", "pdf-layout-wcag-aaa.yaml"), encoding="utf-8") as fh:
+        aaa = fh.read()
+    fields, aaa_fields = yaml.safe_load(default), yaml.safe_load(aaa)
     return [
         ("the configuration page shows bin/pdf-layout.yaml as it is",
-         lambda: "\n### The PDF's page\n" in page and block is not None
-         and block.group(1) == default),
+         lambda: "\n### The PDF's page\n" in page and blocks and blocks[0] == default),
+        ("and bin/pdf-layout-wcag-aaa.yaml as it is",
+         lambda: aaa in blocks),
+        ("which sets every field the default does, on the default's paper and margins",
+         lambda: set(fields) <= set(aaa_fields)
+         and all(aaa_fields[k] == fields[k] for k in ("papersize", "geometry"))),
     ]
 
 

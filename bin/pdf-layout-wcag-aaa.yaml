@@ -1,0 +1,37 @@
+# A page for a book whose PDF is to meet WCAG 1.4.8, Visual Presentation
+# (AAA): the PDF target's default page (bin/pdf-layout.yaml) with larger
+# type, lines and paragraphs further apart, and footnotes and captions
+# spaced as the text is, which makes a book about 45 percent longer. To
+# use it for a book, copy it into the book's folder and name the copy in
+# conversion.yaml (defaults: pdf: metadata: pdf-layout-wcag-aaa.yaml); to
+# make it every book's page, copy it over bin/pdf-layout.yaml.
+# docs/configuration.md, "The PDF's page", says what each setting gives.
+
+# Lines of no more than 80 characters, on average: 13.5-point type in
+# OpenStax's margins holds about 78 to a full line.
+fontsize: 13.5pt
+papersize: letter
+geometry:
+  - left=1in
+  - right=1in
+  - top=0.8in
+  - bottom=0.8in
+  - footskip=0.3in
+
+# Lines space-and-a-half apart: 1.5 times the font's single spacing,
+# which the book class makes 1.2 times the type's size, so 1.8 times it.
+linestretch: 1.5
+
+# Text not justified.
+ragged-right: true
+
+# Paragraphs 2.5 times the font's single spacing apart, from the top of
+# one paragraph's last line to the top of the next one's first: 3 times
+# the type's size, a space of 1.2em between them at this line spacing.
+# And footnotes and captions spaced as the text is, where setspace and
+# the caption package would set them single-spaced. A book's own
+# pdf.metadata file that sets header-includes replaces these two lines,
+# as it would any setting here, so they go in its list too.
+header-includes:
+  - '\setlength{\parskip}{1.2em plus 2pt}'
+  - '\SetSinglespace{1.5}'

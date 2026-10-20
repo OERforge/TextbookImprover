@@ -1003,6 +1003,39 @@ def build_preamble(work):
                    capture_output=True, text=True, stdin=subprocess.DEVNULL)
     return os.path.join(work, "pdf", "org.example.preamble.pdf")
 
+# The page for WCAG 1.4.8 (AAA), bin/pdf-layout-wcag-aaa.yaml, copied into
+# a book as its metadata file: FOOTER_ONE's footnote, and a chapter with a
+# table, which loads the caption package, a figure with a long caption, and
+# paragraphs. The text's lines are spaced by the font's single spacing,
+# which the book class makes 1.2 times the type's size, and so are a
+# footnote's and a caption's, which setspace and the caption package set
+# single-spaced on the default page.
+AAA_TABLE = ("\n| Name | What it holds |\n|---|---|\n| One | A cell. |\n\n"
+             ": A table, which loads the caption package.\n")
+
+
+def build_aaa(work):
+    """FOOTER_ONE, and FOOTER_TWO with AAA_TABLE, a figure with a long
+    caption, and paragraphs, on the AAA page: the PDF's path."""
+    os.makedirs(work)
+    two = (FOOTER_TWO + AAA_TABLE + "\n![" + FOOTER_CAPTION * 3 + "Henceforth.](cc.png)\n"
+           + "".join("\n" + FOOTER_WORDS * 4 + "\n" for _ in range(4)))
+    for name, text in (("one.md", FOOTER_ONE), ("two.md", two)):
+        with open(os.path.join(work, name), "w", encoding="utf-8") as fh:
+            fh.write(text)
+    shutil.copy(os.path.join(BIN, "pdf-layout-wcag-aaa.yaml"), work)
+    with open(os.path.join(work, "project.yaml"), "w", encoding="utf-8") as fh:
+        fh.write("project:\n  title: AAA\n  identifier: org.example.aaa\n"
+                 "  language: en-US\n  contents:\n    - one\n    - two\n")
+    png(os.path.join(work, "cc.png"), (0, 0, 0))
+    with open(os.path.join(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
+        fh.write("targets:\n  pdf:\n    format: pdf\n    pdf:\n"
+                 "      metadata: pdf-layout-wcag-aaa.yaml\n")
+    subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick"], cwd=work,
+                   capture_output=True, text=True, stdin=subprocess.DEVNULL)
+    return os.path.join(work, "pdf", "org.example.aaa.pdf")
+
+
 def build_default(work):
     """The book (write_book) on the PDF target's default page, which its
     checks measure on the class's (CLASS_PAGE): every kind of thing it
@@ -1897,6 +1930,52 @@ def preamble_checks(preamble_path):
          and 23.5 < commonest_leading(body) < 24.3),
     ]
 
+def aaa_checks(aaa_path):
+    """The AAA book's checks (build_aaa): the page for WCAG 1.4.8 (AAA),
+    bin/pdf-layout-wcag-aaa.yaml. 13.5pt is 13.45 of the PDF's points,
+    and a footnote's type, 11.25pt, is 11.21."""
+    reader = pypdf.PdfReader(aaa_path) if os.path.exists(aaa_path) else None
+    lines = glyph_lines(aaa_path) if reader else {}
+    opening = page_holding(aaa_path, "The first chapter opens")
+    body = text_lines(lines, opening + 1) if opening is not None else []
+    sizes = sizes_by_page(reader, "sentence")[opening + 1] \
+        if opening is not None and opening + 1 < len(reader.pages) else []
+    leading = commonest_leading(body) or 0
+    breaks = [a[0] - b[0] for a, b in zip(body, body[1:]) if a[0] - b[0] > 1.5 * leading]
+
+    def lines_from(page, first, last=None):
+        """A page's lines from the one holding first to the one holding
+        last, or to the page's text's end."""
+        found = text_lines(lines, page)
+        start = next((i for i, line in enumerate(found) if squeezed(first) in
+                      squeezed(line[3])), None)
+        if start is None:
+            return []
+        end = next((i for i, line in enumerate(found) if i >= start and last
+                    and squeezed(last) in squeezed(line[3])), len(found) - 1)
+        return found[start:end + 1]
+    note = lines_from(opening, "The note.") if opening is not None else []
+    figure = page_holding(aaa_path, "Each sentence of this caption")
+    caption = lines_from(figure, "Each sentence of this caption", "Henceforth") \
+        if figure is not None else []
+    return [
+        ("on the page for WCAG 1.4.8 (AAA), the text is 13.5pt type on lines "
+         "space-and-a-half apart: 1.5 times the font's single spacing, which the book "
+         "class makes 1.2 times the type's size, so 1.8 times it",
+         lambda: len(body) > 10 and set(sizes) == {13.45}
+         and abs(leading - 1.8 * 13.45) < 0.15),
+        ("its paragraphs 2.5 times that single spacing apart, from the top of one's "
+         "last line to the top of the next one's first, 3 times the type's size",
+         lambda: len(breaks) >= 2 and 3 * 13.45 - 0.15 < min(breaks) < 3 * 13.45 + 3),
+        ("and a footnote's lines and a caption's, in a book with a table, which loads "
+         "the caption package, are as far apart for their type as the text's, where the "
+         "default page sets them single-spaced",
+         lambda: len(note) > 2 and len(caption) > 2
+         and abs(commonest_leading(note) - 1.8 * 11.21) < 0.15
+         and abs(commonest_leading(caption) - 1.8 * 13.45) < 0.15),
+    ]
+
+
 def fancy_checks(fancy_path):
     """The fancy book's checks (build_fancy)."""
     reader = pypdf.PdfReader(fancy_path) if os.path.exists(fancy_path) else None
@@ -1940,6 +2019,7 @@ def checks(work, jobs=1):
             fancied = pool.submit(build_fancy, work + "-fancy")
             defaulted = pool.submit(build_default, work + "-default")
             prefaced = pool.submit(build_preamble, work + "-preamble")
+            aaa = pool.submit(build_aaa, work + "-aaa")
             reader, source, rows, log, placements = book.result()
             ua1_path, ua1_said, ua1_rows = ua1.result()
             untagged_path, untagged_said = plain.result()
@@ -1949,6 +2029,7 @@ def checks(work, jobs=1):
             fancy_path = fancied.result()
             default_path = defaulted.result()
             preamble_path = prefaced.result()
+            aaa_path = aaa.result()
     else:
         reader, source, rows, log, placements = build(work)
         ua1_path, ua1_said, ua1_rows = build_ua1(work + "-ua1")
@@ -1959,6 +2040,7 @@ def checks(work, jobs=1):
         fancy_path = build_fancy(work + "-fancy")
         default_path = build_default(work + "-default")
         preamble_path = build_preamble(work + "-preamble")
+        aaa_path = build_aaa(work + "-aaa")
 
     def page_text(path):
         return "".join(page.extract_text() or "" for page in pypdf.PdfReader(path).pages) \
@@ -2572,6 +2654,7 @@ def checks(work, jobs=1):
     items += fancy_checks(fancy_path)
     items += default_checks(default_path)
     items += preamble_checks(preamble_path)
+    items += aaa_checks(aaa_path)
     if verapdf_ran:
         # The one character no font has is drawn as .notdef, which
         # veraPDF reports, and that's the only rule it finds failed.
@@ -2686,14 +2769,14 @@ def main():
             print(("  ok    " if passed else "  FAIL  ") + name)
             failed += not passed
     finally:
-        # The PDF/UA-1, untagged, notes, footer, sized, fancy, default, and
-        # preamble books are built beside the book (build_ua1,
+        # The PDF/UA-1, untagged, notes, footer, sized, fancy, default,
+        # preamble, and AAA books are built beside the book (build_ua1,
         # build_untagged, build_notes, build_footer, build_sized,
-        # build_fancy, build_default, build_preamble).
+        # build_fancy, build_default, build_preamble, build_aaa).
         if arguments.keep:
             print(f"\nOutput left in {work}, {work}-ua1, {work}-untagged, {work}-notes, "
-                  f"{work}-footer, {work}-sized, {work}-fancy, {work}-default, and "
-                  f"{work}-preamble")
+                  f"{work}-footer, {work}-sized, {work}-fancy, {work}-default, "
+                  f"{work}-preamble, and {work}-aaa")
         else:
             shutil.rmtree(work, ignore_errors=True)
             shutil.rmtree(work + "-ua1", ignore_errors=True)
@@ -2704,6 +2787,7 @@ def main():
             shutil.rmtree(work + "-fancy", ignore_errors=True)
             shutil.rmtree(work + "-default", ignore_errors=True)
             shutil.rmtree(work + "-preamble", ignore_errors=True)
+            shutil.rmtree(work + "-aaa", ignore_errors=True)
     print(f"\n{failed} check(s) failed" if failed
           else "\nall PDF checks passed")
     return 1 if failed else 0

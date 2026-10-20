@@ -189,7 +189,17 @@ Book</emphasis>.</note></para>
 </tbody></tgroup></table>
 <note id="n1" class="linkup"><title>Trading <term id="t3">Posts</term></title>
 <para id="p2">Read more at
-<link url="https://example.org/trade">a site</link>, Zoë's.</para></note>
+<link url="https://example.org/trade">a site</link>, Zoë's.</para>
+<note id="n7" class="linkup"><title>Inner Posts</title>
+<para id="p12">A note inside a note.</para></note></note>
+<note id="n3" class="linkup"><title>Link It <term id="t4">Up</term></title>
+<para id="p8">A title that only repeats the note's kind.</para></note>
+<note id="n4" class="linkup"><title>Link It Up: Markets Meet</title>
+<para id="p9">A title that opens with the note's kind.</para></note>
+<note id="n5" class="linkup"><title>Link it up: Prices Meet</title>
+<para id="p10">A title that opens with the note's kind in other case.</para></note>
+<note id="n6" class="linkup"><title>Link It Ups and Downs</title>
+<para id="p11">A title that opens with the kind's words in a longer one.</para></note>
 <equation id="eq1"><m:math><m:mi>x</m:mi><m:mo>=</m:mo><m:mn>2</m:mn>
 </m:math></equation>
 </section>
@@ -333,14 +343,49 @@ def case_trade(work):
          "its page at openstax.org, named as OpenStax names it",
          lambda: '<a href="https://openstax.org/books/other-trade/pages/'
          'elsewhere">Elsewhere</a>' in gains),
-        ("a note is titled by its class, a heading a level down",
-         lambda: re.search(r'<div class="os-note linkup"[^>]*><h3>Link It '
-                           r'Up</h3>', section)),
-        ("a heading baking wrote in spans keeps what it holds: a term in a "
-         "note's own title keeps its id, which the index links to",
-         lambda: '<h4>Trading <strong><span class="os-term" id="t3">Posts'
-         '</span></strong></h4>' in section
+        ("a note is a box, headed a level down by its kind, which its class "
+         "names, and its own title, in one heading, the kind in a span of its "
+         "own; and a heading baking wrote in spans keeps what it holds: a "
+         "term in the note's title keeps its id, which the index links to",
+         lambda: re.search(r'<div class="os-note linkup box"[^>]*><h3><span '
+                           r'class="os-note-label">Link It Up</span>: Trading '
+                           r'<strong><span class="os-term" id="t3">Posts'
+                           r'</span></strong></h3>', section)
          and 'href="1-1-why-trade-happens.html#t3"' in index),
+        ("a note whose title only repeats its kind is headed by its kind alone, "
+         "an id the title held kept as an anchor",
+         lambda: '<div class="os-note linkup box" id="n3"><h3>Link It Up<span '
+         'id="t4"></span></h3>' in section),
+        ("and one whose title opens with its kind by its title alone, in any "
+         "case, but not one whose title opens with a longer word",
+         lambda: '<div class="os-note linkup box" id="n4"><h3>Link It Up: Markets '
+         'Meet</h3>' in section
+         and '<div class="os-note linkup box" id="n5"><h3>Link it up: Prices '
+         'Meet</h3>' in section
+         and '<div class="os-note linkup box" id="n6"><h3><span class="os-note-label">'
+         'Link It Up</span>: Link It Ups and Downs</h3>' in section),
+        ("the title is in the heading alone, not in the note again, and no "
+         "id is on the page twice",
+         lambda: section.count("Trading") == 1 and section.count('id="t3"') == 1
+         and len(re.findall(r' id="([^"]+)"', section))
+         == len(set(re.findall(r' id="([^"]+)"', section)))),
+        ("what a note holds is a level under its one heading, a note inside it "
+         "too",
+         lambda: re.search(r'<h3><span class="os-note-label">Link It Up</span>: '
+                           r'Trading .*?</h3>\s*<p id="p2">.*?</p>\s*<div '
+                           r'class="os-note linkup box" id="n7"><h4><span '
+                           r'class="os-note-label">Link It Up</span>: Inner '
+                           r'Posts</h4>', section, re.S)),
+        ("the unpacker says how many notes are boxes, and how many baking "
+         "headed by two headings are headed by one, which way",
+         lambda: "7 note(s) made boxes" in result.stdout
+         and "6 note(s) that baking headed by their kind and, under it, their "
+         "own title are headed by one heading: 3 by both" in " ".join(
+             result.stdout.split())
+         and "1 by their kind alone" in result.stdout
+         and "2 by their title alone" in result.stdout),
+        ("a reference written as a note, which a references page lists, isn't a box",
+         lambda: '<div class="os-note reference" id="n2">' in section),
         ("the words are composed (NFC), as HTML wants them",
          lambda: "Zoë's" in section and "̈" not in section),
         ("a footnote is a note as Pandoc writes one",
@@ -752,7 +797,9 @@ url="#exercise/TEST_OC1"/></para></problem></exercise></section>
 <section id="cm" class="chemistry-matters"><title>Alkaloids: From Cocaine
 to Dental Anesthetics</title><para id="p2">Coca leaves.</para></section>
 <note id="n1" class="why-chapter"><title/><note id="n2"><title>Strategy</title>
-<para id="p3">Plan.</para></note></note>""")
+<para id="p3">Plan.</para></note></note>
+<note id="n3" class="why-chapter"><title id="n3t">Bonds Hold</title>
+<para id="p4">Electrons pair.</para></note>""")
     os.makedirs(os.path.join(repo, "media"), exist_ok=True)
     with open(os.path.join(repo, "media", "one.png"), "wb") as fh:
         fh.write(ONE_PIXEL)
@@ -763,6 +810,8 @@ to Dental Anesthetics</title><para id="p2">Coca leaves.</para></section>
                                "Hydrogen has one proton.")))
     out = os.path.join(work, "orgo")
     result = unpack(repo, out, "--exercises-cache", cache)
+    plain_out = os.path.join(work, "orgo-plain")
+    plain = unpack(repo, plain_out, "--exercises-cache", cache, "--no-boxes")
     section = read(out, "1-1-atomic-structure.html")
     key = read(out, "chapter-1.html")
     return [
@@ -786,8 +835,22 @@ to Dental Anesthetics</title><para id="p2">Coca leaves.</para></section>
          "Dental Anesthetics</h1>" in read(out, "1-chemistry-matters.html")),
         ("a note whose title is empty has no heading for it, and what it "
          "holds no level lower for it",
-         lambda: re.search(r"<h2>Why This Chapter\?</h2>\s*<div class=\"os-note\"[^>]*>"
+         lambda: re.search(r"<h2>Why This Chapter\?</h2>\s*<div class=\"os-note box\"[^>]*>"
                            r"\s*<h3>Strategy</h3>", section)),
+        ("a note's kind that ends in a question mark is followed by its "
+         "title with no colon",
+         lambda: '<div class="os-note why-chapter box" id="n3"><h2><span '
+         'class="os-note-label">Why This Chapter?</span> Bonds Hold</h2>'
+         in section),
+        ("--no-boxes leaves every note no box, each still headed by its kind "
+         "and its title in one heading",
+         lambda: plain.returncode == 0
+         and '<div class="os-note why-chapter" id="n3"><h2><span '
+         'class="os-note-label">Why This Chapter?</span> Bonds Hold</h2>'
+         in read(plain_out, "1-1-atomic-structure.html")
+         and not any("box" in c.split() for c in re.findall(
+             r'<div class="(os-note[^"]*)"', read(plain_out, "1-1-atomic-structure.html")))
+         and "made boxes" not in plain.stdout and "made boxes" in result.stdout),
         ("a mechanism's caption is its figure's, as any figure's",
          lambda: '<figcaption><span class="os-label">Figure 1.1</span> '
          '<span class="os-title">MECHANISM</span> <span class="os-caption">'
@@ -1950,6 +2013,52 @@ def case_collation(work):
     ]
 
 
+# A note's heading, from baking's markup -------------------------------------
+
+def case_note_headings(work):
+    """The emitter on notes as baking writes them: a label that ends in its
+    divider's space, as Calculus' theorems do, and ids on the label and on
+    the title, as OpenStax's own assembly writes them."""
+    from lxml import etree
+    from cnx.cnxml import E
+    from cnx.emit import Emitter
+
+    def emitted(markup):
+        out = E("div")
+        Emitter(None, [], "en", []).dt_note(etree.fromstring(markup), out, 2,
+                                            None)
+        return etree.tostring(out, encoding="unicode")
+
+    theorem = emitted(
+        '<div data-type="note" class="theorem" id="n1"><h3 data-type="title" '
+        'class="os-title"><span class="os-title-label">Theorem</span> <span '
+        'class="os-number">2.1</span><span class="os-divider"> </span></h3>'
+        '<div class="os-note-body"><h4 data-type="title" class="os-subtitle" '
+        'id="sub1"><span class="os-subtitle-label">Two Important Limits</span>'
+        '</h4><p id="p1">Let a be a real number.</p></div></div>')
+    try_it = emitted(
+        '<div data-type="note" class="try" id="n2"><h3 data-type="title" '
+        'class="os-title"><span class="os-title-label">Try it</span><span '
+        'id="lab2"></span></h3><div class="os-note-body"><h4 data-type="title" '
+        'class="os-subtitle" id="sub2"><span class="os-subtitle-label">Try It: '
+        'The Terms</span></h4><p id="p2">Find them.</p></div></div>')
+    return [
+        ("a label that ends in a space, its divider's, has none before the "
+         "colon",
+         lambda: '<h3><span class="os-note-label">Theorem 2.1</span>: Two '
+         'Important Limits' in theorem),
+        ("the title's own id stays, an anchor in the heading, when it joins "
+         "its label",
+         lambda: re.search(r'Two Important Limits<span id="sub1"/></h3>',
+                           theorem)),
+        ("and when it stands alone, an id the label held kept as well",
+         lambda: re.search(r'<h3>(<span id="lab2"/>)?Try It: The Terms'
+                           r'(<span id="sub2"/>)?</h3>', try_it)
+         and 'id="lab2"' in try_it and 'id="sub2"' in try_it
+         and "Try it" not in try_it),
+    ]
+
+
 # Baking's steps, one at a time ---------------------------------------------
 
 def case_steps(work):
@@ -2267,6 +2376,7 @@ CASES = [
     ("which summaries read their tables out", case_read_out),
     ("the collation", case_collation),
     ("baking's steps, one at a time", case_steps),
+    ("a note's heading, from baking's markup", case_note_headings),
     ("cookbook's own sample books", case_cookbook),
     ("converting an unpacked book", case_convert),
 ]

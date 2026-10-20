@@ -46,6 +46,10 @@ class Result:
         self.baked = False
         self.exercises = 0
         self.exercises_missing = 0
+        self.boxes = 0
+        self.merged_titles = 0
+        self.kind_alone = 0
+        self.title_alone = 0
 
 
 def resolve_other_books(repo, book, baked, report):
@@ -100,10 +104,11 @@ def _names(repo, other):
     return ({p.module: p for p in pages if p.module}, baked.labels)
 
 
-def unpack(repo_dir, out, slug=None, source_name=None, bank=None):
+def unpack(repo_dir, out, slug=None, source_name=None, bank=None, boxes=True):
     """Unpack one book of a repository into out, which must be empty or
     absent. bank is the exercises.Bank its embedded exercises come from
-    (by default, the cache, then the network). Returns a Result."""
+    (by default, the cache, then the network); boxes, whether its notes
+    are boxes (class box). Returns a Result."""
     repo = Repo(repo_dir)
     book = repo.book(slug)
     result = Result()
@@ -123,13 +128,17 @@ def unpack(repo_dir, out, slug=None, source_name=None, bank=None):
     resolve_other_books(repo, book, baked, report)
     os.makedirs(out, exist_ok=True)
     language = book.collection.language or "en"
-    emitter = Emitter(baked, pages, language, report)
+    emitter = Emitter(baked, pages, language, report, boxes=boxes)
     for page in pages:
         html = emitter.page_html(page)
         with open(os.path.join(out, page.name + ".html"), "w",
                   encoding="utf-8") as fh:
             fh.write(serialize(html))
     result.pages = len(pages)
+    result.boxes = emitter.boxed
+    result.merged_titles = emitter.merged_titles
+    result.kind_alone = emitter.kind_alone
+    result.title_alone = emitter.title_alone
     result.media = copy_media(asm, out, notes)
     source = "unpack-cnx.py from " + (source_name or os.path.basename(
         os.path.abspath(repo_dir))) + f" ({book.slug})"

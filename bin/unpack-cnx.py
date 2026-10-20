@@ -22,7 +22,10 @@ What's written:
     OpenStax's own HTML marks it: a worked example's steps in the
     dev-math books and College Algebra with Corequisite Support, a
     grid of key terms in Physics, and a Key Equations table, a
-    formula's name beside it, and a box of one cell in any book;
+    formula's name beside it, and a box of one cell in any book; and a
+    note headed by its kind and its own title in one heading ("Big
+    Picture: A Global Culture?") and, without --no-boxes, made a box
+    (class box), which every format draws with a border or rules;
   - the media those pages use, under media/;
   - project.yaml, with the book's title, language, license, and contents;
   - for an OpenStax book, conversion.yaml with the footer OpenStax asks
@@ -102,6 +105,9 @@ def main():
                         f"are kept (default: {default_cache()})")
     parser.add_argument("--offline", action="store_true",
                         help="don't fetch exercises; use the cache alone")
+    parser.add_argument("--no-boxes", action="store_true",
+                        help="don't make the book's notes boxes (class box), "
+                        "which every format draws with a border or rules")
     args = parser.parse_args()
     try:
         repo = Repo(args.repository)
@@ -121,11 +127,24 @@ def main():
         sys.exit(f"{out} exists and is not empty; unpacking would mix two "
                  "books. Name another directory with -o.")
     bank = Bank(cache=args.exercises_cache, offline=args.offline)
-    result = unpack(args.repository, out, book.slug, bank=bank)
+    result = unpack(args.repository, out, book.slug, bank=bank,
+                    boxes=not args.no_boxes)
     how = (f"baked as OpenStax bakes style {result.style!r}" if result.baked
            else "not baked: numbered within each page")
     print(f"{result.pages} page(s), {result.media} media file(s), and "
           f"project.yaml written to {out}/ ({how}).")
+    if result.boxes:
+        print(f"{result.boxes} note(s) made boxes (class box), which every "
+              "format draws with a border or rules; --no-boxes leaves them "
+              "unboxed.")
+    one = result.merged_titles + result.kind_alone + result.title_alone
+    if one:
+        print(f"{one} note(s) that baking headed by their kind and, under it, "
+              "their own title are headed by one heading: "
+              f"{result.merged_titles} by both (\"Big Picture: A Global "
+              f"Culture?\"), {result.kind_alone} by their kind alone, their "
+              f"title only repeating it, and {result.title_alone} by their "
+              "title alone, which opens with their kind.")
     if result.exercises or result.exercises_missing:
         print(f"{result.exercises} exercise(s) from OpenStax's exercise bank"
               + (f"; {result.exercises_missing} couldn't be had"

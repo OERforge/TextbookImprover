@@ -7,8 +7,9 @@ reads well to a person:
 
     the page's title the one <h1>, first, as in <title>
     a section's title an <h2> to <h6>, by its depth on the page
-    a note a <div class="os-note ..."> whose title and subtitle are
-        headings a level and two below where it stands
+    a note a box, <div class="os-note ... box">, its kind and its own
+        title one heading a level below where it stands ("Big Picture: A
+        Global Culture?")
     a figure a <figure> with its image and a <figcaption> that reads
         "Figure 3.2 A Demand Curve for Gasoline The demand schedule ..."
     a table a <table> whose <caption> reads "Table 3.1 Price and Quantity
@@ -97,11 +98,20 @@ class Emitter:
     `titles` each page's title by name, for links that still need
     text."""
 
-    def __init__(self, book, pages, language, report):
+    def __init__(self, book, pages, language, report, boxes=True):
         self.book = book
         self.pages = pages
         self.language = language
         self.report = report
+        # Whether a note is a box (class box), as TextbookImprover draws
+        # one in every format; and how many were, and how many that baking
+        # headed by their kind and their own title were headed by one
+        # heading: the two, the kind alone, or the title alone.
+        self.boxes = boxes
+        self.boxed = 0
+        self.merged_titles = 0
+        self.kind_alone = 0
+        self.title_alone = 0
         self.by_name = {p.name: p for p in pages}
         # (page, label, caption text, summary, layout, the words of its
         # body's cells by row, place, excerpt): place is the table's number
@@ -323,11 +333,20 @@ class Emitter:
             self.convert_children(body[0] if body else el, out, level, page)
             dst.append(out)
             return
-        out = E("div", {"class": " ".join(["os-note"] + classes(el)),
-                        "id": el.get("id")})
+        # A note is a box, which TextbookImprover draws in every format,
+        # as OpenStax's stylesheets set every note apart: a border on a page
+        # and in an EPUB and a Word file, rules above and below in a PDF.
+        # But not a reference, which a book of the business styles writes
+        # as a note, each an entry of its references page.
+        names = ["os-note"] + classes(el)
+        if self.boxes and "reference" not in names:
+            names.append("box")
+            self.boxed += 1
+        out = E("div", {"class": " ".join(names), "id": el.get("id")})
         if el.get("lang"):
             out.set("lang", el.get("lang"))
         inner_level = level
+        label = None
         for child in list(el):
             if not isinstance(child.tag, str):
                 continue
@@ -339,6 +358,8 @@ class Emitter:
                 out.append(h)
                 inner_level = level + 1
                 detach(child)
+                if text_of(h):
+                    label = h
         body = el.xpath("./div[@class='os-note-body']")
         holder = body[0] if body else el
         for child in list(holder):
@@ -350,6 +371,46 @@ class Emitter:
                 for named in child.iter():
                     if isinstance(named.tag, str) and named.get("id"):
                         out.append(E("span", {"id": named.get("id")}, ""))
+                detach(child)
+            elif (isinstance(child.tag, str)
+                    and has_class(child, "os-subtitle") and label is not None):
+                # The note's kind, its label, and its own title are one
+                # heading ("Big Picture: A Global Culture?"), where they had
+                # been a heading with only the title under it: a screen
+                # reader's list of a book's headings named each kind as
+                # often as it was used, each title a level below. A title
+                # that only repeats the kind (Physics' "Teacher Support")
+                # leaves the kind alone, and one that opens with the kind
+                # ("Try It: The nth Term…" under "Try it") stands alone.
+                kind, own = text_of(label).casefold(), text_of(child).casefold()
+                if own == kind:
+                    # What a link may name in the title (a term the index
+                    # links to) stays, an anchor in the heading.
+                    for named in child.iter():
+                        if isinstance(named.tag, str) and named.get("id"):
+                            label.append(E("span", {"id": named.get("id")}, ""))
+                    self.kind_alone += 1
+                else:
+                    if own.startswith(kind) and \
+                            not own[len(kind):len(kind) + 1].isalnum():
+                        # The label's words go, what a link may name in
+                        # them kept, an anchor in the heading.
+                        named = [part.get("id") for part in label.iter()
+                                 if part is not label and isinstance(part.tag, str)
+                                 and part.get("id")]
+                        label.text = None
+                        for part in list(label):
+                            label.remove(part)
+                        for name in named:
+                            label.append(E("span", {"id": name}, ""))
+                        self.title_alone += 1
+                    else:
+                        _merge_title(label)
+                        self.merged_titles += 1
+                    self.convert_children(child, label, level, page)
+                    _flatten_spans(label)
+                    if child.get("id"):
+                        label.append(E("span", {"id": child.get("id")}, ""))
                 detach(child)
             elif (isinstance(child.tag, str)
                     and has_class(child, "os-subtitle")):
@@ -1130,6 +1191,38 @@ def _area_title(child):
             and not (child[0].tail or "").strip():
         return child[0]
     return None
+
+
+def _merge_title(label):
+    """A note's label heading made ready to take its title after it: the
+    label's words in a span of class os-note-label, then a colon, unless
+    the label ends in punctuation of its own ("Who Knew?", "Disorders of
+    the...")."""
+    span = E("span", {"class": "os-note-label"})
+    span.text = label.text
+    label.text = None
+    for child in list(label):
+        span.append(child)
+    label.append(span)
+    # Baking may leave a space at the label's end ("Theorem 2.1 ", its
+    # divider's), which would stand before the colon.
+    _rstrip(span)
+    append_text(label, " " if text_of(span)[-1:] in ":?!." else ": ")
+
+
+def _rstrip(element):
+    """The space at the end of an element's words taken off, after its
+    last child or inside it, but not inside a formula."""
+    if len(element):
+        last = element[-1]
+        if (last.tail or "").strip():
+            last.tail = last.tail.rstrip()
+        else:
+            last.tail = None
+            if isinstance(last.tag, str) and etree.QName(last).localname != "math":
+                _rstrip(last)
+    else:
+        element.text = (element.text or "").rstrip() or None
 
 
 def _flatten_spans(element):

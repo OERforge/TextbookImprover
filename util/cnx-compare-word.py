@@ -122,6 +122,16 @@ def html_tokens(path, math=False):
                          "' os-abstract ')]"):
         for number, li in enumerate(ol.xpath("./li"), 1):
             li.text = f"{number} " + (li.text or "")
+    # A note's kind and its own title are one heading here, a colon
+    # between them ("Big Picture: A Global Culture?"), and two in the Word
+    # files, so they're read without the colon. A note headed by its kind
+    # alone, its title repeating it, or by its title alone, which opens
+    # with its kind, has both in the Word file, so the kind's words are
+    # the Word file's alone ("Careers in IS", in Foundations of
+    # Information Systems).
+    for label in body.xpath(".//span[contains(concat(' ', @class, ' '), "
+                            "' os-note-label ')]"):
+        label.tail = re.sub(r"^:", " ", label.tail or "")
     # A table's caption is read after it, where OpenStax puts it.
     for caption in body.xpath(".//table/caption"):
         table = caption.getparent()

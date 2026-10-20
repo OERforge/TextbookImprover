@@ -1183,6 +1183,83 @@ def quoted_lists_var(settings):
     return settings[:at] + "<w:docVars>" + var + "</w:docVars>" + settings[at:]
 
 
+# The footer setting's part, and its paragraphs' style, Word's own Footer
+# (its name is lowercase in Word's styles), which Pandoc's reference
+# document doesn't have: centered, in small type, as a PDF's foot sets it.
+FOOTER_PART = "word/tiqfooter.xml"
+FOOTER_ID = "rIdTiqFooter"
+FOOTER_STYLE = ('<w:style w:type="paragraph" w:styleId="Footer">'
+                '<w:name w:val="footer" /><w:basedOn w:val="Normal" />'
+                '<w:uiPriority w:val="99" /><w:unhideWhenUsed />'
+                '<w:pPr><w:spacing w:before="0" w:after="0" /><w:jc w:val="center" /></w:pPr>'
+                '<w:rPr><w:sz w:val="18" /><w:szCs w:val="18" /></w:rPr></w:style>')
+
+
+def footer_xml(paragraphs):
+    """A footer part holding the paragraphs, each in Word's Footer style,
+    a newline in one a line break."""
+    def runs(text):
+        return "<w:r><w:br /></w:r>".join(
+            '<w:r><w:t xml:space="preserve">%s</w:t></w:r>' % html.escape(line, quote=False)
+            for line in text.split("\n"))
+    body = "".join('<w:p><w:pPr><w:pStyle w:val="Footer" /></w:pPr>%s</w:p>' % runs(text)
+                   for text in paragraphs)
+    return ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
+            '<w:ftr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" '
+            'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
+            + body + "</w:ftr>")
+
+
+def reference_footer(xml):
+    """Every section's default footer, the footer setting's: a reference as
+    each w:sectPr's first child, where the schema puts header and footer
+    references, in place of a default footer the reference document gave.
+    Returns the XML and how many sections it names."""
+    ref = '<w:footerReference w:type="default" r:id="%s" />' % FOOTER_ID
+    xml = re.sub(r'<w:footerReference\b[^>]*\bw:type="default"[^>]*/>', "", xml)
+
+    def section(match):
+        tag = match.group(0)
+        if tag.endswith("/>"):
+            return tag[:-2].rstrip() + ">" + ref + "</w:sectPr>"
+        return tag + ref
+
+    return re.subn(r"<w:sectPr(?:\s[^>]*)?/?>", section, xml)
+
+
+def add_footer(parts, names, infos, paragraphs):
+    """The footer setting on every page of the file at parts: its own part,
+    related from the document, typed, styled, and referenced by every
+    section. Returns 1, or 0 when the document has no section to put it
+    in (Pandoc's writer always writes one)."""
+    xml, sections = reference_footer(parts["word/document.xml"].decode("utf-8"))
+    if not sections:
+        return 0
+    parts["word/document.xml"] = xml.encode("utf-8")
+    parts[FOOTER_PART] = footer_xml(paragraphs).encode("utf-8")
+    if FOOTER_PART not in names:
+        names.append(FOOTER_PART)
+        infos[FOOTER_PART] = zipfile.ZipInfo(FOOTER_PART)
+    rels = "word/_rels/document.xml.rels"
+    if rels in parts and FOOTER_ID not in parts[rels].decode("utf-8"):
+        parts[rels] = parts[rels].decode("utf-8").replace(
+            "</Relationships>",
+            '<Relationship Id="%s" Type="http://schemas.openxmlformats.org/'
+            'officeDocument/2006/relationships/footer" Target="%s" />'
+            "</Relationships>" % (FOOTER_ID, FOOTER_PART.split("/", 1)[1]), 1).encode("utf-8")
+    types = parts["[Content_Types].xml"].decode("utf-8")
+    if 'PartName="/%s"' % FOOTER_PART not in types:
+        parts["[Content_Types].xml"] = types.replace(
+            "</Types>", '<Override PartName="/%s" ContentType="application/'
+            'vnd.openxmlformats-officedocument.wordprocessingml.footer+xml" />'
+            "</Types>" % FOOTER_PART, 1).encode("utf-8")
+    styles = parts.get("word/styles.xml", b"").decode("utf-8")
+    if styles and 'w:styleId="Footer"' not in styles:
+        parts["word/styles.xml"] = styles.replace("</w:styles>", FOOTER_STYLE + "</w:styles>",
+                                                  1).encode("utf-8")
+    return 1
+
+
 # Ids. Pandoc's writer names a bookmark after its id only when the id
 # starts with a letter and is at most 40 characters, Word's rule; any
 # other becomes X and a SHA-1 of the id (Writers/Docx/OpenXML.hs,
@@ -1312,11 +1389,13 @@ def page_title_text(doc):
     return text((doc.get("meta") or {}).get("title")).strip()
 
 
-def finish(path, doc, keep=None):
+def finish(path, doc, keep=None, footer=()):
     """Rewrite the .docx at path with what the page's AST says; returns a
     dict of counts: tooltips, decorative, first_columns, bars, and compat
     (1 when the mode was set). keep: the bookmark names links go to, when
-    the others are to go (bookmarks: linked); None keeps them all."""
+    the others are to go (bookmarks: linked); None keeps them all.
+    footer: the footer setting's paragraphs, as text (pagefooter), for
+    every page's footer."""
     if isinstance(doc, str):
         with open(doc, encoding="utf-8") as fh:
             doc = json.load(fh)
@@ -1389,6 +1468,8 @@ def finish(path, doc, keep=None):
             and 'w:styleId="LineNumber"' not in text("word/styles.xml"):
         parts["word/styles.xml"] = text("word/styles.xml").replace(
             "</w:styles>", LINE_NUMBER_STYLE + "</w:styles>", 1).encode("utf-8")
+    if footer and "word/document.xml" in parts:
+        counts["footers"] = add_footer(parts, names, infos, footer)
     mapping = id_map(doc)
     if (mapping or listed_tables) and ID_MAP_PART not in parts:
         parts[ID_MAP_PART] = _id_map_xml(mapping, listed_tables).encode("utf-8")

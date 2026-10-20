@@ -1035,6 +1035,24 @@ local function list_start(list)
   return list
 end
 
+-- The footer setting a markdown or asciidoc target ends each file with,
+-- in a div of class oer-footer (target-blocks.lua): the target's own
+-- setting puts it on every page of every output, so a file read back as a
+-- source would have it twice. A div of that class at a file's end is
+-- taken out whoever wrote it.
+local function drop_page_footer(doc)
+  local blocks = doc.blocks
+  local dropped = false
+  while #blocks > 0 and blocks[#blocks].t == 'Div'
+      and blocks[#blocks].classes:includes('oer-footer') do
+    blocks:remove(#blocks)
+    dropped = true
+  end
+  if not dropped then return nil end
+  doc.blocks = blocks
+  return doc
+end
+
 -- A table a Markdown target wrote as HTML because it has merged cells,
 -- or a figure it wrote that way because it carries an id: read back
 -- into the block it was, so the rest of the filter can work on it.
@@ -3471,9 +3489,10 @@ end
 return {
   -- A table or figure written as HTML, or a figure written as a div, by
   -- a Markdown target: the block it was, before anything counts or
-  -- numbers tables and figures; and a numbered list it wrote from one,
-  -- its own start again.
-  { RawBlock = RawBlock, Div = figure_div, OrderedList = list_start },
+  -- numbers tables and figures; a numbered list it wrote from one, its
+  -- own start again; and the footer it ended the file with, gone.
+  { RawBlock = RawBlock, Div = figure_div, OrderedList = list_start,
+    Pandoc = drop_page_footer },
   -- White space with nothing to show, before anything reads a table's
   -- cells or its words.
   { Inlines = unmark_white, Table = empty_white_cells },

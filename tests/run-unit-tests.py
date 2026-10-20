@@ -1001,6 +1001,40 @@ def check_notes_groups():
     ]
 
 
+def check_notes_before_footer():
+    """An EPUB's chapter file's notes go in its last section, before the
+    footer setting's <footer> after it, whatever the footer holds."""
+    import notes
+    page = ('<body>\n<section id="c">\n<p>Text.</p>\n</section>\n<footer>\n<section>\n'
+            '<p>Shared under CC BY.</p>\n</section>\n</footer>\n</body>\n')
+    placed = notes.insert_before_end(page, "<aside>A note.</aside>\n", "xhtml")
+    return [
+        ("a chapter's notes go in its last section, before the footer, a section in the "
+         "footer too",
+         lambda: placed == page.replace("<p>Text.</p>\n</section>",
+                                         "<p>Text.</p>\n<aside>A note.</aside>\n</section>", 1)),
+    ]
+
+
+def check_page_footer():
+    """The footer setting outside an HTML page (lib/pagefooter.py): a Word
+    footer's line keeps a no-break space, where its other white space runs
+    together, and no part of a table keeps its id, the footer being on
+    every page."""
+    import pagefooter
+    base = scratch()
+    lines = pagefooter.paragraphs("Shared under CC\\ BY, p.\\ 5.\n\n- One\n- Two", base)
+    table = pagefooter.xhtml(
+        '<table id="t"><thead id="h"><tr id="hr"><th id="c1">A</th></tr></thead>'
+        '<tbody id="b"><tr id="r"><td id="c2">x</td></tr></tbody></table>', base)
+    return [
+        ("a Word footer keeps a no-break space",
+         lambda: lines == ["Shared under CC\u00a0BY, p.\u00a05.", "- One\n- Two"]),
+        ("no part of a table in the footer keeps its id",
+         lambda: "<td>x</td>" in table and " id=" not in table),
+    ]
+
+
 LIST_WRAPPED = ('<table><tr><td><ul><li><img src="x.png" alt="An eye"></li>'
                 '</ul></td></tr></table>')
 PLAIN_CELL = '<table><tr><td><img src="x.png" alt="An eye"></td></tr></table>'
@@ -1804,6 +1838,8 @@ GROUPS = [
     ("one file per chapter", check_one_file_chapters),
     ("a page's notes group", check_notes_groups),
     ("a page's notes heading", check_notes_heading),
+    ("a chapter's notes, before the footer", check_notes_before_footer),
+    ("the footer outside an HTML page", check_page_footer),
     ("the names a target copies files under", check_output_names),
     ("identifiers", check_identifiers),
     ("facts written down twice", check_consistency),

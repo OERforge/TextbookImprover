@@ -798,6 +798,108 @@ def build_notes(work):
             converted.stdout + converted.stderr, source)
 
 
+# Words for a page of text after the chapter's first.
+FOOTER_WORDS = ("Each sentence of this chapter runs on about internationalization, "
+                "characteristically interdisciplinary counterrevolutionaries, and "
+                "institutionalization, so that its lines are long. ")
+FOOTER_ONE = ("# One\n\nThe first chapter opens with a note.[^1]\n\n"
+              "[^1]: The note.\n\n"
+              + "".join(FOOTER_WORDS * 4 + "\n\n" for _ in range(14)))
+FOOTER_TWO = "# Two\n\nThe second chapter.\n"
+
+
+# The footer book's page: 12pt type on lines 1.25 times as far apart as
+# the class sets them, which the footer's own spacing mustn't take.
+FOOTER_LAYOUT = "fontsize: 12pt\nlinestretch: 1.25\n"
+
+
+def build_footer(work):
+    """A book of two chapters with a footer, a link and a picture in it,
+    laid out in FOOTER_LAYOUT: the PDF's path."""
+    os.makedirs(work)
+    for name, text in (("one.md", FOOTER_ONE), ("two.md", FOOTER_TWO)):
+        with open(os.path.join(work, name), "w", encoding="utf-8") as fh:
+            fh.write(text)
+    with open(os.path.join(work, "project.yaml"), "w", encoding="utf-8") as fh:
+        fh.write("project:\n  title: Footed\n  identifier: org.example.footer\n"
+                 "  language: en-US\n  contents:\n    - one\n    - two\n")
+    png(os.path.join(work, "cc.png"), (0, 0, 0))
+    with open(os.path.join(work, "pdf-layout.yaml"), "w", encoding="utf-8") as fh:
+        fh.write(FOOTER_LAYOUT)
+    with open(os.path.join(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
+        fh.write('defaults:\n  footer: "Read *this book* free at '
+                 '[example.net](https://example.net). ![CC BY](cc.png)"\n'
+                 "targets:\n  pdf:\n    format: pdf\n"
+                 "    pdf:\n      metadata: pdf-layout.yaml\n")
+    subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick"], cwd=work,
+                   capture_output=True, text=True, stdin=subprocess.DEVNULL)
+    return os.path.join(work, "pdf", "org.example.footer.pdf")
+
+
+# A footer from a file of its own, with a heading, on pages in
+# fancyhdr's styles, its plain style made from its fancy one: selecting
+# plain, as a chapter's first page does, selects fancy as well, and each
+# wraps the foot (lib/pagefooter.py). fancyhdr is twoside and the book
+# isn't, so its odd foot, which the class sets on every page, gives its
+# even one on an even page.
+FANCY_FOOTER = "## License\n\nShared under [the license](license.md).\n"
+FANCY_LAYOUT = ("classoption: [oneside]\n"
+                "header-includes:\n  - |\n    ```{=latex}\n"
+                "    \\usepackage[twoside]{fancyhdr}\n"
+                "    \\pagestyle{fancy}\n    \\fancyhf{}\n    \\fancyfoot[LE,RO]{\\thepage}\n"
+                "    \\renewcommand\\headrulewidth{0pt}\n"
+                "    \\fancypagestyle{plain}[fancy]{}\n    ```\n")
+
+
+def build_fancy(work):
+    """FOOTER_ONE and FOOTER_TWO with FANCY_FOOTER's footer, from a file,
+    on FANCY_LAYOUT's pages: the PDF's path."""
+    os.makedirs(work)
+    for name, text in (("one.md", FOOTER_ONE), ("two.md", FOOTER_TWO),
+                       ("footer.md", FANCY_FOOTER), ("fancy.yaml", FANCY_LAYOUT)):
+        with open(os.path.join(work, name), "w", encoding="utf-8") as fh:
+            fh.write(text)
+    with open(os.path.join(work, "project.yaml"), "w", encoding="utf-8") as fh:
+        fh.write("project:\n  title: Fancy\n  identifier: org.example.fancy\n"
+                 "  language: en-US\n  contents:\n    - one\n    - two\n")
+    with open(os.path.join(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
+        fh.write("defaults:\n  footer: footer.md\n"
+                 "targets:\n  pdf:\n    format: pdf\n    pdf:\n      metadata: fancy.yaml\n")
+    subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick"], cwd=work,
+                   capture_output=True, text=True, stdin=subprocess.DEVNULL)
+    return os.path.join(work, "pdf", "org.example.fancy.pdf")
+
+
+def glyph_lines(path):
+    """{page index: [(baseline, left, right, text)]}, each page's lines,
+    its glyphs grouped by their baseline, from the top of the page down
+    (pdftext.glyph_boxes)."""
+    rows = {}
+    for page, baseline, left, right, char in pdftext.glyph_boxes(path):
+        rows.setdefault(page, {}).setdefault(baseline, []).append((left, right, char))
+    return {page: sorted(((baseline, min(g[0] for g in glyphs), max(g[1] for g in glyphs),
+                           "".join(g[2] for g in glyphs))
+                          for baseline, glyphs in lines.items()), reverse=True)
+            for page, lines in rows.items()}
+
+
+def sizes_by_page(reader, words):
+    """[the sizes text holding words is drawn at] for each page, its font's
+    size as the page scales it, as head_sizes reads them."""
+    import math
+    found = []
+    for page in reader.pages:
+        sizes = []
+
+        def visit(text, cm, tm, font, size):
+            if words in text:
+                sizes.append(round(size * math.hypot(tm[0], tm[1])
+                                   * math.hypot(cm[0], cm[1]), 2))
+        page.extract_text(visitor_text=visit)
+        found.append(sizes)
+    return found
+
+
 def head_of(source, words):
     """The LaTeX of the longtable holding words, from its column
     specification through its first head ("" if none holds them)."""
@@ -1340,6 +1442,78 @@ def build(work):
     return pypdf.PdfReader(pdf), source, rows, converted.stderr, placements
 
 
+def footer_checks(footer_path):
+    """The footer book's checks (build_footer): the footer setting at the
+    foot of every page (lib/pagefooter.py)."""
+    footer_reader = pypdf.PdfReader(footer_path) if os.path.exists(footer_path) else None
+    footer_lines = glyph_lines(footer_path) if footer_reader else {}
+    footer_texts = pdftext.marked_text(footer_path) if footer_reader else {}
+    opening = page_holding(footer_path, "The first chapter opens")
+
+    def squeezed(words):
+        return re.sub(r"\s+", "", words)
+
+    def footer_baselines():
+        """Each page's footer's baseline, None on a page without one."""
+        return [next((b for b, _, _, t in footer_lines.get(n, [])
+                      if "freeatexample.net" in squeezed(t)), None)
+                for n in range(len(footer_reader.pages))] if footer_reader else []
+
+    def opening_gap():
+        """How far the footer's baseline is under the page number's on the
+        first chapter's opening page, whose foot has its number: the line
+        of digits alone nearest above the footer."""
+        lines = footer_lines.get(opening, [])
+        foot = [b for b, _, _, t in lines if "freeatexample.net" in squeezed(t)]
+        number = [b for b, _, _, t in lines if squeezed(t).isdigit()
+                  and foot and b > foot[0]]
+        return min(number) - foot[0] if number and foot else None
+
+    items = [
+        ("a footer is at the foot of every page, the title page's among them, as an "
+         "artifact, a link in it its words and a picture its alternative text, with no "
+         "link and no image",
+         lambda: footer_reader is not None and len(footer_reader.pages) >= 5
+         and all("Readthisbookfreeatexample.net.CCBY" in squeezed(footer_texts.get((n, None), ""))
+                 for n in range(len(footer_reader.pages)))
+         and not any("freeat" in squeezed(t) for (n, mcid), t in footer_texts.items()
+                     if mcid is not None)
+         and not [uri for _, uri, _ in links(footer_reader) if "example.net" in uri]
+         and not any(page.images for page in footer_reader.pages)),
+        ("it's set in the same size and place on every page, the title page's too",
+         lambda: footer_baselines() and None not in footer_baselines()
+         and max(footer_baselines()) - min(footer_baselines()) < 0.01
+         and len({s for sizes in sizes_by_page(footer_reader, "example") for s in sizes}) == 1),
+        ("a small line's space under the page number, where the foot has one, whatever "
+         "the text's line spacing",
+         lambda: opening_gap() is not None and 11 < opening_gap() < 13),
+    ]
+    if shutil.which("verapdf") or os.environ.get("VERAPDF"):
+        items.append(("veraPDF finds nothing in the footer book's PDF",
+                      lambda: os.path.exists(footer_path) and not pdfcheck.run_verapdf(
+                          outputcheck.find_validator("verapdf"), footer_path)))
+    return items
+
+
+def fancy_checks(fancy_path):
+    """The fancy book's checks (build_fancy)."""
+    reader = pypdf.PdfReader(fancy_path) if os.path.exists(fancy_path) else None
+    texts = pdftext.marked_text(fancy_path) if reader else {}
+
+    def footers(n):
+        return re.sub(r"\s+", "", texts.get((n, None), "")).count("LicenseSharedunderthelicense.")
+    return [
+        ("in fancyhdr's page styles, a chapter's first page's made from the others', and "
+         "an even page's foot given by the odd one's, the footer is at the foot of every "
+         "page once",
+         lambda: reader is not None and len(reader.pages) >= 4
+         and all(footers(n) == 1 for n in range(len(reader.pages)))),
+        ("a heading in the footer is a paragraph there, not in the PDF's bookmarks",
+         lambda: reader is not None and footers(0) == 1
+         and outline_titles(reader) == ["One", "Two"]),
+    ]
+
+
 def checks(work, jobs=1):
     # The two books, at once when there's room: each is a LaTeX build of
     # its own, in a directory of its own.
@@ -1349,15 +1523,21 @@ def checks(work, jobs=1):
             ua1 = pool.submit(build_ua1, work + "-ua1")
             plain = pool.submit(build_untagged, work + "-untagged")
             noted = pool.submit(build_notes, work + "-notes")
+            footed = pool.submit(build_footer, work + "-footer")
+            fancied = pool.submit(build_fancy, work + "-fancy")
             reader, source, rows, log, placements = book.result()
             ua1_path, ua1_said, ua1_rows = ua1.result()
             untagged_path, untagged_said = plain.result()
             notes_path, notes_plain, notes_said, notes_source = noted.result()
+            footer_path = footed.result()
+            fancy_path = fancied.result()
     else:
         reader, source, rows, log, placements = build(work)
         ua1_path, ua1_said, ua1_rows = build_ua1(work + "-ua1")
         untagged_path, untagged_said = build_untagged(work + "-untagged")
         notes_path, notes_plain, notes_said, notes_source = build_notes(work + "-notes")
+        footer_path = build_footer(work + "-footer")
+        fancy_path = build_fancy(work + "-fancy")
 
     def page_text(path):
         return "".join(page.extract_text() or "" for page in pypdf.PdfReader(path).pages) \
@@ -1955,6 +2135,9 @@ def checks(work, jobs=1):
         ("no page label is used twice",
          lambda: len(reader.page_labels) == len(set(reader.page_labels))),
     ]
+
+    items += footer_checks(footer_path)
+    items += fancy_checks(fancy_path)
     if verapdf_ran:
         # The one character no font has is drawn as .notdef, which
         # veraPDF reports, and that's the only rule it finds failed.
@@ -2062,15 +2245,19 @@ def main():
             print(("  ok    " if passed else "  FAIL  ") + name)
             failed += not passed
     finally:
-        # The PDF/UA-1, untagged, and notes books are built beside the book
-        # (build_ua1, build_untagged, build_notes).
+        # The PDF/UA-1, untagged, notes, footer, and fancy books are built
+        # beside the book (build_ua1, build_untagged, build_notes,
+        # build_footer, build_fancy).
         if arguments.keep:
-            print(f"\nOutput left in {work}, {work}-ua1, {work}-untagged, and {work}-notes")
+            print(f"\nOutput left in {work}, {work}-ua1, {work}-untagged, {work}-notes, "
+                  f"{work}-footer, and {work}-fancy")
         else:
             shutil.rmtree(work, ignore_errors=True)
             shutil.rmtree(work + "-ua1", ignore_errors=True)
             shutil.rmtree(work + "-untagged", ignore_errors=True)
             shutil.rmtree(work + "-notes", ignore_errors=True)
+            shutil.rmtree(work + "-footer", ignore_errors=True)
+            shutil.rmtree(work + "-fancy", ignore_errors=True)
     print(f"\n{failed} check(s) failed" if failed
           else "\nall PDF checks passed")
     return 1 if failed else 0

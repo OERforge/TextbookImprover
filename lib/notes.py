@@ -242,11 +242,17 @@ def titled(text, title):
 
 def insert_before_end(text, block, flavor):
     """Put a block at the end of the page's content: in a page's main
-    landmark, before its footer, where it has one."""
+    landmark, before its footer, where it has one; in an EPUB's chapter
+    file, in its last section, before the footer setting's <footer>
+    after it (pagefooter)."""
     if flavor == "html":
         marker = "</main>" if "</main>" in text else "</body>"
     else:
         marker = "</section>\n</body>"
+        footer = re.search(r"</section>\s*<footer>(?:(?!<footer[\s>]).)*</footer>\s*</body>",
+                           text, re.S)
+        if footer:
+            marker = footer.group(0)
     at = text.rfind(marker)
     if at < 0:
         at = text.rfind("</body>")

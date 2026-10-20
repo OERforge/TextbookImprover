@@ -64,6 +64,7 @@ except ImportError:
              "lib/ directory beside bin/.")
 from bookcontents import number_tree, is_generated, PAGE_TYPES  # noqa: E402
 import highlighting  # noqa: E402
+import pagefooter  # noqa: E402
 from bookassembly import (  # noqa: E402
     INTERMEDIATE, page_id, load_page, inlines, header, Assembly, meta_text,
     load_documents, targets_of, plan_book, wants_title_page,
@@ -199,6 +200,16 @@ def chapter_template(work):
         print("WARNING: Pandoc's epub3 template has changed its cover "
               "page; the cover will have no accessible name.",
               file=sys.stderr)
+    # The footer setting, the last thing in every content document but the
+    # cover and the navigation document, as a page's is (pagefooter); the
+    # writer fills the template for each, the title page among them.
+    if "</body>" in template:
+        template = template.replace(
+            "</body>", "$if(oer-footer)$$if(coverpage)$$elseif(navpage)$$else$\n"
+            "$oer-footer$\n$endif$$endif$\n</body>", 1)
+    else:
+        print("WARNING: Pandoc's epub3 template has no </body>; the footer "
+              "setting isn't on the EPUB's pages.", file=sys.stderr)
     path = os.path.join(work, "epub3.template")
     with open(path, "w", encoding="utf-8") as fh:
         fh.write(template)
@@ -782,6 +793,9 @@ def build(base, name, resolved, keep, intermediates=None):
             # resolved for this target.
             "--lua-filter", os.path.join(HERE, "target-blocks.lua"),
         ]
+        footer = pagefooter.xhtml(resolved["footer"], base)
+        if footer:
+            command += ["-V", "oer-footer=" + footer]
         environment = dict(os.environ, TARGET_NAME=name,
                            TITLE_BLOCK=str(resolved["title_block"]))
         # images.downsample: scaled copies, which Pandoc finds before the

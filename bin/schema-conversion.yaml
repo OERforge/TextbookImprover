@@ -225,9 +225,23 @@ keys:
     stage: render
     description: >
       Markdown placed at the bottom of every page, or the path to a file
-      holding it: the page's content information landmark, after its
-      main content. The usual use is an attribution line. Same
-      caveat as header: it isn't processed by the filters.
+      holding it, in every format: an HTML page's content information
+      landmark, after its main content; the end of every content document
+      of an EPUB but its cover and its navigation document; the foot of
+      every page of a PDF, and of the PDF a latex target's master builds,
+      under the page number where the foot has one; the footer of every
+      page of a Word file; and the end of every Markdown or AsciiDoc
+      file's text, in a div of class oer-footer, which reading the file
+      back as a source takes out again. Outside an HTML page a picture is its
+      alternative text and a link to one of the book's own files its
+      words, since a target carries neither file, a heading is a
+      paragraph, and an id is left out; in a PDF and a Word file any link
+      is its words. A deck's PDF, PowerPoint
+      file, and reveal.js presentation get none, nor does a LaTeX book's PDF
+      from its own build (pdf.from: book), or a source target's copy, the
+      author's own file. The usual use is an attribution line, as OpenStax
+      asks of every copy of one of its books. On an HTML page it has the
+      header's caveat: nothing in it is processed by the filters.
 
   promote_h1_to_title:
     type: enum

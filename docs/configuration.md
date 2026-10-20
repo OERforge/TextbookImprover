@@ -337,7 +337,18 @@ defaults:
     [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
 ```
 
-The fragment is inserted after the Pandoc filter has run, so nothing in it
+The footer is on every page of the other formats too, in the way each format has of putting something on every page:
+
+- **EPUB**: the last thing in each content document, the title page among them, after the notes a chapter's file ends with; not on the cover or in the navigation document.
+- **PDF**, and the PDF a `latex` target's master builds: the foot of every page, the title page and each chapter's first page among them, centered in small type under whatever the page style puts there (a chapter's first page has its page number there), and single-spaced whatever the text's line spacing. LaTeX's tagging marks the foot an artifact, outside the document's structure as a page number is, so a link in it would be a link outside the structure: a link is its words. A `pdf.metadata` file that narrows the bottom margin should leave the footer room: geometry's `footskip` sets how far under the text the page number goes, and the footer goes a small line under that.
+- **Word**: the footer of every page of every file, a paragraph for each of its paragraphs, in Word's Footer style; a link is its words here too.
+- **Markdown and AsciiDoc**: the end of every file's text, a Markdown file's notes after it, in a div of class `oer-footer` (in AsciiDoc, an open block with that role), written as the rest of the file is. Reading the file back as a source takes out a div of that class at its end, whoever wrote it, since the target's own setting puts the footer back.
+
+Outside an HTML page, a picture in the footer is its alternative text, a Creative Commons badge its words, and a link to one of the book's own files is its words too, since a target carries neither file. A heading in the footer is a paragraph, which no contents or bookmarks take in, and an id in it is left out, since the footer is on every page.
+
+The header is on an HTML target's pages alone. A deck's PDF, PowerPoint file, and reveal.js presentation have no footer, and nor does a LaTeX book's PDF built from its own LaTeX (`pdf.from: book`), whose pages are the book's own; a `source` target's copy, the author's own file, has none either.
+
+On an HTML page the fragment is inserted after the Pandoc filter has run, so nothing in it
 is processed — no alt checking, no spacer rule. Write its markup correctly
 by hand, and list any images it uses under `common_files`.
 

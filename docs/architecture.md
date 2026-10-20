@@ -23,7 +23,7 @@ on another `bin/` script.
 | `media-extensions.lua` | Pandoc filter naming extracted images by their real content type. |
 | `safe-media.lua` | Rewrites a page's local media references at render time to names that need no encoding in a link, matching what `convert.py` copies beside the page, and in lowercase with `media.lowercase`, for a Markdown or AsciiDoc copy too. |
 | `math-repair.lua` | At the filter stage, after `figures-and-tables.lua`: equations Word's editor wrote in the wrong characters repaired, and math typed as text made equations, with `math-keep.csv` to leave any as it was; where each repair was, recorded so a `source` target can write it into the author's Word file. |
-| `target-blocks.lua` | At render time, keeps a passage marked for some targets and drops it for the rest, and applies `title_block`. |
+| `target-blocks.lua` | At render time, keeps a passage marked for some targets and drops it for the rest, applies `title_block`, and ends a Markdown or AsciiDoc target's file with the `footer` setting. |
 | `latex-source.lua` | When a LaTeX source is read: an image's alt text as LaTeX gives it (none for Pandoc's "image", decorative for `artifact`), a formula as texmath can read it, and a code block `latexsource.py` made of Pandoc's highlighted code given its language. |
 | `asciidoc-source.lua` | When an AsciiDoc source is read: `imagesdir` applied, sections moved below the title, Asciidoctor's own settings dropped from the metadata. |
 | `markdown-html.lua` | When a Markdown source is read: raw HTML reassembled a tag with its match, read as HTML, and cleaned by `html-raw.lua` and `html-source.lua`, loaded from their files. |
@@ -59,6 +59,7 @@ on another `bin/` script.
 | `lib/mathjax.py` | Formulas a saved page holds only as MathJax drew them, made math again. |
 | `lib/cartridgesource.py` | A Common Cartridge read as a book's source: its outline, its pages, and the files they use. |
 | `lib/notes.py` | Footnote numbering and placement across pages, after rendering, for HTML and EPUB alike. |
+| `lib/pagefooter.py` | The `footer` setting for every format but an HTML page: an EPUB's documents, a PDF's page style, a Word file's footer, and the end of a Markdown or AsciiDoc file. |
 | `lib/findings.py` | One format for everything a check finds: the CSV, the Markdown report, the input hashes, the cache. |
 | `lib/sourcecheck.py` | What a Word or Markdown source says about itself, from Pandoc's unfiltered reading. |
 | `lib/pdfcheck.py` | What a PDF states about itself: metadata, claims, structure, with veraPDF when installed. |

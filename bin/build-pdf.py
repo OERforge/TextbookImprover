@@ -71,6 +71,7 @@ import latexbuild  # noqa: E402
 from latexbuild import (  # noqa: E402
     ENGINE, PDF_MACROS as HEADER, UA1_LINKS, is_ua1, label_prefixes, math_setup,
 )
+import pagefooter  # noqa: E402
 import pdfparagraphs  # noqa: E402
 import pdfretag  # noqa: E402
 from names import safe_stem  # noqa: E402
@@ -476,6 +477,9 @@ def book_metadata(project, resolved, base, numbered):
         ours += "\\PassOptionsToPackage{hyperfootnotes=false}{hyperref}\n" + UA1_LINKS
     ours += FIGURE_PLACEMENT[str(resolved["pdf.figures"])]
     ours += RUNNING_HEADS
+    # The footer setting at the foot of every page, its words alone
+    # (pagefooter: LaTeX's tagging marks the foot an artifact).
+    ours += pagefooter.latex_preamble(resolved["footer"], base)
     # The template loads amssymb before unicode-math, which leaves the
     # names unicode-math lacks drawn as control characters.
     ours += "\\ifdefined\\directlua\n" + latexbuild.UM_ALIASES + "\\fi\n"

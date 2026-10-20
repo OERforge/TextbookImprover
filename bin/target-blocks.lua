@@ -7,6 +7,9 @@
 --   ::: {targets="!epub"}        kept for every target but epub
 -- A kept passage is unwrapped; the attribute never reaches the output.
 --
+-- A Markdown or AsciiDoc target's file ends with the footer setting, in
+-- a div of class oer-footer (FOOTER_JSON, which convert.py sets).
+--
 -- A Div or Span with class embed is an <iframe> html-source.lua read,
 -- its attributes the frame's and its content a link to what it framed.
 -- An HTML writer gets the <iframe> back; every other writer gets the
@@ -223,7 +226,25 @@ local function drop_title_block(meta)
   return meta
 end
 
+-- The footer setting at the end of a Markdown or AsciiDoc target's file,
+-- from the document pagefooter.py writes: added before any other filter
+-- runs, so the file's own filters write it as they write the page
+-- (markdown-source.lua makes it an open block in AsciiDoc), and reading
+-- the file back takes it out again (figures-and-tables.lua).
+local FOOTER_JSON = os.getenv('FOOTER_JSON') or ''
+local function add_footer(doc)
+  if FOOTER_JSON == '' then return nil end
+  local fh = io.open(FOOTER_JSON, 'r')
+  if not fh then return nil end
+  local blocks = pandoc.read(fh:read('a'), 'json').blocks
+  fh:close()
+  if #blocks == 0 then return nil end
+  doc.blocks:insert(pandoc.Div(blocks, pandoc.Attr('', { 'oer-footer' })))
+  return doc
+end
+
 return {
+  { Pandoc = add_footer },
   { Div = resolve, Span = resolve, Image = remote_image,
     Link = local_file_link },
   { Pandoc = title_heading },

@@ -90,6 +90,7 @@ try:
     import htmlrepair
     import mathjax
     import notes as notes_lib
+    import pagefooter
     import oerconfig
     from bookcontents import (guess_contents, walk_contents, number_tree,
                               is_generated, toc_blocks, stem_title, declared_titles,
@@ -2546,9 +2547,9 @@ def fragment_source(text, base, work, key):
     if not text:
         return None
     text = str(text)
-    candidate = os.path.join(base, text.strip())
-    if "\n" not in text.strip() and os.path.isfile(candidate):
-        return os.path.abspath(candidate)
+    named = pagefooter.named_file(text, base)
+    if named:
+        return named
     path = os.path.join(work, key + ".md")
     with open(path, "w", encoding="utf-8") as fh:
         fh.write(text.rstrip() + "\n")
@@ -4379,6 +4380,19 @@ def render_markdown(target, pages, base, work, project, env, losses=None):
     asciidoc = target.format == "asciidoc"
     word = target.format == "docx"
     added = {"compat": 0, "tooltips": 0, "decorative": 0, "first_columns": 0}
+    # The footer setting on every page (pagefooter): a Word file's own
+    # footer, its words; the end of a Markdown or AsciiDoc file's text,
+    # which target-blocks.lua adds to each before the target's filters run.
+    footer = pagefooter.paragraphs(target["footer"], base) if word else []
+    source_footer = None if word else pagefooter.document(target["footer"], base)
+    # In a folder of its own, since a merged file's document is the
+    # target's name and its own, which could be "footer".
+    rendered = os.path.join(work, "footers", target.name + ".json")
+    if source_footer:
+        os.makedirs(os.path.dirname(rendered), exist_ok=True)
+        with open(rendered, "w", encoding="utf-8") as fh:
+            fh.write(source_footer)
+    env = dict(env, FOOTER_JSON=rendered if source_footer else "")
     for stem, page in jobs:
         out = os.path.join(target.output_dir, stem + (
             ".adoc" if asciidoc else ".docx" if word else ".md"))
@@ -4403,7 +4417,7 @@ def render_markdown(target, pages, base, work, project, env, losses=None):
                 + downsample.resource_args(DOWNSAMPLED.get(target.name)),
                 env=dict(env, FIDELITY_FOUND=found, TITLE_WRITER="docx"), cwd=base)
             collect_losses(found, target.name, stem, losses)
-            for key, n in docxtarget.finish(out, page, keep).items():
+            for key, n in docxtarget.finish(out, page, keep, footer).items():
                 added[key] = added.get(key, 0) + n
             written.append(out)
             continue

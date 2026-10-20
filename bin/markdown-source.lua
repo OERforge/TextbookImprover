@@ -218,6 +218,12 @@ function Div(div)
     end
     return pandoc.Plain({ pandoc.Span({}, pandoc.Attr(div.identifier)) })
   end
+  -- The footer setting at the end of the file (target-blocks.lua), which
+  -- the writer would unwrap: an open block with its class as its role,
+  -- which reads back to the div, and reading takes it out.
+  if ADOC and div.classes:includes('oer-footer') then
+    return open_block('oer-footer', div.content)
+  end
   -- A frame, which the AsciiDoc writer would reduce to the link inside:
   -- the <iframe> it came from, in a passthrough block.
   if ADOC and div.classes:includes('embed') then

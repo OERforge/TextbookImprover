@@ -1620,6 +1620,225 @@ def case_menu(work):
     ]
 
 
+def case_page_footer(work):
+    """The footer setting on every page of every format, not an HTML
+    target's alone: the last thing in each of an EPUB's content documents
+    but its cover and its navigation document, after the notes a group
+    gathers; every
+    page of a Word file, in a footer part of its own; the end of a
+    Markdown or AsciiDoc file, which reading the file back as a source
+    takes out again, since the target's own setting puts it back; and the
+    LaTeX a latex target writes. A picture is its alternative text in all
+    of them, and so is a link to one of the book's own files, which none
+    of them carries; any link is its words in a Word file's footer and the
+    LaTeX. A line break is one in each, and an id is left out."""
+    first = os.path.join(work, "first")
+    os.makedirs(first, exist_ok=True)
+    for name, text in (("ch1.md", "# Chapter One\n\nOpening.[^1]\n\n[^1]: A note.\n"),
+                       ("ch2.md", "# Chapter Two\n\nTwo.[^2]\n\n[^2]: Another.\n")):
+        with open(os.path.join(first, name), "w", encoding="utf-8") as fh:
+            fh.write(text)
+    with open(os.path.join(first, "project.yaml"), "w", encoding="utf-8") as fh:
+        fh.write("project:\n  identifier: org.example.fixtures\n"
+                 "  title: The Fixture Book\n  contents:\n"
+                 "    - title: Part\n      items: [ch1, ch2]\n")
+    for name in ("cover.png", "cc.png"):
+        with open(os.path.join(first, name), "wb") as fh:
+            fh.write(ONE_PIXEL)
+    footer = ("defaults:\n  footer: |\n    Read *this book*, and the others in its series, "
+              "free at [example.org](https://example.org){#site},\\\n"
+              "    under [the license](license.md). ![CC BY](cc.png)\n")
+    result = convert(first, footer + "targets:\n  html:\n    format: html\n"
+                     '    footer: "Read *this book* free at [example.org](https://example.org)."\n'
+                     "  epub:\n    format: epub3\n    title_page: \"on\"\n"
+                     "    notes:\n      placement: group\n"
+                     "    epub:\n      cover_image: cover.png\n"
+                     "  word:\n    format: docx\n  md:\n    format: markdown\n"
+                     "  adoc:\n    format: asciidoc\n  tex:\n    format: latex\n"
+                     "  linked:\n    format: asciidoc\n"
+                     '    footer: "Shared under [the license [CC BY]](https://example.org/l)."\n',
+                     project=False, fixtures=())
+
+    docs = {}
+    epub = os.path.join(first, "epub", "org.example.fixtures.epub")
+    if os.path.exists(epub):
+        with zipfile.ZipFile(epub) as z:
+            docs = {n: z.read(n).decode("utf-8") for n in z.namelist()
+                    if n.endswith(".xhtml")}
+    nav = [t for t in docs.values() if 'epub:type="toc"' in t]
+    cover = [t for t in docs.values() if '<body id="cover">' in t]
+    content = [t for t in docs.values() if t not in nav and t not in cover]
+    ending = re.compile(r'<footer> <p>Read <em>this book</em>, and the others in its '
+                        r'series, free at <a href="https://example\.org">example\.org</a>,'
+                        r'<br /> under the license\. CC BY</p> </footer> </body> </html> ?$')
+
+    def flat(text):
+        return re.sub(r"\s+", " ", text)
+    noted = [t for t in content if 'role="doc-footnote"' in t]
+    validated = epubcheck(epub)
+
+    def word_footer(name):
+        """Whether the Word file has the footer's words in a footer part of
+        its own, which every section names first, as the schema orders a
+        section's children, related, typed, and styled."""
+        import xml.dom.minidom
+        with zipfile.ZipFile(os.path.join(first, "word", name)) as z:
+            parts = {n: z.read(n).decode("utf-8") for n in z.namelist()
+                     if n.endswith((".xml", ".rels"))}
+        part = parts.get("word/tiqfooter.xml", "")
+        for text in (part, parts["word/document.xml"]):
+            xml.dom.minidom.parseString(text.encode("utf-8"))
+        sections = re.findall(r"<w:sectPr\b.*?</w:sectPr>", parts["word/document.xml"], re.S)
+        return ("".join(re.findall(r"<w:t[^>]*>([^<]*)</w:t>", part))
+                == "Read this book, and the others in its series, free at example.org,"
+                "under the license. CC BY"
+                and "w:hyperlink" not in part and '<w:pStyle w:val="Footer" />' in part
+                and sections and all(
+                    re.match(r'<w:sectPr\b[^>]*>\s*<w:footerReference w:type="default" '
+                             r'r:id="rIdTiqFooter" />', s)
+                    and s.count("<w:footerReference") == 1 for s in sections)
+                and re.search(r'<Relationship Id="rIdTiqFooter" Type="[^"]*/relationships/'
+                              r'footer" Target="tiqfooter\.xml"',
+                              parts["word/_rels/document.xml.rels"])
+                and 'PartName="/word/tiqfooter.xml" ContentType="application/vnd.'
+                    'openxmlformats-officedocument.wordprocessingml.footer+xml"'
+                in parts["[Content_Types].xml"]
+                and 'w:styleId="Footer"' in parts["word/styles.xml"])
+
+    words = sorted(n for n in os.listdir(os.path.join(first, "word"))
+                   if n.endswith(".docx")) if exists(first, "word") else []
+
+    def word_part(name):
+        """A Word file's footer part, as written."""
+        with zipfile.ZipFile(os.path.join(first, "word", name)) as z:
+            return z.read("word/tiqfooter.xml").decode("utf-8") \
+                if "word/tiqfooter.xml" in z.namelist() else ""
+
+    def text_of(folder, ext):
+        found = {}
+        if exists(first, folder):
+            for name in sorted(os.listdir(os.path.join(first, folder))):
+                if name.endswith(ext):
+                    found[name] = read(first, folder, name)
+        return found
+    markdown, asciidoc = text_of("md", ".md"), text_of("adoc", ".adoc")
+    linked = text_of("linked", ".adoc")
+    master = read(first, "tex", "org.example.fixtures.tex") \
+        if exists(first, "tex", "org.example.fixtures.tex") else ""
+
+    def read_back(folder, ext):
+        """The target's files converted again as the book's sources, the
+        footer set as before: each page's HTML, by its name."""
+        again = os.path.join(work, "back-" + folder)
+        os.makedirs(again, exist_ok=True)
+        if not exists(first, folder):
+            return {}
+        for name in os.listdir(os.path.join(first, folder)):
+            if name.endswith(ext):
+                shutil.copy(os.path.join(first, folder, name), again)
+        shutil.copy(os.path.join(first, "project.yaml"), again)
+        with open(os.path.join(again, "conversion.yaml"), "w", encoding="utf-8") as fh:
+            fh.write(footer + "targets:\n  html:\n    format: html\n")
+        subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
+                       cwd=again, capture_output=True, text=True, stdin=subprocess.DEVNULL)
+        return {name: read(again, "html", name) for name in ("ch1.html", "ch2.html")
+                if exists(again, "html", name)}
+
+    def footer_once(pages):
+        """Each page has the footer once, after its main landmark, and none
+        within it."""
+        return len(pages) == 2 and all(
+            t.count("<footer") == 1 and re.search(r"</main>\s*<footer>", t)
+            and "free at" not in t[t.find("<main>"):t.find("</main>")]
+            for t in pages.values())
+    md_back, adoc_back = read_back("md", ".md"), read_back("adoc", ".adoc")
+
+    # A book whose pages, merged a file to each, include one named footer.
+    merged = os.path.join(work, "merged")
+    os.makedirs(merged, exist_ok=True)
+    for name, text in (("ch1.md", "# Chapter One\n\nOne.\n"),
+                       ("footer.md", "# Footer Studies\n\nThe study of feet.\n")):
+        with open(os.path.join(merged, name), "w", encoding="utf-8") as fh:
+            fh.write(text)
+    with open(os.path.join(merged, "project.yaml"), "w", encoding="utf-8") as fh:
+        fh.write("project:\n  identifier: org.example.merged\n  title: Merged\n"
+                 "  contents: [ch1, footer]\n")
+    convert(merged, 'defaults:\n  footer: "Shared under CC BY."\n'
+            "targets:\n  md:\n    format: markdown\n    merge: groups\n",
+            project=False, fixtures=())
+    studies = read(merged, "md", "footer.md") if exists(merged, "md", "footer.md") else ""
+    return [
+        ("the book converts in every format",
+         lambda: result.returncode in (0, 1) and docs and words and markdown
+         and asciidoc and master),
+        ("each of an EPUB's content documents, its title page among them, ends "
+         "with the footer, a link in it a link and a picture its alternative text, "
+         "and its cover and its navigation document have none",
+         lambda: len(content) >= 3 and all(ending.search(flat(t)) and t.count("<footer") == 1
+                                           and "cc.png" not in t for t in content)
+         and any('epub:type="titlepage"' in t for t in content)
+         and len(nav) == 1 and "<footer" not in nav[0]
+         and len(cover) == 1 and "<footer" not in cover[0]),
+        ("and epubcheck finds nothing in it",
+         lambda: validated == [] if validated is not None else True),
+        ("the notes a group gathers are in its last page's section, before the footer",
+         lambda: len(noted) == 1 and re.search(
+             r'role="doc-footnote".*</aside>\s*</section>\s*</section>\s*<footer>',
+             noted[0], re.S)),
+        ("a Word file has the footer on every page, in a footer part of its own that "
+         "every section names, its links their words and its picture its alternative text",
+         lambda: words == ["ch1.docx", "ch2.docx"] and all(word_footer(n) for n in words)),
+        ("a Markdown file's text ends with the footer in a div of class oer-footer, its "
+         "notes after it, an AsciiDoc file with it in an open block of that role, its "
+         "lines as long as the file's own, a picture its alternative text",
+         lambda: len(markdown) == 2 and all(re.search(re.escape(
+             "\n::: oer-footer\nRead *this book*, and the others in its series, free at "
+             "[example.org](https://example.org),\\\nunder the license. CC BY\n:::\n")
+             + r"(\n\[\^\w+\]: .+\n)+\Z", t) for t in markdown.values())
+         and len(asciidoc) == 2 and all(re.search(re.escape(
+             "\n[.oer-footer]\n--\nRead _this book_, and the others in its series, free at "
+             "https://example.org[example.org], +\nunder the license. CC BY\n--\n")
+             + r"\s*\Z", t) for t in asciidoc.values())),
+        ("an AsciiDoc file's footer is written as the rest of the file is, a bracket in "
+         "a link's text a character reference",
+         lambda: len(linked) == 2 and all(re.search(re.escape(
+             "\n[.oer-footer]\n--\nShared under https://example.org/l[the license "
+             "&#91;CC BY&#93;].\n--\n") + r"\s*\Z", t) for t in linked.values())),
+        ("read back as the book's sources, the Markdown and the AsciiDoc give pages "
+         "with the footer once, the target's own, not in their content",
+         lambda: footer_once(md_back) and footer_once(adoc_back)),
+        ("a latex target's master carries it for the foot of every page, its links "
+         "their words and its picture its alternative text",
+         lambda: "\\newcommand\\OERFooterText{Read \\emph{this book}, and the others in its "
+         "series, free at example.org,\\\\\nunder the license. CC BY}" in master
+         and "\\OER@addfooter" in master),
+        ("a link to one of the book's own files, which no target carries, is its words "
+         "outside an HTML page, where a link to a site stays a link",
+         lambda: content and markdown and asciidoc
+         and all("under the license." in flat(t) and "license.md" not in t
+                 and 'href="https://example.org"' in flat(t) for t in content)
+         and all("under the license." in t and "license.md" not in t
+                 and "https://example.org" in t
+                 for t in list(markdown.values()) + list(asciidoc.values()))),
+        ("a line break in the footer is a line break in each format",
+         lambda: content and words and markdown and asciidoc
+         and all(",<br /> under the license" in flat(t) for t in content)
+         and all('example.org,</w:t></w:r><w:r><w:br /></w:r><w:r><w:t xml:space="preserve">'
+                 'under the license' in word_part(n) for n in words)
+         and all(",\\\nunder the license" in t for t in markdown.values())
+         and all(", +\nunder the license" in t for t in asciidoc.values())
+         and ",\\\\\nunder the license" in master),
+        ("a merged file named footer is its page, with the footer at its end",
+         lambda: "The study of feet." in studies
+         and studies.endswith("::: oer-footer\nShared under CC BY.\n:::\n")),
+        ("an id in the footer is left out, since the footer is on every page",
+         lambda: content and markdown and asciidoc
+         and not any('id="site"' in t for t in content)
+         and not any("#site" in t for t in markdown.values())
+         and not any("site]" in t or "#site" in t for t in asciidoc.values())),
+    ]
+
+
 RAW_MD = """---
 title: Raw HTML
 ---
@@ -6558,6 +6777,7 @@ CASES = [
     ("a Word box's bookmark, which a link goes to", case_word_box_anchor),
     ("a table of one cell, a layout table whatever its source", case_one_cell_tables),
     ("a menu for pages posted as a site", case_menu),
+    ("the footer on every page of every format", case_page_footer),
     ("raw HTML in a Markdown source", case_markdown_html),
     ("title rows and bands, split and grouped", case_bands),
     ("a group's own header row, split", case_group_heads),

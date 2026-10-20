@@ -113,22 +113,80 @@ def project_yaml(source, collection, slug, outline, publisher=None,
     return "\n".join(lines) + "\n"
 
 
+# The metadata file conversion.yaml names for an OpenStax book's PDF and
+# LaTeX targets (pdf.metadata), and the styles whose page is A4. Every
+# design in OpenStax's ce-styles sets its pages' margins at 1in at the
+# sides and 0.8in at the top and bottom, which the book's tables and
+# formulas were made for, and only the carnival design's Polish pages set
+# a size, A4 (pl-nursing's and pl-u-physics'); the rest are Prince's
+# default, US Letter. OpenStax's type is 9pt (8.25pt in the math books'
+# styles), about 110 characters a line: this keeps TextbookImprover's own
+# type, at 12pt, about 89 characters a line, on lines 1.5 times its size
+# apart and ragged right as OpenStax's are. LaTeX's own \raggedright,
+# whose lines may end anywhere short of the margin, breaks no word at a
+# line's end, where ragged2e's \RaggedRight hyphenates.
+PDF_LAYOUT = "pdf-layout.yaml"
+A4_STYLES = ("pl-nursing", "pl-u-physics")
+
+
+def openstax_pdf_layout(source, style):
+    """pdf-layout.yaml for an OpenStax book of the style: Pandoc's LaTeX
+    variables for OpenStax's paper and margins with larger type. The page
+    number and the footer go in the bottom margin, the number 0.3in under
+    the text (footskip), where the book class's 30pt would put the
+    footer's line within a quarter inch of the paper's edge, where some
+    printers can't print."""
+    paper = "a4" if style in A4_STYLES else "letter"
+    return "\n".join([
+        f"# Written by {source}; yours to edit.",
+        "# The PDF's page: OpenStax's paper and margins, with type larger than",
+        "# OpenStax's (12pt, where theirs is 9pt, or 8.25pt in the math books),",
+        "# so a line holds about 89 characters where theirs hold about 110. As",
+        "# in OpenStax's PDFs, the lines are 1.5 times the type's size apart",
+        "# (linestretch), and the text is set ragged right, without breaking",
+        "# words.",
+        "fontsize: 12pt",
+        "linestretch: 1.25",
+        f"papersize: {paper}",
+        "geometry:",
+        "  - left=1in",
+        "  - right=1in",
+        "  - top=0.8in",
+        "  - bottom=0.8in",
+        "  # The page number and the footer, in the bottom margin.",
+        "  - footskip=0.3in",
+        "header-includes:",
+        "  - |",
+        "    ```{=latex}",
+        "    \\AtBeginDocument{\\raggedright}",
+        "    ```",
+    ]) + "\n"
+
+
 def openstax_conversion(source, figure_word="Figure", table_word="Table"):
     """conversion.yaml for an OpenStax book: the footer OpenStax asks
     for, footnotes numbered through each chapter as OpenStax numbers
-    them, and the words the book's captions open with where they aren't
-    TextbookImprover's own (*Principles of Management*'s "Exhibit",
-    a Polish book's "Ilustracja" and "Tabela")."""
+    them, the PDF's page (PDF_LAYOUT), and the words the book's captions
+    open with where they aren't TextbookImprover's own (*Principles of
+    Management*'s "Exhibit", a Polish book's "Ilustracja" and "Tabela").
+
+    The footer is the attribution the book's copyright page asks a copy
+    to carry on every page, digital or printed, in its words, and as
+    OpenStax's PDFs print it: not a link, since an address as a link's
+    text, on every page, is what some checkers report as a bare URL."""
     lines = [f"# Written by {source}; yours to edit.",
              "# OpenStax asks that every page of a book made from theirs say where it",
              "# can be read for free; this footer does that on every page of every",
-             "# target.",
+             "# target, in OpenStax's words.",
              "defaults:",
-             '  footer: "Access for free at [openstax.org](https://openstax.org)."',
+             '  footer: "Access for free at openstax.org."',
              "  # Footnotes numbered through each chapter, as OpenStax numbers them;",
              "  # each unit is a part in project.yaml, so its chapters number apart.",
              "  notes:",
-             "    numbering: group"]
+             "    numbering: group",
+             "  # The PDF's page: OpenStax's paper and margins, with larger type.",
+             "  pdf:",
+             f"    metadata: {PDF_LAYOUT}"]
     if figure_word != "Figure" or table_word != "Table":
         lines += ["  # The word each caption's own label opens with, as the book has it.",
                   "  captions:"]

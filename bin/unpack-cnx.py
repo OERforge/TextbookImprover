@@ -26,8 +26,11 @@ What's written:
   - the media those pages use, under media/;
   - project.yaml, with the book's title, language, license, and contents;
   - for an OpenStax book, conversion.yaml with the footer OpenStax asks
-    every page to carry, footnotes numbered through each chapter, and
-    the words its captions open with where they aren't Figure and Table;
+    every page to carry, in its words, footnotes numbered through each
+    chapter, the PDF's page, and the words its captions open with where
+    they aren't Figure and Table; and pdf-layout.yaml, that page:
+    OpenStax's paper and margins, with 12pt type on lines 1.5 times its
+    size apart, set ragged right;
   - table-captions.csv, a description for each table whose caption is
     only its label, from the summary OpenStax wrote for it where it says
     something ("No Summary" doesn't), one that reads the table out named

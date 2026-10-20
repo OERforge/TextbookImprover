@@ -290,6 +290,9 @@ def case_trade(work):
     again = unpack(repo, out, "--book", "tiny-trade")
     import yaml
     project = yaml.safe_load(read(out, "project.yaml"))["project"]
+    conversion = yaml.safe_load(read(out, "conversion.yaml"))
+    layout = yaml.safe_load(read(out, "pdf-layout.yaml")) \
+        if os.path.exists(os.path.join(out, "pdf-layout.yaml")) else {}
     names = sorted(n[:-5] for n in os.listdir(out) if n.endswith(".html"))
     section = read(out, "1-1-why-trade-happens.html")
     gains = read(out, "1-2-gains-from-trade.html")
@@ -472,8 +475,18 @@ def case_trade(work):
          and project["publisher"] == "OpenStax"
          and project["contents"][1]["title"]
          == "Chapter 1 Trade and Its Gains"),
-        ("an OpenStax book's pages carry the footer OpenStax asks for",
-         lambda: "openstax.org" in read(out, "conversion.yaml")),
+        ("an OpenStax book's pages carry the attribution OpenStax asks for, in its "
+         "words, not a link",
+         lambda: conversion["defaults"]["footer"] == "Access for free at openstax.org."),
+        ("its PDF has OpenStax's paper and margins, with 12pt type on lines 1.5 times "
+         "its size apart, set ragged right, the footer in the bottom margin",
+         lambda: conversion["defaults"]["pdf"] == {"metadata": "pdf-layout.yaml"}
+         and {k: layout.get(k) for k in ("fontsize", "linestretch", "papersize", "geometry")}
+         == {"fontsize": "12pt", "linestretch": 1.25, "papersize": "letter",
+             "geometry": ["left=1in", "right=1in", "top=0.8in", "bottom=0.8in",
+                          "footskip=0.3in"]}
+         and "\\AtBeginDocument{\\raggedright}" in (layout.get("header-includes")
+                                                    or [""])[0]),
         ("its notes are numbered through each chapter, as OpenStax numbers "
          "them, and its captions' words are TextbookImprover's own",
          lambda: "  notes:\n    numbering: group\n" in read(out, "conversion.yaml")
@@ -563,8 +576,9 @@ id="gm1">a point</meaning></definition><definition id="g2"><term>dot</term>
          "directory named for the module",
          lambda: 'src="media/m20001/dot.png"' in page
          and os.path.exists(os.path.join(out, "media", "m20001", "dot.png"))),
-        ("no footer for a book that isn't OpenStax's",
-         lambda: not os.path.exists(os.path.join(out, "conversion.yaml"))),
+        ("no footer and no layout for a book that isn't OpenStax's",
+         lambda: not os.path.exists(os.path.join(out, "conversion.yaml"))
+         and not os.path.exists(os.path.join(out, "pdf-layout.yaml"))),
         ("a web address written without its scheme is linked with it, "
          "and reported",
          lambda: '<a href="https://www.example.org">the site</a>' in page
@@ -823,6 +837,7 @@ effect="italics">myśli</emphasis></para></meaning></definition>
         fh.write(ONE_PIXEL)
     out = os.path.join(work, "psychologia")
     result = unpack(repo, out)
+    from cnx.project import openstax_pdf_layout
     section = read(out, "1-1-czym-jest-psychologia.html")
 
     def index(name):
@@ -835,6 +850,11 @@ effect="italics">myśli</emphasis></para></meaning></definition>
         ("and its captions' own labels are read by the Polish words",
          lambda: '  captions:\n    figure_prefixes: ["Ilustracja"]\n'
          '    table_prefixes: ["Tabela"]\n' in read(out, "conversion.yaml")),
+        ("its PDF is on Letter paper, as OpenStax's is for its cosmos design, where "
+         "the carnival design's Polish books, nursing and physics, are on A4",
+         lambda: "papersize: letter\n" in read(out, "pdf-layout.yaml")
+         and all("papersize: a4\n" in openstax_pdf_layout("a test", style)
+                 for style in ("pl-nursing", "pl-u-physics"))),
         ("a link names its target in the case its sentence wants, the "
          "nominative where it names none",
          lambda: 'Na <a href="#f1">Ilustracji 1.1</a> widać mózg, a '
@@ -2172,18 +2192,32 @@ def case_convert(work):
     out = os.path.join(work, "trade")
     unpack(repo, out, "--book", "tiny-trade")
     write(os.path.join(out, "conversion.yaml"),
-          read(out, "conversion.yaml") + "targets:\n  html:\n    format: html\n")
+          read(out, "conversion.yaml") + "targets:\n  html:\n    format: html\n"
+          "  tex:\n    format: latex\n")
     run = subprocess.run(["python3", os.path.join(BIN, "convert.py"),
                           "--quick", "--quiet"], cwd=out, capture_output=True,
                          text=True, stdin=subprocess.DEVNULL)
     page = os.path.join(out, "html", "1-1-why-trade-happens.html")
     html = read(page) if os.path.exists(page) else ""
+    master = os.path.join(out, "tex", "book-11111111-2222-4333-8444-555555555555.tex")
+    latex = read(master) if os.path.exists(master) else ""
     page = os.path.join(out, "html", "chapter-1.html")
     key = read(page) if os.path.exists(page) else ""
     unplaced = os.path.join(out, "table-captions-missing.csv")
     return [
         ("the book converts",
          lambda: run.returncode == 0 and html != ""),
+        ("each page ends with OpenStax's attribution, its address not a link",
+         lambda: re.search(r"</main>\s*<footer>\s*<p>Access for free at openstax\.org\.</p>"
+                           r"\s*</footer>\s*</body>", html)),
+        ("and the LaTeX has OpenStax's paper and margins with 12pt type on lines 1.5 "
+         "times its size apart, ragged right, the attribution at every page's foot",
+         lambda: re.search(r"\\documentclass\[[^]]*\b12pt,\s*letterpaper,", latex)
+         and "\\usepackage[left=1in,right=1in,top=0.8in,bottom=0.8in,footskip=0.3in]"
+             "{geometry}" in latex
+         and "\\setstretch{1.25}" in latex
+         and "\\AtBeginDocument{\\raggedright}" in latex
+         and "\\newcommand\\OERFooterText{Access for free at openstax.org.}" in latex),
         ("its footnote is a note again, nothing left of the markup",
          lambda: "footnote" in html and "doc-endnotes" in html
          and "Reference not found" not in run.stderr),

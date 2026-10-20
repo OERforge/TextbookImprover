@@ -76,6 +76,10 @@ import pdfparagraphs  # noqa: E402
 sys.path.insert(0, HERE)
 import parallel  # noqa: E402
 import pdftext  # noqa: E402
+try:  # the CNX unpacker's, which needs lxml
+    from cnx.project import openstax_pdf_layout  # noqa: E402
+except ImportError:
+    openstax_pdf_layout = None
 
 FRONT = r"""---
 title: The Test Book
@@ -798,7 +802,7 @@ def build_notes(work):
             converted.stdout + converted.stderr, source)
 
 
-# Words for a page of text after the chapter's first.
+# Words long enough that a justified line, or ragged2e's, would break one.
 FOOTER_WORDS = ("Each sentence of this chapter runs on about internationalization, "
                 "characteristically interdisciplinary counterrevolutionaries, and "
                 "institutionalization, so that its lines are long. ")
@@ -808,14 +812,18 @@ FOOTER_ONE = ("# One\n\nThe first chapter opens with a note.[^1]\n\n"
 FOOTER_TWO = "# Two\n\nThe second chapter.\n"
 
 
-# The footer book's page: 12pt type on lines 1.25 times as far apart as
-# the class sets them, which the footer's own spacing mustn't take.
+# The footer book's page where lib/cnx's isn't to be had: 12pt type on
+# lines 1.25 times as far apart as the class sets them, which the
+# footer's own spacing mustn't take.
 FOOTER_LAYOUT = "fontsize: 12pt\nlinestretch: 1.25\n"
 
 
 def build_footer(work):
     """A book of two chapters with a footer, a link and a picture in it,
-    laid out in FOOTER_LAYOUT: the PDF's path."""
+    laid out as unpack-cnx.py lays out an OpenStax book's PDF
+    (pdf-layout.yaml) where lxml is installed for lib/cnx, and otherwise
+    in FOOTER_LAYOUT: (the PDF's path, whether the layout is the
+    unpacker's)."""
     os.makedirs(work)
     for name, text in (("one.md", FOOTER_ONE), ("two.md", FOOTER_TWO)):
         with open(os.path.join(work, name), "w", encoding="utf-8") as fh:
@@ -825,7 +833,8 @@ def build_footer(work):
                  "  language: en-US\n  contents:\n    - one\n    - two\n")
     png(os.path.join(work, "cc.png"), (0, 0, 0))
     with open(os.path.join(work, "pdf-layout.yaml"), "w", encoding="utf-8") as fh:
-        fh.write(FOOTER_LAYOUT)
+        fh.write(openstax_pdf_layout("the PDF suite", "sociology")
+                 if openstax_pdf_layout is not None else FOOTER_LAYOUT)
     with open(os.path.join(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
         fh.write('defaults:\n  footer: "Read *this book* free at '
                  '[example.net](https://example.net). ![CC BY](cc.png)"\n'
@@ -833,7 +842,7 @@ def build_footer(work):
                  "    pdf:\n      metadata: pdf-layout.yaml\n")
     subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick"], cwd=work,
                    capture_output=True, text=True, stdin=subprocess.DEVNULL)
-    return os.path.join(work, "pdf", "org.example.footer.pdf")
+    return os.path.join(work, "pdf", "org.example.footer.pdf"), openstax_pdf_layout is not None
 
 
 # A footer from a file of its own, with a heading, on pages in
@@ -1442,9 +1451,10 @@ def build(work):
     return pypdf.PdfReader(pdf), source, rows, converted.stderr, placements
 
 
-def footer_checks(footer_path):
+def footer_checks(footer_path, unpacker_layout):
     """The footer book's checks (build_footer): the footer setting at the
-    foot of every page (lib/pagefooter.py)."""
+    foot of every page (lib/pagefooter.py), and, where lxml is installed,
+    the layout unpack-cnx.py gives an OpenStax book (pdf-layout.yaml)."""
     footer_reader = pypdf.PdfReader(footer_path) if os.path.exists(footer_path) else None
     footer_lines = glyph_lines(footer_path) if footer_reader else {}
     footer_texts = pdftext.marked_text(footer_path) if footer_reader else {}
@@ -1469,6 +1479,17 @@ def footer_checks(footer_path):
                   and foot and b > foot[0]]
         return min(number) - foot[0] if number and foot else None
 
+    def body_lines():
+        """The lines of the page after the first chapter's opening page, a
+        page of its text alone, between its head and its foot."""
+        return [line for line in footer_lines.get(opening + 1, []) if 57.6 < line[0] < 734.4
+                and len(squeezed(line[3])) > 20] if opening is not None else []
+
+    def leading():
+        """The distance between the page's lines that most of them keep."""
+        lines = body_lines()
+        gaps = [round(a[0] - b[0], 1) for a, b in zip(lines, lines[1:])]
+        return max(set(gaps), key=gaps.count) if gaps else None
     items = [
         ("a footer is at the foot of every page, the title page's among them, as an "
          "artifact, a link in it its words and a picture its alternative text, with no "
@@ -1488,6 +1509,31 @@ def footer_checks(footer_path):
          "the text's line spacing",
          lambda: opening_gap() is not None and 11 < opening_gap() < 13),
     ]
+    if unpacker_layout:
+        items += [
+            ("in the layout unpack-cnx.py gives an OpenStax book, the footer is in the "
+             "bottom margin, a quarter inch or more from the paper's edge",
+             lambda: footer_baselines() and None not in footer_baselines()
+             and all(18 <= b < 57.6 - 18 for b in footer_baselines())),
+            ("and the page is OpenStax's: Letter paper, the text 6.5 inches wide from an "
+             "inch in, in 12pt type on lines 1.5 times its size apart",
+             lambda: footer_reader is not None
+             and (float(footer_reader.pages[0].mediabox.width),
+                  float(footer_reader.pages[0].mediabox.height)) == (612, 792)
+             and len(body_lines()) > 30
+             and {round(line[1]) for line in body_lines()} == {72}
+             and 530 < max(line[2] for line in body_lines()) < 546
+             and 18 <= leading() <= 18.3
+             and set(sizes_by_page(footer_reader, "sentence")[opening + 1]) == {11.96}),
+            ("its text is set ragged right, few of its lines reaching the margin, and "
+             "no word broken at a line's end",
+             lambda: body_lines()
+             and sum(1 for line in body_lines() if line[2] >= 539) < len(body_lines()) / 4
+             and not any(line[3].rstrip().endswith("-") for line in body_lines())),
+        ]
+    else:
+        print("  skip  lxml isn't installed for lib/cnx, so the layout unpack-cnx.py "
+              "writes isn't checked")
     if shutil.which("verapdf") or os.environ.get("VERAPDF"):
         items.append(("veraPDF finds nothing in the footer book's PDF",
                       lambda: os.path.exists(footer_path) and not pdfcheck.run_verapdf(
@@ -1529,14 +1575,14 @@ def checks(work, jobs=1):
             ua1_path, ua1_said, ua1_rows = ua1.result()
             untagged_path, untagged_said = plain.result()
             notes_path, notes_plain, notes_said, notes_source = noted.result()
-            footer_path = footed.result()
+            footer_path, unpacker_layout = footed.result()
             fancy_path = fancied.result()
     else:
         reader, source, rows, log, placements = build(work)
         ua1_path, ua1_said, ua1_rows = build_ua1(work + "-ua1")
         untagged_path, untagged_said = build_untagged(work + "-untagged")
         notes_path, notes_plain, notes_said, notes_source = build_notes(work + "-notes")
-        footer_path = build_footer(work + "-footer")
+        footer_path, unpacker_layout = build_footer(work + "-footer")
         fancy_path = build_fancy(work + "-fancy")
 
     def page_text(path):
@@ -2136,7 +2182,7 @@ def checks(work, jobs=1):
          lambda: len(reader.page_labels) == len(set(reader.page_labels))),
     ]
 
-    items += footer_checks(footer_path)
+    items += footer_checks(footer_path, unpacker_layout)
     items += fancy_checks(fancy_path)
     if verapdf_ran:
         # The one character no font has is drawn as .notdef, which

@@ -27,8 +27,8 @@ from .assemble import assemble
 from .bake import bake
 from .bake.recipes import RECIPES
 from .emit import Emitter, serialize
-from .project import (openstax_conversion, copy_media, project_yaml,
-                      write_captions)
+from .project import (PDF_LAYOUT, openstax_conversion, openstax_pdf_layout,
+                      copy_media, project_yaml, write_captions)
 from .repo import Repo
 
 
@@ -146,6 +146,10 @@ def unpack(repo_dir, out, slug=None, source_name=None, bank=None):
                 source,
                 *(baked.t(key) if baked.has_string(key) else default
                   for key, default in (("figure", "Figure"), ("table", "Table")))))
+        # The PDF's page, which that conversion.yaml names.
+        if not os.path.exists(os.path.join(out, PDF_LAYOUT)):
+            with open(os.path.join(out, PDF_LAYOUT), "w", encoding="utf-8") as fh:
+                fh.write(openstax_pdf_layout(source, book.style))
     (result.prefilled, result.summaries, result.empty_summaries,
      result.summaries_read_out) = write_captions(out, emitter.tables, report)
     result.layout_tables = sum(1 for t in emitter.tables if t[4])

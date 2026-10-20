@@ -252,7 +252,7 @@ tlmgr update --self
 This installs every TeX package and program anything in the project uses, the test suites' books included, so nothing below has to be installed piece by piece. A full TeX Live, from its own installer, has every one of the TeX packages already, so it needs only the last line; TinyTeX needs them all.
 
 ```bash
-tlmgr install latex-lab tagpdf luamml luatexbase selnolig luacolor lua-ul footnotehyper xurl multirow placeins
+tlmgr install latex-lab tagpdf luamml luatexbase selnolig luacolor lua-ul footnotehyper xurl multirow placeins setspace
 tlmgr install luatex85 preview latex-tagging-status
 tlmgr install ltx-talk lua-unicode-math newcomputermodern
 tlmgr install amsfonts amsmath babel-english caption fancyhdr framed geometry grfext mdframed
@@ -264,7 +264,7 @@ The rest of this section says what each is for.
 
 ### What each is for
 
-The first five TeX packages are the tagging code and what Pandoc's template loads for every book; `luacolor` and `lua-ul` are for underlined or struck-out text (the statistics book has some), and `xurl` lets a long address break anywhere, which the template uses when it's installed. Pandoc 3.11's template also loads `footnotehyper` when it's there; 3.12's writes notes in tables itself and doesn't. `multirow` is for a table with a cell spanning rows, which Pandoc's template loads only when a book has one; the PDF suite's book does. `pdf.figures: section` needs `placeins`.
+The first five TeX packages are the tagging code and what Pandoc's template loads for every book; `luacolor` and `lua-ul` are for underlined or struck-out text (the statistics book has some), and `xurl` lets a long address break anywhere, which the template uses when it's installed. Pandoc 3.11's template also loads `footnotehyper` when it's there; 3.12's writes notes in tables itself and doesn't. `multirow` is for a table with a cell spanning rows, which Pandoc's template loads only when a book has one; the PDF suite's book does. `pdf.figures: section` needs `placeins`, and a `pdf.metadata` file's `linestretch` needs `setspace`, which Pandoc's template loads for it: the layout `unpack-cnx.py` writes for an OpenStax book sets one ([A CNXML book as the source](cnx-input.md)), as the PDF suite's book in that layout does.
 
 A book or a deck with SVG images needs `rsvg-convert` for its PDF, and a deck for its PowerPoint file too (`librsvg2-bin`); the run stops and says so if it's missing. DejaVu Sans, which most Linux desktops have already (`fonts-dejavu-core`), supplies characters Latin Modern lacks, such as the circled digits of an AsciiDoc book's code callouts, and `newcomputermodern`, installed for decks, the circled letters of OpenStax's math books. For the PDF's table captions and empty paragraph elements, and a deck's links on the earlier steps of a slide shown in steps, `pikepdf` (`python3-pikepdf`); without it the run says so and leaves them as LaTeX tags them, and the PDF suite skips.
 

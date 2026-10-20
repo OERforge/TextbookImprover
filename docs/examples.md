@@ -136,12 +136,12 @@ OpenStax asks that every page of a book built from its files carry the line "Acc
 ```bash
 cat > conversion.yaml <<'EOF'
 defaults:
-  footer: "Access for free at [openstax.org](https://openstax.org)."
+  footer: "Access for free at openstax.org."
 EOF
 python3 $T/bin/convert.py
 ```
 
-In `defaults`, it applies to every target the book has: to the HTML in the cartridge now, and to an EPUB if you add one later. A footer isn't read by the filters the way a page is, so it isn't checked or changed; write it as it should appear.
+In `defaults`, it applies to every target the book has: to the HTML in the cartridge now, and to an EPUB, a PDF, or Word files if you add them later, each in its own way of putting something on every page ([Header and footer](configuration.md#header-and-footer)). The address is left as text, not a link, as OpenStax's own PDFs print it: a link whose text is an address, on every page, is what some checkers report as a bare URL. A footer isn't read by the filters the way a page is, so it isn't checked or changed; write it as it should appear.
 
 ### 5. Without the PDF: the guessed order
 

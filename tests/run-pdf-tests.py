@@ -992,7 +992,9 @@ PREAMBLE_TWO = ("# Two\n\nThe second chapter.\n\n## Its section\n\nThe section.\
 
 def build_preamble(work):
     """A chapter of long paragraphs and one with a section and a
-    subsection, whose metadata file is PREAMBLE_META: the PDF's path."""
+    subsection, whose metadata file is PREAMBLE_META: (the PDF's path,
+    build-pdf.py's LaTeX run on its own from the folder above, with -d
+    the book's folder as a relative path, and what it said)."""
     os.makedirs(work)
     for name, text in (("one.md", "# One\n\n" + "".join(FOOTER_WORDS * 4 + "\n\n"
                                                          for _ in range(6))),
@@ -1006,7 +1008,20 @@ def build_preamble(work):
         fh.write("targets:\n  pdf:\n    format: pdf\n    pdf:\n      metadata: _preamble.md\n")
     subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick"], cwd=work,
                    capture_output=True, text=True, stdin=subprocess.DEVNULL)
-    return os.path.join(work, "pdf", "org.example.preamble.pdf")
+    # The metadata file had been looked for in the book's folder twice
+    # over (Pandoc ran there, given a path relative to where the build
+    # did), and the build stopped.
+    hand = subprocess.run(["python3", os.path.join(BIN, "build-pdf.py"), "-d",
+                           os.path.basename(work), "--latex-only"],
+                          cwd=os.path.dirname(work), capture_output=True, text=True,
+                          stdin=subprocess.DEVNULL)
+    tex = os.path.join(work, "pdf", "book.tex")
+    source = ""
+    if os.path.exists(tex):
+        with open(tex, encoding="utf-8") as fh:
+            source = fh.read()
+    return os.path.join(work, "pdf", "org.example.preamble.pdf"), source, \
+        hand.stdout + hand.stderr
 
 # The page for WCAG 1.4.8 (AAA), bin/pdf-layout-wcag-aaa.yaml, copied into
 # a book as its metadata file: FOOTER_ONE's footnote, and a chapter with a
@@ -1920,7 +1935,7 @@ def default_checks(default_path):
 
 
 
-def preamble_checks(preamble_path):
+def preamble_checks(preamble_path, preamble_source, preamble_said):
     """The preamble book's checks (build_preamble)."""
     reader = pypdf.PdfReader(preamble_path) if os.path.exists(preamble_path) else None
     lines = glyph_lines(preamble_path) if reader else {}
@@ -1939,6 +1954,10 @@ def preamble_checks(preamble_path):
          lambda: reader is not None
          and not any("Contents" in (page.extract_text() or "") for page in reader.pages)
          and outline_titles(reader) == ["One", "Two", "Its section"]),
+        ("build-pdf.py run on its own, given the book's folder as a relative path, finds "
+         "the metadata file",
+         lambda: "\\usepackage[margin=1.5in]{geometry}" in preamble_source
+         and "Could not find" not in preamble_said and "does not exist" not in preamble_said),
     ]
 
 def aaa_checks(aaa_path):
@@ -2039,7 +2058,7 @@ def checks(work, jobs=1):
             sized_path, sized_said = sized.result()
             fancy_path = fancied.result()
             default_path = defaulted.result()
-            preamble_path = prefaced.result()
+            preamble_path, preamble_source, preamble_said = prefaced.result()
             aaa_path = aaa.result()
     else:
         reader, source, rows, log, placements = build(work)
@@ -2050,7 +2069,7 @@ def checks(work, jobs=1):
         sized_path, sized_said = build_sized(work + "-sized")
         fancy_path = build_fancy(work + "-fancy")
         default_path = build_default(work + "-default")
-        preamble_path = build_preamble(work + "-preamble")
+        preamble_path, preamble_source, preamble_said = build_preamble(work + "-preamble")
         aaa_path = build_aaa(work + "-aaa")
 
     def page_text(path):
@@ -2664,7 +2683,7 @@ def checks(work, jobs=1):
     items += sized_checks(sized_path, sized_said)
     items += fancy_checks(fancy_path)
     items += default_checks(default_path)
-    items += preamble_checks(preamble_path)
+    items += preamble_checks(preamble_path, preamble_source, preamble_said)
     items += aaa_checks(aaa_path)
     if verapdf_ran:
         # The one character no font has is drawn as .notdef, which

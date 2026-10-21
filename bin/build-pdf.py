@@ -471,10 +471,13 @@ def meta_bool(value):
 
 def metadata_file(base, setting):
     """The metadata of the file pdf.metadata names, as Pandoc reads it."""
-    path = setting if os.path.isabs(setting) else os.path.join(base, setting)
+    # Whole, since Pandoc runs in the book's folder: a path relative to a
+    # folder given relative to where the build runs (-d book) had Pandoc
+    # look for book/book/meta.yaml.
+    path = os.path.abspath(os.path.join(base, setting))
     if not os.path.isfile(path):
         sys.exit(f"pdf.metadata is set to {setting}, which does not exist "
-                 f"(looked at {os.path.abspath(path)}).")
+                 f"(looked at {path}).")
     if path.lower().endswith((".yaml", ".yml")):
         command = ["pandoc", "-f", "markdown", "-t", "json",
                    "--metadata-file", path]
@@ -511,13 +514,13 @@ def book_metadata(project, resolved, base, numbered):
                                "c": [meta_string(s) for s in standards]}
     meta["numbersections"] = meta_bool(numbered)
     meta["toc"] = meta_bool(True)
-    # A LaTeX book's own layout, as its preamble gives it (convert.py
-    # passes it on): its type size, paper, margins, line spacing, and
-    # paragraph indents, where the default page would have its own. Any
-    # other book's is the default page (pdf-layout.yaml). The metadata
-    # file still wins, a field at a time, and the run says what of a
-    # LaTeX book's layout is left.
-    layout = book_layout()
+    # A LaTeX book's own layout, as its preamble gives it (latex_book):
+    # its type size, paper, margins, line spacing, and paragraph indents,
+    # where the default page would have its own. Any other book's is the
+    # default page (pdf-layout.yaml). The metadata file still wins, a
+    # field at a time, and the run says what of a LaTeX book's layout is
+    # left.
+    layout, colors = latex_book(base, resolved)
     if layout is None:
         if not os.path.isfile(DEFAULT_LAYOUT):
             sys.exit(f"The PDF target's default page, {DEFAULT_LAYOUT}, is missing; it comes "
@@ -641,13 +644,12 @@ def book_metadata(project, resolved, base, numbered):
     # before these, and define Highlighting when there's highlighted code).
     ours += ("\\ifdefined\\directlua\\ifdefined\\Highlighting\n" + latexbuild.CODE_SPACES
              + "\\fi\\fi\n")
-    # A LaTeX book's own colors, which convert.py passes on: a formula keeps
-    # its TeX as the book wrote it, \color{redcards} and all, and LaTeX
-    # stops on a color nothing defines (OpenIntro Statistics).
-    colors = os.environ.get("BOOK_LATEX_COLORS", "").strip()
+    # A LaTeX book's own colors (latex_book): a formula keeps its TeX as
+    # the book wrote it, \color{redcards} and all, and LaTeX stops on a
+    # color nothing defines (OpenIntro Statistics).
     if colors:
         ours += ("\\RequirePackage{xcolor}\n\\makeatletter\n"
-                 + "\n".join(guarded_color(c) for c in colors.splitlines())
+                 + "\n".join(guarded_color(c) for c in colors)
                  + "\n\\makeatother\n")
     unchosen = [command for field, command in FAMILIES if field not in meta]
     if unchosen:
@@ -699,19 +701,41 @@ def meta_value(value):
     return meta_string(value)
 
 
-def book_layout():
-    """The layout a LaTeX book's preamble gives its pages, as Pandoc's
-    variables (BOOK_LATEX_LAYOUT, which convert.py sets for a LaTeX book,
-    {} when its preamble says nothing of them), or None for a book of
-    any other source."""
+def latex_book(base, resolved):
+    """A LaTeX book's own page and colors: (the layout its preamble gives
+    its pages, as Pandoc's variables, {} when it says nothing of them, or
+    None for a book of any other source; its color statements, a line
+    each). convert.py passes them (BOOK_LATEX_LAYOUT, JSON, and
+    BOOK_LATEX_COLORS); run on its own, --latex-only say, the script
+    read neither, and wrote the default page and none of the book's
+    colors, on which LaTeX can stop. So it reads them as convert.py does,
+    from the masters latex.main chooses (latexsource.book_page)."""
     text = os.environ.get("BOOK_LATEX_LAYOUT")
-    if text is None:
-        return None
+    if text is not None:
+        try:
+            layout = json.loads(text or "{}")
+        except ValueError:
+            layout = {}
+        return (layout if isinstance(layout, dict) else {},
+                [c for c in os.environ.get("BOOK_LATEX_COLORS", "").splitlines()
+                 if c.strip()])
+    import latexsource
+    main = [str(entry).strip() for entry in (resolved["latex.main"] or [])
+            if str(entry).strip()]
     try:
-        layout = json.loads(text or "{}")
-    except ValueError:
-        return {}
-    return layout if isinstance(layout, dict) else {}
+        masters, _ = latexsource.chosen_masters(base, main)
+        pages = [latexsource.book_page(base, master) for master in masters]
+    except OSError:
+        pages = []
+    if not pages:
+        return None, []
+    colors = []
+    for _, statements in pages:
+        for statement in statements:
+            if statement not in colors:
+                colors.append(statement)
+    # A statement a line, as convert.py passes them.
+    return pages[0][0], [" ".join(c.split()) for c in colors]
 
 
 def layout_words(layout):

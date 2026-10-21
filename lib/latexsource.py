@@ -57,6 +57,7 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
+import glob
 import hashlib
 import json
 import os
@@ -281,6 +282,45 @@ def masters(base):
                 and is_master(read_text(path)):
             found.append(name)
     return found
+
+
+def named_documents(base, entry):
+    """What a latex.main entry names, a path below base or a pattern
+    (src/*.tex, in sorted order): (the files, those of them that are
+    whole documents)."""
+    if os.path.isfile(os.path.join(base, entry)):
+        matches = [os.path.normpath(entry)]
+    else:
+        matches = sorted(os.path.relpath(p, base) for p in
+                         glob.glob(os.path.join(glob.escape(base), entry))
+                         if os.path.isfile(p))
+    return matches, [m for m in matches if is_master(read_text(os.path.join(base, m)))]
+
+
+def chosen_masters(base, main):
+    """The book's masters, as latex.main (main, its entries) chooses them:
+    each whole document an entry names, once, in the order named, or,
+    when it names none, the one whole document in base. (masters,
+    problem): problem is None, or what stops the choice, the masters then
+    []: ("entry", entry, matches) for an entry naming no whole document,
+    ("several",) for several here and none named, or ("binder", master,
+    pdfs) for a master that only gathers PDFs (binder)."""
+    chosen = []
+    for entry in main:
+        matches, whole = named_documents(base, entry)
+        if not whole:
+            return [], ("entry", entry, matches)
+        chosen += [m for m in whole if m not in chosen]
+    if not chosen:
+        found = masters(base)
+        if len(found) > 1:
+            return [], ("several",)
+        chosen = found[:1]
+    for master in chosen:
+        pdfs = binder(base, master)
+        if pdfs:
+            return [], ("binder", master, pdfs)
+    return chosen, None
 
 
 INCLUDEPDF = re.compile(r"\\includepdf\s*(?:\[[^]]*\])?\s*\{\s*([^}]+?)\s*\}")
@@ -6142,14 +6182,26 @@ def prepare(base, work, master, say, macros=""):
     texts[master] = preamble_copy + "".join(pieces) + rest
     for name, text in texts.items():
         write_text(os.path.join(copy, name), text)
-    # The book's colors, for a PDF built from its pages, whose formulas
-    # can still name one: the reader keeps a formula's TeX as written.
-    colors = [m.group(0) for m in book_colors(originals, include_macros(originals))]
+    layout, colors = book_page(base, master, originals)
     return {"master": os.path.join(copy, master), "order": order,
             "front_role": front_role, "files": files, "missing": missing,
             "counts": counts, "preamble": preamble, "copy": copy, "colors": colors,
-            "counters": counting, "citations": citations,
-            "layout": page_layout(originals, include_macros(originals))}
+            "counters": counting, "citations": citations, "layout": layout}
+
+
+def book_page(base, master, originals=None):
+    """What a PDF built from a LaTeX book's pages keeps of the book's own
+    LaTeX: (the layout the master's preamble gives its pages, page_layout;
+    the color statements it reaches, book_colors, as the book writes
+    them), the colors since the reader keeps a formula's TeX as written,
+    and a formula can name one. originals: [(name, text)], the files the
+    master reaches, the master first, when they're read already."""
+    if originals is None:
+        files, _ = reached(base, master)
+        originals = [(name, read_text(os.path.join(base, name))) for name in files]
+    includes = include_macros(originals)
+    return (page_layout(originals, includes),
+            [m.group(0) for m in book_colors(originals, includes)])
 
 
 TABLE_BEGIN = re.compile(r"\\begin\s*\{(tabular\*?|tabularx|longtable)\}")

@@ -3485,6 +3485,17 @@ def case_customized(work):
                  + ("  pdf:\n    format: pdf\n    pdf:\n      from: pages\n" if pdf else ""))
     second = convert(work)
     said = second.stdout + second.stderr
+    # build-pdf.py on its own, to read the LaTeX, without the layout and
+    # colors convert.py passes it: it had written the default page and
+    # none of the book's colors, on which LaTeX stops.
+    alone = subprocess.run(
+        ["python3", os.path.join(BIN, "build-pdf.py"), "-d", work, "--target", "pdf",
+         "--latex-only"], capture_output=True, text=True, stdin=subprocess.DEVNULL,
+        env={k: v for k, v in os.environ.items() if not k.startswith("BOOK_LATEX")}) \
+        if pdf else None
+    alone_said = alone.stdout + alone.stderr if alone else ""
+    alone_tex = read(work, "pdf", "book.tex") \
+        if os.path.exists(os.path.join(work, "pdf", "book.tex")) else ""
 
     def page(name):
         path = os.path.join(work, "html", name)
@@ -3627,6 +3638,14 @@ def case_customized(work):
          if pdf else skip("no lualatex for the PDF")),
         ("and the type size and margins the book's preamble gives, not Pandoc's 10pt in "
          "the book class's margins", lambda: page_layout_kept(work, said)
+         if pdf else skip("no lualatex for the PDF")),
+        ("build-pdf.py run on its own, --latex-only, keeps the book's layout and colors, "
+         "as convert.py's run gives them",
+         lambda: "The LaTeX book's own layout, from its preamble: 11pt type; geometry's "
+         "margin=1in; xcolor's dvipsnames colors; indented paragraphs." in alone_said
+         and re.search(r"\\documentclass\[[^]]*11pt[^]]*\]\{book\}", alone_tex)
+         and "\\usepackage[margin=1in]{geometry}" in alone_tex
+         and "\\definecolor{oiB}{rgb}{.337,.608,.741}" in alone_tex
          if pdf else skip("no lualatex for the PDF")),
         ("the copy runs on the paragraphs of an alt-text argument, which "
          "\\includegraphics can't take", lambda: "\\Figure[A gray star in chapter two, drawn "

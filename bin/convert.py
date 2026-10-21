@@ -1058,60 +1058,41 @@ def latex_masters(base, quiet=False, skip=()):
     to name instead. skip: folders a .tex file there is a copy in (a
     run's output), not a source."""
     import latexsource
+    chosen, problem = latexsource.chosen_masters(base, LATEX_MAIN)
+    if problem is None or quiet:
+        return chosen
     found = latexsource.masters(base)
-    chosen = []
-    for entry in LATEX_MAIN:
-        if os.path.isfile(os.path.join(base, entry)):
-            matches = [os.path.normpath(entry)]
-        else:
-            matches = sorted(os.path.relpath(p, base) for p in
-                             glob.glob(os.path.join(glob.escape(base), entry))
-                             if os.path.isfile(p))
-        whole = [m for m in matches
-                 if latexsource.is_master(latexsource.read_text(os.path.join(base, m)))]
-        if not whole:
-            if quiet:
-                return []
-            die(f"latex.main names {entry}, which "
-                + ("isn't here" if not matches else
-                   "isn't a whole LaTeX document (one with \\documentclass and "
-                   "\\begin{document})" if len(matches) == 1 else
-                   "matches no whole LaTeX document (one with \\documentclass "
-                   "and \\begin{document})")
-                + (": " + ", ".join(found) + (" is." if len(found) == 1 else " are.")
-                   if found else "."))
-        chosen += [m for m in whole if m not in chosen]
-    if not chosen:
-        if len(found) > 1:
-            if quiet:
-                return []
-            die(f"{len(found)} files here are each a whole LaTeX document: "
-                + ", ".join(found) + ". Set latex.main to the one that is the "
-                "book, or list them all when each is a part of it.")
-        chosen = found[:1]
-    for master in chosen:
-        pdfs = latexsource.binder(base, master)
-        if not pdfs:
-            continue
-        if quiet:
-            return []
-        sources, without = latexsource.binder_sources(base, pdfs, skip)
-        die(f"{master} gathers {len(pdfs)} PDF(s) with \\includepdf and holds no "
-            "LaTeX of its own to convert: each PDF is a document built on its "
-            "own. "
-            + (f"{len(sources)} of them have the LaTeX they're built from here, a "
-               "whole document of the same name. To convert those, in the order "
-               f"{master} gives them, name them in conversion.yaml:\n\n"
-               "defaults:\n  latex:\n    main:\n"
-               + "".join(f'      - "{s}"\n' for s in sources) + "\n"
-               if sources else "None of them has a whole LaTeX document of the "
-               "same name here; latex.main can name the documents to convert. ")
-            + (f"{len(without)} have no LaTeX here: "
-               + ", ".join(os.path.basename(p) for p in without[:6])
-               + (", ..." if len(without) > 6 else "") + ". "
-               if without and sources else "")
-            + "Nothing was converted.")
-    return chosen
+    if problem[0] == "entry":
+        _, entry, matches = problem
+        die(f"latex.main names {entry}, which "
+            + ("isn't here" if not matches else
+               "isn't a whole LaTeX document (one with \\documentclass and "
+               "\\begin{document})" if len(matches) == 1 else
+               "matches no whole LaTeX document (one with \\documentclass "
+               "and \\begin{document})")
+            + (": " + ", ".join(found) + (" is." if len(found) == 1 else " are.")
+               if found else "."))
+    if problem[0] == "several":
+        die(f"{len(found)} files here are each a whole LaTeX document: "
+            + ", ".join(found) + ". Set latex.main to the one that is the "
+            "book, or list them all when each is a part of it.")
+    _, master, pdfs = problem
+    sources, without = latexsource.binder_sources(base, pdfs, skip)
+    die(f"{master} gathers {len(pdfs)} PDF(s) with \\includepdf and holds no "
+        "LaTeX of its own to convert: each PDF is a document built on its "
+        "own. "
+        + (f"{len(sources)} of them have the LaTeX they're built from here, a "
+           "whole document of the same name. To convert those, in the order "
+           f"{master} gives them, name them in conversion.yaml:\n\n"
+           "defaults:\n  latex:\n    main:\n"
+           + "".join(f'      - "{s}"\n' for s in sources) + "\n"
+           if sources else "None of them has a whole LaTeX document of the "
+           "same name here; latex.main can name the documents to convert. ")
+        + (f"{len(without)} have no LaTeX here: "
+           + ", ".join(os.path.basename(p) for p in without[:6])
+           + (", ..." if len(without) > 6 else "") + ". "
+           if without and sources else "")
+        + "Nothing was converted.")
 
 
 LATEXMATH = re.compile(r"latexmath:\[((?:\\.|[^\]\\])*)\]")

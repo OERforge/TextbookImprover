@@ -841,6 +841,57 @@ def case_one_page_notes(work):
     ]
 
 
+def case_svg_ids(work):
+    """A picture in SVG whose ids repeat, as a Desmos graph's do: the
+    EPUB's copy has each repeat renamed, the first left as it is, and is
+    otherwise the same, words in a comment or in text that look like an
+    id left alone; and one whose stylesheet names a repeated id, which
+    styles every element that has it, left with that id repeated."""
+    os.makedirs(work)
+    svg = ('<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10">'
+           '<!-- the first draft: <g id="graph"/> -->'
+           '<g id="graph"><g id="sketch"><title>One</title></g>'
+           '<g id="sketch"><title>Two</title></g><g id="sketch-2"/>'
+           "<g id='sketch'><title>Three</title></g>"
+           '<text>&lt;div id="graph"&gt;</text></g></svg>')
+    styled = ('<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10">'
+              '<style>#dot{fill:red}</style><circle id="dot" r="1"/>'
+              '<circle id="dot" r="2"/><g id="ring"/><g id="ring"/></svg>')
+    for name, text in (("graph.svg", svg), ("styled.svg", styled)):
+        with open(os.path.join(work, name), "w", encoding="utf-8") as fh:
+            fh.write(text)
+    markdown_page(work, "book", "# A Graph\n\n![A graph of three points](graph.svg)\n\n"
+                  "![Two red dots](styled.svg)\n")
+    write_config(work, "    - book\n")
+    built = Built(work)
+    copies = []
+    path = os.path.join(work, "epub", "org.example.fixtures.epub")
+    if os.path.exists(path):
+        with zipfile.ZipFile(path) as archive:
+            copies = [archive.read(n).decode("utf-8") for n in archive.namelist()
+                      if n.endswith(".svg")]
+    copy = next((text for text in copies if "sketch" in text), "")
+    dots = next((text for text in copies if "dot" in text), "")
+    return [
+        ("an SVG picture's repeated ids are renamed in the EPUB's copy, the first "
+         "kept and a name the file has already skipped, and the run says so",
+         lambda: built.status == 0
+         and re.findall(r"""<g id=["']([^"']+)""", re.sub(r"<!--.*?-->", "", copy))
+         == ["graph", "sketch", "sketch-3", "sketch-2", "sketch-4"]
+         and "2 SVG picture(s) held an id more than once" in built.stderr),
+        ("and the picture is otherwise the same, an id in a comment or in its text "
+         "not taken for an element's",
+         lambda: copy.replace('id="sketch-3"', 'id="sketch"')
+         .replace("id='sketch-4'", "id='sketch'") == svg),
+        ("a repeated id the picture's stylesheet names is left, and the run says why, "
+         "where its other repeated id is renamed",
+         lambda: dots == styled.replace('<g id="ring"/><g id="ring"/>',
+                                        '<g id="ring"/><g id="ring-2"/>')
+         and re.search(r"WARNING: \S+\.svg holds dot more than once, which its own "
+                       r"stylesheet names", built.stderr)),
+    ]
+
+
 CASES = [
     ("the shape of the book", case_structure),
     ("the table of contents read back", case_outline),
@@ -852,6 +903,7 @@ CASES = [
     ("divisions and landmarks", case_divisions),
     ("types declared in contents", case_declared_types),
     ("a one-page book's notes", case_one_page_notes),
+    ("an SVG picture's repeated ids", case_svg_ids),
 ]
 
 

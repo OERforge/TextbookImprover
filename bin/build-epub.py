@@ -295,6 +295,96 @@ def retitle_chapters(path):
 
 ID = re.compile(r'\sid="([^"]+)"')
 FRAGMENT_LINK = re.compile(r'(<a\b[^>]*?\shref=")#([^"]+)(")')
+# An XML file's start tags, and what has to be passed over to find them:
+# a comment, a CDATA section, a processing instruction, or a DOCTYPE with
+# its internal subset, any of which can hold text that looks like a tag.
+# Text between tags holds no "<", which XML escapes there.
+SVG_MARKUP = re.compile(
+    rb"(?P<skip><!--.*?-->|<!\[CDATA\[.*?\]\]>|<\?.*?\?>|<!DOCTYPE(?:[^\[>]|\[.*?\])*>)"
+    rb"""|(?P<tag><[A-Za-z_][^\s/>]*(?:\s+[^\s=/>]+\s*=\s*(?:"[^"]*"|'[^']*'))*\s*/?>)""",
+    re.S)
+SVG_ATTRIBUTE = re.compile(rb"""\s([^\s=/>]+)\s*=\s*(["'])(.*?)\2""", re.S)
+SVG_STYLESHEET = re.compile(rb"<(?:[\w.-]+:)?style\b[^>]*>(.*?)</(?:[\w.-]+:)?style\s*>", re.S)
+
+
+def svg_unique_ids(data):
+    """An SVG file's bytes with each id an element repeats renamed:
+    (the bytes, or None when nothing is renamed; how many were renamed;
+    the repeated ids its stylesheet names, which are left). An id is a
+    start tag's id attribute, never words in a comment or in text that
+    look like one. The first element keeps its id, so whatever refers to
+    it, a reference finding the first element with an id, finds the same
+    element; each repeat gets a number after it that no id of the file
+    has. A stylesheet's #id styles every element with the id, so an id
+    one names is left repeated."""
+    found = []
+    for m in SVG_MARKUP.finditer(data):
+        if m.group("tag") is None:
+            continue
+        for a in SVG_ATTRIBUTE.finditer(m.group("tag")):
+            if a.group(1) == b"id":
+                found.append((m.start("tag") + a.start(3), m.start("tag") + a.end(3),
+                              a.group(3)))
+    ids = [ident for _, _, ident in found]
+    repeated = {ident for ident in ids if ids.count(ident) > 1}
+    if not repeated:
+        return None, 0, []
+    styles = b"".join(m.group(1) for m in SVG_STYLESHEET.finditer(data))
+    styled = sorted(ident for ident in repeated
+                    if re.search(rb"#" + re.escape(ident) + rb"(?![\w-])", styles))
+    taken, seen, pieces, last, renamed = set(ids), set(), [], 0, 0
+    for start, end, ident in found:
+        if ident not in seen or ident in styled:
+            seen.add(ident)
+            continue
+        number = 2
+        while ident + b"-%d" % number in taken:
+            number += 1
+        new = ident + b"-%d" % number
+        taken.add(new)
+        pieces += [data[last:start], new]
+        last = end
+        renamed += 1
+    styled = [s.decode("utf-8", "replace") for s in styled]
+    if not renamed:
+        return None, 0, styled
+    return b"".join(pieces) + data[last:], renamed, styled
+
+
+def unique_svg_ids(path):
+    """Each SVG picture in the EPUB that holds an id more than once given
+    its repeats renamed (svg_unique_ids), which epubcheck requires of a
+    picture in an EPUB (RSC-005): (the pictures changed, the ids renamed,
+    {picture: ids left because its stylesheet names them}).
+
+    An exporter can repeat one: a Desmos graph gives each expression's
+    group of shapes the same id, Algebra 1's Algebra-1_09_12_06_01.svg
+    sketch-99cb8af3 three times, which nothing refers to. The picture
+    looks as it did."""
+    tmp = path + ".tmp"
+    changed, renamed, left = {}, 0, {}
+    with zipfile.ZipFile(path) as zin:
+        for info in zin.infolist():
+            if not info.filename.lower().endswith(".svg"):
+                continue
+            result, count, styled = svg_unique_ids(zin.read(info.filename))
+            if result is not None:
+                changed[info.filename] = result
+                renamed += count
+            if styled:
+                left[info.filename] = styled
+    if not changed:
+        return 0, 0, left
+    with zipfile.ZipFile(path) as zin, \
+            zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as zout:
+        for info in zin.infolist():
+            data = zin.read(info.filename)
+            if info.filename == "mimetype":
+                zout.writestr(info, data, compress_type=zipfile.ZIP_STORED)
+                continue
+            zout.writestr(info, changed.get(info.filename, data))
+    os.replace(tmp, path)
+    return len(changed), renamed, left
 
 
 def link_across_chapters(path):
@@ -820,6 +910,18 @@ def build(base, name, resolved, keep, intermediates=None):
             arrange_epub_notes(out_path, assembly, numbering, placement)
         link_across_chapters(out_path)
         mark_divisions(out_path, assembly.divisions(), assembly.contents_id)
+        pictures, renamed, left = unique_svg_ids(out_path)
+        if pictures:
+            print(f"{pictures} SVG picture(s) held an id more than once; the "
+                  f"EPUB's copy has the {renamed} repeat(s) renamed, as "
+                  "epubcheck requires.", file=sys.stderr)
+        for picture, ids in sorted(left.items()):
+            print(f"WARNING: {os.path.basename(picture)} holds "
+                  + ", ".join(ids) + " more than once, which its own stylesheet "
+                  "names (#id) and so styles every element that has it: left "
+                  "as it is, which epubcheck reports (RSC-005). Giving each "
+                  "element an id of its own, and the stylesheet a rule for "
+                  "each, settles it.", file=sys.stderr)
         if keep:
             shutil.copy(book_json, os.path.join(out_dir, "book.json"))
     finally:

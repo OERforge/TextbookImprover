@@ -3128,8 +3128,11 @@ def case_pieces(work):
          lambda: flat_alt == "\\fig[A first paragraph.\nA second one,\na third]{sq}\\fig[One]{sq}\n"
          and commented_alt == "\\fig[A first. % to reword\nA second.]{sq}\n"
          and flat_counts.get("alt_paragraphs") == 1),
-        ("a language babel hasn't installed is named, with how to find its package",
-         lambda: any("babel has no language ngerman" in advice and "/ngerman.ldf" in advice
+        ("a language babel hasn't installed, the book's or a passage's, is named, with how "
+         "to find its package with tlmgr or with apt",
+         lambda: any("babel has no language ngerman, which the book, or a passage of it, is in"
+                     in advice and "search --global --file /ngerman.ldf" in advice
+                     and "apt-file search /ngerman.ldf" in advice
                      for advice in latexbuild.failure_advice(
                          "! Package babel Error: Unknown option 'ngerman'.\n"
                          "(babel)                Suggested actions:\n"))),

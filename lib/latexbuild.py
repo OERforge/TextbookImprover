@@ -1033,16 +1033,22 @@ def failure_advice(log):
                     "installs that. For a distribution's texlive packages, "
                     "its package manager does (`apt-file search "
                     f"{name}` on Debian and Ubuntu).")
-    # A passage's language, which babel reads from a file of the language's
-    # name (ngerman.ldf, in babel-german); its hyphenation patterns are in
-    # the language's hyphen- package.
+    # The book's language or a passage's, which babel reads from a file of
+    # the language's name (ngerman.ldf, in babel-german), and without which
+    # it stops; its hyphenation patterns are in the language's hyphen-
+    # package, without which babel says so in the log and hyphenates the
+    # language by another's. On Debian and Ubuntu both are in one
+    # texlive-lang- package (texlive-lang-spanish for Spanish).
     for name in dict.fromkeys(BABEL_UNKNOWN.findall(log)):
-        said.append(f"babel has no language {name}, which a passage of the book is in. For "
-                    f"TinyTeX or TeX Live from tug.org, "
+        said.append(f"babel has no language {name}, which the book, or a passage of it, is "
+                    "in. For TinyTeX or TeX Live from tug.org, "
                     f"`{tlmgr_command('search --global --file /' + name + '.ldf')}` names the "
                     "package that has it (babel-german for ngerman), and the language's "
-                    f"hyphen- package has its hyphenation; `{tlmgr_command('install')}` "
-                    "installs both. A full TeX Live has every language.")
+                    "hyphen- package has its hyphenation (hyphen-german for German); "
+                    f"`{tlmgr_command('install')}` installs both. For a distribution's "
+                    f"texlive packages, `apt-file search /{name}.ldf` names the one that has "
+                    "both on Debian and Ubuntu (texlive-lang-german for German). A full TeX "
+                    "Live has every language.")
     # A face the PDF's metadata file names, an OpenStax book's among them
     # (cnx.project.DESIGNS), that isn't installed: Debian's and Ubuntu's
     # TeX Live leave Noto Sans to fonts-noto-core.

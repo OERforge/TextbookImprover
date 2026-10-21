@@ -274,7 +274,15 @@ A LaTeX book's PDF is built from the book's own LaTeX ([LaTeX sources](latex.md#
 
 The TeX packages in the last two `tlmgr` lines are what the LaTeX suite's small books load (`tests/run-latex-tests.py`), with `luatex85`, `preview`, `geometry`, `cancel`, and `pict2e`. Its first checks name a LaTeX too old for the PDF target and any of them that are missing, with the line that installs them, and `rsvg-convert` too. It has one check of Ghostscript's way of embedding fonts, which skips without Ghostscript.
 
-Two more kinds of package, depending on the book. A book with passages in another language needs that language's `babel-` and `hyphen-` packages (`tlmgr install babel-german hyphen-german` for German), or LuaLaTeX stops with babel's `Unknown option`, and the run says how to find the package. And whatever a `pdf.metadata` file's `header-includes` loads, and whatever else a book of your own loads, has to be installed too (`hanging`, say). When LuaLaTeX stops on `File 'something.sty' not found`, `tlmgr search --global --file /something.sty` names the package to install, and the run says so.
+Two more kinds of package, depending on the book. A book in a language other than English, or with passages in one, needs TeX's support for that language: babel's definition of it, in the language's `babel-` package, without which LuaLaTeX stops with babel's `Unknown option` and the language's name, and its hyphenation patterns, in its `hyphen-` package, without which babel hyphenates the language as another one, saying so only in LaTeX's log. The lines above give English alone, and when LuaLaTeX stops for a language, the run says how to find its package. For a book in Spanish (`language: es` in its `project.yaml`, as an OpenStax book in Spanish has):
+
+```bash
+tlmgr install babel-spanish hyphen-spanish
+```
+
+Where TeX Live is the distribution's own, Debian's or Ubuntu's, `sudo apt install texlive-lang-spanish` installs both. Most languages' packages are named the same way, German's `babel-german` and `hyphen-german`, though not all: Portuguese's are `babel-portuges` and `hyphen-portuguese`. The run's advice gives the commands that find a missing language's package, with `tlmgr` or with `apt-file`, and a full TeX Live, from its own installer, has every language.
+
+And whatever a `pdf.metadata` file's `header-includes` loads, and whatever else a book of your own loads, has to be installed too (`hanging`, say). When LuaLaTeX stops on `File 'something.sty' not found`, `tlmgr search --global --file /something.sty` names the package to install, and the run says so.
 
 ## Optional: veraPDF
 

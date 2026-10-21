@@ -581,13 +581,25 @@ def book_metadata(project, resolved, base, numbered):
             depth -= 1
         meta["toc-depth"] = meta_string(depth)
     # Ours come after the author's, so the author's packages are loaded
-    # first, but for a type size, which comes before them; a list either
-    # way.
+    # first, but for a type size and the contents' depth, which come before
+    # them; a list either way.
     includes = meta.get("header-includes")
     if includes is None:
         includes = {"t": "MetaList", "c": []}
     elif includes.get("t") != "MetaList":
         includes = {"t": "MetaList", "c": [includes]}
+    # The bookmarks go as deep as LaTeX's tocdepth when each is written
+    # (hyperref's bookmarksdepth, unset), and Pandoc's template sets it
+    # only where it writes the contents, inside $if(toc)$, as build-pdf's
+    # own contents page does where project.contents places it: with toc:
+    # false the class's own depth stood, and the bookmarks went a level
+    # deeper than pdf.toc_depth says. Set from the start, ahead of the
+    # author's LaTeX, which can still set its own; the contents set it
+    # again to the same.
+    depth = meta_plain(meta.get("toc-depth"))
+    if re.fullmatch(r"-?\d+", depth):
+        includes["c"].insert(0, {"t": "MetaBlocks", "c": [
+            raw_latex("\\setcounter{tocdepth}{%s}\n" % depth)]})
     # The standards in effect, the metadata file's if it set them.
     claimed = meta.get("pdfstandard")
     claimed = [meta_plain(c) for c in claimed["c"]] if claimed and claimed.get("t") == "MetaList" \

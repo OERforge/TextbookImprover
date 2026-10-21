@@ -979,24 +979,29 @@ def build_fancy(work):
 # packages for its own margins and line spacing, as Pandoc's own page
 # left a book to: the default page's margins and line spacing, which load
 # geometry and setspace first, had stopped LaTeX ("Option clash for
-# package geometry"), and undone a spacing the file set.
-PREAMBLE_META = ("---\nheader-includes:\n  - |\n    ```{=latex}\n"
+# package geometry"), and undone a spacing the file set. And no contents
+# page, as such a book may have none: Pandoc's template sets LaTeX's
+# tocdepth, which the bookmarks follow, only where it writes the contents,
+# so a page's subsections had bookmarks too.
+PREAMBLE_META = ("---\ntoc: false\nheader-includes:\n  - |\n    ```{=latex}\n"
                  "    \\usepackage[margin=1.5in]{geometry}\n"
                  "    \\usepackage[doublespacing]{setspace}\n    ```\n---\n")
+PREAMBLE_TWO = ("# Two\n\nThe second chapter.\n\n## Its section\n\nThe section.\n\n"
+                "### Its subsection\n\nThe subsection.\n")
 
 
 def build_preamble(work):
-    """A chapter of long paragraphs whose metadata file is PREAMBLE_META:
-    the PDF's path."""
+    """A chapter of long paragraphs and one with a section and a
+    subsection, whose metadata file is PREAMBLE_META: the PDF's path."""
     os.makedirs(work)
     for name, text in (("one.md", "# One\n\n" + "".join(FOOTER_WORDS * 4 + "\n\n"
                                                          for _ in range(6))),
-                       ("_preamble.md", PREAMBLE_META)):
+                       ("two.md", PREAMBLE_TWO), ("_preamble.md", PREAMBLE_META)):
         with open(os.path.join(work, name), "w", encoding="utf-8") as fh:
             fh.write(text)
     with open(os.path.join(work, "project.yaml"), "w", encoding="utf-8") as fh:
         fh.write("project:\n  title: Preamble\n  identifier: org.example.preamble\n"
-                 "  language: en-US\n  contents:\n    - one\n")
+                 "  language: en-US\n  contents:\n    - one\n    - two\n")
     with open(os.path.join(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
         fh.write("targets:\n  pdf:\n    format: pdf\n    pdf:\n      metadata: _preamble.md\n")
     subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick"], cwd=work,
@@ -1917,7 +1922,8 @@ def default_checks(default_path):
 
 def preamble_checks(preamble_path):
     """The preamble book's checks (build_preamble)."""
-    lines = glyph_lines(preamble_path) if os.path.exists(preamble_path) else {}
+    reader = pypdf.PdfReader(preamble_path) if os.path.exists(preamble_path) else None
+    lines = glyph_lines(preamble_path) if reader else {}
     opening = page_holding(preamble_path, "Each sentence of this chapter")
     body = text_lines(lines, opening)
     # setspace's double spacing at 12pt is 1.655 of the class's 14.5
@@ -1928,6 +1934,11 @@ def preamble_checks(preamble_path):
          "has its own",
          lambda: len(body) > 10 and {round(line[1]) for line in body} == {108}
          and 23.5 < commonest_leading(body) < 24.3),
+        ("without a contents page, the bookmarks go as deep as pdf.toc_depth says, a "
+         "page's sections and not their subsections",
+         lambda: reader is not None
+         and not any("Contents" in (page.extract_text() or "") for page in reader.pages)
+         and outline_titles(reader) == ["One", "Two", "Its section"]),
     ]
 
 def aaa_checks(aaa_path):

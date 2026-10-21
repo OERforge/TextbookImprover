@@ -1026,8 +1026,7 @@ def build_preamble(work):
 # The page for WCAG 1.4.8 (AAA), bin/pdf-layout-wcag-aaa.yaml, copied into
 # a book as its metadata file: FOOTER_ONE's footnote, and a chapter with a
 # table, which loads the caption package, a figure with a long caption, and
-# paragraphs. The text's lines are spaced by the font's single spacing,
-# which the book class makes 1.2 times the type's size, and so are a
+# paragraphs. The text's lines are spaced by the type's size, and so are a
 # footnote's and a caption's, which setspace and the caption package set
 # single-spaced on the default page.
 AAA_TABLE = ("\n| Name | What it holds |\n|---|---|\n| One | A cell. |\n\n"
@@ -1971,7 +1970,14 @@ def aaa_checks(aaa_path):
     sizes = sizes_by_page(reader, "sentence")[opening + 1] \
         if opening is not None and opening + 1 < len(reader.pages) else []
     leading = commonest_leading(body) or 0
-    breaks = [a[0] - b[0] for a, b in zip(body, body[1:]) if a[0] - b[0] > 1.5 * leading]
+    # The space between paragraphs on every page of text, the least of
+    # them as the page sets it: a full page's, two-sided, is stretched to
+    # fill it (\flushbottom), a chapter's last page's not.
+    breaks = []
+    for page in range(opening, len(reader.pages)) if opening is not None else []:
+        found = text_lines(lines, page)
+        breaks += [a[0] - b[0] for a, b in zip(found, found[1:])
+                   if 1.5 * leading < a[0] - b[0] < 2 * leading]
 
     def lines_from(page, first, last=None):
         """A page's lines from the one holding first to the one holding
@@ -1990,19 +1996,19 @@ def aaa_checks(aaa_path):
         if figure is not None else []
     return [
         ("on the page for WCAG 1.4.8 (AAA), the text is 13.5pt type on lines "
-         "space-and-a-half apart: 1.5 times the font's single spacing, which the book "
-         "class makes 1.2 times the type's size, so 1.8 times it",
+         "space-and-a-half apart, 1.5 times the type's size, as W3C's technique C21 "
+         "measures it",
          lambda: len(body) > 10 and set(sizes) == {13.45}
-         and abs(leading - 1.8 * 13.45) < 0.15),
-        ("its paragraphs 2.5 times that single spacing apart, from the top of one's "
-         "last line to the top of the next one's first, 3 times the type's size",
-         lambda: len(breaks) >= 2 and 3 * 13.45 - 0.15 < min(breaks) < 3 * 13.45 + 3),
+         and abs(leading - 1.5 * 13.45) < 0.15),
+        ("its paragraphs 2.5 times the type's size apart, from the top of one's last "
+         "line to the top of the next one's first",
+         lambda: len(breaks) >= 2 and abs(min(breaks) - 2.5 * 13.45) < 0.5),
         ("and a footnote's lines and a caption's, in a book with a table, which loads "
          "the caption package, are as far apart for their type as the text's, where the "
          "default page sets them single-spaced",
          lambda: len(note) > 2 and len(caption) > 2
-         and abs(commonest_leading(note) - 1.8 * 11.21) < 0.15
-         and abs(commonest_leading(caption) - 1.8 * 13.45) < 0.15),
+         and abs(commonest_leading(note) - 1.5 * 11.21) < 0.15
+         and abs(commonest_leading(caption) - 1.5 * 13.45) < 0.15),
     ]
 
 

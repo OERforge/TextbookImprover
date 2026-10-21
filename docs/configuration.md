@@ -418,14 +418,14 @@ ragged-right: false
 - **A LaTeX book** keeps its own layout: its PDF from its pages has the type size, paper, margins, and line spacing its preamble gives, or the class's own page where it gives none ([LaTeX sources](latex.md#the-pdf-target)). A metadata file still changes that a field at a time. A PDF built from the book's own LaTeX is the author's.
 - **An OpenStax book** gets a copy of the file in its folder from `unpack-cnx.py`, named in its `conversion.yaml`, on A4 for the two Polish books OpenStax prints on it ([A CNXML book as the source](cnx-input.md)). A copy keeps the values it was made with, whatever the default becomes.
 
-**WCAG 1.4.8 (AAA).** [Visual Presentation](https://www.w3.org/WAI/WCAG22/Understanding/visual-presentation.html) asks for five things a reader can have of a block of text, and lets the means be the reader's own PDF viewer ("the mechanism can be provided by the browser or other user agent"). Two are a viewer's whatever the page: colors the reader chooses, and text enlarged to twice its size without scrolling sideways, as a viewer's reflow of a tagged PDF gives it. The default page gives a third, text that isn't justified, and misses the other two: its lines average about 88 characters, spaces counted, where the criterion asks for no more than 80, and its lines and paragraphs are closer together than it asks, its footnotes and captions closer still. `bin/pdf-layout-wcag-aaa.yaml` is a page that gives them, for a book that's to meet the criterion, and a book on it is longer: *Introduction to Sociology 3e* runs to 1,414 pages on it, where the default gives it 977. It's the default page with four changes, below. Copy it into a book's folder and name the copy in `conversion.yaml`, as with a copy of the default, or copy it over `bin/pdf-layout.yaml` to make it every book's page:
+**WCAG 1.4.8 (AAA).** [Visual Presentation](https://www.w3.org/WAI/WCAG22/Understanding/visual-presentation.html) asks for five things a reader can have of a block of text, and lets the means be the reader's own PDF viewer ("the mechanism can be provided by the browser or other user agent"). Two are a viewer's whatever the page: colors the reader chooses, and text enlarged to twice its size without scrolling sideways, as a viewer's reflow of a tagged PDF gives it. The default page gives a third, text that isn't justified, and lines space-and-a-half apart, and misses the rest: its lines average about 88 characters, spaces counted, where the criterion asks for no more than 80, and its paragraphs are closer together than it asks, its footnotes' and captions' lines too. `bin/pdf-layout-wcag-aaa.yaml` is a page that gives them, for a book that's to meet the criterion, and a book on it is longer: *Introduction to Sociology 3e* runs to 1,208 pages on it, where the default gives it 975. It's the default page with three changes, below. Copy it into a book's folder and name the copy in `conversion.yaml`, as with a copy of the default, or copy it over `bin/pdf-layout.yaml` to make it every book's page:
 
 ```yaml
 # A page for a book whose PDF is to meet WCAG 1.4.8, Visual Presentation
 # (AAA): the PDF target's default page (bin/pdf-layout.yaml) with larger
-# type, lines and paragraphs further apart, and footnotes and captions
-# spaced as the text is, which makes a book about 45 percent longer. To
-# use it for a book, copy it into the book's folder and name the copy in
+# type, paragraphs further apart, and footnotes and captions spaced as
+# the text is, which makes a book about 24 percent longer. To use it for
+# a book, copy it into the book's folder and name the copy in
 # conversion.yaml (defaults: pdf: metadata: pdf-layout-wcag-aaa.yaml); to
 # make it every book's page, copy it over bin/pdf-layout.yaml.
 # docs/configuration.md, "The PDF's page", says what each setting gives.
@@ -441,33 +441,34 @@ geometry:
   - bottom=0.8in
   - footskip=0.3in
 
-# Lines space-and-a-half apart: 1.5 times the font's single spacing,
-# which the book class makes 1.2 times the type's size, so 1.8 times it.
-linestretch: 1.5
+# Lines space-and-a-half apart, 1.5 times the type's size, as W3C's
+# technique for the criterion (C21) measures it: 1.25 times the book
+# class's own spacing, which is about 1.2 times the type's size.
+linestretch: 1.25
 
 # Text not justified.
 ragged-right: true
 
-# Paragraphs 2.5 times the font's single spacing apart, from the top of
-# one paragraph's last line to the top of the next one's first: 3 times
-# the type's size, a space of 1.2em between them at this line spacing.
-# And footnotes and captions spaced as the text is, where setspace and
+# Paragraphs 2.5 times the type's size apart, from the top of one
+# paragraph's last line to the top of the next one's first, a space of
+# 1em between them at this line spacing. And footnotes and captions
+# spaced as the text is, 1.5 times their type's size, where setspace and
 # the caption package would set them single-spaced. A book's own
 # pdf.metadata file that sets header-includes replaces these two lines,
 # as it would any setting here, so they go in its list too.
 header-includes:
-  - '\setlength{\parskip}{1.2em plus 2pt}'
-  - '\SetSinglespace{1.5}'
+  - '\setlength{\parskip}{1em plus 2pt}'
+  - '\SetSinglespace{1.25}'
 ```
 
 - **Lines of no more than 80 characters**, which W3C's technique for it reads as an average ([C20](https://www.w3.org/WAI/WCAG22/Techniques/css/C20)): 13.5-point type, whose full lines average about 78 (75 to 82, at the 10th and 90th percentiles), where the default's average 88 (85 to 92; *Introduction to Sociology 3e*'s, spaces counted). Larger type serves a reader with low vision too, but gives a wide table fewer characters' room: *Introductory Business Statistics 2e* has 81 lines that run into the margin at 13.5 points, where the default gives it 54. Side margins of 1.35 inches would bring the lines under 80 as well, about 79, with 12-point type and fewer pages (*Introduction to Sociology 3e* 1,040, where 13.5-point type alone makes it 1,160), but the text is then 0.7 inch narrower than the 6.5 inches OpenStax's tables were made for, and *Business Statistics* has the same 81 lines into the margin: `geometry: [left=1.35in, right=1.35in, top=0.8in, bottom=0.8in, footskip=0.3in]`. 1.3 inches comes to just over 80 (80.4 in *Sociology*'s first four chapters, 80.3 in *Business Statistics*').
-- **Lines space-and-a-half apart**, which W3C's explanation of the criterion measures from single spacing, "the default spacing for the font": 1.2 times the type's size in LaTeX, so `linestretch: 1.5` sets lines 1.8 times the type's size apart. W3C's technique for line spacing ([C21](https://www.w3.org/WAI/WCAG22/Techniques/css/C21)) measures from the type's size instead, and by its measure the default's lines, 1.5 times the type's size apart, are space-and-a-half already.
-- **Paragraphs further apart than lines**: "paragraph spacing is at least 1.5 times larger than the line spacing", which the explanation measures from the top of one paragraph's last line to the top of the next one's first, 250% of single spacing. That's 3 times the type's size, a space of 1.2em between paragraphs at this line spacing. The default's paragraphs are 2.1 times the type's size apart, half the class's line apart as parskip sets them (OpenStax's are 2.2).
-- **Footnotes and captions spaced as the text is.** setspace sets a footnote single-spaced, 1.2 times its type's size, whatever `linestretch` says, and the caption package does the same to a caption in a book with a table, which every OpenStax book has. setspace's `\SetSinglespace{1.5}` gives them the text's spacing.
+- **Lines space-and-a-half apart**, which W3C's technique for line spacing ([C21](https://www.w3.org/WAI/WCAG22/Techniques/css/C21)) measures from the type's size: the default's lines, 1.5 times the type's size apart, are space-and-a-half already, and the page keeps them.
+- **Paragraphs further apart than lines**: "paragraph spacing is at least 1.5 times larger than the line spacing", which W3C's explanation of the criterion measures from the top of one paragraph's last line to the top of the next one's first, 250% of single spacing. Measured from the type's size instead, as C21 measures lines, that's 2.5 times the type's size, a space of 1em between paragraphs at this line spacing. The default's paragraphs are 2.1 times the type's size apart, half the class's line apart as parskip sets them (OpenStax's are 2.2).
+- **Footnotes and captions spaced as the text is.** setspace sets a footnote single-spaced, 1.2 times its type's size, whatever `linestretch` says, and the caption package does the same to a caption in a book with a table, which every OpenStax book has. setspace's `\SetSinglespace{1.25}` gives them the text's spacing, 1.5 times their type's size.
 
 A book's own `pdf.metadata` file changes this page as it does the default, a setting at a time, so a file that sets `header-includes` replaces the page's two lines of LaTeX, and needs them in its own list: a book with this page copied over `bin/pdf-layout.yaml` and a metadata file of its own loading a package, say.
 
-Measured from the type's size, as C21 measures line spacing, the default page needs less: `fontsize: 13.5pt`, and in `header-includes`, `\setlength{\parskip}{1em plus 2pt}`, paragraphs 2.5 times the type's size apart, and `\SetSinglespace{1.25}`, footnotes and captions 1.5 times their type's size, as the text's lines are. *Introduction to Sociology 3e* runs to 1,214 pages so.
+Only the criterion's own words are normative, and they don't say what space-and-a-half is measured from. The technique, one of the criterion's [sufficient techniques](https://www.w3.org/WAI/WCAG22/Understanding/visual-presentation.html#techniques), measures from the type's size, and W3C says of a sufficient technique that [using it meets the criterion](https://www.w3.org/WAI/WCAG22/Understanding/understanding-techniques). Its explanation of the criterion measures from single spacing instead, "the default spacing for the font", which LaTeX makes 1.2 times the type's size, so that space-and-a-half is 1.8 times the type's size and paragraphs 3 times it apart. That reading needs `linestretch: 1.5`, and in `header-includes`, `\setlength{\parskip}{1.2em plus 2pt}` and `\SetSinglespace{1.5}`, and makes *Introduction to Sociology 3e* 1,408 pages.
 
 ### Headings that skip a level
 

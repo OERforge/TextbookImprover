@@ -446,6 +446,66 @@ def label_prefixes(resolved):
             "FIGURE_LABEL_PREFIXES": ",".join(map(str, resolved["captions.figure_prefixes"]))}
 
 
+# A formula's term struck out, in a book's PDF and a deck's (PDF_MACROS),
+# and in a LaTeX book's that loads cancel (texremediate.tag).
+CANCEL_STROKES = r"""% A formula's term struck out with the cancel package (\cancel,
+% \bcancel, and \xcancel, which texmath writes for MathML's diagonal
+% strikes, and \cancelto): cancel draws each stroke with picture mode's
+% \line, and \cancelto's arrow with \vector, which set glyphs of LaTeX's
+% line10 font, whose map to Unicode has only a space, and veraPDF failed
+% College Algebra 2e's first chapter on two of them (PDF/UA-2's 8.4.5.8).
+% pict2e draws picture mode's lines and arrows as paths, with no font.
+% cancel, given pict2e, asks for LaTeX's own commands
+% (\OriginalPictureCmds), its comment saying pict2e's have no bounding
+% box, which pict2e's \line has now; told to use pict2e's, it draws each
+% stroke where it did (measured: \cancel, \bcancel, \xcancel, and
+% \cancelto, in text, in a script, and displayed). pict2e is loaded at the
+% end of the preamble, after any pict2e the document loads with options
+% of its own, and only where cancel is, since it has drawing commands of
+% its own, \arc, \Line, \polygon, \moveto, and the rest, which, loaded so
+% late, replaced a document's own \arc, on which LaTeX then stopped
+% ("Missing number"), and stopped LaTeX on a \newcommand of one in the
+% text ("already defined"). So those names are set aside before it loads
+% and, at \begin{document}, given back as the document had them or taken
+% away. Not \maxovalrad, which pict2e's \oval reads, nor the trig
+% package's names (\UseSin and the rest), which pict2e loads.
+\ExplSyntaxOn
+\clist_const:Nn \c__oer_pictiie_names_clist
+  {
+    arc, pIIearc, Line, polyline, Vector, polyvector, polygon, moveto,
+    lineto, curveto, circlearc, closepath, strokepath, fillpath, buttcap,
+    roundcap, squarecap, miterjoin, roundjoin, beveljoin, ltxarrows,
+    pstarrows, cbezier
+  }
+\AddToHook { begindocument / before }
+  {
+    \IfPackageLoadedT { cancel }
+      {
+        \IfPackageLoadedF { pict2e }
+          {
+            \clist_map_inline:Nn \c__oer_pictiie_names_clist
+              {
+                \cs_set_eq:cc { __oer_pictiie_ #1 : } {#1}
+                \cs_undefine:c {#1}
+              }
+            \RequirePackage { pict2e }
+            \AddToHook { begindocument / end }
+              {
+                \clist_map_inline:Nn \c__oer_pictiie_names_clist
+                  {
+                    \cs_if_exist:cTF { __oer_pictiie_ #1 : }
+                      { \cs_set_eq:cc {#1} { __oer_pictiie_ #1 : } }
+                      { \cs_undefine:c {#1} }
+                  }
+              }
+          }
+        \cs_set_eq:NN \OriginalPictureCmds \scan_stop:
+      }
+  }
+\ExplSyntaxOff
+"""
+
+
 # Written into a tagged PDF's preamble, by build-pdf.py after the metadata
 # file's own header-includes, and by a deck's template (decks.py).
 # math/setup names both forms of MathML luamml makes (it needs
@@ -671,7 +731,7 @@ PDF_MACROS = r"""\ExplSyntaxOn
 \AddToHook { package / hyperref / after }
   { \pdfstringdefDisableCommands { \cs_set:Npn \OERBlank #1 {#1} } }
 \ExplSyntaxOff
-% A fill-in blank, a run of four or more underscores pdf-target.lua marks
+""" + CANCEL_STROKES + r"""% A fill-in blank, a run of four or more underscores pdf-target.lua marks
 % (\OERBlank), that runs past the end of its line into the margin: TeX
 % can't break a run of underscores, and Sociology's chapter 19 quiz had a
 % question whose blank ran 24 points past its line. Once a paragraph's
@@ -941,14 +1001,32 @@ def overfull_warning(found, where="PDF"):
 
 def failure_advice(log):
     """What to do about a failed build, from its log: a file LaTeX can't
-    find, a language babel hasn't, a font that isn't installed, or one of
-    TeX's tables outgrown."""
+    find, the two packages a struck-out term needs among them, a language
+    babel hasn't, a font that isn't installed, or one of TeX's tables
+    outgrown."""
     said = []
+    missing = list(dict.fromkeys(MISSING_FILE.findall(log)))
+    # A formula's term struck out: Pandoc's template loads cancel for it in
+    # the preamble, and CANCEL_STROKES loads pict2e at \begin{document},
+    # neither of which TinyTeX or TeX Live's medium scheme has, so a build
+    # stops on cancel.sty and, once that's installed, on pict2e.sty, which
+    # the book never names. Both are named at once; a book that loads
+    # pict2e for drawings of its own is told the same, cancel included.
+    if {"cancel.sty", "pict2e.sty"} & set(missing):
+        said.append("LaTeX can't find cancel.sty or pict2e.sty. A formula's struck-out term "
+                    "(\\cancel, \\bcancel, or \\xcancel) needs TeX's cancel package and "
+                    "pict2e, which the run loads with cancel to draw the strokes as paths, "
+                    "and a book can load pict2e for drawings of its own. For TinyTeX or TeX "
+                    f"Live from tug.org, `{tlmgr_command('install cancel pict2e')}` installs "
+                    "both; for Debian's or Ubuntu's texlive packages, `sudo apt install "
+                    "texlive-latex-extra texlive-pictures`.")
     # tlmgr only manages a TeX Live installed from tug.org or as TinyTeX;
     # Debian's and Ubuntu's texlive packages come with a tlmgr that runs in
     # an uninitialized user mode and installs nothing, so both routes are
     # named.
-    for name in dict.fromkeys(MISSING_FILE.findall(log)):
+    for name in missing:
+        if name in ("cancel.sty", "pict2e.sty"):
+            continue
         said.append(f"LaTeX can't find {name}. For TinyTeX or TeX Live "
                     f"from tug.org, `{tlmgr_command('search --global --file /' + name)}` "
                     f"names the package that has it, and `{tlmgr_command('install')}` "

@@ -1540,9 +1540,10 @@ def check_fitted_blanks():
 
 def check_tex_packages():
     """The installation page's commands for TeX install every package the
-    run and the suites check for, a deck's PDF's and the LaTeX and PDF
-    suites' books', each line a command of its own: copied, two names at a
-    line break had once run together ("soultabto-ltx")."""
+    run and the suites check for, what a deck's PDF needs and what the
+    LaTeX, PDF, and decks suites' books and decks load, each line a command
+    of its own: copied, two names at a line break had once run together
+    ("soultabto-ltx")."""
     page = open(os.path.join(ROOT, "docs", "installation.md"), encoding="utf-8").read()
     section = page.split("### Everything at once", 1)[-1].split("\n### ", 1)[0]
     block = re.search(r"```bash\n(.*?)```", section, re.S)
@@ -1550,16 +1551,16 @@ def check_tex_packages():
     named = {word for line in lines if line.startswith("tlmgr install ")
              for word in line.split()[2:]}
     books = []
-    for name in ("run-latex-tests.py", "run-pdf-tests.py"):
+    for name in ("run-latex-tests.py", "run-pdf-tests.py", "run-decks-tests.py"):
         suite = open(os.path.join(HERE, name), encoding="utf-8").read()
         listed = re.search(r"^SUITE_TEX = \[(.*?)\]$", suite, re.S | re.M)
         books.append(re.findall(r'\("([\w-]+)", "[^"]+"\)', listed.group(1)) if listed else [])
     import decks
     talk = [package for _, package in decks.LTX_TALK_FILES]
     return [
-        ("the installation page installs every TeX package a deck's PDF and the LaTeX "
-         "and PDF suites' books need",
-         lambda: all(books) and set(books[0] + books[1] + talk) <= named),
+        ("the installation page installs every TeX package a deck's PDF and the LaTeX, "
+         "PDF, and decks suites' books and decks need",
+         lambda: all(books) and set(sum(books, []) + talk) <= named),
         ("each line of it a command of its own",
          lambda: named and not any(line.rstrip().endswith("\\") for line in lines)),
     ]

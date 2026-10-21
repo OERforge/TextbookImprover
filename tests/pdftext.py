@@ -405,3 +405,54 @@ def element_texts(path, tag):
 def code_lines(path):
     """Each line of code's text, as the PDF holds it."""
     return element_texts(path, "/codeline")
+
+
+def diagonal_strokes(path):
+    """[(page index, run, rise)] for each straight line a page's own content
+    strokes that is neither level nor upright, as drawn, a path of one
+    segment: a formula's term struck out, which pict2e draws as a line. A
+    rule, an underline, and a box's sides are level or upright."""
+    found = []
+    with pikepdf.open(path) as pdf:
+        for n, page in enumerate(pdf.pages):
+            points = []
+            for operands, op in pikepdf.parse_content_stream(page):
+                op = str(op)
+                if op == "m":
+                    points = [[float(v) for v in operands]]
+                elif op == "l" and points:
+                    points.append([float(v) for v in operands])
+                elif op in ("S", "s"):
+                    if len(points) == 2:
+                        run = points[1][0] - points[0][0]
+                        rise = points[1][1] - points[0][1]
+                        if abs(run) > 0.01 and abs(rise) > 0.01:
+                            found.append((n, round(run, 2), round(rise, 2)))
+                    points = []
+                elif op in ("n", "f", "F", "f*", "B", "B*", "b", "b*", "re", "h", "c", "v",
+                            "y"):
+                    points = []
+    return found
+
+
+def base_fonts(path):
+    """The base font names a PDF's pages and their form XObjects draw with,
+    a subset's tag taken off (ABCDEF+LINE10 is LINE10)."""
+    names = set()
+
+    # Each dictionary by its items: pikepdf 8, Ubuntu 24.04's, has no
+    # Dictionary.values().
+    def walk(resources, seen):
+        if resources is None:
+            return
+        for _, font in (resources.get("/Font") or {}).items():
+            name = str(font.get("/BaseFont", "")).lstrip("/")
+            names.add(name.split("+", 1)[1] if re.match(r"[A-Z]{6}\+", name) else name)
+        for _, xobject in (resources.get("/XObject") or {}).items():
+            if xobject.get("/Subtype") == "/Form" and xobject.objgen not in seen:
+                walk(xobject.get("/Resources"), seen | {xobject.objgen})
+
+    with pikepdf.open(path) as pdf:
+        for page in pdf.pages:
+            walk(page.obj.get("/Resources"), frozenset())
+    return names

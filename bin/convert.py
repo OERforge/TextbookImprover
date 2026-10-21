@@ -3328,6 +3328,8 @@ def remediate_sources(target, base, docs, paths, env, html_stems=(), language=No
                   if counts.get("tag_gyre") else "")
                + ("MathML set up for the book's unicode-math, "
                   if counts.get("tag_math_setup") else "")
+               + ("cancel set to draw with pict2e, so a term the book strikes out is "
+                  "drawn with paths, not a font's glyphs, " if counts.get("tag_cancel") else "")
                + (f"{counts['tag_floats']} figure(s) and table(s) tagged where the text has "
                   "them, not gathered at the end of the document, "
                   if counts.get("tag_floats") else "")
@@ -3735,6 +3737,8 @@ def latex_book_pdf(target, base, latex_parts, paths, work, language, project, ta
                "paragraphs, " if counts.get("layout_tables") else "")
             + ("each formula with its MathML, " if counts.get("tag_math") or
                counts.get("tag_math_setup") else "")
+            + ("cancel set to draw with pict2e, so a term struck out is drawn with "
+               "paths, not a font's glyphs, " if counts.get("tag_cancel") else "")
             + ("its figures and tables tagged where the text has them, "
                if counts.get("tag_floats") else "")
             + (f"{counts['tag_boxes']} table(s) of one column of prose tagged as a "

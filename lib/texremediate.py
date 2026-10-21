@@ -1398,8 +1398,9 @@ def tag(texts, master, language, mathml=True, standard=("ua-2",), base=None):
     center environment, which leaves one open in LaTeX 2026-06-01, each
     float's tags where the text has it (FLOATS_HERE), the packages
     tagging can't build or tag with replaced by definitions that keep the
-    text (SHIMS), and, unless mathml is false, unicode-math for the
-    formulas' MathML (math_block). Returns counts."""
+    text (SHIMS), pict2e for the terms cancel strikes out
+    (latexbuild.CANCEL_STROKES), and, unless mathml is false, unicode-math
+    for the formulas' MathML (math_block). Returns counts."""
     counts = {"metadata": 0, "pdftex_options": 0, "pdftex_settings": 0,
               "theorems": 0, "centerline": 0, "formulas": 0, "floats": 0}
     if mathml:
@@ -1417,6 +1418,14 @@ def tag(texts, master, language, mathml=True, standard=("ua-2",), base=None):
     if "enumitem" in packages:
         block += ENUMITEM_KEYS
         counts["enumitem"] = enumitem_settings(texts)
+    # A term the book strikes out, drawn with paths by pict2e, not with
+    # glyphs of the line10 font, which have no map to Unicode; not again
+    # in a copy made from a copy, where its constant would stop LaTeX
+    # ("already defined").
+    if "cancel" in packages and not any("c__oer_pictiie_names_clist" in piece
+                                         for piece in pieces):
+        block += latexbuild.CANCEL_STROKES
+        counts["cancel"] = 1
     shimmed = shimmed_packages(packages, base)
     # A package math_block stands in for, so unicode-math loads.
     stand_ins = [n for n in (counts.get("math_stand_in") or "").split(", ") if n]

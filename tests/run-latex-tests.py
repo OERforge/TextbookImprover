@@ -508,7 +508,9 @@ def can_draw():
 # made without, and so never reads, can still be one LaTeX needs found
 # (2026-10-08). With the packages a fuller TeX Live has that its smaller
 # schemes may not, which the books load too (amsfonts to tools), named
-# after a TeX Live install lacked some. And the one other tool the LaTeX
+# after a TeX Live install lacked some; and cancel and pict2e, for the
+# terms the book and the struck-out case strike out, which neither TinyTeX
+# nor TeX Live's medium scheme has. And the one other tool the LaTeX
 # target's SVG needs.
 SUITE_TEX = [("amsfonts", "amssymb.sty"), ("amsmath", "amsmath.sty"),
              ("babel-english", "english.ldf"), ("caption", "caption.sty"),
@@ -518,7 +520,8 @@ SUITE_TEX = [("amsfonts", "amssymb.sty"), ("amsmath", "amsmath.sty"),
              ("pgf", "tikz.sty"), ("preview", "preview.sty"), ("soul", "soul.sty"),
              ("tabto-ltx", "tabto.sty"), ("tex-gyre", "texgyreheros-regular.otf"),
              ("titlesec", "titlesec.sty"), ("ulem", "ulem.sty"),
-             ("wasysym", "wasysym.sty"), ("wrapfig", "wrapfig.sty")]
+             ("wasysym", "wasysym.sty"), ("wrapfig", "wrapfig.sty"),
+             ("cancel", "cancel.sty"), ("pict2e", "pict2e.sty")]
 
 
 def tex_ready():
@@ -1267,10 +1270,13 @@ def case_own_fonts(work):
 
 
 BOOK_MASTER = ("\\documentclass{book}\n\\usepackage{graphicx}\n\\usepackage{amsmath,amssymb}\n"
+               "\\usepackage{cancel}\n\\newcommand{\\arc}[1]{\\overset{\\frown}{#1}}\n"
                "\\usepackage{makeidx}\n\\makeindex\n\\title{A Small Book}\n\\author{An Author}\n"
                "\\begin{document}\n\\maketitle\n\\include{one}\n\\printindex\n\\end{document}\n")
 BOOK_CHAPTER = ("\\chapter{One}\nSome text about sets\\index{sets}, where "
                 "$\\mathbb{N} \\subseteq \\mathbb{Z}$ and $x \\neq y$.\n"
+                "Terms struck out, $\\frac{\\cancel{3}x}{\\cancel{3}} = x$, and an arc, "
+                "$\\arc{AB}$, by a command of the book's own named as one of pict2e's.\n"
                 "\\begin{figure}[t]\\centering\\includegraphics[width=2cm]{sq}"
                 "\\caption{A square}\\label{fig:sq}\\end{figure}\n"
                 "After the figure in the source, Figure~\\ref{fig:sq}.\n\n"
@@ -1315,8 +1321,13 @@ def case_book_pdf(work):
         books[name] = (book, result.returncode, result.stdout + result.stderr)
 
     def text(name):
+        """The PDF's text: nothing for a PDF that wasn't built, whose checks
+        fail, and None for one with no pdftotext to read it, whose checks
+        skip."""
         path = os.path.join(books[name][0], "pdf", "book.pdf")
-        if not os.path.exists(path) or not shutil.which("pdftotext"):
+        if not os.path.exists(path):
+            return ""
+        if not shutil.which("pdftotext"):
             return None
         return subprocess.run(["pdftotext", path, "-"], capture_output=True,
                               text=True).stdout
@@ -1411,12 +1422,37 @@ def case_book_pdf(work):
                     found.append(size * math.hypot(tm[0], tm[1]) * math.hypot(cm[0], cm[1]))
             page.extract_text(visitor_text=visit)
         return bool(found) and all(abs(size / 9.96 - 1) < 0.03 for size in found)
+
+    def struck_out():
+        """A term the book strikes out with cancel, in its PDF from its own
+        LaTeX and from its pages: two strokes drawn as paths, no glyph of
+        the line10 font, and the book's own \\arc, a name pict2e has.
+        texremediate adds latexbuild.CANCEL_STROKES to the copy."""
+        try:
+            import pikepdf  # noqa: F401
+        except ImportError:
+            return skip("no pikepdf to read the PDF")
+        import pdftext
+        for name in ("book", "pages"):
+            path = os.path.join(books[name][0], "pdf", "book.pdf")
+            if not os.path.exists(path):
+                return False
+            found = text(name)
+            if found is None:
+                return skip("no pdftotext to read the PDF")
+            if len(pdftext.diagonal_strokes(path)) != 2 or "\u2322" not in found \
+                    or {"LINE10", "LINEW10"} & pdftext.base_fonts(path):
+                return False
+        return "cancel set to draw with pict2e" in books["book"][2]
     return [
         ("a LaTeX book's PDF is built from its own LaTeX: its index is there", built_from_book),
         ("its figure has the sidecar's alt text, its formulas MathML, its figure in place, "
          "its table the census's header row",
          tagged_from_book),
         ("and it passes veraPDF's PDF/UA-2 profile", passes_ua2),
+        ("a term it strikes out with cancel is drawn as lines, from its own LaTeX and from "
+         "its pages, with no glyph of LaTeX's line10 font, and pict2e, loaded for it, "
+         "leaves the book its own \\arc; the run says so", struck_out),
         ("the output check reports LaTeX's placeholder alt text for a drawing with none",
          placeholder_reported),
         ("pdf.from: pages builds it from the pages, which have no index", built_from_pages),
@@ -1425,6 +1461,106 @@ def case_book_pdf(work):
         ("a book that won't build with tagging stops the run, with LaTeX's error and the way out",
          lambda: books["broken"][1] != 0 and "TIQundefined" in books["broken"][2]
          and "wasn't built" in books["broken"][2] and "pdf.from: pages" in books["broken"][2]),
+    ]
+
+
+def case_struck_out(work):
+    """A term struck out with cancel, in the pieces no other book here
+    reaches: a tagged copy's report, a copy made from a copy, a book that
+    loads pict2e itself, a command of a pict2e name made at \\begin{document},
+    and a document with no cancel."""
+    sys.path.insert(0, os.path.join(ROOT, "lib"))
+    import latexbuild
+    import texremediate
+    os.makedirs(work)
+    master = ("\\documentclass{article}\n\\usepackage{amsmath}\n\\usepackage{cancel}\n"
+              "\\newcommand{\\cbezier}{a curve of the book's own}\n\\begin{document}\n"
+              "A term struck out, $\\cancel{3}x$, and \\cbezier.\n\\end{document}\n")
+    with open(os.path.join(work, "notes.tex"), "w", encoding="utf-8") as fh:
+        fh.write(master)
+    with open(os.path.join(work, "conversion.yaml"), "w") as fh:
+        fh.write("targets:\n  tagged:\n    format: source\n    tagging: \"on\"\n")
+    result = convert(work)
+    said = result.stdout + result.stderr
+    copy = os.path.join(work, "tagged", "notes.tex")
+
+    def build(name, text):
+        """(LaTeX's exit status, the PDF's path, its text) for text, built
+        untagged or as it says, in a folder of its own."""
+        folder = os.path.join(work, name)
+        os.makedirs(folder, exist_ok=True)
+        with open(os.path.join(folder, "page.tex"), "w", encoding="utf-8") as fh:
+            fh.write(text)
+        done = subprocess.run(["lualatex", "-interaction=nonstopmode", "-halt-on-error",
+                               "page.tex"], cwd=folder, capture_output=True, text=True,
+                              stdin=subprocess.DEVNULL, timeout=300)
+        pdf = os.path.join(folder, "page.pdf")
+        found = subprocess.run(["pdftotext", pdf, "-"], capture_output=True,
+                               text=True).stdout if os.path.exists(pdf) else ""
+        return done.returncode, pdf, found
+
+    def tools():
+        if not shutil.which("lualatex") or not shutil.which("pdftotext"):
+            return "no lualatex or pdftotext to build and read the page"
+        try:
+            import pikepdf  # noqa: F401
+        except ImportError:
+            return "no pikepdf to read the PDF"
+        return None
+
+    def copy_of_copy():
+        """The tagged copy made again from itself, as a copy laid over the
+        book's folder is: CANCEL_STROKES once, and it builds, its term
+        struck out a path and the book's own \\cbezier its own."""
+        missing = tools()
+        if missing:
+            return skip(missing)
+        import pdftext
+        if not os.path.exists(copy):
+            return False
+        texts = {"notes.tex": read(work, "tagged", "notes.tex")}
+        texremediate.tag(texts, "notes.tex", "en", True, ("ua-2",), None)
+        status, pdf, found = build("again", texts["notes.tex"])
+        return texts["notes.tex"].count("\\clist_const:Nn \\c__oer_pictiie_names_clist") == 1 \
+            and status == 0 and len(pdftext.diagonal_strokes(pdf)) == 1 \
+            and "a curve of the book" in found
+
+    def own_pict2e():
+        """A book that loads pict2e itself keeps all of it: its \\cbezier,
+        which pict2e makes at \\begin{document}, draws."""
+        missing = tools()
+        if missing:
+            return skip(missing)
+        import pdftext
+        status, pdf, _ = build("own", (
+            "\\documentclass{article}\n\\usepackage{cancel}\n\\usepackage{pict2e}\n"
+            + latexbuild.CANCEL_STROKES + "\\begin{document}\n$\\cancel{3}$\n"
+            "\\begin{picture}(40,20)\\cbezier(0,0)(10,20)(30,20)(40,0)\\end{picture}\n"
+            "\\end{document}\n"))
+        return status == 0 and len(pdftext.diagonal_strokes(pdf)) == 1
+
+    def without_cancel():
+        """A document with no cancel loads no pict2e: \\maxovalrad, which
+        pict2e defines and leaves, isn't defined."""
+        missing = tools()
+        if missing:
+            return skip(missing)
+        status, _, found = build("none", (
+            "\\documentclass{article}\n" + latexbuild.CANCEL_STROKES + "\\begin{document}\n"
+            "\\ifdefined\\maxovalrad pict2e loaded\\else no pict2e\\fi\n\\end{document}\n"))
+        return status == 0 and "no pict2e" in found
+    return [
+        ("a tagged copy of a book that strikes a term out with cancel has pict2e drawing it, "
+         "and the run says so",
+         lambda: os.path.exists(copy) and "c__oer_pictiie_names_clist" in read(work, "tagged",
+                                                                              "notes.tex")
+         and "cancel set to draw with pict2e" in said),
+        ("a copy made again from such a copy has it once, and builds, its term struck out a "
+         "path and a command of the book's own named as pict2e's \\cbezier its own",
+         copy_of_copy),
+        ("a book that loads pict2e itself keeps pict2e's \\cbezier, which pict2e makes at "
+         "\\begin{document}", own_pict2e),
+        ("a document with no cancel loads no pict2e", without_cancel),
     ]
 
 
@@ -2997,6 +3133,20 @@ def case_pieces(work):
                      for advice in latexbuild.failure_advice(
                          "! Package babel Error: Unknown option 'ngerman'.\n"
                          "(babel)                Suggested actions:\n"))),
+        # TinyTeX has neither, and a build stops on cancel.sty first and,
+        # once that's installed, on pict2e.sty: each alone gets the one
+        # line, and with another file the one line and that file's.
+        ("a struck-out term's packages missing, cancel or pict2e, are named together, "
+         "with the command that installs both",
+         lambda: all(len(advice) == 1 and "install cancel pict2e" in advice[0]
+                     and "texlive-latex-extra texlive-pictures" in advice[0]
+                     for advice in (latexbuild.failure_advice(
+                         f"! LaTeX Error: File `{name}' not found.\n")
+                         for name in ("cancel.sty", "pict2e.sty")))
+         and latexbuild.failure_advice("! LaTeX Error: File `cancel.sty' not found.\n"
+                                       "! LaTeX Error: File `pict2e.sty' not found.\n"
+                                       "! LaTeX Error: File `hanging.sty' not found.\n")[1:]
+         == latexbuild.failure_advice("! LaTeX Error: File `hanging.sty' not found.\n")),
         ("a font that isn't installed is named, its name split over fontspec's lines too, "
          "with where an OpenStax book's faces come from",
          lambda: any("LaTeX can't find the font IBM Plex Serif Text." in advice
@@ -5001,6 +5151,7 @@ CASES = [("a LaTeX book", case_book), ("two masters", case_masters),
          ("a table tagged as a division of paragraphs", case_layout_tables),
          ("the source target", case_source), ("a book with fonts of its own", case_own_fonts),
          ("a LaTeX book's PDF, from its own LaTeX", case_book_pdf),
+         ("a term struck out with cancel, in pieces no book reaches", case_struck_out),
          ("the PDF build's copy of the book", case_pdf_copy),
          ("the book's other masters", case_other_masters),
          ("calls of the book's macros for an image, as the review found them",

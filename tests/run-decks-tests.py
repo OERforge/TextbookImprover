@@ -641,7 +641,8 @@ Where it falls.[^f]
 # footnote in a caption, a table, and a slide's title, struck text, a
 # passage in another language, code that shows a frame, a frame option
 # ltx-talk has no key for, beamer's own command in header-includes, and
-# a color named as xcolor's dvipsnames name it.
+# a color named as xcolor's dvipsnames name it. And a formula's term
+# struck out, which the cancel package draws.
 ODD = """\
 ---
 title: Odd Cases
@@ -671,6 +672,10 @@ A first note.[^a]
 ::: {lang=de}
 Ein ganzer Absatz.
 :::
+
+# Struck out
+
+$\\frac{\\cancel{3}x}{\\cancel{3}} = x$ and $\\xcancel{2z}$.
 
 # Code
 
@@ -1454,6 +1459,25 @@ def pdf_ready():
     return None
 
 
+# The TeX packages the suite's decks load beyond what ltx-talk needs, which
+# a smaller TeX can lack, by a file each holds: cancel and pict2e for the
+# odd deck's terms struck out of its formulas, which neither TinyTeX nor
+# TeX Live's medium scheme has, and luacolor and lua-ul, not in TinyTeX,
+# which the template loads for its struck text (docs/installation.md).
+SUITE_TEX = [("cancel", "cancel.sty"), ("pict2e", "pict2e.sty"),
+             ("luacolor", "luacolor.sty"), ("lua-ul", "lua-ul.sty")]
+
+
+def tex_missing():
+    """The packages of SUITE_TEX TeX can't find, none where there's no
+    kpsewhich to ask."""
+    if not shutil.which("kpsewhich"):
+        return []
+    return [package for package, name in SUITE_TEX
+            if not subprocess.run(["kpsewhich", name], capture_output=True, text=True,
+                                  stdin=subprocess.DEVNULL).stdout.strip()]
+
+
 def outline(path):
     with pikepdf.open(path) as pdf:
         with pdf.open_outline() as tree:
@@ -1945,8 +1969,13 @@ def case_pdf(work):
     ran = verapdf()
     if not ran:
         print("  skip  veraPDF not found (set VERAPDF); the PDFs' claims aren't judged")
-    flat_text, sectioned_text = text_of(flat), text_of(sectioned)
-    agenda_text, odd_text, more_text = text_of(agenda), text_of(odd), text_of(more)
+
+    def built_text(path):
+        """The deck's text, nothing where its PDF wasn't built, which its
+        checks fail on, so that the rest run."""
+        return text_of(path) if os.path.exists(path) else ""
+    flat_text, sectioned_text = built_text(flat), built_text(sectioned)
+    agenda_text, odd_text, more_text = built_text(agenda), built_text(odd), built_text(more)
     levels = lambda path: [h[0] for h in heading_elements(path)]  # noqa: E731
     checks = [
         ("a PDF of each deck, the whole deck however its pages are cut",
@@ -2069,7 +2098,8 @@ def case_pdf(work):
         ("beamer's commands with a star, and setbeameroption, do nothing, and are named",
          lambda: re.search(r"NOTE: beamer's [^\n]*\\setbeamercolor[^\n]*\\setbeameroption", out)),
         ("no page has a placeholder LaTeX left on a first run",
-         lambda: "Temporary page" not in flat_text + sectioned_text + agenda_text),
+         lambda: flat_text and sectioned_text and agenda_text
+         and "Temporary page" not in flat_text + sectioned_text + agenda_text),
         ("each slide with a title is bookmarked, under its section, once though it pauses",
          lambda: outline(flat) == [("Value Is Subjective", []), ("Specialization => Growth", []),
                                    ("A Chart", []), ("Market Demand", [])]
@@ -2079,7 +2109,7 @@ def case_pdf(work):
          lambda: all(words in sectioned_text for words in (
              "Sections and Slides", "A conference talk", "B. Speaker", "A University"))),
         ("speaker notes aren't in the PDF",
-         lambda: "Ask what the class would pay" not in flat_text
+         lambda: flat_text and sectioned_text and "Ask what the class would pay" not in flat_text
          and "Notes for part two" not in sectioned_text),
         ("a title with > keeps it: the bold face lacks it, and another face supplies it",
          lambda: holds(flat_text, "Specialization => Growth") and "Missing character" not in out
@@ -2100,6 +2130,12 @@ def case_pdf(work):
          and "3The title" in odd_text and "4The table" in odd_text),
         ("struck text is set, and a passage in another language is tagged with it",
          lambda: "struck" in odd_text and languages(odd) >= {"fr", "de"}),
+        # The cancel package's strokes, drawn by pict2e (latexbuild's
+        # PDF_MACROS), not with glyphs of the line10 font.
+        ("a formula's term struck out is drawn as a line, one for each stroke, and no "
+         "glyph of LaTeX's line10 font is in the deck",
+         lambda: len(pdftext.diagonal_strokes(odd)) == 4
+         and not {"LINE10", "LINEW10"} & pdftext.base_fonts(odd)),
         ("beamer's command in header-includes does nothing, and the run names it",
          lambda: re.search(r"NOTE: beamer's [^\n]*\\setbeamertemplate in the header-includes "
                            r"of more, odd do nothing", out)),
@@ -2169,6 +2205,12 @@ def case_pdf(work):
     if ran:
         checks.insert(1, ("veraPDF finds nothing to fail in any of them",
                           lambda: not [r for r in check if r[1].startswith("verapdf")]))
+    lacking = tex_missing()
+    if lacking:
+        checks.insert(0, ("TeX has the packages the suite's decks load, or the checks that "
+                          "build them fail: missing " + ", ".join(lacking) + " ("
+                          + decks.latexbuild.tlmgr_command("install " + " ".join(lacking)) + ")",
+                          lambda: False))
     return checks
 
 

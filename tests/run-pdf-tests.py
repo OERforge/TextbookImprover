@@ -589,6 +589,14 @@ highlight lua-ul draws before a blank could be drawn shorter, left as
 they are: [________________]{.underline}, ~~________________~~, and
 [________________]{.mark}.
 
+```{=latex}
+\newcommand{\arc}[1]{\overset{\frown}{#1}}
+```
+
+Terms struck out, as a worked example cancels them:
+$\frac{\cancel{3}x}{\cancel{3}} = x$, $\bcancel{y}$, and $\xcancel{2z}$; and an
+arc, $\arc{AB}$, by a command the book defines, named as one of pict2e's.
+
 ## Sixty-four places of π, 3141592653589793238462643383279502884197169399375105820974944592
 
 A heading too long for a line of the contents, which is narrower than
@@ -1551,12 +1559,17 @@ def latex_color(color):
 
 # The TeX packages the suite's books load that a tagged build of any book
 # may not, which a smaller TeX can lack, by a file each holds: the default
-# page's geometry and setspace, scrextend for the sized book's 13.5pt, and
-# multirow for the book's table with a cell spanning rows
-# (docs/installation.md).
+# page's geometry and setspace, scrextend for the sized book's 13.5pt,
+# multirow for the book's table with a cell spanning rows, the fancy
+# book's Plex Serif, and for the notes book cancel and pict2e, for its
+# terms struck out of its formulas, which neither TinyTeX nor TeX Live's
+# medium scheme has, and luacolor and lua-ul, not in TinyTeX, for its
+# blanks struck out, underlined, and marked (docs/installation.md).
 SUITE_TEX = [("geometry", "geometry.sty"), ("setspace", "setspace.sty"),
              ("koma-script", "scrextend.sty"), ("multirow", "multirow.sty"),
-             ("plex", "IBMPlexSerif-Regular.otf")]
+             ("plex", "IBMPlexSerif-Regular.otf"), ("cancel", "cancel.sty"),
+             ("pict2e", "pict2e.sty"), ("luacolor", "luacolor.sty"),
+             ("lua-ul", "lua-ul.sty")]
 
 
 def tex_missing():
@@ -2549,6 +2562,22 @@ def checks(work, jobs=1):
          "its line first",
          lambda: all("\\%s{%s}" % (command, "\\_" * 16) in notes_source
                      for command in ("ul", "st", "hl"))),
+        # The cancel package draws its strokes with picture mode's \line,
+        # glyphs of LaTeX's line10 font, which have no map to Unicode;
+        # with pict2e (latexbuild's CANCEL_STROKES) they're paths.
+        ("a formula's term struck out is drawn as a line, one for each stroke, and none "
+         "of LaTeX's line10 font's glyphs, which have no map to Unicode, is in the PDF, "
+         "tagged or not",
+         lambda: [stroke[0] for stroke in pdftext.diagonal_strokes(notes_path)]
+         == [page_holding(notes_path, "Terms struck out")] * 5
+         and not {"LINE10", "LINEW10"} & (pdftext.base_fonts(notes_path)
+                                          | pdftext.base_fonts(notes_plain))),
+        # pict2e defines an \arc of its own, which a \newcommand of the
+        # book's in its text stopped on ("already defined"); CANCEL_STROKES
+        # takes it away again at \begin{document}.
+        ("pict2e, loaded for a term struck out, leaves the book its own command of a "
+         "name pict2e has, \\arc, defined in its text, tagged or not",
+         lambda: says(notes_text, "\u2322") and says(notes_plain_text, "\u2322")),
         # figures-and-tables.lua: a layout table's head rows are body rows,
         # since LaTeX's tagging made a longtable's head header cells even
         # tagged as a division, a TH outside any TR, which PDF/UA-2 rejects

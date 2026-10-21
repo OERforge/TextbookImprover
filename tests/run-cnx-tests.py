@@ -51,6 +51,13 @@ from html import unescape
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 BIN = os.path.join(ROOT, "bin")
+# The cosmos design's face as an OpenStax book's pdf-layout.yaml names it,
+# by its files, and with its math font.
+PLEX_SERIF = {"mainfont": "IBMPlexSerif",
+              "mainfontoptions": ["Extension=.otf", "UprightFont=*-Regular", "BoldFont=*-Bold",
+                                  "ItalicFont=*-Italic", "BoldItalicFont=*-BoldItalic"],
+              "mathfont": "IBMPlexMath-Regular.otf"}
+PLEX_FILES = ",".join(PLEX_SERIF["mainfontoptions"])
 sys.path.insert(0, os.path.join(ROOT, "lib"))
 
 ONE_PIXEL = base64.b64decode(
@@ -540,12 +547,21 @@ def case_trade(work):
          lambda: conversion["defaults"]["footer"] == "Access for free at openstax.org."),
         ("its PDF has the PDF target's default page, OpenStax's paper and margins with "
          "12pt type, copied into the book's folder to be changed there, every setting "
-         "the default's, under a comment saying where it came from",
+         "the default's but the face, under a comment saying where it came from",
          lambda: conversion["defaults"]["pdf"] == {"metadata": "pdf-layout.yaml"}
-         and layout == yaml.safe_load(read(BIN, "pdf-layout.yaml"))
+         and layout == dict(yaml.safe_load(read(BIN, "pdf-layout.yaml")), **PLEX_SERIF)
          and layout["fontsize"] == "12pt" and layout["ragged-right"] is True
          and read(out, "pdf-layout.yaml").startswith("# Written by unpack-cnx.py from ")
          and "# copied here to be changed for this book" in read(out, "pdf-layout.yaml")),
+        ("its text is in OpenStax's face for its design, cosmos's IBM Plex Serif, named by "
+         "its files, and its formulas in IBM Plex Math, whose letters are Plex Serif's, "
+         "the file says",
+         lambda: "# The text in IBM Plex Serif, as OpenStax sets this book in its cosmos\n"
+         in read(out, "pdf-layout.yaml")
+         and "# by its files, so the build stops if one isn't installed. Formulas in IBM\n"
+         "# Plex Math, whose letters are Plex Serif's.\nmainfont: IBMPlexSerif\n"
+         "mainfontoptions:\n  - Extension=.otf\n  - UprightFont=*-Regular\n"
+         in read(out, "pdf-layout.yaml")),
         ("its notes are numbered through each chapter, as OpenStax numbers "
          "them, and its captions' words are TextbookImprover's own",
          lambda: "  notes:\n    numbering: group\n" in read(out, "conversion.yaml")
@@ -915,6 +931,7 @@ effect="italics">myśli</emphasis></para></meaning></definition>
     out = os.path.join(work, "psychologia")
     result = unpack(repo, out)
     from cnx.project import openstax_pdf_layout
+    from cnx.bake.recipes import RECIPES
     import cnx.project
     import yaml
     section = read(out, "1-1-czym-jest-psychologia.html")
@@ -922,13 +939,24 @@ effect="italics">myśli</emphasis></para></meaning></definition>
     # its paper unset.
     edited = os.path.join(work, "edited", "pdf-layout.yaml")
     write(edited, "fontsize: 11pt\n\nlinestretch: 1\n")
+    # And one that names a face of its own.
+    named = os.path.join(work, "named", "pdf-layout.yaml")
+    write(named, "fontsize: 11pt\nmainfont: Libertinus Serif\n")
     saved = cnx.project.DEFAULT_PDF_LAYOUT
     try:
         cnx.project.DEFAULT_PDF_LAYOUT = edited
         copies = [yaml.safe_load(openstax_pdf_layout("a test", style))
                   for style in ("sociology", "pl-nursing")]
+        cnx.project.DEFAULT_PDF_LAYOUT = named
+        copies += [yaml.safe_load(openstax_pdf_layout("a test", "sociology"))]
     finally:
         cnx.project.DEFAULT_PDF_LAYOUT = saved
+    # A style of each design, Organic Chemistry's, set in its design's
+    # second face, and one with no design in OpenStax's styles.
+    faces = {style: yaml.safe_load(openstax_pdf_layout("a test", style))
+             for style in ("psychology", "biology", "organic-chemistry", "marketing",
+                           "statistics", "otto-book")}
+    noto = openstax_pdf_layout("a test", "statistics")
 
     def index(name):
         return read(out, f"{name}.html")
@@ -946,9 +974,38 @@ effect="italics">myśli</emphasis></para></meaning></definition>
          and all("papersize: a4\n" in openstax_pdf_layout("a test", style)
                  for style in ("pl-nursing", "pl-u-physics"))),
         ("a default someone has edited, its opening comment gone and its paper unset, "
-         "is copied whole, and put on A4 for those books",
-         lambda: copies == [{"fontsize": "11pt", "linestretch": 1},
-                            {"fontsize": "11pt", "linestretch": 1, "papersize": "a4"}]),
+         "is copied whole, put on A4 for those books and given each one's face, and a "
+         "face it names stays",
+         lambda: copies == [dict({"fontsize": "11pt", "linestretch": 1}, **PLEX_SERIF),
+                            {"fontsize": "11pt", "linestretch": 1, "papersize": "a4",
+                             "mainfont": "IBMPlexSans",
+                             "mainfontoptions": PLEX_SERIF["mainfontoptions"]},
+                            {"fontsize": "11pt", "mainfont": "Libertinus Serif"}]),
+        ("each book's text is in its design's face, as OpenStax sets it, named by its "
+         "four files: cosmos's IBM Plex Serif, with IBM Plex Math for formulas, "
+         "carnival's IBM Plex Sans, Organic Chemistry's Plex Serif, and cardboard's and "
+         "corn's Noto Sans, Noto Sans Math left for whoever installs a version with a "
+         "MATH table; a style with no design keeps the default's face",
+         lambda: [(faces[s].get("mainfont"), faces[s].get("mathfont")) for s in
+                  ("psychology", "biology", "organic-chemistry", "marketing", "statistics",
+                   "otto-book")]
+         == [("IBMPlexSerif", "IBMPlexMath-Regular.otf"), ("IBMPlexSans", None),
+             ("IBMPlexSerif", "IBMPlexMath-Regular.otf"), ("NotoSans", None),
+             ("NotoSans", None), (None, None)]
+         and all(faces[s]["mainfontoptions"] == PLEX_SERIF["mainfontoptions"]
+                 for s in ("psychology", "biology", "organic-chemistry"))
+         and all(faces[s]["mainfontoptions"] == ["Extension=.ttf"]
+                 + PLEX_SERIF["mainfontoptions"][1:] for s in ("marketing", "statistics"))
+         and noto.endswith("from version 3.000\n# (github.com/notofonts/math), and "
+                           "Debian's and Ubuntu's fonts-noto-core\n# have 2.001. With "
+                           "3.000 or later installed, take the # off the line\n# below.\n"
+                           "mainfont: NotoSans\nmainfontoptions:\n  - Extension=.ttf\n"
+                           "  - UprightFont=*-Regular\n  - BoldFont=*-Bold\n"
+                           "  - ItalicFont=*-Italic\n  - BoldItalicFont=*-BoldItalic\n"
+                           "# mathfont: NotoSansMath-Regular.ttf\n")),
+        ("every style a recipe bakes has an OpenStax design, or none in OpenStax's styles",
+         lambda: sorted(style for style in RECIPES if not cnx.project.design_face(style))
+         == ["ap-history", "otto-book"]),
         ("a link names its target in the case its sentence wants, the "
          "nominative where it names none",
          lambda: 'Na <a href="#f1">Ilustracji 1.1</a> widać mózg, a '
@@ -2380,6 +2437,14 @@ def case_convert(work):
          and "\\setstretch{1.25}" in latex
          and "\\AtBeginDocument{\\@rightskip\\@flushglue\\rightskip\\@rightskip}" in latex
          and "\\newcommand\\OERFooterText{Access for free at openstax.org.}" in latex),
+        ("and its text is in IBM Plex Serif, named by its files, babel's face for its "
+         "language as well, with the fallback fonts for a character it lacks, and its "
+         "formulas in IBM Plex Math",
+         lambda: "\\setmainfont{IBMPlexSerif}[" + PLEX_FILES
+         + ",RawFeature={fallback=oerfallback}]" in latex
+         and "\\babelfont{rm}[" + PLEX_FILES + ",RawFeature={fallback=oerfallback}]"
+         "{IBMPlexSerif}" in latex
+         and "\\setmathfont[]{IBMPlexMath-Regular.otf}" in latex),
         ("its footnote is a note again, nothing left of the markup",
          lambda: "footnote" in html and "doc-endnotes" in html
          and "Reference not found" not in run.stderr),

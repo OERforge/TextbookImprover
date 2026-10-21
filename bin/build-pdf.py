@@ -178,10 +178,13 @@ OWN_SPACING = re.compile(r"\\(?:usepackage|RequirePackage)\s*(?:\[[^\]]*\])?\s*"
 # (.notdef): gone from the page and from the text a screen reader gets. A
 # book that uses them as text (a statistics book's mu, sigma, and
 # less-than-or-equal) loses them. Latin Modern Math has them, so it fills
-# in for each of the three families the metadata file doesn't choose a
-# font for. What it can't supply is reported after the build, because
-# veraPDF catches only some of it: a character an equation falls back to
-# one of LaTeX's older math fonts for is dropped with no trace at all.
+# in for each of the three families, and for a face the metadata file
+# names for one, unless the file gives the face fallbacks of its own
+# (Pandoc's mainfontfallback, say): Noto Sans, an OpenStax book's face,
+# has no less-than-or-equal either. What it can't supply is reported
+# after the build, because veraPDF catches only some of it: a character
+# an equation falls back to one of LaTeX's older math fonts for is
+# dropped with no trace at all.
 # DejaVu Sans comes after it when it's installed, as it is with most Linux
 # desktops: it has what Latin Modern Math doesn't, such as the circled
 # digits an AsciiDoc book's code callouts are (58 of them in the security
@@ -198,9 +201,9 @@ FALLBACK = ("\\def\\OERFallbackFonts{\"Latin Modern Math:mode=harf;\"}\n"
             "\"NewCMMath-Book.otf:mode=harf;\"}}{}\n"
             "\\directlua{luaotfload.add_fallback(\"oerfallback\", "
             "{\\OERFallbackFonts})}\n")
-FAMILIES = (("mainfont", "\\setmainfont{Latin Modern Roman}"),
-            ("sansfont", "\\setsansfont{Latin Modern Sans}"),
-            ("monofont", "\\setmonofont{Latin Modern Mono}"))
+FAMILIES = (("mainfont", "\\setmainfont", "Latin Modern Roman"),
+            ("sansfont", "\\setsansfont", "Latin Modern Sans"),
+            ("monofont", "\\setmonofont", "Latin Modern Mono"))
 
 # Where figures go (pdf.figures). LaTeX's tagging gathers the tags of a
 # figure that floats into one place: at the end of the document unless
@@ -651,11 +654,25 @@ def book_metadata(project, resolved, base, numbered):
         ours += ("\\RequirePackage{xcolor}\n\\makeatletter\n"
                  + "\n".join(guarded_color(c) for c in colors)
                  + "\n\\makeatother\n")
-    unchosen = [command for field, command in FAMILIES if field not in meta]
-    if unchosen:
-        ours += FALLBACK + "".join(
-            f"{command}[RawFeature={{fallback=oerfallback}}]\n"
-            for command in unchosen)
+    faces = []
+    for field, command, default in FAMILIES:
+        if field not in meta:
+            faces.append(f"{command}{{{default}}}[RawFeature={{fallback=oerfallback}}]\n")
+        elif field + "fallback" not in meta and meta_plain(meta[field]):
+            # Set again, as the template set it, with the fallbacks: for
+            # the text's face, babel's too, which the template gives the
+            # language the book is in, and which is the one the text gets.
+            given = meta.get(field + "options")
+            given = given["c"] if given and given.get("t") == "MetaList" \
+                else [given] if given else []
+            options = ",".join([meta_plain(o) for o in given if meta_plain(o)]
+                               + ["RawFeature={fallback=oerfallback}"])
+            name = meta_plain(meta[field])
+            faces.append(f"{command}{{{name}}}[{options}]\n")
+            if field == "mainfont":
+                faces.append(f"\\ifdefined\\babelfont\\babelfont{{rm}}[{options}]{{{name}}}\\fi\n")
+    if faces:
+        ours += FALLBACK + "".join(faces)
     if document_class(meta) in FRONTMATTER_CLASSES:
         meta["has-frontmatter"] = meta_bool(False)
         ours += OPEN_FRONT

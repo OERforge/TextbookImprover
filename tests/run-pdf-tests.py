@@ -945,9 +945,16 @@ def build_sized(work):
 # options, in the class's own margins, which the book class had set at
 # the default page's 12pt and Letter, taking its options in the order it
 # declares them; the size one the class hasn't, which it ignores, so it's
-# the book's fontsize, which scrextend sets.
+# the book's fontsize, which scrextend sets. And a face of its own, IBM
+# Plex Serif, an OpenStax book's, named by its files as the unpacker names
+# it, with the fallback fonts the default's have: a character it lacks,
+# an arrow, had been left out.
 FANCY_FOOTER = "## License\n\nShared under [the license](license.md).\n"
-FANCY_LAYOUT = ("classoption: [oneside, 13.5pt, a4paper]\ngeometry: []\n"
+FANCY_ARROW = "\nIf it rains, the ground is wet: rain ⇒ wet.\n"
+FANCY_LAYOUT = ("mainfont: IBMPlexSerif\nmainfontoptions:\n  - Extension=.otf\n"
+                "  - UprightFont=*-Regular\n  - BoldFont=*-Bold\n  - ItalicFont=*-Italic\n"
+                "  - BoldItalicFont=*-BoldItalic\n"
+                "classoption: [oneside, 13.5pt, a4paper]\ngeometry: []\n"
                 "header-includes:\n  - |\n    ```{=latex}\n"
                 "    \\usepackage[twoside]{fancyhdr}\n"
                 "    \\pagestyle{fancy}\n    \\fancyhf{}\n    \\fancyfoot[LE,RO]{\\thepage}\n"
@@ -956,10 +963,11 @@ FANCY_LAYOUT = ("classoption: [oneside, 13.5pt, a4paper]\ngeometry: []\n"
 
 
 def build_fancy(work):
-    """FOOTER_ONE and FOOTER_TWO with FANCY_FOOTER's footer, from a file,
-    on FANCY_LAYOUT's pages: the PDF's path."""
+    """FOOTER_ONE and FOOTER_TWO with FANCY_ARROW, with FANCY_FOOTER's
+    footer, from a file, on FANCY_LAYOUT's pages: (the PDF's path, what
+    the run said)."""
     os.makedirs(work)
-    for name, text in (("one.md", FOOTER_ONE), ("two.md", FOOTER_TWO),
+    for name, text in (("one.md", FOOTER_ONE), ("two.md", FOOTER_TWO + FANCY_ARROW),
                        ("footer.md", FANCY_FOOTER), ("fancy.yaml", FANCY_LAYOUT)):
         with open(os.path.join(work, name), "w", encoding="utf-8") as fh:
             fh.write(text)
@@ -969,9 +977,11 @@ def build_fancy(work):
     with open(os.path.join(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
         fh.write("defaults:\n  footer: footer.md\n"
                  "targets:\n  pdf:\n    format: pdf\n    pdf:\n      metadata: fancy.yaml\n")
-    subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick"], cwd=work,
-                   capture_output=True, text=True, stdin=subprocess.DEVNULL)
-    return os.path.join(work, "pdf", "org.example.fancy.pdf")
+    converted = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick"],
+                               cwd=work, capture_output=True, text=True,
+                               stdin=subprocess.DEVNULL)
+    return os.path.join(work, "pdf", "org.example.fancy.pdf"), \
+        converted.stdout + converted.stderr
 
 
 
@@ -1545,7 +1555,8 @@ def latex_color(color):
 # multirow for the book's table with a cell spanning rows
 # (docs/installation.md).
 SUITE_TEX = [("geometry", "geometry.sty"), ("setspace", "setspace.sty"),
-             ("koma-script", "scrextend.sty"), ("multirow", "multirow.sty")]
+             ("koma-script", "scrextend.sty"), ("multirow", "multirow.sty"),
+             ("plex", "IBMPlexSerif-Regular.otf")]
 
 
 def tex_missing():
@@ -2012,7 +2023,7 @@ def aaa_checks(aaa_path):
     ]
 
 
-def fancy_checks(fancy_path):
+def fancy_checks(fancy_path, fancy_said):
     """The fancy book's checks (build_fancy)."""
     reader = pypdf.PdfReader(fancy_path) if os.path.exists(fancy_path) else None
     texts = pdftext.marked_text(fancy_path) if reader else {}
@@ -2038,6 +2049,12 @@ def fancy_checks(fancy_path):
          and (round(float(reader.pages[0].mediabox.width)),
               round(float(reader.pages[0].mediabox.height))) == (595, 842)
          and body and set(body) == {13.45}),
+        ("a face the metadata file names is the text's, with the fallback fonts for a "
+         "character it lacks",
+         lambda: reader is not None
+         and any("IBMPlexSerif-Regular" in name for name in font_names(reader))
+         and "rain ⇒ wet" in "".join(page.extract_text() or "" for page in reader.pages)
+         and "missing from the PDF" not in fancy_said),
     ]
 
 
@@ -2062,7 +2079,7 @@ def checks(work, jobs=1):
             notes_path, notes_plain, notes_said, notes_source = noted.result()
             footer_path = footed.result()
             sized_path, sized_said = sized.result()
-            fancy_path = fancied.result()
+            fancy_path, fancy_said = fancied.result()
             default_path = defaulted.result()
             preamble_path, preamble_source, preamble_said = prefaced.result()
             aaa_path = aaa.result()
@@ -2073,7 +2090,7 @@ def checks(work, jobs=1):
         notes_path, notes_plain, notes_said, notes_source = build_notes(work + "-notes")
         footer_path = build_footer(work + "-footer")
         sized_path, sized_said = build_sized(work + "-sized")
-        fancy_path = build_fancy(work + "-fancy")
+        fancy_path, fancy_said = build_fancy(work + "-fancy")
         default_path = build_default(work + "-default")
         preamble_path, preamble_source, preamble_said = build_preamble(work + "-preamble")
         aaa_path = build_aaa(work + "-aaa")
@@ -2687,7 +2704,7 @@ def checks(work, jobs=1):
 
     items += footer_checks(footer_path)
     items += sized_checks(sized_path, sized_said)
-    items += fancy_checks(fancy_path)
+    items += fancy_checks(fancy_path, fancy_said)
     items += default_checks(default_path)
     items += preamble_checks(preamble_path, preamble_source, preamble_said)
     items += aaa_checks(aaa_path)

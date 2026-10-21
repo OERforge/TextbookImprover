@@ -40,6 +40,7 @@ import csv
 import os
 import re
 import shutil
+import textwrap
 import unicodedata
 
 import alttext
@@ -126,15 +127,104 @@ DEFAULT_PDF_LAYOUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), os
                                   os.pardir, "bin", "pdf-layout.yaml")
 A4_STYLES = ("pl-nursing", "pl-u-physics")
 
+# OpenStax's four designs, each with the face it sets its books' text in
+# (ce-styles' styles/design-settings/<design>/_typography.scss, baseFont)
+# and the styles that use it (each style's book.scss, or the one it
+# imports). A book's PDF takes its design's face for the text, and for
+# the headings the face's bold, where OpenStax sets them in faces of their
+# own, three of which draw a capital I and a small l alike. A style with
+# no design in ce-styles (ap-history, otto-book) keeps the default's face.
+DESIGNS = {
+    "cosmos": ("IBM Plex Serif", (
+        "american-government", "economics", "english-composition", "history",
+        "lifespan-development", "philosophy", "pl-economics", "pl-psychology",
+        "political-science", "psychology", "sociology", "world-history")),
+    "carnival": ("IBM Plex Sans", (
+        "anatomy", "anthropology", "ap-biology", "ap-physics", "ap-physics-2e", "biology",
+        "chemistry", "college-physics", "college-physics-2e", "hs-physics", "microbiology",
+        "neuroscience", "nursing-external", "nursing-internal", "organic-chemistry",
+        "pl-nursing", "pl-u-physics", "u-physics")),
+    "cardboard": ("Noto Sans", (
+        "accounting", "astronomy", "bca", "business-ethics", "college-success",
+        "computer-science", "data-science", "entrepreneurship", "finance",
+        "hs-college-success", "information-systems", "intro-business", "marketing",
+        "pl-marketing", "principles-management", "python")),
+    "corn": ("Noto Sans", (
+        "additive-manufacturing", "algebra-1", "calculus", "contemporary-math", "dev-math",
+        "precalculus", "precalculus-coreq", "statistics")),
+}
+# Organic Chemistry is set in its design's second face (baseOption2Font).
+OWN_FACES = {"organic-chemistry": "IBM Plex Serif"}
+
+# What pdf-layout.yaml says of each face, which it names by its files: a
+# file that isn't installed stops LaTeX, which the run names, where a
+# face named by its family can be matched by another of its weights,
+# without a word, as Debian's and Ubuntu's TeX Live has Noto Sans Medium
+# and not its Regular, which fonts-noto-core has. IBM Plex Math's letters
+# are Plex Serif's, and TeX Live's plex has both. IBM Plex has no math
+# font with Plex Sans's letters. Noto Sans Math, which has Noto Sans's,
+# has the MATH table a formula is set by only from version 3.000:
+# Debian's and Ubuntu's fonts-noto-core have 2.001, and unicode-math,
+# given it, sets formulas in Latin Modern Math (2026-10-20).
+
+
+def face_files(stem, extension):
+    """The lines that name a face by its four files, stem-Regular and the
+    rest, for fontspec."""
+    return [f"mainfont: {stem}", "mainfontoptions:", f"  - Extension={extension}",
+            "  - UprightFont=*-Regular", "  - BoldFont=*-Bold", "  - ItalicFont=*-Italic",
+            "  - BoldItalicFont=*-BoldItalic"]
+
+
+FACES = {
+    "IBM Plex Serif": ("Formulas in IBM Plex Math, whose letters are Plex Serif's.",
+                       face_files("IBMPlexSerif", ".otf")
+                       + ["mathfont: IBMPlexMath-Regular.otf"]),
+    "IBM Plex Sans": ("Formulas stay in Latin Modern Math, since IBM Plex has no math "
+                      "font with Plex Sans's letters.", face_files("IBMPlexSans", ".otf")),
+    "Noto Sans": ("Formulas stay in Latin Modern Math: Noto Sans Math, whose letters are "
+                  "Noto Sans's, has the table LaTeX sets a formula by from version 3.000 "
+                  "(github.com/notofonts/math), and Debian's and Ubuntu's "
+                  "fonts-noto-core have 2.001. With 3.000 or later installed, take the "
+                  "# off the line below.",
+                  face_files("NotoSans", ".ttf") + ["# mathfont: NotoSansMath-Regular.ttf"]),
+}
+
+
+def design_face(style):
+    """(OpenStax's design for the style, the face it sets the style's
+    text in), or None for a style with no design."""
+    for design, (face, styles) in DESIGNS.items():
+        if style in styles:
+            return design, OWN_FACES.get(style, face)
+    return None
+
+
+def face_lines(style):
+    """The lines pdf-layout.yaml gives the style's face, a comment saying
+    what they do first; [] for a style with no design."""
+    found = design_face(style)
+    if not found:
+        return []
+    design, face = found
+    said, settings = FACES[face]
+    words = (f"The text in {face}, as OpenStax sets this book in its {design} design, "
+             "and the headings in its bold, where OpenStax sets them in a face of their "
+             "own. Its small letters are larger at a given size than Latin Modern's, the "
+             "default's face, and its thin strokes sturdier. It's named by its files, so "
+             "the build stops if one isn't installed. " + said)
+    return ["# " + line for line in textwrap.wrap(words, 72)] + settings
+
 
 def openstax_pdf_layout(source, style):
     """pdf-layout.yaml for an OpenStax book of the style: the PDF target's
     default page (bin/pdf-layout.yaml), OpenStax's paper and margins with
     larger type, copied into the book's folder to be changed there, on A4
-    for the styles OpenStax prints on it. The default's opening comment,
-    on being the default, gives way to one saying where the copy came
-    from; a default someone has edited is copied as it is, its comment
-    gone or not, and its paper set or not."""
+    for the styles OpenStax prints on it, its text in its design's face
+    (face_lines). The default's opening comment, on being the default,
+    gives way to one saying where the copy came from; a default someone
+    has edited is copied as it is, its comment gone or not, and its paper
+    set or not, and a face it names, or a math font, stays."""
     with open(DEFAULT_PDF_LAYOUT, encoding="utf-8") as fh:
         settings = fh.read()
     opening, blank, rest = settings.partition("\n\n")
@@ -149,6 +239,9 @@ def openstax_pdf_layout(source, style):
         if not found:
             settings = settings.rstrip("\n") + "\npapersize: a4\n"
         head.append("# On A4, as OpenStax prints this style's books.")
+    faces = face_lines(style)
+    if faces and not re.search(r"(?m)^(mainfont|mathfont)\s*:", settings):
+        settings = settings.rstrip("\n") + "\n\n" + "\n".join(faces) + "\n"
     return "\n".join(head) + "\n\n" + settings
 
 

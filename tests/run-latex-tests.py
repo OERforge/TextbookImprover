@@ -2997,6 +2997,14 @@ def case_pieces(work):
                      for advice in latexbuild.failure_advice(
                          "! Package babel Error: Unknown option 'ngerman'.\n"
                          "(babel)                Suggested actions:\n"))),
+        ("a font that isn't installed is named, its name split over fontspec's lines too, "
+         "with where an OpenStax book's faces come from",
+         lambda: any("LaTeX can't find the font IBM Plex Serif Text." in advice
+                     and "IBM Plex in its plex package" in advice
+                     for advice in latexbuild.failure_advice(
+                         "! Package fontspec Error: \n"
+                         "(fontspec)                The font \"IBM Plex\n"
+                         "(fontspec)                Serif Text\" cannot be found; this may\n"))),
         ("LaTeX's first error is found when its file's name has spaces",
          lambda: latexbuild.first_errors(log)
          and "titlesec Error" in latexbuild.first_errors(log)[0]

@@ -46,6 +46,9 @@ CAPACITY = re.compile(r"TeX capacity exceeded, sorry \[([^\]=]+)")
 # A language babel hasn't installed, which Pandoc's template names for a
 # passage in it (french, ngerman), as a class option babel reads.
 BABEL_UNKNOWN = re.compile(r"Package babel Error: Unknown option [`']([^'`\s]+)'")
+# A font fontspec can't find, which it says over several lines, each
+# after "(fontspec)".
+MISSING_FONT = re.compile(r'The font "([^"]+)" cannot be found')
 
 
 def latex_release():
@@ -938,7 +941,8 @@ def overfull_warning(found, where="PDF"):
 
 def failure_advice(log):
     """What to do about a failed build, from its log: a file LaTeX can't
-    find, a language babel hasn't, or one of TeX's tables outgrown."""
+    find, a language babel hasn't, a font that isn't installed, or one of
+    TeX's tables outgrown."""
     said = []
     # tlmgr only manages a TeX Live installed from tug.org or as TinyTeX;
     # Debian's and Ubuntu's texlive packages come with a tlmgr that runs in
@@ -961,6 +965,17 @@ def failure_advice(log):
                     "package that has it (babel-german for ngerman), and the language's "
                     f"hyphen- package has its hyphenation; `{tlmgr_command('install')}` "
                     "installs both. A full TeX Live has every language.")
+    # A face the PDF's metadata file names, an OpenStax book's among them
+    # (cnx.project.DESIGNS), that isn't installed: Debian's and Ubuntu's
+    # TeX Live leave Noto Sans to fonts-noto-core.
+    joined = re.sub(r"\n\(fontspec\)\s*", " ", log)
+    for name in dict.fromkeys(MISSING_FONT.findall(joined)):
+        said.append(f"LaTeX can't find the font {name}. Install it, or name one that's "
+                    "installed where it's chosen: for a PDF from the pages, the pdf.metadata "
+                    "file (mainfont, sansfont, monofont, or mathfont), where taking its lines "
+                    "out gives the default, Latin Modern. TeX Live has an OpenStax book's: "
+                    "IBM Plex in its plex package, and Noto Sans in its noto package, or on "
+                    "Debian and Ubuntu in fonts-noto-core.")
     # A tagged book can outgrow TeX's tables: tagging keeps every structure
     # element, and a large book runs out of strings, hash, or memory
     # (Prescott, TUGboat 47:2; pdfLaTeX on GIAM's tagged copy ran out of

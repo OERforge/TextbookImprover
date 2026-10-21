@@ -43,6 +43,7 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
+import collections
 import copy
 import unicodedata
 
@@ -81,6 +82,71 @@ def _windows_1252():
 
 
 C1_AS_WINDOWS_1252 = _windows_1252()
+
+# The Symbol font's characters where Word wrote them in Unicode's private
+# use area, as Windows writes a symbol font's: its code there plus F000
+# (U+F061 for the font's alpha, 0x61), which no font but that one draws,
+# so a PDF has nothing to draw it with. Each is the character the font
+# draws, as Adobe's mapping of the font has it (unicode.org's
+# VENDORS/ADOBE/symbol.txt), where that's a character of Unicode's own;
+# where it's Adobe's private use, the character Unicode has since added
+# (the pieces of a tall bracket or arrow, ⎛ and the rest, the radical's
+# extension an overline, and ® © ™); and the horizontal line, which
+# Word's users set for a dash, an em dash. Of the ten in OpenStax's
+# repositories here, two are such dashes (Life, Liberty's "ailments—a
+# sprained right ankle"), and the statistics books' are minus signs and
+# alphas. A dingbat font, Wingdings say, writes its characters there too,
+# which would be made wrong, so each one made is reported as taken for
+# the Symbol font's (symbol_report). In the Connexions archive's books
+# here, 659 of 660 are the Symbol font's by their sense, a Vietnamese
+# book's Greek letters and relations among them, and the one left, a
+# 0x34 alone in a checklist's cell, is likely a dingbat's.
+SYMBOL_FONT_LOW = (
+    " !\u2200#\u2203%&\u220b"  # 20
+    "()\u2217+,\u2212./"  # 28
+    "01234567"  # 30
+    "89:;<=>?"  # 38
+    "\u2245\u0391\u0392\u03a7\u0394\u0395\u03a6\u0393"  # 40
+    "\u0397\u0399\u03d1\u039a\u039b\u039c\u039d\u039f"  # 48
+    "\u03a0\u0398\u03a1\u03a3\u03a4\u03a5\u03c2\u03a9"  # 50
+    "\u039e\u03a8\u0396[\u2234]\u22a5_"  # 58
+    "\u203e\u03b1\u03b2\u03c7\u03b4\u03b5\u03c6\u03b3"  # 60
+    "\u03b7\u03b9\u03d5\u03ba\u03bb\u03bc\u03bd\u03bf"  # 68
+    "\u03c0\u03b8\u03c1\u03c3\u03c4\u03c5\u03d6\u03c9"  # 70
+    "\u03be\u03c8\u03b6{|}\u223c"  # 78
+    )
+SYMBOL_FONT_HIGH = (
+    "\u20ac\u03d2\u2032\u2264\u2044\u221e\u0192\u2663"  # A0
+    "\u2666\u2665\u2660\u2194\u2190\u2191\u2192\u2193"  # A8
+    "\u00b0\u00b1\u2033\u2265\u00d7\u221d\u2202\u2022"  # B0
+    "\u00f7\u2260\u2261\u2248\u2026\u23d0\u2014\u21b5"  # B8
+    "\u2135\u2111\u211c\u2118\u2297\u2295\u2205\u2229"  # C0
+    "\u222a\u2283\u2287\u2284\u2282\u2286\u2208\u2209"  # C8
+    "\u2220\u2207\u00ae\u00a9\u2122\u220f\u221a\u22c5"  # D0
+    "\u00ac\u2227\u2228\u21d4\u21d0\u21d1\u21d2\u21d3"  # D8
+    "\u25ca\u27e8\u00ae\u00a9\u2122\u2211\u239b\u239c"  # E0
+    "\u239d\u23a1\u23a2\u23a3\u23a7\u23a8\u23a9\u23aa"  # E8
+    "\0\u27e9\u222b\u2320\u23ae\u2321\u239e\u239f"  # F0
+    "\u23a0\u23a4\u23a5\u23a6\u23ab\u23ac\u23ad"  # F8
+    )
+SYMBOL_FONT = {0xF020 + i: c for i, c in enumerate(SYMBOL_FONT_LOW)}
+SYMBOL_FONT.update({0xF0A0 + i: c for i, c in enumerate(SYMBOL_FONT_HIGH)
+                    if c != "\0"})
+TEXT_FIXES = {**C1_AS_WINDOWS_1252, **SYMBOL_FONT}
+
+
+def symbol_counts(text):
+    """How many of each of the Symbol font's characters text holds."""
+    return collections.Counter(c for c in text if ord(c) in SYMBOL_FONT)
+
+
+def symbol_report(counts, where=""):
+    """The report's words for the Symbol font's characters made what they
+    stand for (symbol_counts), where they were if not the page's text."""
+    return [f"U+{ord(char):04X} ({count}){where}, taken as the Symbol font's, made "
+            f"{SYMBOL_FONT[ord(char)]} (U+{ord(SYMBOL_FONT[ord(char)]):04X}, "
+            f"{unicodedata.name(SYMBOL_FONT[ord(char)], '').lower()})"
+            for char, count in sorted(counts.items())]
 
 # Attributes baking used and a reader has no use for.
 INTERNAL = {"data-type", "data-depth", "data-baked", "data-label-from",
@@ -155,7 +221,8 @@ class Emitter:
         self.convert_children(work, body, 1, page)
         drop_empty_headings(body)
         split_paragraphs(body)
-        finish(body)
+        for words in symbol_report(finish(body)):
+            self.report(page.name, "symbol-font-character", words)
         places = table_places(body)
         for index, table in self._placing:
             place = places.get(table)
@@ -1412,16 +1479,23 @@ def finish(root):
     And the words composed (NFC), as HTML wants them: a source can write
     "Ö" as "O" and a combining diaeresis. A formula's are left as they
     are, since how a formula writes an accent is a choice of its own.
-    A C1 control is the Windows-1252 character it stands for, in a
-    formula too (C1_AS_WINDOWS_1252)."""
+    A C1 control is the Windows-1252 character it stands for, and a
+    character of the Symbol font in the private use area the character
+    the font draws, in a formula too (TEXT_FIXES). Returns how many of
+    each of the Symbol font's characters were made so."""
+    symbols = collections.Counter()
+
+    def fixed(text):
+        symbols.update(c for c in text if ord(c) in SYMBOL_FONT)
+        return text.translate(TEXT_FIXES)
     for el in root.iter():
         if not isinstance(el.tag, str):
             continue
         parent = el.getparent()
         if el.text:
-            el.text = el.text.translate(C1_AS_WINDOWS_1252)
+            el.text = fixed(el.text)
         if el.tail:
-            el.tail = el.tail.translate(C1_AS_WINDOWS_1252)
+            el.tail = fixed(el.tail)
         if el.tail and (parent is None or
                         etree.QName(parent).namespace != MATHML):
             el.tail = unicodedata.normalize("NFC", el.tail)
@@ -1433,9 +1507,10 @@ def finish(root):
             if key in INTERNAL or el.attrib[key] is None:
                 del el.attrib[key]
             else:
-                el.set(key, el.attrib[key].translate(C1_AS_WINDOWS_1252))
+                el.set(key, fixed(el.attrib[key]))
         if el.tag not in VOID and el.text is None and not len(el):
             el.text = ""
+    return symbols
 
 
 def serialize(html):

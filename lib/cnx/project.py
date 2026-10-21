@@ -44,7 +44,7 @@ import unicodedata
 
 import alttext
 
-from .emit import C1_AS_WINDOWS_1252
+from .emit import TEXT_FIXES, symbol_counts, symbol_report
 from .pages import Group
 
 BARE_LABEL = re.compile(r"^(Table)\s+[A-Z]?\d+(\.\d+)*$")
@@ -339,10 +339,16 @@ def write_captions(out, tables, report=None):
     for page, label, caption, summary, layout, cells, place, excerpt in tables:
         if not summary:
             continue
+        # A summary isn't on the page, whose characters the emitter
+        # reported, but it's drafted from, and listed.
+        if report:
+            table = label or (f"{page}#table-{place}" if place else "a table")
+            for words in symbol_report(symbol_counts(summary), f" in the summary of {table}"):
+                report(page, "symbol-font-character", words)
         caption, summary, excerpt = (
-            (text or "").translate(C1_AS_WINDOWS_1252)
+            (text or "").translate(TEXT_FIXES)
             for text in (caption, summary, excerpt))
-        reading = reads_out(summary, [[cell.translate(C1_AS_WINDOWS_1252) for cell in row]
+        reading = reads_out(summary, [[cell.translate(TEXT_FIXES) for cell in row]
                                       for row in cells])
         summaries.append((page, label or "", caption, summary, "yes" if reading else ""))
         if says_nothing(summary):

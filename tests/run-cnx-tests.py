@@ -46,6 +46,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from html import unescape
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -200,6 +201,8 @@ Book</emphasis>.</note></para>
 <para id="p10">A title that opens with the note's kind in other case.</para></note>
 <note id="n6" class="linkup"><title>Link It Ups and Downs</title>
 <para id="p11">A title that opens with the kind's words in a longer one.</para></note>
+<para id="p13">Since \uF061 is small, the change is \uF02D2\uF0BEa loss, if a
+small one.</para>
 <equation id="eq1"><m:math><m:mi>x</m:mi><m:mo>=</m:mo><m:mn>2</m:mn>
 </m:math></equation>
 </section>
@@ -213,7 +216,7 @@ cost.</para>
 <tgroup cols="1"><tbody><row><entry><media alt="A dot"><image
 mime-type="image/png" src="../../media/dot.png"/></media></entry></row>
 </tbody></tgroup></table>
-<table id="tab3" class="unnumbered" summary="The cost of each choice">
+<table id="tab3" class="unnumbered" summary="The cost of each choice\uF0BEtrade or not">
 <tgroup cols="2"><tbody><row><entry>Choice</entry><entry>Cost</entry>
 </row><row><entry>Trade</entry><entry>2</entry></row></tbody></tgroup>
 </table></solution></exercise></section>
@@ -384,6 +387,18 @@ def case_trade(work):
              result.stdout.split())
          and "1 by their kind alone" in result.stdout
          and "2 by their title alone" in result.stdout),
+        ("a character of the Symbol font, which Word writes in the private use area, is "
+         "the character the font draws, its horizontal line an em dash, and each is "
+         "reported as taken for the Symbol font's, a table's summary's too",
+         lambda: "Since α is small, the change is −2—a loss, if a" in section
+         and not re.search("[\uF000-\uF0FF]", section)
+         and sorted(r["Detail"] for r in report if r["Check"] == "symbol-font-character")
+         == ["U+F02D (1), taken as the Symbol font's, made − (U+2212, minus sign)",
+             "U+F061 (1), taken as the Symbol font's, made α (U+03B1, greek small "
+             "letter alpha)",
+             "U+F0BE (1) in the summary of chapter-1#table-1, taken as the Symbol "
+             "font's, made — (U+2014, em dash)",
+             "U+F0BE (1), taken as the Symbol font's, made — (U+2014, em dash)"]),
         ("a reference written as a note, which a references page lists, isn't a box",
          lambda: '<div class="os-note reference" id="n2">' in section),
         ("the words are composed (NFC), as HTML wants them",
@@ -541,7 +556,7 @@ def case_trade(work):
          lambda: [c["Label"] for c in captions]
          == ["Table 1.2", "chapter-1#table-1"]
          and [c["Description"] for c in captions]
-         == ["Hours worked by each person", "The cost of each choice"]
+         == ["Hours worked by each person", "The cost of each choice—trade or not"]
          and captions[1]["Excerpt"] == "Choice"),
         ("media are copied; one the module names that isn't there is "
          "reported, its description in its place",
@@ -2059,6 +2074,28 @@ def case_note_headings(work):
     ]
 
 
+# The Symbol font's characters, in an attribute too ---------------------------
+
+def case_symbol_font(work):
+    """What the emitter's finishing makes of a character of the Symbol
+    font in an attribute, as the statistics books' alt text has one, and
+    in a formula."""
+    from lxml import etree
+    from cnx.emit import finish
+    page = etree.fromstring(
+        '<div><p><img alt="Line 6. a = \uF02D173.5" src="x.png"/> '
+        '<math xmlns="http://www.w3.org/1998/Math/MathML"><mi>\uF061</mi></math>'
+        '</p></div>')
+    counts = finish(page)
+    return [
+        ("a character of the Symbol font in an attribute or a formula is the "
+         "character the font draws, and is counted",
+         lambda: page.find(".//img").get("alt") == "Line 6. a = \u2212173.5"
+         and "<mi>\u03b1</mi>" in etree.tostring(page, encoding="unicode")
+         and counts == {"\uF02D": 1, "\uF061": 1}),
+    ]
+
+
 # Baking's steps, one at a time ---------------------------------------------
 
 def case_steps(work):
@@ -2352,8 +2389,8 @@ def case_convert(work):
          and "Hours worked by each person" in html),
         ("a table with no caption is given its summary under the key "
          "TextbookImprover reports it by, its place on its page",
-         lambda: flat(re.search(r'id="tab3".*?</caption>', key, re.S)
-                      .group(0)).endswith("The cost of each choice")
+         lambda: unescape(flat(re.search(r'id="tab3".*?</caption>', key, re.S)
+                               .group(0))).endswith("The cost of each choice—trade or not")
          and not os.path.exists(unplaced)),
     ]
 
@@ -2377,6 +2414,7 @@ CASES = [
     ("the collation", case_collation),
     ("baking's steps, one at a time", case_steps),
     ("a note's heading, from baking's markup", case_note_headings),
+    ("the Symbol font's characters, in an attribute too", case_symbol_font),
     ("cookbook's own sample books", case_cookbook),
     ("converting an unpacked book", case_convert),
 ]

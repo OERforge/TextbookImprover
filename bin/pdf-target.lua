@@ -648,6 +648,224 @@ local function formula_length(tex)
   return math.ceil(length)
 end
 
+-- A formula's width as LaTeX sets it in a table's cell, in text style, in
+-- characters of text, for a worked example's steps (steps_widths): a
+-- symbol a character, a capital, an m or a w, and an operator or a
+-- relation but a dot, which are wider, one and a half; a function's name
+-- (\sin, \log) a character a letter and one more, for the space TeX sets
+-- beside it, but none where an opening delimiter follows, as in \log(x),
+-- but for \left(, which makes a group TeX sets apart; a script four
+-- fifths as wide as what it's set on, and one set under or over
+-- something, as \underset and \limits set it, no wider than the wider of
+-- the two, and a relation so set, as \overset{?}{=}, a relation; a space
+-- in text seven tenths of a character, and none in \mathrm, where TeX
+-- sets none; a fraction as wide as its wider part, both set as a script
+-- is, and a little more; a root's sign one and a half; and the space TeX
+-- sets around an operator or a relation between two others one and a
+-- half, a half in a script. formula_length, which counts a fraction's two
+-- parts one after the other and space around every operator, a script's
+-- and a formula's first, counted College Algebra 2e's step formulas at
+-- 1.76 times their width as Latin Modern Math sets them in 12-point type,
+-- the median of the 301 in its first chapter's steps, 2.38 at the
+-- ninetieth percentile; this counts them at 1.23, 1.27 at the ninetieth,
+-- and none under 0.93: a little wider than they are, as a column that
+-- mustn't break them wants them.
+local FRACTIONS = { frac = true, tfrac = true, dfrac = true, cfrac = true, binom = true }
+local FUNCTIONS = {
+  arccos = true, arcsin = true, arctan = true, arg = true, cos = true, cosh = true,
+  cot = true, coth = true, csc = true, deg = true, det = true, dim = true, exp = true,
+  gcd = true, hom = true, inf = true, ker = true, lg = true, lim = true, liminf = true,
+  limsup = true, ln = true, log = true, max = true, min = true, Pr = true, sec = true,
+  sin = true, sinh = true, sup = true, tan = true, tanh = true,
+}
+local SET_AS_TEXT = { text = true, textrm = true, textit = true, textbf = true,
+                      mathrm = true, mathit = true, mathbf = true, operatorname = true }
+local TEXT_MODE = { text = true, textrm = true, textit = true, textbf = true }
+local STACKED = { underset = true, overset = true, stackrel = true }
+local OPENERS = { lbrack = true, lbrace = true, langle = true, lvert = true, lVert = true,
+                  lceil = true, lfloor = true, bigl = true, Bigl = true, biggl = true,
+                  Biggl = true }
+local NO_GLYPH = { middle = true, cancel = true, bcancel = true, xcancel = true }
+
+-- The end of the group a brace at i opens.
+local function group_end(tex, i)
+  local level, j = 0, i
+  while j <= #tex do
+    local c = tex:sub(j, j)
+    if c == '\\' then
+      j = j + 2
+    else
+      if c == '{' then level = level + 1 elseif c == '}' then level = level - 1 end
+      if level == 0 then return j end
+      j = j + 1
+    end
+  end
+  return #tex
+end
+
+-- A command's argument at i: a group's insides, a command, or a symbol,
+-- and where what follows it begins.
+local function argument(tex, i)
+  while tex:sub(i, i):match('%s') do i = i + 1 end
+  local c = tex:sub(i, i)
+  if c == '{' then
+    local e = group_end(tex, i)
+    return tex:sub(i + 1, e - 1), e + 1
+  elseif c == '\\' then
+    local name = tex:match('^%a+', i + 1) or tex:sub(i + 1, i + 1)
+    return tex:sub(i, i + #name), i + 1 + #name
+  end
+  local width = c:match('[\192-\247]') and #(tex:match('^[\192-\247][\128-\191]*', i)) or 1
+  return tex:sub(i, i + width - 1), i + width
+end
+
+-- Past a function's name at i: the limits set under and over it, after
+-- \limits, and where what follows them begins; and whether an opening
+-- delimiter follows it and any scripts, beside which TeX sets the name no
+-- space, as it does beside the group \left( makes.
+local function after_name(tex, i)
+  local limits, j = {}, i
+  while tex:sub(j, j):match('%s') do j = j + 1 end
+  if tex:sub(j, j + 6) == '\\limits' then
+    i = j + 7
+    while true do
+      while tex:sub(i, i):match('%s') do i = i + 1 end
+      local c = tex:sub(i, i)
+      if not (c == '^' or c == '_') then break end
+      local body
+      body, i = argument(tex, i + 1)
+      limits[#limits + 1] = body
+    end
+  end
+  j = i
+  while true do
+    while tex:sub(j, j):match('%s') do j = j + 1 end
+    local c = tex:sub(j, j)
+    if c == '^' or c == '_' then
+      local _
+      _, j = argument(tex, j + 1)
+    elseif tex:sub(j, j + 8) == '\\nolimits' then
+      j = j + 9
+    else
+      break
+    end
+  end
+  local c = tex:sub(j, j)
+  local name = c == '\\' and tex:match('^%a+', j + 1)
+  local opens = c == '(' or c == '[' or tex:sub(j, j + 1) == '\\{'
+    or (name and OPENERS[name]) or false
+  return limits, i, opens
+end
+
+-- How wide a formula is, its type size the text's times size; script,
+-- whether it's set in a script's style, where TeX sets no space around
+-- an operator, and display, whether in display style, as a fraction is.
+local function width_of(tex, size, script, display)
+  local length, i, n, atoms, owed = 0, 1, #tex, 0, 0
+  -- An atom of that width; an operator's space owed till an atom follows.
+  local function add(w, operator)
+    if operator then
+      if atoms > 0 then owed = (script and 0.5 or 1.5) * size end
+    else
+      length, owed = length + owed, 0
+    end
+    length, atoms = length + w, atoms + 1
+  end
+  while i <= n do
+    local c = tex:sub(i, i)
+    if c == '{' then
+      local e = group_end(tex, i)
+      add(width_of(tex:sub(i + 1, e - 1), size, script, display))
+      i = e + 1
+    elseif c == '^' or c == '_' then
+      local body
+      body, i = argument(tex, i + 1)
+      length = length + width_of(body, 0.8 * size, true, display)
+    elseif c == '\\' then
+      local name = tex:match('^%a+', i + 1)
+      if not name then
+        local d = tex:sub(i + 1, i + 1)
+        if d == ',' then
+          length = length + 0.35 * size
+        elseif d == ' ' or d == ';' then
+          length = length + 0.55 * size
+        elseif d:match('[{}|%%$#&_]') then
+          add(size)
+        end
+        i = i + 2
+      else
+        i = i + 1 + #name
+        if FRACTIONS[name] then
+          local top, bottom
+          top, i = argument(tex, i)
+          bottom, i = argument(tex, i)
+          local large = name == 'dfrac' or (display and not script)
+          local part = large and size or 0.8 * size
+          add(math.max(width_of(top, part, not large, display),
+                       width_of(bottom, part, not large, display)) + 0.6 * size)
+        elseif name == 'sqrt' then
+          local degree = 0
+          if tex:sub(i, i) == '[' then
+            i = (tex:find(']', i, true) or i) + 1
+            degree = 0.5 * size
+          end
+          local body
+          body, i = argument(tex, i)
+          add(width_of(body, size, script, display) + 1.5 * size + degree)
+        elseif SET_AS_TEXT[name] then
+          local body
+          body, i = argument(tex, i)
+          local _, spaces = body:gsub('%s+', '')
+          if not TEXT_MODE[name] then spaces = 0 end
+          add(width_of(body, size, script, display) + 0.7 * size * spaces)
+        elseif STACKED[name] then
+          local over, under
+          over, i = argument(tex, i)
+          under, i = argument(tex, i)
+          local base = under:match('^%s*(.-)%s*$')
+          local command = base:match('^\\(%a+)$')
+          add(math.max(width_of(over, 0.8 * size, true, display),
+                       width_of(under, size, script, display)),
+              name == 'stackrel' or BREAK_CHARS[base] or (command and BREAK_NAMES[command]))
+        elseif name == 'mspace' then
+          local body
+          body, i = argument(tex, i)
+          length = length + (tonumber(body:match('^%s*([%d.]+)%s*mu')) or 0) / 8.7 * size
+        elseif name == 'quad' or name == 'qquad' then
+          length = length + (name == 'quad' and 2 or 4) * size
+        elseif FUNCTIONS[name] then
+          local limits, opens
+          limits, i, opens = after_name(tex, i)
+          local width = #name * size
+          for _, body in ipairs(limits) do
+            width = math.max(width, width_of(body, 0.8 * size, true, display))
+          end
+          add(width + (opens and 0 or size))
+        elseif not (DRAWS_NOTHING[name] or NO_GLYPH[name]) then
+          local operator = SPACED[name] or BREAK_NAMES[name]
+          add((operator and name ~= 'cdot') and 1.5 * size or size, operator)
+        end
+      end
+    elseif c:match('[%s&]') then
+      i = i + 1
+    elseif c == '~' then
+      length, i = length + 0.7 * size, i + 1
+    else
+      local width = c:match('[\192-\247]') and #(tex:match('^[\192-\247][\128-\191]*', i)) or 1
+      local glyph = tex:sub(i, i + width - 1)
+      local operator = c:match('[-+=<>]') ~= nil or glyph == '\226\136\146'
+        or glyph:match('^\195[\151\183]') ~= nil
+      add(size * ((operator or c:match('[%umwMW]')) and 1.5 or 1), operator)
+      i = i + width
+    end
+  end
+  return length
+end
+
+local function formula_width(tex)
+  return math.ceil(width_of(tex, 1, false, tex:find('\\displaystyle', 1, true) ~= nil))
+end
+
 local function cell_size(cell)
   local length, longest = 0, 0
   for _, block in ipairs(cell.contents) do
@@ -719,6 +937,203 @@ local function widen_to_words(tbl, word)
   end
 end
 
+-- A cell's one formula, the TeX of it, where that's all it holds but
+-- space; or nil.
+local function lone_formula(cell)
+  local blocks = cell.contents
+  if #blocks ~= 1 or (blocks[1].t ~= 'Plain' and blocks[1].t ~= 'Para') then return nil end
+  local found
+  for _, inline in ipairs(blocks[1].content) do
+    if inline.t == 'Math' and not found then
+      found = inline.text
+    elseif inline.t ~= 'Space' and inline.t ~= 'SoftBreak' then
+      return nil
+    end
+  end
+  return found
+end
+
+-- The widest formula in a cell of words, as formula_width counts it, or
+-- 0: a formula in a worked example's steps doesn't break (Table), so a
+-- step's reason is no narrower than its widest formula, given MATH_ROOM.
+local function widest_formula(cell)
+  local widest = 0
+  pandoc.Blocks(cell.contents):walk({ Math = function(math_)
+    widest = math.max(widest, formula_width(math_.text))
+  end })
+  return widest
+end
+
+-- A worked example's steps the CNX unpacker lays out in a table (class
+-- formula-steps), its math cell for cell and its words, a step's reason
+-- or instruction, in a column of their own: at its own width where the
+-- line has room for it, each column as wide as its widest cell; and
+-- where it hasn't, each column of math as wide as its widest formula,
+-- given MATH_ROOM, and the words wrapping in what's left of the line, no
+-- narrower than their longest word or their widest formula, given
+-- MATH_ROOM too. Counted by formula_width, which counts a formula closer
+-- to its width than formula_length: by formula_length's count, College
+-- Algebra 2e's steps would take columns wider than their math, and a
+-- table that fits its line would be set across it, its words wrapped.
+-- Where the formulas and the longest words together are wider than the
+-- line by that count, the words are as wide as their longest and the
+-- formulas share what's left by their counts. Seven of College Algebra
+-- 2e's first chapter's 51 tables of steps are so; set as other tables
+-- are (fit_to_line), six of them, in Noto Sans, would be set in smaller
+-- type to fit their formulas to their columns, and shared so, three are
+-- (MATH_ROOM). Where that would leave the formulas less than FIT_FLOOR of
+-- their counts, as a reason holding a long formula can, which no fit to
+-- the line makes up for, every formula, a reason's too, is given the same
+-- part of its count, each column of words no narrower than its longest
+-- word, so that the fit sets them smaller alike: a word given less than
+-- its width would be broken at a hyphen, where a formula too wide is
+-- fitted. Precalculus 2e's Example 7 in 12.2, whose reason holds a
+-- formula about as wide as its column of math's widest, would otherwise
+-- have its formulas given less than a third of their counts, and be set
+-- at half its size, 353 points wider than the text; it's at three
+-- quarters, 2 points wider than the text. A word is as cell_size counts
+-- it, a piece of a formula between the places TeX could break it among
+-- them, though a formula in steps doesn't break: held at its words
+-- alone, Calculus Volume 2's steps in 3.3, at three quarters of their
+-- size, would be 108 points wider than the text, where they're 36, their
+-- reason's formula counted narrower than LaTeX sets it. A formula still
+-- wider than its column isn't broken but fitted (Table). Whether it was
+-- set so; steps whose longest words alone fill the line are set as other
+-- tables are, and steps whose reason's formula alone fills it, given
+-- MATH_ROOM, are shared, even where their cells' length as cell_size
+-- counts it, a function's name a character, would fit.
+--
+-- MATH_ROOM is the part of its count a formula is given, in a column of
+-- math or among the words: a tenth more. Pandoc's template scales Latin
+-- Modern Math, a formula's face where a book names none, to the height
+-- of the text's small letters, and Noto Sans's, the face of OpenStax's
+-- math books, are 24 percent taller than Latin Modern's, so a formula
+-- is set wider than the count, which is Latin Modern's: in College
+-- Algebra 2e's first chapter, in Noto Sans, without it 10 of its 51
+-- tables of steps would have a formula wider than its column, 9 set
+-- smaller to fit it (FIT_MACROS); with it, 4 have, 3 set smaller, which
+-- are wider than the line even in columns as wide as LaTeX measures
+-- their widest formula or word.
+local MATH_ROOM = 1.1
+
+-- The least part of its size FIT_MACROS sets a table in to fit its line
+-- (latexbuild.py's FIT_FLOOR).
+local FIT_FLOOR = 0.75
+
+local function steps_widths(tbl)
+  local count = #tbl.colspecs
+  local formulas, rows = {}, rows_of(tbl)
+  for _, row in ipairs(rows) do
+    if #row.cells ~= count then return false end
+    for j, cell in ipairs(row.cells) do
+      if (cell.col_span or 1) ~= 1 or (cell.row_span or 1) ~= 1 then return false end
+      local formula = lone_formula(cell)
+      if formula then
+        formulas[j] = formulas[j] ~= false
+      elseif #cell.contents > 0 and stringify(cell.contents):match('%S') then
+        formulas[j] = false
+      end
+    end
+  end
+  local need, word, long, reach = {}, {}, {}, {}
+  for j = 1, count do need[j], word[j], long[j], reach[j] = 0, 0, 0, 0 end
+  for _, row in ipairs(rows) do
+    for j, cell in ipairs(row.cells) do
+      if formulas[j] then
+        local formula = lone_formula(cell)
+        if formula then need[j] = math.max(need[j], formula_width(formula)) end
+      else
+        local length, longest = cell_size(cell)
+        need[j] = math.max(need[j], length)
+        long[j] = math.max(long[j], longest)
+        reach[j] = math.max(reach[j], MATH_ROOM * widest_formula(cell))
+        word[j] = math.max(long[j], reach[j])
+      end
+    end
+  end
+  local room = LINE - GAP * (count - 1)
+  local total, maths, least, words = 0, 0, 0, 0
+  for j = 1, count do
+    total = total + need[j]
+    if formulas[j] then
+      need[j] = MATH_ROOM * need[j]
+      maths = maths + need[j]
+    else
+      least = least + word[j]
+      words = words + long[j]
+    end
+  end
+  if room <= words then return false end
+  if total <= room and least < room then return true end
+  local share, held = {}, {}
+  if maths + least > room then
+    -- part is of the formulas' counts given MATH_ROOM.
+    local part = (room - least) / maths
+    if part * MATH_ROOM >= FIT_FLOOR then
+      for j = 1, count do
+        share[j] = formulas[j] and need[j] * part or word[j]
+      end
+    else
+      -- Every formula the same part of its count, a column of words no
+      -- narrower than its longest word, held at that where its widest
+      -- formula so shared is narrower, the part found again with those
+      -- columns held.
+      repeat
+        local fixed, scaled = 0, 0
+        for j = 1, count do
+          if formulas[j] then
+            scaled = scaled + need[j]
+          elseif held[j] then
+            fixed = fixed + long[j]
+          else
+            scaled = scaled + reach[j]
+          end
+        end
+        part = (room - fixed) / scaled
+        local again = false
+        for j = 1, count do
+          if not formulas[j] and not held[j] and reach[j] * part < long[j] then
+            held[j], again = true, true
+          end
+        end
+      until not again
+      for j = 1, count do
+        share[j] = formulas[j] and need[j] * part or (held[j] and long[j] or reach[j] * part)
+      end
+    end
+    for j = 1, count do
+      tbl.colspecs[j] = { tbl.colspecs[j][1], share[j] / room }
+    end
+    return true
+  end
+  -- What's left shared among the columns of words by need, one whose
+  -- share is less than its longest word held at that, as fit_to_line
+  -- shares.
+  repeat
+    local held_total, free_need = maths, 0
+    for j = 1, count do
+      if not formulas[j] then
+        if held[j] then held_total = held_total + word[j] else free_need = free_need + need[j] end
+      end
+    end
+    local again = false
+    for j = 1, count do
+      if formulas[j] then
+        share[j] = need[j]
+      elseif held[j] then
+        share[j] = word[j]
+      else
+        share[j] = free_need > 0 and (room - held_total) * need[j] / free_need or 0
+        if share[j] < word[j] then held[j], again = true, true end
+      end
+    end
+  until not again
+  for j = 1, count do
+    tbl.colspecs[j] = { tbl.colspecs[j][1], share[j] / room }
+  end
+  return true
+end
+
 local function fit_to_line(tbl)
   local count = #tbl.colspecs
   if count < 2 then return end
@@ -726,6 +1141,7 @@ local function fit_to_line(tbl)
   for _, spec in ipairs(tbl.colspecs) do
     if (spec[2] ~= nil) ~= given then return end
   end
+  if not given and tbl.classes:includes('formula-steps') and steps_widths(tbl) then return end
   local need, word = {}, {}
   for j = 1, count do need[j], word[j] = 1, 1 end
   local spanning = {}  -- cells across columns: { first, last, length, longest }
@@ -852,9 +1268,16 @@ local sized_table
 -- A table not in a table's cell (19) in a group FIT_MACROS fits: \OERFitTable
 -- with its number, its columns, and whether they wrap, and \OERFitTableEnd,
 -- which reads the widths longtable recorded. A layout table's caption, a
--- paragraph before it, is before the group, in the text's type.
+-- paragraph before it, is before the group, in the text's type. A worked
+-- example's steps (steps_widths) break no formula over lines: TeX breaks a
+-- formula in text after a relation or an operator, and FIT_MACROS
+-- measures a column by the longest piece TeX can't break, so that
+-- otherwise a formula wider than its column would be broken, not fitted,
+-- as one of the steps of College Algebra 2e's Example 6 (e), in section
+-- 1.1, would be.
 function Table(tbl)
   local nested = tbl.attributes[IN_CELL] ~= nil
+  local steps = tbl.classes:includes('formula-steps')
   local result, wraps, columns, lead = sized_table(tbl)
   if nested then return result end
   local id = next_fit()
@@ -862,7 +1285,8 @@ function Table(tbl)
     local out = pandoc.Blocks{}
     for i = 1, lead or 0 do out:insert(blocks[i]) end
     out:insert(pandoc.RawBlock('latex', '{\\OERFitTable{' .. id .. '}{'
-      .. columns .. '}{' .. (wraps and '1' or '0') .. '}'))
+      .. columns .. '}{' .. (wraps and '1' or '0') .. '}'
+      .. (steps and '\\binoppenalty=10000 \\relpenalty=10000' or '')))
     for i = (lead or 0) + 1, #blocks do out:insert(blocks[i]) end
     out:insert(pandoc.RawBlock('latex', '\\OERFitTableEnd{' .. id .. '}}'))
     return out

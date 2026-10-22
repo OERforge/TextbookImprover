@@ -341,6 +341,12 @@ def check_consistency():
     pandoc_checked = {name for name in os.listdir(HERE)
                       if name.startswith("run-") and name.endswith(".py")
                       and ") < (" in open(os.path.join(HERE, name), encoding="utf-8").read()}
+    # The least part of its size the PDF's fit sets a table in to fit its
+    # line, by which the filter shares a short line among a worked
+    # example's steps.
+    import latexbuild
+    filter_floor = re.search(r"^local FIT_FLOOR = ([\d.]+)", open(
+        os.path.join(ROOT, "bin", "pdf-target.lua"), encoding="utf-8").read(), re.M)
 
     return [
         ("the schema's back-matter default matches the built-in order",
@@ -371,6 +377,9 @@ def check_consistency():
                          os.path.join(ROOT, "lib", "schema-project.yaml")))),
         ("every declared setting has a description",
          lambda: not undescribed()),
+        ("the PDF filter's least size for a fit to the line is the build's",
+         lambda: filter_floor is not None
+         and float(filter_floor.group(1)) == latexbuild.FIT_FLOOR),
     ]
 
 

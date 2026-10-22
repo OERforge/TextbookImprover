@@ -4959,6 +4959,79 @@ def case_side_by_side(work):
     ]
 
 
+# A worked example's steps as the CNX unpacker lays out a formula of them
+# (lib/cnx/steptables.py's formula_steps): its math cell for cell, the
+# second step's left side empty, and each step's reason in words.
+STEPS_PAGE = (
+    '<!DOCTYPE html><html lang="en"><head><title>Steps</title></head><body><h1>Steps</h1>'
+    '<table role="presentation" class="formula-steps"><tbody>' + "".join(
+        '<tr><td style="text-align: right">%s</td><td style="text-align: center">'
+        '<math xmlns="http://www.w3.org/1998/Math/MathML"><mo>=</mo></math></td>'
+        '<td style="text-align: left"><math xmlns="http://www.w3.org/1998/Math/MathML">'
+        "%s</math></td><td style=\"text-align: left\">%s</td></tr>" % row for row in (
+            ('<math xmlns="http://www.w3.org/1998/Math/MathML"><mrow><mn>3</mn><mi>x</mi>'
+             "<mo>+</mo><mn>4</mn><mi>x</mi></mrow></math>",
+             "<mrow><mn>7</mn><mi>x</mi></mrow>",
+             "Combine like terms, the terms whose variables and powers are the same, "
+             "into one term"),
+            ("", "<mrow><mn>7</mn><mo>\u22c5</mo><mn>2</mn></mrow>",
+             "Substitute two for x, as the question gives it")))
+    + "</tbody></table></body></html>")
+
+
+def case_formula_steps_reflow(work):
+    """A worked example's steps the CNX unpacker lays out in a table (class
+    formula-steps), in a browser: in a wide window, in their columns, the
+    relations one over another; in a phone's, each step's math on a line,
+    and its words wrapping within the window, where a layout table's cells
+    stack, each on a line of its own. Needs Playwright and its Chromium,
+    and skips without them."""
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        print("  skip  Playwright not installed; steps aren't laid out")
+        return []
+    os.makedirs(work)
+    with open(os.path.join(work, "steps.html"), "w", encoding="utf-8") as fh:
+        fh.write(STEPS_PAGE)
+    result = convert(work, "targets:\n  html:\n    format: html\n", fixtures=())
+    boxes = {}
+    page = os.path.join(work, "html", "steps.html")
+    if result.returncode == 0 and os.path.exists(page):
+        try:
+            with sync_playwright() as play:
+                browser = play.chromium.launch()
+                for width in (1000, 360):
+                    view = browser.new_page(viewport={"width": width, "height": 800})
+                    view.goto("file://" + page)
+                    rows = view.locator("table.formula-steps tr")
+                    boxes[width] = [[rows.nth(r).locator("td").nth(c).bounding_box()
+                                     for c in range(4)] for r in range(2)]
+                    view.close()
+                browser.close()
+        except Exception as exc:
+            print(f"  skip  Playwright's Chromium doesn't start ({str(exc)[:100]})")
+            return []
+    wide, narrow = boxes.get(1000), boxes.get(360)
+
+    def on_a_line(cells):
+        """Whether cells stand side by side, left to right, their tops alike."""
+        return all(abs(a["y"] - b["y"]) < 8 and a["x"] + a["width"] <= b["x"] + 1
+                   for a, b in zip(cells, cells[1:]))
+    return [
+        ("in a wide window a worked example's steps laid out as a table are in their "
+         "columns, each step on a line, the relations one over another",
+         lambda: wide and all(on_a_line(row) for row in wide)
+         and abs(wide[0][1]["x"] - wide[1][1]["x"]) < 1),
+        ("and in a phone's, a step's math on a line, not a cell to a line, an empty "
+         "cell no gap, and its words within the window",
+         lambda: narrow and on_a_line(narrow[0][:3]) and on_a_line(narrow[1][1:3])
+         and narrow[1][1]["x"] <= narrow[0][0]["x"] + 1
+         and all(cell is None or cell["x"] + cell["width"] <= 360
+                 for row in narrow for cell in row if cell and cell["width"])),
+    ]
+
+
 def case_word_box(work):
     """A box (a div of class box) in a Word file: each paragraph in it,
     its legend, a list's item, and a formula's paragraph alike, given the
@@ -6820,6 +6893,8 @@ CASES = [
     ("a docx target", case_docx_target),
     ("a box in a Word file", case_word_box),
     ("pictures side by side in a figure", case_side_by_side),
+    ("a worked example's steps laid out as a table, in a wide window and a phone's",
+     case_formula_steps_reflow),
     ("a remediated copy of a Word file", case_remediate_docx),
     ("format: source", case_source_target),
     ("format: source repairs Word's equations", case_word_equations),

@@ -114,6 +114,24 @@ table {
     display: none;
   }
 }
+/* A worked example's steps written as one formula, which the CNX unpacker
+   lays out in a table (class formula-steps), a step to a row: its math cell
+   for cell, and its reason or instruction in a column of words. On a
+   narrow screen a step's cells follow one another on a line, wrapping
+   where they don't fit, its words on a line of their own then, and an
+   empty cell is no gap: stacked, each cell on a line of its own, the
+   relation stood alone between its sides. */
+@media (max-width: 36em) {
+  table.formula-steps[role="presentation"] > * > tr {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    column-gap: 0.5em;
+  }
+  table.formula-steps[role="presentation"] > * > tr > td:empty {
+    display: none;
+  }
+}
 
 /* Word puts the "Table 2.1" label below the table; keep it there. */
 table caption {

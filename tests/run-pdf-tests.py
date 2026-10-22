@@ -1092,7 +1092,12 @@ def build_aaa(work):
 # run; one of formulas, whose math in smaller type is set in the forms for
 # subscripts, wider, so that its first fit leaves it too wide; one whose
 # columns wrap; one whose columns' widths are given, a word too long for
-# its column, which the filter counts as fitting it; a layout table, its
+# its column, which the filter counts as fitting it; one whose columns'
+# widths are given, a formula TeX can't break too wide for its column,
+# opening a line of its cell; one whose formula, too wide for its
+# column, opens a line and breaks after an operator; one whose columns'
+# widths are more than its line together, a line of words in a cell
+# before one a formula opens; a layout table, its
 # caption a paragraph before it; one of 45 columns whose widths are given,
 # the spaces between them more than its line; and one of 22 columns whose
 # longest words are wider than a line together, its corner's words
@@ -1154,6 +1159,24 @@ FIT_ONE = (
     + "</colgroup><thead><tr><th>Given</th><th>Next</th><th>Third</th><th>Fourth</th>"
     "<th>Fifth</th></tr></thead><tbody><tr><td>WWWWWWWWW</td><td>Wordnext</td><td>c</td>"
     "<td>d</td><td>e</td></tr></tbody></table>\n\n"
+    "A table whose columns' widths are given, a formula TeX can't break too wide for its "
+    "column, opening a line of its cell:\n\n<table><colgroup>" + "<col style=\"width: 20%\">" * 5
+    + "</colgroup><thead><tr><th>Trig</th><th>Then</th><th>Third</th><th>Fourth</th>"
+    "<th>Fifth</th></tr></thead><tbody><tr><td>a</td><td>b</td><td>c</td><td>d</td>"
+    "<td>Trigcell then $\\sin x \\cos x \\tan x \\cot x$</td></tr></tbody></table>\n\n"
+    "A table whose columns' widths are given, a formula too wide for its column opening a "
+    "line of its cell and breaking after an operator:\n\n<table><colgroup>"
+    + "<col style=\"width: 20%\">" * 5
+    + "</colgroup><thead><tr><th>Plus</th><th>Then</th><th>Third</th><th>Fourth</th>"
+    "<th>Fifth</th></tr></thead><tbody><tr><td>a</td><td>b</td><td>c</td><td>d</td>"
+    "<td>Pluscell then $\\sec x \\csc x \\sin x \\cos x + 1$</td></tr></tbody></table>\n\n"
+    "A table whose columns' widths are given, more than its line together, a line of words "
+    "in a cell before one a formula opens:\n\n<table><colgroup>"
+    + "<col style=\"width: 30%\">" * 5
+    + "</colgroup><thead><tr><th>Over</th><th>Then</th><th>Third</th><th>Fourth</th>"
+    "<th>Fifth</th></tr></thead><tbody><tr><td>a</td><td>b</td><td>c</td><td>d</td>"
+    "<td>Overgiven, words to fill most of a column, then $\\sin x \\cos x \\tan x$</td>"
+    "</tr></tbody></table>\n\n"
     "A layout table too wide for its line, its caption a paragraph before it:\n\n"
     "<table role=\"presentation\"><caption>Laycap, the caption of a layout table too wide for "
     "its line</caption><tbody><tr><td>Laytable</td>"
@@ -2329,6 +2352,34 @@ def fit_checks(fit_path, fit_said, fit_source, fit_third):
          "LaTeX measures running into the next, is set smaller to fit it",
          lambda: 0.75 * body < size("WWWWWWWWW") < body - 0.1
          and (gap_after(fit_path, "WWWWWWWWW") or 0) > 1),
+        # latexbuild.FIT_MACROS: a line that opens in a formula, TeX having
+        # dropped the node that opens it at the break, was measured by the
+        # pieces between the formula's spaces, as if they were words, so a
+        # formula too wide for its column that TeX can't break wasn't
+        # fitted, and ran 20 points past it, into the margin; fitted, it
+        # ends within the 4 percent of its column a fit may leave it over
+        # (3.6 points).
+        ("and one whose formula TeX can't break, too wide for its column, opening a line "
+         "of its cell, is set smaller to fit it",
+         lambda: 0.75 * body < size("Trigcell") < body - 0.1 and 0 < ends("cos")[1] < 544.1),
+        # A line of a formula that holds neither its start nor its end, as
+        # the first of two does where TeX dropped the start at the break,
+        # was measured by the pieces between the formula's spaces, so a
+        # formula that opens a line and breaks after an operator, its first
+        # line too wide for its column, wasn't fitted, and ran 27 points
+        # past it.
+        ("and one whose formula, too wide for its column, opens a line of its cell and "
+         "breaks after an operator, is set smaller to fit it",
+         lambda: 0.75 * body < size("Pluscell") < body - 0.1 and 0 < ends("csc")[1] < 544.1),
+        # A line of words that ends at a space before a formula that opens
+        # the next line is measured by its words. Taken as the formula's, as
+        # a line that ends at a penalty before one is, it would be measured
+        # whole, and this table, which narrowing its columns fits, would be
+        # set in type three quarters its size.
+        ("and one whose columns' widths are more than its line together, a line of words "
+         "in a cell before a formula that opens the next, keeps its type, its columns "
+         "narrowed to fit it",
+         lambda: at("Overgiven", 1) and within("Overgiven")),
         ("a layout table set smaller keeps its caption, a paragraph before it, in the text's "
          "type",
          lambda: at("Laycap", 1) and 0 < size("Laytable") < body - 0.1),
@@ -2386,8 +2437,8 @@ def fit_checks(fit_path, fit_said, fit_source, fit_third):
          and "Package TextbookImprover Warning" not in fit_third),
         ("the build says what it fitted, and what's still wider than the text, centered, "
          "and names no line as too wide",
-         lambda: "Fitted 19 table(s) and formula(s) too wide for their lines to them: 3 by "
-         "narrowing their spaces; 16 in smaller type as well, the smallest at 50% of its "
+         lambda: "Fitted 22 table(s) and formula(s) too wide for their lines to them: 4 by "
+         "narrowing their spaces; 18 in smaller type as well, the smallest at 50% of its "
          "size." in fit_said
          and re.search(r"9 of them, still wider than the text, are centered on the page "
                        r"\(7 table\(s\), 2 display formula\(s\)\), the widest \d+ points "

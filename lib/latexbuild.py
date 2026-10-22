@@ -535,7 +535,17 @@ FIT_MACROS = r"""% Something too wide for its line, which TeX can't break:
 % is an environment (\OERFitTable, \OERFitFormula), and LaTeX measures
 % each as it sets it: a table by the widths longtable records for its
 % columns and, where its columns wrap (p columns), by any line of a cell
-% longer than its column; a formula by the list TeX makes of it
+% longer than its column, its longest piece TeX can't break, a word or a
+% formula's part between two of its breaks (post_linebreak_filter), a
+% line taken as in a formula from its start where the first of a
+% formula's edges in it is an end (the formula ran on from the line
+% before, or TeX dropped its start at the break, as it drops glue there:
+% TeXbook, chapter 14), and one with no formula's edge in it where it
+% ends at a penalty, as TeX breaks a formula (before its right skip, and
+% the node ending a text direction that babel's bidi puts there), and
+% the next line opens in one (the middle line of a formula over three,
+% or a formula that opens a line and breaks after an operator); a
+% formula by the list TeX makes of it
 % (post_mlist_to_hlist_filter). One wider than its line is fitted on the
 % next run, from what this one measured, as Pandoc runs LaTeX again while
 % its log asks, four times at most: first its spaces narrowed (a table's
@@ -610,7 +620,7 @@ FIT_MACROS = r"""% Something too wide for its line, which TeX can't break:
   \newattribute\OERFitAttribute
   \directlua{
     local attribute = luatexbase.attributes.OERFitAttribute
-    local HLIST, VLIST, GLUE, PENALTY, MATH = node.id("hlist"), node.id("vlist"), node.id("glue"), node.id("penalty"), node.id("math")
+    local HLIST, VLIST, GLUE, PENALTY, MATH, DIR = node.id("hlist"), node.id("vlist"), node.id("glue"), node.id("penalty"), node.id("math"), node.id("dir")
     local FLOOR, LEAST, AIM, JUMP, TOLERANCE = """ + str(FIT_FLOOR) + ", " + str(FIT_LEAST) + r""", 0.98, 0.04, 32768
     oerfit = { state = {}, kind = {}, line = {}, room = {}, size = {}, columns = {},
                width = {}, tight = {}, sep = {}, sep0 = {}, where = {}, twocol = {}, run = 0,
@@ -635,8 +645,8 @@ FIT_MACROS = r"""% Something too wide for its line, which TeX can't break:
       end
       return true
     end, "oer.fit.formulas")
-    local function longest(line)
-      local piece, most, inmath = 0, 0, false
+    local function longest(line, inmath)
+      local piece, most = 0, 0
       for n in node.traverse(line.head) do
         if n.id == MATH then
           inmath = n.subtype == 0
@@ -658,9 +668,28 @@ FIT_MACROS = r"""% Something too wide for its line, which TeX can't break:
     luatexbase.add_to_callback("post_linebreak_filter", function(head)
       local id = current()
       if id and oerfit.kind[id] == "p" then
+        local lines, count, opens = {}, 0, false
         for line in node.traverse_id(HLIST, head) do
-          if line.subtype == 1 and line.width > 0 then
-            local t = longest(line) / line.width
+          if line.subtype == 1 then
+            count = count + 1
+            lines[count] = line
+          end
+        end
+        for k = count, 1, -1 do
+          local line, first = lines[k], nil
+          for n in node.traverse_id(MATH, line.head) do
+            first = n.subtype
+            break
+          end
+          if first then
+            opens = first == 1
+          else
+            local last = node.tail(line.head)
+            while last and (last.id == GLUE or last.id == DIR) do last = last.prev end
+            opens = opens and last and last.id == PENALTY or false
+          end
+          if line.width > 0 then
+            local t = longest(line, opens) / line.width
             if t > (oerfit.tight[id] or 0) then oerfit.tight[id] = t end
           end
         end

@@ -930,9 +930,57 @@ def explain(tbl, kind=None, ev=None):
     It is still a guess, and the ambiguous population is real: a frequency
     table's interval column and a contingency table's category column are
     byte-for-byte identical in the DOCX. The value exists to be corrected.
+
+    A table with a note on the rows above it before its last row
+    (note_rows), a row one cell across that stays a row, has no header
+    column (without_header_column).
     """
     if kind is None:
         kind, ev, _, _ = classify(tbl)
+    value, reason = _explain(tbl, kind, ev)
+    return without_header_column(view(tbl), kind, value, reason)
+
+
+def without_header_column(v, kind, value, reason):
+    """(value, reason) for a table with a note on the rows above it before
+    its last row (note_rows), a line after it that says where the table
+    comes from no row of it (note_body), which has no header column: no
+    cell of the note's row could head it, and every writer cuts a cell
+    across a body's row-head columns, the cells after it moving left
+    (PANDOC-NOTES). So
+    both is first-row; first-column is first-row where the source marks a
+    header row (head_rows: a <thead>, a Word table's first row its table
+    look formats, a row marked to repeat) and none where nothing does; and
+    unknown is none where nothing marks a header row, but for a table whose
+    header row is below a data row, and stays unknown where something does,
+    since a head Word's table look makes of any table is no reading of its
+    own. Prealgebra 2e's Table 3.1, two cases side by side in each row,
+    which the label rule took for labels beside values, is none, and so is
+    its Table 3.4, which no rule recognized. Any other value is as it was.
+    A part's guess, between bands, goes through this too (guess_table),
+    since a note within a part is as much in its rows."""
+    body = note_body(v.grid, v.foot)
+    if value is None or not body:
+        return value, reason
+    notes = [i for i in note_rows(v.grid, v.foot) if i != body[-1]]
+    if not notes:
+        return value, reason
+    why = "rows one cell across read as notes on the rows above them, which no column could head"
+    # The empty label cell a key column sets aside has no column to keep
+    # it now (table-headers.py reads the clause as a summary row's).
+    reason = reason.replace(SUMMARY_CLAUSE, "")
+    marked = head_rows(v) > 0
+    if value == "both" or (value == "first-column" and marked):
+        return "first-row", reason + "; " + why
+    if not marked and (value == "first-column" or (
+            value == "unknown" and not kind.startswith("headers-not-in-row-1"))):
+        return "none", "%s, and nothing marks a header row (read without them: %s)" % (
+            why, reason)
+    return value, reason
+
+
+def _explain(tbl, kind, ev):
+    """explain()'s value and reason, before the notes are read."""
     if kind == "empty" or kind.startswith("layout"):
         return None, "not a data table"
 
@@ -1051,7 +1099,7 @@ def explain(tbl, kind=None, ev=None):
     if (len(body) > 2 and not body[-1][0].text
             and any(c.text for c in body[-1][1:])):
         keyed_rows = body[:-1]
-        summary = ", setting aside a trailing row with no label"
+        summary = SUMMARY_CLAUSE
     col0 = [r[0] for r in keyed_rows]
     rest = [c for r in keyed_rows for c in r[1:]]
     keyed = keys_rows(col0)
@@ -1231,6 +1279,69 @@ def band_rows(grid):
     return [i for i, r in enumerate(grid) if is_full_width_band(r) and r[0].text]
 
 
+# A sentence's end: a full stop, a question mark, or an exclamation mark,
+# and any closing quotation marks or brackets after it.
+SENTENCE_END = re.compile(r"[.!?][\"'”’\]]*$")
+
+# A line at a table's foot that says where the table comes from or notes
+# it as a whole ("Source: ...", "Adapted from ..."), which closes no rows
+# of its own.
+ATTRIBUTION = re.compile(r"(sources?|notes?|adapted|based on|data from|reprinted|reproduced"
+                         r"|credits?|courtesy)\b", re.I)
+
+# The key rule's word for a summary row it sets aside, which
+# table-headers.py reads as such.
+SUMMARY_CLAUSE = ", setting aside a trailing row with no label"
+
+
+def sentence_across(row):
+    """Whether a row is one cell across that ends as a sentence does."""
+    return is_full_width_band(row) and bool(row[0].text) and bool(
+        SENTENCE_END.search(row[0].text.strip()))
+
+
+def note_rows(grid, foot=()):
+    """0-based rows one cell across that are notes on the rows above them,
+    not bands over the rows below: each ends as a sentence does
+    (SENTENCE_END) and comes right after a row of the table's cells, and
+    the table ends with one. Prealgebra 2e's Table 3.1 sets two cases side
+    by side, in pairs of rows, each pair closed by such a note ("When the
+    signs are the same, the counters would be all the same color, so add
+    them."), and its Table 3.4 does the same. A band names the rows under
+    it, and a note ends a table's rows no band could head; a sentence over
+    the rows of a table that ends with them, a self-test's statement over
+    its scale, is read as a band still, and so is one under another row
+    one cell across, as a band under a title is. A table that opens with
+    such a sentence is one of bands, which its first heads, its last a row
+    it keeps: a self-test closed by its total's line. And a line at the
+    table's foot that says where it comes from (ATTRIBUTION) is no note,
+    nor what makes the table end with one: a self-test closed by "Adapted
+    from ..." is one of bands still. Clinical Nursing Skills' steps in two
+    columns under a header row, a step across both first and last, are
+    notes so, and the table whole, where its first step was taken for a
+    band."""
+    body = note_body(grid, foot)
+    if not body or sentence_across(grid[body[0]]):
+        return []
+    rows = [i for i in body if sentence_across(grid[i])
+            and not is_full_width_band(grid[i - 1])]
+    if body[-1] not in rows:
+        return []
+    return rows
+
+
+def note_body(grid, foot=()):
+    """0-based rows a table's notes are read among (note_rows): all but
+    its foot's, and but the lines at its end that say where it comes from
+    (ATTRIBUTION), so that a table closed by a note and then its source's
+    line ends with the note, as it would without the line."""
+    body = [i for i in range(len(grid)) if i not in foot]
+    while body and is_full_width_band(grid[body[-1]]) and ATTRIBUTION.match(
+            grid[body[-1]][0].text.strip()):
+        body = body[:-1]
+    return body
+
+
 def repeated_header_rows(grid):
     """0-based indices of rows that repeat row 1's header cells with a
     different first cell: the corner names a group, and the rest of the
@@ -1356,11 +1467,14 @@ def inferred_structure(grid, foot=(), head=0):
     A band heads the rows under it, so one with nothing under it but
     bands, if anything, isn't one: a note one cell across a table's foot
     ("Source: ..."), which the split keeps a row of the table; nor is any
-    row of the table's foot, which comes after the last part. Elsewhere, a
+    row of the table's foot, which comes after the last part, nor a note on
+    the rows above it (note_rows), which is read as the foot's rows are,
+    neither a band nor a row a band heads. Elsewhere, a
     band right over another names a group of groups, and the split puts
     both in the caption of the part below; where the table has such a pair
     below, a pair at its top is one too, not a title over a band. Written
     into the prefilled row so the plan is visible."""
+    foot = tuple(sorted(set(foot) | set(note_rows(grid, foot))))
     bands = [i for i in band_rows(grid) if i not in foot]
     headers = [i for i in range(head) if i not in bands]
     over_header = [i for i in bands if headers and i < headers[-1]]
@@ -1475,6 +1589,9 @@ def guess_table(tbl, kind=None, ev=None):
     if inferred[1] and value is not None:
         value, reason = guess_by_parts(v, rows_list(inferred[1]), value, reason,
                                        rows_list(inferred[0]))
+        # A part with a note within its rows is guessed without it, the
+        # note before its last row only where the part ends with one.
+        value, reason = without_header_column(v, kind, value, reason)
     return value, reason, inferred
 
 def book_files(args):

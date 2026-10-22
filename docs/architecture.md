@@ -190,15 +190,25 @@ Beyond the Word-to-HTML translation, each page gets:
   of groups, both going into the caption of the part below ("Table 3.2:
   Part Two: Group B"), and where a table has such a pair partway down, a
   pair at its top is one too. A table's foot comes after its last part,
-  and no row of it is inferred as a band. A band at the end of the
-  table's head, where Pandoc's Word reader puts a first row Word's table
-  look formats (Word's default), heads the first part alone. A merged
-  first row over a header row every part shares, in the head or with
-  nothing marking the header row and the first band right under it, is
-  the table's title, inferred as `caption-rows=1`; over a header row of
-  the first part's own, it's the first band, and from the head it takes
-  that row to the first part with it. Any other band above a header row
-  in the head stays in every part's head with it.
+  and no row of it is inferred as a band. Nor is a note on the rows
+  above it: a merged row that ends as a sentence does, right after a row
+  of the table's cells, in a table that ends with one, as
+  *Prealgebra 2e*'s Table 3.1 closes each pair of its cases, but not in
+  a table that opens with such a sentence, a table of bands, and not a
+  line at the foot that says where the table comes from; and since no
+  cell of a note's row could head it, the guess gives a table with a
+  note before its last row no header column: `both` is `first-row`;
+  `first-column` is `first-row` where the source marks a header row and
+  `none` where nothing does; and `unknown` is `none` where nothing marks
+  a header row and none is below a data row. A band at the
+  end of the table's head, where Pandoc's Word reader puts a first row
+  Word's table look formats (Word's default), heads the first part
+  alone. A merged first row over a header row every part shares, in the
+  head or with nothing marking the header row and the first band right
+  under it, is the table's title, inferred as `caption-rows=1`; over a
+  header row of the first part's own, it's the first band, and from the
+  head it takes that row to the first part with it. Any other band above
+  a header row in the head stays in every part's head with it.
 - **Tables get the headers they were declared to have.** `table-headers.csv`
   says, per table, whether the headers are in the first row, the first
   column, both, or nowhere (see [Sidecar files](sidecars.md#sidecar-files)), and for a

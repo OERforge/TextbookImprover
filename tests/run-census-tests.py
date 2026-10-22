@@ -512,6 +512,208 @@ def structure_checks():
                got[2] == ("", "1,4"), str(got[2]))
 
 
+def note_checks():
+    """guess_table on tables with rows one cell across that are notes on
+    the rows above them (note_rows), not bands over the rows below."""
+    def note(text, width=2):
+        return row([cell(text, span=width)])
+    minus = "−"
+    # Prealgebra 2e's Table 3.1: two cases side by side, in pairs of rows,
+    # each pair closed by a note. The notes were taken for bands, and the
+    # rows under each for labels beside values.
+    pairs = [row([cell("5 + 3"), cell(minus + "5 + (" + minus + "3)")]),
+             row([cell("both positive, sum positive"), cell("both negative, sum negative")]),
+             note("When the signs are the same, the counters would be all the same "
+                  "color, so add them."),
+             row([cell(minus + "5 + 3"), cell("5 + (" + minus + "3)")]),
+             row([cell("different signs, more negatives"),
+                  cell("different signs, more positives")]),
+             row([cell("sum negative"), cell("sum positive")]),
+             note("When the signs are different, some counters would make neutral "
+                  "pairs, so subtract.")]
+    got = tc.guess_table(table(pairs))
+    yield ("notes closing pairs of rows are no bands, and no column heads the "
+           "rows: none", got[:1] + got[2:] == ("none", ("", "")), str(got))
+    # Its Table 3.4, which no rule recognized.
+    taking = [row([cell("5 " + minus + " 3"), cell(minus + "5 " + minus + " (" + minus + "3)")]),
+              row([cell("2"), cell(minus + "2")]),
+              row([cell("2 positives"), cell("2 negatives")]),
+              note("When there would be enough counters of the color to take away, "
+                   "subtract."),
+              row([cell(minus + "5 " + minus + " 3"), cell("5 " + minus + " (" + minus + "3)")]),
+              row([cell(minus + "8"), cell("8")]),
+              row([cell("5 negatives, want to subtract 3 positives"),
+                   cell("5 positives, want to subtract 3 negatives")]),
+              row([cell("need neutral pairs"), cell("need neutral pairs")]),
+              note("When there would not be enough of the counters to take away, "
+                   "add neutral pairs.")]
+    got = tc.guess_table(table(taking))
+    yield ("and where no rule recognizes the table, it's none, not unknown",
+           got[:1] + got[2:] == ("none", ("", "")), str(got))
+    # Clinical Nursing Skills: steps in two columns, a step for both
+    # first and last. The first was taken for a band.
+    steps = [row([cell("Approximated edges"), cell("Unapproximated edges")], header=True),
+             note("1. Use standard precautions."),
+             row([cell("2. Moisten a sterile gauze with the cleansing agent."),
+                  cell("2. Moisten a sterile gauze with the cleansing agent.")]),
+             row([cell("3. Clean from top to bottom in parallel strokes."),
+                  cell("3. Clean in a half- or full-circle motion.")]),
+             note("4. If no dressing is being applied, clean to at least two inches "
+                  "beyond the wound.")]
+    got = tc.guess_table(table(steps))
+    yield ("a step across both columns of steps is no band", got[:1] + got[2:]
+           == ("first-row", ("", "")), str(got))
+    # Formatting marks both, but a note's row has no cell a column could
+    # head.
+    marked = [row([cell(""), cell("2019", bold=True), cell("2020", bold=True)], header=True),
+              row([cell("North", bold=True), cell("14"), cell("17")]),
+              row([cell("South", bold=True), cell("11"), cell("13")]),
+              note("Sales rose in both regions.", 3),
+              row([cell("East", bold=True), cell("9"), cell("12")]),
+              row([cell("West", bold=True), cell("8"), cell("10")]),
+              note("Sales rose in every region.", 3)]
+    got = tc.guess_table(table(marked))
+    yield ("a table formatting marks both, with notes between its rows, is "
+           "first-row", got[:1] + got[2:] == ("first-row", ("", "")), str(got))
+    # Nor does a note make a header row below a data row any less one.
+    below = [row([cell("Population estimates, July 1, 2019"), cell("328,239,523")]),
+             row([cell("Race and Hispanic Origin", bold=True),
+                  cell("Percentage (%)", bold=True)]),
+             row([cell("White alone"), cell("76.3")]),
+             row([cell("Black or African American alone"), cell("13.4")]),
+             note("Respondents may report more than one race."),
+             row([cell("Asian alone"), cell("5.9")]),
+             note("Figures are rounded to the nearest tenth.")]
+    got = tc.guess_table(table(below))
+    yield ("a header row below a data row is unknown still, with notes",
+           got[:1] + got[2:] == ("unknown", ("", "")), str(got))
+
+    # What stays a band. College Success 2e's self-test: each statement over
+    # its scale, the table ending with one.
+    scale = row([cell(n) for n in ("1", "2", "3", "4", "5")])
+    statements = [note("Most of the time, I can motivate myself to complete tasks.", 5), scale,
+                  note("I regularly work hard when I need to complete a task.", 5), scale,
+                  note("I use different strategies to manage my time.", 5), scale]
+    got = tc.guess_table(table(statements))
+    yield ("sentences over the rows of a table that ends with them are bands",
+           got[2] == ("", "1,3,5"), str(got))
+    # An inquiry organizer from Life, Liberty, and the Pursuit of Happiness:
+    # sentences under a title, and the last under a row one cell across.
+    organizer = [note("Unit 1: Chapter 1 (1491–1607)"),
+                 note("Compelling Question: How did the collision of cultures shape "
+                      "the colonies?"),
+                 note("Chapter Objectives: Students will be able to explain the causes "
+                      "of exploration."),
+                 row([cell("Supporting Question 1: What were the motives?"),
+                      cell("Resources: a narrative")]),
+                 row([cell("Supporting Question 2: What enabled the voyages?"),
+                      cell("Resources: a map")]),
+                 note("Additional Resources: the chapter's introductory essay."),
+                 note("Unit 1 Essay Activity: How did the collision of cultures shape "
+                      "the colonies?")]
+    got = tc.guess_table(table(organizer))
+    yield ("and so are sentences under rows one cell across",
+           got[2] == ("", "1,2,3"), str(got))
+    # Labels over the rows they name stay bands, in a table that ends with
+    # a note.
+    regions = [row([cell("Year", bold=True), cell("Sales", bold=True), cell("Costs", bold=True)]),
+               note("East", 3),
+               row([cell("2019"), cell("$1,200"), cell("$800")]),
+               row([cell("2020"), cell("$1,350"), cell("$900")]),
+               note("West", 3),
+               row([cell("2019"), cell("$700"), cell("$650")]),
+               row([cell("2020"), cell("$760"), cell("$640")]),
+               note("Figures are in thousands of dollars.", 3)]
+    got = tc.guess_table(table(regions))
+    yield ("and labels, which don't end as sentences do", got[2] == ("", "2,5"), str(got))
+    # A note in the last row alone leaves a header column be.
+    footed = [row([cell("Population"), cell("331 million")]),
+              row([cell("Labor force"), cell("161 million")]),
+              row([cell("Employed"), cell("155 million")]),
+              note("Figures are rounded to the nearest million.")]
+    got = tc.guess_table(table(footed))
+    yield ("a note in the last row alone leaves a header column",
+           got[:1] + got[2:] == ("first-column", ("", "")), str(got))
+    # And so does one with its source's line after it, which is no row a
+    # note comes before.
+    got = tc.guess_table(table(footed + [note("Source: U.S. Census Bureau.")]))
+    yield ("and so does one with its source's line after the note",
+           got[:1] + got[2:] == ("first-column", ("", "")), str(got))
+    # A header row the source marks, here by Word's table look, stays one:
+    # first-column is first-row, and unknown stays unknown, a head Word's
+    # look makes of any table being no reading of its own.
+    plan = [row([cell("Option"), cell("What it costs")]),
+            row([cell("Lease a car for three years"),
+                 cell("A monthly payment and a fee at the end")]),
+            note("Leasing suits a driver who wants a new car often."),
+            row([cell("Buy a used car with a loan"),
+                 cell("A monthly payment until the loan is paid")]),
+            note("Buying suits a driver who keeps a car a long time.")]
+    got = tc.guess_table(table(plan, look=True))
+    yield ("a header row Word's table look formats stays one beside notes: first-row",
+           got[:1] + got[2:] == ("first-row", ("", "")), str(got))
+    got = tc.guess_table(table(taking, look=True))
+    yield ("and where no rule recognizes the table, unknown", got[:1] + got[2:]
+           == ("unknown", ("", "")), str(got))
+    # A part's guess, between bands, goes the same way: a note within the
+    # first group's rows, and labels over the groups.
+    mixed = [row([cell("City", bold=True), cell("Stores", bold=True), cell("Staff", bold=True)]),
+             note("East", 3),
+             row([cell("Boston"), cell("14"), cell("170")]),
+             note("Boston's figures include its suburbs.", 3),
+             row([cell("New York"), cell("11"), cell("130")]),
+             note("West", 3),
+             row([cell("Denver"), cell("9"), cell("120")]),
+             row([cell("Seattle"), cell("8"), cell("100")]),
+             note("Figures are for 2020.", 3)]
+    got = tc.guess_table(table(mixed))
+    yield ("a note within a part between bands leaves the parts no header column",
+           got[:1] + got[2:] == ("first-row", ("", "2,6")), str(got))
+    # A self-test cited at its foot, or closed by its total's line, is one
+    # of bands still: the source's line closes no rows, and a table opening
+    # with a sentence across it is one of bands.
+    got = tc.guess_table(table(statements + [
+        note("Adapted from the Self-Regulation Questionnaire (Brown, 1999).", 5)]))
+    yield ("a self-test with its source at its foot is bands still",
+           got[2] == ("", "1,3,5"), str(got))
+    got = tc.guess_table(table(statements + [note("Add up your scores for your total.", 5)]))
+    yield ("and so is one closed by its total's line, opening with a sentence across it",
+           got[2] == ("", "1,3,5"), str(got))
+    # And one whose scale has a header row, cited at its foot: the source's
+    # line makes the table end with no note.
+    labels = row([cell(w, bold=True) for w in ("Never", "Rarely", "Sometimes", "Often", "Always")])
+    got = tc.guess_table(table([labels] + statements + [
+        note("Adapted from the Self-Regulation Questionnaire (Brown, 1999).", 5)]))
+    yield ("and so is one whose scale has a header row, with its source at its foot",
+           got[2] == ("", "2,4,6"), str(got))
+    # A worked example's steps with a sentence across them partway, as the
+    # algebra books' are, in a table that doesn't end with one: a band.
+    worked = [row([cell("Subtract 6 from each side."),
+                   cell("4x + 6 " + minus + " 6 = " + minus + "14 " + minus + " 6")]),
+              row([cell("Simplify."), cell("4x = " + minus + "20")]),
+              note("Now all the variables are on the left and the constants on the right."),
+              row([cell("Divide each side by 4."), cell("4x/4 = " + minus + "20/4")]),
+              row([cell("Simplify."), cell("x = " + minus + "5")])]
+    got = tc.guess_table(table(worked))
+    yield ("a sentence across a worked example's steps, in a table that doesn't end with "
+           "one, is a band", got[2] == ("", "3"), str(got))
+    # A summary row's empty label has no column to keep it in a table with
+    # notes, which the report reads from the reason.
+    scores = [row([cell("Score", bold=True), cell("Frequency", bold=True),
+                   cell("Percent", bold=True)]),
+              row([cell("0-9"), cell("4"), cell("10")]),
+              row([cell("10-19"), cell("8"), cell("20")]),
+              note("Scores below 20 failed.", 3),
+              row([cell("20-29"), cell("12"), cell("30")]),
+              row([cell("30-39"), cell("16"), cell("40")]),
+              row([cell(""), cell("40"), cell("100")]),
+              note("Scores of 30 or more passed with honors.", 3)]
+    got = tc.guess_table(table(scores))
+    yield ("a summary row with no label in a table with notes is no summary row of a "
+           "header column", got[0] == "first-row"
+           and "trailing row with no label" not in got[1], str(got))
+
+
 def key_checks():
     """Each returns (name, ok, detail)."""
     base = [row([cell("Year"), cell("GDP")]),
@@ -762,7 +964,7 @@ def main():
     failures = 0
     for name, ok, detail in (list(key_checks()) + list(pandoc_checks())
                              + list(script_checks()) + list(part_checks())
-                             + list(structure_checks())):
+                             + list(structure_checks()) + list(note_checks())):
         if ok:
             print("  ok    %s" % name)
         else:
@@ -783,7 +985,8 @@ def main():
             print("          evidence: %s" % "; ".join(ev))
     total = len(CASES) + sum(1 for _ in key_checks()) + \
         sum(1 for _ in pandoc_checks()) + sum(1 for _ in script_checks()) + \
-        sum(1 for _ in part_checks()) + sum(1 for _ in structure_checks())
+        sum(1 for _ in part_checks()) + sum(1 for _ in structure_checks()) + \
+        sum(1 for _ in note_checks())
     print("")
     if failures:
         print("%d of %d census checks failed." % (failures, total),

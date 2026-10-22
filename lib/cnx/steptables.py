@@ -5,7 +5,9 @@ role="presentation". OpenStax's own HTML marks a table so (enki's
 cnxml-to-html5.xsl) when it has no head, no caption or title, and no
 label of OpenStax's, whatever its class. Here it's a table with no head
 (no thead, no th), for what it holds or for where it stands
-(layout_reason).
+(layout_reason). And a worked example's steps that a book writes as one
+formula, a step's reason in words beside its math, are made such a table
+(formula_steps, at the end).
 
 For what it holds, in any book, of any class, with any caption, and
 whatever the header guess reads:
@@ -107,6 +109,7 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
+import copy
 import re
 import unicodedata
 
@@ -115,6 +118,7 @@ from lxml import etree
 import tablecensus as tc
 
 from .bake.core import classes
+from .mathml import MATHML
 from .mathtex import tex
 
 LAYOUT_STYLES = {"dev-math", "precalculus-coreq", "hs-physics"}
@@ -490,3 +494,354 @@ def layout_reason(table, source, style, captioned, organizer=False):
             or style in ANY_CLASS_STYLES and not source.get("data-aria-label")):
         return "place"
     return None
+
+
+# --------------------------------------------------------------------------
+# a worked example's steps written as one formula
+# --------------------------------------------------------------------------
+
+# College Algebra 2e and the books written as it is set a worked example's
+# steps as one formula, an mtable, a step to a row: what's worked on, the
+# relation, and the result each in a column, and the step's reason in
+# words in a column of its own after a wide space ("Commutative and
+# associative laws of multiplication"), or an instruction in the first
+# column ("Find the Fahrenheit temperature for a Celsius temperature of
+# 0"). A formula's words don't wrap, so such a formula ran past its line
+# in a PDF, by up to 224 points in College Algebra 2e's first chapter, and
+# past a narrow window. It's set as the dev-math books set their steps: a
+# layout table, its math cell for cell, each a formula, its columns
+# aligned as the formula aligned them, and its words text, which wraps in
+# its column (formula_steps). Lines labeled in words written as one
+# formula are so too, as Chemistry 2e labels a cell's half-reactions
+# ("oxidation half-reaction:").
+
+# What only groups a formula's pieces, which the steps are read through.
+GROUPING = {"mrow", "mstyle", "mpadded"}
+# A word, as a step's reason or instruction has words: three letters or
+# more, small letters after the first, so that a chemical formula's
+# symbols (Pb, OH, aq) and an acronym aren't words.
+WORD = re.compile(r"[^\W\d_]{3,}")
+# The relations an equation's side stands beside: words beside one are
+# the side, written in words ("Total damage = ..."), not a step's words.
+RELATIONS = set("=<>\u2264\u2265\u2248\u2260\u2192\u21d2\u2261\u221d\u2243\u2245")
+# Punctuation a formula sets as an operator, which ends a step's words
+# ("Simplify" and an mo of ".").
+PUNCTUATION = set(".,;:!?")
+# Spaces in a formula's text, which keeps them with no-break spaces
+# (OpenStax's "Commutative and associative", U+00A0 each) and thin ones,
+# all of them Python's \s, and a zero-width space, which isn't.
+SPACES = re.compile(r"[\s\u200b]+")
+ALIGNMENTS = {"left", "right", "center"}
+# What a formula's text set in a style is in HTML.
+STYLED = {"bold": "strong", "italic": "em", "bold-italic": "strong"}
+
+
+def _name(el):
+    return etree.QName(el).localname if isinstance(el.tag, str) else ""
+
+
+def _text(el):
+    return "".join(el.itertext())
+
+
+def _blank_text(text):
+    return not SPACES.sub("", text or "")
+
+
+def _spacing(piece):
+    """Whether a piece of a formula is space alone: an mspace, or text or
+    an operator that's spaces."""
+    name = _name(piece)
+    return name == "mspace" or (name in ("mtext", "mo", "mi") and _blank_text(_text(piece)))
+
+
+def _pieces(el, style=None):
+    """What an element of a formula holds, through what only groups, each
+    with the style (mathvariant) it's set in, or None. Words the source
+    broke over lines, a table of one column each of whose rows opens with
+    text ("Commutative and associative" over "properties of
+    multiplication", in College Algebra 2e's 1.2), are its rows' pieces,
+    a space between each and the next."""
+    out = []
+    for child in el:
+        name = _name(child)
+        if name in GROUPING:
+            out += _pieces(child, child.get("mathvariant") or style)
+        elif name == "mtable" and _lines(child):
+            for at, line in enumerate(_lines(child)):
+                if at:
+                    out.append((etree.Element("{%s}mspace" % MATHML), None))
+                out += _pieces(line, child.get("mathvariant") or style)
+        elif name:
+            out.append((child, child.get("mathvariant") or style))
+    return out
+
+
+def _lines(table):
+    """A table's cells, when it's one column of lines of words, each
+    opening with text, after any space; or []."""
+    rows = [r for r in table if _name(r)]
+    cells = [[c for c in r if _name(c)] for r in rows]
+    if not rows or any(_name(r) != "mtr" or len(c) != 1 or _name(c[0]) != "mtd"
+                       for r, c in zip(rows, cells)):
+        return []
+    for (cell,) in cells:
+        pieces = [p for p, _ in _pieces(cell) if not _spacing(p)]
+        if not pieces or _name(pieces[0]) != "mtext":
+            return []
+    return [c[0] for c in cells]
+
+
+def _kind(cell):
+    """A cell of the steps: ("empty", 0); ("words", how many), when it
+    opens with text, after any space, and its text holds a word; or
+    ("math", 0)."""
+    pieces = [p for p, _ in _pieces(cell) if not _spacing(p)]
+    if not pieces:
+        return ("empty", 0) if _blank_text(_text(cell)) else ("math", 0)
+    if _name(pieces[0]) != "mtext":
+        return ("math", 0)
+    words = [w for p in pieces if _name(p) == "mtext"
+             for w in WORD.findall(_text(p)) if w[1:].islower()]
+    return ("words", len(words)) if words else ("math", 0)
+
+
+def _relation(cell, end):
+    """Whether a cell opens (end 0) or ends (end -1) with a relation, an
+    operator or text."""
+    pieces = [p for p, _ in _pieces(cell) if not _spacing(p)]
+    if not pieces or _name(pieces[end]) not in ("mo", "mtext"):
+        return False
+    text = SPACES.sub("", _text(pieces[end]))
+    return bool(text) and text[end] in RELATIONS
+
+
+def _sole_table(math):
+    """The mtable that's all a formula holds, through what only groups,
+    an annotation (another form of the formula) aside; or None."""
+    el = math
+    while True:
+        kids = [k for k in el if _name(k) and _name(k) not in ("annotation", "annotation-xml")]
+        if len(kids) != 1:
+            return None
+        el = kids[0]
+        if _name(el) == "mtable":
+            return el
+        if _name(el) not in GROUPING and _name(el) != "semantics":
+            return None
+
+
+def _alignment(table, row, cell, column):
+    """A cell's alignment as MathML reads it: the cell's own, its row's
+    for its column, its table's, or center. A row's and a table's are
+    lists, their last for the columns after."""
+    for value, listed in ((cell.get("columnalign"), False),
+                          (row.get("columnalign"), True),
+                          (table.get("columnalign"), True)):
+        values = (value or "").split()
+        if values:
+            value = values[min(column, len(values) - 1)] if listed else values[0]
+            if value in ALIGNMENTS:
+                return value
+    return "center"
+
+
+def _beside(kinds, column, side):
+    """The column of the next cell holding anything on a row, from a
+    column toward a side (1, -1), or None."""
+    at = column + side
+    while 0 <= at < len(kinds):
+        if kinds[at][0] != "empty":
+            return at
+        at += side
+    return None
+
+
+def _math_of(cell):
+    """Whether a cell holds math, more than text and space: a token of
+    math, an identifier, number, or operator, outside text."""
+    return any(_name(e) in ("mi", "mn", "mo") and not _spacing(e)
+               for e in cell.iter())
+
+
+def _span(cell, attribute):
+    """Whether a cell spans more than one column (columnspan) or row
+    (rowspan)."""
+    return (cell.get(attribute) or "1").strip() != "1"
+
+
+def _trim_space(el, end):
+    """The space at one end of what an element holds (end 0, its first;
+    -1, its last), an mspace or text or an operator that's spaces, taken
+    out, through what only groups."""
+    while True:
+        kids = [k for k in el if isinstance(k.tag, str)]
+        if not kids:
+            return
+        if _spacing(kids[end]):
+            el.remove(kids[end])
+        elif _name(kids[end]) in GROUPING:
+            el = kids[end]
+        else:
+            return
+
+
+def _formula(cell, display, ends):
+    """A cell of math as a formula of its own, in display style where the
+    table set its cells so, and without the space that set it apart from
+    words beside it, at the ends that have them (0, its first; -1, its
+    last)."""
+    math = etree.Element("{%s}math" % MATHML, nsmap={None: MATHML})
+    holder = math
+    if display:
+        holder = etree.SubElement(math, "{%s}mstyle" % MATHML, displaystyle="true")
+    for child in cell:
+        if isinstance(child.tag, str):
+            holder.append(copy.deepcopy(child))
+    for end in ends:
+        _trim_space(holder, end)
+    return math
+
+
+def _words(cell, td):
+    """A cell of words into an HTML cell: its text, each run of spaces one
+    space, which a line can break at, bold or italic where it's set so,
+    its math, each run of it a formula, and punctuation that ends a run of
+    math text."""
+    pieces = _pieces(cell)
+    runs = []                       # (text, style) or [math pieces]
+    for at, (piece, style) in enumerate(pieces):
+        name = _name(piece)
+        after = pieces[at + 1][0] if at + 1 < len(pieces) else None
+        if name == "mtext" or _spacing(piece) or (
+                name == "mo" and _text(piece).strip() in PUNCTUATION
+                and (after is None or _name(after) == "mtext" or _spacing(after))):
+            text = " " if name == "mspace" else _text(piece)
+            style = STYLED.get(piece.get("mathvariant") or style) if name == "mtext" else None
+            if runs and isinstance(runs[-1], tuple) and runs[-1][1] == style:
+                runs[-1] = (runs[-1][0] + text, style)
+            else:
+                runs.append((text, style))
+        elif runs and isinstance(runs[-1], list):
+            runs[-1].append(piece)
+        else:
+            runs.append([piece])
+
+    def add(text):
+        if len(td):
+            td[-1].tail = (td[-1].tail or "") + text
+        else:
+            td.text = (td.text or "") + text
+    for run in runs:
+        if isinstance(run, tuple):
+            text, style = SPACES.sub(" ", run[0]), run[1]
+            if style and text.strip():
+                lead, body, trail = (text[:len(text) - len(text.lstrip())], text.strip(),
+                                     text[len(text.rstrip()):])
+                add(lead)
+                etree.SubElement(td, style).text = body
+                add(trail)
+            else:
+                add(text)
+            continue
+        math = etree.SubElement(td, "{%s}math" % MATHML, nsmap={None: MATHML})
+        for piece in run:
+            kept = copy.deepcopy(piece)
+            kept.tail = None
+            math.append(kept)
+    for el in [td] + list(td):
+        if el.text:
+            el.text = SPACES.sub(" ", el.text)
+        if el is not td and el.tail:
+            el.tail = SPACES.sub(" ", el.tail)
+    if td.text:
+        td.text = td.text.lstrip() or None
+    if len(td) and td[-1].tail:
+        td[-1].tail = td[-1].tail.rstrip() or None
+    elif not len(td) and td.text:
+        td.text = td.text.rstrip() or None
+
+
+def formula_steps(math):
+    """A formula that's a worked example's steps as an HTML table that lays
+    them out (role="presentation", class formula-steps), or None. The
+    formula is an mtable and nothing else; its columns, but those empty in
+    every row, two or more; and its first or its last column words, a
+    step's reason or instruction, in every cell of it that holds anything,
+    two words or more in one at least, and not an equation's side written
+    in words, beside its relation. No column between the first and the
+    last holds two words in a cell, which a table of words written as a
+    formula would, and one holds math. Not a table with lines between its
+    rows or columns, which a layout table would lose, one with an
+    equation's label, or one with a cell across columns or rows, which the
+    layout table wouldn't span; and nothing but rows of cells, so that
+    nothing is lost. Each cell
+    of math is a formula of its own, in display style where the table set
+    its cells so, each column aligned as the table aligned its first cell
+    holding anything, and the space that set it apart from the words
+    beside it left to the table's columns; each cell of words is text,
+    left aligned, its spaces ones a line can break at, and its math
+    formulas."""
+    table = _sole_table(math)
+    if table is None or any(table.get(a, "none") != "none"
+                            for a in ("rowlines", "columnlines", "frame")):
+        return None
+    rows = [r for r in table if _name(r)]
+    if not rows or any(_name(r) != "mtr" for r in rows):
+        return None
+    cells = [[c for c in r if _name(c)] for r in rows]
+    if any(_name(c) != "mtd" or _span(c, "columnspan") or _span(c, "rowspan")
+           for row in cells for c in row):
+        return None
+    kinds = [[_kind(c) for c in row] for row in cells]
+    width = max(len(row) for row in cells)
+
+    def column(j):
+        return [(i, kinds[i][j]) for i in range(len(rows)) if j < len(kinds[i])]
+    used = [j for j in range(width) if any(k[0] != "empty" for _, k in column(j))]
+    if len(used) < 2:
+        return None
+    wordy = []
+    for j, side in ((used[0], 1), (used[-1], -1)):
+        found = [(i, k) for i, k in column(j) if k[0] != "empty"]
+        if any(k[0] != "words" for _, k in found) or max(k[1] for _, k in found) < 2:
+            continue
+        beside = [(i, _beside(kinds[i], j, side)) for i, _ in found]
+        if any(at is not None and _relation(cells[i][at], 0 if side == 1 else -1)
+               for i, at in beside):
+            continue
+        wordy.append(j)
+    if not wordy:
+        return None
+    if any(k[0] == "words" and k[1] >= 2 for j in used[1:-1] for _, k in column(j)):
+        return None
+    maths = [j for j in used if j not in wordy]
+    if not any(_math_of(cells[i][j]) for j in maths for i, _ in column(j)):
+        return None
+    # A row of values under a column of their names ("Integer | -2 | -1 |
+    # 0"), a table of values written as a formula: three columns of math
+    # or more, none of them a relation's.
+    if len(maths) >= 3 and not any(all(_relation(cells[i][j], 0) and len(
+            [p for p, _ in _pieces(cells[i][j]) if not _spacing(p)]) == 1
+            for i, k in column(j) if k[0] != "empty") for j in maths):
+        return None
+    display = table.get("displaystyle") == "true"
+    align = {}
+    for j in used:
+        first = next(i for i, k in column(j) if k[0] != "empty")
+        align[j] = "left" if j in wordy else _alignment(table, rows[first], cells[first][j], j)
+    out = etree.Element("table", {"role": "presentation", "class": "formula-steps"})
+    body = etree.SubElement(out, "tbody")
+    for i, row in enumerate(cells):
+        tr = etree.SubElement(body, "tr")
+        for j in used:
+            td = etree.SubElement(tr, "td", {"style": "text-align: %s" % align[j]})
+            if j >= len(row) or kinds[i][j][0] == "empty":
+                continue
+            if j in wordy:
+                _words(row[j], td)
+                continue
+            ends = [end for end, side in ((0, -1), (-1, 1))
+                    if _beside(kinds[i], j, side) in wordy]
+            td.append(_formula(row[j], display, ends))
+    return out

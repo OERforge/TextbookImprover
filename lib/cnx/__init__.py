@@ -30,7 +30,9 @@ The steps, each a module:
     steptables.py which tables only lay things out (a worked example's
                   steps, a grid of terms, a box of one cell, a form, a
                   matching exercise), layout tables, by what they hold
-                  or where they stand and TextbookImprover's header guess
+                  or where they stand and TextbookImprover's header guess;
+                  and a worked example's steps written as one formula,
+                  made such a table
     mathtex.py    a formula's TeX as Pandoc writes it, for the guess
     project.py    project.yaml, the sidecars the source can fill, the report
     unpack.py     the steps in order, for bin/unpack-cnx.py

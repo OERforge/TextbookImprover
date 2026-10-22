@@ -164,6 +164,11 @@ def main():
         print(f"{result.empty_summaries} table summary(ies) say nothing "
               "(\"No Summary\", \".\", and the like), so no description was drafted "
               "from them.")
+    if result.formula_steps:
+        print(f"{result.formula_steps} formula(s) of a worked example's steps or of lines "
+              "labeled in words, each row's words in a column of their own beside its "
+              "math, set as layout tables (class formula-steps), the words text that "
+              "wraps in its column.")
     if result.layout_tables:
         print(f"{result.layout_tables} table(s) that only lay things out (a worked "
               "example's steps, a Key Equations table, a grid of terms, a box of one "

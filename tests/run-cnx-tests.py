@@ -1703,6 +1703,242 @@ def build_layout_books(repo):
         fh.write(ONE_PIXEL)
 
 
+# A worked example's steps written as one formula, College Algebra 2e's
+# way: an mtable, the math in its columns and each step's reason in a
+# column of its own after a wide space, or an instruction in the first.
+def steps_formula(verb, table="<m:mtable>"):
+    """Two steps, a + a = 2a and = 4, each with its reason, the first
+    opening with verb ("Combine like terms in a."), the second's first
+    word bold."""
+    return (
+        "<m:math><m:mrow>" + table
+        + '<m:mtr><m:mtd columnalign="right"><m:mrow><m:mi>a</m:mi><m:mo>+</m:mo>'
+        "<m:mi>a</m:mi></m:mrow></m:mtd><m:mtd><m:mo>=</m:mo></m:mtd>"
+        '<m:mtd columnalign="left"><m:mrow><m:mn>2</m:mn><m:mi>a</m:mi></m:mrow></m:mtd>'
+        '<m:mtd columnalign="left"><m:mrow><m:mspace width="12em"/>'
+        f"<m:mtext>{verb}&#160;like&#160;terms&#160;in&#160;</m:mtext><m:mi>a</m:mi>"
+        "<m:mo>.</m:mo></m:mrow></m:mtd></m:mtr>"
+        '<m:mtr><m:mtd/><m:mtd><m:mo>=</m:mo></m:mtd><m:mtd columnalign="left">'
+        '<m:mn>4</m:mn></m:mtd><m:mtd columnalign="left"><m:mrow><m:mspace width="3em"/>'
+        '<m:mtext mathvariant="bold">Substitute</m:mtext>'
+        "<m:mtext>&#160;two&#160;for&#160;each</m:mtext></m:mrow></m:mtd></m:mtr>"
+        "</m:mtable></m:mrow></m:math>")
+
+
+FORMULA_STEPS = (
+    '<section id="s1"><title>Simplifying</title>'
+    '<example id="ex1"><para id="p1">Simplify each expression.</para>'
+    '<list id="l1" list-type="bulleted" class="circled">'
+    '<item><span class="token">\u24d0</span><newline/>\n' + steps_formula("Combine")
+    + "</item>"
+    '<item><span class="token">\u24d1</span><newline/>\n<m:math><m:mtable>'
+    '<m:mtr><m:mtd columnalign="left"><m:mtext>Write&#160;the&#160;sum&#160;first:</m:mtext>'
+    '</m:mtd><m:mtd columnalign="left"><m:mrow><m:mspace width="5em"/><m:mn>3</m:mn>'
+    "<m:mo>+</m:mo><m:mn>4</m:mn></m:mrow></m:mtd></m:mtr>"
+    '<m:mtr><m:mtd columnalign="left"><m:mtext>Then&#160;add:</m:mtext></m:mtd>'
+    '<m:mtd columnalign="left"><m:mrow><m:mspace width="5em"/><m:mn>7</m:mn></m:mrow>'
+    "</m:mtd></m:mtr></m:mtable></m:math></item>"
+    '<item><span class="token">\u24d2</span><newline/>\n'
+    '<m:math><m:mtable displaystyle="true"><m:mtr><m:mtd><m:mfrac><m:mn>1</m:mn>'
+    "<m:mn>2</m:mn></m:mfrac></m:mtd><m:mtd><m:mo>=</m:mo></m:mtd><m:mtd><m:mn>0.5</m:mn>"
+    "</m:mtd><m:mtd><m:mtext>Divide&#160;one&#160;by&#160;two</m:mtext></m:mtd></m:mtr>"
+    "</m:mtable></m:math></item>"
+    '<item><span class="token">\u24d3</span><newline/>\n<m:math><m:mtable><m:mtr>'
+    "<m:mtd><m:mn>2</m:mn><m:mo>\u22c5</m:mo><m:mn>3</m:mn></m:mtd><m:mtd><m:mo>=</m:mo></m:mtd>"
+    "<m:mtd><m:mn>3</m:mn><m:mo>\u22c5</m:mo><m:mn>2</m:mn></m:mtd><m:mtd><m:mtable>"
+    '<m:mtr><m:mtd><m:mspace width="3em"/><m:mtext>Commutative&#160;and&#160;associative'
+    '</m:mtext></m:mtd></m:mtr><m:mtr><m:mtd><m:mspace width="3em"/>'
+    "<m:mtext>properties&#160;of&#160;multiplication</m:mtext></m:mtd></m:mtr></m:mtable>"
+    "</m:mtd></m:mtr><m:mtr><m:mtd/><m:mtd><m:mo>=</m:mo></m:mtd><m:mtd><m:mn>6</m:mn>"
+    "</m:mtd><m:mtd><m:mtext>Multiply&#160;them</m:mtext></m:mtd></m:mtr></m:mtable>"
+    "</m:math></item>"
+    '<item><span class="token">\u24d4</span><newline/>\n' + steps_formula("Fuse").replace(
+        "<m:mn>2</m:mn><m:mi>a</m:mi></m:mrow>",
+        '<m:mn>2</m:mn><m:mi>a</m:mi><m:mspace width="2em"/><m:mtext/></m:mrow>', 1).replace(
+        "<m:mn>4</m:mn></m:mtd>", "<m:mn>4</m:mn><m:mo>&#160;</m:mo></m:mtd>", 1)
+    + "<newline/>\nThe sum is four.</item></list></example>"
+    '<equation id="eq1" class="unnumbered">' + steps_formula("Collect") + "</equation>"
+    '<equation id="eq2">' + steps_formula("Merge") + "</equation>"
+    '<table id="celled" summary="Steps in a cell."><tgroup cols="1"><tbody><row><entry>'
+    '<para id="celledpara">' + steps_formula("Join") + "</para></entry></row></tbody>"
+    "</tgroup></table>"
+    '<para id="noted">A note.<footnote id="fn1">' + steps_formula("Group")
+    + "</footnote></para>"
+    '<para id="lined">' + steps_formula("Unite", '<m:mtable rowlines="solid">') + "</para>"
+    '<para id="spanned">' + steps_formula("Span").replace(
+        '<m:mtd columnalign="left"><m:mn>4</m:mn></m:mtd><m:mtd columnalign="left"><m:mrow>'
+        '<m:mspace width="3em"/><m:mtext mathvariant="bold">Substitute</m:mtext>'
+        "<m:mtext>&#160;two&#160;for&#160;each</m:mtext></m:mrow></m:mtd>",
+        '<m:mtd columnalign="left" columnspan="2"><m:mn>4</m:mn></m:mtd>', 1) + "</para>"
+    '<para id="rowspanned">' + steps_formula("Gather").replace(
+        '<m:mtd columnalign="left"><m:mrow><m:mspace width="12em"/>',
+        '<m:mtd columnalign="left" rowspan="2"><m:mrow><m:mspace width="12em"/>', 1).replace(
+        '<m:mtd columnalign="left"><m:mrow><m:mspace width="3em"/>'
+        '<m:mtext mathvariant="bold">Substitute</m:mtext>'
+        "<m:mtext>&#160;two&#160;for&#160;each</m:mtext></m:mrow></m:mtd>", "", 1) + "</para>"
+    '<para id="strayrow">' + steps_formula("Stray").replace(
+        "</m:mtable>", "<m:mtext>after&#160;the&#160;rows</m:mtext></m:mtable>", 1) + "</para>"
+    '<para id="straycell">' + steps_formula("Strand").replace(
+        "</m:mtr>", "<m:mtext>beside&#160;the&#160;cells</m:mtext></m:mtr>", 1) + "</para>"
+    '<para id="labeled">' + steps_formula("Pool").replace(
+        "<m:mtr>", "<m:mlabeledtr><m:mtd><m:mtext>(1)</m:mtext></m:mtd>", 1).replace(
+        "<m:mtr>", "<m:mlabeledtr><m:mtd><m:mtext>(2)</m:mtext></m:mtd>", 1).replace(
+        "</m:mtr>", "</m:mlabeledtr>") + "</para>"
+    '<para id="side">A side: <m:math><m:mtable><m:mtr><m:mtd>'
+    "<m:mtext>Total&#160;cost&#160;of&#160;the&#160;order</m:mtext></m:mtd>"
+    "<m:mtd><m:mo>=</m:mo></m:mtd><m:mtd><m:mn>12</m:mn><m:mo>+</m:mo><m:mn>3</m:mn>"
+    "</m:mtd></m:mtr></m:mtable></m:math></para>"
+    '<para id="values">Values: <m:math><m:mtable>'
+    "<m:mtr><m:mtd><m:mtext>Integer&#160;values</m:mtext></m:mtd><m:mtd><m:mn>1</m:mn>"
+    "</m:mtd><m:mtd><m:mn>2</m:mn></m:mtd><m:mtd><m:mn>3</m:mn></m:mtd></m:mtr>"
+    "<m:mtr><m:mtd><m:mtext>Their&#160;squares</m:mtext></m:mtd><m:mtd><m:mn>1</m:mn>"
+    "</m:mtd><m:mtd><m:mn>4</m:mn></m:mtd><m:mtd><m:mn>9</m:mn></m:mtd></m:mtr>"
+    "</m:mtable></m:math></para>"
+    '<para id="short"><m:math><m:mtable><m:mtr><m:mtd><m:mn>2</m:mn><m:mo>+</m:mo>'
+    "<m:mn>2</m:mn></m:mtd><m:mtd><m:mtext>Add.</m:mtext></m:mtd></m:mtr><m:mtr><m:mtd>"
+    "<m:mn>4</m:mn></m:mtd><m:mtd><m:mtext>Done.</m:mtext></m:mtd></m:mtr></m:mtable>"
+    "</m:math></para>"
+    '<para id="chemical"><m:math><m:mtable><m:mtr><m:mtd><m:mtext>NaCl(aq) + KBr(aq)</m:mtext>'
+    "</m:mtd><m:mtd><m:mo>\u27f6</m:mo><m:msup><m:mtext>Na</m:mtext><m:mo>+</m:mo>"
+    "</m:msup></m:mtd></m:mtr><m:mtr><m:mtd><m:mtext>KOH(aq)</m:mtext></m:mtd><m:mtd>"
+    "<m:mo>\u27f6</m:mo><m:msup><m:mtext>K</m:mtext><m:mo>+</m:mo></m:msup></m:mtd>"
+    "</m:mtr></m:mtable></m:math></para>"
+    '<para id="middle"><m:math><m:mtable><m:mtr><m:mtd><m:mn>1</m:mn></m:mtd><m:mtd>'
+    "<m:mo>=</m:mo></m:mtd><m:mtd>"
+    "<m:mtext>plus&#160;one&#160;more</m:mtext></m:mtd><m:mtd><m:mn>2</m:mn></m:mtd>"
+    "<m:mtd><m:mtext>makes&#160;three&#160;in&#160;all</m:mtext></m:mtd></m:mtr>"
+    "</m:mtable></m:math></para>"
+    '<para id="ledger"><m:math><m:mtable><m:mtr><m:mtd><m:mtext>Office&#160;rental:'
+    "</m:mtext></m:mtd><m:mtd><m:mtext>$50,000</m:mtext></m:mtd></m:mtr><m:mtr><m:mtd>"
+    "<m:mtext>Law&#160;clerk:</m:mtext></m:mtd><m:mtd><m:mtext>$35,000</m:mtext></m:mtd>"
+    "</m:mtr></m:mtable></m:math></para></section>")
+
+
+def build_formula_steps(repo):
+    """A book baked as College Algebra 2e is, which numbers an equation
+    not marked unnumbered."""
+    write(os.path.join(repo, "META-INF", "books.xml"), """<container
+ xmlns="https://openstax.org/namespaces/book-container" version="1">
+<book slug="tiny-algebra" style="precalculus"
+ href="../collections/tiny-algebra.collection.xml"/>
+</container>""")
+    write(os.path.join(repo, "collections", "tiny-algebra.collection.xml"),
+          COLLECTION.format(title="Tiny Algebra", slug="tiny-algebra",
+                            uuid="11111111-2222-4333-8444-cccccccccccc", content="""
+<col:subcollection><md:title>Expressions</md:title><col:content>
+<col:module document="m60011"/>
+<col:module document="m60012"/>
+</col:content></col:subcollection>"""))
+    module(repo, "m60011", "Introduction to Expressions", """
+<para id="p1">Expressions name numbers.</para>""", cls="introduction")
+    module(repo, "m60012", "Simplifying", FORMULA_STEPS)
+
+
+def case_formula_steps(work):
+    repo = os.path.join(work, "osbooks-formulas")
+    build_formula_steps(repo)
+    out = os.path.join(work, "algebra")
+    result = unpack(repo, out, "--book", "tiny-algebra")
+    page = read(out, "1-1-simplifying.html") if result.returncode == 0 else ""
+
+    def table_of(words):
+        """The step table whose text holds words, or ""."""
+        for found in re.finditer(r'<table role="presentation" class="formula-steps">'
+                                 r".*?</table>", page, re.S):
+            if words in found.group(0):
+                return found.group(0)
+        return ""
+
+    def cells(table):
+        """Each row's cells: (style, what it holds)."""
+        return [re.findall(r'<td style="([^"]*)">(.*?)</td>', row, re.S)
+                for row in re.findall(r"<tr>(.*?)</tr>", table, re.S)]
+
+    def kept(verb):
+        """Whether the steps opening with verb are still one formula."""
+        return f"<mtext>{verb}\u00a0like" in page and not table_of(verb + " like")
+    first = cells(table_of("Combine like terms"))
+
+    # Converted, where Pandoc 3.9 or later is installed.
+    converted = None
+    version = pandoc_version()
+    if version is not None and version >= (3, 9) and result.returncode == 0:
+        write(os.path.join(out, "conversion.yaml"), read(out, "conversion.yaml")
+              + "targets:\n  html:\n    format: html\n")
+        run = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick",
+                              "--quiet"], cwd=out, capture_output=True, text=True,
+                             stdin=subprocess.DEVNULL)
+        page_out = os.path.join(out, "html", "1-1-simplifying.html")
+        converted = read(page_out) if run.returncode == 0 and os.path.exists(
+            page_out) else ""
+    checks = [
+        ("a worked example's steps written as one formula, each step's reason in a "
+         "column of words, are a layout table, cell for cell, its columns aligned as "
+         "the formula aligned them",
+         lambda: [[style for style, _ in row] for row in first]
+         == [["text-align: right", "text-align: center", "text-align: left",
+              "text-align: left"]] * 2
+         and all("<math" in held for row in first for _, held in row[:3] if held)
+         and first[1][0][1] == ""),
+        ("its reasons are text, their spaces ones a line can break at, a formula in "
+         "one still a formula, the period after it text, and a bold word strong; the "
+         "space that set them apart is the table's, an empty text and an operator of "
+         "a no-break space among it",
+         lambda: re.fullmatch(r'Combine like terms in <math xmlns="[^"]+"><mi>a</mi>'
+                              r"</math>\.", first[0][3][1])
+         and first[1][3][1] == "<strong>Substitute</strong> two for each"
+         and (lambda table: "<mn>4</mn>" in table and not any(
+             space in table for space in ("<mspace", "<mtext/>", "<mtext></mtext>",
+                                          "<mo>\u00a0</mo>", "<mo>&#160;</mo>")))(
+             table_of("Fuse like terms"))),
+        ("instructions in its first column likewise, the space before the math the "
+         "table's, and the cells of a table set in display style still so",
+         lambda: (lambda rows: rows[0][0] == ("text-align: left", "Write the sum first:")
+                  and "<mspace" not in table_of("Write the sum first:")
+                  and "<mn>3</mn>" in rows[0][1][1])(cells(table_of("Write the sum first:")))
+         and table_of("Divide one by two").count('<mstyle displaystyle="true">') == 3
+         and cells(table_of("Divide one by two"))[0][3][0] == "text-align: left"),
+        ("a reason broken over lines, a table of one column of them, is its lines' "
+         "words, a space between them",
+         lambda: cells(table_of("Commutative and associative"))[0][3][1]
+         == "Commutative and associative properties of multiplication"),
+        ("the line breaks between a part's letter and its steps, and after them, are "
+         "gone",
+         lambda: all(re.search(letter + r'</span>\s*<table role="presentation" '
+                               r'class="formula-steps">', page)
+                     for letter in ("\u24d0", "\u24d1", "\u24d2", "\u24d3", "\u24d4"))
+         and "<br" not in page.split("Simplify each expression.")[1].split("</ul>")[0]
+         and "The sum is four." in page),
+        ("in an unnumbered equation too, but not in a numbered one, nor in a table's "
+         "cell or a footnote, where a PDF's longtable can't be",
+         lambda: table_of("Collect like terms") and kept("Merge") and kept("Join")
+         and kept("Group")),
+        ("not a formula with lines between its rows, a labeled row, a cell across "
+         "columns or rows, or anything but rows of cells, an equation's side written in "
+         "words, a table of values, reasons of one word, a chemical formula's symbols, "
+         "words in a middle column, or words beside no math",
+         lambda: kept("Unite") and kept("Pool") and kept("Span") and kept("Gather")
+         and kept("Stray")
+         and kept("Strand")
+         and all(f'id="{name}"' in page and "<mtable" in page.split(f'id="{name}"')[1]
+                 .split("</p>")[0] for name in ("side", "values", "short", "chemical",
+                                                "middle", "ledger"))
+         and page.count('class="formula-steps"') == 6),
+        ("the run says how many it set as tables",
+         lambda: "6 formula(s) of a worked example's steps or of lines labeled in words"
+         in result.stdout),
+    ]
+    if converted is not None:
+        checks.append(
+            ("converted, the steps are a layout table, asked no caption, its reasons "
+             "text and its math formulas",
+             lambda: (lambda table: 'role="presentation"' in table and "<caption" not in table
+                      and "Combine like terms in" in table and table.count("<math") >= 6)(
+                 next((m.group(0) for m in re.finditer(r"<table.*?</table>", converted, re.S)
+                       if "Combine like terms" in m.group(0)), ""))))
+    return checks
+
+
 def case_layout_kinds(work):
     repo = os.path.join(work, "osbooks-layout")
     build_layout_books(repo)
@@ -2470,6 +2706,8 @@ CASES = [
     ("a nursing book's references, gathered by chapter", case_references),
     ("a math book, baked as College Algebra is", case_precalculus),
     ("a worked example's steps in a table, a layout table", case_step_tables),
+    ("a worked example's steps written as one formula, a layout table",
+     case_formula_steps),
     ("a grid of key terms, a corequisite book's steps, Key Equations, a box of "
      "one cell, a form, pictures, and a matching exercise, layout tables, and "
      "summaries that read a table out", case_layout_kinds),

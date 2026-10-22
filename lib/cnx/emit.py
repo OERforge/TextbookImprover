@@ -53,8 +53,8 @@ from .bake.core import (class_test, classes, detach, has_class, prepend,
                         text_of)
 from .cnxml import E, append_text
 from .mathml import MATHML
-from .steptables import (HEADED, head_rows, header_guess, layout_reason,
-                         organizer_page, symbol_key)
+from .steptables import (HEADED, formula_steps, head_rows, header_guess,
+                         layout_reason, organizer_page, symbol_key)
 
 VOID = {"area", "base", "br", "col", "embed", "hr", "img", "input", "link",
         "meta", "source", "track", "wbr"}
@@ -175,6 +175,9 @@ class Emitter:
         # heading: the two, the kind alone, or the title alone.
         self.boxes = boxes
         self.boxed = 0
+        # Worked examples' steps written as one formula, set as tables
+        # (formula_steps).
+        self.formula_steps = 0
         self.merged_titles = 0
         self.kind_alone = 0
         self.title_alone = 0
@@ -219,6 +222,7 @@ class Emitter:
             body.set("lang", el.get("lang"))
         self._placing = []
         self.convert_children(work, body, 1, page)
+        drop_breaks_beside_steps(body)
         drop_empty_headings(body)
         split_paragraphs(body)
         for words in symbol_report(finish(body)):
@@ -250,7 +254,12 @@ class Emitter:
 
     def convert(self, el, dst, level, page):
         if etree.QName(el).namespace == MATHML:
-            dst.append(copy.deepcopy(_without_tail(el)))
+            steps = formula_steps(el) if _steps_can_stand(el) else None
+            if steps is None:
+                dst.append(copy.deepcopy(_without_tail(el)))
+            else:
+                self.formula_steps += 1
+                dst.append(steps)
             return
         tag = el.tag
         dtype = el.get("data-type")
@@ -1192,6 +1201,28 @@ def _strip_edges(element):
         element.text = element.text.rstrip()
 
 
+# Where a worked example's steps written as one formula can stand as a
+# table (formula_steps): in a paragraph, a list item, or a division, an
+# equation's unless it's numbered; not in a table's cell or a footnote,
+# where a PDF's longtable can't be set, nor in a caption, a heading, or a
+# term.
+STEP_PLACES = {"p", "li", "div", "dd", "section", "blockquote", "body"}
+NO_STEP_PLACES = {"table", "caption", "figcaption", "dt", "h1", "h2", "h3",
+                  "h4", "h5", "h6"}
+
+
+def _steps_can_stand(el):
+    parent = el.getparent()
+    if parent is None or parent.tag not in STEP_PLACES:
+        return False
+    if parent.get("data-type") == "equation" and parent.xpath(
+            "./div[" + class_test("os-equation-number") + "]"):
+        return False
+    return not any(isinstance(a.tag, str) and (a.tag in NO_STEP_PLACES
+                                               or a.get("role") == "doc-endnotes")
+                   for a in el.iterancestors())
+
+
 def _without_tail(el):
     out = copy.deepcopy(el)
     out.tail = None
@@ -1425,6 +1456,21 @@ def drop_empty_headings(body):
         for offset, name in enumerate(ids):
             parent.insert(index + offset, E("div", {"id": name}, ""))
         detach(h)
+
+
+def drop_breaks_beside_steps(root):
+    """A line break right before or after a worked example's steps made
+    a table (formula_steps), which a table, a block, needs no more: the
+    lettered parts of College Algebra 2e's solutions break the line after
+    the letter, before the formula."""
+    for table in root.xpath(".//table[" + class_test("formula-steps") + "]"):
+        before = table.getprevious()
+        if before is not None and before.tag == "br" and not (before.tail or "").strip():
+            before.getparent().remove(before)
+        after = table.getnext()
+        if after is not None and after.tag == "br" and not (table.tail or "").strip():
+            table.tail = (table.tail or "") + (after.tail or "")
+            after.getparent().remove(after)
 
 
 def split_paragraphs(root):

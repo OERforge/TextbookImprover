@@ -286,10 +286,11 @@ And whatever a `pdf.metadata` file's `header-includes` loads, and whatever else 
 
 ## Optional: veraPDF
 
-[veraPDF](https://verapdf.org) checks a PDF against PDF/UA and PDF/A. When it's installed, the output check runs it on every PDF a run builds, and the [audit](auditing.md) on every PDF it's given. It's Java, like the other validators, and installs from its own site without its graphical parts:
+[veraPDF](https://verapdf.org) checks a PDF against PDF/UA and PDF/A. When it's installed, the output check runs it on every PDF a run builds, and the [audit](auditing.md) on every PDF it's given. It's Java, like the other validators, and installs from its own site:
 
 ```bash
 curl -L -o /tmp/verapdf.zip https://software.verapdf.org/releases/verapdf-installer.zip
+rm -rf /tmp/verapdf
 unzip -o /tmp/verapdf.zip -d /tmp/verapdf
 java -DINSTALL_PATH="$HOME/tools/verapdf" -jar /tmp/verapdf/verapdf-greenfield-*/verapdf-izpack-installer-*.jar -options-system
 export VERAPDF="$HOME/tools/verapdf/verapdf"    # and add this line to ~/.bashrc
@@ -297,6 +298,8 @@ export VERAPDF="$HOME/tools/verapdf/verapdf"    # and add this line to ~/.bashrc
 ```
 
 The run finds it through `VERAPDF` or as `verapdf` on the path. veraPDF chooses its profiles from what the file claims: for a PDF claiming PDF/UA-2 and PDF/A-4f, veraPDF 1.30 applies PDF/UA-2 with Tagged PDF, PDF/A-4f, and both WTPDF 1.0 profiles.
+
+**Upgrading.** Run the same commands again. The link gives the latest release, and the installer, given the folder it installed into, replaces the old version there, keeping veraPDF's settings (its `config` folder); `VERAPDF` needn't change, since the path is the same. That's what the `rm -rf` is for: an older installer left in `/tmp/verapdf` matches the wildcard too, and Java runs whichever sorts first (1.30.2's, for an upgrade to 1.30.3), which reinstalls the old version without a word. The installer also empties `bin` as it goes, files it didn't put there included, so nothing of your own belongs in it. For a version other than the latest, the [releases folder](https://software.verapdf.org/releases/) has each one's installer, in a folder per minor version (`1.30/verapdf-greenfield-1.30.2-installer.zip`, say).
 
 ## For a revealjs target: reveal.js
 

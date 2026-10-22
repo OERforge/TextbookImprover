@@ -2022,12 +2022,15 @@ def check_wcag_report():
         ("a rule failed more often than veraPDF lists says how many more",
          lambda: len(by["verapdf-wcag:1.4.3-1"]) == 3
          and by["verapdf-wcag:1.4.3-1"][2].detail.startswith(
-             "Contrast: 148 more failed check(s), which veraPDF doesn't list")),
-        ("a summary line a rule, in the criteria's order, with the count and the pages",
+             "Contrast: 148 more failed check(s), which veraPDF didn't list (it lists about "
+             "10,000 of a PDF's at most).")),
+        ("a summary line a rule, in the criteria's order, with the count and the pages, of "
+         "the checks veraPDF listed when it didn't list them all",
          lambda: [line.split(",")[0] for line in lines] == [
              "book.pdf: verapdf-wcag:1.4.3-1", "book.pdf: verapdf-wcag:1.4.4-1",
              "book.pdf: verapdf-wcag:2.4.9-1", "book.pdf: verapdf-wcag:4.1.2-17"]
-         and "150 failed check(s), pages 10, 12: Contrast." in lines[0]),
+         and "150 failed check(s), the first 2 on pages 10, 12: Contrast." in lines[0]
+         and ": 1 failed check(s), page 3: " in lines[2]),
         ("a probe that passed is a warning, saying the modules' version isn't veraPDF's, "
          "and nothing else",
          lambda: not older["loaded"] and older["findings"] == [] and older["rules"] == []
@@ -2144,6 +2147,19 @@ def check_wcag_setup():
     complete = pdfcheck.run_verapdf_wcag(fake, [], folder=twice)
     lacking_both = pdfcheck.run_verapdf_wcag(fake, [], folder=neither)
     lacking_unloaded = pdfcheck.run_verapdf_wcag(fake, [], folder=unloaded_one)
+    # A rule's summary line: without pages, listed whole and cut short, and
+    # with one of many failed checks listed, as veraPDF does past its cap.
+    def rule(failed, checks, clause="4.1.2", test=17, description="Redundant span"):
+        return {"clause": clause, "testNumber": test, "failedChecks": failed,
+                "description": description, "checks": checks}
+    pageless = {"status": "failed", "context": "root/doc[0]/redundant[0]"}
+    paged = {"status": "failed", "context": "root/doc[0]/repeatedCharacters[0]",
+             "location": '{"bbox":[{"p":0,"rect":[1,2,3,4]}]}'}
+    span_url = "https://www.w3.org/WAI/WCAG22/Understanding/name-role-value.html"
+    rule_lines = [pdfcheck.wcag_rule_line("book.pdf", rule(1, [pageless]), []),
+                  pdfcheck.wcag_rule_line("book.pdf", rule(5, [pageless, pageless]), []),
+                  pdfcheck.wcag_rule_line("book.pdf", rule(11000, [paged], "1.3.1", 1,
+                                                           "Repeated"), [1])]
     os.environ["FAKE_VERAPDF_SLEEP"] = "5"
     try:
         slow = pdfcheck.run_verapdf_wcag(fake, [], folder=twice, timeout=1)
@@ -2192,6 +2208,15 @@ def check_wcag_setup():
          and "didn't load its WCAG modules" in lacking_unloaded[1][0]
          and "has no WCAG-2-2-Machine.xml, so the WCAG checks won't run on a PDF 1.x file"
              in lacking_unloaded[1][1]),
+        ("a rule's line without pages, listed whole or cut short, and with one of many "
+         "listed", lambda: rule_lines == [
+             "book.pdf: verapdf-wcag:4.1.2-17, 4.1.2 Name, Role, Value (A): 1 failed check(s): "
+             f"Redundant span. {span_url}",
+             "book.pdf: verapdf-wcag:4.1.2-17, 4.1.2 Name, Role, Value (A): 5 failed check(s): "
+             f"Redundant span. {span_url}",
+             "book.pdf: verapdf-wcag:1.3.1-1, 1.3.1 Info and Relationships (A): 11000 failed "
+             "check(s), the first on page 1: Repeated. "
+             "https://www.w3.org/WAI/WCAG22/Understanding/info-and-relationships.html"]),
         ("a warning's list of files: three at most, then how many more",
          lambda: [pdfcheck._listed(["/a/one.pdf", "b/two.pdf", "three.pdf", "4.pdf", "5.pdf"]
                                    [:count]) for count in (1, 2, 3, 4, 5)]

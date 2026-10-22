@@ -329,7 +329,7 @@ done
 ls
 ```
 
-`ls` should show the nine jars and the two profiles. PDFBox reads the file again and draws each page with text on it, for the contrast check ([`ContrastRatioConsumer`](https://github.com/veraPDF/veraPDF-wcag-algs/blob/v1.30.3/src/main/java/org/verapdf/wcag/algorithms/semanticalgorithms/consumers/ContrastRatioConsumer.java)), and the image libraries let it read JPEG 2000 and JBIG2 pictures. Then tell the run where they are, with this line in `~/.bashrc`, as for the [validators](#optional-the-full-validators):
+`ls` should show the nine jars and the two profiles. PDFBox reads the file again and draws each page with text on it, for the contrast check ([`ContrastRatioConsumer`](https://github.com/veraPDF/veraPDF-wcag-algs/blob/v1.30.3/src/main/java/org/verapdf/wcag/algorithms/semanticalgorithms/consumers/ContrastRatioConsumer.java)), and the image libraries let it read JPEG 2000 and JBIG2 pictures. On _Introduction to Sociology 3e_'s PDF, 953 pages and 51 MB, `check-output.py --wcag` took 2 minutes 53 seconds in all, veraPDF's usual checks included (measured on Windows, under WSL). Then tell the run where they are, with this line in `~/.bashrc`, as for the [validators](#optional-the-full-validators):
 
 ```bash
 export VERAPDF_WCAG="$HOME/tools/verapdf-wcag"
@@ -357,7 +357,7 @@ W=~/tools/verapdf-wcag
 CLASSPATH_PREFIX="$W/*" "$VERAPDF" --loglevel 0 -p $W/WCAG-2-2-Machine-PDF20.xml --format text -v book.pdf
 ```
 
-The text names each rule that failed; `--format xml` gives each failed check as well, with its page, counted from 0, and the rectangles it covers. The `/*` is what has Java load every jar in the folder: without it, veraPDF quietly passes the profile's own rules. `--loglevel 0` turns veraPDF's log off. The modules otherwise write `SEVERE: Undefined property /Artifact in a content stream` for each artifact in the file, over 16,000 times for a 1,015-page book: they take the tag in an artifact's `/Artifact BMC` for the name of a property list, which `BMC` doesn't have ([`getMCID`](https://github.com/veraPDF/veraPDF-validation/blob/v1.30.3/wcag-validation/src/main/java/org/verapdf/gf/model/factory/chunks/ChunkParser.java#L936-L951)), and the file isn't at fault. veraPDF's launcher passes `JAVA_OPTS` to Java, so `JAVA_OPTS=-Xmx4g` before the command gives it more memory if a long book needs it.
+The text names each rule that failed; `--format xml` gives each failed check as well, with its page, counted from 0, and the rectangles it covers, though only a rule's first 100 unless `--maxfailuresdisplayed` asks for more (`--wcag` asks for 10,000). The `/*` is what has Java load every jar in the folder: without it, veraPDF quietly passes the profile's own rules. `--loglevel 0` turns veraPDF's log off. The modules otherwise write `SEVERE: Undefined property /Artifact in a content stream` for each artifact in the file, over 16,000 times for a 1,015-page book: they take the tag in an artifact's `/Artifact BMC` for the name of a property list, which `BMC` doesn't have ([`getMCID`](https://github.com/veraPDF/veraPDF-validation/blob/v1.30.3/wcag-validation/src/main/java/org/verapdf/gf/model/factory/chunks/ChunkParser.java#L936-L951)), and the file isn't at fault. veraPDF's launcher passes `JAVA_OPTS` to Java, so `JAVA_OPTS=-Xmx4g` before the command gives it more memory if a long book needs it.
 
 ## For a revealjs target: reveal.js
 

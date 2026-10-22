@@ -605,10 +605,13 @@ def wcag_cases(work):
          lambda: f"book.pdf: verapdf-wcag:2.4.9-1, 2.4.9 Link Purpose (Link Only) (AAA): 1 "
                  f"failed check(s), page 3: Links shall contain" in ran and url in ran),
         ("veraPDF gets the folder's profile for PDF 2.0, its log off, a file of any name, "
-         "the probe and the PDF, and the folder's jars first on its classpath",
+         "a rule's every failed check listed, the probe and the PDF, and the folder's jars "
+         "first on its classpath",
          lambda: len(profiled) == 1 and profiled[0]["args"][:6] == [
              "--loglevel", "0", "--nonpdfext", "-p",
              os.path.join(loads, "WCAG-2-2-Machine-PDF20.xml"), "--format"]
+         and profiled[0]["args"][profiled[0]["args"].index("--maxfailuresdisplayed") + 1]
+         == "10000"
          and os.path.basename(profiled[0]["args"][-2]) == "wcag-probe.pdf"
          and profiled[0]["args"][-1] == pdf
          and profiled[0]["prefix"].split(os.pathsep)[0] == os.path.join(loads, "*")

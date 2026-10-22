@@ -669,7 +669,14 @@ WCAG_CAVEAT = "veraPDF's WCAG checks are experimental and may be wrong"
 WCAG_SKIPPED = ("without them veraPDF skips its WCAG checks silently, passing "
                 "their rules unchecked")
 WCAG_DOCS = "docs/installation.md, Optional: veraPDF's WCAG modules"
-WCAG_LISTED = 100                       # the failed checks veraPDF lists for a rule
+# The failed checks veraPDF is asked to list for a rule, each a finding
+# (it lists 100 unless told; on Introduction to Sociology 3e, 789 bare
+# links fail 2.4.9-1, on 121 pages). However many are asked for, veraPDF
+# lists about 10,000 of a PDF's failed checks in all, PDF/UA's rules'
+# among them, and past that only a rule's first (BaseValidator's
+# MAX_CHECKS_NUMBER, 1.30.3; measured), so this asks for every one it
+# will list.
+WCAG_LISTED = 10000
 
 
 def wcag_probe():
@@ -1039,20 +1046,25 @@ def wcag_rule_findings(name, rule):
                         else f"{description}. {about}"))
     if total > len(listed):
         out.append(note(name, (f"{description}: {total - len(listed)} more failed "
-                               "check(s), which veraPDF doesn't list (it lists a rule's "
-                               f"first {len(listed)}). {about}") if listed else
+                               "check(s), which veraPDF didn't list (it lists about 10,000 "
+                               f"of a PDF's at most). {about}") if listed else
                         f"{description}: {total} failed check(s). {about}"))
     return out, sorted(pages)
 
 
 def wcag_rule_line(name, rule, pages):
     """The summary's line for a rule a PDF failed: the criterion, how
-    many checks failed, the pages, and the Understanding document."""
+    many checks failed, the pages of those veraPDF listed, which says
+    so when it didn't list them all, and the Understanding document."""
     clause = str(rule.get("clause", ""))
-    total = max(_count(rule.get("failedChecks")), len(_failed_checks(rule)))
+    listed = len(_failed_checks(rule))
+    total = max(_count(rule.get("failedChecks")), listed)
     shown = ", ".join(str(page) for page in pages[:8]) + (
         f", and {len(pages) - 8} more" if len(pages) > 8 else "")
-    where = f", page{'s' if len(pages) > 1 else ''} {shown}" if pages else ""
+    where = f"page{'s' if len(pages) > 1 else ''} {shown}" if pages else ""
+    if where and total > listed:
+        where = f"the first{'' if listed == 1 else f' {listed}'} on {where}"
+    where = f", {where}" if where else ""
     description = str(rule.get("description") or "").strip().rstrip(".")
     return (f"{name}: verapdf-wcag:{clause}-{rule.get('testNumber', '')}, "
             f"{wcag.named(clause)}: {total} failed check(s){where}: {description}. "

@@ -522,6 +522,14 @@ def wcag_cases(work):
     count = len(calls_since(0))
     halfway = run("--wcag", "--pdf", pdf, "--pdf", older, folder=lacking)
     halfway_calls = [call for call in calls_since(count) if "-p" in call["args"]]
+    # Two PDF 2.0 files, and a folder with only the 1.x profile.
+    second = os.path.join(work, "book2.pdf")
+    shutil.copy(pdf, second)
+    only_older = fakeverapdf.modules(os.path.join(work, "only-older"),
+                                     profiles=("WCAG-2-2-Machine.xml",))
+    count = len(calls_since(0))
+    newer_unfit = run("--wcag", "--pdf", pdf, "--pdf", second, folder=only_older)
+    newer_unfit_calls = [call for call in calls_since(count) if "-p" in call["args"]]
     count = len(calls_since(0))
     pages_only = run("--wcag", os.path.join(work, "good.html"), folder=loads)
     pages_calls = calls_since(count)
@@ -611,6 +619,7 @@ def wcag_cases(work):
          or fail(f"got: {calls}")),
         ("with nothing to check, the probe alone says the modules loaded",
          lambda: "veraPDF 1.30.3 loaded its WCAG modules from " + loads in setup
+         and "run on PDF 2.0 and PDF 1.x files alike" in setup
          or fail("got: " + setup)),
         ("modules veraPDF didn't load are a warning that it skips their checks silently, "
          "and nothing is reported, nor said to have run",
@@ -629,10 +638,15 @@ def wcag_cases(work):
          or fail(f"got: {both_calls} | {both}")),
         ("a folder without a profile a PDF needs is a warning for that PDF, the other "
          "checked", lambda: len(halfway_calls) == 1
-         and "has no WCAG-2-2-Machine.xml, the profile for a PDF 1.x file, so 1 PDF(s) "
-             "weren't checked" in halfway
+         and "has no WCAG-2-2-Machine.xml, so the WCAG checks didn't run on 1 PDF 1.x "
+             "file(s): older.pdf (docs/installation.md" in halfway
          and "book.pdf: verapdf-wcag:1.3.1-1" in halfway
          and "older.pdf: verapdf-wcag" not in halfway or fail("got: " + halfway)),
+        ("and one without the PDF 2.0 profile names the PDF 2.0 files it didn't check",
+         lambda: not newer_unfit_calls
+         and "has no WCAG-2-2-Machine-PDF20.xml, so the WCAG checks didn't run on 2 PDF 2.0 "
+             "file(s): book.pdf and book2.pdf (docs/installation.md" in newer_unfit
+         or fail("got: " + newer_unfit)),
         ("pages and no PDF: the profile isn't run, and the summary says why",
          lambda: "veraPDF's WCAG checks not run: no PDF to check." in pages_only
          and not [call for call in pages_calls if "-p" in call["args"]]),

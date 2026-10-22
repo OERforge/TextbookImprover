@@ -343,10 +343,10 @@ python3 $T/bin/check-output.py --wcag
 
 ```
 Output check: 0 page(s), nothing found.
-  veraPDF 1.30.3 loaded its WCAG modules from /home/you/tools/verapdf-wcag (wcag-validation 1.30.3, wcag-algorithms 1.30.3), so its WCAG 2.2 machine checks run; veraPDF's WCAG checks are experimental and may be wrong.
+  veraPDF 1.30.3 loaded its WCAG modules from /home/you/tools/verapdf-wcag (wcag-validation 1.30.3, wcag-algorithms 1.30.3), so its WCAG 2.2 machine checks run on PDF 2.0 and PDF 1.x files alike; veraPDF's WCAG checks are experimental and may be wrong.
 ```
 
-If they didn't, a warning says what it found: no folder, a module's jar or a profile missing from it, or modules veraPDF didn't load, which veraPDF itself never says.
+If they didn't, a warning says what it found: no folder, a module's jar or a profile missing from it, or modules veraPDF didn't load, which veraPDF itself never says. With one profile of the two, the line says the checks run on a PDF 2.0 file and not a PDF 1.x file, or the other way round, and a warning names the profile missing; the loop above downloads it.
 
 Another veraPDF needs other jars, since `wcag-validation` must be veraPDF's own version: for veraPDF 1._x_._y_, `wcag-validation` 1._x_._y_ and the newest `wcag-algorithms` whose version starts 1._x_ ([its versions](https://repo1.maven.org/maven2/org/verapdf/wcag-algorithms/)), the rest at the versions in `wcag-algorithms`'s POM file and PDFBox's, and the profiles from the profiles repository's branch for that release (`rel/1.30` for 1.30). Nothing more. veraPDF's own jar has what else the modules use (its parser and validation model, and Jackson), and the POM files' other entries, test tools and a coverage plugin, aren't needed at all; a second copy of veraPDF's own, which a tool that gathers a module's dependencies would add (Maven's `dependency:copy-dependencies`, say), would be loaded ahead of it. Empty the folder before filling it with another version's jars: Java loads one of two copies of a class, and [which one it doesn't specify](https://docs.oracle.com/javase/8/docs/technotes/tools/unix/classpath.html), so `--wcag` warns of a module there twice.
 

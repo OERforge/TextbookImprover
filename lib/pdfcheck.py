@@ -664,6 +664,7 @@ def run_verapdf(command, path):
 WCAG_VARIABLE = "VERAPDF_WCAG"
 WCAG_MODULES = ("wcag-validation", "wcag-algorithms")
 WCAG_PROFILES = {"2": "WCAG-2-2-Machine-PDF20.xml", "1": "WCAG-2-2-Machine.xml"}
+WCAG_FILES = {"2": "PDF 2.0", "1": "PDF 1.x"}   # the files each profile is for
 WCAG_CAVEAT = "veraPDF's WCAG checks are experimental and may be wrong"
 WCAG_SKIPPED = ("without them veraPDF skips its WCAG checks silently, passing "
                 "their rules unchecked")
@@ -775,8 +776,7 @@ def run_verapdf_wcag(command, paths, folder=None, timeout=3600):
         it can't: it isn't there, or the probe can't tell with it."""
         name = WCAG_PROFILES[major]
         if not os.path.isfile(profiles[major]):
-            return (f"{folder} ({WCAG_VARIABLE}) has no {name}, the profile for a PDF "
-                    f"{major}.x file")
+            return f"{folder} ({WCAG_VARIABLE}) has no {name}"
         tells = _probe_tells(profiles[major])
         if tells is None:
             return f"{name} in {folder} ({WCAG_VARIABLE}) can't be read as a profile"
@@ -789,19 +789,24 @@ def run_verapdf_wcag(command, paths, folder=None, timeout=3600):
     for major, group in sorted(groups.items(), reverse=True):
         why = unfit(major)
         if why:
-            warnings.append(f"WARNING: --wcag: {why}, so {len(group)} PDF(s) weren't "
-                            f"checked ({WCAG_DOCS}).")
+            warnings.append(f"WARNING: --wcag: {why}, so the WCAG checks didn't run on "
+                            f"{len(group)} {WCAG_FILES[major]} file(s): {_listed(group)} "
+                            f"({WCAG_DOCS}).")
             del groups[major]
+    fit, unfitting = None, []
     if not paths:
         # The setup alone: both profiles should be there, and the probe
-        # runs with whichever is, PDF 2.0's first.
+        # runs with whichever is, PDF 2.0's first; what it says names the
+        # files the checks run on, and the warning the ones they won't,
+        # after a warning that the modules didn't load, which is first.
         whys = {major: unfit(major) for major in ("2", "1")}
-        warnings += [f"WARNING: --wcag: {why} ({WCAG_DOCS})."
-                     for why in whys.values() if why]
-        there = [major for major in ("2", "1") if not whys[major]]
-        groups = {there[0]: []} if there else {}
+        unfitting = [f"WARNING: --wcag: {why}, so the WCAG checks won't run on a "
+                     f"{WCAG_FILES[major]} file, as a PDF/UA-{major} build is ({WCAG_DOCS})."
+                     for major, why in whys.items() if why]
+        fit = [major for major in ("2", "1") if not whys[major]]
+        groups = {fit[0]: []} if fit else {}
     if not groups:
-        return [], warnings
+        return [], warnings + unfitting
     environment = dict(os.environ)
     environment["CLASSPATH_PREFIX"] = os.pathsep.join(
         [os.path.join(os.path.abspath(folder), "*")]
@@ -843,11 +848,25 @@ def run_verapdf_wcag(command, paths, folder=None, timeout=3600):
                     f"from {folder}: {WCAG_CAVEAT}, so what they find is a note, never a "
                     "failure."]
         else:
+            files = ("PDF 2.0 and PDF 1.x files alike" if len(fit) == 2 else
+                     f"a {WCAG_FILES[fit[0]]} file, as a PDF/UA-{fit[0]} build is, but not "
+                     f"on a {WCAG_FILES['1' if fit[0] == '2' else '2']} file")
             head = [f"veraPDF {version} loaded its WCAG modules from {folder} ("
                     + ", ".join(f"{module} {' and '.join(modules[module])}"
                                 for module in WCAG_MODULES)
-                    + f"), so its WCAG 2.2 machine checks run; {WCAG_CAVEAT}."]
-    return findings, head + warnings + [line for _, line in sorted(rules)]
+                    + f"), so its WCAG 2.2 machine checks run on {files}; {WCAG_CAVEAT}."]
+    return findings, head + warnings + unfitting + [line for _, line in sorted(rules)]
+
+
+def _listed(paths, shown=3):
+    """The files' names, as a warning gives them: three at most, then
+    how many more."""
+    names = [os.path.basename(path) for path in paths[:shown]]
+    if len(paths) > shown:
+        names.append(f"{len(paths) - shown} more")
+    if len(names) < 3:
+        return " and ".join(names)
+    return ", ".join(names[:-1]) + ", and " + names[-1]
 
 
 def _run_wcag(command, profile, probe, group, environment, timeout):

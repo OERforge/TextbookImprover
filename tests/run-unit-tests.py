@@ -2106,10 +2106,12 @@ def check_wcag_probe():
 
 def check_wcag_setup():
     """The folder of veraPDF's WCAG modules read as Java would load it,
-    two versions of a module a warning; the setup check naming a missing
-    profile, or one that isn't XML; and the output check's summary, where veraPDF's WCAG notes
-    follow the verdict and stay out of its count, and keep the report.
-    With the suites' stand-in for veraPDF."""
+    two versions of a module a warning; the setup check saying which
+    PDFs the checks run on, and naming a missing profile, or one that
+    isn't XML; a warning's list of files; and the output check's
+    summary, where veraPDF's WCAG notes follow the verdict and stay out
+    of its count, and keep the report. With the suites' stand-in for
+    veraPDF."""
     sys.path.insert(0, HERE)
     import fakeverapdf
     import pdfcheck
@@ -2122,6 +2124,10 @@ def check_wcag_setup():
         open(os.path.join(twice, name), "w").close()
     one = fakeverapdf.modules(os.path.join(work, "one"),
                               profiles=("WCAG-2-2-Machine-PDF20.xml",))
+    other = fakeverapdf.modules(os.path.join(work, "other"), profiles=("WCAG-2-2-Machine.xml",))
+    neither = fakeverapdf.modules(os.path.join(work, "neither"), profiles=())
+    unloaded_one = fakeverapdf.modules(os.path.join(work, "unloaded-one"), loads=False,
+                                       profiles=("WCAG-2-2-Machine-PDF20.xml",))
     # Profiles that can't be read: XML cut short, and XML in an encoding
     # Python doesn't know and in one expat can't read.
     unreadable = {}
@@ -2134,6 +2140,10 @@ def check_wcag_setup():
         unreadable[folder] = pdfcheck.run_verapdf_wcag(fake, [], folder=folder)
     doubled = pdfcheck.run_verapdf_wcag(fake, [], folder=twice)
     lacking = pdfcheck.run_verapdf_wcag(fake, [], folder=one)
+    lacking_other = pdfcheck.run_verapdf_wcag(fake, [], folder=other)
+    complete = pdfcheck.run_verapdf_wcag(fake, [], folder=twice)
+    lacking_both = pdfcheck.run_verapdf_wcag(fake, [], folder=neither)
+    lacking_unloaded = pdfcheck.run_verapdf_wcag(fake, [], folder=unloaded_one)
     os.environ["FAKE_VERAPDF_SLEEP"] = "5"
     try:
         slow = pdfcheck.run_verapdf_wcag(fake, [], folder=twice, timeout=1)
@@ -2153,10 +2163,41 @@ def check_wcag_setup():
         ("veraPDF stopped after the time it's given is a warning saying so",
          lambda: any("veraPDF hadn't finished with WCAG-2-2-Machine-PDF20.xml after 1 "
                      "seconds, and was stopped." in line for line in slow[1])),
-        ("the setup check names a profile missing from the folder",
-         lambda: lacking[1][0].startswith("veraPDF 1.30.3 loaded its WCAG modules")
-         and any("has no WCAG-2-2-Machine.xml, the profile for a PDF 1.x file" in line
-                 for line in lacking[1])),
+        ("the setup check says the checks run on PDF 2.0 and PDF 1.x files, with both "
+         "profiles", lambda: complete[1][0].startswith("veraPDF 1.30.3 loaded its WCAG modules")
+         and "so its WCAG 2.2 machine checks run on PDF 2.0 and PDF 1.x files alike; "
+             in complete[1][0]),
+        ("with one, which files they run on and which they don't, and the warning names the "
+         "profile missing and the files it's for",
+         lambda: "so its WCAG 2.2 machine checks run on a PDF 2.0 file, as a PDF/UA-2 build "
+                 "is, but not on a PDF 1.x file; " in lacking[1][0]
+         and lacking[1][1] == f"WARNING: --wcag: {one} (VERAPDF_WCAG) has no "
+                              "WCAG-2-2-Machine.xml, so the WCAG checks won't run on a PDF 1.x "
+                              "file, as a PDF/UA-1 build is (docs/installation.md, Optional: "
+                              "veraPDF's WCAG modules)."
+         and "so its WCAG 2.2 machine checks run on a PDF 1.x file, as a PDF/UA-1 build "
+             "is, but not on a PDF 2.0 file; " in lacking_other[1][0]
+         and any("has no WCAG-2-2-Machine-PDF20.xml, so the WCAG checks won't run on a PDF "
+                 "2.0 file, as a PDF/UA-2 build is" in line for line in lacking_other[1])),
+        ("with neither, a warning for each and no veraPDF run",
+         lambda: lacking_both[0] == [] and lacking_both[1] == [
+             f"WARNING: --wcag: {neither} (VERAPDF_WCAG) has no WCAG-2-2-Machine-PDF20.xml, so "
+             "the WCAG checks won't run on a PDF 2.0 file, as a PDF/UA-2 build is "
+             "(docs/installation.md, Optional: veraPDF's WCAG modules).",
+             f"WARNING: --wcag: {neither} (VERAPDF_WCAG) has no WCAG-2-2-Machine.xml, so the "
+             "WCAG checks won't run on a PDF 1.x file, as a PDF/UA-1 build is "
+             "(docs/installation.md, Optional: veraPDF's WCAG modules)."]),
+        ("with one, and modules that don't load, the warning that they didn't comes first",
+         lambda: len(lacking_unloaded[1]) == 2
+         and "didn't load its WCAG modules" in lacking_unloaded[1][0]
+         and "has no WCAG-2-2-Machine.xml, so the WCAG checks won't run on a PDF 1.x file"
+             in lacking_unloaded[1][1]),
+        ("a warning's list of files: three at most, then how many more",
+         lambda: [pdfcheck._listed(["/a/one.pdf", "b/two.pdf", "three.pdf", "4.pdf", "5.pdf"]
+                                   [:count]) for count in (1, 2, 3, 4, 5)]
+         == ["one.pdf", "one.pdf and two.pdf", "one.pdf, two.pdf, and three.pdf",
+             "one.pdf, two.pdf, three.pdf, and 1 more",
+             "one.pdf, two.pdf, three.pdf, and 2 more"]),
         ("and one that can't be read as one, cut short or in an encoding that can't be read, "
          "the other run",
          lambda: all(lines[0].startswith("veraPDF 1.30.3 loaded its WCAG modules")

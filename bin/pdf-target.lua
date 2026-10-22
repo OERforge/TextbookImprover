@@ -110,6 +110,11 @@
 --    latexbuild's PDF_MACROS to draw shorter where it runs past its line
 --    (below).
 --
+-- 19. A table, or a formula that TeX can't break, too wide for its line,
+--    which ran into the margin or past the paper's edge: numbered, for
+--    latexbuild's FIT_MACROS to measure as LaTeX sets it and fit to its
+--    line on a later run (below).
+--
 -- Copyright 2026 Robert Szarka
 --
 -- This program is free software: you can redistribute it and/or modify
@@ -467,14 +472,14 @@ end
 -- widths, which the writer sets as p columns, which wrap: each column's
 -- in proportion to its longest cell, and no narrower than its longest
 -- word or formula, or a formula's longest piece. One whose longest words
--- alone are wider than a line is set in smaller type (SMALLER), which
--- Instrumental Analysis's tables of reactions needed, and one too wide
--- even then as narrow as it can be.
+-- alone are wider than a line is as narrow as it can be, and FIT_MACROS
+-- sets it smaller as LaTeX measures it, as Instrumental Analysis's
+-- tables of reactions needed; this had chosen LaTeX's \small or
+-- \footnotesize for it from the characters it counted, which a table of
+-- numbers outran in 12-point type (Introductory Business Statistics 2e's
+-- F tables, up to 172 points too wide in \footnotesize).
 local LINE = 70   -- characters in a line of the book class's 10pt type, about
 local GAP = 3     -- the space between two columns, in characters
--- The type sizes a table too wide for its line is set in, if one fits it,
--- and the part of a character of 10pt type a character of each is.
-local SMALLER = { { 'small', 0.9 }, { 'footnotesize', 0.8 } }
 
 local function simple_cell(cell)
   local blocks = cell.contents
@@ -668,24 +673,6 @@ local function cell_size(cell)
   return length, longest
 end
 
--- The size a table is set in to fit its longest words, and those words'
--- shares of the line in it, scaled (SMALLER): the first size they fit at,
--- else the smallest.
-local function smaller_size(least, sum)
-  if sum <= 1 then return nil, sum end
-  local size = SMALLER[#SMALLER]
-  for _, choice in ipairs(SMALLER) do
-    if sum * choice[2] <= 1 then
-      size = choice
-      break
-    end
-  end
-  for j = 1, #least do
-    least[j] = least[j] * size[2]
-  end
-  return size[1], sum * size[2]
-end
-
 -- A table with widths, its source's or ones its reader gave it (Pandoc's
 -- HTML reader gives a table whose cells hold more than a paragraph equal
 -- widths): a column narrower than its longest word or formula, which
@@ -693,8 +680,9 @@ end
 -- columns of reactions did. Such a column is widened to it, and the
 -- columns with room to spare give it up in proportion to what they
 -- spare; where the longest words together are wider than a line, the
--- table is set in smaller type, and as narrow as it can be if that's
--- not enough. Widths that hold their words are left as they are.
+-- table is as narrow as it can be, each column as wide as its longest
+-- word, and FIT_MACROS sets it smaller. Widths that hold their words are
+-- left as they are.
 local function widen_to_words(tbl, word)
   local count = #tbl.colspecs
   local room = LINE - GAP * (count - 1)
@@ -704,14 +692,12 @@ local function widen_to_words(tbl, word)
     sum = sum + least[j]
     if least[j] > tbl.colspecs[j][2] then short = true end
   end
-  if not short then return nil end
-  local smaller
-  smaller, sum = smaller_size(least, sum)
+  if not short then return end
   if sum > 1 then
     for j = 1, count do
       tbl.colspecs[j] = { tbl.colspecs[j][1], least[j] }
     end
-    return smaller
+    return
   end
   local deficit, spare = 0, 0
   for j = 1, count do
@@ -731,11 +717,9 @@ local function widen_to_words(tbl, word)
                           width - deficit * (width - least[j]) / spare }
     end
   end
-  return smaller
 end
 
 local function fit_to_line(tbl)
-  local smaller = nil
   local count = #tbl.colspecs
   if count < 2 then return end
   local given = tbl.colspecs[1][2] ~= nil
@@ -780,6 +764,11 @@ local function fit_to_line(tbl)
   end
   if given then return widen_to_words(tbl, word) end
   local room, total = LINE - GAP * (count - 1), 0
+  -- More columns than a line has room to space, by this count, as a table
+  -- of a few dozen numbers side by side has: as the writer sets them, each
+  -- as wide as its widest cell, for FIT_MACROS to fit; the shares below
+  -- would be of no room at all.
+  if room <= 0 then return end
   for j = 1, count do total = total + need[j] end
   if total <= room then return end
   local least, sum = {}, 0
@@ -787,17 +776,12 @@ local function fit_to_line(tbl)
     least[j] = word[j] / room
     sum = sum + least[j]
   end
-  -- Where its longest words are too wide for a line, a table in smaller
-  -- type: a line of LaTeX's \small holds a ninth more, and of
-  -- \footnotesize a quarter more; none smaller, to stay legible. One too
-  -- wide even so is set as narrow as it can be, each column as wide as
-  -- its longest word, which the build names as wider than the text.
-  smaller, sum = smaller_size(least, sum)
   if sum > 1 then
-    -- Too wide even so: as narrow as it can be. A table with nothing to
-    -- wrap, every cell a word or two, a table of numbers, is narrowest in
-    -- the columns the writer gives it, each as wide as its widest cell;
-    -- one with cells to wrap, in columns as wide as their longest words.
+    -- Its longest words too wide for a line: as narrow as it can be,
+    -- which FIT_MACROS sets smaller to fit. A table with nothing to wrap,
+    -- every cell a word or two, a table of numbers, is narrowest in the
+    -- columns the writer gives it, each as wide as its widest cell; one
+    -- with cells to wrap, in columns as wide as their longest words.
     local wraps = false
     for j = 1, count do
       if need[j] > word[j] then wraps = true end
@@ -807,7 +791,7 @@ local function fit_to_line(tbl)
         tbl.colspecs[j] = { tbl.colspecs[j][1], least[j] }
       end
     end
-    return smaller
+    return
   end
   -- Shares by need, a column whose share is less than its least held at
   -- its least, and the rest shared again among the others.
@@ -830,23 +814,66 @@ local function fit_to_line(tbl)
   for j = 1, count do
     tbl.colspecs[j] = { tbl.colspecs[j][1], share[j] }
   end
-  return smaller
+end
+
+-- 19. A table, or a formula TeX can't break, wider than its line: Pandoc's
+-- writer leaves both as they are, and LaTeX sets them past the line's end,
+-- into the margin or off the paper (College Algebra 2e's first chapter, 28
+-- formulas by up to 224 points; Introductory Business Statistics 2e's F
+-- tables, by up to 172 in \footnotesize). Each is numbered and set in a
+-- group, for FIT_MACROS (latexbuild.py) to measure as LaTeX sets it and
+-- fit to its line on a later run: its spaces narrowed, then its type set
+-- smaller. The numbers are this run's, in the order the filter meets them,
+-- the same on every run of LaTeX, which reads them from the same LaTeX.
+local fitted = 0
+local function next_fit()
+  fitted = fitted + 1
+  return tostring(fitted)
+end
+
+-- Whether the writer sets a table's columns as p columns, which wrap: any
+-- column with a width, or any cell more than one paragraph or holding a
+-- line break (isSimpleTable, Writers/LaTeX/Table.hs, 3.12.1). A table in
+-- l, c, and r columns is as wide as its cells, which shrink with its type.
+local function wrapping(tbl)
+  for _, spec in ipairs(tbl.colspecs) do
+    if spec[2] ~= nil then return true end
+  end
+  for _, row in ipairs(rows_of(tbl)) do
+    for _, cell in ipairs(row.cells) do
+      if not simple_cell(cell) then return true end
+    end
+  end
+  return false
 end
 
 local sized_table
 
--- A table in smaller type (fit_to_line) is set in a group that sets it.
+-- A table not in a table's cell (19) in a group FIT_MACROS fits: \OERFitTable
+-- with its number, its columns, and whether they wrap, and \OERFitTableEnd,
+-- which reads the widths longtable recorded. A layout table's caption, a
+-- paragraph before it, is before the group, in the text's type.
 function Table(tbl)
-  local result, size = sized_table(tbl)
-  if not size then return result end
-  local blocks = pandoc.Blocks{ pandoc.RawBlock('latex', '{\\' .. size) }
-  if result.t then
-    blocks:insert(result)
-  else
-    blocks:extend(result)
+  local nested = tbl.attributes[IN_CELL] ~= nil
+  local result, wraps, columns, lead = sized_table(tbl)
+  if nested then return result end
+  local id = next_fit()
+  local function fitted(blocks)
+    local out = pandoc.Blocks{}
+    for i = 1, lead or 0 do out:insert(blocks[i]) end
+    out:insert(pandoc.RawBlock('latex', '{\\OERFitTable{' .. id .. '}{'
+      .. columns .. '}{' .. (wraps and '1' or '0') .. '}'))
+    for i = (lead or 0) + 1, #blocks do out:insert(blocks[i]) end
+    out:insert(pandoc.RawBlock('latex', '\\OERFitTableEnd{' .. id .. '}}'))
+    return out
   end
-  blocks:insert(pandoc.RawBlock('latex', '}'))
-  return blocks
+  if result.t == 'Div' then
+    result.content = fitted(result.content)
+    return result
+  elseif result.t then
+    return fitted({ result })
+  end
+  return fitted(result)
 end
 
 sized_table = function(tbl)
@@ -859,7 +886,8 @@ sized_table = function(tbl)
     unquote_cells(body.body)
   end
   unquote_cells(tbl.foot.rows)
-  local smaller = fit_to_line(tbl)
+  fit_to_line(tbl)
+  local wraps, count = wrapping(tbl), #tbl.colspecs
   local columns = 0
   for _, body in ipairs(tbl.bodies) do
     if body.row_head_columns > columns then
@@ -878,6 +906,7 @@ sized_table = function(tbl)
     for _, block in ipairs(tbl.caption and tbl.caption.long or {}) do
       blocks[#blocks + 1] = block.t == 'Plain' and pandoc.Para(block.content) or block
     end
+    local lead = #blocks
     tbl.caption = pandoc.Caption()
     local id = tbl.identifier
     tbl.identifier = ''
@@ -885,9 +914,9 @@ sized_table = function(tbl)
     blocks[#blocks + 1] = tbl
     blocks[#blocks + 1] = pandoc.RawBlock('latex', '}')
     if id ~= '' then
-      return pandoc.Div(blocks, pandoc.Attr(id)), smaller
+      return pandoc.Div(blocks, pandoc.Attr(id)), wraps, count, lead
     end
-    return blocks, smaller
+    return blocks, wraps, count, lead
   end
   -- A data table's id with no caption to hold it is a div's too, an anchor
   -- before the table: the writer's empty caption numbered a table the book
@@ -914,9 +943,9 @@ sized_table = function(tbl)
     }
   end
   if own then blocks = without_label(blocks) end
-  if id then return pandoc.Div(blocks, pandoc.Attr(id)), smaller end
-  if columns == 0 and not own then return tbl, smaller end
-  return blocks, smaller
+  if id then return pandoc.Div(blocks, pandoc.Attr(id)), wraps, count end
+  if columns == 0 and not own then return tbl, wraps, count end
+  return blocks, wraps, count
 end
 
 local function decorative(img)
@@ -1564,6 +1593,53 @@ local function blanks(str)
   return out
 end
 
+-- A formula FIT_MACROS fits (19): a display formula the writer wraps in
+-- \[ \], which TeX never breaks, but not one it writes as an environment
+-- of its own (isMathEnv, Writers/LaTeX.hs, 3.12.1: align, gather, and the
+-- rest), whose list TeX makes a cell at a time; and a formula in text that
+-- is an environment, an array or a matrix, which TeX can't break either,
+-- as the worked examples' steps in OpenStax's math books are. Not one in a
+-- table, whose table is fitted; nor in a heading, a caption, a link, or a
+-- picture's description, which LaTeX sets more than once or not as text.
+local WHOLE_MATH = {
+  align = true, flalign = true, alignat = true, dmath = true, dgroup = true,
+  darray = true, gather = true, multline = true, subequations = true,
+  equation = true, eqnarray = true, displaymath = true,
+}
+
+local function environment(text)
+  local name = text:match('^%s*\\begin%s*{([^}]*)}')
+  if not name then return nil end
+  local closing = text:match('\\end%s*{([^}]*)}%s*$')
+  return name, closing == name
+end
+
+local function fit_math(math_)
+  local name, whole = environment(math_.text)
+  local kind
+  if math_.mathtype == 'DisplayMath' then
+    if name and WHOLE_MATH[name:gsub('%*$', '')] then return nil end
+    -- A numbered display (\tag, as equation() writes a book's number) is
+    -- e, which FIT_MACROS doesn't center: centered, its number was set at
+    -- the end of a line as wide as the margins allow.
+    kind = math_.text:find('\\tag', 1, true) and 'e' or 'd'
+  elseif name and whole then
+    kind = 'i'
+  else
+    return nil
+  end
+  return { pandoc.RawInline('latex', '{\\OERFitFormula{' .. next_fit() .. '}{' .. kind .. '}'),
+           math_, pandoc.RawInline('latex', '}') }
+end
+
+local function fit_formulas(doc)
+  local skip = function(element) return element, false end
+  doc.blocks = doc.blocks:walk{
+    traverse = 'topdown', Table = skip, Header = skip, Figure = skip, Link = skip,
+    Image = skip, Math = fit_math }
+  return doc
+end
+
 return {
   { BulletList = headings_inside, OrderedList = headings_inside,
     DefinitionList = headings_inside, BlockQuote = headings_inside,
@@ -1586,4 +1662,5 @@ return {
         Str = blanks }
       return doc
     end },
+  { Pandoc = fit_formulas },
 }

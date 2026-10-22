@@ -2047,6 +2047,32 @@ def language_marks(text, counter):
     return substitute(LANGUAGE_PASSAGE_END, text, lambda m: "", counter, "language_passages_end")
 
 
+# The PDF target's group around a table or a formula for latexbuild's
+# FIT_MACROS to fit (pdf-target.lua), as the target writes it: its number,
+# its kind, and a table's columns and whether they wrap.
+FIT_MARK = re.compile(r"\{\\OERFit(Table|Formula)\{(\d+)\}\{[^{}]*\}(?:\{[01]\})?")
+
+
+def fit_marks(text, counter):
+    """The PDF target's groups around a table or a formula to fit taken
+    out, in code, with \\OERFitTable or \\OERFitFormula opening each and a
+    table's \\OERFitTableEnd closing it; what each holds is left. Pandoc's
+    reader would expand them as the preamble defines them, in expl3 around
+    Lua, and stop reading the book ("unexpected ()")."""
+    spans = skip_spans(text)
+    found = [m for m in FIT_MARK.finditer(text) if not in_spans(m.start(), spans)]
+    for m in reversed(found):
+        close = matching_brace(text, m.start())
+        if close < 0:
+            continue
+        inner = text[m.end():close - 1]
+        if m.group(1) == "Table":
+            inner = re.sub(r"\\OERFitTableEnd\{%s\}\s*$" % m.group(2), "", inner)
+        text = text[:m.start()] + inner + text[close:]
+        counter["fit_marks"] = counter.get("fit_marks", 0) + 1
+    return text
+
+
 def unwrap(text, command, counter, key):
     """\\command{X} as X, in code: for a wrapper the reader doesn't know
     and drops with what it holds, as Pandoc's LaTeX writer's
@@ -2237,6 +2263,7 @@ def repair_text(text, counter, math_macros=(), counters=()):
     # First, so no rewrite after takes the code for LaTeX: an lstlisting
     # and \verb are verbatim to them all.
     text = highlighted_code(text, counter)
+    text = fit_marks(text, counter)
     text = substitute(BOOLEAN_IF, text, lambda m: "\\iftoggle{%s}" % m.group(1),
                       counter, "ifthenelse")
     text = substitute(BOOLEAN_NEW, text, lambda m: "\\newtoggle{%s}" % m.group(1),

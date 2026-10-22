@@ -1901,6 +1901,10 @@ def case_review_macros(work):
 # Every printable character of ASCII.
 ASCII = "".join(chr(c) for c in range(33, 127))
 
+# A display formula too wide for a line, which LaTeX fits to it
+# (latexbuild's FIT_MACROS).
+LONG_SUM = " + ".join("a_{%d}" % k for k in range(1, 41))
+
 
 def case_latex_target(work):
     """The latex target: a Markdown book written as LaTeX, a master and a
@@ -1924,6 +1928,7 @@ def case_latex_target(work):
         fh.write("# Circles {#circles}\n\n![A black circle.](img/circle.svg)\n\n"
                  "Its area is $\\pi r^2$.\n\n1. Draw it.\n2. Measure it.\n\n"
                  "So $$A = \\pi r^2.$$\\\nQ.E.D.\n\n"
+                 + "A long sum: $$S = " + LONG_SUM + "$$\n\n"
                  "**Theorem.** *$$C = 2 \\pi r$$*\n\nCompare [[compare]](#circles).\n\n"
                  "A sum: ![A plus.](img/a+b.png)\n\n"
                  "*A rule for $x$ with a note[^euler] and more.*\n\n"
@@ -2029,6 +2034,116 @@ def case_latex_target(work):
                                "shapes.tex"], cwd=out, capture_output=True,
                               text=True, timeout=600)
         return done.returncode == 0 and os.path.exists(os.path.join(out, "shapes.pdf"))
+
+    def fitted():
+        """The master's build, by latexmk (builds), kept the long sum's fit
+        in its .aux, its run counted as the second, where counted as the run
+        the file changed on every run."""
+        if not shutil.which("latexmk") or not shutil.which("lualatex"):
+            return skip("no latexmk and lualatex to build the latex target")
+        aux = os.path.join(out, "shapes.aux")
+        text = read(work, "latex", "shapes.aux") if os.path.exists(aux) else ""
+        return "\\OERFitState{" in text and "\\OERFitRun{2}" in text
+
+    def edited():
+        """The book edited after its build (builds), a sum too wide put
+        before the long one, converted again and built again in the same
+        folder, with the last build's .aux: the last run says it set both
+        smaller, each by its own measure. The .aux's count of runs, kept
+        from the build before, had said no more were to be fitted, and its
+        fits, by their numbers, were the wrong formulas'."""
+        if not shutil.which("latexmk") or not shutil.which("lualatex"):
+            return skip("no latexmk and lualatex to build the latex target")
+        again = work + "-edited"
+        shutil.copytree(work, again)
+        with open(os.path.join(again, "two.md"), encoding="utf-8") as fh:
+            text = fh.read()
+        with open(os.path.join(again, "two.md"), "w", encoding="utf-8") as fh:
+            fh.write(text.replace("A long sum:", "A longer sum: $$T = "
+                                  + LONG_SUM.replace("a_", "b_") + " + c$$\n\nA long sum:"))
+        convert(again)
+        done = subprocess.run(["latexmk", "-lualatex", "-interaction=nonstopmode",
+                               "shapes.tex"], cwd=os.path.join(again, "latex"),
+                              capture_output=True, text=True, timeout=600)
+        log = os.path.join(again, "latex", "shapes.log")
+        if done.returncode or not os.path.exists(log):
+            return False
+        with open(log, encoding="utf-8", errors="replace") as fh:
+            runs = re.findall(r"^TextbookImprover fit: run \d+, (\d+) narrowed, (\d+) smaller",
+                              fh.read(), re.M)
+        return bool(runs) and runs[-1] == ("0", "2")
+
+    def in_place():
+        """The target's LaTeX built (builds) and then edited in place, the
+        long sum made a short one on the line it was on, and built again
+        beside the build's .aux: the last run fits nothing. The .aux's count
+        of runs had said no more were to be fitted, and nothing numbered
+        had moved, so the long sum's fit went on to the short one."""
+        if not shutil.which("latexmk") or not shutil.which("lualatex"):
+            return skip("no latexmk and lualatex to build the latex target")
+        again = work + "-in-place"
+        shutil.copytree(out, again)
+        with open(os.path.join(again, "two.tex"), encoding="utf-8") as fh:
+            text = fh.read()
+        if text.count(LONG_SUM) != 1:
+            return False
+        with open(os.path.join(again, "two.tex"), "w", encoding="utf-8") as fh:
+            fh.write(text.replace(LONG_SUM, "a_{1} + a_{2}"))
+        done = subprocess.run(["latexmk", "-lualatex", "-interaction=nonstopmode",
+                               "shapes.tex"], cwd=again, capture_output=True, text=True,
+                              timeout=600)
+        log = os.path.join(again, "shapes.log")
+        if done.returncode or not os.path.exists(log):
+            return False
+        with open(log, encoding="utf-8", errors="replace") as fh:
+            runs = re.findall(r"^TextbookImprover fit: run \d+, (\d+) narrowed, (\d+) smaller",
+                              fh.read(), re.M)
+        return bool(runs) and runs[-1] == ("0", "0")
+
+    def read_files_digested():
+        """The fitting's macros (latexbuild.FIT_MACROS) in a document of
+        LaTeX's own, after a file it inputs with \\input{} before them, as
+        a book's header-includes come before them, whose sum a display
+        sets, and with a display in a file read with TeX's own \\input,
+        built three times: each file edited, its sum made longer, and the
+        document built again beside its .aux, the fitting starts again. A
+        hook on LaTeX's \\input{} saw neither."""
+        if not shutil.which("lualatex"):
+            return skip("no lualatex to build with")
+        sys.path.insert(0, os.path.join(ROOT, "lib"))
+        import latexbuild
+        folder = work + "-files"
+        os.makedirs(folder)
+
+        def terms(letter, count):
+            return " + ".join("%s_{%d}" % (letter, k) for k in range(1, count + 1))
+
+        def write(name, text):
+            with open(os.path.join(folder, name), "w", encoding="utf-8") as fh:
+                fh.write(text)
+
+        def build():
+            subprocess.run(["lualatex", "-interaction=nonstopmode", "doc.tex"], cwd=folder,
+                           capture_output=True, timeout=300, stdin=subprocess.DEVNULL)
+            log = os.path.join(folder, "doc.log")
+            with open(log, encoding="utf-8", errors="replace") if os.path.exists(log) \
+                    else io.StringIO() as fh:
+                return fh.read()
+        write("early.tex", "\\newcommand\\earlysum{" + terms("a", 40) + "}\n")
+        write("plain.tex", "{\\OERFitFormula{2}{d}\\[" + terms("b", 40) + "\\]}\n")
+        write("doc.tex", "\\documentclass{article}\n\\input{early}\n" + latexbuild.FIT_MACROS
+              + "\\begin{document}\n{\\OERFitFormula{1}{d}\\[\\earlysum\\]}\n"
+              "\\input plain.tex\n\\end{document}\n")
+        for _ in range(3):
+            build()
+        found = []
+        for name, letter in (("early.tex", "a"), ("plain.tex", "b")):
+            with open(os.path.join(folder, name), encoding="utf-8") as fh:
+                text = fh.read()
+            write(name, text.replace(terms(letter, 40), terms(letter, 50)))
+            found.append("TextbookImprover fit: %s has changed since the fits were decided"
+                         % name in build())
+        return found == [True, True]
     return [
         ("the master starts with \\DocumentMetadata and \\include-s each chapter",
          lambda: master.startswith("\\DocumentMetadata")
@@ -2121,6 +2236,18 @@ def case_latex_target(work):
          and ASCII in code_texts(page(back, "two"))[0]
          and "<code>area(s[0])</code>" in page(back, "one")),
         ("it builds with latexmk and LuaLaTeX", builds),
+        ("a formula too wide for its line is marked to be fitted, as in the PDF, and "
+         "latexmk's runs settle with it fitted",
+         lambda: "{\\OERFitFormula{" in two and fitted()),
+        ("and with another put before it, built again beside the last build's files, each "
+         "is fitted by its own measure",
+         edited),
+        ("and its LaTeX edited in place, the long sum made short, built again beside them, "
+         "nothing is fitted",
+         in_place),
+        ("the fitting starts again for an edit to a file input before its macros, or read "
+         "with TeX's own \\input",
+         read_files_digested),
     ]
 
 

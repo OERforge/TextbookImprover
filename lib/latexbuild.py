@@ -506,6 +506,532 @@ CANCEL_STROKES = r"""% A formula's term struck out with the cancel package (\can
 """
 
 
+# How small fitting sets something's type (FIT_MACROS): to fit its line,
+# no smaller than FIT_FLOOR of its size; to keep it on the paper, a quarter
+# inch inside its edge, no smaller than FIT_LEAST.
+FIT_FLOOR = 0.75
+FIT_LEAST = 0.5
+
+# Something too wide for its line, in a book's PDF (PDF_MACROS), fitted to
+# it as LaTeX measures it.
+FIT_MACROS = r"""% Something too wide for its line, which TeX can't break:
+% a table's columns side by side, or a formula, displayed or in text, as a
+% worked example's steps are, an array, in College Algebra 2e (224 points
+% too wide, in its first chapter). pdf-target.lua numbers each table not
+% in a table's cell, each display formula, and each formula in text that
+% is an environment (\OERFitTable, \OERFitFormula), and LaTeX measures
+% each as it sets it: a table by the widths longtable records for its
+% columns and, where its columns wrap (p columns), by any line of a cell
+% longer than its column; a formula by the list TeX makes of it
+% (post_mlist_to_hlist_filter). One wider than its line is fitted on the
+% next run, from what this one measured, as Pandoc runs LaTeX again while
+% its log asks, four times at most: first its spaces narrowed (a table's
+% columns half an em apart, where they were 12 points; a formula's \qquad
+% a quad, and an \mspace wider than a quad a quad, as a worked example's
+% step is spaced from its reason, and an array's columns closer), then,
+% where that's not enough, its type set smaller, as much as it takes, but
+% to no less than three quarters of its size (9 points in 12-point type),
+% a table's wrapping columns made as wide as its words need, which TeX
+% then doesn't hyphenate: a smaller design, wider for its size (below),
+% can leave a word a point wider than the column its fit made for it,
+% which TeX broke (Twen-tytwo, in the PDF suite's fit book), where it now
+% runs a point into the space beside its column. A wrapping table's
+% columns are worked out with the spaces between them at the size it's set
+% in: counted at the size the run before had, a table set larger on the
+% second run than on the first, as one longtable's first widths under a
+% head across its columns made too small is, had narrower columns than
+% counted, and its longest word ran past one (Introductory Business
+% Statistics 2e's Table A7, "denominator" 3.4 points). One whose spaces
+% alone fill its line, as those of a table of 45 columns whose widths are
+% given do on the default page, the writer giving its columns less than
+% no width, has them narrowed on the first run and is fitted on the
+% second, as its columns' words then ask. A table that isn't a longtable
+% in its group, as the writer sets one of the class float, a tabular in a
+% table float, isn't fitted: the widths longtable recorded were the last
+% longtable's. A table or a
+% display formula fitted is centered on the page, so that one still wider
+% than its line runs into both margins alike; and one that would come
+% within a quarter inch of the paper's edge even at three quarters of its
+% size is set smaller still, as far as it takes, to half its size at
+% least. Type set smaller isn't always as much narrower: Latin Modern
+% Roman, the default face, has designs for sizes from 5 to 17 points, each
+% wider for its size than the next larger (the 9-point 2.8 percent wider
+% than the 10-point, the 8-point 3.3 percent wider than the 9-point), and
+% in 12-point type unicode-math sets math of 10 points or less in the
+% font's forms for subscripts (ssty), 13 percent wider. So whatever is too
+% wide is fitted on the first run, a formula's spaces narrowed and its
+% type set smaller at once, as its width before narrowing asks; and on the
+% second each fit is measured again, and fitted again where it's off its
+% line by more than 4 percent of it, too wide or too narrow, more than a
+% design's step, less of which centering takes up, and a formula in text
+% or a numbered display, which nothing centers, wherever it's too wide.
+% longtable sets a table's columns by the widths it recorded the run
+% before, and the first run's can be wrong: where a table's head is one
+% row, a cell across columns, it gives the last of those columns the
+% cell's whole width (Introductory Business Statistics 2e's F tables,
+% whose head is "Degrees of freedom in the numerator" across ten columns:
+% 816 points too wide on the first run, 254 on the second). The third run
+% records the widths of the second's fit, which the fourth sets the
+% columns by. Nothing is fitted after the second run, so that the third
+% run's pages are the fourth's, and so are the labels the fourth reads
+% from the third, a contents page's numbers among them: fitted on its
+% third run as well, College Algebra 2e's first chapter ended its fourth
+% with "Label(s) may have changed". The .aux file keeps what's fitted, and
+% once something is, the run, counted as the second from the second on, so
+% that the file stops changing, as latexmk and a deck's build wait for it
+% to: counted as the run, it changed on every run, and latexmk stopped at
+% its most; and a digest of each of the book's own .tex files LaTeX reads
+% (by a path from its folder, not TeX's own): the main file, each it reads
+% lines of once these macros are in, a chapter \include-d or a file read
+% with TeX's own \input, and each read with LaTeX's \input{} before them,
+% as a book's header-includes are, which its list of files has. So a book
+% changed since, edited or laid out anew, is fitted as from its first
+% run, no fit of the old set, where the count had said no more runs were
+% to fit, and the old fits went by their numbers to what had them now: a
+% formula of the latex target edited in place kept its old size, and one
+% a wider margin made too wide wasn't fitted. The log says what's fitted,
+% and what's still wider than its line, which latexbuild.fit_report reads.
+% The Lua is written as the blanks' is (below), without a percent sign, a
+% hash, a tilde, or a backslash.
+\ifdefined\directlua
+  \newattribute\OERFitAttribute
+  \directlua{
+    local attribute = luatexbase.attributes.OERFitAttribute
+    local HLIST, VLIST, GLUE, PENALTY, MATH = node.id("hlist"), node.id("vlist"), node.id("glue"), node.id("penalty"), node.id("math")
+    local FLOOR, LEAST, AIM, JUMP, TOLERANCE = """ + str(FIT_FLOOR) + ", " + str(FIT_LEAST) + r""", 0.98, 0.04, 32768
+    oerfit = { state = {}, kind = {}, line = {}, room = {}, size = {}, columns = {},
+               width = {}, tight = {}, sep = {}, sep0 = {}, where = {}, twocol = {}, run = 0,
+               sources = { status.filename }, seen = { [status.filename] = true }, stored = {} }
+    if string.sub(status.filename, 1, 2) == "./" then oerfit.seen[string.sub(status.filename, 3)] = true end
+    local function current()
+      local id = tex.getattribute(attribute)
+      if id and id > 0 then return id end
+      return nil
+    end
+    local function down(x, places)
+      return math.floor(x * places) / places
+    end
+    local function points(sp)
+      return tostring(math.floor(sp / 6553.6 + 0.5) / 10)
+    end
+    luatexbase.add_to_callback("post_mlist_to_hlist_filter", function(head)
+      local id = current()
+      if id and not (oerfit.kind[id] == "t" or oerfit.kind[id] == "p") then
+        local w = node.dimensions(head)
+        if w > (oerfit.width[id] or 0) then oerfit.width[id] = w end
+      end
+      return true
+    end, "oer.fit.formulas")
+    local function longest(line)
+      local piece, most, inmath = 0, 0, false
+      for n in node.traverse(line.head) do
+        if n.id == MATH then
+          inmath = n.subtype == 0
+        end
+        if (n.id == GLUE and not inmath) or (n.id == PENALTY and inmath and n.penalty < 10000) then
+          if piece > most then most = piece end
+          piece = 0
+        elseif not (n.id == GLUE) then
+          if not ((n.id == HLIST or n.id == VLIST) and math.abs(n.width - line.width) <= 1) then
+            piece = piece + node.dimensions(n, n.next)
+          end
+        else
+          piece = piece + n.width
+        end
+      end
+      if piece > most then most = piece end
+      return most
+    end
+    luatexbase.add_to_callback("post_linebreak_filter", function(head)
+      local id = current()
+      if id and oerfit.kind[id] == "p" then
+        for line in node.traverse_id(HLIST, head) do
+          if line.subtype == 1 and line.width > 0 then
+            local t = longest(line) / line.width
+            if t > (oerfit.tight[id] or 0) then oerfit.tight[id] = t end
+          end
+        end
+      end
+      return true
+    end, "oer.fit.cells")
+    function oerfit.open(id, kind, line, room, size, columns, where, sep0, twocol)
+      oerfit.kind[id], oerfit.line[id], oerfit.room[id] = kind, line, room
+      oerfit.size[id], oerfit.columns[id], oerfit.where[id] = size, columns, where
+      oerfit.sep0[id], oerfit.twocol[id] = sep0, twocol
+      local s = oerfit.state[id]
+      if s then
+        tex.sprint(string.char(92) .. "OERFitApply{" .. kind .. "}{" .. s.narrow .. "}{"
+          .. s.factor .. "}{" .. s.columns .. "}{" .. s.center .. "}{" .. columns .. "}")
+      end
+    end
+    function oerfit.table(id, width, sep)
+      oerfit.width[id], oerfit.sep[id] = width, sep
+    end
+    function oerfit.next(kind, id, s, w, line, room, tight)
+      local size = oerfit.size[id]
+      local center = 0
+      if kind == "d" then center = 1 end
+      if not (kind == "t" or kind == "p") then
+        local f = math.min(1, s.factor * line / w * AIM)
+        if f >= FLOOR then return { narrow = 1, factor = down(f, 1000), columns = 1, center = center } end
+        local least = FLOOR
+        if w * FLOOR / s.factor > room then least = math.max(LEAST, down(s.factor * room / w * AIM, 1000)) end
+        return { narrow = 1, factor = least, columns = 1, center = center }
+      end
+      local k = oerfit.columns[id]
+      local sep = oerfit.sep[id] or 0
+      local pad = 2 * (k - 1) * sep
+      local narrow = 2 * (k - 1) * 0.25 * size
+      if kind == "p" and line <= pad then
+        if line <= narrow then return nil end
+        return { narrow = 1, factor = 1, columns = 1, center = 1 }
+      end
+      if w <= pad then return nil end
+      if kind == "t" then
+        local content = (w - pad) / s.factor
+        if content + 2 * (k - 1) * (oerfit.sep0[id] or sep) <= line then
+          return { narrow = 0, factor = 1, columns = 1, center = 0 }
+        end
+        local f = line / (content + narrow) * AIM
+        if f >= 1 then return { narrow = 1, factor = 1, columns = 1, center = 1 } end
+        if f >= FLOOR then return { narrow = 1, factor = down(f, 1000), columns = 1, center = 1 } end
+        local least = FLOOR
+        if FLOOR * (content + narrow) > room then
+          least = math.max(LEAST, down(room / (content + narrow) * AIM, 1000))
+        end
+        return { narrow = 1, factor = least, columns = 1, center = 1 }
+      end
+      local shares = (w - pad) / (s.columns * (line - pad))
+      local c = math.min(1, 1 / shares)
+      local b = tight * s.columns * (line - pad) / s.factor
+      local f = AIM * line / (b / c + AIM * narrow)
+      if f >= 1 then return { narrow = 1, factor = 1, columns = down(c, 10000), center = 1 } end
+      if f >= FLOOR then return { narrow = 1, factor = down(f, 1000), columns = down(c, 10000), center = 1 } end
+      local least, per = FLOOR, b * shares / AIM + narrow
+      if FLOOR * per > room then least = math.max(LEAST, down(room / per * AIM, 1000)) end
+      if line <= narrow * least then return nil end
+      return { narrow = 1, factor = least, columns = down(least * b / (AIM * (line - narrow * least)), 10000),
+               center = 1 }
+    end
+    local function sorted(list)
+      local ids, count = {}, 0
+      for id in pairs(list) do
+        count = count + 1
+        ids[count] = id
+      end
+      table.sort(ids)
+      return ids, count
+    end
+    local function digest(name)
+      local f = io.open(name, "rb")
+      if not f then return "none" end
+      local text = f:read("a") or ""
+      f:close()
+      return md5.sumhexa(text)
+    end
+    local function hex(s)
+      local out = {}
+      for i = 1, string.len(s) do out[i] = string.format(string.char(37) .. "02x", string.byte(s, i)) end
+      return table.concat(out)
+    end
+    function oerfit.unhex(h)
+      local out = {}
+      for i = 1, string.len(h) - 1, 2 do out[(i + 1) // 2] = string.char(tonumber(string.sub(h, i, i + 1), 16)) end
+      return table.concat(out)
+    end
+    local function source(name)
+      if string.sub(name, 1, 2) == "./" then name = string.sub(name, 3) end
+      if not (string.lower(string.sub(name, -4)) == ".tex") then name = name .. ".tex" end
+      if oerfit.seen[name] or string.sub(name, 1, 1) == "/" then return end
+      oerfit.seen[name] = true
+      local f = io.open(name, "rb")
+      if f then
+        f:close()
+        table.insert(oerfit.sources, name)
+      end
+    end
+    local reading = status.filename
+    luatexbase.add_to_callback("process_input_buffer", function(line)
+      if not (status.filename == reading) then
+        reading = status.filename
+        source(reading)
+      end
+      return line
+    end, "oer.fit.sources")
+    function oerfit.check()
+      for name in string.gmatch(token.get_macro("@filelist") or "", "[^,]+") do
+        source((string.gsub(name, "[{} ]", "")))
+      end
+      for name, sum in pairs(oerfit.stored) do
+        if not (digest(name) == sum) then
+          oerfit.state, oerfit.run = {}, 0
+          texio.write_nl("log", "TextbookImprover fit: " .. name .. " has changed since the fits were decided")
+          return
+        end
+      end
+    end
+    function oerfit.decide()
+      local run = oerfit.run + 1
+      local changed, narrowed, smaller, smallest, wide = 0, 0, 0, 1, {}
+      for id, kind in pairs(oerfit.kind) do
+        local s = oerfit.state[id] or { narrow = 0, factor = 1, columns = 1, center = 0 }
+        local w, line, room = oerfit.width[id], oerfit.line[id], oerfit.room[id]
+        local tight = oerfit.tight[id] or 0
+        local over = w and w > line + TOLERANCE
+        local cells = kind == "p" and tight > 1.002
+        if over or cells then
+          local onpaper = 1
+          if w and w > room then onpaper = 0 end
+          wide[id] = kind .. " " .. points(math.max(0, (w or 0) - line)) .. " " .. oerfit.where[id]
+            .. " " .. s.factor .. " " .. s.center .. " " .. onpaper .. " " .. (oerfit.twocol[id] or 0)
+        end
+        local far = w and (w > (1 + JUMP) * line or w < (1 - JUMP) * line) or tight > 1 + JUMP
+        local new, refit = nil, false
+        if w and run == 1 and (over or cells) then
+          new = oerfit.next(kind, id, s, w, line, room, math.max(tight, 0.05))
+        elseif w and run == 2 and (oerfit.state[id] and (far or (kind == "i" or kind == "e") and over)
+                                   or not oerfit.state[id] and (over or cells)) then
+          new, refit = oerfit.next(kind, id, s, w, line, room, math.max(tight, 0.05)), true
+        end
+        if new and ((refit and (not (new.narrow == s.narrow) or not (new.center == s.center)
+                                or math.abs(new.factor - s.factor) > 0.0005
+                                or math.abs(new.columns - s.columns) > 0.00005))
+                    or new.narrow > s.narrow or new.center > s.center
+                    or new.factor < s.factor - 0.0005) then
+          oerfit.state[id], s = new, new
+          changed = changed + 1
+        end
+        if s.narrow == 1 and s.factor >= 1 then narrowed = narrowed + 1 end
+        if s.factor < 1 then
+          smaller = smaller + 1
+          if s.factor < smallest then smallest = s.factor end
+        end
+      end
+      local ids, count = sorted(oerfit.state)
+      for _, id in ipairs(ids) do
+        local s = oerfit.state[id]
+        tex.sprint(string.char(92) .. "OERFitWrite{" .. id .. "}{" .. s.narrow .. "}{" .. s.factor
+          .. "}{" .. s.columns .. "}{" .. s.center .. "}")
+      end
+      if count > 0 then
+        tex.sprint(string.char(92) .. "OERFitWriteRun{" .. math.min(run, 2) .. "}")
+        for _, name in ipairs(oerfit.sources) do
+          tex.sprint(string.char(92) .. "OERFitWriteSource{" .. hex(name) .. "}{" .. digest(name) .. "}")
+        end
+      end
+      texio.write_nl("term and log", "TextbookImprover fit: run " .. run .. ", " .. narrowed
+        .. " narrowed, " .. smaller .. " smaller, smallest " .. smallest)
+      for id, said in pairs(wide) do
+        texio.write_nl("term and log", "TextbookImprover fit wide: " .. said)
+      end
+      if changed > 0 then
+        texio.write_nl("term and log", "Package TextbookImprover Warning: " .. changed
+          .. " fitted to their lines. Rerun LaTeX.")
+      end
+      texio.write_nl("term and log", "")
+    end
+  }
+  \ExplSyntaxOn
+  \dim_new:N \g__oer_fit_dim
+  \dim_new:N \l__oer_fit_margin_dim
+  \muskip_new:N \l__oer_fit_muskip
+  \cs_new_protected:Npn \OERFitState #1#2#3#4#5
+    { \directlua { oerfit.state[#1] = { narrow = #2, factor = #3, columns = #4, center = #5 } } }
+  \cs_new_protected:Npn \OERFitRun #1 { \directlua { oerfit.run = #1 } }
+  \cs_new_protected:Npn \OERFitSource #1#2 { \directlua { oerfit.stored[oerfit.unhex("#1")] = "#2" } }
+  \cs_new_protected:Npn \OERFitWrite #1#2#3#4#5
+    { \exp_args:Nc \iow_now:Ne { @auxout } { \token_to_str:N \OERFitState {#1}{#2}{#3}{#4}{#5} } }
+  \cs_new_protected:Npn \OERFitWriteRun #1
+    { \exp_args:Nc \iow_now:Ne { @auxout } { \token_to_str:N \OERFitRun {#1} } }
+  \cs_new_protected:Npn \OERFitWriteSource #1#2
+    { \exp_args:Nc \iow_now:Ne { @auxout } { \token_to_str:N \OERFitSource {#1}{#2} } }
+  % Before any fit the .aux file keeps is set, whether a file of the book
+  % has changed since: one LaTeX has read lines of since these macros, or
+  % input with \input{} before them, as its list of files says.
+  \AddToHook { begindocument } { \directlua { oerfit.check() } }
+  \AddToHook { enddocument / afterlastpage }
+    { \legacy_if:nT { @filesw } { \directlua { oerfit.decide() } } }
+  % The margin a centered table or display, or a formula in text, may run
+  % into: the narrower of the page's margins, on either side of a
+  % two-sided page, less a quarter inch at the paper's edge; none on a page
+  % of two columns, where it would be the other column.
+  \cs_new_protected:Npn \__oer_fit_margin:
+    {
+      \dim_set:Nn \l__oer_fit_margin_dim
+        {
+          \dim_min:nn
+            {
+              \dim_min:nn { 1in + \hoffset + \oddsidemargin } { 1in + \hoffset + \evensidemargin }
+            }
+            {
+              \dim_min:nn { \paperwidth - 1in - \hoffset - \oddsidemargin - \textwidth }
+                { \paperwidth - 1in - \hoffset - \evensidemargin - \textwidth }
+            }
+          - 0.25in
+        }
+      \dim_compare:nNnT \l__oer_fit_margin_dim < { 0pt } { \dim_zero:N \l__oer_fit_margin_dim }
+      \legacy_if:nT { @twocolumn } { \dim_zero:N \l__oer_fit_margin_dim }
+    }
+  \cs_new_protected:Npn \__oer_fit_size:n #1
+    {
+      \fontsize { \fp_eval:n { #1 * \use:c { f@size } } pt }
+        { \fp_eval:n { #1 * \dim_to_fp:n { \use:c { f@baselineskip } } } pt }
+      \selectfont
+    }
+  % A display's type, its line spacing kept: TeX breaks the lines before it
+  % in its paragraph as the display begins, inside the group, so smaller
+  % spacing had set them closer.
+  \cs_new_protected:Npn \__oer_fit_size_spaced:n #1
+    {
+      \fontsize { \fp_eval:n { #1 * \use:c { f@size } } pt } { \use:c { f@baselineskip } }
+      \selectfont
+    }
+  \cs_new_protected:Npn \__oer_fit_mskip:n #1
+    {
+      \muskip_set:Nn \l__oer_fit_muskip {#1}
+      \dim_compare:nNnTF { \tex_mutoglue:D \l__oer_fit_muskip } > { 18 pt }
+        { \tex_mskip:D 18 mu \scan_stop: }
+        { \tex_mskip:D \l__oer_fit_muskip }
+    }
+  \cs_new_protected:Npn \__oer_fit_narrow_math:
+    {
+      \cs_set_protected:Npn \mspace ##1 { \__oer_fit_mskip:n {##1} }
+      \cs_set_eq:NN \qquad \quad
+      \dim_set:Nn \arraycolsep { 0.4 \arraycolsep }
+    }
+  \cs_new_protected:Npn \__oer_fit_center_display:
+    {
+      \tex_everydisplay:D \exp_after:wN
+        {
+          \tex_the:D \tex_everydisplay:D
+          \tex_advance:D \tex_displayindent:D - \l__oer_fit_margin_dim
+          \tex_advance:D \tex_displaywidth:D 2 \l__oer_fit_margin_dim
+        }
+    }
+  % What the run before decided for a table or formula: #1 its kind, t a
+  % table whose columns don't wrap, p one whose do, d a display formula, e
+  % a numbered one, i a formula in text; #2 its spaces narrowed or not; #3
+  % its type's size, a part of its own; #4 a wrapping table's columns'
+  % width, a part of the widths its LaTeX gives them; #5 centered or not;
+  % and #6 a table's number of columns.
+  \cs_new_protected:Npn \OERFitApply #1#2#3#4#5#6
+    {
+      \fp_compare:nNnT {#3} < { 1 }
+        {
+          \str_case:nnF {#1}
+            {
+              { d } { \__oer_fit_size_spaced:n {#3} }
+              { e } { \__oer_fit_size_spaced:n {#3} }
+            }
+            { \__oer_fit_size:n {#3} }
+        }
+      \int_compare:nNnT {#2} = { 1 }
+        {
+          \str_case:nnF {#1}
+            {
+              { t } { \dim_set:Nn \tabcolsep { 0.25 em } }
+              { p } { \dim_set:Nn \tabcolsep { 0.25 em } }
+            }
+            { \__oer_fit_narrow_math: }
+        }
+      \str_if_eq:nnT {#1} { p }
+        {
+          \dim_set:Nn \linewidth
+            {
+              \fp_to_dim:n
+                { (#4) * ( \linewidth - 2 * (#6 - 1) * \tabcolsep ) + 2 * (#6 - 1) * \tabcolsep }
+            }
+          \int_set:Nn \tex_hyphenpenalty:D { 10000 }
+        }
+      \int_compare:nNnT {#5} = { 1 }
+        {
+          \str_if_eq:nnTF {#1} { d } { \__oer_fit_center_display: }
+            {
+              \skip_set:Nn \LTleft { 0pt plus 1fill minus 1fill }
+              \skip_set:Nn \LTright { 0pt plus 1fill minus 1fill }
+            }
+        }
+    }
+  % A table, in a group pdf-target.lua opens: #1 its number, #2 its
+  % columns, #3 1 where they wrap. The widths longtable records are
+  % forgotten, so that a table no longtable sets has none.
+  \NewDocumentCommand \OERFitTable { m m m }
+    {
+      \setattribute \OERFitAttribute {#1}
+      \cs_gset_eq:cN { LT@save@row } \scan_stop:
+      \__oer_fit_margin:
+      \directlua
+        {
+          oerfit.open(#1, "\int_compare:nNnTF {#3} = { 1 } { p } { t }",
+            \dim_to_decimal_in_sp:n { \hsize },
+            \dim_to_decimal_in_sp:n { \hsize + 2 \l__oer_fit_margin_dim },
+            \dim_to_decimal_in_sp:n { \use:c { f@size } pt }, #2,
+            \int_use:N \tex_inputlineno:D, \dim_to_decimal_in_sp:n { \tabcolsep },
+            \legacy_if:nTF { @twocolumn } { 1 } { 0 })
+        }
+    }
+  % A table's end: its width, by the widths longtable recorded, none where
+  % no longtable was set in the group, which leaves it as it is.
+  \NewDocumentCommand \OERFitTableEnd { m }
+    {
+      \dim_gzero:N \g__oer_fit_dim
+      \cs_if_exist:cT { LT@save@row }
+        {
+          \group_begin:
+            \cs_set:cpn { LT@entry } ##1 ##2 { \dim_gadd:Nn \g__oer_fit_dim {##2} }
+            \use:c { LT@save@row }
+          \group_end:
+        }
+      \directlua
+        {
+          oerfit.table(#1, \dim_to_decimal_in_sp:n { \g__oer_fit_dim },
+            \dim_to_decimal_in_sp:n { \tabcolsep })
+        }
+    }
+  % A formula, in a group pdf-target.lua opens: #1 its number, #2 d for a
+  % display, e for a numbered one, which isn't centered, its number at the
+  % line's end, and i for a formula in text, the last two running on into
+  % the margin to the right of their line. A display isn't fitted under
+  % the fleqn class option, which sets it a margin from the line's left
+  % end, in a box as wide as the line.
+  \bool_new:N \l__oer_fit_skip_bool
+  \NewDocumentCommand \OERFitFormula { m m }
+    {
+      \bool_set_false:N \l__oer_fit_skip_bool
+      \str_if_eq:nnF {#2} { i }
+        {
+          \cs_if_exist:cT { if@fleqn }
+            { \legacy_if:nT { @fleqn } { \bool_set_true:N \l__oer_fit_skip_bool } }
+        }
+      \bool_if:NF \l__oer_fit_skip_bool
+        {
+          \setattribute \OERFitAttribute {#1}
+          \__oer_fit_margin:
+          \directlua
+            {
+              oerfit.open(#1, "#2", \dim_to_decimal_in_sp:n { \linewidth },
+                \dim_to_decimal_in_sp:n
+                  {
+                    \str_if_eq:nnTF {#2} { d } { \linewidth + 2 \l__oer_fit_margin_dim }
+                      { \hsize - \use:c { @totalleftmargin } + \l__oer_fit_margin_dim }
+                  },
+                \dim_to_decimal_in_sp:n { \use:c { f@size } pt }, 0, \int_use:N \tex_inputlineno:D,
+                0, \legacy_if:nTF { @twocolumn } { 1 } { 0 })
+            }
+        }
+    }
+  \ExplSyntaxOff
+\else
+  \NewDocumentCommand\OERFitTable{mmm}{}
+  \NewDocumentCommand\OERFitTableEnd{m}{}
+  \NewDocumentCommand\OERFitFormula{mm}{}
+  \def\OERFitState#1#2#3#4#5{}
+  \def\OERFitRun#1{}
+  \def\OERFitSource#1#2{}
+\fi
+"""
+
+
 # Written into a tagged PDF's preamble, by build-pdf.py after the metadata
 # file's own header-includes, and by a deck's template (decks.py).
 # math/setup names both forms of MathML luamml makes (it needs
@@ -830,7 +1356,7 @@ PDF_MACROS = r"""\ExplSyntaxOn
 \else
   \NewDocumentCommand\OERBlank{m}{#1}
 \fi
-"""
+""" + FIT_MACROS
 
 
 def missing_characters(lines):
@@ -912,6 +1438,18 @@ OVERFULL_LEAST = 3.0
 LABEL = re.compile(r"\\label\{(page-[^}]*)\}")
 
 
+def line_owners(lines, pages):
+    """The book's page each line of its LaTeX is on: the last of pages
+    ({label: stem}, its id as page_id gives it) whose label is at or
+    before it, or None."""
+    owner, current = [], None
+    for text in lines:
+        for label in LABEL.findall(text):
+            current = pages.get(label, current)
+        owner.append(current)
+    return owner
+
+
 def overfull_lines(output, source, pages):
     """[(points, kind, page)] for each line LaTeX set wider than its text,
     or a table's column, by more than OVERFULL_LEAST points, from what a LaTeX run said
@@ -935,11 +1473,9 @@ def overfull_lines(output, source, pages):
     for m in SHORTENED.finditer(output):
         shortened.setdefault(int(m.group(2)), []).append((float(m.group(1)), float(m.group(3))))
     lines = source.split("\n")
-    owner, current, table, inside = [], None, [], False
+    owner = line_owners(lines, pages)
+    table, inside = [], False
     for text in lines:
-        for label in LABEL.findall(text):
-            current = pages.get(label, current)
-        owner.append(current)
         if "\\begin{longtable}" in text:
             inside = True
         table.append(inside)
@@ -973,6 +1509,12 @@ def overfull_lines(output, source, pages):
     return found
 
 
+def page_list(pages):
+    """Pages, as the build's warnings name them: the first six, and how
+    many more."""
+    return ", ".join(pages[:6]) + (f", and {len(pages) - 6} more" if len(pages) > 6 else "")
+
+
 def overfull_warning(found, where="PDF"):
     """One line for what overfull_lines found, or None."""
     if not found:
@@ -994,9 +1536,90 @@ def overfull_warning(found, where="PDF"):
             + ", ".join(f"{counts[k]} {kinds[k]}" for k in kinds if k in counts)
             + f"; the widest is {one[widest[1]]}" + (f" on {widest[2]}" if widest[2] else "")
             + f", {widest[0]:,.0f} points too wide"
-            + (f"; on {len(pages)} page(s), widest first: " + ", ".join(pages[:6])
-               + (f", and {len(pages) - 6} more" if len(pages) > 6 else "") if pages else "")
+            + (f"; on {len(pages)} page(s), widest first: " + page_list(pages) if pages else "")
             + ".")
+
+
+# What FIT_MACROS says it fitted on a run: how many of the tables and
+# formulas it numbered it has narrowed alone, and how many it set smaller,
+# and the smallest part of its type's size any is in; and each that was still
+# wider than its line on the run: its kind (t a table whose columns don't
+# wrap, p one whose do, d a display formula, e a numbered one, i a formula
+# in text), how many points wider, the line of LaTeX its group opened on,
+# the part of its type's size it was in, whether it was centered, whether
+# it was on the paper, a quarter inch inside its edge, and whether its page
+# has two columns, where it has no more room than its column.
+FITTED = re.compile(r"^TextbookImprover fit: run (\d+), (\d+) narrowed, (\d+) smaller, "
+                    r"smallest ([\d.]+)$", re.M)
+FIT_WIDE = re.compile(r"^TextbookImprover fit wide: ([tpdei]) ([\d.]+) (\d+) ([\d.]+) ([01]) ([01]) "
+                      r"([01])$", re.M)
+
+
+def fit_report(output, source, pages):
+    """[lines to print] for what FIT_MACROS fitted, from what LaTeX's last
+    run said (output) about its input (source), pages as overfull_lines
+    takes them: what it fitted; what's still wider than the text, centered
+    on the page, which LaTeX doesn't report as an overfull box; and, as
+    warnings, what isn't a quarter inch inside the paper's edge even at the
+    least it sets type in, and what's wider than its column, on a page of
+    two. A formula still wider than its line, but a display centered
+    within the margins, is LaTeX's overfull box as well, which
+    overfull_lines names among the lines too wide; a table, centered, isn't
+    one."""
+    found = FITTED.findall(output)
+    if not found:
+        return []
+    narrowed, smaller, smallest = found[-1][1:]
+    narrowed, smaller = int(narrowed), int(smaller)
+    owner = line_owners(source.split("\n"), pages)
+
+    def page(line):
+        line = int(line) - 1
+        return owner[line] if 0 <= line < len(owner) else None
+    wide = [(float(points), kind, page(line), float(factor), center == "1", paper == "1",
+             columns == "1")
+            for kind, points, line, factor, center, paper, columns in FIT_WIDE.findall(output)]
+    said = []
+    if narrowed or smaller:
+        said.append(f"Fitted {narrowed + smaller} table(s) and formula(s) too wide for "
+                    f"their lines to them: "
+                    + "; ".join(([f"{narrowed} by narrowing their spaces"] if narrowed else [])
+                                + ([f"{smaller} in smaller type as well, the smallest at "
+                                    f"{round(float(smallest) * 100)}% of its size"]
+                                   if smaller else []))
+                    + ".")
+    # A table whose word runs a point into the space beside its column,
+    # though the table fits its line, is no wider than the text.
+    middle = sorted((w for w in wide if w[4] and w[5] and w[0] > 0), key=lambda w: -w[0])
+    if middle:
+        tables = sum(1 for w in middle if w[1] in "tp")
+        said.append(f"{len(middle)} of them, still wider than the text, "
+                    f"{'is' if len(middle) == 1 else 'are'} centered on "
+                    f"the page ({tables} table(s), {len(middle) - tables} display "
+                    f"formula(s)), the widest {middle[0][0]:,.0f} points wider"
+                    + (": on " + page_list(list(dict.fromkeys(w[2] for w in middle if w[2])))
+                       if any(w[2] for w in middle) else "")
+                    + ".")
+    off = sorted((w for w in wide if not w[5] and not w[6]), key=lambda w: -w[0])
+    if off:
+        said.append(f"WARNING: {len(off)} table(s) or formula(s) are too wide for the paper "
+                    f"even in smaller type, the smallest at "
+                    f"{round(min(w[3] for w in off) * 100)}% of its size, and run to within a "
+                    "quarter inch of its edge or past it, the widest "
+                    f"{off[0][0]:,.0f} points wider than the text"
+                    + (": on " + page_list(list(dict.fromkeys(w[2] for w in off if w[2])))
+                       if any(w[2] for w in off) else "")
+                    + ".")
+    beside = sorted((w for w in wide if not w[5] and w[6]), key=lambda w: -w[0])
+    if beside:
+        said.append(f"WARNING: {len(beside)} table(s) or formula(s) on pages of two columns "
+                    f"are too wide for their column even in smaller type, the smallest at "
+                    f"{round(min(w[3] for w in beside) * 100)}% of its size, and run past it, "
+                    f"the widest {beside[0][0]:,.0f} points wider than the column"
+                    + (": on " + page_list(list(dict.fromkeys(w[2] for w in beside if w[2])))
+                       if any(w[2] for w in beside) else "")
+                    + ".")
+    return said
 
 
 def failure_advice(log):

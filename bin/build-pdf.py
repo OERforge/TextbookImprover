@@ -1087,8 +1087,12 @@ def build(base, name, resolved, keep, intermediates=None, latex_only=False,
         result = subprocess.run(command, cwd=base, capture_output=True,
                                 text=True, env=environment)
         if result.returncode == 0:
-            line = latexbuild.overfull_warning(latexbuild.overfull_lines(
-                *latex_said(log_path), {page_id(stem): stem for stem, _t, _d in assembly.pages}))
+            said, source = latex_said(log_path)
+            owners = {page_id(stem): stem for stem, _t, _d in assembly.pages}
+            # What was fitted to its line, and what's still wider than it.
+            for line in latexbuild.fit_report(said, source, owners):
+                print(line, file=sys.stderr)
+            line = latexbuild.overfull_warning(latexbuild.overfull_lines(said, source, owners))
             if line:
                 print(line, file=sys.stderr)
         missing, others = latexbuild.missing_characters(result.stderr.splitlines())

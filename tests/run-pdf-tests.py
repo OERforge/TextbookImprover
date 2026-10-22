@@ -23,9 +23,10 @@ roles, the page the metadata file made given no heading, every
 formula's MathML both as structure and as an attached file, a code
 block in a footnote set in its note, a passage in another language
 tagged with it, a heading inside a list, a quotation, a table's cell, a
-figure, or a footnote tagged where it stands, and the default page
+figure, or a footnote tagged where it stands, the default page
 (bin/pdf-layout.yaml), which a metadata file changes a field at a time,
-its rag reaching footnotes and captions. The book is small
+its rag reaching footnotes and captions, and a table or a formula too
+wide for its line fitted to it as LaTeX measures it. The book is small
 because a LaTeX run is slow; it holds one of each thing, and two of the
 things that come in kinds.
 
@@ -382,9 +383,10 @@ A band of noise four times as wide in pixels as it's shown, in a line of
 text, which images.downsample scales to twice: ![A wide band of
 noise](assets/wide.png){width=100px}.
 
-A formula too wide for its line, which LaTeX can't break:
+A formula too wide for the paper even in type half its size, which LaTeX
+can't break:
 
-$$y_{0}+y_{1}+y_{2}+y_{3}+y_{4}+y_{5}+y_{6}+y_{7}+y_{8}+y_{9}+y_{10}+y_{11}+y_{12}+y_{13}+y_{14}+y_{15}+y_{16}+y_{17}+y_{18}+y_{19}+y_{20}+y_{21}+y_{22}+y_{23}+y_{24}+y_{25}+y_{26}+y_{27}+y_{28}+y_{29}$$
+$$y_{0}+y_{1}+y_{2}+y_{3}+y_{4}+y_{5}+y_{6}+y_{7}+y_{8}+y_{9}+y_{10}+y_{11}+y_{12}+y_{13}+y_{14}+y_{15}+y_{16}+y_{17}+y_{18}+y_{19}+y_{20}+y_{21}+y_{22}+y_{23}+y_{24}+y_{25}+y_{26}+y_{27}+y_{28}+y_{29}+y_{30}+y_{31}+y_{32}+y_{33}+y_{34}+y_{35}+y_{36}+y_{37}+y_{38}+y_{39}+y_{40}+y_{41}+y_{42}+y_{43}+y_{44}+y_{45}+y_{46}+y_{47}+y_{48}+y_{49}+y_{50}+y_{51}+y_{52}+y_{53}+y_{54}+y_{55}+y_{56}+y_{57}+y_{58}+y_{59}$$
 
 Boxes that open a list's items, a quotation, and a definition, the
 second item's holding a figure alone:
@@ -494,10 +496,10 @@ And two whose cells, side by side, are longer than a line:
 
 And four whose longest words, side by side, are wider than a line, or
 wider than the columns their widths give them: a column of reactions,
-which TeX breaks at their relations and operators; two words too long
-for a line together; a word too long for an equal share of a table whose
-cell of two paragraphs gives it equal widths; and a table of numbers
-too wide for a line in any type:
+which TeX breaks at their relations and operators; two words the filter
+counts as too long for a line together, which fit it; a word too long
+for an equal share of a table whose cell of two paragraphs gives it
+equal widths; and a table of numbers too wide for a line:
 
 <table><thead><tr><th>Mediator</th><th>Reagent</th><th>Representative reaction</th></tr></thead><tbody><tr><td>Silver</td><td><script type="math/tex">\mathrm{Ag}^{+}\rightleftharpoons\mathrm{Ag}^{2+}+e^{-}</script></td><td><script type="math/tex">\mathrm{H_2C_2O_4}(aq)+2\mathrm{Ag}^{2+}(aq)+2\mathrm{H_2O}(l)\rightleftharpoons 2\mathrm{CO_2}(g)+2\mathrm{Ag}^{+}(aq)+2\mathrm{H_3O}^{+}(aq)</script></td></tr></tbody></table>
 
@@ -1073,6 +1075,182 @@ def build_aaa(work):
     return os.path.join(work, "pdf", "org.example.aaa.pdf")
 
 
+# Tables and formulas too wide for their lines, on the default page, which
+# latexbuild's FIT_MACROS fits as LaTeX measures them, each named by the
+# first cell of its row of numbers or the first word of its formula: first
+# a paragraph whose lines run on before a display formula in it; then a
+# table that narrower spaces between its columns fit; one that needs
+# smaller type as well; one whose smaller type is Latin Modern's design for
+# 9 points, 5 percent wider for its size than the 12-point design, which
+# leaves it 2 percent too wide; one too wide even at three quarters of its
+# type, centered on the page; one too wide for the paper at that size, set
+# smaller still; one too wide for the paper even at half its type, which
+# the build warns of, of more columns than pdf-target.lua's count of a line
+# can space, and after it a table of the class float, which the writer
+# sets as a tabular in a table float, not a longtable; one whose head is a
+# cell across its columns, which longtable measures too wide on the first
+# run; one of formulas, whose math in smaller type is set in the forms for
+# subscripts, wider, so that its first fit leaves it too wide; one whose
+# columns wrap; one whose columns' widths are given, a word too long for
+# its column, which the filter counts as fitting it; a layout table, its
+# caption a paragraph before it; one of 45 columns whose widths are given,
+# the spaces between them more than its line; and one of 22 columns whose
+# longest words are wider than a line together, its corner's words
+# wrapping.
+# Then display formulas likewise, one wide by its spaces, each three quads
+# (54mu), and a numbered one; and a worked example's steps, an array in
+# text.
+FIT_NUMBERS = ("161.45", "199.50", "215.71", "224.58", "230.16", "233.99", "236.77",
+               "238.88", "240.54", "241.88", "242.98", "243.91", "244.69", "245.36",
+               "245.95", "246.46")
+
+
+def fit_table(name, values, head=None):
+    """An HTML table of values, its head the column numbers or head, its
+    row's first cell name."""
+    head = head or ("<tr><th>Degrees</th>"
+                    + "".join("<th>%d</th>" % (i + 1) for i in range(len(values))) + "</tr>")
+    return ("<table><thead>" + head + "</thead><tbody><tr><td>" + name + "</td>"
+            + "".join("<td>%s</td>" % v for v in values) + "</tr></tbody></table>\n\n")
+
+
+def fit_terms(count):
+    """A sum of count terms, a formula TeX breaks nowhere in a display."""
+    return " + ".join("a_{%d}x^{%d}" % (i, i) for i in range(1, count + 1))
+
+
+FIT_ONE = (
+    "# Fitting\n\nLeadpara, a paragraph whose lines run on before a display formula in it too "
+    "wide for its line, the lines spaced as the text's are whatever the formula's type, with "
+    "words enough to fill three lines or more of the default page's six and a half inches "
+    "across, and then a few more to be sure of it, and then more of them:\n"
+    "$$\\text{Displaylead} = " + fit_terms(11) + "$$\nand after the display the paragraph "
+    "goes on.\n\nA table a little too wide, which spaces narrowed between its columns fit:\n\n"
+    + fit_table("Spaced", FIT_NUMBERS[:10])
+    + "A table that needs smaller type as well:\n\n" + fit_table("Smaller", FIT_NUMBERS[:12])
+    + "A table whose smaller type is a design wider for its size, which leaves it a little "
+    "too wide:\n\n" + fit_table("Overstep", FIT_NUMBERS[:14])
+    + "A table too wide even in type three quarters its size, centered:\n\n"
+    + fit_table("Centered", FIT_NUMBERS)
+    + "A table too wide for the paper in that type, set smaller still:\n\n"
+    + fit_table("Margins", (FIT_NUMBERS * 2)[:20])
+    + "A table too wide for the paper in type half its size:\n\n"
+    + fit_table("Overpaper", (FIT_NUMBERS * 3)[:44])
+    + "A floating table after it, which the writer sets as a tabular in a table float, "
+    "not a longtable:\n\n<table class=\"float\"><tbody><tr><td>Floatcell</td><td>beside it</td>"
+    "</tr></tbody></table>\n\n"
+    + "A table whose head is a cell across its columns, which fits its line:\n\n"
+    + fit_table("Spanned", FIT_NUMBERS[:9],
+                head="<tr><th></th><th colspan=\"9\">Degrees of freedom in the numerator</th></tr>")
+    + "A table of formulas:\n\n"
+    + fit_table("Mathcells", ["$x^{%d}y^{2}z$" % (i + 2) for i in range(14)])
+    + "A table whose columns wrap, two words too long for a line together:\n\n"
+    "<table><thead><tr><th>Wrapping</th><th>Longer word</th><th>Notes</th></tr></thead>"
+    "<tbody><tr><td>Supercalifragilisticexpialidocious</td>"
+    "<td>Hippopotomonstrosesquippedaliophobia</td><td><p>From dust.</p><p>Rare.</p></td>"
+    "</tr></tbody></table>\n\n"
+    "A table whose columns' widths are given, one too narrow for its longest word, which the "
+    "filter counts as wide enough:\n\n<table><colgroup>" + "<col style=\"width: 20%\">" * 5
+    + "</colgroup><thead><tr><th>Given</th><th>Next</th><th>Third</th><th>Fourth</th>"
+    "<th>Fifth</th></tr></thead><tbody><tr><td>WWWWWWWWW</td><td>Wordnext</td><td>c</td>"
+    "<td>d</td><td>e</td></tr></tbody></table>\n\n"
+    "A layout table too wide for its line, its caption a paragraph before it:\n\n"
+    "<table role=\"presentation\"><caption>Laycap, the caption of a layout table too wide for "
+    "its line</caption><tbody><tr><td>Laytable</td>"
+    + "".join("<td>%s</td>" % v for v in FIT_NUMBERS[:14]) + "</tr></tbody></table>\n\n"
+    "A table of 45 columns whose widths are given, the spaces between them more than its "
+    "line, so that the writer gives its columns less than no width:\n\n<table><colgroup>"
+    + "<col style=\"width: 2.22%\">" * 45 + "</colgroup><tbody><tr><td>Qz</td>"
+    + "".join("<td>%d</td>" % (i + 1) for i in range(44)) + "</tr></tbody></table>\n\n"
+    "A table of 22 columns whose longest words are wider than a line together, its "
+    "corner's words wrapping:\n\n"
+    + fit_table("Twentytwo", (FIT_NUMBERS * 2)[:21],
+                head="<tr><th>Degrees of freedom</th>"
+                + "".join("<th>%d</th>" % (i + 1) for i in range(21)) + "</tr>")
+    + "A display formula whose spaces narrowed fit it:\n\n$$\\text{Displayspaced} = x^{2} "
+    "\\mspace{54mu} \\text{as a worked example gives a step its reason, here a long one} "
+    "\\mspace{54mu} y$$\n\n"
+    "A display formula a little too wide, set smaller:\n\n$$\\text{Displaysmaller} = "
+    + fit_terms(10) + "$$\n\nA display formula whose math is set in its subscripts' forms "
+    "when smaller:\n\n$$\\text{Displayrefit} = " + fit_terms(13) + "$$\n\n"
+    "A display formula too wide even so, centered:\n\n$$\\text{Displaycentered} = "
+    + fit_terms(14) + "$$\n\nA numbered display formula a little too wide, set smaller, its "
+    "number at its line's end:\n\n$$\\text{Tagwide} = " + fit_terms(11) + " \\tag{1.2}$$\n\n"
+    "A worked example's steps, an array in text:\n\n"
+    "1. $\\begin{array}{lll} \\text{Arraysmaller} & = & " + fit_terms(11)
+    + " \\\\ & = & b \\end{array}$\n")
+
+
+def build_fit(work):
+    """FIT_ONE on the default page: (the PDF's path, what the run said,
+    its LaTeX, and LuaLaTeX's log of its LaTeX run as a third run would
+    be, the aux saying two had gone before and fitted nothing)."""
+    os.makedirs(work)
+    with open(os.path.join(work, "one.md"), "w", encoding="utf-8") as fh:
+        fh.write(FIT_ONE)
+    with open(os.path.join(work, "project.yaml"), "w", encoding="utf-8") as fh:
+        fh.write("project:\n  title: Fit\n  identifier: org.example.fit\n"
+                 "  language: en-US\n  contents:\n    - one\n")
+    with open(os.path.join(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
+        fh.write("targets:\n  pdf:\n    format: pdf\n")
+    converted = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick"],
+                               cwd=work, capture_output=True, text=True,
+                               stdin=subprocess.DEVNULL)
+    run(["python3", os.path.join(BIN, "build-pdf.py"), "--latex-only"], work)
+    tex = os.path.join(work, "pdf", "book.tex")
+    source = third = ""
+    if os.path.exists(tex):
+        with open(tex, encoding="utf-8") as fh:
+            source = fh.read()
+        runs = os.path.join(work, "third")
+        os.makedirs(runs)
+        with open(os.path.join(runs, "book.aux"), "w", encoding="utf-8") as fh:
+            fh.write("\\relax\n\\OERFitRun{2}\n")
+        subprocess.run(["lualatex", "-interaction=nonstopmode", "-output-directory", runs, tex],
+                       cwd=work, capture_output=True, text=True, stdin=subprocess.DEVNULL)
+        if os.path.exists(os.path.join(runs, "book.log")):
+            with open(os.path.join(runs, "book.log"), encoding="utf-8", errors="replace") as fh:
+                third = fh.read()
+    return (os.path.join(work, "pdf", "org.example.fit.pdf"),
+            converted.stdout + converted.stderr, source, third)
+
+
+# On the default page in two columns, under the fleqn class option, which
+# sets a display a margin from its line's left end: a display formula too
+# wide for its column, which FIT_MACROS leaves as fleqn sets it; a worked
+# example's steps, an array in text, too wide for their column even at three
+# quarters of their type, set smaller still to fit it rather than run into
+# the other column; and steps too wide for it even at half their type, of
+# which the build warns. (longtable can't be set in two columns.)
+FIT_TWO = (
+    "# Columns\n\nA display formula too wide for its column:\n\n$$\\text{Columndisplay} = "
+    + fit_terms(10) + "$$\n\nA worked example's steps too wide for their column even at "
+    "three quarters of their type:\n\n1. $\\begin{array}{lll} \\text{Columnarray} & = & "
+    + fit_terms(6) + " \\\\ & = & b \\end{array}$\n\nSteps too wide for it even at half "
+    "their type:\n\n1. $\\begin{array}{lll} \\text{Columnwide} & = & " + fit_terms(14)
+    + " \\\\ & = & b \\end{array}$\n")
+
+
+def build_fit_columns(work):
+    """FIT_TWO on the default page in two columns, under fleqn: (the PDF's
+    path, what the run said)."""
+    os.makedirs(work)
+    with open(os.path.join(work, "one.md"), "w", encoding="utf-8") as fh:
+        fh.write(FIT_TWO)
+    with open(os.path.join(work, "project.yaml"), "w", encoding="utf-8") as fh:
+        fh.write("project:\n  title: Columns\n  identifier: org.example.columns\n"
+                 "  language: en-US\n  contents:\n    - one\n")
+    with open(os.path.join(work, "meta.yaml"), "w", encoding="utf-8") as fh:
+        fh.write("classoption: [twocolumn, fleqn]\n")
+    with open(os.path.join(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
+        fh.write("targets:\n  pdf:\n    format: pdf\n    pdf:\n      metadata: meta.yaml\n")
+    converted = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick"],
+                               cwd=work, capture_output=True, text=True,
+                               stdin=subprocess.DEVNULL)
+    return (os.path.join(work, "pdf", "org.example.columns.pdf"),
+            converted.stdout + converted.stderr)
+
+
 def build_default(work):
     """The book (write_book) on the PDF target's default page, which its
     checks measure on the class's (CLASS_PAGE): every kind of thing it
@@ -1127,19 +1305,6 @@ def head_of(source, words):
         if words in table:
             return table.split("\\endhead")[0]
     return ""
-
-
-def table_size(source, words):
-    """The type size the longtable holding words is set in, the group
-    pdf-target.lua opens before it ("small", "footnotesize"), "" for the
-    text's own, and None if no table holds them."""
-    parts = source.split("\\begin{longtable}")
-    for i in range(1, len(parts)):
-        if words in parts[i].split("\\end{longtable}")[0]:
-            before = parts[i - 1].split("\\end{longtable}")[-1]
-            found = re.findall(r"\{\\(small|footnotesize)\b", before)
-            return found[-1] if found else ""
-    return None
 
 
 def footnote_marks(path):
@@ -1983,6 +2148,280 @@ def preamble_checks(preamble_path, preamble_source, preamble_said):
          and "Could not find" not in preamble_said and "does not exist" not in preamble_said),
     ]
 
+def gap_after(path, words):
+    """The space, in points, between the end of words and the next glyph
+    that isn't a space on its line, or None."""
+    rows = {}
+    for page, baseline, left, right, char in pdftext.glyph_boxes(path):
+        rows.setdefault((page, baseline), []).append((left, right, char))
+    for glyphs in rows.values():
+        glyphs.sort()
+        text = "".join(g[2] for g in glyphs)
+        at = text.find(words)
+        if at >= 0:
+            after = next((g for g in glyphs[at + len(words):] if g[2].strip()), None)
+            return after[0] - glyphs[at + len(words) - 1][1] if after else None
+    return None
+
+
+# A wrapping table's fit on the second run, as Introductory Business
+# Statistics 2e's Table A7 of F's critical values was measured on it: set
+# at 61.3 percent of its size, its columns at 0.3573 of their widths, on
+# the first run, where longtable's widths under a head across its columns
+# had it hundreds of points too wide, its longest piece, "denominator",
+# 0.9801 of its column, the shares of the line its 13 columns, half an em
+# apart, have 1.7347 together, in 12-point type on a line of 469.755
+# points with 578.16 of room. Fitted with its spaces counted at the size
+# it had, it was set at 98.8 percent, "denominator" 3.4 points too wide.
+WRAP_REFIT = {"factor": 0.613, "columns": 0.3573, "tight": 0.9801, "shares": 1.7347,
+              "count": 13, "size": 12, "line": 469.755, "room": 578.16}
+
+
+def wrap_refit(case):
+    """(ratio, factor, columns) for FIT_MACROS' fit of a wrapping table
+    (WRAP_REFIT), its Lua run by texlua: the size and columns it sets, and
+    its longest piece against its column at them, the spaces between its
+    columns half an em at that size; None without texlua."""
+    import latexbuild
+    texlua = shutil.which("texlua")
+    if texlua is None:
+        return None
+    macros = latexbuild.FIT_MACROS
+    opening = macros.index("\\directlua{") + len("\\directlua{")
+    depth, end = 1, opening
+    while depth:
+        depth += {"{": 1, "}": -1}.get(macros[end], 0)
+        end += 1
+    stubs = ("luatexbase = { attributes = { OERFitAttribute = 1 }, add_to_callback = function() end }\n"
+             "node = { id = function() return 0 end }\n"
+             "tex = { getattribute = function() return 0 end, sprint = function() end }\n"
+             "texio = { write_nl = function() end }\n")
+    run = """
+local sp, c = 65536, {case}
+local k = c.count
+oerfit.size[1], oerfit.columns[1] = c.size * sp, k
+oerfit.sep[1] = 0.25 * c.size * c.factor * sp
+local s = {{ narrow = 1, factor = c.factor, columns = c.columns, center = 1 }}
+local line, room = c.line * sp, c.room * sp
+local pad = 2 * (k - 1) * oerfit.sep[1]
+local w = pad + c.shares * s.columns * (line - pad)
+local new = oerfit.next("p", 1, s, w, line, room, c.tight)
+local spaces = 2 * (k - 1) * 0.25 * c.size * sp * new.factor
+print(c.tight * new.factor / s.factor * s.columns * (line - pad) / (new.columns * (line - spaces)),
+      new.factor, new.columns)
+""".format(case="{ " + ", ".join("%s = %r" % item for item in case.items()) + " }")
+    with tempfile.TemporaryDirectory() as work:
+        script = os.path.join(work, "refit.lua")
+        with open(script, "w", encoding="utf-8") as fh:
+            fh.write(stubs + macros[opening:end - 1] + run)
+        done = subprocess.run([texlua, script], cwd=work, capture_output=True, text=True)
+    return tuple(float(x) for x in done.stdout.split()) if done.returncode == 0 else ()
+
+
+def fit_checks(fit_path, fit_said, fit_source, fit_third):
+    """The fit book's checks (build_fit): what latexbuild's FIT_MACROS did
+    with each table and formula too wide for its line. The default page's
+    text runs from 72 to 540 points across a paper 612 wide, its type 12
+    points, 11.96 of the PDF's; a quarter inch is 18 points."""
+    reader = pypdf.PdfReader(fit_path) if os.path.exists(fit_path) else None
+    lines = glyph_lines(fit_path) if reader else {}
+
+    def size(words):
+        """The size the words are drawn at, or 0."""
+        found = [s for sizes in sizes_by_page(reader, words) for s in sizes] if reader else []
+        return found[0] if found else 0
+
+    def ends(words):
+        """(left, right) of the line holding the words, or (0, 0)."""
+        return next(((left, right) for rows in lines.values()
+                     for _baseline, left, right, text in rows if words in text), (0, 0))
+
+    def line_of(words):
+        """The text of the line holding the words, or ""."""
+        return next((text for rows in lines.values()
+                     for _baseline, _left, _right, text in rows if words in text), "")
+
+    def leading_before(words, display):
+        """The distances between the lines of text from the one holding
+        words to the last before the display holding display, on one page,
+        leaving out a line of its superscripts."""
+        for rows in lines.values():
+            texts = [row[3] for row in rows]
+            start = next((i for i, text in enumerate(texts) if words in text), None)
+            stop = next((i for i, text in enumerate(texts) if display in text), None)
+            if start is not None and stop is not None and start < stop:
+                kept = [row[0] for row in rows[start:stop] if len(squeezed(row[3])) > 20]
+                return [a - b for a, b in zip(kept, kept[1:])]
+        return []
+
+    def within(words):
+        left, right = ends(words)
+        return left >= 71.5 and 0 < right <= 540.5
+
+    def centered(words):
+        """Run into both margins alike, a quarter inch inside the paper's
+        edges."""
+        left, right = ends(words)
+        return 18 <= left < 69 and 543 < right <= 594 and abs((72 - left) - (right - 540)) < 1
+
+    body = size("which spaces narrowed")
+    refit = wrap_refit(WRAP_REFIT)
+
+    def at(words, part):
+        """Whether the words are drawn at part of the text's size."""
+        return body > 11 and abs(size(words) - part * body) < 0.03
+    return [
+        ("a table a little too wide for its line fits it with narrower spaces between its "
+         "columns, in the text's type",
+         lambda: at("Spaced", 1) and within("Spaced")),
+        ("a table that needs smaller type as well fits its line in it",
+         lambda: 0.75 * body < size("Smaller") < body - 0.1 and within("Smaller")),
+        ("a table left a little too wide by its smaller type's design is centered on the "
+         "page, and not fitted again for a fit within 4 percent of its line",
+         lambda: 0.75 * body + 0.3 < size("Overstep") < 0.8 * body and centered("Overstep")),
+        ("a table too wide for its line even at three quarters of its type is centered on "
+         "the page, into both margins",
+         lambda: at("Centered", 0.75) and centered("Centered")),
+        ("and one that would come within a quarter inch of the paper's edge at that size is "
+         "set smaller still, a quarter inch inside it",
+         lambda: 0.5 * body < size("Margins") < 0.75 * body - 0.1 and centered("Margins")),
+        ("a table too wide for the paper even at half its type is set at half, its columns "
+         "as the writer sets them, and the build warns of it",
+         lambda: at("Overpaper", 0.5)
+         and "p{(" not in head_of(fit_source, "Overpaper")
+         and re.search(r"WARNING: 1 table\(s\) or formula\(s\) are too wide for the paper "
+                       r"even in smaller type, the smallest at 50% of its size,[^\n]*: on one\.",
+                       fit_said)),
+        ("a table of the class float after it, a tabular, isn't fitted by the widths the "
+         "longtable before it recorded: in the text's type, its columns 12 points apart",
+         lambda: at("Floatcell", 1) and 11.5 < (gap_after(fit_path, "Floatcell") or 0) < 12.5),
+        ("a table whose head is a cell across its columns, which longtable measures too "
+         "wide on the first run, is fitted again on the second, in the text's type, its "
+         "columns 12 points apart",
+         lambda: at("Spanned", 1) and within("Spanned")
+         and 11.5 < (gap_after(fit_path, "Spanned") or 0) < 12.5),
+        ("a table of formulas, whose math in smaller type is set in wider forms, is fitted "
+         "again on the second run",
+         lambda: at("Mathcells", 0.75)),
+        ("a table whose columns wrap, its longest words together a little too wide for a "
+         "line, fits it with narrower spaces, in the text's type, each word whole in its "
+         "column",
+         lambda: at("Supercalifragilisticexpialidocious", 1)
+         and within("SupercalifragilisticexpialidociousHippopotomonstrosesquippedaliophobia")),
+        ("a table whose columns wrap, set larger on the second run than on the first, as "
+         "a head across its columns can make longtable's first widths ask, is fitted with "
+         "its spaces at its new size, its longest piece 98 percent of its column",
+         lambda: refit is not None and len(refit) == 3 and 0.97 < refit[0] <= 0.981
+         and abs(refit[1] - 0.935) < 0.0005),
+        ("a table whose columns' widths are given, a word too long for its column that "
+         "LaTeX measures running into the next, is set smaller to fit it",
+         lambda: 0.75 * body < size("WWWWWWWWW") < body - 0.1
+         and (gap_after(fit_path, "WWWWWWWWW") or 0) > 1),
+        ("a layout table set smaller keeps its caption, a paragraph before it, in the text's "
+         "type",
+         lambda: at("Laycap", 1) and 0 < size("Laytable") < body - 0.1),
+        ("a table of 45 columns whose widths are given, the spaces between them more than "
+         "its line, has them narrowed on the first run and is fitted on the second, a quarter "
+         "inch inside the paper's edges, its first column clear of the next",
+         lambda: 0.5 * body - 0.03 < size("Qz") < body - 0.1
+         and 18 <= ends("Qz")[0] and 0 < ends("Qz")[1] <= 594
+         and (gap_after(fit_path, "Qz") or 0) > 0.5),
+        # Set smaller after the second run, the type's design for 6 points,
+        # wider for its size than the 7-point, leaves the corner's longest
+        # word, "Twentytwo", a little wider than its column, which TeX would
+        # hyphenate.
+        ("a table of 22 columns whose longest words are wider than a line together, its "
+         "corner's words wrapping, is set smaller still to keep it a quarter inch inside the "
+         "paper's edges, each word whole and clear of the next column",
+         lambda: 0.5 * body - 0.03 < size("Twentytwo") < 0.75 * body - 0.1
+         and 18 <= ends("Twentytwo")[0] and ends("Twentytwo")[1] <= 594
+         and (gap_after(fit_path, "Twentytwo") or 0) > 0.5),
+        # The default page's lines are 18.06 points apart, setspace's 1.25
+        # times the class's 14.5.
+        ("a display formula set smaller in a paragraph leaves the paragraph's lines before "
+         "it as far apart as the text's",
+         lambda: size("Displaylead") < body - 0.1
+         and (lambda gaps: len(gaps) > 1 and all(abs(g - 18.06) < 0.05 for g in gaps))(
+             leading_before("Leadpara", "Displaylead"))),
+        ("a display formula too wide for its line by its spaces fits it with them narrowed, "
+         "in the text's type",
+         lambda: at("Displayspaced", 1) and ends("Displayspaced")[0] >= 71.5),
+        ("a display formula a little too wide for its line is set smaller to fit it",
+         lambda: 0.75 * body < size("Displaysmaller") < body - 0.1
+         and ends("Displaysmaller")[0] >= 71.5),
+        ("and one whose math in smaller type is set in wider forms is fitted again on the "
+         "second run",
+         lambda: at("Displayrefit", 0.75)),
+        ("and one too wide even at three quarters of its type is centered on the page",
+         lambda: at("Displaycentered", 0.75)
+         and 18 <= ends("Displaycentered")[0] < 69),
+        # microtype sets a closing parenthesis at the line's end up to 1.4
+        # points into the margin.
+        ("a numbered display formula a little too wide for its line is set smaller to fit "
+         "it, its number at the line's end and not in the margin",
+         lambda: 0.75 * body < size("Tagwide") < body - 0.1
+         and "(1.2)" in line_of("Tagwide") and ends("Tagwide")[0] >= 71.5
+         and ends("Tagwide")[1] <= 541.5),
+        ("a worked example's steps, an array in text, are set smaller to fit their line, "
+         "and fitted again on the second run",
+         lambda: 0.75 * body < size("Arraysmaller") < 0.8 * body),
+        # Fitted on the third run, a formula's smaller type moves the page
+        # breaks the fourth run reads its labels from the third with, the
+        # contents' page numbers among them.
+        ("nothing is fitted after the second run, so the last run's pages are the run's "
+         "before",
+         lambda: "TextbookImprover fit: run 3," in fit_third
+         and "Package TextbookImprover Warning" not in fit_third),
+        ("the build says what it fitted, and what's still wider than the text, centered, "
+         "and names no line as too wide",
+         lambda: "Fitted 19 table(s) and formula(s) too wide for their lines to them: 3 by "
+         "narrowing their spaces; 16 in smaller type as well, the smallest at 50% of its "
+         "size." in fit_said
+         and re.search(r"9 of them, still wider than the text, are centered on the page "
+                       r"\(7 table\(s\), 2 display formula\(s\)\), the widest \d+ points "
+                       r"wider: on one\.", fit_said)
+         and "points wider than the text or table column" not in fit_said),
+    ]
+
+
+def columns_checks(columns_path, columns_said):
+    """The two-column book's checks (build_fit_columns): its columns 229
+    points wide, the left from 72 to 301 and the right from 311 to 540, in
+    12-point type, 11.96 of the PDF's."""
+    reader = pypdf.PdfReader(columns_path) if os.path.exists(columns_path) else None
+    lines = glyph_lines(columns_path) if reader else {}
+
+    def size(words):
+        """The size the words are drawn at, or 0."""
+        found = [s for sizes in sizes_by_page(reader, words) for s in sizes] if reader else []
+        return found[0] if found else 0
+
+    def ends(words):
+        """(left, right) of the line holding the words, or (0, 0)."""
+        return next(((left, right) for rows in lines.values()
+                     for _baseline, left, right, text in rows if words in text), (0, 0))
+    return [
+        ("under the fleqn class option, a display formula too wide for its column is left as "
+         "fleqn sets it, in the text's type, and named among the lines too wide",
+         lambda: abs(size("Columndisplay") - 11.96) < 0.03
+         and re.search(r"WARNING: [^\n]*: 1 display formula\(s\)", columns_said)),
+        # Its smaller type's forms are wider for their size, so that it's
+        # still a few points too wide.
+        ("on a page of two columns, a worked example's steps too wide for their column even "
+         "at three quarters of their type are set smaller still for it, a few points past "
+         "it, and not let run a margin's width into the other column",
+         lambda: 0 < size("Columnarray") < 0.75 * 11.96 - 0.1
+         and 71.5 <= ends("Columnarray")[0] and 0 < ends("Columnarray")[1] <= 307),
+        ("and the build warns of what's too wide for its column even in smaller type, as "
+         "too wide for the column, not for the paper",
+         lambda: re.search(r"WARNING: 2 table\(s\) or formula\(s\) on pages of two columns "
+                           r"are too wide for their column even in smaller type, the smallest "
+                           r"at 50% of its size, and run past it, the widest \d+ points wider "
+                           r"than the column: on one\.", columns_said)
+         and "too wide for the paper" not in columns_said),
+    ]
+
+
 def aaa_checks(aaa_path):
     """The AAA book's checks (build_aaa): the page for WCAG 1.4.8 (AAA),
     bin/pdf-layout-wcag-aaa.yaml. 13.5pt is 13.45 of the PDF's points,
@@ -2086,6 +2525,8 @@ def checks(work, jobs=1):
             defaulted = pool.submit(build_default, work + "-default")
             prefaced = pool.submit(build_preamble, work + "-preamble")
             aaa = pool.submit(build_aaa, work + "-aaa")
+            fitted = pool.submit(build_fit, work + "-fit")
+            columned = pool.submit(build_fit_columns, work + "-columns")
             reader, source, rows, log, placements = book.result()
             ua1_path, ua1_said, ua1_rows = ua1.result()
             untagged_path, untagged_said = plain.result()
@@ -2096,6 +2537,8 @@ def checks(work, jobs=1):
             default_path = defaulted.result()
             preamble_path, preamble_source, preamble_said = prefaced.result()
             aaa_path = aaa.result()
+            fit_path, fit_said, fit_source, fit_third = fitted.result()
+            columns_path, columns_said = columned.result()
     else:
         reader, source, rows, log, placements = build(work)
         ua1_path, ua1_said, ua1_rows = build_ua1(work + "-ua1")
@@ -2107,6 +2550,8 @@ def checks(work, jobs=1):
         default_path = build_default(work + "-default")
         preamble_path, preamble_source, preamble_said = build_preamble(work + "-preamble")
         aaa_path = build_aaa(work + "-aaa")
+        fit_path, fit_said, fit_source, fit_third = build_fit(work + "-fit")
+        columns_path, columns_said = build_fit_columns(work + "-columns")
 
     def page_text(path):
         return "".join(page.extract_text() or "" for page in pypdf.PdfReader(path).pages) \
@@ -2115,6 +2560,13 @@ def checks(work, jobs=1):
 
     def notes_marks():
         return footnote_marks(notes_path) if os.path.exists(notes_path) else []
+    notes_reader = pypdf.PdfReader(notes_path) if os.path.exists(notes_path) else None
+
+    def notes_size(words):
+        """The size the notes book first draws words at, or 0."""
+        found = [s for sizes in sizes_by_page(notes_reader, words) for s in sizes] \
+            if notes_reader else []
+        return found[0] if found else 0
     untagged_text = "".join(page.extract_text() or "" for page in
                             pypdf.PdfReader(untagged_path).pages) \
         if os.path.exists(untagged_path) else ""
@@ -2389,7 +2841,8 @@ def checks(work, jobs=1):
                  for f in figures)
          and "Fill in the ________" in outline_titles(reader)),
         # LaTeX says so in its log, which Pandoc keeps to itself but for
-        # its JSON log of the run.
+        # its JSON log of the run: a formula too wide for the paper even in
+        # type half its size, which FIT_MACROS sets at half.
         ("a line wider than the text is named, a display formula, on its page",
          lambda: re.search(r"WARNING: 1 line\(s\) of the PDF are more than 3 points wider "
                            r"than the text or table column they're set in.*: 1 display "
@@ -2522,25 +2975,30 @@ def checks(work, jobs=1):
          and says(notes_plain_text, "Heading in an item")),
         # pdf-target.lua: a formula's longest word is its longest piece TeX
         # can't break, so a column of reactions, which had counted as one
-        # word too wide for a line, wraps; a table whose longest words
-        # don't fit a line is set smaller; a table with widths gives a
-        # column narrower than its longest word the room it needs; and one
-        # too wide in any type keeps its columns, and the build names it.
+        # word too wide for a line, wraps; a table with widths gives a
+        # column narrower than its longest word the room it needs. A table
+        # whose longest words the filter counts too wide for a line had
+        # been set in \small, which one whose words LaTeX finds fit didn't
+        # need; and a table of numbers is set smaller as LaTeX measures it
+        # (FIT_MACROS), in 10-point Latin Modern at 86 percent, 8.57
+        # points, 1.2 points too wide for its line in the 9-point design,
+        # and so centered, where fitting it again would have set it in the
+        # 8-point design at 84 percent, 2.7 points too wide.
         ("a table of reactions is set in columns that wrap, its formula a word a piece",
-         lambda: "p{(\\linewidth" in head_of(notes_source, "Representative reaction")
-         and table_size(notes_source, "Representative reaction") == ""),
-        ("a table whose longest words don't fit a line is set in \\small",
-         lambda: table_size(notes_source, "Hippopotomonstrosesquippedaliophobia") == "small"),
+         lambda: "p{(\\linewidth" in head_of(notes_source, "Representative reaction")),
+        ("a table whose longest words the filter counts too wide for a line, which LaTeX "
+         "finds fit it, is set in the text's type",
+         lambda: notes_size("Two layout") > 9
+         and notes_size("Hippopotomonstrosesquippedaliophobia") == notes_size("Two layout")),
         ("a table's equal widths give a word too long for its share the room it needs",
          lambda: (lambda reals: len(reals) == 3 and reals[1] > 0.5 and reals[1] == max(reals))(
              [float(r) for r in re.findall(r"\\real\{([\d.]+)\}", head_of(
                  notes_source, "Pneumonoultramicroscopicsilicovolcanoconiosis"))])),
-        ("a table too wide in any type keeps its columns, in \\footnotesize, and the "
-         "build names it",
-         lambda: table_size(notes_source, "242.98") == "footnotesize"
-         and "\\begin{longtable}" in notes_source and "p{(" not in head_of(notes_source, "242.98")
-         and re.search(r"WARNING: \d+ line\(s\) of the PDF are more than 3 points wider[^\n]* "
-                       r"in table\(s\)", notes_said)),
+        ("a table of numbers too wide for its line keeps its columns and is set smaller "
+         "to fit it, and not fitted again for a fit within 4 percent of its line",
+         lambda: head_of(notes_source, "242.98") and "p{(" not in head_of(notes_source, "242.98")
+         and 0.85 * notes_size("Two layout") < notes_size("242.98") < 0.86 * notes_size("Two layout")
+         and "Fitted 1 table(s) and formula(s)" in notes_said),
         # A line too wide in the contents or the list of figures is reported
         # by TeX at a line of the list's own file; the build names it as the
         # list's (PDF_MACROS marks where each list is set).
@@ -2737,6 +3195,8 @@ def checks(work, jobs=1):
     items += default_checks(default_path)
     items += preamble_checks(preamble_path, preamble_source, preamble_said)
     items += aaa_checks(aaa_path)
+    items += fit_checks(fit_path, fit_said, fit_source, fit_third)
+    items += columns_checks(columns_path, columns_said)
     if verapdf_ran:
         # The one character no font has is drawn as .notdef, which
         # veraPDF reports, and that's the only rule it finds failed.
@@ -2852,13 +3312,14 @@ def main():
             failed += not passed
     finally:
         # The PDF/UA-1, untagged, notes, footer, sized, fancy, default,
-        # preamble, and AAA books are built beside the book (build_ua1,
-        # build_untagged, build_notes, build_footer, build_sized,
-        # build_fancy, build_default, build_preamble, build_aaa).
+        # preamble, AAA, fit, and two-column books are built beside the
+        # book (build_ua1, build_untagged, build_notes, build_footer,
+        # build_sized, build_fancy, build_default, build_preamble,
+        # build_aaa, build_fit, build_fit_columns).
         if arguments.keep:
             print(f"\nOutput left in {work}, {work}-ua1, {work}-untagged, {work}-notes, "
                   f"{work}-footer, {work}-sized, {work}-fancy, {work}-default, "
-                  f"{work}-preamble, and {work}-aaa")
+                  f"{work}-preamble, {work}-aaa, {work}-fit, and {work}-columns")
         else:
             shutil.rmtree(work, ignore_errors=True)
             shutil.rmtree(work + "-ua1", ignore_errors=True)
@@ -2870,6 +3331,8 @@ def main():
             shutil.rmtree(work + "-default", ignore_errors=True)
             shutil.rmtree(work + "-preamble", ignore_errors=True)
             shutil.rmtree(work + "-aaa", ignore_errors=True)
+            shutil.rmtree(work + "-fit", ignore_errors=True)
+            shutil.rmtree(work + "-columns", ignore_errors=True)
     print(f"\n{failed} check(s) failed" if failed
           else "\nall PDF checks passed")
     return 1 if failed else 0

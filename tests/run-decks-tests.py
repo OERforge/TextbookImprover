@@ -2553,6 +2553,66 @@ def case_unsettled(work):
     ]
 
 
+# A slide's table and a slide's formula too wide for it, which LaTeX fits
+# to it as it does a book's (latexbuild's FIT_MACROS).
+WIDE_SLIDES = ("---\ntitle: Wide\n---\n\n# A table\n\n"
+               + "| " + " | ".join("Column %d" % c for c in range(12)) + " |\n"
+               + "|" + "---|" * 12 + "\n"
+               + ("| " + " | ".join("%d.%02d" % (c * 37, c) for c in range(12)) + " |\n") * 3
+               + "\n# A formula\n\n$$x = "
+               + " + ".join("a_{%d} b_{%d} c_{%d}" % (k, k, k) for k in range(16)) + "$$\n")
+
+
+def case_wide_slide(work):
+    """A table and a formula too wide for their slides, fitted to them,
+    and LaTeX's runs settling with them fitted, through a LuaLaTeX that
+    notes the folder each run is in: the .aux keeps the fit, which had
+    changed it on every run, and a deck with nothing to fit, which keeps
+    no count of runs, settles in two runs, as it did before fitting."""
+    real = shutil.which("lualatex")
+    if not real or pdf_ready():
+        print(f"  skip  {pdf_ready() or 'lualatex not found'}; a slide too wide isn't checked")
+        return []
+    decks_dir = folder(os.path.join(work, "decks"), "targets:\n  pdf:\n    format: pdf\n",
+                       decks_given={"wide.md": WIDE_SLIDES,
+                                    "plain.md": "---\ntitle: Plain\n---\n\n# Slide\n\nText.\n"})
+    tools, runs = os.path.join(work, "tools"), os.path.join(work, "runs.log")
+    write(os.path.join(tools, "lualatex"),
+          f"#!/bin/sh\npwd >> {shlex.quote(runs)}\nexec {shlex.quote(real)} \"$@\"\n")
+    os.chmod(os.path.join(tools, "lualatex"), 0o755)
+    result = convert(decks_dir, "--quick",
+                     env=dict(os.environ, PATH=tools + os.pathsep + os.environ["PATH"]))
+    path = os.path.join(decks_dir, "pdf", "wide.pdf")
+
+    def counts():
+        """How many runs each deck's LaTeX had, fewest first, not counting
+        the run that tries LaTeX first, in a folder of its own."""
+        folders = [f for f in (read(runs).splitlines() if os.path.exists(runs) else [])
+                   if os.path.basename(f).startswith("deck-pdf")]
+        return sorted(folders.count(f) for f in set(folders))
+
+    def inside(slide, least):
+        """Each of the slide's glyphs, least of them at the least, is a
+        quarter inch inside its edges, its last column's or its last term's
+        among them."""
+        if not os.path.exists(path):
+            return False
+        with pikepdf.open(path) as pdf:
+            width = float(pdf.pages[slide].MediaBox[2])
+        boxes = [b for b in pdftext.glyph_boxes(path) if b[0] == slide]
+        return len(boxes) >= least and all(18 <= left and right <= width - 18
+                                           for _, _, left, right, _ in boxes)
+    return [
+        ("a slide's table and a slide's formula too wide for it are set smaller to fit "
+         "it, a quarter inch inside its edges, as a book's are",
+         lambda: inside(1, 200) and inside(2, 100)),
+        ("and LaTeX's runs settle with them fitted, and in two runs for a deck with "
+         "nothing to fit",
+         lambda: result.returncode == 0 and "still changing" not in result.stderr
+         and len(counts()) == 2 and counts()[0] == 2),
+    ]
+
+
 # --------------------------------------------------------------------------
 # a deck's PowerPoint file
 # --------------------------------------------------------------------------
@@ -4409,6 +4469,7 @@ CASES = [("the pieces", case_pieces),
          ("an SVG the PDF can't show", case_svg),
          ("LaTeX that doesn't finish", case_timeout),
          ("LaTeX that doesn't settle", case_unsettled),
+         ("a slide too wide", case_wide_slide),
          ("the template's fallbacks", case_fallbacks),
          ("no LuaLaTeX", case_no_latex),
          ("a deck's PowerPoint file", case_pptx),

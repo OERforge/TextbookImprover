@@ -1513,9 +1513,18 @@ def check_fitted_blanks():
               "Overfull \\hbox (5.0pt too wide) in paragraph at lines 20--22\n")
     lists = latexbuild.overfull_lines(listed, source, {"page-quiz": "quiz"})
     warning = latexbuild.overfull_warning(lists) or ""
+    # Each chunk of Lua PDF_MACROS gives \directlua{...} at its own level,
+    # the blanks' and the fitting's, to its closing brace; the calls inside
+    # a macro, \directlua { ... }, hold its arguments (#1).
     macros = latexbuild.PDF_MACROS
-    lua = macros[macros.index("\\directlua{") + len("\\directlua{"):]
-    lua = lua[:lua.index("\n\\else")]
+    chunks = []
+    for opening in re.finditer(r"\\directlua\{", macros):
+        depth, end = 1, opening.end()
+        while depth and end < len(macros):
+            depth += {"{": 1, "}": -1}.get(macros[end], 0)
+            end += 1
+        chunks.append(macros[opening.end():end - 1])
+    lua = "\n".join(chunks)
     return [
         ("a line whose blank was drawn shorter to fit it isn't counted",
          lambda: not any(points == 24.27022 for points, _kind, _page in found)),
@@ -1533,8 +1542,10 @@ def check_fitted_blanks():
          lambda: "1 line(s) of text, 1 in the contents, 1 in a list of figures or tables; "
          "the widest is in a list of figures or tables, 12 points too wide; on 1 page(s), "
          "widest first: quiz." in warning),
-        ("the Lua has no percent sign, hash, tilde, or backslash, and no comment",
-         lambda: lua.strip() and not re.search(r"[%#~\\]|--", lua)),
+        ("the Lua has no percent sign, hash, tilde, or backslash, and no comment, the "
+         "blanks' or the fitting's",
+         lambda: len(chunks) == 2 and all(c.strip() for c in chunks)
+         and not re.search(r"[%#~\\]|--", lua)),
     ]
 
 

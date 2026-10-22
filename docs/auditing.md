@@ -7,7 +7,7 @@ python3 $T/bin/audit.py ~/books/nursing            # everything in a directory
 python3 $T/bin/audit.py syllabus.pdf book.epub -o ~/reports --report-docx
 ```
 
-It depends on `lib/` and on Pandoc, to read a source. `pypdf` (for PDFs), epubcheck, the Nu HTML checker, and veraPDF are used when present and reported as absent when not; `--quick` skips the external ones.
+It depends on `lib/` and on Pandoc, to read a source. `pypdf` (for PDFs), epubcheck, the Nu HTML checker, and veraPDF are used when present and reported as absent when not; `--quick` skips the external ones. `--wcag` checks each PDF against veraPDF's WCAG 2.2 machine profile as well, as the [output check](checking.md#verapdfs-wcag-22-checks) does: what it finds is a note, never an error, and the report has a section for each PDF saying whether the checks ran, and when they didn't, why.
 
 ## What it checks, by kind of file
 
@@ -35,7 +35,7 @@ The first three are what `output-check.csv` has always carried, so anything read
 
 `audit.md` opens with the date and the tool's version, then every input with its size and SHA-256, then a summary (counts by severity and by check, each check explained), the findings grouped by file, and for each PDF its metadata and claims. The hashes are how you know a report is current: if a file's hash has changed, the report is stale for it. A stable file name, rather than one with a date in it, is what makes reports diffable and linkable; the date is inside.
 
-The same hashes key `audit-cache.json` beside the report. Run again with nothing changed, the audit says so at the prompt (`Nothing has changed since the audit of <date>; audit.md is current`) and leaves the report alone, so its date stays the date of the audit it records; the exit code still reflects the findings. With some inputs changed, only those are read again and the report is rewritten. `--force` reads everything, `--no-cache` ignores the cache both ways. A PDF is always re-read, since its metadata section is built fresh each time.
+The same hashes key `audit-cache.json` beside the report. Run again with nothing changed, and with the options the report was made with (`--quick` and `--wcag`), the audit says so at the prompt (`Nothing has changed since the audit of <date>; audit.md is current`) and leaves the report alone, so its date stays the date of the audit it records; the exit code still reflects the findings. With other options, the report is made again, and a file read with another `--quick` than this run's is read again, since the validators' findings are among a file's or aren't. A run with `--wcag` makes the report again however little has changed, since what veraPDF's WCAG checks find turns on their setup, which the cache can't see; a PDF is read again, the rest comes from the cache. With some inputs changed, only those are read again and the report is rewritten. `--force` reads everything, `--no-cache` ignores the cache both ways. A PDF is always re-read, since its metadata section is built fresh each time.
 
 Markdown is the report's own form. `--report-html` also writes `audit.html`, the report as a page with the pipeline's own stylesheet embedded; `--report-docx` also writes `audit.docx`, declared as the current Word format so Word treats it as a current file and its own Accessibility Checker runs on it (Pandoc's own Word output opens in Compatibility Mode, which turns that checker off). The switches are named for the report's format, not the input's: the audit reads any mix of files whatever it writes.
 

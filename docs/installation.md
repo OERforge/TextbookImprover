@@ -301,6 +301,64 @@ The run finds it through `VERAPDF` or as `verapdf` on the path. veraPDF chooses 
 
 **Upgrading.** Run the same commands again. The link gives the latest release, and the installer, given the folder it installed into, replaces the old version there, keeping veraPDF's settings (its `config` folder); `VERAPDF` needn't change, since the path is the same. That's what the `rm -rf` is for: an older installer left in `/tmp/verapdf` matches the wildcard too, and Java runs whichever sorts first (1.30.2's, for an upgrade to 1.30.3), which reinstalls the old version without a word. The installer also empties `bin` as it goes, files it didn't put there included, so nothing of your own belongs in it. For a version other than the latest, the [releases folder](https://software.verapdf.org/releases/) has each one's installer, in a folder per minor version (`1.30/verapdf-greenfield-1.30.2-installer.zip`, say).
 
+## Optional: veraPDF's WCAG modules
+
+veraPDF has profiles for the parts of [WCAG 2.2](https://www.w3.org/TR/WCAG22/) a program can check in a PDF, but its release can't check their own rules. They need two more of veraPDF's modules, `wcag-validation` and `wcag-algorithms`, and the libraries those use, and veraPDF looks for the modules when it's given such a profile and quietly does without them ([`GFCosDocument`](https://github.com/veraPDF/veraPDF-validation/blob/v1.30.3/validation-model/src/main/java/org/verapdf/gf/model/impl/cos/GFCosDocument.java#L451-L470)): it checks the PDF/UA rules in the profile and passes the rest without checking them. There's nothing to build, though. veraPDF publishes the modules on Maven Central, as it does its other parts, and its launcher loads whatever `CLASSPATH_PREFIX` names ahead of its own jar, so veraPDF's installation stays as it is. With them, `--wcag` adds the profile's checks to the output check and the audit; [Checking the output](checking.md#verapdfs-wcag-22-checks) says what they check, how they're reported, and why what they find is information, not a verdict.
+
+The jars below are for veraPDF 1.30.3, the version on the first line of `"$VERAPDF" --version`. If it names an earlier one, upgrade veraPDF first, which the commands [above](#optional-verapdf) do when they're run again. The jars go in a folder of their own, with the two machine profiles, one for PDF 2.0, which a PDF/UA-2 build is, and one for PDF 1.x, which a PDF/UA-1 build is; about 5.7 MB in all:
+
+```bash
+mkdir -p ~/tools/verapdf-wcag && cd ~/tools/verapdf-wcag
+for jar in \
+    org/verapdf/wcag-validation/1.30.3/wcag-validation-1.30.3.jar \
+    org/verapdf/wcag-algorithms/1.30.3/wcag-algorithms-1.30.3.jar \
+    org/apache/pdfbox/pdfbox/3.0.4/pdfbox-3.0.4.jar \
+    org/apache/pdfbox/pdfbox-io/3.0.4/pdfbox-io-3.0.4.jar \
+    org/apache/pdfbox/fontbox/3.0.4/fontbox-3.0.4.jar \
+    org/apache/pdfbox/jbig2-imageio/3.0.3/jbig2-imageio-3.0.3.jar \
+    commons-logging/commons-logging/1.3.4/commons-logging-1.3.4.jar \
+    com/github/jai-imageio/jai-imageio-core/1.4.0/jai-imageio-core-1.4.0.jar \
+    com/github/jai-imageio/jai-imageio-jpeg2000/1.3.0/jai-imageio-jpeg2000-1.3.0.jar
+do
+    curl -fsSLO "https://repo1.maven.org/maven2/$jar" || echo "Not downloaded: $jar"
+done
+for profile in WCAG-2-2-Machine-PDF20.xml WCAG-2-2-Machine.xml; do
+    curl -fsSLO "https://raw.githubusercontent.com/veraPDF/veraPDF-validation-profiles/rel/1.30/PDF_UA/$profile" \
+        || echo "Not downloaded: $profile"
+done
+ls
+```
+
+`ls` should show the nine jars and the two profiles. PDFBox reads the file again and draws each page with text on it, for the contrast check ([`ContrastRatioConsumer`](https://github.com/veraPDF/veraPDF-wcag-algs/blob/v1.30.3/src/main/java/org/verapdf/wcag/algorithms/semanticalgorithms/consumers/ContrastRatioConsumer.java)), and the image libraries let it read JPEG 2000 and JBIG2 pictures. Then tell the run where they are, with this line in `~/.bashrc`, as for the [validators](#optional-the-full-validators):
+
+```bash
+export VERAPDF_WCAG="$HOME/tools/verapdf-wcag"
+```
+
+In a new terminal, `check-output.py --wcag` with nothing to check runs veraPDF with the modules on a one-page PDF of its own, made to fail one of the profile's rules, 1.3.1-1, five or more of one character in a row, and says whether they loaded:
+
+```bash
+python3 $T/bin/check-output.py --wcag
+```
+
+```
+Output check: 0 page(s), nothing found.
+  veraPDF 1.30.3 loaded its WCAG modules from /home/you/tools/verapdf-wcag (wcag-validation 1.30.3, wcag-algorithms 1.30.3), so its WCAG 2.2 machine checks run; veraPDF's WCAG checks are experimental and may be wrong.
+```
+
+If they didn't, a warning says what it found: no folder, a module's jar or a profile missing from it, or modules veraPDF didn't load, which veraPDF itself never says.
+
+Another veraPDF needs other jars, since `wcag-validation` must be veraPDF's own version: for veraPDF 1._x_._y_, `wcag-validation` 1._x_._y_ and the newest `wcag-algorithms` whose version starts 1._x_ ([its versions](https://repo1.maven.org/maven2/org/verapdf/wcag-algorithms/)), the rest at the versions in `wcag-algorithms`'s POM file and PDFBox's, and the profiles from the profiles repository's branch for that release (`rel/1.30` for 1.30). Nothing more. veraPDF's own jar has what else the modules use (its parser and validation model, and Jackson), and the POM files' other entries, test tools and a coverage plugin, aren't needed at all; a second copy of veraPDF's own, which a tool that gathers a module's dependencies would add (Maven's `dependency:copy-dependencies`, say), would be loaded ahead of it. Empty the folder before filling it with another version's jars: Java loads one of two copies of a class, and [which one it doesn't specify](https://docs.oracle.com/javase/8/docs/technotes/tools/unix/classpath.html), so `--wcag` warns of a module there twice.
+
+To run the profile by hand, as `--wcag` does:
+
+```bash
+W=~/tools/verapdf-wcag
+CLASSPATH_PREFIX="$W/*" "$VERAPDF" --loglevel 0 -p $W/WCAG-2-2-Machine-PDF20.xml --format text -v book.pdf
+```
+
+The text names each rule that failed; `--format xml` gives each failed check as well, with its page, counted from 0, and the rectangles it covers. The `/*` is what has Java load every jar in the folder: without it, veraPDF quietly passes the profile's own rules. `--loglevel 0` turns veraPDF's log off. The modules otherwise write `SEVERE: Undefined property /Artifact in a content stream` for each artifact in the file, over 16,000 times for a 1,015-page book: they take the tag in an artifact's `/Artifact BMC` for the name of a property list, which `BMC` doesn't have ([`getMCID`](https://github.com/veraPDF/veraPDF-validation/blob/v1.30.3/wcag-validation/src/main/java/org/verapdf/gf/model/factory/chunks/ChunkParser.java#L936-L951)), and the file isn't at fault. veraPDF's launcher passes `JAVA_OPTS` to Java, so `JAVA_OPTS=-Xmx4g` before the command gives it more memory if a long book needs it.
+
 ## For a revealjs target: reveal.js
 
 Nothing to install. A deck's reveal.js presentation loads reveal.js from a copy beside it, which the run takes from the repository's own copy of reveal.js 6.0.2, in `vendor/reveal.js`: the release the script that makes the presentations readable with a screen reader is written against and tested with. The README there says where it came from and how it's updated.

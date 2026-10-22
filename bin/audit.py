@@ -15,7 +15,9 @@ audited and unchanged since (by SHA-256) is not read again unless
 Depends on lib/ and on Pandoc (to read a source), and optionally on
 pypdf (PDFs), epubcheck, the Nu HTML checker, and veraPDF, each found
 the way the output check finds them and reported as absent when they
-are.
+are. --wcag checks each PDF against veraPDF's WCAG 2.2 machine profile
+as well, as check-output.py --wcag does: what it finds is a note, never
+an error, and the report says whether the checks ran.
 
 Copyright 2026 Robert Szarka
 
@@ -75,8 +77,10 @@ def gather(paths):
     return out
 
 
-def audit_one(path, kind, validators):
-    """(findings, sections) for one file."""
+def audit_one(path, kind, validators, wcag=False):
+    """(findings, sections) for one file. wcag: a PDF is checked against
+    veraPDF's WCAG 2.2 machine profile too, its own section saying
+    whether the checks ran."""
     name = os.path.basename(path)
     if kind in ("source-docx", "source-md"):
         found = sourcecheck.check(path, kind)
@@ -116,13 +120,25 @@ def audit_one(path, kind, validators):
         return found, []
     if kind == "pdf":
         facts, found = pdfcheck.inspect(path)
-        if validators:
-            command = outputcheck.find_validator("verapdf")
-            if command:
-                found = pdfcheck.settle_claims(
-                    found, pdfcheck.run_verapdf(command, path))
-        return found, [(f"{name}: metadata and claims",
-                        pdfcheck.facts_lines(facts))]
+        sections = [(f"{name}: metadata and claims", pdfcheck.facts_lines(facts))]
+        command = outputcheck.find_validator("verapdf") if validators else None
+        if command:
+            found = pdfcheck.settle_claims(
+                found, pdfcheck.run_verapdf(command, path))
+        if wcag:
+            if not validators:
+                lines = ["veraPDF's WCAG checks not run (--quick)."]
+            elif not command:
+                lines = ["veraPDF's WCAG checks not run: veraPDF not found (set "
+                         "VERAPDF, or put verapdf on the path)."]
+            else:
+                more, lines = pdfcheck.run_verapdf_wcag(command, [path])
+                found += more
+            for line in lines:
+                print(f"  {line}", file=sys.stderr)
+            sections.append((f"{name}: veraPDF's WCAG 2.2 checks",
+                             [f"- {line}" for line in lines]))
+        return found, sections
     return [], []
 
 
@@ -138,6 +154,10 @@ def main():
                         help="neither read nor write the cache")
     parser.add_argument("--quick", action="store_true",
                         help="skip the external validators")
+    parser.add_argument("--wcag", action="store_true",
+                        help="check each PDF against veraPDF's WCAG 2.2 machine profile "
+                             "too, with its WCAG modules from VERAPDF_WCAG; experimental, "
+                             "so what it finds is a note, never an error")
     parser.add_argument("--report-html", action="store_true",
                         help="also write the report as audit.html")
     parser.add_argument("--report-docx", action="store_true",
@@ -156,35 +176,44 @@ def main():
                                                              "audit-cache.json"))
     inputs = [fl.describe_input(path) for path, _ in files]
     report_md = os.path.join(out_dir, "audit.md")
+    # What changes what a report says, besides its inputs, and what a
+    # file's findings are; --wcag changes only a PDF's, which is always
+    # read again.
+    options = {"quick": bool(args.quick), "wcag": bool(args.wcag)}
+    per_file = {"quick": bool(args.quick)}
     # Nothing changed since the last audit: say so and leave the report
-    # as it is, so its date stays the date of the audit it records.
-    if cache is not None and not args.force and os.path.exists(report_md) \
-            and all(cache.lookup(i["sha256"]) is not None for i in inputs) \
-            and cache.same_inputs(i["sha256"] for i in inputs):
+    # as it is, so its date stays the date of the audit it records. Not
+    # with --wcag, whose findings turn on veraPDF's WCAG modules, which the
+    # cache can't see: a report made before they were set up isn't current
+    # once they are.
+    if cache is not None and not args.force and not args.wcag \
+            and os.path.exists(report_md) \
+            and all(cache.lookup(i["sha256"], per_file) is not None for i in inputs) \
+            and cache.same_inputs((i["sha256"] for i in inputs), options):
         when = cache.audited_at()
         print(f"Nothing has changed since the audit of {when}; "
               f"{report_md} is current. --force audits again.",
               file=sys.stderr)
-        found = [f for i in inputs for f in cache.lookup(i["sha256"])]
+        found = [f for i in inputs for f in cache.lookup(i["sha256"], per_file)]
         return 1 if any(f.severity == "error" for f in found) else 0
     all_found, sections = [], []
     for (path, kind), item in zip(files, inputs):
         cached = None if (args.force or cache is None) else cache.lookup(
-            item["sha256"])
+            item["sha256"], per_file)
         if cached is not None and kind != "pdf":
             print(f"  {os.path.basename(path)}: unchanged, {len(cached)} "
                   "finding(s) from the last audit", file=sys.stderr)
             all_found += cached
             continue
-        found, extra = audit_one(path, kind, not args.quick)
+        found, extra = audit_one(path, kind, not args.quick, args.wcag)
         print(f"  {os.path.basename(path)}: {len(found)} finding(s)",
               file=sys.stderr)
         all_found += found
         sections += extra
         if cache is not None:
-            cache.store(item["sha256"], found)
+            cache.store(item["sha256"], found, per_file)
     if cache is not None:
-        cache.note_inputs(i["sha256"] for i in inputs)
+        cache.note_inputs((i["sha256"] for i in inputs), options)
         cache.save()
     fl.write_csv(os.path.join(out_dir, "audit.csv"), all_found)
     fl.write_report(report_md, all_found, inputs, sections, version=VERSION)

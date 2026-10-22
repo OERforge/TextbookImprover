@@ -39,6 +39,8 @@ import json
 import os
 from collections import Counter, OrderedDict
 
+import wcag
+
 COLUMNS = ["Where", "Check", "Detail", "File", "Kind", "Severity",
            "Standard", "Tool", "Fix"]
 
@@ -336,6 +338,12 @@ class Finding:
         if meaning is None and check.startswith("verapdf:"):
             meaning = ("veraPDF reported " + check.split(":", 1)[1],
                        "error", "PDF/UA (veraPDF)", "source")
+        if meaning is None and check.startswith("verapdf-wcag:"):
+            # veraPDF's WCAG 2.2 profile (--wcag): experimental, and wrong
+            # at times, so a note, never an error a run or an audit fails on.
+            meaning = (describe(check), "note",
+                       wcag.standard(check.split(":", 1)[1].rsplit("-", 1)[0]),
+                       "manual")
         self.severity = severity or (meaning[1] if meaning else "warning")
         self.standard = standard if standard is not None else (
             meaning[2] if meaning else "")
@@ -355,6 +363,11 @@ def describe(check):
         return "epubcheck message " + check.split(":", 1)[1]
     if check.startswith("verapdf:"):
         return "veraPDF rule " + check.split(":", 1)[1]
+    if check.startswith("verapdf-wcag:"):
+        rule = check.split(":", 1)[1]
+        clause = rule.rsplit("-", 1)[0]
+        return (f"veraPDF's WCAG 2.2 rule {rule}, experimental and wrong at times: "
+                f"{wcag.named(clause)}, {wcag.url(clause)}")
     return check
 
 
@@ -394,9 +407,14 @@ class Cache:
         except (OSError, ValueError):
             self.data = {}
 
-    def lookup(self, sha256):
+    def lookup(self, sha256, options=None):
+        """The findings last written for an input, or None when there are
+        none, or they were found with other options: a page read without
+        the validators (--quick) isn't the page read with them."""
         entry = self.data.get(sha256)
         if not entry or sha256 == "__report__":
+            return None
+        if entry.get("options", {}) != (options or {}):
             return None
         out = []
         for r in entry.get("findings", []):
@@ -406,17 +424,23 @@ class Cache:
                                tool=r[7] or "oer", fix=r[8] or None))
         return out
 
-    def store(self, sha256, findings):
+    def store(self, sha256, findings, options=None):
         self.data[sha256] = {"findings": [f.row() for f in findings],
-                             "when": now()}
+                             "options": options or {}, "when": now()}
 
-    def note_inputs(self, hashes):
-        """Which inputs the last report covered, and when."""
-        self.data["__report__"] = {"inputs": sorted(hashes), "when": now()}
+    def note_inputs(self, hashes, options=None):
+        """Which inputs the last report covered, with which options
+        (audit.py's --quick and --wcag), and when."""
+        self.data["__report__"] = {"inputs": sorted(hashes),
+                                   "options": options or {}, "when": now()}
 
-    def same_inputs(self, hashes):
+    def same_inputs(self, hashes, options=None):
+        """Whether the last report covered these inputs with these
+        options: a report made without the validators, or without
+        veraPDF's WCAG checks, isn't the one asked for with them."""
         report = self.data.get("__report__") or {}
-        return report.get("inputs") == sorted(hashes)
+        return report.get("inputs") == sorted(hashes) \
+            and report.get("options", {}) == (options or {})
 
     def audited_at(self):
         return (self.data.get("__report__") or {}).get("when", "?")

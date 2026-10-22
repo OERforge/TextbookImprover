@@ -5312,6 +5312,11 @@ def main():
                         help="check the output without epubcheck, the Nu HTML "
                              "checker, and veraPDF, even where they're "
                              "installed (check-output.py --quick)")
+    parser.add_argument("--wcag", action="store_true",
+                        help="check each PDF against veraPDF's WCAG 2.2 machine "
+                             "profile too, with its WCAG modules from VERAPDF_WCAG; "
+                             "experimental, so what it finds is a note, never an "
+                             "error (check-output.py --wcag)")
     args, passthrough = parser.parse_known_args()
     TRACE = not args.quiet
     base = os.getcwd()
@@ -5869,7 +5874,7 @@ def main():
         # Findings go to one report beside the others and never stop the
         # run: the output exists, and the list is what to work through.
         command = ["python3", CHECK_TOOL, "--report", reports["output_check"]] \
-            + (["--quick"] if args.quick else [])
+            + (["--quick"] if args.quick else []) + (["--wcag"] if args.wcag and pdfs else [])
         # A PowerPoint deck's copies were checked before it was converted,
         # into the same report, which keeps their findings.
         copies_found = []
@@ -5892,6 +5897,9 @@ def main():
             command += ["--pptx", pptx]
         if os.path.isfile(CHECK_TOOL):
             run(command, check=False)
+        if args.wcag and not pdfs:
+            # After the check's verdict, where veraPDF's WCAG lines go.
+            say("  veraPDF's WCAG checks not run: the run made no PDF.")
         if copies_found:
             import findings
             findings.write_csv(reports["output_check"], copies_found + (

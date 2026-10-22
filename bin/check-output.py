@@ -12,7 +12,8 @@ Runs at the end of convert.py over the pages of this run and any EPUB
 built from them, and writes the findings to a report beside the other
 reports. The run is not stopped by a finding: the output exists, and
 the report is the list to work through. With no findings the report is
-removed, so the file existing is the signal.
+removed, so the file existing is the signal (notes from --wcag, below,
+keep it, though the summary's verdict leaves them out).
 
 The checks are in lib/outputcheck.py: links and fragments that resolve
 to nothing, images with no alt attribute, headings that skip a level,
@@ -26,6 +27,16 @@ as well when they are installed -- named by EPUBCHECK_JAR and VNU_JAR,
 or as commands on the path -- and their findings go into the same
 report with the tool's own message id as the check; --quick skips them,
 and veraPDF, and convert.py --quick passes it on.
+
+--wcag runs veraPDF's WCAG 2.2 machine profile on each PDF as well, with
+the WCAG modules its release lacks, from the folder VERAPDF_WCAG names
+(docs/installation.md). The checks are experimental and wrong at times,
+so each failed check is a note, never an error, and the summary says so;
+and since veraPDF without the modules passes the profile's own rules
+without checking them, and says nothing of it, a probe of its own in the
+same run says whether they loaded, and the summary warns when they
+didn't. Given nothing to check, --wcag runs the probe alone, which
+checks the setup. convert.py --wcag passes it on.
 
 Copyright 2026 Robert Szarka
 
@@ -78,6 +89,11 @@ def main():
     parser.add_argument("--quick", action="store_true",
                         help="skip epubcheck, the Nu checker, and veraPDF "
                              "even if installed")
+    parser.add_argument("--wcag", action="store_true",
+                        help="run veraPDF's WCAG 2.2 machine profile on each PDF too, with "
+                             "its WCAG modules from VERAPDF_WCAG; experimental, so what it "
+                             "finds is a note, never an error; with nothing else to check, "
+                             "check the setup")
     args = parser.parse_args()
 
     pages = list(args.pages)
@@ -123,6 +139,22 @@ def main():
             notes.append("veraPDF not found (set VERAPDF, or put verapdf on "
                          "the path); skipped.")
         pdf_findings += found
+    # veraPDF's WCAG 2.2 checks, when asked for: information, never a
+    # verdict, so they're counted and summarized apart from the rest.
+    wcag_findings, wcag_lines = [], []
+    if args.wcag:
+        command = None if args.quick else outputcheck.find_validator("verapdf")
+        if args.quick:
+            wcag_lines.append("veraPDF's WCAG checks not run (--quick).")
+        elif not command:
+            wcag_lines.append("veraPDF's WCAG checks not run: veraPDF not found (set "
+                              "VERAPDF, or put verapdf on the path).")
+        elif not pdfs and (args.pages or args.pages_file or args.epub or args.pdf
+                           or args.pptx):
+            wcag_lines.append("veraPDF's WCAG checks not run: no PDF to check.")
+        else:
+            # With nothing named to check, the setup alone.
+            wcag_findings, wcag_lines = pdfcheck.run_verapdf_wcag(command, pdfs)
     # A PowerPoint file's, as a PowerPoint deck's are found.
     pptxs = [p for p in args.pptx if os.path.exists(p)]
     pptx_findings = []
@@ -130,8 +162,9 @@ def main():
         pptx_findings += pptxcheck.check(pptxparse.read(path), os.path.basename(path),
                                          kind="pptx")
 
+    written = bool(findings or pdf_findings or pptx_findings or wcag_findings)
     if args.report:
-        if findings or pdf_findings or pptx_findings:
+        if written:
             # The shared findings format: the first three columns are
             # the ones this report has always had, the rest say more.
             findings_lib.write_csv(args.report, [
@@ -142,7 +175,7 @@ def main():
                     tool=("vnu" if f.check.startswith("vnu") else
                           "epubcheck" if f.check.startswith("epubcheck")
                           else "oer"))
-                for f in findings] + pdf_findings + pptx_findings)
+                for f in findings] + pdf_findings + pptx_findings + wcag_findings)
         elif os.path.exists(args.report):
             os.remove(args.report)
 
@@ -153,23 +186,31 @@ def main():
     checked = parts[0] if len(parts) == 1 else (
         f"{parts[0]} and {parts[1]}" if len(parts) == 2
         else ", ".join(parts[:-1]) + f", and {parts[-1]}")
-    for note in notes:
-        print(f"  {note}", file=sys.stderr)
-    if not findings and not pdf_findings and not pptx_findings:
-        print(f"Output check: {checked}, nothing found.", file=sys.stderr)
-        return 0
-    print(f"Output check: {checked}, "
-          f"{len(findings) + len(pdf_findings) + len(pptx_findings)} finding(s):",
-          file=sys.stderr)
-    for check, count in outputcheck.summarize(findings):
-        print(f"  {count:5}  {check}: "
-              f"{outputcheck.DESCRIPTIONS.get(check) or findings_lib.describe(check)}",
-              file=sys.stderr)
-    for line in pdf_summary(pdf_findings) + pdf_summary(pptx_findings, by_file=True):
+    for line in summary(checked, notes, findings, pdf_findings, pptx_findings, wcag_lines,
+                        args.report if args.report and written else None):
         print(line, file=sys.stderr)
-    if args.report:
-        print(f"Written to {args.report}.", file=sys.stderr)
     return 0
+
+
+def summary(checked, notes, findings, pdf_findings, pptx_findings, wcag_lines,
+            report=None):
+    """The run's summary: what didn't run, the verdict and its findings,
+    then, outside the verdict's count, what veraPDF's WCAG profile found
+    or why it didn't run, and where the report went."""
+    lines = [f"  {note}" for note in notes]
+    if not findings and not pdf_findings and not pptx_findings:
+        lines.append(f"Output check: {checked}, nothing found.")
+    else:
+        lines.append(f"Output check: {checked}, "
+                     f"{len(findings) + len(pdf_findings) + len(pptx_findings)} finding(s):")
+        for check, count in outputcheck.summarize(findings):
+            lines.append(f"  {count:5}  {check}: "
+                         f"{outputcheck.DESCRIPTIONS.get(check) or findings_lib.describe(check)}")
+        lines += pdf_summary(pdf_findings) + pdf_summary(pptx_findings, by_file=True)
+    lines += [f"  {line}" for line in wcag_lines]
+    if report:
+        lines.append(f"Written to {report}.")
+    return lines
 
 
 def pdf_summary(pdf_findings, by_file=False):

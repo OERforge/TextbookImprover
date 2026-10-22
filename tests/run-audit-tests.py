@@ -212,6 +212,81 @@ def case_front_door():
     ]
 
 
+def case_wcag():
+    """--wcag, with a stand-in for veraPDF: the WCAG profile's failed
+    checks notes that leave the exit status the other findings', a
+    section of the report saying the checks ran and may be wrong, a run
+    with --wcag never taking the report for current, since what it finds
+    turns on a setup the cache can't see, a report made with other
+    options not taken for the one asked for, and a page read with
+    another --quick read again."""
+    sys.path.insert(0, HERE)
+    import fakeverapdf
+    import pdfcheck
+    import pypdf
+    from pypdf.generic import BooleanObject, DictionaryObject, NameObject
+    folder = os.path.join(WORK, "wcag")
+    os.makedirs(folder)
+    probe = os.path.join(WORK, "probe.pdf")
+    with open(probe, "wb") as fh:
+        fh.write(pdfcheck.wcag_probe())
+    # A tagged PDF with a title it displays, so no finding of its own is
+    # an error, and the exit status says whether the profile's are.
+    writer = pypdf.PdfWriter(clone_from=probe)
+    writer.add_metadata({"/Title": "A Book"})
+    writer._root_object[NameObject("/ViewerPreferences")] = DictionaryObject(
+        {NameObject("/DisplayDocTitle"): BooleanObject(True)})
+    with open(os.path.join(folder, "book.pdf"), "wb") as fh:
+        writer.write(fh)
+    with open(os.path.join(folder, "page.html"), "w", encoding="utf-8") as fh:
+        fh.write('<!DOCTYPE html><html lang="en"><head><title>A page</title></head>'
+                 "<body><h1>A page</h1><p>Text.</p></body></html>\n")
+    out = os.path.join(WORK, "wcag-out")
+    env = dict(os.environ, VERAPDF=fakeverapdf.install(os.path.join(WORK, "fake-verapdf")),
+               VERAPDF_WCAG=fakeverapdf.modules(os.path.join(WORK, "wcag-modules")))
+
+    def audit(*flags):
+        result = subprocess.run([sys.executable, os.path.join(BIN, "audit.py"), folder,
+                                 "-o", out, *flags], cwd=WORK, capture_output=True,
+                                text=True, stdin=subprocess.DEVNULL, env=env)
+        found = fl.read_csv(os.path.join(out, "audit.csv"))
+        with open(os.path.join(out, "audit.md"), encoding="utf-8") as fh:
+            return result, found, fh.read()
+    plain, plain_found, _ = audit()
+    ran, found, report = audit("--wcag")
+    again, _, _ = audit("--wcag")
+    without, without_found, without_report = audit()
+    quick, _, _ = audit("--quick")
+    quick_again, _, _ = audit("--quick")
+    wcag = [f for f in found if f.check.startswith("verapdf-wcag:")]
+    return [
+        ("--wcag adds the profile's failed checks, notes at their pages",
+         lambda: sorted((f.where, f.check, f.severity) for f in wcag) == [
+             ("book.pdf#page=3", "verapdf-wcag:2.4.9-1", "note"),
+             ("book.pdf#page=653", "verapdf-wcag:1.3.1-1", "note")]),
+        ("and leaves the exit status the other findings', none of them an error",
+         lambda: plain.returncode == ran.returncode == 0
+         and not [f for f in plain_found if f.severity == "error"]),
+        ("the report has a section on them, saying they ran and may be wrong",
+         lambda: "## book.pdf: veraPDF's WCAG 2.2 checks" in report
+         and "experimental and may be wrong" in report),
+        ("a second audit with --wcag doesn't take the report for current, and checks "
+         "the PDF again, the page coming from the cache",
+         lambda: "is current" not in again.stderr
+         and "book.pdf: " in again.stderr and "page.html: unchanged" in again.stderr),
+        ("one without --wcag doesn't take it for current either, and leaves the profile out",
+         lambda: "is current" not in without.stderr
+         and not any(f.check.startswith("verapdf-wcag:") for f in without_found)
+         and "WCAG 2.2 checks" not in without_report),
+        ("one with --quick after one without reads the page again, its findings found "
+         "with the validators",
+         lambda: "is current" not in quick.stderr
+         and "page.html: unchanged" not in quick.stderr),
+        ("and another with --quick finds the report current",
+         lambda: "is current" in quick_again.stderr),
+    ]
+
+
 def case_check_only():
     d = os.path.join(WORK, "book")
     os.makedirs(d, exist_ok=True)
@@ -260,6 +335,7 @@ def main():
                        ("the source check agrees with the filter",
                         case_agreement),
                        ("the front door", case_front_door),
+                       ("veraPDF's WCAG checks, asked for", case_wcag),
                        ("convert.py --check-only", case_check_only)]:
         print(f"\n{name}")
         try:

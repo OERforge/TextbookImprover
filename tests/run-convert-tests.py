@@ -3085,9 +3085,10 @@ def case_asciidoc_layout(work):
 
 def case_quick(work):
     """--quick: the output check without epubcheck, the Nu checker, and
-    veraPDF, saying so. The run without it has the validators hidden (each
-    variable naming a file that isn't there), so it asks for them and is
-    told they're missing, without starting Java."""
+    veraPDF, saying so; and --wcag, in a run that made no PDF, saying
+    there was none to check. The run without --quick has the validators
+    hidden (each variable naming a file that isn't there), so it asks for
+    them and is told they're missing, without starting Java."""
     os.makedirs(work)
     with open(os.path.join(work, "ch.md"), "w") as fh:
         fh.write("# One\n\nText.\n")
@@ -3099,13 +3100,20 @@ def case_quick(work):
                                 cwd=work, capture_output=True, text=True,
                                 stdin=subprocess.DEVNULL, env=env)
         return result.stdout + result.stderr
-    quick = run("--quick")
+    quick = run("--quick", "--wcag")
     nowhere = os.path.join(work, "no-such-validator")
     full = run(env=dict(os.environ, EPUBCHECK_JAR=nowhere, VNU_JAR=nowhere, VERAPDF=nowhere))
     return [
         ("--quick checks the pages without the validators, and says so",
          lambda: "Output check: 1 page(s)" in quick
-         and "not run (--quick)" in quick and "VNU_JAR" not in quick),
+         and "epubcheck, the Nu HTML checker, and veraPDF not run (--quick)." in quick
+         and "VNU_JAR" not in quick),
+        ("and --wcag, in a run that made no PDF, says there was none to check, after the "
+         "verdict, without passing --wcag on",
+         lambda: "veraPDF's WCAG checks not run: the run made no PDF." in quick
+         and quick.index("Output check: 1 page(s)")
+         < quick.index("veraPDF's WCAG checks not run: the run made no PDF.")
+         and "veraPDF's WCAG checks not run (--quick)." not in quick),
         ("without it, the run looks for them",
          lambda: "VNU_JAR" in full and "not run (--quick)" not in full),
     ]

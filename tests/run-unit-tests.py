@@ -1850,11 +1850,329 @@ def check_alt_text_rules():
     ]
 
 
+def check_wcag_criteria():
+    """WCAG 2.2's criteria as W3C's source has them (lib/wcag.py), and
+    every WCAG standard a finding names agreeing with them: a fact
+    written down twice."""
+    import findings as findings_lib
+    import wcag
+    numbers = list(wcag.CRITERIA)
+    standards = {}
+    for check, meaning in findings_lib.CHECKS.items():
+        if meaning[2].startswith("WCAG"):
+            found = re.match(r"WCAG 2\.\d SC (\d\.\d+\.\d+) \((?:A|AA|AAA)\)$", meaning[2])
+            standards[check] = (meaning[2], wcag.standard(found.group(1)) if found else None)
+    return [
+        ("87 criteria, 61 from WCAG 2.0, 17 from 2.1, and 9 from 2.2, each number once",
+         lambda: len(numbers) == len(set(numbers)) == 87
+         and [sum(1 for entry in wcag.CRITERIA.values() if entry[2] == version)
+              for version in ("2.0", "2.1", "2.2")] == [61, 17, 9]),
+        ("each at a level but 4.1.1, obsolete and removed",
+         lambda: [n for n, entry in wcag.CRITERIA.items()
+                  if entry[1] not in ("A", "AA", "AAA")] == ["4.1.1"]),
+        ("the criteria of veraPDF's machine profiles, each by its name and level, and "
+         "one 2.0 hadn't by the version that brought it",
+         lambda: [wcag.named(n) for n in ("1.3.1", "1.4.3", "1.4.4", "1.4.10", "2.4.9",
+                                          "4.1.2")] == [
+             "1.3.1 Info and Relationships (A)", "1.4.3 Contrast (Minimum) (AA)",
+             "1.4.4 Resize Text (AA)", "1.4.10 Reflow (AA, WCAG 2.1)",
+             "2.4.9 Link Purpose (Link Only) (AAA)", "4.1.2 Name, Role, Value (A)"]),
+        ("a criterion's Understanding document, and its standard as findings name one",
+         lambda: wcag.url("2.4.9")
+         == "https://www.w3.org/WAI/WCAG22/Understanding/link-purpose-link-only.html"
+         and wcag.standard("1.4.10") == "WCAG 2.1 SC 1.4.10 (AA)"),
+        ("a number WCAG 2.2 doesn't have points at WCAG 2.2 itself",
+         lambda: wcag.url("9.9.9") == "https://www.w3.org/TR/WCAG22/"
+         and wcag.standard("9.9.9") == "WCAG 2.2 SC 9.9.9" and wcag.named("9.9.9") == "9.9.9"),
+        ("every WCAG standard a finding names is its criterion's, the version and level W3C's",
+         lambda: len(standards) > 50
+         and [check for check, (ours, theirs) in standards.items() if ours != theirs] == []),
+    ]
+
+
+def check_wcag_report():
+    """veraPDF's JSON report of its WCAG profile read as findings: only
+    the profile's own rules, each failed check a note at its page with
+    what veraPDF found and the criterion; nothing but a warning when the
+    probe, in the same run, passed, since then no WCAG rule was checked."""
+    import findings as findings_lib
+    import pdfcheck
+    probe, book = "/w/wcag-probe.pdf", "/books/ia/book.pdf"
+
+    def job(name, rules):
+        return {"itemDetails": {"name": name, "size": 1}, "validationResult": [
+            {"profileName": "WCAG 2.2 machine validation profile",
+             "details": {"ruleSummaries": rules}}]}
+
+    def rule(spec, clause, test, description, checks, failed=None, kind="SATextChunk"):
+        return {"specification": spec, "clause": clause, "testNumber": test, "status": "failed",
+                "failedChecks": len(checks) if failed is None else failed, "object": kind,
+                "description": description, "checks": checks}
+
+    def check(message, context="", location=None):
+        return dict({"status": "failed", "context": context, "errorMessage": message},
+                    **({"location": location} if location else {}))
+    build = {"releaseDetails": [{"id": "core", "version": "1.30.3"},
+                                {"id": "apps", "version": "1.30.3"}]}
+    repeated = rule("WCAG2.2", "1.3.1", 1, "Text should not contain repeated non space characters",
+                    [check("Text contains 10 repeated non space characters",
+                           "root/doc[0]/repeatedCharacters[0]",
+                           '{"bbox":[{"p":0,"rect":[72.0,717.3,138.72,731.172]}]}')],
+                    kind="SARepeatedCharacters")
+    span = ("root/doc[0]/StructTreeRoot[0]/children[0](11 0 obj Document Document)"
+            "/children[5](17 0 obj Span Span)")
+    text = ("root/doc[0]/StructTreeRoot[0]/children[0](11 0 obj Document Document)"
+            "/children[2](14 0 obj P P)/children[0]{text too  small to read}")
+    rules = [
+        rule("ISO_14289_2", "8.2.5.2", 2, "A PDF/UA rule", [check("a message")]),
+        rule("WCAG2.2", "4.1.2", 17, "Redundant span",
+             [check("score = 1, correct type = null", span)]),
+        rule("WCAG2.2", "2.4.9", 1, "Links shall contain an alternate description",
+             [check("A link annotation does not include an alternate description",
+                    "root/doc[0]/pages[2]/annots[0]")]),
+        rule("WCAG2.2", "1.4.4", 1, "Font size is too small",
+             [check("textSize = 3", text, '{"bbox":[{"p":652,"rect":[72,679,99,682]}]}')]),
+        rule("WCAG2.2", "1.4.3", 1, "Contrast",
+             [check("contrastRatio = 3.1", "",
+                    '{"bbox":[{"p":10,"rect":[0,0,1,1]},{"p":9,"rect":[0,0,1,1]}]}'),
+              check("contrastRatio = 2.8", "", '{"bbox":[{"p":11,"rect":[0,0,1,1]}]}')],
+             failed=150),
+    ]
+    modules = {"wcag-validation": ["1.30.3"], "wcag-algorithms": ["1.30.3"]}
+    read = pdfcheck.wcag_report({"report": {"buildInformation": build, "jobs": [
+        job(probe, [repeated]), job(book, rules)]}}, probe, "/tools/verapdf-wcag", modules)
+    by = {}
+    for found in read["findings"]:
+        by.setdefault(found.check, []).append(found)
+    lines = [line for _, line in sorted(read["rules"])]
+    older = pdfcheck.wcag_report({"report": {"buildInformation": build, "jobs": [
+        job(probe, [rule("ISO_14289_2", "8.2.5.2", 2, "A PDF/UA rule", [check("a message")])]),
+        job(book, rules)]}}, probe, "/tools/verapdf-wcag",
+        dict(modules, **{"wcag-validation": ["1.30.2"]}))
+    read_back = findings_lib.Finding("b.pdf", "verapdf-wcag:1.4.10-1", "")
+    # A report without the probe's job, and one whose probe failed a WCAG
+    # rule on an object veraPDF has without the modules, are no proof.
+    unprobed = pdfcheck.wcag_report({"report": {"buildInformation": build, "jobs": [
+        job(book, rules)]}}, probe, "/tools/verapdf-wcag", modules)
+    core = pdfcheck.wcag_report({"report": {"buildInformation": build, "jobs": [
+        job(probe, [rule("WCAG2.2", "1.3.4", 1, "Pages shall have the same orientation",
+                         [check("a message")], kind="PDPage")])]}},
+        probe, "/tools/verapdf-wcag", modules)
+    # A module's version not veraPDF's, a file veraPDF skipped, and one it
+    # couldn't check, each a warning beside what was read.
+    told = pdfcheck.wcag_report({"report": {"buildInformation": build, "jobs": [
+        job(probe, [repeated]), job(book, rules),
+        {"itemDetails": {"name": "/books/ia/broken.pdf"},
+         "taskException": {"type": "PARSE", "exceptionMessage": "Couldn't parse stream"}}]}},
+        probe, "/tools/verapdf-wcag", dict(modules, **{"wcag-validation": ["1.30.2"]}),
+        expected=[book, "/books/ia/broken.pdf", "/books/ia/skipped.pdf"])
+    # Reports no veraPDF writes: none of them stops the run.
+    shapes = [None, {"report": None}, {"report": {"jobs": None}},
+              {"report": {"buildInformation": {"releaseDetails": None}, "jobs": [None, 5]}},
+              {"report": {"jobs": [{"itemDetails": None, "validationResult": None}]}},
+              {"report": {"jobs": [job(probe, [repeated]), job(book, [
+                  None, {"specification": "WCAG2.2", "clause": "1.4.3", "testNumber": "1a",
+                         "failedChecks": "many", "checks": [None, {"status": "failed",
+                                                                    "location": {"bbox": 5},
+                                                                    "context": None}]}]),
+                  {"itemDetails": {"name": "/w/a#page=b.pdf"}, "validationResult": [
+                      {"details": {"ruleSummaries": [rule(
+                          "WCAG2.2", "4.1.2", 17, "Redundant span", [check("x")])]}}]},
+                  {"itemDetails": {"name": book}, "validationResult": [
+                      {"details": None}, "nonsense"]}]}}]
+    survived = []
+    for shape in shapes:
+        try:
+            survived.append(pdfcheck.wcag_report(shape, probe, "f", modules,
+                                                 expected=[book]))
+        except Exception as exc:
+            survived.append(exc)
+    return [
+        ("the probe failed a WCAG rule, so the modules loaded, and the book was checked",
+         lambda: read["loaded"] and read["checked"] == 1 and read["version"] == "1.30.3"),
+        ("only the profile's own rules are reported, and nothing of the probe",
+         lambda: sorted(by) == ["verapdf-wcag:1.4.3-1", "verapdf-wcag:1.4.4-1",
+                                "verapdf-wcag:2.4.9-1", "verapdf-wcag:4.1.2-17"]),
+        ("each failed check a note, by veraPDF, its criterion the standard",
+         lambda: {f.severity for f in read["findings"]} == {"note"}
+         and {f.tool for f in read["findings"]} == {"verapdf"}
+         and by["verapdf-wcag:2.4.9-1"][0].standard == "WCAG 2.0 SC 2.4.9 (AAA)"),
+        ("its page counted from 1: its boxes' first, or the page an annotation is on",
+         lambda: [by[c][0].where for c in ("verapdf-wcag:1.4.4-1", "verapdf-wcag:2.4.9-1",
+                                           "verapdf-wcag:1.4.3-1")]
+         == ["book.pdf#page=653", "book.pdf#page=3", "book.pdf#page=10"]),
+        ("and none where veraPDF gives none",
+         lambda: by["verapdf-wcag:4.1.2-17"][0].where == "book.pdf"),
+        ("the detail: the rule, veraPDF's message, the text and its element, the criterion, "
+         "its Understanding document, and the caveat",
+         lambda: by["verapdf-wcag:1.4.4-1"][0].detail == (
+             'Font size is too small: textSize = 3, "text too small to read" (P, object 14). '
+             "1.4.4 Resize Text (AA): https://www.w3.org/WAI/WCAG22/Understanding/"
+             "resize-text.html. veraPDF's WCAG checks are experimental and may be wrong.")
+         and "(Span, object 17)" in by["verapdf-wcag:4.1.2-17"][0].detail),
+        ("a rule failed more often than veraPDF lists says how many more",
+         lambda: len(by["verapdf-wcag:1.4.3-1"]) == 3
+         and by["verapdf-wcag:1.4.3-1"][2].detail.startswith(
+             "Contrast: 148 more failed check(s), which veraPDF doesn't list")),
+        ("a summary line a rule, in the criteria's order, with the count and the pages",
+         lambda: [line.split(",")[0] for line in lines] == [
+             "book.pdf: verapdf-wcag:1.4.3-1", "book.pdf: verapdf-wcag:1.4.4-1",
+             "book.pdf: verapdf-wcag:2.4.9-1", "book.pdf: verapdf-wcag:4.1.2-17"]
+         and "150 failed check(s), pages 10, 12: Contrast." in lines[0]),
+        ("a probe that passed is a warning, saying the modules' version isn't veraPDF's, "
+         "and nothing else",
+         lambda: not older["loaded"] and older["findings"] == [] and older["rules"] == []
+         and len(older["warnings"]) == 1 and "1.30.2" in older["warnings"][0]
+         and "silently" in older["warnings"][0]),
+        ("a finding read back from a report is a note with its criterion, described",
+         lambda: read_back.severity == "note"
+         and read_back.standard == "WCAG 2.1 SC 1.4.10 (AA)"
+         and "1.4.10 Reflow (AA, WCAG 2.1)" in findings_lib.describe("verapdf-wcag:1.4.10-1")),
+        ("a report without the probe's job isn't taken for one whose modules loaded",
+         lambda: not unprobed["loaded"] and unprobed["findings"] == []),
+        ("nor one whose probe failed a WCAG rule on an object of veraPDF's own",
+         lambda: not core["loaded"]),
+        ("a module of another version than veraPDF's is a warning, as are a file veraPDF "
+         "couldn't check, with its reason, and one it skipped",
+         lambda: told["loaded"] and len(told["findings"]) == len(read["findings"])
+         and len(told["warnings"]) == 3
+         and told["warnings"][0].startswith("WARNING: --wcag: veraPDF 1.30.3 loaded "
+                                             "wcag-validation 1.30.2 from")
+         and told["warnings"][1] == ("WARNING: --wcag: veraPDF couldn't check broken.pdf: "
+                                     "Couldn't parse stream")
+         and told["warnings"][2].startswith("WARNING: --wcag: veraPDF didn't check "
+                                            "skipped.pdf, and said nothing of it")),
+        ("a report no veraPDF writes is read as far as it goes, never stopping the run",
+         lambda: not [s for s in survived if isinstance(s, Exception)]),
+        ("a test number that isn't a number, a count that isn't one, and a check that's "
+         "nothing are read past, not taken for a report that can't be read",
+         lambda: not [w for w in survived[5]["warnings"] if "couldn't be read" in w]
+         and [f.check for f in survived[5]["findings"] if f.file == "book.pdf"]
+         == ["verapdf-wcag:1.4.3-1a"]),
+        ("a file whose name holds #page= keeps its findings' places",
+         lambda: [f.where for f in survived[-1]["findings"] if "a#page" in f.file]
+         == ["a#page=b.pdf"]),
+    ]
+
+
+def check_wcag_probe():
+    """The probe is a PDF, its cross-reference table right, of one page
+    whose one tagged paragraph is ten underscores; a PDF 2.0 header gets
+    that version's profile; and no folder of modules, or one without
+    their jars, is a warning before veraPDF is run."""
+    import pdfcheck
+    data = pdfcheck.wcag_probe()
+    work = scratch("wcag-probe-")
+    path, newer = os.path.join(work, "probe.pdf"), os.path.join(work, "newer.pdf")
+    with open(path, "wb") as fh:
+        fh.write(data)
+    with open(newer, "wb") as fh:
+        fh.write(data.replace(b"%PDF-1.7", b"%PDF-2.0", 1))
+    start = int(re.search(rb"startxref\n(\d+)", data).group(1))
+    offsets = [int(o) for o in re.findall(rb"^(\d{10}) 00000 n ", data, re.M)]
+    nowhere = [os.path.join(work, "no-such-verapdf")]
+    unset = pdfcheck.run_verapdf_wcag(nowhere, [path], folder="")
+    empty = pdfcheck.run_verapdf_wcag(nowhere, [path], folder=work)
+    text = None
+    if pdfcheck.pypdf is not None:
+        reader = pdfcheck.pypdf.PdfReader(path)
+        text = (len(reader.pages), reader.pages[0].extract_text().strip())
+    return [
+        ("its cross-reference table points at each of its nine objects",
+         lambda: data[start:start + 4] == b"xref" and len(offsets) == 9
+         and all(data[o:].startswith(b"%d 0 obj" % n) for n, o in enumerate(offsets, 1))),
+        ("pypdf reads one page of ten underscores",
+         lambda: text == (1, "__________") if text is not None
+         else print("  skip  no pypdf to read the probe") or True),
+        ("a header saying PDF 2.0 gets that profile, any other the 1.x one",
+         lambda: pdfcheck.pdf_major(newer) == "2" and pdfcheck.pdf_major(path) == "1"),
+        ("no folder is a warning naming VERAPDF_WCAG, veraPDF not run",
+         lambda: unset[0] == [] and len(unset[1]) == 1
+         and "aren't installed (VERAPDF_WCAG names no folder" in unset[1][0]),
+        ("a folder without the modules' jars, a warning naming them",
+         lambda: empty[0] == [] and len(empty[1]) == 1
+         and "has no wcag-validation or wcag-algorithms jar" in empty[1][0]),
+    ]
+
+
+def check_wcag_setup():
+    """The folder of veraPDF's WCAG modules read as Java would load it,
+    two versions of a module a warning; the setup check naming a missing
+    profile, or one that isn't XML; and the output check's summary, where veraPDF's WCAG notes
+    follow the verdict and stay out of its count, and keep the report.
+    With the suites' stand-in for veraPDF."""
+    sys.path.insert(0, HERE)
+    import fakeverapdf
+    import pdfcheck
+    check_output = load(os.path.join(ROOT, "bin", "check-output.py"), "check_output_wcag")
+    work = scratch("wcag-setup-")
+    fake = [fakeverapdf.install(os.path.join(work, "fake"))]
+    twice = fakeverapdf.modules(os.path.join(work, "twice"))
+    for name in ("wcag-algorithms-1.30.2.jar", "wcag-validation-1.30.3-sources.jar",
+                 "wcag-validationX.jar"):
+        open(os.path.join(twice, name), "w").close()
+    one = fakeverapdf.modules(os.path.join(work, "one"),
+                              profiles=("WCAG-2-2-Machine-PDF20.xml",))
+    # Profiles that can't be read: XML cut short, and XML in an encoding
+    # Python doesn't know and in one expat can't read.
+    unreadable = {}
+    for name, text in (("cut short", "<profile>"),
+                       ("UTF-8x", '<?xml version="1.0" encoding="UTF-8x"?><profile/>'),
+                       ("Shift_JIS", '<?xml version="1.0" encoding="Shift_JIS"?><profile/>')):
+        folder = fakeverapdf.modules(os.path.join(work, "unreadable", name))
+        with open(os.path.join(folder, "WCAG-2-2-Machine.xml"), "w") as fh:
+            fh.write(text)
+        unreadable[folder] = pdfcheck.run_verapdf_wcag(fake, [], folder=folder)
+    doubled = pdfcheck.run_verapdf_wcag(fake, [], folder=twice)
+    lacking = pdfcheck.run_verapdf_wcag(fake, [], folder=one)
+    os.environ["FAKE_VERAPDF_SLEEP"] = "5"
+    try:
+        slow = pdfcheck.run_verapdf_wcag(fake, [], folder=twice, timeout=1)
+    finally:
+        del os.environ["FAKE_VERAPDF_SLEEP"]
+    lines = check_output.summary("0 page(s) and 1 PDF(s)", [], [], [], [],
+                                 ["veraPDF 1.30.3's WCAG 2.2 machine checks ran on 1 PDF(s)",
+                                  "book.pdf: verapdf-wcag:1.3.1-1, 1.3.1 Info and "
+                                  "Relationships (A): 1 failed check(s), page 653"],
+                                 "output-check.csv")
+    return [
+        ("a module's jars by their names, a sources jar or another name not one",
+         lambda: pdfcheck.wcag_modules(twice) == {"wcag-validation": ["1.30.3"],
+                                                  "wcag-algorithms": ["1.30.2", "1.30.3"]}),
+        ("two versions of a module are a warning, since Java loads one, saying not which",
+         lambda: any("has wcag-algorithms 1.30.2 and 1.30.3" in line for line in doubled[1])),
+        ("veraPDF stopped after the time it's given is a warning saying so",
+         lambda: any("veraPDF hadn't finished with WCAG-2-2-Machine-PDF20.xml after 1 "
+                     "seconds, and was stopped." in line for line in slow[1])),
+        ("the setup check names a profile missing from the folder",
+         lambda: lacking[1][0].startswith("veraPDF 1.30.3 loaded its WCAG modules")
+         and any("has no WCAG-2-2-Machine.xml, the profile for a PDF 1.x file" in line
+                 for line in lacking[1])),
+        ("and one that can't be read as one, cut short or in an encoding that can't be read, "
+         "the other run",
+         lambda: all(lines[0].startswith("veraPDF 1.30.3 loaded its WCAG modules")
+                     and any("WCAG-2-2-Machine.xml in " + folder + " (VERAPDF_WCAG) can't be "
+                             "read as a profile" in line for line in lines)
+                     for folder, (_, lines) in unreadable.items())),
+        ("veraPDF's WCAG notes alone: nothing found, their lines after it, the report kept",
+         lambda: lines == [
+             "Output check: 0 page(s) and 1 PDF(s), nothing found.",
+             "  veraPDF 1.30.3's WCAG 2.2 machine checks ran on 1 PDF(s)",
+             "  book.pdf: verapdf-wcag:1.3.1-1, 1.3.1 Info and Relationships (A): 1 failed "
+             "check(s), page 653",
+             "Written to output-check.csv."]),
+    ]
+
+
 GROUPS = [
     ("a report's rows", check_report_rows),
     ("alt text's rules, and their findings", check_alt_text_rules),
     ("a PDF read without pypdf's warnings", check_pdf_read_quietly),
     ("the PDF findings in the output check's summary", check_pdf_summary),
+    ("WCAG 2.2's criteria, as W3C has them", check_wcag_criteria),
+    ("veraPDF's WCAG profile's report, read as findings", check_wcag_report),
+    ("the WCAG probe, and the setup checked before veraPDF runs", check_wcag_probe),
+    ("the WCAG modules' folder, and the summary their notes go in", check_wcag_setup),
     ("tlmgr, with sudo where it needs it", check_tlmgr_command),
     ("a PDF's lines too wide, and its fitted blanks", check_fitted_blanks),
     ("the installation page's TeX packages", check_tex_packages),

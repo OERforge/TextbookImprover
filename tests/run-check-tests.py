@@ -26,7 +26,11 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
+import csv
+import io
+import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -36,7 +40,10 @@ import zipfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, os.path.join(ROOT, "lib"))
+sys.path.insert(0, HERE)
+import fakeverapdf  # noqa: E402
 import outputcheck  # noqa: E402
+import pdfcheck  # noqa: E402
 
 GOOD = """<!DOCTYPE html><html lang="en"><head><title>A page</title></head>
 <body><h1 id="top">Top</h1><h2>Second</h2>
@@ -445,6 +452,7 @@ def main():
                          for variable in hidden)
              or fail("got: " + " | ".join(notes))),
         ]
+        cases += wcag_cases(work)
         for label, predicate in cases:
             try:
                 ok = predicate()
@@ -456,6 +464,277 @@ def main():
         shutil.rmtree(work, ignore_errors=True)
     print(f"\n{failed} check(s) failed" if failed else "\nall output checks passed")
     return 1 if failed else 0
+
+
+def wcag_cases(work):
+    """--wcag: veraPDF's WCAG 2.2 profile run on a PDF, its own rules
+    reported apart and as notes, and a probe in the same run saying
+    whether its modules loaded. With a stand-in for veraPDF wherever the
+    suite runs; and with veraPDF itself where it's installed, which,
+    with jars that hold no modules, passes the profile's rule unchecked,
+    as the probe shows, and with the modules VERAPDF_WCAG names, loads
+    them."""
+    tool = os.path.join(ROOT, "bin", "check-output.py")
+    fake = fakeverapdf.install(os.path.join(work, "fake"))
+    loads = fakeverapdf.modules(os.path.join(work, "loads"))
+    unloaded = fakeverapdf.modules(os.path.join(work, "unloaded"), loads=False)
+    log = os.path.join(work, "fake.log")
+    pdf = os.path.join(work, "book.pdf")
+    with open(pdf, "wb") as fh:
+        fh.write(pdfcheck.wcag_probe().replace(b"%PDF-1.7", b"%PDF-2.0", 1))
+
+    def run(*flags, folder=None, verapdf=fake, **more):
+        env = dict(os.environ, VERAPDF=verapdf, FAKE_VERAPDF_LOG=log, **more)
+        env.pop("VERAPDF_WCAG", None)
+        if folder:
+            env["VERAPDF_WCAG"] = folder
+        return subprocess.run([sys.executable, tool, *flags], capture_output=True, text=True,
+                              env=env, cwd=work, stdin=subprocess.DEVNULL).stderr
+
+    def calls_since(count):
+        with open(log, encoding="utf-8") as fh:
+            return [json.loads(line) for line in fh][count:]
+
+    report = os.path.join(work, "wcag.csv")
+    ran = run("--wcag", "--pdf", pdf, "--report", report, folder=loads)
+    with open(report, newline="", encoding="utf-8") as fh:
+        rows = list(csv.DictReader(fh))
+    with open(log, encoding="utf-8") as fh:
+        calls = [json.loads(line) for line in fh]
+    profiled = [call for call in calls if "-p" in call["args"]]
+    others = sum(1 for row in rows if not row["Check"].startswith("verapdf-wcag:"))
+    setup = run("--wcag", folder=loads)
+    missed = run("--wcag", "--pdf", pdf, folder=unloaded)
+    absent = run("--wcag", "--pdf", pdf)
+    quick = run("--wcag", "--quick", "--pdf", pdf, folder=loads)
+    # A PDF 1.x beside a PDF 2.0, each against its own profile, a
+    # CLASSPATH_PREFIX already set kept after the modules', and a folder
+    # without the 1.x profile.
+    older = os.path.join(work, "older.pdf")
+    with open(older, "wb") as fh:
+        fh.write(pdfcheck.wcag_probe())
+    count = len(calls_since(0))
+    both = run("--wcag", "--pdf", pdf, "--pdf", older, folder=loads,
+               CLASSPATH_PREFIX="/somewhere/else.jar")
+    both_calls = [call for call in calls_since(count) if "-p" in call["args"]]
+    lacking = fakeverapdf.modules(os.path.join(work, "lacking"),
+                                  profiles=("WCAG-2-2-Machine-PDF20.xml",))
+    count = len(calls_since(0))
+    halfway = run("--wcag", "--pdf", pdf, "--pdf", older, folder=lacking)
+    halfway_calls = [call for call in calls_since(count) if "-p" in call["args"]]
+    count = len(calls_since(0))
+    pages_only = run("--wcag", os.path.join(work, "good.html"), folder=loads)
+    pages_calls = calls_since(count)
+    garbled = run("--wcag", "--pdf", pdf, folder=loads, FAKE_VERAPDF_GARBLED="1")
+    skipped = run("--wcag", "--pdf", pdf, folder=loads, FAKE_VERAPDF_SKIP="book.pdf")
+    # Modules that don't load, with two profiles to run: one run, one warning.
+    count = len(calls_since(0))
+    missed_both = run("--wcag", "--pdf", pdf, "--pdf", older, folder=unloaded)
+    missed_calls = [call for call in calls_since(count) if "-p" in call["args"]]
+    # What veraPDF writes to stderr beside its report: an exception, the
+    # JVM's note of options that mention an error, and bytes that aren't UTF-8.
+    erred = run("--wcag", "--pdf", pdf, folder=loads,
+                FAKE_VERAPDF_STDERR="java.io.IOException: Couldn't render page 3\n"
+                                    "\tat org.apache.pdfbox.rendering.PDFRenderer.x(X.java:1)\n")
+    # The notes and the log lines are as veraPDF 1.30.3 writes them here.
+    noted = run("--wcag", "--pdf", pdf, folder=loads,
+                FAKE_VERAPDF_STDERR="NOTE: Picked up JDK_JAVA_OPTIONS: "
+                                    "-XX:+HeapDumpOnOutOfMemoryError\n"
+                                    "Picked up JAVA_TOOL_OPTIONS: -Dhttps.proxyPort=46607\n"
+                                    "Oct 22, 2026 10:14:27 AM org.verapdf.gf.model.factory."
+                                    "chunks.ChunkParser getMCID\n"
+                                    "SEVERE: Undefined property /Artifact in a content "
+                                    "stream\n")
+    undecoded = run("--wcag", "--pdf", pdf, folder=loads, FAKE_VERAPDF_STDERR="\udcff\udcfe\n")
+    # veraPDF killed before it reported, as the kernel kills a JVM short of
+    # memory, with only the JVM's note on stderr.
+    killed = run("--wcag", "--pdf", pdf, folder=loads, FAKE_VERAPDF_KILLED="1",
+                 FAKE_VERAPDF_STDERR="NOTE: Picked up JDK_JAVA_OPTIONS: "
+                                     "-XX:+HeapDumpOnOutOfMemoryError\n")
+    # A PDF or an EPUB named that isn't there: no PDF to check, not the setup.
+    count = len(calls_since(0))
+    typos = [run("--wcag", flag, os.path.join(work, "no-such" + ext), folder=loads)
+             for flag, ext in (("--pdf", ".pdf"), ("--epub", ".epub"))]
+    typo_calls = [call for call in calls_since(count) if "-p" in call["args"]]
+    # A profile without the rule the probe fails, by the name of veraPDF's.
+    foreign = fakeverapdf.modules(os.path.join(work, "foreign"))
+    for name, kind in fakeverapdf.KINDS.items():
+        with open(os.path.join(foreign, name), "w", encoding="utf-8") as fh:
+            fh.write(fakeverapdf.PROFILE.format(kind=kind).replace('testNumber="1"',
+                                                                   'testNumber="2"'))
+    count = len(calls_since(0))
+    unfit = run("--wcag", "--pdf", pdf, folder=foreign)
+    unfit_calls = [call for call in calls_since(count) if "-p" in call["args"]]
+    # Nothing found and no --wcag: the report removed, and not said to be written.
+    bare_report = os.path.join(work, "nothing.csv")
+    with open(bare_report, "w") as fh:
+        fh.write("Where,Check,Detail\n")
+    nothing = run(os.path.join(work, "other.html"), "--report", bare_report)
+    url = "https://www.w3.org/WAI/WCAG22/Understanding/link-purpose-link-only.html"
+    cases = [
+        ("--wcag reports the profile's own rules, not PDF/UA's, each failed check a note at "
+         "its page, with the criterion as the standard",
+         lambda: [(r["Where"], r["Check"], r["Severity"], r["Standard"]) for r in rows
+                  if r["Check"].startswith("verapdf")] == [
+             ("book.pdf#page=653", "verapdf-wcag:1.3.1-1", "note", "WCAG 2.0 SC 1.3.1 (A)"),
+             ("book.pdf#page=3", "verapdf-wcag:2.4.9-1", "note", "WCAG 2.0 SC 2.4.9 (AAA)")]
+         or fail("got: " + " | ".join(r["Where"] + " " + r["Check"] for r in rows))),
+        ("and the detail says what veraPDF found, the criterion, its Understanding "
+         "document, and that the check may be wrong",
+         lambda: [r["Detail"] for r in rows if r["Check"] == "verapdf-wcag:2.4.9-1"] == [
+             "Links shall contain an alternate description via their Contents or Alt keys or "
+             "in the text value: A link annotation does not include an alternate description "
+             "in the Contents or Alt Keys or in the text value. 2.4.9 Link Purpose (Link Only) "
+             f"(AAA): {url}. veraPDF's WCAG checks are experimental and may be wrong."]),
+        ("the summary's verdict doesn't count them, and their lines come after it, "
+         "under one saying they're experimental",
+         lambda: re.search(rf"Output check: 0 page\(s\) and 1 PDF\(s\), {others} finding\(s\)",
+                           ran)
+         and ran.index("Output check:") < ran.index("WCAG 2.2 machine checks ran on 1 PDF(s)")
+         < ran.index("experimental and may be wrong")
+         < ran.index("book.pdf: verapdf-wcag:1.3.1-1") or fail("got: " + ran)),
+        ("a line for each rule, naming the criterion, the pages, and its Understanding document",
+         lambda: f"book.pdf: verapdf-wcag:2.4.9-1, 2.4.9 Link Purpose (Link Only) (AAA): 1 "
+                 f"failed check(s), page 3: Links shall contain" in ran and url in ran),
+        ("veraPDF gets the folder's profile for PDF 2.0, its log off, a file of any name, "
+         "the probe and the PDF, and the folder's jars first on its classpath",
+         lambda: len(profiled) == 1 and profiled[0]["args"][:6] == [
+             "--loglevel", "0", "--nonpdfext", "-p",
+             os.path.join(loads, "WCAG-2-2-Machine-PDF20.xml"), "--format"]
+         and os.path.basename(profiled[0]["args"][-2]) == "wcag-probe.pdf"
+         and profiled[0]["args"][-1] == pdf
+         and profiled[0]["prefix"].split(os.pathsep)[0] == os.path.join(loads, "*")
+         or fail(f"got: {profiled}")),
+        ("and veraPDF's usual run gets a file of any name too",
+         lambda: [call for call in calls if "-p" not in call["args"]]
+         and all("--nonpdfext" in call["args"] for call in calls if "-p" not in call["args"])
+         or fail(f"got: {calls}")),
+        ("with nothing to check, the probe alone says the modules loaded",
+         lambda: "veraPDF 1.30.3 loaded its WCAG modules from " + loads in setup
+         or fail("got: " + setup)),
+        ("modules veraPDF didn't load are a warning that it skips their checks silently, "
+         "and nothing is reported, nor said to have run",
+         lambda: "WARNING: veraPDF 1.30.3 didn't load its WCAG modules" in missed
+         and "silently" in missed and "verapdf-wcag:" not in missed
+         and "ran on" not in missed or fail("got: " + missed)),
+        ("a PDF 1.x and a PDF 2.0 each get their own profile, and a CLASSPATH_PREFIX "
+         "already set comes after the modules'",
+         lambda: sorted(os.path.basename(call["args"][call["args"].index("-p") + 1])
+                        for call in both_calls)
+         == ["WCAG-2-2-Machine-PDF20.xml", "WCAG-2-2-Machine.xml"]
+         and all(call["prefix"] == os.pathsep.join([os.path.join(loads, "*"),
+                                                    "/somewhere/else.jar"])
+                 for call in both_calls)
+         and "ran on 2 PDF(s)" in both and "older.pdf: verapdf-wcag:2.4.9-1" in both
+         or fail(f"got: {both_calls} | {both}")),
+        ("a folder without a profile a PDF needs is a warning for that PDF, the other "
+         "checked", lambda: len(halfway_calls) == 1
+         and "has no WCAG-2-2-Machine.xml, the profile for a PDF 1.x file, so 1 PDF(s) "
+             "weren't checked" in halfway
+         and "book.pdf: verapdf-wcag:1.3.1-1" in halfway
+         and "older.pdf: verapdf-wcag" not in halfway or fail("got: " + halfway)),
+        ("pages and no PDF: the profile isn't run, and the summary says why",
+         lambda: "veraPDF's WCAG checks not run: no PDF to check." in pages_only
+         and not [call for call in pages_calls if "-p" in call["args"]]),
+        ("what veraPDF prints when it can't load a profile is a warning with its exception, "
+         "not a stopped run",
+         lambda: "WARNING: --wcag: veraPDF didn't report on WCAG-2-2-Machine-PDF20.xml: "
+                 'Exception in thread "main" javax.xml.bind.UnmarshalException' in garbled
+         and "Traceback" not in garbled or fail("got: " + garbled)),
+        ("a PDF veraPDF left out of its report, saying nothing, is a warning",
+         lambda: "WARNING: --wcag: veraPDF didn't check book.pdf, and said nothing of it"
+         in skipped or fail("got: " + skipped)),
+        ("modules that don't load with one profile aren't tried with the other: one run, "
+         "one warning", lambda: len(missed_calls) == 1
+         and missed_both.count("didn't load its WCAG modules") == 1
+         or fail(f"got: {missed_calls} | {missed_both}")),
+        ("an exception veraPDF printed as it checked is a warning that checks may be undone",
+         lambda: "WARNING: --wcag: veraPDF wrote an error as it checked, which may have left "
+                 "some checks undone: java.io.IOException: Couldn't render page 3" in erred
+         and "book.pdf: verapdf-wcag:1.3.1-1" in erred or fail("got: " + erred)),
+        ("the JVM's notes of its options, one naming an error, and veraPDF's log aren't one",
+         lambda: "wrote an error" not in noted and "ran on 1 PDF(s)" in noted
+         or fail("got: " + noted)),
+        ("nor do bytes that aren't UTF-8 stop the run, or veraPDF's usual one",
+         lambda: "Traceback" not in undecoded and "ran on 1 PDF(s)" in undecoded
+         and "verapdf:failed" not in undecoded or fail("got: " + undecoded)),
+        ("veraPDF killed before it reported is a warning saying so, not naming the JVM's note",
+         lambda: "WARNING: --wcag: veraPDF didn't report on WCAG-2-2-Machine-PDF20.xml: "
+                 "stopped by signal 9" in killed and "Picked up" not in killed
+         or fail("got: " + killed)),
+        ("a PDF or an EPUB named that isn't there: no PDF to check, and the setup not checked",
+         lambda: all("veraPDF's WCAG checks not run: no PDF to check." in typo
+                     and "loaded its WCAG modules" not in typo for typo in typos)
+         and not typo_calls or fail(f"got: {typos} | {typo_calls}")),
+        ("a profile without the probe's rule is a warning, and isn't run, since the probe "
+         "can't tell with it", lambda: not unfit_calls
+         and "lacks the rule veraPDF's 1.30 machine profiles have on repeated characters, "
+             "1.3.1-1" in unfit
+         and "didn't load" not in unfit or fail("got: " + unfit)),
+        ("nothing found: the report removed, and not said to be written",
+         lambda: "nothing found" in nothing and "Written to" not in nothing
+         and not os.path.exists(bare_report) or fail("got: " + nothing)),
+        ("no folder of them is a warning naming VERAPDF_WCAG",
+         lambda: "WARNING: veraPDF's WCAG modules aren't installed (VERAPDF_WCAG" in absent
+         or fail("got: " + absent)),
+        ("--quick leaves the profile out, saying so",
+         lambda: "veraPDF's WCAG checks not run (--quick)." in quick),
+    ]
+    # A PDF the output check finds nothing in of its own: the probe with a
+    # title it displays, XMP metadata, and a bookmark.
+    try:
+        import pikepdf
+    except ImportError:
+        pikepdf = None
+    if pikepdf is not None:
+        tidy, tidy_report = os.path.join(work, "tidy.pdf"), os.path.join(work, "tidy.csv")
+        with pikepdf.open(io.BytesIO(pdfcheck.wcag_probe())) as made:
+            made.docinfo["/Title"] = "A Book"
+            made.Root.ViewerPreferences = pikepdf.Dictionary(DisplayDocTitle=True)
+            with made.open_metadata() as meta:
+                meta["dc:title"] = "A Book"
+            with made.open_outline() as outline:
+                outline.root.append(pikepdf.OutlineItem("A Book", 0))
+            made.save(tidy)
+        alone = run("--wcag", "--pdf", tidy, "--report", tidy_report, folder=loads)
+        with open(tidy_report, newline="", encoding="utf-8") as fh:
+            tidy_rows = list(csv.DictReader(fh))
+        cases.append(("veraPDF's WCAG notes alone: nothing found, their lines after, and the "
+                      "report written with them",
+                      lambda: "Output check: 0 page(s) and 1 PDF(s), nothing found." in alone
+                      and f"Written to {tidy_report}." in alone
+                      and [r["Check"] for r in tidy_rows] == ["verapdf-wcag:1.3.1-1",
+                                                               "verapdf-wcag:2.4.9-1"]
+                      or fail("got: " + alone)))
+    else:
+        print("  skip  no pikepdf to make a PDF the output check finds nothing in")
+    real = outputcheck.find_validator("verapdf")
+    if not real:
+        print("  skip  veraPDF not installed (VERAPDF); its WCAG profile isn't run itself")
+        return cases
+    if len(real) > 1:
+        print("  skip  VERAPDF names veraPDF's jar, which java -jar runs without "
+              "CLASSPATH_PREFIX; its WCAG profile isn't run itself")
+        return cases
+    bare = os.path.join(work, "bare")
+    os.makedirs(bare)
+    for name in fakeverapdf.MODULES:
+        zipfile.ZipFile(os.path.join(bare, name), "w").close()
+    for name, kind in fakeverapdf.KINDS.items():
+        with open(os.path.join(bare, name), "w", encoding="utf-8") as fh:
+            fh.write(fakeverapdf.PROFILE.format(kind=kind))
+    silent = run("--wcag", folder=bare, verapdf=real[0])
+    cases.append(("veraPDF itself, given jars that hold no modules, passes the probe, which "
+                  "the warning says", lambda: "didn't load its WCAG modules" in silent
+                  or fail("got: " + silent)))
+    installed = os.environ.get("VERAPDF_WCAG", "").strip()
+    if installed:
+        loaded = run("--wcag", folder=installed, verapdf=real[0])
+        cases.append(("and given the modules VERAPDF_WCAG names, it loads them",
+                      lambda: "loaded its WCAG modules" in loaded or fail("got: " + loaded)))
+    else:
+        print("  skip  veraPDF's WCAG modules not installed (VERAPDF_WCAG)")
+    return cases
 
 
 if __name__ == "__main__":

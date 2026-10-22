@@ -62,7 +62,8 @@ on another `bin/` script.
 | `lib/pagefooter.py` | The `footer` setting for every format but an HTML page: an EPUB's documents, a PDF's page style, a Word file's footer, and the end of a Markdown or AsciiDoc file. |
 | `lib/findings.py` | One format for everything a check finds: the CSV, the Markdown report, the input hashes, the cache. |
 | `lib/sourcecheck.py` | What a Word or Markdown source says about itself, from Pandoc's unfiltered reading. |
-| `lib/pdfcheck.py` | What a PDF states about itself: metadata, claims, structure, with veraPDF when installed. |
+| `lib/pdfcheck.py` | What a PDF states about itself: metadata, claims, structure, with veraPDF when installed, and veraPDF's WCAG 2.2 checks when asked for (`--wcag`), with the probe that says whether its WCAG modules loaded. |
+| `lib/wcag.py` | WCAG 2.2's success criteria, from W3C's source: each one's name, level, the version it came in, and its Understanding document, which a finding from veraPDF's WCAG profile names. |
 | `lib/pptxparse.py` | What a PowerPoint deck holds, read from its XML: slides in order, each slide's shapes in the tree's order (its reading order and its stacking order alike) and where each sits, titles, pictures keyed by their image's SHA-256, tables, charts and embedded objects, links, notes, sections, languages. Changes nothing. |
 | `lib/pptxcheck.py` | What's wrong with a deck: what PowerPoint's Accessibility Checker reports, and more. |
 | `lib/pptxremediate.py` | A `source` target on a deck: the sidecars' decisions written into a copy, edited as text, the rest byte for byte. |

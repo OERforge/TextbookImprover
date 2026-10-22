@@ -64,6 +64,7 @@ ALLOWED = {
     (None, "aria-labelledby"), (None, "labelledby"),
     (None, "Licence"),                      # "Notice and Licence", IMS
     ("docs/examples.md", "flavour"),        # veraPDF's own --flavour option
+    ("tests/fakeverapdf.py", "flavour"),    # and a veraPDF profile's attribute
     ("lib/bookcontents.py", "unrecognised_roles"),
     ("CHANGELOG.md", "unrecognised_roles"),     # the entries naming the old
     ("CHANGELOG.md", "sanitise"),               # spellings to say what became

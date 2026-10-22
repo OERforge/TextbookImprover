@@ -18,7 +18,7 @@ Reads a book's sources, one file per page (Word, Markdown, AsciiDoc, or HTML, or
 
 **PowerPoint decks are newer still**: a folder of them is slides, each deck checked as PowerPoint's own Accessibility Checker checks it and for more, the decisions it needs reported, and a copy of each written with the decisions made so far ([Slides](docs/slides.md)). A PowerPoint deck becomes a page, a tagged PDF, a reveal.js presentation, and Markdown too, as a deck written in Markdown does, which also becomes a PowerPoint file.
 
-**Every run checks what it wrote**: dead links and fragments, missing alt text, heading order, invalid ids, tables without headers or caption, and, when the validators are installed, epubcheck, the Nu HTML checker, and veraPDF. The same checks, plus what a Word, Markdown, PowerPoint, or PDF file says about itself, run on any file without converting it: `audit.py` writes a findings CSV and a report.
+**Every run checks what it wrote**: dead links and fragments, missing alt text, heading order, invalid ids, tables without headers or caption, and, when the validators are installed, epubcheck, the Nu HTML checker, and veraPDF, with veraPDF's experimental WCAG 2.2 checks for the asking (`--wcag`). The same checks, plus what a Word, Markdown, PowerPoint, or PDF file says about itself, run on any file without converting it: `audit.py` writes a findings CSV and a report.
 
 **Testing with assistive technology has been limited**, mostly to NVDA in Chrome and in Acrobat, so reports of how the outputs work with other screen readers, browsers, and readers are welcome ([how far each path has been tested](docs/formats.md#how-the-paths-are-rated)).
 

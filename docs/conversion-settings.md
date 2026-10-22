@@ -230,7 +230,7 @@ A YAML file, or a Markdown file that opens with a YAML block, whose metadata goe
 
 **`pdf.figures`**—one of `in_place`, `section`, `float`; default `in_place`
 
-Where a figure goes, on the page and in the order a screen reader reads. in_place keeps it where the text has it, on both, as the float package's H placement does. section lets it float within its section, flushed before the next one starts (placeins), and puts its tags after the section's text. float is LaTeX's own placement, wherever a figure fits, and LaTeX's tagging then gathers every figure's tags at the end of the document, where a screen reader reaches them after everything else: in the statistics textbook, 246 of its 270 figures. section needs the placeins package installed.
+Where a figure is printed. in_place keeps it where the text has it, as the float package's H placement does. section lets it float within its section, flushed before the next one starts (placeins). float is LaTeX's own placement, wherever a figure fits. Under each, a figure's tags are where the text has it, in the order a screen reader reads, and so are a table's of the class float, which floats under each: LaTeX's tagging gathers the tags of what floats at the end of the document unless told otherwise, where a screen reader reaches them after everything else, as it had 246 of the statistics textbook's 270 figures. section needs the placeins package installed.
 
 **`pdf.repair_captions`**—`bool`; default `true`
 

@@ -205,18 +205,18 @@ FAMILIES = (("mainfont", "\\setmainfont", "Latin Modern Roman"),
             ("sansfont", "\\setsansfont", "Latin Modern Sans"),
             ("monofont", "\\setmonofont", "Latin Modern Mono"))
 
-# Where figures go (pdf.figures). LaTeX's tagging gathers the tags of a
-# figure that floats into one place: at the end of the document unless
-# told to flush them, which it does when a section begins (the float/flush
-# key of latex-lab-testphase-float.sty). A figure placed H doesn't float,
-# so its tags stay where the text has it.
+# Where figures are printed (pdf.figures): each placed H, where the text
+# has it (in_place); floating, but not past the next section's heading
+# (section); or where LaTeX floats it (float). Under each, a float's tags
+# are where the text has it (latexbuild.FLOATS_HERE), not where it's
+# printed: LaTeX's tagging had gathered them at the end of the document,
+# a figure's that floated and a table's of the class float, which the
+# writer sets in a table float under every placement; flushed when a
+# section began, as section had them, they followed the section, in its
+# chapter.
 FIGURE_PLACEMENT = {
     "in_place": "\\usepackage{float}\\floatplacement{figure}{H}\n",
-    "section": ("\\usepackage[section]{placeins}\n"
-                "\\ifdefined\\tagpdfsetup\n"
-                "  \\AddToHook{cmd/section/before}{\\tagpdfsetup{float/flush=section}}\n"
-                "  \\AddToHook{cmd/chapter/before}{\\tagpdfsetup{float/flush=chapter}}\n"
-                "\\fi\n"),
+    "section": "\\usepackage[section]{placeins}\n",
     "float": "",
 }
 
@@ -617,7 +617,7 @@ def book_metadata(project, resolved, base, numbered):
         # which PDF/UA-1 requires of every link (7.18.5); a footnote mark
         # isn't made a link. (The template loads hyperref after this.)
         ours += "\\PassOptionsToPackage{hyperfootnotes=false}{hyperref}\n" + UA1_LINKS
-    ours += FIGURE_PLACEMENT[str(resolved["pdf.figures"])]
+    ours += latexbuild.FLOATS_HERE + FIGURE_PLACEMENT[str(resolved["pdf.figures"])]
     ours += RUNNING_HEADS
     # A type size the class doesn't have, whose option the class would
     # ignore, leaving the type 10pt: set through scrextend, ahead of the

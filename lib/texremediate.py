@@ -597,8 +597,7 @@ FLOAT_KEY = re.compile(r"\\tagpdfsetup\s*\{[^}]*float/")
 FLOATS_HERE = (
     "% Written for LaTeX's tagging: a figure's or table's tags where the text\n"
     "% has it, not gathered at the end of the document; it's printed where it was.\n"
-    "\\ExplSyntaxOn\\keys_if_exist:nnT {__tag/setup} {float/here}\n"
-    "  {\\tagpdfsetup{float/here}}\\ExplSyntaxOff\n")
+    + latexbuild.FLOATS_HERE)
 # enumitem's settings for a list, which LaTeX's tagging replaces with an
 # emulation of its own (latex-lab-enumitem, loaded by latex-lab-testphase-
 # block in place of enumitem.sty, LaTeX 2026-06-01). The emulation stops on

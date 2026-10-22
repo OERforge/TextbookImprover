@@ -446,6 +446,19 @@ def label_prefixes(resolved):
             "FIGURE_LABEL_PREFIXES": ",".join(map(str, resolved["captions.figure_prefixes"]))}
 
 
+# A float's tags where the text has it, in a book's PDF and in a LaTeX
+# book's (texremediate.FLOATS_HERE). LaTeX's tagging gathers the tags of
+# every figure and table that floats into one place, at the end of the
+# document unless flushed sooner (latex-lab-testphase-float.sty), where a
+# screen reader reaches them after everything else. float/here tags each
+# where the text has it; where it's printed doesn't change. The key came in
+# latex-lab-float 0.81m (2025-12-04), after LaTeX 2025-11-01; the run
+# builds only with a LaTeX that has it (MINIMUM_LATEX), and a copy built
+# with an older one, or untagged, skips it.
+FLOATS_HERE = ("\\ExplSyntaxOn\\keys_if_exist:nnT {__tag/setup} {float/here}\n"
+               "  {\\tagpdfsetup{float/here}}\\ExplSyntaxOff\n")
+
+
 # A formula's term struck out, in a book's PDF and a deck's (PDF_MACROS),
 # and in a LaTeX book's that loads cancel (texremediate.tag).
 CANCEL_STROKES = r"""% A formula's term struck out with the cancel package (\cancel,

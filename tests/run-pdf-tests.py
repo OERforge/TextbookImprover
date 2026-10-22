@@ -1412,6 +1412,13 @@ def deep_texts(path):
     return found
 
 
+def text_order(path, words):
+    """For each of words, where the innermost structure element holding
+    them comes in the tree, in order, or None where none does."""
+    found = [" ".join(text.split()) for _, _, text, _ in deep_texts(path)]
+    return [max((i for i, text in enumerate(found) if w in text), default=None) for w in words]
+
+
 def row_cells(path, words):
     """The text of each cell of each table row whose text holds words."""
     return [[text for kind_, text in kids if kind_ in ("/TD", "/TH")]
@@ -2295,6 +2302,11 @@ def fit_checks(fit_path, fit_said, fit_source, fit_third):
         ("a table of the class float after it, a tabular, isn't fitted by the widths the "
          "longtable before it recorded: in the text's type, its columns 12 points apart",
          lambda: at("Floatcell", 1) and 11.5 < (gap_after(fit_path, "Floatcell") or 0) < 12.5),
+        ("and though it floats, its tags are where the text has it, between the paragraphs "
+         "before and after it, not after everything else",
+         lambda: (lambda order: None not in order and order == sorted(order))(text_order(
+             fit_path, ("A floating table after it", "Floatcell",
+                        "A table whose head is a cell across")))),
         ("a table whose head is a cell across its columns, which longtable measures too "
          "wide on the first run, is fitted again on the second, in the text's type, its "
          "columns 12 points apart",
@@ -3054,16 +3066,19 @@ def checks(work, jobs=1):
          lambda: not any(kind(k) == "/Artifact" for t in table_elements for k in children(t))),
         # pdf.figures in_place: H, so the tags stay where the text has them,
         # not gathered in a container at the end of the document.
-        ("pdf.figures section flushes each section's figure tags, and lets "
-         "figures float within it",
-         lambda: "float/flush=section" in placements["section"]
-         and "\\usepackage[section]{placeins}" in placements["section"]
+        ("pdf.figures section lets figures float within their section",
+         lambda: "\\usepackage[section]{placeins}" in placements["section"]
          and "floatplacement" not in placements["section"]),
         ("pdf.figures float leaves LaTeX's placement alone",
          lambda: not any(word in placements["float"] for word in
                          ("floatplacement", "placeins", "float/flush"))),
         ("and the default keeps figures in place",
          lambda: "\\floatplacement{figure}{H}" in source),
+        # LaTeX's tagging gathers the tags of what floats at the end of the
+        # document; under section, flushed, they had followed the section.
+        ("under each placement, a float's tags are where the text has it",
+         lambda: all("{\\tagpdfsetup{float/here}}" in text
+                     for text in (source, placements["section"], placements["float"]))),
         ("each figure's tags sit where the text has it",
          lambda: figures and not inside(tree, "/figures", "/Figure")),
         ("the described image is a figure with its alt text",

@@ -30,6 +30,10 @@
 --    comes first because WCAG 2.5.3 wants the accessible name to hold
 --    what is seen; LaTeX's own default is the address, or "Go to
 --    destination" and an id, which is what Acrobat would read out.
+--    hyperref's \pdfstringdef, which writes it, reads -- and --- as
+--    dashes and ?` and !` as inverted marks, as TeX's text does, so an
+--    empty group ({}) after each hyphen and before each backtick keeps
+--    the text's own: an address's lang--en isn't lang–en.
 --
 -- 4. A table inside a table's cell. The writer makes each a longtable,
 --    and LaTeX stops on a longtable inside another ("Extra alignment tab";
@@ -149,6 +153,12 @@ end
 
 local function squash(s)
   return (s:gsub("%s+", " "):gsub("^ ", ""):gsub(" $", ""))
+end
+
+-- A link's /Contents as \pdfstringdef should keep it, its hyphens and
+-- backticks apart from what's beside them (3).
+local function unjoined(s)
+  return (s:gsub("%-", "-{}"):gsub("`", "{}`"))
 end
 
 -- The words that begin a caption's own label (9), from the captions.*
@@ -1461,7 +1471,7 @@ function Link(link)
   -- its own (a footnote mark, a contents line) never inherits it.
   return {
     pandoc.RawInline("latex",
-                     "\\OERLinkContents{" .. tex_escape(contents) .. "}"),
+                     "\\OERLinkContents{" .. unjoined(tex_escape(contents)) .. "}"),
     link,
     pandoc.RawInline("latex", "\\OERLinkContentsReset{}"),
   }

@@ -101,6 +101,9 @@ This preface points to [the first section](one.html#first) and cites
 [https://doi.org/10/b8xx35](https://doi.org/10/b8xx35 "Crandall 2019 via doi.org"),
 then [a plain link](https://example.org/).[^n]
 
+An address whose path names its language, <https://example.org/lang--en/q?`x>,
+is its own description.
+
 [^n]: A note, whose mark is a link LaTeX makes on its own.
 
 # Acknowledgements
@@ -740,6 +743,8 @@ UA1_PAGE = r"""# Old Standard
 
 A [described link](https://example.org/ "Example, a test site") and a
 formula, $a^2 + b^2 = c^2$, with a note.[^1] Its [flat]{lang=en-GB} too.
+
+An address LaTeX links on its own, \url{https://example.org/lang--en/q?`x}.
 
 [^1]: The note.
 """
@@ -3038,6 +3043,11 @@ def checks(work, jobs=1):
          and not ua1_math[0][2]),
         ("every link in it has a /Contents",
          lambda: ua1_links and all(ua1_links)),
+        ("and one LaTeX makes on its own is its address, its hyphens and backtick as "
+         "written",
+         lambda: os.path.exists(ua1_path) and [
+             contents for s, uri, contents in links(pypdf.PdfReader(ua1_path))
+             if "lang" in uri] == ["https://example.org/lang--en/q?`x"]),
         # A one-page book whose heading is its title: no title page, and the
         # heading is its first, at level 1 (title_page: auto).
         ("a one-page book has no title page, and its title is its level-1 heading",
@@ -3538,6 +3548,12 @@ def checks(work, jobs=1):
          == "https://doi.org/10/b8xx35 (Crandall 2019 via doi.org)"),
         ("a link without one reads its text",
          lambda: by_uri.get("https://example.org/") == "a plain link"),
+        # hyperref's \pdfstringdef, which writes it, would make -- an en
+        # dash, as the ilo.org addresses in Sociology's references were,
+        # and ?` an inverted question mark.
+        ("and an address's hyphens and backtick are kept in it as they're written",
+         lambda: by_uri.get("https://example.org/lang--en/q?%60x")
+         == "https://example.org/lang--en/q?`x"),
         ("a link within the book reads its text",
          lambda: "the first section" in goto),
         # The footnote mark, and the contents lines, are links LaTeX

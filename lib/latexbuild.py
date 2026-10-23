@@ -399,7 +399,9 @@ CODE_SPACES = r"""\makeatletter
 # ("Go to destination" and the destination's name, or the address), which
 # would overwrite the text-and-description /Contents pdf-target.lua gives a
 # text link. These plugs use hyperref's text only for a link that has none
-# of its own.
+# of its own. An address keeps its hyphens and backticks, which
+# \pdfstringdef would join into dashes and inverted marks, as
+# pdf-target.lua's Link keeps a link's text.
 UA1_LINKS = r"""\ExplSyntaxOn
 \AddToHook{begindocument/end}
   {
@@ -421,7 +423,10 @@ UA1_LINKS = r"""\ExplSyntaxOn
           {
             \tl_if_empty:NT \l__oer_link_contents_tl
               {
-                \pdfstringdef \l_tmpa_tl {#1}
+                \tl_set:Nn \l_tmpb_tl {#1}
+                \tl_replace_all:Nnn \l_tmpb_tl { - } { - { } }
+                \tl_replace_all:Nnn \l_tmpb_tl { ` } { { } ` }
+                \exp_args:NNV \pdfstringdef \l_tmpa_tl \l_tmpb_tl
                 \pdfannot_dict_put:nne {link/URI}{Contents}{(\l_tmpa_tl)}
               }
           }

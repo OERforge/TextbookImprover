@@ -107,8 +107,9 @@
 --
 -- 18. A fill-in blank, a run of four or more underscores, which TeX can't
 --    break, so a line ending in one ran into the margin: marked, for
---    latexbuild's PDF_MACROS to draw shorter where it runs past its line
---    (below).
+--    latexbuild's PDF_MACROS to draw shorter where it runs past its line,
+--    and to tag as a Span whose ActualText is "blank", which a screen
+--    reader says in place of the underscores (below).
 --
 -- 19. A table, or a formula that TeX can't break, too wide for its line,
 --    which ran into the margin or past the paper's edge: numbered, for
@@ -1992,8 +1993,9 @@ end
 -- quiz asks "Core nations are also known as __________________"): the
 -- writer's \_ each, in \OERBlank, which marks them, so that PDF_MACROS
 -- can draw a blank that runs past the end of its line shorter, to end
--- where the line does. A run of three or fewer is never drawn shorter, so
--- it isn't marked. Last, so the text the other passes read (a link's
+-- where the line does, and tags each a Span whose ActualText is "blank".
+-- A run of three or fewer is never drawn shorter, so it isn't marked.
+-- Last, so the text the other passes read (a link's
 -- /Contents) has the underscores. Not in a link's text, an image's
 -- description, a heading, or the metadata, whose plain text the writer
 -- takes as well (a bare address's \url, alt=, a bookmark's

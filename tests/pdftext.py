@@ -402,6 +402,60 @@ def element_texts(path, tag):
     return found
 
 
+def actual_texts(path, tag):
+    """(ActualText, own text) for each structure element tagged tag, in
+    reading order: what a screen reader says and copying gives in place
+    of the element's marked content (None without an ActualText), and the
+    characters of that content."""
+    texts = marked_text(path)
+    found = []
+    with pikepdf.open(path) as pdf:
+        pages = {page.objgen: n for n, page in enumerate(pdf.pages)}
+
+        def walk(element):
+            if isinstance(element, pikepdf.Array):
+                for kid in element:
+                    walk(kid)
+            elif isinstance(element, pikepdf.Dictionary) and "/S" in element:
+                if element.S == tag:
+                    said = element.get("/ActualText")
+                    found.append((None if said is None else str(said),
+                                  own_text(element, texts, pages)))
+                if element.get("/K") is not None:
+                    walk(element.K)
+
+        walk(pdf.Root.StructTreeRoot.K)
+    return found
+
+
+def span_parents(path, said):
+    """For each Span whose ActualText is said, in reading order: its
+    parent's tag, the parent's own text, and whether the Span holds a
+    structure element of its own, which it shouldn't (its marked content
+    is all it holds)."""
+    texts = marked_text(path)
+    found = []
+    with pikepdf.open(path) as pdf:
+        pages = {page.objgen: n for n, page in enumerate(pdf.pages)}
+
+        def walk(element):
+            if isinstance(element, pikepdf.Array):
+                for kid in element:
+                    walk(kid)
+            elif isinstance(element, pikepdf.Dictionary) and "/S" in element:
+                if element.S == "/Span" and str(element.get("/ActualText", "")) == said:
+                    kids = element.get("/K")
+                    kids = list(kids) if isinstance(kids, pikepdf.Array) else [kids]
+                    found.append((str(element.P.S), own_text(element.P, texts, pages),
+                                  any(isinstance(kid, pikepdf.Dictionary) and "/S" in kid
+                                      for kid in kids)))
+                if element.get("/K") is not None:
+                    walk(element.K)
+
+        walk(pdf.Root.StructTreeRoot.K)
+    return found
+
+
 def code_lines(path):
     """Each line of code's text, as the PDF holds it."""
     return element_texts(path, "/codeline")

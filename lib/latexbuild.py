@@ -1298,6 +1298,26 @@ PDF_MACROS = r"""\ExplSyntaxOn
 \text_declare_purify_equivalent:Nn \OERBlank { \use:n }
 \AddToHook { package / hyperref / after }
   { \pdfstringdefDisableCommands { \cs_set:Npn \OERBlank #1 {#1} } }
+% And in the text, a Span whose ActualText is "blank", which a screen
+% reader should say in place of the underscores, and copying give, where
+% a screen reader was left to read them as its punctuation setting has
+% it; untagged, the underscores alone. The underscores are drawn, and
+% marked, as before.
+\NewDocumentCommand \OERBlankSpan { m }
+  {
+    \cs_if_exist:NTF \tag_mc_end_push:
+      {
+        \mode_leave_vertical:
+        \tag_mc_end_push:
+        \tag_struct_begin:n { tag = Span , actualtext = blank }
+        \tag_mc_begin:n { }
+        #1
+        \tag_mc_end:
+        \tag_struct_end:
+        \tag_mc_begin_pop:n { }
+      }
+      { #1 }
+  }
 \ExplSyntaxOff
 """ + CANCEL_STROKES + r"""% A fill-in blank, a run of four or more underscores pdf-target.lua marks
 % (\OERBlank), that runs past the end of its line into the margin: TeX
@@ -1305,13 +1325,13 @@ PDF_MACROS = r"""\ExplSyntaxOn
 % question whose blank ran 24 points past its line. Once a paragraph's
 % lines are made, such a blank is drawn shorter, its underscores
 % overlapping, so it ends where the line does and the line's spaces are
-% their natural width again. Every underscore is still in the text, for a
-% screen reader and for copying, and a blank that fits its line is left as
-% it is. A blank is drawn no shorter than three underscores; a line that
-% leaves less room than that still runs over. TeX has named the line as
-% too wide (overfull) by then, so the log names each line fitted this way
-% too: how much too wide TeX said it was, the line of LaTeX TeX said its
-% paragraph ended on, and how much too wide it is now, which
+% their natural width again. Every underscore is still drawn, its Span's
+% ActualText what a screen reader says (above), and a blank that fits its
+% line is left as it is. A blank is drawn no shorter than three underscores;
+% a line that leaves less room than that still runs over. TeX has named the
+% line as too wide (overfull) by then, so the log names each line fitted
+% this way too: how much too wide TeX said it was, the line of LaTeX TeX
+% said its paragraph ended on, and how much too wide it is now, which
 % latexbuild.overfull_lines reads. The Lua is written without a percent
 % sign, a hash, a tilde, or a backslash, which TeX would read as its own,
 % and without a comment, which would run on to the end, TeX joining the
@@ -1319,7 +1339,7 @@ PDF_MACROS = r"""\ExplSyntaxOn
 \ifdefined\directlua
   \newattribute\OERBlankAttribute
   \NewDocumentCommand\OERBlank{m}
-    {\leavevmode\setattribute\OERBlankAttribute{1}#1\unsetattribute\OERBlankAttribute}
+    {\leavevmode\OERBlankSpan{\setattribute\OERBlankAttribute{1}#1\unsetattribute\OERBlankAttribute}}
   \directlua{
     local attribute = luatexbase.attributes.OERBlankAttribute
     local GLYPH, GLUE, KERN, HLIST = node.id("glyph"), node.id("glue"), node.id("kern"), node.id("hlist")
@@ -1396,7 +1416,7 @@ PDF_MACROS = r"""\ExplSyntaxOn
     end, "oer.blanks")
   }
 \else
-  \NewDocumentCommand\OERBlank{m}{#1}
+  \NewDocumentCommand\OERBlank{m}{\OERBlankSpan{#1}}
 \fi
 """ + FIT_MACROS
 

@@ -352,6 +352,9 @@ The Rating of Perceived Exertion (RPE) is an example of ________________
 
 Core nations are also known as __________________
 
+The terms ____ and ________ are often used interchangeably, the words
+after each blank still in the paragraph.
+
 And underscores in code, which aren't a blank: `a____b`. And in a bare
 address, <https://example.org/fill____in>, and a picture's description:
 ![A red square over a line to write on, ________](assets/red.png).
@@ -1665,6 +1668,21 @@ def blank_on_line(path, words):
                         run[-1][1] - run[0][0], run[0][1] - run[0][0],
                         min((b[0] - a[0] for a, b in zip(glyphs, glyphs[1:]) if a[2] == " "),
                             default=None))
+    return None
+
+
+def blank_box(path, words):
+    """(page index, box) for the run of underscores on the line whose text
+    holds words, the box as veraPDF gives a check's location, [left,
+    bottom, right, top] in points; None for no such line."""
+    lines = {}
+    for page, baseline, left, right, char in pdftext.glyph_boxes(path):
+        lines.setdefault((page, baseline), []).append((left, right, char))
+    for (page, baseline), glyphs in lines.items():
+        if words in "".join(g[2] for g in glyphs):
+            run = [g for g in glyphs if g[2] == "_"]
+            if run:
+                return page, [run[0][0], baseline - 3, run[-1][1], baseline + 9]
     return None
 
 
@@ -3139,17 +3157,42 @@ def checks(work, jobs=1):
         # line of 345 points does, its spaces their natural width (3.32
         # points, where TeX had shrunk them to 2.21), and the build doesn't
         # name the line, which LaTeX had reported as too wide; every
-        # underscore is in the text still. A blank that fits is left as it
-        # is.
+        # underscore is drawn still, each blank a Span whose ActualText,
+        # "blank", is what a screen reader says. A blank that fits is left
+        # as it is.
         ("a fill-in blank that runs past its line ends where the line does, its spaces "
          "their natural width, and the build doesn't name the line",
          lambda: (lambda found: found is not None and abs(found[0] - 345) < 1
                   and found[1] == 16 and found[2] and found[5] is not None
                   and found[5] > 3.2)(blank_on_line(pdf_path, "Exertion"))
          and not re.search(r"more than 3 points wider[^\n]*appendix", log)),
-        ("and every underscore of it is in the text, for a screen reader",
-         lambda: "The Rating of Perceived Exertion (RPE) is an example of " + "_" * 16
+        ("and each blank is a Span whose ActualText is \"blank\", for a screen reader, its "
+         "underscores drawn, the question's words the paragraph's",
+         lambda: [(said, text) for said, text in pdftext.actual_texts(pdf_path, "/Span")
+                  if said == "blank"] == [("blank", "_" * 16), ("blank", "_" * 18),
+                                          ("blank", "_" * 4), ("blank", "_" * 8)]
+         and "The Rating of Perceived Exertion (RPE) is an example of"
          in [" ".join(t.split()) for t in pdftext.element_texts(pdf_path, "/text")]),
+        # A blank in the middle of a paragraph: the words after it are the
+        # paragraph's still, not an artifact, and its Span holds nothing
+        # but the underscores, the next paragraph after the Span's, not in it.
+        ("a blank in a paragraph's middle leaves the words after it the paragraph's, its Span "
+         "the paragraph's child and holding no other",
+         lambda: "The terms and are often used interchangeably, the words after each blank "
+                 "still in the paragraph."
+         in [" ".join(t.split()) for t in pdftext.element_texts(pdf_path, "/text")]
+         and [(tag, has) for tag, _, has in pdftext.span_parents(pdf_path, "blank")]
+         == [("/text", False)] * 4
+         and [" ".join(text.split()) for _, text, _ in pdftext.span_parents(pdf_path, "blank")][2:]
+         == ["The terms and are often used interchangeably, the words after each blank still "
+             "in the paragraph."] * 2),
+        # What --wcag --verbose says of a blank veraPDF fails: the line it's
+        # on, read with pypdf, which gives some runs around a tagged PDF's
+        # marked content no place.
+        ("and --wcag --verbose names the line a blank is on, its words in order",
+         lambda: (lambda found: found is not None and pdfcheck._WcagContext(pdf_path).line(
+             *found).endswith("is an example of " + "_" * 16))(
+             blank_box(pdf_path, "Exertion"))),
         ("a blank that fits its line is left as it is",
          lambda: (lambda found: found is not None and found[1] == 18 and not found[2])(
              blank_on_line(pdf_path, "Core nations"))

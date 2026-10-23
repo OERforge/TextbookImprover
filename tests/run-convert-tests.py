@@ -3085,10 +3085,11 @@ def case_asciidoc_layout(work):
 
 def case_quick(work):
     """--quick: the output check without epubcheck, the Nu checker, and
-    veraPDF, saying so; and --wcag, in a run that made no PDF, saying
-    there was none to check. The run without --quick has the validators
-    hidden (each variable naming a file that isn't there), so it asks for
-    them and is told they're missing, without starting Java."""
+    veraPDF, saying so; --wcag, with --verbose, in a run that made no PDF,
+    saying there was none to check; and --verbose alone saying it changes
+    nothing. The run without --quick has the
+    validators hidden (each variable naming a file that isn't there), so
+    it asks for them and is told they're missing, without starting Java."""
     os.makedirs(work)
     with open(os.path.join(work, "ch.md"), "w") as fh:
         fh.write("# One\n\nText.\n")
@@ -3100,7 +3101,8 @@ def case_quick(work):
                                 cwd=work, capture_output=True, text=True,
                                 stdin=subprocess.DEVNULL, env=env)
         return result.stdout + result.stderr
-    quick = run("--quick", "--wcag")
+    quick = run("--quick", "--wcag", "--verbose")
+    unasked = run("--quick", "--verbose")
     nowhere = os.path.join(work, "no-such-validator")
     full = run(env=dict(os.environ, EPUBCHECK_JAR=nowhere, VNU_JAR=nowhere, VERAPDF=nowhere))
     return [
@@ -3114,6 +3116,9 @@ def case_quick(work):
          and quick.index("Output check: 1 page(s)")
          < quick.index("veraPDF's WCAG checks not run: the run made no PDF.")
          and "veraPDF's WCAG checks not run (--quick)." not in quick),
+        ("and --verbose without --wcag says it changes nothing",
+         lambda: "--verbose lists veraPDF's WCAG checks one by one, with --wcag; without it, "
+                 "it changes nothing." in unasked and "WCAG checks not run" not in unasked),
         ("without it, the run looks for them",
          lambda: "VNU_JAR" in full and "not run (--quick)" not in full),
     ]

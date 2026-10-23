@@ -168,6 +168,14 @@ def say(text):
     print(text, file=sys.stderr)
 
 
+def output_check_flags(args, pdfs):
+    """The flags the run gives the output check: --quick, and --wcag and
+    --verbose only when it made a PDF for them to check."""
+    return ((["--quick"] if args.quick else [])
+            + (["--wcag"] if args.wcag and pdfs else [])
+            + (["--verbose"] if args.wcag and args.verbose and pdfs else []))
+
+
 def archive_entry(name):
     """An archive entry's path as parts, None for what a system leaves
     behind (macOS's __MACOSX and ._ files, .DS_Store, Thumbs.db), or
@@ -5317,8 +5325,15 @@ def main():
                              "profile too, with its WCAG modules from VERAPDF_WCAG; "
                              "experimental, so what it finds is a note, never an "
                              "error (check-output.py --wcag)")
+    parser.add_argument("--verbose", action="store_true",
+                        help="with --wcag, a note for each of its failed checks, with what "
+                             "the PDF has there, where each rule's are otherwise counted "
+                             "in one (check-output.py --verbose)")
     args, passthrough = parser.parse_known_args()
     TRACE = not args.quiet
+    if args.verbose and not args.wcag:
+        import pdfcheck
+        say(pdfcheck.WCAG_ALONE)
     base = os.getcwd()
 
     for required in (FIGURE_FILTER, MATH_FILTER, MEDIA_FILTER, HEADER_FILTER,
@@ -5874,7 +5889,7 @@ def main():
         # Findings go to one report beside the others and never stop the
         # run: the output exists, and the list is what to work through.
         command = ["python3", CHECK_TOOL, "--report", reports["output_check"]] \
-            + (["--quick"] if args.quick else []) + (["--wcag"] if args.wcag and pdfs else [])
+            + output_check_flags(args, pdfs)
         # A PowerPoint deck's copies were checked before it was converted,
         # into the same report, which keeps their findings.
         copies_found = []

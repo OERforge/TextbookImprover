@@ -1901,9 +1901,10 @@ def check_wcag_criteria():
 
 def check_wcag_report():
     """veraPDF's JSON report of its WCAG profile read as findings: only
-    the profile's own rules, each failed check a note at its page with
-    what veraPDF found and the criterion; nothing but a warning when the
-    probe, in the same run, passed, since then no WCAG rule was checked."""
+    the profile's own rules, each a note counting its failed checks, or,
+    verbose, each failed check a note at its page with what veraPDF found
+    and the criterion; nothing but a warning when the probe, in the same
+    run, passed, since then no WCAG rule was checked."""
     import findings as findings_lib
     import pdfcheck
     probe, book = "/w/wcag-probe.pdf", "/books/ia/book.pdf"
@@ -1949,11 +1950,19 @@ def check_wcag_report():
     ]
     modules = {"wcag-validation": ["1.30.3"], "wcag-algorithms": ["1.30.3"]}
     read = pdfcheck.wcag_report({"report": {"buildInformation": build, "jobs": [
-        job(probe, [repeated]), job(book, rules)]}}, probe, "/tools/verapdf-wcag", modules)
+        job(probe, [repeated]), job(book, rules)]}}, probe, "/tools/verapdf-wcag", modules,
+        verbose=True)
     by = {}
     for found in read["findings"]:
         by.setdefault(found.check, []).append(found)
-    lines = [line for _, line in sorted(read["rules"])]
+    lines = [group[0] for _, group in sorted(read["rules"])]
+    listed = [line for _, group in sorted(read["rules"]) for line in group]
+    counted = pdfcheck.wcag_report({"report": {"buildInformation": build, "jobs": [
+        job(probe, [repeated]), job(book, rules)]}}, probe, "/tools/verapdf-wcag", modules)
+    thirty = rule("WCAG2.2", "2.4.9", 1, "Links",
+                  [check("a message", f"root/doc[0]/pages[{n}]/annots[0]") for n in range(30)])
+    many, many_pages, _ = pdfcheck.wcag_rule_findings("book.pdf", thirty)
+    many_line = pdfcheck.wcag_rule_line("book.pdf", thirty, many_pages)
     older = pdfcheck.wcag_report({"report": {"buildInformation": build, "jobs": [
         job(probe, [rule("ISO_14289_2", "8.2.5.2", 2, "A PDF/UA rule", [check("a message")])]),
         job(book, rules)]}}, probe, "/tools/verapdf-wcag",
@@ -1974,7 +1983,7 @@ def check_wcag_report():
         {"itemDetails": {"name": "/books/ia/broken.pdf"},
          "taskException": {"type": "PARSE", "exceptionMessage": "Couldn't parse stream"}}]}},
         probe, "/tools/verapdf-wcag", dict(modules, **{"wcag-validation": ["1.30.2"]}),
-        expected=[book, "/books/ia/broken.pdf", "/books/ia/skipped.pdf"])
+        expected=[book, "/books/ia/broken.pdf", "/books/ia/skipped.pdf"], verbose=True)
     # Reports no veraPDF writes: none of them stops the run.
     shapes = [None, {"report": None}, {"report": {"jobs": None}},
               {"report": {"buildInformation": {"releaseDetails": None}, "jobs": [None, 5]}},
@@ -1999,6 +2008,36 @@ def check_wcag_report():
     return [
         ("the probe failed a WCAG rule, so the modules loaded, and the book was checked",
          lambda: read["loaded"] and read["checked"] == 1 and read["version"] == "1.30.3"),
+        ("each rule a note of its own, counting its failed checks and naming their pages, "
+         "where veraPDF gives them",
+         lambda: [(f.where, f.check, f.severity) for f in counted["findings"]] == [
+             ("book.pdf", "verapdf-wcag:4.1.2-17", "note"),
+             ("book.pdf", "verapdf-wcag:2.4.9-1", "note"),
+             ("book.pdf", "verapdf-wcag:1.4.4-1", "note"),
+             ("book.pdf", "verapdf-wcag:1.4.3-1", "note")]
+         and counted["findings"][3].detail == (
+             "Contrast: 150 failed check(s), the first 2 on pages 10, 12; --verbose lists "
+             "the 2 veraPDF listed, with what the PDF has there. 1.4.3 Contrast (Minimum) (AA): "
+             "https://www.w3.org/WAI/WCAG22/Understanding/contrast-minimum.html. veraPDF's "
+             "WCAG checks are experimental and may be wrong.")
+         and counted["findings"][0].detail.startswith("Redundant span: 1 failed check(s); ")
+         and counted["findings"][1].detail.startswith(
+             "Links shall contain an alternate description: 1 failed check(s), page 3; ")),
+        ("the first 20 pages named, and how many more, and 8 in its line in the summary",
+         lambda: len(many) == 1 and many[0].detail.startswith(
+             "Links: 30 failed check(s), pages 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, "
+             "15, 16, 17, 18, 19, 20, and 10 more; --verbose lists each")
+         and "30 failed check(s), pages 1, 2, 3, 4, 5, 6, 7, 8, and 22 more: Links." in many_line),
+        ("and its line in the summary, the same as verbose's, without the checks'",
+         lambda: [group for _, group in sorted(counted["rules"])]
+         == [[line] for line in lines]),
+        ("verbose, each listed check a line after its rule's, saying where and what veraPDF "
+         "found", lambda: listed[:4] == [
+             lines[0], "  book.pdf#page=10: contrastRatio = 3.1",
+             "  book.pdf#page=12: contrastRatio = 2.8",
+             "  book.pdf: 148 more failed check(s), which veraPDF didn't list (it lists about "
+             "10,000 of a PDF's at most)"]
+         and listed[-1] == '  book.pdf: score = 1, correct type = null (Span, object 17)'),
         ("only the profile's own rules are reported, and nothing of the probe",
          lambda: sorted(by) == ["verapdf-wcag:1.4.3-1", "verapdf-wcag:1.4.4-1",
                                 "verapdf-wcag:2.4.9-1", "verapdf-wcag:4.1.2-17"]),
@@ -2064,6 +2103,227 @@ def check_wcag_report():
         ("a file whose name holds #page= keeps its findings' places",
          lambda: [f.where for f in survived[-1]["findings"] if "a#page" in f.file]
          == ["a#page=b.pdf"]),
+    ]
+
+
+def check_wcag_context():
+    """What a PDF has where veraPDF's failed checks are, for --verbose: a
+    link annotation's address, its description when that isn't the
+    address, an address outside ASCII as UTF-8, one in UTF-16, and one
+    kept in an object of its own; and the line of text a box of repeated
+    characters is on, its words in order, a subscript and a superscript
+    among them, under a transformation too, cut short past 120 characters;
+    nothing for a page or an annotation the PDF hasn't, or a check of
+    another kind; and a verbose report on the PDF with what it has there.
+    On a PDF written here: questions ending in a blank, each blank in
+    marked content of its own, as a tagged PDF's is, around which pypdf
+    gives some runs no place; a blank drawn shorter to fit its line; and
+    five links."""
+    import pdfcheck
+    import pypdf
+    # Each run in a text object of its own, placed with Tm, and a blank in
+    # marked content of its own, as LuaLaTeX writes a tagged page.
+    stream = (b"/P <</MCID 0>> BDC BT /F1 12 Tf 1 0 0 1 72 720 Tm "
+              b"(Core nations are also known as ) Tj ET EMC "
+              b"/Span <</MCID 1>> BDC BT /F1 12 Tf 1 0 0 1 252.1 720 Tm (__________) Tj ET EMC "
+              b"/P <</MCID 2>> BDC BT /F1 12 Tf 1 0 0 1 318.8 720 Tm (.) Tj ET EMC "
+              b"BT /F1 12 Tf 1 0 0 1 72 706 Tm (The next line.) Tj ET "
+              # A blank drawn shorter to fit its line, its underscores overlapping.
+              b"BT /F1 12 Tf 1 0 0 1 72 650 Tm (Fitted: ) Tj ET "
+              b"/Span <</MCID 3>> BDC BT /F1 12 Tf 1 0 0 1 120 650 Tm "
+              b"[(_) 400 (_) 400 (_) 400 (_)] TJ ET EMC "
+              # A subscript before a blank, lower than its line's baseline.
+              # Each run up to the blank starts where the one before it ends,
+              # by Helvetica's widths, as a typesetter sets a subscript: pypdf
+              # 5.9 and 6 read a gap of half a space between runs as a space,
+              # and from 6.4.1 pypdf knows those widths.
+              b"BT /F1 12 Tf 1 0 0 1 72 600 Tm (The formula for water is H) Tj ET "
+              b"BT /F1 8 Tf 1 0 0 1 210.04 597 Tm (2) Tj ET "
+              b"BT /F1 12 Tf 1 0 0 1 214.49 600 Tm (O, and the gas we breathe out is ) Tj ET "
+              b"/Span <</MCID 4>> BDC BT /F1 12 Tf 1 0 0 1 420 600 Tm (________) Tj ET EMC "
+              b"BT /F1 12 Tf 1 0 0 1 473 600 Tm (.) Tj ET "
+              # A question under a transformation, 20 points down, a list
+              # item's label before it, as LuaLaTeX writes one.
+              b"q 1 0 0 1 0 -20 cm "
+              b"/Lbl <</MCID 8>> BDC BT /F1 12 Tf 1 0 0 1 50 560 Tm (1.) Tj ET EMC "
+              b"/P <</MCID 5>> BDC BT /F1 12 Tf 1 0 0 1 72 560 Tm (Under a transform, ) Tj "
+              b"ET EMC /Span <</MCID 6>> BDC BT /F1 12 Tf 1 0 0 1 200 560 Tm (________) Tj ET "
+              b"EMC /P <</MCID 7>> BDC BT /F1 12 Tf 1 0 0 1 253 560 Tm (.) Tj ET EMC Q "
+              # A superscript as high as a footnote's mark at 12 points, and a
+              # subscript, before a blank, either nearer the box's foot or
+              # top than the line's baseline, each run up to the blank where
+              # the one before it ends.
+              b"BT /F1 12 Tf 1 0 0 1 72 450 Tm (E = mc) Tj ET "
+              b"BT /F1 8 Tf 1 0 0 1 109.68 454.3 Tm (2) Tj ET "
+              b"BT /F1 12 Tf 1 0 0 1 114.13 450 Tm (, and water is H) Tj ET "
+              b"BT /F1 8 Tf 1 0 0 1 197.5 447 Tm (2) Tj ET "
+              b"BT /F1 12 Tf 1 0 0 1 201.95 450 Tm (O: ) Tj ET "
+              b"/Span <</MCID 9>> BDC BT /F1 12 Tf 1 0 0 1 240 450 Tm (________) Tj ET EMC "
+              # Two blanks a space apart, and a question shown with ', which
+              # moves to the next line first.
+              b"BT /F1 12 Tf 1 0 0 1 72 420 Tm (Name: ____ ____) Tj ET "
+              b"BT /F1 12 Tf 1 0 0 1 72 400 Tm (A first line, of the question.) Tj ET "
+              b"BT /F1 12 Tf 14 TL 1 0 0 1 72 386 Tm (Then the blank, ______.) ' ET "
+              # A line too long to give whole.
+              b"BT /F1 6 Tf 1 0 0 1 20 480 Tm (" + b"word " * 26 + b") Tj ET "
+              b"BT /F1 6 Tf 1 0 0 1 420 480 Tm (__________) Tj ET")
+    utf16 = "https://example.org/utf16".encode("utf-16-be").hex().upper().encode()
+    objects = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R "
+        b"/Resources << /Font << /F1 5 0 R >> >> "
+        b"/Annots [6 0 R 7 0 R 8 0 R 9 0 R 10 0 R] >>",
+        b"<< /Length %d >>\nstream\n" % len(stream) + stream + b"\nendstream",
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+        b"<< /Type /Annot /Subtype /Link /Rect [72 690 200 702] /Contents "
+        b"(https://example.org/fill) /A << /S /URI /URI (https://example.org/fill) >> >>",
+        b"<< /Type /Annot /Subtype /Link /Rect [72 670 200 682] /Contents (The census page) "
+        b"/A << /S /URI /URI (https://example.org/census) >> >>",
+        b"<< /Type /Annot /Subtype /Link /Rect [72 650 200 662] "
+        b"/A << /S /URI /URI (https://example.org/isn\\342\\200\\231t) >> >>",
+        b"<< /Type /Annot /Subtype /Link /Rect [72 630 200 642] "
+        b"/A << /S /URI /URI <FEFF" + utf16 + b"> >> >>",
+        b"<< /Type /Annot /Subtype /Link /Rect [72 610 200 622] "
+        b"/A << /S /URI /URI 11 0 R >> >>",
+        b"(https://example.org/indirect)",
+    ]
+    data, offsets = b"%PDF-2.0\n", []
+    for number, body in enumerate(objects, 1):
+        offsets.append(len(data))
+        data += b"%d 0 obj\n" % number + body + b"\nendobj\n"
+    start = len(data)
+    data += (b"xref\n0 %d\n0000000000 65535 f \n" % (len(objects) + 1)
+             + b"".join(b"%010d 00000 n \n" % offset for offset in offsets)
+             + b"trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n"
+             % (len(objects) + 1, start))
+    path = os.path.join(scratch("wcag-context-"), "quiz.pdf")
+    with open(path, "wb") as fh:
+        fh.write(data)
+    context = pdfcheck._WcagContext(path)
+
+    def link(page, number):
+        return context.about("SALinkAnnotation",
+                             {"context": f"root/doc[0]/pages[{page}]/annots[{number}]"})
+
+    def repeated(rect):
+        return context.about("SARepeatedCharacters",
+                             {"location": json.dumps({"bbox": [{"p": 0, "rect": rect}]})})
+    long_line = context.line(0, [420, 478.6, 450, 485.6])
+
+    # Where pypdf itself places the run shown with ': on the next line, 14
+    # points down, or not.
+    quoted = []
+    pypdf.PdfReader(path).pages[0].extract_text(visitor_text=lambda text, cm, tm, font, size: (
+        quoted.append(tm[5] * cm[3] + tm[4] * cm[1] + cm[5]) if "Then the blank" in text
+        else None))
+    quoted = quoted[0] if quoted else 0
+
+    # A page pypdf reads partway, then stops on.
+    class Half:
+        def extract_text(self, visitor_operand_before=None, visitor_operand_after=None,
+                         visitor_text=None):
+            visitor_text("Half a line", [1, 0, 0, 1, 0, 0], [1, 0, 0, 1, 72, 300], None, 12)
+            raise ValueError("a broken stream")
+    half = pdfcheck._WcagContext(path)
+    half.page = lambda index: Half()
+    # veraPDF's report on the PDF, read verbose: the PDF's own words in it.
+    report = {"report": {"jobs": [
+        {"itemDetails": {"name": "/w/wcag-probe.pdf"}, "validationResult": [{"details": {
+            "ruleSummaries": [{"specification": "WCAG2.2", "clause": "1.3.1",
+                               "testNumber": 1, "object": "SARepeatedCharacters",
+                               "failedChecks": 1, "checks": [{"status": "failed"}]}]}}]},
+        {"itemDetails": {"name": path}, "validationResult": [{"details": {"ruleSummaries": [
+            {"specification": "WCAG2.2", "clause": "2.4.9", "testNumber": 1,
+             "object": "SALinkAnnotation", "description": "Links", "failedChecks": 1,
+             "checks": [{"status": "failed", "errorMessage": "No description",
+                         "context": "root/doc[0]/pages[0]/annots[0]"}]},
+            {"specification": "WCAG2.2", "clause": "1.3.1", "testNumber": 1,
+             "object": "SARepeatedCharacters", "description": "Repeated", "failedChecks": 1,
+             "checks": [{"status": "failed", "errorMessage": "Text contains 10",
+                         "location": '{"bbox":[{"p":0,"rect":[252.1,717.3,318.8,731.2]}]}'}]},
+        ]}}]}]}}
+    read = pdfcheck.wcag_report(report, "/w/wcag-probe.pdf", "f", verbose=True)
+    lines = [line for _, group in sorted(read["rules"]) for line in group]
+    return [
+        ("a link's address, and its description when that isn't the address",
+         lambda: [link(0, 0), link(0, 1)] == [
+             "the link to https://example.org/fill",
+             'the link to https://example.org/census, described as "The census page"']),
+        ("an address outside ASCII read as UTF-8, as PDF 2.0 has it, one in UTF-16 as that, "
+         "and one in an object of its own",
+         lambda: [link(0, 2), link(0, 3), link(0, 4)] == [
+             "the link to https://example.org/isn’t",
+             "the link to https://example.org/utf16",
+             "the link to https://example.org/indirect"]),
+        ("the line a box of repeated characters is on, its words in order",
+         lambda: repeated([252.1, 717.3, 318.8, 731.2])
+         == 'on the line "Core nations are also known as __________."'),
+        ("a blank drawn shorter to fit its line read as one run, not spaced",
+         lambda: repeated([120, 647.3, 140, 661.2]) == 'on the line "Fitted: ____"'),
+        ("the line, not a subscript on it, though the subscript is nearer the box's foot",
+         lambda: repeated([420, 597.3, 473, 611.2])
+         == 'on the line "The formula for water is H2O, and the gas we breathe out is '
+            '________."'),
+        ("and under a transformation, each run in its place, after a label too",
+         lambda: repeated([200, 537.3, 253, 551.2]).replace("1.Under", "1. Under")
+         == 'on the line "1. Under a transform, ________."'),
+        ("a superscript and a subscript on the line, wherever the box's foot is",
+         lambda: repeated([240, 447.3, 293, 461.2])
+         == 'on the line "E = mc2, and water is H2O: ________"'),
+        ("two blanks a space apart kept apart",
+         lambda: repeated([109, 417.3, 133, 431.2]) == 'on the line "Name: ____ ____"'),
+        ("a run shown with ' read where it moved to, on the next line, where pypdf places it "
+         "there (5.9 moves it by its leading times the type's size)",
+         lambda: repeated([180, 369.3, 220, 383.2])
+         == ('on the line "Then the blank, ______."' if abs(quoted - 372) < 1 else "")),
+        ("a line past 120 characters cut short",
+         lambda: len(long_line) > 120 and long_line.endswith("__________")
+         and repeated([420, 478.6, 450, 485.6]) == f'on the line "{long_line[:117]}…"'),
+        ("nothing for a page or an annotation the PDF hasn't, or a check of another kind",
+         lambda: [link(0, 9), link(3, 0), link(-1, 0),
+                  context.about("SATextChunk", {"context": "root/doc[0]/pages[0]/annots[0]"}),
+                  context.about("SARepeatedCharacters", {"location": "nonsense"})]
+         == ["", "", "", "", ""]),
+        ("nor for a page read partway, then or after",
+         lambda: [half.about("SARepeatedCharacters",
+                             {"location": '{"bbox":[{"p":0,"rect":[72,297.3,100,311.2]}]}'})
+                  for _ in range(2)] == ["", ""]),
+        ("nor for a PDF that isn't there, which isn't tried again",
+         lambda: (lambda missing: [missing.about(
+             "SALinkAnnotation", {"context": "root/doc[0]/pages[0]/annots[0]"})
+             for _ in range(2)] == ["", ""] and missing.reader is False)(
+             pdfcheck._WcagContext("/no/such.pdf"))),
+        ("a verbose report on the PDF says what it has where each check failed",
+         lambda: sorted(f.detail.split(". 1.3.1")[0].split(". 2.4.9")[0]
+                        for f in read["findings"]) == [
+             "Links: No description (the link to https://example.org/fill)",
+             'Repeated: Text contains 10 (on the line "Core nations are also known as '
+             '__________.")']
+         and f"  quiz.pdf#page=1: No description (the link to https://example.org/fill)"
+         in lines),
+    ]
+
+
+def check_output_check_flags():
+    """What convert.py gives the output check: --quick when asked, and
+    --wcag and --verbose only when the run made a PDF, --verbose only with
+    --wcag."""
+    import argparse
+    convert = load(os.path.join(ROOT, "bin", "convert.py"), "convert_flags")
+
+    def flags(pdfs, **given):
+        args = argparse.Namespace(**dict({"quick": False, "wcag": False, "verbose": False},
+                                         **given))
+        return convert.output_check_flags(args, pdfs)
+    return [
+        ("--wcag and --verbose passed on with a PDF to check",
+         lambda: flags(["b.pdf"], wcag=True, verbose=True) == ["--wcag", "--verbose"]
+         and flags(["b.pdf"], quick=True, wcag=True) == ["--quick", "--wcag"]),
+        ("and neither without one, nor --verbose without --wcag",
+         lambda: flags([], wcag=True, verbose=True) == []
+         and flags(["b.pdf"], verbose=True) == []
+         and flags([], quick=True) == ["--quick"]),
     ]
 
 
@@ -2246,6 +2506,8 @@ GROUPS = [
     ("the PDF findings in the output check's summary", check_pdf_summary),
     ("WCAG 2.2's criteria, as W3C has them", check_wcag_criteria),
     ("veraPDF's WCAG profile's report, read as findings", check_wcag_report),
+    ("what a PDF has where its WCAG checks failed, for --verbose", check_wcag_context),
+    ("the output check's flags from convert.py", check_output_check_flags),
     ("the WCAG probe, and the setup checked before veraPDF runs", check_wcag_probe),
     ("the WCAG modules' folder, and the summary their notes go in", check_wcag_setup),
     ("tlmgr, with sudo where it needs it", check_tlmgr_command),

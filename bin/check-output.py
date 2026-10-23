@@ -31,12 +31,16 @@ and veraPDF, and convert.py --quick passes it on.
 --wcag runs veraPDF's WCAG 2.2 machine profile on each PDF as well, with
 the WCAG modules its release lacks, from the folder VERAPDF_WCAG names
 (docs/installation.md). The checks are experimental and wrong at times,
-so each failed check is a note, never an error, and the summary says so;
+so what they find is a note, never an error, and the summary says so;
 and since veraPDF without the modules passes the profile's own rules
 without checking them, and says nothing of it, a probe of its own in the
 same run says whether they loaded, and the summary warns when they
-didn't. Given nothing to check, --wcag runs the probe alone, which
-checks the setup. convert.py --wcag passes it on.
+didn't. Each rule a PDF fails is one note, with how many of its checks
+failed and on which pages; --verbose makes each failed check a note,
+with what the PDF has there that veraPDF's report doesn't say (a link's
+address, the line repeated characters are on), and lists them in the
+summary. Given nothing to check, --wcag runs the probe alone, which
+checks the setup. convert.py --wcag and --verbose pass them on.
 
 Copyright 2026 Robert Szarka
 
@@ -94,6 +98,11 @@ def main():
                              "its WCAG modules from VERAPDF_WCAG; experimental, so what it "
                              "finds is a note, never an error; with nothing else to check, "
                              "check the setup")
+    parser.add_argument("--verbose", action="store_true",
+                        help="with --wcag, a note for each failed check of veraPDF's WCAG "
+                             "profile, listed in the summary too, with what the PDF has "
+                             "there (a link's address, the line repeated characters are "
+                             "on), where each rule's are otherwise counted in one")
     args = parser.parse_args()
 
     pages = list(args.pages)
@@ -142,6 +151,8 @@ def main():
     # veraPDF's WCAG 2.2 checks, when asked for: information, never a
     # verdict, so they're counted and summarized apart from the rest.
     wcag_findings, wcag_lines = [], []
+    if args.verbose and not args.wcag:
+        notes.append(pdfcheck.WCAG_ALONE)
     if args.wcag:
         command = None if args.quick else outputcheck.find_validator("verapdf")
         if args.quick:
@@ -154,7 +165,8 @@ def main():
             wcag_lines.append("veraPDF's WCAG checks not run: no PDF to check.")
         else:
             # With nothing named to check, the setup alone.
-            wcag_findings, wcag_lines = pdfcheck.run_verapdf_wcag(command, pdfs)
+            wcag_findings, wcag_lines = pdfcheck.run_verapdf_wcag(command, pdfs,
+                                                                  verbose=args.verbose)
     # A PowerPoint file's, as a PowerPoint deck's are found.
     pptxs = [p for p in args.pptx if os.path.exists(p)]
     pptx_findings = []

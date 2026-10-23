@@ -669,6 +669,12 @@ WCAG_CAVEAT = "veraPDF's WCAG checks are experimental and may be wrong"
 WCAG_SKIPPED = ("without them veraPDF skips its WCAG checks silently, passing "
                 "their rules unchecked")
 WCAG_DOCS = "docs/installation.md, Optional: veraPDF's WCAG modules"
+WCAG_ALONE = ("--verbose lists veraPDF's WCAG checks one by one, with --wcag; without it, "
+              "it changes nothing.")
+WCAG_VERBOSE = ("Each rule's failed checks are counted, not listed: run again with --verbose "
+                "for each one, with what the PDF has there (a link's address, the line "
+                "repeated characters are on), or check one PDF so with check-output.py "
+                "--wcag --verbose --pdf.")
 # The failed checks veraPDF is asked to list for a rule, each a finding
 # (it lists 100 unless told; on Introduction to Sociology 3e, 789 bare
 # links fail 2.4.9-1, on 121 pages). However many are asked for, veraPDF
@@ -745,15 +751,19 @@ def wcag_modules(folder):
     return found
 
 
-def run_verapdf_wcag(command, paths, folder=None, timeout=3600):
+def run_verapdf_wcag(command, paths, folder=None, timeout=3600, verbose=False):
     """veraPDF's WCAG 2.2 machine checks on the PDFs, as (findings,
-    lines): a note for each check of the profile's own rules a PDF
-    failed, and the lines for the run's summary or a report, the first
-    saying whether the checks ran, then a warning for anything that kept
-    them from running or from checking everything, which veraPDF itself
-    doesn't say, then one for each rule a PDF failed. With no PDFs, the
-    probe alone, which checks the setup. folder: where the modules and
-    the profiles are, VERAPDF_WCAG's when not given."""
+    lines): a note for each of the profile's own rules a PDF failed,
+    counting its failed checks, and the lines for the run's summary or a
+    report, the first saying whether the checks ran, then a warning for
+    anything that kept them from running or from checking everything,
+    which veraPDF itself doesn't say, then one for each rule a PDF
+    failed, and one saying --verbose lists each check. verbose: a note
+    for each failed check instead, with what the PDF has there, which
+    veraPDF's report doesn't say (a link's address, the line repeated
+    characters are on), and a line for each after its rule's. With no
+    PDFs, the probe alone, which checks the setup. folder: where the
+    modules and the profiles are, VERAPDF_WCAG's when not given."""
     if folder is None:
         folder = os.environ.get(WCAG_VARIABLE, "").strip()
     if not folder:
@@ -831,7 +841,7 @@ def run_verapdf_wcag(command, paths, folder=None, timeout=3600):
                 continue
             report, stderr = result
             try:
-                read = wcag_report(report, probe, folder, modules, group)
+                read = wcag_report(report, probe, folder, modules, group, verbose)
             except Exception as exc:        # a report no veraPDF writes
                 warnings.append(f"WARNING: --wcag: veraPDF's report on "
                                 f"{WCAG_PROFILES[major]} couldn't be read: {exc}")
@@ -862,7 +872,10 @@ def run_verapdf_wcag(command, paths, folder=None, timeout=3600):
                     + ", ".join(f"{module} {' and '.join(modules[module])}"
                                 for module in WCAG_MODULES)
                     + f"), so its WCAG 2.2 machine checks run on {files}; {WCAG_CAVEAT}."]
-    return findings, head + warnings + unfitting + [line for _, line in sorted(rules)]
+    listed = [line for _, lines in sorted(rules) for line in lines]
+    if rules and not verbose:
+        listed.append(WCAG_VERBOSE)
+    return findings, head + warnings + unfitting + listed
 
 
 def _listed(paths, shown=3):
@@ -943,15 +956,17 @@ def _probe_tells(profile):
     return False
 
 
-def wcag_report(report, probe, folder="", modules=None, expected=()):
+def wcag_report(report, probe, folder="", modules=None, expected=(), verbose=False):
     """What veraPDF's JSON report of a run of a WCAG profile, the probe
     among its files, says: {"loaded": whether the probe failed one of
     the profile's own rules, so the modules loaded, "version": veraPDF's,
     "checked": how many PDFs besides the probe were checked, "findings",
-    "rules": (a sort key, the summary's line) for each rule a PDF failed,
+    "rules": (a sort key, the summary's lines) for each rule a PDF failed,
     and "warnings"}. When the probe passed, the warning says so and
     nothing else is read, since then no WCAG rule was checked. expected:
-    the PDFs given, each of which veraPDF should have reported on."""
+    the PDFs given, each of which veraPDF should have reported on.
+    verbose: a finding, and a line, for each failed check, with what the
+    PDF it names (veraPDF's own name for it) has there."""
     modules = modules or {}
     body = _dict(_dict(report).get("report"))
     details = {}
@@ -987,6 +1002,7 @@ def wcag_report(report, probe, folder="", modules=None, expected=()):
         name = os.path.basename(path)
         if path:
             seen.add(os.path.realpath(path))
+        context = _WcagContext(path) if verbose else None
         try:
             results = job.get("validationResult")
             results = [results] if isinstance(results, dict) else [
@@ -1001,10 +1017,10 @@ def wcag_report(report, probe, folder="", modules=None, expected=()):
                     if not isinstance(rule, dict) or not str(
                             rule.get("specification", "")).startswith("WCAG"):
                         continue
-                    found, pages = wcag_rule_findings(name, rule)
+                    found, pages, lines = wcag_rule_findings(name, rule, context)
                     read["findings"] += found
                     read["rules"].append((_rule_key(name, rule),
-                                          wcag_rule_line(name, rule, pages)))
+                                          [wcag_rule_line(name, rule, pages)] + lines))
         except Exception as exc:            # a job no veraPDF writes, read as far as it goes
             read["warnings"].append(f"WARNING: --wcag: veraPDF's report on {name} couldn't "
                                     f"be read: {exc}")
@@ -1017,13 +1033,16 @@ def wcag_report(report, probe, folder="", modules=None, expected=()):
     return read
 
 
-def wcag_rule_findings(name, rule):
-    """(findings, pages) for one of the WCAG profile's own rules a PDF
-    failed: a note for each failed check veraPDF lists, saying where (the
-    PDF, and the page when veraPDF gives one), the rule, what veraPDF
-    found, and the criterion, its level, and its Understanding document,
-    and one more note for a rule failed more often than veraPDF lists,
-    saying how many more; and the pages the listed checks are on."""
+def wcag_rule_findings(name, rule, context=None):
+    """(findings, pages, lines) for one of the WCAG profile's own rules a
+    PDF failed: a note saying so, with how many of its checks failed and
+    the pages of those veraPDF listed, the first 20, the criterion, its
+    level, and its Understanding document; and the pages. context (a _WcagContext, for
+    --verbose): a note for each failed check veraPDF lists instead,
+    saying where (the PDF, and the page when veraPDF gives one), the rule,
+    what veraPDF found, and what the PDF has there, and one more for a
+    rule failed more often than veraPDF lists, saying how many more; and
+    a line for each listed check, for the summary."""
     clause = str(rule.get("clause", ""))
     check = f"verapdf-wcag:{clause}-{rule.get('testNumber', '')}"
     description = str(rule.get("description") or "").strip().rstrip(".")
@@ -1035,21 +1054,170 @@ def wcag_rule_findings(name, rule):
         return Finding(where, check, detail, file=name, kind="pdf", severity="note",
                        standard=wcag.standard(clause), tool="verapdf", fix="manual")
 
-    out, pages = [], set()
+    pages = sorted({page for page in map(_wcag_page, listed) if page})
+    if context is None:
+        each = "each" if total <= len(listed) else f"the {len(listed)} veraPDF listed"
+        return ([note(name, f"{description}: {total} failed check(s)"
+                            f"{_pages_listed(pages, total, len(listed), shown=20)}; "
+                            f"--verbose lists {each}, with what the PDF has there. {about}")],
+                pages, [])
+    out, lines = [], []
     for item in listed:
         page = _wcag_page(item)
         said = _wcag_said(item)
-        if page:
-            pages.add(page)
-        out.append(note(f"{name}#page={page}" if page else name,
-                        f"{description}: {said}. {about}" if said
+        there = context.about(str(rule.get("object") or ""), item)
+        if there:
+            said = f"{said} ({there})" if said else there
+        where = f"{name}#page={page}" if page else name
+        out.append(note(where, f"{description}: {said}. {about}" if said
                         else f"{description}. {about}"))
+        lines.append(f"  {where}: {said or description}")
     if total > len(listed):
-        out.append(note(name, (f"{description}: {total - len(listed)} more failed "
-                               "check(s), which veraPDF didn't list (it lists about 10,000 "
-                               f"of a PDF's at most). {about}") if listed else
-                        f"{description}: {total} failed check(s). {about}"))
-    return out, sorted(pages)
+        more = (f"{total - len(listed)} more failed check(s), which veraPDF didn't list (it "
+                "lists about 10,000 of a PDF's at most)" if listed
+                else f"{total} failed check(s)")
+        out.append(note(name, f"{description}: {more}. {about}"))
+        lines.append(f"  {name}: {more}")
+    return out, pages, lines
+
+
+def _pages_listed(pages, total, listed, shown=None):
+    """The pages a rule's listed checks are on, as a finding or a line
+    names them: ", pages 3, 10", the first shown of them, and how many
+    more; ", the first 100 on pages 3, 10" when veraPDF listed fewer
+    checks than failed; nothing without pages."""
+    if not pages:
+        return ""
+    named = pages if shown is None else pages[:shown]
+    words = ", ".join(str(page) for page in named) + (
+        f", and {len(pages) - len(named)} more" if len(pages) > len(named) else "")
+    where = f"page{'s' if len(pages) > 1 else ''} {words}"
+    if total > listed:
+        where = f"the first{'' if listed == 1 else f' {listed}'} on {where}"
+    return f", {where}"
+
+
+class _WcagContext:
+    """What a PDF has where veraPDF's failed checks are, which veraPDF's
+    report doesn't say, for --verbose: a link annotation's address (its
+    check's context, .../pages[2]/annots[0]), and the line of text a
+    check's box is on, for repeated characters, whose context names no
+    text. Read with pypdf, the PDF opened when first asked; nothing where
+    the PDF, or pypdf, can't say."""
+
+    def __init__(self, path):
+        self.path = path
+        self.reader = None
+        self.texts = {}
+
+    def about(self, kind, item):
+        """What the PDF has where the failed check is, or ""."""
+        try:
+            if kind == "SALinkAnnotation":
+                found = re.search(r"/pages\[(\d+)\]/annots\[(\d+)\]",
+                                  str(item.get("context") or ""))
+                return self.link(int(found.group(1)), int(found.group(2))) if found else ""
+            if kind == "SARepeatedCharacters":
+                location = item.get("location")
+                box = _list(_dict(json.loads(location) if isinstance(location, str)
+                                  else location).get("bbox"))[0]
+                line = self.line(int(box["p"]), [float(v) for v in box["rect"]])
+                if line:
+                    return f'on the line "{line[:117]}…"' if len(line) > 120 \
+                        else f'on the line "{line}"'
+        except Exception:                   # a page or an annotation the PDF hasn't
+            return ""
+        return ""
+
+    def page(self, index):
+        """The page, counted from 0; the PDF, once it can't be opened,
+        isn't tried again for the next check."""
+        if self.reader is None:
+            self.reader = False
+            self.reader = pypdf.PdfReader(self.path)
+        if self.reader is False or index < 0:
+            raise LookupError(index)
+        return self.reader.pages[index]
+
+    def link(self, page, number):
+        """Where the link annotation goes: an address, or a place in the
+        PDF; and its description (/Contents) when that isn't the address."""
+        annotation = self.page(page)["/Annots"][number].get_object()
+        action = annotation.get("/A")
+        action = action.get_object() if action is not None else {}
+        # Indexed, an indirect value is read where it's kept.
+        address = action["/URI"] if "/URI" in action else None
+        if address is not None:
+            raw = getattr(address, "original_bytes", None)
+            # A URI is UTF-8 in PDF 2.0, ASCII in 1.7; pypdf reads one
+            # without a UTF-16 byte-order mark as PDFDocEncoding, which
+            # garbles one outside ASCII.
+            address = (bytes(raw).decode("utf-8", "replace")
+                       if isinstance(raw, (bytes, bytearray))
+                       and not bytes(raw).startswith((b"\xfe\xff", b"\xff\xfe"))
+                       else _text(address))
+        words = " ".join(_text(annotation["/Contents"] if "/Contents" in annotation
+                               else None).split())
+        said = f"the link to {address}" if address else "a link to a place in the PDF"
+        if words and words != address:
+            said += f', described as "{words[:80]}…"' if len(words) > 80 \
+                else f', described as "{words}"'
+        return said
+
+    def line(self, page, rect):
+        """The words of the line the box is on, in order across the page: the
+        line of the run of text the box starts in, its baseline in the box's
+        lower half, with what's raised or lowered on it (a subscript, a
+        superscript, a footnote's mark) less than 0.4 of the box's height
+        off, where the lines above and below are about its height away."""
+        items = self.texts.get(page)
+        if items is None:
+            items, shown = [], []
+            self.texts[page] = items            # a page pypdf can't read, read once
+
+            def at(cm, tm):
+                return (tm[4] * cm[1] + tm[5] * cm[3] + cm[5],
+                        tm[4] * cm[0] + tm[5] * cm[2] + cm[4])
+
+            def before(operator, operands, cm, tm):
+                if operator in (b"Tj", b"TJ"):
+                    shown.append(at(cm, tm))
+
+            def after(operator, operands, cm, tm):
+                # ' and " move to the next line, then show: their run's
+                # place is where the move left it.
+                if operator in (b"'", b'"'):
+                    shown.append(at(cm, tm))
+
+            def visit(text, cm, tm, font, size):
+                # A run's place is where its first show operator was:
+                # around marked content, as a blank's Span is, pypdf gives
+                # some runs none (the origin, 4.0.2 those after it, 5.9
+                # those before), or the origin of a transformed page.
+                if text:
+                    y, x = shown[0] if shown else at(cm, tm)
+                    items.append((y, x, text))
+                shown.clear()
+            try:
+                self.page(page).extract_text(visitor_operand_before=before,
+                                             visitor_operand_after=after, visitor_text=visit)
+            except Exception:
+                items.clear()                   # a page read partway is a page not read
+                raise
+        left, foot, top = min(rect[0], rect[2]), min(rect[1], rect[3]), max(rect[1], rect[3])
+        near = [item for item in items if foot - 1 <= item[0] <= (foot + top) / 2]
+        if not near:
+            return ""
+        started = [item for item in near if item[1] <= left + 1]
+        base = (max(started, key=lambda item: item[1]) if started
+                else min(near, key=lambda item: abs(item[0] - foot)))[0]
+        off = max(2.0, 0.4 * (top - foot))
+        words = " ".join("".join(text for y, x, text in sorted(
+            (item for item in items if abs(item[0] - base) < off), key=lambda i: i[1])).split())
+        # Spaces pypdf puts in: before a mark, and between the underscores
+        # of a fill-in blank drawn shorter, to fit its line, overlapping.
+        words = re.sub(r" ([.,;:!?])", r"\1", words)
+        return re.sub(r"_(?: _){2,}", lambda run: run.group().replace(" ", ""), words)
 
 
 def wcag_rule_line(name, rule, pages):
@@ -1059,12 +1227,7 @@ def wcag_rule_line(name, rule, pages):
     clause = str(rule.get("clause", ""))
     listed = len(_failed_checks(rule))
     total = max(_count(rule.get("failedChecks")), listed)
-    shown = ", ".join(str(page) for page in pages[:8]) + (
-        f", and {len(pages) - 8} more" if len(pages) > 8 else "")
-    where = f"page{'s' if len(pages) > 1 else ''} {shown}" if pages else ""
-    if where and total > listed:
-        where = f"the first{'' if listed == 1 else f' {listed}'} on {where}"
-    where = f", {where}" if where else ""
+    where = _pages_listed(pages, total, listed, shown=8)
     description = str(rule.get("description") or "").strip().rstrip(".")
     return (f"{name}: verapdf-wcag:{clause}-{rule.get('testNumber', '')}, "
             f"{wcag.named(clause)}: {total} failed check(s){where}: {description}. "

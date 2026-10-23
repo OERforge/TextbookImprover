@@ -213,8 +213,10 @@ def case_front_door():
 
 
 def case_wcag():
-    """--wcag, with a stand-in for veraPDF: the WCAG profile's failed
-    checks notes that leave the exit status the other findings', a
+    """--wcag, with a stand-in for veraPDF: a note for each rule of the
+    WCAG profile a PDF fails, counting its failed checks, and with
+    --verbose one for each failed check, an item in the report under its
+    rule's, notes that leave the exit status the other findings', a
     section of the report saying the checks ran and may be wrong, a run
     with --wcag never taking the report for current, since what it finds
     turns on a setup the cache can't see, a report made with other
@@ -254,16 +256,30 @@ def case_wcag():
             return result, found, fh.read()
     plain, plain_found, _ = audit()
     ran, found, report = audit("--wcag")
+    loud, loud_found, loud_report = audit("--wcag", "--verbose")
+    alone, _, _ = audit("--verbose")
     again, _, _ = audit("--wcag")
     without, without_found, without_report = audit()
     quick, _, _ = audit("--quick")
     quick_again, _, _ = audit("--quick")
     wcag = [f for f in found if f.check.startswith("verapdf-wcag:")]
     return [
-        ("--wcag adds the profile's failed checks, notes at their pages",
+        ("--wcag adds a note for each rule of the profile the PDF fails",
          lambda: sorted((f.where, f.check, f.severity) for f in wcag) == [
+             ("book.pdf", "verapdf-wcag:1.3.1-1", "note"),
+             ("book.pdf", "verapdf-wcag:2.4.9-1", "note")]),
+        ("and with --verbose, one for each failed check, at its page, an item in the report "
+         "under its rule's",
+         lambda: sorted((f.where, f.check, f.severity) for f in loud_found
+                        if f.check.startswith("verapdf-wcag:")) == [
              ("book.pdf#page=3", "verapdf-wcag:2.4.9-1", "note"),
-             ("book.pdf#page=653", "verapdf-wcag:1.3.1-1", "note")]),
+             ("book.pdf#page=653", "verapdf-wcag:1.3.1-1", "note")]
+         and "\n- book.pdf: verapdf-wcag:1.3.1-1, " in loud_report
+         and "\n  - book.pdf#page=653: Text contains 7 repeated non space characters\n"
+         in loud_report and "--verbose" not in loud_report
+         and "run again with --verbose" in report),
+        ("--verbose without --wcag says it changes nothing",
+         lambda: pdfcheck.WCAG_ALONE in alone.stderr),
         ("and leaves the exit status the other findings', none of them an error",
          lambda: plain.returncode == ran.returncode == 0
          and not [f for f in plain_found if f.severity == "error"]),

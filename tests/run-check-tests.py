@@ -503,6 +503,12 @@ def wcag_cases(work):
         calls = [json.loads(line) for line in fh]
     profiled = [call for call in calls if "-p" in call["args"]]
     others = sum(1 for row in rows if not row["Check"].startswith("verapdf-wcag:"))
+    # With --verbose: each failed check a row, and a line after its rule's.
+    loud_report = os.path.join(work, "wcag-verbose.csv")
+    loud = run("--wcag", "--verbose", "--pdf", pdf, "--report", loud_report, folder=loads)
+    unasked = run("--verbose", "--pdf", pdf, folder=loads)
+    with open(loud_report, newline="", encoding="utf-8") as fh:
+        loud_rows = list(csv.DictReader(fh))
     setup = run("--wcag", folder=loads)
     missed = run("--wcag", "--pdf", pdf, folder=unloaded)
     absent = run("--wcag", "--pdf", pdf)
@@ -580,20 +586,43 @@ def wcag_cases(work):
     nothing = run(os.path.join(work, "other.html"), "--report", bare_report)
     url = "https://www.w3.org/WAI/WCAG22/Understanding/link-purpose-link-only.html"
     cases = [
-        ("--wcag reports the profile's own rules, not PDF/UA's, each failed check a note at "
-         "its page, with the criterion as the standard",
+        ("--wcag reports the profile's own rules, not PDF/UA's, each a note counting its "
+         "failed checks, with the criterion as the standard",
          lambda: [(r["Where"], r["Check"], r["Severity"], r["Standard"]) for r in rows
                   if r["Check"].startswith("verapdf")] == [
-             ("book.pdf#page=653", "verapdf-wcag:1.3.1-1", "note", "WCAG 2.0 SC 1.3.1 (A)"),
-             ("book.pdf#page=3", "verapdf-wcag:2.4.9-1", "note", "WCAG 2.0 SC 2.4.9 (AAA)")]
+             ("book.pdf", "verapdf-wcag:1.3.1-1", "note", "WCAG 2.0 SC 1.3.1 (A)"),
+             ("book.pdf", "verapdf-wcag:2.4.9-1", "note", "WCAG 2.0 SC 2.4.9 (AAA)")]
          or fail("got: " + " | ".join(r["Where"] + " " + r["Check"] for r in rows))),
-        ("and the detail says what veraPDF found, the criterion, its Understanding "
-         "document, and that the check may be wrong",
+        ("and the detail says how many, on which pages, that --verbose lists each, the "
+         "criterion, its Understanding document, and that the check may be wrong",
          lambda: [r["Detail"] for r in rows if r["Check"] == "verapdf-wcag:2.4.9-1"] == [
+             "Links shall contain an alternate description via their Contents or Alt keys or "
+             "in the text value: 1 failed check(s), page 3; --verbose lists each, with what the "
+             f"PDF has there. 2.4.9 Link Purpose (Link Only) (AAA): {url}. veraPDF's WCAG "
+             "checks are experimental and may be wrong."]),
+        ("and the summary says, last, that --verbose lists each failed check",
+         lambda: ran.rstrip().splitlines()[-2:] == [
+             "  " + pdfcheck.WCAG_VERBOSE, f"Written to {report}."] or fail("got: " + ran)),
+        ("with --verbose, each failed check a note at its page, saying what veraPDF found",
+         lambda: [(r["Where"], r["Check"], r["Severity"]) for r in loud_rows
+                  if r["Check"].startswith("verapdf")] == [
+             ("book.pdf#page=653", "verapdf-wcag:1.3.1-1", "note"),
+             ("book.pdf#page=3", "verapdf-wcag:2.4.9-1", "note")]
+         and [r["Detail"] for r in loud_rows if r["Check"] == "verapdf-wcag:2.4.9-1"] == [
              "Links shall contain an alternate description via their Contents or Alt keys or "
              "in the text value: A link annotation does not include an alternate description "
              "in the Contents or Alt Keys or in the text value. 2.4.9 Link Purpose (Link Only) "
-             f"(AAA): {url}. veraPDF's WCAG checks are experimental and may be wrong."]),
+             f"(AAA): {url}. veraPDF's WCAG checks are experimental and may be wrong."]
+         or fail("got: " + " | ".join(r["Where"] + " " + r["Detail"] for r in loud_rows))),
+        ("and a line for each after its rule's, and nothing said of --verbose",
+         lambda: loud.index("  book.pdf: verapdf-wcag:1.3.1-1")
+         < loud.index("    book.pdf#page=653: Text contains 7 repeated non space characters\n")
+         < loud.index("  book.pdf: verapdf-wcag:2.4.9-1")
+         < loud.index("    book.pdf#page=3: A link annotation does not include")
+         and "--verbose" not in loud or fail("got: " + loud)),
+        ("--verbose without --wcag says it changes nothing, and runs no profile",
+         lambda: "  " + pdfcheck.WCAG_ALONE in unasked and "verapdf-wcag" not in unasked
+         or fail("got: " + unasked)),
         ("the summary's verdict doesn't count them, and their lines come after it, "
          "under one saying they're experimental",
          lambda: re.search(rf"Output check: 0 page\(s\) and 1 PDF\(s\), {others} finding\(s\)",

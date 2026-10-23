@@ -7,7 +7,7 @@ python3 $T/bin/audit.py ~/books/nursing            # everything in a directory
 python3 $T/bin/audit.py syllabus.pdf book.epub -o ~/reports --report-docx
 ```
 
-It depends on `lib/` and on Pandoc, to read a source. `pypdf` (for PDFs), epubcheck, the Nu HTML checker, and veraPDF are used when present and reported as absent when not; `--quick` skips the external ones. `--wcag` checks each PDF against veraPDF's WCAG 2.2 machine profile as well, as the [output check](checking.md#verapdfs-wcag-22-checks) does: what it finds is a note, never an error, and the report has a section for each PDF saying whether the checks ran, and when they didn't, why.
+It depends on `lib/` and on Pandoc, to read a source. `pypdf` (for PDFs), epubcheck, the Nu HTML checker, and veraPDF are used when present and reported as absent when not; `--quick` skips the external ones. `--wcag` checks each PDF against veraPDF's WCAG 2.2 machine profile as well, as the [output check](checking.md#verapdfs-wcag-22-checks) does: what it finds is a note, never an error, one for each rule a PDF fails, counting its failed checks, and the report has a section for each PDF saying whether the checks ran, and when they didn't, why. `--verbose` makes each failed check a note, with what the PDF has there (a link's address, the line repeated characters are on), and an item in the section under its rule's.
 
 ## What it checks, by kind of file
 

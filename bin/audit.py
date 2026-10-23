@@ -17,7 +17,9 @@ pypdf (PDFs), epubcheck, the Nu HTML checker, and veraPDF, each found
 the way the output check finds them and reported as absent when they
 are. --wcag checks each PDF against veraPDF's WCAG 2.2 machine profile
 as well, as check-output.py --wcag does: what it finds is a note, never
-an error, and the report says whether the checks ran.
+an error, one for each rule a PDF fails, and the report says whether the
+checks ran; --verbose makes each failed check a note, with what the PDF
+has there.
 
 Copyright 2026 Robert Szarka
 
@@ -77,10 +79,11 @@ def gather(paths):
     return out
 
 
-def audit_one(path, kind, validators, wcag=False):
+def audit_one(path, kind, validators, wcag=False, verbose=False):
     """(findings, sections) for one file. wcag: a PDF is checked against
     veraPDF's WCAG 2.2 machine profile too, its own section saying
-    whether the checks ran."""
+    whether the checks ran; verbose: each of its failed checks a finding,
+    and an item in the section, where each rule's are counted in one."""
     name = os.path.basename(path)
     if kind in ("source-docx", "source-md"):
         found = sourcecheck.check(path, kind)
@@ -132,12 +135,14 @@ def audit_one(path, kind, validators, wcag=False):
                 lines = ["veraPDF's WCAG checks not run: veraPDF not found (set "
                          "VERAPDF, or put verapdf on the path)."]
             else:
-                more, lines = pdfcheck.run_verapdf_wcag(command, [path])
+                more, lines = pdfcheck.run_verapdf_wcag(command, [path], verbose=verbose)
                 found += more
             for line in lines:
                 print(f"  {line}", file=sys.stderr)
+            # A failed check's line, with --verbose, an item under its rule's.
             sections.append((f"{name}: veraPDF's WCAG 2.2 checks",
-                             [f"- {line}" for line in lines]))
+                             [f"  - {line.strip()}" if line.startswith("  ") else f"- {line}"
+                              for line in lines]))
         return found, sections
     return [], []
 
@@ -158,6 +163,11 @@ def main():
                         help="check each PDF against veraPDF's WCAG 2.2 machine profile "
                              "too, with its WCAG modules from VERAPDF_WCAG; experimental, "
                              "so what it finds is a note, never an error")
+    parser.add_argument("--verbose", action="store_true",
+                        help="with --wcag, a note for each of its failed checks, listed in "
+                             "the report too, with what the PDF has there (a link's address, "
+                             "the line repeated characters are on), where each rule's are "
+                             "otherwise counted in one")
     parser.add_argument("--report-html", action="store_true",
                         help="also write the report as audit.html")
     parser.add_argument("--report-docx", action="store_true",
@@ -179,6 +189,8 @@ def main():
     # What changes what a report says, besides its inputs, and what a
     # file's findings are; --wcag changes only a PDF's, which is always
     # read again.
+    if args.verbose and not args.wcag:
+        print(pdfcheck.WCAG_ALONE, file=sys.stderr)
     options = {"quick": bool(args.quick), "wcag": bool(args.wcag)}
     per_file = {"quick": bool(args.quick)}
     # Nothing changed since the last audit: say so and leave the report
@@ -205,7 +217,7 @@ def main():
                   "finding(s) from the last audit", file=sys.stderr)
             all_found += cached
             continue
-        found, extra = audit_one(path, kind, not args.quick, args.wcag)
+        found, extra = audit_one(path, kind, not args.quick, args.wcag, args.verbose)
         print(f"  {os.path.basename(path)}: {len(found)} finding(s)",
               file=sys.stderr)
         all_found += found

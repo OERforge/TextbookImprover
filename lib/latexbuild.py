@@ -409,7 +409,7 @@ UA1_LINKS = r"""\ExplSyntaxOn
       {
         \socket_new_plug:nnn {hyp/link/GoTo/Contents}{oer}
           {
-            \tl_if_empty:NT \l__oer_link_contents_tl
+            \tl_if_empty:NT \g__oer_link_contents_tl
               {
                 \pdfstringdef \l_tmpa_tl {Go~to~destination~#1}
                 \pdfannot_dict_put:nne {link/GoTo}{Contents}{(\l_tmpa_tl)}
@@ -421,7 +421,7 @@ UA1_LINKS = r"""\ExplSyntaxOn
       {
         \socket_new_plug:nnn {hyp/link/URI/Contents}{oer}
           {
-            \tl_if_empty:NT \l__oer_link_contents_tl
+            \tl_if_empty:NT \g__oer_link_contents_tl
               {
                 \tl_set:Nn \l_tmpb_tl {#1}
                 \tl_replace_all:Nnn \l_tmpb_tl { - } { - { } }
@@ -1314,21 +1314,25 @@ PDF_MACROS = r"""\ExplSyntaxOn
     \prop_if_exist:NT \g__tbl_untagged_cells_prop
       { \prop_gclear:N \g__tbl_untagged_cells_prop }
   }
-\tl_new:N \l__oer_link_contents_tl
+% A link's description, which \pdfstringdef sets globally, and so it's
+% cleared globally too: cleared in a group (a footnote, a cell, a
+% caption), it came back at the group's end, and in a PDF/UA-1 book a
+% link LaTeX made on its own after it got no /Contents (UA1_LINKS).
+\tl_new:N \g__oer_link_contents_tl
 \NewDocumentCommand \OERLinkContents { m }
   {
     \cs_if_exist:NT \pdfannot_dict_put:nne
       {
-        \pdfstringdef \l__oer_link_contents_tl {#1}
+        \pdfstringdef \g__oer_link_contents_tl {#1}
         \pdfannot_dict_put:nne {link/URI} {Contents}
-          { (\l__oer_link_contents_tl) }
+          { (\g__oer_link_contents_tl) }
         \pdfannot_dict_put:nne {link/GoTo} {Contents}
-          { (\l__oer_link_contents_tl) }
+          { (\g__oer_link_contents_tl) }
       }
   }
 \NewDocumentCommand \OERLinkContentsReset { }
   {
-    \tl_clear:N \l__oer_link_contents_tl
+    \tl_gclear:N \g__oer_link_contents_tl
     \cs_if_exist:NT \pdfannot_dict_remove:nn
       {
         \pdfannot_dict_remove:nn {link/URI} {Contents}

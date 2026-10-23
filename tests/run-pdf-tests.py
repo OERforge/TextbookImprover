@@ -746,7 +746,7 @@ formula, $a^2 + b^2 = c^2$, with a note.[^1] Its [flat]{lang=en-GB} too.
 
 An address LaTeX links on its own, \url{https://example.org/lang--en/q?`x}.
 
-[^1]: The note.
+[^1]: The note, with [a link in it](https://example.org/note).
 """
 
 

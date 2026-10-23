@@ -36,7 +36,11 @@ docxremediate.py does for Word:
   their characters, and the limit's macron was the only bar it read; an
   equation a row of math-keep.csv names, by the line it's written out in
   (equation_text), stays as it was;
-- the language, on text that declares none, when the project declares one;
+- the deck's language (lib/languages.py), on text that declares none; and,
+  when languages.csv's row or a producer's property gives the deck
+  another language than its own runs do, that one in their place: its
+  default text style's, its masters', and every run's that said the
+  language the deck's own was, so a passage marked in a third keeps it;
 - the title in the file's core properties, when they have none;
 - another font in place of one a license restricts, or one named for
   replacing, and the restricted font's embedded files taken out
@@ -84,6 +88,7 @@ import zipfile
 from collections import Counter
 
 import docxremediate
+import languages
 import pptxcheck
 import pptxfonts
 import pptxorder
@@ -755,20 +760,43 @@ def _readdress(match, readdress):
     return "<Relationship%s%s>" % (_set_attr(attrs, "Target", readdress[rid]), match.group(2))
 
 
-def _lang_on_defaults(region, language):
+def _lang_on_defaults(region, language, replace=False):
     """A text style list with a language on each default run property that
-    declares none; (region, count)."""
+    declares none, or on every one with replace; (region, count)."""
     count = 0
 
     def tag(match):
         nonlocal count
         attrs, close = match.group(1), match.group(2)
         if re.search(r'\slang="', attrs):
-            return match.group(0)
+            if not replace or _attr_value(attrs, "lang") == language:
+                return match.group(0)
+            count += 1
+            return '<a:defRPr%s%s>' % (_set_attr(attrs, "lang", language), close)
         count += 1
         return '<a:defRPr%s lang="%s"%s>' % (attrs, _attr(language), close)
 
     return re.sub(r"<a:defRPr%s(/?)>" % ATTRS, tag, region), count
+
+
+RUN_PROPERTIES = re.compile(r"<a:(rPr|endParaRPr|defRPr)%s(/?)>" % ATTRS)
+
+
+def replace_language_marks(xml, old, new):
+    """xml with the language of each run's, paragraph end's, and default's
+    properties that said old (as languages.tag reads both) saying new;
+    (xml, count)."""
+    count = 0
+
+    def one(match):
+        nonlocal count
+        name, attrs, close = match.groups()
+        value = _attr_value(attrs, "lang")
+        if value is None or value == new or not languages.same_tag(value, old):
+            return match.group(0)
+        count += 1
+        return "<a:%s%s%s>" % (name, _set_attr(attrs, "lang", new), close)
+    return RUN_PROPERTIES.sub(one, xml), count
 
 
 def _in_elements(xml, names, edit):
@@ -817,10 +845,11 @@ def _after_notes_size(xml):
     return at
 
 
-def set_default_language(xml, language):
+def set_default_language(xml, language, replace=False):
     """presentation.xml with the deck's default language where PowerPoint
     writes it, on the default text style's defPPr, added when the style
-    has none; and on each level's defaults that declare none. (xml, count)"""
+    has none; and on each level's defaults that declare none, or on every
+    one with replace. (xml, count)"""
     lang = _attr(language)
     match = start_tag("p:defaultTextStyle").search(xml)
     if match is None:
@@ -855,15 +884,16 @@ def set_default_language(xml, language):
             at = ext if ext >= 0 else close
             region = region[:at] + '<a:defRPr lang="%s"/>' % lang + region[at:]
             count += 1
-    region, n = _lang_on_defaults(region, language)
+    region, n = _lang_on_defaults(region, language, replace)
     return xml[:match.end()] + region + xml[end:], count + n
 
 
-def set_master_language(xml, language):
+def set_master_language(xml, language, replace=False):
     """A slide master's or notes master's text styles with the language on
-    each default that declares none; (xml, count)."""
+    each default that declares none, or on every one with replace; (xml,
+    count)."""
     return _in_elements(xml, ("p:txStyles", "p:notesStyle"),
-                        lambda region: _lang_on_defaults(region, language))
+                        lambda region: _lang_on_defaults(region, language, replace))
 
 
 def set_core_title(xml, title):
@@ -970,7 +1000,7 @@ def repair_part(xml):
 def remediate(source, destination, alts=None, tables=None, titles=None, language=None,
               core_title=True, deck=None, orders=None, problems=None, links=None,
               equations=False, fonts=None, replaced=None, keep_equations=(),
-              repairs=None):
+              repairs=None, replace_language=None):
     """Write source's decisions into destination; counts of what was
     written. alts, tables, titles, orders, links as alt_rows(),
     header_rows(), title_rows(), order_rows(), and link_rows() read them;
@@ -989,7 +1019,10 @@ def remediate(source, destination, alts=None, tables=None, titles=None, language
     each one replaced. keep_equations: equations to leave as they are,
     each as equation_text() writes it out, where equations would change
     them; repairs, a list, is told (before, after), so written, for each
-    equation repaired, and (before, None) for each kept."""
+    equation repaired, and (before, None) for each kept. language: the
+    deck's, written where it declares none; replace_language, the language
+    its own runs say ("" for none), when language replaces it
+    (languages.for_copy)."""
     alts, tables, titles, orders = alts or {}, tables or {}, titles or {}, orders or {}
     links = links or {}
     deck = deck or deck_name(source)
@@ -1001,7 +1034,7 @@ def remediate(source, destination, alts=None, tables=None, titles=None, language
               "titles": 0, "titles_in_place": 0, "language": 0, "core_title": 0, "repaired": 0,
               "skipped": 0, "orders": 0, "orders_refused": 0, "retitled": 0, "titles_kept": 0,
               "links": 0, "replaced": 0, "equations_repaired": 0, "equation_characters": 0,
-              "equations_kept": 0,
+              "equations_kept": 0, "relanguaged": 0,
               "fonts_replaced": 0, "fonts_unembedded": 0}
     # A titled slide's row replaces its title only when another slide in
     # the deck has it too: a title the author gave since stands.
@@ -1159,8 +1192,29 @@ def remediate(source, destination, alts=None, tables=None, titles=None, language
     # The language goes where PowerPoint declares a deck's, its default
     # text style and its masters' text styles, which every run that says
     # nothing of its own inherits, and only when the deck has no default:
-    # a run that names a language is the author's.
-    if language and not parsed.default_language:
+    # a run that names a language is the author's. Unless another language
+    # replaces the deck's own: then every default says it, and every run
+    # that said the deck's own.
+    if language and replace_language is not None:
+        edits = 0
+        for part in sorted(parts):
+            if not re.match(r"ppt/(presentation|(slides|slideLayouts|slideMasters|notesSlides|"
+                            r"notesMasters|handoutMasters)/[^/]+)\.xml$", part):
+                continue
+            xml, n = text_of(part), 0
+            if replace_language:
+                xml, n = replace_language_marks(xml, replace_language, language)
+            if part == parsed.presentation_part:
+                xml, m = set_default_language(xml, language, replace=True)
+                n += m
+            elif re.match(r"ppt/(slideMasters|notesMasters)/[^/]+\.xml$", part):
+                xml, m = set_master_language(xml, language, replace=True)
+                n += m
+            if n:
+                texts[part] = xml
+                edits += n
+        counts["relanguaged"] += 1 if edits else 0
+    elif language and not parsed.default_language:
         edits = 0
         for part in sorted(parts):
             if part == parsed.presentation_part:

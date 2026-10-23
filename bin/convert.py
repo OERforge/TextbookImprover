@@ -632,14 +632,33 @@ def slides_run(base, decks, targets, project, paths, reports, args, first, archi
         + (" and remediated" if any(t.format == "source" for t in targets) else "")
         + " on its own" + (" (project.kind)." if KIND_DECLARED == "slides" else
                            ", since they're all this folder holds."))
+    import pptxremediate
+    import zipfile
+    # Each deck's language, decided as a book's pages' are, its sidecar
+    # rows keyed on its name as its other sidecars' are, or its page's.
+    match_language_rows(paths, {safe_stem(name[:-5]): [pptxremediate.deck_name(name)]
+                                for name in decks})
+
+    def copy_language(name, path, deck):
+        stem = safe_stem(name[:-5])
+        LANGUAGE_NAMES[stem] = pptxremediate.deck_name(path)
+        PAGE_SOURCES[stem] = ("pptx", name)
+        with zipfile.ZipFile(path) as archive:
+            props = languages.custom_properties(archive)
+        LANGUAGES[stem] = languages.decide(
+            LANGUAGE_ROWS.get(stem), languages.deck_own(deck, props, name),
+            project["language"])
+        # Written into a copy only when the project declares it, as a book's
+        # copies get it: the schema's default is nobody's decision.
+        return languages.for_copy(LANGUAGES[stem], LANGUAGE_DECLARED)
+
     code = deckrun.run(
         base, decks, targets, paths, reports,
-        # Written into a copy only when the project declares it, as a
-        # book's copies get it: the schema's default is nobody's decision.
         language=project["language"] if LANGUAGE_DECLARED else None,
         alt_max_chars=first["images.alt_max_chars"],
         alt_placeholders=first["images.alt_placeholders"] or (),
-        check_only=args.check_only, say=say)
+        check_only=args.check_only, say=say, copy_language=copy_language)
+    report_languages(project, reports, paths)
     warn_unreviewed(paths)
     if not archive:
         return code
@@ -3374,15 +3393,24 @@ def remediate_sources(target, base, docs, paths, env, html_stems=(), language=No
         if work and target["math.from_text"] else {}
     keep_rows = math_keep_rows(paths.get("math_keep"))
     written, totals = [], {}
+
+    def copy_language(name):
+        """(language, replacing) for a file's copy: its page's, as decided
+        once for every target (languages.for_copy), or language."""
+        decision = LANGUAGES.get(page_name_of(name))
+        return languages.for_copy(decision, LANGUAGE_DECLARED) if decision else (language, None)
+
     for name in docs:
         stem = os.path.splitext(name)[0]
         out = os.path.join(target.output_dir, name)
+        own, replacing = copy_language(name)
         counts = docxremediate.remediate(os.path.join(base, name), out, resolved.get(stem, []),
                                          alts.get(stem, {}), titles,
                                          str(target["compatibility_mode"]) == "15",
                                          captions=captions.get(stem, []),
                                          replacements={u: r for u, (r, _) in links.items() if r},
-                                         language=language, headings=WORD_HEADINGS,
+                                         language=own, replace_language=replacing,
+                                         headings=WORD_HEADINGS,
                                          deletions=WORD_DELETIONS,
                                          equations=bool(target["math.repair_equations"]),
                                          places=places.get(stem, []),
@@ -3402,19 +3430,23 @@ def remediate_sources(target, base, docs, paths, env, html_stems=(), language=No
         name = stem + ".html"
         if not os.path.exists(os.path.join(base, name)):
             continue
+        own, replacing = copy_language(name)
         counts = htmlremediate.remediate(os.path.join(base, name),
                                          os.path.join(target.output_dir, name),
-                                         resolved_html.get(stem, []), page_alts, links, language,
-                                         captions.get(stem, []))
+                                         resolved_html.get(stem, []), page_alts, links, own,
+                                         captions.get(stem, []),
+                                         replace_language=replacing is not None)
         for key, n in counts.items():
             totals[key] = totals.get(key, 0) + n
         written.append(os.path.join(target.output_dir, name))
         pages += 1
     md_files = 0
     for name in markdown:
+        own, replacing = copy_language(name)
         counts = mdremediate.remediate(
             os.path.join(base, name), os.path.join(target.output_dir, name), page_alts, links,
-            captions.get(safe_stem(os.path.basename(name)[:-3]), []), language)
+            captions.get(safe_stem(os.path.basename(name)[:-3]), []), own,
+            replace=replacing is not None)
         for key, n in counts.items():
             totals[key] = totals.get(key, 0) + n
         written.append(os.path.join(target.output_dir, name))
@@ -3607,6 +3639,8 @@ def remediate_sources(target, base, docs, paths, env, html_stems=(), language=No
             f"{totals.get('links', 0)} link title(s), "
             f"{totals.get('replaced', 0)} link(s) given their replacement address, "
             f"the language set in {totals.get('language', 0)}"
+            + (f" and given in place of the file's own in {totals['relanguaged']}"
+               if totals.get("relanguaged") else "")
             + (f", {totals['equations_repaired']} Word equation(s) given the "
                f"characters they mean ({totals['equation_characters']} change(s))"
                if totals.get("equations_repaired") else "")

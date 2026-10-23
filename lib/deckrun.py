@@ -310,9 +310,13 @@ def report(path, columns, rows, noun, sidecar, say, hint=None):
 
 
 def run(base, decks, targets, paths, reports, language=None, alt_max_chars=120,
-        alt_placeholders=(), check_only=False, say=print):
+        alt_placeholders=(), check_only=False, say=print, copy_language=None):
     """Check, report, and remediate every deck; 0 when every deck was read
-    and every copy written."""
+    and every copy written. language: what a copy says where its deck
+    declares none; copy_language, given each deck read (its name, path,
+    and pptxparse.Deck) once it's read, says what its copy is given in
+    its place: (language, the language the deck's own runs say when
+    language replaces it, else None), as languages.for_copy gives it."""
     alts = pptxremediate.alt_rows(paths.get("image_alt"))
     unknown = set()
     tables = pptxremediate.header_rows(paths.get("table_headers"), unknown)
@@ -357,6 +361,8 @@ def run(base, decks, targets, paths, reports, language=None, alt_max_chars=120,
             failed += 1
             continue
         parsed.append((name, path, deck))
+    spoken = {name: copy_language(name, path, deck) if copy_language else (language, None)
+              for name, path, deck in parsed}
     # A font one deck embeds restricted is restricted in every deck that
     # uses it, whether or not that one embeds it.
     restricted = restricted_fonts(parsed)
@@ -562,12 +568,13 @@ def run(base, decks, targets, paths, reports, language=None, alt_max_chars=120,
             named = [row for row in keep if row[0] == "equation" and row[1] in ("", dname)]
             equations = setting(target, "math.repair_equations")
             repairing = repairing or equations
+            own, replacing = spoken[name]
             counts = pptxremediate.remediate(path, destination, alts, tables, titles,
-                                             language, deck=dname, orders=orders,
+                                             own, deck=dname, orders=orders,
                                              problems=problems, links=links,
                                              equations=equations, fonts=plan, replaced=replaced,
                                              keep_equations={row[2] for row in named},
-                                             repairs=repairs)
+                                             repairs=repairs, replace_language=replacing)
             for before, after in repairs:
                 if after is None:
                     # The deck's own row keeps it, as a page's does a book's,
@@ -592,12 +599,14 @@ def run(base, decks, targets, paths, reports, language=None, alt_max_chars=120,
         say("%s: %d deck(s) written, %d of them changed: %d picture(s) and object(s) given alt "
             "text and %d marked decorative, %d header row(s) and %d header column(s) marked, "
             "%d slide(s) given the heading they show as their title, in place, %d title(s) "
-            "added above their slides, %d deck(s) given the project's language as their "
-            "default, and %d given a title in the file's properties, their first slide's."
+            "added above their slides, %d deck(s) given their language as their "
+            "default%s, and %d given a title in the file's properties, their first slide's."
             % (target.name, written, changed,
                totals["described"], totals["decorative"], totals["header_rows"],
                totals["header_columns"], totals["titles_in_place"], totals["titles"],
-               totals["language"], totals["core_title"]))
+               totals["language"],
+               " and %d another in place of their own" % totals["relanguaged"]
+               if totals["relanguaged"] else "", totals["core_title"]))
         if totals["links"] or totals["replaced"]:
             say("%s: %d bare link(s) given a ScreenTip and %d a replacement, as %s says." % (
                 target.name, totals["links"], totals["replaced"],

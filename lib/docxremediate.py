@@ -34,8 +34,13 @@ What it changes, all of it decided elsewhere in the pipeline:
 - **Links.** From the bare-links sidecar, a link's title as its ScreenTip,
   and its replacement address, which replaces the link's address and, for
   a bare link, its text.
-- **Language.** The book's language as the document's default, when the
-  file has none.
+- **Language.** The page's language (lib/languages.py) as the document's
+  default, when the file has none; and, when languages.csv's row or a
+  producer's property gives the file another language than its own marks
+  do, that one in their place: the default, and every run, style, and
+  part marked with the language the file's own was, in the attribute
+  Pandoc's writer puts that language in (language_slot), so a passage
+  marked in a third language keeps it.
 - **Equations.** With math.repair_equations, the characters of Word's own
   equations as math-repair.lua repairs them in the pages: a bar for an
   upper limit that is a macron or an en dash, mu for the micro sign, and
@@ -61,6 +66,7 @@ import tempfile
 import zipfile
 
 import docxtarget
+import languages
 import sidecars
 
 R_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
@@ -840,15 +846,80 @@ def replace_links(xml, rels, replacements):
     return xml, rels, count
 
 
+def language_slot(language):
+    """Which of w:lang's attributes a language is written in, as Pandoc's
+    Word writer writes the document's (mkLangTransformer, Writers/Docx.hs):
+    w:eastAsia for Chinese, Japanese, or Korean, w:bidi for Hebrew or
+    Arabic, w:val for any other."""
+    primary = language.split("-")[0].lower()
+    return "eastAsia" if primary in ("zh", "ja", "ko") else \
+        "bidi" if primary in ("he", "ar") else "val"
+
+
+LANG_ELEMENT = re.compile(r"<w:lang\b((?:\s+[\w:.-]+\s*=\s*(?:\"[^\"]*\"|'[^']*'))*)(\s*/?)>")
+
+
+def _lang_attribute(attributes, slot):
+    found = re.search(r"""\sw:%s\s*=\s*(?:"([^"]*)"|'([^']*)')""" % slot, attributes)
+    if not found:
+        return None
+    return html.unescape(found.group(1) if found.group(1) is not None else found.group(2))
+
+
+def _with_lang_attribute(attributes, slot, value):
+    written = ' w:%s="%s"' % (slot, html.escape(value, quote=True))
+    pattern = re.compile(r"""\sw:%s\s*=\s*(?:"[^"]*"|'[^']*')""" % slot)
+    if pattern.search(attributes):
+        return pattern.sub(lambda m: written, attributes, count=1)
+    return attributes + written
+
+
+def replace_language_marks(xml, old, new):
+    """xml with each w:lang that says old (as languages.tag reads both:
+    es-ES_tradnl is es-ES) saying new instead, in the attribute new is
+    written in. Returns (xml, count)."""
+    slot = language_slot(new)
+    count = 0
+
+    def one(match):
+        nonlocal count
+        attributes = match.group(1)
+        value = _lang_attribute(attributes, slot)
+        if value is None or not languages.same_tag(value, old) or value == new:
+            return match.group(0)
+        count += 1
+        return "<w:lang%s%s>" % (_with_lang_attribute(attributes, slot, new), match.group(2))
+    return LANG_ELEMENT.sub(one, xml), count
+
+
+def set_default_language(styles, language):
+    """styles.xml with language as the document's default, whatever it was,
+    in the attribute it's written in; the element added where the defaults
+    have none. Returns (styles, 1 or 0)."""
+    defaults = re.search(r"<w:docDefaults>.*?</w:docDefaults>", styles, re.S)
+    if not defaults or not re.search(r"<w:lang\b", defaults.group(0)):
+        return remediate_language(styles, language)
+    block = defaults.group(0)
+    slot = language_slot(language)
+    match = LANG_ELEMENT.search(block)
+    if _lang_attribute(match.group(1), slot) == language:
+        return styles, 0
+    new_block = block[:match.start()] + "<w:lang%s%s>" % (
+        _with_lang_attribute(match.group(1), slot, language), match.group(2)) \
+        + block[match.end():]
+    return styles.replace(block, new_block, 1), 1
+
+
 def remediate_language(styles, language):
-    """The document's default language, when styles.xml declares none.
-    Returns (styles, 1 or 0)."""
+    """The document's default language, when styles.xml declares none, in
+    the attribute it's written in (language_slot). Returns (styles, 1 or
+    0)."""
     if not language or "<w:docDefaults>" not in styles:
         return styles, 0
     defaults = re.search(r"<w:docDefaults>.*?</w:docDefaults>", styles, re.S)
     if re.search(r"<w:lang\b", defaults.group(0)):
         return styles, 0
-    lang = '<w:lang w:val="%s"/>' % html.escape(language, quote=True)
+    lang = '<w:lang w:%s="%s"/>' % (language_slot(language), html.escape(language, quote=True))
     block = defaults.group(0)
     if re.search(r"<w:rPrDefault>\s*<w:rPr>", block):
         rpr = re.search(r"<w:rPrDefault>\s*<w:rPr>(.*?)</w:rPr>", block, re.S)
@@ -894,15 +965,18 @@ def remediate_links(xml, rels, titles):
 def remediate(source, destination, tables=None, alts=None, titles=None, compat=False,
               guesses=False, captions=None, replacements=None, language=None,
               headings="keep", deletions="accept", equations=False, places=None,
-              keep_equations=()):
+              keep_equations=(), replace_language=None):
     """Write destination, a copy of source with the decisions applied.
     tables: the pre-pass's resolved list for this file; alts: {relationship
     id: alt or None}; titles: {address: title}; equations: repair the
-    characters of Word's equations (math.repair_equations). Returns a dict
-    of counts."""
+    characters of Word's equations (math.repair_equations); language, the
+    document's default where it has none; replace_language, the language
+    the file's own marks say ("" for none), when language replaces it
+    (languages.for_copy). Returns a dict of counts."""
     counts = {"compat": 0, "links": 0, "equations_repaired": 0,
               "equation_characters": 0, "text_equations": 0,
-              "text_equations_left": 0, "equations_kept": 0}
+              "text_equations_left": 0, "equations_kept": 0, "relanguaged": 0}
+    replacing = language and replace_language is not None
     with zipfile.ZipFile(source) as z:
         infos = z.infolist()
         parts = {i.filename: z.read(i.filename) for i in infos}
@@ -961,9 +1035,38 @@ def remediate(source, destination, tables=None, alts=None, titles=None, compat=F
     # A place no paragraph of any part matched is left too.
     counts["text_equations_left"] += sum(1 for number, _, _, _, _ in places or []
                                          if number not in matched)
+    # Another language in place of the file's own: every mark of its own
+    # in the parts that hold text and its properties, and the default.
+    relanguaged = 0
+    if replacing and replace_language:
+        for name in sorted(parts):
+            if name == "word/styles.xml" or not re.match(r"word/[^/]+\.xml$", name):
+                continue
+            xml = text(name)
+            new, n = replace_language_marks(xml, replace_language, language)
+            if n:
+                parts[name] = new.encode("utf-8")
+                changed.add(name)
+                relanguaged += n
+    if replacing and "docProps/core.xml" in parts:
+        core = text("docProps/core.xml")
+        new = re.sub(r"(<dc:language>)[^<]*(</dc:language>)",
+                     lambda m: m.group(1) + html.escape(language, quote=False) + m.group(2),
+                     core, count=1)
+        if new != core:
+            parts["docProps/core.xml"] = new.encode("utf-8")
+            changed.add("docProps/core.xml")
+            relanguaged += 1
     if "word/styles.xml" in parts:
         styles = text("word/styles.xml")
-        new_styles, counts["language"] = remediate_language(styles, language)
+        if replacing:
+            new_styles, n = replace_language_marks(styles, replace_language, language) \
+                if replace_language else (styles, 0)
+            new_styles, m = set_default_language(new_styles, language)
+            counts["language"] = 0
+            relanguaged += n + m
+        else:
+            new_styles, counts["language"] = remediate_language(styles, language)
         if counts.get("captions") and 'w:styleId="Caption"' not in new_styles:
             new_styles = new_styles.replace("</w:styles>", CAPTION_STYLE + "</w:styles>", 1)
         if new_styles != styles:
@@ -988,5 +1091,6 @@ def remediate(source, destination, tables=None, alts=None, titles=None, compat=F
         for info in infos:
             out.writestr(info, parts[info.filename])
     shutil.move(temporary, destination)
+    counts["relanguaged"] = 1 if relanguaged else 0
     counts["parts_changed"] = len(changed)
     return counts

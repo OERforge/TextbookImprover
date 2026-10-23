@@ -23,7 +23,9 @@ and counted.
   before any attributes the caption ends with. A table is found as a
   stretch of lines that Pandoc's Markdown reader reads as exactly that
   table.
-- **Language.** lang in the front matter, when it has none.
+- **Language.** The page's language (lib/languages.py) as lang in the
+  front matter, when it has none; and languages.csv's row, when it gives
+  another, in place of its own.
 
 Copyright 2026 Robert Szarka
 """
@@ -383,9 +385,24 @@ def remediate_language(text, language):
     return "---\nlang: " + language + "\n---\n\n" + text, 1
 
 
-def remediate(source, destination, alts=None, links=None, captions=None, language=None):
-    """Write destination, a copy of source with the decisions applied.
-    Returns a dict of counts."""
+def replace_language(text, language):
+    """language in place of the front matter's lang, or added where it has
+    none. Returns (text, 1 or 0)."""
+    front = re.match(r"---[ \t]*\n(.*?)\n(---|\.\.\.)[ \t]*(\n|$)", text, re.S)
+    if front:
+        line = re.search(r"^lang\s*:.*$", front.group(1), re.M)
+        if line:
+            start, end = front.start(1) + line.start(), front.start(1) + line.end()
+            new = "lang: " + language
+            return (text, 0) if text[start:end] == new else (text[:start] + new + text[end:], 1)
+    return remediate_language(text, language)
+
+
+def remediate(source, destination, alts=None, links=None, captions=None, language=None,
+              replace=False):
+    """Write destination, a copy of source with the decisions applied:
+    language the front matter's lang where it has none, or in place of its
+    own with replace. Returns a dict of counts."""
     with open(source, "rb") as fh:
         raw = fh.read()
     text = raw.decode("utf-8")
@@ -399,7 +416,12 @@ def remediate(source, destination, alts=None, links=None, captions=None, languag
     counts.update(found)
     new, found = remediate_links(new, read(new), links or {})
     counts.update(found)
-    new, counts["language"] = remediate_language(new, language)
+    counts["relanguaged"] = 0
+    if language and replace:
+        new, counts["relanguaged"] = replace_language(new, language)
+        counts["language"] = 0
+    else:
+        new, counts["language"] = remediate_language(new, language)
     os.makedirs(os.path.dirname(os.path.abspath(destination)), exist_ok=True)
     with open(destination, "wb") as fh:
         fh.write(raw if new == text else new.encode("utf-8"))

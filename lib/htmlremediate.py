@@ -22,7 +22,10 @@ saved from a platform is better fixed in the platform.
   which table it gave each description to, by position (the sidecar's key
   names the table as the filter sees the page, which can differ from the
   file), and the copy finds that table as it does for headers.
-- **Language.** The book's language as lang on <html>, when it has none.
+- **Language.** The page's language (lib/languages.py) as lang on <html>,
+  when it has none; and languages.csv's row, when it gives another, in
+  place of the page's own, its <html>'s and its <body>'s, lang and
+  xml:lang alike.
 
 Copyright 2026 Robert Szarka
 """
@@ -298,6 +301,25 @@ def remediate_links(page, links):
     return re.sub(r"<a\b([^>]*)>(.*?)</a\s*>", one, page, flags=re.I | re.S), counts
 
 
+def replace_language_of(page, language):
+    """The page's language, language, in place of its own: lang and
+    xml:lang on <html>, lang added there where it has none, and on <body>
+    where it says one. Returns (page, 1 or 0)."""
+    changed = page
+    for name in ("html", "body"):
+        tag = re.search(r"<%s\b[^>]*>" % name, changed, re.I)
+        if not tag:
+            continue
+        start = tag.group(0)
+        new = re.sub(r"""(\s(?:xml:)?lang\s*=\s*)(?:"[^"]*"|'[^']*')""",
+                     lambda m: m.group(1) + '"%s"' % htmllib.escape(language, quote=True), start,
+                     flags=re.I)
+        if name == "html" and not re.search(r"\slang\s*=", new, re.I):
+            new = new[:-1].rstrip() + ' lang="%s">' % htmllib.escape(language, quote=True)
+        changed = changed[:tag.start()] + new + changed[tag.end():]
+    return changed, int(changed != page)
+
+
 def remediate_language(page, language):
     """lang on <html>, when it has none. Returns (page, 1 or 0)."""
     if not language:
@@ -359,9 +381,10 @@ def link_rows(path):
 
 
 def remediate(source, destination, tables=None, alts=None, links=None, language=None,
-              captions=None):
-    """Write destination, a copy of source with the decisions applied.
-    Returns a dict of counts."""
+              captions=None, replace_language=False):
+    """Write destination, a copy of source with the decisions applied:
+    language the page's lang where it has none, or in place of its own
+    with replace_language. Returns a dict of counts."""
     with open(source, "rb") as fh:
         raw = fh.read()
     page = raw.decode("utf-8")
@@ -374,7 +397,12 @@ def remediate(source, destination, tables=None, alts=None, links=None, language=
     counts.update(found)
     new, found = remediate_links(new, links or {})
     counts.update(found)
-    new, counts["language"] = remediate_language(new, language)
+    counts["relanguaged"] = 0
+    if language and replace_language:
+        new, counts["relanguaged"] = replace_language_of(new, language)
+        counts["language"] = 0
+    else:
+        new, counts["language"] = remediate_language(new, language)
     handle, temporary = tempfile.mkstemp(suffix=".html",
                                          dir=os.path.dirname(os.path.abspath(destination)))
     os.close(handle)

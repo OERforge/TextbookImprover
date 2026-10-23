@@ -352,7 +352,7 @@ Names for the pages split_level cuts, keyed on the source and the heading text: 
 
 **`sidecars.languages`**—`path`; default `languages.csv`
 
-The language a page is in, keyed on its source, as page_names is: source, language, a BCP 47 tag such as es or fr-CA. A page with no row is in the language its own file declares, else the project's; a row is only needed where that's wrong. Every target marks the page so. A row whose source names no page is reported.
+The language a page is in, keyed on its source, as page_names is: source, language, a BCP 47 tag such as es or fr-CA. A page with no row is in the language its own file declares, else the project's; a row is only needed where that's wrong. Every target marks the page so, and a source target's copy is given the row's language in place of its own. A row whose source names no page is reported.
 
 ## reports
 

@@ -2752,6 +2752,90 @@ def check_page_languages():
     ]
 
 
+def check_copy_languages():
+    """What a source's copy is given of its page's language
+    (languages.for_copy), and how a Word, deck, HTML, and Markdown copy
+    say it: a row's in place of the file's own marks, a producer's or the
+    project's in place of marks in another language, not another region,
+    and otherwise the page's only where the file has none."""
+    import languages
+    import docxremediate
+    import htmlremediate
+    import mdremediate
+    import pptxremediate
+    Own, decide = languages.Own, languages.decide
+    word_es = Own("es-ES", "file", "s.docx: most of its text", "es-ES")
+    producer = Own("es", "producer", "o.docx: its custom property language", "en-US")
+    styles = ('<w:docDefaults><w:rPrDefault><w:rPr><w:lang w:val="en-US" w:eastAsia="en-US" '
+              'w:bidi="ar-SA" /></w:rPr></w:rPrDefault></w:docDefaults>'
+              '<w:style><w:rPr><w:lang w:val="en-US"/></w:rPr></w:style>'
+              '<w:style><w:rPr><w:lang w:val="de-DE"/></w:rPr></w:style>')
+    replaced, n = docxremediate.replace_language_marks(styles, "en-US", "es")
+    defaulted, m = docxremediate.set_default_language(replaced, "es")
+    asian, _ = docxremediate.set_default_language(styles, "ja")
+    slides = ('<a:p><a:r><a:rPr lang="en-US" b="1"/><a:t>A</a:t></a:r><a:r><a:rPr lang="de-DE"/>'
+              '<a:t>B</a:t></a:r><a:endParaRPr lang="en-US"/></a:p>')
+    deck_text, k = pptxremediate.replace_language_marks(slides, "en-US", "es")
+    presentation = ('<p:presentation><p:notesSz cx="1" cy="1"/><p:defaultTextStyle><a:defPPr>'
+                    '<a:defRPr lang="en-US"/></a:defPPr><a:lvl1pPr><a:defRPr lang="en-US"/>'
+                    '</a:lvl1pPr><a:lvl2pPr><a:defRPr/></a:lvl2pPr></p:defaultTextStyle>'
+                    '</p:presentation>')
+    kept, _ = pptxremediate.set_default_language(presentation, "es")
+    forced, _ = pptxremediate.set_default_language(presentation, "es", replace=True)
+    html_pages = [htmlremediate.replace_language_of(page, "es") for page in (
+        '<html lang="en-US" xml:lang="en-US"><body lang="en-US"><p>Hola</p></body></html>',
+        '<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en"><body><p>Hola</p></body>',
+        "<html><body><p>Hola</p></body></html>",
+        '<html lang="es"><body><p>Hola</p></body></html>')]
+    md_files = [mdremediate.replace_language(text, "es") for text in (
+        "---\ntitle: Hola\nlang: en-US\n---\n\nHola\n", "Hola\n", "---\nlang: es\n---\n\nHola\n")]
+    return [
+        ("a copy is given a row's language in place of its marks', a producer's or the "
+         "project's in place of marks in another language, not another region, and "
+         "otherwise a language only where it has none, the project's only when it declares "
+         "one",
+         lambda: [languages.for_copy(d, declared) for d, declared in (
+             (decide("fr", word_es, "de"), True),
+             (decide("es-ES", word_es, "de"), True),
+             (decide("fr", None, "de"), True),
+             (decide(None, producer, "en"), False),
+             (decide(None, Own("es", "producer", "", "es-ES"), "en"), False),
+             (decide(None, producer, "es-MX"), True),
+             (decide(None, word_es, "de"), True),
+             (decide(None, None, "de"), True),
+             (decide(None, None, "en"), False))]
+         == [("fr", "es-ES"), ("es-ES", None), ("fr", ""), ("es", "en-US"), ("es", None),
+             ("es-MX", "en-US"), ("es-ES", None), ("de", None), (None, None)]),
+        ("a Word copy's language goes where Pandoc's writer writes it: East Asian for "
+         "Chinese, Japanese, and Korean, complex script for Hebrew and Arabic",
+         lambda: [docxremediate.language_slot(v) for v in ("ja", "zh-Hant", "ko-KR", "he",
+                                                           "ar-EG", "es", "en-US")]
+         == ["eastAsia"] * 3 + ["bidi"] * 2 + ["val"] * 2),
+        ("a Word copy's marks of its own language say the new one, a passage's other kept, "
+         "and its default says it, the rest of the element as it was",
+         lambda: n == 2 and m == 0
+         and '<w:lang w:val="es" w:eastAsia="en-US" w:bidi="ar-SA" />' in defaulted
+         and '<w:lang w:val="de-DE"/>' in defaulted
+         and '<w:lang w:val="en-US" w:eastAsia="ja" w:bidi="ar-SA" />' in asian),
+        ("a deck copy's runs of its own language say the new one, a passage's other kept, "
+         "and with replace every default says it",
+         lambda: k == 2 and 'lang="de-DE"' in deck_text and deck_text.count('lang="es"') == 2
+         and kept.count('lang="es"') == 1 and kept.count('lang="en-US"') == 2
+         and forced.count('lang="es"') == 3 and 'lang="en-US"' not in forced),
+        ("an HTML copy's lang and xml:lang say the new one, on <html> and on a <body> that "
+         "says one, and <html> gets a lang where it has none, beside an xml:lang too",
+         lambda: html_pages[0] == ('<html lang="es" xml:lang="es"><body lang="es"><p>Hola</p>'
+                                   '</body></html>', 1)
+         and html_pages[1] == ('<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="es" '
+                               'lang="es"><body><p>Hola</p></body>', 1)
+         and html_pages[2] == ('<html lang="es"><body><p>Hola</p></body></html>', 1)
+         and html_pages[3][1] == 0),
+        ("a Markdown copy's front matter says the new one, or gets it where it has none",
+         lambda: md_files[0] == ("---\ntitle: Hola\nlang: es\n---\n\nHola\n", 1)
+         and md_files[1] == ("---\nlang: es\n---\n\nHola\n", 1) and md_files[2][1] == 0),
+    ]
+
+
 GROUPS = [
     ("a report's rows", check_report_rows),
     ("alt text's rules, and their findings", check_alt_text_rules),
@@ -2803,6 +2887,7 @@ GROUPS = [
     ("header cells holding only formulas, in a PDF", check_pdf_formula_headers),
     ("an image named in another case, in a source's copy", check_cased_images_in_copies),
     ("a page's language", check_page_languages),
+    ("a page's language in its source's copy", check_copy_languages),
     ("a one-page book's title page, its page in another language", check_title_page_languages),
 ]
 

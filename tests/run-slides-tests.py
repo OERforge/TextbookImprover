@@ -4089,6 +4089,100 @@ def page_headings(page):
             for level, text in re.findall(r"<h([1-6])[^>]*>(.*?)</h\1>", page, re.S)]
 
 
+def with_custom(path, properties):
+    """The deck at path with custom properties, as a producer's own tools
+    write them: OpenStax's, its company and its language."""
+    xml = ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Properties xmlns="http://'
+           'schemas.openxmlformats.org/officeDocument/2006/custom-properties" xmlns:vt="http://'
+           'schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes">' + "".join(
+               '<property fmtid="{D5CDD505-2E9C-101B-9397-08002B2CF9AE}" pid="%d" name="%s">'
+               "<vt:lpwstr>%s</vt:lpwstr></property>" % (n, k, v)
+               for n, (k, v) in enumerate(properties.items(), 2)) + "</Properties>")
+    with zipfile.ZipFile(path, "a") as z:
+        z.writestr("docProps/custom.xml", xml)
+    return path
+
+
+def case_deck_languages(work):
+    """Each deck's language, decided as a book's pages' are: its row in
+    languages.csv, else its own (the language most of its runs say, or
+    OpenStax's language property), else the project's; its copy given a
+    row's or the property's in place of its own runs' and default's, and
+    its own where it declares no default; its page in it."""
+    if not pandoc_ok():
+        return
+    folder = os.path.join(work, "decks")
+    os.makedirs(folder)
+
+    def one(name, words, lang, default):
+        return deck(os.path.join(folder, name + ".pptx"), [
+            {"shapes": [title(2, words[0], lang=lang), content(3, [words[1]], lang=lang)]}],
+            default_lang=default, core_title=words[0])
+    with_custom(one("openstax-es", ("Funciones", "Una función"), "en-US", "en-US"),
+                {"company": "OpenStax", "language": "es"})
+    one("francais", ("Bonjour", "Une phrase"), "fr-FR", None)
+    one("row", ("Zeile", "Ein Satz"), "en-US", "en-US")
+    one("english", ("English", "A sentence"), "en-US", "en-US")
+    with open(os.path.join(folder, "languages.csv"), "w", encoding="utf-8") as fh:
+        fh.write("source,language\nrow,de\n")
+    with open(os.path.join(folder, "conversion.yaml"), "w", encoding="utf-8") as fh:
+        fh.write("targets:\n  copy:\n    format: source\n  pages:\n    format: html\n")
+    checked = convert(folder, "--check-only")
+    first_drafted = rows_of(os.path.join(folder, "languages-new.csv"))
+    result = convert(folder, "--quick")
+    said = result.stderr
+
+    def part(name, inner):
+        path = os.path.join(folder, "copy", name + ".pptx")
+        return read_part(path, inner) if os.path.isfile(path) else ""
+
+    def page(name):
+        path = os.path.join(folder, "pages", name + ".html")
+        if not os.path.isfile(path):
+            return None
+        with open(path, encoding="utf-8") as fh:
+            found = re.search(r'<html\b[^>]*\slang="([^"]*)"', fh.read())
+        return found.group(1) if found else None
+    drafted = rows_of(os.path.join(folder, "languages-new.csv"))
+    yield "checked only, the decks' languages are reported, as a slides run writes its " \
+        "reports before it converts", \
+        checked.returncode == 0 and "3 page(s) are in another language than the book's" \
+        in checked.stderr and len(first_drafted) == 2, checked.stderr[-800:]
+    yield "the decks are copied and converted", result.returncode == 0, said[-600:]
+    yield "a copy is given OpenStax's language in place of the US English its runs, its " \
+        "default, and its masters say", \
+        'lang="en-US"' not in part("openstax-es", "ppt/slides/slide1.xml") \
+        and part("openstax-es", "ppt/slides/slide1.xml").count('lang="es"') >= 2 \
+        and '<a:defRPr lang="es"/>' in part("openstax-es", "ppt/presentation.xml") \
+        and 'lang="en-US"' not in part("openstax-es", "ppt/presentation.xml") \
+        and 'lang="es"' in part("openstax-es", "ppt/slideMasters/slideMaster1.xml"), \
+        (part("openstax-es", "ppt/presentation.xml")[-400:], said[-400:])
+    yield "and a row's in place of its own", \
+        'lang="en-US"' not in part("row", "ppt/slides/slide1.xml") \
+        and '<a:defRPr lang="de"/>' in part("row", "ppt/presentation.xml"), \
+        part("row", "ppt/presentation.xml")[-300:]
+    yield "a deck with no default is given its runs' language, though the project declares " \
+        "none, and its runs keep theirs; one in the book's language keeps its own", \
+        '<a:defRPr lang="fr-FR"/>' in part("francais", "ppt/presentation.xml") \
+        and part("francais", "ppt/slides/slide1.xml").count('lang="fr-FR"') >= 2 \
+        and '<a:defRPr lang="en-US"/>' in part("english", "ppt/presentation.xml"), \
+        part("francais", "ppt/presentation.xml")[-300:]
+    yield "the run counts the decks given their language as their default, and those given " \
+        "another in place of their own", \
+        "1 deck(s) given their language as their default and 2 another in place of their " \
+        "own, and" in said, said[-1200:]
+    yield "each deck's page is in its language, one in the book's in the book's", \
+        [page(n) for n in ("openstax-es", "row", "francais", "english")] \
+        == ["es", "de", "fr-FR", "en"], [page(n) for n in ("openstax-es", "row", "francais",
+                                                         "english")]
+    yield "the run names the decks in another language than the book's, and drafts a row for " \
+        "each its own file put there", \
+        "3 page(s) are in another language than the book's, en, the default" in said \
+        and "row de (languages.csv)" in said \
+        and sorted(r[:2] for r in drafted) == [["francais", "fr-FR"], ["openstax-es", "es"]], \
+        (drafted, said[-1200:])
+
+
 def case_converting(work):
     """convert.py on a folder of PowerPoint decks with targets of other
     formats than source: each deck checked and copied as before, then
@@ -4508,6 +4602,7 @@ CASES = [("reading a deck", case_parse), ("the checks", case_check),
          ("no Pandoc", case_no_pandoc),
          ("a deck read for converting", case_reader),
          ("convert.py converting decks", case_converting),
+         ("each deck's language", case_deck_languages),
          ("a converted deck's PDF and presentation", case_converting_more),
          ("a deck rebuilt on a template", case_rebuild),
          ("the round trip", case_round_trip)]

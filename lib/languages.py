@@ -157,7 +157,8 @@ Own = collections.namedtuple("Own", "language source found marks")
 Own.__doc__ = """A file's own language: language, its producer's property's
 when trusted, else its marks'; source, "producer" or "file"; found, where it
 was found, for a person to judge it by; marks, the language the file's own
-marks give (a Word file's text, a deck's runs), or None."""
+marks give (a Word file's text, a deck's runs), which a copy given another
+language rewrites, or None."""
 
 
 def custom_properties(archive):
@@ -521,6 +522,28 @@ def other_than(decision, project):
     """Whether a page is in another language than the project's, not only
     another region's."""
     return not same_language(decision.language, project)
+
+
+def for_copy(decision, declared):
+    """(language, replacing) for a source's copy: language, what it says
+    where the file says none, or None for nothing (the project's when the
+    project doesn't declare it, which is nobody's decision); replacing,
+    when the file's own marks are to be rewritten as language, what they
+    say ("" for none), else None. A row rewrites a file's language, and a
+    producer's property or the project's rewrites marks in another
+    language, as an OpenStax file's English is in a Spanish book; a
+    file's own region is kept."""
+    marks = decision.own.marks if decision.own else None
+    if decision.source == "sidecar":
+        if same_tag(marks, decision.language):
+            return decision.language, None
+        return decision.language, marks or ""
+    if decision.source in ("producer", "project") and marks \
+            and not same_language(marks, decision.language):
+        return decision.language, marks
+    if decision.source == "project" and not declared:
+        return None, None
+    return decision.language, None
 
 
 def for_source_targets(decision, reader):

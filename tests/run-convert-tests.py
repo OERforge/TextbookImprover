@@ -5451,7 +5451,7 @@ def case_page_languages(work):
     language property OpenStax's Word files carry, a Markdown file's lang, a
     hand-written page's), else the book's, a file's that differs from the
     book's only in region the book's; what the book puts on a page in
-    another language marked in the book's; and the report."""
+    another language marked in the book's; the copies; and the report."""
     os.makedirs(os.path.join(work, "_pt"))
     for name, text in LANGUAGE_PAGES.items():
         with open(os.path.join(work, name), "w", encoding="utf-8") as fh:
@@ -5543,9 +5543,21 @@ def case_page_languages(work):
          == [("de", "de"), ("fr-CA", "fr-CA"), ("es-ES", "es-ES"), ("it", "it")]
          and footer.search(chapter("espanol")) and "<footer>" in chapter("deutsch")),
         ("and epubcheck agrees", lambda: validated == [] if validated is not None else True),
-        ("an HTML page a row gives another region of the book's language is in it",
+        ("an HTML page a row gives another region of the book's language is in it, and so is "
+         "its copy, in place of the language it said",
          lambda: root_language(read(work, "html", "seite.html"))[0] == "de-CH"
+         and '<html lang="de-CH">' in read(work, "src", "seite.html")
          and "seite" not in said.split("NOTE:", 1)[-1].split("\n", 1)[0]),
+        ("a copy is given its row's language in place of its own, and OpenStax's property's "
+         "in place of the US English its marks say; one in its own keeps it, and one that "
+         "says none gets the book's",
+         lambda: 'w:val="es"' in word_language(os.path.join(work, "src", "funciones.docx"))
+         and 'w:val="en-US"' not in word_language(os.path.join(work, "src", "funciones.docx"))
+         and 'w:val="es-ES"' in word_language(os.path.join(work, "src", "espanol.docx"))
+         and 'w:val="de-AT"' in word_language(os.path.join(work, "src", "osterreich.docx"))
+         and "lang: fr-CA" in read(work, "src", "chapitre.md")
+         and "lang: fr\n" not in read(work, "src", "chapitre.md")
+         and "lang: de" in read(work, "src", "deutsch.md")),
         ("the run names each page in another language and where its language came from",
          lambda: "4 page(s) are in another language than the book's, de" in said
          and "chapitre fr-CA (languages.csv)" in said and "espanol es-ES (its file)" in said

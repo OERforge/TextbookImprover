@@ -686,6 +686,10 @@ $\\frac{\\cancel{3}x}{\\cancel{3}} = x$ and $\\xcancel{2z}$.
 \\end{frame}
 ```
 
+# Pages 10\\-\\-20
+
+Two hyphens in a title, escaped so as to stay two.
+
 [^a]: The first note.
 [^c]: The caption's note.
 [^t]: The title's note.
@@ -2073,6 +2077,9 @@ def case_pdf(work):
              ("Part Two", [("Slide C1", [])])]),
         ("a slide's bookmark leaves out its title's footnote",
          lambda: ("A Claim", []) in outline(odd)),
+        # hyperref's \\pdfstringdef, which writes it, would make them a dash.
+        ("and keeps two hyphens in its title as they're printed",
+         lambda: ("Pages 10--20", []) in outline(odd) and "Pages 10--20" in odd_text),
         ("a slide in a div is a slide: bookmarked, its title's footnote set",
          lambda: ("Wrapped Slide", []) in outline(more) and "Wrapped Slide5" in more_text
          and "5The wrapped" in more_text),

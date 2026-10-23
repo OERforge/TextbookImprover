@@ -67,6 +67,15 @@ local function tex_escape(text)
   return (text:gsub('[\\{}#%$%%&_~%^]', SPECIALS))
 end
 
+-- And hyphens and backticks, which \pdfstringdef reads as dashes (-- and
+-- ---) and inverted marks (?` and !`), as TeX's text does: an empty group
+-- after each hyphen and before each backtick keeps a title's own, as the
+-- writer prints a title's two hyphens (-\/-), and as pdf-target.lua
+-- keeps a link's description.
+local function unjoined(text)
+  return (text:gsub('%-', '-{}'):gsub('`', '{}`'))
+end
+
 local function notes(div)
   if div.classes:includes('notes') then
     return {}
@@ -413,7 +422,7 @@ local function slides(doc)
           -- On the frame's first slide only: a frame with pauses is set as
           -- several slides, and each would have the bookmark.
           out:insert(pandoc.RawBlock('latex', ('\\only<1>{\\pdfbookmark[%d]{%s}{oer-slide-%d}}')
-            :format(#open + 1, tex_escape(text), count)))
+            :format(#open + 1, unjoined(tex_escape(text)), count)))
         end
         out:extend(texts)
       elseif block.t == 'Header' then

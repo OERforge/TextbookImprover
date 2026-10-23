@@ -437,6 +437,8 @@ Text with a note.[^a]
 
 ![A figure whose caption, long enough to run past the width of its line and be set as a paragraph of its own, has a note.[^c]](assets/red.png)
 
+![A figure whose caption has [a linked word](https://example.org/caption) and [one within](#captions) in it.](assets/red.png)
+
 [^a]: Note a, in the text.
 [^b]: Note b, in a caption.
 [^c]: Note c, in a long caption.
@@ -3643,6 +3645,15 @@ def checks(work, jobs=1):
          lambda: re.search(r"\\caption\[[^\]]*OERCaptionNotes", notes_source) is None
          and len(re.findall(r"\\caption\[[^\]]*\]\{\\OERCaptionNotes\{[12]\}",
                             notes_source)) == 2),
+        # LaTeX titles an entry's structure element with its text made
+        # plain, which had kept a link's description and an \\href's address.
+        ("an entry in the list of figures is titled by its caption's words, a link in it "
+         "by its text alone",
+         lambda: os.path.exists(notes_path)
+         and "A figure whose caption has a linked word and one within in it."
+         in [str(e.get("/T")) for e in elements(
+             pypdf.PdfReader(notes_path).trailer["/Root"]["/StructTreeRoot"])
+             if kind(e) == "/TOCI"]),
         # Written with the cell's text, a minipage's note, lettered, its
         # text taking a number another note had (pdf-target.lua).
         ("a footnote in a table inside a table's cell is numbered among the outer "

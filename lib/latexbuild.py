@@ -1339,6 +1339,28 @@ PDF_MACROS = r"""\ExplSyntaxOn
         \pdfannot_dict_remove:nn {link/GoTo} {Contents}
       }
   }
+% A link in a caption is in its entry in the list of figures or tables
+% too, whose structure element LaTeX titles with the entry's text made
+% plain (\text_purify:n), which kept the description and the link's
+% target: "has a linked wordhttps://example.org/captiona linked word in
+% it", and a link within the book its target's name in brackets. A
+% description is left out, and a link is its text: an \href's, an
+% optional argument before its address too, as hyperref's own
+% \pdfstringdef takes it; a \hyperref's, Pandoc's [id]{text} or the
+% four-argument form; and a linked citation's (\citeproc, from Pandoc's
+% template). hyperref's are declared once it's loaded, so that its own
+% declarations, were it to make any, come first.
+\cs_new:Npn \__oer_purify_href:w #1 # { \use_ii:nn }
+\cs_new:Npn \__oer_purify_hyperref:w #1 #
+  { \tl_if_blank:nTF {#1} { \use_iv:nnnn } { \use:n } }
+\text_declare_purify_equivalent:Nn \OERLinkContents { \use_none:n }
+\text_declare_purify_equivalent:Nn \OERLinkContentsReset { }
+\text_declare_purify_equivalent:Nn \citeproc { \use_ii:nn }
+\AddToHook { package / hyperref / after }
+  {
+    \text_declare_purify_equivalent:Nn \href { \__oer_purify_href:w }
+    \text_declare_purify_equivalent:Nn \hyperref { \__oer_purify_hyperref:w }
+  }
 \AddToHook{begindocument}
   {
     \socket_if_exist:nT {hyp/link/URI/Contents}

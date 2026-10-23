@@ -47,6 +47,7 @@ import subprocess
 import sys
 import tempfile
 import warnings
+import zipfile
 import zlib
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -1932,6 +1933,78 @@ def languages(path):
                     walk(element.K)
         walk(pdf.Root.StructTreeRoot.K)
     return found
+
+
+GERMAN_DECK = """---
+title: Auf Deutsch
+lang: de
+---
+
+## Eine Folie
+
+Ein Satz auf Deutsch.
+"""
+ENGLISH_DECK = """---
+title: In English
+---
+
+## A Slide
+
+A sentence in English.
+"""
+
+
+def case_languages(work):
+    """A deck in another language than the project's, as its YAML says:
+    its page, its presentation, its PowerPoint file, and its PDF in its
+    own, each deck's language decided once for every target, a deck with
+    none in the project's."""
+    ready = pdf_ready()
+    work = folder(work, "targets:\n  pages:\n    format: html\n  show:\n    format: revealjs\n"
+                  "  slides:\n    format: pptx\n" + ("" if ready else "  pdf:\n    format: pdf\n"),
+                  decks_given={"allemand.md": GERMAN_DECK, "english.md": ENGLISH_DECK})
+    result = convert(work, "--quick")
+
+    def root(*parts):
+        path = os.path.join(work, *parts)
+        found = re.search(r'<html\b[^>]*\slang="([^"]*)"', read(path)) \
+            if os.path.isfile(path) else None
+        return found.group(1) if found else None
+
+    def runs(name):
+        path = os.path.join(work, "slides", name + ".pptx")
+        if not os.path.isfile(path):
+            return set()
+        with zipfile.ZipFile(path) as z:
+            return {lang for part in z.namelist() if part.startswith("ppt/slides/slide")
+                    for lang in re.findall(r'<a:(?:rPr|endParaRPr)\b[^>]*\slang="([^"]*)"',
+                                           z.read(part).decode("utf-8"))}
+
+    def catalog(name):
+        path = os.path.join(work, "pdf", name + ".pdf")
+        if not os.path.isfile(path):
+            return None
+        with pikepdf.open(path) as pdf:
+            return str(pdf.Root.get("/Lang", ""))
+    checks = [
+        ("each deck converts", lambda: result.returncode == 0),
+        ("a deck's page and presentation are in its language, one with none in the project's",
+         lambda: (root("pages", "allemand.html"), root("pages", "english.html"),
+                  root("show", "allemand.html"), root("show", "english.html"))
+         == ("de", "en-US", "de", "en-US")),
+        ("and its PowerPoint file's text",
+         lambda: runs("allemand") == {"de"} and runs("english") == {"en-US"}),
+        ("the run names the deck in another language and drafts its row",
+         lambda: "1 page(s) are in another language than the book's, en-US: allemand de "
+         "(its file)" in result.stderr
+         and rows_of(os.path.join(work, "languages-new.csv"))[0][:2] == ["allemand", "de"]),
+    ]
+    if ready:
+        print(f"  skip  {ready}; a deck's PDF's language isn't checked")
+    else:
+        checks.append(("and its PDF", lambda: (catalog("allemand"), catalog("english"))
+                       == ("de", "en-US")))
+    return checks
 
 
 def case_pdf(work):
@@ -4476,6 +4549,7 @@ CASES = [("the pieces", case_pieces),
          ("the PowerPoint files' settings", case_pptx_settings),
          ("what the PowerPoint writer can't do", case_pptx_edges),
          ("a deck's reveal.js presentation", case_revealjs),
+         ("a deck in another language", case_languages),
          ("the presentations' settings", case_revealjs_settings)]
 SLOW = ("a deck's PDF", "the PDF's settings", "the template's fallbacks")
 

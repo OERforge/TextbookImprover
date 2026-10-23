@@ -88,6 +88,7 @@ try:
     import downsample
     import highlighting
     import htmlrepair
+    import languages
     import mathjax
     import notes as notes_lib
     import pagefooter
@@ -917,6 +918,14 @@ WORD_HEADINGS, WORD_DELETIONS = "keep", "accept"
 LATEX_MAIN = []
 LATEX_MACROS = "latex-conversion-macros.tex"
 LANGUAGE_DECLARED = False
+# Each page's source, by its name, as the readers find it: (kind, the
+# file's name relative to the book's folder), kind docx, markdown, pptx,
+# asciidoc, latex (the master), html, or hand; and a LaTeX book's language
+# by its master, as its preamble gives it. LANGUAGES: each page's
+# languages.Decision, by its name, worked out once for every target.
+PAGE_SOURCES = {}
+LATEX_LANGUAGES = {}
+LANGUAGES = {}
 KIND_DECLARED = None        # project.kind as a file gives it, if one does
 # A slides run of decks written in Markdown: each .md a deck, read and
 # filtered as a page is, and written by the formats a deck has; or of
@@ -1378,6 +1387,7 @@ def read_latex_to_json(base, masters, env, work, titles=None):
                 json.dump({"pandoc-api-version": doc["pandoc-api-version"],
                            "meta": page_meta, "blocks": blocks}, fh)
             own.append(stem)
+            PAGE_SOURCES[stem] = ("latex", master)
             if master_own:
                 held.append(stem)
             # A bibliography the run wrote out as a page of its own is one,
@@ -1416,6 +1426,7 @@ def read_latex_to_json(base, masters, env, work, titles=None):
             header["authors"] = [name for a in items
                                  for name in latexsource.author_names(a.get("c", []))]
         language = latexsource.preamble_language(prep["preamble"])
+        LATEX_LANGUAGES[master] = language
         if language and "language" not in header:
             header["language"] = language
         if len(masters) == 1:
@@ -1580,6 +1591,7 @@ def read_asciidoc_to_json(base, docs, env, imagesdir=""):
                 die(f"pandoc couldn't read {name}.")
         portable_media_paths(os.path.join(base, stem + ".json"), base, name)
         stems.append(stem)
+        PAGE_SOURCES[stem] = ("asciidoc", name)
     return stems
 
 
@@ -2015,6 +2027,7 @@ def read_markdown_to_json(base, docs, env, decks=False):
             env=env, cwd=base)
         settle_markdown(os.path.join(base, stem + ".json"), base, name, decks)
         stems.append(stem)
+        PAGE_SOURCES[stem] = ("markdown", name)
         if decks:
             DECK_SOURCES[stem] = name
     if decks:
@@ -2048,6 +2061,7 @@ def read_pptx_to_json(base, decks, env, work, paths):
         with open(os.path.join(base, stem + ".json"), "w", encoding="utf-8") as fh:
             json.dump(doc, fh)
         DECK_SOURCES[stem] = name
+        PAGE_SOURCES[stem] = ("pptx", name)
         records.append((name, record))
         stems.append(stem)
     if TRACE:
@@ -2141,6 +2155,7 @@ def read_html_to_json(base, docs, env, work):
              "--lua-filter=" + MEDIA_FILTER], env=env, cwd=base)
         portable_media_paths(os.path.join(base, stem + ".json"), base, name)
         stems.append(stem)
+        PAGE_SOURCES[stem] = ("html", name)
     return stems
 
 
@@ -2206,6 +2221,7 @@ def read_to_json(base, docs, env, work):
         if tips and TRACE:
             say(f"# {name}: {tips} ScreenTip(s) kept as link titles")
         stems.append(stem)
+        PAGE_SOURCES[stem] = ("docx", name)
     return stems
 
 
@@ -2609,6 +2625,182 @@ def with_fragments(env, fragments):
 
 
 # --------------------------------------------------------------------------
+# 2.5 each page's language
+# --------------------------------------------------------------------------
+
+# The metadata key a page's language rides in from its raw intermediate
+# to every target, where target-blocks.lua makes it the page's lang and
+# takes it out.
+LANGUAGE_KEY = "page-language"
+# A page's name in the languages sidecar and its report, by its name,
+# where it isn't its name: a PowerPoint deck's, as its other sidecars'.
+LANGUAGE_NAMES = {}
+LANGUAGE_ROWS = {}          # page: the sidecar's language, its rows matched
+LANGUAGE_UNMATCHED = []     # the rows' sources that name no page
+LANGUAGE_REPORTED = []      # written once a run: by a slides run, or here
+READ_LANGUAGE = {"markdown": "lang in its YAML", "html": "its lang",
+                 "asciidoc": "its lang attribute", "hand": "its lang"}
+
+
+def own_language(base, kind, name, meta=None):
+    """A page's file's own language (languages.Own) by what its kind of
+    file declares, or None: a Word file's read from the file, since
+    Pandoc's reader reads none, and a deck's, its producer's property
+    among what's read; a LaTeX book's from its preamble; a hand-written
+    page's from its HTML, before it's read; any other's as its reader
+    gave it, in meta."""
+    path = os.path.join(base, name)
+    if kind == "docx" or name.lower().endswith(".docx"):
+        return languages.docx_own(path, name)
+    if kind == "pptx":
+        return languages.pptx_own(path, name)
+    if kind == "latex":
+        return languages.declared_own(LATEX_LANGUAGES.get(name), f"{name}: its preamble")
+    if kind == "hand":
+        with open(path, encoding="utf-8", errors="replace") as fh:
+            return languages.declared_own(languages.html_language(fh.read()),
+                                          f"{name}: its lang")
+    return languages.declared_own(meta_text(meta or {}, "lang"),
+                                  f"{name}: {READ_LANGUAGE.get(kind, 'its lang')}")
+
+
+def settle_page_language(path, decision):
+    """The page's language in its intermediate at path: page-language,
+    for every target to mark the page in, and lang, what a Markdown or
+    AsciiDoc target says (languages.for_source_targets)."""
+    with open(path, encoding="utf-8") as fh:
+        doc = json.load(fh)
+    meta = doc.setdefault("meta", {})
+    reader = meta_text(meta, "lang") or None
+    meta[LANGUAGE_KEY] = {"t": "MetaString", "c": decision.language}
+    written = languages.for_source_targets(decision, reader)
+    if written is None:
+        meta.pop("lang", None)
+    elif written != reader:
+        meta["lang"] = {"t": "MetaString", "c": written}
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump(doc, fh)
+
+
+def match_language_rows(paths, names):
+    """The languages sidecar's rows, matched to the pages (names: {page:
+    its other names}) into LANGUAGE_ROWS, and what names none into
+    LANGUAGE_UNMATCHED; a row whose language isn't one is warned about."""
+    rows, problems = languages.read_rows(paths.get("languages"))
+    for problem in problems:
+        say(f"WARNING: {os.path.basename(paths['languages'])}: {problem}.")
+    matched, unmatched = languages.match_rows(rows, names)
+    LANGUAGE_ROWS.clear()
+    LANGUAGE_ROWS.update(matched)
+    LANGUAGE_UNMATCHED[:] = unmatched
+
+
+def settle_languages(base, stems, project, paths, hand=(), variants=()):
+    """Each page's language, decided once (languages.decide) for every
+    target: its row in the languages sidecar, else its file's own, else
+    the project's. Each goes into LANGUAGES and into the page's raw
+    intermediate (settle_page_language). hand: the hand-written pages,
+    decided here and given theirs as they're read; variants: the pages
+    only a target's variant gives, which are its to decide (variant_
+    languages), and whose rows match here."""
+    names = {stem: [LANGUAGE_NAMES[stem]] if stem in LANGUAGE_NAMES else []
+             for stem in list(stems) + list(hand) + list(variants)}
+    match_language_rows(paths, names)
+    for stem in stems:
+        if stem not in LANGUAGES:
+            path = os.path.join(base, stem + ".json")
+            kind, name = PAGE_SOURCES.get(stem, (None, None))
+            meta = {}
+            if kind not in ("docx", "pptx", "latex"):
+                with open(path, encoding="utf-8") as fh:
+                    meta = json.load(fh).get("meta", {})
+            own = own_language(base, kind, name, meta) if name else None
+            LANGUAGES[stem] = languages.decide(LANGUAGE_ROWS.get(stem), own,
+                                               project["language"])
+        settle_page_language(os.path.join(base, stem + ".json"), LANGUAGES[stem])
+    for stem in hand:
+        name = os.path.relpath(hand_path(base, stem), base).replace(os.sep, "/")
+        PAGE_SOURCES[stem] = ("hand", name)
+        LANGUAGES[stem] = languages.decide(LANGUAGE_ROWS.get(stem),
+                                           own_language(base, "hand", name),
+                                           project["language"])
+
+
+def variant_languages(base, target, raw, project):
+    """A target's variants' raw intermediates (raw, {page: path}) given
+    their pages' languages: the page's own decision, where another file is
+    the page for the other targets, since a variant is the same page; else
+    the variant's, decided as any page's is."""
+    for stem, path in raw.items():
+        if stem not in LANGUAGES:
+            with open(path, encoding="utf-8") as fh:
+                meta = json.load(fh).get("meta", {})
+            name = os.path.relpath(target.variants[stem], base).replace(os.sep, "/")
+            lower = name.lower()
+            kind = "docx" if lower.endswith(".docx") else "html" if lower.endswith(".html") \
+                else "asciidoc" if lower.endswith((".adoc", ".asciidoc")) else "markdown"
+            LANGUAGES[stem] = languages.decide(
+                LANGUAGE_ROWS.get(stem), own_language(base, kind, name, meta),
+                project["language"])
+        settle_page_language(path, LANGUAGES[stem])
+
+
+def report_languages(project, reports, paths):
+    """languages-new.csv: a drafted row for each page in another language
+    than the project's, by what its file says, that the sidecar has no
+    row for, or no file when there's none; a note naming every page in
+    another language and where its language came from; and a warning for
+    each row that names no page. Once a run."""
+    if LANGUAGE_REPORTED:
+        return
+    LANGUAGE_REPORTED.append(True)
+    book = project["language"]
+    other = [(stem, d) for stem, d in sorted(LANGUAGES.items())
+             if languages.other_than(d, book)]
+    rows = [languages.report_row(LANGUAGE_NAMES.get(stem, stem), d) for stem, d in other
+            if d.source in ("file", "producer")]
+    report = reports.get("languages_new")
+    sidecar = os.path.basename(paths.get("languages") or "languages.csv")
+    if report:
+        if rows:
+            with open(report, "w", encoding="utf-8", newline="") as fh:
+                writer = csv.writer(fh, lineterminator="\n")
+                writer.writerow(languages.SIDECAR_COLUMNS)
+                writer.writerows(rows)
+        elif os.path.exists(report):
+            os.remove(report)
+    if other:
+        said = {"sidecar": sidecar, "file": "its file", "producer": "its producer's property"}
+        listed = [f"{LANGUAGE_NAMES.get(stem, stem)} {d.language} ({said[d.source]})"
+                  for stem, d in other]
+        say(f"NOTE: {len(other)} page(s) are in another language than the book's, {book}"
+            + ("" if LANGUAGE_DECLARED else ", the default, since no file declares "
+               "project.language") + ": " + ", ".join(listed[:6])
+            + (", ..." if len(listed) > 6 else "") + ". Each target marks each one so, "
+            "and the book's packages keep the book's language.")
+        spoken = {languages.language_of(d.language) for _, d in other}
+        if not LANGUAGE_DECLARED and len(other) == len(LANGUAGES) and len(spoken) == 1:
+            common = Counter(d.language for _, d in other).most_common(1)[0][0]
+            say(f"  Every page is in {common}: project.language: {common}, in project.yaml, "
+                "would make it the book's.")
+    if rows and report:
+        say(f"Wrote {report} ({len(rows)} page(s) in another language than the book's, as "
+            f"their files say). Each row's language is used as it stands: append a row to "
+            f"{sidecar} to keep it, and correct its language there if it's wrong.")
+    if LANGUAGE_UNMATCHED:
+        say(f"WARNING: {sidecar}: {len(LANGUAGE_UNMATCHED)} row(s) name no page of the book ("
+            + ", ".join(LANGUAGE_UNMATCHED[:4]) + (", ..." if len(LANGUAGE_UNMATCHED) > 4
+                                                    else "")
+            + "). A row's source is the page's name, its file's name without the extension, "
+            "or the file's name; a file renamed, or a row mistyped, matches none.")
+
+
+def page_language(meta, fallback):
+    """The language a page's intermediate says it's in, else fallback."""
+    return meta_text(meta or {}, LANGUAGE_KEY) or fallback
+
+
+# --------------------------------------------------------------------------
 # 4. filter, split, render
 # --------------------------------------------------------------------------
 
@@ -2970,15 +3162,26 @@ def unique_within_file(body, seen):
     return len(renamed)
 
 
-def merged_document(members, title, where, holder, base):
+def merged_document(members, title, where, holder, base, book_language=None):
     """One document from several pages: the group's title as its own
     heading, each page a section under it, every page anchored by its
-    stem so a link can still name it."""
+    stem so a link can still name it. Its language is its pages', when
+    they're all in one, else the book's, and a page in another is a div
+    in its own."""
     api, blocks, seen, moved = None, [], set(), 0
-    for index, (stem, page_title, depth) in enumerate(members):
-        with open(os.path.join(base, stem + INTERMEDIATE),
-                  encoding="utf-8") as fh:
-            doc = json.load(fh)
+    docs = []
+    for stem, _, _ in members:
+        with open(os.path.join(base, stem + INTERMEDIATE), encoding="utf-8") as fh:
+            docs.append(json.load(fh))
+    spoken = {page_language(doc.get("meta"), book_language) for doc in docs}
+    language = spoken.pop() if len(spoken) == 1 else book_language
+    # What a Markdown or AsciiDoc file says, the pages' own lang where
+    # they agree (settle_page_language), else the file's language where
+    # it isn't the book's.
+    written = {meta_text(doc.get("meta", {}), "lang") for doc in docs}
+    lang = written.pop() if len(written) == 1 else (
+        language if language and not languages.same_tag(language, book_language) else "")
+    for index, ((stem, page_title, depth), doc) in enumerate(zip(members, docs)):
         api = api or doc["pandoc-api-version"]
         body = copy.deepcopy(doc["blocks"])
         level = min(6, depth + 1)
@@ -3002,19 +3205,23 @@ def merged_document(members, title, where, holder, base):
         opens_group = index == 0 and page_title == title
         heading = {"t": "Header", "c": [level, [stem, [], []],
                                         inline_text(page_title)]}
-        if opens_group:
-            # The group's own opening page: its content follows the
-            # file's heading rather than repeating the title.
-            blocks += body
-        else:
-            blocks += [heading] + body
+        # The group's own opening page: its content follows the file's
+        # heading rather than repeating the title.
+        part = body if opens_group else [heading] + body
+        own = page_language(doc.get("meta"), language)
+        if language and not languages.same_tag(own, language):
+            part = [{"t": "Div", "c": [["", [], [["lang", own]]], part]}]
+        blocks += part
     where = dict(where); where["__here__"] = holder
     retarget_links(blocks, where)
     if moved:
         say(f"  {holder}: {moved} id(s) renamed where two pages used one")
-    return {"pandoc-api-version": api,
-            "meta": {"title": {"t": "MetaString", "c": title}},
-            "blocks": blocks}
+    meta = {"title": {"t": "MetaString", "c": title}}
+    if language:
+        meta[LANGUAGE_KEY] = {"t": "MetaString", "c": language}
+    if lang:
+        meta["lang"] = {"t": "MetaString", "c": lang}
+    return {"pandoc-api-version": api, "meta": meta, "blocks": blocks}
 
 
 def noheader(text):
@@ -3052,8 +3259,9 @@ REVIEW_COLUMNS = {
     "bare_links": ((1, 2), 5, 6),
     "slide_titles": ((1,), 3, 4),
     "reading_order": ((1,), 5, 6),
+    "languages": languages.REVIEW,
 }
-HEADER_WORDS = {"image", "label", "table", "file", "key", "url", "slide"}
+HEADER_WORDS = {"image", "label", "table", "file", "key", "url", "slide", "source"}
 
 
 def unreviewed_rows(path, columns):
@@ -4021,7 +4229,7 @@ def deck_pptxs(target, stems, names, base, language, work):
                 "first), and a deck's PowerPoint file needs rsvg-convert to make each a PNG, "
                 "which PowerPoint shows beside it: sudo apt install librsvg2-bin (see "
                 "docs/installation.md).")
-    jobs = []
+    jobs, spoken = [], {}
     for stem in stems:
         intermediate = os.path.join(target.pages_dir, stem + INTERMEDIATE)
         with open(intermediate, encoding="utf-8") as fh:
@@ -4032,6 +4240,7 @@ def deck_pptxs(target, stems, names, base, language, work):
         shape, why = (None, None) if reference else decklib.aspect_ratio(doc.get("meta") or {},
                                                                           ratio)
         jobs.append((stem, intermediate, level, shape, why))
+        spoken[stem] = page_language(doc.get("meta"), language)
     references = {shape: pptxtarget.reference_doc(shape, os.path.join(
         work, f"reference-{target.name}-{shape.replace(':', 'x')}-{slide_size}.pptx"),
         slide_size) for shape in sorted({job[3] for job in jobs if job[3]})}
@@ -4044,7 +4253,7 @@ def deck_pptxs(target, stems, names, base, language, work):
         return job, pptxtarget.build(
             intermediate, base, os.path.join(target.output_dir, stem + ".pptx"),
             filters=[TARGET_FILTER, DECK_PPTX_FILTER], reference=reference or references[shape],
-            level=level, language=language,
+            level=level, language=spoken[stem],
             title=os.path.splitext(os.path.basename(names.get(stem, stem)))[0],
             notes=str(target["slides.notes"]), env=env)
 
@@ -4360,7 +4569,7 @@ def render_markdown(target, pages, base, work, project, env, losses=None):
         jobs = []
         for holder, title, members in plan:
             document = merged_document(members, title, where, holder,
-                                       os.path.dirname(pages[0]))
+                                       os.path.dirname(pages[0]), project["language"])
             if target.format == "docx":
                 # Word's outline opens at Heading 1, the group's title, as
                 # a page's does (target-blocks.lua), not at its pages'
@@ -4521,10 +4730,12 @@ def render_html(target, pages, base, fragments, language, env):
                MEDIA_LOWERCASE="1" if target["media.lowercase"] else "")
     """--lua-filter figures-and-tables ran already; what remains is the
     writer. -M lang sets the html lang attribute (WCAG 3.1.1), from the
-    project's declared language. v0.1 hardcoded "en" while the manifest
-    read its own separate setting, so a book in any other language shipped
-    pages that disagreed with the package describing them, and nothing
-    checked.
+    project's declared language, and target-blocks.lua sets the page's own
+    in its place (lib/languages.py), a page in another language than the
+    book's (3.1.2) being in its own. v0.1 hardcoded "en" while the
+    manifest read its own separate setting, so a book in any other
+    language shipped pages that disagreed with the package describing
+    them, and nothing checked.
 
     The stylesheet goes in through header-includes.lua rather than
     --include-in-header, because that option replaces the page's own
@@ -4569,6 +4780,40 @@ def render_html(target, pages, base, fragments, language, env):
     copy_media(base, target.output_dir, pages, lower=bool(target["media.lowercase"]),
                scaled=DOWNSAMPLED.get(target.name))
     return written
+
+
+BOOK_PART = re.compile(r'<(header|footer|nav class="book-(?:menu|pager)"|'
+                       r'h2 class="footnotes-title")([\s>])')
+
+
+def mark_book_parts(path, book):
+    """A page in another language than the book's (its <html lang>) with
+    what the book puts on it marked in the book's: the header setting's
+    banner before its main landmark, the footer setting's footer after
+    it, the menu and the pager, and its notes' heading (notes.title).
+    Returns whether the page changed."""
+    with open(path, encoding="utf-8") as fh:
+        text = fh.read()
+    own = languages.html_language(text.split("<body", 1)[0] + "<body>")
+    if not own or not book or languages.same_tag(own, book):
+        return False
+    main = text.find("<main>")
+    end = text.rfind("</main>")
+    body = text.find("<body")
+
+    def mark(match):
+        name = match.group(1)
+        if name == "header" and not (body <= match.start() < main):
+            return match.group(0)        # a title block's, in the page's own words
+        if name == "footer" and (end < 0 or match.start() < end):
+            return match.group(0)
+        return "<%s lang=\"%s\"%s" % (name, html_escape(book), match.group(2))
+    new = BOOK_PART.sub(mark, text)
+    if new == text:
+        return False
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write(new)
+    return True
 
 
 def add_menu(target, tree, titles, written, hand, work):
@@ -5420,7 +5665,7 @@ def main():
     paths = {key: resolve_path(base, first[f"sidecars.{key}"])
              for key in ("table_captions", "image_alt", "table_headers",
                          "page_names", "bare_links", "math_keep", "slide_titles",
-                         "reading_order")}
+                         "reading_order", "languages")}
     for key, default in (("table_captions", "table-captions.csv"),
                          ("image_alt", "image-alt.csv"),
                          ("bare_links", "bare-links.csv"),
@@ -5428,7 +5673,8 @@ def main():
                          ("page_names", "page-names.csv"),
                          ("math_keep", "math-keep.csv"),
                          ("slide_titles", "slide-titles.csv"),
-                         ("reading_order", "reading-order.csv")):
+                         ("reading_order", "reading-order.csv"),
+                         ("languages", "languages.csv")):
         check_sidecar(paths[key], f"sidecars.{key}", default, base)
     reports = {key: resolve_path(base, first[f"reports.{key}"])
                for key in ("table_captions_missing", "image_alt_missing",
@@ -5437,7 +5683,8 @@ def main():
                            "page_names_new", "page_names_report",
                            "media_unresolved", "spacer_images",
                            "output_check", "math_repaired", "ids_renamed",
-                           "slide_titles_new", "reading_order_new", "slides_check")}
+                           "slide_titles_new", "reading_order_new", "slides_check",
+                           "languages_new")}
     pptx_code, pptx_targets = 0, targets
     if slides and not DECK_RUN:
         code = slides_run(base, decks, targets, project, paths, reports, args, first,
@@ -5652,6 +5899,11 @@ def main():
             if os.path.exists(reports[key]):
                 os.remove(reports[key])
 
+        # ---- 2.5 each page's language, once for every target ---------------
+        settle_languages(base, stems, project, paths,
+                         [] if DECK_RUN else hand_pages(base, stems),
+                         sorted({s for t in targets for s in t.variants if s not in stems}))
+
         # ---- 4. filter and split, once per filter stage ---------------------
         css_header = os.path.join(work, "head.html")
         with open(css_header, "w", encoding="utf-8") as fh, \
@@ -5663,6 +5915,7 @@ def main():
                 continue
             fenv = filter_env(target, base, paths, env)
             raw = read_variants(base, target, work, env)
+            variant_languages(base, target, raw, project)
             variant_stems = [s for s in raw if s not in stems]
             pages = filter_pages(base, stems + variant_stems, target, fenv,
                                  raw)
@@ -5671,6 +5924,7 @@ def main():
             pages_by_dir[target.pages_dir] = split_pages(
                 target, pages, paths, reports,
                 splitting=any(int(t["pages.split_level"]) > 0 for t in targets))
+        report_languages(project, reports, paths)
 
         if args.check_only:
             say("Check only: the reports are written; nothing was rendered "
@@ -5685,8 +5939,12 @@ def main():
             if target.pages_dir in pages_by_dir and not any(
                     p.endswith(stem + INTERMEDIATE) for stem in hand
                     for p in pages_by_dir[target.pages_dir]):
-                pages_by_dir[target.pages_dir] += read_hand_pages(
-                    base, hand, target.pages_dir, env, target.variants)
+                written_hand = read_hand_pages(base, hand, target.pages_dir, env,
+                                               target.variants)
+                for path in written_hand:
+                    settle_page_language(path, LANGUAGES[
+                        os.path.basename(path)[:-len(INTERMEDIATE)]])
+                pages_by_dir[target.pages_dir] += written_hand
         hand_stems = set(hand)
 
         # ---- 4.65 images wider than they're shown (images.downsample) -------
@@ -5733,6 +5991,9 @@ def main():
                 if target["menu"] == "on":
                     add_menu(target, tree, titles, written[target.name],
                              hand_stems, work)
+                for path in written[target.name]:
+                    if path.endswith(".html") and os.path.basename(path)[:-5] not in hand_stems:
+                        mark_book_parts(path, language)
 
         # ---- 5. reports, once per book ----------------------------------------
         # A PowerPoint deck's are its checks', about the deck itself, written

@@ -16,6 +16,37 @@ equation,chapter-2,5 µm
 symbol,,μ
 ```
 
+## A page's language
+
+Every page has a language, worked out once and given to every target. It's the page's row in `languages.csv` if it has one; otherwise the language its own file declares; otherwise the project's (`project.language`). A file's own language that differs from the project's only in region, `en-GB` in a book in `en-US`, or `es` in one in `es-MX`, doesn't override it, since a Word file's language is often just the one the copy of Word that made it was set to, whatever the book is in.
+
+What a file declares depends on its kind:
+
+- **A Word file**: the language most of its letters are in, as Word resolves each one's, from the run's own properties, its character style, its paragraph style, and the document's default. A Chinese, Japanese, or Korean letter takes the East Asian language, and a letter of a right-to-left or complex script the complex-script one. Pandoc reads no language from a Word file at all, so this is read here. A file with no language on any letter is in the language in its core properties, if it has one.
+- **A PowerPoint deck**: the language most of its runs say, else its default text style's, else its masters'.
+- **A Word file or a deck from OpenStax**: the custom property `language`, when the custom property `company` is `OpenStax`. OpenStax's Word files are Pandoc's output on OpenStax's own template, whose default is US English, and nothing in them says otherwise, so a section of a Spanish book is English throughout to Word (as one section of *Precálculo 2ed* shows; others aren't checked here). OpenStax writes the language in that property, which Word doesn't read. Other producers are added when their files are known to carry their language there too.
+- **A Markdown file**: `lang` in its YAML. **An HTML page**: the `lang` of its `<body>`, else of its `<html>`, as Pandoc's reader takes it, so a page the CNX unpacker writes for a module in another language than its book is in the module's. **An AsciiDoc file**: its `lang` attribute. **A LaTeX book's pages**: the language its preamble gives, as babel's main language, polyglossia's, or `\DocumentMetadata`'s.
+
+A page in another language than the book's says so in every target, and the book's packages keep the book's language: the EPUB's and the cartridge's, and the PDF's catalog.
+
+- **An HTML page** has the page's `lang`, and what the book puts on every page, the `header` setting's banner, the `footer` setting's footer, the menu, and the notes' heading, the book's.
+- **An EPUB** has the page's language on the root of each of its chapter files, and the `footer` setting's footer the book's. Pandoc's writer gives every chapter file the book's language, so it's set after the EPUB is built.
+- **A PDF** has the page in a passage of its language, tagged as any passage in another language is ([Formats](formats.md#pdf)): its text in its language, its headings' words too.
+- **A Word, Markdown, or AsciiDoc target's file** has the page's language as its own. A Markdown or AsciiDoc file keeps its source's `lang` where it differs from the page's only in region, since it's what the author wrote, and says none where the page is in the project's language and its source gave none. A file `merge: groups` makes of pages in more than one language is in the book's, each page in another language a passage in its own.
+- **A deck's outputs** are in the deck's language: its page, its PDF, its PowerPoint file, and its reveal.js presentation.
+
+`languages.csv` is keyed on the page's source, as `page-names.csv` is: the page's name, which is its file's name without the extension, made safe for a link, or the file's name itself. A deck's row can name it as its other sidecars do, by its file's name without `.pptx`. Its columns are the report's, of which the run reads the first two: the page and its language, a BCP 47 tag such as `es`, `fr-CA`, or `zh-Hant`.
+
+```csv
+source,language,found,drafted-by,reviewed
+chapter-3,es,chapter-3.docx: most of its text,TI,RS 2026-10-23
+intro,fr-CA,,,
+```
+
+The run says which pages are in another language than the book's, and where each one's language came from. `languages-new.csv` drafts a row for each page whose own file put it there and that `languages.csv` has no row for, `found` saying where in the file the language was found, `TI` in `drafted-by`. A drafted language is used as it stands, whether or not it's in `languages.csv`, since it's the file's own; append a row there to keep it, or correct it, and fill in `reviewed` once a person has checked it. A row whose source names no page, or whose language isn't a tag, is warned about and not used. Of two rows for one page, the later is used. A hand-written page in the pass-through directory is copied into an HTML target as it stands, its `lang` too; in an EPUB or a PDF, its language is decided as any page's is.
+
+Where the project declares no language, the book's is `en`, the default. When every page's own file says it's in one other language, the run says so, since `project.language` would make that the book's.
+
 ## Reports
 
 Each run writes only the reports that have something in them, and deletes
@@ -40,20 +71,17 @@ the others. A report existing at all means there's work outstanding.
 | `slide-titles-new.csv` | Filling in the `Title` column and appending the rows to `slide-titles.csv`: a PowerPoint deck's slides with no title, and those with a title an earlier slide has, whose rows are drafted ([Slides](slides.md#the-reports-and-the-sidecars)). |
 | `reading-order-new.csv` | Checking each drafted `Order` and appending the rows to `reading-order.csv`: a PowerPoint deck's slides read in another order than they're laid out ([Slides](slides.md#the-reports-and-the-sidecars)). |
 | `slides-check.csv` | Fixing what it names, in the deck or through the sidecars: every finding in a folder of PowerPoint decks, written every slides run ([Slides](slides.md#whats-checked)). |
+| `languages-new.csv` | Checking each drafted `language` and appending the rows to `languages.csv`: a page in another language than the book's, as its own file says, that the sidecar has no row for ([A page's language](#a-pages-language)). |
 
 ### Who drafted a value, and whether it's been reviewed
 
-The reports a person fills in, and so the sidecars their rows are pasted into, end with two columns: `Drafted by` and `Reviewed` (`drafted-by` and `reviewed` in `table-headers.csv`, whose columns are lowercase). `Drafted by` is blank when a person wrote the value, `TI` when TextbookImprover guessed it, as it does every table's headers, and a model's name when a model suggested it. `Reviewed` is blank until a person has checked the value; then a name or initials, and a date if you like. A row without the columns, as in every sidecar written before them, counts as a person's. That is true of `image-alt.csv`, `table-captions.csv`, and `bare-links.csv`, whose values only a person ever wrote, so they need nothing. It isn't of `table-headers.csv`, whose rows were mostly pasted from `table-headers-new.csv`, TextbookImprover's guesses unchecked: when it has no `drafted-by` column, the run writes `table-headers-sample.csv`, the sidecar with the two columns added, `TI` on each row that says what the guess says now and blank on each that differs, since a person changed it. The sidecar itself is left alone; rename the sample to `table-headers.csv` once you've looked.
+The reports a person fills in, and so the sidecars their rows are pasted into, end with two columns: `Drafted by` and `Reviewed` (`drafted-by` and `reviewed` in `table-headers.csv` and `languages.csv`, whose columns are lowercase). `Drafted by` is blank when a person wrote the value, `TI` when TextbookImprover guessed it, as it does every table's headers, and a model's name when a model suggested it. `Reviewed` is blank until a person has checked the value; then a name or initials, and a date if you like. A row without the columns, as in every sidecar written before them, counts as a person's. That is true of `image-alt.csv`, `table-captions.csv`, and `bare-links.csv`, whose values only a person ever wrote, so they need nothing. It isn't of `table-headers.csv`, whose rows were mostly pasted from `table-headers-new.csv`, TextbookImprover's guesses unchecked: when it has no `drafted-by` column, the run writes `table-headers-sample.csv`, the sidecar with the two columns added, `TI` on each row that says what the guess says now and blank on each that differs, since a person changed it. The sidecar itself is left alone; rename the sample to `table-headers.csv` once you've looked.
 
 A drafted value is used whether or not it's been reviewed, as the table-header guesses always have been: a plausible description serves a reader better than none. The run says how many drafted values haven't been reviewed, sidecar by sidecar, so they can be found and checked. Filling in `Reviewed` once you've checked a value, whether you kept it or changed it, keeps the record of where it came from as well as who stands behind it.
 
 ### Sidecar files
 
-`image-alt.csv`, `table-captions.csv`, `table-headers.csv`, and
-`page-names.csv` hold your corrections. All four are plain CSV, read
-afresh each run, and survive re-conversion from updated Word files.
-`page-names.csv` is read only when `pages.split_level` is on; see
-[Splitting pages](splitting.md).
+`image-alt.csv`, `table-captions.csv`, `table-headers.csv`, `page-names.csv`, and `languages.csv` hold your corrections. All five are plain CSV, read afresh each run, and survive re-conversion from updated Word files. `page-names.csv` is read only when `pages.split_level` is on; see [Splitting pages](splitting.md).
 
 **Where to keep them.** By default they sit in the book's own directory,
 next to the reports that name what still needs filling in. That is the

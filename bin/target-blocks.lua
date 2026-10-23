@@ -10,6 +10,9 @@
 -- A Markdown or AsciiDoc target's file ends with the footer setting, in
 -- a div of class oer-footer (FOOTER_JSON, which convert.py sets).
 --
+-- A page's language, page-language in its metadata, is its lang in every
+-- writer but those two, whose lang convert.py has set already.
+--
 -- A Div or Span with class embed is an <iframe> html-source.lua read,
 -- its attributes the frame's and its content a link to what it framed.
 -- An HTML writer gets the <iframe> back; every other writer gets the
@@ -50,6 +53,9 @@ end
 local TARGET = os.getenv('TARGET_NAME') or ''
 local TITLE_BLOCK = (os.getenv('TITLE_BLOCK') or 'on') ~= 'off'
 local TITLE_WRITER = os.getenv('TITLE_WRITER') or ''
+-- convert.py's LANGUAGE_KEY, and the writers whose files are sources again.
+local LANGUAGE_KEY = 'page-language'
+local SOURCE_WRITERS = { markdown = true, asciidoc = true }
 
 local function wanted(spec)
   -- Names keep; "!name" excludes. A list of only exclusions keeps by
@@ -176,6 +182,15 @@ local function title_heading(doc)
   -- A deck's slide level, which decks.py recorded when the deck was read,
   -- and the PDF's writer is given as an option.
   meta['deck-slide-level'] = nil
+  -- The page's language, which convert.py decided once for every target
+  -- (lib/languages.py): the page's lang, in place of the book's that -M
+  -- gave, for every writer but Markdown's and AsciiDoc's, whose lang is
+  -- what the author decided, set in the intermediate already.
+  local language = meta[LANGUAGE_KEY] and pandoc.utils.stringify(meta[LANGUAGE_KEY]) or ''
+  meta[LANGUAGE_KEY] = nil
+  if language ~= '' and not SOURCE_WRITERS[FORMAT] then
+    meta.lang = pandoc.MetaString(language)
+  end
   if not marked or meta.title == nil or TITLE_WRITER == '' then return doc end
   if TITLE_WRITER == 'html' and TITLE_BLOCK
       and (meta.subtitle or meta.date or meta.abstract) then

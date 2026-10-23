@@ -64,6 +64,7 @@ except ImportError:
              "lib/ directory beside bin/.")
 from bookcontents import number_tree, is_generated, PAGE_TYPES  # noqa: E402
 import highlighting  # noqa: E402
+import languages  # noqa: E402
 import pagefooter  # noqa: E402
 from bookassembly import (  # noqa: E402
     INTERMEDIATE, page_id, load_page, inlines, header, Assembly, meta_text,
@@ -764,6 +765,73 @@ def arrange_epub_notes(path, assembly, numbering, placement):
     os.replace(tmp, path)
 
 
+HTML_ROOT = re.compile(r"<html\b[^>]*>")
+ROOT_LANGUAGE = re.compile(r'(\s(?:xml:)?lang=")[^"]*(")')
+FOOTER = re.compile(r"<footer>(?=(?:(?!<footer[\s>]).)*</footer>\s*</body>)", re.S)
+
+
+def chapter_stems(names, texts, stems):
+    """{chapter file: the page it holds}, by the id of the section the
+    writer opens it with: page-<stem>, or a page's own section cut into a
+    file of its own, page-<stem>--<id>, the longest such stem's; a group
+    heading's chapter, the Notes chapter, and the title page hold none."""
+    by_id = {page_id(stem): stem for stem in stems}
+    out = {}
+    for name in names:
+        first = re.search(r'<section id="([^"]+)"', texts[name])
+        ident = first.group(1) if first else ""
+        stem = by_id.get(ident) or max(
+            (s for s in stems if ident.startswith(page_id(s) + "--")), key=len, default=None)
+        if stem is not None:
+            out[name] = stem
+    return out
+
+
+def mark_page_languages(path, assembly, book):
+    """Each chapter file of a page in another language than the book's
+    with that language on its root, lang and xml:lang, where the writer
+    gave every chapter the book's (A book has one language, PANDOC-NOTES),
+    and the footer setting's footer in it marked in the book's. Returns
+    the number of chapter files changed."""
+    others = {stem: language for stem, language in assembly.languages.items()
+              if not languages.same_tag(language, book)}
+    if not others:
+        return 0
+    with zipfile.ZipFile(path) as archive:
+        names = [n for n in archive.namelist() if "/text/" in n and n.endswith(".xhtml")]
+        texts = {n: archive.read(n).decode("utf-8") for n in names}
+    changed = {}
+    for name, stem in chapter_stems(names, texts, list(assembly.languages)).items():
+        if stem not in others:
+            continue
+        text = texts[name]
+        root = HTML_ROOT.search(text)
+        if not root:
+            continue
+        language = html_escape(others[stem])
+        tag = ROOT_LANGUAGE.sub(lambda m: m.group(1) + language + m.group(2), root.group(0))
+        new = text[:root.start()] + tag + text[root.end():]
+        marked = html_escape(book)
+        new = FOOTER.sub('<footer lang="%s" xml:lang="%s">' % (marked, marked), new, count=1)
+        if new != text:
+            changed[name] = new
+    if not changed:
+        return 0
+    tmp = path + ".tmp"
+    with zipfile.ZipFile(path) as zin, \
+            zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as zout:
+        for info in zin.infolist():
+            data = zin.read(info.filename)
+            if info.filename == "mimetype":
+                zout.writestr(info, data, compress_type=zipfile.ZIP_STORED)
+                continue
+            if info.filename in changed:
+                data = changed[info.filename].encode("utf-8")
+            zout.writestr(info, data)
+    os.replace(tmp, path)
+    return len(changed)
+
+
 def mark_mathml(opf, texts):
     """The mathml property on each text item, as its content now is."""
     def fix(match):
@@ -910,6 +978,8 @@ def build(base, name, resolved, keep, intermediates=None):
             arrange_epub_notes(out_path, assembly, numbering, placement)
         link_across_chapters(out_path)
         mark_divisions(out_path, assembly.divisions(), assembly.contents_id)
+        # Last, as it marks the footer the notes are placed before.
+        mark_page_languages(out_path, assembly, project["language"])
         pictures, renamed, left = unique_svg_ids(out_path)
         if pictures:
             print(f"{pictures} SVG picture(s) held an id more than once; the "

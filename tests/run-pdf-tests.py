@@ -829,6 +829,66 @@ def languages(path):
     return out
 
 
+# A book in en-US with a page in French and a chapter whose opening page is
+# in French, its title the chapter's, after which a page in the book's
+# language: each page in its own language (build-pdf.py's in_language).
+LANGUAGE_PAGES = {
+    "un.md": "---\ntitle: Un\nlang: fr\n---\n\nUne phrase en français.\n",
+    "two.md": "---\ntitle: Two\n---\n\nA sentence in the book's own language.\n",
+    "chapitre.md": "---\ntitle: Le chapitre\nlang: fr\n---\n\nLe début du chapitre.\n",
+    "suite.md": "---\ntitle: Suite\n---\n\nMore in the book's own language.\n",
+}
+
+
+def build_languages(work):
+    """LANGUAGE_PAGES built: the PDF's path."""
+    os.makedirs(work)
+    for name, text in LANGUAGE_PAGES.items():
+        with open(os.path.join(work, name), "w", encoding="utf-8") as fh:
+            fh.write(text)
+    with open(os.path.join(work, "project.yaml"), "w", encoding="utf-8") as fh:
+        fh.write("project:\n  title: Languages\n  identifier: org.example.languages\n"
+                 "  language: en-US\n  contents:\n    - two\n    - un\n"
+                 "    - title: Le chapitre\n      items:\n        - chapitre\n"
+                 "        - suite\n")
+    with open(os.path.join(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
+        fh.write("targets:\n  pdf:\n    format: pdf\n")
+    subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick"], cwd=work,
+                   capture_output=True, text=True, stdin=subprocess.DEVNULL)
+    return os.path.join(work, "pdf", "org.example.languages.pdf")
+
+
+def language_checks(path):
+    declared = languages(path) if os.path.exists(path) else []
+    with pikepdf_open(path) as pdf:
+        catalog = str(pdf.Root.get("/Lang", "")) if pdf is not None else ""
+    return [
+        ("a page in another language than the book's is in its own, its heading's words and "
+         "its text, the book's catalog the book's",
+         lambda: catalog == "en-US"
+         and any(s == "/Span" and lang == "fr" and text == "Un" for s, lang, text, _ in declared)
+         and any(lang == "fr" and text == "Une phrase en français." for _, lang, text, _
+                 in declared)),
+        ("and so is a chapter's opening page in another language, the chapter's heading its "
+         "title, the page after it in the book's",
+         lambda: any(s == "/Span" and lang == "fr" and text == "Le chapitre"
+                     for s, lang, text, _ in declared)
+         and any(lang == "fr" and text == "Le début du chapitre." for _, lang, text, _
+                 in declared)
+         and [(lang, above) for _, lang, text, above in declared if "own language" in text]
+         and all(lang is None and above is None
+                 for _, lang, text, above in declared if "own language" in text)),
+    ]
+
+
+def pikepdf_open(path):
+    """The PDF at path opened with pikepdf, or a context giving None."""
+    import contextlib
+    if not os.path.exists(path):
+        return contextlib.nullcontext(None)
+    return pdftext.pikepdf.open(path)
+
+
 def build_notes(work):
     """NOTES_CAPTIONS, NOTES_CELLS, and NOTES_HEADINGS, built tagged, to
     PDF/UA-2, with a list of figures, and untagged: (the tagged PDF's path,
@@ -3201,6 +3261,7 @@ def checks(work, jobs=1):
             fitted = pool.submit(build_fit, work + "-fit")
             columned = pool.submit(build_fit_columns, work + "-columns")
             barred = pool.submit(build_blank_lines, work + "-bars")
+            spoken = pool.submit(build_languages, work + "-languages")
             reader, source, rows, log, placements = book.result()
             ua1_path, ua1_said, ua1_rows = ua1.result()
             untagged_path, untagged_said = plain.result()
@@ -3214,6 +3275,7 @@ def checks(work, jobs=1):
             fit_path, fit_said, fit_source, fit_third = fitted.result()
             columns_path, columns_said = columned.result()
             bars_path, bars_source = barred.result()
+            languages_path = spoken.result()
     else:
         reader, source, rows, log, placements = build(work)
         ua1_path, ua1_said, ua1_rows = build_ua1(work + "-ua1")
@@ -3228,6 +3290,7 @@ def checks(work, jobs=1):
         fit_path, fit_said, fit_source, fit_third = build_fit(work + "-fit")
         columns_path, columns_said = build_fit_columns(work + "-columns")
         bars_path, bars_source = build_blank_lines(work + "-bars")
+        languages_path = build_languages(work + "-languages")
 
     def page_text(path):
         return "".join(page.extract_text() or "" for page in pypdf.PdfReader(path).pages) \
@@ -3982,6 +4045,7 @@ def checks(work, jobs=1):
          lambda: os.path.exists(bars_path)
          and [abs(up - down) < 3 for up, down in bar_limits(bars_path)] == [True, True]),
     ]
+    items += language_checks(languages_path)
     if verapdf_ran:
         # The one character no font has is drawn as .notdef, which
         # veraPDF reports, and that's the only rule it finds failed.

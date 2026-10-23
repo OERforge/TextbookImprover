@@ -67,6 +67,7 @@ from bookassembly import (  # noqa: E402
 )
 from bookcontents import flatten_pages, is_generated, role_of  # noqa: E402
 import highlighting  # noqa: E402
+import languages  # noqa: E402
 import latexbuild  # noqa: E402
 from latexbuild import (  # noqa: E402
     ENGINE, PDF_MACROS as HEADER, UA1_LINKS, is_ua1, label_prefixes, math_setup,
@@ -378,8 +379,12 @@ class PdfAssembly(Assembly):
     and a role is a division command."""
 
     def __init__(self, *args, title_page=None, book_title="",
-                 divisions=True, toc_depth=2, mark_files=False, contents=True, **kwargs):
+                 divisions=True, toc_depth=2, mark_files=False, contents=True,
+                 book_language=None, **kwargs):
         super().__init__(*args, **kwargs)
+        # The book's language, the PDF's: a page in another is a div in its
+        # own (in_language), which pdf-target.lua tags.
+        self.book_language = book_language
         # The book opens in the front matter (OPEN_FRONT): its title
         # page, and the contents when the template places them.
         self.division = "front"
@@ -413,6 +418,30 @@ class PdfAssembly(Assembly):
         # the roles; the copies in the page would say them twice.
         self.blocks[start:] = [b for b in self.blocks[start:]
                                if not is_division(b)]
+        # A group's opening page has the group's heading, which is its own
+        # title, before it (add_tree).
+        before = self.blocks[start - 1] if start else None
+        if not heading and before and before.get("t") == "Header" \
+                and before["c"][1][0] == page_id(stem):
+            start -= 1
+        self.in_language(stem, start)
+
+    def add_single_page(self, stem, title_override):
+        start = len(self.blocks)
+        super().add_single_page(stem, title_override)
+        self.in_language(stem, start)
+
+    def in_language(self, stem, start):
+        """The blocks from start, a page's, in a div with its language
+        when it isn't the book's. pdf-target.lua tags the blocks between
+        its headings in that language and the headings' words, so no
+        section's element, which goes on past the div, takes it; and the
+        LaTeX writer gives babel the div's language."""
+        own = self.languages.get(stem)
+        if own and self.book_language and not languages.same_tag(own, self.book_language) \
+                and len(self.blocks) > start:
+            self.blocks[start:] = [{"t": "Div", "c": [["", [], [["lang", own]]],
+                                                      self.blocks[start:]]}]
 
     def before_entry(self, entry, depth):
         # For the latex target, each top-level entry is a file of its own,
@@ -985,7 +1014,8 @@ def build(base, name, resolved, keep, intermediates=None, latex_only=False,
         notes_title=" ".join(str(resolved["notes.title"] or "").split()) or "Notes",
         book_title=meta_plain(meta.get("title")),
         divisions=document_class(meta) in FRONTMATTER_CLASSES,
-        toc_depth=toc_depth, mark_files=as_latex, contents=contents)
+        toc_depth=toc_depth, mark_files=as_latex, contents=contents,
+        book_language=meta_plain(meta.get("lang")))
     if len(tree) == 1 and tree[0][0] == "page":
         # The divisions are written where the role changes, between entries,
         # so a book of one page never reached its main matter: numbered i in

@@ -350,6 +350,10 @@ Where each table's headers are, keyed on a hash of the table's content: first-ro
 
 Names for the pages split_level cuts, keyed on the source and the heading text: source, heading, name. Only needed when the name derived from the heading is not the one you want. A row whose source and heading match nothing is reported, since it means a heading was edited or the row was mistyped.
 
+**`sidecars.languages`**—`path`; default `languages.csv`
+
+The language a page is in, keyed on its source, as page_names is: source, language, a BCP 47 tag such as es or fr-CA. A page with no row is in the language its own file declares, else the project's; a row is only needed where that's wrong. Every target marks the page so. A row whose source names no page is reported.
+
 ## reports
 
 Where the run records what still needs human attention. Removing a report when nothing is outstanding is deliberate: the file existing at all is the signal that there's work to do.
@@ -399,6 +403,10 @@ Prefilled page_names rows for every page split_level cut that the sidecar has no
 **`reports.page_names_report`**—`path`; default `page-names-report.csv`
 
 Every page split_level wrote this run: its source, the heading it was cut at, its name, and which part of how many it is.
+
+**`reports.languages_new`**—`path`; default `languages-new.csv`
+
+Drafted languages rows for every page in another language than the project's, by what its own file declares, that the sidecar has no row for, with where the language was found. Written when there are any and removed when there are none.
 
 **`reports.output_check`**—`path`; default `output-check.csv`
 

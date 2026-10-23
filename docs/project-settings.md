@@ -18,7 +18,7 @@ The book's title, as it should appear to a reader.
 
 **`language`**—`language`; default `en`
 
-BCP 47 language tag for the book's text. Sets the lang attribute on every page (WCAG 3.1.1) and the language declared in any package built from those pages. Quote it: unquoted no, yes, and on are read as booleans by YAML. A PDF of a book in a language other than English needs TeX's support for the language installed, which docs/installation.md says how to add, Spanish's for one.
+BCP 47 language tag for the book's text. Sets the lang attribute on every page in it (WCAG 3.1.1) and the language declared in any package built from those pages; a page in another language, as its row in the languages sidecar or its own file says, is marked in its own (WCAG 3.1.2; docs/sidecars.md). Quote it: unquoted no, yes, and on are read as booleans by YAML. A PDF of a book in a language other than English needs TeX's support for the language installed, which docs/installation.md says how to add, Spanish's for one.
 
 **`description`**—`text`; default `""` (empty)
 

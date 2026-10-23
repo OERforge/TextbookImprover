@@ -805,6 +805,32 @@ def case_single(work):
     ]
 
 
+def case_language(work):
+    """A LaTeX book's pages are in the language its preamble gives, babel's
+    main language here, in a project in another."""
+    os.makedirs(work)
+    with open(os.path.join(work, "notas.tex"), "w", encoding="utf-8") as fh:
+        fh.write("\\documentclass{article}\n\\usepackage[english,spanish]{babel}\n"
+                 "\\begin{document}\n\\section*{Repaso}\nUn texto.\n\\end{document}\n")
+    with open(os.path.join(work, "project.yaml"), "w", encoding="utf-8") as fh:
+        fh.write("project:\n  identifier: org.example.notas\n  title: Notas\n"
+                 "  language: en\n")
+    with open(os.path.join(work, "conversion.yaml"), "w") as fh:
+        fh.write("targets:\n  html:\n    format: html\n")
+    result = convert(work)
+    page = os.path.join(work, "html", "notas.html")
+    drafted = os.path.join(work, "languages-new.csv")
+    return [
+        ("a LaTeX book's page is in babel's main language, its last",
+         lambda: os.path.exists(page)
+         and re.search(r'<html\b[^>]*\slang="es"', read(work, "html", "notas.html"))),
+        ("and the run drafts its row, found in its preamble",
+         lambda: os.path.exists(drafted)
+         and "notas,es,notas.tex: its preamble,TI," in read(work, "languages-new.csv")
+         and "notas es (its file)" in result.stdout + result.stderr),
+    ]
+
+
 def case_unbuilt(work):
     """A file the book's own build makes, not made yet: the run stops."""
     os.makedirs(os.path.join(work, "figures"))
@@ -5282,6 +5308,7 @@ def case_no_contents(work):
 
 
 CASES = [("a LaTeX book", case_book), ("two masters", case_masters),
+         ("a LaTeX book's language", case_language),
          ("one file", case_single), ("an unbuilt book", case_unbuilt),
          ("a table tagged as a division of paragraphs", case_layout_tables),
          ("the source target", case_source), ("a book with fonts of its own", case_own_fonts),

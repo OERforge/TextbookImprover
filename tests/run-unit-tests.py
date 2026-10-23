@@ -2499,6 +2499,259 @@ def check_wcag_setup():
     ]
 
 
+W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+
+
+def word_file(path, runs, defaults=None, styles="", custom=None, core=None):
+    """A Word file of one paragraph per run, for its language to be read:
+    runs, [(text, its paragraph's style or None, its run properties)];
+    defaults, the docDefaults' w:lang attributes; styles, more w:style
+    elements; custom, {name: value} custom properties; core, dc:language."""
+    import zipfile
+    lang = "".join(' w:%s="%s"' % item for item in (defaults or {}).items())
+    styles_xml = ('<w:styles xmlns:w="%s"><w:docDefaults><w:rPrDefault><w:rPr>%s</w:rPr>'
+                  '</w:rPrDefault></w:docDefaults>'
+                  '<w:style w:type="paragraph" w:default="1" w:styleId="Normal"/>%s'
+                  '</w:styles>' % (W_NS, "<w:lang%s/>" % lang if lang else "", styles))
+    body = "".join('<w:p>%s<w:r>%s<w:t xml:space="preserve">%s</w:t></w:r></w:p>' % (
+        '<w:pPr><w:pStyle w:val="%s"/></w:pPr>' % style if style else "",
+        "<w:rPr>%s</w:rPr>" % rpr if rpr else "", text) for text, style, rpr in runs)
+    with zipfile.ZipFile(path, "w") as z:
+        z.writestr("word/styles.xml", styles_xml)
+        z.writestr("word/document.xml", '<w:document xmlns:w="%s"><w:body>%s</w:body>'
+                   '</w:document>' % (W_NS, body))
+        if custom:
+            z.writestr("docProps/custom.xml", (
+                '<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/'
+                'custom-properties" xmlns:vt="http://schemas.openxmlformats.org/officeDocument/'
+                '2006/docPropsVTypes">' + "".join(
+                    '<property fmtid="{D5CDD505-2E9C-101B-9397-08002B2CF9AE}" pid="%d" '
+                    'name="%s"><vt:lpwstr>%s</vt:lpwstr></property>' % (i, k, v)
+                    for i, (k, v) in enumerate(custom.items(), 2)) + "</Properties>"))
+        if core:
+            z.writestr("docProps/core.xml", (
+                '<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/'
+                'metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/">'
+                '<dc:language>%s</dc:language></cp:coreProperties>' % core))
+    return path
+
+
+def check_title_page_languages():
+    """A one-page book's title page, by its top-level headings, where its
+    page is in another language than the book's: the PDF puts the page in
+    a div of its language (build-pdf.py's in_language), and its headings
+    are the book's still."""
+    from bookassembly import wants_title_page
+
+    class Book:
+        title_preceded = False
+
+    def heading(text):
+        return {"t": "Header", "c": [1, [text, [], []], [{"t": "Str", "c": text}]]}
+    spoken, plain = Book(), Book()
+    spoken.blocks = [{"t": "Div", "c": [["", [], [["lang", "fr"]]],
+                                        [heading("a"), heading("b")]]}]
+    plain.blocks = [{"t": "Div", "c": [["box", ["note"], []], [heading("a"), heading("b")]]}]
+    tree = [("page", "one", None)]
+    return [
+        ("a page in a div of its language has its headings at the top level still",
+         lambda: wants_title_page("auto", tree, spoken)),
+        ("and a div of any other kind holds its headings",
+         lambda: not wants_title_page("auto", tree, plain)),
+    ]
+
+
+def check_page_languages():
+    """A page's language (lib/languages.py): a tag as a page carries it,
+    the region rule, a Word file's own and a deck's, a producer's
+    property, the sidecar, what's decided, and what a copy and a Markdown
+    or AsciiDoc target are given.
+
+    Pandoc's Word reader reads no language at all, so a Word file's is
+    read here, as Word resolves each letter's: OpenStax's Spanish Word
+    files are English to Word throughout, their reference document's
+    default, with es in a custom property Pandoc's writer doesn't read."""
+    import collections
+    import languages
+    work = scratch("languages-")
+    spanish = word_file(os.path.join(work, "spanish.docx"), [
+        ("Texto en español, bastante largo.", None, ""),
+        ("One English line.", None, '<w:lang w:val="en-US"/>')],
+        defaults={"val": "es-ES_tradnl", "eastAsia": "zh-CN", "bidi": "ar-SA"})
+    quoted = word_file(os.path.join(work, "quoted.docx"), [
+        ("Une longue citation en français, toute entière.", "Quote", ""),
+        ("Short.", None, "")], defaults={"val": "en-US"},
+        styles='<w:style w:type="paragraph" w:styleId="Quote"><w:basedOn w:val="Base"/>'
+               '</w:style><w:style w:type="paragraph" w:styleId="Base"><w:rPr>'
+               '<w:lang w:val="fr-FR"/></w:rPr></w:style>')
+    styled = word_file(os.path.join(work, "styled.docx"), [
+        ("Ein ganzer Satz auf Deutsch, lang genug.", None, '<w:rStyle w:val="Foreign"/>'),
+        ("Short.", None, "")], defaults={"val": "en-US"},
+        styles='<w:style w:type="character" w:styleId="Foreign"><w:rPr>'
+               '<w:lang w:val="de-DE"/></w:rPr></w:style>')
+    japanese = word_file(os.path.join(work, "japanese.docx"), [
+        ("日本語の文章がここにあります", None, ""), ("A few words", None, "")],
+        defaults={"val": "en-US", "eastAsia": "ja-JP"})
+    arabic = word_file(os.path.join(work, "arabic.docx"), [
+        ("نص عربي طويل هنا", None, '<w:lang w:bidi="ar-EG"/>'),
+        ("Latin", None, "")], defaults={"val": "en-US", "bidi": "ar-SA"})
+    # A run marked complex script is in the complex-script language, its
+    # letters whatever they are (ECMA-376, 17.3.2.7, cs).
+    flagged = word_file(os.path.join(work, "flagged.docx"), [
+        ("Letters Word sets as complex script", None, '<w:cs/><w:lang w:bidi="he-IL"/>'),
+        ("Latin", None, "")], defaults={"val": "en-US", "bidi": "ar-SA"})
+    openstax = word_file(os.path.join(work, "openstax.docx"), [
+        ("Funciones y notación de funciones", None, "")],
+        defaults={"val": "en-US", "eastAsia": "en-US", "bidi": "ar-SA"},
+        custom={"company": "OpenStax", "language": "es"})
+    other = word_file(os.path.join(work, "other.docx"), [("Funciones", None, "")],
+                      defaults={"val": "en-US"}, custom={"company": "Acme", "language": "es"})
+    cored = word_file(os.path.join(work, "cored.docx"), [("Texte", None, "")], core="fr")
+    bare = word_file(os.path.join(work, "bare.docx"), [("Text", None, "")])
+    owns = {name: languages.docx_own(path) for name, path in (
+        ("spanish", spanish), ("quoted", quoted), ("styled", styled), ("japanese", japanese),
+        ("arabic", arabic), ("flagged", flagged), ("openstax", openstax), ("other", other),
+        ("cored", cored),
+        ("bare", bare))}
+
+    class Deck:
+        """What languages.deck_own reads of a pptxparse.Deck."""
+        def __init__(self, runs=(), default=None, masters=()):
+            self.languages = collections.Counter(dict(runs))
+            self.default_language = default
+            self.master_languages = collections.Counter(dict(masters))
+
+    decks = [languages.deck_own(Deck({"en-US": 5, "zxx": 9}), {}, "a.pptx"),
+             languages.deck_own(Deck((), "fr-FR"), {}, "b.pptx"),
+             languages.deck_own(Deck((), None, {"de-DE": 3}), {}, "c.pptx"),
+             languages.deck_own(Deck({"en-US": 5}), {"company": "openstax", "language": "es"},
+                                "d.pptx"),
+             languages.deck_own(Deck(), {}, "e.pptx")]
+    Own = languages.Own
+    word_es = Own("es-ES", "file", "s.docx: most of its text", "es-ES")
+    producer = Own("es", "producer", "o.docx: its custom property language", "en-US")
+    decide = languages.decide
+    sidecar = os.path.join(work, "languages.csv")
+    with open(sidecar, "w", encoding="utf-8", newline="") as fh:
+        csv.writer(fh).writerows([
+            languages.SIDECAR_COLUMNS, ["chapter-1", "es-mx", "", "TI", ""],
+            ["Week 1.pptx", "fr"], ["intro.docx", "de"], ["Chapter 2.md", "pt-BR"],
+            ["notes", "French"], ["blank", ""], ["gone", "it"]])
+    rows, problems = languages.read_rows(sidecar)
+    matched, unmatched = languages.match_rows(rows, {"chapter-1": [], "Week-1": ["Week 1"],
+                                                     "intro": [], "Chapter-2": [], "notes": [],
+                                                     "blank": []})
+    appended = os.path.join(work, "languages-appended.csv")
+    with open(appended, "w", encoding="utf-8", newline="") as fh:
+        csv.writer(fh).writerows([["intro", "fr"], ["intro.docx", "de"], ["intro", "es"],
+                                  ["Week 1", "it"], ["Week-1", "pt"]])
+    later, _ = languages.match_rows(languages.read_rows(appended)[0],
+                                    {"Week-1": ["Week 1"], "intro": []})
+    convert = load(os.path.join(ROOT, "bin", "convert.py"), "convert_languages")
+    with open(os.path.join(ROOT, "bin", "target-blocks.lua"), encoding="utf-8") as fh:
+        target_lua = fh.read()
+    with open(os.path.join(ROOT, "bin", "markdown-source.lua"), encoding="utf-8") as fh:
+        source_lua = fh.read()
+    accepted = ["en", "en-US", "es-419", "zh-Hant-TW", "sr-Latn-RS", "de-CH-1996",
+                "en-US-x-twain", "yue", "zh-yue-HK"]
+    return [
+        ("a tag is in BCP 47's usual case, Word's sort suffix gone and an underscore a hyphen; "
+         "a word, a code for no language, and a blank are none",
+         lambda: [languages.tag(v) for v in ("en-us", "es-ES_tradnl", "en_US", "zh-hant-tw",
+                                             "SR-LATN-rs", "English", "x-none", "zxx", "und",
+                                             "", None)]
+         == ["en-US", "es-ES", "en-US", "zh-Hant-TW", "sr-Latn-RS"] + [None] * 6),
+        ("every tag a page's language takes, the configuration takes",
+         lambda: all(languages.tag(v) and oerconfig.LANGUAGE_RE.match(languages.tag(v))
+                     for v in accepted)),
+        ("two tags are one language whatever their regions, but not in two scripts",
+         lambda: [languages.same_language(a, b) for a, b in (
+             ("en-GB", "en-US"), ("es", "es-MX"), ("sr-Latn", "sr-Cyrl"), ("zh", "zh-Hant"),
+             ("en", "fr"), ("English", "English"))]
+         == [True, True, False, False, False, False]),
+        ("a Word file's own is the language most of its letters are in, the default's where "
+         "no run says another, its sort suffix gone",
+         lambda: owns["spanish"] == Own("es-ES", "file", "spanish.docx: its default, which "
+                                        "most of its text has", "es-ES")),
+        ("a paragraph style's language, by the style it's based on, and a character style's",
+         lambda: owns["quoted"][:2] == ("fr-FR", "file")
+         and owns["quoted"].found == "quoted.docx: most of its text"
+         and owns["styled"][:2] == ("de-DE", "file")),
+        ("Japanese letters take the East Asian language, and Arabic letters, and a run "
+         "marked complex script, the complex-script language",
+         lambda: owns["japanese"].language == "ja-JP" and owns["arabic"].language == "ar-EG"
+         and owns["flagged"].language == "he-IL"),
+        ("OpenStax's language property is the file's, its marks the reference document's "
+         "US English; another company's isn't trusted",
+         lambda: owns["openstax"][:2] == ("es", "producer")
+         and owns["openstax"].marks == "en-US" and "OpenStax" in owns["openstax"].found
+         and owns["other"][:2] == ("en-US", "file")),
+        ("with no language on any letter, the core properties' language; with none at all, "
+         "none",
+         lambda: owns["cored"][:3] == ("fr", "file", "cored.docx: its core properties' "
+                                                     "language")
+         and owns["bare"] is None),
+        ("a deck's own is the language most of its runs say, a code for none aside, else its "
+         "default's, else its masters'; and a trusted producer's property",
+         lambda: [(d.language, d.source, d.found.split(": ", 1)[1]) if d else None
+                  for d in decks[:4]]
+         == [("en-US", "file", "most of its text"), ("fr-FR", "file", "its default"),
+             ("de-DE", "file", "its masters' text styles"),
+             ("es", "producer", "its custom property language, which openstax's files carry")]
+         and decks[3].marks == "en-US" and decks[4] is None),
+        ("an HTML page's language is its body's, else its root's, as Pandoc's reader reads it",
+         lambda: [languages.html_language(t) for t in (
+             '<html lang="en"><body lang="es">', '<html xml:lang="fr"><body>',
+             "<html><body>")] == ["es", "fr", None]),
+        ("a row decides; else the file's own; else the project's",
+         lambda: decide("fr", word_es, "de") == ("fr", "sidecar", word_es)
+         and decide(None, word_es, "de") == ("es-ES", "file", word_es)
+         and decide(None, None, "de") == ("de", "project", None)),
+        ("a file's own that differs from the project's language only in region doesn't "
+         "override it, declared or the default",
+         lambda: decide(None, word_es, "es-MX")[:2] == ("es-MX", "project")
+         and decide(None, Own("en-US", "file", "", "en-US"), "en")[:2]
+         == ("en", "project")),
+        ("a page is in another language than the book's when its language is another, not "
+         "its region",
+         lambda: languages.other_than(decide(None, word_es, "de"), "de")
+         and not languages.other_than(decide(None, word_es, "es-MX"), "es-MX")),
+        ("a Markdown or AsciiDoc target keeps its reader's language where it's the page's but "
+         "for its region, and says none where the page is the project's and the reader gave "
+         "none; a row is written as it is",
+         lambda: [languages.for_source_targets(d, r) for d, r in (
+             (decide(None, Own("en-GB", "file", "", "en-GB"), "en-US"), "en-GB"),
+             (decide(None, None, "de"), None),
+             (decide("fr-CA", Own("fr", "file", "", "fr"), "de"), "fr"),
+             (decide(None, producer, "en"), "en-US"))]
+         == ["en-GB", None, "fr-CA", "es"]),
+        ("the sidecar's rows by page, a deck's own name, or a file's name, made safe as a "
+         "page's is, a row whose language is no tag said and set aside, a blank one passed "
+         "over",
+         lambda: rows == {"chapter-1": "es-MX", "Week 1.pptx": "fr", "intro.docx": "de",
+                          "Chapter 2.md": "pt-BR", "gone": "it"}
+         and len(problems) == 1 and "'French'" in problems[0]
+         and matched == {"chapter-1": "es-MX", "Week-1": "fr", "intro": "de",
+                         "Chapter-2": "pt-BR"}
+         and unmatched == ["gone"]),
+        ("of two rows for one page, however each names it, the later one is used",
+         lambda: later == {"intro": "es", "Week-1": "pt"}),
+        ("a drafted row is the sidecar's own columns, marked TI",
+         lambda: languages.report_row("ch", decide(None, word_es, "de"))
+         == ["ch", "es-ES", "s.docx: most of its text", "TI", ""]
+         and len(languages.SIDECAR_COLUMNS) == 5),
+        ("the sidecar's value and review columns are where convert.py reads them",
+         lambda: convert.REVIEW_COLUMNS["languages"] == languages.REVIEW
+         and [languages.SIDECAR_COLUMNS[i] for i in (1, 3, 4)]
+         == ["language", "drafted-by", "reviewed"]
+         and "source" in convert.HEADER_WORDS),
+        ("the key a page's language rides in is one key in convert.py and the filters",
+         lambda: "local LANGUAGE_KEY = '%s'" % convert.LANGUAGE_KEY in target_lua
+         and "'%s'" % convert.LANGUAGE_KEY in re.search(
+             r"PIPELINE_META = \{(.*?)\}", source_lua, re.S).group(1)),
+    ]
+
+
 GROUPS = [
     ("a report's rows", check_report_rows),
     ("alt text's rules, and their findings", check_alt_text_rules),
@@ -2549,6 +2802,8 @@ GROUPS = [
     ("a table whose head holds every row, in an HTML source", check_head_only_tables),
     ("header cells holding only formulas, in a PDF", check_pdf_formula_headers),
     ("an image named in another case, in a source's copy", check_cased_images_in_copies),
+    ("a page's language", check_page_languages),
+    ("a one-page book's title page, its page in another language", check_title_page_languages),
 ]
 
 

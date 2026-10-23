@@ -269,7 +269,13 @@ def wants_title_page(setting, tree, assembly):
     entries = [e for e in tree if not is_generated(e)]
     if len(entries) > 1:
         return True
-    tops = [b for b in assembly.blocks if b.get("t") == "Header" and b["c"][0] == 1]
+    # A page in another language than the book's is a div in its own in a
+    # PDF (build-pdf.py's in_language), its headings the book's still.
+    blocks = [inner for b in assembly.blocks
+              for inner in (b["c"][1] if b.get("t") == "Div" and b["c"][0][0] == ""
+                            and not b["c"][0][1] and [k for k, _ in b["c"][0][2]] == ["lang"]
+                            else [b])]
+    tops = [b for b in blocks if b.get("t") == "Header" and b["c"][0] == 1]
     if len(tops) > 1:
         return True
     return assembly.title_preceded
@@ -291,6 +297,10 @@ class Assembly:
         self.notes_placed = False    # the Notes chapter, where contents put it
         self.title_preceded = False  # a one-page book's title heading had something before it
         self.aliases = {}            # a page heading's own id -> the page's id
+        # Each page's language, as convert.py decided it (page-language in
+        # its metadata, lib/languages.py), by its stem; none for a page
+        # with no such decision, an intermediate from before it.
+        self.languages = {}
 
     def add_tree(self, tree, depth=1):
         for entry in tree:
@@ -377,6 +387,7 @@ class Assembly:
         count_images(blocks, self.found)
         self.depth = max(self.depth, depth)
         self.pages.append((stem, title, depth))
+        self.note_language(stem, doc)
         self.blocks.extend(blocks)
 
     def alias(self, prefix, own_id, stem):
@@ -433,7 +444,13 @@ class Assembly:
                 pass
         count_images(blocks, self.found)
         self.pages.append((stem, title, 1))
+        self.note_language(stem, doc)
         self.blocks.extend(blocks)
+
+    def note_language(self, stem, doc):
+        language = meta_text(doc.get("meta", {}), "page-language")
+        if language:
+            self.languages[stem] = language
 
 
 def group_id(title, depth, assembly):

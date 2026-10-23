@@ -113,6 +113,8 @@ A book in a language other than English or Polish is baked with English words, s
 - **Its order**: glossaries and indexes sorted by CLDR's Spanish order, ñ after n, by a branch of `collation_key` in `lib/cnx/bake/directions.py`, which sorts a Polish book by CLDR's Polish. An index's groups need nothing: cookbook lists a term under its first letter without the accent, ñ's under N, in every language but Polish, as `_group_of` does.
 - **Its footer**: OpenStax's words in Spanish, cookbook's "Acceso gratis en openstax.org", in `lib/cnx/project.py`, which writes the English ones for every book now.
 
+A module in another language than its book, as its root's `xml:lang` says, is a page in its own: the unpacker writes the book's language on the page's `<html>` and the module's on its `<body>`, which Pandoc's reader takes, and every target marks the page so, the book's footer on it in the book's ([A page's language](sidecars.md#a-pages-language)). A passage in another language (`<foreign xml:lang>`, or any element's `xml:lang`) keeps its language as a span or a div.
+
 A book in another style, and every book of the Connexions archive, is baked plainly: its figures, tables, and equations numbered within each page, as the archive numbered them, its notes keeping their own titles, and nothing moved. The report says so for an OpenStax style with no recipe here.
 
 What's left out is what only styles OpenStax's own web reader and print: its wrappers, its running heads, the classes its stylesheet reads. What TextbookImprover does itself is left to it: the table of contents, a scope on a header cell, opening a link in a new window, and an embedded video (kept in a web page, a link in an EPUB).

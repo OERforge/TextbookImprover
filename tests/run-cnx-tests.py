@@ -2644,6 +2644,9 @@ def case_convert(work):
         return []
     repo = os.path.join(work, "osbooks-trade")
     build_trade(repo)
+    # The preface in another language than the book, as its root says.
+    preface = os.path.join(repo, "modules", "m10001", "index.cnxml")
+    write(preface, read(preface).replace("<document ", '<document xml:lang="es" ', 1))
     out = os.path.join(work, "trade")
     unpack(repo, out, "--book", "tiny-trade")
     write(os.path.join(out, "conversion.yaml"),
@@ -2659,9 +2662,17 @@ def case_convert(work):
     page = os.path.join(out, "html", "chapter-1.html")
     key = read(page) if os.path.exists(page) else ""
     unplaced = os.path.join(out, "table-captions-missing.csv")
+    page = os.path.join(out, "html", "preface.html")
+    preface_page = read(page) if os.path.exists(page) else ""
     return [
         ("the book converts",
          lambda: run.returncode == 0 and html != ""),
+        ("a module in another language than its book is a page in its own, the book's "
+         "attribution in the book's, as its unpacked page has it on its body",
+         lambda: '<body lang="es">' in read(out, "preface.html")
+         and re.search(r'<html\b[^>]*\slang="es"', preface_page)
+         and re.search(r'<html\b[^>]*\slang="en"', html)
+         and '<footer lang="en">' in preface_page),
         ("each page ends with OpenStax's attribution, its address not a link",
          lambda: re.search(r"</main>\s*<footer>\s*<p>Access for free at openstax\.org\.</p>"
                            r"\s*</footer>\s*</body>", html)),

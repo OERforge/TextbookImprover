@@ -5409,6 +5409,231 @@ def case_title_heading(work):
     ]
 
 
+def word_from_markdown(path, text, *metadata):
+    """A Word file Pandoc writes from Markdown, with metadata given as -M,
+    which its writer writes where it writes each: lang as the document's
+    language, any other field a custom property."""
+    command = ["pandoc", "-f", "markdown", "-t", "docx", "-o", path]
+    for field in metadata:
+        command += ["-M", field]
+    subprocess.run(command, input=text, text=True, check=True, capture_output=True)
+
+
+def word_language(path):
+    """A Word file's default language, its document defaults' w:lang."""
+    if not os.path.exists(path):
+        return ""
+    with zipfile.ZipFile(path) as z:
+        styles = z.read("word/styles.xml").decode("utf-8")
+    defaults = re.search(r"<w:docDefaults>.*?</w:docDefaults>", styles, re.S)
+    found = re.search(r"<w:lang\b[^>]*>", defaults.group(0)) if defaults else None
+    return found.group(0) if found else ""
+
+
+def root_language(text):
+    """An HTML or XHTML file's root's lang, and xml:lang when it has one."""
+    root = re.search(r"<html\b[^>]*>", text or "")
+    if not root:
+        return None
+    found = dict(re.findall(r'\s((?:xml:)?lang)="([^"]*)"', root.group(0)))
+    return found.get("lang"), found.get("xml:lang")
+
+
+LANGUAGE_PAGES = {
+    "deutsch.md": "---\ntitle: Deutsch\n---\n\nEin Satz in der Sprache des Buches.\n",
+    "chapitre.md": "---\ntitle: Chapitre\nlang: fr\n---\n\nUne phrase en français.\n",
+}
+
+
+def case_page_languages(work):
+    """Each page's language, decided once for every target: a row of
+    languages.csv, else what its own file declares (a Word file's text, the
+    language property OpenStax's Word files carry, a Markdown file's lang, a
+    hand-written page's), else the book's, a file's that differs from the
+    book's only in region the book's; what the book puts on a page in
+    another language marked in the book's; and the report."""
+    os.makedirs(os.path.join(work, "_pt"))
+    for name, text in LANGUAGE_PAGES.items():
+        with open(os.path.join(work, name), "w", encoding="utf-8") as fh:
+            fh.write(text)
+    word_from_markdown(os.path.join(work, "espanol.docx"),
+                       "# Español\n\nUn texto bastante largo en español.\n", "lang=es-ES")
+    # As OpenStax's are: Pandoc's output, its language a custom property,
+    # the document's language the reference document's US English.
+    word_from_markdown(os.path.join(work, "funciones.docx"),
+                       "# Funciones\n\nUna función asigna a cada entrada una salida.\n",
+                       "company=OpenStax", "language=es")
+    word_from_markdown(os.path.join(work, "osterreich.docx"),
+                       "# Österreich\n\nEin Satz aus Wien.\n", "lang=de-AT")
+    with open(os.path.join(work, "_pt", "about.html"), "w", encoding="utf-8") as fh:
+        fh.write('<!DOCTYPE html><html lang="it"><head><title>Chi siamo</title></head><body>'
+                 "<h1>Chi siamo</h1><p>Un testo scritto a mano.</p></body></html>")
+    # An HTML page that says it's in English, which a row corrects.
+    with open(os.path.join(work, "seite.html"), "w", encoding="utf-8") as fh:
+        fh.write('<!DOCTYPE html>\n<html lang="en"><head><title>Seite</title></head><body>'
+                 "<h1>Seite</h1><p>Ein Absatz aus Zürich.</p></body></html>\n")
+    with open(os.path.join(work, "languages.csv"), "w", encoding="utf-8") as fh:
+        fh.write("source,language\nchapitre,fr-CA\nseite.html,de-CH\nnothing,it\n"
+                 "broken,French\n")
+    with open(os.path.join(work, "project.yaml"), "w", encoding="utf-8") as fh:
+        fh.write("project:\n  identifier: org.example.languages\n  title: Sprachen\n"
+                 "  language: de\n")
+    first = convert(work, 'defaults:\n  footer: "A *footer*."\n'
+                    "targets:\n  html:\n    format: html\n    header: \"A *banner*.\"\n"
+                    "  md:\n    format: markdown\n  word:\n    format: docx\n"
+                    "  epub:\n    format: epub3\n  src:\n    format: source\n",
+                    project=False, fixtures=())
+    pages = {stem: read(work, "html", stem + ".html") if exists(work, "html", stem + ".html")
+             else "" for stem in ("deutsch", "chapitre", "espanol", "funciones", "osterreich")}
+    sources = {stem: read(work, "md", stem + ".md") if exists(work, "md", stem + ".md") else ""
+               for stem in ("deutsch", "chapitre", "espanol", "funciones", "osterreich")}
+    epub = os.path.join(work, "epub", "org.example.languages.epub")
+    chapters, package = {}, ""
+    if os.path.exists(epub):
+        with zipfile.ZipFile(epub) as z:
+            for name in z.namelist():
+                text = z.read(name).decode("utf-8", "replace")
+                if name.endswith(".opf"):
+                    package = text
+                found = re.search(r'<section id="page-([^"]+)"', text)
+                if "/text/ch" in name and found:
+                    chapters[found.group(1)] = text
+    validated = epubcheck(epub)
+    drafted = []
+    if exists(work, "languages-new.csv"):
+        with open(os.path.join(work, "languages-new.csv"), encoding="utf-8", newline="") as fh:
+            drafted = list(csv.reader(fh))
+    said = first.stdout + first.stderr
+    # A person adopts the drafted rows as they stand.
+    with open(os.path.join(work, "languages.csv"), "a", encoding="utf-8", newline="") as fh:
+        csv.writer(fh).writerows(drafted[1:])
+    second = convert(work, project=False, fixtures=())
+    again = second.stdout + second.stderr
+    footer = re.compile(r'<footer lang="de"( xml:lang="de")?>\s*<p>A <em>footer</em>')
+
+    def chapter(stem):
+        return chapters.get(stem, "")
+    return [
+        ("the book converts", lambda: first.returncode == 0 and all(pages.values())),
+        ("each page is in its language: a row's, else its file's, a Word file's text's, "
+         "OpenStax's property's, or a Markdown file's lang, else the book's; a file's in "
+         "another region of the book's language is the book's",
+         lambda: [root_language(pages[s])[0] for s in ("deutsch", "chapitre", "espanol",
+                                                        "funciones", "osterreich")]
+         == ["de", "fr-CA", "es-ES", "es", "de"]),
+        ("a page in another language has the book's banner and footer marked in the book's, "
+         "a page in the book's language not",
+         lambda: '<header lang="de">' in pages["espanol"] and footer.search(pages["espanol"])
+         and "<header>" in pages["deutsch"] and "<footer>" in pages["deutsch"]),
+        ("a Markdown target's file says its page's language, unless it's the book's and the "
+         "source said none",
+         lambda: "lang: fr-CA" in sources["chapitre"] and "lang: es-ES" in sources["espanol"]
+         and "lang: es" in sources["funciones"]
+         and "lang:" not in sources["deutsch"] and "lang:" not in sources["osterreich"]),
+        ("a Word target's file has its page's language as its default, the book's where the "
+         "page is in it, not the reference document's US English",
+         lambda: 'w:val="es-ES"' in word_language(os.path.join(work, "word", "espanol.docx"))
+         and 'w:val="es"' in word_language(os.path.join(work, "word", "funciones.docx"))
+         and 'w:val="de"' in word_language(os.path.join(work, "word", "deutsch.docx"))
+         and 'w:val="fr-CA"' in word_language(os.path.join(work, "word", "chapitre.docx"))),
+        ("the EPUB is in the book's language, and each chapter file of a page in another "
+         "says so on its root, a hand-written page's its own, the footer the book's",
+         lambda: "<dc:language>de</dc:language>" in package
+         and [root_language(chapter(s)) for s in ("deutsch", "chapitre", "espanol", "about")]
+         == [("de", "de"), ("fr-CA", "fr-CA"), ("es-ES", "es-ES"), ("it", "it")]
+         and footer.search(chapter("espanol")) and "<footer>" in chapter("deutsch")),
+        ("and epubcheck agrees", lambda: validated == [] if validated is not None else True),
+        ("an HTML page a row gives another region of the book's language is in it",
+         lambda: root_language(read(work, "html", "seite.html"))[0] == "de-CH"
+         and "seite" not in said.split("NOTE:", 1)[-1].split("\n", 1)[0]),
+        ("the run names each page in another language and where its language came from",
+         lambda: "4 page(s) are in another language than the book's, de" in said
+         and "chapitre fr-CA (languages.csv)" in said and "espanol es-ES (its file)" in said
+         and "funciones es (its producer's property)" in said and "about it (its file)" in said),
+        ("languages-new.csv drafts a row for each one a file put there that the sidecar has "
+         "none for, saying where it was found",
+         lambda: drafted[0] == ["source", "language", "found", "drafted-by", "reviewed"]
+         and sorted(r[:2] + r[3:] for r in drafted[1:])
+         == [["about", "it", "TI", ""], ["espanol", "es-ES", "TI", ""],
+             ["funciones", "es", "TI", ""]]
+         and any(r[0] == "funciones" and "OpenStax" in r[2] for r in drafted)
+         and any(r[0] == "about" and r[2] == "_pt/about.html: its lang" for r in drafted)),
+        ("a row naming no page, and a row whose language isn't a tag, are warned about",
+         lambda: "row(s) name no page of the book (nothing)" in said
+         and "the row for broken gives 'French', which isn't a language tag" in said),
+        ("adopted, the rows leave no draft, and are said to be drafted and not yet reviewed",
+         lambda: second.returncode == 0 and not exists(work, "languages-new.csv")
+         and "languages.csv 3" in again),
+    ]
+
+
+def case_merged_languages(work):
+    """A file merge: groups makes of pages in two languages: in the book's,
+    each page in another a div in its own, in a Markdown file and a Word
+    file alike; and one made of pages in one other language is in it."""
+    os.makedirs(work)
+    for name, text in dict(LANGUAGE_PAGES, **{
+            "page.md": "---\ntitle: Page\nlang: fr\n---\n\nEncore une phrase.\n"}).items():
+        with open(os.path.join(work, name), "w", encoding="utf-8") as fh:
+            fh.write(text)
+    with open(os.path.join(work, "project.yaml"), "w", encoding="utf-8") as fh:
+        fh.write("project:\n  identifier: org.example.merged\n  title: Gemischt\n"
+                 "  language: de\n  contents:\n    - title: Gemischt\n"
+                 "      items: [deutsch, chapitre]\n    - title: Ganz\n      items: [page]\n")
+    result = convert(work, "targets:\n  md:\n    format: markdown\n    merge: groups\n"
+                     "  word:\n    format: docx\n    merge: groups\n", project=False, fixtures=())
+    mixed = read(work, "md", "Gemischt.md") if exists(work, "md", "Gemischt.md") else ""
+    # A group whose pages are all one source's file is named for it.
+    whole = read(work, "md", "page.md") if exists(work, "md", "page.md") else ""
+    word = os.path.join(work, "word", "Gemischt.docx")
+    runs = ""
+    if os.path.exists(word):
+        with zipfile.ZipFile(word) as z:
+            runs = z.read("word/document.xml").decode("utf-8")
+    return [
+        ("the book merges", lambda: result.returncode == 0 and mixed and whole),
+        ("a Markdown file of pages in two languages says none, the book's, and its page in "
+         "another is a div in its own",
+         lambda: "lang:" not in mixed.split("\n---", 1)[0]
+         and re.search(r'::: \{lang="fr"\}\s*\n## Chapitre', mixed)
+         and "Ein Satz" not in mixed.split('lang="fr"', 1)[1]),
+        ("and a Word file's default is the book's, the page in another in its own",
+         lambda: 'w:val="de"' in word_language(word)
+         and re.search(r'<w:lang w:val="fr"\s*/>.*Une phrase', runs, re.S)),
+        ("a file of pages in one other language is in it",
+         lambda: "lang: fr" in whole and ":::" not in whole
+         and 'w:val="fr"' in word_language(os.path.join(work, "word", "page.docx"))),
+    ]
+
+
+def case_variant_languages(work):
+    """A target's variant of a page is the page, in its language; a page
+    only a variant gives is in its own."""
+    os.makedirs(work)
+    for name, text in (("deutsch.md", LANGUAGE_PAGES["deutsch.md"]),
+                       ("deutsch.print.md", "---\ntitle: Deutsch\nlang: fr\n---\n\nGedruckt.\n"),
+                       ("nur.print.md", "---\ntitle: Nur\nlang: it\n---\n\nSolo stampato.\n")):
+        with open(os.path.join(work, name), "w", encoding="utf-8") as fh:
+            fh.write(text)
+    with open(os.path.join(work, "project.yaml"), "w", encoding="utf-8") as fh:
+        fh.write("project:\n  identifier: org.example.variants\n  title: Varianten\n"
+                 "  language: de\n")
+    result = convert(work, "targets:\n  html:\n    format: html\n  print:\n    format: html\n",
+                     project=False, fixtures=())
+
+    def lang(*parts):
+        return root_language(read(work, *parts))[0] if exists(work, *parts) else None
+    return [
+        ("the book converts", lambda: result.returncode == 0),
+        ("a variant of a page is the page, in the page's language",
+         lambda: lang("html", "deutsch.html") == "de" and lang("print", "deutsch.html") == "de"
+         and "Gedruckt" in read(work, "print", "deutsch.html")),
+        ("a page only a variant gives is in its own, and the run names it",
+         lambda: lang("print", "nur.html") == "it"
+         and "nur it (its file)" in result.stdout + result.stderr),
+    ]
+
+
 def case_review_columns(work):
     """Every report a person fills in has Drafted by and Reviewed columns;
     the table-header guesses are drafted by TI; a sidecar value drafted
@@ -6885,6 +7110,9 @@ CASES = [
     ("a docx target's bookmarks", case_word_bookmarks),
     ("a page's title heading, and the title page", case_title_heading),
     ("who drafted a sidecar value, and whether it's reviewed", case_review_columns),
+    ("a page's language, decided once for every target", case_page_languages),
+    ("a merged file of pages in two languages", case_merged_languages),
+    ("a variant's language", case_variant_languages),
     ("lists in quotations through Word", case_quoted_lists),
     ("ids with spaces in HTML sources", case_html_ids),
     ("decorative images and frame sizes in HTML sources", case_html_images),

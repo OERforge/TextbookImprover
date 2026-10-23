@@ -1094,6 +1094,16 @@ keys:
           whose source and heading match nothing is reported, since it
           means a heading was edited or the row was mistyped.
 
+      languages:
+        type: path
+        default: languages.csv
+        description: >
+          The language a page is in, keyed on its source, as page_names
+          is: source, language, a BCP 47 tag such as es or fr-CA. A page
+          with no row is in the language its own file declares, else the
+          project's; a row is only needed where that's wrong. Every target
+          marks the page so. A row whose source names no page is reported.
+
   reports:
     book_level: true
     stage: report
@@ -1196,6 +1206,15 @@ keys:
         description: >
           Every page split_level wrote this run: its source, the heading
           it was cut at, its name, and which part of how many it is.
+
+      languages_new:
+        type: path
+        default: languages-new.csv
+        description: >
+          Drafted languages rows for every page in another language than
+          the project's, by what its own file declares, that the sidecar
+          has no row for, with where the language was found. Written when
+          there are any and removed when there are none.
 
       output_check:
         type: path

@@ -965,6 +965,8 @@ Heat: *q* = *m* $\times$ *c* $\times$ Δ*T*.
 
 Plan 1: n~1~ = 4, and H~0~: σ~1~^2^ = σ~2~^2^ as a^2^ + b^2^ = c^2^, but H~2~O and 2H~2~ + O~2~ = 2H~2~O stay text.
 
+Notes: the line ŷ = a + bx and Ŷ = 2x + 1, the average (x̄_n), and ŷ alone, but a crêpe for the rôle, ŷes, and a plain a + b = c stay text.
+
 Repaired: $\overset{–}{X} – µ + ŷ$ and $H_{Ø}$, but not $\text{pages 1–5}$, and in
 text only a character for a character: $x_{2}\text{···}x_{n} + \text{µ ŷ}$.
 """
@@ -1065,6 +1067,15 @@ def case_math_repair(work):
         ("a formula whose script runs into a letter stays text, and so does one such letter "
          "with its script",
          lambda: not any("H_{2}" in m or "O_{2}" in m for m in maths)),
+        ("a letter with a hat or a bar typed as a letter and its mark is math, alone or with "
+         "a script typed as TeX's, and so are the plain letters beside the operators of its "
+         "run, a coefficient's too",
+         lambda: all(m in maths for m in ("\\hat{y}=a+bx", "\\hat{Y}=2x+1", "\\bar{x}_{n}",
+                                          "\\hat{y}"))),
+        ("but a word's letter with a hat stays the word's, and a run with no such letter keeps "
+         "its plain letters text",
+         lambda: not any(("hat" in m and re.search(r"cr|le|es", m)) or "b=c" in m
+                         for m in maths)),
         ("math.from_text off makes no equation of text",
          lambda: len(off_text) == 6),
         ("the keep sidecar leaves its expression and its symbol text, and "

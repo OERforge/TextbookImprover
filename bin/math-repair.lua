@@ -330,14 +330,64 @@ local function greek_tex(ch)
   return ch
 end
 
+-- A hat or a bar set over a letter, a combining character after it, and
+-- the letters that come so composed in one character: math's ŷ and x̄,
+-- which a deck's text types as a letter and the mark (OpenStax's
+-- statistics decks, the notes of 7 and 13).
+local ACCENTS = {[0x302] = '\\hat', [0x304] = '\\bar', [0x305] = '\\bar'}
+local COMPOSED = {[0x177] = {'y', '\\hat'}, [0x176] = {'Y', '\\hat'}}
+
+-- A letter alone with a hat or a bar, not part of a word (crêpe's ê
+-- stays a word's letter): its TeX, and how many code points it takes.
+local function accented_at(cps, i)
+  if i > 1 and is_letter(cps[i - 1]) then return nil end
+  local cp, letter, accent, n = cps[i], nil, nil, 0
+  if COMPOSED[cp] then
+    letter, accent, n = COMPOSED[cp][1], COMPOSED[cp][2], 1
+  elseif (is_latin(cp) or is_greek(cp)) and cps[i + 1] and ACCENTS[cps[i + 1]] then
+    letter, accent, n = utf8.char(cp), ACCENTS[cps[i + 1]], 2
+  else
+    return nil
+  end
+  local next_cp = cps[i + n]
+  if next_cp and (is_letter(next_cp) or (next_cp >= 0x300 and next_cp <= 0x36F)) then
+    return nil
+  end
+  return accent .. '{' .. greek_tex(letter) .. '}', n
+end
+
 -- A Str split into pieces: runs of digits (with a decimal point or comma
--- between digits), runs of letters, and single other characters.
+-- between digits), runs of letters, a letter with a hat or a bar, and
+-- single other characters. A hat or a bar's letter may be followed by a
+-- script typed as TeX types one, x̄_n, an underscore or a caret and a
+-- letter or a number, which is a piece too.
 local function pieces(text)
   local cps = {}
   for _, cp in utf8.codes(text) do cps[#cps + 1] = cp end
   local out, i = {}, 1
   while i <= #cps do
     local cp, j = cps[i], i
+    local accented, width = accented_at(cps, i)
+    if accented then
+      out[#out + 1] = {text = utf8.char(table.unpack(cps, i, i + width - 1)), tex = accented}
+      i = i + width
+      local mark = cps[i]
+      if (mark == 95 or mark == 94) and cps[i + 1] then
+        local k = i + 1
+        if is_digit(cps[k]) then
+          while cps[k + 1] and is_digit(cps[k + 1]) do k = k + 1 end
+        elseif not is_latin(cps[k]) then
+          k = nil
+        end
+        if k and not (cps[k + 1] and (is_letter(cps[k + 1]) or is_digit(cps[k + 1]))) then
+          local body = utf8.char(table.unpack(cps, i + 1, k))
+          out[#out + 1] = {text = utf8.char(table.unpack(cps, i, k)),
+                           script = (mark == 95 and '_' or '^') .. '{' .. body .. '}'}
+          i = k + 1
+        end
+      end
+      goto continue
+    end
     if is_digit(cp) then
       while j + 1 <= #cps and (is_digit(cps[j + 1]) or
             ((cps[j + 1] == 46 or cps[j + 1] == 44) and j + 2 <= #cps
@@ -349,6 +399,7 @@ local function pieces(text)
     end
     out[#out + 1] = utf8.char(table.unpack(cps, i, j))
     i = j + 1
+    ::continue::
   end
   return out
 end
@@ -418,16 +469,30 @@ function atoms_of(inlines, italic)
     elseif t == 'Str' then
       local ps = pieces(el.text)
       for _, p in ipairs(ps) do
-        local kind, tex = classify(p, italic)
-        out[#out + 1] = atom(kind, tex, p,
-                             #ps == 1 and el or pandoc.Str(p), p)
+        local text, kind, tex = p, nil, nil
+        if type(p) == 'table' then
+          text, kind, tex = p.text, p.script and 'script' or 'var', p.script or p.tex
+        else
+          kind, tex = classify(p, italic)
+        end
+        local a = atom(kind, tex, text, #ps == 1 and el or pandoc.Str(text), text)
+        a.accent = type(p) == 'table' and not p.script
+        out[#out + 1] = a
       end
     elseif t == 'Emph' and #el.content == 1 and el.content[1].t == 'Str'
         and #pieces(el.content[1].text) == 1 then
-      local p = el.content[1].text
-      local kind, tex = classify(p, true)
-      if kind == 'letter' then kind = 'var' end
-      out[#out + 1] = atom(kind, tex, p, el)
+      local p = pieces(el.content[1].text)[1]
+      local kind, tex
+      if type(p) == 'table' and not p.script then
+        kind, tex = 'var', p.tex
+      else
+        p = el.content[1].text
+        kind, tex = classify(p, true)
+        if kind == 'letter' then kind = 'var' end
+      end
+      local a = atom(kind, tex, el.content[1].text, el)
+      a.accent = type(p) == 'table'
+      out[#out + 1] = a
     elseif (t == 'Subscript' or t == 'Superscript') then
       local tex = script_tex(el.content)
       -- An ordinal's superscript (the th of nth) is a word's ending.
@@ -547,8 +612,8 @@ local function expression_at(atoms, i)
   return nil, j
 end
 
--- A lone symbol at atom i: a Greek letter, or an italic letter with a
--- script, standing between words.
+-- A lone symbol at atom i: a Greek letter, a letter with a hat or a bar,
+-- or an italic letter with a script, standing between words.
 local function symbol_at(atoms, i)
   local a = atoms[i]
   if a.kind ~= 'var' then return nil end
@@ -558,7 +623,7 @@ local function symbol_at(atoms, i)
     j = j + 1
   end
   local greek = select(2, letters(a.text)) == 1
-  if not greek and j == i then return nil end
+  if not greek and not a.accent and j == i then return nil end
   local before, after = atoms[i - 1], atoms[j + 1]
   local function apart(b)
     return b == nil or b.kind == 'sp' or b.kind == 'punct'
@@ -598,6 +663,41 @@ local function from_text(inlines)
       atoms[k].kind = 'base'
     end
   end
+  -- A letter with a hat or a bar is math, as no letter typed as text is
+  -- otherwise, so in a run holding one a plain letter or two after an
+  -- operator, a relation, or a number's digits, and before an operator, a
+  -- relation, or the run's end (punctuation or a word), is a variable
+  -- too: ŷ = a + bx and ŷ = 2x + 1, where a plain a + b = c stays text.
+  local function plain(a)
+    return a.kind == 'letter' or (a.kind == 'word' and a.text:match('^%a%a$') ~= nil)
+  end
+  local function beside(k, step)
+    local j = k + step
+    while atoms[j] and atoms[j].kind == 'sp' do j = j + step end
+    return atoms[j]
+  end
+  local function with_accent(k)
+    for _, step in ipairs({ -1, 1 }) do
+      local j = k + step
+      while atoms[j] and (MATHY[atoms[j].kind] or atoms[j].kind == 'letter') do
+        if atoms[j].accent then return true end
+        j = j + step
+      end
+    end
+    return false
+  end
+  local variables = {}
+  for k, a in ipairs(atoms) do
+    local before, after = beside(k, -1), beside(k, 1)
+    if plain(a) and before and (before.kind == 'rel' or before.kind == 'op'
+                                or (before.kind == 'num' and atoms[k - 1] == before))
+        and (after == nil or after.kind == 'rel' or after.kind == 'op'
+             or after.kind == 'punct' or (after.kind == 'word' and not plain(after)))
+        and with_accent(k) then
+      variables[#variables + 1] = a
+    end
+  end
+  for _, a in ipairs(variables) do a.kind = 'var' end
   local out, changed, i = {}, false, 1
   while i <= #atoms do
     local a = atoms[i]

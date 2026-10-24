@@ -542,6 +542,10 @@ FIT_MACROS = r"""% Something too wide for its line, which TeX can't break:
 % columns and, where its columns wrap (p columns), by any line of a cell
 % longer than its column, its longest piece TeX can't break, a word or a
 % formula's part between two of its breaks (post_linebreak_filter), a
+% fill-in blank no more than three underscores, which PDF_MACROS draws a
+% blank too long for its line shorter to, at the least (taken whole, as it
+% was, a blank too long for its column set the table in smaller type, the
+% PDF suite's fit book's at 87 percent of its size), a
 % line taken as in a formula from its start where the first of a
 % formula's edges in it is an end (the formula ran on from the line
 % before, or TeX dropped its start at the break, as it drops glue there:
@@ -583,7 +587,8 @@ FIT_MACROS = r"""% Something too wide for its line, which TeX can't break:
 % on a first run: each column of formulas as wide as its widest, and the column of words, which wraps,
 % as wide as its widest paragraph set as one line, where the table so
 % fits its line, and otherwise as wide as the line leaves it, no narrower
-% than its longest piece TeX can't break; where even that's wider than
+% than its longest piece TeX can't break, a blank's three underscores at
+% most; where even that's wider than
 % the line, the table's spaces are narrowed, and then its type is set
 % smaller, as another table's are, its words as wide as the line leaves
 % them at that size, or as their longest piece. A table or a
@@ -631,7 +636,11 @@ FIT_MACROS = r"""% Something too wide for its line, which TeX can't break:
 % a wider margin made too wide wasn't fitted. The log says what's fitted,
 % and what's still wider than its line, which latexbuild.fit_report reads.
 % The Lua is written as the blanks' is (below), without a percent sign, a
-% hash, a tilde, or a backslash.
+% hash, a tilde, or a backslash. The attribute that marks a blank is
+% PDF_MACROS', made before these macros; the measures test that it's there
+% before they read it, since node.has_attribute reads a nil as attribute 0,
+% which luaotfload sets for every node, so that without it, as where the
+% LaTeX suite reads these macros alone, no run of underscores is a blank.
 \ifdefined\directlua
   \newattribute\OERFitAttribute
   \newattribute\OERFitStepsAttribute
@@ -640,6 +649,7 @@ FIT_MACROS = r"""% Something too wide for its line, which TeX can't break:
     local column = luatexbase.attributes.OERFitStepsAttribute
     local HLIST, VLIST, GLUE, PENALTY, MATH, DIR = node.id("hlist"), node.id("vlist"), node.id("glue"), node.id("penalty"), node.id("math"), node.id("dir")
     local GLYPH = node.id("glyph")
+    local blank = luatexbase.attributes.OERBlankAttribute
     local FLOOR, LEAST, AIM, JUMP, TOLERANCE = """ + str(FIT_FLOOR) + ", " + str(FIT_LEAST) + r""", 0.98, 0.04, 32768
     oerfit = { state = {}, kind = {}, line = {}, room = {}, size = {}, columns = {},
                width = {}, tight = {}, sep = {}, sep0 = {}, where = {}, twocol = {}, run = 0,
@@ -672,15 +682,19 @@ FIT_MACROS = r"""% Something too wide for its line, which TeX can't break:
       return true
     end, "oer.fit.formulas")
     local function longest(line, inmath)
-      local piece, most = 0, 0
+      local piece, most, blanks = 0, 0, 0
       for n in node.traverse(line.head) do
         if n.id == MATH then
           inmath = n.subtype == 0
         end
         if (n.id == GLUE and not inmath) or (n.id == PENALTY and inmath and n.penalty < 10000) then
           if piece > most then most = piece end
-          piece = 0
+          piece, blanks = 0, 0
+        elseif n.id == GLYPH and n.char == 95 and blank and node.has_attribute(n, blank) then
+          blanks = blanks + 1
+          if blanks <= 3 then piece = piece + node.dimensions(n, n.next) end
         elseif not (n.id == GLUE) then
+          blanks = 0
           if not ((n.id == HLIST or n.id == VLIST) and math.abs(n.width - line.width) <= 1) then
             piece = piece + node.dimensions(n, n.next)
           end
@@ -722,7 +736,6 @@ FIT_MACROS = r"""% Something too wide for its line, which TeX can't break:
       end
       return true
     end, "oer.fit.cells")
-    local blank = luatexbase.attributes.OERBlankAttribute
     luatexbase.add_to_callback("pre_linebreak_filter", function(head)
       local id, j = current(), tex.getattribute(column)
       if id and oerfit.kind[id] == "s" and j and j > 0 then
@@ -740,7 +753,7 @@ FIT_MACROS = r"""% Something too wide for its line, which TeX can't break:
           elseif not (n.id == VLIST and math.abs(n.width - tex.hsize) <= 1) then
             local w = node.dimensions(n, n.next)
             line = line + w
-            if n.id == GLYPH and n.char == 95 and node.has_attribute(n, blank) then
+            if n.id == GLYPH and n.char == 95 and blank and node.has_attribute(n, blank) then
               blanks = blanks + 1
               if blanks <= 3 then piece = piece + w end
             else
@@ -1538,7 +1551,15 @@ PDF_MACROS = r"""\ExplSyntaxOn
 % line as too wide (overfull) by then, so the log names each line fitted
 % this way too: how much too wide TeX said it was, the line of LaTeX TeX
 % said its paragraph ended on, and how much too wide it is now, which
-% latexbuild.overfull_lines reads. The Lua is written without a percent
+% latexbuild.overfull_lines reads. In a cell of a table whose columns
+% wrap, FIT_MACROS (after these macros, so that its post_linebreak_filter
+% function runs first, LaTeX running them last registered first) measures
+% a blank as no more than three underscores, as this draws it, so a blank
+% too long for its column doesn't of itself set its table in smaller type
+% (pdf-target.lua's widths for the table's columns count it whole). This
+% draws a blank shorter only where the blank itself runs past its line's
+% end, so text joined to its end can run past it still. The Lua
+% is written without a percent
 % sign, a hash, a tilde, or a backslash, which TeX would read as its own,
 % and without a comment, which would run on to the end, TeX joining the
 % lines.

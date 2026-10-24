@@ -1216,6 +1216,16 @@ FIT_ONE = (
     "<th>Fifth</th></tr></thead><tbody><tr><td>a</td><td>b</td><td>c</td><td>d</td>"
     "<td>Overgiven, words to fill most of a column, then $\\sin x \\cos x \\tan x$</td>"
     "</tr></tbody></table>\n\n"
+    "A table whose columns' widths are given, a fill-in blank too long for its column:\n\n"
+    "<table><colgroup>" + "<col style=\"width: 20%\">" * 5
+    + "</colgroup><thead><tr><th>Blank</th><th>Then</th><th>Third</th><th>Fourth</th>"
+    "<th>Fifth</th></tr></thead><tbody><tr><td>a</td><td>b</td><td>c</td><td>d</td>"
+    "<td>Blankcell: fill in the " + "_" * 30 + " here.</td></tr></tbody></table>\n\n"
+    "A table whose columns' widths are given, more than its line together, a fill-in blank too "
+    "long for its column:\n\n<table><colgroup>" + "<col style=\"width: 60%\">" * 2
+    + "</colgroup><thead><tr><th>Over</th><th>Blank</th></tr></thead><tbody><tr>"
+    "<td>Overblank: some words to fill a column</td><td>fill in the " + "_" * 36 + " here.</td>"
+    "</tr></tbody></table>\n\n"
     "A layout table too wide for its line, its caption a paragraph before it:\n\n"
     "<table role=\"presentation\"><caption>Laycap, the caption of a layout table too wide for "
     "its line</caption><tbody><tr><td>Laytable</td>"
@@ -1314,6 +1324,10 @@ FIT_ONE = (
     + "Steps whose reason holds a fill-in blank longer than its column:\n\n"
     + fit_steps("1111 + 2222", "=", "3333",
                 "Blankreason: fill in the " + "_" * 60 + " here.")
+    + "Steps whose reason holds a run of underscores underlined, which isn't a blank, so "
+    "nothing draws it shorter:\n\n"
+    + fit_steps("1111 + 2222", "=", "3333",
+                "Underreason: fill in the <u>" + "_" * 45 + "</u> here.")
     + "Steps whose reason's lines are broken where it says, each shorter than the part of the "
     "line the counts give it:\n\n"
     + fit_steps("1111 + 2222", "=", "3333", "Breakreason:<br>a line under it.")
@@ -1796,6 +1810,22 @@ def blank_on_line(path, words):
                         min((b[0] - a[0] for a, b in zip(glyphs, glyphs[1:]) if a[2] == " "),
                             default=None))
     return None
+
+
+def blank_runs(path):
+    """For each line holding a run of underscores, in order: how many it
+    has, whether any overlaps the one before it, and where its last
+    ends."""
+    lines = {}
+    for page, baseline, left, right, char in pdftext.glyph_boxes(path):
+        lines.setdefault((page, baseline), []).append((left, right, char))
+    found = []
+    for glyphs in lines.values():
+        run = [g for g in glyphs if g[2] == "_"]
+        if run:
+            found.append((len(run), any(b[0] < a[1] - 0.01 for a, b in zip(run, run[1:])),
+                          run[-1][1]))
+    return found
 
 
 def blank_box(path, words):
@@ -2650,6 +2680,26 @@ def fit_checks(fit_path, fit_said, fit_source, fit_third):
          "in a cell before a formula that opens the next, keeps its type, its columns "
          "narrowed to fit it",
          lambda: at("Overgiven", 1) and within("Overgiven")),
+        # FIT_MACROS measures a cell's lines before oer.blanks draws a
+        # blank shorter to fit its line, and took this one at its full
+        # length for a piece TeX can't break, setting the table at 87
+        # percent of its size; a blank is three underscores at most to it
+        # now.
+        ("and one whose columns' widths are given, a fill-in blank too long for its column, "
+         "keeps its type, the blank drawn shorter to its column",
+         lambda: at("Blankcell", 1) and within("Blankcell")
+         and any(count == 30 and over and 0 < right < 542
+                 for count, over, right in blank_runs(fit_path))),
+        # Narrowed, a table is set smaller as its cells' longest pieces ask:
+        # taken whole, as on main, this blank set the table at 75 percent of
+        # its size, and drawn shorter first, as the blank's macros run first
+        # where they come after the fit's, to end where its column does, it
+        # would be as wide as its column to the fit, the table at 83.
+        ("and one whose columns' widths are more than its line together, a fill-in blank too "
+         "long for its column, keeps its type, its columns narrowed, the blank drawn shorter",
+         lambda: at("Overblank", 1) and within("Overblank")
+         and any(count == 36 and over and 0 < right < 542
+                 for count, over, right in blank_runs(fit_path))),
         ("a layout table set smaller keeps its caption, a paragraph before it, in the text's "
          "type",
          lambda: at("Laycap", 1) and 0 < size("Laytable") < body - 0.1),
@@ -2920,6 +2970,15 @@ def fit_checks(fit_path, fit_said, fit_source, fit_third):
          and (lambda found: found is not None and found[1] == 60 and found[2])(
              blank_on_line(fit_path, "_" * 60))
          and 0 < ends("_" * 60)[1] < 542),
+        # A run of underscores underlined isn't marked as a blank, and
+        # nothing draws it shorter, so the measure takes it whole: taken for
+        # a blank, the steps would be set across the line in the text's
+        # type, the run 62.8 points past it.
+        ("and steps whose reason holds a run of underscores underlined, which isn't a blank, "
+         "are measured with the run whole, set smaller to fit it within the line",
+         lambda: size("Underreason") < body - 0.1
+         and any(count == 45 and not over and 0 < right < 542
+                 for count, over, right in blank_runs(fit_path))),
         ("and steps whose reason's lines are broken where it says are as wide as their longest "
          "line, centered",
          lambda: "a line under it." not in line_of("Breakreason")
@@ -2988,8 +3047,8 @@ def fit_checks(fit_path, fit_said, fit_source, fit_third):
          and "Package TextbookImprover Warning" not in fit_third),
         ("the build says what it fitted, and what's still wider than the text, centered, "
          "and names no line as too wide",
-         lambda: "Fitted 27 table(s) and formula(s) too wide for their lines to them: 5 by "
-         "narrowing their spaces; 22 in smaller type as well, the smallest at 50% of its "
+         lambda: "Fitted 29 table(s) and formula(s) too wide for their lines to them: 6 by "
+         "narrowing their spaces; 23 in smaller type as well, the smallest at 50% of its "
          "size." in fit_said
          and re.search(r"10 of them, still wider than the text, are centered on the page "
                        r"\(8 table\(s\), 2 display formula\(s\)\), the widest \d+ points "

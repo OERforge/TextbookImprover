@@ -550,14 +550,15 @@ end
 -- no attributes, which the writers write as its words, gives up a break
 -- at its end too, so one at a mark's end comes out of both
 -- (<em><span>for any<br></span></em>, as the HTML reader reads it). A
--- break anywhere else is left: in Markdown one inside a mark or at its
--- start reads back, as does one at the end of a span with attributes,
--- small caps (which Markdown writes as a span), a link, or quotation
--- marks, but not one inside a superscript or a subscript, which holds
--- none; in AsciiDoc one inside a mark reads back, but not one at the start
--- of a mark after a space, whose opening delimiter is then followed by
--- the " +"'s space, nor one inside a superscript or a subscript (measured
--- likewise).
+-- script holds no break in either format, so a superscript or a
+-- subscript is cut at each of its breaks, x^a^\ and ^b^ on the next line.
+-- In AsciiDoc a break at a mark's start goes just before it too: after a
+-- space, the mark can't open on the " +"'s space (_ +, read back as text),
+-- and leading_break gives one that then starts a paragraph an {empty}. A
+-- break anywhere else is left, since it reads back: in Markdown one
+-- inside a mark or at its start, or at the end of a span with
+-- attributes, small caps (which Markdown writes as a span), a link, or
+-- quotation marks; in AsciiDoc one inside a mark (measured likewise).
 local BREAK_MARKS = { Emph = true, Strong = true, Underline = true, Strikeout = true,
                       Superscript = true, Subscript = true, SmallCaps = ADOC }
 local TRAILING = { LineBreak = true, Space = true, SoftBreak = true }
@@ -567,27 +568,54 @@ local function bare_span(el)
     and #el.attributes == 0
 end
 
+local SCRIPTS = { Superscript = true, Subscript = true }
+
+-- The runs of breaks and spaces in a mark's content that come out of it:
+-- each a pair of indices, first to last, holding a line break. One at the
+-- end always; in AsciiDoc one at the start too; and in a script any.
+local function cuts(el)
+  local content, found = el.content, {}
+  local k = 1
+  while k <= #content do
+    if TRAILING[content[k].t] then
+      local from, broken = k, false
+      while k <= #content and TRAILING[content[k].t] do
+        broken = broken or content[k].t == 'LineBreak'
+        k = k + 1
+      end
+      local to = k - 1
+      if broken and (to == #content or (from == 1 and ADOC) or SCRIPTS[el.t]) then
+        found[#found + 1] = { from, to }
+      end
+    else
+      k = k + 1
+    end
+  end
+  return found
+end
+
 local function breaks_out(inlines)
   local changed = false
   local out = pandoc.Inlines({})
   for _, el in ipairs(inlines) do
-    local content = (BREAK_MARKS[el.t] or bare_span(el)) and el.content
-    local last = content and #content or 0
-    while last > 0 and TRAILING[content[last].t] do last = last - 1 end
-    local broken = false
-    if content then
-      for k = last + 1, #content do
-        if content[k].t == 'LineBreak' then broken = true end
+    local found = (BREAK_MARKS[el.t] or bare_span(el)) and cuts(el) or {}
+    if #found > 0 then
+      local content, k = el.content, 1
+      local function piece(to)
+        if to >= k then
+          local part = el:clone()
+          local kept = pandoc.Inlines({})
+          for j = k, to do kept:insert(content[j]) end
+          part.content = kept
+          out:insert(part)
+        end
       end
-    end
-    if broken then
-      local kept = pandoc.Inlines({})
-      for k = 1, last do kept:insert(content[k]) end
-      if #kept > 0 then
-        el.content = kept
-        out:insert(el)
+      for _, run in ipairs(found) do
+        piece(run[1] - 1)
+        for j = run[1], run[2] do out:insert(content[j]) end
+        k = run[2] + 1
       end
-      for k = last + 1, #content do out:insert(content[k]) end
+      piece(#content)
       changed = true
     else
       out:insert(el)
@@ -1077,8 +1105,26 @@ local function not_a_figure(block)
   return nil
 end
 
-function Para(para) return not_a_figure(para) end
-function Plain(plain) return not_a_figure(plain) end
+-- In AsciiDoc a line break at the start of a paragraph, a break a mark
+-- there gave up included (breaks_out), is " +" on a line of its own,
+-- which the reader takes for a literal paragraph, the text indented. An
+-- {empty} before it, which writes nothing, makes it the break.
+local function leading_break(block)
+  if block.content[1] and block.content[1].t == 'LineBreak' then
+    block.content:insert(1, pandoc.RawInline('asciidoc', '{empty}'))
+    return block
+  end
+  return nil
+end
+
+function Para(para)
+  if ADOC then return leading_break(para) end
+  return not_a_figure(para)
+end
+function Plain(plain)
+  if ADOC then return leading_break(plain) end
+  return not_a_figure(plain)
+end
 
 -- Inline math is latexmath:[...], which the reader ends at the first ],
 -- escaped or not: [0,1] cuts the formula short. TeX's own names for the

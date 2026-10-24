@@ -6985,24 +6985,32 @@ def case_mark_breaks(work):
     with open(os.path.join(page, "spans.html"), "w", encoding="utf-8") as fh:
         fh.write("<!DOCTYPE html>\n<html lang=\"en\"><head><title>Spans</title></head><body>\n"
                  "<h1>Spans</h1>\n<p>Before <em><span>for any<br></span></em>after.</p>\n"
+                 # A break at a mark's start after a space, inside and at the
+                 # end of a script, and at a mark's start that opens a
+                 # paragraph.
+                 "<p>Then <em><br>starts</em> here, x<sup>a<br>b</sup> and "
+                 "y<sub>c<br></sub>after.</p>\n"
+                 "<p><strong><br>Opens</strong> a paragraph.</p>\n"
                  "</body></html>\n")
     spans = convert(page, "targets:\n  src:\n    format: markdown\n"
                           "  adoc:\n    format: asciidoc\n", fixtures=())
     spans_md = read(page, "src", "spans.md") if exists(page, "src", "spans.md") else ""
     spans_adoc = read(page, "adoc", "spans.adoc") if exists(page, "adoc", "spans.adoc") else ""
     pages = {}
-    for name, sub, written in (("from-md", "src", "marks.md"), ("from-adoc", "adoc",
-                                                                "marks.adoc")):
+    for name, source, sub, written in (("from-md", first, "src", "marks.md"),
+                                       ("from-adoc", first, "adoc", "marks.adoc"),
+                                       ("spans-md", page, "src", "spans.md"),
+                                       ("spans-adoc", page, "adoc", "spans.adoc")):
         folder = os.path.join(work, name)
         os.makedirs(folder)
-        if exists(first, sub, written):
-            shutil.copy(os.path.join(first, sub, written), folder)
-        shutil.copy(os.path.join(first, "project.yaml"), folder)
+        if exists(source, sub, written):
+            shutil.copy(os.path.join(source, sub, written), folder)
+        shutil.copy(os.path.join(source, "project.yaml"), folder)
         with open(os.path.join(folder, "conversion.yaml"), "w") as fh:
             fh.write("targets:\n  html:\n    format: html\n")
         run_in(folder)
-        pages[name] = read(folder, "html", "marks.html") if exists(folder, "html",
-                                                                     "marks.html") else ""
+        html = written.rsplit(".", 1)[0] + ".html"
+        pages[name] = read(folder, "html", html) if exists(folder, "html", html) else ""
 
     def marked_again(page, *marks):
         body = re.sub(r"\s+", " ", page)
@@ -7019,6 +7027,29 @@ def case_mark_breaks(work):
         ("and one at the end of a span with no attributes that ends a mark, from an HTML page",
          lambda: spans.returncode == 0 and "Before *for any*\\\nafter." in spans_md
          and "Before _for any_ +\nafter." in spans_adoc),
+        ("a script with a line break in it or at its end is cut there, the break between its "
+         "pieces, by both targets, where Pandoc's writers leave it inside, which their readers "
+         "take for text",
+         lambda: "x^a^\\\n^b^ and y~c~\\\nafter." in spans_md
+         and "x^a^ +\n^b^ and y~c~ +\nafter." in spans_adoc),
+        ("a break at a mark's start is left in Markdown, whose reader takes it back, and in "
+         "AsciiDoc goes before the mark, which can't open on the break's space, an {empty} "
+         "before it where it then starts the paragraph",
+         lambda: "Then *\\\nstarts* here" in spans_md and "**\\\nOpens** a" in spans_md
+         and re.search(r"Then +\+\n_starts_ here", spans_adoc)
+         and "{empty} +\n*Opens* a" in spans_adoc),
+        ("read back, each is its mark again, a script's pieces too, with the break, and none "
+         "of their characters is text",
+         lambda: all(re.search(pattern, re.sub(r"\s+", " ", pages[name]))
+                     for name in ("spans-md", "spans-adoc")
+                     for pattern in (r"x<sup>a</sup><br ?/?> ?<sup>b</sup> and "
+                                     r"y<sub>c</sub><br ?/?> ?after\.",
+                                     r"Then ?(<br ?/?> ?<em>|<em><br ?/?> ?)starts</em> here",
+                                     r"<p>(<br ?/?> ?<strong>|<strong><br ?/?> ?)Opens</strong> a"))
+         and not any(re.search(r"[_^~+*]|\{empty\}",
+                               re.sub(r"<[^>]*>", "", pages[name].split("</h1>", 1)[-1]
+                                      .split("</main>", 1)[0]))
+                     for name in ("spans-md", "spans-adoc"))),
         ("and the AsciiDoc target before its \" +\", where Pandoc's writer puts that inside it",
          lambda: all(s in adoc for s in ("_for any_ +\n", "*bold then* +\n",
                                          "[line-through]#struck# +\n",

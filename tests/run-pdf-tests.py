@@ -50,6 +50,7 @@ import argparse
 import concurrent.futures
 import contextlib
 import csv
+import glob
 import io
 import json
 import os
@@ -3598,6 +3599,18 @@ def fancy_checks(fancy_path, fancy_said):
     ]
 
 
+# The folders the books are built in, each the main book's (work) with its
+# suffix: the PDF/UA-1, untagged, notes, footer, sized, fancy, default,
+# preamble, AAA, fit, two-column, evaluation bar's, and languages books are
+# built beside it (build_ua1 to build_languages). The cleanup removes them
+# and --keep names them, from this one list, and a check sees that no build
+# leaves another: the languages book's folder was left in the temporary
+# directory by every run, when the cleanup and the message each had a list
+# of their own.
+BOOK_FOLDERS = ("", "-ua1", "-untagged", "-notes", "-footer", "-sized", "-fancy",
+                "-default", "-preamble", "-aaa", "-fit", "-columns", "-bars", "-languages")
+
+
 def checks(work, jobs=1):
     # The two books, at once when there's room: each is a LaTeX build of
     # its own, in a directory of its own.
@@ -4410,6 +4423,10 @@ def checks(work, jobs=1):
          and [abs(up - down) < 3 for up, down in bar_limits(bars_path)] == [True, True]),
     ]
     items += language_checks(languages_path)
+    items.append(("every folder a book is built in is one the suite removes once it's done, "
+                  "or names when told to keep them (BOOK_FOLDERS)",
+                  lambda: {os.path.basename(path) for path in glob.glob(glob.escape(work) + "*")}
+                  <= {os.path.basename(work) + suffix for suffix in BOOK_FOLDERS}))
     if verapdf_ran:
         # The one character no font has is drawn as .notdef, which
         # veraPDF reports, and that's the only rule it finds failed.
@@ -4524,30 +4541,13 @@ def main():
             print(("  ok    " if passed else "  FAIL  ") + name)
             failed += not passed
     finally:
-        # The PDF/UA-1, untagged, notes, footer, sized, fancy, default,
-        # preamble, AAA, fit, two-column, and evaluation bar's books are
-        # built beside the book (build_ua1, build_untagged, build_notes,
-        # build_footer, build_sized, build_fancy, build_default,
-        # build_preamble, build_aaa, build_fit, build_fit_columns,
-        # build_blank_lines).
+        # Each book's folder (BOOK_FOLDERS).
+        folders = [work + suffix for suffix in BOOK_FOLDERS]
         if arguments.keep:
-            print(f"\nOutput left in {work}, {work}-ua1, {work}-untagged, {work}-notes, "
-                  f"{work}-footer, {work}-sized, {work}-fancy, {work}-default, "
-                  f"{work}-preamble, {work}-aaa, {work}-fit, {work}-columns, and {work}-bars")
+            print(f"\nOutput left in {', '.join(folders[:-1])}, and {folders[-1]}")
         else:
-            shutil.rmtree(work, ignore_errors=True)
-            shutil.rmtree(work + "-ua1", ignore_errors=True)
-            shutil.rmtree(work + "-untagged", ignore_errors=True)
-            shutil.rmtree(work + "-notes", ignore_errors=True)
-            shutil.rmtree(work + "-footer", ignore_errors=True)
-            shutil.rmtree(work + "-sized", ignore_errors=True)
-            shutil.rmtree(work + "-fancy", ignore_errors=True)
-            shutil.rmtree(work + "-default", ignore_errors=True)
-            shutil.rmtree(work + "-preamble", ignore_errors=True)
-            shutil.rmtree(work + "-aaa", ignore_errors=True)
-            shutil.rmtree(work + "-fit", ignore_errors=True)
-            shutil.rmtree(work + "-columns", ignore_errors=True)
-            shutil.rmtree(work + "-bars", ignore_errors=True)
+            for folder in folders:
+                shutil.rmtree(folder, ignore_errors=True)
     print(f"\n{failed} check(s) failed" if failed
           else "\nall PDF checks passed")
     return 1 if failed else 0

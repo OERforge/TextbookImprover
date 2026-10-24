@@ -36,7 +36,7 @@ python3 $T/util/shortdoi.py bare-links.csv                # look up and write
 python3 $T/util/shortdoi.py bare-links.csv --min-length 40  # only the long ones
 ```
 
-It asks one a second (`--wait` changes that), waits out a busy service, never changes a Replacement already there, and keeps the sidecar as it was beside it as `bare-links.csv.bak`. Asking for a DOI that has no shortDOI yet creates one, which it counts. A shortDOI is opaque, which is its cost: the publisher's prefix in `10.1080/...` is gone, so keep full DOIs where readers use them to recognize a source.
+It asks one a second (`--wait` changes that), waits out a busy service, never changes a Replacement already there, writes the sidecar with a byte-order mark, as a run writes its reports ([In a spreadsheet](sidecars.md#sidecar-files)), and keeps the sidecar as it was beside it as `bare-links.csv.bak`. Asking for a DOI that has no shortDOI yet creates one, which it counts. A shortDOI is opaque, which is its cost: the publisher's prefix in `10.1080/...` is gone, so keep full DOIs where readers use them to recognize a source.
 
 Shortening other addresses with a URL shortener, and addresses written as plain text rather than links, are left for later: see the [roadmap](../ROADMAP.md).
 

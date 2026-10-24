@@ -277,8 +277,8 @@ def alt_rows(path):
     found = {}
     if not path or not os.path.exists(path):
         return found
-    with open(path, encoding="utf-8-sig", newline="") as fh:
-        for row in csv.DictReader(fh):
+    with open(path, encoding=sidecars.CSV_ENCODING, newline="") as fh:
+        for row in csv.DictReader(sidecars.csv_lines(fh)):
             image, alt = (row.get("Image") or "").strip(), (row.get("Alt") or "").strip()
             parts = image.split("/")
             if len(parts) != 3 or parts[1] != "media" or not alt:
@@ -294,8 +294,8 @@ def link_titles(path):
     found = {}
     if not path or not os.path.exists(path):
         return found
-    with open(path, encoding="utf-8-sig", newline="") as fh:
-        for row in csv.DictReader(fh):
+    with open(path, encoding=sidecars.CSV_ENCODING, newline="") as fh:
+        for row in csv.DictReader(sidecars.csv_lines(fh)):
             if (row.get("URL") or "").strip() and (row.get("Title") or "").strip():
                 found[row["URL"].strip()] = row["Title"].strip()
     return found

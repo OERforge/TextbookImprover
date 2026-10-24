@@ -560,7 +560,7 @@ def case_split(work):
                     "--report", os.path.join(work, "table-headers-report.csv"),
                     "--resolved", resolved],
                    cwd=work, capture_output=True, text=True, stdin=subprocess.DEVNULL)
-    with open(os.path.join(work, "table-headers-new.csv"), newline="", encoding="utf-8") as fh:
+    with open(os.path.join(work, "table-headers-new.csv"), newline="", encoding="utf-8-sig") as fh:
         reader = csv.DictReader(fh)
         new = list(reader)
         columns = reader.fieldnames
@@ -860,7 +860,7 @@ def case_headers(work):
 
     prepass()
     with open(os.path.join(work, "table-headers-new.csv"), newline="",
-              encoding="utf-8") as fh:
+              encoding="utf-8-sig") as fh:
         rows = list(csv.DictReader(fh))
     # Table 1.1: the guess says both; keep it. Table 1.2 has a repeat-header
     # row and is declared first-column, so its head must come down and its
@@ -1132,6 +1132,52 @@ def case_media_keys_single_pass(work):
     ]
 
 
+def case_sidecar_marks(work):
+    """Sidecars as Excel saves them, a byte-order mark first, with files
+    appended to them as a person adds rows: a report, its header row
+    after a mark of its own, and rows saved without a header, a mark
+    before the first. The filters dropped only the file's own mark, so a
+    row after another was keyed on the mark and its key, and applied to
+    nothing."""
+    mark = "\ufeff"
+    out = Converted(work, ["tables", "media-a"], sidecars={
+        "table-captions.csv":
+            mark + "Label,Description,Source,Excerpt,Drafted by,Reviewed\r\n"
+            + mark + "Label,Description,Source,Excerpt,Drafted by,Reviewed\r\n"
+            "Table 1.1,Intervals described after a second header,tables,Interval,,\r\n"
+            + mark + "Table 1.2,Values described in rows appended after a mark\r\n",
+        "image-alt.csv":
+            mark + "Image,Alt,Source,Reason,CurrentAlt,Drafted by,Reviewed\r\n"
+            + mark + "media-a/media/image1.png,A picture described after a mark\r\n",
+    })
+    keep_file = os.path.join(work, "keep.csv")
+    with open(keep_file, "w", encoding="utf-8") as fh:
+        fh.write(mark + "Kind,Page,Before,After\r\n"
+                 "expression,,\u03bc = 5.51,\u03bc=5.51\r\n"
+                 + mark + "symbol,,\u03bc,\u03bc\r\n")
+    kept_file = os.path.join(work, "kept-rows.csv")
+    kept_maths, _ = math_run(work, "kept", {"MATH_KEEP": keep_file, "MATH_KEPT": kept_file})
+    kept_rows = []
+    if os.path.exists(kept_file):
+        with open(kept_file, encoding="utf-8", newline="") as fh:
+            kept_rows = [tuple(r) for r in csv.reader(fh)]
+    captions = out.captions("tables")
+    return [
+        ("a caption after a header row repeated after a mark applies",
+         lambda: "Table 1.1 Intervals described after a second header" in captions),
+        ("and one in a row after a mark",
+         lambda: "Table 1.2 Values described in rows appended after a mark" in captions),
+        ("an image's alt text in a row after a mark applies",
+         lambda: "A picture described after a mark" in out.alt_texts("media-a")),
+        ("and neither table nor the image is reported",
+         lambda: not out.report_column("caps-missing.csv", 0)
+         and not out.report_column("alt-missing.csv", 0)),
+        ("the keep sidecar's row after a mark keeps its symbol as text",
+         lambda: "\u03bc" not in kept_maths
+         and {r[0] for r in kept_rows} == {"expression", "symbol"}),
+    ]
+
+
 def case_intermediate(work):
     """Filtering to JSON and rendering that must give the same page as
     filtering while rendering.
@@ -1190,6 +1236,7 @@ CASES = [
     ("math repaired, and math typed as text", case_math_repair),
     ("media naming, alt text, and keys", case_media),
     ("media keys when converting in one pass", case_media_keys_single_pass),
+    ("sidecars Excel saved, with files appended", case_sidecar_marks),
 ]
 
 

@@ -495,7 +495,7 @@ def unpack_archives(base, check_only=False, linked_documents=False):
                               "in a directory of its own." if inside else ""))
             if notes:
                 with open(os.path.join(work, "unpack-report.csv"), "w",
-                          newline="", encoding="utf-8") as fh:
+                          newline="", encoding=sidecars.CSV_ENCODING) as fh:
                     writer = csv.writer(fh)
                     writer.writerow(["Where", "Check", "Detail"])
                     writer.writerows(notes)
@@ -916,8 +916,13 @@ def check_sidecar(path, setting, default, base):
     always a wrong path rather than a deliberately empty one, and the run
     would otherwise succeed while silently discarding every correction in
     it. The default names are exempt: not having written one yet is the
-    normal starting state."""
+    normal starting state. A sidecar that isn't UTF-8, as Excel's plain
+    "CSV" saves one, stops the run too, before anything is converted,
+    whether this run reads it or not (sidecars.not_utf8)."""
     if os.path.exists(path):
+        why = sidecars.not_utf8(path)
+        if why:
+            die("ERROR: " + why)
         return
     if os.path.basename(path) == default and \
             os.path.dirname(os.path.abspath(path)) == os.path.abspath(base):
@@ -2551,7 +2556,7 @@ def media_gate(base, stems, media_rows, report_path, namings=((True, False),)):
     say("===================================================")
     say(f"Stopping: {len(problems)} media reference(s) could not be "
         "resolved.")
-    with open(report_path, "w", encoding="utf-8") as fh:
+    with open(report_path, "w", encoding=sidecars.CSV_ENCODING) as fh:
         fh.write("File,Source,Detected,Problem\n")
         fh.write("\n".join(sorted(set(rows))) + "\n")
     say(f"Written to {report_path}.")
@@ -2789,7 +2794,7 @@ def report_languages(project, reports, paths):
     sidecar = os.path.basename(paths.get("languages") or "languages.csv")
     if report:
         if rows:
-            with open(report, "w", encoding="utf-8", newline="") as fh:
+            with open(report, "w", encoding=sidecars.CSV_ENCODING, newline="") as fh:
                 writer = csv.writer(fh, lineterminator="\n")
                 writer.writerow(languages.SIDECAR_COLUMNS)
                 writer.writerows(rows)
@@ -3299,8 +3304,8 @@ def unreviewed_rows(path, columns):
     found = 0
     if not path or not os.path.exists(path):
         return found
-    with open(path, encoding="utf-8", newline="") as fh:
-        for row in csv.reader(fh):
+    with open(path, encoding=sidecars.CSV_ENCODING, newline="") as fh:
+        for row in csv.reader(sidecars.csv_lines(fh)):
             if not row or row[0].strip().lower() in HEADER_WORDS:
                 continue
             row = row + [""] * (max(values + (drafted, reviewed)) + 1 - len(row))
@@ -5573,7 +5578,7 @@ def write_report(rows_file, report, header, noun, sidecar=None, hint=None):
         if os.path.exists(report):
             os.remove(report)
         return rows
-    with open(report, "w", encoding="utf-8", newline="") as fh:
+    with open(report, "w", encoding=sidecars.CSV_ENCODING, newline="") as fh:
         fh.write(header + "\n")
         csv.writer(fh, lineterminator="\n").writerows(rows)
     say(f"Wrote {report} ({len(rows)} {noun}).")
@@ -5632,7 +5637,7 @@ def write_fidelity(losses, report):
         if os.path.exists(report):
             os.remove(report)
         return
-    with open(report, "w", encoding="utf-8", newline="") as fh:
+    with open(report, "w", encoding=sidecars.CSV_ENCODING, newline="") as fh:
         w = csv.writer(fh, lineterminator="\n")
         w.writerow(["Target", "Page", "Loss", "Detail", "What happens"])
         for target, page, kind, detail in losses:
@@ -5664,7 +5669,7 @@ def write_bare_links(rows_file, report, sidecar):
         if source not in entry["sources"]:
             entry["sources"].append(source)
     if new:
-        with open(report, "w", encoding="utf-8", newline="") as fh:
+        with open(report, "w", encoding=sidecars.CSV_ENCODING, newline="") as fh:
             w = csv.writer(fh, lineterminator="\n")
             w.writerow(["URL", "Replacement", "Title", "Source", "Context",
                         "Drafted by", "Reviewed"])
@@ -5679,8 +5684,8 @@ def write_bare_links(rows_file, report, sidecar):
     elif os.path.exists(report):
         os.remove(report)
     if sidecar and os.path.exists(sidecar):
-        with open(sidecar, encoding="utf-8", newline="") as fh:
-            rows = [r for r in csv.reader(fh) if r and r[0].strip()
+        with open(sidecar, encoding=sidecars.CSV_ENCODING, newline="") as fh:
+            rows = [r for r in csv.reader(sidecars.csv_lines(fh)) if r and r[0].strip()
                     and r[0].strip().lower() != "url"]
         stale = [r[0].strip() for r in rows if r[0].strip() not in seen]
         if stale:

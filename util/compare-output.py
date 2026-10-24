@@ -580,7 +580,7 @@ def collect_reports(root, raw=False):
                 continue
             path = os.path.join(base, name)
             rows = []
-            with open(path, encoding="utf-8", errors="replace",
+            with open(path, encoding="utf-8-sig", errors="replace",
                       newline="") as handle:
                 for row in csv.reader(handle):
                     if not raw:

@@ -1046,7 +1046,7 @@ def case_html_headers(work):
         work, "table-headers-new.csv") else ""
     import csv
     with open(os.path.join(work, "table-headers-report.csv"),
-              encoding="utf-8") as fh:
+              encoding="utf-8-sig") as fh:
         report = list(csv.DictReader(fh))
     country = next((r for r in report if "Country" in r["preview"]), {})
     with open(os.path.join(work, "table-headers.csv"), "w",
@@ -1145,7 +1145,7 @@ def case_layout_tables(work):
         path = os.path.join(work, name)
         if not os.path.exists(path):
             return []
-        with open(path, encoding="utf-8", newline="") as fh:
+        with open(path, encoding="utf-8-sig", newline="") as fh:
             return list(csv.DictReader(fh))
 
     def tables(*parts):
@@ -1215,7 +1215,7 @@ def case_layout_tables(work):
     run_in(others, "")
     listed = []
     if os.path.exists(os.path.join(others, "table-headers-new.csv")):
-        with open(os.path.join(others, "table-headers-new.csv"), encoding="utf-8",
+        with open(os.path.join(others, "table-headers-new.csv"), encoding="utf-8-sig",
                   newline="") as fh:
             listed = [(r["preview"], r["headers"]) for r in csv.DictReader(fh)]
     return [
@@ -1295,7 +1295,7 @@ def case_layout_word_head(work):
     run_in(work, "")
     keys = []
     if exists(work, "table-headers-new.csv"):
-        with open(os.path.join(work, "table-headers-new.csv"), encoding="utf-8",
+        with open(os.path.join(work, "table-headers-new.csv"), encoding="utf-8-sig",
                   newline="") as fh:
             keys = [r["key"] for r in csv.DictReader(fh)]
     with open(os.path.join(work, "table-headers.csv"), "w", encoding="utf-8") as fh:
@@ -1381,7 +1381,7 @@ def case_word_table_matching(work):
     run_in(work, "")
     keys = []
     if exists(work, "table-headers-new.csv"):
-        with open(os.path.join(work, "table-headers-new.csv"), encoding="utf-8",
+        with open(os.path.join(work, "table-headers-new.csv"), encoding="utf-8-sig",
                   newline="") as fh:
             keys = [r["key"] for r in csv.DictReader(fh)]
     with open(os.path.join(work, "table-headers.csv"), "w", encoding="utf-8") as fh:
@@ -1443,16 +1443,16 @@ def case_word_box_anchor(work):
     page = read(work, "html", "box.html") if exists(work, "html", "box.html") else ""
     checked = []
     if exists(work, "output-check.csv"):
-        with open(os.path.join(work, "output-check.csv"), encoding="utf-8", newline="") as fh:
+        with open(os.path.join(work, "output-check.csv"), encoding="utf-8-sig", newline="") as fh:
             checked = [r["Check"] for r in csv.DictReader(fh)]
     listed = []
     if exists(work, "table-headers-new.csv"):
-        with open(os.path.join(work, "table-headers-new.csv"), encoding="utf-8",
+        with open(os.path.join(work, "table-headers-new.csv"), encoding="utf-8-sig",
                   newline="") as fh:
             listed = [r["preview"] for r in csv.DictReader(fh)]
     missing = []
     if exists(work, "table-captions-missing.csv"):
-        with open(os.path.join(work, "table-captions-missing.csv"), encoding="utf-8",
+        with open(os.path.join(work, "table-captions-missing.csv"), encoding="utf-8-sig",
                   newline="") as fh:
             missing = [r["Label"] for r in csv.DictReader(fh)]
     tables = re.findall(r'(<div class="table-wrapper"[^>]*>\s*)?<table([^>]*)>', page)
@@ -1530,7 +1530,7 @@ def case_one_cell_tables(work):
     def rows(name, column):
         if not exists(work, name):
             return []
-        with open(os.path.join(work, name), encoding="utf-8", newline="") as fh:
+        with open(os.path.join(work, name), encoding="utf-8-sig", newline="") as fh:
             return [r[column] for r in csv.DictReader(fh)]
     return [
         ("an HTML page's box of one cell is a layout table, asked no caption and "
@@ -2033,7 +2033,7 @@ def case_bands(work):
         "html", "md", "*.json"))
     import csv
     with open(os.path.join(work, "table-headers-new.csv"),
-              encoding="utf-8") as fh:
+              encoding="utf-8-sig") as fh:
         rows = list(csv.DictReader(fh))
     for row in rows:
         if "Labor" in row["preview"]:
@@ -2384,7 +2384,7 @@ def case_heading_levels(work):
         check = os.path.join(where, "output-check.csv")
         skips = 0
         if os.path.exists(check):
-            with open(check, encoding="utf-8", newline="") as fh:
+            with open(check, encoding="utf-8-sig", newline="") as fh:
                 skips = sum(1 for row in csv.DictReader(fh)
                             if row["Check"] == "heading-skips-level"
                             or row["Check"] == "vnu:error" and "skipping" in row["Detail"])
@@ -2443,7 +2443,7 @@ def case_heading_ids(work):
     costs, prices = output("html", "costs"), output("html", "prices")
     rows = []
     if exists(work, "ids-renamed.csv"):
-        with open(os.path.join(work, "ids-renamed.csv"), encoding="utf-8",
+        with open(os.path.join(work, "ids-renamed.csv"), encoding="utf-8-sig",
                   newline="") as fh:
             rows = list(csv.reader(fh))
     tag = lambda text, name: (re.search(r'<(\w+)[^>]*\bid="%s"' % name, text)
@@ -2909,6 +2909,8 @@ def case_zip(work):
     saved_pages = [n for n in os.listdir(saved) if n.endswith(".html")]
     report = open(os.path.join(book, "unpack-report.csv")).read() if exists(
         book, "unpack-report.csv") else ""
+    report_marked = exists(book, "unpack-report.csv") and open(
+        os.path.join(book, "unpack-report.csv"), "rb").read(3) == b"\xef\xbb\xbf"
     return [
         ("a zip alone in a directory is extracted, the folder around it "
          "dropped, and converted", lambda: "Unpacked My Book.zip" in first.stderr
@@ -2919,6 +2921,8 @@ def case_zip(work):
         ("an entry that would land outside the book is refused and reported",
          lambda: not os.path.exists(os.path.join(work, "evil.txt"))
          and "unsafe-path" in report),
+        ("in unpack-report.csv, which starts with a byte-order mark, for Excel",
+         lambda: report_marked),
         ("the directory's own conversion.yaml is kept, the zip's beside it",
          lambda: "html" in open(os.path.join(book, "conversion.yaml")).read()
          and exists(book, "conversion-unpacked.yaml")),
@@ -4061,7 +4065,7 @@ def case_head_only_tables(work):
                     for t in re.findall(r"<w:tbl>.*?</w:tbl>", xml, re.S)]
     found = []
     if exists(work, "output-check.csv"):
-        with open(os.path.join(work, "output-check.csv"), encoding="utf-8") as fh:
+        with open(os.path.join(work, "output-check.csv"), encoding="utf-8-sig") as fh:
             found = [row["Check"] for row in csv.DictReader(fh)]
     return [
         ("a table whose head held every row has a body of its rows of data, its header "
@@ -4111,7 +4115,7 @@ def case_bare_links(work):
     first = run()
     report = []
     if exists(work, "bare-links-new.csv"):
-        with open(os.path.join(work, "bare-links-new.csv"), encoding="utf-8") as fh:
+        with open(os.path.join(work, "bare-links-new.csv"), encoding="utf-8-sig") as fh:
             report = list(csvmod.DictReader(fh))
     by_url = {r["URL"]: r for r in report}
     with open(os.path.join(work, "bare-links.csv"), "w", encoding="utf-8") as fh:
@@ -4244,7 +4248,7 @@ def case_word_equations(work):
         on_xml = z.read("word/document.xml").decode("utf-8")
     # The keep sidecar names the equation by its Before in the report, the
     # TeX the filter read; a second row names nothing.
-    with open(os.path.join(work, "math-repaired.csv"), encoding="utf-8", newline="") as fh:
+    with open(os.path.join(work, "math-repaired.csv"), encoding="utf-8-sig", newline="") as fh:
         before = next((row["Before"] for row in csv.DictReader(fh)
                        if row["Kind"] == "equation"), "")
     off_result, off = build("    math:\n      repair_equations: false\n")
@@ -4802,7 +4806,7 @@ def case_alt_text(work):
                    capture_output=True, text=True, stdin=subprocess.DEVNULL)
     rows = []
     if exists(work, "image-alt-missing.csv"):
-        with open(os.path.join(work, "image-alt-missing.csv"), encoding="utf-8", newline="") as fh:
+        with open(os.path.join(work, "image-alt-missing.csv"), encoding="utf-8-sig", newline="") as fh:
             rows = [(r["Image"], r["Reason"], r["CurrentAlt"]) for r in csv.DictReader(fh)]
     return [
         ("alt text that says nothing, a camera's name for a file, Office's descriptions, a file "
@@ -4851,7 +4855,7 @@ def case_alt_shared(work):
                        capture_output=True, text=True, stdin=subprocess.DEVNULL)
         if not exists(where, "image-alt-missing.csv"):
             return []
-        with open(os.path.join(where, "image-alt-missing.csv"), encoding="utf-8",
+        with open(os.path.join(where, "image-alt-missing.csv"), encoding="utf-8-sig",
                   newline="") as fh:
             return sorted((r["Image"], r["Source"], r["Reason"]) for r in csv.DictReader(fh))
     md = reasons(book)
@@ -5009,6 +5013,10 @@ def case_remediate_docx(work):
     rem = run_tool(work, ["remediate.py", "ch1.docx", "--resolved", "resolved.json",
                           "--alt", "image-alt.csv", "--include-guesses", "--out", "out"], util=True)
     refused = run_tool(work, ["remediate.py", "ch1.docx", "--out", "."], util=True)
+    with open(os.path.join(work, "ansi.csv"), "w", encoding="cp1252", newline="") as fh:
+        fh.write("Image,Alt\r\nch1/media/%s.png,Scores \u2013 by student\r\n" % embeds[0])
+    ansi = run_tool(work, ["remediate.py", "ch1.docx", "--alt", "ansi.csv", "--out", "ansi"],
+                    util=True)
     out = os.path.join(work, "out", "ch1.docx")
     changed, xml = [], ""
     if os.path.exists(out):
@@ -5061,6 +5069,9 @@ def case_remediate_docx(work):
          and 'title="A rule"' not in xml),
         ("it won't write over the file it reads",
          lambda: refused.returncode == 2 and "overwritten" in refused.stderr),
+        ("and stops on a sidecar that isn't UTF-8, naming its line, writing nothing",
+         lambda: ansi.returncode != 0 and "ansi.csv: line 2 isn't UTF-8 (byte 0x96)" in ansi.stderr
+         and "Traceback" not in ansi.stderr and not os.path.exists(os.path.join(work, "ansi"))),
     ]
 
 
@@ -5698,10 +5709,12 @@ def case_page_languages(work):
                 if "/text/ch" in name and found:
                     chapters[found.group(1)] = text
     validated = epubcheck(epub)
-    drafted = []
+    drafted, drafted_marked = [], False
     if exists(work, "languages-new.csv"):
-        with open(os.path.join(work, "languages-new.csv"), encoding="utf-8", newline="") as fh:
+        with open(os.path.join(work, "languages-new.csv"), encoding="utf-8-sig", newline="") as fh:
             drafted = list(csv.reader(fh))
+        with open(os.path.join(work, "languages-new.csv"), "rb") as fh:
+            drafted_marked = fh.read(3) == b"\xef\xbb\xbf"
     said = first.stdout + first.stderr
     # A person adopts the drafted rows as they stand.
     with open(os.path.join(work, "languages.csv"), "a", encoding="utf-8", newline="") as fh:
@@ -5772,6 +5785,7 @@ def case_page_languages(work):
         ("a row naming no page, and a row whose language isn't a tag, are warned about",
          lambda: "row(s) name no page of the book (nothing)" in said
          and "the row for broken gives 'French', which isn't a language tag" in said),
+        ("languages-new.csv starts with a byte-order mark, for Excel", lambda: drafted_marked),
         ("adopted, the rows leave no draft, and are said to be drafted and not yet reviewed",
          lambda: second.returncode == 0 and not exists(work, "languages-new.csv")
          and "languages.csv 3" in again),
@@ -5955,7 +5969,7 @@ def case_review_columns(work):
         path = os.path.join(work, name)
         if not os.path.exists(path):
             return []
-        with open(path, encoding="utf-8", newline="") as fh:
+        with open(path, encoding="utf-8-sig", newline="") as fh:
             return next(csv.reader(fh), [])
 
     run()
@@ -5963,11 +5977,11 @@ def case_review_columns(work):
                                                "table-headers-new.csv", "bare-links-new.csv")}
     guessed = []
     if os.path.exists(os.path.join(work, "table-headers-new.csv")):
-        with open(os.path.join(work, "table-headers-new.csv"), encoding="utf-8", newline="") as fh:
+        with open(os.path.join(work, "table-headers-new.csv"), encoding="utf-8-sig", newline="") as fh:
             guessed = list(csv.DictReader(fh))
     missing = []
     if os.path.exists(os.path.join(work, "image-alt-missing.csv")):
-        with open(os.path.join(work, "image-alt-missing.csv"), encoding="utf-8", newline="") as fh:
+        with open(os.path.join(work, "image-alt-missing.csv"), encoding="utf-8-sig", newline="") as fh:
             missing = [r for r in csv.reader(fh)][1:]
     # One description drafted by a model and not reviewed, one reviewed.
     with open(os.path.join(work, "image-alt.csv"), "w", encoding="utf-8", newline="") as fh:
@@ -5990,6 +6004,121 @@ def case_review_columns(work):
         ("a drafted value is used, reviewed or not, and the run counts the one not reviewed",
          lambda: len(missing) == 2 and 'alt="A red square"' in page and 'alt="Another red square"' in page
          and "1 value(s) in the sidecars were drafted" in said and "image-alt.csv 1" in said),
+    ]
+
+
+def case_excel_sidecars(work):
+    """A book's reports open in Excel as UTF-8, and its sidecars as Excel
+    saves them read as written. Excel opens a CSV as UTF-8 when it starts
+    with a byte-order mark, and its "CSV UTF-8" writes one; a person who
+    adds rows by appending a report to a sidecar, its header row and all,
+    or a file saved without a header, leaves one partway through. The
+    reports had no mark; a header row after one was a row, which
+    table-headers.py warned of and set aside as matching no table and the
+    run named a row of bare-links.csv matching no bare link; and a row
+    after one applied to nothing. And a sidecar that isn't UTF-8, as
+    Excel's plain "CSV" saves one, stops the run before anything is
+    converted, where its characters were U+FFFD on the pages and the run
+    stopped later with a traceback."""
+    import io
+    os.makedirs(work)
+    solid_png(os.path.join(work, "one.png"), 4, 4, (255, 0, 0))
+    solid_png(os.path.join(work, "two.png"), 4, 4, (0, 0, 255))
+    with open(os.path.join(work, "page.md"), "w", encoding="utf-8") as fh:
+        fh.write("# Page\n\n![](one.png)\n\n![](two.png)\n\n"
+                 "| Country | GDP |\n|---|---|\n| Brazil | 3,153 |\n| Canada | 1,827 |\n\n"
+                 "See <https://example.org/a-page> and <https://example.org/another>.\n")
+    with open(os.path.join(work, "project.yaml"), "w", encoding="utf-8") as fh:
+        fh.write("project:\n  title: Marks\n  identifier: org.example.marks\n"
+                 "  language: en-US\n  contents:\n    - page\n    - tables\n")
+    shutil.copy(os.path.join(FIXTURES, "tables.docx"), work)
+    with open(os.path.join(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
+        fh.write("targets:\n  html:\n    format: html\n")
+
+    def run():
+        done = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
+                              cwd=work, capture_output=True, text=True, stdin=subprocess.DEVNULL)
+        return done.stdout + done.stderr
+
+    def reports():
+        return sorted(n for n in os.listdir(work) if n.endswith(".csv"))
+
+    def marked(name):
+        with open(os.path.join(work, name), "rb") as fh:
+            data = fh.read()
+        return data.startswith(b"\xef\xbb\xbf") and not data[3:].startswith(b"\xef\xbb\xbf")
+
+    def rows(name):
+        with open(os.path.join(work, name), encoding="utf-8-sig", newline="") as fh:
+            return list(csv.reader(fh))
+
+    def line(row):
+        out = io.StringIO()
+        csv.writer(out, lineterminator="\r\n").writerow(row)
+        return out.getvalue()
+
+    def sidecar(name, report, fill):
+        """A report's first row filled in and saved from Excel as CSV
+        UTF-8, its mark first; then the report appended whole, its header
+        row after a mark of its own, with the rows but the last, which for
+        a report of two rows is none; then the last appended from a file
+        Excel saved without a header, after a mark of its own."""
+        found = rows(report)
+        filled = [fill(row) for row in found[1:]]
+        with open(os.path.join(work, name), "w", encoding="utf-8", newline="") as fh:
+            fh.write("\ufeff" + line(found[0]) + line(filled[0])
+                     + "\ufeff" + line(found[0]) + "".join(map(line, filled[1:-1]))
+                     + "\ufeff" + line(filled[-1]))
+
+    run()
+    first = {name: marked(name) for name in reports()}
+    alts = {"one.png": "A red square", "two.png": "A blue square"}
+    sidecar("image-alt.csv", "image-alt-missing.csv",
+            lambda r: [r[0], alts.get(r[0], ""), r[2], r[3], r[4], "claude", ""])
+    sidecar("table-captions.csv", "table-captions-missing.csv",
+            lambda r: [r[0], "Described " + r[0].replace("#", " "), r[2], r[3], "claude", ""])
+    sidecar("table-headers.csv", "table-headers-new.csv", lambda r: r)
+    sidecar("bare-links.csv", "bare-links-new.csv",
+            lambda r: [r[0], "", "A page to read", r[3], r[4], "claude", ""])
+    said = run()
+    page = read(work, "html", "page.html") if exists(work, "html", "page.html") else ""
+    tables = read(work, "html", "tables.html") if exists(work, "html", "tables.html") else ""
+    # As Excel's plain "CSV" saves the sidecar in the US: Windows-1252.
+    with open(os.path.join(work, "image-alt.csv"), "w", encoding="cp1252", newline="") as fh:
+        fh.write("Image,Alt,Source,Reason,CurrentAlt,Drafted by,Reviewed\r\n"
+                 "one.png,A red square,page,missing,,claude,\r\n"
+                 "two.png,A blue square \u2013 smaller,page,missing,,claude,\r\n")
+    built = os.path.getmtime(os.path.join(work, "html", "page.html")) \
+        if exists(work, "html", "page.html") else None
+    stopped = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
+                             cwd=work, capture_output=True, text=True, stdin=subprocess.DEVNULL)
+    return [
+        ("every report starts with one byte-order mark",
+         lambda: {"image-alt-missing.csv", "table-captions-missing.csv", "table-headers-new.csv",
+                  "table-headers-report.csv", "bare-links-new.csv", "output-check.csv"}
+         <= set(first) and all(first.values())),
+        ("every row of the sidecars applies, a row after a mark as much as the first",
+         lambda: 'alt="A red square"' in page and 'alt="A blue square"' in page
+         and "<caption>Described page table-1" in page
+         and "Table 1.1 Described Table 1.1" in tables and "Table 1.2 Described Table 1.2" in tables
+         and page.count('title="A page to read"') == 2),
+        ("and no header row is read as a row",
+         lambda: "not one this version understands" not in said
+         and "match no table" not in said and "match no bare link" not in said
+         and not exists(work, "table-headers-unmatched.csv")
+         and not exists(work, "table-headers-sample.csv")),
+        ("the run counts each drafted value, and no report asks for one again",
+         lambda: "9 value(s) in the sidecars were drafted" in said
+         and "image-alt.csv 2, table-captions.csv 3, table-headers.csv 2, bare-links.csv 2" in said
+         and not {"image-alt-missing.csv", "table-captions-missing.csv", "table-headers-new.csv",
+                  "bare-links-new.csv"} & set(reports())),
+        ("a sidecar that isn't UTF-8 stops the run before anything is converted, naming its "
+         "line and how to save it",
+         lambda: stopped.returncode != 0 and "Traceback" not in stopped.stderr
+         and "image-alt.csv: line 3 isn't UTF-8 (byte 0x96)" in stopped.stdout + stopped.stderr
+         and "CSV UTF-8 (Comma delimited)" in stopped.stdout + stopped.stderr
+         and built is not None
+         and os.path.getmtime(os.path.join(work, "html", "page.html")) == built),
     ]
 
 
@@ -7518,6 +7647,7 @@ CASES = [
     ("a docx target's bookmarks", case_word_bookmarks),
     ("a page's title heading, and the title page", case_title_heading),
     ("who drafted a sidecar value, and whether it's reviewed", case_review_columns),
+    ("reports and sidecars as Excel opens and saves them", case_excel_sidecars),
     ("a page's language, decided once for every target", case_page_languages),
     ("a contents listing and a moved note in a page's language", case_listed_languages),
     ("a merged file of pages in two languages", case_merged_languages),

@@ -88,6 +88,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(HERE), "lib"))
 from bookcontents import slugify, stem_title, PIECE_SEPARATOR  # noqa: E402
+import sidecars  # noqa: E402
 
 INTERMEDIATE = ".filtered.json"
 SIDECAR_COLUMNS = ["source", "parents", "heading", "position", "name"]
@@ -261,8 +262,8 @@ def read_sidecar(path):
     names = {}
     if not path or not os.path.exists(path):
         return names
-    with open(path, encoding="utf-8", newline="") as fh:
-        reader = csv.DictReader(fh)
+    with open(path, encoding=sidecars.CSV_ENCODING, newline="") as fh:
+        reader = csv.DictReader(sidecars.csv_lines(fh))
         for row in reader:
             row = {k.strip().lower(): (v or "").strip()
                    for k, v in row.items() if k}
@@ -281,7 +282,7 @@ def previous_pages(report):
     """Names a previous run's report lists, so they can be replaced."""
     if not report or not os.path.exists(report):
         return []
-    with open(report, encoding="utf-8", newline="") as fh:
+    with open(report, encoding=sidecars.CSV_ENCODING, newline="") as fh:
         return [row.get("name", "") for row in csv.DictReader(fh)
                 if row.get("name")]
 
@@ -578,6 +579,9 @@ def main():
                         help="every piece written, with its source and part")
     args = parser.parse_args()
 
+    why = args.sidecar and os.path.exists(args.sidecar) and sidecars.not_utf8(args.sidecar)
+    if why:
+        sys.exit(why)
     names = read_sidecar(args.sidecar)
     problems, new_rows, report_rows, written = [], [], [], []
     homes, first = {}, {}      # source -> {id: piece}; source -> first piece
@@ -680,7 +684,7 @@ def main():
         print(f"WARNING: {problem}", file=sys.stderr)
     if args.new:
         if new_rows:
-            with open(args.new, "w", encoding="utf-8", newline="") as fh:
+            with open(args.new, "w", encoding=sidecars.CSV_ENCODING, newline="") as fh:
                 writer = csv.writer(fh)
                 writer.writerow(SIDECAR_COLUMNS)
                 writer.writerows(new_rows)
@@ -692,7 +696,7 @@ def main():
             os.remove(args.new)
     if args.report:
         if report_rows:
-            with open(args.report, "w", encoding="utf-8", newline="") as fh:
+            with open(args.report, "w", encoding=sidecars.CSV_ENCODING, newline="") as fh:
                 writer = csv.writer(fh)
                 writer.writerow(REPORT_COLUMNS)
                 writer.writerows(report_rows)

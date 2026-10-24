@@ -23,6 +23,8 @@ import csv
 import os
 import re
 
+import sidecars
+
 
 def xml_name(text):
     """A project identifier has to be an XML name with no colon; a
@@ -127,7 +129,7 @@ def project_yaml(source, meta, tree, flagged, unnamed, title):
 
 
 def write_report(path, notes):
-    with open(path, "w", newline="", encoding="utf-8") as fh:
+    with open(path, "w", newline="", encoding=sidecars.CSV_ENCODING) as fh:
         writer = csv.writer(fh)
         writer.writerow(["Where", "Check", "Detail"])
         writer.writerows(notes)

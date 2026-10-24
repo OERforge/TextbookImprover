@@ -385,6 +385,8 @@ def case_pieces(work):
          lambda: "chapter-7,,7.5 Costs in the Long Run,chapter-7--7-5-costs-"
          "in-the-long-run,1,1,5" in report
          and "economies-of-scale-2,1.3,4,5" in report),
+        ("the prefilled rows and the report start with a byte-order mark, for Excel",
+         lambda: new.startswith("\ufeffsource,") and report.startswith("\ufeffsource,")),
     ]
 
 
@@ -406,6 +408,27 @@ def case_names(work):
         sidecar="source,parents,heading,position,name\n"
                 "chapter-7,7.5 Costs in the Long Run,Economies of Scale,,"
                 "no spaces allowed\n"))
+    # As Excel saves it, its byte-order mark first and CRLF, with a report
+    # appended after it, a header row after a mark of its own, and a row
+    # Excel saved without a header, after another.
+    excel = Pieces(os.path.join(work, "excel"), split(
+        os.path.join(work, "excel"), [prepare(os.path.join(work, "excel"))],
+        sidecar="\ufeffsource,parents,heading,position,name\r\n"
+                "chapter-7,7.5 Costs in the Long Run,Choice of Production "
+                "Technology,,7-1-technology\r\n"
+                "\ufeffsource,parents,heading,position,name\r\n"
+                "chapter-7,Diseconomies,Economies of Scale,,7-4-scale\r\n"
+                "\ufeffchapter-7,7.5 Costs in the Long Run,Economies of Scale,1.3,"
+                "7-3-scale-again\r\n"))
+    # As Excel's plain "CSV" saves it: Windows-1252.
+    ansi_dir = os.path.join(work, "ansi")
+    ansi_source = prepare(ansi_dir)
+    with open(os.path.join(ansi_dir, "page-names.csv"), "w", encoding="cp1252",
+              newline="") as fh:
+        fh.write("source,parents,heading,position,name\r\n"
+                 "chapter-7,7.5 Costs in the Long Run,Choice of Production "
+                 "Technology,,technology \u2013 choice\r\n")
+    ansi = split(ansi_dir, [ansi_source])
     new_path = os.path.join(work, "page-names-new.csv")
     with open(new_path, encoding="utf-8") as fh:
         new = fh.read()
@@ -427,6 +450,14 @@ def case_names(work):
         ("an unusable name is refused, said so, and the heading's used",
          lambda: bad.status == 0 and "not a usable name" in bad.stderr
          and "chapter-7--economies-of-scale" in bad.stems),
+        ("a sidecar Excel saved, its byte-order mark first, with a report and a row "
+         "appended after others, names its pieces",
+         lambda: excel.status == 0 and "7-1-technology" in excel.stems
+         and "7-4-scale" in excel.stems and "7-3-scale-again" in excel.stems),
+        ("one that isn't UTF-8 stops the split, naming its line",
+         lambda: ansi.returncode != 0
+         and "page-names.csv: line 2 isn't UTF-8 (byte 0x96)" in ansi.stderr
+         and "Traceback" not in ansi.stderr),
     ]
 
 

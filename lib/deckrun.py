@@ -182,7 +182,7 @@ def write_rows(path, columns, rows):
         if os.path.exists(path):
             os.remove(path)
         return False
-    with open(path, "w", encoding="utf-8", newline="") as fh:
+    with open(path, "w", encoding=sidecars.CSV_ENCODING, newline="") as fh:
         writer = csv.writer(fh)
         writer.writerow(columns)
         writer.writerows(rows)

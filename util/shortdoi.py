@@ -35,7 +35,8 @@ reports (IsNew) and this counts. Requests are spaced --wait seconds
 apart (one a second by default), and a 429 or a server error is retried
 after a pause that doubles, or as long as the service's Retry-After asks.
 The sidecar is rewritten in place, every other column and row as it was,
-after a copy is kept beside it as <name>.bak.
+a byte-order mark first, as every CSV written for a person starts
+(lib/sidecars.py), after a copy is kept beside it as <name>.bak.
 """
 
 import argparse
@@ -49,6 +50,9 @@ import time
 import urllib.error
 import urllib.request
 from urllib.parse import quote, unquote
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "lib"))
+import sidecars  # noqa: E402
 
 DOI_URL = re.compile(r"^(?:https?://)?(?:dx\.)?doi\.org/(10\.\S+)$", re.I)
 SHORT = re.compile(r"^10/[0-9A-Za-z]+$")
@@ -110,8 +114,11 @@ def main():
     if not os.path.exists(args.sidecar):
         sys.exit(f"{args.sidecar}: not found. Copy bare-links-new.csv's rows "
                  "into it first.")
-    with open(args.sidecar, encoding="utf-8", newline="") as fh:
-        rows = list(csv.reader(fh))
+    why = sidecars.not_utf8(args.sidecar)
+    if why:
+        sys.exit(why)
+    with open(args.sidecar, encoding=sidecars.CSV_ENCODING, newline="") as fh:
+        rows = list(csv.reader(sidecars.csv_lines(fh)))
     if not rows:
         sys.exit(f"{args.sidecar}: empty.")
 
@@ -158,7 +165,7 @@ def main():
 
     if filled:
         shutil.copyfile(args.sidecar, args.sidecar + ".bak")
-        with open(args.sidecar, "w", encoding="utf-8", newline="") as fh:
+        with open(args.sidecar, "w", encoding=sidecars.CSV_ENCODING, newline="") as fh:
             csv.writer(fh, lineterminator="\n").writerows(rows)
     print(f"{filled} shortDOI(s) written to {args.sidecar}"
           + (f", {created} of them created by this request" if created else "")

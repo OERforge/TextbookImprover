@@ -62,6 +62,8 @@ import re
 import zipfile
 from xml.etree import ElementTree as ET
 
+import sidecars
+
 # The producers whose language property is a file's language, matched
 # against the custom property company without regard to case.
 TRUSTED_PRODUCERS = ("OpenStax",)
@@ -448,8 +450,8 @@ def read_rows(path):
     rows, problems = collections.OrderedDict(), []
     if not path or not os.path.exists(path):
         return rows, problems
-    with open(path, encoding="utf-8-sig", newline="") as fh:
-        for row in csv.reader(fh):
+    with open(path, encoding=sidecars.CSV_ENCODING, newline="") as fh:
+        for row in csv.reader(sidecars.csv_lines(fh)):
             if not row or not row[0].strip() or row[0].strip().lower() == "source":
                 continue
             source = row[0].strip()

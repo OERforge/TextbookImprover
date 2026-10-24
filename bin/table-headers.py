@@ -50,7 +50,8 @@ treated as blank. That is what lets `manual`, `list`, and `caption-rows` be
 declared before anything acts on them, and what keeps a sidecar written
 against a newer version from losing work under an older one.
 
-Exit status: 0; 1 when a sidecar row matched nothing; 2 for usage.
+Exit status: 0; 1 when a sidecar row matched nothing; 2 for usage, or a
+sidecar that isn't UTF-8.
 
 Copyright 2026 Robert Szarka
 
@@ -78,6 +79,7 @@ import xml.etree.ElementTree as ET
 
 sys.path.insert(0, os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "lib"))
+import sidecars  # noqa: E402
 import tablecensus as tc  # noqa: E402
 
 # The values a sidecar may carry, and what each means to the pipeline:
@@ -106,8 +108,8 @@ def has_review_columns(path):
     if not path or not os.path.exists(path):
         return True
     rows = False
-    with open(path, newline="", encoding="utf-8") as handle:
-        for raw in csv.reader(handle):
+    with open(path, newline="", encoding=sidecars.CSV_ENCODING) as handle:
+        for raw in csv.reader(sidecars.csv_lines(handle)):
             if not raw or not raw[0].strip():
                 continue
             if raw[0].strip().lower() == "key":
@@ -128,8 +130,8 @@ def read_sidecar(path, warn):
     if not path or not os.path.exists(path):
         return rows
     unknown = set()
-    with open(path, newline="", encoding="utf-8") as handle:
-        reader = csv.reader(handle)
+    with open(path, newline="", encoding=sidecars.CSV_ENCODING) as handle:
+        reader = csv.reader(sidecars.csv_lines(handle))
         for raw in reader:
             if not raw or not raw[0].strip():
                 continue
@@ -452,7 +454,7 @@ def decide(info, row):
 # ---------------------------------------------------------------------------
 
 def write_csv(path, columns, rows):
-    with open(path, "w", newline="", encoding="utf-8") as handle:
+    with open(path, "w", newline="", encoding=sidecars.CSV_ENCODING) as handle:
         writer = csv.writer(handle)
         writer.writerow(columns)
         for row in rows:
@@ -485,6 +487,10 @@ def main():
     def warn(message):
         print("table-headers: " + message, file=sys.stderr)
 
+    why = args.sidecar and os.path.exists(args.sidecar) and sidecars.not_utf8(args.sidecar)
+    if why:
+        warn(why)
+        return 2
     sidecar = read_sidecar(args.sidecar, warn)
     tables = []
     for path in args.files:

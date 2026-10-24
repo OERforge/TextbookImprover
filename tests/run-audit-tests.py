@@ -166,7 +166,7 @@ def case_front_door():
     first = run([os.path.join(BIN, "audit.py"), WORK, "-o", out, "--quick"],
                 WORK)
     csv_path = os.path.join(out, "audit.csv")
-    with open(csv_path, newline="", encoding="utf-8") as fh:
+    with open(csv_path, newline="", encoding="utf-8-sig") as fh:
         rows = list(csv.reader(fh))
     header, body = rows[0], rows[1:]
     kinds = {r[4] for r in body}

@@ -497,7 +497,7 @@ def wcag_cases(work):
 
     report = os.path.join(work, "wcag.csv")
     ran = run("--wcag", "--pdf", pdf, "--report", report, folder=loads)
-    with open(report, newline="", encoding="utf-8") as fh:
+    with open(report, newline="", encoding="utf-8-sig") as fh:
         rows = list(csv.DictReader(fh))
     with open(log, encoding="utf-8") as fh:
         calls = [json.loads(line) for line in fh]
@@ -507,7 +507,7 @@ def wcag_cases(work):
     loud_report = os.path.join(work, "wcag-verbose.csv")
     loud = run("--wcag", "--verbose", "--pdf", pdf, "--report", loud_report, folder=loads)
     unasked = run("--verbose", "--pdf", pdf, folder=loads)
-    with open(loud_report, newline="", encoding="utf-8") as fh:
+    with open(loud_report, newline="", encoding="utf-8-sig") as fh:
         loud_rows = list(csv.DictReader(fh))
     setup = run("--wcag", folder=loads)
     missed = run("--wcag", "--pdf", pdf, folder=unloaded)
@@ -743,7 +743,7 @@ def wcag_cases(work):
                 outline.root.append(pikepdf.OutlineItem("A Book", 0))
             made.save(tidy)
         alone = run("--wcag", "--pdf", tidy, "--report", tidy_report, folder=loads)
-        with open(tidy_report, newline="", encoding="utf-8") as fh:
+        with open(tidy_report, newline="", encoding="utf-8-sig") as fh:
             tidy_rows = list(csv.DictReader(fh))
         cases.append(("veraPDF's WCAG notes alone: nothing found, their lines after, and the "
                       "report written with them",

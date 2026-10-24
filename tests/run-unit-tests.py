@@ -1282,9 +1282,30 @@ def check_shortdoi():
     asked_dry = len(seen)
     real = subprocess.run([sys.executable, tool, sidecar, "--wait", "0", "--service", service],
                           capture_output=True, text=True)
+    # As Excel saves it, its mark first, with a row appended from a file
+    # saved without a header, after a mark of its own; and as Excel's plain
+    # "CSV" saves it, in Windows-1252.
+    excel = os.path.join(work, "excel.csv")
+    with open(excel, "w", encoding="utf-8", newline="") as fh:
+        fh.write("\ufeffURL,Replacement,Title\r\nhttps://example.org/not-a-doi,,\r\n"
+                 "\ufeffhttps://doi.org/10.1080/08913810508443640,,\r\n")
+    from_excel = subprocess.run([sys.executable, tool, excel, "--wait", "0", "--service", service],
+                                capture_output=True, text=True)
+    ansi = os.path.join(work, "ansi.csv")
+    with open(ansi, "w", encoding="cp1252", newline="") as fh:
+        fh.write("URL,Replacement,Title\r\nhttps://doi.org/10.1080/08913810508443640,,"
+                 "Klein \u2013 Stern\r\n")
+    from_ansi = subprocess.run([sys.executable, tool, ansi, "--wait", "0", "--service", service],
+                               capture_output=True, text=True)
     server.shutdown()
-    with open(sidecar, encoding="utf-8") as fh:
+    with open(sidecar, "rb") as fh:
+        marked = fh.read(6) == b"\xef\xbb\xbfURL"
+    with open(sidecar, encoding="utf-8-sig") as fh:
         rows = list(csv.reader(fh))
+    with open(excel, "rb") as fh:
+        excel_data = fh.read()
+    with open(ansi, "rb") as fh:
+        ansi_data = fh.read()
     return [
         ("--dry-run names the two DOIs and asks nothing",
          lambda: asked_dry == 0 and dry.stdout.count("would look up") == 2),
@@ -1302,6 +1323,16 @@ def check_shortdoi():
              and "TextbookImprover" in agent for p, agent in seen)),
         ("the sidecar as it was is kept beside it",
          lambda: os.path.exists(sidecar + ".bak")),
+        ("and the sidecar is written with a byte-order mark, for Excel", lambda: marked),
+        ("a sidecar Excel saved is read, a row after a mark of its own too, and written with "
+         "one mark", lambda: from_excel.returncode == 0
+         and excel_data.decode("utf-8").split("\n")[2].startswith(
+             "https://doi.org/10.1080/08913810508443640,https://doi.org/10/b8xx35")
+         and excel_data.count(b"\xef\xbb\xbf") == 1 and excel_data.startswith(b"\xef\xbb\xbf")),
+        ("one that isn't UTF-8 stops it, naming the line, and is left as it was",
+         lambda: from_ansi.returncode != 0 and "line 2 isn't UTF-8 (byte 0x96)" in from_ansi.stderr
+         and "Traceback" not in from_ansi.stderr
+         and ansi_data.startswith(b"URL,") and b"\x96" in ansi_data),
     ]
 
 
@@ -1319,7 +1350,7 @@ def check_report_rows():
             ["a.png", "missing", ""],
             ["b.png", "too long", "Its first paragraph.\n\nIts second, after a line end"]])
     convert.write_report(rows_file, report, "Image,Reason,CurrentAlt", "image(s)")
-    with open(report, encoding="utf-8", newline="") as fh:
+    with open(report, encoding="utf-8-sig", newline="") as fh:
         rows = list(csv.DictReader(fh))
     shutil.rmtree(work, ignore_errors=True)
     return [
@@ -1839,6 +1870,192 @@ def check_decorative_marker():
          and pages.get("ch1/media/rId9") == "A decorative border"),
         ("the filter's list and the Python's are the same list",
          lambda: lua_markers == set(sidecars.DECORATIVE_MARKERS)),
+    ]
+
+
+def check_sidecar_marks():
+    """Sidecars as Excel saves them, a byte-order mark first, with files
+    appended to them as a person adds rows: a report, its header row
+    after a mark of its own, and rows saved without a header, a mark
+    before the first. Every reader takes each row, keyed as written.
+
+    The readers had read a sidecar as plain UTF-8, or dropped only the
+    mark at the file's start. page-names.csv saved by Excel named no page
+    at all, its first column the mark and "source", and table-headers.py
+    warned of a header row's "headers". A header row after a mark was a
+    row: of languages.csv, whose language isn't a tag; of
+    slide-titles.csv, a slide no deck has; and of reading-order.csv, an
+    order that isn't a list of ids. math-keep.csv's header row was a row
+    anywhere but first, math that kept nothing. And a row after a mark
+    was keyed on the mark and its key.
+    """
+    import docxremediate
+    import htmlremediate
+    import languages
+    import pptxremediate
+    import sidecars
+    convert = load(os.path.join(ROOT, "bin", "convert.py"), "convert_marks")
+    headers = load(os.path.join(ROOT, "bin", "table-headers.py"), "table_headers_marks")
+    split = load(os.path.join(ROOT, "bin", "split-pages.py"), "split_pages_marks")
+    work = scratch("sidecar-marks-")
+    mark = "\ufeff"
+
+    def sidecar(name, header, first, second, third):
+        """The header and a row as Excel saves them, a report appended
+        whole, and a row Excel saved without a header appended."""
+        path = os.path.join(work, name)
+        with open(path, "w", encoding="utf-8", newline="") as fh:
+            fh.write(mark + header + "\r\n" + first + "\r\n" + mark + header + "\r\n"
+                     + second + "\r\n" + mark + third + "\r\n")
+        return path
+
+    alt = sidecar("image-alt.csv", "Image,Alt,Source,Reason,CurrentAlt,Drafted by,Reviewed",
+                  "ch1/media/rId7.png,One,ch1,missing,,claude,",
+                  "ch1/media/rId8.png,Two,ch1,missing,,claude,",
+                  "ch1/media/rId9.png,Three,ch1,missing,,claude,RS")
+    links = sidecar("bare-links.csv", "URL,Replacement,Title,Source,Context,Drafted by,Reviewed",
+                    "https://example.org/a,,Page A,ch1,,,",
+                    "https://example.org/b,,Page B,ch1,,,",
+                    "https://example.org/c,,Page C,ch1,,,")
+    tables = sidecar("table-headers.csv", ",".join(headers.SIDECAR_COLUMNS),
+                     "aaa,first-row,,,,ch1.docx,,,TI,",
+                     "bbb,both,,,,ch1.docx,,,TI,",
+                     "ccc,none,,,,ch1.docx,,,,RS")
+    names = sidecar("page-names.csv", "source,parents,heading,position,name",
+                    "ch1.docx,,Introduction,,intro",
+                    "ch1.docx,,Methods,,methods",
+                    "ch2.docx,,Results,,results")
+    language = sidecar("languages.csv", ",".join(languages.SIDECAR_COLUMNS),
+                       "ch1,fr,,,", "ch2,de,,,", "ch3,es-MX,,,")
+    titles = sidecar("slide-titles.csv", "Slide,Title,Source,Drafted by,Reviewed",
+                     "deck/slide-256,One,,,", "deck/slide-257,Two,,,", "deck/slide-258,Three,,,")
+    orders = sidecar("reading-order.csv", "Slide,Order,Source,Shapes,Note,Drafted by,Reviewed",
+                     "deck/slide-256,2 3,,,,,", "deck/slide-257,3 2,,,,,", "deck/slide-258,4,,,,,")
+    keep = sidecar("math-keep.csv", "Kind,Page,Before,After",
+                   "symbol,,\u03bc,\u03bc", "expression,,\u03bc = 5.51,\u03bc=5.51",
+                   "equation,ch1,5 \u00b5m,")
+    found = os.path.join(work, "bare-links-found")
+    with open(found, "w", encoding="utf-8", newline="") as fh:
+        for url in ("https://example.org/a", "https://example.org/b", "https://example.org/c"):
+            fh.write("decided,%s,,ch1,See\n" % url)
+    said = []
+    convert.say = said.append
+    convert.write_bare_links(found, os.path.join(work, "bare-links-new.csv"), links)
+    warned = []
+    table_rows = headers.read_sidecar(tables, warned.append)
+    unknown = set()
+    deck_tables = pptxremediate.header_rows(tables, unknown)
+    language_rows, problems = languages.read_rows(language)
+    bad = []
+    order_rows = pptxremediate.order_rows(orders, bad)
+    ansi = os.path.join(work, "ansi.csv")
+    with open(ansi, "w", encoding="cp1252", newline="") as fh:
+        fh.write("Image,Alt\r\nch1/media/rId7.png,Caf\u00e9\r\n")
+    mac = os.path.join(work, "mac.csv")
+    with open(mac, "w", encoding="cp1252", newline="") as fh:
+        fh.write("Image,Alt\rch1/media/rId7.png,One\rch1/media/rId8.png,Caf\u00e9\r")
+    marked = lambda keys: any(mark in key for key in keys)
+    return [
+        ("image-alt.csv's rows are each read, by the pages', the Word copies', and the decks' "
+         "readers",
+         lambda: [htmlremediate.alt_rows(alt).get("ch1/media/rId%d" % n) for n in (7, 8, 9)]
+         == ["One", "Two", "Three"]
+         and docxremediate.alt_rows(alt).get("ch1") == {"rId7": "One", "rId8": "Two",
+                                                        "rId9": "Three"}
+         and set(pptxremediate.alt_rows(alt)) == {"ch1/media/rId7", "ch1/media/rId8",
+                                                  "ch1/media/rId9"}
+         and not marked(htmlremediate.alt_rows(alt))),
+        ("and so are bare-links.csv's, and none is named a row matching no bare link",
+         lambda: [htmlremediate.link_rows(links).get("https://example.org/" + x)
+                  for x in "abc"] == [("", "Page A"), ("", "Page B"), ("", "Page C")]
+         and docxremediate.link_titles(links).get("https://example.org/c") == "Page C"
+         and set(pptxremediate.link_rows(links)) == {"https://example.org/" + x for x in "abc"}
+         and not marked(htmlremediate.link_rows(links)) and said == []),
+        ("table-headers.csv's, with no warning of a header row's value, and with its "
+         "review columns", lambda: set(table_rows) == {"aaa", "bbb", "ccc"} and warned == []
+         and headers.has_review_columns(tables)
+         and deck_tables == {"aaa": "first-row", "bbb": "both", "ccc": "none"}
+         and unknown == set()),
+        ("page-names.csv's, as split-pages.py keys them",
+         lambda: {k: v for k, v in split.read_sidecar(names).items() if k[0] != "source"}
+         == {("ch1.docx", "", "Introduction", ""): "intro",
+             ("ch1.docx", "", "Methods", ""): "methods",
+             ("ch2.docx", "", "Results", ""): "results"}),
+        ("languages.csv's, its header row after a mark no row",
+         lambda: dict(language_rows) == {"ch1": "fr", "ch2": "de", "ch3": "es-MX"}
+         and problems == []),
+        ("slide-titles.csv's and reading-order.csv's, no header row among them",
+         lambda: pptxremediate.title_rows(titles) == {"deck/slide-256": "One",
+                                                      "deck/slide-257": "Two",
+                                                      "deck/slide-258": "Three"}
+         and order_rows == {"deck/slide-256": ["2", "3"], "deck/slide-257": ["3", "2"],
+                            "deck/slide-258": ["4"]} and bad == []),
+        ("math-keep.csv's, a header row anywhere skipped",
+         lambda: sidecars.math_keep_rows(keep) == [("symbol", "", "\u03bc"),
+                                                   ("expression", "", "\u03bc = 5.51"),
+                                                   ("equation", "ch1", "5 \u00b5m")]),
+        ("the run counts the drafted rows not reviewed, the header rows none of them",
+         lambda: convert.unreviewed_rows(alt, convert.REVIEW_COLUMNS["image_alt"]) == 2
+         and convert.unreviewed_rows(tables, convert.REVIEW_COLUMNS["table_headers"]) == 2),
+        ("a sidecar saved in Windows-1252 isn't UTF-8 at its line, a CR alone ending each "
+         "line or not, and one with marks is",
+         lambda: ansi + ": line 2 isn't UTF-8 (byte 0xE9)" in (sidecars.not_utf8(ansi) or "")
+         and "CSV UTF-8 (Comma delimited)" in (sidecars.not_utf8(ansi) or "")
+         and mac + ": line 3 isn't UTF-8 (byte 0xE9)" in (sidecars.not_utf8(mac) or "")
+         and sidecars.not_utf8(alt) is None),
+    ]
+
+
+def check_report_marks():
+    """Every CSV a run writes for a person starts with a byte-order mark,
+    once, which Excel needs to read it as UTF-8: without one, an en dash
+    shows as "â€“". Each is read back as written, the output check's
+    findings by findings.read_csv among them."""
+    import deckrun
+    import findings as findings_lib
+    import unpacking
+    convert = load(os.path.join(ROOT, "bin", "convert.py"), "convert_report_marks")
+    convert.say = lambda text: None
+    headers = load(os.path.join(ROOT, "bin", "table-headers.py"), "table_headers_reports")
+    work = scratch("report-marks-")
+    path = lambda name: os.path.join(work, name)
+    rows_file = path("rows")
+    with open(rows_file, "w", encoding="utf-8", newline="") as fh:
+        fh.write("ch1/media/rId7.png,,ch1,missing,\u03b1 \u2013 \u03b2,,\n")
+    convert.write_report(rows_file, path("image-alt-missing.csv"),
+                         "Image,Alt,Source,Reason,CurrentAlt,Drafted by,Reviewed", "image(s)")
+    links_file = path("links")
+    with open(links_file, "w", encoding="utf-8", newline="") as fh:
+        fh.write("new,https://example.org/a,,ch1,See \u2013\n")
+    convert.write_bare_links(links_file, path("bare-links-new.csv"), path("bare-links.csv"))
+    convert.write_fidelity([("docx", "ch1", "frame", "\u2013")], path("fidelity.csv"))
+    found = [findings_lib.Finding("html/ch1.html", "image-without-alt", "\u03b1.png")]
+    findings_lib.write_csv(path("output-check.csv"), found)
+    back = findings_lib.read_csv(path("output-check.csv"))
+    unpacking.write_report(path("unpack-report.csv"), [("ch1", "a-check", "\u2013")])
+    headers.write_csv(path("table-headers-new.csv"), headers.SIDECAR_COLUMNS,
+                      [{"key": "aaa", "headers": "both", "preview": "\u03b1 | \u03b2"}])
+    deckrun.write_rows(path("slide-titles-new.csv"), deckrun.TITLE_COLUMNS,
+                       [["deck/slide-256", "", "deck", "", ""]])
+    written = sorted(n for n in os.listdir(work) if n.endswith(".csv"))
+
+    def starts(name):
+        with open(path(name), "rb") as fh:
+            data = fh.read()
+        return data.startswith(b"\xef\xbb\xbf") and not data[3:].startswith(b"\xef\xbb\xbf")
+    with open(path("image-alt-missing.csv"), encoding="utf-8-sig", newline="") as fh:
+        alt_rows = list(csv.DictReader(fh))
+    return [
+        ("each report is written",
+         lambda: written == ["bare-links-new.csv", "fidelity.csv", "image-alt-missing.csv",
+                             "output-check.csv", "slide-titles-new.csv",
+                             "table-headers-new.csv", "unpack-report.csv"]),
+        ("and starts with one byte-order mark", lambda: all(starts(n) for n in written)),
+        ("a report reads back as it was written, its first column by name",
+         lambda: [(r["Image"], r["CurrentAlt"]) for r in alt_rows]
+         == [("ch1/media/rId7.png", "\u03b1 \u2013 \u03b2")]),
+        ("and the output check's findings, each where it was",
+         lambda: [(f.where, f.check) for f in back] == [("html/ch1.html", "image-without-alt")]),
     ]
 
 
@@ -2938,6 +3155,8 @@ GROUPS = [
     ("sidecar paths", check_sidecar_paths),
     ("shortDOIs for a bare-links sidecar", check_shortdoi),
     ("the decorative marker", check_decorative_marker),
+    ("sidecars Excel saved, with files appended", check_sidecar_marks),
+    ("the byte-order mark on every report", check_report_marks),
     ("the PDF target's default page", check_default_page),
     ("PDF/UA-1's math", check_ua1_math),
     ("a formula's words, in an HTML source", check_math_words),

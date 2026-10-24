@@ -36,6 +36,7 @@ import htmlremediate  # noqa: E402
 import mdremediate  # noqa: E402
 import pptxparse  # noqa: E402
 import pptxremediate  # noqa: E402
+import sidecars  # noqa: E402
 
 DECORATIVE = "[decorative]"
 
@@ -64,6 +65,10 @@ def main(argv=None):
                          "the pipeline's math.repair_equations does")
     ap.add_argument("--out", required=True, help="folder for the copies")
     args = ap.parse_args(argv)
+    for path in (args.alt, args.links, args.table_headers, args.slide_titles, args.reading_order):
+        why = path and os.path.exists(path) and sidecars.not_utf8(path)
+        if why:
+            sys.exit(why)
     resolved, resolved_html = {}, {}
     if args.resolved:
         with open(args.resolved, encoding="utf-8") as fh:

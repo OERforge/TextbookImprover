@@ -1406,7 +1406,7 @@ def case_book_pdf(work):
         report = os.path.join(books["book"][0], "output-check.csv")
         if not os.path.exists(report):
             return False
-        with open(report, encoding="utf-8") as fh:
+        with open(report, encoding="utf-8-sig") as fh:
             rows = list(csv.reader(fh))
         return any(len(r) > 2 and r[1] == "pdf-figure-alt-is-placeholder"
                    and r[2] == "picture environment" for r in rows)
@@ -3936,7 +3936,7 @@ def case_customized(work):
              for row in rows) and all(re.search(r"\.(png|jpe?g|svg|pdf)$", row.get("Image") or "")
                                       for row in rows))(
              list(csv.DictReader(open(os.path.join(work, "image-alt-missing.csv"),
-                                      encoding="utf-8", newline=""))))),
+                                      encoding="utf-8-sig", newline=""))))),
         ("and the source target's copy writes a decision in the argument the adopted "
          "definition passes on, and the definitions after the preamble",
          lambda: "\\Figure[{A triangle, from the sidecar}]{0.3}{triangle}" in review_copy

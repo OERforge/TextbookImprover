@@ -203,7 +203,7 @@ def unpack(inputs, out, *extra):
 
 
 def report(out):
-    with open(os.path.join(out, "unpack-report.csv"), encoding="utf-8") as fh:
+    with open(os.path.join(out, "unpack-report.csv"), encoding="utf-8-sig") as fh:
         return list(csv.DictReader(fh))
 
 

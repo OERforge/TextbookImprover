@@ -122,7 +122,7 @@ def unpack(repo, out, *extra):
 
 
 def report_of(out):
-    with open(os.path.join(out, "unpack-report.csv"), encoding="utf-8") as fh:
+    with open(os.path.join(out, "unpack-report.csv"), encoding="utf-8-sig") as fh:
         return list(csv.DictReader(fh))
 
 
@@ -322,8 +322,12 @@ def case_trade(work):
     key = read(out, "chapter-1.html")
     index = read(out, "index.html")
     report = report_of(out)
-    with open(os.path.join(out, "table-captions.csv"), encoding="utf-8") as fh:
+    with open(os.path.join(out, "table-captions.csv"), encoding="utf-8-sig") as fh:
         captions = list(csv.DictReader(fh))
+    marked = []
+    for name in ("table-captions.csv", "unpack-report.csv"):
+        with open(os.path.join(out, name), "rb") as fh:
+            marked.append(fh.read(3) == b"\xef\xbb\xbf")
     return [
         ("--list names the repository's books and their styles; a "
          "repository of two needs --book",
@@ -574,6 +578,8 @@ def case_trade(work):
          and [c["Description"] for c in captions]
          == ["Hours worked by each person", "The cost of each choice—trade or not"]
          and captions[1]["Excerpt"] == "Choice"),
+        ("table-captions.csv and unpack-report.csv start with a byte-order mark, which "
+         "Excel needs to show the summary's dash as written", lambda: marked == [True, True]),
         ("media are copied; one the module names that isn't there is "
          "reported, its description in its place",
          lambda: os.path.exists(os.path.join(out, "media", "dot.png"))
@@ -1384,7 +1390,7 @@ def case_step_tables(work):
             if r["Check"] == "table-kept-as-data"}
     labels = [r["Detail"] for r in report
               if r["Check"] == "table-label-left-out"]
-    with open(os.path.join(out, "table-captions.csv"), encoding="utf-8") as fh:
+    with open(os.path.join(out, "table-captions.csv"), encoding="utf-8-sig") as fh:
         drafted = {r["Label"]: r["Description"] for r in csv.DictReader(fh)}
     other = os.path.join(work, "precalculus")
     unpack(repo, other, "--book", "tiny-precalculus")
@@ -1402,11 +1408,11 @@ def case_step_tables(work):
         page_out = os.path.join(out, "html", "1-1-ratios.html")
         converted = read(page_out) if run.returncode == 0 and os.path.exists(
             page_out) else ""
-        with open(os.path.join(out, "table-headers-new.csv"), encoding="utf-8") as fh:
+        with open(os.path.join(out, "table-headers-new.csv"), encoding="utf-8-sig") as fh:
             guessed = sorted((r["preview"], r["headers"]) for r in csv.DictReader(fh))
         if os.path.exists(os.path.join(out, "table-captions-missing.csv")):
             with open(os.path.join(out, "table-captions-missing.csv"),
-                      encoding="utf-8") as fh:
+                      encoding="utf-8-sig") as fh:
                 missing = [r["Label"] for r in csv.DictReader(fh)]
 
     def presentation(name):
@@ -2025,6 +2031,7 @@ def case_layout_kinds(work):
     repo = os.path.join(work, "osbooks-layout")
     build_layout_books(repo)
     found, said, reports, drafted, summaries = {}, {}, {}, {}, {}
+    summaries_marked = []
     for slug in ("tiny-physics", "tiny-coreq", "tiny-history"):
         out = os.path.join(work, slug)
         result = unpack(repo, out, "--book", slug)
@@ -2034,8 +2041,10 @@ def case_layout_kinds(work):
         listed = os.path.join(out, "cnx-table-summaries.csv")
         summaries[slug] = []
         if os.path.exists(listed):
-            with open(listed, encoding="utf-8", newline="") as fh:
+            with open(listed, encoding="utf-8-sig", newline="") as fh:
                 summaries[slug] = list(csv.DictReader(fh))
+            with open(listed, "rb") as fh:
+                summaries_marked.append(fh.read(3) == b"\xef\xbb\xbf")
         found[slug] = {}
         for name in sorted(os.listdir(out)) if result.returncode == 0 else []:
             if name.endswith(".html"):
@@ -2115,6 +2124,8 @@ def case_layout_kinds(work):
          and "key equations table" not in drafted["tiny-physics"]
          and any(r["Summary"] == "The rules." for r in summaries["tiny-coreq"])
          and "1 table summary(ies) say nothing" in said["tiny-physics"]),
+        ("cnx-table-summaries.csv starts with a byte-order mark, for Excel",
+         lambda: summaries_marked and all(summaries_marked)),
         # A summary that reads its table out, drafted as a caption, is read
         # before the table it repeats; it's drafted still, so a person can
         # rewrite it where it stands, and named, so they can find it.

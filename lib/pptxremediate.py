@@ -162,8 +162,8 @@ def sidecar_rows(path):
     a header row anywhere skipped, as the filter reads every sidecar."""
     if not path or not os.path.exists(path):
         return
-    with open(path, encoding="utf-8-sig", newline="") as fh:
-        for row in csv.reader(fh):
+    with open(path, encoding=sidecars.CSV_ENCODING, newline="") as fh:
+        for row in csv.reader(sidecars.csv_lines(fh)):
             if not row or not row[0].strip() or row[0].strip().lower() in HEADER_CELLS:
                 continue
             yield [c.strip() for c in row] + ["", ""]

@@ -164,7 +164,7 @@ def read(workdir, name):
     path = os.path.join(workdir, name)
     if not os.path.exists(path):
         return None
-    with open(path, newline="", encoding="utf-8") as handle:
+    with open(path, newline="", encoding="utf-8-sig") as handle:
         return list(csv.DictReader(handle))
 
 
@@ -372,6 +372,18 @@ def checks(workdir):
     yield "a sidecar whose header names them needs no sample, however short its rows", \
         not os.path.exists(os.path.join(old, "table-headers-sample.csv")) \
         and "no drafted-by or reviewed column" not in err, err
+
+    # As Excel's plain "CSV" saves it: Windows-1252, a preview's en dash a
+    # byte that isn't UTF-8.
+    with open(os.path.join(old, "table-headers.csv"), "w", newline="", encoding="cp1252") as h:
+        w = csv.writer(h)
+        w.writerow(columns + ["drafted-by", "reviewed"])
+        w.writerow([fresh[0]["key"], fresh[0]["headers"], "", "", "", "d.docx", "Table 1.1",
+                    "Speeding \u2013 or not", "", ""])
+    code, err = run(old)
+    yield "a sidecar that isn't UTF-8 stops the pre-pass, naming its line", \
+        code == 2 and "table-headers.csv: line 2 isn't UTF-8 (byte 0x96)" in err \
+        and "Traceback" not in err, (code, err[-300:])
 
 
 def main():

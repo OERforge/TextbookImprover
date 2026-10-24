@@ -747,7 +747,7 @@ def headings(page):
 def rows_of(path):
     if not os.path.exists(path):
         return []
-    with open(path, encoding="utf-8", newline="") as fh:
+    with open(path, encoding="utf-8-sig", newline="") as fh:
         return list(csv.reader(fh))[1:]
 
 

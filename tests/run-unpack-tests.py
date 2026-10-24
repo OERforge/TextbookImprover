@@ -134,7 +134,7 @@ def case_unpack(work):
     import yaml
     project = yaml.safe_load(read(out, "project.yaml"))["project"]
     chapter = read(out, "chapter-1.html")
-    with open(os.path.join(out, "unpack-report.csv"), encoding="utf-8") as fh:
+    with open(os.path.join(out, "unpack-report.csv"), encoding="utf-8-sig") as fh:
         report = {(r["Where"], r["Check"]) for r in csv.DictReader(fh)}
     return [
         ("the run succeeds, a page per content document, the navigation "
@@ -223,13 +223,15 @@ def case_convert(work):
     checks = []
     if os.path.exists(os.path.join(out, "output-check.csv")):
         with open(os.path.join(out, "output-check.csv"),
-                  encoding="utf-8") as fh:
+                  encoding="utf-8-sig") as fh:
             checks = [r["Check"] for r in csv.DictReader(fh)]
     return [
         ("an image that is an HTML page stops the run at the media gate, "
          "named for what it is",
          lambda: stopped.returncode != 0 and "images/file1.html" in gate
          and "an HTML page where an image should be" in gate),
+        ("its report starts with a byte-order mark, for Excel",
+         lambda: gate.startswith("\ufeffFile,")),
         ("the unpacked book converts, pages and an EPUB",
          lambda: result.returncode == 0 and page
          and os.path.exists(os.path.join(

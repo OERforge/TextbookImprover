@@ -47,6 +47,7 @@ sys.path.insert(0, os.path.join(ROOT, "lib"))
 
 import deckcompare      # noqa: E402
 import pptxremediate    # noqa: E402
+import sidecars         # noqa: E402
 from names import safe_stem     # noqa: E402
 
 CONVERT = os.path.join(ROOT, "bin", "convert.py")
@@ -107,6 +108,11 @@ def main():
     source = os.path.abspath(args.folder)
     if args.keep and os.path.exists(args.keep):
         sys.exit("%s exists; --keep makes it." % args.keep)
+    for name in SIDECARS:
+        path = os.path.join(source, name)
+        why = os.path.exists(path) and sidecars.not_utf8(path)
+        if why:
+            sys.exit(why)
     work = os.path.abspath(args.keep) if args.keep else tempfile.mkdtemp(prefix="round-trip-")
     os.makedirs(work, exist_ok=True)
     try:

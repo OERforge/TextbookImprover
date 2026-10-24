@@ -3242,7 +3242,7 @@ def convert(where, *flags):
 def rows_of(path):
     if not os.path.exists(path):
         return []
-    with open(path, encoding="utf-8", newline="") as fh:
+    with open(path, encoding="utf-8-sig", newline="") as fh:
         return list(csv.reader(fh))[1:]
 
 
@@ -4630,6 +4630,18 @@ def case_round_trip(work):
         and "slide 5 (A Table), content:" in tool.stdout \
         and os.path.isfile(os.path.join(work, "kept", "trip", "decks", "Reader.pptx")), \
         (tool.stdout + tool.stderr)[-600:]
+    # A folder whose sidecar Excel's plain "CSV" saved, in Windows-1252.
+    ansi = os.path.join(work, "ansi-decks")
+    os.makedirs(ansi)
+    shutil.copy(os.path.join(folder, "Cut.pptx"), ansi)
+    with open(os.path.join(ansi, "slide-titles.csv"), "w", encoding="cp1252", newline="") as fh:
+        fh.write("Slide,Title,Source,Drafted by,Reviewed\r\nCut/slide-256,Caf\u00e9,,,\r\n")
+    stopped = subprocess.run(["python3", os.path.join(ROOT, "util", "round-trip-decks.py"), ansi],
+                             capture_output=True, text=True)
+    yield "and stops on a sidecar that isn't UTF-8, naming the folder's own file and its line", \
+        stopped.returncode != 0 and os.path.join(ansi, "slide-titles.csv") \
+        + ": line 2 isn't UTF-8 (byte 0xE9)" in stopped.stderr \
+        and "Traceback" not in stopped.stderr, stopped.stderr[-400:]
     yield "and each of these changed in the trip is a difference where it is: a picture's alt " \
         "text, a word's bold, a list's item and its numbering, a table's cell, an equation, a " \
         "word of the notes, the subtitle; and a slide's title changed leaves its slide " \

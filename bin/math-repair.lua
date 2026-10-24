@@ -112,7 +112,13 @@ end
 -- The keep sidecar, as {kind: {before: {page = true}}}, a blank page
 -- stored as the empty string.
 local function parse_csv(text)
-  text = text:gsub('^\239\187\191', ''):gsub('\r\n', '\n'):gsub('\r', '\n')
+  text = text:gsub('\r\n', '\n'):gsub('\r', '\n')
+  -- Excel's byte-order mark, at the file's start and at a line's, where
+  -- appending math-repaired.csv, its header row and all, leaves one.
+  text = '\n' .. text
+  local marks
+  repeat text, marks = text:gsub('\n\239\187\191', '\n') until marks == 0
+  text = text:sub(2)
   local rows, row, field, quoted = {}, {}, {}, false
   local i, n = 1, #text
   local function end_field() row[#row + 1] = table.concat(field); field = {} end
@@ -148,9 +154,10 @@ local keep = {}
 if KEEP and KEEP ~= '' then
   local handle = io.open(KEEP, 'r')
   if handle then
-    for n, row in ipairs(parse_csv(handle:read('a'))) do
+    for _, row in ipairs(parse_csv(handle:read('a'))) do
       local kind, where, before = row[1] or '', row[2] or '', row[3] or ''
-      if not (n == 1 and kind:lower() == 'kind') and before ~= '' then
+      -- A header row anywhere: appending the report carries one along.
+      if kind:lower() ~= 'kind' and before ~= '' then
         keep[kind] = keep[kind] or {}
         keep[kind][before] = keep[kind][before] or {}
         keep[kind][before][where] = true

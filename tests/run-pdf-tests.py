@@ -770,7 +770,7 @@ def build_ua1(work):
     report = os.path.join(work, "output-check.csv")
     rows = []
     if os.path.exists(report):
-        with open(report, encoding="utf-8", newline="") as fh:
+        with open(report, encoding="utf-8-sig", newline="") as fh:
             rows = list(csv.DictReader(fh))
     return os.path.join(work, "pdf", "org.example.ua1.pdf"), converted.stdout + converted.stderr, rows
 
@@ -2385,7 +2385,7 @@ def build(work):
     report = os.path.join(work, "output-check.csv")
     rows = []
     if os.path.exists(report):
-        with open(report, encoding="utf-8", newline="") as fh:
+        with open(report, encoding="utf-8-sig", newline="") as fh:
             rows = list(csv.DictReader(fh))
     return pypdf.PdfReader(pdf), source, rows, converted.stderr, placements
 

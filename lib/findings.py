@@ -39,6 +39,7 @@ import json
 import os
 from collections import Counter, OrderedDict
 
+import sidecars
 import wcag
 
 COLUMNS = ["Where", "Check", "Detail", "File", "Kind", "Severity",
@@ -460,7 +461,7 @@ def now():
 # --------------------------------------------------------------------------
 
 def write_csv(path, findings):
-    with open(path, "w", newline="", encoding="utf-8") as fh:
+    with open(path, "w", newline="", encoding=sidecars.CSV_ENCODING) as fh:
         writer = csv.writer(fh)
         writer.writerow(COLUMNS)
         for f in findings:
@@ -469,7 +470,7 @@ def write_csv(path, findings):
 
 def read_csv(path):
     """Findings back from a CSV, ours or an older three-column one."""
-    with open(path, newline="", encoding="utf-8") as fh:
+    with open(path, newline="", encoding=sidecars.CSV_ENCODING) as fh:
         reader = csv.reader(fh)
         header = next(reader, None) or []
         out = []

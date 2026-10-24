@@ -44,6 +44,7 @@ import textwrap
 import unicodedata
 
 import alttext
+import sidecars
 
 from .emit import TEXT_FIXES, symbol_counts, symbol_report
 from .pages import Group
@@ -469,14 +470,14 @@ def write_captions(out, tables, report=None):
                        + ("…" if len(words) > 12 else "") + "”")
     if rows:
         with open(os.path.join(out, "table-captions.csv"), "w", newline="",
-                  encoding="utf-8") as fh:
+                  encoding=sidecars.CSV_ENCODING) as fh:
             writer = csv.writer(fh)
             writer.writerow(["Label", "Description", "Source", "Excerpt",
                              "Drafted by", "Reviewed"])
             writer.writerows(rows)
     if summaries:
         with open(os.path.join(out, "cnx-table-summaries.csv"), "w",
-                  newline="", encoding="utf-8") as fh:
+                  newline="", encoding=sidecars.CSV_ENCODING) as fh:
             writer = csv.writer(fh)
             writer.writerow(["Page", "Label", "Caption", "Summary", "Reads out"])
             writer.writerows(summaries)

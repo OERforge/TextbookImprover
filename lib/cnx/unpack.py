@@ -21,6 +21,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 import csv
 import os
 
+import sidecars
+
 from . import exercises
 from . import pages as P
 from .assemble import assemble
@@ -170,7 +172,7 @@ def unpack(repo_dir, out, slug=None, source_name=None, bank=None, boxes=True):
                       "within each page, nothing moved"))
     result.notes = notes
     with open(os.path.join(out, "unpack-report.csv"), "w", newline="",
-              encoding="utf-8") as fh:
+              encoding=sidecars.CSV_ENCODING) as fh:
         writer = csv.writer(fh)
         writer.writerow(["Where", "Check", "Detail"])
         writer.writerows(notes)

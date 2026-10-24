@@ -40,6 +40,45 @@ def is_decorative(value):
     return (value or "").strip().lower() in DECORATIVE_MARKERS
 
 
+# Excel opens a CSV that starts with a byte-order mark as UTF-8, and one
+# that doesn't in the computer's code page, Windows-1252 in the US, where
+# an en dash shows as "â€“" and a minus sign as "âˆ’"; its "CSV UTF-8"
+# writes the mark. So every CSV a run writes for a person, a report or
+# rows to adopt as a sidecar, is written in CSV_ENCODING, which puts the
+# mark first. A sidecar is read in it too, which drops the mark at the
+# file's start, and through csv_lines, which drops one at a line's start,
+# where appending a report to a sidecar, its header row and all, leaves
+# it. figures-and-tables.lua and math-repair.lua drop both as they read.
+CSV_ENCODING = "utf-8-sig"
+BOM = "\ufeff"
+
+
+def csv_lines(fh):
+    """A CSV file's lines, for csv.reader or csv.DictReader, each without
+    a byte-order mark at its start."""
+    for line in fh:
+        yield line.lstrip(BOM)
+
+
+def not_utf8(path):
+    """What to tell a person whose sidecar at path isn't UTF-8, naming the
+    line and saying how to save it, or None. Excel's plain "CSV" saves in
+    the computer's code page, so any character outside ASCII is a byte
+    UTF-8 can't read there: the filter would hand it to Pandoc, which
+    shows U+FFFD in its place, and a Python reader would stop with a
+    traceback. Lines are counted as the csv module ends them, so a file
+    with a CR alone at each line's end ("CSV (Macintosh)") is too."""
+    with open(path, "rb") as fh:
+        data = fh.read()
+    try:
+        data.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        line = len(re.split(rb"\r\n?|\n", data[:exc.start]))
+        return ("%s: line %d isn't UTF-8 (byte 0x%02X), so it can't be read. Save it as UTF-8: "
+                "from Excel, as \"CSV UTF-8 (Comma delimited)\"." % (path, line, data[exc.start]))
+    return None
+
+
 # The schemes a bare link's Replacement can be an address in, as the
 # filter's BARE_SCHEMES: an address replaces the link's address and its
 # text, and anything else replaces only its text.
@@ -62,12 +101,13 @@ MATH_SETTINGS = {"equation": "math.repair_equations", "expression": "math.from_t
 def math_keep_rows(path):
     """The keep sidecar's rows, (kind, page, before), each once: math a run
     would repair, kept as it was (math-keep.csv, its rows copied from
-    math-repaired.csv)."""
+    math-repaired.csv), a header row anywhere skipped, as appending the
+    report again and again carries one along each time."""
     rows = []
     if path and os.path.exists(path):
-        with open(path, encoding="utf-8-sig", newline="") as fh:
-            for n, row in enumerate(csv.reader(fh)):
-                if n == 0 and row and row[0].strip().lower() == "kind":
+        with open(path, encoding=CSV_ENCODING, newline="") as fh:
+            for row in csv.reader(csv_lines(fh)):
+                if row and row[0].strip().lower() == "kind":
                     continue
                 if len(row) >= 3 and row[2]:
                     rows.append((row[0], row[1], row[2]))

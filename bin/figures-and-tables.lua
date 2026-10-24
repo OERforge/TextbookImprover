@@ -527,8 +527,14 @@ end
 -- Minimal RFC 4180 parser. Character-at-a-time rather than line-at-a-time
 -- because a quoted field may itself contain a newline.
 local function parse_csv(text)
-  text = text:gsub('^\239\187\191', '')  -- strip Excel's UTF-8 BOM
   text = text:gsub('\r\n', '\n'):gsub('\r', '\n')
+  -- Excel's UTF-8 byte-order mark, at the start of the file and at the
+  -- start of any line, where appending a report to a sidecar, its header
+  -- row and all, leaves one (lib/sidecars.py's csv_lines).
+  text = '\n' .. text
+  local marks
+  repeat text, marks = text:gsub('\n\239\187\191', '\n') until marks == 0
+  text = text:sub(2)
 
   local rows, row, field, quoted = {}, {}, {}, false
   local i, n = 1, #text

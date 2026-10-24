@@ -46,6 +46,7 @@ import struct
 import subprocess
 import sys
 import tempfile
+import unicodedata
 import warnings
 import zipfile
 import zlib
@@ -3029,6 +3030,14 @@ See [the data](https://example.org/data "Where the data & more are"), [*the* pla
 # Code Link
 
 See [`the code`](https://example.org/code).
+
+# Notes Math
+
+Words shown.
+
+::: notes
+The line $\\hat{y}=a+bx$, the average $\\bar{x}_{n}$, and $\\frac{a}{b}$.
+:::
 """
 
 
@@ -3399,6 +3408,9 @@ def case_pptx(work):
     titled_xml = hp[titled.part] if titled else ""
     titled_rels = slide_rels(hp, titled)
     code_link = slide_titled(hd, "Code Link")
+    notes_math = slide_titled(hd, "Notes Math")
+    notes_math_text = "".join(re.findall(r"<a:t>([^<]*)</a:t>", notes_of(hp, notes_math))) \
+        if notes_math else ""
     every_notes = [x for p in (fp, sp, hp) for n, x in p.items()
                    if re.match(r"ppt/notesSlides/notesSlide\d+\.xml$", n)]
     every_slides = [x for p in (fp, sp, hp) for x in pptx_slides(p)]
@@ -3481,6 +3493,16 @@ def case_pptx(work):
                  for rid in re.findall(r'<Relationship\b[^>]*?\sId="(rId\d+)"[^>]*?'
                                        r'relationships/(?:hyperlink|slide)"', titled_rels))
          and "3 link(s) on slides given their titles as their ScreenTips" in out),
+        ("a formula in the notes is its text, where the writer writes its TeX there, with a "
+         "word's spaces and a script as a deck types one; one texmath can't make text is left "
+         "its TeX; and the run says how many of each, the plain writer's warning not passed "
+         "on as the PowerPoint writer's",
+         lambda: "The line \u0177 = a + bx," in unicodedata.normalize("NFC", notes_math_text)
+         and "x\u0304_n" in notes_math_text and "\\frac{a}{b}" in notes_math_text
+         and "\\hat" not in notes_math_text
+         and "2 formula(s) in the speaker notes of 1 deck(s) are text" in out
+         and "1 formula(s) in the speaker notes of 1 deck(s) are their TeX" in out
+         and "Could not convert TeX math \\frac{a}{b}" not in out),
         ("a run's properties are in the schema's order, a code font before its link, where "
          "the writer puts the link first; and each notes slide has the color map PowerPoint "
          "gives one, after its common data, which the writer leaves out, and one that has it "

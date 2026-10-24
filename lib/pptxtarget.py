@@ -141,6 +141,7 @@ import shutil
 import subprocess
 import tempfile
 import zipfile
+from collections import Counter
 from urllib.parse import unquote
 
 import decks
@@ -517,11 +518,22 @@ def build(intermediate, base, out, *, filters, reference, level, language, title
                                     if entry.get("type") == "PowerpointTemplateWarning"
                                     for m in [LAYOUT_NAMED.search(str(entry.get("pretty", "")))]
                                     if m})
-        result["warnings"] = sorted({" ".join(str(entry.get("pretty", "")).split())[:160]
-                                     for entry in log if entry.get("verbosity") == "WARNING"
-                                     and entry.get("type") != "PowerpointTemplateWarning"})
         with open(record_path, encoding="utf-8") as fh:
             result["record"] = json.load(fh)
+        # A formula in the notes the filter couldn't make text, its own
+        # call to the plain writer's warning (deck-pptx.lua, notes_math),
+        # which the run counts on its own.
+        unwritten = Counter(result["record"].get("notes_tex_formulas") or [])
+        kept_log = []
+        for entry in log:
+            if entry.get("type") == "CouldNotConvertTeXMath" \
+                    and unwritten[entry.get("contents")] > 0:
+                unwritten[entry.get("contents")] -= 1
+                continue
+            kept_log.append(entry)
+        result["warnings"] = sorted({" ".join(str(entry.get("pretty", "")).split())[:160]
+                                     for entry in kept_log if entry.get("verbosity") == "WARNING"
+                                     and entry.get("type") != "PowerpointTemplateWarning"})
         result["counts"] = finish(out, result["record"], language=language, title=title,
                                   svgs=svgs, notes=result["notes"])
         deck = pptxparse.read(out)

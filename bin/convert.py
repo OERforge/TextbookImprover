@@ -4299,7 +4299,8 @@ def deck_pptxs(target, stems, names, base, language, work):
     written, failed, slides, ratios, layouts = [], [], 0, {}, set()
     counts, found = Counter(), {key: [] for key in (
         "cut", "pauses", "inline_images", "languages", "unlinked", "column_blocks", "notes",
-        "notes_unlinked", "not_rendered", "overlaps", "small", "overflow", "warnings")}
+        "notes_unlinked", "notes_math", "notes_tex", "not_rendered", "overlaps", "small",
+        "overflow", "warnings")}
     left_out = Counter()
     for (stem, _intermediate, _level, shape, why), result in results:
         if not result["ok"]:
@@ -4323,7 +4324,7 @@ def deck_pptxs(target, stems, names, base, language, work):
         counts.update(result["counts"])
         record = result["record"]
         for key in ("cut", "pauses", "inline_images", "languages", "unlinked", "column_blocks",
-                    "notes", "notes_unlinked"):
+                    "notes", "notes_unlinked", "notes_math", "notes_tex"):
             if record.get(key):
                 found[key].append((stem, record[key] if key != "cut" else record.get("added")))
         if result["not_rendered"]:
@@ -4419,6 +4420,16 @@ def deck_pptxs(target, stems, names, base, language, work):
             "the PowerPoint files, their words kept (" + named_decks(found["notes_unlinked"])
             + "): Pandoc's writer takes every link out of the notes, and a link to an address "
             "alone is put back.")
+    if found["notes_math"]:
+        say(f"NOTE: {sum(n for _, n in found['notes_math'])} formula(s) in the speaker notes "
+            f"of {len(found['notes_math'])} deck(s) are text in the PowerPoint files, as "
+            "Pandoc's plain writer writes them (" + named_decks(found["notes_math"])
+            + "): Pandoc's PowerPoint writer writes a formula in the notes as its TeX.")
+    if found["notes_tex"]:
+        say(f"NOTE: {sum(n for _, n in found['notes_tex'])} formula(s) in the speaker notes "
+            f"of {len(found['notes_tex'])} deck(s) are their TeX in the PowerPoint files ("
+            + named_decks(found["notes_tex"]) + "): neither Pandoc's PowerPoint writer nor "
+            "its plain writer writes them as text, the notes holding no equation.")
     if found["notes"]:
         say(f"NOTE: slides.notes is omitted for target {target.name}, so the speaker notes of "
             f"{len(found['notes'])} deck(s) are left out of their PowerPoint files too.")

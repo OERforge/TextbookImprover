@@ -79,6 +79,9 @@
 --    writes an a:hlinkClick with no tooltip), so each link on a slide with
 --    a title has its words between marks, its title recorded, for
 --    pptxtarget.py to write as the ScreenTip of the runs between them.
+-- 16. A formula in the speaker notes, which the writer writes as its TeX
+--    there, is written as the Unicode text Pandoc's plain writer makes
+--    of it, where texmath can make it text.
 --
 -- Copyright 2026 Robert Szarka
 --
@@ -111,6 +114,7 @@ local record = {
   pictures = {}, tables = {}, inline_images = 0, pauses = 0, languages = 0,
   retargeted = 0, unlinked = 0, notes = 0, institute = false, cut = 0, added = 0,
   continued = 0, column_blocks = 0, spaces = {}, notes_links = {}, notes_unlinked = 0,
+  notes_math = 0, notes_tex = 0, notes_tex_formulas = {},
   link_titles = {},
 }
 local pictures, tables = 0, 0
@@ -968,6 +972,32 @@ local function titled_link(link)
   return link
 end
 
+-- A formula in the speaker notes as text (16, above): the writer writes
+-- one there as its TeX (paraElemToElements, in Output.hs, at 3.12.1), so
+-- \hat{y}=a+bx is what a screen reader read. Pandoc's plain writer writes
+-- it as Unicode text, ŷ = a + bx, where texmath can; one it can't, a
+-- fraction's, it writes as TeX between dollar signs, and that one is left
+-- to the writer.
+local function notes_math(math)
+  local text = pandoc.write(pandoc.Pandoc({ pandoc.Plain({ math }) }), 'plain',
+                            { wrap_text = 'none' }):gsub('%s+$', '')
+  if text == '' or text:find('$', 1, true) then
+    -- The plain writer warned that it couldn't; the formula's TeX is
+    -- recorded, so the run says so once, as this, and not as a warning
+    -- of the PowerPoint writer's (pptxtarget.build).
+    record.notes_tex = record.notes_tex + 1
+    table.insert(record.notes_tex_formulas, math.text)
+    return nil
+  end
+  -- texmath spaces a relation and an operator with spaces of a third and
+  -- a quarter of an em, and writes a script it has no character for in
+  -- parentheses, x̄_(n): a word's space and x̄_n, as a deck types it, are
+  -- what math.from_text reads back as the formula.
+  text = text:gsub('\226\128[\128-\138]', ' '):gsub('([_^])%((%w+)%)', '%1%2')
+  record.notes_math = record.notes_math + 1
+  return pandoc.Str(text)
+end
+
 -- A metadata value as a list of its entries.
 local function entries(value)
   if value == nil then return pandoc.List({}) end
@@ -992,6 +1022,8 @@ function Pandoc(doc)
   if OMIT_NOTES and meta.notes ~= nil then
     meta.notes = nil
     record.notes = record.notes + 1
+  elseif meta.notes ~= nil then
+    meta.notes = meta.notes:walk({ Math = notes_math })
   end
   doc.meta = meta
   doc = doc:walk({
@@ -1003,11 +1035,11 @@ function Pandoc(doc)
         end
         -- The writer takes a div for notes only when notes is its one
         -- class (isNotesDiv); one with another went on the slide.
+        div = div:walk({ Math = notes_math })
         if #div.classes ~= 1 then
           div.classes = pandoc.List({ 'notes' })
-          return div
         end
-        return nil
+        return div
       end
       if kept(div) then return nil end
       if div.attributes.lang then record.languages = record.languages + 1 end

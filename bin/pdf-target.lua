@@ -1336,6 +1336,54 @@ local function steps_spec(tbl)
   return { table.concat(letters), table.concat(parts, ',') }
 end
 
+-- A table whose source gives its columns no widths, each of its cells one
+-- paragraph or none, none across columns or rows and none holding a
+-- picture, laid out by what LaTeX measures of it where LuaTeX sets it, as
+-- a worked example's steps are (FIT_MACROS' \OERFitStepsTable), every
+-- column one of words: each as wide as its widest paragraph set as one
+-- line, where the table so fits its line, and otherwise wrapping, no
+-- narrower than its longest piece TeX can't break, a formula's included;
+-- where even that's wider than the line, the table's spaces are narrowed
+-- and its type set smaller, as another table's are. The counts give each
+-- column its part of the line on LaTeX's first run, the widths
+-- fit_to_line gave it, or where it gave none, its longest cell's part of
+-- the line; and lay the table out for a TeX without Lua, which sets the
+-- writer's columns. Not a table with nothing to wrap, each cell a word or
+-- a formula TeX can't break by the count, as a table of numbers is, which
+-- a measure would set as the writer's columns do, each as wide as its
+-- widest cell; nor one of more columns than a line has room to space by
+-- the count, which fit_to_line leaves as the writer sets it.
+local function table_spec(tbl, given)
+  if given or tbl.classes:includes('formula-steps') then return nil end
+  local count = #tbl.colspecs
+  local room = LINE - GAP * (count - 1)
+  if count < 1 or room <= 0 then return nil end
+  local need, wraps = {}, false
+  for j = 1, count do need[j] = 1 end
+  for _, row in ipairs(rows_of(tbl)) do
+    if #row.cells > count then return nil end
+    for j, cell in ipairs(row.cells) do
+      if (cell.col_span or 1) > 1 or (cell.row_span or 1) > 1 or not simple_cell(cell) then
+        return nil
+      end
+      local picture = false
+      pandoc.Blocks(cell.contents):walk({ Image = function() picture = true end })
+      if picture then return nil end
+      local length, longest = cell_size(cell)
+      need[j] = math.max(need[j], length)
+      if length > longest then wraps = true end
+    end
+  end
+  if not wraps then return nil end
+  local letters, parts = {}, {}
+  for j = 1, count do
+    local align = tbl.colspecs[j][1]
+    letters[j] = (align == 'AlignRight' and 'r') or (align == 'AlignCenter' and 'c') or 'l'
+    parts[j] = string.format('%.4f', tbl.colspecs[j][2] or math.min(1, need[j] / room))
+  end
+  return { table.concat(letters), table.concat(parts, ',') }
+end
+
 -- 19. A table, or a formula TeX can't break, wider than its line: Pandoc's
 -- writer leaves both as they are, and LaTeX sets them past the line's end,
 -- into the margin or off the paper (College Algebra 2e's first chapter, 28
@@ -1371,7 +1419,8 @@ local sized_table
 
 -- A table not in a table's cell (19) in a group FIT_MACROS fits: \OERFitTable
 -- with its number, its columns, and whether they wrap, or for a worked
--- example's steps LaTeX lays out \OERFitStepsTable (steps_spec), and
+-- example's steps or a table without widths LaTeX lays out
+-- \OERFitStepsTable (steps_spec, table_spec), and
 -- \OERFitTableEnd, which reads the widths longtable recorded. A layout
 -- table's caption, a paragraph before it, is before the group, in the
 -- text's type. A worked example's steps (steps_widths) break no formula
@@ -1425,8 +1474,12 @@ sized_table = function(tbl)
     unquote_cells(body.body)
   end
   unquote_cells(tbl.foot.rows)
+  local given = false
+  for _, spec in ipairs(tbl.colspecs) do
+    if spec[2] ~= nil then given = true end
+  end
   fit_to_line(tbl)
-  local measured = not cell and steps_spec(tbl) or nil
+  local measured = not cell and (steps_spec(tbl) or table_spec(tbl, given)) or nil
   local wraps, count = wrapping(tbl), #tbl.colspecs
   local columns = 0
   for _, body in ipairs(tbl.bodies) do

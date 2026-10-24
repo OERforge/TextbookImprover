@@ -1355,6 +1355,20 @@ FIT_ONE = (
     "blank longer than the line:\n\n<table><colgroup><col style=\"width: 100%\"></colgroup>"
     "<tbody><tr><td>Namelabel " + "_" * 72 + " and Datelabel " + "_" * 72 + "</td></tr></tbody>"
     "</table>\n\n"
+    "A table whose columns have no widths, a fill-in blank in one too long for the line at "
+    "its full length, which a count of its characters fits:\n\n<table><thead><tr>"
+    "<th>Label</th><th>Blank</th></tr></thead><tbody><tr><td>Rowblank</td><td>"
+    + "_" * 52 + "</td></tr></tbody></table>\n\n"
+    "A table whose columns have no widths, a label and its formula in the first column, "
+    "pairs of numbers with fractions in the others, as Precalculus 2e's Table 2 of section "
+    "4.4 has them, which the counts give more of the line than the label:\n\n<table><tbody><tr>"
+    "<td>Wholerow $g(x) = \\log_{2}(x)$</td>"
+    + "".join("<td>$\\left( \\frac{1}{%d},%d \\right)$</td>" % (2 ** i, -i) for i in range(1, 6))
+    + "</tr></tbody></table>\n\n"
+    "A table whose columns have no widths, a sum too long for the line in one:\n\n"
+    "<table><thead><tr><th>Name</th><th>Sum</th></tr></thead><tbody><tr>"
+    "<td>Piecerow, a sum too long for its line</td><td>$S = " + fit_terms(22) + "$</td>"
+    "</tr></tbody></table>\n\n"
     "A layout table too wide for its line, its caption a paragraph before it:\n\n"
     "<table role=\"presentation\"><caption>Laycap, the caption of a layout table too wide for "
     "its line</caption><tbody><tr><td>Laytable</td>"
@@ -1368,6 +1382,10 @@ FIT_ONE = (
     + fit_table("Twentytwo", (FIT_NUMBERS * 2)[:21],
                 head="<tr><th>Degrees of freedom</th>"
                 + "".join("<th>%d</th>" % (i + 1) for i in range(21)) + "</tr>")
+    + "And one with a cell across two columns in its head:\n\n"
+    + fit_table("Twentyspan", (FIT_NUMBERS * 2)[:21],
+                head="<tr><th>Corner words wrapping</th><th colspan=\"2\">1 and 2</th>"
+                + "".join("<th>%d</th>" % (i + 3) for i in range(19)) + "</tr>")
     + "A display formula whose spaces narrowed fit it:\n\n$$\\text{Displayspaced} = x^{2} "
     "\\mspace{54mu} \\text{as a worked example gives a step its reason, here a long one} "
     "\\mspace{54mu} y$$\n\n"
@@ -2758,6 +2776,18 @@ def fit_checks(fit_path, fit_said, fit_source, fit_third):
             runs = blank_runs(fit_path)
         return any(n == count and over and 539.5 <= right <= 540.5 for n, over, right in runs)
 
+    def rows_until(first, stop):
+        """The lines from the one holding first to the last before the one
+        holding stop, on first's page: (baseline, left, right, text)."""
+        for rows in lines.values():
+            texts = [row[3] for row in rows]
+            start = next((i for i, text in enumerate(texts) if first in text), None)
+            if start is not None:
+                end = next((i for i, text in enumerate(texts) if stop in text and i > start),
+                           len(rows))
+                return rows[start:end]
+        return []
+
     glyphs = {}
     for page, baseline, left, right, char in (pdftext.glyph_boxes(fit_path) if reader else []):
         if char.strip():
@@ -3034,6 +3064,27 @@ def fit_checks(fit_path, fit_said, fit_source, fit_third):
          "blank",
          lambda: "Datelabel" not in line_of("Namelabel")
          and at_edge(72, "Datelabel") and within("Datelabel")),
+        # A table whose columns don't wrap, as the writer sets one that fits
+        # its line by the count, has no lines in a cell to draw a blank
+        # shorter on: fitted, it was set at 89 percent of its size, the
+        # blank whole.
+        ("a table whose columns have no widths, a blank too long for its line, keeps its "
+         "type, its columns wrapping, the blank drawn shorter to end within its column",
+         lambda: at("Rowblank", 1) and within("Rowblank") and at_edge(52)),
+        # The counts gave the pairs' columns, their fractions counted a part
+        # after the other, more of the line than the label's, whose formula
+        # broke after its relation, the label and the formula on three lines.
+        ("a table whose columns have no widths is laid out as LaTeX measures it, a "
+         "label's formula on the label's line, beside pairs with fractions",
+         lambda: "log" in line_of("Wholerow") and within("Wholerow")),
+        # Taken whole, as a worked example's step is, the sum set the table at
+        # half its size, and it still ran past the paper's edges.
+        ("and one with a formula too long for the line keeps its type, the formula "
+         "breaking within its column, as TeX breaks a formula in text",
+         lambda: at("Piecerow", 1)
+         and (lambda rows: len(rows) > 1
+              and all(left >= 71.5 and 0 < right <= 540.5 for _, left, right, _ in rows))(
+             rows_until("Piecerow", "A layout table too wide"))),
         # microtype hangs an underscore into the margin, a fifth of its
         # width in Latin Modern, 1.8 points at 12; LuaTeX puts the margin's
         # kern after the penalty a paragraph ends with, and before the node
@@ -3052,16 +3103,27 @@ def fit_checks(fit_path, fit_said, fit_source, fit_third):
          lambda: 0.5 * body - 0.03 < size("Qz") < body - 0.1
          and 18 <= ends("Qz")[0] and 0 < ends("Qz")[1] <= 594
          and (gap_after(fit_path, "Qz") or 0) > 0.5),
-        # Set smaller after the second run, the type's design for 6 points,
-        # wider for its size than the 7-point, leaves the corner's longest
-        # word, "Twentytwo", a little wider than its column, which TeX would
-        # hyphenate.
+        # Laid out as LaTeX measures it, set smaller after the second run, at
+        # 7.3 points (at 6.05 where the counts laid it out), in the type's
+        # design for 7 points, wider for its size than the 12-point it was
+        # measured in, which leaves its first column's longest word,
+        # "Twentytwo", a little wider than its column, short of the next.
         ("a table of 22 columns whose longest words are wider than a line together, its "
          "corner's words wrapping, is set smaller still to keep it a quarter inch inside the "
          "paper's edges, each word whole and clear of the next column",
          lambda: 0.5 * body - 0.03 < size("Twentytwo") < 0.75 * body - 0.1
          and 18 <= ends("Twentytwo")[0] and ends("Twentytwo")[1] <= 594
          and (gap_after(fit_path, "Twentytwo") or 0) > 0.5),
+        # In the columns the writer sets, each as wide as its widest cell, the
+        # corner's words on one line, the table was set at 53 percent of its
+        # size and ran to within 5.2 points of the paper's edges.
+        ("and one with a cell across two columns in its head, which the counts lay out "
+         "instead, its longest words their columns' widths, likewise, its corner's words "
+         "wrapping",
+         lambda: 0.5 * body - 0.03 < size("Twentyspan") < 0.75 * body - 0.1
+         and 18 <= ends("Twentyspan")[0] and ends("Twentyspan")[1] <= 594
+         and (gap_after(fit_path, "Twentyspan") or 0) > 0.5
+         and line_of("Corner") != "" and line_of("Corner words wrapping") == ""),
         # The default page's lines are 18.06 points apart, setspace's 1.25
         # times the class's 14.5.
         ("a display formula set smaller in a paragraph leaves the paragraph's lines before "
@@ -3400,11 +3462,11 @@ def fit_checks(fit_path, fit_said, fit_source, fit_third):
          and "Package TextbookImprover Warning" not in fit_third),
         ("the build says what it fitted, and what's still wider than the text, centered, "
          "and names no line as too wide",
-         lambda: "Fitted 30 table(s) and formula(s) too wide for their lines to them: 7 by "
-         "narrowing their spaces; 23 in smaller type as well, the smallest at 50% of its "
+         lambda: "Fitted 31 table(s) and formula(s) too wide for their lines to them: 7 by "
+         "narrowing their spaces; 24 in smaller type as well, the smallest at 50% of its "
          "size." in fit_said
-         and re.search(r"10 of them, still wider than the text, are centered on the page "
-                       r"\(8 table\(s\), 2 display formula\(s\)\), the widest \d+ points "
+         and re.search(r"11 of them, still wider than the text, are centered on the page "
+                       r"\(9 table\(s\), 2 display formula\(s\)\), the widest \d+ points "
                        r"wider: on one\.", fit_said)
          and "points wider than the text or table column" not in fit_said),
     ]

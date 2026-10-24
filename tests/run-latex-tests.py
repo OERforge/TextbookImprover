@@ -2131,6 +2131,33 @@ def case_latex_target(work):
                               fh.read(), re.M)
         return bool(runs) and runs[-1] == ("0", "0")
 
+    def old_aux():
+        """The target's LaTeX built (builds) and built again, forced, beside
+        an .aux file as one written before a table could have more than
+        one column of words would have it, a worked example's steps' width
+        with no column's number: the build ends without an error. Read with
+        a third argument, as a width with its column's number is, the line
+        took the next one of the .aux for it, and LaTeX ended with Lua's
+        error (unexpected symbol near '\\')."""
+        if not shutil.which("latexmk") or not shutil.which("lualatex"):
+            return skip("no latexmk and lualatex to build the latex target")
+        again = work + "-old-aux"
+        shutil.copytree(out, again)
+        aux = os.path.join(again, "shapes.aux")
+        if not os.path.exists(aux):
+            return False
+        with open(aux, encoding="utf-8") as fh:
+            text, found = re.subn(r"\\OERFitStepsWidth\{(\d+)\}\{\d+\}\{(\d+)\}",
+                                  r"\\OERFitStepsState{\1}{\2}", fh.read())
+        if not found:
+            return False
+        with open(aux, "w", encoding="utf-8") as fh:
+            fh.write(text)
+        done = subprocess.run(["latexmk", "-g", "-lualatex", "-interaction=nonstopmode",
+                               "shapes.tex"], cwd=again, capture_output=True, text=True,
+                              timeout=600)
+        return done.returncode == 0 and os.path.exists(os.path.join(again, "shapes.pdf"))
+
     def read_files_digested():
         """The fitting's macros (latexbuild.FIT_MACROS) in a document of
         LaTeX's own, after a file it inputs with \\input{} before them, as
@@ -2276,6 +2303,9 @@ def case_latex_target(work):
         ("and its LaTeX edited in place, the long sum made short, built again beside them, "
          "nothing is fitted",
          in_place),
+        ("and built again beside an .aux file written before a table could have more than "
+         "one column of words, a step's width with no column's number, it builds",
+         old_aux),
         ("the fitting starts again for an edit to a file input before its macros, or read "
          "with TeX's own \\input",
          read_files_digested),

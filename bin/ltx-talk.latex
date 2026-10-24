@@ -6,7 +6,7 @@ $--
 $-- Variables decks.py sets: aspect-ratio (the slide's shape, width:height),
 $-- frametitle-tag (the heading every slide's title is tagged as if
 $-- ltx-talk's code for a slide's title isn't the code this template knows,
-$-- 0.6.9's: H1, or one level more for each level of sections), math-setup
+$-- 0.6.9's and 0.6.10's: H1, or one level more for each level of sections), math-setup
 $-- (how a formula's MathML is carried), oer-macros (the commands
 $-- pdf-target.lua's output uses, from lib/latexbuild.py), code-spaces (a
 $-- highlighted code block's spaces as characters, latexbuild.CODE_SPACES,
@@ -58,7 +58,7 @@ $oer-macros$
 \ExplSyntaxOn
 % A footnote's text given apart from its mark (\footnotetext, as the
 % writer gives a footnote in a table), and a slide's title's footnote
-% (deck-pdf.lua): ltx-talk 0.6.9 takes the overlay a footnote is shown on
+% (deck-pdf.lua): ltx-talk 0.6.9 and 0.6.10 take the overlay a footnote is shown on
 % from a list \footnote adds to, and with nothing there LaTeX never
 % finished. Its text is shown on the whole frame.
 \seq_if_exist:NT \g__talk_footnote_overlay_seq
@@ -131,7 +131,7 @@ $oer-macros$
 % with none, as for a slide before a deck's first section, H2 in a
 % section, H3 in a subsection, as on the deck's page. ltx-talk tags every
 % slide's title with one tag, frametitle, so its code is given a tag that
-% the sections below change, if the code is 0.6.9's, as this is.
+% the sections below change, if the code is 0.6.9's, as 0.6.10's is.
 \tl_new:N \g__oer_frametitle_tag_tl
 \tl_gset:Nn \g__oer_frametitle_tag_tl { oerframetitle1 }
 % The level of a slide's title, which a heading on the slide is one below.
@@ -185,7 +185,7 @@ $oer-macros$
   }
 % A section's title on a slide of its own, as beamer's and PowerPoint's
 % section slides show it, and the slide's text is the section's heading.
-% ltx-talk 0.6.9 tags a section's heading with no content, its title as
+% ltx-talk 0.6.9 and 0.6.10 tag a section's heading with no content, its title as
 % its actual text, shown on no page; that heading is left out, so a
 % screen reader meets the title once, as the slide's heading. Where
 % ltx-talk has no such heading to leave out, the slide's text is an
@@ -247,7 +247,7 @@ $oer-macros$
 % A heading on a slide, as on the deck's page, #1 levels below the
 % slide's title, deck-pdf.lua working out how many, as the page does: a
 % block's title (a heading below the slide level), which ltx-talk sets as
-% a paragraph, the block's first, if its code is 0.6.9's, as this is, the
+% a paragraph, the block's first, if its code is 0.6.9's, as 0.6.10's is, the
 % level \oerblocklevel at the head of the title gives (a block with no
 % title has none, and no heading); and a heading in a quotation, a list, or
 % a table, which deck-pdf.lua makes a bold paragraph in oerheading. Each

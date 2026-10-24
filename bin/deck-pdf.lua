@@ -8,8 +8,8 @@
 -- below the deepest (decks.renumber).
 --
 -- Speaker notes, Pandoc's ::: notes divs, which the writer writes as
--- \note, are left out: ltx-talk 0.6.9 has no \note, and no notes pages to
--- put them on. The deck's page has them (deck-html.lua).
+-- \note, are left out: ltx-talk has no \note (0.6.9 nor 0.6.10), and no
+-- notes pages to put them on. The deck's page has them (deck-html.lua).
 --
 -- A passage in another language, a span or a div with a lang attribute,
 -- is tagged with its language (ltx-talk.latex's \oerlang and oerlanguage),

@@ -351,7 +351,8 @@ FRAME = re.compile(r"\\begin\{frame\}")
 FRAME_KEYS = {"allowframebreaks": "auto-break=true",
               "t": "vertical-alignment=top", "c": "vertical-alignment=center",
               "b": "vertical-alignment=bottom"}
-# ltx-talk 0.6.9's frame keys: a key=value option naming one of them stays.
+# ltx-talk's frame keys, 0.6.9's and 0.6.10's: a key=value option naming one
+# of them stays.
 TALK_FRAME_KEYS = ("action-spec", "auto-break", "auto-break-coverage", "label", "name",
                    "supplementary-frame", "tag-slides", "vertical-alignment")
 # Columns as the writer opens them (wrapDiv in Writers/LaTeX/Util.hs):
@@ -667,7 +668,7 @@ def svgs_to_pdf(doc, base, out_dir):
 
 
 RERUN = re.compile(r"Warning:.*Rerun", re.I)
-# ltx-talk 0.6.9 stops on an older LaTeX, and loads the font and the math
+# ltx-talk (0.6.9, and 0.6.10) stops on an older LaTeX, and loads the font and the math
 # package below, which TinyTeX doesn't install with it.
 LTX_TALK_LATEX = "2026-06-01"
 LTX_TALK_FILES = (("ltx-talk.cls", "ltx-talk"),

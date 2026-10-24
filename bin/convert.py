@@ -4148,12 +4148,14 @@ def deck_pdfs(target, stems, names, base, language):
             "links work on its last step, not before.")
     if one_level:
         say(f"WARNING: ltx-talk's code for a slide's title isn't the code bin/ltx-talk.latex "
-            f"was written for (ltx-talk 0.6.9), so in {len(one_level)} deck PDF(s) ("
+            f"was written for (ltx-talk 0.6.9, and checked against 0.6.10), so in "
+            f"{len(one_level)} deck PDF(s) ("
             + ", ".join(one_level[:4]) + ") every slide's title is tagged at one level, not "
             "at the level of the sections around it.")
     if untagged_blocks:
         say(f"WARNING: ltx-talk's code for a block isn't the code bin/ltx-talk.latex was "
-            f"written for (ltx-talk 0.6.9), so in {len(untagged_blocks)} deck PDF(s) ("
+            f"written for (ltx-talk 0.6.9, and checked against 0.6.10), so in "
+            f"{len(untagged_blocks)} deck PDF(s) ("
             + ", ".join(untagged_blocks[:4]) + ") a block's title is a paragraph, not a "
             "heading.")
     if unlinked:

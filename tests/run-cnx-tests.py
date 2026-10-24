@@ -1742,7 +1742,13 @@ FORMULA_STEPS = (
     '<m:math><m:mtable displaystyle="true"><m:mtr><m:mtd><m:mfrac><m:mn>1</m:mn>'
     "<m:mn>2</m:mn></m:mfrac></m:mtd><m:mtd><m:mo>=</m:mo></m:mtd><m:mtd><m:mn>0.5</m:mn>"
     "</m:mtd><m:mtd><m:mtext>Divide&#160;one&#160;by&#160;two</m:mtext></m:mtd></m:mtr>"
-    "</m:mtable></m:math></item>"
+    # A reason in lines, a table in the cell, whose fraction is in text
+    # style as that table sets its cells.
+    "<m:mtr><m:mtd/><m:mtd><m:mo>=</m:mo></m:mtd><m:mtd><m:mn>0.5</m:mn></m:mtd><m:mtd>"
+    '<m:mtable><m:mtr><m:mtd><m:mspace width="3em"/><m:mtext>Halve&#160;it,&#160;as&#160;'
+    "</m:mtext><m:mfrac><m:mn>1</m:mn><m:mn>2</m:mn></m:mfrac></m:mtd></m:mtr><m:mtr><m:mtd>"
+    '<m:mspace width="3em"/><m:mtext>of&#160;one</m:mtext></m:mtd></m:mtr></m:mtable>'
+    "</m:mtd></m:mtr></m:mtable></m:math></item>"
     '<item><span class="token">\u24d3</span><newline/>\n<m:math><m:mtable><m:mtr>'
     "<m:mtd><m:mn>2</m:mn><m:mo>\u22c5</m:mo><m:mn>3</m:mn></m:mtd><m:mtd><m:mo>=</m:mo></m:mtd>"
     "<m:mtd><m:mn>3</m:mn><m:mo>\u22c5</m:mo><m:mn>2</m:mn></m:mtd><m:mtd><m:mtable>"
@@ -1811,7 +1817,39 @@ FORMULA_STEPS = (
     '<para id="ledger"><m:math><m:mtable><m:mtr><m:mtd><m:mtext>Office&#160;rental:'
     "</m:mtext></m:mtd><m:mtd><m:mtext>$50,000</m:mtext></m:mtd></m:mtr><m:mtr><m:mtd>"
     "<m:mtext>Law&#160;clerk:</m:mtext></m:mtd><m:mtd><m:mtext>$35,000</m:mtext></m:mtd>"
-    "</m:mtr></m:mtable></m:math></para></section>")
+    "</m:mtr></m:mtable></m:math></para>"
+    # Steps whose integral sign alone is in display style, as OpenStax sets
+    # most of Calculus Volume 2's, in a formula and in a reason; a relation
+    # in display style, and a fraction in a script under it; an accent and
+    # words over an arrow in display style, which it draws the same; a
+    # limit's limits under it, and a large operator by its largeop; and a
+    # fraction in a table in a cell that sets its cells in display style.
+    '<para id="integral"><m:math><m:mtable><m:mtr><m:mtd columnalign="right"><m:mrow>'
+    '<m:mstyle displaystyle="true"><m:mo>∫</m:mo></m:mstyle><m:mfrac><m:mn>1</m:mn>'
+    "<m:mi>x</m:mi></m:mfrac><m:mi>d</m:mi><m:mi>x</m:mi></m:mrow></m:mtd><m:mtd><m:mo>=</m:mo>"
+    '</m:mtd><m:mtd columnalign="left"><m:mrow><m:mi>ln</m:mi><m:mi>x</m:mi></m:mrow></m:mtd>'
+    '<m:mtd columnalign="left"><m:mrow><m:mspace width="2em"/>'
+    '<m:mtext>Integrate&#160;as&#160;</m:mtext><m:mstyle displaystyle="true"><m:mo>∫'
+    "</m:mo></m:mstyle><m:mi>u</m:mi><m:mtext>&#160;is&#160;integrated</m:mtext></m:mrow>"
+    '</m:mtd></m:mtr><m:mtr><m:mtd/><m:mtd><m:mstyle displaystyle="true"><m:mo>=</m:mo>'
+    '</m:mstyle></m:mtd><m:mtd columnalign="left"><m:mstyle displaystyle="true"><m:msup>'
+    "<m:mi>e</m:mi><m:mfrac><m:mi>x</m:mi><m:mn>2</m:mn></m:mfrac></m:msup></m:mstyle></m:mtd>"
+    '<m:mtd columnalign="left"><m:mtext>Write&#160;it&#160;as&#160;a&#160;power</m:mtext>'
+    "</m:mtd></m:mtr><m:mtr><m:mtd/><m:mtd><m:mo>=</m:mo></m:mtd><m:mtd columnalign=\"left\">"
+    '<m:mstyle displaystyle="true"><m:mover accent="true"><m:mi>x</m:mi><m:mo>¯</m:mo>'
+    "</m:mover><m:mover><m:mo>→</m:mo><m:mtext>maps</m:mtext></m:mover><m:mi>y</m:mi>"
+    '</m:mstyle></m:mtd><m:mtd columnalign="left"><m:mtext>Name&#160;the&#160;mean</m:mtext>'
+    '</m:mtd></m:mtr><m:mtr><m:mtd/><m:mtd><m:mo>=</m:mo></m:mtd><m:mtd columnalign="left">'
+    '<m:mstyle displaystyle="true"><m:munder><m:mo>lim</m:mo><m:mrow><m:mi>x</m:mi>'
+    "<m:mo>→</m:mo><m:mn>0</m:mn></m:mrow></m:munder></m:mstyle><m:mi>x</m:mi></m:mtd>"
+    '<m:mtd columnalign="left"><m:mrow><m:mspace width="2em"/>'
+    '<m:mtext>Join&#160;them&#160;as&#160;</m:mtext><m:mstyle displaystyle="true">'
+    '<m:mo largeop="true">⊕</m:mo></m:mstyle><m:mi>v</m:mi></m:mrow></m:mtd></m:mtr>'
+    '<m:mtr><m:mtd/><m:mtd><m:mo>=</m:mo></m:mtd><m:mtd columnalign="left"><m:mrow>'
+    '<m:mi>A</m:mi><m:mo>=</m:mo><m:mtable displaystyle="true"><m:mtr><m:mtd><m:mfrac>'
+    "<m:mn>1</m:mn><m:mn>4</m:mn></m:mfrac></m:mtd></m:mtr></m:mtable></m:mrow></m:mtd>"
+    '<m:mtd columnalign="left"><m:mtext>Write&#160;it&#160;as&#160;a&#160;table</m:mtext>'
+    "</m:mtd></m:mtr></m:mtable></m:math></para></section>")
 
 
 def build_formula_steps(repo):
@@ -1857,6 +1895,11 @@ def case_formula_steps(work):
     def kept(verb):
         """Whether the steps opening with verb are still one formula."""
         return f"<mtext>{verb}\u00a0like" in page and not table_of(verb + " like")
+
+    def marked(held):
+        """Whether what a cell holds has a formula in a span that sets it
+        in display style."""
+        return '<span class="displaystyle"><math' in held
     first = cells(table_of("Combine like terms"))
 
     # Converted, where Pandoc 3.9 or later is installed.
@@ -1896,8 +1939,23 @@ def case_formula_steps(work):
          lambda: (lambda rows: rows[0][0] == ("text-align: left", "Write the sum first:")
                   and "<mspace" not in table_of("Write the sum first:")
                   and "<mn>3</mn>" in rows[0][1][1])(cells(table_of("Write the sum first:")))
-         and table_of("Divide one by two").count('<mstyle displaystyle="true">') == 3
+         and table_of("Divide one by two").count('<mstyle displaystyle="true">') == 5
          and cells(table_of("Divide one by two"))[0][3][0] == "text-align: left"),
+        ("a step's formula set in display style, as the table set its cells or the source "
+         "set its integral sign alone, is in a span that sets it all so, as a formula in a "
+         "reason set so is, where display style changes it, a limit's limits, a large "
+         "operator by its largeop, and a fraction in a table in it that sets its cells so "
+         "too; a relation in display style, a fraction in a script under it, a number, an "
+         "accent, words over an arrow, and a fraction in a reason's lines, a table that sets "
+         "its cells in text style, aren't",
+         lambda: [[marked(held) for _, held in row]
+                  for row in cells(table_of("Divide one by two"))]
+         == [[True, False, False, False], [False, False, False, False]]
+         and [[marked(held) for _, held in row] for row in cells(table_of("Integrate as"))]
+         == [[True, False, False, True], [False, False, False, False],
+             [False, False, False, False], [False, False, True, True],
+             [False, False, True, False]]
+         and page.count('class="displaystyle"') == 6),
         ("a reason broken over lines, a table of one column of them, is its lines' "
          "words, a space between them",
          lambda: cells(table_of("Commutative and associative"))[0][3][1]
@@ -1923,9 +1981,9 @@ def case_formula_steps(work):
          and all(f'id="{name}"' in page and "<mtable" in page.split(f'id="{name}"')[1]
                  .split("</p>")[0] for name in ("side", "values", "short", "chemical",
                                                 "middle", "ledger"))
-         and page.count('class="formula-steps"') == 6),
+         and page.count('class="formula-steps"') == 7),
         ("the run says how many it set as tables",
-         lambda: "6 formula(s) of a worked example's steps or of lines labeled in words"
+         lambda: "7 formula(s) of a worked example's steps or of lines labeled in words"
          in result.stdout),
     ]
     if converted is not None:
@@ -1936,6 +1994,12 @@ def case_formula_steps(work):
                       and "Combine like terms in" in table and table.count("<math") >= 6)(
                  next((m.group(0) for m in re.finditer(r"<table.*?</table>", converted, re.S)
                        if "Combine like terms" in m.group(0)), ""))))
+        checks.append(
+            ("and a formula set in display style is so on its page, its MathML in an mstyle "
+             "that says so, its TeX opening with \\displaystyle; the others aren't",
+             lambda: converted.count('<semantics><mstyle displaystyle="true">') == 6
+             and converted.count('<annotation encoding="application/x-tex">\\displaystyle ')
+             == 6 and 'class="displaystyle"' not in converted))
     return checks
 
 

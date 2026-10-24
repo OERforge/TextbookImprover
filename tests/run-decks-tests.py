@@ -1130,6 +1130,34 @@ def case_lowercase_names(work):
     ]
 
 
+def case_display_style(work):
+    """A formula whose TeX opens with \\displaystyle is in display style in
+    a deck's presentation, as on its page and in its PDF: its MathML in an
+    mstyle that says so, laid out as a display is, a sum's limits under and
+    over it (target-blocks.lua), where another formula's are scripts."""
+    problem = revealjs_ready()
+    if problem:
+        return [("a copy of reveal.js to build the presentations with: " + problem,
+                 lambda: False)]
+    work = folder(work, "targets:\n  pages:\n    format: html\n  show:\n    format: revealjs\n",
+                  decks_given={"one.md": "---\ntitle: One\n---\n\n# First\n\nA sum, "
+                                         "$\\displaystyle \\sum_{i=1}^{n} i$, and one in "
+                                         "a line, $\\sum_{j=1}^{n} j$.\n"})
+    result = convert(work, "--quick")
+    shown = {name: read(os.path.join(work, name, "one.html"))
+             if os.path.exists(os.path.join(work, name, "one.html")) else ""
+             for name in ("pages", "show")}
+    return [
+        ("in the presentation, as on the deck's page, the formula opening with "
+         "\\displaystyle is in an mstyle that says so, its sum's limits under and over it, "
+         "and the other's beside it",
+         lambda: result.returncode == 0 and all(
+             page.count('<semantics><mstyle displaystyle="true"><mrow><munderover>') == 1
+             and len(re.findall(r"<msubsup><mo>(?:&#x2211;|∑)</mo>", page)) == 1
+             for page in shown.values())),
+    ]
+
+
 def case_downsample(work):
     """images.downsample in a deck's presentation, its PowerPoint file,
     and its PDF: each carries the picture scaled down to twice the width
@@ -4700,6 +4728,7 @@ CASES = [("the pieces", case_pieces),
          ("a folder of decks", case_folder),
          ("one alt text on a deck's different pictures", case_shared_alt),
          ("file names lowercased", case_lowercase_names),
+         ("a formula in display style", case_display_style),
          ("pictures scaled down to a set number of times the width shown", case_downsample),
          ("the headings' levels on a page", case_levels),
          ("the implied target, and a book's Markdown", case_implied),

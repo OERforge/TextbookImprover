@@ -21,6 +21,10 @@
 -- exception: it keeps the Div, attributes and all, so a Markdown source
 -- holds the decision and reads back to it.
 --
+-- A formula whose TeX opens with \displaystyle is in display style in the
+-- MathML of a page, an EPUB, and a deck's reveal.js presentation too, but
+-- in a heading or a picture's description, whose text the writer reads.
+--
 -- Copyright 2026 Robert Szarka
 --
 -- This program is free software: you can redistribute it and/or modify
@@ -136,6 +140,49 @@ local function embed(el, block)
   local markup = table.concat(parts) .. '></iframe>'
   if block then return pandoc.RawBlock('html', markup) end
   return pandoc.RawInline('html', markup)
+end
+
+-- A formula in display style, its TeX opening with \displaystyle (as
+-- html-source.lua makes a formula a page marks so): for a page, an EPUB, or
+-- a reveal.js presentation, each written with MathML, its MathML in an
+-- <mstyle displaystyle="true">, which texmath's writer doesn't write,
+-- reading TeX's \displaystyle as nothing, and laid out as texmath lays out
+-- a display, a sum's limits under and over it and a limit's under it, as
+-- TeX's display style sets them, where in a formula in text it sets them
+-- as scripts; in the line still (display="inline"). The rest is written as
+-- the page's writer writes a formula, its TeX, \displaystyle and all, its
+-- annotation, which the HTML reader reads in its place: a page read again
+-- has the formula it was written from.
+local DISPLAYED = '^%s*\\displaystyle%f[^%a]'
+local function display_style(math_)
+  if math_.mathtype ~= 'InlineMath' or not math_.text:match(DISPLAYED) then
+    return nil
+  end
+  local written = pandoc.write(
+    pandoc.Pandoc({ pandoc.Plain({ pandoc.Math('DisplayMath', math_.text) }) }), 'html5',
+    { html_math_method = 'mathml', prefer_ascii = PANDOC_WRITER_OPTIONS.prefer_ascii })
+  local open, body, annotation = written:match(
+    '^%s*(<math[^>]*>%s*<semantics>)(.-)(<annotation encoding="application/x%-tex">.*</math>)%s*$')
+  if not open or not open:find('display="block"', 1, true) then return nil end
+  return pandoc.RawInline('html', open:gsub('display="block"', 'display="inline"', 1)
+    .. '<mstyle displaystyle="true">' .. body .. '</mstyle>' .. annotation)
+end
+
+-- Each such formula in the body, but in a picture's description or a
+-- heading, whose text the writer reads, a raw formula giving it none: a
+-- picture's alt text, and an EPUB's contents and its chapter's title. There
+-- the formula keeps its TeX, \displaystyle and all, in text style.
+local function display_styles(doc)
+  if not (FORMAT:match('html') or FORMAT:match('epub') or FORMAT == 'revealjs') then
+    return nil
+  end
+  doc.blocks = doc.blocks:walk({
+    traverse = 'topdown',
+    Image = function(img) return img, false end,
+    Header = function(h) return h, false end,
+    Math = display_style,
+  })
+  return doc
 end
 
 local function resolve(el)
@@ -262,6 +309,7 @@ return {
   { Pandoc = add_footer },
   { Div = resolve, Span = resolve, Image = remote_image,
     Link = local_file_link },
+  { Pandoc = display_styles },
   { Pandoc = title_heading },
   { Meta = drop_title_block },
 }

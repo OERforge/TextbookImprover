@@ -3100,6 +3100,101 @@ def case_empty_rows(work):
     ]
 
 
+DISPLAY_STYLE = """<!DOCTYPE html><html lang="en"><head><title>Integrals</title></head><body><main><h1>Integrals</h1>
+<p>Marked: <span class="displaystyle"><math xmlns="http://www.w3.org/1998/Math/MathML"><mrow><mo>=</mo><mstyle displaystyle="true"><mo>&#x222B;</mo></mstyle><mfrac><mn>1</mn><mi>x</mi></mfrac><mi>d</mi><mi>x</mi></mrow></math></span> and not: <math xmlns="http://www.w3.org/1998/Math/MathML"><mrow><mo>&#x222B;</mo><mfrac><mn>1</mn><mi>u</mi></mfrac><mi>d</mi><mi>u</mi></mrow></math>.</p>
+</main></body></html>
+"""
+
+
+def case_display_style(work):
+    """A formula in a span of class displaystyle, as the CNX unpacker marks
+    a step OpenStax set in display style, is set so (html-source.lua): its
+    TeX opens with \\displaystyle, in a Markdown target, and its MathML, on
+    a page and in an EPUB, is in an mstyle that says so (target-blocks.lua),
+    which texmath's writer doesn't write; the page read again has the same
+    formula. And a formula whose TeX opens with \\displaystyle in a Markdown
+    source is in display style on its page too, laid out as a display is,
+    a sum's limits under and over it, but in a picture's description or a
+    heading, whose text the writer reads: there it keeps its TeX."""
+    import importlib.util
+    if not (importlib.util.find_spec("html5lib") or importlib.util.find_spec("lxml")):
+        return [("skip: HTML sources need html5lib or lxml", lambda: True)]
+    os.makedirs(work)
+    with open(os.path.join(work, "integrals.html"), "w", encoding="utf-8") as fh:
+        fh.write(DISPLAY_STYLE)
+    with open(os.path.join(work, "sums.md"), "w", encoding="utf-8") as fh:
+        fh.write("# Sums\n\nA sum, $\\displaystyle \\sum_{i=1}^{n} i$, and $\\sum_{j=1}^{n} j$.\n")
+    with open(os.path.join(work, "areas.md"), "w", encoding="utf-8") as fh:
+        fh.write("# Areas\n\n## The area $\\displaystyle \\int_0^1 x\\,dx$\n\nThe curve "
+                 "![The graph of $\\displaystyle y=\\frac{1}{x}$ for positive x](dot.png) "
+                 "is shown.\n")
+    with open(os.path.join(work, "dot.png"), "wb") as fh:
+        fh.write(ONE_PIXEL)
+    with open(os.path.join(work, "project.yaml"), "w") as fh:
+        fh.write("project:\n  title: Integrals\n  identifier: org.example.integrals\n"
+                 "  language: en-US\n  contents:\n    - integrals\n    - sums\n    - areas\n")
+    with open(os.path.join(work, "conversion.yaml"), "w") as fh:
+        fh.write("targets:\n  html:\n    format: html\n  epub:\n    format: epub3\n"
+                 "  md:\n    format: markdown\n")
+    subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
+                   cwd=work, capture_output=True, text=True, stdin=subprocess.DEVNULL)
+    md = read(work, "md", "integrals.md") if exists(work, "md", "integrals.md") else ""
+    page = read(work, "html", "integrals.html") if exists(work, "html", "integrals.html") \
+        else ""
+    sums = read(work, "html", "sums.html") if exists(work, "html", "sums.html") else ""
+    areas = read(work, "html", "areas.html") if exists(work, "html", "areas.html") else ""
+    chapters = areas_chapter = contents = ""
+    books = glob.glob(os.path.join(work, "epub", "*.epub"))
+    if books:
+        with zipfile.ZipFile(books[0]) as book:
+            texts = {name: book.read(name).decode("utf-8") for name in book.namelist()
+                     if name.endswith((".xhtml", ".ncx"))}
+        # The integrals' chapter, the areas', and the contents for a reading
+        # system that reads EPUB 2's.
+        chapters = "".join(text for text in texts.values() if "Marked:" in text)
+        areas_chapter = "".join(text for text in texts.values() if "The curve" in text)
+        contents = "".join(text for name, text in texts.items() if name.endswith(".ncx"))
+    alt = 'alt="The graph of \\displaystyle y=\\frac{1}{x} for positive x"'
+    # The page read again, as a source of its own.
+    again = os.path.join(work, "again")
+    os.makedirs(again)
+    back = ""
+    if page:
+        with open(os.path.join(again, "integrals.html"), "w", encoding="utf-8") as fh:
+            fh.write(page)
+        with open(os.path.join(again, "conversion.yaml"), "w") as fh:
+            fh.write("targets:\n  md:\n    format: markdown\n")
+        subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
+                       cwd=again, capture_output=True, text=True, stdin=subprocess.DEVNULL)
+        back = read(again, "md", "integrals.md") if exists(again, "md", "integrals.md") else ""
+    displayed = (r'<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML">'
+                 r'<semantics><mstyle displaystyle="true"><mrow><mo>=</mo>'
+                 r'<mo>(?:&#x222B;|∫)</mo><mfrac>.*?</mfrac>.*?</mrow></mstyle>'
+                 r'<annotation encoding="application/x-tex">\\displaystyle = \\int')
+    return [
+        ("a formula in a span of class displaystyle is set in display style, its TeX opening "
+         "with \\displaystyle, and the span is gone; another formula isn't",
+         lambda: "Marked: $\\displaystyle = \\int\\frac{1}{x}dx$ and not: $\\int\\frac{1}{u}du$"
+         in md and "displaystyle\"" not in md and "{.displaystyle}" not in md),
+        ("on its page its MathML is in an mstyle that says so, its TeX the annotation, "
+         "\\displaystyle and all, as in an EPUB; the other formula's isn't",
+         lambda: re.search(displayed, page) and re.search(displayed, chapters)
+         and page.count("<mstyle") == 1 and chapters.count("<mstyle") == 1),
+        ("the page read again has the formula it was written from",
+         lambda: "Marked: $\\displaystyle = \\int\\frac{1}{x}dx$" in back),
+        ("a formula whose TeX opens with \\displaystyle in a Markdown source is in display "
+         "style on its page too, a sum's limits under and over it, as TeX sets them, where "
+         "another sum's are its scripts",
+         lambda: sums.count('<semantics><mstyle displaystyle="true"><mrow><munderover>') == 1
+         and sums.count("<mstyle") == 1 and sums.count("<msubsup><mo>&#x2211;</mo>") == 1),
+        ("but one in a picture's description or a heading keeps its TeX, in text style, "
+         "where the writer reads text from it: the picture's alt text on its page and in an "
+         "EPUB, and the heading in the EPUB's contents",
+         lambda: alt in areas and alt in areas_chapter and "<mstyle" not in areas
+         and "The area \\displaystyle \\int_0^1 x\\,dx" in contents),
+    ]
+
+
 def case_asciidoc_layout(work):
     """An AsciiDoc block's width and target don't reach an element XHTML
     forbids them on; an image block's size goes to its image."""
@@ -5020,8 +5115,11 @@ def case_side_by_side(work):
 
 # A worked example's steps as the CNX unpacker lays out a formula of them
 # (lib/cnx/steptables.py's formula_steps): its math cell for cell, the
-# second step's left side empty, and each step's reason in words; and a
-# table of data after them.
+# second step's left side empty, and each step's reason in words, then a
+# fraction marked to be set in display style and the same fraction not;
+# and a table of data after them.
+HALF = ('<math xmlns="http://www.w3.org/1998/Math/MathML"><mfrac><mn>7</mn><mn>2</mn>'
+        "</mfrac></math>")
 STEPS_PAGE = (
     '<!DOCTYPE html><html lang="en"><head><title>Steps</title></head><body><h1>Steps</h1>'
     '<table role="presentation" class="formula-steps"><tbody>' + "".join(
@@ -5035,7 +5133,10 @@ STEPS_PAGE = (
              "Combine like terms, the terms whose variables and powers are the same, "
              "into one term"),
             ("", "<mrow><mn>7</mn><mo>\u22c5</mo><mn>2</mn></mrow>",
-             "Substitute two for x, as the question gives it")))
+             "Substitute two for x, as the question gives it"),
+            ('<span class="displaystyle">' + HALF + "</span>", "<mn>3.5</mn>",
+             "Divide seven by two"),
+            (HALF, "<mn>3.5</mn>", "Divide them again")))
     + "</tbody></table><table><caption>Values</caption><thead><tr><th>Term</th>"
     "<th>Value</th></tr></thead><tbody><tr><td>x</td><td>2</td></tr></tbody></table>"
     "</body></html>")
@@ -5045,10 +5146,10 @@ def case_formula_steps_reflow(work):
     """A worked example's steps the CNX unpacker lays out in a table (class
     formula-steps), in a browser: in a wide window, in their columns, the
     relations one over another, and no rule above or below them, where a
-    table of data has its rules; in a phone's, each step's math on a line,
-    and its words wrapping within the window, where a layout table's cells
-    stack, each on a line of its own. Needs Playwright and its Chromium,
-    and skips without them."""
+    table of data has its rules; a formula marked to be set in display style
+    drawn so; in a phone's, each step's math on a line, and its words wrapping
+    within the window, where a layout table's cells stack, each on a line of
+    its own. Needs Playwright and its Chromium, and skips without them."""
     try:
         from playwright.sync_api import sync_playwright
     except ImportError:
@@ -5058,30 +5159,43 @@ def case_formula_steps_reflow(work):
     with open(os.path.join(work, "steps.html"), "w", encoding="utf-8") as fh:
         fh.write(STEPS_PAGE)
     result = convert(work, "targets:\n  html:\n    format: html\n", fixtures=())
-    boxes, rules = {}, {}
+    boxes, rules, halves = {}, {}, []
     page = os.path.join(work, "html", "steps.html")
     if result.returncode == 0 and os.path.exists(page):
+        play = None
         try:
-            with sync_playwright() as play:
-                browser = play.chromium.launch()
-                for width in (1000, 360):
-                    view = browser.new_page(viewport={"width": width, "height": 800})
-                    view.goto("file://" + page)
-                    rows = view.locator("table.formula-steps tr")
-                    boxes[width] = [[rows.nth(r).locator("td").nth(c).bounding_box()
-                                     for c in range(4)] for r in range(2)]
-                    if width == 1000:
-                        # The rules above and below each table's body.
-                        rules.update(view.evaluate(
-                            "() => Object.fromEntries([...document.querySelectorAll("
-                            "'table')].map(t => [t.className || 'data', ["
-                            "getComputedStyle(t.tBodies[0]).borderTopWidth, "
-                            "getComputedStyle(t.tBodies[0]).borderBottomWidth]]))"))
-                    view.close()
-                browser.close()
+            play = sync_playwright().start()
+            browser = play.chromium.launch()
         except Exception as exc:
+            if play:
+                play.stop()
             print(f"  skip  Playwright's Chromium doesn't start ({str(exc)[:100]})")
             return []
+        # Measured once the browser has started: what isn't on the page
+        # fails the case, where it would have skipped it.
+        try:
+            for width in (1000, 360):
+                view = browser.new_page(viewport={"width": width, "height": 800})
+                view.set_default_timeout(5000)
+                view.goto("file://" + page)
+                rows = view.locator("table.formula-steps tr")
+                boxes[width] = [[rows.nth(r).locator("td").nth(c).bounding_box()
+                                 for c in range(4)] for r in range(2)]
+                if width == 1000:
+                    # The rules above and below each table's body.
+                    rules.update(view.evaluate(
+                        "() => Object.fromEntries([...document.querySelectorAll("
+                        "'table')].map(t => [t.className || 'data', ["
+                        "getComputedStyle(t.tBodies[0]).borderTopWidth, "
+                        "getComputedStyle(t.tBodies[0]).borderBottomWidth]]))"))
+                    # The fraction marked to be set in display style, and the
+                    # one not.
+                    halves = [rows.nth(r).locator("td").nth(0).locator("math")
+                              .bounding_box() for r in (2, 3)]
+                view.close()
+        finally:
+            browser.close()
+            play.stop()
     wide, narrow = boxes.get(1000), boxes.get(360)
 
     def on_a_line(cells):
@@ -5097,6 +5211,10 @@ def case_formula_steps_reflow(work):
          "table of data has both",
          lambda: rules.get("formula-steps") == ["0px", "0px"]
          and rules.get("data") == ["1px", "1px"]),
+        ("a formula marked to be set in display style is drawn larger than the same formula "
+         "in text style, a fraction's parts at full size",
+         lambda: len(halves) == 2 and all(halves)
+         and halves[0]["height"] > 1.2 * halves[1]["height"]),
         ("and in a phone's, a step's math on a line, not a cell to a line, an empty "
          "cell no gap, and its words within the window",
          lambda: narrow and on_a_line(narrow[0][:3]) and on_a_line(narrow[1][1:3])
@@ -7341,6 +7459,8 @@ CASES = [
     ("a markdown target that merges", case_merge),
     ("a Markdown target, round trip", case_markdown_target),
     ("a formula's empty row, through Markdown and AsciiDoc", case_empty_rows),
+    ("a formula in display style, on a page, in an EPUB, and in Markdown",
+     case_display_style),
     ("a nested list that starts past one, through Markdown", case_list_starts),
     ("a mark that ends in a line break, through Markdown and AsciiDoc", case_mark_breaks),
     ("two editions from one directory", case_editions),

@@ -534,6 +534,21 @@ SPACES = re.compile(r"[\s\u200b]+")
 ALIGNMENTS = {"left", "right", "center"}
 # What a formula's text set in a style is in HTML.
 STYLED = {"bold": "strong", "italic": "em", "bold-italic": "strong"}
+# The large operators, which display style draws at their larger size: an
+# integral, a sum, a product, a union, and their kin, as MathML's operator
+# dictionary has them (largeop).
+LARGE_OPERATORS = set("∫∬∭∮∯∰∱∲∳⨋⨌⨍⨎⨏⨐⨑⨒⨓⨔⨕⨖⨗⨘⨙⨚⨛⨜"
+                      "∑∏∐⋀⋁⋂⋃⨀⨁⨂⨃⨄⨅⨆⨉")
+# What makes an element an operator still, holding one alone (MathML's
+# embellished operators).
+EMBELLISHING = ("mrow", "mstyle", "mpadded", "mphantom")
+# What holds scripts, which are in text style or smaller after the first
+# of what it holds, its base.
+SCRIPTED = {"msub", "msup", "msubsup", "munder", "mover", "munderover",
+            "mmultiscripts", "mroot"}
+# The class of a span around a formula OpenStax set in display style, which
+# html-source.lua reads: Pandoc's reader drops MathML's display style.
+DISPLAY_CLASS = "displaystyle"
 
 
 def _name(el):
@@ -703,11 +718,95 @@ def _formula(cell, display, ends):
     return math
 
 
-def _words(cell, td):
+def _large(el):
+    """Whether an mo is a large operator: as its largeop says, or else as
+    LARGE_OPERATORS has it."""
+    if el.get("largeop") in ("true", "false"):
+        return el.get("largeop") == "true"
+    return _text(el).strip() in LARGE_OPERATORS
+
+
+def _style_set(el):
+    """Whether display style draws an element otherwise than text style
+    does: a fraction, its parts at full size; a large operator, at its
+    larger size; and an operator's limits, a sum's or a limit's (a large
+    operator, or one named in letters), under and over it, where text
+    style sets them as scripts. An accent over a letter, a brace under
+    it, or words over an arrow are drawn the same in both."""
+    name = _name(el)
+    if name == "mfrac":
+        return True
+    if name in ("munder", "mover", "munderover"):
+        base = next((k for k in el if _name(k)), None)
+        while base is not None and _name(base) in EMBELLISHING:
+            kids = [k for k in base if _name(k)]
+            base = kids[0] if len(kids) == 1 else None
+        return base is not None and _name(base) == "mo" and (
+            _large(base) or _text(base).strip().isalpha())
+    return name == "mo" and _large(el)
+
+
+def _display_at(el, display):
+    """Whether an element of a cell stands in display style: as the
+    nearest mstyle above it that sets displaystyle says, or, where none
+    is nearer than the cell, as its table sets its cells: the table of
+    steps as display says, and a table in a cell as its own displaystyle
+    says, text style unless it says otherwise."""
+    for above in el.iterancestors():
+        name = _name(above)
+        if name == "mtd":
+            table = next((a for a in above.iterancestors() if _name(a) == "mtable"), None)
+            if any(_name(a) == "mtd" for a in above.iterancestors()):
+                return table is not None and table.get("displaystyle") == "true"
+            return display
+        if name == "mstyle" and above.get("displaystyle") in ("true", "false"):
+            return above.get("displaystyle") == "true"
+    return display
+
+
+def _displayed(pieces, display):
+    """Whether a formula, the pieces of a cell it's made of, holds
+    something display style draws otherwise (_style_set) set in display
+    style: under an mstyle with displaystyle "true", nearer than one with
+    "false", or anywhere where the table set its cells so (display). A
+    fraction's parts, a script, and a table's cells are in text style or
+    smaller, as MathML sets them, whatever the formula's style, unless a
+    table says its cells are in display style. OpenStax sets most such
+    formulas' integral sign alone so, the integrand in text style (54 of
+    the 97 parts in display style in Calculus Volume 2's steps)."""
+    def walk(el, on):
+        name = _name(el)
+        if name == "mstyle" and el.get("displaystyle") in ("true", "false"):
+            on = el.get("displaystyle") == "true"
+        if on and _style_set(el):
+            return True
+        if name == "mfrac":
+            on = False
+        elif name == "mtable":
+            on = el.get("displaystyle") == "true"
+        for at, kid in enumerate(k for k in el if _name(k)):
+            if walk(kid, on and not (at and name in SCRIPTED)):
+                return True
+        return False
+    return any(walk(piece, _display_at(piece, display)) for piece in pieces)
+
+
+def _display_marked(math, parent=None):
+    """A formula in a span of class displaystyle (DISPLAY_CLASS), as a
+    child of parent where one is given: html-source.lua sets it in display
+    style, which MathML's own mstyle can't tell Pandoc's reader."""
+    span = etree.Element("span", {"class": DISPLAY_CLASS}) if parent is None \
+        else etree.SubElement(parent, "span", {"class": DISPLAY_CLASS})
+    span.append(math)
+    return span
+
+
+def _words(cell, td, display=False):
     """A cell of words into an HTML cell: its text, each run of spaces one
     space, which a line can break at, bold or italic where it's set so,
-    its math, each run of it a formula, and punctuation that ends a run of
-    math text."""
+    its math, each run of it a formula, in display style where the source
+    set it so (_displayed, display the table's), and punctuation that ends
+    a run of math text."""
     pieces = _pieces(cell)
     runs = []                       # (text, style) or [math pieces]
     for at, (piece, style) in enumerate(pieces):
@@ -744,11 +843,15 @@ def _words(cell, td):
             else:
                 add(text)
             continue
-        math = etree.SubElement(td, "{%s}math" % MATHML, nsmap={None: MATHML})
+        math = etree.Element("{%s}math" % MATHML, nsmap={None: MATHML})
         for piece in run:
             kept = copy.deepcopy(piece)
             kept.tail = None
             math.append(kept)
+        if _displayed(run, display):
+            _display_marked(math, td)
+        else:
+            td.append(math)
     for el in [td] + list(td):
         if el.text:
             el.text = SPACES.sub(" ", el.text)
@@ -781,7 +884,12 @@ def formula_steps(math):
     holding anything, and the space that set it apart from the words
     beside it left to the table's columns; each cell of words is text,
     left aligned, its spaces ones a line can break at, and its math
-    formulas."""
+    formulas. A formula that holds something display style draws
+    otherwise set in display style, all of it or a part, as the table set
+    its cells or the source set the part (_displayed), is in a span of
+    class displaystyle, which sets it all in display style
+    (html-source.lua): Pandoc's reader drops MathML's display style, and
+    with it the part can't be told from the rest."""
     table = _sole_table(math)
     if table is None or any(table.get(a, "none") != "none"
                             for a in ("rowlines", "columnlines", "frame")):
@@ -839,9 +947,13 @@ def formula_steps(math):
             if j >= len(row) or kinds[i][j][0] == "empty":
                 continue
             if j in wordy:
-                _words(row[j], td)
+                _words(row[j], td, display)
                 continue
             ends = [end for end, side in ((0, -1), (-1, 1))
                     if _beside(kinds[i], j, side) in wordy]
-            td.append(_formula(row[j], display, ends))
+            formula = _formula(row[j], display, ends)
+            if _displayed([k for k in row[j] if _name(k)], display):
+                _display_marked(formula, td)
+            else:
+                td.append(formula)
     return out

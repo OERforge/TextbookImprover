@@ -83,6 +83,15 @@ nothing, which is the test.
     bold">, as Scribble and many editors' exports write them) are Strong
     and Emph, which is what the reader makes of <b> and <i>: a header
     row bold that way is a header row the census can see.
+  - A formula in a span of class displaystyle is set in display style:
+    \displaystyle opens its TeX, and the span goes, where it had nothing
+    else of its own. MathML says so with an <mstyle
+    displaystyle="true">, which the reader drops, texmath reading
+    MathML's display style nowhere; the CNX unpacker marks so a worked
+    example's step OpenStax set in display style. A page this pipeline
+    wrote has the formula's TeX as its MathML's annotation, which the
+    reader reads in the MathML's place, \displaystyle and all
+    (target-blocks.lua writes its mstyle).
   - A table column with nothing in any of its cells (Scribble puts one
     between every pair of real columns, to space them) is dropped; a
     cell spanning it narrows by one. A screen reader announces every
@@ -534,13 +543,35 @@ function Header(h)
   return before
 end
 
+-- A formula in a span of class displaystyle is set in display style:
+-- \displaystyle opens its TeX. True where the span had the class, which
+-- goes.
+local DISPLAY_CLASS = 'displaystyle'
+local DISPLAYED = '^%s*\\displaystyle%f[^%a]'
+local function display_style(span)
+  if not span.classes:includes(DISPLAY_CLASS) then return false end
+  span.content = span.content:walk({ Math = function(math_)
+    if math_.mathtype == 'InlineMath' and not math_.text:match(DISPLAYED) then
+      math_.text = '\\displaystyle ' .. math_.text
+      return math_
+    end
+  end })
+  span.classes = span.classes:filter(function(name) return name ~= DISPLAY_CLASS end)
+  return true
+end
+
 -- An href on something that isn't a link: RDFa on a license statement
 -- (<span href="http://purl.org/dc/dcmitype/Text" rel="dct:type">). The
 -- HTML writer passes it through, and XHTML allows it on no such element.
 function Span(span)
+  local displayed = display_style(span)
+  if displayed and span.identifier == '' and #span.classes == 0
+      and #span.attributes == 0 then
+    return span.content
+  end
   local styled_span = styled(span)
   if styled_span then return styled_span end
-  local changed = drop_obsolete(span)
+  local changed = drop_obsolete(span) or displayed
   if span.attributes.href then
     span.attributes.href = nil
     changed = true

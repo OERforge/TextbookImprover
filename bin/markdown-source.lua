@@ -1037,16 +1037,31 @@ function inline_tex(text)
   return (text:gsub('%[', '\\lbrack '):gsub('%]', '\\rbrack '))
 end
 
+-- An mtable's empty last row, which texmath writes, where the mtable has
+-- one column, as an empty line before the matrix's end (PANDOC-NOTES), as
+-- OpenStax places an evaluation bar's limits and a synthetic division's
+-- divisor: the Markdown reader ends the paragraph at the empty line, so the
+-- formula read back as the text "$|_{", raw TeX, and "}$". The AsciiDoc
+-- target writes a formula in text on one line, \\ and \end{matrix} side by
+-- side, which texmath reads as the row, but LaTeX doesn't, a \\ before a
+-- matrix's end making none, so a PDF from it lost the row. The empty line
+-- is an empty group, {}, which makes the row, as pdf-target.lua writes it
+-- for LaTeX; another empty line, which texmath doesn't write, is a line
+-- end.
+local function empty_rows(text)
+  return (text:gsub('\n%s*\n(%s*\\end%s*{)', '\n{}\n%1'):gsub('\n%s*\n', '\n'))
+end
+
 function Math(m)
   if ADOC and m.mathtype == 'InlineMath' then
-    local text = inline_tex(m.text)
+    local text = inline_tex(empty_rows(m.text))
     if text ~= m.text then return pandoc.Math('InlineMath', text) end
     return nil
   end
   -- Word's equation export ends some equations with a thin space, "\\ ".
   -- Markdown's closing $ may not follow a space, so "$...\\ $" would not
   -- be math at all on the next read. The thin space goes.
-  local text = m.text:gsub('%s*\\%s+$', ''):gsub('%s+$', '')
+  local text = empty_rows(m.text):gsub('%s*\\%s+$', ''):gsub('%s+$', '')
   if text ~= m.text then
     return pandoc.Math(m.mathtype, text)
   end

@@ -3046,6 +3046,56 @@ def case_math_words(work):
     ]
 
 
+EMPTY_ROWS = """<!DOCTYPE html><html lang="en"><head><title>Bars</title></head><body><main><h1>Bars</h1>
+<p>Evaluated, <math xmlns="http://www.w3.org/1998/Math/MathML"><msubsup><mo>|</mo><mtable><mtr><mtd><mn>0</mn></mtd></mtr><mtr><mtd></mtd></mtr></mtable><mtable><mtr><mtd></mtd></mtr><mtr><mtd><mn>2</mn></mtd></mtr></mtable></msubsup></math> is the bar.</p>
+<p>And in a display, <math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><msubsup><mo>|</mo><mtable><mtr><mtd><mn>1</mn></mtd></mtr><mtr><mtd></mtd></mtr></mtable><mtable><mtr><mtd></mtd></mtr><mtr><mtd><mn>3</mn></mtd></mtr></mtable></msubsup></math> too.</p>
+</main></body></html>
+"""
+
+
+def case_empty_rows(work):
+    """An evaluation bar as OpenStax writes it, its limits in mtables of
+    two rows, one empty, which texmath writes with an empty line before the
+    matrix's end: the markdown target writes the empty line as {}, so the
+    page reads back with each formula whole, where the Markdown reader had
+    ended the paragraph there, the formula read back as text and raw TeX;
+    and the asciidoc target, which writes a formula in text on one line,
+    writes the row as {} too, so LaTeX, for which \\\\ before a matrix's end
+    makes no row, sets it."""
+    import importlib.util
+    if not (importlib.util.find_spec("html5lib") or importlib.util.find_spec("lxml")):
+        return [("skip: HTML sources need html5lib or lxml", lambda: True)]
+    os.makedirs(work)
+    with open(os.path.join(work, "bars.html"), "w", encoding="utf-8") as fh:
+        fh.write(EMPTY_ROWS)
+    with open(os.path.join(work, "conversion.yaml"), "w") as fh:
+        fh.write("targets:\n  md:\n    format: markdown\n  adoc:\n    format: asciidoc\n")
+    subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
+                   cwd=work, capture_output=True, text=True, stdin=subprocess.DEVNULL)
+    md = read(work, "md", "bars.md") if exists(work, "md", "bars.md") else ""
+    adoc = read(work, "adoc", "bars.adoc") if exists(work, "adoc", "bars.adoc") else ""
+
+    def back(source, reader):
+        """The MathML Pandoc makes of the target's file read back."""
+        done = subprocess.run(["pandoc", "-f", reader, "-t", "html", "--mathml"], input=source,
+                              capture_output=True, text=True)
+        return done.stdout if done.returncode == 0 else ""
+    md_back, adoc_back = back(md, "markdown"), back(adoc, "asciidoc")
+    rows = r"<mtr>\s*<mtd[^>]*>\s*</mtd>\s*</mtr>"
+    return [
+        ("the markdown target writes an empty row as {}, no empty line in a formula",
+         lambda: md.count("\\\\\n{}\n\\end{matrix}") == 2 and "$|_{" in md
+         and not re.search(r"\\\\\s*\n\s*\n\s*\\end", md)),
+        ("read back, each formula is whole, its empty rows kept",
+         lambda: md_back.count("<math") == 2 and len(re.findall(rows, md_back)) == 4
+         and "$" not in re.sub(r"<[^>]+>", "", md_back)),
+        ("the asciidoc target writes the row as {} in a formula in text and a display, "
+         "which reads back with its empty rows",
+         lambda: "0 \\\\ {} \\end{matrix}" in adoc and "1 \\\\\n{}\n\\end{matrix}" in adoc
+         and adoc_back.count("<math") == 2 and len(re.findall(rows, adoc_back)) == 4),
+    ]
+
+
 def case_asciidoc_layout(work):
     """An AsciiDoc block's width and target don't reach an element XHTML
     forbids them on; an image block's size goes to its image."""
@@ -7078,6 +7128,7 @@ CASES = [
     ("where the book is named", case_book_name),
     ("a markdown target that merges", case_merge),
     ("a Markdown target, round trip", case_markdown_target),
+    ("a formula's empty row, through Markdown and AsciiDoc", case_empty_rows),
     ("a nested list that starts past one, through Markdown", case_list_starts),
     ("two editions from one directory", case_editions),
     ("roles, numbering, and a contents page", case_structure),

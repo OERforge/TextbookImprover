@@ -24,7 +24,13 @@
 --        operand on each end, and a variable: an italic Latin letter, a
 --        Greek letter, or an equation already there. A plain Latin letter
 --        is a word and ends the run, except a single one right before a
---        parenthesis, a function's name (P in P(x < 5)).
+--        parenthesis, a function's name (P in P(x < 5)), and one right
+--        before a sub- or superscript, the letter it's set on (n in n sub 1
+--        = 4), which is a variable there; but a run ending in such a
+--        letter's script that runs into a letter is a formula's (2H sub 2
+--        O), and stays text. A comma and a space end a run outside
+--        parentheses, and a colon and a space one with no variable yet, a
+--        label's (Plan 1:).
 --      - a lone symbol is a Greek letter, or an italic letter carrying a
 --        sub- or superscript (H sub 0). A lone italic letter is left
 --        alone: outside a statistics book it's mostly emphasis, an
@@ -440,11 +446,15 @@ function atoms_of(inlines, italic)
   return out
 end
 
+-- A base is a single plain letter right before a sub- or superscript, the
+-- letter it's set on (n in n sub 1, H in H sub 0): a variable in an
+-- expression, but no symbol on its own, so H sub 2 O stays text.
 local MATHY = {var = true, ivar = true, fn = true, num = true, rel = true,
                op = true, punct = true, script = true, prime = true,
-               sp = true, math = true, percent = true}
+               sp = true, math = true, percent = true, base = true}
 local OPERAND_END = {var = true, ivar = true, num = true, script = true,
-                     prime = true, math = true, percent = true}
+                     prime = true, math = true, percent = true, base = true}
+local VARIABLE = {var = true, ivar = true, math = true, base = true}
 
 local function join_tex(run)
   local out = ''
@@ -486,15 +496,19 @@ end
 local function expression_at(atoms, i)
   -- A comma followed by a space ends a run outside parentheses: in
   -- "mu = 5.51, s = 2.15" there are two equations, in N(5.51, 2.15) one.
-  local j, depth = i, 0
+  -- So does a colon followed by a space in a run with no variable yet, a
+  -- label's: in "Plan 1: n sub 1 = 4" the equation is after the colon, in
+  -- "H sub 0: mu = 34" the colon is the equation's.
+  local j, depth, variable = i, 0, false
   while j <= #atoms and MATHY[atoms[j].kind] do
     local tex = atoms[j].tex
     if tex == '(' or tex == '[' then depth = depth + 1 end
     if tex == ')' or tex == ']' then depth = depth - 1 end
-    if tex == ',' and depth <= 0 and atoms[j + 1] and atoms[j + 1].kind == 'sp'
-        and j > i then
+    if (tex == ',' or (tex == ':' and not variable)) and depth <= 0 and atoms[j + 1]
+        and atoms[j + 1].kind == 'sp' and j > i then
       break
     end
+    if VARIABLE[atoms[j].kind] then variable = true end
     j = j + 1
   end
   local first, last = i, j - 1
@@ -510,12 +524,19 @@ local function expression_at(atoms, i)
   if first > last then return nil, j end
   local run = {table.unpack(atoms, first, last)}
   if not balanced(run) then return nil, j end
+  -- A run that ends in a base's script and runs straight into a letter is
+  -- part of a word, a formula's: 2H sub 2 + O sub 2 = 2H sub 2 O.
+  local k = last
+  while k > first and (atoms[k].kind == 'script' or atoms[k].kind == 'prime') do k = k - 1 end
+  local after = atoms[last + 1]
+  if k < last and atoms[k].kind == 'base' and after and after.text ~= ''
+      and is_letter(utf8.codepoint(after.text, 1)) then
+    return nil, j
+  end
   local has_rel, has_var = false, false
   for _, a in ipairs(run) do
     if a.kind == 'rel' then has_rel = true end
-    if a.kind == 'var' or a.kind == 'ivar' or a.kind == 'math' then
-      has_var = true
-    end
+    if VARIABLE[a.kind] then has_var = true end
   end
   local head, tail = run[1], run[#run]
   local starts = OPERAND_END[head.kind] or head.kind == 'fn' or head.tex == '('
@@ -569,10 +590,12 @@ local function from_text(inlines)
     place(number, paragraph, text, occurrences(upto, text), tex)
   end
   -- A single plain letter right before an opening parenthesis names a
-  -- function.
+  -- function, and one right before a sub- or superscript is its base.
   for k = 1, #atoms - 1 do
     if atoms[k].kind == 'letter' and atoms[k + 1].tex == '(' then
       atoms[k].kind = 'fn'
+    elseif atoms[k].kind == 'letter' and atoms[k + 1].kind == 'script' then
+      atoms[k].kind = 'base'
     end
   end
   local out, changed, i = {}, false, 1

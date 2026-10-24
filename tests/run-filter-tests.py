@@ -963,6 +963,8 @@ Years 1773–1799, ±3%, and 3 < 5 stay text, as do *a* lot, *A* = {1, 2}, the *
 
 Heat: *q* = *m* $\times$ *c* $\times$ Δ*T*.
 
+Plan 1: n~1~ = 4, and H~0~: σ~1~^2^ = σ~2~^2^ as a^2^ + b^2^ = c^2^, but H~2~O and 2H~2~ + O~2~ = 2H~2~O stay text.
+
 Repaired: $\overset{–}{X} – µ + ŷ$ and $H_{Ø}$, but not $\text{pages 1–5}$, and in
 text only a character for a character: $x_{2}\text{···}x_{n} + \text{µ ŷ}$.
 """
@@ -1052,6 +1054,17 @@ def case_math_repair(work):
         ("an equation's command before a Greek letter is set apart from "
          "it, which texmath would read as one command's name",
          lambda: "q=m\\times c\\times \u0394T" in maths),
+        ("a plain letter before a sub- or superscript is the letter it's set on, which an "
+         "expression takes: H sub 0's H, and a's, b's, and c's",
+         lambda: "H_{0}:\u03c3_{1}^{2}=\u03c3_{2}^{2}" in maths
+         and "a^{2}+b^{2}=c^{2}" in maths),
+        ("a colon and a space end a label's run before the equation after it, a run with "
+         "no variable yet, and an equation keeps its own",
+         lambda: "n_{1}=4" in maths and not any(m.startswith("1:") for m in maths)
+         and "H_{0}:\u03bc\\neq 34" in maths),
+        ("a formula whose script runs into a letter stays text, and so does one such letter "
+         "with its script",
+         lambda: not any("H_{2}" in m or "O_{2}" in m for m in maths)),
         ("math.from_text off makes no equation of text",
          lambda: len(off_text) == 6),
         ("the keep sidecar leaves its expression and its symbol text, and "

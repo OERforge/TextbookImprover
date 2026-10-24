@@ -772,7 +772,8 @@ def case_white_marks(work):
     with open(os.path.join(work, "marks.html"), "w", encoding="utf-8") as fh:
         fh.write("<!DOCTYPE html>\n<html lang=\"en\"><head><title>Marks</title></head><body>\n"
                  "<h1>Marks</h1>\n"
-                 "<p>Here S<sub>mb</sub><sub><em> </em></sub>= 0, and x<sup>&nbsp;</sup>y.</p>\n"
+                 "<p>Here S<sub>mb</sub><sub><em> </em></sub>is 0, and x<sup>&nbsp;</sup>y.</p>\n"
+                 "<p>So S<sub>mb</sub><sub><em> </em></sub>= 0 there.</p>\n"
                  "<p>As shown in<a href=\"https://example.org/x\"> </a>Figure 2, and "
                  "<em><a href=\"https://example.org/y\"> </a></em> Figure 3.</p>\n"
                  "<p>And A<sub><em>SX</em><em> </em></sub>is 0.41, and "
@@ -798,13 +799,16 @@ def case_white_marks(work):
     return [
         ("a subscript holding only a space is the space alone, on the page",
          lambda: result.returncode == 0
-         and "S<sub>mb</sub> = 0" in page and "<sub></sub>" not in page
+         and "S<sub>mb</sub> is 0" in page and "<sub></sub>" not in page
          and "<sub><em></em></sub>" not in page and "<sup>" not in page
          and "<em></em>" not in page),
+        ("and such a subscript before = 0 is in the formula, math.from_text taking the "
+         "plain letter the subscript is set on",
+         lambda: '<annotation encoding="application/x-tex">S_{mb}=0</annotation>' in page),
         ("and in the Word file one space, where Pandoc's writer gave its two a run each, "
          "and one where a link held only a space, inside emphasis or not, or a subscript "
          "ended in an emphasized one, inside bold or not",
-         lambda: "Here Smb = 0, and x\u00a0y." in said
+         lambda: "Here Smb is 0, and x\u00a0y." in said
          and "As shown in Figure 2, and Figure 3." in said
          and "And ASX is 0.41, and BSX is 0.5." in said),
         ("no mark is emptied to make two spaces one: a span with a style holding only a "

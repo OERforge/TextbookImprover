@@ -324,7 +324,9 @@ keys:
           <, >, and the rest) between operands, with at least one variable,
           an italic letter or a Greek one (mu = 34, P(x < 160) = 0.3); and
           a Greek letter, or an italic letter with a sub- or superscript,
-          standing alone (mu, H sub 0). A plain letter is a word, and a
+          standing alone (mu, H sub 0). A plain letter is a word, but before
+          a parenthesis, a function's name (P(x < 160)), or before a sub- or
+          superscript, the letter it's set on (n in n sub 1 = 4), and a
           lone italic letter is left alone, since outside math it's mostly
           emphasis. Conservative on purpose: text becomes math only when
           it's clearly math.

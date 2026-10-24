@@ -532,9 +532,75 @@ local function escape_text(text)
   return changed and out or nil
 end
 
-function Inlines(inlines)
-  if not ADOC then return nil end
+-- A line break at the end of emphasis, bold, underline, strikethrough, a
+-- superscript, or a subscript, and in AsciiDoc small caps, moved to just
+-- after it: Pandoc's Markdown writer writes the break's backslash before
+-- the closing mark (*for any\*), which its reader takes for an escaped
+-- asterisk, so the mark is lost and its asterisks are text, and its
+-- AsciiDoc writer writes its " +" there (__for any +__, [smallcaps]#for
+-- any +#), where it isn't at the end of a line, so it's a plus and not a
+-- break. Both writers put a mark's closing delimiter before the white
+-- space it ends with and after everything else (delimited, in
+-- Writers/Shared.hs), the break's newline being white space and its
+-- backslash or " +" not. After the mark, each writer writes what its
+-- reader takes back (measured, Pandoc 3.12.1, in its markdown, gfm,
+-- commonmark, and asciidoc writers). A mark inside a mark is done first,
+-- so the break comes out of both; spaces before the break come out with
+-- it, and a mark holding nothing but the break is its break. A span with
+-- no attributes, which the writers write as its words, gives up a break
+-- at its end too, so one at a mark's end comes out of both
+-- (<em><span>for any<br></span></em>, as the HTML reader reads it). A
+-- break anywhere else is left: in Markdown one inside a mark or at its
+-- start reads back, as does one at the end of a span with attributes,
+-- small caps (which Markdown writes as a span), a link, or quotation
+-- marks, but not one inside a superscript or a subscript, which holds
+-- none; in AsciiDoc one inside a mark reads back, but not one at the start
+-- of a mark after a space, whose opening delimiter is then followed by
+-- the " +"'s space, nor one inside a superscript or a subscript (measured
+-- likewise).
+local BREAK_MARKS = { Emph = true, Strong = true, Underline = true, Strikeout = true,
+                      Superscript = true, Subscript = true, SmallCaps = ADOC }
+local TRAILING = { LineBreak = true, Space = true, SoftBreak = true }
+
+local function bare_span(el)
+  return el.t == 'Span' and el.identifier == '' and #el.classes == 0
+    and #el.attributes == 0
+end
+
+local function breaks_out(inlines)
   local changed = false
+  local out = pandoc.Inlines({})
+  for _, el in ipairs(inlines) do
+    local content = (BREAK_MARKS[el.t] or bare_span(el)) and el.content
+    local last = content and #content or 0
+    while last > 0 and TRAILING[content[last].t] do last = last - 1 end
+    local broken = false
+    if content then
+      for k = last + 1, #content do
+        if content[k].t == 'LineBreak' then broken = true end
+      end
+    end
+    if broken then
+      local kept = pandoc.Inlines({})
+      for k = 1, last do kept:insert(content[k]) end
+      if #kept > 0 then
+        el.content = kept
+        out:insert(el)
+      end
+      for k = last + 1, #content do out:insert(content[k]) end
+      changed = true
+    else
+      out:insert(el)
+    end
+  end
+  return changed and out or nil
+end
+
+function Inlines(inlines)
+  local moved = breaks_out(inlines)
+  if not ADOC then return moved end
+  inlines = moved or inlines
+  local changed = moved ~= nil
   local out = pandoc.Inlines({})
   local line_start = true
   for i, el in ipairs(inlines) do

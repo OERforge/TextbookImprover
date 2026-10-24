@@ -6873,6 +6873,97 @@ def case_list_starts(work):
     ]
 
 
+# Marks that end in a line break, which Pandoc's Markdown writer closes
+# after the break's backslash and its AsciiDoc writer after its " +", where
+# their readers take the mark for text; and a span's, which both write so
+# that their readers take it back.
+MARK_BREAKS = """\
+# Marks and Breaks
+
+Before *for any\\
+*after, **bold then\\
+**after, ***both\\
+***after, ~~struck\\
+~~out, [under\\
+]{.underline}lined, [small\\
+]{.smallcaps}caps, and [a span\\
+]{lang=fr}here.
+"""
+
+
+def case_mark_breaks(work):
+    """A mark that ends in a line break, through a Markdown target and an
+    AsciiDoc target and back: each mark closed before the break, so its
+    reader takes it back, and a span's break left inside it."""
+    first = os.path.join(work, "first")
+    os.makedirs(first)
+    with open(os.path.join(first, "marks.md"), "w", encoding="utf-8") as fh:
+        fh.write(MARK_BREAKS)
+    result = convert(first, "targets:\n  src:\n    format: markdown\n"
+                            "  adoc:\n    format: asciidoc\n", fixtures=())
+    md = read(first, "src", "marks.md") if exists(first, "src", "marks.md") else ""
+    adoc = read(first, "adoc", "marks.adoc") if exists(first, "adoc", "marks.adoc") else ""
+    # A span with no attributes ending a mark, as Pandoc's HTML reader reads
+    # <em><span>...<br></span></em>.
+    page = os.path.join(work, "page")
+    os.makedirs(page)
+    with open(os.path.join(page, "spans.html"), "w", encoding="utf-8") as fh:
+        fh.write("<!DOCTYPE html>\n<html lang=\"en\"><head><title>Spans</title></head><body>\n"
+                 "<h1>Spans</h1>\n<p>Before <em><span>for any<br></span></em>after.</p>\n"
+                 "</body></html>\n")
+    spans = convert(page, "targets:\n  src:\n    format: markdown\n"
+                          "  adoc:\n    format: asciidoc\n", fixtures=())
+    spans_md = read(page, "src", "spans.md") if exists(page, "src", "spans.md") else ""
+    spans_adoc = read(page, "adoc", "spans.adoc") if exists(page, "adoc", "spans.adoc") else ""
+    pages = {}
+    for name, sub, written in (("from-md", "src", "marks.md"), ("from-adoc", "adoc",
+                                                                "marks.adoc")):
+        folder = os.path.join(work, name)
+        os.makedirs(folder)
+        if exists(first, sub, written):
+            shutil.copy(os.path.join(first, sub, written), folder)
+        shutil.copy(os.path.join(first, "project.yaml"), folder)
+        with open(os.path.join(folder, "conversion.yaml"), "w") as fh:
+            fh.write("targets:\n  html:\n    format: html\n")
+        run_in(folder)
+        pages[name] = read(folder, "html", "marks.html") if exists(folder, "html",
+                                                                     "marks.html") else ""
+
+    def marked_again(page, *marks):
+        body = re.sub(r"\s+", " ", page)
+        return all(re.search(r"<%s>%s</%s>(?:</\w+>)*<br ?/?> ?\w" % (tag, words, tag), body)
+                   for tag, words in marks)
+    return [
+        ("the Markdown target closes each mark before its line break, a mark in a mark too, "
+         "where Pandoc's writer closes it after the break's backslash; a span's break stays "
+         "inside it, small caps' too, which it writes as a span",
+         lambda: result.returncode == 0
+         and all(s in md for s in ("*for any*\\\n", "**bold then**\\\n", "***both***\\\n",
+                                   "~~struck~~\\\n", "[under]{.underline}\\\n"))
+         and all(s in md for s in ('[small\\\n]{.smallcaps}', '[a span\\\n]{lang="fr"}'))),
+        ("and one at the end of a span with no attributes that ends a mark, from an HTML page",
+         lambda: spans.returncode == 0 and "Before *for any*\\\nafter." in spans_md
+         and "Before _for any_ +\nafter." in spans_adoc),
+        ("and the AsciiDoc target before its \" +\", where Pandoc's writer puts that inside it",
+         lambda: all(s in adoc for s in ("_for any_ +\n", "*bold then* +\n",
+                                         "[line-through]#struck# +\n",
+                                         "[.underline]#under# +\n",
+                                         "[smallcaps]#small# +\n"))),
+        ("read back, each is its mark again, the line break after it, and none of their "
+         "characters is text",
+         lambda: marked_again(pages["from-md"], ("em", "for any"), ("strong", "bold then"),
+                              ("em", "both"), ("del", "struck"), ("u", "under"))
+         and marked_again(pages["from-adoc"], ("em", "for any"), ("strong", "bold then"),
+                          ("em", "both"))
+         and re.search(r'<span class="smallcaps">small</span><br ?/?> ?\w',
+                       re.sub(r"\s+", " ", pages["from-adoc"]))
+         and re.search(r'<span class="smallcaps">small<br ?/?> ?</span>\w',
+                       re.sub(r"\s+", " ", pages["from-md"]))
+         and not re.search(r"\*\*?for|any\*|then\*|both\*|~~|\+</|then \+", pages["from-md"]
+                           + pages["from-adoc"])),
+    ]
+
+
 MERGE_BOOK = {
     "ch1.md": ("# Chapter One\n\nIntro.\n\n## First\n\nA. See "
                "[Second](ch1--second.html) and [Two](ch2.html).\n\n"
@@ -7145,6 +7236,7 @@ CASES = [
     ("a Markdown target, round trip", case_markdown_target),
     ("a formula's empty row, through Markdown and AsciiDoc", case_empty_rows),
     ("a nested list that starts past one, through Markdown", case_list_starts),
+    ("a mark that ends in a line break, through Markdown and AsciiDoc", case_mark_breaks),
     ("two editions from one directory", case_editions),
     ("roles, numbering, and a contents page", case_structure),
     ("footnote numbering and placement", case_notes),

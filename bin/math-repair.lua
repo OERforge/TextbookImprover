@@ -598,6 +598,14 @@ local function expression_at(atoms, i)
       and is_letter(utf8.codepoint(after.text, 1)) then
     return nil, j
   end
+  -- A run followed straight away by an opening parenthesis or a letter
+  -- stopped short of the rest of its formula, whose words it can't take:
+  -- F = MS(Factor)/MS(Error) isn't F = MS, then text.
+  local next_atom = atoms[last + 1]
+  if next_atom and (next_atom.tex == '(' or (next_atom.kind ~= 'sp' and next_atom.text ~= ''
+      and is_letter(utf8.codepoint(next_atom.text, 1)))) then
+    return nil, j
+  end
   local has_rel, has_var = false, false
   for _, a in ipairs(run) do
     if a.kind == 'rel' then has_rel = true end

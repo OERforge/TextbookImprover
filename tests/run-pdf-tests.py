@@ -1143,6 +1143,14 @@ def fit_terms(count):
 TRIG_TERMS = " ".join(["\\sin x", "\\cos x", "\\tan x", "\\cot x", "\\sec x", "\\csc x"] * 2)
 
 
+# A row of a matrix of ten columns, amsmath's most, 451 points wide in the
+# default page's type; and eighteen numbers, 683 points wide summed.
+MATRIX_ROW = ["123456", "234567", "345678", "456789", "567891", "678912", "789123", "891234",
+              "912345", "102345"]
+FIT_NUMBERS_STEPS = ["1111", "2222", "3333", "4444", "5555", "6666", "7777", "8888", "9999", "1212",
+                     "2323", "3434", "4545", "5656", "6767", "7878", "8989", "9191"]
+
+
 def fit_steps(first, relation, second, reason):
     """A worked example's steps as the CNX unpacker lays them out, a layout
     table of the class formula-steps: first, relation, and second, and the
@@ -1284,6 +1292,68 @@ FIT_ONE = (
     + "Steps whose reason's longest word alone is longer than a line, as counted:\n\n"
     + fit_steps("x + 1", "=", "y", "Longestwordofthisreasonlongerthanalineofsixtyonecharacterscounted "
                 "is a word.")
+    + "Steps the counts set across the line, which fit it at their own width as LaTeX sets "
+    "them:\n\n"
+    + fit_steps("1111 + 2222", "=", "3333", "Ownwidth: one line of words beside the math, at its width.")
+    + "Steps a little too wide at their own width, which narrowed spaces would fit:\n\n"
+    + fit_steps("1112 + 2223", "=", "3335",
+                "Nearwidth: a line of words beside the math, a little too wide for it.")
+    + "Steps too wide at their own width, their reason wrapping beside their formulas:\n\n"
+    + fit_steps("1515 + 2626 + 3737", "=", "4848 + 5959 + 6161 + 7272 + 8383",
+                "Mathwidth: collect the terms, and the equation holds as it did, in words enough to "
+                "wrap in their column beside the math.")
+    + "Steps too wide even with their reason as narrow as its longest word:\n\n"
+    + fit_steps("1313 + \\frac{2424}{3535} + \\frac{4646}{5757} + \\frac{1212}{3434} + "
+                "\\frac{5656}{7878}", "=",
+                "\\frac{68686}{7979} + \\frac{8080}{9191} + 1414 + \\frac{2323}{4545} + "
+                "\\frac{6767}{8989}",
+                "Smallsteps: Unbreakablelongestwordofthsreasonhere is its longest word.")
+    + "Steps whose reason's longest word is wider than its count, which narrowed spaces fit:\n\n"
+    + fit_steps("1918 + 2827 + 3736 + 4645", "=", "5554",
+                "Wordwide: " + "W" * 22 + " is the longest word here.")
+    + "Steps whose reason holds a fill-in blank longer than its column:\n\n"
+    + fit_steps("1111 + 2222", "=", "3333",
+                "Blankreason: fill in the " + "_" * 60 + " here.")
+    + "Steps whose reason's lines are broken where it says, each shorter than the part of the "
+    "line the counts give it:\n\n"
+    + fit_steps("1111 + 2222", "=", "3333", "Breakreason:<br>a line under it.")
+    + "Steps whose reason's formula, whole, is wider than the line beside their formulas:\n\n"
+    + fit_steps("x", "=", "y", "Mathpiece: use $" + " + ".join("a_{%d}" % i for i in range(1, 17))
+                + "$ on it.")
+    + "Steps whose reason holds a matrix wider than the line beside their formulas:\n\n"
+    + fit_steps("x", "=", "y", "Matrixreason: use $\\begin{matrix} " + " & ".join(MATRIX_ROW)
+                + " \\end{matrix}$ here.")
+    + "Steps too wide for the paper even at three quarters of their type:\n\n"
+    + fit_steps(" + ".join(FIT_NUMBERS_STEPS), "=", "1111", "Paperwide: add them.")
+    + "Steps whose words are in two columns, set as the counts lay them out:\n\n"
+    '<table role="presentation" class="formula-steps"><tr><td>$x$</td><td>$=$</td>'
+    "<td>Twowords: a column</td><td>of words beside it.</td></tr><tr><td></td><td>$=$</td>"
+    "<td>$29738$</td><td>Add them.</td></tr></table>\n\n"
+    + "Steps whose formula is spaced with an empty matrix, as OpenStax spaces one:\n\n"
+    + fit_steps("x + 1", "=", "2\\begin{matrix} & & & \\end{matrix}",
+                "Bracedsteps: take one from each side.")
+    + "Steps whose cells in a column differ in width, each column aligned as they align it:\n\n"
+    '<table role="presentation" class="formula-steps"><tr>'
+    '<td style="text-align: right">$6031 + 7042$</td><td style="text-align: center">$=$</td>'
+    '<td style="text-align: left">$13073$</td><td style="text-align: left">Alignone: add.</td>'
+    '</tr><tr><td style="text-align: right">$58$</td>'
+    '<td style="text-align: center">$\\Longrightarrow$</td>'
+    '<td style="text-align: left">$1000000000003$</td>'
+    '<td style="text-align: left">Aligntwo: compare.</td></tr></table>\n\n'
+    + "Steps whose longtable has a column more than their group says, as an edit of the latex "
+    "target's LaTeX can leave them:\n\n"
+    "```{=latex}\n"
+    "{\\OERFitStepsTable{999}{4}{rcll}{m,m,m,0.3000}\\binoppenalty=10000 \\relpenalty=10000\n"
+    "{\\ifdefined\\tagpdfsetup\\tagpdfsetup{table/tagging=div}\\fi\n"
+    "{\\def\\LTcaptype{none}\n"
+    "\\begin{longtable}[]{@{}rclll@{}}\n"
+    "\\toprule\\noalign{}\n\\endhead\n\\bottomrule\\noalign{}\n\\endlastfoot\n"
+    "\\(4321\\) & \\(=\\) & \\(1234\\) & Editedspec: a column & and another. \\\\\n"
+    "\\end{longtable}\n}\n}\n\\OERFitTableEnd{999}}\n"
+    "```\n\n"
+    + "Steps that float, which the writer sets as a tabular in a table float:\n\n"
+    + fit_steps("1111 + 2222", "=", "3333", "Floatsteps: add them.").replace(
+        'class="formula-steps"', 'class="formula-steps float"')
     + "A worked example's steps, an array in text:\n\n"
     "1. $\\begin{array}{lll} \\text{Arraysmaller} & = & " + fit_terms(11)
     + " \\\\ & = & b \\end{array}$\n")
@@ -2461,6 +2531,27 @@ def fit_checks(fit_path, fit_said, fit_source, fit_third):
         left, right = ends(words)
         return left >= 71.5 and 0 < right <= 540.5
 
+    glyphs = {}
+    for page, baseline, left, right, char in (pdftext.glyph_boxes(fit_path) if reader else []):
+        if char.strip():
+            glyphs.setdefault((page, baseline), []).append((left, right, char))
+
+    def span(words, part):
+        """(left, right) of the glyphs of part, its first on the line holding
+        words, spaces aside, or None."""
+        for boxes in glyphs.values():
+            boxes = sorted(boxes)
+            text, starts = "", []
+            for box in boxes:
+                starts.append(len(text))
+                text += box[2]
+            if words in text and part in text:
+                i = text.index(part)
+                first = max(k for k, start in enumerate(starts) if start <= i)
+                last = max(k for k, start in enumerate(starts) if start <= i + len(part) - 1)
+                return boxes[first][0], boxes[last][1]
+        return None
+
     def whole(first, second):
         """Whether a line holds both, two fractions' numerators in one
         formula, unbroken."""
@@ -2604,11 +2695,13 @@ def fit_checks(fit_path, fit_said, fit_source, fit_third):
          lambda: 0.75 * body < size("Tagwide") < body - 0.1
          and "(1.2)" in line_of("Tagwide") and ends("Tagwide")[0] >= 71.5
          and ends("Tagwide")[1] <= 541.5),
-        # pdf-target.lua's steps_widths: steps whose formulas and longest
-        # word it counted wider than a line had been set as any other table,
-        # their columns of math narrower than their formulas; a formula
-        # wider than its column had been broken over its lines, which
-        # FIT_MACROS doesn't measure; a relation TeX names, as \leq,
+        # pdf-target.lua's steps_widths, the counts, read from the LaTeX:
+        # each column's share of the line as its \real{}, which a TeX
+        # without Lua sets, and LuaTeX's first run gives the words theirs
+        # of (the PDF's steps are laid out by LaTeX's measure, below).
+        # Steps whose formulas and longest word it counted wider than a
+        # line had been set as any other table, their columns of math
+        # narrower than their formulas; a relation TeX names, as \leq,
         # counted as a symbol is, as wide as an x, would leave its column
         # narrower than it; a formula in a reason, which doesn't break
         # either, counted by its longest piece, would leave the reason's
@@ -2616,22 +2709,14 @@ def fit_checks(fit_path, fit_said, fit_source, fit_third):
         # column of math is given (MATH_ROOM), narrower than a face larger
         # than Latin Modern sets it; and steps whose longest word alone
         # fills the line, shared as the rest are, would be given columns of
-        # less than no width.
-        ("a worked example's steps whose formulas and reason's longest word the filter "
-         "counts wider than a line, which LaTeX finds fit it, keep each formula whole, in the "
-         "text's type",
-         lambda: whole("2222", "4444") and whole("66666", "8888")
-         and at("Antidisestablishmentarianism", 1)),
-        ("and steps whose reason's longest word leaves their formulas less of the line than "
-         "they're wide keep them whole, set smaller to fit their columns",
-         lambda: whole("2424", "4646") and whole("68686", "8080")
-         and 0.75 * body < size("Unbreakableformulasreasonlongestword") < body - 0.1),
-        # A reason's longest a word, not a formula, the line is shared as
-        # above whatever the formulas are left: the word's column as wide
-        # as the word, the formulas sharing what's left by their counts,
-        # their part found again once the word's column is held at it.
-        ("and their reason's column is as wide as the word, the formulas sharing what's left "
-         "by their counts",
+        # less than no width. A reason's longest a word, not a formula, the
+        # line is shared as above whatever the formulas are left: the
+        # word's column as wide as the word, the formulas sharing what's
+        # left by their counts, their part found again once the word's
+        # column is held at it.
+        ("in the LaTeX, the counts give a worked example's steps whose reason's longest word leaves their formulas "
+         "less of the line than they're wide a column of words as wide as the word, the "
+         "formulas sharing what's left by their counts",
          lambda: (lambda reals, w: len(reals) == 4 and len(w) == 3 and all(
              abs(reals[j] - w[j] * (61 - 36) / sum(w) / 61) < 0.0001 for j in range(3))
              and abs(reals[3] - 36 / 61) < 0.0001)(
@@ -2639,14 +2724,21 @@ def fit_checks(fit_path, fit_said, fit_source, fit_third):
                                            head_of(fit_source, "Unbreakableformulas"))],
              formula_widths(["1313 + \\frac{2424}{3535} + \\frac{4646}{5757}", "=",
                              "\\frac{68686}{7979} + \\frac{8080}{9191} + 1414"]))),
-        ("and steps whose relations are TeX's commands, set across the line, have room for "
-         "them in the text's type",
-         lambda: at("Leqreason", 1)),
-        ("and steps whose reason holds a formula wider than the line leaves their words "
-         "give it room, whole, in the text's type",
-         lambda: at("Reasonmath", 1) and whole("2929", "4242")),
-        ("the reason's column a tenth wider than its formula as counted, as a column of math "
-         "is, and the formulas sharing what's left by their counts",
+        # Its relation counted as an equals sign is, an operator's or a
+        # relation's width, where a symbol's would leave its column too
+        # narrow.
+        ("and steps whose relations are TeX's commands, set across the line, each column of "
+         "formulas its count and a tenth more, a relation TeX names as wide as an equals sign, "
+         "the words what's left",
+         lambda: (lambda reals, w: len(reals) == 4 and len(w) == 3 and all(
+             abs(reals[j] - 1.1 * w[j] / 61) < 0.0001 for j in range(3))
+             and abs(reals[3] - (61 - 1.1 * sum(w)) / 61) < 0.0001)(
+             [float(r) for r in re.findall(r"\\real\{([\d.]+)\}",
+                                           head_of(fit_source, "Leqreason"))],
+             formula_widths(["1515 + \\frac{2626}{3737}", "=", "\\frac{48484}{5959} + 6161"]))),
+        ("and steps whose reason holds a formula wider than the line leaves their words a "
+         "column for the reason a tenth wider than its formula as counted, as a column of math "
+         "is, the formulas sharing what's left by their counts",
          lambda: (lambda reals, w: len(reals) == 4 and len(w) == 4 and all(
              abs(reals[j] - share / 61) < 0.0001 for j, share in enumerate(
                  [1.1 * w[k] * (61 - 1.1 * w[3]) / (1.1 * sum(w[:3])) for k in range(3)]
@@ -2659,24 +2751,24 @@ def fit_checks(fit_path, fit_said, fit_source, fit_third):
         # Shared as the rest are, the formulas of steps whose reason's
         # formula leaves them less than FIT_FLOOR of their counts would be
         # given less than the fit to the line sets a table in, as
-        # Precalculus 2e's Example 7 in 12.2 would run past the paper's
+        # Precalculus 2e's Example 7 in 12.2 would have run past the paper's
         # edge.
         ("and steps whose reason's formula leaves their formulas less than three quarters of "
          "their counts share the line in proportion, each formula, the reason's too, the same "
-         "part of its count, and fit it in the text's type, each formula whole",
+         "part of its count",
          lambda: (lambda reals, w: len(reals) == 4 and len(w) == 4 and all(
              abs(reals[j] - w[j] / sum(w)) < 0.0001 for j in range(4)))(
              [float(r) for r in re.findall(r"\\real\{([\d.]+)\}",
                                            head_of(fit_source, "Reasonshare"))],
              formula_widths(["1919 + \\frac{2828}{3737} + \\frac{4646}{5656}", "=",
                              "\\frac{64646}{7575} + \\frac{8686}{9797} + 1919",
-                             "p^{2} + q^{2} + r^{2} + s^{2} + t^{2} + u^{2} = w^{2}"]))
-         and at("Reasonshare", 1) and whole("2828", "4646") and whole("64646", "8686")),
+                             "p^{2} + q^{2} + r^{2} + s^{2} + t^{2} + u^{2} = w^{2}"]))),
         # Where the formulas would get FIT_FLOOR of their counts or more, a
         # fit to the line makes up the rest, and shared alike, as they would
         # be were their part of their counts given the tenth more (MATH_ROOM)
         # taken for their part of their counts, one of Precalculus 2e's
-        # tables of steps in 12.4 would be set smaller than it is.
+        # tables of steps in 12.4 would have been set smaller than it was,
+        # when the counts laid out the PDF.
         ("and steps whose reason's formula leaves their formulas a little more than three "
          "quarters of their counts give it room, a tenth more than its count, the formulas "
          "sharing what's left by their counts",
@@ -2713,8 +2805,9 @@ def fit_checks(fit_path, fit_said, fit_source, fit_third):
         # And held at its longest word as cell_size counts a cell's words,
         # a formula's pieces between the places TeX could break it among
         # them, though a formula in steps doesn't break: held at its words
-        # alone, Calculus Volume 2's steps in 3.3 would be 108 points wider
-        # than the text, where they're 36 (pdf-target.lua's steps_widths).
+        # alone, Calculus Volume 2's steps in 3.3 would have been 108 points
+        # wider than the text, where they were 36, when the counts laid out
+        # the PDF (pdf-target.lua's steps_widths).
         ("and steps whose reason holds a fraction, longer counted piece by piece than its "
          "words, hold its column at that count",
          lambda: (lambda reals, w, piece: len(reals) == 4 and len(w) == 3 and len(piece) == 1
@@ -2758,6 +2851,131 @@ def fit_checks(fit_path, fit_said, fit_source, fit_third):
          lambda: (lambda reals: len(reals) == 4 and min(reals) > 0)(
              [float(r) for r in re.findall(r"\\real\{(-?[\d.]+)\}",
                                            head_of(fit_source, "Longestwordofthis"))])),
+        # latexbuild.FIT_MACROS' \OERFitStepsTable: steps whose counts set
+        # them across the line, their words wrapped, are set at their own
+        # width where LaTeX finds them narrower than it, their spaces as they
+        # were, and where it doesn't, across it, each column of formulas as
+        # wide as its widest, the words in what's left, no narrower than
+        # their longest piece TeX can't break, then with their spaces
+        # narrowed, then in smaller type, three quarters of it the least to
+        # fit the line and half to keep a quarter inch inside the paper's
+        # edges, measured again where the second run finds them still too
+        # wide. Each paragraph of words is measured, the writer's minipage
+        # around a cell's lines broken where it says, as wide as its column,
+        # not counted, though a matrix is; a formula is one piece, and a
+        # fill-in blank three underscores, as it's drawn shorter to fit its
+        # line. Steps with two columns of words, and steps the writer
+        # floats, not a longtable, keep the counts' columns.
+        ("a worked example's steps whose formulas and reason's longest word the filter counts "
+         "wider than a line, which LaTeX finds fit it, are set in the text's type, each formula "
+         "whole",
+         lambda: whole("2222", "4444") and whole("66666", "8888")
+         and at("Antidisestablishmentarianism", 1)),
+        ("and steps whose reason's longest word the counts leave their formulas less of the "
+         "line than they're wide, which LaTeX finds fit it, are set in the text's type, their "
+         "formulas whole, within the line",
+         lambda: whole("2424", "4646") and whole("68686", "8080")
+         and at("Unbreakableformulasreasonlongestword", 1)
+         and within("Unbreakableformulasreasonlongestword")),
+        ("and steps whose reason holds a formula wider than the line the counts leave their "
+         "words, and steps whose reason's formula leaves their formulas less than three "
+         "quarters of their counts, are set in the text's type, their formulas whole",
+         lambda: at("Reasonmath", 1) and whole("2929", "4242")
+         and at("Reasonshare", 1) and whole("2828", "4646") and whole("64646", "8686")),
+        ("and steps the counts set across the line, which fit it at their own width as LaTeX "
+         "sets them, are set so, centered, their reason on one line",
+         lambda: "at its width." in line_of("Ownwidth") and ends("Ownwidth")[0] > 80
+         and abs((ends("Ownwidth")[0] - 72) - (540 - ends("Ownwidth")[1])) < 1),
+        ("and steps a little too wide at their own width, which narrowed spaces would fit, "
+         "are set across the line, their spaces as they were, their reason wrapping",
+         lambda: at("Nearwidth", 1) and within("Nearwidth") and ends("Nearwidth")[0] < 72.5
+         and "for it." not in line_of("Nearwidth")
+         and 11.5 < (gap_after(fit_path, "1112+2223") or 0) < 12.5),
+        ("and steps too wide at their own width are set across the line, each column of "
+         "formulas as wide as its widest, their reason wrapping in what's left",
+         lambda: at("Mathwidth", 1) and within("Mathwidth") and ends("Mathwidth")[0] < 72.5
+         and "beside the math." not in line_of("Mathwidth")
+         and 11.5 < (gap_after(fit_path, "8383") or 0) < 12.5),
+        ("and steps whose reason's longest word is wider than its count fit the line with "
+         "their spaces narrowed, in the text's type, the word whole",
+         lambda: at("Wordwide", 1) and whole("W" * 22, "W" * 22) and within("W" * 22)
+         and 5.5 < (gap_after(fit_path, "3736+4645") or 0) < 6.5),
+        # Fitted at 0.801 of their size on the first run, their math set in
+        # its forms for subscripts there 12 percent wider for its size, on
+        # the second at three quarters (FIT_FLOOR), where 0.741 would fit;
+        # their word, in a smaller design wider for its size than the one
+        # the second run measured, a little wider than its column, which TeX
+        # had broken (Unbreakablelongestword-).
+        ("and steps too wide even with their reason as narrow as its longest word are set "
+         "smaller, measured again on the second run, at three quarters of their size, within "
+         "the line, the word whole",
+         lambda: at("Smallsteps", 0.75) and within("Smallsteps")
+         and whole("Unbreakablelongestwordofthsreasonhere",
+                   "Unbreakablelongestwordofthsreasonhere")
+         and within("Unbreakablelongestwordofthsreasonhere")),
+        # An underscore's ink runs 1.8 points past each side of its width.
+        ("and steps whose reason holds a fill-in blank longer than its column keep the text's "
+         "type, the blank drawn shorter to fit its line",
+         lambda: at("Blankreason", 1) and within("Blankreason")
+         and (lambda found: found is not None and found[1] == 60 and found[2])(
+             blank_on_line(fit_path, "_" * 60))
+         and 0 < ends("_" * 60)[1] < 542),
+        ("and steps whose reason's lines are broken where it says are as wide as their longest "
+         "line, centered",
+         lambda: "a line under it." not in line_of("Breakreason")
+         and ends("Breakreason")[0] > 80
+         and abs((ends("Breakreason")[0] - 72) - (540 - ends("a line under it.")[1])) < 1),
+        ("and steps whose reason's formula, whole, is wider than the line beside their "
+         "formulas are set smaller to fit it, the formula whole",
+         lambda: size("Mathpiece") < body - 0.1 and within("+".join(["\U0001d44e"] * 16))),
+        ("and steps whose reason holds a matrix wider than the line beside their formulas "
+         "are set smaller to fit it",
+         lambda: size("Matrixreason") < body - 0.1 and within("912345102345")),
+        ("and steps too wide for the paper even at three quarters of their type are set "
+         "smaller still, a quarter inch inside its edges",
+         lambda: 0.5 * body < size("Paperwide") < 0.75 * body - 0.1 and centered("Paperwide")),
+        # pdf-target.lua's lone_formula: a formula with an alignment in it,
+        # in braces in a table's cell (braced_math), was taken for words, its
+        # column for one of words, so the steps had two and kept the counts'
+        # columns (20 of College Algebra 2e's 160 tables of steps).
+        ("and steps whose formula is spaced with an empty matrix's &, in braces in a table's "
+         "cell, are laid out by LaTeX's measure too, at their own width",
+         lambda: "Bracedsteps" in fit_source and re.findall(
+             r"\{\\OERFit(?:Steps)?Table\{", fit_source[:fit_source.find("Bracedsteps")])[-1:]
+         == ["{\\OERFitStepsTable{"] and "each side." in line_of("Bracedsteps")),
+        ("and steps whose words are in two columns keep the counts' columns",
+         lambda: "Twowords" in fit_source and re.findall(
+             r"\{\\OERFit(?:Steps)?Table\{", fit_source[:fit_source.find("Twowords")])[-1:]
+         == ["{\\OERFitTable{"]),
+        ("and steps the writer floats, not a longtable, keep the counts' columns, in the "
+         "text's type",
+         lambda: at("Floatsteps", 1) and (lambda start, end: start >= 0
+             and fit_source.startswith("{\\OERFitStepsTable{", start)
+             and "\\begin{tabular}{@{}rcll@{}}" in fit_source[start:end]
+             and "\\begin{longtable}" not in fit_source[start:end])(
+             fit_source.rfind("{\\OERFit", 0, fit_source.find("Floatsteps")),
+             fit_source.find("Floatsteps"))),
+        # pdf-target.lua's steps_spec gives each column's letter as the
+        # steps align it, which oerfit.lt_array sets: cells of a column
+        # differ in width, so that a column set another way would show.
+        ("and each of their columns is aligned as the steps align it: the formulas before the "
+         "relation at its right, the relations centered on each other, and the formulas "
+         "after it at its left",
+         lambda: (lambda a, b, c, d, e, f: None not in (a, b, c, d, e, f)
+                  and abs(a[1] - b[1]) < 0.5 and abs(a[0] - b[0]) > 5
+                  and abs((c[0] + c[1]) - (d[0] + d[1])) < 1 and abs(c[0] - d[0]) > 2
+                  and abs(e[0] - f[0]) < 0.5 and abs(e[1] - f[1]) > 5)(
+             span("Alignone", "6031+7042"), span("Aligntwo", "58"),
+             span("Alignone", "="), span("Aligntwo", "\u27f9"),
+             span("Alignone", "13073"), span("Aligntwo", "1000000000003"))),
+        # An edit of the latex target's LaTeX can give a table of steps'
+        # longtable another number of columns than its \OERFitStepsTable
+        # says, which LaTeX stopped on, the measure setting the group's
+        # ("Extra alignment tab has been changed to \cr").
+        ("and steps whose longtable has a column more than their group says, as an edit of the "
+         "latex target's LaTeX can leave them, are set by their own columns, in the text's type",
+         lambda: at("Editedspec", 1) and "4321" in line_of("Editedspec")
+         and "another." in line_of("Editedspec")),
         ("a worked example's steps, an array in text, are set smaller to fit their line, "
          "and fitted again on the second run",
          lambda: 0.75 * body < size("Arraysmaller") < 0.8 * body),
@@ -2770,11 +2988,11 @@ def fit_checks(fit_path, fit_said, fit_source, fit_third):
          and "Package TextbookImprover Warning" not in fit_third),
         ("the build says what it fitted, and what's still wider than the text, centered, "
          "and names no line as too wide",
-         lambda: "Fitted 28 table(s) and formula(s) too wide for their lines to them: 6 by "
+         lambda: "Fitted 27 table(s) and formula(s) too wide for their lines to them: 5 by "
          "narrowing their spaces; 22 in smaller type as well, the smallest at 50% of its "
          "size." in fit_said
-         and re.search(r"9 of them, still wider than the text, are centered on the page "
-                       r"\(7 table\(s\), 2 display formula\(s\)\), the widest \d+ points "
+         and re.search(r"10 of them, still wider than the text, are centered on the page "
+                       r"\(8 table\(s\), 2 display formula\(s\)\), the widest \d+ points "
                        r"wider: on one\.", fit_said)
          and "points wider than the text or table column" not in fit_said),
     ]
@@ -3388,8 +3606,8 @@ def checks(work, jobs=1):
                   and says(re.sub(r"-\n", "", notes_text), "Collect the numbers that came "
                            "before into one sum, carrying the others along as they were."))(
              [text for rows in glyph_lines(notes_path).values() for *_, text in rows])),
-        ("and steps that fit their line are set at their own width, in columns that "
-         "don't wrap",
+        ("and in the LaTeX, the counts' columns, steps that fit their line are set at their "
+         "own width, in columns that don't wrap",
          lambda: head_of(notes_source, "\\frac{9876}{5432}")
          and "p{(" not in head_of(notes_source, "\\frac{9876}{5432}")),
         # pdf-target.lua's formula_width, which an escaped symbol (\{) and a
@@ -3420,8 +3638,8 @@ def checks(work, jobs=1):
                              "\\underset{x}{\\text{lim}}", "\\text{lim}",
                              "x\\overset{?}{=}5", "x = 5", "x\\underset{a}{\\leq}5", "x \\leq 5",
                              "x\\stackrel{a}{b}y", "x = y"]))),
-        ("and steps set across the line give each column of math a tenth more than its "
-         "widest formula, so counted",
+        ("and in the LaTeX, steps set across the line give each column of math a tenth more "
+         "than its widest formula, so counted",
          lambda: (lambda reals, w: len(reals) == 4 and len(w) == 3 and all(
              abs(reals[j] - 1.1 * w[j] / 61) < 0.0001 for j in range(3)))(
              [float(r) for r in re.findall(r"\\real\{([\d.]+)\}",

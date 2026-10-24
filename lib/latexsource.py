@@ -2049,16 +2049,19 @@ def language_marks(text, counter):
 
 # The PDF target's group around a table or a formula for latexbuild's
 # FIT_MACROS to fit (pdf-target.lua), as the target writes it: its number,
-# its kind, and a table's columns and whether they wrap.
-FIT_MARK = re.compile(r"\{\\OERFit(Table|Formula)\{(\d+)\}\{[^{}]*\}(?:\{[01]\})?")
+# its kind, and a table's columns and whether they wrap, or for a worked
+# example's steps (\OERFitStepsTable) their alignments' letters and each
+# column's part of the line.
+FIT_MARK = re.compile(r"\{\\OERFit(Table|StepsTable|Formula)\{(\d+)\}\{[^{}]*\}"
+                      r"(?:\{[01]\}|\{[lcr]+\}\{[m\d.,]+\})?")
 
 
 def fit_marks(text, counter):
     """The PDF target's groups around a table or a formula to fit taken
-    out, in code, with \\OERFitTable or \\OERFitFormula opening each and a
-    table's \\OERFitTableEnd closing it; what each holds is left. Pandoc's
-    reader would expand them as the preamble defines them, in expl3 around
-    Lua, and stop reading the book ("unexpected ()")."""
+    out, in code, with \\OERFitTable, \\OERFitStepsTable, or \\OERFitFormula
+    opening each and a table's \\OERFitTableEnd closing it; what each holds
+    is left. Pandoc's reader would expand them as the preamble defines them,
+    in expl3 around Lua, and stop reading the book ("unexpected ()")."""
     spans = skip_spans(text)
     found = [m for m in FIT_MARK.finditer(text) if not in_spans(m.start(), spans)]
     for m in reversed(found):
@@ -2066,7 +2069,7 @@ def fit_marks(text, counter):
         if close < 0:
             continue
         inner = text[m.end():close - 1]
-        if m.group(1) == "Table":
+        if m.group(1) != "Formula":
             inner = re.sub(r"\\OERFitTableEnd\{%s\}\s*$" % m.group(2), "", inner)
         text = text[:m.start()] + inner + text[close:]
         counter["fit_marks"] = counter.get("fit_marks", 0) + 1

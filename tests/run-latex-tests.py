@@ -1929,6 +1929,11 @@ def case_latex_target(work):
                  "Its area is $\\pi r^2$.\n\n1. Draw it.\n2. Measure it.\n\n"
                  "So $$A = \\pi r^2.$$\\\nQ.E.D.\n\n"
                  + "A long sum: $$S = " + LONG_SUM + "$$\n\n"
+                 # A worked example's steps, which the PDF's LaTeX measures.
+                 '<table role="presentation" class="formula-steps"><tr>'
+                 '<td style="text-align: right">$x + 1$</td>'
+                 '<td style="text-align: center">$=$</td><td style="text-align: left">$2$</td>'
+                 '<td style="text-align: left">Take one from each side.</td></tr></table>\n\n'
                  "**Theorem.** *$$C = 2 \\pi r$$*\n\nCompare [[compare]](#circles).\n\n"
                  "A sum: ![A plus.](img/a+b.png)\n\n"
                  "*A rule for $x$ with a note[^euler] and more.*\n\n"

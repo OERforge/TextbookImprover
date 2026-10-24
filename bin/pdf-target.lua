@@ -949,7 +949,11 @@ local function widen_to_words(tbl, word)
 end
 
 -- A cell's one formula, the TeX of it, where that's all it holds but
--- space; or nil.
+-- space and the braces around a formula with an alignment in it
+-- (braced_math); or nil. Taken for words, such a formula, as OpenStax
+-- spaces a step's (an empty matrix's &, 20 of College Algebra 2e's 160
+-- tables of steps and 38 of Precalculus 2e's 142), left its column a
+-- column of words, and the table one with two columns of words.
 local function lone_formula(cell)
   local blocks = cell.contents
   if #blocks ~= 1 or (blocks[1].t ~= 'Plain' and blocks[1].t ~= 'Para') then return nil end
@@ -957,7 +961,8 @@ local function lone_formula(cell)
   for _, inline in ipairs(blocks[1].content) do
     if inline.t == 'Math' and not found then
       found = inline.text
-    elseif inline.t ~= 'Space' and inline.t ~= 'SoftBreak' then
+    elseif not (inline.t == 'Space' or inline.t == 'SoftBreak'
+                or inline.t == 'RawInline' and (inline.text == '{' or inline.text == '}')) then
       return nil
     end
   end
@@ -975,6 +980,14 @@ local function widest_formula(cell)
   return widest
 end
 
+-- The counts of a worked example's steps. Where LuaTeX sets the PDF,
+-- steps with one column of words are laid out by what LaTeX measures of
+-- them (steps_spec, below), so these counts lay out the steps a TeX
+-- without Lua sets, those with no column of words or more than one, and
+-- those the writer floats; give the words their part of the line on
+-- LaTeX's first run; and are the shares the LaTeX gives each column. The
+-- figures below were measured when the counts laid out every PDF.
+--
 -- A worked example's steps the CNX unpacker lays out in a table (class
 -- formula-steps), its math cell for cell and its words, a step's reason
 -- or instruction, in a column of their own: at its own width where the
@@ -991,7 +1004,7 @@ end
 -- formulas share what's left by their counts. Seven of College Algebra
 -- 2e's first chapter's 51 tables of steps are so; set as other tables
 -- are (fit_to_line), six of them, in Noto Sans, would be set in smaller
--- type to fit their formulas to their columns, and shared so, three are
+-- type to fit their formulas to their columns, and shared so, three were
 -- (MATH_ROOM). Where that would leave the formulas less than FIT_FLOOR of
 -- their counts, as a reason holding a long formula can, which no fit to
 -- the line makes up for, every formula, a reason's too, is given the same
@@ -1001,18 +1014,18 @@ end
 -- fitted. Precalculus 2e's Example 7 in 12.2, whose reason holds a
 -- formula about as wide as its column of math's widest, would otherwise
 -- have its formulas given less than a third of their counts, and be set
--- at half its size, 353 points wider than the text; it's at three
+-- at half its size, 353 points wider than the text; it was at three
 -- quarters, 2 points wider than the text. A word is as cell_size counts
 -- it, a piece of a formula between the places TeX could break it among
 -- them, though a formula in steps doesn't break: held at its words
 -- alone, Calculus Volume 2's steps in 3.3, at three quarters of their
--- size, would be 108 points wider than the text, where they're 36, their
--- reason's formula counted narrower than LaTeX sets it. A formula still
--- wider than its column isn't broken but fitted (Table). Whether it was
--- set so; steps whose longest words alone fill the line are set as other
--- tables are, and steps whose reason's formula alone fills it, given
--- MATH_ROOM, are shared, even where their cells' length as cell_size
--- counts it, a function's name a character, would fit.
+-- size, would have been 108 points wider than the text, where they were
+-- 36, their reason's formula counted narrower than LaTeX sets it. A
+-- formula still wider than its column isn't broken but fitted (Table).
+-- Whether it was set so; steps whose longest words alone fill the line
+-- are set as other tables are, and steps whose reason's formula alone
+-- fills it, given MATH_ROOM, are shared, even where their cells' length
+-- as cell_size counts it, a function's name a character, would fit.
 --
 -- MATH_ROOM is the part of its count a formula is given, in a column of
 -- math or among the words: a tenth more. Pandoc's template scales Latin
@@ -1021,9 +1034,9 @@ end
 -- math books, are 24 percent taller than Latin Modern's, so a formula
 -- is set wider than the count, which is Latin Modern's: in College
 -- Algebra 2e's first chapter, in Noto Sans, without it 10 of its 51
--- tables of steps would have a formula wider than its column, 9 set
--- smaller to fit it (FIT_MACROS); with it, 4 have, 3 set smaller, which
--- are wider than the line even in columns as wide as LaTeX measures
+-- tables of steps would have had a formula wider than its column, 9 set
+-- smaller to fit it (FIT_MACROS); with it, 4 had, 3 set smaller, which
+-- were wider than the line even in columns as wide as LaTeX measures
 -- their widest formula or word.
 local MATH_ROOM = 1.1
 
@@ -1031,13 +1044,17 @@ local MATH_ROOM = 1.1
 -- (latexbuild.py's FIT_FLOOR).
 local FIT_FLOOR = 0.75
 
-local function steps_widths(tbl)
+-- Which of a worked example's columns hold formulas, each cell one or
+-- nothing (true), which hold words (false), and which nothing at all
+-- (nil), where each of its rows has a cell for each column and no cell is
+-- across columns or rows; nil where not.
+local function steps_columns(tbl)
   local count = #tbl.colspecs
   local formulas, rows = {}, rows_of(tbl)
   for _, row in ipairs(rows) do
-    if #row.cells ~= count then return false end
+    if #row.cells ~= count then return nil end
     for j, cell in ipairs(row.cells) do
-      if (cell.col_span or 1) ~= 1 or (cell.row_span or 1) ~= 1 then return false end
+      if (cell.col_span or 1) ~= 1 or (cell.row_span or 1) ~= 1 then return nil end
       local formula = lone_formula(cell)
       if formula then
         formulas[j] = formulas[j] ~= false
@@ -1046,6 +1063,13 @@ local function steps_widths(tbl)
       end
     end
   end
+  return formulas, rows
+end
+
+local function steps_widths(tbl)
+  local count = #tbl.colspecs
+  local formulas, rows = steps_columns(tbl)
+  if not formulas then return false end
   local need, word, long, reach = {}, {}, {}, {}
   for j = 1, count do need[j], word[j], long[j], reach[j] = 0, 0, 0, 0 end
   for _, row in ipairs(rows) do
@@ -1243,6 +1267,52 @@ local function fit_to_line(tbl)
   end
 end
 
+-- A worked example's steps (steps_columns) with one column of words, as
+-- the CNX unpacker writes them, laid out by what LaTeX measures of them
+-- where LuaTeX sets them (FIT_MACROS' \OERFitStepsTable): each column of
+-- formulas as wide as its widest, and the column of words, which wraps,
+-- as wide as its longest paragraph set as one line, where the table so
+-- fits its line, and otherwise as wide as the line leaves it, no narrower
+-- than its longest piece TeX can't break; where even that's wider than the
+-- line, the table's spaces are narrowed and its type set smaller, as
+-- another table's are. The counts above give the words their part of the
+-- line on LaTeX's first run, and lay the table out for a TeX without Lua,
+-- which sets the writer's columns: the letters of the columns'
+-- alignments, and for each column m, one of formulas, or the column of
+-- words' part of the line by the counts, their share where they set it
+-- across the line. Nil for steps with no column of words or more than
+-- one, which the counts lay out.
+local function steps_spec(tbl)
+  if not tbl.classes:includes('formula-steps') then return nil end
+  local formulas, rows = steps_columns(tbl)
+  if not formulas then return nil end
+  local count, words = #tbl.colspecs, 0
+  for j = 1, count do
+    if formulas[j] == false then words = words + 1 end
+  end
+  if words ~= 1 then return nil end
+  local room = LINE - GAP * (count - 1)
+  local letters, parts, need = {}, {}, {}
+  for j = 1, count do
+    local align = tbl.colspecs[j][1]
+    letters[j] = (align == 'AlignRight' and 'r') or (align == 'AlignCenter' and 'c') or 'l'
+    need[j] = 0
+  end
+  for _, row in ipairs(rows) do
+    for j, cell in ipairs(row.cells) do
+      if formulas[j] == false then need[j] = math.max(need[j], (cell_size(cell))) end
+    end
+  end
+  for j = 1, count do
+    if formulas[j] == false then
+      parts[j] = string.format('%.4f', tbl.colspecs[j][2] or math.min(1, need[j] / room))
+    else
+      parts[j] = 'm'
+    end
+  end
+  return { table.concat(letters), table.concat(parts, ',') }
+end
+
 -- 19. A table, or a formula TeX can't break, wider than its line: Pandoc's
 -- writer leaves both as they are, and LaTeX sets them past the line's end,
 -- into the margin or off the paper (College Algebra 2e's first chapter, 28
@@ -1277,26 +1347,30 @@ end
 local sized_table
 
 -- A table not in a table's cell (19) in a group FIT_MACROS fits: \OERFitTable
--- with its number, its columns, and whether they wrap, and \OERFitTableEnd,
--- which reads the widths longtable recorded. A layout table's caption, a
--- paragraph before it, is before the group, in the text's type. A worked
--- example's steps (steps_widths) break no formula over lines: TeX breaks a
--- formula in text after a relation or an operator, and FIT_MACROS
--- measures a column by the longest piece TeX can't break, so that
--- otherwise a formula wider than its column would be broken, not fitted,
--- as one of the steps of College Algebra 2e's Example 6 (e), in section
--- 1.1, would be.
+-- with its number, its columns, and whether they wrap, or for a worked
+-- example's steps LaTeX lays out \OERFitStepsTable (steps_spec), and
+-- \OERFitTableEnd, which reads the widths longtable recorded. A layout
+-- table's caption, a paragraph before it, is before the group, in the
+-- text's type. A worked example's steps (steps_widths) break no formula
+-- over lines: TeX breaks a formula in text after a relation or an
+-- operator, and FIT_MACROS measures a column by the longest piece TeX
+-- can't break, so that otherwise a formula wider than its column would be
+-- broken, not fitted, as one of the steps of College Algebra 2e's Example
+-- 6 (e), in section 1.1, would be.
 function Table(tbl)
   local nested = tbl.attributes[IN_CELL] ~= nil
   local steps = tbl.classes:includes('formula-steps')
-  local result, wraps, columns, lead = sized_table(tbl)
+  local result, wraps, columns, lead, measured = sized_table(tbl)
   if nested then return result end
   local id = next_fit()
+  local open = measured
+    and ('{\\OERFitStepsTable{' .. id .. '}{' .. columns .. '}{' .. measured[1] .. '}{'
+         .. measured[2] .. '}')
+    or ('{\\OERFitTable{' .. id .. '}{' .. columns .. '}{' .. (wraps and '1' or '0') .. '}')
   local function fitted(blocks)
     local out = pandoc.Blocks{}
     for i = 1, lead or 0 do out:insert(blocks[i]) end
-    out:insert(pandoc.RawBlock('latex', '{\\OERFitTable{' .. id .. '}{'
-      .. columns .. '}{' .. (wraps and '1' or '0') .. '}'
+    out:insert(pandoc.RawBlock('latex', open
       .. (steps and '\\binoppenalty=10000 \\relpenalty=10000' or '')))
     for i = (lead or 0) + 1, #blocks do out:insert(blocks[i]) end
     out:insert(pandoc.RawBlock('latex', '\\OERFitTableEnd{' .. id .. '}}'))
@@ -1322,6 +1396,7 @@ sized_table = function(tbl)
   end
   unquote_cells(tbl.foot.rows)
   fit_to_line(tbl)
+  local measured = not cell and steps_spec(tbl) or nil
   local wraps, count = wrapping(tbl), #tbl.colspecs
   local columns = 0
   for _, body in ipairs(tbl.bodies) do
@@ -1349,9 +1424,9 @@ sized_table = function(tbl)
     blocks[#blocks + 1] = tbl
     blocks[#blocks + 1] = pandoc.RawBlock('latex', '}')
     if id ~= '' then
-      return pandoc.Div(blocks, pandoc.Attr(id)), wraps, count, lead
+      return pandoc.Div(blocks, pandoc.Attr(id)), wraps, count, lead, measured
     end
-    return blocks, wraps, count, lead
+    return blocks, wraps, count, lead, measured
   end
   -- A data table's id with no caption to hold it is a div's too, an anchor
   -- before the table: the writer's empty caption numbered a table the book
@@ -1378,9 +1453,9 @@ sized_table = function(tbl)
     }
   end
   if own then blocks = without_label(blocks) end
-  if id then return pandoc.Div(blocks, pandoc.Attr(id)), wraps, count end
-  if columns == 0 and not own then return tbl, wraps, count end
-  return blocks, wraps, count
+  if id then return pandoc.Div(blocks, pandoc.Attr(id)), wraps, count, nil, measured end
+  if columns == 0 and not own then return tbl, wraps, count, nil, measured end
+  return blocks, wraps, count, nil, measured
 end
 
 local function decorative(img)

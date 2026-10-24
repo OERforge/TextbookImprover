@@ -560,7 +560,8 @@ FIT_MACROS = r"""% Something too wide for its line, which TeX can't break:
 % where that's not enough, its type set smaller, as much as it takes, but
 % to no less than three quarters of its size (9 points in 12-point type),
 % a table's wrapping columns made as wide as its words need, which TeX
-% then doesn't hyphenate: a smaller design, wider for its size (below),
+% then doesn't hyphenate, nor a worked example's steps' words once they're
+% laid out: a smaller design, wider for its size (below),
 % can leave a word a point wider than the column its fit made for it,
 % which TeX broke (Twen-tytwo, in the PDF suite's fit book), where it now
 % runs a point into the space beside its column. A wrapping table's
@@ -576,7 +577,16 @@ FIT_MACROS = r"""% Something too wide for its line, which TeX can't break:
 % second, as its columns' words then ask. A table that isn't a longtable
 % in its group, as the writer sets one of the class float, a tabular in a
 % table float, isn't fitted: the widths longtable recorded were the last
-% longtable's. A table or a
+% longtable's. A worked example's steps (\OERFitStepsTable), whose
+% formulas don't break, are laid out by what LaTeX measures of them, not
+% by pdf-target.lua's counts, which give the words their part of the line
+% on a first run: each column of formulas as wide as its widest, and the column of words, which wraps,
+% as wide as its widest paragraph set as one line, where the table so
+% fits its line, and otherwise as wide as the line leaves it, no narrower
+% than its longest piece TeX can't break; where even that's wider than
+% the line, the table's spaces are narrowed, and then its type is set
+% smaller, as another table's are, its words as wide as the line leaves
+% them at that size, or as their longest piece. A table or a
 % display formula fitted is centered on the page, so that one still wider
 % than its line runs into both margins alike; and one that would come
 % within a quarter inch of the paper's edge even at three quarters of its
@@ -592,7 +602,8 @@ FIT_MACROS = r"""% Something too wide for its line, which TeX can't break:
 % second each fit is measured again, and fitted again where it's off its
 % line by more than 4 percent of it, too wide or too narrow, more than a
 % design's step, less of which centering takes up, and a formula in text
-% or a numbered display, which nothing centers, wherever it's too wide.
+% or a numbered display, which nothing centers, or a worked example's
+% steps, each of whose columns LaTeX measured, wherever it's too wide.
 % longtable sets a table's columns by the widths it recorded the run
 % before, and the first run's can be wrong: where a table's head is one
 % row, a cell across columns, it gives the last of those columns the
@@ -623,13 +634,17 @@ FIT_MACROS = r"""% Something too wide for its line, which TeX can't break:
 % hash, a tilde, or a backslash.
 \ifdefined\directlua
   \newattribute\OERFitAttribute
+  \newattribute\OERFitStepsAttribute
   \directlua{
     local attribute = luatexbase.attributes.OERFitAttribute
+    local column = luatexbase.attributes.OERFitStepsAttribute
     local HLIST, VLIST, GLUE, PENALTY, MATH, DIR = node.id("hlist"), node.id("vlist"), node.id("glue"), node.id("penalty"), node.id("math"), node.id("dir")
+    local GLYPH = node.id("glyph")
     local FLOOR, LEAST, AIM, JUMP, TOLERANCE = """ + str(FIT_FLOOR) + ", " + str(FIT_LEAST) + r""", 0.98, 0.04, 32768
     oerfit = { state = {}, kind = {}, line = {}, room = {}, size = {}, columns = {},
                width = {}, tight = {}, sep = {}, sep0 = {}, where = {}, twocol = {}, run = 0,
-               sources = { status.filename }, seen = { [status.filename] = true }, stored = {} }
+               sources = { status.filename }, seen = { [status.filename] = true }, stored = {},
+               steps = {}, entries = {}, natural = {}, longest = {}, applied = {} }
     if string.sub(status.filename, 1, 2) == "./" then oerfit.seen[string.sub(status.filename, 3)] = true end
     local function current()
       local id = tex.getattribute(attribute)
@@ -642,9 +657,15 @@ FIT_MACROS = r"""% Something too wide for its line, which TeX can't break:
     local function points(sp)
       return tostring(math.floor(sp / 6553.6 + 0.5) / 10)
     end
+    local function smaller(whole, line, room)
+      local f = down(AIM * line / whole, 1000)
+      if f >= FLOOR then return f end
+      if FLOOR * whole > room then return math.max(LEAST, down(AIM * room / whole, 1000)) end
+      return FLOOR
+    end
     luatexbase.add_to_callback("post_mlist_to_hlist_filter", function(head)
       local id = current()
-      if id and not (oerfit.kind[id] == "t" or oerfit.kind[id] == "p") then
+      if id and not (oerfit.kind[id] == "t" or oerfit.kind[id] == "p" or oerfit.kind[id] == "s") then
         local w = node.dimensions(head)
         if w > (oerfit.width[id] or 0) then oerfit.width[id] = w end
       end
@@ -701,6 +722,39 @@ FIT_MACROS = r"""% Something too wide for its line, which TeX can't break:
       end
       return true
     end, "oer.fit.cells")
+    local blank = luatexbase.attributes.OERBlankAttribute
+    luatexbase.add_to_callback("pre_linebreak_filter", function(head)
+      local id, j = current(), tex.getattribute(column)
+      if id and oerfit.kind[id] == "s" and j and j > 0 then
+        local line, piece, longest, inmath, blanks = 0, 0, 0, false, 0
+        for n in node.traverse(head) do
+          if n.id == MATH then inmath = n.subtype == 0 end
+          if n.id == GLUE then
+            line = line + n.width
+            if inmath then
+              piece = piece + n.width
+            else
+              if piece > longest then longest = piece end
+              piece, blanks = 0, 0
+            end
+          elseif not (n.id == VLIST and math.abs(n.width - tex.hsize) <= 1) then
+            local w = node.dimensions(n, n.next)
+            line = line + w
+            if n.id == GLYPH and n.char == 95 and node.has_attribute(n, blank) then
+              blanks = blanks + 1
+              if blanks <= 3 then piece = piece + w end
+            else
+              blanks = 0
+              piece = piece + w
+            end
+          end
+        end
+        if piece > longest then longest = piece end
+        if line > (oerfit.natural[id] or 0) then oerfit.natural[id] = line end
+        if longest > (oerfit.longest[id] or 0) then oerfit.longest[id] = longest end
+      end
+      return true
+    end, "oer.fit.steps")
     function oerfit.open(id, kind, line, room, size, columns, where, sep0, twocol)
       oerfit.kind[id], oerfit.line[id], oerfit.room[id] = kind, line, room
       oerfit.size[id], oerfit.columns[id], oerfit.where[id] = size, columns, where
@@ -713,6 +767,103 @@ FIT_MACROS = r"""% Something too wide for its line, which TeX can't break:
     end
     function oerfit.table(id, width, sep)
       oerfit.width[id], oerfit.sep[id] = width, sep
+    end
+    function oerfit.entry(id, width)
+      local e = oerfit.entries[id]
+      e.n = e.n + 1
+      e[e.n] = width
+    end
+    function oerfit.steps_table(id, letters, guess)
+      local info, k = { letters = letters }, 0
+      for item in string.gmatch(guess, "[^,]+") do
+        k = k + 1
+        if not (item == "m") then info.word, info.guess = k, tonumber(item) end
+      end
+      info.k = k
+      oerfit.steps[id] = info
+    end
+    function oerfit.steps_state(id, width)
+      local s = oerfit.state[id]
+      if s then s.width = width end
+    end
+    function oerfit.after_group(spec, j)
+      local last, level = string.len(spec), 0
+      while j <= last and not (string.byte(spec, j) == 123) do j = j + 1 end
+      while j <= last do
+        local c = string.byte(spec, j)
+        if c == 123 then level = level + 1 elseif c == 125 then level = level - 1 end
+        j = j + 1
+        if level == 0 then return j end
+      end
+      return j
+    end
+    function oerfit.is_letter(c)
+      return c and ((c >= 65 and c <= 90) or (c >= 97 and c <= 122))
+    end
+    function oerfit.spec_columns(spec)
+      local n, j, last = 0, 1, string.len(spec)
+      while j <= last do
+        local c = string.byte(spec, j)
+        if c == 64 or c == 33 or c == 60 or c == 62 then
+          j = oerfit.after_group(spec, j + 1)
+        elseif c == 92 then
+          j = j + 1
+          while j <= last and oerfit.is_letter(string.byte(spec, j)) do j = j + 1 end
+        elseif oerfit.is_letter(c) then
+          n = n + 1
+          if c == 112 or c == 109 or c == 98 then j = oerfit.after_group(spec, j + 1) else j = j + 1 end
+        else
+          j = j + 1
+        end
+      end
+      return n
+    end
+    function oerfit.lt_array(id, opt, spec)
+      local info, s, bs = oerfit.steps[id], oerfit.state[id], string.char(92)
+      if not (oerfit.spec_columns(spec) == info.k) then
+        info.unmeasured = true
+        tex.sprint(bs .. "OERFitLTArray[" .. opt .. "]{" .. spec .. "}")
+        return
+      end
+      local parts = {}
+      for j = 1, info.k do
+        local letter = string.sub(info.letters, j, j)
+        if j == info.word then
+          local width = math.floor(info.guess * (oerfit.line[id] - 2 * (info.k - 1) * oerfit.sep0[id]))
+          if s and s.width then width = s.width end
+          oerfit.applied[id] = width
+          local align = "raggedright"
+          if letter == "r" then align = "raggedleft" elseif letter == "c" then align = "centering" end
+          parts[j] = ">{" .. bs .. align .. bs .. "arraybackslash" .. bs .. "setattribute" .. bs
+            .. "OERFitStepsAttribute{1}}p{" .. width .. "sp}"
+        else
+          parts[j] = letter
+        end
+      end
+      tex.sprint(bs .. "OERFitLTArray[" .. opt .. "]{@{}" .. table.concat(parts) .. "@{}}")
+    end
+    function oerfit.steps_next(id, s)
+      local info, e = oerfit.steps[id], oerfit.entries[id]
+      if info.unmeasured or e.n < info.k then return nil end
+      local k, f0 = info.k, s.factor
+      local sep, sep0, size = oerfit.sep[id], oerfit.sep0[id], oerfit.size[id]
+      local line, room = oerfit.line[id], oerfit.room[id]
+      local natural, longest, all = (oerfit.natural[id] or 0) / f0, (oerfit.longest[id] or 0) / f0, 0
+      for j = 1, k do all = all + e[j] end
+      local maths = (all - oerfit.applied[id] - 2 * (k - 1) * sep) / f0
+      local spaced, narrow = 2 * (k - 1) * sep0, 2 * (k - 1) * 0.25 * size
+      if maths + natural + spaced <= line then
+        return { narrow = 0, factor = 1, columns = 1, center = 0, width = math.ceil(natural) }
+      end
+      if maths + longest + spaced <= line then
+        return { narrow = 0, factor = 1, columns = 1, center = 0, width = math.floor(line - maths - spaced) }
+      end
+      if maths + longest + narrow <= line then
+        return { narrow = 1, factor = 1, columns = 1, center = 1, width = math.floor(line - maths - narrow) }
+      end
+      local f = smaller(maths + longest + narrow, line, room)
+      return { narrow = 1, factor = f, columns = 1, center = 1,
+               width = math.floor(math.max(f * longest, line - f * (maths + narrow))) }
     end
     function oerfit.next(kind, id, s, w, line, room, tight)
       local size = oerfit.size[id]
@@ -739,14 +890,8 @@ FIT_MACROS = r"""% Something too wide for its line, which TeX can't break:
         if content + 2 * (k - 1) * (oerfit.sep0[id] or sep) <= line then
           return { narrow = 0, factor = 1, columns = 1, center = 0 }
         end
-        local f = line / (content + narrow) * AIM
-        if f >= 1 then return { narrow = 1, factor = 1, columns = 1, center = 1 } end
-        if f >= FLOOR then return { narrow = 1, factor = down(f, 1000), columns = 1, center = 1 } end
-        local least = FLOOR
-        if FLOOR * (content + narrow) > room then
-          least = math.max(LEAST, down(room / (content + narrow) * AIM, 1000))
-        end
-        return { narrow = 1, factor = least, columns = 1, center = 1 }
+        if line / (content + narrow) * AIM >= 1 then return { narrow = 1, factor = 1, columns = 1, center = 1 } end
+        return { narrow = 1, factor = smaller(content + narrow, line, room), columns = 1, center = 1 }
       end
       local shares = (w - pad) / (s.columns * (line - pad))
       local c = math.min(1, 1 / shares)
@@ -834,7 +979,15 @@ FIT_MACROS = r"""% Something too wide for its line, which TeX can't break:
         end
         local far = w and (w > (1 + JUMP) * line or w < (1 - JUMP) * line) or tight > 1 + JUMP
         local new, refit = nil, false
-        if w and run == 1 and (over or cells) then
+        if kind == "s" then
+          if w and (run == 1 or run == 2 and over) then new = oerfit.steps_next(id, s) end
+          if new and (not oerfit.state[id] or math.abs(new.factor - s.factor) > 0.0005
+                      or math.abs(new.width - (s.width or 0)) > TOLERANCE) then
+            oerfit.state[id], s = new, new
+            changed = changed + 1
+          end
+          new = nil
+        elseif w and run == 1 and (over or cells) then
           new = oerfit.next(kind, id, s, w, line, room, math.max(tight, 0.05))
         elseif w and run == 2 and (oerfit.state[id] and (far or (kind == "i" or kind == "e") and over)
                                    or not oerfit.state[id] and (over or cells)) then
@@ -859,6 +1012,9 @@ FIT_MACROS = r"""% Something too wide for its line, which TeX can't break:
         local s = oerfit.state[id]
         tex.sprint(string.char(92) .. "OERFitWrite{" .. id .. "}{" .. s.narrow .. "}{" .. s.factor
           .. "}{" .. s.columns .. "}{" .. s.center .. "}")
+        if s.width then
+          tex.sprint(string.char(92) .. "OERFitStepsWrite{" .. id .. "}{" .. math.floor(s.width) .. "}")
+        end
       end
       if count > 0 then
         tex.sprint(string.char(92) .. "OERFitWriteRun{" .. math.min(run, 2) .. "}")
@@ -892,6 +1048,9 @@ FIT_MACROS = r"""% Something too wide for its line, which TeX can't break:
     { \exp_args:Nc \iow_now:Ne { @auxout } { \token_to_str:N \OERFitRun {#1} } }
   \cs_new_protected:Npn \OERFitWriteSource #1#2
     { \exp_args:Nc \iow_now:Ne { @auxout } { \token_to_str:N \OERFitSource {#1}{#2} } }
+  \cs_new_protected:Npn \OERFitStepsState #1#2 { \directlua { oerfit.steps_state(#1, #2) } }
+  \cs_new_protected:Npn \OERFitStepsWrite #1#2
+    { \exp_args:Nc \iow_now:Ne { @auxout } { \token_to_str:N \OERFitStepsState {#1}{#2} } }
   % Before any fit the .aux file keeps is set, whether a file of the book
   % has changed since: one LaTeX has read lines of since these macros, or
   % input with \input{} before them, as its list of files says.
@@ -956,11 +1115,11 @@ FIT_MACROS = r"""% Something too wide for its line, which TeX can't break:
         }
     }
   % What the run before decided for a table or formula: #1 its kind, t a
-  % table whose columns don't wrap, p one whose do, d a display formula, e
-  % a numbered one, i a formula in text; #2 its spaces narrowed or not; #3
-  % its type's size, a part of its own; #4 a wrapping table's columns'
-  % width, a part of the widths its LaTeX gives them; #5 centered or not;
-  % and #6 a table's number of columns.
+  % table whose columns don't wrap, p one whose do, s a worked example's
+  % steps, d a display formula, e a numbered one, i a formula in text; #2
+  % its spaces narrowed or not; #3 its type's size, a part of its own; #4 a
+  % wrapping table's columns' width, a part of the widths its LaTeX gives
+  % them; #5 centered or not; and #6 a table's number of columns.
   \cs_new_protected:Npn \OERFitApply #1#2#3#4#5#6
     {
       \fp_compare:nNnT {#3} < { 1 }
@@ -978,6 +1137,7 @@ FIT_MACROS = r"""% Something too wide for its line, which TeX can't break:
             {
               { t } { \dim_set:Nn \tabcolsep { 0.25 em } }
               { p } { \dim_set:Nn \tabcolsep { 0.25 em } }
+              { s } { \dim_set:Nn \tabcolsep { 0.25 em } }
             }
             { \__oer_fit_narrow_math: }
         }
@@ -988,8 +1148,8 @@ FIT_MACROS = r"""% Something too wide for its line, which TeX can't break:
               \fp_to_dim:n
                 { (#4) * ( \linewidth - 2 * (#6 - 1) * \tabcolsep ) + 2 * (#6 - 1) * \tabcolsep }
             }
-          \int_set:Nn \tex_hyphenpenalty:D { 10000 }
         }
+      \str_case:nnT {#1} { { p } { } { s } { } } { \int_set:Nn \tex_hyphenpenalty:D { 10000 } }
       \int_compare:nNnT {#5} = { 1 }
         {
           \str_if_eq:nnTF {#1} { d } { \__oer_fit_center_display: }
@@ -1000,8 +1160,9 @@ FIT_MACROS = r"""% Something too wide for its line, which TeX can't break:
         }
     }
   % A table, in a group pdf-target.lua opens: #1 its number, #2 its
-  % columns, #3 1 where they wrap. The widths longtable records are
-  % forgotten, so that a table no longtable sets has none.
+  % columns, #3 1 where they wrap, 2 for a worked example's steps
+  % (\OERFitStepsTable). The widths longtable records are forgotten, so
+  % that a table no longtable sets has none.
   \NewDocumentCommand \OERFitTable { m m m }
     {
       \setattribute \OERFitAttribute {#1}
@@ -1009,7 +1170,7 @@ FIT_MACROS = r"""% Something too wide for its line, which TeX can't break:
       \__oer_fit_margin:
       \directlua
         {
-          oerfit.open(#1, "\int_compare:nNnTF {#3} = { 1 } { p } { t }",
+          oerfit.open(#1, "\int_case:nnF {#3} { { 1 } { p } { 2 } { s } } { t }",
             \dim_to_decimal_in_sp:n { \hsize },
             \dim_to_decimal_in_sp:n { \hsize + 2 \l__oer_fit_margin_dim },
             \dim_to_decimal_in_sp:n { \use:c { f@size } pt }, #2,
@@ -1017,15 +1178,53 @@ FIT_MACROS = r"""% Something too wide for its line, which TeX can't break:
             \legacy_if:nTF { @twocolumn } { 1 } { 0 })
         }
     }
+  % A worked example's steps, in a group pdf-target.lua opens: #1 its
+  % number, #2 its columns, #3 their alignments' letters, and #4 for each
+  % column m, a column of formulas, or a column of words' part of the line
+  % pdf-target.lua's count gives it. A column of formulas is set as wide as
+  % its widest, as the letter sets it, and a column of words wraps (p), as
+  % wide as the run before decided from what LaTeX measured (oerfit.lt_array:
+  % the longtable's column specification, in place of the writer's), or on
+  % a first run that part of the line. Each paragraph of a column of words
+  % is measured as LaTeX sets it, before its lines are broken: how wide it
+  % is as one line and its longest piece TeX can't break, a formula whole,
+  % since none breaks in the steps, but a fill-in blank no more than three
+  % underscores, as it's drawn shorter to fit its line, and a box as wide as
+  % the column not at all, the minipage the writer sets a cell's lines in
+  % where they're broken where it says, whose paragraphs are measured
+  % (oer.fit.steps). A writer's specification of another number of
+  % columns, as an edit of the latex target's LaTeX can leave it, is the
+  % table's, unmeasured.
+  \NewDocumentCommand \OERFitStepsTable { m m m m }
+    {
+      \OERFitTable {#1} {#2} { 2 }
+      \directlua { oerfit.steps_table(#1, "#3", "#4") }
+      \cs_set_eq:Nc \OERFitLTArray { LT@array }
+      \cs_set_protected:cpn { LT@array } [##1] ##2
+        {
+          \cs_set_eq:cN { LT@array } \OERFitLTArray
+          \directlua
+            {
+              oerfit.lt_array(#1, "\luaescapestring{##1}",
+                "\luaescapestring{\tl_to_str:n{##2}}")
+            }
+        }
+    }
   % A table's end: its width, by the widths longtable recorded, none where
-  % no longtable was set in the group, which leaves it as it is.
+  % no longtable was set in the group, which leaves it as it is, and each
+  % column's, for a worked example's steps.
   \NewDocumentCommand \OERFitTableEnd { m }
     {
       \dim_gzero:N \g__oer_fit_dim
+      \directlua { oerfit.entries[#1] = { n = 0 } }
       \cs_if_exist:cT { LT@save@row }
         {
           \group_begin:
-            \cs_set:cpn { LT@entry } ##1 ##2 { \dim_gadd:Nn \g__oer_fit_dim {##2} }
+            \cs_set:cpn { LT@entry } ##1 ##2
+              {
+                \dim_gadd:Nn \g__oer_fit_dim {##2}
+                \directlua { oerfit.entry(#1, \dim_to_decimal_in_sp:n {##2}) }
+              }
             \use:c { LT@save@row }
           \group_end:
         }
@@ -1070,9 +1269,11 @@ FIT_MACROS = r"""% Something too wide for its line, which TeX can't break:
   \ExplSyntaxOff
 \else
   \NewDocumentCommand\OERFitTable{mmm}{}
+  \NewDocumentCommand\OERFitStepsTable{mmmm}{}
   \NewDocumentCommand\OERFitTableEnd{m}{}
   \NewDocumentCommand\OERFitFormula{mm}{}
   \def\OERFitState#1#2#3#4#5{}
+  \def\OERFitStepsState#1#2{}
   \def\OERFitRun#1{}
   \def\OERFitSource#1#2{}
 \fi
@@ -1611,14 +1812,15 @@ def overfull_warning(found, where="PDF"):
 # formulas it numbered it has narrowed alone, and how many it set smaller,
 # and the smallest part of its type's size any is in; and each that was still
 # wider than its line on the run: its kind (t a table whose columns don't
-# wrap, p one whose do, d a display formula, e a numbered one, i a formula
-# in text), how many points wider, the line of LaTeX its group opened on,
-# the part of its type's size it was in, whether it was centered, whether
-# it was on the paper, a quarter inch inside its edge, and whether its page
-# has two columns, where it has no more room than its column.
+# wrap, p one whose do, s a worked example's steps, d a display formula, e
+# a numbered one, i a formula in text), how many points wider, the line of
+# LaTeX its group opened on, the part of its type's size it was in,
+# whether it was centered, whether it was on the paper, a quarter inch
+# inside its edge, and whether its page has two columns, where it has no
+# more room than its column.
 FITTED = re.compile(r"^TextbookImprover fit: run (\d+), (\d+) narrowed, (\d+) smaller, "
                     r"smallest ([\d.]+)$", re.M)
-FIT_WIDE = re.compile(r"^TextbookImprover fit wide: ([tpdei]) ([\d.]+) (\d+) ([\d.]+) ([01]) ([01]) "
+FIT_WIDE = re.compile(r"^TextbookImprover fit wide: ([tpsdei]) ([\d.]+) (\d+) ([\d.]+) ([01]) ([01]) "
                       r"([01])$", re.M)
 
 
@@ -1659,7 +1861,7 @@ def fit_report(output, source, pages):
     # though the table fits its line, is no wider than the text.
     middle = sorted((w for w in wide if w[4] and w[5] and w[0] > 0), key=lambda w: -w[0])
     if middle:
-        tables = sum(1 for w in middle if w[1] in "tp")
+        tables = sum(1 for w in middle if w[1] in "tps")
         said.append(f"{len(middle)} of them, still wider than the text, "
                     f"{'is' if len(middle) == 1 else 'are'} centered on "
                     f"the page ({tables} table(s), {len(middle) - tables} display "

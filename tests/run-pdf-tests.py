@@ -1359,6 +1359,47 @@ def build_fit_columns(work):
             converted.stdout + converted.stderr)
 
 
+# An evaluation bar's limits as OpenStax writes them, an mtable under the
+# bar and one over it, a row of each empty: texmath writes a one-column
+# matrix whose last row is empty with an empty line before its end, which
+# TeX reads as \par, and LaTeX's tagging stopped at one in a display
+# formula (Calculus Volume 2's chapter 3); in a formula in text, where LaTeX
+# read on, the row was lost, a \\ before a matrix's end making none, and
+# the upper limit sat 9.5 points above the formula's baseline, the lower
+# 28.5 below. A page of HTML, as the CNX unpacker writes one: a Markdown
+# formula can't hold an empty line.
+BAR_LIMITS = ("<msubsup><mo>|</mo><mtable><mtr><mtd></mtd></mtr><mtr><mtd><mn>0</mn></mtd></mtr>"
+              "</mtable><mtable><mtr><mtd><mn>5</mn></mtd></mtr><mtr><mtd></mtd></mtr></mtable>"
+              "</msubsup>")
+BLANK_LINES = ('<!DOCTYPE html>\n<html lang="en"><head><meta charset="utf-8"><title>Bars</title>'
+               '</head><body>\n<h1>Bars</h1>\n<p>Barlimits, an evaluation bar\'s limits in a display '
+               'formula:</p>\n<p><math display="block"><mrow><mi>x</mi>' + BAR_LIMITS
+               + '<mo>=</mo><mn>5</mn></mrow></math></p>\n<p>And Barinline, in a formula in text, '
+               '<math><mrow><mi>y</mi>' + BAR_LIMITS + '</mrow></math>, after it.</p>\n'
+               '</body></html>\n')
+
+
+def build_blank_lines(work):
+    """BLANK_LINES as a book's one page, on the default page: (the PDF's
+    path, its LaTeX)."""
+    os.makedirs(work)
+    with open(os.path.join(work, "bars.html"), "w", encoding="utf-8") as fh:
+        fh.write(BLANK_LINES)
+    with open(os.path.join(work, "project.yaml"), "w", encoding="utf-8") as fh:
+        fh.write("project:\n  title: Bars\n  identifier: org.example.bars\n"
+                 "  language: en-US\n  contents:\n    - bars\n")
+    with open(os.path.join(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
+        fh.write("targets:\n  pdf:\n    format: pdf\n")
+    run(["python3", os.path.join(BIN, "convert.py"), "--quick"], work)
+    run(["python3", os.path.join(BIN, "build-pdf.py"), "--latex-only"], work)
+    tex = os.path.join(work, "pdf", "book.tex")
+    source = ""
+    if os.path.exists(tex):
+        with open(tex, encoding="utf-8") as fh:
+            source = fh.read()
+    return os.path.join(work, "pdf", "org.example.bars.pdf"), source
+
+
 def build_default(work):
     """The book (write_book) on the PDF target's default page, which its
     checks measure on the class's (CLASS_PAGE): every kind of thing it
@@ -1370,6 +1411,17 @@ def build_default(work):
     subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick"], cwd=work,
                    capture_output=True, text=True, stdin=subprocess.DEVNULL)
     return os.path.join(work, "pdf", "org.example.pdf.pdf")
+
+
+def bar_limits(path):
+    """[(how far the upper limit's baseline is above the formula's, how far
+    the lower limit's is below it)] for each evaluation bar on the bars
+    page (BLANK_LINES), the display's and the one in text: a line between
+    one holding the upper limit, 5, alone and one holding the lower, 0."""
+    rows = [row for page, lines in sorted(glyph_lines(path).items()) for row in lines]
+    return [(rows[i - 1][0] - rows[i][0], rows[i][0] - rows[i + 1][0])
+            for i in range(1, len(rows) - 1)
+            if rows[i - 1][3] == "5" and rows[i + 1][3] == "0"]
 
 
 def glyph_lines(path):
@@ -2871,6 +2923,7 @@ def checks(work, jobs=1):
             aaa = pool.submit(build_aaa, work + "-aaa")
             fitted = pool.submit(build_fit, work + "-fit")
             columned = pool.submit(build_fit_columns, work + "-columns")
+            barred = pool.submit(build_blank_lines, work + "-bars")
             reader, source, rows, log, placements = book.result()
             ua1_path, ua1_said, ua1_rows = ua1.result()
             untagged_path, untagged_said = plain.result()
@@ -2883,6 +2936,7 @@ def checks(work, jobs=1):
             aaa_path = aaa.result()
             fit_path, fit_said, fit_source, fit_third = fitted.result()
             columns_path, columns_said = columned.result()
+            bars_path, bars_source = barred.result()
     else:
         reader, source, rows, log, placements = build(work)
         ua1_path, ua1_said, ua1_rows = build_ua1(work + "-ua1")
@@ -2896,6 +2950,7 @@ def checks(work, jobs=1):
         aaa_path = build_aaa(work + "-aaa")
         fit_path, fit_said, fit_source, fit_third = build_fit(work + "-fit")
         columns_path, columns_said = build_fit_columns(work + "-columns")
+        bars_path, bars_source = build_blank_lines(work + "-bars")
 
     def page_text(path):
         return "".join(page.extract_text() or "" for page in pypdf.PdfReader(path).pages) \
@@ -3634,6 +3689,22 @@ def checks(work, jobs=1):
     items += aaa_checks(aaa_path)
     items += fit_checks(fit_path, fit_said, fit_source, fit_third)
     items += columns_checks(columns_path, columns_said)
+    # pdf-target.lua's Math: an empty line in a formula, as texmath writes a
+    # one-column matrix whose last row is empty, is that row, an empty group.
+    matrices = re.findall(r"\\begin\{matrix\}.*?\\end\{matrix\}", bars_source, re.S)
+    items += [
+        ("a display formula holding an empty line, as texmath writes an evaluation bar's "
+         "limits, builds, the empty line an empty row, and so does a formula in text "
+         "holding one",
+         lambda: os.path.exists(bars_path) and len(matrices) == 4
+         and not any(re.search(r"\n[ \t]*\n", m) for m in matrices)
+         and "Barinline" in "".join(page.extract_text() or "" for page in
+                                    pypdf.PdfReader(bars_path).pages)),
+        ("and each bar's upper limit is as far above the formula's line as its lower "
+         "limit is below it, in the display and in text, the empty row kept",
+         lambda: os.path.exists(bars_path)
+         and [abs(up - down) < 3 for up, down in bar_limits(bars_path)] == [True, True]),
+    ]
     if verapdf_ran:
         # The one character no font has is drawn as .notdef, which
         # veraPDF reports, and that's the only rule it finds failed.
@@ -3749,14 +3820,15 @@ def main():
             failed += not passed
     finally:
         # The PDF/UA-1, untagged, notes, footer, sized, fancy, default,
-        # preamble, AAA, fit, and two-column books are built beside the
-        # book (build_ua1, build_untagged, build_notes, build_footer,
-        # build_sized, build_fancy, build_default, build_preamble,
-        # build_aaa, build_fit, build_fit_columns).
+        # preamble, AAA, fit, two-column, and evaluation bar's books are
+        # built beside the book (build_ua1, build_untagged, build_notes,
+        # build_footer, build_sized, build_fancy, build_default,
+        # build_preamble, build_aaa, build_fit, build_fit_columns,
+        # build_blank_lines).
         if arguments.keep:
             print(f"\nOutput left in {work}, {work}-ua1, {work}-untagged, {work}-notes, "
                   f"{work}-footer, {work}-sized, {work}-fancy, {work}-default, "
-                  f"{work}-preamble, {work}-aaa, {work}-fit, and {work}-columns")
+                  f"{work}-preamble, {work}-aaa, {work}-fit, {work}-columns, and {work}-bars")
         else:
             shutil.rmtree(work, ignore_errors=True)
             shutil.rmtree(work + "-ua1", ignore_errors=True)
@@ -3770,6 +3842,7 @@ def main():
             shutil.rmtree(work + "-aaa", ignore_errors=True)
             shutil.rmtree(work + "-fit", ignore_errors=True)
             shutil.rmtree(work + "-columns", ignore_errors=True)
+            shutil.rmtree(work + "-bars", ignore_errors=True)
     print(f"\n{failed} check(s) failed" if failed
           else "\nall PDF checks passed")
     return 1 if failed else 0

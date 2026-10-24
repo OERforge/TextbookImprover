@@ -1743,8 +1743,22 @@ end
 -- LuaTeX while LaTeX's tagging took the formula's MathML ("(nodes):
 -- trying to set an attribute fails, case 2"; OpenIntro Statistics's
 -- headings of its boxes), where \pmb{\hat{p}_1} and \pmb{p_1 - b} didn't.
+--
+-- And an mtable's empty last row, which texmath writes, where the mtable
+-- has one column, as an empty line before the matrix's end, OpenStax
+-- placing what's beside it so: an evaluation bar's limits (an mtable under
+-- the bar and one over it, a row of each empty), and a synthetic
+-- division's rows. TeX reads the empty line as \par, at which LaTeX's
+-- tagging, reading a display formula's body as an argument, stopped
+-- ("Paragraph ended before \environment equation* was complete": Calculus
+-- Volume 2's chapter 3, Precalculus 2e's chapter 7); and in a formula in
+-- text, where LaTeX read on, the row was lost, since a \\ before a
+-- matrix's end makes no row, so the bar's upper limit sat low. The empty
+-- line is an empty group, {}, which makes the row; another empty line,
+-- which texmath doesn't write, is the line end TeX would read.
 local function Math(math)
   local text = math.text:gsub('\\pmb%f[^%a]', '\\symbfit')
+    :gsub('\n%s*\n(%s*\\end%s*{)', '\n{}\n%1'):gsub('\n%s*\n', '\n')
   if math.mathtype == 'DisplayMath' and text:match('^%s*\\begin%s*{eqnarray%*}') then
     return pandoc.RawInline('latex', text)
   end

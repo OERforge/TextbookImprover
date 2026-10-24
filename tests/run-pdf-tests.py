@@ -1288,6 +1288,16 @@ FIT_ONE = (
     + "</colgroup><thead><tr><th>Over</th><th>Blank</th></tr></thead><tbody><tr>"
     "<td>Overblank: some words to fill a column</td><td>fill in the " + "_" * 36 + " here.</td>"
     "</tr></tbody></table>\n\n"
+    "A table whose columns' widths are given, half the line each, a word of 26 letters in "
+    "one and a fill-in blank in the other, the blank longer than its column:\n\n<table>"
+    "<colgroup>" + "<col style=\"width: 50%\">" * 2 + "</colgroup><thead><tr><th>Word</th>"
+    "<th>Blank</th></tr></thead><tbody><tr><td>Abcdefghijklmnopqrstuvwxyz</td>"
+    "<td>Halfblank: fill in the " + "_" * 64 + " here.</td></tr></tbody></table>\n\n"
+    "A table whose columns' widths are given, a word of code in one holding a run of "
+    "underscores, which isn't a fill-in blank, longer than its column:\n\n<table><colgroup>"
+    "<col style=\"width: 10%\"><col style=\"width: 90%\"></colgroup><tbody><tr>"
+    "<td>Codeblank `print(________)`</td><td>words beside it, enough of them to fill the rest "
+    "of the line</td></tr></tbody></table>\n\n"
     "A layout table too wide for its line, its caption a paragraph before it:\n\n"
     "<table role=\"presentation\"><caption>Laycap, the caption of a layout table too wide for "
     "its line</caption><tbody><tr><td>Laytable</td>"
@@ -1888,6 +1898,22 @@ def blank_runs(path):
             found.append((len(run), any(b[0] < a[1] - 0.01 for a, b in zip(run, run[1:])),
                           run[-1][1]))
     return found
+
+
+def blank_at(path, words):
+    """For the line whose text holds words and a run of underscores: how
+    many underscores the run has, whether any overlaps the one before it,
+    and where its first starts and its last ends; None for no such line."""
+    lines = {}
+    for page, baseline, left, right, char in pdftext.glyph_boxes(path):
+        lines.setdefault((page, baseline), []).append((left, right, char))
+    for glyphs in lines.values():
+        if words in "".join(g[2] for g in glyphs):
+            run = [g for g in glyphs if g[2] == "_"]
+            if run:
+                return (len(run), any(b[0] < a[1] - 0.01 for a, b in zip(run, run[1:])),
+                        run[0][0], run[-1][1])
+    return None
 
 
 def blank_box(path, words):
@@ -2776,6 +2802,24 @@ def fit_checks(fit_path, fit_said, fit_source, fit_third):
          lambda: at("Overblank", 1) and within("Overblank")
          and any(count == 36 and over and 0 < right < 542
                  for count, over, right in blank_runs(fit_path))),
+        # pdf-target.lua's widths for the columns counted the blank as a word
+        # of 64 characters, and gave its column the line, the word of 26
+        # letters too, which set the table at 86 percent of its size.
+        ("and one whose columns' widths are given, half the line each, a blank longer than "
+         "its column beside a word of 26 letters, keeps its type, the word whole",
+         lambda: at("Abcdefghijklmnopqrstuvwxyz", 1) and within("Abcdefghijklmnopqrstuvwxyz")
+         and any(count == 64 and over and 0 < right < 542
+                 for count, over, right in blank_runs(fit_path))),
+        # pdf-target.lua's widths counted the code's run of underscores as
+        # a blank, three to a word, and gave its column 10 characters for
+        # its 15; LaTeX draws code's underscores whole, and the table was
+        # set at 75 percent of its size.
+        ("and one whose columns' widths are given, a word of code holding a run of "
+         "underscores, which isn't a blank, too long for its column, keeps its type, its "
+         "column widened to the code, the underscores drawn whole",
+         lambda: at("Codeblank", 1) and within("Codeblank")
+         and (lambda found: found is not None and found[0] == 8 and not found[1])(
+             blank_at(fit_path, "print("))),
         ("a layout table set smaller keeps its caption, a paragraph before it, in the text's "
          "type",
          lambda: at("Laycap", 1) and 0 < size("Laytable") < body - 0.1),
@@ -3047,9 +3091,8 @@ def fit_checks(fit_path, fit_said, fit_source, fit_third):
         ("and steps whose reason holds a fill-in blank longer than its column keep the text's "
          "type, the blank drawn shorter to fit its line",
          lambda: at("Blankreason", 1) and within("Blankreason")
-         and (lambda found: found is not None and found[1] == 60 and found[2])(
-             blank_on_line(fit_path, "_" * 60))
-         and 0 < ends("_" * 60)[1] < 542),
+         and any(count == 60 and over and 0 < right < 542
+                 for count, over, right in blank_runs(fit_path))),
         # A run of underscores underlined isn't marked as a blank, and
         # nothing draws it shorter, so the measure takes it whole: taken for
         # a blank, the steps would be set across the line in the text's

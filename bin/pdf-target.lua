@@ -507,7 +507,11 @@ end
 -- as its TeX shows, and two more for each operator or relation, which
 -- TeX sets with space around it; a picture, which the writer scales to
 -- its column, a line, and no word. A formula's words are the pieces TeX
--- can't break it into (formula_pieces).
+-- can't break it into (formula_pieces). A fill-in blank, a run of four or
+-- more underscores, is three in a word, as PDF_MACROS draws one too long
+-- for its line shorter, to three at the least: counted whole, a long
+-- blank's column took the line from the next column's longest word, and
+-- the table was set smaller for it.
 local SPACED = { times = true, cdot = true, div = true, pm = true, mp = true,
                  le = true, leq = true, ge = true, geq = true, ne = true,
                  neq = true, approx = true, equiv = true, to = true,
@@ -877,26 +881,45 @@ local function formula_width(tex)
   return math.ceil(width_of(tex, 1, false, tex:find('\\displaystyle', 1, true) ~= nil))
 end
 
+-- A fill-in blank, a run of four or more underscores the blank pass
+-- marks (blanks, below), counts as three in a cell's longest word, the
+-- shortest LaTeX draws it to fit its column, and whole in the cell's
+-- length, as it's drawn where there's room. Underscores the pass leaves
+-- alone, in code, a link, an underline, a strikeout, or a mark, LaTeX
+-- doesn't draw shorter, and they count whole in both.
+local function blanks_counted(block)
+  local skip = function(element) return element, false end
+  return pandoc.Blocks{ block }:walk{
+    traverse = 'topdown', Image = skip, Link = skip, Underline = skip, Strikeout = skip,
+    Span = function(span) if span.classes:includes('mark') then return span, false end end,
+    Str = function(str)
+      if str.text:find('____', 1, true) then
+        return pandoc.Str((str.text:gsub('____+', '___')))
+      end
+    end }
+end
+
 local function cell_size(cell)
   local length, longest = 0, 0
+  local counted = {
+    Math = function(math_)
+      local words = {}
+      for _, piece in ipairs(formula_pieces(math_.text)) do
+        local size = formula_length(piece)
+        if size > 0 then words[#words + 1] = ('m'):rep(size) end
+      end
+      return pandoc.Str(#words > 0 and table.concat(words, ' ') or 'm')
+    end,
+    Image = function() return pandoc.Str((' '):rep(LINE)) end,
+    LineBreak = function() return pandoc.Str('\n') end,
+  }
   for _, block in ipairs(cell.contents) do
-    local text = stringify(pandoc.Blocks{ block }:walk({
-      Math = function(math_)
-        local words = {}
-        for _, piece in ipairs(formula_pieces(math_.text)) do
-          local size = formula_length(piece)
-          if size > 0 then words[#words + 1] = ('m'):rep(size) end
-        end
-        return pandoc.Str(#words > 0 and table.concat(words, ' ') or 'm')
-      end,
-      Image = function() return pandoc.Str((' '):rep(LINE)) end,
-      LineBreak = function() return pandoc.Str('\n') end,
-    }))
+    local text = stringify(pandoc.Blocks{ block }:walk(counted))
     for line in (text .. '\n'):gmatch('(.-)\n') do
       length = math.max(length, utf8.len(line) or #line)
-      for word in line:gmatch('%S+') do
-        longest = math.max(longest, utf8.len(word) or #word)
-      end
+    end
+    for word in stringify(blanks_counted(block):walk(counted)):gmatch('%S+') do
+      longest = math.max(longest, utf8.len(word) or #word)
     end
   end
   return length, longest

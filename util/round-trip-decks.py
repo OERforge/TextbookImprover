@@ -14,9 +14,10 @@ lib/deckcompare.py compares them, for its titles, text and formatting,
 lists, tables, pictures and their alt text, equations, and notes. The
 decks themselves aren't touched: the trip is made in a folder of its own.
 
-What Pandoc's PowerPoint writer doesn't write is reported with the rest,
-as a difference: a link's ScreenTip, a merged cell. Exit status is 0 when
-every deck came back the same, 1 when one didn't or a run failed.
+What Pandoc's PowerPoint writer doesn't write, and the pptx target doesn't
+put back, is reported with the rest, as a difference: a merged cell. Exit
+status is 0 when every deck came back the same, 1 when one didn't or a run
+failed.
 
 Copyright 2026 Robert Szarka
 

@@ -3012,6 +3012,19 @@ one](#linked-notes), and [`the code`](https://example.org/data).
 
 - A point at <someone@example.org>
 :::
+
+# Listed Beside a Picture
+
+Words before the list.
+
+- A point
+    - A smaller point
+
+![A rising line](img/plot.png)
+
+# Titled Links
+
+See [the data](https://example.org/data "Where the data & more are"), [*the* plan](https://example.org/plan "The plan"), [no title](https://example.org/none), and [the list](#listed-beside-a-picture "Back to the list").
 """
 
 
@@ -3067,6 +3080,39 @@ def slide_links(parts, slide):
 
 def file_of(slide):
     return slide.part.rsplit("/", 1)[1] if slide else None
+
+
+def run_tooltips(xml):
+    """(text, ScreenTip or None) of each run with a link on a slide."""
+    out = []
+    for run in re.findall(r"<a:r>.*?</a:r>", xml, re.S):
+        click = re.search(r"<a:hlinkClick\b[^>]*>", run)
+        if click:
+            tip = re.search(r'\stooltip="([^"]*)"', click.group(0))
+            out.append(("".join(re.findall(r"<a:t>([^<]*)</a:t>", run)),
+                        tip.group(1) if tip else None))
+    return out
+
+
+def paragraph_bullets(xml):
+    """(level, bullet, left margin, indent, text) of each paragraph in a
+    slide's shapes that aren't its title, the bullet its character or
+    None."""
+    out = []
+    for shape in re.findall(r"<p:sp>.*?</p:sp>", xml, re.S):
+        if re.search(r'<p:ph\b[^>]*\stype="(?:title|ctrTitle)"', shape):
+            continue
+        for paragraph in re.findall(r"<a:p>.*?</a:p>", shape, re.S):
+            props = re.search(r"<a:pPr\b([^>]*?)(?:/>|>(.*?)</a:pPr>)", paragraph, re.S)
+            attrs, inner = (props.group(1), props.group(2) or "") if props else ("", "")
+            char = re.search(r'<a:buChar\b[^>]*?\schar="([^"]*)"', inner)
+
+            def value(name):
+                found = re.search(r'\s%s="([^"]*)"' % name, attrs)
+                return found.group(1) if found else None
+            out.append((value("lvl"), char.group(1) if char else None, value("marL"),
+                        value("indent"), "".join(re.findall(r"<a:t>([^<]*)</a:t>", paragraph))))
+    return out
 
 
 def notes_of(parts, slide):
@@ -3300,6 +3346,10 @@ def case_pptx(work):
     space_top = slide_titled(hd, "Space Top")
     after_list = slide_titled(hd, "Display After a List")
     top_math = slide_titled(hd, "Display Top")
+    beside = slide_titled(hd, "Listed Beside a Picture")
+    titled = slide_titled(hd, "Titled Links")
+    titled_xml = hp[titled.part] if titled else ""
+    titled_rels = slide_rels(hp, titled)
     code = slide_titled(sd, "Some Code")
 
     def number(slide):
@@ -3356,6 +3406,29 @@ def case_pptx(work):
          "(shapes 8)" in out),
         ("a picture after text is the writer's own layout, the text beside it",
          lambda: slide_titled(hd, "Picture and Text").layout == "Content with Caption"),
+        ("a list beside a picture has the bullets the master gives a slide's list, hanging as "
+         "a numbered one does, where the writer's layout for text beside a picture gives none; "
+         "its other paragraphs keep none, and a list the master's style gives bullets is the "
+         "writer's",
+         lambda: beside is not None and beside.layout == "Content with Caption"
+         and paragraph_bullets(hp[beside.part])[:3] == [
+             ("0", None, "0", "0", "Words before the list."),
+             ("0", "•", "457200", "-457200", "A point"),
+             ("1", "–", "914400", "-457200", "A smaller point")]
+         and after_list is not None and paragraph_bullets(hp[after_list.part])[:2] == [
+             ("0", None, None, None, "A point"), ("1", None, None, None, "A smaller point")]
+         and "2 paragraph(s) of lists on slides given their bullets" in out),
+        ("a link's title is its ScreenTip, on every run of the link, one to a slide's too, "
+         "which the writer doesn't write; the marks the filter put around its words are gone, "
+         "and each relationship the slide keeps is one it names",
+         lambda: run_tooltips(titled_xml) == [
+             ("the data", "Where the data &amp; more are"), ("the", "The plan"),
+             (" plan", "The plan"), ("no title", None), ("the list", "Back to the list")]
+         and not re.search("[]", every)
+         and all(re.search(r'\sr:id="%s"' % rid, titled_xml)
+                 for rid in re.findall(r'<Relationship\b[^>]*?\sId="(rId\d+)"[^>]*?'
+                                       r'relationships/(?:hyperlink|slide)"', titled_rels))
+         and "3 link(s) on slides given their titles as their ScreenTips" in out),
         ("a link to a figure goes to the slide the figure is on",
          lambda: opening is not None and first is not None and re.search(
              r'Target="%s"' % re.escape(first.part.rsplit("/", 1)[1]),

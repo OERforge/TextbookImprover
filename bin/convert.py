@@ -4364,11 +4364,17 @@ def deck_pptxs(target, stems, names, base, language, work):
             + (f", {counts['math_fallbacks']} shape(s) holding equations given their text "
                "for programs that show no PowerPoint equation" if counts["math_fallbacks"]
                else "")
+            + (f", {counts['list_bullets']} paragraph(s) of lists on slides given their "
+               "bullets, which Pandoc's writer leaves to a placeholder that gives none, as the "
+               "one it puts text beside a picture in does" if counts["list_bullets"] else "")
             + (f", {counts['notes_bullets']} paragraph(s) of lists in speaker notes given their "
                "bullets, which Pandoc's writer leaves to a notes master that gives none"
                if counts["notes_bullets"] else "")
             + (f", {counts['notes_links']} link(s) in speaker notes put back, which Pandoc's "
                "writer takes out of them" if counts["notes_links"] else "")
+            + (f", {counts['link_titles']} link(s) on slides given their titles as their "
+               "ScreenTips, which Pandoc's writer doesn't write" if counts["link_titles"]
+               else "")
             + (f", {counts['repaired']} repair(s) of XML PowerPoint can't read as Pandoc "
                "wrote it" if counts["repaired"] else "") + ".")
     if found["cut"]:

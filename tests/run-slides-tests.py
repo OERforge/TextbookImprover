@@ -4485,13 +4485,13 @@ def case_round_trip(work):
     what = sorted((d.where, d.what) for d in found)
     yield "slide for slide, the same titles, text and its formatting, lists, tables, pictures " \
         "and their alt text, equations, and notes, but for what Pandoc's PowerPoint writer " \
-        "doesn't write: a merged cell, and a link's ScreenTip", \
-        what == [("slide 4 (Links)", "content"), ("slide 5 (A Table)", "content")], found
-    links = next((d for d in found if d.where == "slide 4 (Links)"), None)
-    shown = links and deckcompare.first_difference(links.first, links.second)
-    yield "the link's difference is its ScreenTip alone", \
-        shown == ('See <a href="https://example.org/data" title="Where the data are">the '
-                  'source</a>.', 'See <a href="https://example.org/data">the source</a>.'), shown
+        "doesn't write: a merged cell", \
+        what == [("slide 5 (A Table)", "content")], found
+    tips = [(l.text, l.target, l.tooltip) for s in pptxparse.read(tripped).slides
+            for shape in s.all_shapes() for l in shape.links]
+    yield "a link's ScreenTip comes back, which Pandoc's PowerPoint writer doesn't write and " \
+        "the pptx target does", \
+        ("the source", "https://example.org/data", "Where the data are") in tips, tips
     cells = next((d for d in found if d.where == "slide 5 (A Table)"), None)
     yield "and the table's, its merged cell", \
         cells is not None and cells.first[0][-1] == "spans" and cells.second[0][-1] == "", \
@@ -4569,8 +4569,8 @@ def case_round_trip(work):
     tool = subprocess.run(["python3", os.path.join(ROOT, "util", "round-trip-decks.py"), folder,
                            "--keep", os.path.join(work, "kept")], capture_output=True, text=True)
     yield "util/round-trip-decks.py makes the trip of a folder's decks and reports the same", \
-        tool.returncode == 1 and "Reader.pptx: 2 difference(s)" in tool.stdout \
-        and "Cut.pptx: the same" in tool.stdout and "slide 4 (Links), content:" in tool.stdout \
+        tool.returncode == 1 and "Reader.pptx: 1 difference(s)" in tool.stdout \
+        and "Cut.pptx: the same" in tool.stdout and "slide 4 (Links)" not in tool.stdout \
         and "slide 5 (A Table), content:" in tool.stdout \
         and os.path.isfile(os.path.join(work, "kept", "trip", "decks", "Reader.pptx")), \
         (tool.stdout + tool.stderr)[-600:]

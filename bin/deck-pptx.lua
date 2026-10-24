@@ -75,6 +75,10 @@
 --    between marks, its target recorded, for pptxtarget.py to make the
 --    words the link again. One to a place in the deck stays its words, as
 --    the writer leaves it, and is counted.
+-- 15. A link's title, its ScreenTip in PowerPoint, isn't written (Output.hs
+--    writes an a:hlinkClick with no tooltip), so each link on a slide with
+--    a title has its words between marks, its title recorded, for
+--    pptxtarget.py to write as the ScreenTip of the runs between them.
 --
 -- Copyright 2026 Robert Szarka
 --
@@ -107,6 +111,7 @@ local record = {
   pictures = {}, tables = {}, inline_images = 0, pauses = 0, languages = 0,
   retargeted = 0, unlinked = 0, notes = 0, institute = false, cut = 0, added = 0,
   continued = 0, column_blocks = 0, spaces = {}, notes_links = {}, notes_unlinked = 0,
+  link_titles = {},
 }
 local pictures, tables = 0, 0
 
@@ -219,6 +224,11 @@ local SPACE_BASE = 0xF0000
 -- in record.notes_links (U+F0001 the first) before its words, NOTES_LINK_END
 -- after them, the words between the link's in pptxtarget.py.
 local NOTES_LINK, NOTES_LINK_END = '\u{E004}', '\u{E005}'
+-- A link on a slide with a title (15, above): TITLED_LINK and a character
+-- naming its title's place in record.link_titles (U+F0001 the first)
+-- before its words, TITLED_LINK_END after them, which pptxtarget.py takes
+-- out, giving the runs between them the title as their ScreenTip.
+local TITLED_LINK, TITLED_LINK_END = '\u{E006}', '\u{E007}'
 local LATEX_LINE = 13.6
 local UNITS = {
   pt = 1, bp = 72.27 / 72, px = 72.27 / 72, ['in'] = 72.27, cm = 72.27 / 2.54,
@@ -945,6 +955,19 @@ local function notes_link(link)
   return words
 end
 
+-- A link on a slide with a title, its words between marks and its title
+-- recorded (15, above); one with none left as it is.
+local function titled_link(link)
+  if link.title == '' then return nil end
+  table.insert(record.link_titles, link.title)
+  local words = pandoc.Inlines({
+    pandoc.Str(TITLED_LINK .. utf8.char(SPACE_BASE + #record.link_titles)) })
+  words:extend(link.content)
+  words:insert(pandoc.Str(TITLED_LINK_END))
+  link.content = words
+  return link
+end
+
 -- A metadata value as a list of its entries.
 local function entries(value)
   if value == nil then return pandoc.List({}) end
@@ -1041,6 +1064,16 @@ function Pandoc(doc)
     Div = function(div)
       if is_notes(div) then return div:walk({ Link = notes_link }), false end
     end,
+  })
+  -- The slides' links with titles, but in a picture's alt text, which is
+  -- no text on the slide.
+  doc.blocks = doc.blocks:walk({
+    traverse = 'topdown',
+    Div = function(div)
+      if is_notes(div) then return div, false end
+    end,
+    Image = function(img) return img, false end,
+    Link = function(link) return titled_link(link), false end,
   })
   -- Tables, the images left in lines of text, and the passages in other
   -- languages, speaker notes aside.

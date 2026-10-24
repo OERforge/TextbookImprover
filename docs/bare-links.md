@@ -19,7 +19,7 @@ https://doi.org/10.1080/08913810508443640,,,refs,"Klein and Stern. 2005. “Prof
 
 - **A Replacement that is a URL** (`http`, `https`, or `ftp`) replaces the link's address and its text: `https://doi.org/10/b8xx35` for the DOI above. That's how a shortDOI goes in.
 - **Any other Replacement** replaces only the text, and the link isn't bare any more: `The Data and Story Library's cars data`.
-- **A Title** becomes the link's title: a tooltip in HTML and EPUB, a ScreenTip in Word once there's Word output. A blank Title keeps whatever title the source gave the link.
+- **A Title** becomes the link's title: a tooltip in HTML and EPUB, and a ScreenTip in a Word file and in a deck's PowerPoint file. A blank Title keeps whatever title the source gave the link.
 - **A row with both columns blank** keeps the link as it is. That's a decision too, and the link leaves the report.
 
 A PowerPoint deck's bare links are in the same report and sidecar, and its `source` target writes each decision into its copy, the Title as the link's ScreenTip ([Slides](slides.md#the-copy)), as a book's `source` target writes them into a Word, HTML, or Markdown source's. In PowerPoint, NVDA reads a ScreenTip only when the mouse is over the link in the normal view and its Report tooltips is on, and never in Slide Show, so there a Replacement does more for a screen reader than a Title.

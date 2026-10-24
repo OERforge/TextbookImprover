@@ -88,7 +88,11 @@ writer's output:
   slide's list, hanging as the writer hangs a numbered one: the writer
   gives a list's paragraph no bullet of its own, for the style it inherits
   to give, and a notes master's gives none, so the list was shown, and
-  read, as paragraphs (notes_bullets);
+  read, as paragraphs (notes_bullets); and so does one on a slide in a
+  placeholder whose style gives none, as the one the writer puts text
+  beside a picture in does, Content with Caption's (list_bullets);
+- a link's title is its ScreenTip, on each run of the link, where the
+  writer writes none (link_titles, from deck-pptx.lua's marks);
 - a shape or table holding an equation has a fallback, which a program
   that reads no PowerPoint equations shows (LibreOffice, for one), each
   equation written there as a line of text (x̄ = 1/n∑xᵢ): the writer gives
@@ -1005,25 +1009,26 @@ def _merged(*styles):
     return out
 
 
-def text_styles(master):
-    """A master's text styles' levels: title, body, and other."""
+def text_styles(master, read=_levels):
+    """A master's text styles' levels: title, body, and other, each as read
+    reads a list style (_levels, or bullet_levels)."""
     def region(name):
         found = re.search(r"<p:%s>(.*?)</p:%s>" % (name, name), master, re.S)
         return found.group(1) if found else ""
-    return {key: _levels(region(name)) for key, name in (
+    return {key: read(region(name)) for key, name in (
         ("title", "titleStyle"), ("body", "bodyStyle"), ("other", "otherStyle"))}
 
 
-def layout_styles(layout):
+def layout_styles(layout, read=_levels):
     """{("idx", n) or ("type", t): levels} of a layout's placeholders'
-    own list styles."""
+    own list styles, as read reads one (_levels, or bullet_levels)."""
     out = {}
     for shape in PLACEHOLDER_SHAPE.finditer(layout):
         ph = re.search(r"<p:ph\b([^>]*)", shape.group(0))
         if ph is None:
             continue
         lists = re.search(r"<a:lstStyle>(.*?)</a:lstStyle>", shape.group(0), re.S)
-        levels = _levels(lists.group(1) if lists else "")
+        levels = read(lists.group(1) if lists else "")
         kind = _attr_value(ph.group(1), "type") or "obj"
         out.setdefault(("idx", _attr_value(ph.group(1), "idx") or "0"), levels)
         out.setdefault(("type", kind), levels)
@@ -1556,6 +1561,36 @@ def body_bullets(master):
     return out
 
 
+def _paragraph_level(attrs):
+    """A paragraph's level, 0 to 8, from its properties' attributes."""
+    try:
+        return min(8, max(0, int(_attr_value(attrs, "lvl") or 0)))
+    except ValueError:
+        return 0
+
+
+def _bulleted(attrs, inner, level, bullets, margins):
+    """A paragraph's properties (attrs, inner) given the bullet a slide's
+    list has at its level (bullets, body_bullets'), hanging as the writer
+    hangs a numbered one (paragraphToElement): its margin the next level's
+    (margins: {level: left margin in EMU}), its first line this level's."""
+    font, char = bullets.get(level, ("Arial", "\u2022"))
+    this = margins.get(level)
+    after = margins.get(level + 1)
+    this = 457200 * level if this is None else this
+    after = this + 457200 if after is None else after
+    attrs = _set_attr(_set_attr(attrs, "marL", str(after)), "indent", str(this - after))
+    lead = 0
+    while True:
+        more = BEFORE_BULLET.match(inner, lead)
+        if more is None:
+            break
+        lead = more.end()
+    return "<a:pPr%s>%s%s<a:buChar char=\"%s\"/>%s</a:pPr>" % (
+        attrs, inner[:lead], '<a:buFont typeface="%s"/>' % html.escape(font) if font else "",
+        html.escape(char), inner[lead:])
+
+
 def notes_bullets(xml, bullets, margins, counts):
     """A notes slide's paragraphs of a bulleted list given the bullets the
     master gives a slide's list (bullets, body_bullets'): the writer gives
@@ -1565,38 +1600,91 @@ def notes_bullets(xml, bullets, margins, counts):
     have bullets of their own), so the list was shown and read as
     paragraphs. A list's paragraph is one whose properties hold no bullet,
     the writer giving every other buNone or numbering, and it hangs as the
-    writer hangs a numbered one (paragraphToElement): its margin the next
-    level's in the master's otherStyle (margins), its first line this
-    level's. counts["notes_bullets"] counts them."""
+    writer hangs a numbered one (_bulleted), at the levels' margins in the
+    master's otherStyle (margins). counts["notes_bullets"] counts them."""
     def paragraph(match):
         attrs, inner = match.group(1), match.group(2) or ""
         if "<a:bu" in inner:
             return match.group(0)
-        try:
-            level = min(8, max(0, int(_attr_value(attrs, "lvl") or 0)))
-        except ValueError:
-            level = 0
-        font, char = bullets.get(level, ("Arial", "\u2022"))
-        this = margins.get(level)
-        after = margins.get(level + 1)
-        this = 457200 * level if this is None else this
-        after = this + 457200 if after is None else after
-        attrs = _set_attr(_set_attr(attrs, "marL", str(after)), "indent", str(this - after))
-        lead = 0
-        while True:
-            more = BEFORE_BULLET.match(inner, lead)
-            if more is None:
-                break
-            lead = more.end()
         counts["notes_bullets"] += 1
-        return "<a:pPr%s>%s%s<a:buChar char=\"%s\"/>%s</a:pPr>" % (
-            attrs, inner[:lead],
-            '<a:buFont typeface="%s"/>' % html.escape(font) if font else "",
-            html.escape(char), inner[lead:])
+        return _bulleted(attrs, inner, _paragraph_level(attrs), bullets, margins)
 
     def body(match):
         return NOTES_PARAGRAPH_PROPERTIES.sub(paragraph, match.group(0))
     return NOTES_BODY.sub(body, xml, count=1)
+
+
+def bullet_levels(region):
+    """{level, 0 to 8: True where a list style's level gives its paragraphs
+    a bullet (a character, a number, or a picture), False where it gives
+    them none (buNone)}, for the levels that say."""
+    out = {}
+    for match in LEVEL_STYLE.finditer(region or ""):
+        inner = match.group(3) or ""
+        if re.search(r"<a:buNone\b", inner):
+            out[int(match.group(1)) - 1] = False
+        elif re.search(r"<a:bu(?:Char|AutoNum|Blip)\b", inner):
+            out[int(match.group(1)) - 1] = True
+    return out
+
+
+def list_bullets(xml, slide, bullets, styles, layout, master, counts):
+    """A slide whose bulleted lists have bullets where the placeholder that
+    holds one gives its paragraphs none: the writer gives a list's
+    paragraph no bullet of its own, for the style it inherits to give
+    (paragraphToElement: a list's paragraph has no bullet element, every
+    other paragraph buNone or numbering), and the placeholder it puts text
+    beside a picture in, Content with Caption's, gives none, so the list
+    was shown, and read, as paragraphs. slide: the parsed slide; styles,
+    the master's text styles, and layout and master, its layout's
+    placeholders' list styles and its master's, each {"levels": as
+    _levels reads them (text_styles, layout_styles), "bullets": as
+    bullet_levels does}, a placeholder's found as fit_text finds its
+    levels. bullets: the master's body style's (body_bullets), a slide's
+    list's, which hang as notes_bullets' do (_bulleted), at the
+    placeholder's levels' margins, its size kept. counts["list_bullets"]
+    counts the paragraphs."""
+    for shape in slide.shapes:
+        if shape.kind != "sp" or not shape.placeholder or not shape.text.strip() \
+                or not shape.id:
+            continue
+        kind = pptxparse._base_type(shape.ph_type)
+
+        def chain(read):
+            own = layout[read].get(("idx", shape.ph_idx)) \
+                or layout[read].get(("type", shape.ph_type)) or {}
+            return (own, master[read].get(("type", kind), {}),
+                    styles[read]["title" if kind == "title" else "body" if kind == "body"
+                                 else "other"])
+        none = {level for level in range(9)
+                if next((style[level] for style in chain("bullets") if level in style),
+                        True) is False}
+        if not none:
+            continue
+        margins = {}
+        for level in range(9):
+            margin = next((style[level][1] for style in chain("levels")
+                           if style.get(level, (None, None))[1] is not None), None)
+            if margin is not None:
+                margins[level] = margin
+
+        def paragraph(match):
+            attrs, inner = match.group(1), match.group(2) or ""
+            level = _paragraph_level(attrs)
+            if "<a:bu" in inner or level not in none:
+                return match.group(0)
+            counts["list_bullets"] += 1
+            return _bulleted(attrs, inner, level, bullets, margins)
+        spans = pptxremediate._cnvpr_spans(xml, shape.id)
+        # Choice and Fallback alike, from the end, so each one's place holds.
+        for at, _end, _attrs, _closing in reversed(spans):
+            begin, close = xml.rfind("<p:sp>", 0, at), xml.find("</p:sp>", at)
+            if begin >= 0 and close >= 0:
+                xml = xml[:begin] + TEXT_BODY.sub(
+                    lambda body: body.group(1) + NOTES_PARAGRAPH_PROPERTIES.sub(
+                        paragraph, body.group(2)) + body.group(3),
+                    xml[begin:close], count=1) + xml[close:]
+    return xml
 
 
 # A link in a slide's speaker notes, which Pandoc's writer takes out of
@@ -1677,6 +1765,67 @@ def notes_links(xml, rels, links, counts):
         return NOTES_RUN.sub(run, match.group(0))
     xml = NOTES_PARAGRAPH.sub(paragraph, xml)
     counts["notes_links"] += len(linked)
+    return xml, rels
+
+
+# A link on a slide with a title, which the writer writes with no ScreenTip
+# (an a:hlinkClick with no tooltip, Output.hs): deck-pptx.lua puts
+# TITLED_LINK and a character naming its title's place in
+# record["link_titles"] (U+F0001 the first) before its words, and
+# TITLED_LINK_END after them.
+TITLED_LINK, TITLED_LINK_END = "", ""
+TITLED_LINK_MARK = re.compile("%s(.)|%s" % (TITLED_LINK, TITLED_LINK_END), re.S)
+HYPERLINK_CLICK = re.compile(r"<a:hlinkClick" + ATTRS + r"(/?)>")
+
+
+def link_titles(xml, rels, titles, counts):
+    """A slide (xml) and its relationships (rels), its links with titles
+    given them as their ScreenTips: each run between a link's marks, cut
+    where a mark falls inside it, its a:hlinkClick given the title as its
+    tooltip (titles: record["link_titles"]), and the marks taken out,
+    wherever they are; a run between them with no link of its own, as where
+    the writer took a link out, stays its words, and a run of nothing but a
+    mark goes, with the relationship the writer gave it, when nothing else
+    names it. counts["link_titles"] counts the links given a ScreenTip."""
+    if TITLED_LINK not in xml and TITLED_LINK_END not in xml:
+        return xml, rels
+    given, emptied = set(), set()
+
+    def paragraph(match):
+        place = [None]          # the link the runs are in, by its title's place
+
+        def run(run_match):
+            rpr, content = run_match.group(1), run_match.group(2)
+            pieces, at = [], 0
+            for mark in TITLED_LINK_MARK.finditer(content):
+                pieces.append((content[at:mark.start()], place[0]))
+                place[0] = ord(mark.group(1)) - SPACE_BASE if mark.group(1) else None
+                at = mark.end()
+            pieces.append((content[at:], place[0]))
+            out = []
+            for words, index in pieces:
+                if not words:
+                    continue
+                props = rpr
+                if index is not None and 0 < index <= len(titles) \
+                        and HYPERLINK_CLICK.search(rpr):
+                    title = titles[index - 1]
+                    props = HYPERLINK_CLICK.sub(
+                        lambda m: "<a:hlinkClick%s%s>" % (
+                            _set_attr(m.group(1), "tooltip", title), m.group(2)), rpr, count=1)
+                    given.add(index)
+                out.append("<a:r>%s<a:t>%s</a:t></a:r>" % (props, words))
+            if not out:
+                click = HYPERLINK_CLICK.search(rpr)
+                if click and _attr_value(click.group(1), "r:id"):
+                    emptied.add(_attr_value(click.group(1), "r:id"))
+            return "".join(out)
+        return NOTES_RUN.sub(run, match.group(0))
+    xml = TITLED_LINK_MARK.sub("", NOTES_PARAGRAPH.sub(paragraph, xml))
+    for rid in emptied:
+        if not re.search(r'\sr:id="%s"' % re.escape(rid), xml):
+            rels = re.sub(r'<Relationship\b[^>]*?\sId="%s"[^>]*?/>' % re.escape(rid), "", rels)
+    counts["link_titles"] += len(given)
     return xml, rels
 
 
@@ -1880,7 +2029,7 @@ def finish(path, record, *, language, title, svgs=None, notes=None):
               "tables_fitted": 0, "tables_overflow": 0, "text_fitted": 0, "text_overflow": 0,
               "bars": 0, "math_fallbacks": 0, "ids": 0, "animations": 0, "repaired": 0,
               "svgs": 0, "properties": 0, "displays": 0, "spaces": 0, "notes_bullets": 0,
-              "notes_links": 0}
+              "notes_links": 0, "list_bullets": 0, "link_titles": 0}
     with zipfile.ZipFile(path) as zin:
         infos = zin.infolist()
         parts = {info.filename: zin.read(info.filename) for info in infos}
@@ -1931,6 +2080,10 @@ def finish(path, record, *, language, title, svgs=None, notes=None):
         if name in slide_parts:
             folder, base = name.rsplit("/", 1)
             rels_name = "%s/_rels/%s.rels" % (folder, base)
+            xml, rels = link_titles(xml, text(rels_name) if rels_name in parts else "",
+                                    record.get("link_titles") or [], counts)
+            if rels_name in parts:
+                texts[rels_name] = rels
 
             def add_svg(svg, rels_name=rels_name):
                 media = next((m for m, s in added.items() if s == svg), None)
@@ -1992,14 +2145,23 @@ def finish(path, record, *, language, title, svgs=None, notes=None):
     finally:
         os.remove(temporary)
     placeholders = layout_styles(master)
-    layouts = {}
+    listed = {"levels": styles, "bullets": text_styles(master, bullet_levels)}
+    listed_placeholders = {"levels": placeholders,
+                           "bullets": layout_styles(master, bullet_levels)}
+    layouts, listed_layouts = {}, {}
     for slide in deck.slides:
         if slide.layout_part and slide.layout_part not in layouts:
-            layouts[slide.layout_part] = layout_styles(text(slide.layout_part)) \
-                if slide.layout_part in parts else {}
-        texts[slide.part] = fit_text(text(slide.part), slide, styles,
-                                     layouts.get(slide.layout_part, {}), counts, placeholders,
-                                     notes)
+            known = slide.layout_part in parts
+            layouts[slide.layout_part] = layout_styles(text(slide.layout_part)) if known else {}
+            listed_layouts[slide.layout_part] = {
+                "levels": layouts[slide.layout_part],
+                "bullets": layout_styles(text(slide.layout_part), bullet_levels) if known
+                else {}}
+        xml = list_bullets(text(slide.part), slide, bullets, listed,
+                           listed_layouts.get(slide.layout_part, {"levels": {}, "bullets": {}}),
+                           listed_placeholders, counts)
+        texts[slide.part] = fit_text(xml, slide, styles, layouts.get(slide.layout_part, {}),
+                                     counts, placeholders, notes)
     if "docProps/app.xml" in parts:
         texts["docProps/app.xml"] = app_properties(
             text("docProps/app.xml"), [s.title or "" for s in deck.slides], len(notes_parts))

@@ -2626,6 +2626,8 @@ Z_OMML = ('<m:r><m:t>z=</m:t></m:r><m:f><m:num><m:r><m:t>x–µ</m:t></m:r></m:n
 ROOT_OMML = ('<m:r><m:t>σ=</m:t></m:r><m:rad><m:radPr><m:degHide m:val="1"/></m:radPr><m:deg/>'
              '<m:e><m:r><m:t>npq</m:t></m:r></m:e></m:rad>')
 DELTA_OMML = '<m:r><m:t>∆x=2</m:t></m:r>'
+# Z_OMML in the TeX Pandoc's Word reader reads, as math-repaired.csv names it.
+Z_TEX = "z = \\frac{x–µ}{\\sigma}"
 
 
 def omml(body):
@@ -2638,8 +2640,9 @@ def mr(text):
 
 
 def case_math_keep(work):
-    """math-keep.csv for decks: an equation named by the line it's written
-    out in, as math-repaired.csv shows it, kept as it was."""
+    """math-keep.csv for decks: an equation named by its TeX, as
+    math-repaired.csv shows it, as a book's are, or by the line it's
+    written out in, as the report showed it before, kept as it was."""
     written = {
         "a fraction, its parts in parentheses": (
             '<m:f><m:fPr><m:ctrlPr/></m:fPr><m:num>%s</m:num><m:den>%s</m:den></m:f>'
@@ -2706,12 +2709,13 @@ def case_math_keep(work):
         return code, said
     code, said = run()
     first = rows_of(reports["math_repaired"])
-    yield "a run's math repairs are a report, a book's columns, each equation written out " \
-        "in one line, once a deck", code == 0 and first == [
-            ["equation", "maths", "x┴¯–µy┴–", "x┴¯−μy┴¯"],
-            ["equation", "maths", "z=(x–µ)/σ", "z=(x−μ)/σ"],
-            ["equation", "maths", "∆x=2", "Δx=2"],
-            ["equation", "other", "z=(x–µ)/σ", "z=(x−μ)/σ"]] \
+    yield "a run's math repairs are a report, a book's columns, each equation in the TeX " \
+        "Pandoc's Word reader reads, as a book's are, once a deck", code == 0 and first == [
+            ["equation", "maths", "\\overset{¯}{x}–µ\\overset{–}{y}",
+             "\\overset{¯}{x} - \\mu\\overset{¯}{y}"],
+            ["equation", "maths", Z_TEX, "z = \\frac{x - \\mu}{\\sigma}"],
+            ["equation", "maths", "\\mathrm{\\Delta}x = 2", "\\Delta x = 2"],
+            ["equation", "other", Z_TEX, "z = \\frac{x - \\mu}{\\sigma}"]] \
         and "Wrote %s (4 math repair(s))." % reports["math_repaired"] in said \
         and not any("Fill in the second column" in s and "math" in s for s in said), (first, said)
     with open(paths["math_keep"], "w", encoding="utf-8", newline="") as fh:
@@ -2736,8 +2740,9 @@ def case_math_keep(work):
         and all(read_part(maths, "ppt/slides/slide%d.xml" % n)
                 == read_part(source, "ppt/slides/slide%d.xml" % n) for n in (1, 2, 3, 4)) \
         and "<m:t>x−μ</m:t>" in read_part(other, "ppt/slides/slide1.xml") \
-        and rows_of(reports["math_repaired"]) == [["equation", "other", "z=(x–µ)/σ",
-                                                    "z=(x−μ)/σ"]], rows_of(reports["math_repaired"])
+        and rows_of(reports["math_repaired"]) == [
+            ["equation", "other", Z_TEX, "z = \\frac{x - \\mu}{\\sigma}"]], \
+        rows_of(reports["math_repaired"])
     yield "the run says so, and a deck whose only change was kept isn't counted changed", \
         "fixed: 1 equation(s) given the characters they mean, 2 character(s) in all " \
         "(math.repair_equations); 3 kept as they were, as math-keep.csv says." in said \
@@ -2750,9 +2755,10 @@ def case_math_keep(work):
         and "  equation,,x┴¯–µy┴–" in said and "  equation,,σ=√(npq)" in said \
         and "  equation,gone,q" in said and not any("expression" in s for s in said), said
     with open(paths["math_keep"], "a", encoding="utf-8", newline="") as fh:
-        csv.writer(fh).writerow(["equation", "other", "z=(x–µ)/σ"])
+        csv.writer(fh).writerow(["equation", "other", Z_TEX])
     code, said = run()
-    yield "with every equation kept, the run says so, and the report is gone", code == 0 \
+    yield "with every equation kept, one named in TeX as the report has it, the run says so, " \
+        "and the report is gone", code == 0 \
         and "fixed: 0 equation(s) given the characters they mean, 0 character(s) in all " \
         "(math.repair_equations); 4 kept as they were, as math-keep.csv says." in said \
         and not os.path.exists(reports["math_repaired"]), said
@@ -4288,6 +4294,57 @@ def case_converting(work):
         and broken.stderr.count("nothing was archived") == 1, broken.stderr[-400:]
 
 
+def case_converting_math(work):
+    """A deck's math-repaired.csv when the decks are converted too: the
+    copy's equations repaired and the page's repairs, its equations' and
+    the text made an equation, each in TeX under the deck's name, a repair
+    the copy and the page both make once; math-keep.csv's rows keeping
+    them in both, by the deck's name, and a row that keeps nothing in
+    either warned about."""
+    if not pandoc_ok():
+        return
+    folder = os.path.join(work, "decks")
+    os.makedirs(folder)
+    deck(os.path.join(folder, "Two Words.pptx"), [
+        {"shapes": [title(2, "Scores"), equation(4, Z_OMML)]},
+        {"shapes": [title(2, "Means"),
+                    textbox(5, "TextBox 5", ["The mean \u03bc = 34 here."],
+                            (457200, 1600200, 4000000, 600000))]}])
+    with open(os.path.join(folder, "conversion.yaml"), "w") as fh:
+        fh.write("targets:\n  pages:\n    format: html\n  copy:\n    format: source\n")
+    report = os.path.join(folder, "math-repaired.csv")
+    first = convert(folder, "--quick")
+    rows = rows_of(report)
+    yield "the report has the copy's equation and the page's text made an equation, in TeX, " \
+        "under the deck's name, the equation once, as the page repaired it, though both did", \
+        first.returncode == 0 and sorted(rows) == sorted([
+            ["equation", "Two Words", Z_TEX, "z = \\frac{x-\u03bc}{\\sigma}"],
+            ["expression", "Two Words", "\u03bc = 34", "\u03bc=34"]]), (rows, first.stderr[-600:])
+    with open(os.path.join(folder, "math-keep.csv"), "w", encoding="utf-8", newline="") as fh:
+        csv.writer(fh).writerows([["Kind", "Page", "Before", "After"],
+                                  ["equation", "Two Words", Z_TEX],
+                                  ["equation", "Two Words", "z=(x\u2013\u00b5)/\u03c3"],
+                                  ["expression", "Two Words", "\u03bc = 34"],
+                                  ["symbol", "Two Words", "\u03b2"]])
+    again = convert(folder, "--quick")
+    page = html.unescape(open(os.path.join(folder, "pages", "Two-Words.html"),
+                              encoding="utf-8").read()) \
+        if os.path.exists(os.path.join(folder, "pages", "Two-Words.html")) else ""
+    copy = os.path.join(folder, "copy", "Two Words.pptx")
+    yield "rows copied from it keep the equation in the copy and on the page, and the text " \
+        "as text, by the deck's name; the report is gone", \
+        again.returncode == 0 and not os.path.exists(report) \
+        and os.path.exists(copy) and "x–µ" in read_part(copy, "ppt/slides/slide1.xml") \
+        and "The mean \u03bc = 34 here." in " ".join(re.sub(r"<[^>]+>", "", page).split()) \
+        and "\u03bc=34" not in page, again.stderr[-800:]
+    yield "and the row that kept nothing in either is warned about, the others not, one that " \
+        "names the equation in one line, which keeps it in the copy alone, among them", \
+        "1 row(s) of math-keep.csv kept nothing" in again.stderr \
+        and "  symbol,Two Words,\u03b2" in again.stderr \
+        and "  equation,Two Words" not in again.stderr \
+        and "  expression,Two Words" not in again.stderr, again.stderr[-800:]
+
+
 def case_converting_more(work):
     """A PowerPoint deck's PDF, through ltx-talk, and its reveal.js
     presentation, as a deck written in Markdown has them."""
@@ -4601,6 +4658,7 @@ CASES = [("reading a deck", case_parse), ("the checks", case_check),
          ("no Pandoc", case_no_pandoc),
          ("a deck read for converting", case_reader),
          ("convert.py converting decks", case_converting),
+         ("convert.py converting decks, their math report", case_converting_math),
          ("each deck's language", case_deck_languages),
          ("a converted deck's PDF and presentation", case_converting_more),
          ("a deck rebuilt on a template", case_rebuild),

@@ -34,8 +34,8 @@ docxremediate.py does for Word:
   the same Office math, except that a bar written as an upper limit stays
   one, a macron in place of an en dash: NVDA reads a deck's equations by
   their characters, and the limit's macron was the only bar it read; an
-  equation a row of math-keep.csv names, by the line it's written out in
-  (equation_text), stays as it was;
+  equation a row of math-keep.csv names, by its TeX, as deckrun gives it,
+  or by the line it's written out in (equation_text), stays as it was;
 - the deck's language (lib/languages.py), on text that declares none; and,
   when languages.csv's row or a producer's property gives the deck
   another language than its own runs do, that one in their place: its
@@ -527,12 +527,32 @@ SCRIPTS = {"sSub": (("e", ""), ("sub", "_")), "sSup": (("e", ""), ("sup", "^")),
 ATOM = re.compile(r".[\u0300-\u036f\u20d0-\u20ff]*|\d+(?:[.,]\d+)*", re.S)
 
 
+def equation_pairs(source):
+    """(before, after), each an equation's OMML, for each equation on a
+    slide that math.repair_equations changes, as remediate() repairs it:
+    what a report names in TeX needs Pandoc to read both first
+    (deckrun.equation_tex)."""
+    parsed = pptxparse.read(source)
+    out = []
+    with zipfile.ZipFile(source) as zin:
+        for slide in parsed.slides:
+            xml = pptxparse.part_text(zin.read(slide.part))[0]
+            fixed, _found = docxremediate.remediate_equations(xml, pattern=OMATH,
+                                                              macron_bars=True)
+            out += [(old, new) for old, new in zip(re.findall(OMATH, xml, re.S),
+                                                   re.findall(OMATH, fixed, re.S))
+                    if old != new]
+    return out
+
+
 def equation_text(omml):
-    """An equation written out in one line, as math-repaired.csv shows a
-    deck's and math-keep.csv names one, where a book's show Pandoc's TeX:
-    a slides run reads a deck without Pandoc. The line is near the linear
-    format PowerPoint shows an equation in when it's switched to Linear
-    (UnicodeMath): its characters as they are, so a repaired one shows,
+    """An equation written out in one line, as math-repaired.csv showed a
+    deck's, and still does where Pandoc can't read it (a slides run reads
+    a deck without Pandoc), and math-keep.csv may name one: a book's, and
+    a deck's now, show Pandoc's TeX (deckrun.equation_tex). The line is
+    near the linear format PowerPoint shows an equation in when it's
+    switched to Linear (UnicodeMath): its characters as they are, so a
+    repaired one shows,
     with a fraction's slash, a script's _ or ^, a root's sign, an
     accent's character after what it's over, and parentheses round a part
     of more than one piece. One that can't be read as XML alone is its
@@ -1000,7 +1020,7 @@ def repair_part(xml):
 def remediate(source, destination, alts=None, tables=None, titles=None, language=None,
               core_title=True, deck=None, orders=None, problems=None, links=None,
               equations=False, fonts=None, replaced=None, keep_equations=(),
-              repairs=None, replace_language=None):
+              repairs=None, replace_language=None, describe=None):
     """Write source's decisions into destination; counts of what was
     written. alts, tables, titles, orders, links as alt_rows(),
     header_rows(), title_rows(), order_rows(), and link_rows() read them;
@@ -1017,14 +1037,19 @@ def remediate(source, destination, alts=None, tables=None, titles=None, language
     deck uses or embeds them; replaced, a list, is told (typeface, the font in
     its place, the elements changed, whether the deck embedded it) for
     each one replaced. keep_equations: equations to leave as they are,
-    each as equation_text() writes it out, where equations would change
-    them; repairs, a list, is told (before, after), so written, for each
-    equation repaired, and (before, None) for each kept. language: the
+    each as describe() writes it out, or as equation_text() does, where
+    equations would change them; repairs, a list, is told (before, after),
+    as describe() writes them, for each equation repaired, and (before,
+    None) for each kept. describe: an equation's OMML as its report and
+    the keep sidecar name it, equation_text() when it's None; deckrun gives
+    the TeX Pandoc's Word reader reads, a book's form (equation_tex).
+    language: the
     deck's, written where it declares none; replace_language, the language
     its own runs say ("" for none), when language replaces it
     (languages.for_copy)."""
     alts, tables, titles, orders = alts or {}, tables or {}, titles or {}, orders or {}
     links = links or {}
+    describe = describe or equation_text
     deck = deck or deck_name(source)
     parsed = pptxparse.read(source)
     if core_title is True:
@@ -1119,13 +1144,15 @@ def remediate(source, destination, alts=None, tables=None, titles=None, language
                                                            macron_bars=True)
             pairs = list(zip(re.findall(OMATH, old_xml, re.S), re.findall(OMATH, xml, re.S)))
             skip = {n for n, (old, new) in enumerate(pairs)
-                    if old != new and equation_text(old) in keep_equations}
+                    if old != new and (describe(old) in keep_equations
+                                       or equation_text(old) in keep_equations)}
             if skip:
                 xml, found = docxremediate.remediate_equations(old_xml, skip=skip, pattern=OMATH,
                                                                macron_bars=True)
             counts["equations_kept"] += len(skip)
             if repairs is not None:
-                repairs += [(equation_text(old), None if n in skip else equation_text(new))
+                repairs += [(describe(old), None if n in skip else describe(new),
+                             equation_text(old))
                             for n, (old, new) in enumerate(pairs) if old != new]
             if found["equations_repaired"]:
                 texts[part] = xml

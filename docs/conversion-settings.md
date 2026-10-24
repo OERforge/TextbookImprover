@@ -422,7 +422,7 @@ Spacer images found, and what was done with each.
 
 **`reports.math_repaired`**—`path`; default `math-repaired.csv`
 
-Each change the math settings made: an equation's characters repaired, or text made an equation, with the page and the text before and after. A deck's equation is written out in one line, much as PowerPoint's linear format writes it, its Page the deck's name.
+Each change the math settings made: an equation's characters repaired, or text made an equation, with the page and the text before and after, in Pandoc's TeX. A deck's Page is the deck's name; its equations are written out in one line, much as PowerPoint's linear format writes them, only when Pandoc can't read them.
 
 **`reports.ids_renamed`**—`path`; default `ids-renamed.csv`
 

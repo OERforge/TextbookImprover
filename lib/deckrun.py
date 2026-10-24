@@ -31,9 +31,11 @@ each deck (pptxremediate.py). The reports:
 - slides-check.csv: every finding, in the output check's format; and,
   once a source target has written its copies, output-check.csv, what's
   left to do in them, and math-repaired.csv, each equation they repaired
-  (math.repair_equations), in a book's columns, written out in one line
-  (pptxremediate.equation_text) as the rows of math-keep.csv name one to
-  keep as it was.
+  (math.repair_equations), in a book's columns and its form, the TeX
+  Pandoc's Word reader reads (equation_tex), as the rows of math-keep.csv
+  name one to keep as it was, or written out in one line
+  (pptxremediate.equation_text) where Pandoc can't read it; with a
+  conversion after, the pages' repairs too (convert.py).
 
 A report is written only when it has rows, and a stale one is removed:
 the file being there says there's work to do.
@@ -309,14 +311,53 @@ def report(path, columns, rows, noun, sidecar, say, hint=None):
         say(hint)
 
 
+def equation_tex(path):
+    """{OMML: TeX} for each equation of a deck's slides that the math
+    repairs change, before and after, as Pandoc's Word reader reads it,
+    which is how the deck's page has it (pptxsource.read_tex): a deck's
+    report and keep rows name an equation as a book's do. One Pandoc
+    couldn't read isn't there."""
+    import tempfile
+    import xml.etree.ElementTree as ET
+    import pptxsource
+    found = []
+    for old, new in pptxremediate.equation_pairs(path):
+        found += [old, new]
+    found = list(dict.fromkeys(found))
+    elements, named = [], []
+    for omml in found:
+        try:
+            elements.append((ET.fromstring(pptxremediate.EQUATION_ROOT % omml)[0], False, None))
+            named.append(omml)
+        except ET.ParseError:
+            continue
+    if not elements:
+        return {}
+    work = tempfile.mkdtemp(prefix="deck-equations-")
+    try:
+        tex = pptxsource.read_tex(elements, work)
+    finally:
+        import shutil
+        shutil.rmtree(work, ignore_errors=True)
+    return {omml: read[1] for omml, read in zip(named, tex) if read}
+
+
 def run(base, decks, targets, paths, reports, language=None, alt_max_chars=120,
-        alt_placeholders=(), check_only=False, say=print, copy_language=None):
+        alt_placeholders=(), check_only=False, say=print, copy_language=None,
+        math=None):
     """Check, report, and remediate every deck; 0 when every deck was read
     and every copy written. language: what a copy says where its deck
     declares none; copy_language, given each deck read (its name, path,
     and pptxparse.Deck) once it's read, says what its copy is given in
     its place: (language, the language the deck's own runs say when
-    language replaces it, else None), as languages.for_copy gives it."""
+    language replaces it, else None), as languages.for_copy gives it.
+    math, a dict, is given the copies' math repairs when a conversion
+    follows, which adds its own (convert.py, PPTX_RUN) and writes
+    math-repaired.csv, and says which of math-keep.csv's rows kept
+    nothing, since a row may keep math in the pages alone: "rows", each
+    (kind, deck, before, after), "kept", the keep rows that kept an
+    equation in a copy, and "repairing", whether any target repairs them.
+    Without it, they're written here."""
     alts = pptxremediate.alt_rows(paths.get("image_alt"))
     unknown = set()
     tables = pptxremediate.header_rows(paths.get("table_headers"), unknown)
@@ -548,6 +589,7 @@ def run(base, decks, targets, paths, reports, language=None, alt_max_chars=120,
     copies = []
     math_rows = OrderedDict()   # (kind, deck, before, after), each repair once
     kept, repairing = set(), False  # the keep rows that kept an equation
+    tex = {}                    # each deck's {OMML: TeX}, once
     for target in targets:
         if target.format != "source":
             continue                # a conversion's, after this (convert.py)
@@ -568,18 +610,25 @@ def run(base, decks, targets, paths, reports, language=None, alt_max_chars=120,
             named = [row for row in keep if row[0] == "equation" and row[1] in ("", dname)]
             equations = setting(target, "math.repair_equations")
             repairing = repairing or equations
+            if equations and path not in tex:
+                tex[path] = equation_tex(path)
+            known = tex.get(path, {})
             own, replacing = spoken[name]
             counts = pptxremediate.remediate(path, destination, alts, tables, titles,
                                              own, deck=dname, orders=orders,
                                              problems=problems, links=links,
                                              equations=equations, fonts=plan, replaced=replaced,
                                              keep_equations={row[2] for row in named},
-                                             repairs=repairs, replace_language=replacing)
-            for before, after in repairs:
+                                             repairs=repairs, replace_language=replacing,
+                                             describe=lambda omml, known=known: known.get(
+                                                 omml, pptxremediate.equation_text(omml)))
+            for before, after, written_out in repairs:
                 if after is None:
                     # The deck's own row keeps it, as a page's does a book's,
-                    # else the row for every deck.
-                    rows = [row for row in named if row[2] == before]
+                    # else the row for every deck; named in TeX, or as the
+                    # equation written out in one line, as a deck's report
+                    # named one before.
+                    rows = [row for row in named if row[2] in (before, written_out)]
                     kept.update([row for row in rows if row[1]] or rows)
                 else:
                     math_rows.setdefault(("equation", dname, before, after), None)
@@ -639,12 +688,13 @@ def run(base, decks, targets, paths, reports, language=None, alt_max_chars=120,
             say("WARNING: %s: %d decision(s) not written, for shapes whose id their slide "
                 "repeats, which PowerPoint repairs when it opens and saves the deck."
                 % (target.name, totals["skipped"]))
-    if reports.get("math_repaired"):
+    if math is not None:
+        math.update(rows=math_rows, kept=kept, repairing=repairing)
+    elif reports.get("math_repaired"):
         report(reports["math_repaired"], MATH_COLUMNS, list(math_rows), "math repair(s)", None,
-               say, "Each is an equation's characters repaired, Before and After written out "
-               "in one line, much as PowerPoint's linear format writes an equation; "
-               "math.repair_equations turns them off.")
-    if paths.get("math_keep"):
+               say, "Each is an equation's characters repaired, Before and After in Pandoc's "
+               "TeX, as a book's are; math.repair_equations turns them off.")
+    if paths.get("math_keep") and math is None:
         # Only a run that repairs equations can keep one.
         off = () if repairing else ("math.repair_equations",)
         for line in sidecars.keep_warning(os.path.basename(paths["math_keep"]),

@@ -72,7 +72,7 @@ import copy
 import subprocess
 import sys
 import tempfile
-from collections import Counter
+from collections import Counter, OrderedDict
 from urllib.parse import unquote
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -610,7 +610,8 @@ def book_sources(base):
                   and os.path.basename(p).lower() not in REPOSITORY_FILES)
 
 
-def slides_run(base, decks, targets, project, paths, reports, args, first, archive=True):
+def slides_run(base, decks, targets, project, paths, reports, args, first, archive=True,
+               math=None):
     """A folder of PowerPoint decks: each checked, the decisions it needs
     written to the reports, and each format: source target given a copy of
     each deck with the decisions made so far written in (deckrun.py), the
@@ -657,7 +658,7 @@ def slides_run(base, decks, targets, project, paths, reports, args, first, archi
         language=project["language"] if LANGUAGE_DECLARED else None,
         alt_max_chars=first["images.alt_max_chars"],
         alt_placeholders=first["images.alt_placeholders"] or (),
-        check_only=args.check_only, say=say, copy_language=copy_language)
+        check_only=args.check_only, say=say, copy_language=copy_language, math=math)
     report_languages(project, reports, paths)
     warn_unreviewed(paths)
     if not archive:
@@ -2654,6 +2655,12 @@ LANGUAGE_KEY = "page-language"
 # A page's name in the languages sidecar and its report, by its name,
 # where it isn't its name: a PowerPoint deck's, as its other sidecars'.
 LANGUAGE_NAMES = {}
+# A slides run of PowerPoint decks that a conversion follows: the copies'
+# math repairs, which deckrun.run hands over (deck_math_report), and the
+# keep sidecar with each deck's rows keyed on its page, as the filter
+# names pages (deck_math_keep).
+DECK_MATH = None
+MATH_KEEP_PAGES = ""
 LANGUAGE_ROWS = {}          # page: the sidecar's language, its rows matched
 LANGUAGE_UNMATCHED = []     # the rows' sources that name no page
 LANGUAGE_REPORTED = []      # written once a run: by a slides run, or here
@@ -2846,7 +2853,8 @@ def filter_env(target, base, paths, env):
         "TABLE_BANDS": str(target["tables.bands"]),
         "MATH_REPAIR_EQUATIONS": "true" if r["math.repair_equations"] else "false",
         "MATH_FROM_TEXT": "true" if r["math.from_text"] else "false",
-        "MATH_KEEP": paths["math_keep"] if os.path.exists(paths["math_keep"]) else "",
+        "MATH_KEEP": MATH_KEEP_PAGES or (paths["math_keep"] if os.path.exists(paths["math_keep"])
+                                         else ""),
         "TABLE_CAPTIONS": paths["table_captions"],
         "IMAGE_ALT": paths["image_alt"],
         "BARE_LINKS": paths["bare_links"],
@@ -3349,6 +3357,65 @@ def say_headings_moved(found):
         say(f"{sum(n for n, _ in pages.values())} heading(s) on {len(pages)} page(s) moved up "
             f"to close the levels they skipped, each one below the heading it's under "
             f"({first[0]}: {first[1][1]}); heading_levels: source keeps the source's levels.")
+
+
+def deck_math_keep(paths, work):
+    """The keep sidecar for the filter in a slides run of PowerPoint decks:
+    a row's Page is the deck's name, without .pptx, which its page is
+    named for as a safe stem (copy_language), so each is given its page's
+    name; a blank Page stays blank. The path, or "" without a sidecar."""
+    if not os.path.exists(paths.get("math_keep") or ""):
+        return ""
+    stems = {name: stem for stem, name in LANGUAGE_NAMES.items()}
+    out = os.path.join(work, "math-keep-pages.csv")
+    with open(out, "w", encoding="utf-8", newline="") as fh:
+        writer = csv.writer(fh, lineterminator="\n")
+        writer.writerow(["Kind", "Page", "Before"])
+        for kind, page, before in math_keep_rows(paths["math_keep"]):
+            writer.writerow([kind, stems.get(page, page), before])
+    return out
+
+
+def deck_math_report(collected, reports, paths, targets, work):
+    """math-repaired.csv of a slides run of PowerPoint decks that a
+    conversion follows: the copies' equations repaired (deckrun.run, in
+    DECK_MATH) and the pages' repairs, each equation's and each piece of
+    text made an equation, all in Pandoc's TeX and each under its deck's
+    name, a repair the copy and the page both made once; and the keep
+    sidecar's rows that kept nothing in either."""
+    names = dict(LANGUAGE_NAMES)
+    rows = OrderedDict()
+    if os.path.exists(collected["math"]):
+        with open(collected["math"], encoding="utf-8", newline="") as fh:
+            for row in csv.reader(fh):
+                if len(row) >= 4:
+                    rows.setdefault((row[0], names.get(row[1], row[1]), row[2]), row[3])
+    for kind, deck, before, after in (DECK_MATH or {}).get("rows", {}):
+        rows.setdefault((kind, deck, before), after)
+    merged = os.path.join(work, "math-merged")
+    with open(merged, "w", encoding="utf-8", newline="") as fh:
+        csv.writer(fh, lineterminator="\n").writerows(
+            [key + (after,) for key, after in rows.items()])
+    write_report(merged, reports["math_repaired"], "Kind,Page,Before,After", "math repair(s)",
+                 None, "Each is an equation's characters repaired, or math typed as text made "
+                 "an equation, Before and After in Pandoc's TeX, as a book's are; "
+                 "math.repair_equations and math.from_text turn them off.")
+    keep = math_keep_rows(paths.get("math_keep"))
+    if not keep:
+        return
+    matched = set((DECK_MATH or {}).get("kept", ()))
+    if os.path.exists(collected["math_kept"]):
+        with open(collected["math_kept"], encoding="utf-8", newline="") as fh:
+            matched |= {(r[0], names.get(r[1], r[1]), r[2]) for r in csv.reader(fh) if len(r) >= 3}
+    repairing = (DECK_MATH or {}).get("repairing") or any(
+        t["math.repair_equations"] for t in targets)
+    off = [key for key in set(sidecars.MATH_SETTINGS.values())
+           if not any(t[key] for t in targets)
+           and not (key == "math.repair_equations" and repairing)]
+    for line in sidecars.keep_warning(os.path.basename(paths["math_keep"]),
+                                      [r for r in keep if r not in matched], "these decks",
+                                      off):
+        say(line)
 
 
 def warn_math_keep(sidecar, kept_file, off=()):
@@ -5625,7 +5692,7 @@ def write_bare_links(rows_file, report, sidecar):
 # --------------------------------------------------------------------------
 
 def main():
-    global TRACE, DECK_RUN, PPTX_RUN
+    global TRACE, DECK_RUN, PPTX_RUN, DECK_MATH, MATH_KEEP_PAGES
     parser = argparse.ArgumentParser(
         description="Convert the .docx files here, one output per target.",
         epilog="Anything else is passed to build-cartridge.py: --zip, "
@@ -5770,8 +5837,9 @@ def main():
                            "languages_new")}
     pptx_code, pptx_targets = 0, targets
     if slides and not DECK_RUN:
+        DECK_MATH = {} if converting else None
         code = slides_run(base, decks, targets, project, paths, reports, args, first,
-                          archive=not converting)
+                          archive=not converting, math=DECK_MATH)
         if not converting:
             return code
         # The decks converted, as decks written in Markdown are, but read by
@@ -5791,6 +5859,7 @@ def main():
 
     work = tempfile.mkdtemp(prefix="convert-")
     try:
+        MATH_KEEP_PAGES = deck_math_keep(paths, work) if PPTX_RUN else ""
         collected = {key: os.path.join(work, key) for key in
                      ("captions_missing", "alt_missing", "alt_seen", "spacers",
                       "media_unresolved", "bare_links", "captions_applied",
@@ -6104,7 +6173,9 @@ def main():
             warn_unreviewed(paths)
         warn_title_numbers(collected["title_numbers"])
         say_headings_moved(collected["headings_moved"])
-        if not PPTX_RUN:
+        if PPTX_RUN:
+            deck_math_report(collected, reports, paths, targets, work)
+        else:
             write_report(collected["math"], reports["math_repaired"],
                          "Kind,Page,Before,After", "math repair(s)", None,
                          "Each is an equation's characters repaired, or math "

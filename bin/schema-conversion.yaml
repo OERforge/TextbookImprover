@@ -1252,9 +1252,10 @@ keys:
         description: >
           Each change the math settings made: an equation's characters
           repaired, or text made an equation, with the page and the text
-          before and after. A deck's equation is written out in one line,
-          much as PowerPoint's linear format writes it, its Page the deck's
-          name.
+          before and after, in Pandoc's TeX. A deck's Page is the deck's
+          name; its equations are written out in one line, much as
+          PowerPoint's linear format writes them, only when Pandoc can't
+          read them.
 
       ids_renamed:
         type: path

@@ -45,6 +45,7 @@ import argparse
 from html import escape as html_escape, unescape as html_unescape
 import json
 import os
+import posixpath
 import re
 import shutil
 import zipfile
@@ -740,8 +741,13 @@ def arrange_epub_notes(path, assembly, numbering, placement):
         if stem is None:
             continue                    # a group heading's own chapter
         key, title = groups[stem]
-        pages.append(notes_lib.Page(short, text, key, title, "xhtml"))
-    changed = notes_lib.arrange(pages, numbering, placement, notes_page)
+        # Its page's language, which mark_page_languages gives its root
+        # after this; the writer gave every chapter the book's.
+        pages.append(notes_lib.Page(short, text, key, title, "xhtml",
+                                    assembly.languages.get(stem)))
+    changed = notes_lib.arrange(pages, numbering, placement, notes_page, None,
+                                notes_lib.title_languages(assembly.tree, assembly.titles,
+                                                          assembly.other_languages()))
     if not changed:
         return
     updates = {"EPUB/text/" + p.name: p.text for p in changed}
@@ -787,21 +793,48 @@ def chapter_stems(names, texts, stems):
     return out
 
 
+NAV_TOC = re.compile(r'<nav\b[^>]*\bepub:type="toc"[^>]*>.*?</nav>', re.S)
+NAV_LINK = re.compile(r'<a\b[^>]*\bhref="([^"]*)"[^>]*>')
+
+
 def mark_page_languages(path, assembly, book):
     """Each chapter file of a page in another language than the book's
     with that language on its root, lang and xml:lang, where the writer
     gave every chapter the book's (A book has one language, PANDOC-NOTES),
-    and the footer setting's footer in it marked in the book's. Returns
-    the number of chapter files changed."""
+    and the footer setting's footer in it marked in the book's; and each
+    entry of the navigation document's contents for such a page, or for a
+    group whose title is in another language (assembly.heading_languages),
+    marked in that language. Returns the number of files changed, the
+    navigation document among them."""
     others = {stem: language for stem, language in assembly.languages.items()
               if not languages.same_tag(language, book)}
-    if not others:
+    headings = assembly.heading_languages
+    if not others and not headings:
         return 0
     with zipfile.ZipFile(path) as archive:
         names = [n for n in archive.namelist() if "/text/" in n and n.endswith(".xhtml")]
         texts = {n: archive.read(n).decode("utf-8") for n in names}
+        nav_name = next((n for n in archive.namelist() if n.endswith("nav.xhtml")), None)
+        nav = archive.read(nav_name).decode("utf-8") if nav_name else None
+    stems = chapter_stems(names, texts, list(assembly.languages))
     changed = {}
-    for name, stem in chapter_stems(names, texts, list(assembly.languages)).items():
+    if nav is not None:
+        here = posixpath.dirname(nav_name)
+
+        def entry(match):
+            if re.search(r"\s(?:xml:)?lang=", match.group(0)):
+                return match.group(0)
+            target, _, fragment = html_unescape(match.group(1)).partition("#")
+            stem = stems.get(posixpath.normpath(posixpath.join(here, target)))
+            language = headings.get(fragment) or others.get(stem)
+            if not language:
+                return match.group(0)
+            value = html_escape(language)
+            return match.group(0)[:-1] + ' lang="%s" xml:lang="%s">' % (value, value)
+        new_nav = NAV_TOC.sub(lambda toc: NAV_LINK.sub(entry, toc.group(0)), nav)
+        if new_nav != nav:
+            changed[nav_name] = new_nav
+    for name, stem in stems.items():
         if stem not in others:
             continue
         text = texts[name]
@@ -903,7 +936,7 @@ def build(base, name, resolved, keep, intermediates=None):
 
     assembly = EpubAssembly(pages_dir, placed, tree, titles,
                             notes_title=" ".join(str(resolved["notes.title"] or "").split())
-                            or "Notes")
+                            or "Notes", book_language=project["language"])
     if len(tree) == 1 and tree[0][0] == "page":
         assembly.add_single_page(tree[0][1], tree[0][2])
     else:

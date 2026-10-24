@@ -37,6 +37,11 @@ system may show a note beside its reference. The heading's class,
 footnotes-title, is how htmlrepair knows it on a page read again, where
 Pandoc's reader would keep it and the section around it.
 
+A note moved from a page in one language to a page in another keeps its
+page's, lang on its item (lang and xml:lang on an EPUB's aside), and a
+group's heading on the Notes page is in its title's language, as the
+contents listings have it (bookcontents.entry_language).
+
 Pandoc cannot be asked to start numbering at 7, so the numbers are
 rewritten in the output: the reference's visible number, the note's
 number, and the ids that tie them, which stay unique within whichever
@@ -65,7 +70,8 @@ import html
 import re
 
 import highlighting
-from bookcontents import is_generated, numbered_title
+import languages as languages_lib
+from bookcontents import entry_language, is_generated, numbered_title
 
 # Pandoc's HTML writer and its EPUB writer mark the same things in the
 # same classes; they differ in the container (an ol of li, or asides).
@@ -123,16 +129,44 @@ def groups(tree, titles):
     return found
 
 
-class Page:
-    """One rendered page: its text, and where it sits in the book."""
+def title_languages(tree, titles, languages):
+    """{group key: language} for each group whose title is in another
+    language than the book's, as groups() keys them: languages gives the
+    pages in one ({stem: language}), and a group's title is in its
+    language as a contents listing's entry is (entry_language)."""
+    found = {}
+    if not languages:
+        return found
 
-    def __init__(self, name, text, group, group_title, flavor):
+    def walk(entries, path):
+        for index, entry in enumerate(entries):
+            if is_generated(entry):
+                continue
+            key = path + (index,)
+            if entry[0] == "group" and getattr(entry, "type", None) == "part":
+                walk(entry[2], key)
+                continue
+            language = entry_language(entry, titles, languages)
+            if language:
+                found[key] = language
+    walk(tree, ())
+    return found
+
+
+class Page:
+    """One rendered page: its text, where it sits in the book, and its
+    language, its root's unless given (an EPUB's chapter file has the
+    book's until the run marks it)."""
+
+    def __init__(self, name, text, group, group_title, flavor, language=None):
         self.name = name                # what a link to it looks like
         self.text = text
         self.group = group              # a key shared by the group's pages
         self.group_title = group_title
         self.flavor = flavor            # "html" or "xhtml"
         self.notes = []                 # [(old number, item html)]
+        self.language = language or languages_lib.html_language(
+            text.split("<body", 1)[0] + "<body>")
 
     def take_notes(self):
         """Cut the notes out of the page, keeping them."""
@@ -212,21 +246,37 @@ def renumber(page, offset, dest, prefix=""):
     return page
 
 
-def render_notes(notes, flavor, prefix="", heading=None):
+def _in_language(language, flavor):
+    """The attributes that put an element in a language: lang, and
+    xml:lang too in an EPUB's XHTML, as Pandoc's EPUB writer gives a
+    chapter's root."""
+    if not language:
+        return ""
+    value = html.escape(language, quote=True)
+    return f' lang="{value}"' + (f' xml:lang="{value}"' if flavor == "xhtml" else "")
+
+
+def render_notes(notes, flavor, prefix="", heading=None, heading_language=None):
     """The notes as one footnotes section in the writer's own shape, with
-    a heading after its rule if one is given."""
+    a heading after its rule if one is given, in heading_language when
+    that's given. A note (number, body, its language or None) is in its
+    language when one's given, as a note moved from a page in another
+    language than the one it's put on is."""
     if not notes:
         return ""
-    head = HEADING % html.escape(heading) + "\n" if heading else ""
+    notes = [(n[0], n[1], n[2] if len(n) > 2 else None) for n in notes]
+    head = (HEADING.replace('">', '"%s>' % _in_language(heading_language, flavor), 1)
+            % html.escape(heading) + "\n") if heading else ""
     if flavor == "html":
-        items = "\n".join(f'<li id="{prefix}fn{n}" value="{n}">{body}</li>'
-                          for n, body in notes)
+        items = "\n".join(f'<li id="{prefix}fn{n}" value="{n}"{_in_language(lang, flavor)}>'
+                          f'{body}</li>' for n, body, lang in notes)
         return (f'<section id="{prefix}footnotes" class="footnotes '
                 'footnotes-end-of-document" role="doc-endnotes">\n<hr />\n'
                 f'{head}<ol>\n{items}\n</ol>\n</section>\n')
     items = "\n".join(
         f'<aside epub:type="footnote" role="doc-footnote" '
-        f'id="{prefix}fn{n}">{body}</aside>' for n, body in notes)
+        f'id="{prefix}fn{n}"{_in_language(lang, flavor)}>{body}</aside>'
+        for n, body, lang in notes)
     return (f'<section id="{prefix}footnotes" class="footnotes '
             'footnotes-end-of-document" epub:type="footnotes">\n<hr />\n'
             f'{head}{items}\n</section>\n')
@@ -259,14 +309,16 @@ def insert_before_end(text, block, flavor):
     return text[:at] + block + text[at:] if at >= 0 else text + block
 
 
-def arrange(pages, numbering, placement, notes_page=None, title=None):
+def arrange(pages, numbering, placement, notes_page=None, title=None, title_languages=None):
     """Apply the two settings to a book's pages, in reading order.
 
     pages: [Page]; notes_page: a Page to hold everything when placement
-    is "book" (its text gets the sections, each headed by its group).
-    title: the heading of each page's notes (notes.title), given for HTML
-    pages and not for an EPUB's chapter files. Returns the pages whose
-    text changed.
+    is "book" (its text gets the sections, each headed by its group, in
+    the group title's language when title_languages, {group key:
+    language}, gives one). title: the heading of each page's notes
+    (notes.title), given for HTML pages and not for an EPUB's chapter
+    files. A note moved to a page in another language than its own keeps
+    its page's. Returns the pages whose text changed.
     """
     if numbering == "page" and placement == "page":
         return []
@@ -280,15 +332,24 @@ def arrange(pages, numbering, placement, notes_page=None, title=None):
             groups.append((page.group, page.group_title, []))
         groups[-1][2].append(page)
 
+    def moved(page, holder):
+        """A page's notes as they go to holder's page, each in the page's
+        language when holder's is another."""
+        own = page.language
+        keep = own if own and holder is not None and holder.language \
+            and not languages_lib.same_tag(own, holder.language) else None
+        return [(n, body, keep) for n, body in page.notes]
+
     # Notes gathered in one list are numbered across their group.
     continuing = numbering == "group" or placement != "page"
     book_sections = []
-    for index, (_, group_title, members) in enumerate(groups, 1):
+    for index, (key, group_title, members) in enumerate(groups, 1):
         offset = 0
         gathered = []
         prefix = f"g{index}-" if placement == "book" else ""
         dest = members[-1].name if placement == "group" else \
             (notes_page.name if placement == "book" else None)
+        holder = members[-1] if placement == "group" else notes_page
         for page in members:
             page_offset = offset if continuing else 0
             renumber(page, page_offset, dest or page.name, prefix)
@@ -301,7 +362,7 @@ def arrange(pages, numbering, placement, notes_page=None, title=None):
                     page.text, render_notes(page.notes, page.flavor, heading=title),
                     page.flavor)
             else:
-                gathered.extend(page.notes)
+                gathered.extend(moved(page, holder))
         if placement == "group" and gathered:
             last = members[-1]
             last.text = insert_before_end(
@@ -309,8 +370,13 @@ def arrange(pages, numbering, placement, notes_page=None, title=None):
             if last not in changed:
                 changed.append(last)
         elif placement == "book" and gathered:
+            heading_language = (title_languages or {}).get(key)
+            if heading_language and notes_page.language and languages_lib.same_tag(
+                    heading_language, notes_page.language):
+                heading_language = None
             book_sections.append(render_notes(
-                gathered, notes_page.flavor, prefix, heading=group_title))
+                gathered, notes_page.flavor, prefix, heading=group_title,
+                heading_language=heading_language))
     if placement == "book" and notes_page is not None and book_sections:
         notes_page.text = insert_before_end(
             notes_page.text, "".join(book_sections), notes_page.flavor)

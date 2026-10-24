@@ -1010,6 +1010,63 @@ def check_notes_groups():
     ]
 
 
+def check_notes_languages():
+    """A title's language in a contents listing and on the Notes page: a
+    page's own, a group's opening page's where the group's line stands for
+    it, else the one all its pages share; and a note gathered onto a page
+    in another language keeps its own page's."""
+    import notes
+    contents = [{"title": "Chapitre", "items": ["fr1", "fr2"]},
+                {"title": "Gemischt", "items": ["de1", "fr3"]},
+                "fr4", "de2",
+                {"title": "Ouverture", "items": ["ouverture", "de3"]}]
+    stems = {"fr1", "fr2", "de1", "fr3", "fr4", "de2", "ouverture", "de3"}
+    titles = {stem: stem.capitalize() for stem in stems}
+    others = {"fr1": "fr", "fr2": "fr", "fr3": "fr", "fr4": "fr", "ouverture": "fr"}
+    tree = bookcontents.walk_contents(contents, stems, set(), [])
+    listed = bookcontents.toc_blocks(tree, titles, lambda s: s + ".html", others, xml=True)
+    links = {}
+
+    def walk(node):
+        if isinstance(node, dict):
+            if node.get("t") == "Link":
+                links[node["c"][2][0]] = node["c"][0][2]
+            for value in node.values():
+                walk(value)
+        elif isinstance(node, list):
+            for value in node:
+                walk(value)
+    walk(listed)
+
+    def page(language, words, note):
+        return ('<html lang="%s"><body><main><p>%s<a href="#fn1" class="footnote-ref" '
+                'id="fnref1" role="doc-noteref"><sup>1</sup></a></p>\n<section id="footnotes" '
+                'class="footnotes footnotes-end-of-document" role="doc-endnotes">\n<hr />\n<ol>\n'
+                '<li id="fn1"><p>%s<a href="#fnref1" class="footnote-back" '
+                'role="doc-backlink">&#x21A9;</a></p></li>\n</ol>\n</section>\n</main></body>'
+                '</html>\n' % (language, words, note))
+    first = notes.Page("fr.html", page("fr", "Un.", "Une note."), (0,), "Gemischt", "html")
+    last = notes.Page("de.html", page("de", "Ein.", "Eine Anmerkung."), (0,), "Gemischt",
+                      "html")
+    notes.arrange([first, last], "group", "group")
+    return [
+        ("a group's title is in the language all its pages share, or its opening page's "
+         "where its line stands for that page, and a page's in its own",
+         lambda: notes.title_languages(tree, titles, others) == {
+             (0,): "fr", (2,): "fr", (4,): "fr"}),
+        ("a contents listing's entries are marked so, lang and xml:lang, a page in the "
+         "book's language not",
+         lambda: links["fr1.html"] == [["lang", "fr"], ["xml:lang", "fr"]]
+         and links["de1.html"] == [] and links["fr3.html"] == [["lang", "fr"], ["xml:lang", "fr"]]
+         and links["ouverture.html"] == [["lang", "fr"], ["xml:lang", "fr"]]
+         and links["de2.html"] == [] and links["de3.html"] == []),
+        ("a note gathered at the end of its group, on a page in another language, keeps its "
+         "page's, and the last page's own note none",
+         lambda: '<li id="fn1" value="1" lang="fr"><p>Une note.' in last.text
+         and '<li id="fn2" value="2"><p>Eine Anmerkung.' in last.text),
+    ]
+
+
 def check_notes_before_footer():
     """An EPUB's chapter file's notes go in its last section, before the
     footer setting's <footer> after it, whatever the footer holds."""
@@ -2871,6 +2928,7 @@ GROUPS = [
     ("highlighted code's colors", check_highlighting),
     ("one file per chapter", check_one_file_chapters),
     ("a page's notes group", check_notes_groups),
+    ("a title's and a moved note's language", check_notes_languages),
     ("a page's notes heading", check_notes_heading),
     ("a chapter's notes, before the footer", check_notes_before_footer),
     ("the footer outside an HTML page", check_page_footer),

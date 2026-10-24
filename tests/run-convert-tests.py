@@ -5648,6 +5648,77 @@ def case_page_languages(work):
     ]
 
 
+LISTED_LANGUAGES = {
+    "deutsch.md": "---\ntitle: Deutsch\n---\n\nEin Satz.[^1]\n\n[^1]: Eine Anmerkung.\n",
+    "chapitre.md": "---\ntitle: Chapitre\nlang: fr\n---\n\nUne phrase.[^1]\n\n"
+                   "[^1]: Une note.\n",
+}
+
+
+def case_listed_languages(work):
+    """A contents listing's entry for a page in another language than the
+    book's is in the page's, lang on its link (and xml:lang in an EPUB):
+    the contents page, the menu and the pager, the EPUB's contents and its
+    navigation; and so is the page's notes' group heading on the Notes
+    page, and each of its notes moved there."""
+    os.makedirs(work)
+    for name, text in LISTED_LANGUAGES.items():
+        with open(os.path.join(work, name), "w", encoding="utf-8") as fh:
+            fh.write(text)
+    with open(os.path.join(work, "project.yaml"), "w", encoding="utf-8") as fh:
+        fh.write("project:\n  identifier: org.example.listed\n  title: Aufgelistet\n"
+                 "  language: de\n  contents:\n    - generate: toc\n      title: Inhalt\n"
+                 "    - deutsch\n    - chapitre\n")
+    result = convert(work, "defaults:\n  notes:\n    placement: book\n"
+                     "targets:\n  html:\n    format: html\n    menu: \"on\"\n"
+                     "  epub:\n    format: epub3\n", project=False, fixtures=())
+    html_pages = {stem: read(work, "html", stem + ".html") if exists(work, "html", stem + ".html")
+                  else "" for stem in ("toc", "deutsch", "chapitre", "notes")}
+    epub = os.path.join(work, "epub", "org.example.listed.epub")
+    parts = {}
+    if os.path.exists(epub):
+        with zipfile.ZipFile(epub) as z:
+            parts = {n: z.read(n).decode("utf-8", "replace") for n in z.namelist()
+                     if n.endswith(".xhtml")}
+    nav = next((t for n, t in parts.items() if n.endswith("nav.xhtml")), "")
+    contents = next((t for t in parts.values() if 'id="page-toc"' in t), "")
+    notes = next((t for t in parts.values() if 'id="page-notes"' in t), "")
+    validated = epubcheck(epub)
+    french = re.compile(r'<a href="chapitre\.html"(?: aria-current="page")? lang="fr">Chapitre</a>')
+    german = re.compile(r'<a href="deutsch\.html"(?: aria-current="page")?>Deutsch</a>')
+    toc = re.search(r'<nav\b[^>]*epub:type="toc".*?</nav>', nav, re.S)
+    toc = toc.group(0) if toc else ""
+    return [
+        ("the book converts", lambda: result.returncode == 0 and all(html_pages.values())),
+        ("the contents page's entry for a page in another language is in the page's, the "
+         "book's page's in none of its own",
+         lambda: french.search(html_pages["toc"]) and german.search(html_pages["toc"])),
+        ("and so are the menu's on each page and the pager's link to the page",
+         lambda: all(french.search(html_pages[s]) and german.search(html_pages[s])
+                     for s in ("deutsch", "chapitre"))
+         and re.search(r'rel="next" href="chapitre\.html">Next: <span lang="fr">Chapitre</span>',
+                       html_pages["deutsch"])),
+        ("on the Notes page, the page's group heading and its note are in its language, the "
+         "book's page's in the Notes page's",
+         lambda: re.search(r'<h2 class="footnotes-title" lang="fr">Chapitre</h2>',
+                           html_pages["notes"])
+         and re.search(r'<li id="g\d+-fn1" value="1" lang="fr">\s*<p>Une note', html_pages["notes"])
+         and re.search(r'<h2 class="footnotes-title">Deutsch</h2>', html_pages["notes"])
+         and re.search(r'<li id="g\d+-fn1" value="1">\s*<p>Eine Anmerkung', html_pages["notes"])),
+        ("the EPUB's contents and its navigation mark the page's entry in its language, lang "
+         "and xml:lang, and its Notes chapter the page's heading and note",
+         lambda: re.search(r'<a href="ch\d+\.xhtml#page-chapitre" lang="fr" xml:lang="fr">'
+                           r'Chapitre</a>', contents)
+         and re.search(r'<a href="text/ch\d+\.xhtml#page-chapitre" lang="fr" xml:lang="fr">'
+                       r'Chapitre</a>', toc)
+         and re.search(r'<a href="text/ch\d+\.xhtml#page-deutsch">Deutsch</a>', toc)
+         and re.search(r'<h2 class="footnotes-title" lang="fr" xml:lang="fr">Chapitre</h2>',
+                       notes)
+         and re.search(r'<aside[^>]*id="g\d+-fn1" lang="fr" xml:lang="fr">', notes)),
+        ("and epubcheck agrees", lambda: validated == [] if validated is not None else True),
+    ]
+
+
 def case_merged_languages(work):
     """A file merge: groups makes of pages in two languages: in the book's,
     each page in another a div in its own, in a Markdown file and a Word
@@ -7285,6 +7356,7 @@ CASES = [
     ("a page's title heading, and the title page", case_title_heading),
     ("who drafted a sidecar value, and whether it's reviewed", case_review_columns),
     ("a page's language, decided once for every target", case_page_languages),
+    ("a contents listing and a moved note in a page's language", case_listed_languages),
     ("a merged file of pages in two languages", case_merged_languages),
     ("a variant's language", case_variant_languages),
     ("lists in quotations through Word", case_quoted_lists),

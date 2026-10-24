@@ -36,10 +36,12 @@ import os
 import re
 import sys
 
+import languages
 import oerconfig
 from bookcontents import (
     guess_contents, walk_contents, flatten_pages, natural_key, stem_title,
     expand_split_sources, is_generated, numbered_title, toc_blocks, opener_types,
+    entry_language,
 )
 
 LIB = os.path.dirname(os.path.abspath(__file__))
@@ -284,7 +286,8 @@ def wants_title_page(setting, tree, assembly):
 class Assembly:
     """The book being built: blocks, and what was learned building them."""
 
-    def __init__(self, base, pages, tree=(), titles=None, notes_title="Notes"):
+    def __init__(self, base, pages, tree=(), titles=None, notes_title="Notes",
+                 book_language=None):
         self.base = base
         self.notes_title = notes_title  # the Notes chapter's, unless contents names it
         self.tree = tree
@@ -301,6 +304,28 @@ class Assembly:
         # its metadata, lib/languages.py), by its stem; none for a page
         # with no such decision, an intermediate from before it.
         self.languages = {}
+        # The book's language, for an EPUB's contents page and its
+        # navigation, whose entries for a page in another language are in
+        # that page's (other_languages); and a group heading's id, its
+        # title's language, where that's another than the book's.
+        self.book_language = book_language
+        self.heading_languages = {}
+        self._others = None
+
+    def other_languages(self):
+        """{stem: language} of the tree's pages in another language than
+        the book's, read from their intermediates once; empty with no book
+        language."""
+        if self._others is None:
+            self._others = {}
+            for stem in flatten_pages(self.tree):
+                if not self.book_language or not os.path.exists(
+                        os.path.join(self.base, stem + INTERMEDIATE)):
+                    continue
+                own = meta_text(load_page(self.base, stem).get("meta", {}), "page-language")
+                if own and not languages.same_tag(own, self.book_language):
+                    self._others[stem] = own
+        return self._others
 
     def add_tree(self, tree, depth=1):
         for entry in tree:
@@ -330,9 +355,11 @@ class Assembly:
                     doc = load_page(self.base, stem)
                     if (override or page_title(doc, stem)) == a:
                         opener = stem
-                self.blocks.append(header(
-                    depth, inlines(numbered_title(entry, a)),
-                    page_id(opener) if opener else group_id(a, depth, self)))
+                ident = page_id(opener) if opener else group_id(a, depth, self)
+                language = entry_language(entry, self.titles, self.other_languages())
+                if language:
+                    self.heading_languages[ident] = language
+                self.blocks.append(header(depth, inlines(numbered_title(entry, a)), ident))
                 if opener:
                     self.add_page(opener, None, depth, heading=False)
                 self.add_tree(b[1:] if opener else b, depth + 1)
@@ -349,7 +376,8 @@ class Assembly:
         if entry.generate == "toc":
             self.blocks.append(header(depth, inlines(title), page_id(name)))
             self.blocks.extend(toc_blocks(
-                self.tree, self.titles, lambda stem: "#" + page_id(stem)))
+                self.tree, self.titles, lambda stem: "#" + page_id(stem),
+                self.other_languages(), xml=True))
             self.pages.append((name, title, depth))
 
     def add_page(self, stem, title_override, depth, heading=True,

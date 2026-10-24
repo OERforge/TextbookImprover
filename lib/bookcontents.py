@@ -788,12 +788,43 @@ def numbered_title(entry, title):
     return f"{number} {title}"
 
 
-def toc_blocks(tree, titles, link_for):
+def opening_page(entry, titles):
+    """The page a group's own line stands for, its first when that page is
+    the group's own (its title the group's, or its number), or None."""
+    kind, a, b = entry
+    if kind == "group" and b and b[0][0] == "page" and not is_generated(b[0]) \
+            and (b[0].number == entry.number or (b[0][2] or titles.get(b[0][1])) == a):
+        return b[0][1]
+    return None
+
+
+def entry_language(entry, titles, languages):
+    """The language an entry's title is in, of those languages gives
+    ({stem: language}, the pages in another language than the listing's),
+    or None: a page's; a group's, the page its line stands for
+    (opening_page), else the one every page in it shares."""
+    if not languages:
+        return None
+    kind, a, b = entry
+    if kind == "page":
+        return languages.get(a)
+    opener = opening_page(entry, titles)
+    if opener:
+        return languages.get(opener)
+    found = {languages.get(stem) for stem in flatten_pages(b)
+             if not any(is_generated(e) and e[1] == stem for e in b)}
+    return found.pop() if len(found) == 1 else None
+
+
+def toc_blocks(tree, titles, link_for, languages=None, xml=False):
     """The tree as Pandoc blocks: a nested bullet list of links, one
     entry per page or group, numbered when numbering has run. link_for
     maps a page stem to the target a link should carry for the output
     being written (page.html, #page-stem, page.md); a group with no page
-    of its own links to its first page."""
+    of its own links to its first page. languages: {stem: language} of
+    the pages in another language than the listing's, an entry's link in
+    the language of its title (entry_language), lang on it, and xml:lang
+    too for an EPUB's XHTML (xml)."""
     def inlines(text):
         out = []
         for index, word in enumerate(text.split()):
@@ -802,32 +833,36 @@ def toc_blocks(tree, titles, link_for):
             out.append({"t": "Str", "c": word})
         return out
 
-    def link(text, target):
-        return {"t": "Link", "c": [["", [], []], inlines(text), [target, ""]]}
+    def marks(language):
+        if not language:
+            return []
+        return [["lang", language]] + ([["xml:lang", language]] if xml else [])
+
+    def link(text, target, language=None):
+        return {"t": "Link", "c": [["", [], marks(language)], inlines(text), [target, ""]]}
 
     def items(nodes):
         out = []
         for entry in nodes:
             kind, a, b = entry
+            language = entry_language(entry, titles, languages)
             if kind == "page":
                 if is_generated(entry) and is_generated(entry) == "toc":
                     continue                 # the contents page itself
                 text = numbered_title(entry, b or titles.get(a) or a)
-                out.append([{"t": "Plain", "c": [link(text, link_for(a))]}])
+                out.append([{"t": "Plain", "c": [link(text, link_for(a), language)]}])
             else:
                 first = next((s for s in flatten_pages(b)
                               if not any(is_generated(e) and e[1] == s
                                          for e in b)), None)
                 text = numbered_title(entry, a)
-                head = [link(text, link_for(first))] if first else inlines(text)
+                head = [link(text, link_for(first), language)] if first else (
+                    [{"t": "Span", "c": [["", [], marks(language)], inlines(text)]}]
+                    if language else inlines(text))
                 item = [{"t": "Plain", "c": head}]
                 # A group's own opening page is the group line; listing it
                 # again below would repeat the chapter.
-                rest = b
-                if b and b[0][0] == "page" and not is_generated(b[0]) \
-                        and (b[0].number == entry.number
-                             or (b[0][2] or titles.get(b[0][1])) == a):
-                    rest = b[1:]
+                rest = b[1:] if opening_page(entry, titles) else b
                 children = items(rest)
                 if children:
                     item.append({"t": "BulletList", "c": children})

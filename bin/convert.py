@@ -4862,20 +4862,36 @@ def mark_book_parts(path, book):
     return True
 
 
-def add_menu(target, tree, titles, written, hand, work):
+def other_languages(pages, book):
+    """{stem: language} of the pages whose intermediates say they're in
+    another language than the book's (page-language), for a contents
+    listing and the notes to mark their titles in."""
+    found = {}
+    for path in pages:
+        with open(path, encoding="utf-8") as fh:
+            own = page_language(json.load(fh).get("meta"), None)
+        if own and not languages.same_tag(own, book):
+            found[os.path.basename(path)[:-len(INTERMEDIATE)]] = own
+    return found
+
+
+def add_menu(target, tree, titles, written, hand, work, others=None):
     """A contents menu at the top of every page this target rendered and
     previous/next links at its foot: for pages posted as a site of their
     own. The menu is the book's tree as the contents page shows it,
     rendered once, and marks each page's own entry aria-current; it sits
     in a <details> so it takes one line until it's wanted, and a <nav>
     so it's a landmark. A pass-through page is someone's finished page
-    and isn't touched."""
+    and isn't touched. others: the pages in another language than the
+    book's (other_languages), whose entries are marked in theirs, as a
+    link in the pager to one is."""
     from bookcontents import toc_blocks, flatten_pages
+    others = others or {}
     api = json.loads(subprocess.run(
         ["pandoc", "-f", "markdown", "-t", "json"], input="",
         capture_output=True, text=True, check=True).stdout)["pandoc-api-version"]
     doc = {"pandoc-api-version": api, "meta": {},
-           "blocks": toc_blocks(tree, titles, lambda s: s + ".html")}
+           "blocks": toc_blocks(tree, titles, lambda s: s + ".html", others)}
     source = os.path.join(work, f"{target.name}-menu.json")
     with open(source, "w", encoding="utf-8") as fh:
         json.dump(doc, fh)
@@ -4899,6 +4915,9 @@ def add_menu(target, tree, titles, written, hand, work):
             if 0 <= other < len(order):
                 name = order[other]
                 title = html_escape(titles.get(name) or name)
+                if name in others:
+                    title = '<span lang="%s">%s</span>' % (
+                        html_escape(others[name]).replace('"', "&quot;"), title)
                 steps.append(f'<a rel="{rel}" href="{name}.html">{arrow}'
                              f'{title}</a>')
         pager = ('<nav class="book-pager" aria-label="Previous and next">\n'
@@ -5164,9 +5183,11 @@ def generated_pages(tree):
 
 
 def write_generated(target, tree, titles, api, base, work, fragments,
-                    language, env):
+                    language, env, others=None):
     """The pages contents asks the run to write: a contents page, as a
-    nested list of links, numbered when the book is."""
+    nested list of links, numbered when the book is, an entry's link in
+    the language of its title where others (other_languages) gives one
+    other than the book's."""
     written = []
     for entry in generated_pages(tree):
         kind, name, title = entry
@@ -5174,7 +5195,7 @@ def write_generated(target, tree, titles, api, base, work, fragments,
             continue
         doc = {"pandoc-api-version": api,
                "meta": {"title": {"t": "MetaString", "c": title}},
-               "blocks": toc_blocks(tree, titles, lambda s: s + ".html")}
+               "blocks": toc_blocks(tree, titles, lambda s: s + ".html", others)}
         source = os.path.join(work, f"{target.name}-{name}.json")
         with open(source, "w", encoding="utf-8") as fh:
             json.dump(doc, fh)
@@ -5188,12 +5209,14 @@ def write_generated(target, tree, titles, api, base, work, fragments,
 
 
 def arrange_notes(target, pages, base, work, fragments, language, env,
-                  tree, titles):
+                  tree, titles, others=None):
     """Apply notes.numbering and notes.placement to a target's rendered
     pages, grouped and ordered as the book's tree has them, as the EPUB
     groups them (notes.groups), and write the Notes page when placement
     is book. A page the tree leaves out is a group of its own, after
-    the rest."""
+    the rest. A note moved to a page in another language keeps its
+    page's, and a group's heading on the Notes page is in its title's
+    language (others, other_languages)."""
     numbering = str(target["notes.numbering"])
     placement = str(target["notes.placement"])
     heading = " ".join(str(target["notes.title"] or "").split())
@@ -5237,7 +5260,8 @@ def arrange_notes(target, pages, base, work, fragments, language, env,
         with open(out, encoding="utf-8") as fh:
             notes_page = notes_lib.Page("notes.html", fh.read(), "notes",
                                         heading or "Notes", "html")
-    changed = notes_lib.arrange(records, numbering, placement, notes_page, heading)
+    changed = notes_lib.arrange(records, numbering, placement, notes_page, heading,
+                                notes_lib.title_languages(tree, titles, others))
     written = []
     for page in changed:
         path = os.path.join(target.output_dir, page.name)
@@ -6026,17 +6050,18 @@ def main():
                     numbering_for(target, project))
                 if numbering_for(target, project):
                     number_page_headings(target, tree, titles)
+                others = other_languages(pages_by_dir[target.pages_dir], language)
                 written[target.name] += write_generated(
                     target, tree, titles, api, base, work,
-                    fragments[target.name], language, renv)
+                    fragments[target.name], language, renv, others)
                 for path in arrange_notes(target, rendered, base, work,
                                           fragments[target.name], language,
-                                          renv, tree, titles):
+                                          renv, tree, titles, others):
                     if path not in written[target.name]:
                         written[target.name].append(path)
                 if target["menu"] == "on":
                     add_menu(target, tree, titles, written[target.name],
-                             hand_stems, work)
+                             hand_stems, work, others)
                 for path in written[target.name]:
                     if path.endswith(".html") and os.path.basename(path)[:-5] not in hand_stems:
                         mark_book_parts(path, language)

@@ -543,7 +543,8 @@ FIT_MACROS = r"""% Something too wide for its line, which TeX can't break:
 % longer than its column, its longest piece TeX can't break, a word or a
 % formula's part between two of its breaks (post_linebreak_filter), a
 % fill-in blank no more than three underscores, which PDF_MACROS draws a
-% blank too long for its line shorter to, at the least (taken whole, as it
+% blank too long for its line shorter to, at the least, without the kerns
+% it draws a long blank's underscores closer with (taken whole, as it
 % was, a blank too long for its column set the table in smaller type, the
 % PDF suite's fit book's at 87 percent of its size), a
 % line taken as in a formula from its start where the first of a
@@ -648,7 +649,7 @@ FIT_MACROS = r"""% Something too wide for its line, which TeX can't break:
     local attribute = luatexbase.attributes.OERFitAttribute
     local column = luatexbase.attributes.OERFitStepsAttribute
     local HLIST, VLIST, GLUE, PENALTY, MATH, DIR = node.id("hlist"), node.id("vlist"), node.id("glue"), node.id("penalty"), node.id("math"), node.id("dir")
-    local GLYPH = node.id("glyph")
+    local GLYPH, KERN = node.id("glyph"), node.id("kern")
     local blank = luatexbase.attributes.OERBlankAttribute
     local FLOOR, LEAST, AIM, JUMP, TOLERANCE = """ + str(FIT_FLOOR) + ", " + str(FIT_LEAST) + r""", 0.98, 0.04, 32768
     oerfit = { state = {}, kind = {}, line = {}, room = {}, size = {}, columns = {},
@@ -687,7 +688,9 @@ FIT_MACROS = r"""% Something too wide for its line, which TeX can't break:
         if n.id == MATH then
           inmath = n.subtype == 0
         end
-        if (n.id == GLUE and not inmath) or (n.id == PENALTY and inmath and n.penalty < 10000) then
+        if n.id == KERN and blank and node.has_attribute(n, blank, 2) then
+          piece = piece + 0
+        elseif (n.id == GLUE and not inmath) or (n.id == PENALTY and inmath and n.penalty < 10000) then
           if piece > most then most = piece end
           piece, blanks = 0, 0
         elseif n.id == GLYPH and n.char == 95 and blank and node.has_attribute(n, blank) then
@@ -742,7 +745,9 @@ FIT_MACROS = r"""% Something too wide for its line, which TeX can't break:
         local line, piece, longest, inmath, blanks = 0, 0, 0, false, 0
         for n in node.traverse(head) do
           if n.id == MATH then inmath = n.subtype == 0 end
-          if n.id == GLUE then
+          if n.id == KERN and blank and node.has_attribute(n, blank, 2) then
+            line = line + 0
+          elseif n.id == GLUE then
             line = line + n.width
             if inmath then
               piece = piece + n.width
@@ -1570,32 +1575,71 @@ PDF_MACROS = r"""\ExplSyntaxOn
 % question whose blank ran 24 points past its line. Once a paragraph's
 % lines are made, such a blank is drawn shorter, its underscores
 % overlapping, so it ends where the line does and the line's spaces are
-% their natural width again. Every underscore is still drawn, its Span's
-% ActualText what a screen reader says (above), and a blank that fits its
-% line is left as it is. A blank is drawn no shorter than three underscores;
-% a line that leaves less room than that still runs over. TeX has named the
-% line as too wide (overfull) by then, so the log names each line fitted
-% this way too: how much too wide TeX said it was, the line of LaTeX TeX
-% said its paragraph ended on, and how much too wide it is now, which
-% latexbuild.overfull_lines reads. In a cell of a table whose columns
+% their natural width again; and so is one whose line is too wide for the
+% text joined to its end, up to the next space outside a formula
+% ("(____)", "____%", "____$x$"), which had run past the line though the
+% blank itself ended within it. Every underscore is still drawn, its
+% Span's ActualText what a screen reader says (above), and a blank that
+% fits its line is left as it is. A blank is
+% drawn no shorter than three underscores; a line that leaves less room
+% than that still runs over. TeX has named the line as too wide
+% (overfull) by then, so the log names each line fitted this way too: how
+% much too wide TeX said it was, the line of LaTeX TeX said its paragraph
+% ended on, and how much too wide it is now, which
+% latexbuild.overfull_lines reads. In a paragraph of ragged lines, as the
+% PDF target sets its text and a table's cells, a blank longer than two
+% thirds of its line is drawn at two thirds of it before TeX breaks the
+% paragraph into lines, so that words beside it that fit in the other
+% third share its line, a label before it as "Name" is, where TeX had
+% broken the line before the blank and drawn it shorter on a line of its
+% own (Writing Guide with Handbook's form for drafting a position
+% argument), and TeX is asked to end a line after it, or after a formula
+% joined to it, where a penalty within the formula would have let TeX
+% break it before its relation (a penalty of -51, as \linebreak[1]); once
+% the lines are made, it's drawn as long as its line leaves room for, up
+% to its whole length, to end where its line does. In a paragraph set
+% flush to both margins, TeX keeps a label with a blank too long for its
+% line itself, taking the line too wide as a last resort, which the blank
+% is then drawn shorter to fit, and a line ending at a blank drawn at two
+% thirds is too loose for TeX to take: the words after a blank that fitted
+% its line with its label had shared the line, the blank drawn shorter. A
+% blank drawn shorter, or drawn to fill its line, isn't hung into the
+% margin, as microtype hangs an underscore at a line's start or end (a
+% fifth of its width in Latin Modern, 1.8 points at 12): the margin's kern
+% beside it is set to nothing before it's drawn, so it begins and ends
+% where the line does, and a line with no room for that gets back as much
+% of the kern as it needs. Hung, a blank drawn to its line's end ran 1.8
+% points past its column. A blank that fits as TeX set it keeps its hang,
+% as any character at a margin does, beside a blank drawn on its line too,
+% and so does a blank drawn at two thirds that its line has room for
+% whole; whether a blank reaches past its line's end is measured as TeX
+% set the line, hangs and all. With the hang set to nothing and the line's
+% spaces set again, a line TeX had shrunk to fit, opening with a blank,
+% ran past the margin, and a blank that fitted at a line's end was drawn
+% shorter by the space TeX had taken from the line; with the hang put
+% back before a blank was drawn to fill its line, a blank alone on a line
+% of a narrow column hung past it; and with every hang on a line set to
+% nothing where one blank was drawn, a blank beside it lost its own, and
+% one that fitted, measured without the other's hang, could be drawn
+% shorter. The underscores
+% overlap by kerns this marks, the attribute's value 2 to an underscore's
+% 1, which FIT_MACROS' measures leave out, taking such a blank as its
+% underscores, three at most. In a cell of a table whose columns
 % wrap, FIT_MACROS (after these macros, so that its post_linebreak_filter
 % function runs first, LaTeX running them last registered first) measures
 % a blank as no more than three underscores, as this draws it, so a blank
-% too long for its column doesn't of itself set its table in smaller type
-% (pdf-target.lua's widths for the table's columns count it whole). This
-% draws a blank shorter only where the blank itself runs past its line's
-% end, so text joined to its end can run past it still. The Lua
-% is written without a percent
-% sign, a hash, a tilde, or a backslash, which TeX would read as its own,
-% and without a comment, which would run on to the end, TeX joining the
-% lines.
+% too long for its column doesn't of itself set its table in smaller
+% type. The Lua is written without a percent sign, a hash, a tilde, or a
+% backslash, which TeX would read as its own, and without a comment,
+% which would run on to the end, TeX joining the lines.
 \ifdefined\directlua
   \newattribute\OERBlankAttribute
   \NewDocumentCommand\OERBlank{m}
     {\leavevmode\OERBlankSpan{\setattribute\OERBlankAttribute{1}#1\unsetattribute\OERBlankAttribute}}
   \directlua{
     local attribute = luatexbase.attributes.OERBlankAttribute
-    local GLYPH, GLUE, KERN, HLIST = node.id("glyph"), node.id("glue"), node.id("kern"), node.id("hlist")
+    local GLYPH, GLUE, KERN, HLIST, PENALTY = node.id("glyph"), node.id("glue"), node.id("kern"), node.id("hlist"), node.id("penalty")
+    local MARGIN, MATH = node.id("margin_kern"), node.id("math")
     local function points(s)
       local out = tostring(s // 65536) .. "."
       s = 10 * (s - (s // 65536) * 65536) + 5
@@ -1608,62 +1652,223 @@ PDF_MACROS = r"""\ExplSyntaxOn
       until s <= delta
       return out
     end
-    local function fit(line)
-      local over = node.dimensions(line.glue_set, line.glue_sign, line.glue_order, line.head) - line.width
-      if over <= tex.hfuzz then return end
+    local function runs_of(head)
       local runs, count, run = {}, 0, nil
-      for n in node.traverse(line.head) do
-        if n.id == GLYPH and n.char == 95 and node.has_attribute(n, attribute) then
+      for n in node.traverse(head) do
+        if n.id == GLYPH and n.char == 95 and node.has_attribute(n, attribute, 1) then
           if run then
             run.size = run.size + 1
             run.glyphs[run.size] = n
           else
-            run = { glyphs = { n }, size = 1 }
+            run = { glyphs = { n }, size = 1, drawn = false }
             count = count + 1
             runs[count] = run
           end
-        elseif not (n.id == KERN) then
+        elseif n.id == KERN and run then
+          if node.has_attribute(n, attribute, 2) then run.drawn = true end
+        else
           run = nil
         end
       end
-      if count == 0 then return end
+      for i = 1, count do
+        run = runs[i]
+        run.width = node.dimensions(run.glyphs[1], run.glyphs[run.size].next)
+        run.natural = run.width
+        local n = run.glyphs[1]
+        while not (n == run.glyphs[run.size]) do
+          if n.id == KERN then run.natural = run.natural - n.kern end
+          n = n.next
+        end
+        run.least = 3 * run.natural // run.size
+      end
+      return runs, count
+    end
+    local function draw(head, run, width)
+      local last, n = run.glyphs[run.size], run.glyphs[1].next
+      while n and not (n == last) do
+        local after = n.next
+        if n.id == KERN then
+          head = node.remove(head, n)
+          node.free(n)
+        end
+        n = after
+      end
+      width = math.max(run.least, math.min(run.natural, width))
+      local total = run.natural - width
+      if total > 0 then
+        local each = total // (run.size - 1)
+        local left = total - each * (run.size - 1)
+        for j = 1, run.size - 1 do
+          local kern = node.new(KERN, 1)
+          kern.kern = 0 - each - ((j <= left) and 1 or 0)
+          node.set_attribute(kern, attribute, 2)
+          head = node.insert_after(head, run.glyphs[j], kern)
+        end
+      end
+      run.width, run.drawn = width, total > 0
+      return head
+    end
+    local function line_width()
+      local width, shape = tex.hsize, tex.parshape
+      if type(shape) == "table" then
+        for _, entry in ipairs(shape) do width = entry[2] end
+      end
+      return width - tex.leftskip.width - tex.rightskip.width
+    end
+    local function shrink_of(line)
       local shrink = 0
       for glue in node.traverse_id(GLUE, line.head) do
         if glue.shrink_order == 0 then shrink = shrink + glue.shrink end
       end
-      local need = over + shrink
-      for i = 1, count do
-        run = runs[i]
-        if need > 0 and run.size > 3 and node.dimensions(line.glue_set, line.glue_sign,
-            line.glue_order, line.head, run.glyphs[run.size].next) > line.width then
-          local width = node.dimensions(run.glyphs[1], run.glyphs[run.size].next)
-          local take = math.min(need, width - width * 3 // run.size)
-          local each = take // (run.size - 1)
-          local left = take - each * (run.size - 1)
-          for j = 1, run.size - 1 do
-            local kern = node.new(KERN, 1)
-            kern.kern = 0 - each - ((j <= left) and 1 or 0)
-            node.insert_after(line.head, run.glyphs[j], kern)
+      return shrink
+    end
+    local function settle(line, excess)
+      line.glue_set, line.glue_sign, line.glue_order = 0, 0, 0
+      if excess > 0 then
+        local shrink = shrink_of(line)
+        if shrink > 0 then
+          line.glue_set, line.glue_sign = math.min(1, excess / shrink), 2
+        end
+      elseif excess < 0 then
+        local totals = { 0, 0, 0, 0, 0 }
+        for glue in node.traverse_id(GLUE, line.head) do
+          totals[glue.stretch_order + 1] = totals[glue.stretch_order + 1] + glue.stretch
+        end
+        for order = 4, 0, -1 do
+          if totals[order + 1] > 0 then
+            line.glue_set, line.glue_sign, line.glue_order = (0 - excess) / totals[order + 1], 1, order
+            break
           end
-          need = need - take
         end
       end
-      if need == over + shrink then return end
-      if need == 0 then
-        line.glue_set, line.glue_sign, line.glue_order = 0, 0, 0
-      elseif need < shrink then
-        line.glue_set, line.glue_sign, line.glue_order = need / shrink, 2, 0
-      else
-        line.glue_set, line.glue_order = 1, 0
+    end
+    local function after(run)
+      local stop, inmath = run.glyphs[run.size].next, false
+      while stop and not (stop.id == GLUE and not inmath) do
+        if stop.id == MATH then inmath = stop.subtype == 0 end
+        stop = stop.next
       end
-      texio.write_nl("term and log", "TextbookImprover blank: " .. points(over)
-        .. "pt over at line " .. tostring(tex.inputlineno) .. ", now "
-        .. points(math.max(0, need - shrink)) .. "pt")
-      texio.write_nl("term and log", "")
+      return stop
+    end
+    luatexbase.add_to_callback("pre_linebreak_filter", function(head)
+      local runs, count = runs_of(head)
+      if count == 0 then return true end
+      if not (tex.rightskip.stretch_order > 0 or tex.leftskip.stretch_order > 0) then return true end
+      local width = line_width()
+      local most = width - width // 3
+      for i = 1, count do
+        local run = runs[i]
+        if run.size > 3 and run.natural > most then
+          head = draw(head, run, most)
+          local stop = after(run)
+          if stop and not (stop.prev.id == PENALTY) then
+            local penalty = node.new(PENALTY)
+            penalty.penalty = 0 - 51
+            node.set_attribute(penalty, attribute, 2)
+            head = node.insert_before(head, stop, penalty)
+          end
+        end
+      end
+      return head
+    end, "oer.blanks.lines")
+    local function unprotrude(line, runs, count, chosen)
+      local edges, edged = {}, 0
+      for n in node.traverse_id(MARGIN, line.head) do
+        local beside = n.next
+        if n.subtype == 1 then beside = n.prev end
+        while beside and not (beside.id == GLYPH) and node.dimensions(beside, beside.next) == 0 do
+          if n.subtype == 1 then beside = beside.prev else beside = beside.next end
+        end
+        if beside and beside.id == GLYPH and not (n.width == 0) then
+          for i = 1, count do
+            local run = runs[i]
+            if chosen[i] and (beside == run.glyphs[1] or beside == run.glyphs[run.size]) then
+              edged = edged + 1
+              edges[edged] = { beside, n.width, n, run }
+              n.width = 0
+            end
+          end
+        end
+      end
+      return edges, edged
+    end
+    local function fit(line)
+      local runs, count = runs_of(line.head)
+      if count == 0 then return end
+      local over = node.dimensions(line.glue_set, line.glue_sign, line.glue_order, line.head) - line.width
+      local drawn = false
+      for i = 1, count do drawn = drawn or runs[i].drawn end
+      if not drawn and (line.glue_sign == 1 or over <= tex.hfuzz) then return end
+      local sign, set, order = line.glue_sign, line.glue_set, line.glue_order
+      if drawn then sign, set, order = 0, 0, 0 end
+      local function reach(run, set, sign, order)
+        local stop = after(run)
+        return stop and node.dimensions(set, sign, order, line.head, stop)
+          or node.dimensions(set, sign, order, line.head)
+      end
+      local chosen, any = {}, false
+      for i = 1, count do
+        local run = runs[i]
+        chosen[i] = run.drawn or (run.size > 3 and run.width > run.least
+          and reach(run, line.glue_set, line.glue_sign, line.glue_order) > line.width)
+        any = any or chosen[i]
+      end
+      if not any then return end
+      local edges, edged = unprotrude(line, runs, count, chosen)
+      local need, shortened = node.dimensions(line.head) - line.width, false
+      local again = true
+      while again do
+        again = false
+        if need < 0 then
+          for i = 1, count do
+            local run = runs[i]
+            if run.drawn and need < 0 then
+              local wider = math.min(0 - need, run.natural - run.width)
+              line.head = draw(line.head, run, run.width + wider)
+              need = need + wider
+            end
+          end
+        else
+          for i = 1, count do
+            local run = runs[i]
+            if chosen[i] and need > 0 and run.size > 3 and run.width > run.least and reach(run, set, sign, order) > line.width then
+              local take = math.min(need, run.width - run.least)
+              line.head = draw(line.head, run, run.width - take)
+              need, shortened = need - take, true
+            end
+          end
+        end
+        for k = 1, edged do
+          local edge = edges[k]
+          if edge[3].width == 0 and not edge[4].drawn then
+            edge[3].width = edge[2]
+            need = need + edge[2]
+            again = true
+          end
+        end
+      end
+      for k = 1, edged do
+        local back = math.min(need, 0 - edges[k][2])
+        if back > 0 and edges[k][3].width == 0 then
+          edges[k][3].width = 0 - back
+          need = need - back
+        end
+      end
+      if not (drawn or shortened) then
+        for k = 1, edged do edges[k][3].width = edges[k][2] end
+        return
+      end
+      settle(line, need)
+      if over > tex.hfuzz and shortened then
+        texio.write_nl("term and log", "TextbookImprover blank: " .. points(over)
+          .. "pt over at line " .. tostring(tex.inputlineno) .. ", now "
+          .. points(math.max(0, need - shrink_of(line))) .. "pt")
+        texio.write_nl("term and log", "")
+      end
     end
     luatexbase.add_to_callback("post_linebreak_filter", function(head)
       for line in node.traverse_id(HLIST, head) do
-        if line.subtype == 1 and not (line.glue_sign == 1) then fit(line) end
+        if line.subtype == 1 then fit(line) end
       end
       return true
     end, "oer.blanks")

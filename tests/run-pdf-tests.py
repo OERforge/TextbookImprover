@@ -1298,6 +1298,63 @@ FIT_ONE = (
     "<col style=\"width: 10%\"><col style=\"width: 90%\"></colgroup><tbody><tr>"
     "<td>Codeblank `print(________)`</td><td>words beside it, enough of them to fill the rest "
     "of the line</td></tr></tbody></table>\n\n"
+    "A table whose columns' widths are given, a fill-in blank shorter than two thirds of its "
+    "column joined to a word, the two longer than the column together:\n\n<table>"
+    "<colgroup>" + "<col style=\"width: 50%\">" * 2 + "</colgroup><tbody><tr><td>Joinleft</td>"
+    "<td>Joincell " + "_" * 15 + "12345678901234567890</td></tr></tbody></table>"
+    "\n\n"
+    "A table whose columns' widths are given, a fill-in blank longer than two thirds of its "
+    "column with words joined to it, the three a little longer than the column even with "
+    "the blank three underscores long, which a count of their characters fits:\n\n<table>"
+    "<colgroup>" + "<col style=\"width: 20%\">" * 5
+    + "</colgroup><tbody><tr><td>a</td><td>b</td><td>c</td><td>d</td><td>Joinlong WWW"
+    + "_" * 15 + "8642</td></tr></tbody></table>\n\n"
+    "A table of ten columns whose widths are given, a tenth of the line each, a fill-in blank "
+    "longer than two thirds of the last between two words, alone on its line:\n\n<table>"
+    "<colgroup>" + "<col style=\"width: 10%\">" * 10 + "</colgroup><tbody><tr>"
+    "<td>bbb Edgy</td>" + "<td>b</td>" * 8 + "<td>bb " + "_" * 6 + " bb</td></tr>"
+    "</tbody></table>\n\n"
+    "A paragraph with a fill-in blank longer than two thirds of the line joined to a formula, "
+    "and words after it:\n\n"
+    "Mathjoin " + "_" * 40 + "$x = 1$ and more words to follow it on the line.\n\n"
+    "A paragraph set flush to both margins, a label and a fill-in blank that fit the line "
+    "together, and a second label and blank:\n\n"
+    "```{=latex}\n{\\rightskip=0pt\\relax Justname \\OERBlank{" + "\\_" * 46
+    + "} Justdate \\OERBlank{" + "\\_" * 10 + "}\\par}\n```\n\n"
+    "A paragraph of two lines, the first ending in a fill-in blank and the second opening "
+    "with one, each line's space shrunk to fit it:\n\n"
+    "```{=latex}\n{\\setbox0=\\hbox{Rightmargin}\\setbox2=\\hbox{\\_\\_\\_\\_\\_}"
+    "\\setbox4=\\hbox{Leftmargin}\\noindent Rightmargin\\nobreak\\hskip\\dimexpr\\linewidth"
+    "-\\wd0-\\wd2+4pt\\relax minus 10pt\\OERBlank{\\_\\_\\_\\_\\_}\\linebreak\n"
+    "\\OERBlank{\\_\\_\\_\\_\\_}\\nobreak\\hskip\\dimexpr\\linewidth-\\wd2-\\wd4+11.26pt\\relax "
+    "minus 10pt Leftmargin\\par}\n```\n\n"
+    "A paragraph opening with a fill-in blank that fits, a label, and a blank longer than two "
+    "thirds of the line:\n\n" + "_" * 5 + " Twoblank " + "_" * 50 + "\n\n"
+    + "_" * 37 + " Wholeback, the words after a fill-in blank longer than two thirds of the "
+    "line that its line has room for whole.\n\n"
+    "A paragraph opening with a fill-in blank, then a label, and a second blank that ends a "
+    "point short of the line's end as TeX sets the line, a space after it taking the line two "
+    "and a half points further:\n\n"
+    "```{=latex}\n{\\setbox2=\\hbox{\\_\\_\\_\\_\\_}\\setbox4=\\hbox{Reachfit}"
+    "\\setbox6=\\hbox{" + "\\_" * 10 + "}\\noindent\\OERBlank{\\_\\_\\_\\_\\_}"
+    "\\nobreak\\hskip 3pt\\relax\\hbox{Reachfit}\\nobreak\\hskip\\dimexpr\\linewidth-\\wd2"
+    "-\\wd4-\\wd6-4pt+1.76pt\\relax\\OERBlank{" + "\\_" * 10 + "}\\nobreak\\hskip 2.5pt"
+    "\\relax\\hbox{}\\par}\n```\n\n"
+    "A paragraph of one line opening with a fill-in blank longer than two thirds of it, no "
+    "break allowed after the blank, then a label and a second blank, which ends a point short "
+    "of the line's end with the line's space shrunk two points, as TeX sets the line:\n\n"
+    "```{=latex}\n{\\setbox2=\\hbox{\\_\\_\\_\\_\\_}\\setbox4=\\hbox{Shrunk}"
+    "\\noindent\\OERBlank{" + "\\_" * 40 + "}\\nobreak\\hskip 4pt\\relax\\hbox{Shrunk}"
+    "\\nobreak\\hskip\\dimexpr\\linewidth+2.76pt-\\linewidth*2/3-4pt-\\wd4-\\wd2\\relax "
+    "minus 10pt\\relax\\OERBlank{\\_\\_\\_\\_\\_}\\nobreak\\hskip 1pt\\relax\\hbox{}"
+    "\\par}\n```\n\n"
+    "A paragraph ending in a fill-in blank longer than the line:\n\n"
+    "Endlabel " + "_" * 80 + "\n\n"
+    + "_" * 76 + " Startafter, the word after a fill-in blank that opens its paragraph.\n\n"
+    "A table of one column whose width is given, the line, two labels each with a fill-in "
+    "blank longer than the line:\n\n<table><colgroup><col style=\"width: 100%\"></colgroup>"
+    "<tbody><tr><td>Namelabel " + "_" * 72 + " and Datelabel " + "_" * 72 + "</td></tr></tbody>"
+    "</table>\n\n"
     "A layout table too wide for its line, its caption a paragraph before it:\n\n"
     "<table role=\"presentation\"><caption>Laycap, the caption of a layout table too wide for "
     "its line</caption><tbody><tr><td>Laytable</td>"
@@ -1396,6 +1453,9 @@ FIT_ONE = (
     + "Steps whose reason holds a fill-in blank longer than its column:\n\n"
     + fit_steps("1111 + 2222", "=", "3333",
                 "Blankreason: fill in the " + "_" * 60 + " here.")
+    + "Steps whose reason holds a label and a fill-in blank that fit the line beside their "
+    "formulas, the blank longer than two thirds of the column the counts give it:\n\n"
+    + fit_steps("x", "=", "y", "Wholereason " + "_" * 32)
     + "Steps whose reason holds a run of underscores underlined, which isn't a blank, so "
     "nothing draws it shorter:\n\n"
     + fit_steps("1111 + 2222", "=", "3333",
@@ -1913,6 +1973,44 @@ def blank_at(path, words):
             if run:
                 return (len(run), any(b[0] < a[1] - 0.01 for a, b in zip(run, run[1:])),
                         run[0][0], run[-1][1])
+    return None
+
+
+def blank_spans(path):
+    """For each line holding a run of underscores, in order: how many it
+    has, whether any overlaps the one before it, and where its first
+    starts and its last ends."""
+    lines = {}
+    for page, baseline, left, right, char in pdftext.glyph_boxes(path):
+        lines.setdefault((page, baseline), []).append((left, right, char))
+    found = []
+    for glyphs in lines.values():
+        run = [g for g in glyphs if g[2] == "_"]
+        if run:
+            found.append((len(run), any(b[0] < a[1] - 0.01 for a, b in zip(run, run[1:])),
+                          run[0][0], run[-1][1]))
+    return found
+
+
+def blanks_on_line(path, words):
+    """For the line whose text holds words: each run of underscores on it,
+    in order, as (how many it has, whether any overlaps the one before it,
+    where its first starts, where its last ends); None for no such line."""
+    lines = {}
+    for page, baseline, left, right, char in pdftext.glyph_boxes(path):
+        lines.setdefault((page, baseline), []).append((left, right, char))
+    for glyphs in lines.values():
+        if words in "".join(g[2] for g in glyphs):
+            found, run = [], []
+            for glyph in glyphs + [(0, 0, "")]:
+                if glyph[2] == "_":
+                    run.append(glyph)
+                elif run:
+                    found.append((len(run),
+                                  any(b[0] < a[1] - 0.01 for a, b in zip(run, run[1:])),
+                                  run[0][0], run[-1][1]))
+                    run = []
+            return found
     return None
 
 
@@ -2649,6 +2747,17 @@ def fit_checks(fit_path, fit_said, fit_source, fit_third):
         left, right = ends(words)
         return left >= 71.5 and 0 < right <= 540.5
 
+    def at_edge(count, words=None):
+        """Whether a run of count underscores, drawn shorter, ends within
+        half a point of the text's right edge: the run on the line holding
+        words, or any run of that many."""
+        if words:
+            found = blank_at(fit_path, words)
+            runs = [(found[0], found[1], found[3])] if found else []
+        else:
+            runs = blank_runs(fit_path)
+        return any(n == count and over and 539.5 <= right <= 540.5 for n, over, right in runs)
+
     glyphs = {}
     for page, baseline, left, right, char in (pdftext.glyph_boxes(fit_path) if reader else []):
         if char.strip():
@@ -2789,9 +2898,7 @@ def fit_checks(fit_path, fit_said, fit_source, fit_third):
         # now.
         ("and one whose columns' widths are given, a fill-in blank too long for its column, "
          "keeps its type, the blank drawn shorter to its column",
-         lambda: at("Blankcell", 1) and within("Blankcell")
-         and any(count == 30 and over and 0 < right < 542
-                 for count, over, right in blank_runs(fit_path))),
+         lambda: at("Blankcell", 1) and within("Blankcell") and at_edge(30)),
         # Narrowed, a table is set smaller as its cells' longest pieces ask:
         # taken whole, as on main, this blank set the table at 75 percent of
         # its size, and drawn shorter first, as the blank's macros run first
@@ -2799,17 +2906,14 @@ def fit_checks(fit_path, fit_said, fit_source, fit_third):
         # would be as wide as its column to the fit, the table at 83.
         ("and one whose columns' widths are more than its line together, a fill-in blank too "
          "long for its column, keeps its type, its columns narrowed, the blank drawn shorter",
-         lambda: at("Overblank", 1) and within("Overblank")
-         and any(count == 36 and over and 0 < right < 542
-                 for count, over, right in blank_runs(fit_path))),
+         lambda: at("Overblank", 1) and within("Overblank") and at_edge(36)),
         # pdf-target.lua's widths for the columns counted the blank as a word
         # of 64 characters, and gave its column the line, the word of 26
         # letters too, which set the table at 86 percent of its size.
         ("and one whose columns' widths are given, half the line each, a blank longer than "
          "its column beside a word of 26 letters, keeps its type, the word whole",
          lambda: at("Abcdefghijklmnopqrstuvwxyz", 1) and within("Abcdefghijklmnopqrstuvwxyz")
-         and any(count == 64 and over and 0 < right < 542
-                 for count, over, right in blank_runs(fit_path))),
+         and at_edge(64)),
         # pdf-target.lua's widths counted the code's run of underscores as
         # a blank, three to a word, and gave its column 10 characters for
         # its 15; LaTeX draws code's underscores whole, and the table was
@@ -2820,6 +2924,125 @@ def fit_checks(fit_path, fit_said, fit_source, fit_third):
          lambda: at("Codeblank", 1) and within("Codeblank")
          and (lambda found: found is not None and found[0] == 8 and not found[1])(
              blank_at(fit_path, "print("))),
+        # oer.blanks drew a blank shorter only where its own underscores ran
+        # past its line's end, which these end within; the word joined to
+        # them ran 8.8 points past the line.
+        ("and one whose cell holds a blank joined to a number, the two longer than its "
+         "column, has the blank drawn shorter, the number ending within its line",
+         lambda: at("Joincell", 1) and within("12345678901234567890")
+         and (lambda found: found is not None and found[1] == 15 and found[2])(
+             blank_on_line(fit_path, "12345678901234567890"))),
+        # Drawn at two thirds of its column while TeX breaks the cell's
+        # lines, the blank's underscores overlap by kerns the fit's measure
+        # meets before they're drawn again: counted, they took the blank for
+        # less than its three underscores, the table kept its spaces, and the
+        # words ran 1.2 points past the column; and counted with every
+        # underscore, as a word's letters are, they set the table at 75
+        # percent of its size.
+        ("and one whose cell holds a blank longer than two thirds of its column with words "
+         "joined to it, the three a little longer than the column with the blank at its "
+         "shortest, keeps its type, its spaces narrowed, the words within its column, the "
+         "blank measured as three underscores",
+         lambda: at("Joinlong", 1) and within("8642")),
+        # The margin's first fix put the blank's kerns back, as far as the
+        # blank, drawn at its shortest while TeX broke the cell's lines,
+        # couldn't give them up, before drawing it to fill its line, and it
+        # hung 1.8 points past each edge of its column; main, which widens
+        # its column for the blank counted whole, began it 1.8 points before
+        # its column and ended it 0.6 past. A cell's only line hangs
+        # nothing, opening and ending with the array package's struts.
+        ("and a blank alone on a middle line of a column too narrow for it, drawn at its "
+         "shortest while TeX breaks the cell's lines and then to fill its line, begins and "
+         "ends where the column does, hung into neither margin",
+         lambda: (lambda found: found is not None and found[0] == 6 and found[1]
+                  and 503.5 <= found[2] <= 504.5 and 539.5 <= found[3] <= 540.5)(
+             blank_at(fit_path, "Edgy"))),
+        # The penalty after the blank, drawn at two thirds of its line, went
+        # before the first glue after it, the formula's own, where TeX ended
+        # the line: x on the blank's line, and = 1 on the next.
+        ("a blank longer than two thirds of its line joined to a formula has the line end "
+         "after the formula, which isn't broken",
+         lambda: "\U0001d465=1" in line_of("Mathjoin") and "and" not in line_of("Mathjoin")
+         and within("Mathjoin")),
+        # Drawn at two thirds of its line while TeX broke the paragraph, the
+        # blank left a line too loose to end after it, so the next label and
+        # its blank shared it, the two blanks drawn shorter, 415 points of
+        # their 491.
+        ("in a paragraph set flush to both margins, a label and a blank that fit the line "
+         "share it, the blank whole, and the next label starts the next line",
+         lambda: "Justdate" not in line_of("Justname")
+         and (lambda found: found is not None and found[0] == 46 and not found[1])(
+             blank_at(fit_path, "Justname"))),
+        # With the margin's kern set to nothing and the line's spaces set
+        # again at their width, the blank was drawn shorter by the space TeX
+        # had taken from them as well as by its hang, 39.9 points of its
+        # 43.9; it's left as TeX set it now, as a blank that fits is.
+        ("a blank that fits at the end of a line whose spaces TeX shrank to fit it is left "
+         "as TeX set it, whole, hung into the margin as microtype hangs it and no further",
+         lambda: (lambda found: found is not None and found[0] == 5 and not found[1]
+                  and 540.5 < found[3] <= 542)(blank_at(fit_path, "Rightmargin"))),
+        # With the kern before its blank set to nothing and the line's spaces
+        # set again, the line, whose spaces TeX had shrunk all but all they
+        # could, ran 1.3 points past the margin; it's left as TeX set it now,
+        # the blank hung into the left margin as microtype hangs it.
+        ("and one that opens such a line, its spaces shrunk all but all they could, is left "
+         "as TeX set it too, the line ending at the text's edge, not past it, the blank whole",
+         lambda: 539.5 <= ends("Leftmargin")[1] <= 540.5
+         and (lambda found: found is not None and found[0] == 5 and not found[1])(
+             blank_at(fit_path, "Leftmargin"))),
+        # With every hang on a line set to nothing where one of its blanks
+        # was drawn, the blank that opens the line began at the margin.
+        ("a blank that fits keeps its hang beside one drawn on its line, which ends where "
+         "the line does",
+         lambda: (lambda runs: runs is not None and len(runs) == 2
+                  and runs[0][0] == 5 and not runs[0][1] and runs[0][2] < 71.5
+                  and runs[1][0] == 50 and runs[1][1] and 539.5 <= runs[1][3] <= 540.5)(
+             blanks_on_line(fit_path, "Twoblank"))),
+        # Drawn at two thirds of its line while TeX broke the paragraph, and
+        # then whole, it began at the margin, its hang set to nothing.
+        ("and so does a blank drawn at two thirds of its line that its line has room for "
+         "whole",
+         lambda: any(n == 37 and not over and left < 71.5
+                     for n, over, left, right in blank_spans(fit_path))
+         and line_of("Wholeback") != "" and "_" not in line_of("Wholeback")),
+        # Measured with the hang of the blank before it set to nothing, the
+        # second blank reached past the line's end, and was drawn shorter by
+        # 3.2 points.
+        ("and a blank that ends short of its line's end as TeX set the line is left whole "
+         "where what follows it runs past, the hang of the blank before it counted",
+         lambda: (lambda runs: runs is not None and len(runs) == 2
+                  and runs[0][0] == 5 and not runs[0][1] and runs[0][2] < 71.5
+                  and runs[1][0] == 10 and not runs[1][1] and 538.5 <= runs[1][3] <= 539.5)(
+             blanks_on_line(fit_path, "Reachfit"))),
+        # Measured at the line's natural spacing, as the blank drawn at two
+        # thirds has the line set again, the second blank reached past the
+        # line's end, and was drawn shorter, 40.1 points of its 43.9.
+        ("and so is one on a line TeX shrank to fit, beside a blank drawn at two thirds, which "
+         "gets back its hang, the line having no room without it",
+         lambda: (lambda runs: runs is not None and len(runs) == 2
+                  and runs[0][0] == 40 and runs[0][1] and runs[0][2] < 71.5
+                  and runs[1][0] == 5 and not runs[1][1] and 538.5 <= runs[1][3] <= 539.5)(
+             blanks_on_line(fit_path, "Shrunk"))),
+        # TeX broke the line before a blank too long for it, which was drawn
+        # shorter on a line of its own, the label alone on the line before.
+        ("a blank longer than its line shares it with the label before it, drawn shorter to "
+         "end where the line does",
+         lambda: at_edge(72, "Namelabel") and within("Namelabel")),
+        # Without the penalty after the blank, the next label and the word
+        # before it shared the first blank's line, their blank on the next.
+        ("and the line ends after it, the next label starting the next line, with its own "
+         "blank",
+         lambda: "Datelabel" not in line_of("Namelabel")
+         and at_edge(72, "Datelabel") and within("Datelabel")),
+        # microtype hangs an underscore into the margin, a fifth of its
+        # width in Latin Modern, 1.8 points at 12; LuaTeX puts the margin's
+        # kern after the penalty a paragraph ends with, and before the node
+        # that opens its first line, not beside the underscore.
+        ("a blank that ends a paragraph, drawn shorter to end where its line does, isn't "
+         "hung into the margin, nor one that opens a paragraph",
+         lambda: within("Endlabel") and within("Startafter") and at_edge(80, "Endlabel")
+         and any(n == 76 and over and 71.5 <= left <= 72.5 and 539.5 <= right <= 540.5
+                 for n, over, left, right in blank_spans(fit_path))),
         ("a layout table set smaller keeps its caption, a paragraph before it, in the text's "
          "type",
          lambda: at("Laycap", 1) and 0 < size("Laytable") < body - 0.1),
@@ -3087,12 +3310,19 @@ def fit_checks(fit_path, fit_said, fit_source, fit_third):
          and whole("Unbreakablelongestwordofthsreasonhere",
                    "Unbreakablelongestwordofthsreasonhere")
          and within("Unbreakablelongestwordofthsreasonhere")),
-        # An underscore's ink runs 1.8 points past each side of its width.
+        # microtype hung a blank at the end of a line 1.8 points into the
+        # margin, a fifth of an underscore's width.
         ("and steps whose reason holds a fill-in blank longer than its column keep the text's "
-         "type, the blank drawn shorter to fit its line",
-         lambda: at("Blankreason", 1) and within("Blankreason")
-         and any(count == 60 and over and 0 < right < 542
-                 for count, over, right in blank_runs(fit_path))),
+         "type, the blank drawn shorter to fit its line, ending where it does",
+         lambda: at("Blankreason", 1) and within("Blankreason") and at_edge(60)),
+        # Drawn at two thirds of the reason's column on the first run before
+        # the measure took the paragraph's width, the blank was measured with
+        # its overlapping underscores, and drawn 207.8 points of its 280.8.
+        ("and steps whose reason holds a label and a fill-in blank that fit beside their "
+         "formulas are set so, the blank whole on the label's line",
+         lambda: at("Wholereason", 1) and within("Wholereason")
+         and (lambda found: found is not None and found[1] == 32 and not found[2])(
+             blank_on_line(fit_path, "Wholereason"))),
         # A run of underscores underlined isn't marked as a blank, and
         # nothing draws it shorter, so the measure takes it whole: taken for
         # a blank, the steps would be set across the line in the text's
@@ -3170,7 +3400,7 @@ def fit_checks(fit_path, fit_said, fit_source, fit_third):
          and "Package TextbookImprover Warning" not in fit_third),
         ("the build says what it fitted, and what's still wider than the text, centered, "
          "and names no line as too wide",
-         lambda: "Fitted 29 table(s) and formula(s) too wide for their lines to them: 6 by "
+         lambda: "Fitted 30 table(s) and formula(s) too wide for their lines to them: 7 by "
          "narrowing their spaces; 23 in smaller type as well, the smallest at 50% of its "
          "size." in fit_said
          and re.search(r"10 of them, still wider than the text, are centered on the page "

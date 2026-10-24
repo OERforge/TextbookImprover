@@ -4375,6 +4375,12 @@ def deck_pptxs(target, stems, names, base, language, work):
             + (f", {counts['link_titles']} link(s) on slides given their titles as their "
                "ScreenTips, which Pandoc's writer doesn't write" if counts["link_titles"]
                else "")
+            + (f", {counts['properties_ordered']} run(s)' properties put in the schema's "
+               "order, where Pandoc's writer puts a link before a color or a code font"
+               if counts["properties_ordered"] else "")
+            + (f", {counts['notes_colors']} notes slide(s) given the color map PowerPoint "
+               "gives one, which Pandoc's writer leaves out and Keynote is reported to need"
+               if counts["notes_colors"] else "")
             + (f", {counts['repaired']} repair(s) of XML PowerPoint can't read as Pandoc "
                "wrote it" if counts["repaired"] else "") + ".")
     if found["cut"]:

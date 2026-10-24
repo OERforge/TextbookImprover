@@ -93,6 +93,13 @@ writer's output:
   beside a picture in does, Content with Caption's (list_bullets);
 - a link's title is its ScreenTip, on each run of the link, where the
   writer writes none (link_titles, from deck-pptx.lua's marks);
+- each notes slide has a color map override, the master's mapping, as
+  PowerPoint writes one, which the writer leaves out: the schema has it
+  optional, but Keynote is reported to refuse a deck without it (Pandoc's
+  issue 11935, which its writer puts right after 3.12.1; notes_colors);
+- each run's properties are in the order the schema gives them, where the
+  writer puts a link's a:hlinkClick before a color's a:solidFill and a
+  code font's a:latin (ordered_properties);
 - a shape or table holding an equation has a fallback, which a program
   that reads no PowerPoint equations shows (LibreOffice, for one), each
   equation written there as a line of text (x̄ = 1/n∑xᵢ): the writer gives
@@ -1829,6 +1836,66 @@ def link_titles(xml, rels, titles, counts):
     return xml, rels
 
 
+# The children of a run's properties (CT_TextCharacterProperties: a:rPr,
+# a:endParaRPr, a:defRPr), in the order the schema gives them (ECMA-376's
+# dml-main.xsd), those of one group sharing a place: the writer writes a
+# link's a:hlinkClick first, before a color's a:solidFill and a code font's
+# a:latin (propContents in paraElemToElements, Output.hs).
+PROPERTY_ORDER = {name: n for n, names in enumerate((
+    ("ln",), ("noFill", "solidFill", "gradFill", "blipFill", "pattFill", "grpFill"),
+    ("effectLst", "effectDag"), ("highlight",), ("uLnTx", "uLn"), ("uFillTx", "uFill"),
+    ("latin",), ("ea",), ("cs",), ("sym",), ("hlinkClick",), ("hlinkMouseOver",), ("rtl",),
+    ("extLst",))) for name in names}
+CHARACTER_PROPERTIES = re.compile(r"<a:(rPr|endParaRPr|defRPr)" + ATTRS + r"(/?)>")
+
+
+def ordered_properties(xml, counts):
+    """xml whose runs' properties hold their children in the schema's order
+    (PROPERTY_ORDER), each child whole and those sharing a place as they
+    were; properties holding a child the order doesn't name are left as
+    they are. counts["properties_ordered"] counts those put in order."""
+    out, pos = [], 0
+    for match in CHARACTER_PROPERTIES.finditer(xml):
+        if match.start() < pos or match.group(3):
+            continue
+        close = xml.find("</a:%s>" % match.group(1), match.end())
+        if close < 0:
+            continue
+        children = pptxorder.children(xml, match.end(), close)
+        ranks = [PROPERTY_ORDER.get(name.split(":", 1)[-1]) if name.startswith("a:") else None
+                 for _start, _end, name in children]
+        if None in ranks or ranks == sorted(ranks):
+            continue
+        order = sorted(range(len(children)), key=lambda k: ranks[k])
+        out.append(xml[pos:match.end()])
+        out.append("".join(xml[children[k][0]:children[k][1]] for k in order))
+        pos = close
+        counts["properties_ordered"] += 1
+    return "".join(out) + xml[pos:]
+
+
+# A notes slide's color map override, the master's mapping, as PowerPoint
+# writes one after the slide's common data (CT_NotesSlide's EG_ChildSlide).
+NOTES_COLOR_MAP = "<p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr>"
+
+
+def notes_colors(xml, counts):
+    """A notes slide with a color map override, the master's mapping, where
+    the writer writes none: the schema has it optional, but Keynote is
+    reported to refuse a deck whose notes slide has none, and to open it
+    with one (Pandoc's issue 11935, against 3.12; not tried here). The
+    writer writes one from the release after 3.12.1 on (commit 25bef2d),
+    and a notes slide that has one is left as it is.
+    counts["notes_colors"] counts the notes slides given one."""
+    if "<p:clrMapOvr" in xml or "</p:cSld>" not in xml:
+        return xml
+    counts["notes_colors"] += 1
+    mapping = NOTES_COLOR_MAP if re.search(r"<p:notes\b[^>]*\sxmlns:a=", xml) else \
+        NOTES_COLOR_MAP.replace("<a:masterClrMapping/>", '<a:masterClrMapping xmlns:a="http://'
+                                "schemas.openxmlformats.org/drawingml/2006/main\"/>")
+    return xml.replace("</p:cSld>", "</p:cSld>" + mapping, 1)
+
+
 def math_fallbacks(xml, counts):
     """A slide with a fallback for each shape the writer wrapped in
     mc:AlternateContent for its equations (a Choice alone), and each table
@@ -2029,7 +2096,8 @@ def finish(path, record, *, language, title, svgs=None, notes=None):
               "tables_fitted": 0, "tables_overflow": 0, "text_fitted": 0, "text_overflow": 0,
               "bars": 0, "math_fallbacks": 0, "ids": 0, "animations": 0, "repaired": 0,
               "svgs": 0, "properties": 0, "displays": 0, "spaces": 0, "notes_bullets": 0,
-              "notes_links": 0, "list_bullets": 0, "link_titles": 0}
+              "notes_links": 0, "list_bullets": 0, "link_titles": 0, "properties_ordered": 0,
+              "notes_colors": 0}
     with zipfile.ZipFile(path) as zin:
         infos = zin.infolist()
         parts = {info.filename: zin.read(info.filename) for info in infos}
@@ -2110,10 +2178,11 @@ def finish(path, record, *, language, title, svgs=None, notes=None):
             if rels_name in parts:
                 xml, texts[rels_name] = notes_links(xml, text(rels_name),
                                                     record.get("notes_links") or [], counts)
+            xml = notes_colors(xml, counts)
         xml = math_fallbacks(xml, counts)
         if language:
             xml, _ = relanguage(xml, language)
-        texts[name] = xml
+        texts[name] = ordered_properties(xml, counts)
     if language:
         for name in parts:
             if re.match(r"ppt/(slideMasters|slideLayouts|notesMasters|handoutMasters)/[^/]+\.xml$",

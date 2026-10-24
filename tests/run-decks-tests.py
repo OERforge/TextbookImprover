@@ -3025,6 +3025,10 @@ Words before the list.
 # Titled Links
 
 See [the data](https://example.org/data "Where the data & more are"), [*the* plan](https://example.org/plan "The plan"), [no title](https://example.org/none), and [the list](#listed-beside-a-picture "Back to the list").
+
+# Code Link
+
+See [`the code`](https://example.org/code).
 """
 
 
@@ -3080,6 +3084,34 @@ def slide_links(parts, slide):
 
 def file_of(slide):
     return slide.part.rsplit("/", 1)[1] if slide else None
+
+
+# The children of a run's properties in the order ECMA-376's dml-main.xsd
+# gives them (CT_TextCharacterProperties), a group's sharing a place.
+SCHEMA_ORDER = {name: n for n, names in enumerate((
+    ("ln",), ("noFill", "solidFill", "gradFill", "blipFill", "pattFill", "grpFill"),
+    ("effectLst", "effectDag"), ("highlight",), ("uLnTx", "uLn"), ("uFillTx", "uFill"),
+    ("latin",), ("ea",), ("cs",), ("sym",), ("hlinkClick",), ("hlinkMouseOver",), ("rtl",),
+    ("extLst",))) for name in names}
+
+
+def properties_in_order(xml):
+    """Whether each run's properties in a part hold their children in the
+    schema's order."""
+    for name, inner in re.findall(r"<a:(rPr|endParaRPr|defRPr)\b[^>]*?(?<!/)>(.*?)</a:\1>",
+                                  xml, re.S):
+        depth, ranks = 0, []
+        for close, tag, end in re.findall(r"<(/?)a:(\w+)\b[^>]*?(/?)>", inner):
+            if close:
+                depth -= 1
+                continue
+            if depth == 0:
+                ranks.append(SCHEMA_ORDER.get(tag, -1))
+            if not end:
+                depth += 1
+        if ranks != sorted(ranks):
+            return False
+    return True
 
 
 def run_tooltips(xml):
@@ -3142,6 +3174,22 @@ def unrecorded_link():
         '<a:p><a:r><a:rPr lang="en"/><a:t>See \ue004\U000f0001the data\ue005.</a:t></a:r></a:p>',
         "<Relationships></Relationships>", [], counts)
     return xml, rels, counts["notes_links"]
+
+
+# A notes slide as Pandoc's writer writes one from the release after
+# 3.12.1 on, its color map after its common data.
+MAPPED_NOTES = ('<p:notes xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" '
+                'xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">'
+                '<p:cSld><p:spTree/></p:cSld><p:clrMapOvr><a:masterClrMapping/>'
+                '</p:clrMapOvr></p:notes>')
+
+
+def mapped_notes():
+    """pptxtarget's notes slide that has a color map already, and the
+    notes slides it counts as given one."""
+    import pptxtarget
+    counts = {"notes_colors": 0}
+    return pptxtarget.notes_colors(MAPPED_NOTES, counts), counts["notes_colors"]
 
 
 def notes_rels(parts, slide):
@@ -3350,6 +3398,10 @@ def case_pptx(work):
     titled = slide_titled(hd, "Titled Links")
     titled_xml = hp[titled.part] if titled else ""
     titled_rels = slide_rels(hp, titled)
+    code_link = slide_titled(hd, "Code Link")
+    every_notes = [x for p in (fp, sp, hp) for n, x in p.items()
+                   if re.match(r"ppt/notesSlides/notesSlide\d+\.xml$", n)]
+    every_slides = [x for p in (fp, sp, hp) for x in pptx_slides(p)]
     code = slide_titled(sd, "Some Code")
 
     def number(slide):
@@ -3429,6 +3481,19 @@ def case_pptx(work):
                  for rid in re.findall(r'<Relationship\b[^>]*?\sId="(rId\d+)"[^>]*?'
                                        r'relationships/(?:hyperlink|slide)"', titled_rels))
          and "3 link(s) on slides given their titles as their ScreenTips" in out),
+        ("a run's properties are in the schema's order, a code font before its link, where "
+         "the writer puts the link first; and each notes slide has the color map PowerPoint "
+         "gives one, after its common data, which the writer leaves out, and one that has it "
+         "is left as it is",
+         lambda: code_link is not None and re.search(
+             r'<a:rPr\b[^>]*><a:latin typeface="[^"]*"\s*/><a:hlinkClick r:id="rId\d+"\s*/>'
+             r"</a:rPr><a:t>the code</a:t>", hp[code_link.part])
+         and all(properties_in_order(x) for x in every_slides + every_notes)
+         and every_notes and all("</p:cSld><p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr>"
+                                 in x for x in every_notes)
+         and "1 run(s)' properties put in the schema's order" in out
+         and "%d notes slide(s) given the color map PowerPoint gives one" % len(every_notes)
+         in out and mapped_notes() == (MAPPED_NOTES, 0)),
         ("a link to a figure goes to the slide the figure is on",
          lambda: opening is not None and first is not None and re.search(
              r'Target="%s"' % re.escape(first.part.rsplit("/", 1)[1]),

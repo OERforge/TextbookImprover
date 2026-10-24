@@ -15,10 +15,10 @@ least restrictive bit set being the one in force
 A deck that embeds a font for preview and print only opens read-only on a
 computer that doesn't have the font, as the license asks; and a deck that
 uses such a font without embedding it, set to embed its fonts, can't be
-saved on one: PowerPoint says the font isn't available. Both were seen
-in ten decks made with Avenir Next, which macOS has and Windows doesn't:
-six embedded it for preview and print only, and the other four used it
-without embedding it, one of which PowerPoint opened for editing and then
+saved on one: PowerPoint says the font isn't available. Both have been
+seen with Avenir Next, which macOS has and Windows doesn't, and whose
+license lets a deck embed it for preview and print only: a deck that used
+it without embedding it opened in PowerPoint for editing, and then
 wouldn't save.
 
 A font is named restricted here when a deck embeds it so; a run names the

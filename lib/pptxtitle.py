@@ -15,14 +15,13 @@ headings in body placeholders and two in text boxes: the shape keeps its
 id, name, position, text, and place in the tree; its placeholder becomes
 <p:ph type="title" idx="4294967295"/> (a text box's added, with its lock
 noGrp="1"); and everything its text inherited is written onto it, since a
-title inherits the master's title style instead, which there was centered
-and 44 points where the heading was left-aligned and 72. PowerPoint
-writes it out on every paragraph and run; this writes it into the shape's
-own list style, which every paragraph and run inherits before anything
-else, and which keeps their own formatting as it was. On those five
-slides, every paragraph's and run's properties came out as PowerPoint's
-did, and as the heading's had been, and so did the text body's and the
-shape's.
+title inherits the master's title style instead, which can align and size
+it otherwise. PowerPoint writes it out on every paragraph and run; this
+writes it into the shape's own list style, which every paragraph and run
+inherits before anything else, and which keeps their own formatting as it
+was. On those five slides, every paragraph's and run's properties came out
+as PowerPoint's did, and as the heading's had been, and so did the text
+body's and the shape's.
 
 What the shape inherits is read from its chain: a placeholder's from the
 layout's placeholder it matches (by idx, else by type), the master's of
@@ -36,10 +35,10 @@ where PowerPoint writes it too: it's the default either way, and a program
 with defaults of its own keeps them. LibreOffice's insets for a text body
 that gives none are 0.25 cm and 0.125 cm, where PowerPoint's are 0.254 cm
 and 0.127 cm; written out, they moved a heading's glyphs there by a
-fraction of a pixel. Left out, 204 of the 214 slides of ten decks rendered
-in LibreOffice as they had, pixel for pixel: the rest were those whose
-title had a number added, and one whose text box LibreOffice now reads as
-a frame and not a shape.
+fraction of a pixel. Left out, the slides of the decks measured rendered
+in LibreOffice as they had, pixel for pixel, but for those whose title had
+a number added, and a text box LibreOffice now reads as a frame and not a
+shape.
 
 The XML is edited as text, never parsed and written again: the elements
 copied from a layout, a master, or the presentation are copied as they're

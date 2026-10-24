@@ -1839,8 +1839,7 @@ def case_retitle(work):
 # A master whose title is centered, 44 points, in the headings' font, over
 # a yellow fill, its text anchored in the middle with no insets; and a
 # layout with no title placeholder, whose heading is a body placeholder
-# (idx 10) of 72-point bold, as in the decks PowerPoint's Set as Slide
-# Title was measured on.
+# (idx 10) of 72-point bold.
 HEADING_BOX = (457200, 457200, 8229600, 914400)
 TITLE_STYLE = ('<a:lvl1pPr algn="ctr"><a:lnSpc><a:spcPct val="90000"/></a:lnSpc><a:spcBef>'
                '<a:spcPct val="0"/></a:spcBef><a:buNone/><a:defRPr sz="4400" kern="1200">'

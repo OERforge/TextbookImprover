@@ -116,11 +116,18 @@ table {
 }
 /* A worked example's steps written as one formula, which the CNX unpacker
    lays out in a table (class formula-steps), a step to a row: its math cell
-   for cell, and its reason or instruction in a column of words. On a
-   narrow screen a step's cells follow one another on a line, wrapping
-   where they don't fit, its words on a line of their own then, and an
-   empty cell is no gap: stacked, each cell on a line of its own, the
-   relation stood alone between its sides. */
+   for cell, and its reason or instruction in a column of words. It has no
+   rule above or below it, as OpenStax sets the formula: Pandoc's
+   stylesheets, a page's and an EPUB's, rule every table's body above and
+   below, which set the steps off as a table of data. On a narrow screen a
+   step's cells follow one another on a line, wrapping where they don't
+   fit, its words on a line of their own then, and an empty cell is no gap:
+   stacked, each cell on a line of its own, the relation stood alone
+   between its sides. */
+table.formula-steps[role="presentation"] > tbody {
+  border-top: 0;
+  border-bottom: 0;
+}
 @media (max-width: 36em) {
   table.formula-steps[role="presentation"] > * > tr {
     display: flex;

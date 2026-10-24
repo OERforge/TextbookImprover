@@ -1356,7 +1356,15 @@ local sized_table
 -- operator, and FIT_MACROS measures a column by the longest piece TeX
 -- can't break, so that otherwise a formula wider than its column would be
 -- broken, not fitted, as one of the steps of College Algebra 2e's Example
--- 6 (e), in section 1.1, would be.
+-- 6 (e), in section 1.1, would be. And they're drawn without the rules the
+-- writer draws above and below every table (booktabs' \toprule and
+-- \bottomrule, each followed by \noalign{}, which is left alone), as
+-- OpenStax sets a worked example's steps, a formula with no lines: drawn,
+-- they set the steps off as a table of data. Steps have no head, and so
+-- no rule under it.
+local STEPS_OPEN = '\\binoppenalty=10000 \\relpenalty=10000 '
+  .. '\\def\\toprule{}\\def\\bottomrule{}'
+
 function Table(tbl)
   local nested = tbl.attributes[IN_CELL] ~= nil
   local steps = tbl.classes:includes('formula-steps')
@@ -1370,8 +1378,7 @@ function Table(tbl)
   local function fitted(blocks)
     local out = pandoc.Blocks{}
     for i = 1, lead or 0 do out:insert(blocks[i]) end
-    out:insert(pandoc.RawBlock('latex', open
-      .. (steps and '\\binoppenalty=10000 \\relpenalty=10000' or '')))
+    out:insert(pandoc.RawBlock('latex', open .. (steps and STEPS_OPEN or '')))
     for i = (lead or 0) + 1, #blocks do out:insert(blocks[i]) end
     out:insert(pandoc.RawBlock('latex', '\\OERFitTableEnd{' .. id .. '}}'))
     return out

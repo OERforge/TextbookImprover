@@ -2662,6 +2662,20 @@ def fit_checks(fit_path, fit_said, fit_source, fit_third):
     def at(words, part):
         """Whether the words are drawn at part of the text's size."""
         return body > 11 and abs(size(words) - part * body) < 0.03
+
+    rules = artifact_rules(fit_path) if reader else {}
+
+    def rules_by(words, rows):
+        """How many rules are drawn as artifacts from 20 points above the
+        line holding the words to 20 below the line rows - 1 lines after
+        it, as a table's are above its first row, under its head, and
+        below its last; None for no such line."""
+        for page, found in lines.items():
+            for i, (baseline, _left, _right, text) in enumerate(found):
+                if words in text:
+                    last = found[min(i + rows - 1, len(found) - 1)][0]
+                    return sum(1 for y in rules.get(page, []) if last - 20 < y < baseline + 20)
+        return None
     return [
         ("a table a little too wide for its line fits it with narrower spaces between its "
          "columns, in the text's type",
@@ -2998,6 +3012,10 @@ def fit_checks(fit_path, fit_said, fit_source, fit_third):
          "sets them, are set so, centered, their reason on one line",
          lambda: "at its width." in line_of("Ownwidth") and ends("Ownwidth")[0] > 80
          and abs((ends("Ownwidth")[0] - 72) - (540 - ends("Ownwidth")[1])) < 1),
+        # Pandoc's writer draws a rule above and below every table; OpenStax
+        # sets a worked example's steps, a formula, with none.
+        ("and steps are drawn without the rules above and below them a table of data has",
+         lambda: rules_by("Ownwidth", 2) == 0 and rules_by("Spaced", 1) == 2),
         ("and steps a little too wide at their own width, which narrowed spaces would fit, "
          "are set across the line, their spaces as they were, their reason wrapping",
          lambda: at("Nearwidth", 1) and within("Nearwidth") and ends("Nearwidth")[0] < 72.5

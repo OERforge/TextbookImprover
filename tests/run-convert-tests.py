@@ -5016,7 +5016,8 @@ def case_side_by_side(work):
 
 # A worked example's steps as the CNX unpacker lays out a formula of them
 # (lib/cnx/steptables.py's formula_steps): its math cell for cell, the
-# second step's left side empty, and each step's reason in words.
+# second step's left side empty, and each step's reason in words; and a
+# table of data after them.
 STEPS_PAGE = (
     '<!DOCTYPE html><html lang="en"><head><title>Steps</title></head><body><h1>Steps</h1>'
     '<table role="presentation" class="formula-steps"><tbody>' + "".join(
@@ -5031,13 +5032,16 @@ STEPS_PAGE = (
              "into one term"),
             ("", "<mrow><mn>7</mn><mo>\u22c5</mo><mn>2</mn></mrow>",
              "Substitute two for x, as the question gives it")))
-    + "</tbody></table></body></html>")
+    + "</tbody></table><table><caption>Values</caption><thead><tr><th>Term</th>"
+    "<th>Value</th></tr></thead><tbody><tr><td>x</td><td>2</td></tr></tbody></table>"
+    "</body></html>")
 
 
 def case_formula_steps_reflow(work):
     """A worked example's steps the CNX unpacker lays out in a table (class
     formula-steps), in a browser: in a wide window, in their columns, the
-    relations one over another; in a phone's, each step's math on a line,
+    relations one over another, and no rule above or below them, where a
+    table of data has its rules; in a phone's, each step's math on a line,
     and its words wrapping within the window, where a layout table's cells
     stack, each on a line of its own. Needs Playwright and its Chromium,
     and skips without them."""
@@ -5050,7 +5054,7 @@ def case_formula_steps_reflow(work):
     with open(os.path.join(work, "steps.html"), "w", encoding="utf-8") as fh:
         fh.write(STEPS_PAGE)
     result = convert(work, "targets:\n  html:\n    format: html\n", fixtures=())
-    boxes = {}
+    boxes, rules = {}, {}
     page = os.path.join(work, "html", "steps.html")
     if result.returncode == 0 and os.path.exists(page):
         try:
@@ -5062,6 +5066,13 @@ def case_formula_steps_reflow(work):
                     rows = view.locator("table.formula-steps tr")
                     boxes[width] = [[rows.nth(r).locator("td").nth(c).bounding_box()
                                      for c in range(4)] for r in range(2)]
+                    if width == 1000:
+                        # The rules above and below each table's body.
+                        rules.update(view.evaluate(
+                            "() => Object.fromEntries([...document.querySelectorAll("
+                            "'table')].map(t => [t.className || 'data', ["
+                            "getComputedStyle(t.tBodies[0]).borderTopWidth, "
+                            "getComputedStyle(t.tBodies[0]).borderBottomWidth]]))"))
                     view.close()
                 browser.close()
         except Exception as exc:
@@ -5078,6 +5089,10 @@ def case_formula_steps_reflow(work):
          "columns, each step on a line, the relations one over another",
          lambda: wide and all(on_a_line(row) for row in wide)
          and abs(wide[0][1]["x"] - wide[1][1]["x"]) < 1),
+        ("with no rule above them or below, as OpenStax sets the formula, where a "
+         "table of data has both",
+         lambda: rules.get("formula-steps") == ["0px", "0px"]
+         and rules.get("data") == ["1px", "1px"]),
         ("and in a phone's, a step's math on a line, not a cell to a line, an empty "
          "cell no gap, and its words within the window",
          lambda: narrow and on_a_line(narrow[0][:3]) and on_a_line(narrow[1][1:3])

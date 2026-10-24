@@ -53,8 +53,8 @@ from .bake.core import (class_test, classes, detach, has_class, prepend,
                         text_of)
 from .cnxml import E, append_text
 from .mathml import MATHML
-from .steptables import (HEADED, formula_steps, head_rows, header_guess,
-                         layout_reason, organizer_page, symbol_key)
+from .steptables import (HEADED, STEPS_CLASS, formula_steps, head_rows, header_guess,
+                         layout_reason, organizer_page, steps_table, symbol_key)
 
 VOID = {"area", "base", "br", "col", "embed", "hr", "img", "input", "link",
         "meta", "source", "track", "wbr"}
@@ -1003,7 +1003,9 @@ class Emitter:
         exercise; for the page it's on, an inquiry organizer (organizer);
         for where it stands, a worked example's steps, a Key Equations
         table, or a grid of key terms, unless the header guess reads a
-        header row in it, which leaves it a data table, reported.
+        header row in it, which leaves it a data table, reported. Steps
+        are given the class steps too (steps_table), which every format
+        draws without a table of data's rules.
         OpenStax's HTML marks a table so only when it has no label of
         OpenStax's (aria-label), with which a browser would ignore the
         role. The labels, written in 2023 from the tables' summaries,
@@ -1023,6 +1025,9 @@ class Emitter:
             layout = guess not in HEADED
             if layout:
                 out.set("role", "presentation")
+                if steps_table(source, self.book.style):
+                    out.set("class", " ".join((out.get("class") or "").split()
+                                              + [STEPS_CLASS]))
             else:
                 first = " | ".join(" ".join(text_of(c).split())
                                    for c in out.xpath("(.//tr)[1]/td"))

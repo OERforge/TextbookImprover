@@ -1363,6 +1363,13 @@ def tables_of(html):
         r'<table id="([^"]+)"[^>]*>', html)}
 
 
+def stepped(tables, name):
+    """Whether the table of an id in tables (tables_of) is of the class
+    steps."""
+    found = re.search(r'\bclass="([^"]*)"', tables.get(name, ""))
+    return bool(found) and "steps" in found.group(1).split()
+
+
 def case_step_tables(work):
     from lxml import etree
     from cnx import mathtex, steptables
@@ -1423,6 +1430,13 @@ def case_step_tables(work):
          "tables of values and of data, most of them",
          lambda: "days" in tables and not presentation("days")
          and "days" not in kept),
+        ("steps laid out so are of the class steps too, which every format draws "
+         "without a table of data's rules; a table of data, one kept a data table, and "
+         "another book's tables aren't",
+         lambda: all(stepped(tables, n) for n in ("steps1", "steps2", "steps3", "steps4"))
+         and not any(stepped(tables, n) for n in ("data1", "days", "kinds", "pictures",
+                                                    "spaced"))
+         and other_tables and not any(stepped(other_tables, n) for n in other_tables)),
         ("the header guess reads a table as Pandoc gives it to the guess: "
          "a ratio set as a fraction is a formula, not the number 21100 "
          "under a row of words, and a short row is padded, not a band "
@@ -1504,6 +1518,10 @@ def case_step_tables(work):
                          ("The amount we want to co | 21 out of 100", "layout"),
                          ("Write a phrase. | Seven plus twelve.", "layout"),
                          ("x | y | x", "both")]),
+        ("and steps keep their class on the page",
+         lambda: all(stepped(tables_of(converted), n)
+                     for n in ("steps1", "steps2", "steps3", "steps4"))
+         and not stepped(tables_of(converted), "data1")),
     ])
 
 
@@ -2076,6 +2094,16 @@ def case_layout_kinds(work):
          and presentation("tiny-coreq", "rules")
          and [r["Detail"].split(" ")[0] for r in reports["tiny-coreq"]
               if r["Check"] == "table-kept-as-data"] == ["hours"]),
+        ("and its worked steps are of the class steps, which every format draws without a "
+         "table of data's rules; its Key Equations, Physics' grid of key terms and its Key "
+         "Equations, and a byline aren't",
+         lambda: stepped(found["tiny-coreq"], "worked")
+         and known("tiny-physics", "terms", "equations", "alone")
+         and known("tiny-history", "byline")
+         and not any(stepped(found[slug], name) for slug, name in (
+             ("tiny-coreq", "rules"), ("tiny-coreq", "hours"), ("tiny-physics", "terms"),
+             ("tiny-physics", "equations"), ("tiny-physics", "alone"),
+             ("tiny-history", "byline")))),
         ("and the run counts them",
          lambda: "3 table(s) that only lay things out" in said["tiny-physics"]
          and "2 table(s) that only lay things out" in said["tiny-coreq"]

@@ -1516,6 +1516,25 @@ FIT_ONE = (
     "\\(4321\\) & \\(=\\) & \\(1234\\) & Editedspec: a column & and another. \\\\\n"
     "\\end{longtable}\n}\n}\n\\OERFitTableEnd{999}}\n"
     "```\n\n"
+    + "A worked example's steps a book sets out in a table of its own, which the CNX unpacker "
+    "gives the class steps, as it does the dev-math books':\n\n"
+    '<table role="presentation" class="unnumbered unstyled steps"><tr><td>Unruledsteps: '
+    "write the sum.</td><td>$7 + 12$</td></tr><tr><td>Simplify.</td><td>$19$</td></tr>"
+    "</table>\n\n"
+    "And a layout table that isn't steps:\n\n"
+    '<table role="presentation" class="unnumbered unstyled"><tr><td>Ruledlayout: write the '
+    "sum.</td><td>$7 + 12$</td></tr><tr><td>Simplify.</td><td>$19$</td></tr></table>\n\n"
+    "And steps of each kind made a table of data again, as a row of table-headers.csv makes "
+    "them, a header row and no role:\n\n"
+    '<table class="unnumbered unstyled steps"><thead><tr><th>Ruleddata: the step</th>'
+    "<th>Its result</th></tr></thead><tbody><tr><td>Write the sum.</td><td>$7 + 12$</td>"
+    "</tr></tbody></table>\n\n"
+    + fit_steps("1212 + 3434", "=", "4646", "Ruledformula: add them.").replace(
+        '<table role="presentation" class="formula-steps"><tr>',
+        '<table class="formula-steps"><thead><tr>').replace(
+        "Ruledformula: add them.</td></tr>",
+        "Ruledformula: add them.</td></tr></thead><tbody>").replace(
+        "Add them.</td></tr></table>", "Add them.</td></tr></tbody></table>")
     + "Steps that float, which the writer sets as a tabular in a table float:\n\n"
     + fit_steps("1111 + 2222", "=", "3333", "Floatsteps: add them.").replace(
         'class="formula-steps"', 'class="formula-steps float"')
@@ -3346,6 +3365,12 @@ def fit_checks(fit_path, fit_said, fit_source, fit_third):
         # sets a worked example's steps, a formula, with none.
         ("and steps are drawn without the rules above and below them a table of data has",
          lambda: rules_by("Ownwidth", 2) == 0 and rules_by("Spaced", 1) == 2),
+        ("and so are a worked example's steps a book sets out in a table of its own (class "
+         "steps), where a layout table that isn't steps has its rules",
+         lambda: rules_by("Unruledsteps", 2) == 0 and rules_by("Ruledlayout", 2) == 2),
+        ("but steps of either kind made a table of data again keep a table of data's rules, "
+         "above its head, under it, and below its last row",
+         lambda: rules_by("Ruleddata", 2) == 3 and rules_by("Ruledformula", 2) == 3),
         ("and steps a little too wide at their own width, which narrowed spaces would fit, "
          "are set across the line, their spaces as they were, their reason wrapping",
          lambda: at("Nearwidth", 1) and within("Nearwidth") and ends("Nearwidth")[0] < 72.5

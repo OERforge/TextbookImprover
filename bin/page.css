@@ -123,8 +123,14 @@ table {
    step's cells follow one another on a line, wrapping where they don't
    fit, its words on a line of their own then, and an empty cell is no gap:
    stacked, each cell on a line of its own, the relation stood alone
-   between its sides. */
-table.formula-steps[role="presentation"] > tbody {
+   between its sides. A worked example's steps a book sets out in a table
+   of its own, each step's words beside its result, which the unpacker
+   gives the class steps (the dev-math books' and the corequisite book's),
+   have no rule either, their cells stacked on a narrow screen as another
+   layout table's are. Either kind made a table of data again, without the
+   role, keeps its rules. */
+table.formula-steps[role="presentation"] > tbody,
+table.steps[role="presentation"] > tbody {
   border-top: 0;
   border-bottom: 0;
 }

@@ -126,6 +126,16 @@ LAYOUT_STYLES = {"dev-math", "precalculus-coreq", "hs-physics"}
 # when OpenStax gave them no label: a dev-math book writes some of its
 # steps without the class.
 ANY_CLASS_STYLES = {"dev-math"}
+# The books whose tables laid out for where they stand are a worked
+# example's steps for the most part, outside their Key Equations: the
+# dev-math books' (821 of Prealgebra 2e's 860, in solutions, the rest a box
+# of properties, a comparison, or a problem laid out so), and College
+# Algebra with Corequisite Support 2e's, whose worked examples and
+# corequisite skills set theirs out the same way. Physics' tables so laid
+# out are its grids of key terms.
+STEPS_STYLES = {"dev-math", "precalculus-coreq"}
+# The class steps_table gives them.
+STEPS_CLASS = "steps"
 
 
 def cell_text(cell, alt=True):
@@ -331,6 +341,18 @@ def in_key_equations(source):
     """Whether a source table is in a chapter's Key Equations (OpenStax's
     section key-equations, which baking moves to the chapter's end)."""
     return any("key-equations" in classes(a) for a in source.iterancestors())
+
+
+def steps_table(source, style):
+    """Whether a table laid out for where it stands (layout_reason's
+    "place") is given the class steps (STEPS_CLASS): in a book of
+    STEPS_STYLES, outside its Key Equations, where such a table is a worked
+    example's steps, each step's words beside its result, or else a box of
+    properties, a comparison, or a problem laid out as it stands. Every
+    format draws them without the rules a table of data has, as it draws
+    the steps the unpacker lays out itself (formula_steps), while they're
+    a layout table."""
+    return style in STEPS_STYLES and not in_key_equations(source)
 
 
 def _holds(cell, *names):

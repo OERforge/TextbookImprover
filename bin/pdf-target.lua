@@ -1433,13 +1433,20 @@ local sized_table
 -- \bottomrule, each followed by \noalign{}, which is left alone), as
 -- OpenStax sets a worked example's steps, a formula with no lines: drawn,
 -- they set the steps off as a table of data. Steps have no head, and so
--- no rule under it.
-local STEPS_OPEN = '\\binoppenalty=10000 \\relpenalty=10000 '
-  .. '\\def\\toprule{}\\def\\bottomrule{}'
+-- no rule under it. A worked example's steps a book sets out in a table of
+-- its own, each step's words beside its result, which the CNX unpacker
+-- gives the class steps (the dev-math books' and the corequisite book's),
+-- are drawn without them too (UNRULED), their formulas breaking as other
+-- tables' do. Steps are drawn so only while they're a layout table: steps
+-- that table-headers.csv makes a table of data keep a table of data's
+-- rules, as they do on a page (page.css).
+local UNRULED = '\\def\\toprule{}\\def\\bottomrule{}'
+local UNBROKEN = '\\binoppenalty=10000 \\relpenalty=10000 '
 
 function Table(tbl)
   local nested = tbl.attributes[IN_CELL] ~= nil
   local steps = tbl.classes:includes('formula-steps')
+  local unruled = is_layout(tbl) and (steps or tbl.classes:includes('steps'))
   local result, wraps, columns, lead, measured = sized_table(tbl)
   if nested then return result end
   local id = next_fit()
@@ -1450,7 +1457,8 @@ function Table(tbl)
   local function fitted(blocks)
     local out = pandoc.Blocks{}
     for i = 1, lead or 0 do out:insert(blocks[i]) end
-    out:insert(pandoc.RawBlock('latex', open .. (steps and STEPS_OPEN or '')))
+    out:insert(pandoc.RawBlock('latex', open .. (steps and UNBROKEN or '')
+                                        .. (unruled and UNRULED or '')))
     for i = (lead or 0) + 1, #blocks do out:insert(blocks[i]) end
     out:insert(pandoc.RawBlock('latex', '\\OERFitTableEnd{' .. id .. '}}'))
     return out

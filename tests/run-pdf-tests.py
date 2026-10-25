@@ -151,6 +151,8 @@ And amssymb's squares, which unicode-math has no names for: $\square \blacksquar
 
 ![A small red square](assets/red.png){width=800px}
 
+![A cell\'s nucleus, its \|bar\|, 1 < 2 > 0, x\~y, a\\b, x\^2, “quoted” and ‘single’ it’s 1–5 a—b, and \-\- as typed](assets/red.png)
+
 A rule between paragraphs: ![](assets/rule.png){.decorative width=900px height=2px}
 
 ![](assets/blank.png)
@@ -3892,8 +3894,8 @@ def checks(work, jobs=1):
          lambda: sorted([kind(k) for k in children(e)] for e in tree
                         if kind(e) == "/Caption"
                         and [kind(k) for k in children(e)][:1] != ["/Div"])
-         == [["/Lbl", "/text"], ["/Lbl", "/text"], ["/text"], ["/text"], ["/text"],
-             ["/text"]]),
+         == [["/Lbl", "/text"], ["/Lbl", "/text"], ["/Lbl", "/text"], ["/text"], ["/text"],
+             ["/text"], ["/text"]]),
         # Untagged and with no table, so no caption package: LaTeX's classes
         # set its figures, a caption too long for a line as a paragraph.
         ("so in an untagged book with no table, a short caption and a long one, "
@@ -4297,8 +4299,16 @@ def checks(work, jobs=1):
         ("the described image is a figure with its alt text",
          lambda: any(str(f.get("/Alt")) == "A small red square"
                      for f in figures)),
+        # Pandoc's writer writes a straight quote, a bar, <, >, ~, and \ in
+        # the alt key as commands, ^ as \^{}, and curly quotes and dashes as
+        # TeX's ligatures, which /Alt had as they're written.
+        ("a figure's alt text is its characters, those the writer writes as commands and "
+         "the quotes and dashes it writes as TeX's ligatures among them",
+         lambda: any(str(f.get("/Alt")) == "A cell's nucleus, its |bar|, 1 < 2 > 0, x~y, a\\b, "
+                     "x^2, \u201cquoted\u201d and \u2018single\u2019 it\u2019s 1\u20135 "
+                     "a\u2014b, and -- as typed" for f in figures)),
         ("the decorative image is no figure",
-         lambda: len(figures) == 10),
+         lambda: len(figures) == 11),
         # Each inner figure's empty \caption{} was the float's too, three
         # Captions in one Aside, which veraPDF rejects (ISO 14289-2,
         # 8.2.5.27).

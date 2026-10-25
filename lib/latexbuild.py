@@ -1443,6 +1443,43 @@ PDF_MACROS = r"""\ExplSyntaxOn
   }
 \NewDocumentCommand \OERArtifactGraphics { }
   { \cs_if_exist:NT \tag_mc_begin:n { \setkeys{Gin}{artifact} } }
+% A picture's alt text, which latex-lab makes its figure's /Alt by making
+% the alt key's text plain (\pdf_purify:nN). Pandoc's writer writes a
+% straight quote there as \textquotesingle, a bar, <, >, ~, and \ as
+% commands, and ^ as \^{}, which /Alt had as written ("a cell
+% \textquotesingle s"), and curly quotes and dashes as TeX's ligatures,
+% `` '' ` ' -- ---, which only a font makes the characters they stand
+% for. The commands made plain are their characters, here and wherever
+% text is made plain, and the alt key's ^ and ligatures are made
+% characters before latex-lab reads it; -\/-, two hyphens as written,
+% stays two.
+\text_declare_purify_equivalent:Nn \textquotesingle { ' }
+\text_declare_purify_equivalent:Nn \textbar { | }
+\text_declare_purify_equivalent:Nn \textless { < }
+\text_declare_purify_equivalent:Nn \textgreater { > }
+\text_declare_purify_equivalent:Nn \textasciitilde { \c_tilde_str }
+\text_declare_purify_equivalent:Nn \textbackslash { \c_backslash_str }
+\tl_new:N \l__oer_alt_tl
+\cs_new_protected:Npn \__oer_alt:n #1
+  {
+    \tl_set:Nn \l__oer_alt_tl {#1}
+    \regex_replace_all:nnN { \c{\^} \cB. \cE. } { \cO\^ } \l__oer_alt_tl
+    \tl_replace_all:Nnn \l__oer_alt_tl { --- } { ^^^^2014 }
+    \tl_replace_all:Nnn \l__oer_alt_tl { -- } { ^^^^2013 }
+    \tl_replace_all:Nnn \l__oer_alt_tl { `` } { ^^^^201c }
+    \tl_replace_all:Nnn \l__oer_alt_tl { '' } { ^^^^201d }
+    \tl_replace_all:Nnn \l__oer_alt_tl { ` } { ^^^^2018 }
+    \tl_replace_all:Nnn \l__oer_alt_tl { ' } { ^^^^2019 }
+    \exp_args:NV \__oer_gin_alt:n \l__oer_alt_tl
+  }
+\AddToHook { begindocument/before }
+  {
+    \cs_if_exist:cT { KV@Gin@alt }
+      {
+        \cs_set_eq:Nc \__oer_gin_alt:n { KV@Gin@alt }
+        \cs_set_eq:cN { KV@Gin@alt } \__oer_alt:n
+      }
+  }
 % A table of class unnumbered that has a caption is written in a group
 % that sets \LTcaptype to none, and the caption package, which the
 % template loads, stopped at its \caption ("No float type 'none'

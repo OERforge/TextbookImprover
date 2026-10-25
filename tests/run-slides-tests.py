@@ -2710,14 +2710,16 @@ def case_math_keep(work):
     code, said = run()
     first = rows_of(reports["math_repaired"])
     yield "a run's math repairs are a report, a book's columns, each equation in the TeX " \
-        "Pandoc's Word reader reads, as a book's are, once a deck", code == 0 and first == [
+        "Pandoc's Word reader reads, as a book's are, once a deck, and the run says nothing " \
+        "of a line, no row being written out in one", code == 0 and first == [
             ["equation", "maths", "\\overset{¯}{x}–µ\\overset{–}{y}",
              "\\overset{¯}{x} - \\mu\\overset{¯}{y}"],
             ["equation", "maths", Z_TEX, "z = \\frac{x - \\mu}{\\sigma}"],
             ["equation", "maths", "\\mathrm{\\Delta}x = 2", "\\Delta x = 2"],
             ["equation", "other", Z_TEX, "z = \\frac{x - \\mu}{\\sigma}"]] \
         and "Wrote %s (4 math repair(s))." % reports["math_repaired"] in said \
-        and not any("Fill in the second column" in s and "math" in s for s in said), (first, said)
+        and not any("Fill in the second column" in s and "math" in s for s in said) \
+        and not any("written out in one line" in s for s in said), (first, said)
     with open(paths["math_keep"], "w", encoding="utf-8", newline="") as fh:
         csv.writer(fh).writerows([["Kind", "Page", "Before", "After"],
                                   ["equation", "maths", "z=(x–µ)/σ", "z=(x−μ)/σ"],
@@ -2769,6 +2771,35 @@ def case_math_keep(work):
         and read_part(other, "ppt/slides/slide1.xml") == read_part(
             os.path.join(folder, "other.pptx"), "ppt/slides/slide1.xml") \
         and not any("kept nothing" in s for s in said), said
+    # With a conversion after, which writes the report with the pages'
+    # repairs (convert.py), the copies' rows are handed over, and written
+    # all the same, unsaid, for a run that stops before then.
+    os.remove(paths["math_keep"])
+    handed, said = {}, []
+    code = deckrun.run(folder, ["maths.pptx", "other.pptx"], [target()], paths, reports,
+                       say=said.append, math=handed)
+    yield "with a conversion after, the copies' rows are handed over and written all the " \
+        "same, unsaid, so that a run stopping before the conversion's report leaves them, " \
+        "none of them said to be written out in one line", \
+        code == 0 and len(handed.get("rows", ())) == 4 \
+        and rows_of(reports["math_repaired"]) == first \
+        and not any("math repair" in s for s in said) \
+        and handed.get("in_one_line") is False, (handed, said)
+    reading = deckrun.equation_tex
+    deckrun.equation_tex = lambda path: {}
+    try:
+        code, said = run()
+        written_out = rows_of(reports["math_repaired"])
+        handed = {}
+        deckrun.run(folder, ["maths.pptx", "other.pptx"], [target()], paths, reports,
+                    say=lambda s: None, math=handed)
+    finally:
+        deckrun.equation_tex = reading
+    yield "an equation Pandoc doesn't read, or isn't there to, is written out in one line, " \
+        "and the run says so, or hands the conversion's report the word to", code == 0 \
+        and ["equation", "other", "z=(x–µ)/σ", "z=(x−μ)/σ"] in written_out \
+        and any("or written out in one line" in s for s in said) \
+        and handed.get("in_one_line") is True, (written_out, said, handed)
 
 
 # ---------------------------------------------------------------------------

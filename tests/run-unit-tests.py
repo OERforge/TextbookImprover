@@ -457,6 +457,40 @@ def check_sidecar_paths():
     ]
 
 
+def check_deck_math_note():
+    """The note on math-repaired.csv's form in a run that converts decks:
+    its hint says some rows are written out in one line when the copies'
+    were (deckrun hands that over in DECK_MATH), and only then. The
+    slides suite runs convert.py whole, where Pandoc reads every
+    equation, so the hint's other branch is called directly here."""
+    import contextlib
+    import io
+    convert = load(os.path.join(ROOT, "bin", "convert.py"), "convert")
+    work = scratch("deck-math-note-")
+    report = os.path.join(work, "math-repaired.csv")
+    collected = {"math": os.path.join(work, "none"), "math_kept": os.path.join(work, "none")}
+
+    def hint(in_one_line):
+        convert.DECK_MATH = {"rows": [("equation", "deck", "z=(x\u2013\u00b5)/\u03c3",
+                                       "z=(x\u2212\u03bc)/\u03c3")],
+                             "in_one_line": in_one_line}
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            convert.deck_math_report(collected, {"math_repaired": report}, {"math_keep": None},
+                                     [], work)
+        return err.getvalue()
+
+    written_out, tex = hint(True), hint(False)
+    return [
+        ("a deck's row written out in one line, the report's hint says so",
+         lambda: "Wrote %s (1 math repair(s))." % report in written_out
+         and "or written out in one line" in written_out),
+        ("and with every row TeX, it doesn't",
+         lambda: "Wrote %s (1 math repair(s))." % report in tex
+         and "written out in one line" not in tex),
+    ]
+
+
 def check_docx_repair():
     """Bookmarks between blocks move into the block that follows."""
     import xml.etree.ElementTree as ET
@@ -3153,6 +3187,7 @@ GROUPS = [
     ("identifiers", check_identifiers),
     ("facts written down twice", check_consistency),
     ("sidecar paths", check_sidecar_paths),
+    ("a deck's math report's note on its form", check_deck_math_note),
     ("shortDOIs for a bare-links sidecar", check_shortdoi),
     ("the decorative marker", check_decorative_marker),
     ("sidecars Excel saved, with files appended", check_sidecar_marks),

@@ -965,6 +965,8 @@ Heat: *q* = *m* $\times$ *c* $\times$ Δ*T*.
 
 The ratio *F* = *MS*(Factor)/*MS*(Error) and *x* = 3cm stay text.
 
+A picture after *s* = 4![a mark](mark.png) leaves it an equation.
+
 Plan 1: n~1~ = 4, and H~0~: σ~1~^2^ = σ~2~^2^ as a^2^ + b^2^ = c^2^, but H~2~O and 2H~2~ + O~2~ = 2H~2~O stay text.
 
 Notes: the line ŷ = a + bx and Ŷ = 2x + 1, the average (x̄_n), and ŷ alone, but a crêpe for the rôle, ŷes, and a plain a + b = c stay text.
@@ -1081,6 +1083,8 @@ def case_math_repair(work):
         ("a run followed straight away by an opening parenthesis or a letter stays text, "
          "cut short of its formula",
          lambda: not any(m.startswith(("F=", "x=3")) for m in maths)),
+        ("but one followed by a picture isn't, its description not in the line",
+         lambda: "s=4" in maths),
         ("math.from_text off makes no equation of text",
          lambda: len(off_text) == 6),
         ("the keep sidecar leaves its expression and its symbol text, and "

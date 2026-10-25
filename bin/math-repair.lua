@@ -607,9 +607,11 @@ local function expression_at(atoms, i)
   end
   -- A run followed straight away by an opening parenthesis or a letter
   -- stopped short of the rest of its formula, whose words it can't take:
-  -- F = MS(Factor)/MS(Error) isn't F = MS, then text.
+  -- F = MS(Factor)/MS(Error) isn't F = MS, then text. A picture's text is
+  -- its description, which isn't in the line.
   local next_atom = atoms[last + 1]
   if next_atom and (next_atom.tex == '(' or (next_atom.kind ~= 'sp' and next_atom.text ~= ''
+      and not (next_atom.el and next_atom.el.t == 'Image')
       and is_letter(utf8.codepoint(next_atom.text, 1)))) then
     return nil, j
   end

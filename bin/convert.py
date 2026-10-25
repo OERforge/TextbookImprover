@@ -3401,10 +3401,12 @@ def deck_math_report(collected, reports, paths, targets, work):
     with open(merged, "w", encoding="utf-8", newline="") as fh:
         csv.writer(fh, lineterminator="\n").writerows(
             [key + (after,) for key, after in rows.items()])
+    import deckrun
     write_report(merged, reports["math_repaired"], "Kind,Page,Before,After", "math repair(s)",
                  None, "Each is an equation's characters repaired, or math typed as text made "
-                 "an equation, Before and After in Pandoc's TeX, as a book's are; "
-                 "math.repair_equations and math.from_text turn them off.")
+                 "an equation, Before and After in Pandoc's TeX, as a book's are%s; "
+                 "math.repair_equations and math.from_text turn them off."
+                 % (deckrun.IN_ONE_LINE if (DECK_MATH or {}).get("in_one_line") else ""))
     keep = math_keep_rows(paths.get("math_keep"))
     if not keep:
         return

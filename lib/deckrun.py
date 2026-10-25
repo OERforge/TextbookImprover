@@ -79,6 +79,10 @@ TITLE_COLUMNS = ["Slide", "Title", "Source", "Drafted by", "Reviewed"]
 ORDER_COLUMNS = ["Slide", "Order", "Source", "Shapes", "Note", "Drafted by", "Reviewed"]
 LINK_COLUMNS = ["URL", "Replacement", "Title", "Source", "Context", "Drafted by", "Reviewed"]
 MATH_COLUMNS = ["Kind", "Page", "Before", "After"]
+# What the math report's hint adds when an equation of it is written out
+# in one line, Pandoc not reading it or not there to (equation_tex).
+IN_ONE_LINE = (", or written out in one line, much as PowerPoint's linear format writes an "
+               "equation, where Pandoc couldn't read it")
 # The alt-text findings that ask a person for a decision.
 DECIDE = ("pptx-object-no-alt", "pptx-shape-no-alt", "pptx-alt-is-file-name",
           "pptx-alt-placeholder", "pptx-alt-auto-generated", "pptx-alt-page-title",
@@ -356,8 +360,11 @@ def run(base, decks, targets, paths, reports, language=None, alt_max_chars=120,
     math-repaired.csv, and says which of math-keep.csv's rows kept
     nothing, since a row may keep math in the pages alone: "rows", each
     (kind, deck, before, after), "kept", the keep rows that kept an
-    equation in a copy, and "repairing", whether any target repairs them.
-    Without it, they're written here."""
+    equation in a copy, "repairing", whether any target repairs them, and
+    "in_one_line", whether a row's equation is written out in one line,
+    Pandoc not reading it. The copies' rows are written here then too,
+    unsaid, a report the conversion's replaces, so that a run stopping
+    before it leaves them on record. Without it, they're written here."""
     alts = pptxremediate.alt_rows(paths.get("image_alt"))
     unknown = set()
     tables = pptxremediate.header_rows(paths.get("table_headers"), unknown)
@@ -590,6 +597,7 @@ def run(base, decks, targets, paths, reports, language=None, alt_max_chars=120,
     math_rows = OrderedDict()   # (kind, deck, before, after), each repair once
     kept, repairing = set(), False  # the keep rows that kept an equation
     tex = {}                    # each deck's {OMML: TeX}, once
+    in_one_line = False         # a row's equation written out, not TeX
     for target in targets:
         if target.format != "source":
             continue                # a conversion's, after this (convert.py)
@@ -622,6 +630,7 @@ def run(base, decks, targets, paths, reports, language=None, alt_max_chars=120,
                                              repairs=repairs, replace_language=replacing,
                                              describe=lambda omml, known=known: known.get(
                                                  omml, pptxremediate.equation_text(omml)))
+            texts = set(known.values())
             for before, after, written_out in repairs:
                 if after is None:
                     # The deck's own row keeps it, as a page's does a book's,
@@ -632,6 +641,8 @@ def run(base, decks, targets, paths, reports, language=None, alt_max_chars=120,
                     kept.update([row for row in rows if row[1]] or rows)
                 else:
                     math_rows.setdefault(("equation", dname, before, after), None)
+                    # Pandoc couldn't read it, or isn't there: in one line.
+                    in_one_line = in_one_line or before not in texts or after not in texts
             for key, why in problems:
                 if key == pptxremediate.deck_name(path):
                     say("WARNING: %s: in %s, %s." % (target.name, name, why))
@@ -689,11 +700,17 @@ def run(base, decks, targets, paths, reports, language=None, alt_max_chars=120,
                 "repeats, which PowerPoint repairs when it opens and saves the deck."
                 % (target.name, totals["skipped"]))
     if math is not None:
-        math.update(rows=math_rows, kept=kept, repairing=repairing)
+        math.update(rows=math_rows, kept=kept, repairing=repairing, in_one_line=in_one_line)
+        # The conversion after writes the report, the pages' repairs with
+        # these, and says so (convert.py); it's written here too, unsaid, so
+        # that the copies' repairs are on record if the run stops first.
+        if reports.get("math_repaired"):
+            write_rows(reports["math_repaired"], MATH_COLUMNS, list(math_rows))
     elif reports.get("math_repaired"):
         report(reports["math_repaired"], MATH_COLUMNS, list(math_rows), "math repair(s)", None,
                say, "Each is an equation's characters repaired, Before and After in Pandoc's "
-               "TeX, as a book's are; math.repair_equations turns them off.")
+               "TeX, as a book's are%s; math.repair_equations turns them off."
+               % (IN_ONE_LINE if in_one_line else ""))
     if paths.get("math_keep") and math is None:
         # Only a run that repairs equations can keep one.
         off = () if repairing else ("math.repair_equations",)

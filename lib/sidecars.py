@@ -60,6 +60,19 @@ def csv_lines(fh):
         yield line.lstrip(BOM)
 
 
+def dict_rows(fh):
+    """A sidecar's rows as csv.DictReader reads them, through csv_lines,
+    but a header row repeated partway, as appending a report leaves one:
+    a row whose first value is its first column's name, which the other
+    readers, the filter's among them, skip too."""
+    reader = csv.DictReader(csv_lines(fh))
+    for row in reader:
+        first = (reader.fieldnames or [""])[0]
+        if first.strip() and (row.get(first) or "").strip().lower() == first.strip().lower():
+            continue
+        yield row
+
+
 def not_utf8(path):
     """What to tell a person whose sidecar at path isn't UTF-8, naming the
     line and saying how to save it, or None. Excel's plain "CSV" saves in
@@ -67,7 +80,11 @@ def not_utf8(path):
     UTF-8 can't read there: the filter would hand it to Pandoc, which
     shows U+FFFD in its place, and a Python reader would stop with a
     traceback. Lines are counted as the csv module ends them, so a file
-    with a CR alone at each line's end ("CSV (Macintosh)") is too."""
+    with a CR alone at each line's end ("CSV (Macintosh)") is too. A
+    path that isn't a file has nothing here: its reader says so its own
+    way."""
+    if not os.path.isfile(path):
+        return None
     with open(path, "rb") as fh:
         data = fh.read()
     try:

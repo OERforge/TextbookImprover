@@ -454,6 +454,10 @@ def check_sidecar_paths():
         ("the default name, not yet written, is the normal starting state",
          lambda: not stops(os.path.join(base, "table-captions.csv"),
                            "sidecars.table_captions", "table-captions.csv")),
+        ("a setting naming a folder stops the run, saying so, where the check of its "
+         "encoding had stopped it with a traceback",
+         lambda: stops(base, "sidecars.image_alt", "image-alt.csv")
+         and "sidecars.image_alt" in said[-1] and "a folder, not a file" in said[-1]),
     ]
 
 
@@ -1988,30 +1992,29 @@ def check_sidecar_marks():
     mac = os.path.join(work, "mac.csv")
     with open(mac, "w", encoding="cp1252", newline="") as fh:
         fh.write("Image,Alt\rch1/media/rId7.png,One\rch1/media/rId8.png,Caf\u00e9\r")
-    marked = lambda keys: any(mark in key for key in keys)
     return [
         ("image-alt.csv's rows are each read, by the pages', the Word copies', and the decks' "
-         "readers",
-         lambda: [htmlremediate.alt_rows(alt).get("ch1/media/rId%d" % n) for n in (7, 8, 9)]
-         == ["One", "Two", "Three"]
-         and docxremediate.alt_rows(alt).get("ch1") == {"rId7": "One", "rId8": "Two",
-                                                        "rId9": "Three"}
+         "readers, the header row after a mark no row of any",
+         lambda: htmlremediate.alt_rows(alt) == {"ch1/media/rId%d" % n: alt_text for n, alt_text
+                                                 in ((7, "One"), (8, "Two"), (9, "Three"))}
+         and docxremediate.alt_rows(alt) == {"ch1": {"rId7": "One", "rId8": "Two",
+                                                     "rId9": "Three"}}
          and set(pptxremediate.alt_rows(alt)) == {"ch1/media/rId7", "ch1/media/rId8",
-                                                  "ch1/media/rId9"}
-         and not marked(htmlremediate.alt_rows(alt))),
+                                                  "ch1/media/rId9"}),
         ("and so are bare-links.csv's, and none is named a row matching no bare link",
-         lambda: [htmlremediate.link_rows(links).get("https://example.org/" + x)
-                  for x in "abc"] == [("", "Page A"), ("", "Page B"), ("", "Page C")]
-         and docxremediate.link_titles(links).get("https://example.org/c") == "Page C"
+         lambda: htmlremediate.link_rows(links)
+         == {"https://example.org/" + x: ("", "Page " + x.upper()) for x in "abc"}
+         and docxremediate.link_titles(links) == {"https://example.org/" + x: "Page " + x.upper()
+                                                  for x in "abc"}
          and set(pptxremediate.link_rows(links)) == {"https://example.org/" + x for x in "abc"}
-         and not marked(htmlremediate.link_rows(links)) and said == []),
+         and said == []),
         ("table-headers.csv's, with no warning of a header row's value, and with its "
          "review columns", lambda: set(table_rows) == {"aaa", "bbb", "ccc"} and warned == []
          and headers.has_review_columns(tables)
          and deck_tables == {"aaa": "first-row", "bbb": "both", "ccc": "none"}
          and unknown == set()),
-        ("page-names.csv's, as split-pages.py keys them",
-         lambda: {k: v for k, v in split.read_sidecar(names).items() if k[0] != "source"}
+        ("page-names.csv's, as split-pages.py keys them, the header row after a mark no row",
+         lambda: split.read_sidecar(names)
          == {("ch1.docx", "", "Introduction", ""): "intro",
              ("ch1.docx", "", "Methods", ""): "methods",
              ("ch2.docx", "", "Results", ""): "results"}),
@@ -2037,6 +2040,8 @@ def check_sidecar_marks():
          and "CSV UTF-8 (Comma delimited)" in (sidecars.not_utf8(ansi) or "")
          and mac + ": line 3 isn't UTF-8 (byte 0xE9)" in (sidecars.not_utf8(mac) or "")
          and sidecars.not_utf8(alt) is None),
+        ("and a folder has nothing to say, for its reader to say it isn't a file",
+         lambda: sidecars.not_utf8(os.path.dirname(alt)) is None),
     ]
 
 

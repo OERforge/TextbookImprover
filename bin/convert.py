@@ -918,7 +918,11 @@ def check_sidecar(path, setting, default, base):
     it. The default names are exempt: not having written one yet is the
     normal starting state. A sidecar that isn't UTF-8, as Excel's plain
     "CSV" saves one, stops the run too, before anything is converted,
-    whether this run reads it or not (sidecars.not_utf8)."""
+    whether this run reads it or not (sidecars.not_utf8). One naming a
+    folder stops it as well, saying so."""
+    if os.path.isdir(path):
+        die(f"ERROR: {setting} is set to {path}, which is a folder, not a file.\n"
+            f"       Name the sidecar's file, or remove the setting to use ./{default}.")
     if os.path.exists(path):
         why = sidecars.not_utf8(path)
         if why:

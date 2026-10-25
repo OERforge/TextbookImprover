@@ -273,12 +273,11 @@ def remediate_images(xml, alts):
 def alt_rows(path):
     """{stem: {relationship id: alt, or None for decorative}} from an
     image-alt sidecar, whose Image column names <stem>/media/rIdN.ext."""
-    import csv
     found = {}
     if not path or not os.path.exists(path):
         return found
     with open(path, encoding=sidecars.CSV_ENCODING, newline="") as fh:
-        for row in csv.DictReader(sidecars.csv_lines(fh)):
+        for row in sidecars.dict_rows(fh):
             image, alt = (row.get("Image") or "").strip(), (row.get("Alt") or "").strip()
             parts = image.split("/")
             if len(parts) != 3 or parts[1] != "media" or not alt:
@@ -290,12 +289,11 @@ def alt_rows(path):
 
 def link_titles(path):
     """{address: title} from a bare-links sidecar."""
-    import csv
     found = {}
     if not path or not os.path.exists(path):
         return found
     with open(path, encoding=sidecars.CSV_ENCODING, newline="") as fh:
-        for row in csv.DictReader(sidecars.csv_lines(fh)):
+        for row in sidecars.dict_rows(fh):
             if (row.get("URL") or "").strip() and (row.get("Title") or "").strip():
                 found[row["URL"].strip()] = row["Title"].strip()
     return found

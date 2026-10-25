@@ -263,8 +263,7 @@ def read_sidecar(path):
     if not path or not os.path.exists(path):
         return names
     with open(path, encoding=sidecars.CSV_ENCODING, newline="") as fh:
-        reader = csv.DictReader(sidecars.csv_lines(fh))
-        for row in reader:
+        for row in sidecars.dict_rows(fh):
             row = {k.strip().lower(): (v or "").strip()
                    for k, v in row.items() if k}
             if row.get("source") and row.get("heading"):

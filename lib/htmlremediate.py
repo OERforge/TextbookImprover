@@ -334,12 +334,11 @@ def remediate_language(page, language):
 def alt_rows(path):
     """{image path without its extension: alt, or None for decorative}
     from an image-alt sidecar."""
-    import csv
     found = {}
     if not path or not os.path.exists(path):
         return found
     with open(path, encoding=sidecars.CSV_ENCODING, newline="") as fh:
-        for row in csv.DictReader(sidecars.csv_lines(fh)):
+        for row in sidecars.dict_rows(fh):
             image, alt = (row.get("Image") or "").strip(), (row.get("Alt") or "").strip()
             if image and alt:
                 found[os.path.splitext(image)[0]] = None if sidecars.is_decorative(alt) else alt
@@ -367,12 +366,11 @@ def caption_rows(path):
 
 def link_rows(path):
     """{address: (replacement, title)} from a bare-links sidecar."""
-    import csv
     found = {}
     if not path or not os.path.exists(path):
         return found
     with open(path, encoding=sidecars.CSV_ENCODING, newline="") as fh:
-        for row in csv.DictReader(sidecars.csv_lines(fh)):
+        for row in sidecars.dict_rows(fh):
             url = (row.get("URL") or "").strip()
             replacement, title = (row.get("Replacement") or "").strip(), (row.get("Title") or "").strip()
             if url and (replacement or title):

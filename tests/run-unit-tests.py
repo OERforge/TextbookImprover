@@ -2132,6 +2132,67 @@ def check_cased_images_in_copies():
     ]
 
 
+def check_media_keys_in_copies():
+    """A picture in a book's own media/ folder, in a source's copy.
+
+    The filter keys a picture whose path is in media/ under its page's
+    name, as it keys a Word file's media (figures-and-tables.lua's
+    qualify_media), and the report gives that key, the path as Pandoc's
+    reader writes it, a space as %20; the pages took such a row, and an
+    HTML or a Markdown copy keyed the path alone, so the author's copy of
+    an unpacked OpenStax page kept none of them.
+    """
+    import htmlremediate
+    import mdremediate
+    import sidecars
+    alts = {"p/media/red": "A red square", "p/media/my%20pic": "A picture",
+            "media/green": "A green square"}
+    page = ('<p><img src="media/red.png"> <img src="media/my pic.png" alt="">'
+            ' <img src="media/green.png"></p>')
+    html_p = htmlremediate.remediate_images(page, alts, None, "p")
+    html_q = htmlremediate.remediate_images(page, alts, None, "q")
+    text = "![](media/red.png) and ![](<media/my pic.png>)\n"
+    doc = {"blocks": [{"t": "Para", "c": [
+        {"t": "Image", "c": [["", [], []], [], ["media/red.png", ""]]},
+        {"t": "Space"}, {"t": "Str", "c": "and"}, {"t": "Space"},
+        {"t": "Image", "c": [["", [], []], [], ["media/my%20pic.png", ""]]}]}]}
+    md_p = mdremediate.remediate_images(text, doc, alts, None, "p")
+    # And each copy's remediate() gives its file's name as the page's.
+    work = scratch("media-keys-")
+    for name, content in (("p.html", page), ("p.md", text)):
+        with open(os.path.join(work, name), "w", encoding="utf-8") as fh:
+            fh.write(content)
+    htmlremediate.remediate(os.path.join(work, "p.html"), os.path.join(work, "p-copy.html"),
+                            alts=alts)
+    mdremediate.remediate(os.path.join(work, "p.md"), os.path.join(work, "p-copy.md"), alts=alts)
+
+    def copied(name):
+        with open(os.path.join(work, name), encoding="utf-8") as fh:
+            return fh.read()
+    return [
+        ("an HTML copy's picture in media/ takes the row the report keys it by, its page's "
+         "name first and a space as Pandoc's reader writes it",
+         lambda: '<img src="media/red.png" alt="A red square">' in html_p[0]
+         and '<img src="media/my pic.png" alt="A picture">' in html_p[0]),
+        ("and one keyed by its path alone still takes that row",
+         lambda: '<img src="media/green.png" alt="A green square">' in html_p[0]
+         and html_p[1]["described"] == 3),
+        ("another page's rows aren't its",
+         lambda: html_q[1]["described"] == 1 and "A red square" not in html_q[0]),
+        ("a Markdown copy's likewise",
+         lambda: md_p[0] == "![A red square](media/red.png) and ![A picture](<media/my pic.png>)\n"
+         and md_p[1]["described"] == 2),
+        ("and each copy written is keyed by its file's name, as its page is",
+         lambda: 'alt="A picture"' in copied("p-copy.html")
+         and "![A picture](<media/my pic.png>)" in copied("p-copy.md")),
+        ("a path as Pandoc's readers write it, as its HTML reader was found to",
+         lambda: sidecars.pandoc_uri("media/a[1] b^c{d}|e.png")
+         == "media/a%5B1%5D%20b%5Ec%7Bd%7D%7Ce.png"
+         and sidecars.pandoc_uri("media/n\u00a0b\u2003.png") == "media/n%C2%A0b%E2%80%83.png"
+         and sidecars.page_media_key("p", "images/x.png") is None),
+    ]
+
+
 def check_alt_text_rules():
     """Every kind of alt text lib/alttext.py finds has its finding in each
     checker that applies its rules, declared in lib/findings.py; and one
@@ -3203,6 +3264,7 @@ GROUPS = [
     ("a table whose head holds every row, in an HTML source", check_head_only_tables),
     ("header cells holding only formulas, in a PDF", check_pdf_formula_headers),
     ("an image named in another case, in a source's copy", check_cased_images_in_copies),
+    ("a picture in a book's media folder, in a source's copy", check_media_keys_in_copies),
     ("a page's language", check_page_languages),
     ("a page's language in its source's copy", check_copy_languages),
     ("a one-page book's title page, its page in another language", check_title_page_languages),

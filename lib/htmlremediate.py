@@ -244,9 +244,11 @@ def image_key(src, base=None):
     return os.path.splitext(path)[0]
 
 
-def remediate_images(page, alts, base=None):
+def remediate_images(page, alts, base=None, stem=None):
     """alts: {path without extension: alt, or None for decorative}; base,
-    the page's folder (image_key). Returns (page, counts)."""
+    the page's folder (image_key); stem, the page's name, which a picture
+    in media/ is keyed under, as the pages key it (sidecars.page_media_key).
+    Returns (page, counts)."""
     counts = {"described": 0, "decorative": 0}
     if not alts:
         return page, counts
@@ -257,7 +259,9 @@ def remediate_images(page, alts, base=None):
         if not src:
             return tag
         path = htmllib.unescape(src.group(2) if src.group(2) is not None else src.group(3))
-        key = os.path.splitext(path[2:] if path.startswith("./") else path)[0]
+        key = sidecars.page_media_key(stem, sidecars.pandoc_uri(path))
+        if key not in alts:
+            key = os.path.splitext(path[2:] if path.startswith("./") else path)[0]
         if key not in alts:
             key = image_key(path, base)
         if key not in alts:
@@ -391,7 +395,8 @@ def remediate(source, destination, tables=None, alts=None, links=None, language=
     counts.update(found)
     new, found = remediate_captions(new, captions or [], tables or [])
     counts.update(found)
-    new, found = remediate_images(new, alts or {}, os.path.dirname(os.path.abspath(source)))
+    new, found = remediate_images(new, alts or {}, os.path.dirname(os.path.abspath(source)),
+                                  os.path.splitext(os.path.basename(source))[0])
     counts.update(found)
     new, found = remediate_links(new, links or {})
     counts.update(found)

@@ -73,6 +73,33 @@ def dict_rows(fh):
         yield row
 
 
+def pandoc_uri(path):
+    """A path as Pandoc's readers write an image's (escapeURI, in
+    Text/Pandoc/URI.hs at 3.12.1): white space, as Haskell's isSpace has
+    it, and <>|"{}[]^` percent-encoded, each byte of their UTF-8."""
+    import unicodedata
+
+    def spaced(c):
+        n = ord(c)
+        return c == " " or 9 <= n <= 13 or n == 0xA0 or (
+            n > 0x377 and unicodedata.category(c) == "Zs")
+    return "".join("".join("%%%02X" % b for b in c.encode("utf-8"))
+                   if spaced(c) or c in '<>|"{}[]^`' else c for c in path)
+
+
+def page_media_key(stem, path):
+    """The image-alt key the filter gives a picture of the page stem
+    whose path, as Pandoc's reader writes it, is in media/: the page's
+    name first (figures-and-tables.lua's qualify_media), as the report
+    keys it, without the extension; None for any other path. Meant for a
+    Word file's media, where every file's are media/rIdN, it holds for a
+    page's in a book's own media/ folder too, as the CNX unpacker writes
+    one, and a copy has to find the row by it as the pages do."""
+    if not stem or not path.startswith("media/"):
+        return None
+    return stem + "/" + os.path.splitext(path)[0]
+
+
 def not_utf8(path):
     """What to tell a person whose sidecar at path isn't UTF-8, naming the
     line and saying how to save it, or None. Excel's plain "CSV" saves in

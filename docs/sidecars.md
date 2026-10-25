@@ -150,7 +150,7 @@ page's `<th>` cells; that's the one thing the
 old `table-headers-missing.csv` reported, and it's now a row in the report
 rather than a file.
 
-`image-alt.csv` keys on the image path. A row whose path doesn't match exactly still applies when it differs only by extension, because conversion renames Word's extracted media by content type, but only when no other file in that directory shares the name: `images/logo.png` and `images/logo.svg` are two images, and a row for one doesn't describe the other. Four states for the `Alt` column:
+`image-alt.csv` keys on the image path. A page's picture in the book's own `media/` folder, as the CNX unpacker writes one, is keyed under its page's name, as a Word file's media are, and by its path as Pandoc's reader writes it, a space as `%20` (`3-2-add-integers/media/my%20pic.png`); `image-alt-missing.csv` gives it so, and the pages and a source's copy both take that row. A row whose path doesn't match exactly still applies when it differs only by extension, because conversion renames Word's extracted media by content type, but only when no other file in that directory shares the name: `images/logo.png` and `images/logo.svg` are two images, and a row for one doesn't describe the other. Four states for the `Alt` column:
 
 | Value | Meaning |
 |---|---|

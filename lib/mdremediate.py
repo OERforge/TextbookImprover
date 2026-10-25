@@ -145,18 +145,28 @@ def sidecar_key(target, base=None):
     return os.path.splitext(path)[0]
 
 
-def remediate_images(text, doc, alts, base=None):
+def remediate_images(text, doc, alts, base=None, stem=None):
     """alts: {path without extension: alt, or None for decorative}; base,
-    the source's folder (sidecar_key). Returns (text, counts)."""
+    the source's folder (sidecar_key); stem, the source's name, which a
+    picture in media/ is keyed under, as the pages key it
+    (sidecars.page_media_key). Returns (text, counts)."""
     counts = {"described": 0, "decorative": 0, "images_skipped": 0}
     if not alts:
         return text, counts
-    wanted = Counter(unquote(e["c"][2][0]) for e in elements(doc["blocks"], "Image"))
+    wanted, read_as = Counter(), {}
+    for e in elements(doc["blocks"], "Image"):
+        # The path as Pandoc's reader writes it, which the pages' key is
+        # made from, and decoded, as the author's text has it.
+        target = unquote(e["c"][2][0])
+        wanted[target] += 1
+        read_as.setdefault(target, e["c"][2][0])
     scanned = scan_images(text)
     written = Counter(unquote(o["dest"]) for o in scanned)
     edits = []
     for target, n in wanted.items():
-        key = sidecar_key(target, base)
+        key = sidecars.page_media_key(stem, read_as[target])
+        if key not in alts:
+            key = sidecar_key(target, base)
         if key not in alts:
             continue
         if written[target] != n:
@@ -412,7 +422,8 @@ def remediate(source, destination, alts=None, links=None, captions=None, languag
     new, found = remediate_captions(text, read(text), captions or [])
     counts.update(found)
     new, found = remediate_images(new, read(new), alts or {},
-                                  os.path.dirname(os.path.abspath(source)))
+                                  os.path.dirname(os.path.abspath(source)),
+                                  os.path.splitext(os.path.basename(source))[0])
     counts.update(found)
     new, found = remediate_links(new, read(new), links or {})
     counts.update(found)

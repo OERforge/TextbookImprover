@@ -6038,7 +6038,8 @@ def case_excel_sidecars(work):
     is converted, read in the code page Excel saved it in, Windows Excel's
     or Excel for Mac's, where its characters were U+FFFD on the pages and
     the run stopped later with a traceback; one that reads in neither
-    stops the run."""
+    stops the run. One in UTF-8 without the mark, as a text editor saves
+    one, is given the mark, which Excel needs to open it as UTF-8."""
     import io
     os.makedirs(work)
     solid_png(os.path.join(work, "one.png"), 4, 4, (255, 0, 0))
@@ -6118,6 +6119,19 @@ def case_excel_sidecars(work):
     mac = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
                          cwd=work, capture_output=True, text=True, stdin=subprocess.DEVNULL)
     mac_page = read(work, "html", "page.html") if exists(work, "html", "page.html") else ""
+    # And as a text editor saves it: UTF-8 without the mark, which the run
+    # gives it, as Excel needs to open it as UTF-8, and nothing else.
+    editor = ("Image,Alt\none.png,A red square\ntwo.png,The square\u2019s blue \u2013 smaller\n"
+              .encode("utf-8"))
+    with open(os.path.join(work, "image-alt.csv"), "wb") as fh:
+        fh.write(editor)
+    beside_before = sorted(n for n in os.listdir(work) if n.lstrip(".").startswith("image-alt.csv"))
+    unmarked = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
+                              cwd=work, capture_output=True, text=True, stdin=subprocess.DEVNULL)
+    unmarked_page = read(work, "html", "page.html") if exists(work, "html", "page.html") else ""
+    beside_after = sorted(n for n in os.listdir(work) if n.lstrip(".").startswith("image-alt.csv"))
+    with open(os.path.join(work, "image-alt.csv"), "rb") as fh:
+        editor_now = fh.read()
     # And as "CSV (MS-DOS)" saves Müller: a byte Windows-1252 has no
     # character for, and a capital Mac OS Roman reads inside a word.
     with open(os.path.join(work, "image-alt.csv"), "wb") as fh:
@@ -6159,6 +6173,14 @@ def case_excel_sidecars(work):
          in mac.stdout + mac.stderr
          and 'alt="The square&#x2019;s blue &#x2013; smaller"' in mac_page
          and exists(work, "image-alt.csv.mac-roman")),
+        ("and one a text editor saved, UTF-8 without the mark, is given the mark Excel needs, the "
+         "run saying so, and nothing else in it changes, no copy kept beside it",
+         lambda: unmarked.returncode == 0
+         and "image-alt.csv had no byte-order mark, which Excel needs to open it as UTF-8"
+         in unmarked.stdout + unmarked.stderr
+         and editor_now == b"\xef\xbb\xbf" + editor
+         and 'alt="The square&#x2019;s blue &#x2013; smaller"' in unmarked_page
+         and beside_after == beside_before),
         ("one that reads as neither stops the run before anything is converted, naming its "
          "line and how to save it",
          lambda: stopped.returncode != 0 and "Traceback" not in stopped.stderr

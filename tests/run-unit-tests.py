@@ -2174,8 +2174,23 @@ def check_sidecar_code_pages():
         "control.csv", b"Image,Alt\r\none.png,A \xe9\x01 square\r\n")
     utf16, utf16_said, utf16_why = rewritten(
         "utf16.csv", "Image\tAlt\r\none.png\tCaf\u00e9\r\n".encode("utf-16"))
-    plain = write("plain.csv", "Image,Alt\none.png,Caf\u00e9\n".encode("utf-8"))
+    # One in UTF-8 without the mark, as a text editor saves one, given it,
+    # its mode kept, and nothing else changed: its lines ending as Notepad,
+    # Unix, and an old Mac end them, a mark partway, as rows appended from
+    # a report have, and no end to its last line. One with the mark is
+    # left as it is.
+    plain_bytes = ("Image,Alt\r\none.png,Caf\u00e9\rtwo.png,A red square\n"
+                   "\ufeffthree.png,G\u00f6del\u00a0and Escher").encode("utf-8")
+    plain = write("plain.csv", plain_bytes)
+    os.chmod(plain, 0o640)
+    plain_said = sidecars.rewrite_as_utf8(plain)
     marked = write("marked.csv", "\ufeffImage,Alt\r\none.png,Caf\u00e9\r\n".encode("utf-8"))
+    marked_said = sidecars.rewrite_as_utf8(marked)
+    empty = write("empty.csv", b"")
+    empty_said = sidecars.rewrite_as_utf8(empty)
+    ascii_bytes = b"Image,Alt\none.png,A red square\n"
+    ascii = write("ascii.csv", ascii_bytes)
+    ascii_said = sidecars.rewrite_as_utf8(ascii)
     long_rows = header + "".join("p%d.png,Caf\u00e9 %d\r\n" % (n, n) for n in range(12))
     many, many_said, _ = rewritten("many.csv", long_rows.encode("cp1252"))
     # A mark at the start of a line that isn't UTF-8 is UTF-8's.
@@ -2269,6 +2284,49 @@ def check_sidecar_code_pages():
         fat_said, fat_why = sidecars.rewrite_as_utf8(fat)
     finally:
         os.chmod = saved_chmod
+    # One without the mark left as it is, as it reads the same either way:
+    # one held open, as Excel holds one on Windows; one read-only, which
+    # root, who runs these here, could write; another user's, whose owner
+    # a run that isn't root can't keep; and one with another link to it.
+    unmarked = {}
+    for name, patch in (("held-utf8.csv", {"replace": held}),
+                        ("theirs-utf8.csv", {"geteuid": lambda: 1001})):
+        theirs = write(name, plain_bytes)
+        os.chown(theirs, 1000, 1000)
+        saved_euid = os.geteuid
+        for attribute, value in patch.items():
+            setattr(os, attribute, value)
+        try:
+            unmarked[name] = sidecars.rewrite_as_utf8(theirs)
+        finally:
+            os.replace, os.fdopen, os.access = saved
+            os.geteuid = saved_euid
+    readonly_utf8 = write("readonly-utf8.csv", plain_bytes)
+    os.chmod(readonly_utf8, 0o444)
+    unmarked["readonly-utf8.csv"] = sidecars.rewrite_as_utf8(readonly_utf8)
+    linked_utf8 = write("linked-utf8.csv", plain_bytes)
+    os.link(linked_utf8, os.path.join(work, "hard-link-utf8"))
+    unmarked["linked-utf8.csv"] = sidecars.rewrite_as_utf8(linked_utf8)
+    # And one that changed between reading and marking, no longer UTF-8.
+    changed_said = sidecars._mark(write("changed.csv", "Caf\u00e9\n".encode("cp1252")))
+    # A read-only file in a code page stops the run, for root as for anyone.
+    readonly_ansi = write("readonly-ansi.csv", ansi_rows.encode("cp1252"))
+    os.chmod(readonly_ansi, 0o444)
+    readonly_ansi_said, readonly_ansi_why = sidecars.rewrite_as_utf8(readonly_ansi)
+    # A run that can't give a file its owner gives it its group.
+    calls = []
+
+    def chown(path, uid, gid):
+        calls.append((uid, gid))
+        if uid != -1:
+            raise PermissionError(1, "Operation not permitted", path)
+    grouped = write("grouped.csv", ansi_rows.encode("cp1252"))
+    os.chown(grouped, 1000, 1000)
+    os.chown, saved_chown = chown, os.chown
+    try:
+        sidecars.rewrite_as_utf8(grouped)
+    finally:
+        os.chown = saved_chown
     # What a separate review of the rewrite found read wrong or stopped:
     # each read right now, in the code page it's saved in, alone in a file
     # with the line ends that code page's Excel writes.
@@ -2436,11 +2494,38 @@ def check_sidecar_code_pages():
          lambda: fat_why is None and data(fat).startswith(b"\xef\xbb\xbf")),
         ("a file in UTF-16, as Excel's Unicode Text saves one, is said to be no CSV",
          lambda: utf16_said is None and "is UTF-16" in utf16_why and beside("utf16.csv") == []),
-        ("a sidecar in UTF-8, with the mark or without it, is left as it is, and nothing said",
-         lambda: sidecars.rewrite_as_utf8(plain) == ([], None)
-         and sidecars.rewrite_as_utf8(marked) == ([], None)
-         and data(plain) == "Image,Alt\none.png,Caf\u00e9\n".encode("utf-8")
-         and beside("plain.csv") == [] and beside("marked.csv") == []),
+        ("a sidecar in UTF-8 with the mark is left as it is, and nothing said",
+         lambda: marked_said == ([], None)
+         and data(marked) == "\ufeffImage,Alt\r\none.png,Caf\u00e9\r\n".encode("utf-8")
+         and beside("marked.csv") == []),
+        ("and one without the mark is given it, which Excel needs to open it as UTF-8, its bytes "
+         "otherwise as they were, every line end and a mark partway among them, its mode kept, no "
+         "copy beside it, and the run says so, showing its lines outside ASCII as they read",
+         lambda: plain_said == (["%s had no byte-order mark, which Excel needs to open it as "
+                                 "UTF-8: one is added, and nothing else in it changes. Its lines "
+                                 "outside ASCII, as they read:" % plain,
+                                 "  line 2: one.png,Caf\u00e9",
+                                 "  line 4: three.png,G\u00f6del<U+00A0>and Escher",
+                                 "  A character there that isn't the one written means Excel saved "
+                                 "the file in a code page whose bytes happen to read as UTF-8: put it "
+                                 "right in Excel, which opens the file as UTF-8 from now on."], None)
+         and data(plain) == b"\xef\xbb\xbf" + plain_bytes
+         and os.stat(plain).st_mode & 0o777 == 0o640 and beside("plain.csv") == []),
+        ("but one of ASCII alone, which Excel reads the same either way, an empty one, one held "
+         "open, a read-only one, another user's, and one linked from elsewhere are left as they "
+         "are, nothing said, as is one that's no longer UTF-8 when it's marked",
+         lambda: ascii_said == ([], None) and data(ascii) == ascii_bytes and beside("ascii.csv") == []
+         and empty_said == ([], None) and data(empty) == b""
+         and sorted(unmarked) == ["held-utf8.csv", "linked-utf8.csv", "readonly-utf8.csv",
+                                  "theirs-utf8.csv"]
+         and all(unmarked[n] == ([], None) and data(os.path.join(work, n)) == plain_bytes
+                 and beside(n) == [] for n in unmarked)
+         and changed_said == []),
+        ("a read-only file in a code page stops the run as root too, and a run that can't give a "
+         "rewritten file its owner gives it its group",
+         lambda: readonly_ansi_said is None and "it's read-only" in readonly_ansi_why
+         and data(readonly_ansi) == ansi_rows.encode("cp1252") and beside("readonly-ansi.csv") == []
+         and calls[:2] == [(1000, 1000), (-1, 1000)]),
         ("and a path that isn't a file is no sidecar to rewrite",
          lambda: sidecars.rewrite_as_utf8(os.path.join(work, "none.csv")) == ([], None)
          and sidecars.rewrite_as_utf8(work) == ([], None)),

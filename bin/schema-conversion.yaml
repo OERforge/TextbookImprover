@@ -987,8 +987,9 @@ keys:
       describe the book rather than one rendering, so a target should
       rarely override them.
 
-      These files are read, never written, and hold work no script can
-      reproduce. A bare name resolves against the content directory,
+      These files are read, and written only to make them readable (one
+      Excel saved in a code page rewritten as UTF-8, one without the
+      byte-order mark given it), and hold work no script can reproduce. A bare name resolves against the content directory,
       which is convenient but leaves them among the generated HTML, the
       extracted media, and the disposable reports: the directory you
       would delete to rebuild, and the one replaced wholesale when the

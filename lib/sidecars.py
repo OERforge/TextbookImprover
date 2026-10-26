@@ -343,7 +343,8 @@ def shown(line):
 
 def _owned(path, like):
     """path given the owner and the mode of like, as far as this process
-    may: a run as root keeps a person's sidecar theirs."""
+    may: a run as root keeps a person's sidecar theirs, and one that isn't
+    keeps its group, where it's in it, as a shared folder's people are."""
     status = os.stat(like)
     try:
         os.chmod(path, status.st_mode & 0o7777)
@@ -353,7 +354,19 @@ def _owned(path, like):
         try:
             os.chown(path, status.st_uid, status.st_gid)
         except OSError:
-            pass
+            try:
+                os.chown(path, -1, status.st_gid)
+            except OSError:
+                pass
+
+
+def _writable(path):
+    """Whether path may be written and is meant to be: one with no write
+    bit is read-only, even to root, whom os.access lets write it."""
+    try:
+        return os.access(path, os.W_OK) and bool(os.stat(path).st_mode & 0o222)
+    except OSError:
+        return False
 
 
 def _replace(path, text):
@@ -399,25 +412,70 @@ def _keep(path, suffix, data):
         return kept
 
 
+def _mark(path, limit=10):
+    """A sidecar at path that's UTF-8 without a byte-order mark, and holds a
+    character outside ASCII, given the mark, which Excel needs to open it
+    as UTF-8: without it Excel reads the file in the computer's code page,
+    "é" as "Ã©", and saved again from Excel that's the sidecar's text.
+    Nothing else in it changes. Returns the lines to say: what was done,
+    and the first limit of its lines outside ASCII as they read, since one
+    Excel saved in a code page can happen to read as UTF-8 ("Gauß’s" in
+    Windows-1252 as "Gauߒs"), which the mark makes Excel show too; or none
+    for a file that has the mark, holds only ASCII, which Excel reads the
+    same either way, or isn't a file, and for one left as it is because it
+    reads the same either way: read-only, another user's, whose owner a
+    run that isn't root can't keep, linked from elsewhere, or one that
+    can't be written, as another program holds one on Windows, or that
+    changed since it was read."""
+    if not os.path.isfile(path):
+        return []
+    with open(path, "rb") as fh:
+        data = fh.read()
+    if data.isascii() or data.startswith(BOM.encode("utf-8")) or not _writable(path):
+        return []
+    status = os.stat(path)
+    if status.st_nlink > 1 or (hasattr(os, "geteuid") and os.geteuid() not in (0, status.st_uid)):
+        return []
+    try:
+        text = data.decode("utf-8")
+        _replace(path, BOM + text)
+    except (OSError, UnicodeDecodeError):
+        return []
+    odd = [(index, piece.decode("utf-8")) for index, piece in enumerate(_lines(data))
+           if not piece.isascii()]
+    said = ["%s had no byte-order mark, which Excel needs to open it as UTF-8: one is added, and "
+            "nothing else in it changes. Its lines outside ASCII, as they read:" % path]
+    said += ["  line %d: %s" % (index + 1, shown(line)) for index, line in odd[:limit]]
+    if len(odd) > limit:
+        said.append("  and %d more" % (len(odd) - limit))
+    said.append("  A character there that isn't the one written means Excel saved the file in a "
+                "code page whose bytes happen to read as UTF-8: put it right in Excel, which opens "
+                "the file as UTF-8 from now on.")
+    return said
+
+
 def rewrite_as_utf8(path, limit=10):
     """A sidecar at path that isn't UTF-8, as Excel's plain "CSV" saves one,
     rewritten as UTF-8, as read_code_page reads it, so that it's read as it
     was written. The file as it was is kept beside it (_keep), and the
     file is written as Excel's "CSV UTF-8" writes one, a byte-order mark
-    first, its lines' ends as they were. Returns (lines to say, None),
-    none for a sidecar that's UTF-8 already or isn't a file, else saying
-    what was done and showing, as now read, the first limit of the lines
-    read in the code page, and of those kept as UTF-8; or (None, what to
-    stop with), when it can't be read so or can't be written, a file that
-    can't be written left as it was, with no copy beside it."""
+    first, its lines' ends as they were; and one that's UTF-8 without the
+    mark, holding a character outside ASCII, given it (_mark). Returns
+    (lines to say, None): none for a sidecar that's UTF-8 with the mark
+    already, or that _mark leaves as it is, or isn't a file; _mark's for
+    one given the mark; and for one rewritten, what was done, showing, as
+    now read, the first limit of the lines read in the code page, and of
+    those kept as UTF-8. Or (None, what to stop with), when it can't be
+    read so or can't be written, a file that can't be written left as it
+    was, with no copy beside it."""
     reading, why = read_code_page(path)
     if why:
         return None, why
     if reading is None:
-        return [], None
+        return _mark(path, limit), None
     decoded, (_, name, suffix, saved), lines, kept_lines = reading
     text = "".join(decoded)
-    if not os.access(path, os.W_OK):
+    if not _writable(path):
         return None, "%s isn't UTF-8, and can't be rewritten as UTF-8: it's read-only. %s" % (
             path, SAVE_AS_UTF8)
     with open(path, "rb") as fh:

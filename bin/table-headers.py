@@ -16,7 +16,8 @@ suggests, and records both.
 
 Three files share the name and do different jobs:
 
-  table-headers.csv         the sidecar. Human-owned; read here, never written.
+  table-headers.csv         the sidecar. Human-owned; read here, and written
+                            only to make it readable (sidecars.rewrite_as_utf8).
   table-headers-new.csv     one prefilled row for every table the sidecar has
                             no row for. Written when there are any, meant to
                             be pasted into the sidecar. Removed when there

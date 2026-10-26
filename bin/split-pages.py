@@ -578,9 +578,11 @@ def main():
                         help="every piece written, with its source and part")
     args = parser.parse_args()
 
-    why = args.sidecar and os.path.exists(args.sidecar) and sidecars.not_utf8(args.sidecar)
+    said, why = sidecars.rewrite_as_utf8(args.sidecar) if args.sidecar else ([], None)
     if why:
         sys.exit(why)
+    for line in said:
+        print(line, file=sys.stderr)
     names = read_sidecar(args.sidecar)
     problems, new_rows, report_rows, written = [], [], [], []
     homes, first = {}, {}      # source -> {id: piece}; source -> first piece

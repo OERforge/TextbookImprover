@@ -66,9 +66,11 @@ def main(argv=None):
     ap.add_argument("--out", required=True, help="folder for the copies")
     args = ap.parse_args(argv)
     for path in (args.alt, args.links, args.table_headers, args.slide_titles, args.reading_order):
-        why = path and os.path.exists(path) and sidecars.not_utf8(path)
+        said, why = sidecars.rewrite_as_utf8(path) if path else ([], None)
         if why:
             sys.exit(why)
+        for line in said:
+            print(line, file=sys.stderr)
     resolved, resolved_html = {}, {}
     if args.resolved:
         with open(args.resolved, encoding="utf-8") as fh:

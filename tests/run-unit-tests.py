@@ -1335,6 +1335,27 @@ def check_shortdoi():
                  "Klein \u2013 Stern\r\n")
     from_ansi = subprocess.run([sys.executable, tool, ansi, "--wait", "0", "--service", service],
                                capture_output=True, text=True)
+    # A dry run of one Excel saved as plain CSV, which writes nothing.
+    dry_file = os.path.join(work, "dry.csv")
+    dry_bytes = ("URL,Replacement,Title\r\nhttps://doi.org/10.1080/08913810508443640,,"
+                 "Klein \u2013 Stern\r\n").encode("cp1252")
+    with open(dry_file, "wb") as fh:
+        fh.write(dry_bytes)
+    from_dry = subprocess.run([sys.executable, tool, dry_file, "--dry-run", "--service", service],
+                              capture_output=True, text=True)
+    with open(dry_file, "rb") as fh:
+        dry_left = fh.read()
+    # And one that reads as neither, as "CSV (MS-DOS)" saves Müller: a
+    # byte Windows-1252 has no character for, and a capital Mac OS Roman
+    # reads inside a word.
+    odd = os.path.join(work, "odd.csv")
+    stopping = b"URL,Replacement,Title\r\nhttps://doi.org/10.1080/08913810508443640,,M\x81ller's b\r\n"
+    with open(odd, "wb") as fh:
+        fh.write(stopping)
+    from_odd = subprocess.run([sys.executable, tool, odd, "--wait", "0", "--service", service],
+                              capture_output=True, text=True)
+    with open(odd, "rb") as fh:
+        odd_left = fh.read()
     server.shutdown()
     with open(sidecar, "rb") as fh:
         marked = fh.read(6) == b"\xef\xbb\xbfURL"
@@ -1344,6 +1365,10 @@ def check_shortdoi():
         excel_data = fh.read()
     with open(ansi, "rb") as fh:
         ansi_data = fh.read()
+    kept_ansi = b""
+    if os.path.exists(ansi + ".windows-1252"):
+        with open(ansi + ".windows-1252", "rb") as fh:
+            kept_ansi = fh.read()
     return [
         ("--dry-run names the two DOIs and asks nothing",
          lambda: asked_dry == 0 and dry.stdout.count("would look up") == 2),
@@ -1367,10 +1392,24 @@ def check_shortdoi():
          and excel_data.decode("utf-8").split("\n")[2].startswith(
              "https://doi.org/10.1080/08913810508443640,https://doi.org/10/b8xx35")
          and excel_data.count(b"\xef\xbb\xbf") == 1 and excel_data.startswith(b"\xef\xbb\xbf")),
-        ("one that isn't UTF-8 stops it, naming the line, and is left as it was",
-         lambda: from_ansi.returncode != 0 and "line 2 isn't UTF-8 (byte 0x96)" in from_ansi.stderr
+        ("one Excel saved as plain CSV, in Windows-1252, is rewritten as UTF-8 first, the file "
+         "as it was kept beside it, and read as written",
+         lambda: from_ansi.returncode == 0 and "ansi.csv wasn't UTF-8" in from_ansi.stderr
          and "Traceback" not in from_ansi.stderr
-         and ansi_data.startswith(b"URL,") and b"\x96" in ansi_data),
+         and ansi_data.startswith(b"\xef\xbb\xbfURL,")
+         and "https://doi.org/10/b8xx35,Klein \u2013 Stern" in ansi_data.decode("utf-8")
+         and kept_ansi == "URL,Replacement,Title\r\nhttps://doi.org/10.1080/08913810508443640,,"
+         "Klein \u2013 Stern\r\n".encode("cp1252")),
+        ("a dry run of one Excel saved as plain CSV reads it as the run would and writes nothing",
+         lambda: from_dry.returncode == 0
+         and "dry.csv isn't UTF-8: it's read as Windows-1252" in from_dry.stderr
+         and "would look up https://doi.org/10.1080/08913810508443640" in from_dry.stdout
+         and dry_left == dry_bytes
+         and not any(n.startswith("dry.csv.") for n in os.listdir(work))),
+        ("and one that reads as neither stops it, saying how each reads it, the file left as "
+         "it was", lambda: from_odd.returncode != 0
+         and "odd.csv isn't UTF-8, and doesn't read as Windows-1252" in from_odd.stderr
+         and "Traceback" not in from_odd.stderr and odd_left == stopping),
     ]
 
 
@@ -2036,12 +2075,440 @@ def check_sidecar_marks():
          and convert.unreviewed_rows(tables, convert.REVIEW_COLUMNS["table_headers"]) == 2),
         ("a sidecar saved in Windows-1252 isn't UTF-8 at its line, a CR alone ending each "
          "line or not, and one with marks is",
-         lambda: ansi + ": line 2 isn't UTF-8 (byte 0xE9)" in (sidecars.not_utf8(ansi) or "")
-         and "CSV UTF-8 (Comma delimited)" in (sidecars.not_utf8(ansi) or "")
-         and mac + ": line 3 isn't UTF-8 (byte 0xE9)" in (sidecars.not_utf8(mac) or "")
-         and sidecars.not_utf8(alt) is None),
+         lambda: sidecars.rewrite_as_utf8(ansi)[0][1:2] == ["  line 2: ch1/media/rId7.png,Caf\u00e9"]
+         and sidecars.rewrite_as_utf8(mac)[0][1:2] == ["  line 3: ch1/media/rId8.png,Caf\u00e9"]
+         and sidecars.rewrite_as_utf8(alt) == ([], None)),
         ("and a folder has nothing to say, for its reader to say it isn't a file",
-         lambda: sidecars.not_utf8(os.path.dirname(alt)) is None),
+         lambda: sidecars.rewrite_as_utf8(os.path.dirname(alt)) == ([], None)),
+    ]
+
+
+def check_sidecar_code_pages():
+    """A sidecar Excel saved as plain "CSV", in a code page, not UTF-8, is
+    rewritten as UTF-8 (sidecars.rewrite_as_utf8): its lines that aren't
+    UTF-8 read in the code page Excel saves in, Windows-1252 or Mac OS
+    Roman, the one with fewer characters misplaced, or, where they have as
+    many, the one its lines' ends tell, a CR alone Mac OS Roman's; each
+    line that is UTF-8, as rows appended from a report are, kept as it is,
+    and shown; the file as it was kept beside it. Lines all misplaced in
+    both stop it, as saved in another code page, and so does a file that
+    can't be written, left as it was. A sidecar so saved had stopped the run, its characters having
+    been U+FFFD on the pages and a traceback before that.
+    """
+    import sidecars
+    work = scratch("sidecar-code-pages-")
+
+    def write(name, data):
+        path = os.path.join(work, name)
+        with open(path, "wb") as fh:
+            fh.write(data)
+        return path
+
+    def data(path):
+        with open(path, "rb") as fh:
+            return fh.read()
+
+    def rewritten(name, raw):
+        path = write(name, raw)
+        said, why = sidecars.rewrite_as_utf8(path)
+        return path, said, why
+
+    def beside(name):
+        return sorted(n for n in os.listdir(work) if n.startswith(name) and n != name
+                      or n.startswith("." + name))
+
+    header = "Image,Alt\r\n"
+    ansi_rows = header + "one.png,A red square \u2013 large\r\n"
+    report_rows = "\ufefftwo.png,A blue caf\u00e9\r\n"
+    ansi, ansi_said, ansi_why = rewritten(
+        "ansi.csv", ansi_rows.encode("cp1252") + report_rows.encode("utf-8"))
+    again = write("again.csv", ansi_rows.encode("cp1252"))
+    write("again.csv.windows-1252", b"taken")
+    again_said, _ = sidecars.rewrite_as_utf8(again)
+    # As Excel for Mac saves it now, its lines ending with CR LF.
+    mac_rows = header + "one.png,Don\u2019t \u2013 \u201cquoted\u201d\r\n"
+    mac, mac_said, _ = rewritten("mac.csv", mac_rows.encode("mac_roman"))
+    french_rows = header + "one.png,Tr\u00e8s bien\r\n"
+    french, french_said, _ = rewritten("french.csv", french_rows.encode("mac_roman"))
+    french_cr_rows = "Image,Alt\rone.png,Tr\u00e8s bien, gar\u00e7on\r"
+    french_cr, french_cr_said, _ = rewritten("french-cr.csv", french_cr_rows.encode("mac_roman"))
+    # Neither code page tells: a CR alone ending the lines, as Excel 2011
+    # for Mac saved them, tells Mac OS Roman; else it's Windows-1252.
+    tie = b"Image,Alt%sone.png,The company\x92s%s"
+    tie_cr, _, _ = rewritten("tie-cr.csv", tie % (b"\r", b"\r"))
+    tie_crlf, _, _ = rewritten("tie-crlf.csv", tie % (b"\r\n", b"\r\n"))
+    tie_report, _, _ = rewritten("tie-report.csv", tie % (b"\r", b"\r")
+                                 + "\ufefftwo.png,Caf\u00e9\r\n".encode("utf-8"))
+    # As "CSV (MS-DOS)" saves M\u00fcller: a byte Windows-1252 has no
+    # character for, and a capital Mac OS Roman reads inside a word.
+    undefined, undefined_said, undefined_why = rewritten(
+        "undefined.csv", b"Image,Alt\r\none.png,M\x81ller's square\r\n")
+    # A sign each code page reads alike tells neither, and stops neither.
+    alike, _, alike_why = rewritten("alike.csv", b"Image,Alt\r\none.png,M\xb1SD \x96 by group\r\n")
+    # Greek, in Windows-1253, as Excel in Greece saves it, two lines of it.
+    greek_rows = ("Image,Alt\r\none.png,\u0393\u03b5\u03b9\u03ac \u03c3\u03bf\u03c5\r\n"
+                  "two.png,\u03ba\u03b1\u03bb\u03ac\r\n")
+    greek, _, greek_why = rewritten("greek.csv", greek_rows.encode("cp1253"))
+    # A file whose one line is misplaced in both is read in the one with
+    # fewer: \u00d1 alone in Windows-1252, a letter's name, against two in
+    # Mac OS Roman.
+    one_odd_rows = header + "one.png,la letra \u00d1, na\u00efve caf\u00e9\r\n"
+    one_odd, _, one_odd_why = rewritten("one-odd.csv", one_odd_rows.encode("cp1252"))
+    # Saved in Mac OS Roman with CR LF, it reads with fewer there, and the
+    # line ends, which prefer Windows-1252, don't decide.
+    mac_odd, _, mac_odd_why = rewritten("mac-odd.csv", one_odd_rows.encode("mac_roman"))
+    # And one of two lines, the other misplaced in neither: no stop either.
+    two_odd_rows = one_odd_rows + "two.png,don\u2019t\r\n"
+    two_odd, _, two_odd_why = rewritten("two-odd.csv", two_odd_rows.encode("cp1252"))
+    # A line misplaced as Windows-1252 among lines that aren't, as a line
+    # of a sentence's own is: the file's other lines tell.
+    four_rows = (header + "a.png,firm\u2019s output, 1990\u20132000\r\n"
+                 "b.png,yen (\u00a5) per US dollar\r\nc.png,GDP per capita \u2013 a comparison\r\n"
+                 "d.png,see World Bank.\u00b9\r\n")
+    four, _, four_why = rewritten("four.csv", four_rows.encode("cp1252"))
+    # Czech, in Windows-1250, as Excel in Central Europe saves it:
+    # \u017elu\u0165ou\u010dk\u00fd.
+    other, other_said, other_why = rewritten("other.csv",
+                                             b"Image,Alt\r\none.png,\x9elu\x9dou\xe8k\xfd\r\n")
+    control, control_said, control_why = rewritten(
+        "control.csv", b"Image,Alt\r\none.png,A \xe9\x01 square\r\n")
+    utf16, utf16_said, utf16_why = rewritten(
+        "utf16.csv", "Image\tAlt\r\none.png\tCaf\u00e9\r\n".encode("utf-16"))
+    plain = write("plain.csv", "Image,Alt\none.png,Caf\u00e9\n".encode("utf-8"))
+    marked = write("marked.csv", "\ufeffImage,Alt\r\none.png,Caf\u00e9\r\n".encode("utf-8"))
+    long_rows = header + "".join("p%d.png,Caf\u00e9 %d\r\n" % (n, n) for n in range(12))
+    many, many_said, _ = rewritten("many.csv", long_rows.encode("cp1252"))
+    # A mark at the start of a line that isn't UTF-8 is UTF-8's.
+    mark_first, mark_said, _ = rewritten("mark-first.csv", b"\xef\xbb\xbfone.png,Caf\xe9\r\n")
+    # Windows-1252 that happens to be UTF-8 at a line, Gau\u00df\u2019s being
+    # UTF-8's Gau\u07d2s, beside a line that isn't: kept as UTF-8, as a
+    # report's row is, and shown with them.
+    chance_rows = header + "one.png,Gau\u00df\u2019s law\r\ntwo.png,Caf\u00e9 \u2013 red\r\n"
+    chance, chance_said, _ = rewritten("chance.csv", chance_rows.encode("cp1252"))
+    # And a report's row in UTF-8 with a character text seldom has there,
+    # and with ones that show as nothing.
+    kept_rows = "two.png,na\u2022ve\u00a0inter\u00adnal\r\n"
+    kept_utf8, kept_said, _ = rewritten("kept-utf8.csv",
+                                        ansi_rows.encode("cp1252") + kept_rows.encode("utf-8"))
+    # A file that can't be written: one another program holds open, as Excel
+    # holds one on Windows, a disk full partway, and one read-only, which
+    # only root, who runs these here, can write.
+    cases = {}
+    saved = (os.replace, os.fdopen, os.access)
+
+    class Full:
+        def __init__(self, handle, *args, **kwargs):
+            os.close(handle)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def write(self, text):
+            raise OSError(28, "No space left on device")
+
+    def held(source, target):
+        raise PermissionError(13, "The process cannot access the file", target)
+
+    for name, patch in (("held.csv", {"replace": held}), ("full.csv", {"fdopen": Full}),
+                        ("readonly.csv", {"access": lambda path, mode: False})):
+        for attribute, value in patch.items():
+            setattr(os, attribute, value)
+        try:
+            cases[name] = rewritten(name, ansi_rows.encode("cp1252"))
+        finally:
+            os.replace, os.fdopen, os.access = saved
+
+    class FullCopy:
+        def __init__(self, fh):
+            self.fh = fh
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            self.fh.close()
+            return False
+
+        def write(self, data):
+            self.fh.write(data[:5])
+            raise OSError(28, "No space left on device")
+
+    def copying(file, mode="r", *args, **kwargs):
+        fh = open(file, mode, *args, **kwargs)
+        return FullCopy(fh) if mode == "xb" else fh
+    sidecars.open = copying
+    try:
+        cases["full-copy.csv"] = rewritten("full-copy.csv", ansi_rows.encode("cp1252"))
+    finally:
+        del sidecars.open
+    # The file as it was kept under the next name when a dangling link has
+    # the first; a link's file rewritten, the link kept; and its mode kept.
+    dangling = write("dangling.csv", ansi_rows.encode("cp1252"))
+    os.symlink(os.path.join(work, "nowhere"), dangling + ".windows-1252")
+    dangling_said, dangling_why = sidecars.rewrite_as_utf8(dangling)
+    target = write("target.csv", ansi_rows.encode("cp1252"))
+    link = os.path.join(work, "link.csv")
+    os.symlink(target, link)
+    link_said, link_why = sidecars.rewrite_as_utf8(link)
+    moded = write("moded.csv", ansi_rows.encode("cp1252"))
+    os.chmod(moded, 0o640)
+    sidecars.rewrite_as_utf8(moded)
+    # A person's file, rewritten by root, stays theirs, the copy kept too.
+    owned = write("owned.csv", ansi_rows.encode("cp1252"))
+    os.chown(owned, 1000, 1000)
+    sidecars.rewrite_as_utf8(owned)
+    # On a disk that keeps no mode (FAT), the rewrite goes on without one.
+    def unmoded(path, mode):
+        raise PermissionError(1, "Operation not permitted", path)
+    fat = write("fat.csv", ansi_rows.encode("cp1252"))
+    os.chmod, saved_chmod = unmoded, os.chmod
+    try:
+        fat_said, fat_why = sidecars.rewrite_as_utf8(fat)
+    finally:
+        os.chmod = saved_chmod
+    # What a separate review of the rewrite found read wrong or stopped:
+    # each read right now, in the code page it's saved in, alone in a file
+    # with the line ends that code page's Excel writes.
+    found = [("Bond length 1.54 \u00c5", "cp1252", "\r\n"),
+             ("Bornholm \u00e4r en \u00f6", "cp1252", "\r\n"),
+             ("an n\u00d7n matrix, A\u00d7B, 3x\u00b2y, M\u00b1SD", "cp1252", "\r\n"),
+             ("Pipe \u00d8 25 mm, 3 \u00f3 4, the letter \u00f1, en \u00e5", "cp1252", "\r\n"),
+             ("\u00e1, \u00e9, \u00ed, \u00f3, \u00fa; \u00c4\u00d6\u00dc", "cp1252", "\r\n"),
+             ("inter\u00adnational", "cp1252", "\r\n"),
+             ("p \u2264 0.05", "mac_roman", "\r\n"), ("area \u03c0 r", "mac_roman", "\r"),
+             ("\u2206x", "mac_roman", "\r"), ("25\u00baC", "mac_roman", "\r\n"),
+             ("10 k\u03a9", "mac_roman", "\r\n"), ("\u00d8 25 mm", "mac_roman", "\r\n"),
+             ("5000 \u00c5", "mac_roman", "\r\n"), ("100 \u00b0C", "mac_roman", "\r\n"),
+             ("the 1990\u2019s", "mac_roman", "\r\n"), ("\u2022 item", "mac_roman", "\r\n"),
+             ("x\u2264y", "mac_roman", "\r"), ("Coca-Cola\u2122", "mac_roman", "\r\n"),
+             ("Sales in \u20ac", "mac_roman", "\r\n"),
+             ("\u00c0 la recherche", "mac_roman", "\r\n"), ("The \u00c9cole", "mac_roman", "\r\n"),
+             ("\u00a1Atenci\u00f3n!", "mac_roman", "\r\n"), ("Ele \u00e9 o professor", "mac_roman", "\r\n"),
+             ("see World Bank.\u00b9", "cp1252", "\r\n"), ("\u00c4, \u00d6 und \u00dc", "cp1252", "\r\n"),
+             ("the 1990\u00b4s", "cp1252", "\r\n"), ("yen (\u00a5)", "cp1252", "\r\n"),
+             ("yen (\u00a5)", "mac_roman", "\r"), ("C = 2\u03c0R, C = \u03c0D", "mac_roman", "\r"),
+             ("25\u02daC and 98.6\u02daF, 45\u02da", "mac_roman", "\r"), ("\u00d6 island", "mac_roman", "\r"),
+             ("Figure 3.2 \u2014 the supply curve", "mac_roman", "\r\n"),
+             ("Prices in \u00a5 and $", "cp1252", "\r\n"), ("\u00c4\u00d6\u00dc \u00e4\u00f6\u00fc \u00df", "cp1252", "\r\n"),
+             ("x\u00af = 5, 5\u00b4 tall", "mac_roman", "\r"), ("\u02c6 caret", "mac_roman", "\r"),
+             ("O\u2019Neill and D\u2019Angelo", "mac_roman", "\r\n"),
+             ("5\u2030 alcohol, the \u2030 rate", "mac_roman", "\r\n"), ("C = 2\u03c0r", "mac_roman", "\r\n"),
+             ("a \u2013 b \u2014 c", "mac_roman", "\r\n")]
+    read_found = []
+    for n, (text, codec, end) in enumerate(found):
+        raw = ("Image,Alt" + end + "one.png," + text + end).encode(codec)
+        path, said, why = rewritten("found-%d.csv" % n, raw)
+        read_found.append(why is None and data(path) == ("\ufeff" + raw.decode(codec)).encode("utf-8"))
+    odd = sidecars.misplaced
+    return [
+        ("a sidecar in Windows-1252 is rewritten as UTF-8, a mark first and its lines' ends as "
+         "they were, a line in UTF-8 appended from a report kept as it was",
+         lambda: ansi_why is None
+         and data(ansi) == ("\ufeff" + ansi_rows + report_rows).encode("utf-8")),
+        ("the file as it was is kept beside it, byte for byte",
+         lambda: data(ansi + ".windows-1252") == ansi_rows.encode("cp1252")
+         + report_rows.encode("utf-8")),
+        ("and the run says so, showing the lines it read in the code page as now read, and "
+         "what to do if a character is wrong",
+         lambda: "%s wasn't UTF-8: 1 line(s) of it are read as Windows-1252, as Windows Excel's "
+         "plain \"CSV\" saves a file" % ansi in ansi_said[0]
+         and ansi + ".windows-1252" in ansi_said[0]
+         and ansi_said[1] == "  line 2: one.png,A red square \u2013 large"
+         and ansi_said[2:4] == ["  These were UTF-8, and are kept as they were:",
+                                "  line 3: two.png,A blue caf\u00e9"]
+         and "CSV UTF-8 (Comma delimited)" in ansi_said[-1] and len(ansi_said) == 5),
+        ("a name taken keeps the one already there, the file as it was kept under the next",
+         lambda: data(again + ".windows-1252") == b"taken"
+         and data(again + ".windows-1252.2") == ansi_rows.encode("cp1252")
+         and again + ".windows-1252.2" in again_said[0]),
+        ("and the next after a dangling link, which the first name is",
+         lambda: dangling_why is None and os.path.islink(dangling + ".windows-1252")
+         and data(dangling + ".windows-1252.2") == ansi_rows.encode("cp1252")),
+        ("a file Excel for Mac saved, in Mac OS Roman, is read so, though its lines end with CR "
+         "LF, its characters misplaced in Windows-1252",
+         lambda: data(mac) == ("\ufeff" + mac_rows).encode("utf-8")
+         and "as Mac OS Roman, as Excel for Mac's plain \"CSV\" saves a file" in mac_said[0]
+         and os.path.exists(mac + ".mac-roman")),
+        ("and so is one with a byte Windows-1252 has no character for, its lines ending with CR "
+         "LF or with a CR alone",
+         lambda: data(french) == ("\ufeff" + french_rows).encode("utf-8")
+         and "as Mac OS Roman" in french_said[0]
+         and data(french_cr) == ("\ufeff" + french_cr_rows).encode("utf-8")
+         and "as Mac OS Roman" in french_cr_said[0]),
+        ("where neither code page has a character misplaced, a CR alone ending the lines tells "
+         "Mac OS Roman, and CR LF Windows-1252",
+         lambda: data(tie_cr) == "\ufeffImage,Alt\rone.png,The company\u00eds\r".encode("utf-8")
+         and data(tie_crlf) == "\ufeffImage,Alt\r\none.png,The company\u2019s\r\n".encode("utf-8")),
+        ("the lines read in the code page tell it so, though rows appended from a report end "
+         "with CR LF",
+         lambda: data(tie_report).startswith(
+             "\ufeffImage,Alt\rone.png,The company\u00eds\r".encode("utf-8"))),
+        ("a line that is UTF-8 is kept as it is, and shown apart, one of the code page's that "
+         "happens to be UTF-8 among them",
+         lambda: data(chance) == ("\ufeff" + header).encode("utf-8")
+         + "one.png,Gau\u00df\u2019s law\r\n".encode("cp1252")
+         + "two.png,Caf\u00e9 \u2013 red\r\n".encode("utf-8")
+         and "  These were UTF-8, and are kept as they were:" in chance_said
+         and "  line 2: one.png,Gau\u07d2s law" in chance_said),
+        ("and a report's row is kept, a character that shows as nothing named where it's shown",
+         lambda: data(kept_utf8) == ("\ufeff" + ansi_rows + kept_rows).encode("utf-8")
+         and "  line 3: two.png,na\u2022ve<U+00A0>inter<U+00AD>nal" in kept_said),
+        ("what the review found read wrong or stopped is read right, each line in the code page "
+         "it's saved in",
+         lambda: read_found == [True] * len(found)),
+        ("ten lines are shown, and how many more there are",
+         lambda: len(many_said) == 13 and many_said[10] == "  line 11: p9.png,Caf\u00e9 9"
+         and many_said[11] == "  and 2 more"),
+        ("a mark at the start of a line that isn't UTF-8 is read as UTF-8's, and kept, the "
+         "file given no other",
+         lambda: data(mark_first) == "\ufeffone.png,Caf\u00e9\r\n".encode("utf-8")
+         and mark_said[1] == "  line 1: one.png,Caf\u00e9"),
+        ("lines that read with a character misplaced in each code page stop it, saying how each "
+         "reads them and how to save the file, which is left as it was",
+         lambda: undefined_said is None
+         and undefined_why.startswith("%s isn't UTF-8, and doesn't read as Windows-1252 (line 2 "
+                                      "has byte 0x81, which is no character in it) or as Mac OS "
+                                      "Roman (line 2 reads \"one.png,M\u00c5ller's square\", a "
+                                      "character misplaced)" % undefined)
+         and "CSV UTF-8 (Comma delimited)" in undefined_why
+         and data(undefined) == b"Image,Alt\r\none.png,M\x81ller's square\r\n"
+         and beside("undefined.csv") == []),
+        ("as does one saved in another code page, Windows-1250 say",
+         lambda: other_said is None
+         and "Windows-1252 (line 2 has byte 0x9D, which is no character in it) or as Mac OS "
+         "Roman (line 2 reads \"one.png,\u00fblu\u00f9ou\u00cbk\u02dd\", a character misplaced)"
+         in other_why
+         and "saved in another" in other_why and beside("other.csv") == []),
+        ("and one in Greek, Windows-1253, which reads as Latin letters in a row",
+         lambda: greek_why is not None and "Windows-1252 (line 2 reads \"" in greek_why
+         and beside("greek.csv") == []),
+        ("but a file whose one line is misplaced in each is read in the one with fewer, whichever "
+         "its line ends prefer",
+         lambda: one_odd_why is None and data(one_odd) == ("\ufeff" + one_odd_rows).encode("utf-8")
+         and mac_odd_why is None and data(mac_odd) == ("\ufeff" + one_odd_rows).encode("utf-8")
+         and os.path.exists(mac_odd + ".mac-roman")),
+        ("and one whose line misplaced in each is among lines that aren't doesn't stop",
+         lambda: two_odd_why is None and data(two_odd) == ("\ufeff" + two_odd_rows).encode("utf-8")),
+        ("and a line misplaced as Windows-1252 among lines that aren't doesn't make the file Mac "
+         "OS Roman",
+         lambda: four_why is None and data(four) == ("\ufeff" + four_rows).encode("utf-8")),
+        ("but a sign each reads alike stops neither, M\u00b1SD in a statistics caption",
+         lambda: alike_why is None
+         and data(alike) == "\ufeffImage,Alt\r\none.png,M\u00b1SD \u2013 by group\r\n".encode("utf-8")),
+        ("and so does a control character, which no sidecar holds",
+         lambda: control_said is None
+         and control_why.startswith("%s: line 2 isn't UTF-8, and holds a control character "
+                                    "(byte 0x01)" % control)
+         and beside("control.csv") == []),
+        ("a file another program holds open stops it, left as it was, with no copy beside it, "
+         "saying to close it",
+         lambda: cases["held.csv"][1] is None
+         and "couldn't be rewritten as UTF-8 ([Errno 13] The process cannot access the file"
+         in cases["held.csv"][2]
+         and "so it's left as it was, with no copy beside it. If a program has it open, close it"
+         in cases["held.csv"][2]
+         and data(cases["held.csv"][0]) == ansi_rows.encode("cp1252") and beside("held.csv") == []),
+        ("and so does a disk full partway, the file not cut short",
+         lambda: cases["full.csv"][1] is None and "No space left on device" in cases["full.csv"][2]
+         and data(cases["full.csv"][0]) == ansi_rows.encode("cp1252") and beside("full.csv") == []),
+        ("and the copy kept beside it failing partway, which goes",
+         lambda: cases["full-copy.csv"][1] is None
+         and "No space left on device" in cases["full-copy.csv"][2]
+         and data(cases["full-copy.csv"][0]) == ansi_rows.encode("cp1252")
+         and beside("full-copy.csv") == []),
+        ("and a read-only file, before anything is written",
+         lambda: cases["readonly.csv"][1] is None and "it's read-only" in cases["readonly.csv"][2]
+         and data(cases["readonly.csv"][0]) == ansi_rows.encode("cp1252")
+         and beside("readonly.csv") == []),
+        ("a link's file is rewritten, and the link kept, the file as it was beside the link",
+         lambda: link_why is None and os.path.islink(link)
+         and data(target).startswith(b"\xef\xbb\xbfImage,Alt")
+         and data(link + ".windows-1252") == ansi_rows.encode("cp1252")),
+        ("and a file's mode is kept, and its owner, the copy beside it given them too",
+         lambda: os.stat(moded).st_mode & 0o777 == 0o640
+         and (os.stat(owned).st_uid, os.stat(owned).st_gid) == (1000, 1000)
+         and (os.stat(owned + ".windows-1252").st_uid, os.stat(owned + ".windows-1252").st_gid)
+         == (1000, 1000)),
+        ("and where a mode can't be set, the file's rewritten without it",
+         lambda: fat_why is None and data(fat).startswith(b"\xef\xbb\xbf")),
+        ("a file in UTF-16, as Excel's Unicode Text saves one, is said to be no CSV",
+         lambda: utf16_said is None and "is UTF-16" in utf16_why and beside("utf16.csv") == []),
+        ("a sidecar in UTF-8, with the mark or without it, is left as it is, and nothing said",
+         lambda: sidecars.rewrite_as_utf8(plain) == ([], None)
+         and sidecars.rewrite_as_utf8(marked) == ([], None)
+         and data(plain) == "Image,Alt\none.png,Caf\u00e9\n".encode("utf-8")
+         and beside("plain.csv") == [] and beside("marked.csv") == []),
+        ("and a path that isn't a file is no sidecar to rewrite",
+         lambda: sidecars.rewrite_as_utf8(os.path.join(work, "none.csv")) == ([], None)
+         and sidecars.rewrite_as_utf8(work) == ([], None)),
+        ("a Latin capital after a small letter, after a letter before a small one, between capitals "
+         "before a small one, or after a digit before a small one is misplaced, but not in a word all "
+         "in capitals",
+         lambda: odd("don\u00d5t") == 1 and odd("caf\u00c8") == 1 and odd("M\u0178ller") == 1
+         and odd("the 1990\u00d5s") == 1 and odd("O\u00d5Neill") == 1
+         and odd("CAF\u00c9 NO\u00cbL \u00c9cole 10 k\u03a9 4\u00c9 A\u00c7\u00d5ES") == 0),
+        ("and a capital before a capital and a small letter",
+         lambda: odd("\u00c1Atenci\u00f3n") == 1 and odd("\u00c9COLE \u00c9cole") == 0),
+        ("and a small Latin letter before a capital, but \u00df (\u00aa and \u00ba are no Latin "
+         "letters), and \u00aa after a small letter",
+         lambda: odd("\u00ecHello") == 1 and odd("25\u00fbC") == 1 and odd("Cola\u00aa") == 1
+         and odd("STRA\u00dfE N\u00baA 25\u00baC D\u00aa 2\u03c0R \u03bcF") == 0),
+        ("and a letter text doesn't have alone, alone, but not one it has",
+         lambda: [odd(t) for t in ("a \u00d0 b", "3.2 \u00d1 the", "\u00ef item", "Ele \u017d o",
+                                   "Section \u00db 4")] == [1] * 5
+         and odd("1.54 \u00c5, \u00d8 25, en \u00e5, en \u00f6, \u00f1, 3 \u00f3 4, \u00e0 la, "
+                 "\u00c9 isso, \u00c7, \u00c4, \u00d6") == 0),
+        ("and \u00e4 after a number but in a word, as Mac OS Roman's \u2030 reads there, but not "
+         "alone elsewhere",
+         lambda: odd("5 \u00e4 alcohol") == 1 and odd("0,5\u00e4") == 1
+         and odd("Fotos u. \u00e4., Symbole o. \u00e4., the letter \u00e4, \u00e5, \u00e4 och \u00f6") == 0
+         and odd("\u00e4 52") == 0 and odd("5 \u00e4hnliche F\u00e4lle") == 0),
+        ("and a Latin letter between digits, and \u00e0 or \u00fb after a digit but in a word, as "
+         "Mac OS Roman's \u2021 and \u02da read there",
+         lambda: odd("1990\u00f12000") == 1 and odd("6\u00d62") == 1 and odd("Table 1\u00e0") == 1
+         and odd("A 45\u00fb angle") == 1
+         and odd("2\u03c03 1990\u20132000 1.54\u00c5 2\u00e8me 1\u00ba Le 2\u00e8 \u00e9tage, 5\u00e8 "
+                 "curs, 17\u00df-estradiol, y = 2\u0192(x)") == 0),
+        ("and \u0192 beside a letter, but not alone",
+         lambda: odd("\u0192cole") == 1 and odd("CAF\u0192") == 1 and odd("\u0192(x) = 2") == 0),
+        ("and a third letter outside ASCII in a row, a small one among them, or a fourth, of any "
+         "script",
+         lambda: odd("\u00cf\u00f0\u00e8\u00e2\u00e5\u00f2") == 4 and odd("\u00aa\u00e2\u00f0") == 1
+         and odd("\u00d6\u00d0\u00ce\u00c4") == 1
+         and odd("Gr\u00f6\u00dfe cr\u00e9\u00e9e a\u00e7\u00e3o \u00e9\u00e9\u2013\u00e9\u00e9 "
+                 "\u00c4\u00d6\u00dc") == 0),
+        ("and a mark or a sign between letters, but an apostrophe, a dash, a middle dot, an "
+         "ellipsis, a soft hyphen, a superscript, or a math sign",
+         lambda: odd("M\u2030rz") == 1 and odd("a\u25cab") == 1 and odd("na\u2022ve") == 1
+         and odd("don\u2019t Hawai\u2018i test\u2013retest l\u00b7l well\u2014known wait\u2026what "
+                 "inter\u00adnational a\u00d7b a\u00f7b x\u00b2y a\u2264b") == 0),
+        ("and a spacing accent beside a letter or another character outside ASCII, or before "
+         "a number, but \u00b4 after a letter or a digit, \u00af after a letter, and \u02da after "
+         "a digit",
+         lambda: odd("\u00af 25 mm") == 1 and odd("sch\u02c6n") == 1 and odd("f\u00b8r") >= 1
+         and odd("\u2030\u02c6\u00b8") == 2 and odd("\u02daC") == 1
+         and odd("don\u00b4t 1990\u00b4s 5\u00b4 tall 25\u02daC 45\u02da x\u00af = 5 "
+                 "\u02c6 caret \u00a8 diaeresis") == 0),
+        ("and a superscript after a space, \u00b9 between a digit and a letter, a soft hyphen but "
+         "in a word, and a fraction after a letter or before a capital",
+         lambda: odd("p \u00b2 0.05") == 1 and odd("\u00b9 r") == 1 and odd("2\u00b9r") == 1
+         and odd("a \u00ad b") == 1
+         and odd("10 k\u00bd") == 1 and odd("25\u00bcC") == 1
+         and odd("x\u00b2 10\u00b3 kg (a+b)\u00b2 Bank.\u00b9 inter\u00adnal 2\u00bd cups 10\u00b3m "
+                 "6.02\u00d710\u00b2\u00b3mol, 2019\u00b9 and 2020\u00b2") == 0),
+        ("and \u00a1 or \u00bf after a letter or a digit, or with no ! or ? after it",
+         lambda: odd("100 \u00a1C") == 1 and odd("3\u00a1C!") == 1 and odd("s\u00bfx?") == 1
+         and odd("\u00a1Hola! Y \u00bfqu\u00e9?") == 0),
+        ("and \u00a5 at a field's start before a space and a letter, as a bullet is, and \u00a4 "
+         "or \u00a6 anywhere",
+         lambda: odd("\u00a5 item") == 1 and odd("x.png,\u00a5 item") == 1
+         and odd("Section \u00a4 4.2") == 1
+         and odd("\u00a5500, 500 \u00a5, yen (\u00a5), \u00a5/$, Prices in \u00a5 and $") == 0),
+        ("and a character each code page reads alike counts for nothing, wherever it sits",
+         lambda: odd("M\u00b1SD Pearson\u00a9s 10 \u00b5M 5\u00a2c \u00a3k") == 0),
     ]
 
 
@@ -3257,6 +3724,7 @@ GROUPS = [
     ("shortDOIs for a bare-links sidecar", check_shortdoi),
     ("the decorative marker", check_decorative_marker),
     ("sidecars Excel saved, with files appended", check_sidecar_marks),
+    ("a sidecar Excel saved as plain CSV", check_sidecar_code_pages),
     ("the byte-order mark on every report", check_report_marks),
     ("the PDF target's default page", check_default_page),
     ("PDF/UA-1's math", check_ua1_math),

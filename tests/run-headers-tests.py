@@ -381,9 +381,27 @@ def checks(workdir):
         w.writerow([fresh[0]["key"], fresh[0]["headers"], "", "", "", "d.docx", "Table 1.1",
                     "Speeding \u2013 or not", "", ""])
     code, err = run(old)
-    yield "a sidecar that isn't UTF-8 stops the pre-pass, naming its line", \
-        code == 2 and "table-headers.csv: line 2 isn't UTF-8 (byte 0x96)" in err \
-        and "Traceback" not in err, (code, err[-300:])
+    with open(os.path.join(old, "table-headers.csv"), "rb") as h:
+        rewritten = h.read()
+    yield "a sidecar Excel saved as plain CSV, in Windows-1252, is rewritten as UTF-8 first, " \
+        "the file as it was kept beside it, and read", \
+        code == 0 and "table-headers.csv wasn't UTF-8" in err and "Traceback" not in err \
+        and rewritten.startswith(b"\xef\xbb\xbf") \
+        and "Speeding \u2013 or not" in rewritten.decode("utf-8") \
+        and os.path.exists(os.path.join(old, "table-headers.csv.windows-1252")) \
+        and "match no table" not in err, (code, err[-300:])
+    # And as "CSV (MS-DOS)" saves Müller: a byte Windows-1252 has no
+    # character for, and a capital Mac OS Roman reads inside a word.
+    stopping = b"key,headers\r\nd.docx#table-1,M\x81ller's table\r\n"
+    with open(os.path.join(old, "table-headers.csv"), "wb") as h:
+        h.write(stopping)
+    code, err = run(old)
+    with open(os.path.join(old, "table-headers.csv"), "rb") as h:
+        left = h.read()
+    yield "one that reads as neither stops it, saying how each reads it, the file left as it " \
+        "was", \
+        code == 2 and "table-headers.csv isn't UTF-8, and doesn't read as Windows-1252" in err \
+        and "Traceback" not in err and left == stopping, (code, err[-300:])
 
 
 def main():

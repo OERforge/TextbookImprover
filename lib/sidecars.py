@@ -28,6 +28,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 import csv
 import os
 import re
+import tempfile
+import unicodedata
 
 # Accepted spellings of the decorative marker, matched case-insensitively
 # after trimming. figures-and-tables.lua's DECORATIVE_MARKERS is the same
@@ -100,27 +102,354 @@ def page_media_key(stem, path):
     return stem + "/" + os.path.splitext(path)[0]
 
 
-def not_utf8(path):
-    """What to tell a person whose sidecar at path isn't UTF-8, naming the
-    line and saying how to save it, or None. Excel's plain "CSV" saves in
-    the computer's code page, so any character outside ASCII is a byte
-    UTF-8 can't read there: the filter would hand it to Pandoc, which
-    shows U+FFFD in its place, and a Python reader would stop with a
-    traceback. Lines are counted as the csv module ends them, so a file
-    with a CR alone at each line's end ("CSV (Macintosh)") is too. A
-    path that isn't a file has nothing here: its reader says so its own
-    way."""
+# The code pages Excel's plain "CSV" saves a file in, in the US and
+# Western Europe, as others report Excel's saves (not tried here, where
+# there's no Excel): Windows Excel's "CSV (Comma delimited)" in
+# Windows-1252, the computer's ANSI code page there, and Excel for Mac's
+# "Comma Separated Values" in Mac OS Roman, Excel 2011 for Mac ending each
+# line with a CR alone and Excel 2016 for Mac with CR LF, as Windows does.
+# Each is Python's codec for it, its name, the suffix the file as it was
+# is kept under, and the saves that write it.
+WINDOWS_1252 = ("cp1252", "Windows-1252", "windows-1252",
+                "as Windows Excel's plain \"CSV\" saves a file in the US and Western Europe")
+MAC_ROMAN = ("mac_roman", "Mac OS Roman", "mac-roman",
+             "as Excel for Mac's plain \"CSV\" saves a file in the US and Western Europe")
+SAVE_AS_UTF8 = "Save it as UTF-8: from Excel, as \"CSV UTF-8 (Comma delimited)\"."
+
+# Read in the wrong one of those code pages, a line's punctuation turns
+# into letters and its letters into other letters or marks, and some sit
+# where text's never do, which is how the right one is told (misplaced).
+# These each code page reads alike, so they tell neither from the other,
+# wherever they sit (M±SD).
+ALIKE = "\u00a2\u00a3\u00a9\u00b1\u00b5"
+# Letters text doesn't have alone, where a sign read in the wrong one is:
+# Mac OS Roman's dashes, €, À, Ã, Õ, Œ, œ, ¬, √, ä, é, ö, and û read as
+# Windows-1252, and Windows-1252's bullet read as Mac OS Roman. Others
+# alone are text's: à, é, ñ, ö, å, ä, Ç, Ä, Ö, Å, Ø, as words, units,
+# abbreviations, or the names of letters (o. ä.); Ñ alone is too, seldom,
+# as an em dash is often.
+ALONE = "\u00d0\u00d1\u00db\u00ca\u00cb\u00cc\u00cd\u00ce\u00cf\u00c2\u00c3\u0160\u017d\u0161\u017e" \
+    "\u00ef"
+# Signs text never has, Mac OS Roman's § and ¶ read as Windows-1252.
+NEVER = "\u00a4\u00a6"
+# What text has between letters, besides a math sign: an apostrophe, a
+# dash, a middle dot, or an ellipsis (don’t, Hawai‘i, test–retest, l·l).
+BETWEEN_LETTERS = "\u2019\u2018\u2013\u2014\u00b7\u2026"
+SUPERSCRIPTS = "\u00b9\u00b2\u00b3"
+# What Windows-1252 reads where Mac OS Roman's ‡ and ˚ follow a number, as
+# a note's mark and a degree are typed (1‡, 45˚): à and û.
+AFTER_DIGIT = "\u00e0\u00fb"
+FRACTIONS = "\u00bc\u00bd\u00be"
+
+
+def _letter(char):
+    """Whether char is a letter, a modifier letter such as ˆ not one."""
+    return char.isalpha() and unicodedata.category(char) != "Lm"
+
+
+def _latin(char):
+    """Whether char is a Latin letter."""
+    return _letter(char) and (char.isascii() or unicodedata.name(char, "").startswith("LATIN"))
+
+
+def misplaced(line):
+    """How many of line's characters outside ASCII sit where text's don't,
+    as a line read in the wrong code page has them:
+    - a Latin capital after a small letter, or after a letter before a
+      small one, or between capitals before a small one, or after a digit
+      before a small one (donÕt, cafÈ, MŸller, OÕNeill, 1990Õs, 10Êkm), and
+      one at a word's start before a capital and a small letter
+      (ÁAtención);
+    - a small Latin letter before a capital, but ß (ìHelloî, 25ûC, but
+      STRAßE), and ª after a small letter (Colaª);
+    - a Latin letter between digits, and à or û after a digit but in a
+      word, as Mac OS Roman's ‡ and ˚ read there (1990ñ2000, 1à, 45û);
+    - a letter text doesn't have alone, alone (a Ð b, ï item), ä after a
+      number but in a word, as Mac OS Roman's ‰ reads there (5 ä), and ƒ
+      beside a letter (ƒcole);
+    - a third letter outside ASCII in a row, a small one among them, or a
+      fourth, as Cyrillic or Greek read as Latin letters has (Ïðèâåò,
+      ÖÐÎÄ);
+    - a mark or a sign between letters, but those text has there (M‰rz,
+      a◊b, na•ve);
+    - a spacing accent beside a letter or another character outside ASCII,
+      or before a number, but ´ after a letter or a digit (1990´s, 5´),
+      ¯ after a letter (x¯), and ˚ after a digit (25˚C), as Mac users type a
+      degree (f¸r, ‰ˆ¸, ¯ 25 mm);
+    - a superscript after a space, ¹ between a digit and a letter, as Mac
+      OS Roman's π reads there, a soft hyphen but in a word, and a fraction
+      after a letter or before a capital (p ² 0.05, 2¹r, a - b, 10 k½,
+      25¼C);
+    - ¡ or ¿ after a letter or a digit, or with no ! or ? after it (100 ¡C);
+    - ¥ at a field's start before a space and a letter, as a bullet is
+      (¥ item);
+    - and ¤ or ¦ anywhere (Section ¤ 4.2).
+    A character each code page reads alike counts for nothing."""
+    count = run = 0
+    small = False
+    for at, char in enumerate(line):
+        if char.isascii() or char in ALIKE:
+            run, small = 0, False
+            continue
+        before = line[at - 1] if at else " "
+        after = line[at + 1] if at + 1 < len(line) else " "
+        category = unicodedata.category(char)
+        if _letter(char):
+            latin = _latin(char)
+            run, small = run + 1, small or char.islower()
+            count += bool(
+                (latin and char.isupper()
+                 and ((_letter(before) and (before.islower() or after.islower()))
+                      or (before.isupper() and after.isupper() and line[at + 2:at + 3].islower())
+                      or (before.isdigit() and after.islower())
+                      or (not _letter(before) and after.isupper()
+                          and line[at + 2:at + 3].islower())))
+                or (latin and char.islower() and char != "\u00df" and after.isupper())
+                or (char == "\u00aa" and before.islower())
+                or (latin and before.isdigit() and (after.isdigit()
+                                                    or (char in AFTER_DIGIT and not _letter(after))))
+                or (char == "\u00e4" and not _letter(after)
+                    and (before.isdigit() or (at > 1 and before == " " and line[at - 2].isdigit())))
+                or (char in ALONE and not _letter(before) and not _letter(after))
+                or (char == "\u0192" and (_letter(before) or _letter(after)))
+                or run > 3 or (run > 2 and small))
+            continue
+        run, small = 0, False
+        if char in "\u00a1\u00bf":
+            count += before.isalnum() or ("!" if char == "\u00a1" else "?") not in line[at + 1:]
+        elif char in NEVER:
+            count += 1
+        elif char == "\u00a5":
+            count += ((not at or before in ',"\t') and after == " "
+                      and _letter(line[at + 2:at + 3] or " "))
+        elif char in SUPERSCRIPTS:
+            count += before.isspace() or (char == "\u00b9" and before.isdigit() and _letter(after))
+        elif char == "\u00ad":
+            count += not (_letter(before) and _letter(after))
+        elif char in FRACTIONS:
+            count += _letter(before) or after.isupper()
+        elif category in ("Sk", "Lm"):
+            count += ((_letter(before) or _letter(after) or not before.isascii()
+                       or not after.isascii() or after.isdigit()
+                       or (after.isspace() and line[at + 2:at + 3].isdigit()))
+                      and not ((char == "\u00b4" and before.isalnum())
+                               or (char == "\u00af" and _letter(before))
+                               or (char == "\u02da" and before.isdigit())))
+        else:
+            count += (not char.isspace() and char not in BETWEEN_LETTERS and category != "Sm"
+                      and _letter(before) and _letter(after))
+    return count
+
+
+def _lines(data):
+    """data's lines, each with its end as written, so that joined they're
+    data again."""
+    return re.findall(rb"[^\r\n]*(?:\r\n|\r|\n)|[^\r\n]+$", data)
+
+
+def read_code_page(path):
+    """A sidecar at path that isn't UTF-8, as Excel's plain "CSV" saves one,
+    read as it was written: read as UTF-8, each of its characters outside
+    ASCII was a U+FFFD on the pages, and a Python reader stopped with a
+    traceback. The lines that aren't UTF-8 are read in one of the code
+    pages Excel saves in (above): the one with fewer characters misplaced,
+    or, where they have as many, Mac OS Roman when those lines end with a
+    CR alone and Windows-1252 otherwise. A line that is UTF-8, as rows
+    appended from a report are, is kept as it is. Returns ((each line as
+    read, its end as written; the code page; the indexes of the lines read
+    in it; and of those kept as UTF-8 that hold a character outside ASCII),
+    None); (None, None) for a file that's UTF-8 or isn't a file; or (None,
+    what to stop with), when a line holds a control character, which no
+    text a spreadsheet saves does, when the file is UTF-16, or when every
+    line read in the code page, two of them or more, reads with a
+    character misplaced in each code page, or in Mac OS Roman where
+    Windows-1252 has no character for a byte, as a file saved in another
+    code page reads."""
     if not os.path.isfile(path):
-        return None
+        return None, None
     with open(path, "rb") as fh:
         data = fh.read()
     try:
         data.decode("utf-8")
-    except UnicodeDecodeError as exc:
-        line = len(re.split(rb"\r\n?|\n", data[:exc.start]))
-        return ("%s: line %d isn't UTF-8 (byte 0x%02X), so it can't be read. Save it as UTF-8: "
-                "from Excel, as \"CSV UTF-8 (Comma delimited)\"." % (path, line, data[exc.start]))
-    return None
+        return None, None
+    except UnicodeDecodeError:
+        pass
+    if data.startswith((b"\xff\xfe", b"\xfe\xff")):
+        return None, ("%s is UTF-16, as Excel's \"Unicode Text\" saves a file, its columns "
+                      "apart by tabs, which is no CSV. %s" % (path, SAVE_AS_UTF8))
+    pieces = _lines(data)
+    mark = BOM.encode("utf-8")
+
+    def read(index, codec):
+        # A mark at the line's start is UTF-8's, as a reader takes it.
+        piece = pieces[index]
+        if codec != "utf-8" and piece.startswith(mark):
+            return BOM + piece[len(mark):].decode(codec)
+        return piece.decode(codec)
+
+    legacy, kept = [], []
+    for index, piece in enumerate(pieces):
+        try:
+            piece.decode("utf-8")
+        except UnicodeDecodeError:
+            legacy.append(index)
+            control = re.search(rb"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", piece)
+            if control:
+                return None, ("%s: line %d isn't UTF-8, and holds a control character (byte "
+                              "0x%02X), which no text a spreadsheet saves does. %s"
+                              % (path, index + 1, piece[control.start()], SAVE_AS_UTF8))
+        else:
+            if not piece.isascii():
+                kept.append(index)
+    ended = [pieces[i] for i in legacy if pieces[i].endswith((b"\r", b"\n"))] \
+        or [p for p in pieces if p.endswith((b"\r", b"\n"))]
+    cr_alone = bool(ended) and all(p.endswith(b"\r") for p in ended)
+    readings, trouble = {}, {}
+    for page in (WINDOWS_1252, MAC_ROMAN):
+        lines = {}
+        try:
+            for index in legacy:
+                lines[index] = read(index, page[0])
+        except UnicodeDecodeError as exc:
+            trouble[page] = "line %d has byte 0x%02X, which is no character in it" % (
+                index + 1, exc.object[exc.start])
+            continue
+        odd = {index: misplaced(lines[index]) for index in legacy}
+        readings[page] = (lines, sum(odd.values()), [i for i in legacy if odd[i]])
+        if readings[page][2]:
+            first = readings[page][2][0]
+            trouble[page] = "line %d reads \"%s\", a character misplaced" % (
+                first + 1, shown(lines[first]))
+    if all(page in trouble and (page not in readings or readings[page][2] == legacy)
+           for page in (WINDOWS_1252, MAC_ROMAN)) \
+            and (len(legacy) > 1 or WINDOWS_1252 not in readings):
+        return None, ("%s isn't UTF-8, and doesn't read as Windows-1252 (%s) or as Mac OS Roman "
+                      "(%s), the code pages Excel's plain \"CSV\" uses in the US and Western "
+                      "Europe, so it was saved in another. %s"
+                      % (path, trouble[WINDOWS_1252], trouble[MAC_ROMAN], SAVE_AS_UTF8))
+    preferred = MAC_ROMAN if cr_alone else WINDOWS_1252
+    page = min(readings, key=lambda page: (readings[page][1], page is not preferred))
+    lines = readings[page][0]
+    return ([lines[index] if index in lines else read(index, "utf-8")
+             for index in range(len(pieces))], page, legacy, kept), None
+
+
+def shown(line):
+    """line as a warning shows it, its end dropped and its characters that
+    show as nothing named (a no-break space, a soft hyphen)."""
+    return "".join("<U+%04X>" % ord(c) if unicodedata.category(c) in ("Cf", "Zs") and c != " "
+                   else c for c in line.lstrip(BOM).rstrip("\r\n"))
+
+
+def _owned(path, like):
+    """path given the owner and the mode of like, as far as this process
+    may: a run as root keeps a person's sidecar theirs."""
+    status = os.stat(like)
+    try:
+        os.chmod(path, status.st_mode & 0o7777)
+    except OSError:
+        pass
+    if hasattr(os, "chown"):
+        try:
+            os.chown(path, status.st_uid, status.st_gid)
+        except OSError:
+            pass
+
+
+def _replace(path, text):
+    """path holding text, written beside it and moved into its place, so
+    that a write that fails, a disk full or a file another program holds
+    open, leaves it as it was; a link's file, not the link, and its owner
+    and its mode kept."""
+    real = os.path.realpath(path)
+    handle, temporary = tempfile.mkstemp(prefix="." + os.path.basename(real) + ".",
+                                         suffix=".tmp", dir=os.path.dirname(real))
+    try:
+        with os.fdopen(handle, "w", encoding="utf-8", newline="") as fh:
+            fh.write(text)
+        _owned(temporary, real)
+        os.replace(temporary, real)
+    except BaseException:
+        try:
+            os.remove(temporary)
+        except OSError:
+            pass
+        raise
+
+
+def _keep(path, suffix, data):
+    """data kept beside path, under the code page's name after its own, or
+    .2 and on after that when the name's taken, as another run's may be;
+    its name."""
+    kept, n = "%s.%s" % (path, suffix), 1
+    while True:
+        try:
+            fh = open(kept, "xb")
+        except FileExistsError:
+            n += 1
+            kept = "%s.%s.%d" % (path, suffix, n)
+            continue
+        try:
+            with fh:
+                fh.write(data)
+            _owned(kept, path)
+        except BaseException:
+            os.remove(kept)
+            raise
+        return kept
+
+
+def rewrite_as_utf8(path, limit=10):
+    """A sidecar at path that isn't UTF-8, as Excel's plain "CSV" saves one,
+    rewritten as UTF-8, as read_code_page reads it, so that it's read as it
+    was written. The file as it was is kept beside it (_keep), and the
+    file is written as Excel's "CSV UTF-8" writes one, a byte-order mark
+    first, its lines' ends as they were. Returns (lines to say, None),
+    none for a sidecar that's UTF-8 already or isn't a file, else saying
+    what was done and showing, as now read, the first limit of the lines
+    read in the code page, and of those kept as UTF-8; or (None, what to
+    stop with), when it can't be read so or can't be written, a file that
+    can't be written left as it was, with no copy beside it."""
+    reading, why = read_code_page(path)
+    if why:
+        return None, why
+    if reading is None:
+        return [], None
+    decoded, (_, name, suffix, saved), lines, kept_lines = reading
+    text = "".join(decoded)
+    if not os.access(path, os.W_OK):
+        return None, "%s isn't UTF-8, and can't be rewritten as UTF-8: it's read-only. %s" % (
+            path, SAVE_AS_UTF8)
+    with open(path, "rb") as fh:
+        data = fh.read()
+    kept = None
+    try:
+        kept = _keep(path, suffix, data)
+        _replace(path, ("" if text.startswith(BOM) else BOM) + text)
+    except OSError as exc:
+        if kept:
+            try:
+                os.remove(kept)
+            except OSError:
+                pass
+        return None, ("%s isn't UTF-8, and couldn't be rewritten as UTF-8 (%s), so it's left as "
+                      "it was, with no copy beside it. If a program has it open, close it and run "
+                      "again; or %s" % (path, exc, SAVE_AS_UTF8[0].lower() + SAVE_AS_UTF8[1:]))
+    said = ["WARNING: %s wasn't UTF-8: %d line(s) of it are read as %s, %s, and the file is "
+            "rewritten as UTF-8, as \"CSV UTF-8 (Comma delimited)\" saves one. The file as it was "
+            "is %s. As now read:" % (path, len(lines), name, saved, kept)]
+    said += ["  line %d: %s" % (index + 1, shown(decoded[index])) for index in lines[:limit]]
+    if len(lines) > limit:
+        said.append("  and %d more" % (len(lines) - limit))
+    if kept_lines:
+        said.append("  These were UTF-8, and are kept as they were:")
+        said += ["  line %d: %s" % (index + 1, shown(decoded[index])) for index in kept_lines[:limit]]
+        if len(kept_lines) > limit:
+            said.append("  and %d more" % (len(kept_lines) - limit))
+    said.append("  A character there that isn't the one written means the file was saved in "
+                "another code page: put %s back in its place, and save it from Excel as "
+                "\"CSV UTF-8 (Comma delimited)\", as any sidecar can be from now on." % kept)
+    return said, None
 
 
 # The schemes a bare link's Replacement can be an address in, as the

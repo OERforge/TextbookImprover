@@ -429,6 +429,15 @@ def case_names(work):
                  "chapter-7,7.5 Costs in the Long Run,Choice of Production "
                  "Technology,,technology \u2013 choice\r\n")
     ansi = split(ansi_dir, [ansi_source])
+    # And one that reads as neither: the split stops before reading a page.
+    odd_dir = os.path.join(work, "odd")
+    os.makedirs(odd_dir)
+    stopping = b"source,parents,heading,position,name\r\nchapter-7,,M\x81ller's heading,,x\r\n"
+    with open(os.path.join(odd_dir, "page-names.csv"), "wb") as fh:
+        fh.write(stopping)
+    odd = split(odd_dir, [os.path.join(odd_dir, "chapter-7.filtered.json")])
+    with open(os.path.join(odd_dir, "page-names.csv"), "rb") as fh:
+        odd_left = fh.read()
     new_path = os.path.join(work, "page-names-new.csv")
     with open(new_path, encoding="utf-8") as fh:
         new = fh.read()
@@ -454,10 +463,17 @@ def case_names(work):
          "appended after others, names its pieces",
          lambda: excel.status == 0 and "7-1-technology" in excel.stems
          and "7-4-scale" in excel.stems and "7-3-scale-again" in excel.stems),
-        ("one that isn't UTF-8 stops the split, naming its line",
-         lambda: ansi.returncode != 0
-         and "page-names.csv: line 2 isn't UTF-8 (byte 0x96)" in ansi.stderr
-         and "Traceback" not in ansi.stderr),
+        ("one Excel saved as plain CSV, in Windows-1252, is rewritten as UTF-8 first, and its "
+         "row read as written, its name with a dash no usable one",
+         lambda: ansi.returncode == 0 and "page-names.csv wasn't UTF-8" in ansi.stderr
+         and "'technology \u2013 choice' is not a usable name" in ansi.stderr
+         and "Traceback" not in ansi.stderr
+         and os.path.exists(os.path.join(ansi_dir, "page-names.csv.windows-1252"))),
+        ("and one that reads as neither stops the split, saying how each reads it, the file "
+         "left as it was",
+         lambda: odd.returncode != 0
+         and "page-names.csv isn't UTF-8, and doesn't read as Windows-1252" in odd.stderr
+         and "Traceback" not in odd.stderr and odd_left == stopping),
     ]
 
 

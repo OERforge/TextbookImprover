@@ -110,9 +110,11 @@ def main():
         sys.exit("%s exists; --keep makes it." % args.keep)
     for name in SIDECARS:
         path = os.path.join(source, name)
-        why = os.path.exists(path) and sidecars.not_utf8(path)
+        said, why = sidecars.rewrite_as_utf8(path)
         if why:
             sys.exit(why)
+        for line in said:
+            print(line, file=sys.stderr)
     work = os.path.abspath(args.keep) if args.keep else tempfile.mkdtemp(prefix="round-trip-")
     os.makedirs(work, exist_ok=True)
     try:

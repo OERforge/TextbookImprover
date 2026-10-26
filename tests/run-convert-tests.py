@@ -5017,6 +5017,17 @@ def case_remediate_docx(work):
         fh.write("Image,Alt\r\nch1/media/%s.png,Scores \u2013 by student\r\n" % embeds[0])
     ansi = run_tool(work, ["remediate.py", "ch1.docx", "--alt", "ansi.csv", "--out", "ansi"],
                     util=True)
+    ansi_xml = ""
+    if os.path.exists(os.path.join(work, "ansi", "ch1.docx")):
+        with zipfile.ZipFile(os.path.join(work, "ansi", "ch1.docx")) as z:
+            ansi_xml = z.read("word/document.xml").decode("utf-8")
+    # And one that reads as neither, as "CSV (MS-DOS)" saves Müller: a
+    # byte Windows-1252 has no character for, and a capital Mac OS Roman
+    # reads inside a word.
+    with open(os.path.join(work, "odd.csv"), "wb") as fh:
+        fh.write(b"Image,Alt\r\nch1/media/x.png,M\x81ller's chart\r\n")
+    odd = run_tool(work, ["remediate.py", "ch1.docx", "--alt", "odd.csv", "--out", "odd"],
+                   util=True)
     out = os.path.join(work, "out", "ch1.docx")
     changed, xml = [], ""
     if os.path.exists(out):
@@ -5069,9 +5080,15 @@ def case_remediate_docx(work):
          and 'title="A rule"' not in xml),
         ("it won't write over the file it reads",
          lambda: refused.returncode == 2 and "overwritten" in refused.stderr),
-        ("and stops on a sidecar that isn't UTF-8, naming its line, writing nothing",
-         lambda: ansi.returncode != 0 and "ansi.csv: line 2 isn't UTF-8 (byte 0x96)" in ansi.stderr
-         and "Traceback" not in ansi.stderr and not os.path.exists(os.path.join(work, "ansi"))),
+        ("and rewrites a sidecar Excel saved as plain CSV, in Windows-1252, as UTF-8 first, "
+         "the image getting its alt text as written",
+         lambda: ansi.returncode == 0 and "ansi.csv wasn't UTF-8" in ansi.stderr
+         and "Traceback" not in ansi.stderr and 'descr="Scores \u2013 by student"' in ansi_xml
+         and exists(work, "ansi.csv.windows-1252")),
+        ("and stops on one that reads as neither, saying how each reads it, writing no copy",
+         lambda: odd.returncode != 0
+         and "odd.csv isn't UTF-8, and doesn't read as Windows-1252" in odd.stderr
+         and "Traceback" not in odd.stderr and not exists(work, "odd", "ch1.docx")),
     ]
 
 
@@ -6017,9 +6034,11 @@ def case_excel_sidecars(work):
     table-headers.py warned of and set aside as matching no table and the
     run named a row of bare-links.csv matching no bare link; and a row
     after one applied to nothing. And a sidecar that isn't UTF-8, as
-    Excel's plain "CSV" saves one, stops the run before anything is
-    converted, where its characters were U+FFFD on the pages and the run
-    stopped later with a traceback."""
+    Excel's plain "CSV" saves one, is rewritten as UTF-8 before anything
+    is converted, read in the code page Excel saved it in, Windows Excel's
+    or Excel for Mac's, where its characters were U+FFFD on the pages and
+    the run stopped later with a traceback; one that reads in neither
+    stops the run."""
     import io
     os.makedirs(work)
     solid_png(os.path.join(work, "one.png"), 4, 4, (255, 0, 0))
@@ -6088,6 +6107,21 @@ def case_excel_sidecars(work):
         fh.write("Image,Alt,Source,Reason,CurrentAlt,Drafted by,Reviewed\r\n"
                  "one.png,A red square,page,missing,,claude,\r\n"
                  "two.png,A blue square \u2013 smaller,page,missing,,claude,\r\n")
+    rewritten = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
+                               cwd=work, capture_output=True, text=True, stdin=subprocess.DEVNULL)
+    rewritten_page = read(work, "html", "page.html") if exists(work, "html", "page.html") else ""
+    # As Excel for Mac's plain "CSV" saves it: Mac OS Roman, its lines
+    # ending with CR LF.
+    with open(os.path.join(work, "image-alt.csv"), "w", encoding="mac_roman", newline="") as fh:
+        fh.write("Image,Alt\r\none.png,A red square\r\n"
+                 "two.png,The square\u2019s blue \u2013 smaller\r\n")
+    mac = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
+                         cwd=work, capture_output=True, text=True, stdin=subprocess.DEVNULL)
+    mac_page = read(work, "html", "page.html") if exists(work, "html", "page.html") else ""
+    # And as "CSV (MS-DOS)" saves Müller: a byte Windows-1252 has no
+    # character for, and a capital Mac OS Roman reads inside a word.
+    with open(os.path.join(work, "image-alt.csv"), "wb") as fh:
+        fh.write(b"Image,Alt\r\none.png,A red square\r\ntwo.png,M\x81ller's blue square\r\n")
     built = os.path.getmtime(os.path.join(work, "html", "page.html")) \
         if exists(work, "html", "page.html") else None
     stopped = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
@@ -6112,10 +6146,24 @@ def case_excel_sidecars(work):
          and "image-alt.csv 2, table-captions.csv 3, table-headers.csv 2, bare-links.csv 2" in said
          and not {"image-alt-missing.csv", "table-captions-missing.csv", "table-headers-new.csv",
                   "bare-links-new.csv"} & set(reports())),
-        ("a sidecar that isn't UTF-8 stops the run before anything is converted, naming its "
+        ("a sidecar Excel saved as plain CSV, in Windows-1252, is rewritten as UTF-8 before "
+         "anything is converted, the file as it was kept beside it, and read as written",
+         lambda: rewritten.returncode == 0 and "Traceback" not in rewritten.stderr
+         and "image-alt.csv wasn't UTF-8: 1 line(s) of it are read as Windows-1252"
+         in rewritten.stdout + rewritten.stderr
+         and 'alt="A blue square &#x2013; smaller"' in rewritten_page
+         and exists(work, "image-alt.csv.windows-1252")),
+        ("and one Excel for Mac saved, in Mac OS Roman, is read so",
+         lambda: mac.returncode == 0
+         and "image-alt.csv wasn't UTF-8: 1 line(s) of it are read as Mac OS Roman"
+         in mac.stdout + mac.stderr
+         and 'alt="The square&#x2019;s blue &#x2013; smaller"' in mac_page
+         and exists(work, "image-alt.csv.mac-roman")),
+        ("one that reads as neither stops the run before anything is converted, naming its "
          "line and how to save it",
          lambda: stopped.returncode != 0 and "Traceback" not in stopped.stderr
-         and "image-alt.csv: line 3 isn't UTF-8 (byte 0x96)" in stopped.stdout + stopped.stderr
+         and "image-alt.csv isn't UTF-8, and doesn't read as Windows-1252 (line 3 has byte 0x81"
+         in stopped.stdout + stopped.stderr
          and "CSV UTF-8 (Comma delimited)" in stopped.stdout + stopped.stderr
          and built is not None
          and os.path.getmtime(os.path.join(work, "html", "page.html")) == built),

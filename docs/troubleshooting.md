@@ -61,6 +61,8 @@ aren't counted. The `Excerpt` column identifies the row.
 descriptions key on the label (`Table 2.1`) or a positional key; image alt
 keys on the media path ignoring its extension.
 
+**`WARNING: image-alt.csv wasn't UTF-8`** — Excel saved the sidecar as plain "CSV", in a code page, and the run rewrote it as UTF-8, keeping the file as it was beside it (`image-alt.csv.windows-1252`, say). Check the lines the warning shows: a character that isn't the one written means the code page was another. A run that stops instead, saying the sidecar `doesn't read as Windows-1252 (…) or as Mac OS Roman (…)`, has found one that was; one saying it `couldn't be rewritten` left it as it was: close it in Excel, or whatever has it open, and run again. Either way, you can save the file as "CSV UTF-8 (Comma delimited)" yourself; [A sidecar that isn't UTF-8](sidecars.md#a-sidecar-that-isnt-utf-8) has the steps.
+
 ## Known limits
 
 - **Header row text can't be invented.** A table whose cells hold nothing

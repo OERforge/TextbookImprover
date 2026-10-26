@@ -51,7 +51,8 @@ declared before anything acts on them, and what keeps a sidecar written
 against a newer version from losing work under an older one.
 
 Exit status: 0; 1 when a sidecar row matched nothing; 2 for usage, or a
-sidecar that isn't UTF-8.
+sidecar that isn't UTF-8 and can't be rewritten as UTF-8 (the one Excel's
+plain "CSV" saves, in Windows-1252 or Mac OS Roman, is rewritten first).
 
 Copyright 2026 Robert Szarka
 
@@ -487,10 +488,12 @@ def main():
     def warn(message):
         print("table-headers: " + message, file=sys.stderr)
 
-    why = args.sidecar and os.path.exists(args.sidecar) and sidecars.not_utf8(args.sidecar)
+    said, why = sidecars.rewrite_as_utf8(args.sidecar) if args.sidecar else ([], None)
     if why:
         warn(why)
         return 2
+    for line in said:
+        warn(line)
     sidecar = read_sidecar(args.sidecar, warn)
     tables = []
     for path in args.files:

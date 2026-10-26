@@ -4802,12 +4802,34 @@ def case_round_trip(work):
     shutil.copy(os.path.join(folder, "Cut.pptx"), ansi)
     with open(os.path.join(ansi, "slide-titles.csv"), "w", encoding="cp1252", newline="") as fh:
         fh.write("Slide,Title,Source,Drafted by,Reviewed\r\nCut/slide-256,Caf\u00e9,,,\r\n")
+    rewrote = subprocess.run(["python3", os.path.join(ROOT, "util", "round-trip-decks.py"), ansi],
+                             capture_output=True, text=True)
+    with open(os.path.join(ansi, "slide-titles.csv"), "rb") as fh:
+        rewritten = fh.read()
+    yield "and rewrites a sidecar Excel saved as plain CSV, in Windows-1252, as UTF-8 first, " \
+        "the folder's own file, keeping it as it was beside it", \
+        rewrote.returncode in (0, 1) and os.path.join(ansi, "slide-titles.csv") \
+        + " wasn't UTF-8" in rewrote.stderr and "Traceback" not in rewrote.stderr \
+        and rewritten == ("\ufeffSlide,Title,Source,Drafted by,Reviewed\r\n"
+                          "Cut/slide-256,Caf\u00e9,,,\r\n").encode("utf-8") \
+        and os.path.isfile(os.path.join(ansi, "slide-titles.csv.windows-1252")), \
+        (rewrote.stdout + rewrote.stderr)[-400:]
+    # And one that reads as neither, as "CSV (MS-DOS)" saves Müller: a
+    # byte Windows-1252 has no character for, and a capital Mac OS Roman
+    # reads inside a word.
+    stopping = b"Slide,Title\r\nCut/slide-256,M\x81ller's title\r\n"
+    with open(os.path.join(ansi, "slide-titles.csv"), "wb") as fh:
+        fh.write(stopping)
     stopped = subprocess.run(["python3", os.path.join(ROOT, "util", "round-trip-decks.py"), ansi],
                              capture_output=True, text=True)
-    yield "and stops on a sidecar that isn't UTF-8, naming the folder's own file and its line", \
-        stopped.returncode != 0 and os.path.join(ansi, "slide-titles.csv") \
-        + ": line 2 isn't UTF-8 (byte 0xE9)" in stopped.stderr \
-        and "Traceback" not in stopped.stderr, stopped.stderr[-400:]
+    with open(os.path.join(ansi, "slide-titles.csv"), "rb") as fh:
+        left = fh.read()
+    yield "and stops on one that reads as neither, saying how each reads it, the file left as " \
+        "it was", \
+        stopped.returncode not in (0, None) and os.path.join(ansi, "slide-titles.csv") \
+        + " isn't UTF-8, and doesn't read as Windows-1252" in stopped.stderr \
+        and "Traceback" not in stopped.stderr and left == stopping, \
+        (stopped.stdout + stopped.stderr)[-400:]
     yield "and each of these changed in the trip is a difference where it is: a picture's alt " \
         "text, a word's bold, a list's item and its numbering, a table's cell, an equation, a " \
         "word of the notes, the subtitle; and a slide's title changed leaves its slide " \

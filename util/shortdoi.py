@@ -114,11 +114,26 @@ def main():
     if not os.path.exists(args.sidecar):
         sys.exit(f"{args.sidecar}: not found. Copy bare-links-new.csv's rows "
                  "into it first.")
-    why = sidecars.not_utf8(args.sidecar)
-    if why:
-        sys.exit(why)
-    with open(args.sidecar, encoding=sidecars.CSV_ENCODING, newline="") as fh:
-        rows = list(csv.reader(sidecars.csv_lines(fh)))
+    if args.dry_run:
+        # Nothing written, a sidecar that isn't UTF-8 read as the run rewrites it.
+        reading, why = sidecars.read_code_page(args.sidecar)
+        if why:
+            sys.exit(why)
+        if reading:
+            print(f"{args.sidecar} isn't UTF-8: it's read as {reading[1][1]}, as a run without "
+                  "--dry-run rewrites it as UTF-8 first.", file=sys.stderr)
+    else:
+        reading = None
+        said, why = sidecars.rewrite_as_utf8(args.sidecar)
+        if why:
+            sys.exit(why)
+        for line in said:
+            print(line, file=sys.stderr)
+    if reading:
+        rows = list(csv.reader(sidecars.csv_lines(reading[0])))
+    else:
+        with open(args.sidecar, encoding=sidecars.CSV_ENCODING, newline="") as fh:
+            rows = list(csv.reader(sidecars.csv_lines(fh)))
     if not rows:
         sys.exit(f"{args.sidecar}: empty.")
 

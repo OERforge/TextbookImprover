@@ -262,7 +262,7 @@ def read_sidecar(path):
     names = {}
     if not path or not os.path.exists(path):
         return names
-    with open(path, encoding=sidecars.CSV_ENCODING, newline="") as fh:
+    with sidecars.opened(path) as fh:
         for row in sidecars.dict_rows(fh):
             row = {k.strip().lower(): (v or "").strip()
                    for k, v in row.items() if k}
@@ -576,9 +576,13 @@ def main():
                              "sidecar does not name")
     parser.add_argument("--report", default=None,
                         help="every piece written, with its source and part")
+    # convert.py, which runs this, has made the sidecar UTF-8 already, or
+    # said why it couldn't, which this would only say again.
+    parser.add_argument("--sidecar-checked", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args()
 
-    said, why = sidecars.rewrite_as_utf8(args.sidecar) if args.sidecar else ([], None)
+    said, why = sidecars.rewrite_as_utf8(args.sidecar) \
+        if args.sidecar and not args.sidecar_checked else ([], None)
     if why:
         sys.exit(why)
     for line in said:

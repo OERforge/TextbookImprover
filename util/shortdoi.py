@@ -34,17 +34,23 @@ Asking for a DOI that has no shortDOI yet creates one, which the service
 reports (IsNew) and this counts. Requests are spaced --wait seconds
 apart (one a second by default), and a 429 or a server error is retried
 after a pause that doubles, or as long as the service's Retry-After asks.
-The sidecar is rewritten in place, every other column and row as it was,
-a byte-order mark first, as every CSV written for a person starts
-(lib/sidecars.py), after a copy is kept beside it as <name>.bak.
+The sidecar is written in its place, every other column and row as it
+was, a byte-order mark first, as every CSV written for a person starts
+(lib/sidecars.py), so that it keeps its owner, its mode, and any other
+name for it, a colleague's in a shared folder among them; the file as it
+was is kept beside it first, as <name>.bak (.bak.2 and on when that's
+taken). One that can't be read, or written, or kept, stops this before
+anything is looked up; one that can't be written after all, a disk full,
+has its shortDOIs said, to add by hand, and its original put back where
+it can be.
 """
 
 import argparse
 import csv
+import io
 import json
 import os
 import re
-import shutil
 import sys
 import time
 import urllib.error
@@ -114,26 +120,21 @@ def main():
     if not os.path.exists(args.sidecar):
         sys.exit(f"{args.sidecar}: not found. Copy bare-links-new.csv's rows "
                  "into it first.")
-    if args.dry_run:
-        # Nothing written, a sidecar that isn't UTF-8 read as the run rewrites it.
-        reading, why = sidecars.read_code_page(args.sidecar)
-        if why:
-            sys.exit(why)
-        if reading:
-            print(f"{args.sidecar} isn't UTF-8: it's read as {reading[1][1]}, as a run without "
-                  "--dry-run rewrites it as UTF-8 first.", file=sys.stderr)
-    else:
-        reading = None
-        said, why = sidecars.rewrite_as_utf8(args.sidecar)
-        if why:
-            sys.exit(why)
-        for line in said:
-            print(line, file=sys.stderr)
+    unread = sidecars.unreadable(args.sidecar)
+    if unread:
+        sys.exit(unread + " Nothing is looked up.")
+    # One that isn't UTF-8, as Excel's plain "CSV" saves one, is read as the
+    # run reads it, and written as UTF-8 with the shortDOIs; one that reads
+    # in no code page stops this, as it stops the run.
+    reading, why = sidecars.read_code_page(args.sidecar)
+    if why:
+        sys.exit(why)
     if reading:
-        rows = list(csv.reader(sidecars.csv_lines(reading[0])))
-    else:
-        with open(args.sidecar, encoding=sidecars.CSV_ENCODING, newline="") as fh:
-            rows = list(csv.reader(sidecars.csv_lines(fh)))
+        print(f"{args.sidecar} isn't UTF-8: it's read as {reading[1][1]}, and "
+              + ("a run without --dry-run writes" if args.dry_run else "written")
+              + " as UTF-8 with the shortDOIs.", file=sys.stderr)
+    with sidecars.opened(args.sidecar) as fh:
+        rows = list(csv.reader(sidecars.csv_lines(fh)))
     if not rows:
         sys.exit(f"{args.sidecar}: empty.")
 
@@ -152,14 +153,38 @@ def main():
               + (f" and at least {args.min_length} characters long" if args.min_length else "")
               + "; nothing to do.")
         return 0
+    held = cannot_write(args.sidecar)
     if args.dry_run:
         for _, url, _ in wanted:
             print("would look up", url)
         print(f"{len(wanted)} DOI(s) would be looked up at {args.service}.")
+        if held:
+            print(f"But {args.sidecar} can't be written ({held}), so a run without --dry-run "
+                  "would stop before looking anything up.")
+            return 1
         return 0
+    # It's written in its place, as it always has been, so that it keeps its
+    # owner, its mode, and any other name for it, a colleague's in a shared
+    # folder among them; and the file as it was is kept beside it first, so
+    # that one that can't be written, or kept, stops this before anything
+    # is asked of the service.
+    if held:
+        sys.exit(f"{args.sidecar} can't be written ({held}), so no shortDOI could be written "
+                 "to it, and nothing is looked up.")
+    with open(args.sidecar, "rb") as fh:
+        original = fh.read()
+    try:
+        kept = sidecars.keep_beside(args.sidecar, "bak")
+    except OSError as exc:
+        sys.exit(f"{args.sidecar} couldn't be kept beside itself ({exc.strerror or exc}), "
+                 "which it is before it's written, so nothing is looked up.")
+    status = os.stat(args.sidecar)
+    if hasattr(os, "geteuid") and os.geteuid() not in (0, status.st_uid):
+        print(f"NOTE: {args.sidecar} belongs to another user, {sidecars.owner_of(status)}; it's "
+              "written in its place, so it stays theirs, its mode kept.", file=sys.stderr)
 
     filled = created = 0
-    failed = []
+    failed, found = [], []
     for k, (n, url, doi) in enumerate(wanted):
         if k:
             time.sleep(args.wait)
@@ -174,19 +199,72 @@ def main():
         while len(row) < 2:
             row.append("")
         row[1] = "https://doi.org/" + short
+        found.append((url, row[1]))
         filled += 1
         created += new
         print(f"  {url} -> {row[1]}" + ("  (created)" if new else ""))
 
-    if filled:
-        shutil.copyfile(args.sidecar, args.sidecar + ".bak")
-        with open(args.sidecar, "w", encoding=sidecars.CSV_ENCODING, newline="") as fh:
-            csv.writer(fh, lineterminator="\n").writerows(rows)
+    if not filled:
+        os.remove(kept)
+        print(f"0 shortDOI(s) written to {args.sidecar}"
+              + (f"; {len(failed)} lookup(s) failed" if failed else "") + ".")
+        return 1 if failed else 0
+    out = io.StringIO()
+    csv.writer(out, lineterminator="\n").writerows(rows)
+    problem = write_in_place(args.sidecar, (sidecars.BOM + out.getvalue()).encode("utf-8"),
+                             original)
+    if problem:
+        # What was looked up isn't lost: it's said here, to add by hand.
+        print(f"{args.sidecar} couldn't be written ({problem}); the file as it was is {kept}. "
+              "The shortDOIs found, as the sidecar's rows would have them:", file=sys.stderr)
+        for url, replacement in found:
+            print(f"{url},{replacement}")
+        return 1
     print(f"{filled} shortDOI(s) written to {args.sidecar}"
           + (f", {created} of them created by this request" if created else "")
           + (f"; {len(failed)} lookup(s) failed" if failed else "")
-          + (f"; the original is {args.sidecar}.bak" if filled else "") + ".")
+          + f"; the original is {kept}.")
     return 1 if failed else 0
+
+
+def cannot_write(path):
+    """Why the sidecar at path can't be written in its place, a clause, or
+    None: it's read-only, the disk it's on is, or it can't be opened to
+    write, as one the user may not write can't, and on Windows one that
+    Excel has open (not tried here)."""
+    if not os.stat(path).st_mode & 0o222:
+        return "it's read-only"
+    if sidecars.read_only_disk(path):
+        return "the disk it's on is mounted read-only"
+    try:
+        with open(path, "r+b"):
+            pass
+    except OSError as exc:
+        return exc.strerror or str(exc)
+    return None
+
+
+def write_in_place(path, data, original):
+    """data written over the file at path, in its place, flushed to the disk;
+    what went wrong, a clause, or None. One that fails partway, a disk
+    full, is given its original back where it can be, as it is in the copy
+    kept beside it."""
+    try:
+        with open(path, "r+b") as fh:
+            fh.write(data)
+            fh.truncate()
+            fh.flush()
+            os.fsync(fh.fileno())
+        return None
+    except OSError as exc:
+        problem = exc.strerror or str(exc)
+    try:
+        with open(path, "r+b") as fh:
+            fh.write(original)
+            fh.truncate()
+        return problem + ", and the file is as it was"
+    except OSError:
+        return problem + ", and the file may be cut short"
 
 
 if __name__ == "__main__":

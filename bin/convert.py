@@ -151,6 +151,12 @@ TAR_EXTENSIONS = (".tar", ".tar.gz", ".tgz", ".tar.bz2", ".tbz2", ".tar.xz", ".t
 PAGE_CSS = os.path.join(HERE, "page.css")
 HEADERS_TOOL = os.path.join(HERE, "table-headers.py")
 SPLIT_TOOL = os.path.join(HERE, "split-pages.py")
+# The sidecars the filters read themselves, each by its setting's key
+# upper-cased (figures-and-tables.lua's TABLE_CAPTIONS, IMAGE_ALT, and
+# BARE_LINKS, math-repair.lua's MATH_KEEP), which they're given where
+# sidecars.filter_copy says: a copy in UTF-8 of one the run couldn't
+# rewrite. tests/run-unit-tests.py holds the list to what the filters read.
+FILTER_SIDECARS = ("table_captions", "image_alt", "bare_links", "math_keep")
 EPUB_TOOL = os.path.join(HERE, "build-epub.py")
 PDF_TOOL = os.path.join(HERE, "build-pdf.py")
 CHECK_TOOL = os.path.join(HERE, "check-output.py")
@@ -930,26 +936,34 @@ def check_sidecar(path, setting, default, base):
     always a wrong path rather than a deliberately empty one, and the run
     would otherwise succeed while silently discarding every correction in
     it. The default names are exempt: not having written one yet is the
-    normal starting state. A sidecar that isn't UTF-8, as Excel's plain
-    "CSV" saves one, is rewritten as UTF-8 before anything is converted,
-    whether this run reads it or not, read in the code page Excel saved it
-    in, the file as it was kept beside it; one that doesn't read so stops
-    the run (sidecars.rewrite_as_utf8). One naming a folder stops it too,
-    saying so."""
+    normal starting state. Every sidecar is made UTF-8 with the byte-order
+    mark before anything is converted, whether this run reads it or not:
+    one that isn't UTF-8, as Excel's plain "CSV" saves one, rewritten as
+    UTF-8, read in the code page Excel saved it in, the file as it was kept
+    beside it, and one without the mark given it; one that doesn't read so
+    stops the run (sidecars.rewrite_as_utf8). One the run can't rewrite,
+    another user's or one read-only, is read all the same, and one it can't
+    read, a link to nothing as much as one it may not read, gone without,
+    the run saying so either way. One naming a folder stops it, saying
+    so."""
     if os.path.isdir(path):
         die(f"ERROR: {setting} is set to {path}, which is a folder, not a file.\n"
             f"       Name the sidecar's file, or remove the setting to use ./{default}.")
-    if os.path.exists(path):
+    named = not (os.path.basename(path) == default and
+                 os.path.dirname(os.path.abspath(path)) == os.path.abspath(base))
+    # A link to nothing at the default name is gone without, said to be;
+    # a setting naming one stops the run, as one naming nothing does.
+    if os.path.exists(path) or (os.path.lexists(path) and not named):
         said, why = sidecars.rewrite_as_utf8(path)
         if why:
             die("ERROR: " + why)
         for line in said:
             say(line)
         return
-    if os.path.basename(path) == default and \
-            os.path.dirname(os.path.abspath(path)) == os.path.abspath(base):
+    if not named:
         return
-    die(f"ERROR: {setting} is set to {path}, which does not exist.\n"
+    gone = f", a link to {os.readlink(path)}, which isn't there" if os.path.islink(path) else ""
+    die(f"ERROR: {setting} is set to {path}, which does not exist{gone}.\n"
         f"       A relative name resolves against {os.path.abspath(base)}.\n"
         f"       Create the file, or remove the setting to use ./{default}.")
 
@@ -2857,9 +2871,13 @@ def page_language(meta, fallback):
 # 4. filter, split, render
 # --------------------------------------------------------------------------
 
-def filter_env(target, base, paths, env):
+def filter_env(target, base, paths, env, reads=None):
     """What the filter reads: the settings that change the intermediate,
-    and where the sidecars and the collected report rows are."""
+    and where the sidecars and the collected report rows are, each sidecar
+    where the filter is to read it from (reads, by sidecars.filter_copy: a
+    copy in UTF-8 of one in a code page the run couldn't rewrite), the
+    image-alt sidecar's name as the run names it for its warnings."""
+    reads = dict(paths, **(reads or {}))
     r = target.resolved
     out = dict(env)
     out.update({
@@ -2880,11 +2898,12 @@ def filter_env(target, base, paths, env):
         "TABLE_BANDS": str(target["tables.bands"]),
         "MATH_REPAIR_EQUATIONS": "true" if r["math.repair_equations"] else "false",
         "MATH_FROM_TEXT": "true" if r["math.from_text"] else "false",
-        "MATH_KEEP": MATH_KEEP_PAGES or (paths["math_keep"] if os.path.exists(paths["math_keep"])
+        "MATH_KEEP": MATH_KEEP_PAGES or (reads["math_keep"] if os.path.exists(reads["math_keep"])
                                          else ""),
-        "TABLE_CAPTIONS": paths["table_captions"],
-        "IMAGE_ALT": paths["image_alt"],
-        "BARE_LINKS": paths["bare_links"],
+        "TABLE_CAPTIONS": reads["table_captions"],
+        "IMAGE_ALT": reads["image_alt"],
+        "IMAGE_ALT_NAME": paths["image_alt"],
+        "BARE_LINKS": reads["bare_links"],
         "TABLE_HEADERS": paths["table_headers"],
     })
     if DECK_RUN:
@@ -2995,7 +3014,7 @@ def split_pages(target, pages, paths, reports, splitting=False):
                 os.remove(reports[name])
         return pages
     result = run(["python3", SPLIT_TOOL, "--level", str(level),
-                  "--sidecar", paths["page_names"],
+                  "--sidecar", paths["page_names"], "--sidecar-checked",
                   "--new", reports["page_names_new"],
                   "--report", reports["page_names_report"]] + pages,
                  capture=True)
@@ -3326,7 +3345,7 @@ def unreviewed_rows(path, columns):
     found = 0
     if not path or not os.path.exists(path):
         return found
-    with open(path, encoding=sidecars.CSV_ENCODING, newline="") as fh:
+    with sidecars.opened(path) as fh:
         for row in csv.reader(sidecars.csv_lines(fh)):
             if not row or row[0].strip().lower() in HEADER_WORDS:
                 continue
@@ -5710,7 +5729,7 @@ def write_bare_links(rows_file, report, sidecar):
     elif os.path.exists(report):
         os.remove(report)
     if sidecar and os.path.exists(sidecar):
-        with open(sidecar, encoding=sidecars.CSV_ENCODING, newline="") as fh:
+        with sidecars.opened(sidecar) as fh:
             rows = [r for r in csv.reader(sidecars.csv_lines(fh)) if r and r[0].strip()
                     and r[0].strip().lower() != "url"]
         stale = [r[0].strip() for r in rows if r[0].strip() not in seen]
@@ -5891,6 +5910,9 @@ def main():
     work = tempfile.mkdtemp(prefix="convert-")
     try:
         MATH_KEEP_PAGES = deck_math_keep(paths, work) if PPTX_RUN else ""
+        # Where the filters read the sidecars they read themselves: a copy
+        # in UTF-8 of one in a code page the run couldn't rewrite.
+        filter_reads = {key: sidecars.filter_copy(paths[key], work) for key in FILTER_SIDECARS}
         collected = {key: os.path.join(work, key) for key in
                      ("captions_missing", "alt_missing", "alt_seen", "spacers",
                       "media_unresolved", "bare_links", "captions_applied",
@@ -6042,7 +6064,7 @@ def main():
             env["TABLE_HEADERS_RESOLVED"] = os.path.join(work,
                                                         "table-headers.json")
             run(["python3", HEADERS_TOOL] + prepass
-                + ["--sidecar", paths["table_headers"],
+                + ["--sidecar", paths["table_headers"], "--sidecar-checked",
                    "--new", reports["table_headers_new"],
                    "--report", reports["table_headers_report"],
                    "--resolved", env["TABLE_HEADERS_RESOLVED"],
@@ -6096,7 +6118,7 @@ def main():
         for target in targets:
             if target.pages_dir in pages_by_dir:
                 continue
-            fenv = filter_env(target, base, paths, env)
+            fenv = filter_env(target, base, paths, env, filter_reads)
             raw = read_variants(base, target, work, env)
             variant_languages(base, target, raw, project)
             variant_stems = [s for s in raw if s not in stems]

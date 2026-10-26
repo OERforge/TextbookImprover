@@ -71,8 +71,10 @@ def trip(source, work):
                    and not n.startswith("~$"))
     first = os.path.join(work, "source")
     os.makedirs(first)
-    for name in decks + [n for n in SIDECARS + ("project.yaml",)
-                         if os.path.isfile(os.path.join(source, n))]:
+    # A sidecar that can't be read, said so already, isn't copied.
+    for name in decks + [n for n in SIDECARS if os.path.isfile(os.path.join(source, n))
+                         and not sidecars.unreadable(os.path.join(source, n))] \
+            + [n for n in ("project.yaml",) if os.path.isfile(os.path.join(source, n))]:
         shutil.copy2(os.path.join(source, name), first)
     with open(os.path.join(first, "conversion.yaml"), "w", encoding="utf-8") as fh:
         fh.write("targets:\n  md:\n    format: markdown\n")

@@ -47,6 +47,7 @@ import csv
 import json
 import re
 import shutil
+import struct
 import tempfile
 import sys
 
@@ -424,6 +425,20 @@ def check_sidecar_paths():
     import io
     said = []
 
+    nowhere_link = os.path.join(base, "alt-link.csv")
+    os.symlink("/nowhere/alt.csv", nowhere_link)
+    default_link = os.path.join(base, "bare-links.csv")
+    os.symlink("/nowhere/links.csv", default_link)
+    noted = []
+
+    def goes_on(path, setting, default):
+        """check_sidecar's run going on, what it says caught."""
+        saved_say, convert.say = convert.say, noted.append
+        try:
+            return not stops(path, setting, default)
+        finally:
+            convert.say = saved_say
+
     def stops(path, setting, default):
         # What convert.py prints on the way out is the check's to read,
         # not the terminal's: an expected error shouldn't look like one.
@@ -458,6 +473,14 @@ def check_sidecar_paths():
          "encoding had stopped it with a traceback",
          lambda: stops(base, "sidecars.image_alt", "image-alt.csv")
          and "sidecars.image_alt" in said[-1] and "a folder, not a file" in said[-1]),
+        ("a setting naming a link to nothing stops the run as one naming nothing does, saying "
+         "where it leads",
+         lambda: stops(nowhere_link, "sidecars.image_alt", "image-alt.csv")
+         and "which does not exist, a link to /nowhere/alt.csv, which isn't there" in said[-1]),
+        ("but at the default name, the run goes on without it, saying so",
+         lambda: goes_on(default_link, "sidecars.bare_links", "bare-links.csv")
+         and any("bare-links.csv is a link to /nowhere/links.csv, which isn't there, so this "
+                 "run goes on without it" in line for line in noted)),
     ]
 
 
@@ -1356,6 +1379,96 @@ def check_shortdoi():
                               capture_output=True, text=True)
     with open(odd, "rb") as fh:
         odd_left = fh.read()
+    # One it can't write the shortDOIs to, read-only, which root too is
+    # kept from writing: it stops before asking anything, the file left as
+    # it was. And a pipe, which reading would wait on: never read.
+    readonly = os.path.join(work, "readonly.csv")
+    readonly_bytes = ("URL,Replacement,Title\r\nhttps://doi.org/10.1080/08913810508443640,,"
+                      "Klein \u2013 Stern\r\n").encode("cp1252")
+    with open(readonly, "wb") as fh:
+        fh.write(readonly_bytes)
+    os.chmod(readonly, 0o444)
+    asked = len(seen)
+    from_readonly = subprocess.run([sys.executable, tool, readonly, "--wait", "0", "--service",
+                                    service], capture_output=True, text=True)
+    asked_readonly = len(seen) - asked
+    with open(readonly, "rb") as fh:
+        readonly_left = fh.read()
+    pipe = os.path.join(work, "pipe.csv")
+    os.mkfifo(pipe)
+    from_pipe = subprocess.run([sys.executable, tool, pipe, "--wait", "0", "--service", service],
+                               capture_output=True, text=True, timeout=60)
+    # Nor one with another link to it, which writing it would part from it.
+    linked = os.path.join(work, "linked.csv")
+    linked_bytes = ("\ufeffURL,Replacement,Title\r\n"
+                    "https://doi.org/10.1080/08913810508443640,,\r\n").encode("utf-8")
+    with open(linked, "wb") as fh:
+        fh.write(linked_bytes)
+    os.link(linked, os.path.join(work, "linked-too.csv"))
+    asked = len(seen)
+    from_linked = subprocess.run([sys.executable, tool, linked, "--wait", "0", "--service",
+                                  service], capture_output=True, text=True)
+    asked_linked = len(seen) - asked
+    with open(linked, "rb") as fh:
+        linked_left = fh.read()
+    with open(os.path.join(work, "linked-too.csv"), "rb") as fh:
+        linked_too = fh.read()
+    from_readonly_dry = subprocess.run([sys.executable, tool, readonly, "--dry-run", "--service",
+                                        service], capture_output=True, text=True)
+    # Nothing found, the lookups failing, leaves no copy behind: the sidecar
+    # isn't written.
+    unknown = os.path.join(work, "unknown.csv")
+    with open(unknown, "w", encoding="utf-8", newline="") as fh:
+        fh.write("URL,Replacement,Title\nhttps://doi.org/10.9999/not-there,,\n")
+    from_unknown = subprocess.run([sys.executable, tool, unknown, "--wait", "0", "--retries", "0",
+                                   "--service", service], capture_output=True, text=True)
+    # A write that fails partway, as a disk full fails one, made by an open
+    # whose file takes half the bytes: the original's put back.
+    shortdoi = load(tool, "shortdoi_cut")
+    cut = os.path.join(work, "cut.csv")
+    cut_bytes = linked_bytes
+    with open(cut, "wb") as fh:
+        fh.write(cut_bytes)
+    opened_files = []
+
+    class Half:
+        def __init__(self, fh):
+            self.fh = fh
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            self.fh.close()
+            return False
+
+        def write(self, data):
+            self.fh.write(data[:len(data) // 2])
+            raise OSError(28, "No space left on device")
+
+    def cutting(file, mode="r", *args, **kwargs):
+        fh = open(file, mode, *args, **kwargs)
+        opened_files.append(mode)
+        return Half(fh) if len(opened_files) == 1 else fh
+    shortdoi.open = cutting
+    cut_said = shortdoi.write_in_place(cut, b"\xef\xbb\xbf" + cut_bytes * 3, cut_bytes)
+    with open(cut, "rb") as fh:
+        cut_left = fh.read()
+    # A copy kept by an earlier run is kept: the sidecar as it was goes
+    # under the next name.
+    again = os.path.join(work, "again.csv")
+    with open(again, "wb") as fh:
+        fh.write(linked_bytes)
+    with open(again + ".bak", "wb") as fh:
+        fh.write(b"an earlier run's")
+    from_again = subprocess.run([sys.executable, tool, again, "--wait", "0", "--service", service],
+                                capture_output=True, text=True)
+    with open(again + ".bak", "rb") as fh:
+        again_bak = fh.read()
+    again_bak2 = b""
+    if os.path.exists(again + ".bak.2"):
+        with open(again + ".bak.2", "rb") as fh:
+            again_bak2 = fh.read()
     server.shutdown()
     with open(sidecar, "rb") as fh:
         marked = fh.read(6) == b"\xef\xbb\xbfURL"
@@ -1366,8 +1479,8 @@ def check_shortdoi():
     with open(ansi, "rb") as fh:
         ansi_data = fh.read()
     kept_ansi = b""
-    if os.path.exists(ansi + ".windows-1252"):
-        with open(ansi + ".windows-1252", "rb") as fh:
+    if os.path.exists(ansi + ".bak"):
+        with open(ansi + ".bak", "rb") as fh:
             kept_ansi = fh.read()
     return [
         ("--dry-run names the two DOIs and asks nothing",
@@ -1392,9 +1505,11 @@ def check_shortdoi():
          and excel_data.decode("utf-8").split("\n")[2].startswith(
              "https://doi.org/10.1080/08913810508443640,https://doi.org/10/b8xx35")
          and excel_data.count(b"\xef\xbb\xbf") == 1 and excel_data.startswith(b"\xef\xbb\xbf")),
-        ("one Excel saved as plain CSV, in Windows-1252, is rewritten as UTF-8 first, the file "
-         "as it was kept beside it, and read as written",
-         lambda: from_ansi.returncode == 0 and "ansi.csv wasn't UTF-8" in from_ansi.stderr
+        ("one Excel saved as plain CSV, in Windows-1252, is read as written, and written as "
+         "UTF-8, the file as it was kept beside it",
+         lambda: from_ansi.returncode == 0
+         and "ansi.csv isn't UTF-8: it's read as Windows-1252, and written as UTF-8 with the "
+         "shortDOIs." in from_ansi.stderr
          and "Traceback" not in from_ansi.stderr
          and ansi_data.startswith(b"\xef\xbb\xbfURL,")
          and "https://doi.org/10/b8xx35,Klein \u2013 Stern" in ansi_data.decode("utf-8")
@@ -1410,6 +1525,37 @@ def check_shortdoi():
          "it was", lambda: from_odd.returncode != 0
          and "odd.csv isn't UTF-8, and doesn't read as Windows-1252" in from_odd.stderr
          and "Traceback" not in from_odd.stderr and odd_left == stopping),
+        ("one it can't write is read, but stops it before anything is looked up, the file left "
+         "as it was",
+         lambda: from_readonly.returncode != 0 and asked_readonly == 0
+         and "readonly.csv can't be written (it's read-only), so no shortDOI could be written "
+         "to it, and nothing is looked up." in from_readonly.stderr
+         and "Traceback" not in from_readonly.stderr and readonly_left == readonly_bytes
+         and not any(n.startswith("readonly.csv.") for n in os.listdir(work))),
+        ("and a dry run says a run would stop",
+         lambda: from_readonly_dry.returncode == 1
+         and "But %s can't be written (it's read-only), so a run without --dry-run would stop "
+         "before looking anything up." % readonly in from_readonly_dry.stdout),
+        ("and one that can't be read, a pipe here, stops it, never read",
+         lambda: from_pipe.returncode != 0
+         and "pipe.csv isn't a file but a pipe or a device. Nothing is looked up." in from_pipe.stderr),
+        ("one with another link to it is written in its place, so that the other name has it "
+         "too, the file as it was kept beside it",
+         lambda: from_linked.returncode == 0 and asked_linked == 1
+         and linked_left == linked_too
+         and linked_left.startswith(b"\xef\xbb\xbfURL,Replacement,Title\n")
+         and b"https://doi.org/10/b8xx35" in linked_left
+         and os.path.exists(linked + ".bak")),
+        ("lookups that all fail write nothing, and leave no copy beside it",
+         lambda: from_unknown.returncode == 1 and "0 shortDOI(s) written" in from_unknown.stdout
+         and "1 lookup(s) failed" in from_unknown.stdout
+         and not any(n.startswith("unknown.csv.") for n in os.listdir(work))),
+        ("a write that fails partway, a disk full, gives the file its original back, saying so",
+         lambda: cut_said == "No space left on device, and the file is as it was"
+         and cut_left == cut_bytes),
+        ("a copy an earlier run kept is kept, the sidecar as it was kept under the next name",
+         lambda: from_again.returncode == 0 and again_bak == b"an earlier run's"
+         and again_bak2 == linked_bytes and "the original is %s.bak.2" % again in from_again.stdout),
     ]
 
 
@@ -2078,9 +2224,249 @@ def check_sidecar_marks():
          lambda: sidecars.rewrite_as_utf8(ansi)[0][1:2] == ["  line 2: ch1/media/rId7.png,Caf\u00e9"]
          and sidecars.rewrite_as_utf8(mac)[0][1:2] == ["  line 3: ch1/media/rId8.png,Caf\u00e9"]
          and sidecars.rewrite_as_utf8(alt) == ([], None)),
-        ("and a folder has nothing to say, for its reader to say it isn't a file",
-         lambda: sidecars.rewrite_as_utf8(os.path.dirname(alt)) == ([], None)),
+        ("and a folder is said to be one, which the run goes on without",
+         lambda: sidecars.rewrite_as_utf8(os.path.dirname(alt))
+         == (["WARNING: %s is a folder, not a file, so this run goes on without it, and leaves it "
+              "as it is." % os.path.dirname(alt)], None)),
     ]
+
+
+def check_sidecars_another_user():
+    """Sidecars root owns, read by a run as another user, where root runs
+    these and can be someone else (setpriv): the run's checks as they are,
+    os.access and the euid unpatched, which the other checks stand in for.
+    Root's file is read and left to it, its owner's alone said, though the
+    user can't write it either, which isn't its being read-only; one only
+    root may read is gone without, said to be root's."""
+    import json
+    import sidecars
+    if os.geteuid() != 0 or not shutil.which("setpriv"):
+        return [("a run as another user, which only root can make here",
+                 lambda: print("  skip  not root, or no setpriv") or True)]
+    # In /tmp, which anyone may go into, as TMPDIR needn't be, the module
+    # copied there, as the clone and its folders needn't be anyone's either.
+    work = tempfile.mkdtemp(prefix="sidecar-another-user-", dir="/tmp")
+    atexit.register(shutil.rmtree, work, True)
+    # A shared folder, anyone's to write, as /tmp is; and one only root's.
+    os.chmod(work, 0o1777)
+    locked = os.path.join(work, "locked")
+    os.mkdir(locked)
+    os.chmod(locked, 0o755)
+    lib = os.path.join(work, "lib")
+    os.mkdir(lib)
+    shutil.copy(os.path.join(ROOT, "lib", "sidecars.py"), lib)
+    os.chmod(lib, 0o755)
+    os.chmod(os.path.join(lib, "sidecars.py"), 0o644)
+    who = ["setpriv", "--reuid=65534", "--regid=65534", "--clear-groups", sys.executable]
+    probe = subprocess.run(who + ["-c", "import sys; sys.path.insert(0, %r); import sidecars; "
+                                  "print('ready')" % lib], capture_output=True, text=True,
+                           env=dict(os.environ, HOME=work))
+    if probe.stdout.strip() != "ready":
+        return [("a run as another user, which this Python can't be run as here",
+                 lambda: print("  skip  uid 65534 can't run %s: %s" % (
+                     sys.executable, (probe.stderr.strip().splitlines() or ["?"])[-1])) or True)]
+    rows = "Image,Alt\r\none.png,A red square \u2013 large\r\n"
+    files = {"theirs-ansi.csv": (rows.encode("cp1252"), 0o644),
+             "theirs-utf8.csv": (rows.encode("utf-8"), 0o666),
+             "theirs-ascii.csv": (b"Image,Alt\r\none.png,A red square\r\n", 0o644),
+             "theirs-hidden.csv": (rows.encode("utf-8"), 0o600),
+             "locked/theirs-locked.csv": (rows.encode("cp1252"), 0o644)}
+    for name, (raw, mode) in files.items():
+        with open(os.path.join(work, name), "wb") as fh:
+            fh.write(raw)
+        os.chmod(os.path.join(work, name), mode)
+    script = ("import json, os, sys; sys.path.insert(0, %r); import sidecars; "
+              "print(json.dumps({n: [sidecars.rewrite_as_utf8(os.path.join(%r, n)), "
+              "sidecars.text(os.path.join(%r, n))] for n in %r}))"
+              % (lib, work, work, sorted(files)))
+    run = subprocess.run(who + ["-c", script], capture_output=True, text=True,
+                         env=dict(os.environ, HOME=work))
+    try:
+        said = json.loads(run.stdout)
+    except ValueError:
+        print(run.stderr)
+        said = {}
+
+    def path(name):
+        return os.path.join(work, name)
+
+    def left(name):
+        with open(path(name), "rb") as fh:
+            return fh.read() == files[name][0]
+    return [
+        ("root's file in Windows-1252 is read in it by another user and left to root, said "
+         "to be root's, not read-only, which it isn't",
+         lambda: run.returncode == 0 and said["theirs-ansi.csv"][0][0][0].startswith(
+             "WARNING: %s isn't UTF-8: 1 line(s) of it are read as Windows-1252" % path("theirs-ansi.csv"))
+         and "but it can't be rewritten as UTF-8: it belongs to another user, root. This run reads "
+         "it so" in said["theirs-ansi.csv"][0][0][0]
+         and said["theirs-ansi.csv"][0][0][-1].endswith("To have the run rewrite it, %s."
+                                                        % (THEIRS % "root"))
+         and said["theirs-ansi.csv"][1] == rows and left("theirs-ansi.csv")),
+        ("one in UTF-8 without the mark that anyone may write is read as it is and left to root",
+         lambda: said["theirs-utf8.csv"][0][0][0].startswith(
+             "WARNING: %s has no byte-order mark, which Excel needs to open it as UTF-8, and can't "
+             "be given one: it belongs to another user, root." % path("theirs-utf8.csv"))
+         and said["theirs-utf8.csv"][1] == rows and left("theirs-utf8.csv")),
+        ("and one of ASCII alone is noted",
+         lambda: said["theirs-ascii.csv"][0][0] == [
+             "NOTE: %s has no byte-order mark, and can't be given one: it belongs to another user, "
+             "root. It holds nothing outside ASCII, which reads the same either way. To have the "
+             "mark added, %s." % (path("theirs-ascii.csv"), THEIRS % "root")]
+         and left("theirs-ascii.csv")),
+        ("and one in a folder only root may write is said to be in one, which a copy of one's "
+         "own needs",
+         lambda: "it belongs to another user, root; its folder can't be written. This run reads "
+         "it so" in said["locked/theirs-locked.csv"][0][0][0]
+         and said["locked/theirs-locked.csv"][0][0][-1].endswith(
+             "To have the run rewrite it, %s, and make its folder writable." % (THEIRS % "root"))
+         and left("locked/theirs-locked.csv")),
+        ("one only root may read is gone without, said to be root's",
+         lambda: said["theirs-hidden.csv"] == [[[
+             "WARNING: %s can't be read (Permission denied); it belongs to root, so this run goes "
+             "on without it, and leaves it as it is. To use it, give the user running this "
+             "permission to read it." % path("theirs-hidden.csv")], None], ""]
+         and left("theirs-hidden.csv")),
+    ]
+
+
+def check_sidecars_left_as_they_are():
+    """Every reader reads a sidecar the run can't rewrite as UTF-8 as the
+    run reads it (sidecars.opened), not with open: Rob, 2026-10-26, "upgrade
+    all sidecars to UTF-8 and read UTF-8 for all of them", and "assume that
+    users will be sloppy about permissions but files in the directory are
+    there for a reason". Each kind, as Excel's plain "CSV" saves it, in
+    Windows-1252, and read-only, so that a run as root leaves it as it is
+    too, is read as written, a character outside ASCII in its row; and one
+    that can't be read is read as none, by every reader, none stopping.
+    Read with open, such a file had been read as UTF-8, which it isn't.
+    """
+    import docxremediate
+    import htmlremediate
+    import languages
+    import pptxremediate
+    import sidecars
+    convert = load(os.path.join(ROOT, "bin", "convert.py"), "convert_kept")
+    headers = load(os.path.join(ROOT, "bin", "table-headers.py"), "table_headers_kept")
+    split = load(os.path.join(ROOT, "bin", "split-pages.py"), "split_pages_kept")
+    work = scratch("sidecar-kept-")
+    cafe = "Caf\u00e9 \u2013 one"
+
+    def sidecar(name, header, row):
+        path = os.path.join(work, name)
+        with open(path, "w", encoding="cp1252", newline="") as fh:
+            fh.write(header + "\r\n" + row + "\r\n")
+        os.chmod(path, 0o444)
+        return path
+
+    def data(path):
+        with open(path, "rb") as fh:
+            return fh.read()
+
+    alt = sidecar("image-alt.csv", "Image,Alt,Source,Reason,CurrentAlt,Drafted by,Reviewed",
+                  "ch1/media/rId7.png,%s,ch1,missing,,claude," % cafe)
+    links = sidecar("bare-links.csv", "URL,Replacement,Title,Source,Context,Drafted by,Reviewed",
+                    "https://example.org/a,,%s,ch1,,," % cafe)
+    tables = sidecar("table-headers.csv", ",".join(headers.SIDECAR_COLUMNS),
+                     "aaa,first-row,,,,caf\u00e9.docx,,,TI,")
+    names = sidecar("page-names.csv", "source,parents,heading,position,name",
+                    "ch1.docx,,%s,,intro" % cafe)
+    language = sidecar("languages.csv", ",".join(languages.SIDECAR_COLUMNS),
+                       "caf\u00e9,fr,,,")
+    titles = sidecar("slide-titles.csv", "Slide,Title,Source,Drafted by,Reviewed",
+                     "deck/slide-256,%s,,," % cafe)
+    orders = sidecar("reading-order.csv", "Slide,Order,Source,Shapes,Note,Drafted by,Reviewed",
+                     "deck/slide-256,2 3,,,%s,," % cafe)
+    keep = sidecar("math-keep.csv", "Kind,Page,Before,After", "equation,ch1,5 \u00b5m \u2013 x,")
+    every = [alt, links, tables, names, language, titles, orders, keep]
+    before = {path: data(path) for path in every}
+    said = {path: sidecars.rewrite_as_utf8(path) for path in every}
+
+    def read_all():
+        warned, unknown, bad = [], set(), []
+        return {
+            "alt": (docxremediate.alt_rows(alt), htmlremediate.alt_rows(alt),
+                    pptxremediate.alt_rows(alt), convert.unreviewed_rows(
+                        alt, convert.REVIEW_COLUMNS["image_alt"])),
+            "links": (htmlremediate.link_rows(links), docxremediate.link_titles(links),
+                      pptxremediate.link_rows(links)),
+            "tables": (headers.read_sidecar(tables, warned.append),
+                       pptxremediate.header_rows(tables, unknown)),
+            "names": split.read_sidecar(names),
+            "languages": languages.read_rows(language),
+            "titles": pptxremediate.title_rows(titles),
+            "orders": pptxremediate.order_rows(orders, bad),
+            "keep": sidecars.math_keep_rows(keep),
+        }
+    read = read_all()
+
+    def refusing(file, mode="r", *args, **kwargs):
+        if file in every:
+            raise PermissionError(13, "Permission denied", file)
+        return open(file, mode, *args, **kwargs)
+    found = os.path.join(work, "bare-links-found")
+    with open(found, "w", encoding="utf-8", newline="") as fh:
+        fh.write("decided,https://example.org/a,,ch1,See\n")
+    stale = []
+    convert.say = stale.append
+    convert.write_bare_links(found, os.path.join(work, "bare-links-new.csv"), links)
+    sidecars.open = refusing
+    try:
+        unread = read_all()
+        has_columns = headers.has_review_columns(tables)
+    finally:
+        del sidecars.open
+    # The sidecars the filters read themselves, which convert.py gives them
+    # a copy of where one's left in a code page: each setting the filters
+    # read by its key upper-cased.
+    lua = ""
+    for name in sorted(os.listdir(os.path.join(ROOT, "bin"))):
+        if name.endswith(".lua"):
+            with open(os.path.join(ROOT, "bin", name), encoding="utf-8") as fh:
+                lua += fh.read()
+    read_by_filters = set(re.findall(r"os\.getenv\('([A-Z_]+)'\)", lua))
+    keys = ("table_captions", "image_alt", "table_headers", "page_names", "bare_links",
+            "math_keep", "slide_titles", "reading_order", "languages")
+    return [
+        ("each kind, read-only in Windows-1252, is left as it is, the run saying it's read in "
+         "its code page all the same",
+         lambda: all(said[path][1] is None and said[path][0][0].startswith(
+             "WARNING: %s isn't UTF-8: 1 line(s) of it are read as Windows-1252" % path)
+             and "it can't be rewritten as UTF-8: it's read-only" in said[path][0][0]
+             and data(path) == before[path] for path in every)),
+        ("image-alt.csv is read so by the Word, page, and deck copies, and its drafted row counted",
+         lambda: read["alt"] == ({"ch1": {"rId7": cafe}}, {"ch1/media/rId7": cafe},
+                                 pptxremediate.alt_rows(alt), 1)
+         and list(read["alt"][2].values()) == [cafe]),
+        ("and bare-links.csv",
+         lambda: read["links"][:2] == ({"https://example.org/a": ("", cafe)},
+                                       {"https://example.org/a": cafe})
+         and set(read["links"][2]) == {"https://example.org/a"}),
+        ("table-headers.csv, by table-headers.py and the decks",
+         lambda: set(read["tables"][0]) == {"aaa"} and read["tables"][1] == {"aaa": "first-row"}),
+        ("page-names.csv, by split-pages.py",
+         lambda: read["names"] == {("ch1.docx", "", cafe, ""): "intro"}),
+        ("languages.csv", lambda: read["languages"] == ({"caf\u00e9": "fr"}, [])),
+        ("slide-titles.csv and reading-order.csv",
+         lambda: read["titles"] == {"deck/slide-256": cafe}
+         and read["orders"] == {"deck/slide-256": ["2", "3"]}),
+        ("and math-keep.csv",
+         lambda: read["keep"] == [("equation", "ch1", "5 \u00b5m \u2013 x")]),
+        ("and the run's bare links match bare-links.csv's row, none of its rows matching none",
+         lambda: stale == []),
+        ("the filters are given a copy of each sidecar they read themselves",
+         lambda: {k for k in keys if k.upper() in read_by_filters} == set(convert.FILTER_SIDECARS)),
+        ("one that can't be read is read as none by every reader, none stopping",
+         lambda: unread == {"alt": ({}, {}, {}, 0), "links": ({}, {}, {}), "tables": ({}, {}),
+                            "names": {}, "languages": ({}, []), "titles": {}, "orders": {},
+                            "keep": []} and has_columns),
+    ]
+
+
+# What the run says to do with another user's sidecar it reads and leaves
+# as it is, its owner's name for %s.
+THEIRS = ("replace it with a copy of your own made with cp -p, which keeps its mode, or ask %s to "
+          "save it as UTF-8 with the mark")
 
 
 def check_sidecar_code_pages():
@@ -2091,12 +2477,22 @@ def check_sidecar_code_pages():
     many, the one its lines' ends tell, a CR alone Mac OS Roman's; each
     line that is UTF-8, as rows appended from a report are, kept as it is,
     and shown; the file as it was kept beside it. Lines all misplaced in
-    both stop it, as saved in another code page, and so does a file that
-    can't be written, left as it was. A sidecar so saved had stopped the run, its characters having
-    been U+FFFD on the pages and a traceback before that.
+    both stop it, as saved in another code page. A sidecar so saved had
+    stopped the run, its characters having been U+FFFD on the pages and a
+    traceback before that. And every sidecar is made UTF-8 with the mark
+    (Rob, 2026-10-26: "upgrade all sidecars to UTF-8 and read UTF-8 for all
+    of them"): one without the mark given it, of ASCII alone too; one the
+    run can't rewrite, read-only, another user's, linked, held open, or in
+    a folder that can't be written, read as it is, in its code page or as
+    UTF-8, and left so, the run saying why; and one that's there and can't
+    be read gone without, said to be, never opened if it's a pipe.
     """
+    import signal
     import sidecars
     work = scratch("sidecar-code-pages-")
+    # A person's uid and gid: 1000 where root runs these, the user's own
+    # where a user does.
+    person = (1000, 1000) if os.geteuid() == 0 else (os.getuid(), os.getgid())
 
     def write(name, data):
         path = os.path.join(work, name)
@@ -2206,8 +2602,8 @@ def check_sidecar_code_pages():
     kept_utf8, kept_said, _ = rewritten("kept-utf8.csv",
                                         ansi_rows.encode("cp1252") + kept_rows.encode("utf-8"))
     # A file that can't be written: one another program holds open, as Excel
-    # holds one on Windows, a disk full partway, and one read-only, which
-    # only root, who runs these here, can write.
+    # holds one on Windows, a disk full partway, and one in a folder that
+    # can't be written, which only root, who runs these here, can write.
     cases = {}
     saved = (os.replace, os.fdopen, os.access)
 
@@ -2225,10 +2621,16 @@ def check_sidecar_code_pages():
             raise OSError(28, "No space left on device")
 
     def held(source, target):
-        raise PermissionError(13, "The process cannot access the file", target)
+        # As Windows refuses to replace a file another program has open, a
+        # sharing violation, which Python makes a PermissionError.
+        exc = PermissionError(13, "The process cannot access the file", target)
+        exc.winerror = 32
+        raise exc
 
+    folder = os.path.realpath(work)
     for name, patch in (("held.csv", {"replace": held}), ("full.csv", {"fdopen": Full}),
-                        ("readonly.csv", {"access": lambda path, mode: False})):
+                        ("folder.csv", {"access": lambda path, mode: (
+                            os.path.realpath(path) != folder and saved[2](path, mode))})):
         for attribute, value in patch.items():
             setattr(os, attribute, value)
         try:
@@ -2273,7 +2675,7 @@ def check_sidecar_code_pages():
     sidecars.rewrite_as_utf8(moded)
     # A person's file, rewritten by root, stays theirs, the copy kept too.
     owned = write("owned.csv", ansi_rows.encode("cp1252"))
-    os.chown(owned, 1000, 1000)
+    os.chown(owned, *person)
     sidecars.rewrite_as_utf8(owned)
     # On a disk that keeps no mode (FAT), the rewrite goes on without one.
     def unmoded(path, mode):
@@ -2284,35 +2686,226 @@ def check_sidecar_code_pages():
         fat_said, fat_why = sidecars.rewrite_as_utf8(fat)
     finally:
         os.chmod = saved_chmod
-    # One without the mark left as it is, as it reads the same either way:
-    # one held open, as Excel holds one on Windows; one read-only, which
-    # root, who runs these here, could write; another user's, whose owner
-    # a run that isn't root can't keep; and one with another link to it.
+    # One without the mark that can't be given it, read as it is: one held
+    # open, as Excel holds one on Windows; one read-only, which root, who
+    # runs these here, could write; another user's, whose owner a run that
+    # isn't root can't keep, a run by someone else made with the euid; and
+    # one with another link to it. And one of ASCII alone that can't be.
     unmarked = {}
     for name, patch in (("held-utf8.csv", {"replace": held}),
-                        ("theirs-utf8.csv", {"geteuid": lambda: 1001})):
+                        ("theirs-utf8.csv", {"geteuid": None})):
         theirs = write(name, plain_bytes)
-        os.chown(theirs, 1000, 1000)
+        owner = os.stat(theirs).st_uid
         saved_euid = os.geteuid
         for attribute, value in patch.items():
-            setattr(os, attribute, value)
+            setattr(os, attribute, value or (lambda: owner + 1))
         try:
             unmarked[name] = sidecars.rewrite_as_utf8(theirs)
         finally:
             os.replace, os.fdopen, os.access = saved
             os.geteuid = saved_euid
+    theirs_name = sidecars.owner_of(os.stat(os.path.join(work, "theirs-utf8.csv")))
+    # Another user's that this user can't write either, as root's 0644 file
+    # is to anyone else: its owner's alone said, not that it's read-only,
+    # which it isn't. One's own that this user may not write, though it has
+    # a write bit. And one whose replacing is refused (EACCES), not by a
+    # program holding it open.
+    saved_euid, saved_access = os.geteuid, os.access
+    # One's own a user may not write is made a person's, uid 1000, where
+    # root runs these, the run made theirs; and one that root can't write,
+    # as one marked immutable is, though it has a write bit.
+    for name, euid in (("theirs-closed.csv", "another"), ("closed-utf8.csv", "owner"),
+                       ("immutable-utf8.csv", "root")):
+        subject = write(name, plain_bytes)
+        os.chmod(subject, 0o644)
+        if euid == "owner" and os.geteuid() == 0:
+            os.chown(subject, *person)
+        uid = os.stat(subject).st_uid
+        os.geteuid = {"another": lambda: uid + 1, "owner": lambda: uid, "root": lambda: 0}[euid]
+        os.access = lambda p, mode, subject=subject: (os.path.realpath(p) != os.path.realpath(subject)
+                                                      and saved_access(p, mode))
+        try:
+            unmarked[name] = sidecars.rewrite_as_utf8(subject)
+        finally:
+            os.geteuid, os.access = saved_euid, saved_access
+    # One on a disk mounted read-only, which nothing on it gets past.
+    mounted = write("mounted-utf8.csv", plain_bytes)
+
+    class ReadOnly:
+        f_flag = getattr(os, "ST_RDONLY", 1)
+    saved_statvfs = getattr(os, "statvfs", None)
+    os.statvfs = lambda p: ReadOnly() if os.path.realpath(p) == os.path.realpath(mounted) \
+        else saved_statvfs(p)
+    try:
+        unmarked["mounted-utf8.csv"] = sidecars.rewrite_as_utf8(mounted)
+    finally:
+        if saved_statvfs is None:
+            del os.statvfs
+        else:
+            os.statvfs = saved_statvfs
+
+    def denied(source, target):
+        raise PermissionError(13, "Permission denied", target)
+
+    def denied_on_windows(source, target):
+        # As Windows answers replacing a file another program has open.
+        exc = PermissionError(13, "Access is denied", target)
+        exc.winerror = 5
+        raise exc
+    for name, refusal in (("denied-utf8.csv", denied), ("windows-utf8.csv", denied_on_windows)):
+        os.replace = refusal
+        try:
+            unmarked[name] = sidecars.rewrite_as_utf8(write(name, plain_bytes))
+        finally:
+            os.replace, os.fdopen, os.access = saved
+    # Its extended attributes kept, an access control list among them,
+    # where the disk keeps them (Linux): a person given a shared file
+    # keeps it.
+    noted = write("noted.csv", ascii_bytes)
+    os.chmod(noted, 0o664)
+    acl = struct.pack("<I", 2) + b"".join(struct.pack("<HHI", tag, perm, uid) for tag, perm, uid in (
+        (0x01, 6, 0xFFFFFFFF), (0x02, 6, 1000), (0x04, 4, 0xFFFFFFFF), (0x10, 6, 0xFFFFFFFF),
+        (0x20, 4, 0xFFFFFFFF)))
+    attributes, measured = {}, False
+    for name, value in (("user.note", b"kept"), ("system.posix_acl_access", acl)):
+        try:
+            os.setxattr(noted, name, value)
+            attributes[name] = value
+        except (AttributeError, OSError):
+            pass
+    # One that describes the old contents, as integrity measurement's do,
+    # isn't kept; a trusted one stands in for it, where root can set one.
+    try:
+        os.setxattr(noted, "trusted.measured", b"old contents")
+        measured = True
+    except (AttributeError, OSError):
+        pass
+    synced = []
+    saved_fsync = os.fsync
+    os.fsync = lambda fd: synced.append(fd) or saved_fsync(fd)
+    try:
+        sidecars.rewrite_as_utf8(noted)
+        synced_mark = len(synced)
+        sidecars.rewrite_as_utf8(write("synced.csv", ansi_rows.encode("cp1252")))
+        synced_rewrite = len(synced) - synced_mark
+    finally:
+        os.fsync = saved_fsync
+    attributes_after = {name: os.getxattr(noted, name) for name in attributes
+                        if name in os.listxattr(noted)} if attributes else {}
+    measured_after = measured and "trusted.measured" in os.listxattr(noted)
     readonly_utf8 = write("readonly-utf8.csv", plain_bytes)
     os.chmod(readonly_utf8, 0o444)
     unmarked["readonly-utf8.csv"] = sidecars.rewrite_as_utf8(readonly_utf8)
     linked_utf8 = write("linked-utf8.csv", plain_bytes)
     os.link(linked_utf8, os.path.join(work, "hard-link-utf8"))
     unmarked["linked-utf8.csv"] = sidecars.rewrite_as_utf8(linked_utf8)
-    # And one that changed between reading and marking, no longer UTF-8.
-    changed_said = sidecars._mark(write("changed.csv", "Caf\u00e9\n".encode("cp1252")))
-    # A read-only file in a code page stops the run, for root as for anyone.
+    readonly_ascii = write("readonly-ascii.csv", ascii_bytes)
+    os.chmod(readonly_ascii, 0o444)
+    readonly_ascii_said = sidecars.rewrite_as_utf8(readonly_ascii)
+    # Two reasons at once, each with what would let a run rewrite it.
+    both = write("both.csv", plain_bytes)
+    os.chmod(both, 0o444)
+    os.link(both, os.path.join(work, "hard-link-both"))
+    both_said, _ = sidecars.rewrite_as_utf8(both)
+    # A link in a folder that can't be written, to a file in one that can:
+    # one in UTF-8 without the mark is given it, the file the link leads to
+    # written; one in a code page, whose file as it was is kept beside the
+    # link, isn't rewritten.
+    away = os.path.join(work, "away")
+    os.mkdir(away)
+    linked_folder = os.path.realpath(work)
+    for name, raw in (("marked-away.csv", plain_bytes), ("ansi-away.csv", ansi_rows.encode("cp1252"))):
+        with open(os.path.join(away, name), "wb") as fh:
+            fh.write(raw)
+        os.symlink(os.path.join(away, name), os.path.join(work, name))
+    saved_access = os.access
+    os.access = lambda p, mode: os.path.realpath(p) != linked_folder and saved_access(p, mode)
+    try:
+        marked_away = sidecars.rewrite_as_utf8(os.path.join(work, "marked-away.csv"))
+        ansi_away = sidecars.rewrite_as_utf8(os.path.join(work, "ansi-away.csv"))
+    finally:
+        os.access = saved_access
+    # One in a code page with a report's rows in UTF-8, left as it is.
+    readonly_kept = write("readonly-kept.csv", ansi_rows.encode("cp1252") + report_rows.encode("utf-8"))
+    os.chmod(readonly_kept, 0o444)
+    readonly_kept_said, _ = sidecars.rewrite_as_utf8(readonly_kept)
+    # A field that holds a line end, read as written, CR LF and all.
+    quoted = write("quoted.csv", "\ufeffImage,Alt\r\none.png,\"A red\r\nsquare\"\r\n".encode("utf-8"))
+    quoted_rows = list(csv.reader(sidecars.csv_lines(sidecars.opened(quoted))))
+    # And one whose lines end with a CR alone, as Excel 2011 for Mac ended
+    # them, which a rewrite keeps.
+    cr_ended = write("cr-ended.csv", "\ufeffImage,Alt\rone.png,Caf\u00e9\r".encode("utf-8"))
+    cr_rows = list(csv.reader(sidecars.csv_lines(sidecars.opened(cr_ended))))
+    # A read-only file in a code page is read so all the same, for root as
+    # for anyone, and left as it is.
     readonly_ansi = write("readonly-ansi.csv", ansi_rows.encode("cp1252"))
     os.chmod(readonly_ansi, 0o444)
     readonly_ansi_said, readonly_ansi_why = sidecars.rewrite_as_utf8(readonly_ansi)
+    # And another user's, read so and left to them.
+    theirs_ansi = write("theirs-ansi.csv", ansi_rows.encode("cp1252"))
+    saved_euid = os.geteuid
+    os.geteuid = lambda: os.stat(theirs_ansi).st_uid + 1
+    try:
+        theirs_ansi_said, theirs_ansi_why = sidecars.rewrite_as_utf8(theirs_ansi)
+    finally:
+        os.geteuid = saved_euid
+    # One that's there but can't be read: one this user may not read, as
+    # root may read any, made by an open that refuses it; another user's
+    # likewise, said to be theirs; a pipe, which reading would wait on; a
+    # link to nothing; and a folder. Each is gone without, said to be, and
+    # read as nothing, the filters given no file to read.
+    unread = write("unread.csv", ansi_rows.encode("cp1252"))
+
+    def refusing(file, mode="r", *args, **kwargs):
+        if file == unread:
+            raise PermissionError(13, "Permission denied", file)
+        return open(file, mode, *args, **kwargs)
+    sidecars.open = refusing
+    saved_euid = os.geteuid
+    try:
+        unread_said = sidecars.rewrite_as_utf8(unread)
+        unread_read = (sidecars.text(unread), sidecars.filter_copy(unread, work))
+        unread_tool = sidecars.unreadable(unread)
+        os.geteuid = lambda: os.stat(unread).st_uid + 1
+        unread_theirs_said = sidecars.rewrite_as_utf8(unread)
+    finally:
+        os.geteuid = saved_euid
+        del sidecars.open
+    # A disk's error is said as it is, nothing for a person to allow.
+    faulty = write("faulty.csv", ascii_bytes)
+
+    def failing(file, mode="r", *args, **kwargs):
+        if file == faulty:
+            raise OSError(5, "Input/output error", file)
+        return open(file, mode, *args, **kwargs)
+    sidecars.open = failing
+    try:
+        faulty_said = sidecars.rewrite_as_utf8(faulty)
+        faulty_tool = sidecars.unreadable(faulty)
+    finally:
+        del sidecars.open
+    pipe = os.path.join(work, "pipe.csv")
+    os.mkfifo(pipe)
+
+    # Not an OSError, as TimeoutError is, which a reader would take for a
+    # file it can't read and go on to open the pipe again; and again every
+    # five seconds, should one be taken all the same.
+    class Waited(RuntimeError):
+        pass
+
+    def waited(*_):
+        raise Waited("reading %s waited for a writer" % pipe)
+    alarm = signal.signal(signal.SIGALRM, waited)
+    signal.setitimer(signal.ITIMER_REAL, 20, 5)
+    try:
+        pipe_said = sidecars.rewrite_as_utf8(pipe)
+        pipe_read = (sidecars.text(pipe), sidecars.filter_copy(pipe, work))
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, alarm)
+    nowhere = os.path.join(work, "nowhere.csv")
+    os.symlink(os.path.join(work, "gone.csv"), nowhere)
+    nowhere_said = sidecars.rewrite_as_utf8(nowhere)
     # A run that can't give a file its owner gives it its group.
     calls = []
 
@@ -2321,7 +2914,7 @@ def check_sidecar_code_pages():
         if uid != -1:
             raise PermissionError(1, "Operation not permitted", path)
     grouped = write("grouped.csv", ansi_rows.encode("cp1252"))
-    os.chown(grouped, 1000, 1000)
+    os.chown(grouped, *person)
     os.chown, saved_chown = chown, os.chown
     try:
         sidecars.rewrite_as_utf8(grouped)
@@ -2361,6 +2954,37 @@ def check_sidecar_code_pages():
         path, said, why = rewritten("found-%d.csv" % n, raw)
         read_found.append(why is None and data(path) == ("\ufeff" + raw.decode(codec)).encode("utf-8"))
     odd = sidecars.misplaced
+
+    def unwritten(name, reasons, remedy, result=None):
+        """A file in Windows-1252 the run couldn't rewrite: the run says why,
+        reading it so all the same, and it's as it was, nothing beside it.
+        result: what the rewrite returned, a patched case's in cases."""
+        path = os.path.join(work, name)
+        said, why = result or cases[name][1:]
+        return (why is None and said == [
+            "WARNING: %s isn't UTF-8: 1 line(s) of it are read as Windows-1252, as Windows Excel's "
+            "plain \"CSV\" saves a file in the US and Western Europe, but it can't be rewritten as "
+            "UTF-8: %s. This run reads it so, and leaves it as it is. As read:" % (path, reasons),
+            "  line 2: one.png,A red square \u2013 large",
+            "  A character there that isn't the one written means the file was saved in another "
+            "code page: save it from Excel as \"CSV UTF-8 (Comma delimited)\". To have the run "
+            "rewrite it, %s." % remedy]
+            and data(path) == ansi_rows.encode("cp1252") and beside(name) == []
+            and sidecars.text(path) == ansi_rows)
+
+    def unmarkable(name, reasons, remedy):
+        """A file in UTF-8 without the mark that couldn't be given it."""
+        path = os.path.join(work, name)
+        return (unmarked[name] == (
+            ["WARNING: %s has no byte-order mark, which Excel needs to open it as UTF-8, and can't "
+             "be given one: %s. It's read as UTF-8, as it is. Its lines outside ASCII, as they read:"
+             % (path, reasons),
+             "  line 2: one.png,Caf\u00e9",
+             "  line 4: three.png,G\u00f6del<U+00A0>and Escher",
+             "  A character there that isn't the one written means Excel saved the file in a code "
+             "page whose bytes happen to read as UTF-8. To have the mark added, %s." % remedy], None)
+            and data(path) == plain_bytes and beside(name) == []
+            and sidecars.text(path) == plain_bytes.decode("utf-8"))
     return [
         ("a sidecar in Windows-1252 is rewritten as UTF-8, a mark first and its lines' ends as "
          "they were, a line in UTF-8 appended from a report kept as it was",
@@ -2461,35 +3085,28 @@ def check_sidecar_code_pages():
          and control_why.startswith("%s: line 2 isn't UTF-8, and holds a control character "
                                     "(byte 0x01)" % control)
          and beside("control.csv") == []),
-        ("a file another program holds open stops it, left as it was, with no copy beside it, "
-         "saying to close it",
-         lambda: cases["held.csv"][1] is None
-         and "couldn't be rewritten as UTF-8 ([Errno 13] The process cannot access the file"
-         in cases["held.csv"][2]
-         and "so it's left as it was, with no copy beside it. If a program has it open, close it"
-         in cases["held.csv"][2]
-         and data(cases["held.csv"][0]) == ansi_rows.encode("cp1252") and beside("held.csv") == []),
-        ("and so does a disk full partway, the file not cut short",
-         lambda: cases["full.csv"][1] is None and "No space left on device" in cases["full.csv"][2]
-         and data(cases["full.csv"][0]) == ansi_rows.encode("cp1252") and beside("full.csv") == []),
-        ("and the copy kept beside it failing partway, which goes",
-         lambda: cases["full-copy.csv"][1] is None
-         and "No space left on device" in cases["full-copy.csv"][2]
-         and data(cases["full-copy.csv"][0]) == ansi_rows.encode("cp1252")
-         and beside("full-copy.csv") == []),
-        ("and a read-only file, before anything is written",
-         lambda: cases["readonly.csv"][1] is None and "it's read-only" in cases["readonly.csv"][2]
-         and data(cases["readonly.csv"][0]) == ansi_rows.encode("cp1252")
-         and beside("readonly.csv") == []),
+        ("a file another program holds open is read in its code page all the same, left as it "
+         "was, with no copy beside it, the run saying why and to close it",
+         lambda: unwritten("held.csv", "it couldn't be written (The process cannot access the "
+                           "file)", "close the program that has it open")),
+        ("and so is one a disk full partway kept from being written, the file not cut short",
+         lambda: unwritten("full.csv", "it couldn't be written (No space left on device)",
+                           "put right what kept it from being written")),
+        ("and one whose copy beside it failed partway, which goes",
+         lambda: unwritten("full-copy.csv", "it couldn't be written (No space left on device)",
+                           "put right what kept it from being written")),
+        ("and one in a folder that can't be written, before anything is written",
+         lambda: unwritten("folder.csv", "its folder can't be written",
+                           "make its folder writable")),
         ("a link's file is rewritten, and the link kept, the file as it was beside the link",
          lambda: link_why is None and os.path.islink(link)
          and data(target).startswith(b"\xef\xbb\xbfImage,Alt")
          and data(link + ".windows-1252") == ansi_rows.encode("cp1252")),
         ("and a file's mode is kept, and its owner, the copy beside it given them too",
          lambda: os.stat(moded).st_mode & 0o777 == 0o640
-         and (os.stat(owned).st_uid, os.stat(owned).st_gid) == (1000, 1000)
+         and (os.stat(owned).st_uid, os.stat(owned).st_gid) == person
          and (os.stat(owned + ".windows-1252").st_uid, os.stat(owned + ".windows-1252").st_gid)
-         == (1000, 1000)),
+         == person),
         ("and where a mode can't be set, the file's rewritten without it",
          lambda: fat_why is None and data(fat).startswith(b"\xef\xbb\xbf")),
         ("a file in UTF-16, as Excel's Unicode Text saves one, is said to be no CSV",
@@ -2511,24 +3128,137 @@ def check_sidecar_code_pages():
                                  "right in Excel, which opens the file as UTF-8 from now on."], None)
          and data(plain) == b"\xef\xbb\xbf" + plain_bytes
          and os.stat(plain).st_mode & 0o777 == 0o640 and beside("plain.csv") == []),
-        ("but one of ASCII alone, which Excel reads the same either way, an empty one, one held "
-         "open, a read-only one, another user's, and one linked from elsewhere are left as they "
-         "are, nothing said, as is one that's no longer UTF-8 when it's marked",
-         lambda: ascii_said == ([], None) and data(ascii) == ascii_bytes and beside("ascii.csv") == []
-         and empty_said == ([], None) and data(empty) == b""
-         and sorted(unmarked) == ["held-utf8.csv", "linked-utf8.csv", "readonly-utf8.csv",
-                                  "theirs-utf8.csv"]
-         and all(unmarked[n] == ([], None) and data(os.path.join(work, n)) == plain_bytes
-                 and beside(n) == [] for n in unmarked)
-         and changed_said == []),
-        ("a read-only file in a code page stops the run as root too, and a run that can't give a "
-         "rewritten file its owner gives it its group",
-         lambda: readonly_ansi_said is None and "it's read-only" in readonly_ansi_why
-         and data(readonly_ansi) == ansi_rows.encode("cp1252") and beside("readonly-ansi.csv") == []
-         and calls[:2] == [(1000, 1000), (-1, 1000)]),
-        ("and a path that isn't a file is no sidecar to rewrite",
+        ("and one of ASCII alone, which Excel reads the same either way, is given it too, and an "
+         "empty one, so that every sidecar has it, the run saying so",
+         lambda: ascii_said == (["%s had no byte-order mark: one is added, as Excel's \"CSV "
+                                 "UTF-8\" writes one, and nothing else in it changes." % ascii], None)
+         and data(ascii) == b"\xef\xbb\xbf" + ascii_bytes and beside("ascii.csv") == []
+         and empty_said == (["%s had no byte-order mark: one is added, as Excel's \"CSV UTF-8\" "
+                             "writes one, and nothing else in it changes." % empty], None)
+         and data(empty) == b"\xef\xbb\xbf" and beside("empty.csv") == []),
+        ("one that can't be given it is read as UTF-8 as it is, the run saying why, showing its "
+         "lines outside ASCII, and what would let a run mark it: one held open",
+         lambda: unmarkable("held-utf8.csv", "it couldn't be written (The process cannot access "
+                            "the file)", "close the program that has it open")),
+        ("another user's, which a run that isn't root leaves to them",
+         lambda: unmarkable("theirs-utf8.csv", "it belongs to another user, %s" % theirs_name,
+                            THEIRS % theirs_name)),
+        ("a read-only one, as root too",
+         lambda: unmarkable("readonly-utf8.csv", "it's read-only", "make it writable")),
+        ("and one with another link to it, which a rewrite would part from it",
+         lambda: unmarkable("linked-utf8.csv", "another name links to it, which a rewrite would "
+                            "leave as it was", "make it a file of its own")),
+        ("another user's that this user can't write either is said to be theirs, not "
+         "read-only, which it isn't, and to be replaced with a copy of one's own",
+         lambda: unmarkable("theirs-closed.csv", "it belongs to another user, %s"
+                            % sidecars.owner_of(os.stat(os.path.join(work, "theirs-closed.csv"))),
+                            THEIRS % sidecars.owner_of(os.stat(os.path.join(work, "theirs-closed.csv"))))),
+        ("one's own that this user may not write, though it has a write bit, is said to be that",
+         lambda: unmarkable("closed-utf8.csv", "this user may not write it",
+                            "give the user running this permission to write it")),
+        ("and one root can't write, though it has a write bit, as one marked immutable",
+         lambda: unmarkable("immutable-utf8.csv", "it can't be written, though it has a write bit "
+                            "(marked immutable, say)", "make it writable")),
+        ("one on a disk mounted read-only is said to be, that alone",
+         lambda: unmarkable("mounted-utf8.csv", "the disk it's on is mounted read-only",
+                            "copy the book to a disk that can be written")),
+        ("and one Windows won't let be replaced, as it answers for a file another program has "
+         "open, is said to be either",
+         lambda: unmarkable("windows-utf8.csv", "it couldn't be written (Access is denied)",
+                            "close any program that has it open, or give the user running this "
+                            "permission to write it and its folder")),
+        ("and one whose replacing is refused, not by a program holding it, says so",
+         lambda: unmarkable("denied-utf8.csv", "it couldn't be written (Permission denied)",
+                            "give the user running this permission to write it and its folder")),
+        ("a file's extended attributes are kept, an access control list among them, where the "
+         "disk keeps them, but not one that describes its old contents",
+         lambda: (attributes_after == attributes and not measured_after) if attributes
+         else print("  skip  no extended attributes on this disk") or True),
+        ("and what's rewritten is flushed to the disk before it's moved into place, the copy "
+         "kept beside it too",
+         lambda: synced_mark == 1 and synced_rewrite == 2),
+        ("and one with two reasons gives both, and what would let a run mark it for each",
+         lambda: both_said[0] == ("WARNING: %s has no byte-order mark, which Excel needs to open "
+                                  "it as UTF-8, and can't be given one: it's read-only; another "
+                                  "name links to it, which a rewrite would leave as it was. It's "
+                                  "read as UTF-8, as it is. Its lines outside ASCII, as they read:"
+                                  % both)
+         and both_said[-1].endswith("To have the mark added, make it writable, and make it a "
+                                    "file of its own.")),
+        ("a link in a folder that can't be written leads to a file given the mark, but not to "
+         "one rewritten from a code page, whose file as it was is kept beside the link",
+         lambda: marked_away[0][0].startswith("%s had no byte-order mark"
+                                              % os.path.join(work, "marked-away.csv"))
+         and data(os.path.join(away, "marked-away.csv")) == b"\xef\xbb\xbf" + plain_bytes
+         and "it can't be rewritten as UTF-8: its folder can't be written" in ansi_away[0][0]
+         and data(os.path.join(away, "ansi-away.csv")) == ansi_rows.encode("cp1252")),
+        ("one in a code page left as it is shows its lines in UTF-8 as read as they are",
+         lambda: readonly_kept_said[2:4] == ["  These are UTF-8, and read as they are:",
+                                             "  line 3: two.png,A blue caf\u00e9"]
+         and sidecars.text(readonly_kept) == ansi_rows + report_rows),
+        ("every reader reads a sidecar without the mark at its start, a field's line end as "
+         "written, and lines that end with a CR alone",
+         lambda: sidecars.text(marked) == "Image,Alt\r\none.png,Caf\u00e9\r\n"
+         and quoted_rows == [["Image", "Alt"], ["one.png", "A red\r\nsquare"]]
+         and cr_rows == [["Image", "Alt"], ["one.png", "Caf\u00e9"]]),
+        ("and one of ASCII alone that can't be marked is noted, nothing in it reading otherwise",
+         lambda: readonly_ascii_said == (["NOTE: %s has no byte-order mark, and can't be given one: "
+                                          "it's read-only. It holds nothing outside ASCII, which "
+                                          "reads the same either way. To have the mark added, make "
+                                          "it writable." % readonly_ascii], None)
+         and data(readonly_ascii) == ascii_bytes),
+        ("a read-only file in a code page is read in it all the same, as root too, and left as it "
+         "is; and a run that can't give a rewritten file its owner gives it its group",
+         lambda: unwritten("readonly-ansi.csv", "it's read-only", "make it writable",
+                           (readonly_ansi_said, readonly_ansi_why))
+         and calls[:2] == [person, (-1, person[1])]),
+        ("and another user's in a code page is read in it, and left to them",
+         lambda: unwritten("theirs-ansi.csv", "it belongs to another user, %s"
+                           % sidecars.owner_of(os.stat(theirs_ansi)),
+                           THEIRS % sidecars.owner_of(os.stat(theirs_ansi)),
+                           (theirs_ansi_said, theirs_ansi_why))),
+        ("the filters read a copy in UTF-8 of one in a code page left as it is, and the file "
+         "itself otherwise",
+         lambda: data(sidecars.filter_copy(readonly_ansi, work))
+         == ("\ufeff" + ansi_rows).encode("utf-8")
+         and sidecars.filter_copy(readonly_utf8, work) == readonly_utf8
+         and sidecars.filter_copy(os.path.join(work, "none.csv"), work)
+         == os.path.join(work, "none.csv")),
+        ("one that's there and can't be read is gone without, said to be, read as nothing, and "
+         "given the filters as no file, left as it is",
+         lambda: unread_said == (["WARNING: %s can't be read (Permission denied), so this run goes "
+                                  "on without it, and leaves it as it is. To use it, give the user "
+                                  "running this permission to read it." % unread], None)
+         and unread_read == ("", "") and data(unread) == ansi_rows.encode("cp1252")
+         and beside("unread.csv") == []),
+        ("a tool that can do nothing without it says the same, and what would let it read it",
+         lambda: unread_tool == "%s can't be read (Permission denied). To use it, give the user "
+         "running this permission to read it." % unread),
+        ("a disk's error stops the run, which going on would make a book without what the "
+         "sidecar holds, nothing for a person to allow",
+         lambda: faulty_said == (None, "%s can't be read (Input/output error), so the run stops "
+                                       "rather than go on without what it holds. Run it again "
+                                       "once it can be read." % faulty)
+         and faulty_tool == "%s can't be read (Input/output error)." % faulty),
+        ("and another user's is said to be theirs",
+         lambda: unread_theirs_said == (["WARNING: %s can't be read (Permission denied); it belongs "
+                                         "to %s, so this run goes on without it, and leaves it as "
+                                         "it is. To use it, give the user running this permission "
+                                         "to read it." % (unread, sidecars.owner_of(os.stat(unread)))],
+                                        None)),
+        ("a pipe is never read, which would wait for a writer, and is said not to be a file",
+         lambda: pipe_said == (["WARNING: %s isn't a file but a pipe or a device, so this run goes "
+                                "on without it, and leaves it as it is." % pipe], None)
+         and pipe_read == ("", "")),
+        ("and a link to nothing is said to be one",
+         lambda: nowhere_said == (["WARNING: %s is a link to %s, which isn't there, so this run "
+                                   "goes on without it, and leaves it as it is."
+                                   % (nowhere, os.path.join(work, "gone.csv"))], None)),
+        ("a path with nothing there is no sidecar to rewrite, and a folder is said to be one",
          lambda: sidecars.rewrite_as_utf8(os.path.join(work, "none.csv")) == ([], None)
-         and sidecars.rewrite_as_utf8(work) == ([], None)),
+         and sidecars.rewrite_as_utf8(work) == (["WARNING: %s is a folder, not a file, so this run "
+                                                 "goes on without it, and leaves it as it is."
+                                                 % work], None)),
         ("a Latin capital after a small letter, after a letter before a small one, between capitals "
          "before a small one, or after a digit before a small one is misplaced, but not in a word all "
          "in capitals",
@@ -3809,6 +4539,8 @@ GROUPS = [
     ("shortDOIs for a bare-links sidecar", check_shortdoi),
     ("the decorative marker", check_decorative_marker),
     ("sidecars Excel saved, with files appended", check_sidecar_marks),
+    ("sidecars the run can't rewrite, read by every reader", check_sidecars_left_as_they_are),
+    ("sidecars root owns, read by a run as another user", check_sidecars_another_user),
     ("a sidecar Excel saved as plain CSV", check_sidecar_code_pages),
     ("the byte-order mark on every report", check_report_marks),
     ("the PDF target's default page", check_default_page),

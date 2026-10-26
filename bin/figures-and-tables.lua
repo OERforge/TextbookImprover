@@ -107,6 +107,9 @@ local MISSING_FILE = os.getenv('TABLE_CAPTIONS_MISSING')
 -- file name, which is the noise alt="" exists to suppress, so the
 -- decorative case has to be stated rather than inferred from emptiness.
 local ALT_FILE = os.getenv('IMAGE_ALT') or 'image-alt.csv'
+-- The sidecar's name as the run names it, where ALT_FILE is a copy in
+-- UTF-8 of one the run couldn't rewrite (sidecars.filter_copy).
+local ALT_NAME = os.getenv('IMAGE_ALT_NAME') or ALT_FILE
 local ALT_MISSING_FILE = os.getenv('IMAGE_ALT_MISSING')
 -- The alt text an author gave, one row an image (its key, its page, the
 -- text, the image as the page names it), which convert.py judges by the
@@ -931,7 +934,7 @@ local function alt_for(src)
       local stem = media_stem(key)
       local existing = image_alts[stem]
       if existing ~= nil and existing ~= '' and value ~= '' and existing ~= value then
-        warn('conflicting alt text for ' .. stem .. ' in ' .. ALT_FILE
+        warn('conflicting alt text for ' .. stem .. ' in ' .. ALT_NAME
           .. ' -- two rows differing only by extension')
       end
       -- A non-empty value wins over a blank one from a duplicate row.
@@ -1149,7 +1152,7 @@ function Image(img)
       local length = char_len(replacement)
       if length > ALT_MAX_CHARS then
         warn(('alt text from %s is %d characters (limit %d): %s')
-          :format(ALT_FILE, length, ALT_MAX_CHARS, img.src))
+          :format(ALT_NAME, length, ALT_MAX_CHARS, img.src))
       end
     end
     -- Decided, so not judged again, but still alt text another image's

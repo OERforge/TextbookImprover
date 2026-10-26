@@ -438,6 +438,28 @@ def case_names(work):
     odd = split(odd_dir, [os.path.join(odd_dir, "chapter-7.filtered.json")])
     with open(os.path.join(odd_dir, "page-names.csv"), "rb") as fh:
         odd_left = fh.read()
+    # One the split can't rewrite, read-only, which a run as root leaves as
+    # it is too: read in its code page all the same and left as it is, the
+    # split saying so; but not when convert.py runs it, having said so.
+    kept_dir = os.path.join(work, "kept")
+    kept_source = prepare(kept_dir)
+    kept_path = os.path.join(kept_dir, "page-names.csv")
+    kept_bytes = ("source,parents,heading,position,name\r\n"
+                  "chapter-7,7.5 Costs in the Long Run,Choice of Production "
+                  "Technology,,technology \u2013 choice\r\n").encode("cp1252")
+    with open(kept_path, "wb") as fh:
+        fh.write(kept_bytes)
+    os.chmod(kept_path, 0o444)
+    kept = split(kept_dir, [kept_source])
+    kept_source = prepare(kept_dir)
+    checked = run(["python3", os.path.join(BIN, "split-pages.py"), "--level", "2",
+                   "--sidecar", kept_path, "--sidecar-checked",
+                   "--new", os.path.join(kept_dir, "page-names-new.csv"),
+                   "--report", os.path.join(kept_dir, "page-names-report.csv"), kept_source],
+                  kept_dir, check=False)
+    with open(kept_path, "rb") as fh:
+        kept_left = fh.read()
+    os.chmod(kept_path, 0o644)
     new_path = os.path.join(work, "page-names-new.csv")
     with open(new_path, encoding="utf-8") as fh:
         new = fh.read()
@@ -474,6 +496,15 @@ def case_names(work):
          lambda: odd.returncode != 0
          and "page-names.csv isn't UTF-8, and doesn't read as Windows-1252" in odd.stderr
          and "Traceback" not in odd.stderr and odd_left == stopping),
+        ("one it can't rewrite, read-only, is read in its code page all the same and left as it "
+         "is, the split saying so, but not when convert.py runs it, which said so already",
+         lambda: kept.returncode == 0
+         and "page-names.csv isn't UTF-8: 1 line(s) of it are read as Windows-1252" in kept.stderr
+         and "it can't be rewritten as UTF-8: it's read-only" in kept.stderr
+         and "'technology \u2013 choice' is not a usable name" in kept.stderr
+         and checked.returncode == 0 and "isn't UTF-8" not in checked.stderr
+         and "'technology \u2013 choice' is not a usable name" in checked.stderr
+         and kept_left == kept_bytes),
     ]
 
 

@@ -17,7 +17,9 @@ suggests, and records both.
 Three files share the name and do different jobs:
 
   table-headers.csv         the sidecar. Human-owned; read here, and written
-                            only to make it readable (sidecars.rewrite_as_utf8).
+                            only to make it UTF-8 with the byte-order mark
+                            (sidecars.rewrite_as_utf8), not when convert.py,
+                            which does that first, runs this.
   table-headers-new.csv     one prefilled row for every table the sidecar has
                             no row for. Written when there are any, meant to
                             be pasted into the sidecar. Removed when there
@@ -52,8 +54,9 @@ declared before anything acts on them, and what keeps a sidecar written
 against a newer version from losing work under an older one.
 
 Exit status: 0; 1 when a sidecar row matched nothing; 2 for usage, or a
-sidecar that isn't UTF-8 and can't be rewritten as UTF-8 (the one Excel's
-plain "CSV" saves, in Windows-1252 or Mac OS Roman, is rewritten first).
+sidecar that isn't UTF-8 and reads in no code page Excel saves in (the one
+Excel's plain "CSV" saves, in Windows-1252 or Mac OS Roman, is rewritten
+first, or read so where it can't be rewritten).
 
 Copyright 2026 Robert Szarka
 
@@ -110,7 +113,7 @@ def has_review_columns(path):
     if not path or not os.path.exists(path):
         return True
     rows = False
-    with open(path, newline="", encoding=sidecars.CSV_ENCODING) as handle:
+    with sidecars.opened(path) as handle:
         for raw in csv.reader(sidecars.csv_lines(handle)):
             if not raw or not raw[0].strip():
                 continue
@@ -132,7 +135,7 @@ def read_sidecar(path, warn):
     if not path or not os.path.exists(path):
         return rows
     unknown = set()
-    with open(path, newline="", encoding=sidecars.CSV_ENCODING) as handle:
+    with sidecars.opened(path) as handle:
         reader = csv.reader(sidecars.csv_lines(handle))
         for raw in reader:
             if not raw or not raw[0].strip():
@@ -484,12 +487,16 @@ def main():
     ap.add_argument("--resolved", default=None,
                     help="JSON of the value in effect per table, for the filter")
     ap.add_argument("--verbose", action="store_true")
+    # convert.py, which runs this, has made the sidecar UTF-8 already, or
+    # said why it couldn't, which this would only say again.
+    ap.add_argument("--sidecar-checked", action="store_true", help=argparse.SUPPRESS)
     args = ap.parse_args()
 
     def warn(message):
         print("table-headers: " + message, file=sys.stderr)
 
-    said, why = sidecars.rewrite_as_utf8(args.sidecar) if args.sidecar else ([], None)
+    said, why = sidecars.rewrite_as_utf8(args.sidecar) \
+        if args.sidecar and not args.sidecar_checked else ([], None)
     if why:
         warn(why)
         return 2

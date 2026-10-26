@@ -26,6 +26,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
 import csv
+import errno
+import io
 import os
 import re
 import tempfile
@@ -47,10 +49,11 @@ def is_decorative(value):
 # an en dash shows as "â€“" and a minus sign as "âˆ’"; its "CSV UTF-8"
 # writes the mark. So every CSV a run writes for a person, a report or
 # rows to adopt as a sidecar, is written in CSV_ENCODING, which puts the
-# mark first. A sidecar is read in it too, which drops the mark at the
-# file's start, and through csv_lines, which drops one at a line's start,
-# where appending a report to a sidecar, its header row and all, leaves
-# it. figures-and-tables.lua and math-repair.lua drop both as they read.
+# mark first, and every sidecar is given it (rewrite_as_utf8). A sidecar
+# is read as text reads it, which drops the mark at the file's start, and
+# through csv_lines, which drops one at a line's start, where appending a
+# report to a sidecar, its header row and all, leaves it.
+# figures-and-tables.lua and math-repair.lua drop both as they read.
 CSV_ENCODING = "utf-8-sig"
 BOM = "\ufeff"
 
@@ -247,7 +250,7 @@ def _lines(data):
     return re.findall(rb"[^\r\n]*(?:\r\n|\r|\n)|[^\r\n]+$", data)
 
 
-def read_code_page(path):
+def read_code_page(path, data=None):
     """A sidecar at path that isn't UTF-8, as Excel's plain "CSV" saves one,
     read as it was written: read as UTF-8, each of its characters outside
     ASCII was a U+FFFD on the pages, and a Python reader stopped with a
@@ -264,11 +267,12 @@ def read_code_page(path):
     line read in the code page, two of them or more, reads with a
     character misplaced in each code page, or in Mac OS Roman where
     Windows-1252 has no character for a byte, as a file saved in another
-    code page reads."""
-    if not os.path.isfile(path):
-        return None, None
-    with open(path, "rb") as fh:
-        data = fh.read()
+    code page reads. data: the file's bytes, read here when not given."""
+    if data is None:
+        if not os.path.isfile(path):
+            return None, None
+        with open(path, "rb") as fh:
+            data = fh.read()
     try:
         data.decode("utf-8")
         return None, None
@@ -341,10 +345,21 @@ def shown(line):
                    else c for c in line.lstrip(BOM).rstrip("\r\n"))
 
 
+# The extended attributes a rewritten sidecar keeps besides a person's own
+# (user.*): its access control list and its SELinux label (_owned).
+KEPT_ATTRIBUTES = ("system.posix_acl_access", "security.selinux")
+
+
 def _owned(path, like):
     """path given the owner and the mode of like, as far as this process
     may: a run as root keeps a person's sidecar theirs, and one that isn't
-    keeps its group, where it's in it, as a shared folder's people are."""
+    keeps its group, where it's in it, as a shared folder's people are.
+    And on Linux the extended attributes that say who may use it or are a
+    person's own (KEPT_ATTRIBUTES), its access control list among them, so
+    that a person given a file of a shared folder by one keeps it; not
+    those that describe its contents, as integrity measurement's do
+    (security.ima, security.evm), which the new contents would fail.
+    Python reads none on macOS or Windows."""
     status = os.stat(like)
     try:
         os.chmod(path, status.st_mode & 0o7777)
@@ -358,15 +373,173 @@ def _owned(path, like):
                 os.chown(path, -1, status.st_gid)
             except OSError:
                 pass
+    if hasattr(os, "listxattr"):
+        try:
+            names = os.listxattr(like)
+        except OSError:
+            names = []
+        for name in names:
+            if not (name.startswith("user.") or name in KEPT_ATTRIBUTES):
+                continue
+            try:
+                os.setxattr(path, name, os.getxattr(like, name))
+            except OSError:
+                pass
 
 
-def _writable(path):
-    """Whether path may be written and is meant to be: one with no write
-    bit is read-only, even to root, whom os.access lets write it."""
+def owner_of(status):
+    """The name of the user a file belongs to, or its number where the
+    system has no name for it."""
     try:
-        return os.access(path, os.W_OK) and bool(os.stat(path).st_mode & 0o222)
-    except OSError:
+        import pwd
+        return pwd.getpwuid(status.st_uid).pw_name
+    except (ImportError, KeyError):
+        return "number %d" % status.st_uid
+
+
+def _look(path):
+    """A sidecar's bytes, or what keeps the run from reading one that's
+    there: (None, None, None, False) for one that isn't, and (None, why,
+    what to do, whether it stops the run), clauses, for one it can't read.
+    The run goes on without one this user may not read, which is what to
+    do something about (Rob, 2026-10-26: "assume that users will be sloppy
+    about permissions but files in the directory are there for a
+    reason"), and without a link to nothing, a folder, and something other
+    than a file, as a pipe is, which reading would wait on. Any other error
+    reading it, a disk's, or a network share's gone stale, stops the run,
+    which would otherwise make a book without what the sidecar holds, as
+    it did before."""
+    if not path or not os.path.lexists(path):
+        return None, None, None, False
+    if not os.path.exists(path):
+        try:
+            return None, "is a link to %s, which isn't there" % os.readlink(path), None, False
+        except OSError:
+            return None, "is a link that leads nowhere", None, False
+    if os.path.isdir(path):
+        return None, "is a folder, not a file", None, False
+    if not os.path.isfile(path):
+        return None, "isn't a file but a pipe or a device", None, False
+    try:
+        with open(path, "rb") as fh:
+            return fh.read(), None, None, False
+    except OSError as exc:
+        why = "can't be read (%s)" % (exc.strerror or exc)
+        if exc.errno not in (errno.EACCES, errno.EPERM):
+            return None, why, None, True
+        try:
+            status = os.stat(path)
+            if hasattr(os, "geteuid") and os.geteuid() != status.st_uid:
+                why += "; it belongs to %s" % owner_of(status)
+        except OSError:
+            pass
+        return None, why, "give the user running this permission to read it", False
+
+
+def _read(path):
+    """A sidecar's bytes, and what keeps the run from reading one that's
+    there (_look): (None, None) for one that isn't."""
+    return _look(path)[:2]
+
+
+def unreadable(path):
+    """What to say of a sidecar at path that's there but can't be read, to
+    a tool that can do nothing without it; None for one that can be, or
+    isn't there."""
+    _, why, remedy, _ = _look(path)
+    if not why:
+        return None
+    return "%s %s.%s" % (path, why, " To use it, %s." % remedy if remedy else "")
+
+
+def _unread(path, why, remedy):
+    """What a run says of a sidecar that's there and can't be read."""
+    return ("WARNING: %s %s, so this run goes on without it, and leaves it as it is.%s"
+            % (path, why, " To use it, %s." % remedy if remedy else ""))
+
+
+def _kept(path, beside=False):
+    """Why the run leaves a sidecar at path as it is rather than rewriting
+    it, each a clause and what would let a run rewrite it; none for one it
+    may. Another user's, whose owner a run that isn't root can't keep, is
+    read and left to its owner, that alone said of it (Rob, 2026-10-26:
+    "If there are files owned by other users but in the correct directory
+    and readable by us, then we should use them (with an appropriate
+    warning)"). Of one's own: one with no write bit is read-only, even to
+    root, whom os.access lets write it, and one this user may not write
+    otherwise is said to be that; one with another link to it
+    would be parted from it by the rewrite, a new file moved into its
+    place; and one whose folder this user can't write has nowhere for the
+    new file, nor, for one whose file as it was is kept beside it (beside,
+    _keep), a link's folder for that."""
+    try:
+        status = os.stat(path)
+    except OSError as exc:      # gone since it was read
+        return [_failed(exc)]
+    if read_only_disk(path):
+        return [("the disk it's on is mounted read-only", "copy the book to a disk that can be "
+                 "written")]
+    folders = {os.path.dirname(os.path.realpath(path))}
+    if beside:
+        folders.add(os.path.dirname(os.path.abspath(path)))
+    folder = [] if all(os.access(f, os.W_OK) for f in folders) else [
+        ("its folder can't be written", "make its folder writable")]
+    # Another user's is left to its owner whatever else is so of it, but
+    # its folder: one of one's own in its place, its mode kept for a shared
+    # folder's people (cp -p), is the run's to rewrite. Having the owner, or
+    # root, run the conversion instead would make the book's outputs theirs.
+    if hasattr(os, "geteuid") and os.geteuid() not in (0, status.st_uid):
+        owner = owner_of(status)
+        return [("it belongs to another user, %s" % owner,
+                 "replace it with a copy of your own made with cp -p, which keeps its mode, or ask "
+                 "%s to save it as UTF-8 with the mark" % owner)] + folder
+    why = []
+    if not status.st_mode & 0o222:
+        why.append(("it's read-only", "make it writable"))
+    elif not os.access(path, os.W_OK):
+        if hasattr(os, "geteuid") and os.geteuid() == 0:
+            why.append(("it can't be written, though it has a write bit (marked immutable, say)",
+                        "make it writable"))
+        else:
+            why.append(("this user may not write it", "give the user running this permission to "
+                        "write it"))
+    if status.st_nlink > 1:
+        why.append(("another name links to it, which a rewrite would leave as it was",
+                    "make it a file of its own"))
+    return why + folder
+
+
+def read_only_disk(path):
+    """Whether the disk path is on is mounted read-only, which nothing on it
+    can be written past; never so where the system won't say (Windows)."""
+    try:
+        return bool(os.statvfs(path).f_flag & getattr(os, "ST_RDONLY", 1))
+    except (AttributeError, OSError):
         return False
+
+
+def _failed(exc):
+    """A rewrite that failed, as a reason _kept gives one, what to do by
+    what failed. On Windows a sharing or lock violation (32, 33) is a file
+    another program has open; but replacing a file another program has open
+    is "access denied" (5), as Git for Windows and LLVM have found, so that
+    is either (not tried here). Elsewhere one a user may not write is
+    EACCES or EPERM; anything else, a disk full, is said as it is."""
+    why = "it couldn't be written (%s)" % (exc.strerror or exc)
+    winerror = getattr(exc, "winerror", None)
+    if winerror in (32, 33):
+        return why, "close the program that has it open"
+    if winerror == 5:
+        return why, ("close any program that has it open, or give the user running this "
+                     "permission to write it and its folder")
+    if getattr(exc, "errno", None) in (errno.EACCES, errno.EPERM):
+        return why, "give the user running this permission to write it and its folder"
+    return why, "put right what kept it from being written"
+
+
+def _because(why):
+    """_kept's reasons as one clause, and what to do as another."""
+    return "; ".join(w[0] for w in why), ", and ".join(w[1] for w in why)
 
 
 def _replace(path, text):
@@ -380,6 +553,8 @@ def _replace(path, text):
     try:
         with os.fdopen(handle, "w", encoding="utf-8", newline="") as fh:
             fh.write(text)
+            fh.flush()
+            os.fsync(fh.fileno())
         _owned(temporary, real)
         os.replace(temporary, real)
     except BaseException:
@@ -405,6 +580,8 @@ def _keep(path, suffix, data):
         try:
             with fh:
                 fh.write(data)
+                fh.flush()
+                os.fsync(fh.fileno())
             _owned(kept, path)
         except BaseException:
             os.remove(kept)
@@ -412,102 +589,198 @@ def _keep(path, suffix, data):
         return kept
 
 
-def _mark(path, limit=10):
-    """A sidecar at path that's UTF-8 without a byte-order mark, and holds a
-    character outside ASCII, given the mark, which Excel needs to open it
-    as UTF-8: without it Excel reads the file in the computer's code page,
-    "é" as "Ã©", and saved again from Excel that's the sidecar's text.
-    Nothing else in it changes. Returns the lines to say: what was done,
-    and the first limit of its lines outside ASCII as they read, since one
-    Excel saved in a code page can happen to read as UTF-8 ("Gauß’s" in
-    Windows-1252 as "Gauߒs"), which the mark makes Excel show too; or none
-    for a file that has the mark, holds only ASCII, which Excel reads the
-    same either way, or isn't a file, and for one left as it is because it
-    reads the same either way: read-only, another user's, whose owner a
-    run that isn't root can't keep, linked from elsewhere, or one that
-    can't be written, as another program holds one on Windows, or that
-    changed since it was read."""
-    if not os.path.isfile(path):
-        return []
-    with open(path, "rb") as fh:
-        data = fh.read()
-    if data.isascii() or data.startswith(BOM.encode("utf-8")) or not _writable(path):
-        return []
-    status = os.stat(path)
-    if status.st_nlink > 1 or (hasattr(os, "geteuid") and os.geteuid() not in (0, status.st_uid)):
-        return []
-    try:
-        text = data.decode("utf-8")
-        _replace(path, BOM + text)
-    except (OSError, UnicodeDecodeError):
+def _mark(path, data, limit=10):
+    """A sidecar at path, its bytes data, UTF-8 without a byte-order mark,
+    given the mark, which Excel needs to open it as UTF-8: without it Excel
+    reads the file in the computer's code page, "é" as "Ã©", and saved
+    again from Excel that's the sidecar's text. One of ASCII alone, or
+    empty, which reads the same either way, is given it too, so that every
+    sidecar is UTF-8 as Excel's "CSV UTF-8" writes it, and a script reading
+    one as plain UTF-8 finds the mark in every one at once, not in one that
+    comes to hold a character outside ASCII later (Rob, 2026-10-26: "Let's
+    break everything now, not later"). Nothing else in it changes. Returns
+    the lines to say: what was done, and for one that holds characters
+    outside ASCII the first limit of its lines that do, as they read, since
+    one Excel saved in a code page can happen to read as UTF-8 ("Gauß’s" in
+    Windows-1252 as "Gauߒs"), which the mark makes Excel show too; or, for
+    one left as it is (_kept), or that couldn't be written, why, it being
+    read as UTF-8 all the same; none for one that has the mark."""
+    if data.startswith(BOM.encode("utf-8")):
         return []
     odd = [(index, piece.decode("utf-8")) for index, piece in enumerate(_lines(data))
            if not piece.isascii()]
-    said = ["%s had no byte-order mark, which Excel needs to open it as UTF-8: one is added, and "
-            "nothing else in it changes. Its lines outside ASCII, as they read:" % path]
-    said += ["  line %d: %s" % (index + 1, shown(line)) for index, line in odd[:limit]]
+    why = _kept(path)
+    if not why:
+        try:
+            _replace(path, BOM + data.decode("utf-8"))
+        except OSError as exc:
+            why = [_failed(exc)]
+    lines = ["  line %d: %s" % (index + 1, shown(line)) for index, line in odd[:limit]]
     if len(odd) > limit:
-        said.append("  and %d more" % (len(odd) - limit))
-    said.append("  A character there that isn't the one written means Excel saved the file in a "
-                "code page whose bytes happen to read as UTF-8: put it right in Excel, which opens "
-                "the file as UTF-8 from now on.")
-    return said
-
-
-def rewrite_as_utf8(path, limit=10):
-    """A sidecar at path that isn't UTF-8, as Excel's plain "CSV" saves one,
-    rewritten as UTF-8, as read_code_page reads it, so that it's read as it
-    was written. The file as it was is kept beside it (_keep), and the
-    file is written as Excel's "CSV UTF-8" writes one, a byte-order mark
-    first, its lines' ends as they were; and one that's UTF-8 without the
-    mark, holding a character outside ASCII, given it (_mark). Returns
-    (lines to say, None): none for a sidecar that's UTF-8 with the mark
-    already, or that _mark leaves as it is, or isn't a file; _mark's for
-    one given the mark; and for one rewritten, what was done, showing, as
-    now read, the first limit of the lines read in the code page, and of
-    those kept as UTF-8. Or (None, what to stop with), when it can't be
-    read so or can't be written, a file that can't be written left as it
-    was, with no copy beside it."""
-    reading, why = read_code_page(path)
+        lines.append("  and %d more" % (len(odd) - limit))
     if why:
-        return None, why
-    if reading is None:
-        return _mark(path, limit), None
+        reasons, remedy = _because(why)
+        if not odd:
+            return ["NOTE: %s has no byte-order mark, and can't be given one: %s. It holds "
+                    "nothing outside ASCII, which reads the same either way. To have the mark "
+                    "added, %s." % (path, reasons, remedy)]
+        return (["WARNING: %s has no byte-order mark, which Excel needs to open it as UTF-8, "
+                 "and can't be given one: %s. It's read as UTF-8, as it is. Its lines outside "
+                 "ASCII, as they read:" % (path, reasons)]
+                + lines
+                + ["  A character there that isn't the one written means Excel saved the file "
+                   "in a code page whose bytes happen to read as UTF-8. To have the mark added, "
+                   "%s." % remedy])
+    if not odd:
+        return ["%s had no byte-order mark: one is added, as Excel's \"CSV UTF-8\" writes one, "
+                "and nothing else in it changes." % path]
+    return (["%s had no byte-order mark, which Excel needs to open it as UTF-8: one is added, "
+             "and nothing else in it changes. Its lines outside ASCII, as they read:" % path]
+            + lines
+            + ["  A character there that isn't the one written means Excel saved the file in a "
+               "code page whose bytes happen to read as UTF-8: put it right in Excel, which "
+               "opens the file as UTF-8 from now on."])
+
+
+def _rewrite(path, data, reading, limit=10):
+    """A sidecar at path, its bytes data, that isn't UTF-8, as Excel's
+    plain "CSV" saves one, rewritten as UTF-8, as read_code_page reads it
+    (reading), so that it's read as it was written: the file as it was
+    kept beside it (_keep), and the file written as Excel's "CSV UTF-8"
+    writes one, a byte-order mark first, its lines' ends as they were. One
+    left as it is (_kept), or that couldn't be written, is read so all the
+    same, by every reader (text), and left as it was, with no copy beside
+    it. Returns the lines to say: what was done, or why it wasn't, showing,
+    as read, the first limit of the lines read in the code page, and of
+    those kept as UTF-8 that hold a character outside ASCII."""
     decoded, (_, name, suffix, saved), lines, kept_lines = reading
-    text = "".join(decoded)
-    if not _writable(path):
-        return None, "%s isn't UTF-8, and can't be rewritten as UTF-8: it's read-only. %s" % (
-            path, SAVE_AS_UTF8)
-    with open(path, "rb") as fh:
-        data = fh.read()
-    kept = None
-    try:
-        kept = _keep(path, suffix, data)
-        _replace(path, ("" if text.startswith(BOM) else BOM) + text)
-    except OSError as exc:
-        if kept:
-            try:
-                os.remove(kept)
-            except OSError:
-                pass
-        return None, ("%s isn't UTF-8, and couldn't be rewritten as UTF-8 (%s), so it's left as "
-                      "it was, with no copy beside it. If a program has it open, close it and run "
-                      "again; or %s" % (path, exc, SAVE_AS_UTF8[0].lower() + SAVE_AS_UTF8[1:]))
-    said = ["WARNING: %s wasn't UTF-8: %d line(s) of it are read as %s, %s, and the file is "
-            "rewritten as UTF-8, as \"CSV UTF-8 (Comma delimited)\" saves one. The file as it was "
-            "is %s. As now read:" % (path, len(lines), name, saved, kept)]
+    content = "".join(decoded)
+    why, kept = _kept(path, beside=True), None
+    if not why:
+        try:
+            kept = _keep(path, suffix, data)
+            _replace(path, ("" if content.startswith(BOM) else BOM) + content)
+        except OSError as exc:
+            if kept:
+                try:
+                    os.remove(kept)
+                except OSError:
+                    pass
+            why = [_failed(exc)]
+    if why:
+        reasons, remedy = _because(why)
+        said = ["WARNING: %s isn't UTF-8: %d line(s) of it are read as %s, %s, but it can't be "
+                "rewritten as UTF-8: %s. This run reads it so, and leaves it as it is. As read:"
+                % (path, len(lines), name, saved, reasons)]
+    else:
+        said = ["WARNING: %s wasn't UTF-8: %d line(s) of it are read as %s, %s, and the file is "
+                "rewritten as UTF-8, as \"CSV UTF-8 (Comma delimited)\" saves one. The file as it "
+                "was is %s. As now read:" % (path, len(lines), name, saved, kept)]
     said += ["  line %d: %s" % (index + 1, shown(decoded[index])) for index in lines[:limit]]
     if len(lines) > limit:
         said.append("  and %d more" % (len(lines) - limit))
     if kept_lines:
-        said.append("  These were UTF-8, and are kept as they were:")
+        said.append("  These are UTF-8, and read as they are:" if why
+                    else "  These were UTF-8, and are kept as they were:")
         said += ["  line %d: %s" % (index + 1, shown(decoded[index])) for index in kept_lines[:limit]]
         if len(kept_lines) > limit:
             said.append("  and %d more" % (len(kept_lines) - limit))
-    said.append("  A character there that isn't the one written means the file was saved in "
-                "another code page: put %s back in its place, and save it from Excel as "
-                "\"CSV UTF-8 (Comma delimited)\", as any sidecar can be from now on." % kept)
-    return said, None
+    if why:
+        said.append("  A character there that isn't the one written means the file was saved in "
+                    "another code page: save it from Excel as \"CSV UTF-8 (Comma delimited)\". To "
+                    "have the run rewrite it, %s." % remedy)
+    else:
+        said.append("  A character there that isn't the one written means the file was saved in "
+                    "another code page: put %s back in its place, and save it from Excel as "
+                    "\"CSV UTF-8 (Comma delimited)\", as any sidecar can be from now on." % kept)
+    return said
+
+
+def rewrite_as_utf8(path, limit=10):
+    """A sidecar at path made UTF-8 with the byte-order mark, as Excel's
+    "CSV UTF-8" writes one, and every reader reads one (text), whatever it
+    holds (Rob, 2026-10-26: "upgrade all sidecars to UTF-8 and read UTF-8
+    for all of them"): one that isn't UTF-8, as Excel's plain "CSV" saves
+    one, rewritten as UTF-8 (_rewrite), and one that's UTF-8 without the
+    mark given it (_mark). One the run may not rewrite (_kept), or fails
+    to, is left as it is and read all the same, the run saying why; one
+    that's there and can't be read is left as it is and gone without, the
+    run saying so (_look). Returns (lines to say, None): none for a sidecar
+    that's UTF-8 with the mark already, or isn't there; or (None, what to
+    stop with), for one that reads in no code page (read_code_page), or
+    that can't be read for another reason than permission, a disk's error,
+    left as it was."""
+    data, why, remedy, stops = _look(path)
+    if stops:
+        return None, ("%s %s, so the run stops rather than go on without what it holds. Run it "
+                      "again once it can be read." % (path, why))
+    if why:
+        return [_unread(path, why, remedy)], None
+    if data is None:
+        return [], None
+    reading, stop = read_code_page(path, data)
+    if stop:
+        return None, stop
+    if reading is None:
+        return _mark(path, data, limit), None
+    return _rewrite(path, data, reading, limit), None
+
+
+def keep_beside(path, suffix):
+    """The sidecar at path kept beside it as it is, under suffix after its
+    name, or .2 and on after that when the name's taken, never over a file
+    kept before (_keep), for a tool that writes a sidecar in its place
+    (util/shortdoi.py); the kept file's name."""
+    with open(path, "rb") as fh:
+        data = fh.read()
+    return _keep(path, suffix, data)
+
+
+def text(path):
+    """A sidecar's text, as every reader reads one: UTF-8, the mark at its
+    start dropped; one Excel saved in a code page, which the run couldn't
+    rewrite, read as rewrite_as_utf8 reads it (read_code_page); and nothing
+    for one that isn't there or can't be read, which rewrite_as_utf8 tells
+    of. One that reads in no code page, which stops a run before anything
+    reads it, reads with U+FFFD for each byte that isn't UTF-8."""
+    data, _ = _read(path)
+    if not data:
+        return ""
+    try:
+        read = data.decode("utf-8")
+    except UnicodeDecodeError:
+        reading, _ = read_code_page(path, data)
+        read = "".join(reading[0]) if reading else data.decode("utf-8", "replace")
+    return read[1:] if read.startswith(BOM) else read
+
+
+def opened(path):
+    """A sidecar's text (text) as a file to read, for csv.reader through
+    csv_lines or dict_rows: every sidecar is read so, not with open."""
+    return io.StringIO(text(path), newline="")
+
+
+def filter_copy(path, folder):
+    """Where a reader that takes a sidecar's bytes for UTF-8, as the filters
+    do, is to read it: path itself; a copy in folder, UTF-8 with the mark,
+    of its text (text), for one in a code page the run couldn't rewrite;
+    and "", which names no file, for one that can't be read, as a pipe,
+    which a reader would wait on."""
+    data, why = _read(path)
+    if why:
+        return ""
+    if not data:
+        return path
+    try:
+        data.decode("utf-8")
+        return path
+    except UnicodeDecodeError:
+        pass
+    handle, copy = tempfile.mkstemp(prefix="sidecar-", suffix="-" + os.path.basename(path),
+                                    dir=folder)
+    with os.fdopen(handle, "w", encoding=CSV_ENCODING, newline="") as fh:
+        fh.write(text(path))
+    return copy
 
 
 # The schemes a bare link's Replacement can be an address in, as the
@@ -536,7 +809,7 @@ def math_keep_rows(path):
     report again and again carries one along each time."""
     rows = []
     if path and os.path.exists(path):
-        with open(path, encoding=CSV_ENCODING, newline="") as fh:
+        with opened(path) as fh:
             for row in csv.reader(csv_lines(fh)):
                 if row and row[0].strip().lower() == "kind":
                     continue

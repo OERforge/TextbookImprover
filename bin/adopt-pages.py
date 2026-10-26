@@ -60,6 +60,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(HERE), "lib"))
 try:
     import yaml
+    import sidecars
     from bookcontents import (guess_contents, walk_contents,
                               contents_from_tree, expand_split_sources,
                               page_title, page_provenance, page_role)
@@ -204,6 +205,10 @@ def main():
                                   allow_unicode=True, width=1000))
     for name in SIDECARS:
         if os.path.isfile(os.path.join(book, name)):
+            unread = sidecars.unreadable(os.path.join(book, name))
+            if unread:
+                problems.append(f"{name} isn't copied: {unread}")
+                continue
             shutil.copy2(os.path.join(book, name), os.path.join(out, name))
     for problem in problems:
         print(f"WARNING: {problem}", file=sys.stderr)

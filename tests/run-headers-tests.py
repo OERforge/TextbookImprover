@@ -276,8 +276,9 @@ def checks(workdir):
     yield "the resolved file carries the value in effect", \
         entries[""]["headers"] == "first-row" if "" in entries else False, ""
 
-    # A stale key is warned about and set aside; the run goes on.
-    with open(os.path.join(workdir, "table-headers.csv"), encoding="utf-8") as h:
+    # A stale key is warned about and set aside; the run goes on. The run
+    # gives every sidecar the byte-order mark, so it's read as utf-8-sig.
+    with open(os.path.join(workdir, "table-headers.csv"), encoding="utf-8-sig") as h:
         before = [r for r in csv.DictReader(h)]
     with open(os.path.join(workdir, "table-headers.csv"), "a", newline="", encoding="utf-8") as h:
         csv.writer(h).writerow(["0" * 64, "both", "", "", "", "gone.docx", "Table 9.9", "not here"])
@@ -343,7 +344,7 @@ def checks(workdir):
         w.writerow([fresh[0][c] for c in columns])
         w.writerow([changed.get(fresh[1]["headers"], "first-row") if c == "headers" else fresh[1][c]
                     for c in columns])
-    with open(os.path.join(old, "table-headers.csv"), encoding="utf-8") as h:
+    with open(os.path.join(old, "table-headers.csv"), encoding="utf-8-sig") as h:
         before = h.read()
     code, err = run(old)
     sample = read(old, "table-headers-sample.csv") or []
@@ -355,9 +356,10 @@ def checks(workdir):
         by_key.get(fresh[0]["key"], {}).get("drafted-by") == "TI" \
         and by_key.get(fresh[1]["key"], {}).get("drafted-by") == "" \
         and all(r["reviewed"] == "" for r in sample), sample
-    with open(os.path.join(old, "table-headers.csv"), encoding="utf-8") as h:
+    with open(os.path.join(old, "table-headers.csv"), encoding="utf-8-sig") as h:
         after = h.read()
-    yield "and the sidecar itself is left as it was", before == after, ""
+    yield "and the sidecar itself is left as it was, but for the mark every sidecar is given", \
+        before == after, ""
     shutil.move(os.path.join(old, "table-headers-sample.csv"), os.path.join(old, "table-headers.csv"))
     code, err = run(old)
     yield "adopting the sample brings no sample back", \

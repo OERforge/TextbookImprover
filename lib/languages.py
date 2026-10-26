@@ -450,7 +450,7 @@ def read_rows(path):
     rows, problems = collections.OrderedDict(), []
     if not path or not os.path.exists(path):
         return rows, problems
-    with open(path, encoding=sidecars.CSV_ENCODING, newline="") as fh:
+    with sidecars.opened(path) as fh:
         for row in csv.reader(sidecars.csv_lines(fh)):
             if not row or not row[0].strip() or row[0].strip().lower() == "source":
                 continue

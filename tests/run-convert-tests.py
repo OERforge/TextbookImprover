@@ -6039,7 +6039,12 @@ def case_excel_sidecars(work):
     or Excel for Mac's, where its characters were U+FFFD on the pages and
     the run stopped later with a traceback; one that reads in neither
     stops the run. One in UTF-8 without the mark, as a text editor saves
-    one, is given the mark, which Excel needs to open it as UTF-8."""
+    one, is given the mark, which Excel needs to open it as UTF-8, and so
+    is one of ASCII alone, so that every sidecar has it. One the run can't
+    rewrite, read-only here, which a run as root leaves as it is too, is
+    read in its code page all the same, the filter reading a copy in UTF-8,
+    where it had stopped the run; and a pipe where a sidecar would be is
+    gone without, and never opened, which would wait for a writer."""
     import io
     os.makedirs(work)
     solid_png(os.path.join(work, "one.png"), 4, 4, (255, 0, 0))
@@ -6101,6 +6106,7 @@ def case_excel_sidecars(work):
     sidecar("bare-links.csv", "bare-links-new.csv",
             lambda r: [r[0], "", "A page to read", r[3], r[4], "claude", ""])
     said = run()
+    said_reports = reports()
     page = read(work, "html", "page.html") if exists(work, "html", "page.html") else ""
     tables = read(work, "html", "tables.html") if exists(work, "html", "tables.html") else ""
     # As Excel's plain "CSV" saves the sidecar in the US: Windows-1252.
@@ -6140,6 +6146,57 @@ def case_excel_sidecars(work):
         if exists(work, "html", "page.html") else None
     stopped = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
                              cwd=work, capture_output=True, text=True, stdin=subprocess.DEVNULL)
+    stopped_built = os.path.getmtime(os.path.join(work, "html", "page.html")) \
+        if exists(work, "html", "page.html") else None
+    # Every sidecar is given the mark, one of ASCII alone too, which Excel
+    # reads the same either way, whether the run reads it or not.
+    ascii_titles = b"Slide,Title\ndeck/slide-256,One\n"
+    with open(os.path.join(work, "slide-titles.csv"), "wb") as fh:
+        fh.write(ascii_titles)
+    # Sidecars the run can't rewrite, read-only here, which a run as root
+    # leaves as they are too, each as Excel's plain "CSV" saves it, in
+    # Windows-1252: read in it all the same, the filter reading a copy in
+    # UTF-8, and left as they are. And a pipe where a sidecar would be,
+    # which reading would wait on: gone without, said to be.
+    # The table-headers sidecar as the run left it, its preview of a table
+    # given a dash; and an alt text longer than the filter's limit, which
+    # the filter's warning names image-alt.csv for, not the copy it reads.
+    headers_rows = [[c.lstrip("\ufeff") for c in row] for row in rows("table-headers.csv")]
+    preview = headers_rows[0].index("preview")
+    headers_rows[1][preview] += " \u2013 a table"
+    long_alt = "A red square " + "\u2013 red " * 20
+    kept = {"image-alt.csv": "Image,Alt\r\none.png,%s\r\n"
+                             "two.png,A blue square \u2013 smaller\r\n" % long_alt,
+            "table-headers.csv": "".join(map(line, headers_rows)),
+            "table-captions.csv": "Label,Description\r\npage#table-1,Described \u2013 page\r\n",
+            "bare-links.csv": "URL,Replacement,Title\r\nhttps://example.org/a-page,,Read \u2013 "
+                              "a page\r\nhttps://example.org/another,,Read \u2013 a page\r\n"}
+    for name, content in kept.items():
+        os.chmod(os.path.join(work, name), 0o644)
+        with open(os.path.join(work, name), "w", encoding="cp1252", newline="") as fh:
+            fh.write(content)
+        os.chmod(os.path.join(work, name), 0o444)
+    os.mkfifo(os.path.join(work, "languages.csv"))
+    # And a link to a file that isn't there, which the run goes on without.
+    os.symlink(os.path.join(work, "gone.csv"), os.path.join(work, "reading-order.csv"))
+    kept_before = {name: open(os.path.join(work, name), "rb").read() for name in kept}
+
+    def beside_them():
+        return sorted(n for n in os.listdir(work)
+                      if any(n.lstrip(".").startswith(name) and n != name for name in kept))
+    beside_kept = beside_them()
+    left = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
+                          cwd=work, capture_output=True, text=True, stdin=subprocess.DEVNULL,
+                          timeout=1200)
+    left_page = read(work, "html", "page.html") if exists(work, "html", "page.html") else ""
+    kept_after = {name: open(os.path.join(work, name), "rb").read() for name in kept}
+    beside_left = beside_them()
+    with open(os.path.join(work, "slide-titles.csv"), "rb") as fh:
+        titles_now = fh.read()
+    for name in kept:
+        os.chmod(os.path.join(work, name), 0o644)
+    os.remove(os.path.join(work, "languages.csv"))
+    os.remove(os.path.join(work, "reading-order.csv"))
     return [
         ("every report starts with one byte-order mark",
          lambda: {"image-alt-missing.csv", "table-captions-missing.csv", "table-headers-new.csv",
@@ -6159,7 +6216,7 @@ def case_excel_sidecars(work):
          lambda: "9 value(s) in the sidecars were drafted" in said
          and "image-alt.csv 2, table-captions.csv 3, table-headers.csv 2, bare-links.csv 2" in said
          and not {"image-alt-missing.csv", "table-captions-missing.csv", "table-headers-new.csv",
-                  "bare-links-new.csv"} & set(reports())),
+                  "bare-links-new.csv"} & set(said_reports)),
         ("a sidecar Excel saved as plain CSV, in Windows-1252, is rewritten as UTF-8 before "
          "anything is converted, the file as it was kept beside it, and read as written",
          lambda: rewritten.returncode == 0 and "Traceback" not in rewritten.stderr
@@ -6187,8 +6244,70 @@ def case_excel_sidecars(work):
          and "image-alt.csv isn't UTF-8, and doesn't read as Windows-1252 (line 3 has byte 0x81"
          in stopped.stdout + stopped.stderr
          and "CSV UTF-8 (Comma delimited)" in stopped.stdout + stopped.stderr
-         and built is not None
-         and os.path.getmtime(os.path.join(work, "html", "page.html")) == built),
+         and built is not None and stopped_built == built),
+        ("one the run can't rewrite, read-only here, is read in its code page all the same, the "
+         "run saying so and why, the filter reading it too, and left as it is, nothing beside it",
+         lambda: left.returncode == 0 and "Traceback" not in left.stderr
+         and all("%s isn't UTF-8: %d line(s) of it are read as Windows-1252" % (name, n)
+                 in left.stdout + left.stderr for name, n in
+                 (("image-alt.csv", 2), ("table-captions.csv", 1), ("bare-links.csv", 2),
+                  ("table-headers.csv", 1)))
+         and (left.stdout + left.stderr).count("but it can't be rewritten as UTF-8: it's "
+                                               "read-only") == 4
+         and 'alt="A blue square &#x2013; smaller"' in left_page
+         and "Described &#x2013; page" in left_page
+         and left_page.count('title="Read &#x2013; a page"') == 2
+         and kept_after == kept_before and beside_left == beside_kept),
+        ("the table-headers pre-pass, which convert.py runs, doesn't say so again, and the "
+         "filter names image-alt.csv where it warns of an alt text, not the copy it read",
+         lambda: "table-headers: " not in "".join(
+             l for l in (left.stdout + left.stderr).split("\n") if "UTF-8" in l)
+         and re.search(r"alt text from \S*image-alt\.csv is \d+ characters",
+                       left.stdout + left.stderr) is not None
+         and "sidecar-" not in left.stdout + left.stderr),
+        ("a pipe where a sidecar would be is gone without, said to be, and never read",
+         lambda: "languages.csv isn't a file but a pipe or a device, so this run goes on "
+         "without it" in left.stdout + left.stderr),
+        ("and so is a link to a file that isn't there",
+         lambda: "reading-order.csv is a link to %s, which isn't there, so this run goes on "
+         "without it" % os.path.join(work, "gone.csv") in left.stdout + left.stderr),
+        ("and one of ASCII alone is given the mark too, the run saying so",
+         lambda: "slide-titles.csv had no byte-order mark: one is added" in left.stdout + left.stderr
+         and titles_now == b"\xef\xbb\xbf" + ascii_titles),
+    ]
+
+
+def case_sidecar_said_once(work):
+    """A sidecar the run can't rewrite as UTF-8, read-only here, which a run
+    as root leaves as it is too, is read as written by every part that
+    reads it, and said so once: split-pages.py, which convert.py runs, and
+    reads page-names.csv too, doesn't say again what convert.py said
+    (--sidecar-checked)."""
+    os.makedirs(work)
+    with open(os.path.join(work, "econ.md"), "w", encoding="utf-8") as fh:
+        fh.write("# Economics\n\nOpening.\n\n## Caf\u00e9 Economics\n\nText.\n\n"
+                 "## Costs\n\nMore text.\n")
+    names = os.path.join(work, "page-names.csv")
+    names_bytes = ("source,parents,heading,position,name\r\n"
+                   "econ,,Caf\u00e9 Economics,,cafe-econ\r\n").encode("cp1252")
+    with open(names, "wb") as fh:
+        fh.write(names_bytes)
+    os.chmod(names, 0o444)
+    result = convert(work, "defaults:\n  pages:\n    split_level: 2\n"
+                           "targets:\n  html:\n    format: html\n", fixtures=())
+    with open(names, "rb") as fh:
+        left = fh.read()
+    os.chmod(names, 0o644)
+    said = result.stdout + result.stderr
+    return [
+        ("the split names the piece as the sidecar does, read in its code page, and the "
+         "sidecar is left as it is",
+         lambda: result.returncode == 0 and exists(work, "html", "cafe-econ.html")
+         and left == names_bytes),
+        ("and the run says so once",
+         lambda: said.count("page-names.csv isn't UTF-8: 1 line(s) of it are read as "
+                            "Windows-1252") == 1
+         and "it can't be rewritten as UTF-8: it's read-only" in said),
     ]
 
 
@@ -7718,6 +7837,7 @@ CASES = [
     ("a page's title heading, and the title page", case_title_heading),
     ("who drafted a sidecar value, and whether it's reviewed", case_review_columns),
     ("reports and sidecars as Excel opens and saves them", case_excel_sidecars),
+    ("a sidecar the run can't rewrite, said once", case_sidecar_said_once),
     ("a page's language, decided once for every target", case_page_languages),
     ("a contents listing and a moved note in a page's language", case_listed_languages),
     ("a merged file of pages in two languages", case_merged_languages),

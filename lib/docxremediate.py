@@ -276,7 +276,7 @@ def alt_rows(path):
     found = {}
     if not path or not os.path.exists(path):
         return found
-    with open(path, encoding=sidecars.CSV_ENCODING, newline="") as fh:
+    with sidecars.opened(path) as fh:
         for row in sidecars.dict_rows(fh):
             image, alt = (row.get("Image") or "").strip(), (row.get("Alt") or "").strip()
             parts = image.split("/")
@@ -292,7 +292,7 @@ def link_titles(path):
     found = {}
     if not path or not os.path.exists(path):
         return found
-    with open(path, encoding=sidecars.CSV_ENCODING, newline="") as fh:
+    with sidecars.opened(path) as fh:
         for row in sidecars.dict_rows(fh):
             if (row.get("URL") or "").strip() and (row.get("Title") or "").strip():
                 found[row["URL"].strip()] = row["Title"].strip()

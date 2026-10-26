@@ -39,7 +39,8 @@ checks and the copy, and keeps:
 - equations, Office math, through Pandoc's Word reader: PowerPoint keeps
   them in the same OMML a Word file does, so each deck's go into one stub
   Word file, a paragraph each, and come back as TeX, a display equation
-  (m:oMathPara) as display math;
+  (m:oMathPara) as display math, each of a display paragraph's equations
+  a display of its own;
 - speaker notes, as a ::: notes div after the slide's content, read as
   the slide's text is, a list's bullets inherited from the notes master;
 - the title slide, the first slide when its title is a ctrTitle
@@ -559,11 +560,22 @@ class Reader:
                 out.append(("br", None, (), self.link_of(click)))
             elif tag == q("a14:m"):
                 # An equation, in a shape PowerPoint wraps in
-                # mc:AlternateContent, whose Choice pptxparse reads.
+                # mc:AlternateContent, whose Choice pptxparse reads. A
+                # display paragraph's equations are each a display of its
+                # own: Pandoc's Word reader reads a paragraph of two as one
+                # formula, the two run together ({a = 1}{b = 2}), where
+                # the deck holds two equations, which the copy repairs, and
+                # its report names, each on its own.
                 for math in child:
-                    if math.tag in (q("m:oMathPara"), q("m:oMath")):
-                        self.equations.append((math, math.tag == q("m:oMathPara"),
-                                               self.where()))
+                    if math.tag == q("m:oMathPara"):
+                        found = [(m, True) for m in math if m.tag == q("m:oMath")] \
+                            or [(math, True)]
+                    elif math.tag == q("m:oMath"):
+                        found = [(math, False)]
+                    else:
+                        continue
+                    for element, display in found:
+                        self.equations.append((element, display, self.where()))
                         out.append(("math", len(self.equations) - 1, (), None))
         return out
 
@@ -1105,7 +1117,10 @@ def read_tex(equations, work, pandoc="pandoc", env=None):
             return [None] * len(equations)
         if result.returncode:
             return [None] * len(equations)
-        doc = json.loads(result.stdout)
+        try:
+            doc = json.loads(result.stdout)
+        except ValueError:
+            return [None] * len(equations)
     finally:
         shutil.rmtree(folder, ignore_errors=True)
     found, current = {}, None
@@ -1150,6 +1165,26 @@ def place_equations(blocks, tex, equations, record):
     return walk(blocks)
 
 
+def split_displays(node):
+    """A paragraph of nothing but display equations, as a display paragraph
+    of several is read (Reader.pieces), a paragraph each, as Pandoc's
+    PowerPoint writer writes them and a deck written so reads back."""
+    if isinstance(node, list):
+        out = []
+        for item in node:
+            if isinstance(item, dict) and item.get("t") in ("Para", "Plain"):
+                inlines = [i for i in item["c"] if i.get("t") not in ("Space", "SoftBreak")]
+                if len(inlines) > 1 and all(i.get("t") == "Math" and
+                                            i["c"][0]["t"] == "DisplayMath" for i in inlines):
+                    out += [{"t": item["t"], "c": [i]} for i in inlines]
+                    continue
+            out.append(split_displays(item))
+        return out
+    if isinstance(node, dict):
+        return {k: split_displays(v) for k, v in node.items()}
+    return node
+
+
 # --------------------------------------------------------------------------
 # The whole of it
 # --------------------------------------------------------------------------
@@ -1164,7 +1199,8 @@ def read(path, base, work, alts=None, tables=None, titles=None, orders=None, pan
     finally:
         reader.close()
     tex = read_tex(reader.equations, work, pandoc, env)
-    doc["blocks"] = place_equations(doc["blocks"], tex, reader.equations, reader.record)
+    doc["blocks"] = split_displays(place_equations(doc["blocks"], tex, reader.equations,
+                                                   reader.record))
     doc["meta"] = place_equations(doc["meta"], tex, reader.equations, reader.record)
     if api_version:
         doc["pandoc-api-version"] = list(api_version)

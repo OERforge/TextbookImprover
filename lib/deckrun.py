@@ -315,12 +315,47 @@ def report(path, columns, rows, noun, sidecar, say, hint=None):
         say(hint)
 
 
+# The Pandoc a deck's equations are read into TeX with, for its report and
+# its keep rows: the release a conversion needs (convert.py), so that a
+# copies-only run names an equation as the page of a run that converts the
+# decks will.
+TEX_PANDOC = (3, 9)
+_tex_pandoc = []
+
+
+def tex_pandoc_problem():
+    """Why Pandoc can't read a deck's equations into TeX here, or None: it
+    isn't on the PATH, or it's older than TEX_PANDOC. Asked once a run."""
+    if not _tex_pandoc:
+        import re
+        import shutil
+        import subprocess
+        problem = None
+        if shutil.which("pandoc") is None:
+            problem = "Pandoc isn't on the PATH"
+        else:
+            try:
+                version = subprocess.run(["pandoc", "--version"], capture_output=True,
+                                         text=True).stdout.split()[1]
+            except (OSError, IndexError):
+                version = ""
+            parts = tuple(int(p) for p in re.findall(r"\d+", version)[:3])
+            if not parts or parts < TEX_PANDOC:
+                problem = "Pandoc %s is older than %s" % (
+                    version or "(of no version it says)", ".".join(map(str, TEX_PANDOC)))
+        _tex_pandoc.append(problem)
+    return _tex_pandoc[0]
+
+
 def equation_tex(path):
     """{OMML: TeX} for each equation of a deck's slides that the math
     repairs change, before and after, as Pandoc's Word reader reads it,
     which is how the deck's page has it (pptxsource.read_tex): a deck's
     report and keep rows name an equation as a book's do. One Pandoc
-    couldn't read isn't there."""
+    couldn't read isn't there, and none is when Pandoc can't be asked
+    (tex_pandoc_problem)."""
+    if tex_pandoc_problem():
+        return {}
     import tempfile
     import xml.etree.ElementTree as ET
     import pptxsource
@@ -699,8 +734,22 @@ def run(base, decks, targets, paths, reports, language=None, alt_max_chars=120,
             say("WARNING: %s: %d decision(s) not written, for shapes whose id their slide "
                 "repeats, which PowerPoint repairs when it opens and saves the deck."
                 % (target.name, totals["skipped"]))
+    problem = tex_pandoc_problem() if in_one_line and math_rows else None
+    if problem:
+        say("NOTE: %s, so the copies' equations in %s are written out in one line, much as "
+            "PowerPoint's linear format writes them, not in Pandoc's TeX, as a book's and a "
+            "deck's page's are: Pandoc %s or later reads them so." % (
+                problem, os.path.basename(reports.get("math_repaired") or "math-repaired.csv"),
+                ".".join(map(str, TEX_PANDOC))))
+    off = () if repairing else ("math.repair_equations",)
     if math is not None:
         math.update(rows=math_rows, kept=kept, repairing=repairing, in_one_line=in_one_line)
+        # What the keep sidecar's rows kept in the copies alone, for a run
+        # whose conversion stops before its report says what they kept in
+        # both (convert.py, die).
+        math["copies_warnings"] = sidecars.keep_warning(
+            os.path.basename(paths["math_keep"]), [row for row in keep if row not in kept],
+            "these decks' copies", off + ("math.from_text",)) if paths.get("math_keep") else []
         # The conversion after writes the report, the pages' repairs with
         # these, and says so (convert.py); it's written here too, unsaid, so
         # that the copies' repairs are on record if the run stops first.
@@ -713,7 +762,6 @@ def run(base, decks, targets, paths, reports, language=None, alt_max_chars=120,
                % (IN_ONE_LINE if in_one_line else ""))
     if paths.get("math_keep") and math is None:
         # Only a run that repairs equations can keep one.
-        off = () if repairing else ("math.repair_equations",)
         for line in sidecars.keep_warning(os.path.basename(paths["math_keep"]),
                                           [row for row in keep if row not in kept],
                                           "these decks", off + ("math.from_text",)):

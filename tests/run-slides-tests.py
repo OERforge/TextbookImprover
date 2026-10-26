@@ -2457,6 +2457,20 @@ def equation(shape_id, omml):
             % (box, rect(shape_id, "TextBox %d" % shape_id, (457200, 1600200, 4000000, 600000))))
 
 
+def display_paragraph(shape_id, *bodies):
+    """A text box holding a display paragraph of several equations, an
+    m:oMathPara of an m:oMath each, as equation() writes one."""
+    para = ('<m:oMathPara xmlns:m="http://schemas.openxmlformats.org/officeDocument/2006/math">'
+            + "".join("<m:oMath>%s</m:oMath>" % body for body in bodies) + "</m:oMathPara>")
+    box = ('<p:sp>%s<p:spPr>%s</p:spPr><p:txBody><a:bodyPr/><a:lstStyle/><a:p><a14:m>%s'
+           '</a14:m></a:p></p:txBody></p:sp>' % (nv("sp", shape_id, "TextBox %d" % shape_id),
+                                                 xfrm(457200, 1600200, 4000000, 600000), para))
+    return ('<mc:AlternateContent xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/'
+            '2006"><mc:Choice xmlns:a14="http://schemas.microsoft.com/office/drawing/2010/main" '
+            'Requires="a14">%s</mc:Choice><mc:Fallback>%s</mc:Fallback></mc:AlternateContent>'
+            % (box, rect(shape_id, "TextBox %d" % shape_id, (457200, 1600200, 4000000, 600000))))
+
+
 # Two bars written as upper limits, a macron's and an en dash's, as
 # OpenStax's decks have them, and an en dash and the micro sign.
 BAR_OMML = ('<m:limUpp><m:e><m:r><m:t>x</m:t></m:r></m:e><m:lim><m:r><m:t>¯</m:t></m:r>'
@@ -4376,6 +4390,127 @@ def case_converting_math(work):
         and "  expression,Two Words" not in again.stderr, again.stderr[-800:]
 
 
+def case_display_paragraph(work):
+    """A display paragraph of two equations, each a display of its own on
+    the page, as the copy repairs it, so each has a row of its own in
+    math-repaired.csv, and a row keeps that one in the copy and on the
+    page; Pandoc's Word reader reads such a paragraph as one formula."""
+    if not pandoc_ok():
+        return
+    folder = os.path.join(work, "decks")
+    os.makedirs(folder)
+    deck(os.path.join(folder, "Lines.pptx"), [
+        {"shapes": [title(2, "Two Lines"),
+                    display_paragraph(4, "<m:r><m:t>x\u2013\u00b5=1</m:t></m:r>",
+                                      "<m:r><m:t>y=\u00b5</m:t></m:r>")]}])
+    with open(os.path.join(folder, "conversion.yaml"), "w") as fh:
+        fh.write("targets:\n  pages:\n    format: html\n  copy:\n    format: source\n")
+    report = os.path.join(folder, "math-repaired.csv")
+    first = convert(folder, "--quick")
+    page_path = os.path.join(folder, "pages", "Lines.html")
+    page = html.unescape(open(page_path, encoding="utf-8").read()) \
+        if os.path.exists(page_path) else ""
+    annotations = re.findall(r'<annotation encoding="application/x-tex">([^<]*)</annotation>',
+                             page)
+    yield "each equation of the paragraph is a display of its own on the page, repaired, " \
+        "where Pandoc's Word reader runs them together into one formula", \
+        first.returncode == 0 and page.count('display="block"') == 2 \
+        and annotations == ["x-\u03bc = 1", "y = \u03bc"], (annotations, first.stderr[-600:])
+    rows = rows_of(report)
+    intermediate = os.path.join(folder, "Lines.json")
+    blocks = json.load(open(intermediate, encoding="utf-8"))["blocks"] \
+        if os.path.exists(intermediate) else []
+    yield "each a paragraph of its own, as Pandoc's PowerPoint writer writes it, so the deck " \
+        "reads back the same", [b["t"] for b in blocks][1:] == ["Para", "Para"] \
+        and all(len(b["c"]) == 1 and b["c"][0]["t"] == "Math" for b in blocks[1:]), blocks
+    yield "and each has a row of its own in the report, the copy's and the page's once", \
+        sorted(rows) == sorted([["equation", "Lines", "x\u2013\u00b5 = 1", "x-\u03bc = 1"],
+                                ["equation", "Lines", "y = \u00b5", "y = \u03bc"]]), rows
+    with open(os.path.join(folder, "math-keep.csv"), "w", encoding="utf-8", newline="") as fh:
+        csv.writer(fh).writerows([["Kind", "Page", "Before", "After"],
+                                  ["equation", "Lines", "y = \u00b5"]])
+    again = convert(folder, "--quick")
+    page = html.unescape(open(page_path, encoding="utf-8").read()) \
+        if os.path.exists(page_path) else ""
+    copy = os.path.join(folder, "copy", "Lines.pptx")
+    slide = read_part(copy, "ppt/slides/slide1.xml") if os.path.exists(copy) else ""
+    yield "a row copied from it keeps its equation in the copy and on the page, the other " \
+        "repaired in both, and nothing is warned about", \
+        again.returncode == 0 and "<m:t>y=\u00b5</m:t>" in slide and "<m:t>x\u2212\u03bc=1" \
+        in slide and re.findall(r'<annotation encoding="application/x-tex">([^<]*)</annotation>',
+                                page) == ["x-\u03bc = 1", "y = \u00b5"] \
+        and "kept nothing" not in again.stderr, (slide[-600:], again.stderr[-600:])
+
+
+def case_math_pandoc_and_stop(work):
+    """A deck's math report with a Pandoc older than a conversion needs,
+    its equations written out in one line and the run saying why; and
+    math-keep.csv's rows tried on the copies and said when the
+    conversion stops before its pages are made."""
+    if not pandoc_ok():
+        return
+    folder = os.path.join(work, "old")
+    os.makedirs(folder)
+    deck(os.path.join(folder, "maths.pptx"), [
+        {"shapes": [title(2, "Scores"), equation(4, Z_OMML)]}])
+    reports = {k: os.path.join(folder, v) for k, v in (
+        ("image_alt_missing", "a.csv"), ("table_headers_new", "t.csv"),
+        ("slide_titles_new", "s.csv"), ("slides_check", "check.csv"),
+        ("output_check", "output-check.csv"), ("math_repaired", "math-repaired.csv"))}
+    paths = {k: os.path.join(folder, v) for k, v in (
+        ("image_alt", "image-alt.csv"), ("table_headers", "table-headers.csv"),
+        ("slide_titles", "slide-titles.csv"), ("math_keep", "math-keep.csv"))}
+    target = type("Target", (), {"format": "source", "name": "fixed",
+                                 "output_dir": os.path.join(folder, "fixed"),
+                                 "__getitem__": lambda self, key: key == "math.repair_equations"})()
+    tools = os.path.join(work, "old-pandoc")
+    os.makedirs(tools)
+    with open(os.path.join(tools, "pandoc"), "w") as fh:
+        fh.write("#!/bin/sh\necho 'pandoc 2.19.2'\n")
+    os.chmod(os.path.join(tools, "pandoc"), 0o755)
+    path, said = os.environ["PATH"], []
+    os.environ["PATH"] = tools + os.pathsep + path
+    del deckrun._tex_pandoc[:]
+    try:
+        code = deckrun.run(folder, ["maths.pptx"], [target], paths, reports, say=said.append)
+    finally:
+        os.environ["PATH"] = path
+        del deckrun._tex_pandoc[:]
+    yield "with a Pandoc older than 3.9 first on the PATH, a copies-only run's report has its " \
+        "equations written out in one line, and the run says why", \
+        code == 0 and rows_of(reports["math_repaired"]) == [
+            ["equation", "maths", "z=(x\u2013\u00b5)/\u03c3", "z=(x\u2212\u03bc)/\u03c3"]] \
+        and any(s.startswith("NOTE: Pandoc 2.19.2 is older than 3.9, so the copies' equations")
+                for s in said), said
+    said = []
+    code = deckrun.run(folder, ["maths.pptx"], [target], paths, reports, say=said.append)
+    yield "and with this one, TeX, and nothing said of Pandoc", code == 0 \
+        and rows_of(reports["math_repaired"])[0][2] == Z_TEX \
+        and not any("is older than" in s for s in said), \
+        (rows_of(reports["math_repaired"]), said[-6:])
+    stops = os.path.join(work, "stops")
+    os.makedirs(stops)
+    for name in ("Two Words.pptx", "Two-Words.pptx"):
+        deck(os.path.join(stops, name), [{"shapes": [title(2, "Scores"), equation(4, Z_OMML)]}])
+    with open(os.path.join(stops, "conversion.yaml"), "w") as fh:
+        fh.write("targets:\n  pages:\n    format: html\n  copy:\n    format: source\n")
+    with open(os.path.join(stops, "math-keep.csv"), "w", encoding="utf-8", newline="") as fh:
+        csv.writer(fh).writerows([["Kind", "Page", "Before", "After"],
+                                  ["equation", "Two Words", Z_TEX],
+                                  ["equation", "Two Words", "q"],
+                                  ["expression", "Two Words", "\u03bc = 34"]])
+    stopped = convert(stops, "--quick")
+    out = stopped.stderr
+    yield "when the conversion stops after the copies are written, the keep sidecar's rows " \
+        "that kept nothing in the copies are said, before the reason it stopped, and not a " \
+        "row the copies can't keep", \
+        stopped.returncode != 0 and "rows were tried on the copies alone" in out \
+        and "  equation,Two Words,q" in out and "  equation,Two Words,z" not in out \
+        and "  expression,Two Words" not in out \
+        and out.find("tried on the copies alone") < out.find("would each be the same page"), \
+        out[-900:]
+
+
 def case_converting_more(work):
     """A PowerPoint deck's PDF, through ltx-talk, and its reveal.js
     presentation, as a deck written in Markdown has them."""
@@ -4702,6 +4837,9 @@ CASES = [("reading a deck", case_parse), ("the checks", case_check),
          ("a deck read for converting", case_reader),
          ("convert.py converting decks", case_converting),
          ("convert.py converting decks, their math report", case_converting_math),
+         ("a display paragraph of two equations", case_display_paragraph),
+         ("a deck's math report with an old Pandoc, and a conversion that stops",
+          case_math_pandoc_and_stop),
          ("each deck's language", case_deck_languages),
          ("a converted deck's PDF and presentation", case_converting_more),
          ("a deck rebuilt on a template", case_rebuild),

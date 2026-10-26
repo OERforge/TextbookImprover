@@ -544,8 +544,22 @@ def unpack_archives(base, check_only=False, linked_documents=False):
 
 
 def die(text, code=1):
+    stopped_math_keep()
     say(text)
     sys.exit(code)
+
+
+def stopped_math_keep():
+    """A slides run of PowerPoint decks whose conversion stops after the
+    copies are written, before its report says which of math-keep.csv's
+    rows kept nothing in the copies or on the pages (deck_math_report):
+    the rows that kept nothing in the copies, as deckrun found them."""
+    if DECK_MATH and not DECK_MATH.get("reported") and DECK_MATH.get("copies_warnings"):
+        DECK_MATH["reported"] = True
+        say("NOTE: the conversion stopped before the decks' pages were made, so "
+            "math-keep.csv's rows were tried on the copies alone:")
+        for line in DECK_MATH["copies_warnings"]:
+            say(line)
 
 
 def run(command, env=None, cwd=None, check=True, capture=False):
@@ -3411,6 +3425,8 @@ def deck_math_report(collected, reports, paths, targets, work):
                  "an equation, Before and After in Pandoc's TeX, as a book's are%s; "
                  "math.repair_equations and math.from_text turn them off."
                  % (deckrun.IN_ONE_LINE if (DECK_MATH or {}).get("in_one_line") else ""))
+    if DECK_MATH is not None:
+        DECK_MATH["reported"] = True
     keep = math_keep_rows(paths.get("math_keep"))
     if not keep:
         return

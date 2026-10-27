@@ -30,6 +30,7 @@ import errno
 import io
 import os
 import re
+import stat
 import tempfile
 import unicodedata
 
@@ -458,20 +459,28 @@ def _unread(path, why, remedy):
             % (path, why, " To use it, %s." % remedy if remedy else ""))
 
 
+MAY_NOT_WRITE = ("this user may not write it",
+                 "give the user running this permission to write it")
+
+
 def _kept(path, beside=False):
     """Why the run leaves a sidecar at path as it is rather than rewriting
     it, each a clause and what would let a run rewrite it; none for one it
-    may. Another user's, whose owner a run that isn't root can't keep, is
-    read and left to its owner, that alone said of it (Rob, 2026-10-26:
-    "If there are files owned by other users but in the correct directory
-    and readable by us, then we should use them (with an appropriate
-    warning)"). Of one's own: one with no write bit is read-only, even to
-    root, whom os.access lets write it, and one this user may not write
-    otherwise is said to be that; one with another link to it
-    would be parted from it by the rewrite, a new file moved into its
-    place; and one whose folder this user can't write has nowhere for the
-    new file, nor, for one whose file as it was is kept beside it (beside,
-    _keep), a link's folder for that."""
+    may. Of one's own: one with no write bit is read-only, even to root,
+    whom os.access lets write it, and one this user may not write
+    otherwise is said to be that; one with another link to it would be
+    parted from it by the rewrite, a new file moved into its place; and one
+    whose folder this user can't write has nowhere for the new file, nor,
+    for one whose file as it was is kept beside it (beside, _keep), a
+    link's folder for that. Another user's, whose owner a run that isn't
+    root can't keep, is read and left to its owner (Rob, 2026-10-26: "If
+    there are files owned by other users but in the correct directory and
+    readable by us, then we should use them (with an appropriate
+    warning)"), said to be theirs (_theirs). So is one of a user outside
+    the user namespace root runs in, as a rootless container runs it, whom
+    root sees as the kernel's overflow uid (_overflow_uid), nobody, and may
+    write only as anyone may: it had been said to be marked immutable, say,
+    as another file root can't write though it has a write bit is."""
     try:
         status = os.stat(path)
     except OSError as exc:      # gone since it was read
@@ -484,29 +493,117 @@ def _kept(path, beside=False):
         folders.add(os.path.dirname(os.path.abspath(path)))
     folder = [] if all(os.access(f, os.W_OK) for f in folders) else [
         ("its folder can't be written", "make its folder writable")]
-    # Another user's is left to its owner whatever else is so of it, but
-    # its folder: one of one's own in its place, its mode kept for a shared
-    # folder's people (cp -p), is the run's to rewrite. Having the owner, or
-    # root, run the conversion instead would make the book's outputs theirs.
-    if hasattr(os, "geteuid") and os.geteuid() not in (0, status.st_uid):
-        owner = owner_of(status)
-        return [("it belongs to another user, %s" % owner,
-                 "replace it with a copy of your own made with cp -p, which keeps its mode, or ask "
-                 "%s to save it as UTF-8 with the mark" % owner)] + folder
     why = []
     if not status.st_mode & 0o222:
         why.append(("it's read-only", "make it writable"))
     elif not os.access(path, os.W_OK):
-        if hasattr(os, "geteuid") and os.geteuid() == 0:
+        if hasattr(os, "geteuid") and os.geteuid() == 0 and status.st_uid != _overflow_uid():
             why.append(("it can't be written, though it has a write bit (marked immutable, say)",
                         "make it writable"))
         else:
-            why.append(("this user may not write it", "give the user running this permission to "
-                        "write it"))
+            why.append(MAY_NOT_WRITE)
     if status.st_nlink > 1:
         why.append(("another name links to it, which a rewrite would leave as it was",
                     "make it a file of its own"))
+    if hasattr(os, "geteuid") and os.geteuid() != status.st_uid and (
+            os.geteuid() != 0 or MAY_NOT_WRITE in why):
+        return _theirs(path, status, [w for w in why if w is not MAY_NOT_WRITE] + folder,
+                       MAY_NOT_WRITE in why)
     return why + folder
+
+
+def _overflow_uid():
+    """The owner a file of a user outside this user namespace shows, the
+    kernel's overflowuid, 65534 unless it's set otherwise."""
+    try:
+        with open("/proc/sys/kernel/overflowuid", encoding="ascii") as fh:
+            return int(fh.read())
+    except (OSError, ValueError):
+        return 65534
+
+
+def _theirs(path, status, others=(), unwritable=None):
+    """Why another user's sidecar at path, its status status, is left as it
+    is, and what to do, for _kept. Where nothing but whose it is keeps the
+    run from rewriting it, as nothing would were it this user's, though
+    this user may not write it (the usual 0644 is the owner's alone to
+    write), it's warned of, whatever it holds, the reason's third item
+    True (Rob, 2026-10-27: "we want to warn ... where a sidecar isn't being
+    rewritten when it otherwise would be because of file ownership"); else
+    the others that would keep it so are said too (others), read-only,
+    another name linked to it, or its folder unwritable. A link's own name
+    is the one the run says, so a link says whose file it leads to. What to
+    do is to replace it with a copy of one's own, made with cp -p, which
+    keeps its mode, so that the run rewrites that, where this user can put
+    a file in its name's place (_replaceable), and to ask its owner to save
+    it as UTF-8 with the mark, which needs no rewrite; the owner named as
+    such, since a run in a user namespace sees one outside it as nobody.
+    In a folder with the sticky bit, as /tmp has, only a file's owner or
+    the folder's may replace it, which keeps the run from replacing it
+    there (_owners_only). Having its owner, or root, run the conversion
+    instead would make the book's outputs theirs. A file the kernel won't
+    let be replaced for another reason, append-only or mounted on its own,
+    as a container mounts one, is taken for one that could be (not looked
+    for)."""
+    owner = owner_of(status)
+    subject = ("it's a link to %s, which belongs to another user, %s"
+               % (os.path.realpath(path), owner) if os.path.islink(path)
+               else "it belongs to another user, %s" % owner)
+    ask = "ask its owner, %s, to save it as UTF-8 with the mark" % owner
+    if not _replaceable(path):
+        remedy = ask
+    elif any(w[0] == "it's read-only" for w in others):
+        remedy = ("replace it with a copy of your own made with cp -p, which keeps its mode, and "
+                  "make the copy writable, or " + ask)
+    else:
+        remedy = "replace it with a copy of your own made with cp -p, which keeps its mode, or " + ask
+    if others:
+        return [("; ".join([subject] + [w[0] for w in others]), remedy)]
+    if _owners_only(os.path.dirname(os.path.realpath(path)), status):
+        return [(subject + ", in a folder where only a file's owner, or the folder's owner, may "
+                 "replace it", remedy, True)]
+    if unwritable is None:
+        unwritable = not os.access(path, os.W_OK)
+    if unwritable:
+        return [(subject, remedy, True)]
+    return [(subject + ", and though the user running this may write it, a rewrite would take "
+             "it from them", remedy, True)]
+
+
+def _owners_only(folder, status):
+    """Whether a file whose status is status, in folder, may be replaced or
+    removed only by its owner, the folder's owner, or root, this user none
+    of them: so in a folder with the sticky bit (restricted deletion), as
+    /tmp has."""
+    try:
+        holder = os.stat(folder)
+    except OSError:
+        return False
+    return (bool(holder.st_mode & stat.S_ISVTX)
+            and os.geteuid() not in (holder.st_uid, status.st_uid))
+
+
+def _replaceable(path):
+    """Whether this user can put a file of their own in the place of the
+    one named path, as a copy of another user's sidecar would be: its
+    name's folder writable, and in one with the sticky bit the name its own
+    or the folder (a link's name is its own, whoever the file it leads to
+    belongs to)."""
+    folder = os.path.dirname(os.path.abspath(path))
+    try:
+        entry = os.lstat(path)
+    except OSError:
+        return False
+    return os.access(folder, os.W_OK | os.X_OK) and not _owners_only(folder, entry)
+
+
+class OwnerLost(OSError):
+    """A rewrite whose new file couldn't be given the old one's owner, for
+    a run that seemed able to give it: root in a user namespace, as a
+    rootless container runs, which can't give a file a user outside it
+    has, or root on a network share that answers for it as nobody. It
+    isn't moved into place, so that the sidecar stays its owner's
+    (_replace), and the run says so as for another user's (_theirs)."""
 
 
 def read_only_disk(path):
@@ -538,16 +635,21 @@ def _failed(exc):
 
 
 def _because(why):
-    """_kept's reasons as one clause, and what to do as another."""
-    return "; ".join(w[0] for w in why), ", and ".join(w[1] for w in why)
+    """_kept's reasons as one clause, what to do as another, and whether
+    nothing but whose it is keeps the run from rewriting the sidecar:
+    another user's that it would rewrite were it this user's (_theirs)."""
+    return ("; ".join(w[0] for w in why), ", and ".join(w[1] for w in why),
+            any(len(w) > 2 and w[2] for w in why))
 
 
 def _replace(path, text):
     """path holding text, written beside it and moved into its place, so
     that a write that fails, a disk full or a file another program holds
     open, leaves it as it was; a link's file, not the link, and its owner
-    and its mode kept."""
+    and its mode kept. One whose new file couldn't be given its owner is
+    left as it was (OwnerLost)."""
     real = os.path.realpath(path)
+    owner = os.stat(real).st_uid
     handle, temporary = tempfile.mkstemp(prefix="." + os.path.basename(real) + ".",
                                          suffix=".tmp", dir=os.path.dirname(real))
     try:
@@ -556,6 +658,8 @@ def _replace(path, text):
             fh.flush()
             os.fsync(fh.fileno())
         _owned(temporary, real)
+        if os.stat(temporary).st_uid != owner:
+            raise OwnerLost(errno.EPERM, "its owner couldn't be kept", real)
         os.replace(temporary, real)
     except BaseException:
         try:
@@ -604,7 +708,11 @@ def _mark(path, data, limit=10):
     one Excel saved in a code page can happen to read as UTF-8 ("Gauß’s" in
     Windows-1252 as "Gauߒs"), which the mark makes Excel show too; or, for
     one left as it is (_kept), or that couldn't be written, why, it being
-    read as UTF-8 all the same; none for one that has the mark."""
+    read as UTF-8 all the same, in a warning, but in a note for one of
+    ASCII alone the run can't mark, nothing in it reading otherwise, and
+    in a warning whatever it holds for another user's that nothing but
+    whose it is keeps the run from marking, which it says isn't given the
+    mark (_theirs); none for one that has the mark."""
     if data.startswith(BOM.encode("utf-8")):
         return []
     odd = [(index, piece.decode("utf-8")) for index, piece in enumerate(_lines(data))
@@ -614,19 +722,20 @@ def _mark(path, data, limit=10):
         try:
             _replace(path, BOM + data.decode("utf-8"))
         except OSError as exc:
-            why = [_failed(exc)]
+            why = _theirs(path, os.stat(path)) if isinstance(exc, OwnerLost) else [_failed(exc)]
     lines = ["  line %d: %s" % (index + 1, shown(line)) for index, line in odd[:limit]]
     if len(odd) > limit:
         lines.append("  and %d more" % (len(odd) - limit))
     if why:
-        reasons, remedy = _because(why)
+        reasons, remedy, theirs = _because(why)
+        given = "isn't given one" if theirs else "can't be given one"
         if not odd:
-            return ["NOTE: %s has no byte-order mark, and can't be given one: %s. It holds "
-                    "nothing outside ASCII, which reads the same either way. To have the mark "
-                    "added, %s." % (path, reasons, remedy)]
+            return ["%s: %s has no byte-order mark, and %s: %s. It holds nothing outside ASCII, "
+                    "which reads the same either way. To have the mark added, %s."
+                    % ("WARNING" if theirs else "NOTE", path, given, reasons, remedy)]
         return (["WARNING: %s has no byte-order mark, which Excel needs to open it as UTF-8, "
-                 "and can't be given one: %s. It's read as UTF-8, as it is. Its lines outside "
-                 "ASCII, as they read:" % (path, reasons)]
+                 "and %s: %s. It's read as UTF-8, as it is. Its lines outside ASCII, as they "
+                 "read:" % (path, given, reasons)]
                 + lines
                 + ["  A character there that isn't the one written means Excel saved the file "
                    "in a code page whose bytes happen to read as UTF-8. To have the mark added, "
@@ -650,9 +759,11 @@ def _rewrite(path, data, reading, limit=10):
     writes one, a byte-order mark first, its lines' ends as they were. One
     left as it is (_kept), or that couldn't be written, is read so all the
     same, by every reader (text), and left as it was, with no copy beside
-    it. Returns the lines to say: what was done, or why it wasn't, showing,
-    as read, the first limit of the lines read in the code page, and of
-    those kept as UTF-8 that hold a character outside ASCII."""
+    it, the run saying it isn't rewritten, not that it can't be, of
+    another user's that nothing but whose it is keeps it from rewriting
+    (_theirs). Returns the lines to say: what was done, or why it wasn't,
+    showing, as read, the first limit of the lines read in the code page,
+    and of those kept as UTF-8 that hold a character outside ASCII."""
     decoded, (_, name, suffix, saved), lines, kept_lines = reading
     content = "".join(decoded)
     why, kept = _kept(path, beside=True), None
@@ -666,12 +777,12 @@ def _rewrite(path, data, reading, limit=10):
                     os.remove(kept)
                 except OSError:
                     pass
-            why = [_failed(exc)]
+            why = _theirs(path, os.stat(path)) if isinstance(exc, OwnerLost) else [_failed(exc)]
     if why:
-        reasons, remedy = _because(why)
-        said = ["WARNING: %s isn't UTF-8: %d line(s) of it are read as %s, %s, but it can't be "
+        reasons, remedy, theirs = _because(why)
+        said = ["WARNING: %s isn't UTF-8: %d line(s) of it are read as %s, %s, but it %s "
                 "rewritten as UTF-8: %s. This run reads it so, and leaves it as it is. As read:"
-                % (path, len(lines), name, saved, reasons)]
+                % (path, len(lines), name, saved, "isn't" if theirs else "can't be", reasons)]
     else:
         said = ["WARNING: %s wasn't UTF-8: %d line(s) of it are read as %s, %s, and the file is "
                 "rewritten as UTF-8, as \"CSV UTF-8 (Comma delimited)\" saves one. The file as it "

@@ -56,7 +56,7 @@ against a newer version from losing work under an older one.
 Exit status: 0; 1 when a sidecar row matched nothing; 2 for usage, or a
 sidecar that isn't UTF-8 and reads in no code page Excel saves in (the one
 Excel's plain "CSV" saves, in Windows-1252 or Mac OS Roman, is rewritten
-first, or read so where it can't be rewritten).
+first, or read so where it isn't rewritten).
 
 Copyright 2026 Robert Szarka
 

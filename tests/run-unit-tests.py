@@ -2942,9 +2942,24 @@ def check_sidecars_another_user():
     """Sidecars root owns, read by a run as another user, where root runs
     these and can be someone else (setpriv): the run's checks as they are,
     os.access and the euid unpatched, which the other checks stand in for.
-    Root's file is read and left to it, its owner's alone said, though the
-    user can't write it either, which isn't its being read-only; one only
-    root may read is gone without, said to be root's."""
+    Root's file that nothing but whose it is keeps the run from rewriting
+    is warned of, of ASCII alone too, the run saying it isn't given the
+    mark or rewritten, not that it can't be (Rob, 2026-10-27), whether the
+    user may write it or only root may, said to be root's, not read-only,
+    which it isn't; in a folder with the sticky bit, as /tmp has, it's
+    root's to put right, a copy of one's own unable to replace it there,
+    as it can in a plain folder and in one with the sticky bit that's the
+    user's, made with cp -p and moved with mv -f, as the run and the docs
+    say; one in a folder only root may write can't be, said to be; a link
+    says whose file it leads to, and whether a copy can take its place,
+    the user's own link in root's folder with the sticky bit as well; the
+    user's own file in root's folder with the sticky bit is given the
+    mark; one with the mark already is read without a word; one only root
+    may read is gone without, said to be root's; and a run as root in a
+    user namespace, which can't give a new file root as its owner, leaves
+    root's file as it was, said to be another user's, and one it may not
+    write, which it sees as nobody's, said to be theirs, not marked
+    immutable."""
     import json
     import sidecars
     if os.geteuid() != 0 or not shutil.which("setpriv"):
@@ -2954,17 +2969,20 @@ def check_sidecars_another_user():
     # copied there, as the clone and its folders needn't be anyone's either.
     work = tempfile.mkdtemp(prefix="sidecar-another-user-", dir="/tmp")
     atexit.register(shutil.rmtree, work, True)
-    # A shared folder, anyone's to write, as /tmp is; and one only root's.
+    # A shared folder, anyone's to write, as /tmp is, with its sticky bit;
+    # one without it; one only root's; and the user's own with the bit.
     os.chmod(work, 0o1777)
-    locked = os.path.join(work, "locked")
-    os.mkdir(locked)
-    os.chmod(locked, 0o755)
+    for name, mode in (("shared", 0o777), ("locked", 0o755), ("own", 0o1777)):
+        os.mkdir(os.path.join(work, name))
+        os.chmod(os.path.join(work, name), mode)
+    os.chown(os.path.join(work, "own"), 65534, 65534)
     lib = os.path.join(work, "lib")
     os.mkdir(lib)
     shutil.copy(os.path.join(ROOT, "lib", "sidecars.py"), lib)
     os.chmod(lib, 0o755)
     os.chmod(os.path.join(lib, "sidecars.py"), 0o644)
-    who = ["setpriv", "--reuid=65534", "--regid=65534", "--clear-groups", sys.executable]
+    user = ["setpriv", "--reuid=65534", "--regid=65534", "--clear-groups"]
+    who = user + [sys.executable]
     probe = subprocess.run(who + ["-c", "import sys; sys.path.insert(0, %r); import sidecars; "
                                   "print('ready')" % lib], capture_output=True, text=True,
                            env=dict(os.environ, HOME=work))
@@ -2972,20 +2990,50 @@ def check_sidecars_another_user():
         return [("a run as another user, which this Python can't be run as here",
                  lambda: print("  skip  uid 65534 can't run %s: %s" % (
                      sys.executable, (probe.stderr.strip().splitlines() or ["?"])[-1])) or True)]
-    rows = "Image,Alt\r\none.png,A red square \u2013 large\r\n"
+    rows = "Image,Alt\r\none.png,A red square – large\r\n"
+    ascii_rows = b"Image,Alt\r\none.png,A red square\r\n"
     files = {"theirs-ansi.csv": (rows.encode("cp1252"), 0o644),
              "theirs-utf8.csv": (rows.encode("utf-8"), 0o666),
-             "theirs-ascii.csv": (b"Image,Alt\r\none.png,A red square\r\n", 0o644),
+             "theirs-ascii.csv": (ascii_rows, 0o644),
              "theirs-hidden.csv": (rows.encode("utf-8"), 0o600),
-             "locked/theirs-locked.csv": (rows.encode("cp1252"), 0o644)}
+             "shared/open-ascii.csv": (ascii_rows, 0o666),
+             "shared/open-utf8.csv": (rows.encode("utf-8"), 0o666),
+             "shared/open-ansi.csv": (rows.encode("cp1252"), 0o666),
+             "shared/closed-ascii.csv": (ascii_rows, 0o644),
+             "shared/closed-ansi.csv": (rows.encode("cp1252"), 0o644),
+             "shared/marked.csv": (b"\xef\xbb\xbf" + rows.encode("utf-8"), 0o666),
+             "locked/theirs-locked.csv": (rows.encode("cp1252"), 0o644),
+             "locked/open-locked.csv": (rows.encode("utf-8"), 0o666),
+             "own/theirs.csv": (ascii_rows, 0o666),
+             "own-ascii.csv": (ascii_rows, 0o644),
+             "shared/target.csv": (ascii_rows, 0o666),
+             "target-sticky.csv": (ascii_rows, 0o666),
+             "shared/namespace.csv": (ascii_rows, 0o666),
+             "shared/namespace-closed.csv": (ascii_rows, 0o644),
+             "shared/target-mine.csv": (ascii_rows, 0o666)}
     for name, (raw, mode) in files.items():
         with open(os.path.join(work, name), "wb") as fh:
             fh.write(raw)
         os.chmod(os.path.join(work, name), mode)
+    # The user's own, in root's folder with the sticky bit.
+    os.chown(os.path.join(work, "own-ascii.csv"), 65534, 65534)
+    # Root's link, in its folder with the sticky bit, to its file in the
+    # plain folder; the user's, in the user's own folder, to root's file in
+    # root's folder with the sticky bit.
+    os.symlink(os.path.join(work, "shared", "target.csv"), os.path.join(work, "link-to-shared.csv"))
+    os.symlink(os.path.join(work, "target-sticky.csv"), os.path.join(work, "own", "link-to-sticky.csv"))
+    os.lchown(os.path.join(work, "own", "link-to-sticky.csv"), 65534, 65534)
+    # And the user's own link in root's folder with the sticky bit, which
+    # the user may replace there, the link being theirs, to root's file in
+    # the plain folder.
+    os.symlink(os.path.join(work, "shared", "target-mine.csv"), os.path.join(work, "mine-link.csv"))
+    os.lchown(os.path.join(work, "mine-link.csv"), 65534, 65534)
+    run_names = sorted(n for n in files if "target" not in n and "namespace" not in n) + [
+        "link-to-shared.csv", "own/link-to-sticky.csv", "mine-link.csv"]
     script = ("import json, os, sys; sys.path.insert(0, %r); import sidecars; "
               "print(json.dumps({n: [sidecars.rewrite_as_utf8(os.path.join(%r, n)), "
               "sidecars.text(os.path.join(%r, n))] for n in %r}))"
-              % (lib, work, work, sorted(files)))
+              % (lib, work, work, run_names))
     run = subprocess.run(who + ["-c", script], capture_output=True, text=True,
                          env=dict(os.environ, HOME=work))
     try:
@@ -2993,47 +3041,197 @@ def check_sidecars_another_user():
     except ValueError:
         print(run.stderr)
         said = {}
+    # What the run says to do with root's file of ASCII alone the user can't
+    # write, done as the user, and the run again: a copy made with cp -p
+    # moved into its place with mv -f, the user's now, which the run gives
+    # the mark, in the plain folder and in the user's own with the sticky
+    # bit; and in root's folder with the sticky bit, which won't let the
+    # copy in.
+    copied = {}
+    for name in ("shared/copied-ascii.csv", "own/copied-ascii.csv", "copied-ascii.csv"):
+        with open(os.path.join(work, name), "wb") as fh:
+            fh.write(ascii_rows)
+        os.chmod(os.path.join(work, name), 0o644)
+        mine = os.path.join(os.path.dirname(os.path.join(work, name)), "mine.csv")
+        moved = subprocess.run(user + ["sh", "-c", 'cp -p "$1" "$2" && mv -f "$2" "$1"', "sh",
+                                       os.path.join(work, name), mine],
+                               capture_output=True, text=True, cwd=work, stdin=subprocess.DEVNULL)
+        again = subprocess.run(who + ["-c", "import json, sys; sys.path.insert(0, %r); "
+                                      "import sidecars; print(json.dumps(sidecars.rewrite_as_utf8"
+                                      "(%r)))" % (lib, os.path.join(work, name))],
+                               capture_output=True, text=True, env=dict(os.environ, HOME=work))
+        status = os.stat(os.path.join(work, name))
+        try:
+            copied[name] = (moved.returncode, json.loads(again.stdout), status.st_uid,
+                            status.st_mode & 0o7777)
+        except ValueError:
+            print(again.stderr)
+            copied[name] = None
+    # Root in a user namespace, as a rootless container runs, made of the
+    # user (unshare -r): it seems root, and can't give a new file root,
+    # whom it sees as nobody, as its owner.
+    namespaced = subprocess.run(
+        user + ["unshare", "-U", "-r", sys.executable, "-c",
+                "import json, os, sys; sys.path.insert(0, %r); import sidecars; "
+                "print(json.dumps([os.geteuid()] + [sidecars.rewrite_as_utf8(p) for p in %r]))"
+                % (lib, [os.path.join(work, "shared", n)
+                         for n in ("namespace.csv", "namespace-closed.csv")])],
+        capture_output=True, text=True, env=dict(os.environ, HOME=work)) \
+        if shutil.which("unshare") else None
+    try:
+        euid_inside, namespace_said, closed_said = json.loads(namespaced.stdout)
+    except (AttributeError, ValueError):
+        euid_inside, namespace_said, closed_said = None, None, None
 
     def path(name):
         return os.path.join(work, name)
 
-    def left(name):
+    def data(name):
         with open(path(name), "rb") as fh:
-            return fh.read() == files[name][0]
+            return fh.read()
+
+    def left(name):
+        return data(name) == files[name][0] and os.stat(path(name)).st_uid == 0
+
+    def one(name, line):
+        """The run said line alone of name, which it read as written and
+        left as it was."""
+        text = files[name][0].decode("cp1252" if "ansi" in name else "utf-8")
+        return said[name][0] == [[line], None] and said[name][1] == text and left(name)
+
+    def warned(name, start, end):
+        """The run warned of name, its first line starting so and its last
+        ending so, and read it as written, leaving it as it was."""
+        lines = said[name][0][0]
+        return (said[name][0][1] is None and lines[0].startswith(start)
+                and lines[-1].endswith(end) and said[name][1] == rows and left(name))
+
+    def ascii_warned(name, reason, remedy, kind="WARNING", given="isn't given one"):
+        return one(name, "%s: %s has no byte-order mark, and %s: %s. It holds nothing outside "
+                   "ASCII, which reads the same either way. To have the mark added, %s."
+                   % (kind, path(name), given, reason, remedy))
+
+    def skipped(why):
+        print("  skip  " + why)
+        return True
+    unmarked = "%s has no byte-order mark, which Excel needs to open it as UTF-8, and "
+    coded = ("%s isn't UTF-8: 1 line(s) of it are read as Windows-1252, as Windows Excel's plain "
+             "\"CSV\" saves a file in the US and Western Europe, but it ")
     return [
         ("root's file in Windows-1252 is read in it by another user and left to root, said "
-         "to be root's, not read-only, which it isn't",
-         lambda: run.returncode == 0 and said["theirs-ansi.csv"][0][0][0].startswith(
-             "WARNING: %s isn't UTF-8: 1 line(s) of it are read as Windows-1252" % path("theirs-ansi.csv"))
-         and "but it can't be rewritten as UTF-8: it belongs to another user, root. This run reads "
-         "it so" in said["theirs-ansi.csv"][0][0][0]
-         and said["theirs-ansi.csv"][0][0][-1].endswith("To have the run rewrite it, %s."
-                                                        % (THEIRS % "root"))
-         and said["theirs-ansi.csv"][1] == rows and left("theirs-ansi.csv")),
-        ("one in UTF-8 without the mark that anyone may write is read as it is and left to root",
-         lambda: said["theirs-utf8.csv"][0][0][0].startswith(
-             "WARNING: %s has no byte-order mark, which Excel needs to open it as UTF-8, and can't "
-             "be given one: it belongs to another user, root." % path("theirs-utf8.csv"))
-         and said["theirs-utf8.csv"][1] == rows and left("theirs-utf8.csv")),
-        ("and one of ASCII alone is noted",
-         lambda: said["theirs-ascii.csv"][0][0] == [
-             "NOTE: %s has no byte-order mark, and can't be given one: it belongs to another user, "
-             "root. It holds nothing outside ASCII, which reads the same either way. To have the "
-             "mark added, %s." % (path("theirs-ascii.csv"), THEIRS % "root")]
-         and left("theirs-ascii.csv")),
-        ("and one in a folder only root may write is said to be in one, which a copy of one's "
-         "own needs",
-         lambda: "it belongs to another user, root; its folder can't be written. This run reads "
-         "it so" in said["locked/theirs-locked.csv"][0][0][0]
-         and said["locked/theirs-locked.csv"][0][0][-1].endswith(
-             "To have the run rewrite it, %s, and make its folder writable." % (THEIRS % "root"))
-         and left("locked/theirs-locked.csv")),
+         "to be root's, not read-only, which it isn't, in a folder with the sticky bit, where "
+         "only a file's owner may replace it, so that it's root's to put right",
+         lambda: run.returncode == 0
+         and warned("theirs-ansi.csv", "WARNING: " + coded % path("theirs-ansi.csv")
+                    + "isn't rewritten as UTF-8: %s. This run reads it so" % (STICKY % "root"),
+                    "To have the run rewrite it, %s." % (ASK % "root"))),
+        ("one in UTF-8 without the mark that anyone may write there is read as it is and left "
+         "to root, the same said of it",
+         lambda: warned("theirs-utf8.csv", "WARNING: " + unmarked % path("theirs-utf8.csv")
+                        + "isn't given one: %s. It's read as UTF-8" % (STICKY % "root"),
+                        "To have the mark added, %s." % (ASK % "root"))),
+        ("and one of ASCII alone is warned of, whose it is all that keeps it so",
+         lambda: ascii_warned("theirs-ascii.csv", STICKY % "root", ASK % "root")),
+        ("in a shared folder without the bit, one of ASCII alone the user may write is warned "
+         "of, the run leaving it to root, though nothing in it reads otherwise",
+         lambda: ascii_warned("shared/open-ascii.csv", CHOSEN % "root", THEIRS % "root")),
+        ("and one in UTF-8, and one in Windows-1252, said not to be given the mark or "
+         "rewritten, not that they can't be, and why",
+         lambda: warned("shared/open-utf8.csv", "WARNING: " + unmarked % path("shared/open-utf8.csv")
+                        + "isn't given one: %s. It's read as UTF-8" % (CHOSEN % "root"),
+                        "To have the mark added, %s." % (THEIRS % "root"))
+         and warned("shared/open-ansi.csv", "WARNING: " + coded % path("shared/open-ansi.csv")
+                    + "isn't rewritten as UTF-8: %s. This run reads it so" % (CHOSEN % "root"),
+                    "To have the run rewrite it, %s." % (THEIRS % "root"))),
+        ("and one only root may write, as the usual 0644 is, warned of too, of ASCII alone as "
+         "in Windows-1252, its being root's all that keeps it so",
+         lambda: ascii_warned("shared/closed-ascii.csv", OWNED % "root", THEIRS % "root")
+         and warned("shared/closed-ansi.csv", "WARNING: " + coded % path("shared/closed-ansi.csv")
+                    + "isn't rewritten as UTF-8: %s. This run reads it so" % (OWNED % "root"),
+                    "To have the run rewrite it, %s." % (THEIRS % "root"))),
+        ("and root's with the mark already is read as it is without a word",
+         lambda: said["shared/marked.csv"] == [[[], None], rows] and left("shared/marked.csv")),
+        ("one in a folder only root may write can't be rewritten or given the mark, which a "
+         "copy of one's own needs the folder for, root's to put right",
+         lambda: warned("locked/theirs-locked.csv",
+                        "WARNING: " + coded % path("locked/theirs-locked.csv")
+                        + "can't be rewritten as UTF-8: %s; its folder can't be written. This run "
+                        "reads it so" % (OWNED % "root"),
+                        "To have the run rewrite it, %s." % (ASK % "root"))
+         and warned("locked/open-locked.csv",
+                    "WARNING: " + unmarked % path("locked/open-locked.csv")
+                    + "can't be given one: %s; its folder can't be written. It's read as UTF-8"
+                    % (OWNED % "root"), "To have the mark added, %s." % (ASK % "root"))),
+        ("in the user's own folder with the sticky bit, root's file can be replaced with a copy "
+         "of one's own, as the run says",
+         lambda: ascii_warned("own/theirs.csv", CHOSEN % "root", THEIRS % "root")),
+        ("and the user's own file in root's folder with the sticky bit is given the mark",
+         lambda: said["own-ascii.csv"][0] == [["%s had no byte-order mark: one is added, as "
+                                               "Excel's \"CSV UTF-8\" writes one, and nothing "
+                                               "else in it changes." % path("own-ascii.csv")], None]
+         and data("own-ascii.csv") == b"\xef\xbb\xbf" + ascii_rows),
+        ("a link says whose file it leads to: root's, in root's folder with the sticky bit, can't "
+         "be replaced there, and the user's, in the user's own folder, can",
+         lambda: said["link-to-shared.csv"][0] == [[
+             "WARNING: %s has no byte-order mark, and isn't given one: it's a link to %s, which "
+             "belongs to another user, root, and though the user running this may write it, a "
+             "rewrite would take it from them. It holds nothing outside ASCII, which reads the "
+             "same either way. To have the mark added, %s."
+             % (path("link-to-shared.csv"), path("shared/target.csv"), ASK % "root")], None]
+         and said["own/link-to-sticky.csv"][0] == [[
+             "WARNING: %s has no byte-order mark, and isn't given one: it's a link to %s, which "
+             "belongs to another user, root, in a folder where only a file's owner, or the "
+             "folder's owner, may replace it. It holds nothing outside ASCII, which reads the "
+             "same either way. To have the mark added, %s."
+             % (path("own/link-to-sticky.csv"), path("target-sticky.csv"), THEIRS % "root")],
+             None]
+         and data("shared/target.csv") == ascii_rows and data("target-sticky.csv") == ascii_rows),
+        ("and the user's own link in root's folder with the sticky bit, which the user may "
+         "replace there, can be replaced with a copy of one's own",
+         lambda: said["mine-link.csv"][0] == [[
+             "WARNING: %s has no byte-order mark, and isn't given one: it's a link to %s, which "
+             "belongs to another user, root, and though the user running this may write it, a "
+             "rewrite would take it from them. It holds nothing outside ASCII, which reads the "
+             "same either way. To have the mark added, %s."
+             % (path("mine-link.csv"), path("shared/target-mine.csv"), THEIRS % "root")], None]
+         and data("shared/target-mine.csv") == ascii_rows),
+        ("a copy made with cp -p moved into root's file's place with mv -f, as the run says, is "
+         "the user's, its mode kept, which the run gives the mark; in a plain folder, and in the "
+         "user's own with the sticky bit",
+         lambda: all(copied[name] == (
+             0, [["%s had no byte-order mark: one is added, as Excel's \"CSV UTF-8\" writes one, "
+                  "and nothing else in it changes." % path(name)], None], 65534, 0o644)
+             and data(name) == b"\xef\xbb\xbf" + ascii_rows
+             for name in ("shared/copied-ascii.csv", "own/copied-ascii.csv"))),
+        ("but not in root's folder with the sticky bit, which keeps root's file root's",
+         lambda: copied["copied-ascii.csv"] is not None and copied["copied-ascii.csv"][0] != 0
+         and copied["copied-ascii.csv"][2:] == (0, 0o644)
+         and data("copied-ascii.csv") == ascii_rows),
         ("one only root may read is gone without, said to be root's",
          lambda: said["theirs-hidden.csv"] == [[[
              "WARNING: %s can't be read (Permission denied); it belongs to root, so this run goes "
              "on without it, and leaves it as it is. To use it, give the user running this "
              "permission to read it." % path("theirs-hidden.csv")], None], ""]
-         and left("theirs-hidden.csv")),
+         and data("theirs-hidden.csv") == files["theirs-hidden.csv"][0]),
+        ("a run as root in a user namespace, which sees root as nobody and can't give a new file "
+         "root as its owner, leaves root's file as it was, said to be another user's, and one it "
+         "may not write, said to be theirs, not marked immutable",
+         lambda: skipped("no user namespaces here: %s" % (
+             (namespaced.stderr.strip().splitlines() or ["?"])[-1] if namespaced else "no unshare"))
+         if euid_inside != 0 else
+         namespace_said == [[
+             "WARNING: %s has no byte-order mark, and isn't given one: %s. It holds nothing "
+             "outside ASCII, which reads the same either way. To have the mark added, %s."
+             % (path("shared/namespace.csv"), CHOSEN % "nobody", THEIRS % "nobody")], None]
+         and data("shared/namespace.csv") == ascii_rows
+         and os.stat(path("shared/namespace.csv")).st_uid == 0
+         and closed_said == [[
+             "WARNING: %s has no byte-order mark, and isn't given one: %s. It holds nothing "
+             "outside ASCII, which reads the same either way. To have the mark added, %s."
+             % (path("shared/namespace-closed.csv"), OWNED % "nobody", THEIRS % "nobody")], None]
+         and data("shared/namespace-closed.csv") == ascii_rows
+         and sorted(os.listdir(path("shared"))) == sorted(
+             n for n in os.listdir(path("shared")) if not n.startswith("."))),
     ]
 
 
@@ -3171,9 +3369,18 @@ def check_sidecars_left_as_they_are():
 
 
 # What the run says to do with another user's sidecar it reads and leaves
-# as it is, its owner's name for %s.
-THEIRS = ("replace it with a copy of your own made with cp -p, which keeps its mode, or ask %s to "
-          "save it as UTF-8 with the mark")
+# as it is, its owner's name for %s: where its name's place can't be taken
+# by a copy of one's own, a folder with the sticky bit that isn't this
+# user's say, ask its owner (ASK); elsewhere, a copy of one's own too
+# (THEIRS). And why it leaves one that nothing but whose it is keeps it
+# from rewriting: theirs (OWNED); one this user may write too (CHOSEN);
+# and one in a folder with the sticky bit (STICKY).
+ASK = "ask its owner, %s, to save it as UTF-8 with the mark"
+THEIRS = "replace it with a copy of your own made with cp -p, which keeps its mode, or " + ASK
+OWNED = "it belongs to another user, %s"
+CHOSEN = OWNED + (", and though the user running this may write it, a rewrite would take it "
+                  "from them")
+STICKY = OWNED + ", in a folder where only a file's owner, or the folder's owner, may replace it"
 
 
 def check_sidecar_code_pages():
@@ -3396,8 +3603,9 @@ def check_sidecar_code_pages():
     # One without the mark that can't be given it, read as it is: one held
     # open, as Excel holds one on Windows; one read-only, which root, who
     # runs these here, could write; another user's, whose owner a run that
-    # isn't root can't keep, a run by someone else made with the euid; and
-    # one with another link to it. And one of ASCII alone that can't be.
+    # isn't root can't keep, a run by someone else made with the euid, which
+    # this user may write, so that the run leaves it by choice; and one with
+    # another link to it. And one of ASCII alone that can't be.
     unmarked = {}
     for name, patch in (("held-utf8.csv", {"replace": held}),
                         ("theirs-utf8.csv", {"geteuid": None})):
@@ -3412,6 +3620,105 @@ def check_sidecar_code_pages():
             os.replace, os.fdopen, os.access = saved
             os.geteuid = saved_euid
     theirs_name = sidecars.owner_of(os.stat(os.path.join(work, "theirs-utf8.csv")))
+    # Another user's that nothing but whose it is keeps the run from
+    # rewriting, warned of whatever it holds (Rob, 2026-10-27): of ASCII
+    # alone, which this user may write, and one that only its owner may
+    # write, as the usual 0644 is; and in a folder with the sticky bit that
+    # isn't this user's, where only a file's owner, or the folder's, may
+    # replace it, so that a copy of one's own can't either. And those it
+    # couldn't rewrite were they this user's, noted when of ASCII alone,
+    # as one's own is: one read-only, one with another link to it, and one
+    # in a folder this user can't write, which a copy of one's own needs.
+    # A link says whose file it leads to; a link in a plain folder can be
+    # replaced with a copy, one of another user's in a folder with the
+    # sticky bit can't.
+    for folder, mode in (("unwritable", 0o755), ("sticky", 0o1777)):
+        os.mkdir(os.path.join(work, folder))
+        os.chmod(os.path.join(work, folder), mode)
+    unmarked_ascii = {}
+    saved_euid, saved_access = os.geteuid, os.access
+    for name, raw, mode, refused in (
+            ("theirs-ascii.csv", ascii_bytes, 0o644, None),
+            ("theirs-closed-ascii.csv", ascii_bytes, 0o644, "theirs-closed-ascii.csv"),
+            ("theirs-readonly-utf8.csv", plain_bytes, 0o444, None),
+            ("theirs-linked-utf8.csv", plain_bytes, 0o666, None),
+            ("unwritable/theirs-utf8.csv", plain_bytes, 0o666, "unwritable"),
+            ("sticky/theirs-utf8.csv", plain_bytes, 0o666, None),
+            ("sticky/linked-to.csv", plain_bytes, 0o666, None),
+            ("plain-to.csv", plain_bytes, 0o666, None)):
+        subject = write(name, raw)
+        os.chmod(subject, mode)
+        if name == "theirs-linked-utf8.csv":
+            os.link(subject, os.path.join(work, "hard-link-theirs"))
+        if name == "sticky/linked-to.csv":
+            os.symlink(subject, os.path.join(work, "link-to-sticky.csv"))
+            subject = os.path.join(work, "link-to-sticky.csv")
+        if name == "plain-to.csv":
+            os.symlink(subject, os.path.join(work, "sticky", "link-to-plain.csv"))
+            subject = os.path.join(work, "sticky", "link-to-plain.csv")
+        uid = os.stat(subject).st_uid
+        os.geteuid = lambda uid=uid: uid + 1
+        if refused:
+            os.access = lambda p, m, refused=os.path.join(work, refused): (
+                os.path.realpath(p) != os.path.realpath(refused) and saved_access(p, m))
+        try:
+            (unmarked if raw == plain_bytes else unmarked_ascii)[
+                os.path.relpath(subject, work)] = sidecars.rewrite_as_utf8(subject)
+        finally:
+            os.geteuid, os.access = saved_euid, saved_access
+    # A run that seems able to give a rewritten file its owner and can't,
+    # as root in a user namespace (a rootless container) can't give one a
+    # user outside it has: the file is left as it was, and said to be
+    # theirs, the new file gone.
+    lost = write("lost-utf8.csv", plain_bytes)
+    saved_stat, saved_chown = os.stat, os.chown
+
+    class Theirs:
+        """A file's status as another user's (uid one more)."""
+        def __init__(self, status):
+            self.status, self.st_uid = status, status.st_uid + 1
+
+        def __getattr__(self, name):
+            return getattr(self.status, name)
+
+    def refused_chown(p, uid, gid, *args, **kwargs):
+        raise PermissionError(1, "Operation not permitted", p)
+    os.stat = lambda p, *args, **kwargs: (
+        Theirs(saved_stat(p, *args, **kwargs))
+        if isinstance(p, str) and os.path.realpath(p) == os.path.realpath(lost)
+        else saved_stat(p, *args, **kwargs))
+    os.chown, os.geteuid = refused_chown, lambda: 0
+    try:
+        unmarked["lost-utf8.csv"] = sidecars.rewrite_as_utf8(lost)
+        lost_name = sidecars.owner_of(os.stat(lost))
+    finally:
+        os.stat, os.chown, os.geteuid = saved_stat, saved_chown, saved_euid
+    # A file of a user outside the user namespace root runs in, which root
+    # sees as the kernel's overflow uid and may not write: another user's,
+    # as the run in a namespace (check_sidecars_another_user) finds it, not
+    # one marked immutable.
+    outside = write("outside-utf8.csv", plain_bytes)
+    os.chmod(outside, 0o644)
+
+    class Outside:
+        """A file's status as a user outside the namespace has it."""
+        def __init__(self, status):
+            self.status, self.st_uid = status, sidecars._overflow_uid()
+
+        def __getattr__(self, name):
+            return getattr(self.status, name)
+    os.stat = lambda p, *args, **kwargs: (
+        Outside(saved_stat(p, *args, **kwargs))
+        if isinstance(p, str) and os.path.realpath(p) == os.path.realpath(outside)
+        else saved_stat(p, *args, **kwargs))
+    os.geteuid = lambda: 0
+    os.access = lambda p, mode: (os.path.realpath(p) != os.path.realpath(outside)
+                                 and saved_access(p, mode))
+    try:
+        unmarked["outside-utf8.csv"] = sidecars.rewrite_as_utf8(outside)
+        outside_name = sidecars.owner_of(os.stat(outside))
+    finally:
+        os.stat, os.geteuid, os.access = saved_stat, saved_euid, saved_access
     # Another user's that this user can't write either, as root's 0644 file
     # is to anyone else: its owner's alone said, not that it's read-only,
     # which it isn't. One's own that this user may not write, though it has
@@ -3662,16 +3969,19 @@ def check_sidecar_code_pages():
         read_found.append(why is None and data(path) == ("\ufeff" + raw.decode(codec)).encode("utf-8"))
     odd = sidecars.misplaced
 
-    def unwritten(name, reasons, remedy, result=None):
+    def unwritten(name, reasons, remedy, result=None, rewritten="can't be"):
         """A file in Windows-1252 the run couldn't rewrite: the run says why,
         reading it so all the same, and it's as it was, nothing beside it.
-        result: what the rewrite returned, a patched case's in cases."""
+        result: what the rewrite returned, a patched case's in cases;
+        rewritten, "isn't" for another user's that nothing but whose it is
+        keeps the run from rewriting."""
         path = os.path.join(work, name)
         said, why = result or cases[name][1:]
         return (why is None and said == [
             "WARNING: %s isn't UTF-8: 1 line(s) of it are read as Windows-1252, as Windows Excel's "
-            "plain \"CSV\" saves a file in the US and Western Europe, but it can't be rewritten as "
-            "UTF-8: %s. This run reads it so, and leaves it as it is. As read:" % (path, reasons),
+            "plain \"CSV\" saves a file in the US and Western Europe, but it %s rewritten as "
+            "UTF-8: %s. This run reads it so, and leaves it as it is. As read:"
+            % (path, rewritten, reasons),
             "  line 2: one.png,A red square \u2013 large",
             "  A character there that isn't the one written means the file was saved in another "
             "code page: save it from Excel as \"CSV UTF-8 (Comma delimited)\". To have the run "
@@ -3679,13 +3989,15 @@ def check_sidecar_code_pages():
             and data(path) == ansi_rows.encode("cp1252") and beside(name) == []
             and sidecars.text(path) == ansi_rows)
 
-    def unmarkable(name, reasons, remedy):
-        """A file in UTF-8 without the mark that couldn't be given it."""
+    def unmarkable(name, reasons, remedy, given="can't be given one"):
+        """A file in UTF-8 without the mark that couldn't be given it, or,
+        given "isn't given one", another user's that nothing but whose it
+        is keeps the run from giving it."""
         path = os.path.join(work, name)
         return (unmarked[name] == (
-            ["WARNING: %s has no byte-order mark, which Excel needs to open it as UTF-8, and can't "
-             "be given one: %s. It's read as UTF-8, as it is. Its lines outside ASCII, as they read:"
-             % (path, reasons),
+            ["WARNING: %s has no byte-order mark, which Excel needs to open it as UTF-8, and %s: "
+             "%s. It's read as UTF-8, as it is. Its lines outside ASCII, as they read:"
+             % (path, given, reasons),
              "  line 2: one.png,Caf\u00e9",
              "  line 4: three.png,G\u00f6del<U+00A0>and Escher",
              "  A character there that isn't the one written means Excel saved the file in a code "
@@ -3847,9 +4159,64 @@ def check_sidecar_code_pages():
          "lines outside ASCII, and what would let a run mark it: one held open",
          lambda: unmarkable("held-utf8.csv", "it couldn't be written (The process cannot access "
                             "the file)", "close the program that has it open")),
-        ("another user's, which a run that isn't root leaves to them",
-         lambda: unmarkable("theirs-utf8.csv", "it belongs to another user, %s" % theirs_name,
-                            THEIRS % theirs_name)),
+        ("another user's, which a run that isn't root leaves to them, nothing else keeping it "
+         "from marking it, is warned of, the run saying that it isn't given the mark, and why",
+         lambda: unmarkable("theirs-utf8.csv", CHOSEN % theirs_name, THEIRS % theirs_name,
+                            "isn't given one")),
+        ("and one of ASCII alone is warned of all the same, not noted",
+         lambda: unmarked_ascii["theirs-ascii.csv"] == (
+             ["WARNING: %s has no byte-order mark, and isn't given one: %s. It holds nothing "
+              "outside ASCII, which reads the same either way. To have the mark added, %s."
+              % (os.path.join(work, "theirs-ascii.csv"), CHOSEN % theirs_name,
+                 THEIRS % theirs_name)], None)
+         and data(os.path.join(work, "theirs-ascii.csv")) == ascii_bytes),
+        ("and so is one only its owner may write, as the usual 0644 is, whose it is the only "
+         "reason this user may not write it",
+         lambda: unmarked_ascii["theirs-closed-ascii.csv"] == (
+             ["WARNING: %s has no byte-order mark, and isn't given one: %s. It holds nothing "
+              "outside ASCII, which reads the same either way. To have the mark added, %s."
+              % (os.path.join(work, "theirs-closed-ascii.csv"), OWNED % theirs_name,
+                 THEIRS % theirs_name)], None)
+         and data(os.path.join(work, "theirs-closed-ascii.csv")) == ascii_bytes),
+        ("and one in a folder with the sticky bit, where only a file's owner or the folder's may "
+         "replace it, is its owner's to put right, a copy of one's own unable to replace it",
+         lambda: unmarkable("sticky/theirs-utf8.csv", STICKY % theirs_name, ASK % theirs_name,
+                            "isn't given one")),
+        ("but another user's that a rewrite couldn't replace were it this user's, read-only or "
+         "with another link to it, can't be given it, each reason said, a copy of one's own "
+         "made writable",
+         lambda: unmarkable("theirs-readonly-utf8.csv", OWNED % theirs_name + "; it's read-only",
+                            "replace it with a copy of your own made with cp -p, which keeps its "
+                            "mode, and make the copy writable, or " + ASK % theirs_name)
+         and unmarkable("theirs-linked-utf8.csv", OWNED % theirs_name + "; another name links to "
+                        "it, which a rewrite would leave as it was", THEIRS % theirs_name)),
+        ("as one in a folder this user can't write can't, its owner's to put right, which no "
+         "copy of one's own can take the place of",
+         lambda: unmarkable("unwritable/theirs-utf8.csv", OWNED % theirs_name + "; its folder "
+                            "can't be written", ASK % theirs_name)),
+        ("a link says whose file it leads to: one in a plain folder, to a file in a folder with "
+         "the sticky bit, can be replaced with a copy of one's own",
+         lambda: unmarkable("link-to-sticky.csv", "it's a link to %s, which belongs to another "
+                            "user, %s, in a folder where only a file's owner, or the folder's "
+                            "owner, may replace it" % (os.path.join(work, "sticky", "linked-to.csv"),
+                                                       theirs_name),
+                            THEIRS % theirs_name, "isn't given one")),
+        ("and another user's link in a folder with the sticky bit can't, its file's owner's to "
+         "put right",
+         lambda: unmarkable(os.path.join("sticky", "link-to-plain.csv"), "it's a link to %s, which "
+                            "belongs to another user, %s, and though the user running this may "
+                            "write it, a rewrite would take it from them"
+                            % (os.path.join(work, "plain-to.csv"), theirs_name),
+                            ASK % theirs_name, "isn't given one")),
+        ("a rewritten file that can't be given its owner, as root in a user namespace can't give "
+         "one a user outside it has, is left as it was, nothing beside it, the file said to be "
+         "theirs",
+         lambda: unmarkable("lost-utf8.csv", CHOSEN % lost_name, THEIRS % lost_name,
+                            "isn't given one")),
+        ("and one of a user outside the namespace, which root there may not write, is "
+         "theirs, not marked immutable",
+         lambda: unmarkable("outside-utf8.csv", OWNED % outside_name, THEIRS % outside_name,
+                            "isn't given one")),
         ("a read-only one, as root too",
          lambda: unmarkable("readonly-utf8.csv", "it's read-only", "make it writable")),
         ("and one with another link to it, which a rewrite would part from it",
@@ -3857,9 +4224,10 @@ def check_sidecar_code_pages():
                             "leave as it was", "make it a file of its own")),
         ("another user's that this user can't write either is said to be theirs, not "
          "read-only, which it isn't, and to be replaced with a copy of one's own",
-         lambda: unmarkable("theirs-closed.csv", "it belongs to another user, %s"
+         lambda: unmarkable("theirs-closed.csv", OWNED
                             % sidecars.owner_of(os.stat(os.path.join(work, "theirs-closed.csv"))),
-                            THEIRS % sidecars.owner_of(os.stat(os.path.join(work, "theirs-closed.csv"))))),
+                            THEIRS % sidecars.owner_of(os.stat(os.path.join(work, "theirs-closed.csv"))),
+                            "isn't given one")),
         ("one's own that this user may not write, though it has a write bit, is said to be that",
          lambda: unmarkable("closed-utf8.csv", "this user may not write it",
                             "give the user running this permission to write it")),
@@ -3919,11 +4287,11 @@ def check_sidecar_code_pages():
          lambda: unwritten("readonly-ansi.csv", "it's read-only", "make it writable",
                            (readonly_ansi_said, readonly_ansi_why))
          and calls[:2] == [person, (-1, person[1])]),
-        ("and another user's in a code page is read in it, and left to them",
-         lambda: unwritten("theirs-ansi.csv", "it belongs to another user, %s"
-                           % sidecars.owner_of(os.stat(theirs_ansi)),
+        ("and another user's in a code page is read in it, and left to them, the run saying that "
+         "it isn't rewritten, which it could be, and why",
+         lambda: unwritten("theirs-ansi.csv", CHOSEN % sidecars.owner_of(os.stat(theirs_ansi)),
                            THEIRS % sidecars.owner_of(os.stat(theirs_ansi)),
-                           (theirs_ansi_said, theirs_ansi_why))),
+                           (theirs_ansi_said, theirs_ansi_why), "isn't")),
         ("the filters read a copy in UTF-8 of one in a code page left as it is, and the file "
          "itself otherwise",
          lambda: data(sidecars.filter_copy(readonly_ansi, work))

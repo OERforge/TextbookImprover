@@ -941,7 +941,7 @@ def check_sidecar(path, setting, default, base):
     one that isn't UTF-8, as Excel's plain "CSV" saves one, rewritten as
     UTF-8, read in the code page Excel saved it in, the file as it was kept
     beside it, and one without the mark given it; one that doesn't read so
-    stops the run (sidecars.rewrite_as_utf8). One the run can't rewrite,
+    stops the run (sidecars.rewrite_as_utf8). One the run doesn't rewrite,
     another user's or one read-only, is read all the same, and one it can't
     read, a link to nothing as much as one it may not read, gone without,
     the run saying so either way. One naming a folder stops it, saying

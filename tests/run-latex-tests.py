@@ -484,13 +484,22 @@ def markdown_reads_back(work):
 
 
 def word_math_in_list(work):
-    """The Word file's display formula in a list item is numbered as the
-    item's other paragraphs are, so reading it keeps the item whole."""
+    """The Word file's display formula in a list item is set as the
+    item's other later paragraphs are, so reading it keeps the item whole:
+    numbered with no marker, as Pandoc's writer numbers them before 3.13,
+    or unnumbered and lined up with the item's text, as it sets them from
+    3.13 on, the first formula's item's at the list's first level (720), the
+    second's in a quotation inside it a quote step further (1200)."""
     import zipfile
+    sys.path.insert(0, os.path.join(ROOT, "lib"))
+    import docxtarget
     with zipfile.ZipFile(os.path.join(work, "word", "one.docx")) as z:
         xml = z.read("word/document.xml").decode("utf-8")
     paragraphs = re.findall(r"<w:p>.*?</w:p>", xml, re.S)
     formula = [p for p in paragraphs if "oMathPara" in p and "x" in p]
+    if docxtarget.continuations_indented():
+        return [docxtarget.continuation_left(p) for p in formula] == [720, 1200] \
+            and "tiqMath" not in xml
     return formula and all('<w:numId w:val="1000"' in p for p in formula) \
         and "tiqMath" not in xml
 

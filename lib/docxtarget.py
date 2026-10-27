@@ -47,12 +47,14 @@ the page's AST to the XML in document order, which is the order Pandoc
 writes it; a rule that finds nothing to match changes nothing.
 """
 
+import functools
 import hashlib
 import html
 import json
 import os
 import re
 import shutil
+import subprocess
 import tempfile
 import zipfile
 
@@ -241,11 +243,13 @@ DECORATIVE_MARK = "tiqDecorative"
 LINES_MARK = "tiqLines"
 CODE_MARK = "tiqLang"
 # A paragraph holding only a display formula, after the first block of a
-# list item. Pandoc's writer gives such a paragraph no numbering at all
-# (getParaProps's displayMathPara, Writers/Docx/OpenXML.hs, 3.12), where
-# the item's other paragraphs get its no-marker numbering; so the item,
-# and the list, end at the formula when the file is read. The mark carries
-# the list's depth, which becomes the paragraph's numbering level.
+# list item. Pandoc's writer gives such a paragraph no numbering and no
+# indent (getParaProps's displayMathPara, Writers/Docx/OpenXML.hs, 3.12 and
+# 3.13), where the item's other paragraphs get its no-marker numbering, or
+# from 3.13 the item's indent (CONTINUATION_PANDOC); so the item, and the
+# list, end at the formula when the file is read. The mark carries the
+# list's depth, which becomes the paragraph's numbering level, or its
+# indent (list_math).
 MATH_MARK = "tiqMath"
 # A box: a div of class box (a LibreTexts page's Example, Exercise, or
 # Note; a LaTeX book's framed passage), which the pages draw with a
@@ -261,6 +265,21 @@ AFTER_BORDER = ("w:shd", "w:tabs", "w:suppressAutoHyphens", "w:kinsoku", "w:word
                 "w:overflowPunct", "w:topLinePunct", "w:autoSpaceDE", "w:autoSpaceDN",
                 "w:bidi", "w:adjustRightInd", "w:snapToGrid", "w:spacing", "w:ind")
 BASE_LIST_ID = 1000          # Pandoc's numbering with no marker (baseListId)
+# A list item's later paragraphs. Before 3.13, Pandoc's writer numbered
+# each in a list of its own whose marker is blank (BASE_LIST_ID), which
+# Word, a screen reader, and Pandoc's reader took for an item of another
+# list; from 3.13 (#9197) it gives such a paragraph no numbering but an
+# indent that lines it up with the item's text, as Word's List Continue
+# styles do: w:left the level's text indent, LIST_STEP for each level from
+# the outermost, and w:firstLine 0 (getParaProps, Writers/Docx/OpenXML.hs).
+# Its reader takes an unnumbered paragraph indented like the text of an
+# open item for that item's, and anything else for the end of the list
+# (bodyPartToBlocks, Readers/Docx.hs). A formula such a paragraph holds
+# alone is still written with neither (MATH_MARK), and a quote or code
+# inside an item, or a list inside a quote, is indented here as before
+# (indent_quotes), the reading taking each back (docxrepair).
+CONTINUATION_PANDOC = (3, 13)
+LIST_STEP = 720              # the writer's indent for each list level (mkLvl's step)
 # A table or a horizontal rule inside an item of a list that isn't itself
 # in a list. Word can't put a table in a numbered paragraph, and Pandoc's
 # reader takes its own rule only from a paragraph with no properties, so
@@ -269,7 +288,16 @@ BASE_LIST_ID = 1000          # Pandoc's numbering with no marker (baseListId)
 # so the file
 # says which of its tables belong to an item, with how many blocks of the
 # item follow it and whether the list goes on after the item, in the same
-# part as the id map; docxrepair.apply_list_tables puts them back.
+# part as the id map; docxrepair.apply_list_tables puts them back. And,
+# where an item's later paragraphs are indented (CONTINUATION_PANDOC), a
+# figure in an item: one of a picture and a caption ("f"), whose picture's
+# paragraph, unnumbered, the reader pairs with its caption as a figure
+# (captioned_parts), which ends the list as a table does (bodyPartToBlocks,
+# Readers/Docx.hs), where the writer before 3.13 numbered it, and the
+# reader kept it in the item as a picture and its caption as a paragraph;
+# and one of more than a picture, which the writer writes as a table
+# (toFigureTable, Writers/Docx/OpenXML.hs), its caption after it, a table
+# here ("t"). A figure with no caption is a paragraph the item keeps.
 ITEM_TABLE_MARK = "tiqItemTable"
 NUMBER_CLASSES = ("numberLines", "number-lines")
 # A code block's language, the class Pandoc highlights by, has nowhere to
@@ -424,23 +452,31 @@ def mark_blocks(doc):
     return doc, sum(counts.values())
 
 
+def _display_math(inline):
+    """A display formula as Pandoc's writer takes one, alone or alone in a
+    span (isDisplayMath, Writers/Shared.hs)."""
+    if inline.get("t") == "Span" and len(inline["c"][1]) == 1:
+        inline = inline["c"][1][0]
+    return inline.get("t") == "Math" and inline["c"][0].get("t") == "DisplayMath"
+
+
 def _display_math_para(block):
     """A paragraph Pandoc's writer gives no numbering in a list item: one
-    holding only a display formula."""
-    return block.get("t") == "Para" and len(block["c"]) == 1 \
-        and block["c"][0].get("t") == "Math" \
-        and block["c"][0]["c"][0].get("t") == "DisplayMath"
+    holding only a display formula, a Plain as much as a Para, which the
+    writer writes as one (blockToOpenXML')."""
+    return block.get("t") in ("Para", "Plain") and len(block["c"]) == 1 \
+        and _display_math(block["c"][0])
 
 
 def _split_display(block):
     """A paragraph holding display formulas among other inlines, as
-    Pandoc's writer will write it: each run of formulas and each run of
-    the rest its own paragraph, spaces at their edges dropped."""
-    if block.get("t") != "Para":
+    Pandoc's writer will write it (fixDisplayMath, Writers/Shared.hs): each
+    run of formulas and each run of the rest its own paragraph, of the
+    block's own kind, spaces at their edges dropped."""
+    if block.get("t") not in ("Para", "Plain"):
         return [block]
     inlines = block["c"]
-    shown = [i.get("t") == "Math" and i["c"][0].get("t") == "DisplayMath"
-             for i in inlines]
+    shown = [_display_math(i) for i in inlines]
     if not any(shown) or all(shown):
         return [block]
     groups, current, kind = [], [], None
@@ -459,8 +495,32 @@ def _split_display(block):
         while group and group[-1].get("t") in space:
             group = group[:-1]
         if group:
-            out.append({"t": "Para", "c": group})
+            out.append({"t": block["t"], "c": group})
     return out
+
+
+def _number_anchored(item):
+    """An item Pandoc's writer gives no number: it numbers an item's first
+    paragraph, and puts an empty one first only where a list opens the
+    item (listItemToOpenXML, Writers/Docx/OpenXML.hs), so an item whose
+    first blocks are anchors, empty divs with ids, before a list (OpenStax's
+    solutions open items so), or that opens with a table, a figure it
+    writes as one, or a rule, none of them paragraphs it numbers, gets
+    none, and Word and the reader take what it holds for the item
+    before's. The anchors as spans in a paragraph of their own, which the
+    writer numbers; an empty paragraph before the table or rule, as the
+    writer puts one before a list. Returns 1 if so, else 0."""
+    if item and isinstance(item[0], dict) and _held(item[0], True) in ("t", "r"):
+        item.insert(0, {"t": "Plain", "c": [{"t": "Str", "c": ""}]})
+        return 1
+    n = 0
+    while n < len(item) and isinstance(item[n], dict) and item[n].get("t") == "Div" \
+            and not item[n]["c"][1] and item[n]["c"][0][0]:
+        n += 1
+    if not n or n == len(item) or item[n].get("t") not in ("BulletList", "OrderedList"):
+        return 0
+    item[:n] = [{"t": "Plain", "c": [{"t": "Span", "c": [div["c"][0], []]} for div in item[:n]]}]
+    return 1
 
 
 def _mark_item(blocks, depth, counter, opens_item):
@@ -481,25 +541,94 @@ def _mark_item(blocks, depth, counter, opens_item):
             _mark_item(inner["c"], depth, counter, False)
 
 
-def _held(block):
+def _held(block, figures=False):
     """"t" for a table, "r" for a horizontal rule, or a div holding nothing
-    but one, at any depth; None otherwise."""
+    but one, at any depth; and with figures, where the writer indents an
+    item's later paragraphs, "f" for a figure of one picture and a caption,
+    which the writer writes as the picture's paragraph (Captioned Figure)
+    and the caption's, and "t" for a figure of more than a picture, which it
+    writes as a table (ITEM_TABLE_MARK); None otherwise."""
     while block.get("t") == "Div" and len(block["c"][1]) == 1:
         block = block["c"][1][0]
+    if block.get("t") == "Figure":
+        if not figures:
+            return None
+        if _lone_image(block) is None:
+            return "t"
+        return "f" if block["c"][1][1] else None
     return {"Table": "t", "HorizontalRule": "r"}.get(block.get("t"))
 
 
+def _read_back(blocks, figures):
+    """How many blocks the reader gives back, at the top of the page, for
+    blocks, an item's after something it holds, at which the reader has
+    ended every list (figures as _held takes them). Reading makes each of
+    the item's paragraphs a list paragraph, which the reader folds into an
+    item just before it (handleListParagraphs, Readers/Docx/Lists.hs), and
+    into nothing else: a block of its own after a table, a rule, a figure,
+    a heading, or another such paragraph. A list's items are one block, a
+    run the reader begins with an item and ends at anything that isn't an
+    item deeper than that one or another of its list (flatToBullets'),
+    each table, rule, figure, or heading an item holds ending it there, so
+    that the items after it begin another. A quotation, a code block, a
+    definition list, and a figure _held doesn't take are one paragraph to
+    this count, as they are where they hold nothing; a div is what it
+    holds, an anchor (an empty one) nothing."""
+    count, run = 0, None               # run: (level, list) of the item a run of items begins with
+
+    def item_(entry, level, owner):
+        nonlocal count, run
+        if run is None or not (level > run[0] or (level == run[0] and run[1] is owner)):
+            count, run = count + 1, (level, owner)
+        entry = list(entry)
+        while entry and isinstance(entry[0], dict) and entry[0].get("t") == "Div" \
+                and entry[0]["c"][1] and not _held(entry[0], figures):
+            entry = entry[0]["c"][1] + entry[1:]
+        if entry and isinstance(entry[0], dict) and (
+                entry[0].get("t") in ("BulletList", "OrderedList")
+                or _held(entry[0], True) in ("t", "r")):
+            # After the empty paragraph for the number the writer puts
+            # before a list, or _number_anchored before a table or a rule.
+            block_(entry[0], level)
+        for block in entry[1:]:
+            block_(block, level)
+
+    def block_(block, level):
+        nonlocal count, run
+        if not isinstance(block, dict):
+            return
+        kind = block.get("t")
+        # A figure the writer writes as a table is a table to the reader
+        # whichever writer wrote it.
+        if _held(block, figures) or _held(block, True) == "t" or kind == "Header":
+            count, run = count + 1, None
+        elif kind in ("BulletList", "OrderedList"):
+            for entry in block["c"][1] if kind == "OrderedList" else block["c"]:
+                item_(entry, level + 1, block)
+        elif kind == "Div":
+            for inner in block["c"][1]:
+                block_(inner, level)
+        elif run is None:
+            count += 1
+    for block in blocks:
+        block_(block, 0)
+    return count
+
+
 def _mark_item_tables(item, counter, chain):
-    """Mark each table or rule after the first block of a list item with
-    how many of the item's blocks follow it and, for each list from the
-    outermost to the item's own, whether it goes on (a digit each)."""
+    """Mark each table or rule after the first block of a list item, and
+    each figure where the writer indents an item's later paragraphs, with
+    how many blocks the reader gives back for the item's after it
+    (_read_back) and, for each list from the outermost to the item's own,
+    whether it goes on (a digit each)."""
     bits = "".join(str(int(b)) for b in chain)
+    figures = continuations_indented()
     for i in range(len(item) - 1, 0, -1):
-        kind = _held(item[i])
+        kind = _held(item[i], figures)
         if kind:
             counter[0] += 1
             item[i] = {"t": "Div", "c": [["%s%dk%sf%dc%s" % (
-                ITEM_TABLE_MARK, counter[0], kind, len(item) - i - 1, bits),
+                ITEM_TABLE_MARK, counter[0], kind, _read_back(item[i + 1:], figures), bits),
                 [], []], [item[i]]]}
 
 
@@ -528,7 +657,7 @@ def _mark_quote_tables(blocks):
                 and inner[0]["c"][0][0].startswith(QUOTE_MARK):
             inner = inner[0]["c"][1]
         for i in range(len(inner) - 1, 0, -1):
-            if _held(inner[i]) == "t":
+            if _held(inner[i]) == "t":   # a table, not a figure
                 count += 1
                 inner[i] = {"t": "Div", "c": [["%sQ%dkqf0c%d" % (
                     ITEM_TABLE_MARK, count, int(i < len(inner) - 1)),
@@ -536,12 +665,112 @@ def _mark_quote_tables(blocks):
     return count
 
 
+CAPTIONED_FIGURE = 'w:pStyle w:val="CaptionedFigure"'
+# The reader's captions (addCaptioned, Readers/Docx/Parse.hs, the same from
+# 3.9 to 3.13): among the body's parts, a table being one, a paragraph in a
+# caption style (Caption, Table Caption, Image Caption, by its style or one
+# it's based on, hasCaptionStyle) and unnumbered, beside something it can
+# caption, a table or an unnumbered paragraph holding a picture and nothing
+# else (isCaptionable): before it, or after it unless the caption keeps
+# with the next paragraph; the parts taken in order, a pair skipped once
+# made. A caption and what it captions are one part to the reader, which
+# ends every list at it, and a picture so captioned is the reader's figure.
+# Not in a table's cells, whose parts the reader doesn't pair.
+CAPTION_STYLE_IDS = ("caption", "tablecaption", "imagecaption")
+BLOCK_TOKENS = re.compile(r"<w:tbl>|</w:tbl>|<w:p\b[^>]*/>|<w:p\b[^>]*>.*?</w:p>", re.S)
+
+
+def _style_id(paragraph):
+    found = re.search(r'<w:pStyle w:val="([^"]*)"', paragraph)
+    return found.group(1) if found else None
+
+
+def caption_paragraph(paragraph):
+    """Whether the reader can take a paragraph for a caption: in a caption
+    style, and unnumbered, a paragraph to it and not a list's item."""
+    style = _style_id(paragraph)
+    return bool(style) and style.lower() in CAPTION_STYLE_IDS and _numbering(paragraph) is None
+
+
+def drawing_alone(paragraph):
+    """Whether a paragraph holds a picture and nothing else, unnumbered,
+    which the reader can pair with a caption beside it (isCaptionable): no
+    text, bookmark, link, or field beside the picture."""
+    body = re.sub(r"<w:pPr>.*?</w:pPr>", "", paragraph, flags=re.S)
+    return "<w:drawing" in paragraph and _numbering(paragraph) is None \
+        and not re.search(r"<w:t[ >]|<w:bookmarkStart|<w:hyperlink|<w:fldSimple", body)
+
+
+def captioned_parts(tokens):
+    """The pairs the reader makes of the body's parts (above), tokens being
+    BLOCK_TOKENS' matches in a part of the package, in order: [(the
+    caption's token's index, the index of what it captions, the picture's
+    paragraph or the table's opening, "f" for a picture or "t" for a table,
+    the ordinal of the reader's figure, or of the table among the body's,
+    from 0)]."""
+    parts, depth, tables = [], 0, 0
+    for i, m in enumerate(tokens):
+        token = m.group(0)
+        if token == "<w:tbl>":
+            if depth == 0:
+                parts.append(("t", i, tables))
+                tables += 1
+            depth += 1
+        elif token == "</w:tbl>":
+            depth -= 1
+        elif depth == 0:
+            parts.append(("p", i, None))
+
+    def caption(part):
+        return part[0] == "p" and caption_paragraph(tokens[part[1]].group(0))
+
+    def captionable(part):
+        return part[0] == "t" or drawing_alone(tokens[part[1]].group(0))
+    pairs, figures, k = [], 0, 0
+    while k + 1 < len(parts):
+        one, other = parts[k], parts[k + 1]
+        if caption(one) and captionable(other):
+            caption_at, captioned = one, other
+        elif captionable(one) and caption(other) \
+                and "<w:keepNext" not in tokens[other[1]].group(0):
+            caption_at, captioned = other, one
+        else:
+            k += 1
+            continue
+        if captioned[0] == "t":
+            pairs.append((caption_at[1], captioned[1], "t", captioned[2]))
+        else:
+            pairs.append((caption_at[1], captioned[1], "f", figures))
+            figures += 1
+        k += 2
+    return pairs
+
+
+def _reader_figure(xml, nth, marks):
+    """The ordinal of the figure the reader makes of xml's nth paragraph
+    styled Captioned Figure, counted from 0, as reading the file will have
+    it (item_tables), or None if the reader makes none of it."""
+    import docxrepair
+    ids = [m.group(1) for m in marks.finditer(xml)]
+    if ids:
+        xml = re.sub(r'<w:bookmark(?:Start|End) w:id="(?:%s)"[^>]*/>' % "|".join(ids), "", xml)
+    xml, _ = docxrepair.move_bookmarks_into_paragraphs(xml)
+    tokens = list(BLOCK_TOKENS.finditer(xml))
+    pictures = [i for i, t in enumerate(tokens) if CAPTIONED_FIGURE in t.group(0)]
+    if nth >= len(pictures):
+        return None
+    return next((n for _, captioned, kind, n in captioned_parts(tokens)
+                 if kind == "f" and captioned == pictures[nth]), None)
+
+
 def item_tables(xml):
-    """[(kind, ordinal, follow, continues)] for each table ("t") or rule
-    ("r") mark_blocks marked as in a list item, the ordinal counting the
-    body's tables, or its rules, outside tables, from 0. The marks are
-    then removed. Returns (xml, found)."""
-    pattern = re.compile(r'<w:bookmarkStart w:id="(\d+)" w:name="_?%sQ?\d+k([trq])f(\d+)c(\d+)"\s*/>'
+    """[(kind, ordinal, follow, continues)] for each table ("t"), rule
+    ("r"), or figure ("f") mark_blocks marked as in a list item, the
+    ordinal counting the body's tables, its rules, or the reader's figures
+    (captioned_parts), from 0, outside tables; a mark whose range holds no
+    such table, rule, or figure is left out. The marks are then removed.
+    Returns (xml, found)."""
+    pattern = re.compile(r'<w:bookmarkStart w:id="(\d+)" w:name="_?%sQ?\d+k([trqf])f(\d+)c(\d+)"\s*/>'
                          % ITEM_TABLE_MARK)
     found = []
     while True:
@@ -549,15 +778,26 @@ def item_tables(xml):
         if not m:
             break
         kind = m.group(2)
-        target = 'o:hr="t"' if kind == "r" else "<w:tbl>"
-        at = xml.find(target, m.end())
+        target = {"r": 'o:hr="t"', "f": CAPTIONED_FIGURE}.get(kind, "<w:tbl>")
+        close = re.compile(r'<w:bookmarkEnd w:id="%s"\s*/>' % m.group(1)).search(xml, m.end())
+        at = xml.find(target, m.end(), close.start() if close else len(xml))
         if at >= 0 and kind == "q":
             # The writer gives a quotation's table cells the quotation's
             # style, and each cell reads back as a quotation of its own.
             end = _table_end(xml, at)
             xml = xml[:at] + xml[at:end].replace(
                 '<w:pStyle w:val="BlockText" />', '<w:pStyle w:val="Compact" />') + xml[end:]
-        if at >= 0:
+        if at >= 0 and kind == "f":
+            # The figure the reader makes of the picture's paragraph and
+            # its caption, if it makes one (one numbered, or with no caption
+            # beside it, it doesn't), counted in the file as the reading
+            # will have it: these marks gone, and the bookmarks moved into
+            # paragraphs (docxrepair.move_bookmarks_into_paragraphs), out of
+            # a picture's into its caption's.
+            ordinal = _reader_figure(xml, xml.count(CAPTIONED_FIGURE, 0, at), pattern)
+            if ordinal is not None:
+                found.append((kind, ordinal, int(m.group(3)), m.group(4)))
+        elif at >= 0:
             depth, ordinal = 0, 0
             for tag in re.finditer(r'<w:tbl>|</w:tbl>|o:hr="t"', xml[:at]):
                 if tag.group(0) == "<w:tbl>":
@@ -592,6 +832,7 @@ def _mark_list_math(blocks, depth, counter=None, chain=(), tables=True):
         items = items_of(block) if isinstance(block, dict) else None
         if items is not None:
             for j, item in enumerate(items):
+                counter[0] += _number_anchored(item)
                 # The writer cuts a paragraph holding a display formula and
                 # text into paragraphs (fixDisplayMath, Writers/Shared.hs);
                 # cut here the same way, so the formula's own is marked.
@@ -607,10 +848,13 @@ def _mark_list_math(blocks, depth, counter=None, chain=(), tables=True):
     return counter[0]
 
 
-def list_math(xml):
+def list_math(xml, indented=False):
     """Each paragraph mark_blocks marked as a display formula in a list
-    item numbered as the item's other paragraphs are: the item's level,
-    with no marker. The marks are then removed. Returns (xml, count)."""
+    item set as the item's other later paragraphs are: numbered at the
+    item's level, with no marker, as Pandoc's writer numbers them before
+    3.13; or, indented (CONTINUATION_PANDOC), lined up with the item's text
+    and unnumbered, as it sets them from 3.13 on, which its reader keeps in
+    the item. The marks are then removed. Returns (xml, count)."""
     pattern = re.compile(r'<w:bookmarkStart w:id="(\d+)" w:name="_?%s(\d+)d(\d+)"\s*/>'
                          % MATH_MARK)
     count = 0
@@ -625,7 +869,13 @@ def list_math(xml):
             if para >= 0 else None
         numbering = ('<w:numPr><w:ilvl w:val="%s" /><w:numId w:val="%d" /></w:numPr>'
                      % (level, BASE_LIST_ID))
-        if para >= 0 and not (props and "<w:numPr>" in props.group(1)):
+        if para >= 0 and indented and not (props and re.search(r"<w:numPr>|<w:ind\b",
+                                                               props.group(1))):
+            close = xml.find("</w:p>", para) + len("</w:p>")
+            xml = xml[:para] + _set_indent(xml[para:close], (int(level) + 1) * LIST_STEP,
+                                           first_line=True) + xml[close:]
+            count += 1
+        elif para >= 0 and not indented and not (props and "<w:numPr>" in props.group(1)):
             if props:
                 inner = props.group(1)
                 style = re.match(r"\s*<w:pStyle [^>]*/>", inner)
@@ -852,6 +1102,36 @@ def apply_markers(xml, tables, lines=None, codes=None):
 # the table before, not after (Readers/Docx/Parse.hs, addCaptioned): a
 # table with no caption takes the next one's. Word users want a caption
 # kept with its table anyway. A workaround pending Pandoc.
+# A table's caption in a list item, or in a table's cell: Pandoc's writer
+# gives a caption that's a Plain, as one read from HTML is, the style it
+# gives a Plain in a list or a table, Compact, over Table Caption
+# (blockToOpenXML' for Plain, Writers/Docx/OpenXML.hs, which tableToOpenXML
+# in Writers/Docx/Table.hs goes around for a table's own cells only, 3.9 to
+# 3.13), so Word shows it as the item's words, and Pandoc's reader takes it
+# for a paragraph before the table and the table's w:tblCaption for its
+# caption: the caption twice, the list ended at the paragraph. Measured
+# with 3.12.1 and 3.13. In Table Caption, as the writer means it to be, the
+# reader pairs it with its table, its own words the table's caption. A
+# caption's paragraphs are those mark_blocks's mark around the table holds
+# before it, a formula's or a line break's as much as words.
+def table_captions(xml):
+    """Each paragraph of a table's caption written in Compact, styled Table
+    Caption; before apply_markers takes the tables' marks away. Returns
+    (xml, count)."""
+    count, out, at = 0, [], 0
+    for m in re.finditer(r'<w:bookmarkStart w:id="(\d+)" w:name="_?%s\d+"\s*/>' % TABLE_MARK, xml):
+        table = xml.find("<w:tbl>", m.end())
+        close = re.compile(r'<w:bookmarkEnd w:id="%s"\s*/>' % m.group(1)).search(xml, m.end())
+        if m.start() < at or table < 0 or (close and close.start() < table):
+            continue
+        caption, n = re.subn(r'<w:pStyle w:val="Compact"(\s*)/>', r'<w:pStyle w:val="TableCaption"\1/>',
+                             xml[m.end():table])
+        count += n
+        out.append(xml[at:m.end()] + caption)
+        at = table
+    return "".join(out) + xml[at:], count
+
+
 def keep_captions(xml):
     """Keep with next on each table caption; returns (xml, count)."""
     count = 0
@@ -1018,9 +1298,50 @@ def _numbering(paragraph):
     return (m.group(2), m.group(1)) if m else None
 
 
-def _set_indent(paragraph, left, right=None, hanging=None):
-    ind = '<w:ind w:left="%d"%s%s />' % (left, ' w:right="%d"' % right if right else "",
-                                        ' w:hanging="%d"' % hanging if hanging else "")
+@functools.lru_cache(maxsize=None)
+def pandoc_version():
+    """The version of the Pandoc on the path, as a tuple of numbers; () when
+    there's none."""
+    try:
+        words = subprocess.run(["pandoc", "--version"], capture_output=True,
+                               text=True).stdout.split()
+    except OSError:
+        return ()
+    return tuple(int(p) for p in re.findall(r"\d+", words[1] if len(words) > 1 else "")[:3])
+
+
+def continuations_indented():
+    """Whether the Pandoc on the path writes a list item's later paragraphs
+    indented and unnumbered (CONTINUATION_PANDOC)."""
+    return pandoc_version() >= CONTINUATION_PANDOC
+
+
+def own_indent(paragraph):
+    """The w:ind among a paragraph's own properties, as {attribute: value}."""
+    props = re.match(r"<w:p\b[^>]*>\s*<w:pPr>(.*?)</w:pPr>", paragraph, re.S)
+    ind = props and re.search(r"<w:ind\b([^>]*)/>", props.group(1))
+    return dict(re.findall(r'w:(\w+)="([^"]*)"', ind.group(1))) if ind else {}
+
+
+def continuation_left(paragraph):
+    """The left indent of a list item's later paragraph as Pandoc's writer
+    writes one from 3.13 on (CONTINUATION_PANDOC), and list_math and
+    indent_quotes keep the form: unnumbered, its own w:ind's w:firstLine 0,
+    with no w:hanging; None for any other paragraph."""
+    if "<w:numPr>" in paragraph:
+        return None
+    ind = own_indent(paragraph)
+    left = ind.get("left", ind.get("start"))
+    if ind.get("firstLine") != "0" or "hanging" in ind or left is None \
+            or not re.fullmatch(r"-?\d+", left):
+        return None
+    return int(left)
+
+
+def _set_indent(paragraph, left, right=None, hanging=None, first_line=False):
+    ind = '<w:ind w:left="%d"%s%s%s />' % (left, ' w:right="%d"' % right if right else "",
+                                          ' w:hanging="%d"' % hanging if hanging else "",
+                                          ' w:firstLine="0"' if first_line else "")
     if "<w:pPr>" not in paragraph:
         return paragraph.replace("<w:p>", "<w:p><w:pPr>" + ind + "</w:pPr>", 1)
     start = paragraph.index("<w:pPr>")
@@ -1083,8 +1404,9 @@ def indent_quotes(xml, levels=None, blanks=None):
     """Each paragraph inside the marked quote ranges indented by its
     depth, a list's items beyond their level's own indent (levels, from
     level_indents), and code that a list item holds in a quote beyond its
-    blank level's (blanks, level_indents with blank), the marks removed;
-    returns (xml, count, list items and code)."""
+    blank level's (blanks, level_indents with blank), or, as Pandoc's writer
+    sets an item's later paragraphs from 3.13 on, beyond the item's text;
+    the marks removed. Returns (xml, count, list items and code)."""
     if QUOTE_MARK not in xml:
         return xml, 0, 0
     names = dict(re.findall(r'<w:bookmarkStart w:id="(\d+)" w:name="(_?' + QUOTE_MARK
@@ -1098,7 +1420,10 @@ def indent_quotes(xml, levels=None, blanks=None):
         if mark and mark.group(2) in names:
             depth += 1 if mark.group(1) == "Start" else -1
             continue
-        if token.startswith("<w:p>") and "<w:numPr>" not in token:
+        # A list outside every quote, or none: a paragraph outside them, or
+        # one in a quote that's neither an item nor an item's later one.
+        if token.startswith("<w:p>") and (not depth or (
+                "<w:numPr>" not in token and continuation_left(token) is None)):
             list_depth = 0
         if token == "<w:tbl>":
             tables += 1
@@ -1145,6 +1470,26 @@ def indent_quotes(xml, levels=None, blanks=None):
                 token = _set_indent(token, left + QUOTE_STEP * depth, hanging=hanging)
                 count += 1
                 items += 1
+        elif token.startswith("<w:p>") and depth and not tables \
+                and continuation_left(token) is not None:
+            # An item's later paragraph as Pandoc's writer writes one from
+            # 3.13 on, unnumbered and lined up with the item's text
+            # (CONTINUATION_PANDOC): lined up with it still where the list's
+            # items are moved into their quotes, in Body Text, as a numbered
+            # one is above; a quote's or code's inside the item indented
+            # beyond it by the quote's own depth, which reading Word takes
+            # back (docxrepair.mark_continuations, quoted_code).
+            own = 'w:pStyle w:val="BlockText"'
+            text = continuation_left(token) + QUOTE_STEP * list_depth
+            inside = depth - list_depth
+            if inside <= 0:
+                token = _set_indent(token.replace(own, 'w:pStyle w:val="BodyText"'), text,
+                                    first_line=True)
+            else:
+                token = _set_indent(token, text + QUOTE_STEP * inside,
+                                    QUOTE_STEP if own in token else None, first_line=True)
+                items += 1
+            count += 1
         elif token.startswith("<w:p>") and depth and not tables:
             block_text = 'w:pStyle w:val="BlockText"' in token
             if not (block_text and depth == 1):
@@ -1166,14 +1511,33 @@ def indent_quotes(xml, levels=None, blanks=None):
 # author's own file, without it, can indent a list for other reasons, a
 # step's sub-items under a numbered step, and is left as Pandoc reads it.
 QUOTED_LISTS_VAR = "TextbookImproverQuotedLists"
+# A file whose lists' later paragraphs are indented, as Pandoc's writer
+# sets them from 3.13 on (CONTINUATION_PANDOC), says so too: reading it,
+# a quote's or code's paragraph in an item, indented beyond the item's
+# text, is lined up with it again for the reader to keep it in the item,
+# an item's paragraphs after its table or rule are kept for it, and for a
+# reader before 3.13, which would take each for a quote, every one is
+# made a list paragraph, as the writer's numbered ones were (docxrepair).
+CONTINUATIONS_VAR = "TextbookImproverContinuations"
 
 
 def quoted_lists_var(settings):
     """settings.xml with the document variable, after w:compat, where the
     schema puts w:docVars."""
-    if QUOTED_LISTS_VAR in settings:
+    return _document_var(settings, QUOTED_LISTS_VAR, str(QUOTE_STEP))
+
+
+def continuations_var(settings):
+    """settings.xml saying its lists' later paragraphs are indented."""
+    return _document_var(settings, CONTINUATIONS_VAR, "indent")
+
+
+def _document_var(settings, name, value):
+    """settings.xml with the document variable name, valued value, after
+    w:compat, where the schema puts w:docVars; as it was where it has it."""
+    if name in settings:
         return settings
-    var = '<w:docVar w:name="%s" w:val="%d"/>' % (QUOTED_LISTS_VAR, QUOTE_STEP)
+    var = '<w:docVar w:name="%s" w:val="%s"/>' % (name, value)
     if "<w:docVars>" in settings:
         return settings.replace("<w:docVars>", "<w:docVars>" + var, 1)
     at = settings.find("</w:compat>")
@@ -1404,6 +1768,7 @@ def finish(path, doc, keep=None, footer=()):
     lines = lines_marks(doc)
     codes = code_marks(doc)
     quoted_items = 0
+    continued = False                 # an item's later paragraph, indented
     counts = {"compat": 0, "tooltips": 0, "decorative": 0, "first_columns": 0,
               "quotes": 0, "jaws_titles": 0, "ids": 0, "captions_kept": 0,
               "code_lines": 0, "code_languages": 0, "bookmarks_removed": 0,
@@ -1426,11 +1791,25 @@ def finish(path, doc, keep=None, footer=()):
         xml = text(part)
         xml, n = screentips(xml, text(rels), facts["links"])
         counts["tooltips"] += n
+        # A table's caption in its style, while the tables' marks show it.
+        xml, n = table_captions(xml)
+        counts["table_captions"] = counts.get("table_captions", 0) + n
         xml, found = apply_markers(xml, tables, lines, codes)
         for key, n in found.items():
             counts[key] += n
-        xml, n = list_math(xml)
+        xml, n = list_math(xml, continuations_indented())
         counts["list_math"] = counts.get("list_math", 0) + n
+        # Kept with its table, and the bookmarks nothing links to gone, the
+        # target's own marks aside, before the figures an item holds are
+        # counted as the reader will pair them (item_tables): a bookmark in
+        # a picture's paragraph keeps the reader from pairing it.
+        xml, n = keep_captions(xml)
+        counts["captions_kept"] += n
+        if keep is not None:
+            own = {name for _, name in BOOKMARK_START.findall(xml)
+                   if name.lstrip("_").startswith("tiq")}
+            xml, n = prune_bookmarks(xml, set(keep) | own)
+            counts["bookmarks_removed"] += n
         if part == "word/document.xml":
             xml, listed_tables = item_tables(xml)
         numbering = text("word/numbering.xml") if "word/numbering.xml" in parts else ""
@@ -1438,8 +1817,8 @@ def finish(path, doc, keep=None, footer=()):
                                       level_indents(numbering, blank=True) if numbering else None)
         counts["quotes"] += n
         quoted_items += items
-        xml, n = keep_captions(xml)
-        counts["captions_kept"] += n
+        continued = continued or any(continuation_left(p) is not None for p in re.findall(
+            r"<w:p>.*?</w:p>", xml, re.S))
         xml, n = box_borders(xml)
         counts["boxes"] = counts.get("boxes", 0) + n
         xml, n = single_alignment(xml)
@@ -1452,6 +1831,10 @@ def finish(path, doc, keep=None, footer=()):
         parts[part] = xml.encode("utf-8")
     if quoted_items and "word/settings.xml" in parts:
         parts["word/settings.xml"] = quoted_lists_var(
+            parts["word/settings.xml"].decode("utf-8")).encode("utf-8")
+    if (continued or listed_tables) and continuations_indented() \
+            and "word/settings.xml" in parts:
+        parts["word/settings.xml"] = continuations_var(
             parts["word/settings.xml"].decode("utf-8")).encode("utf-8")
     # The page's title is its Heading 1, not a Title paragraph
     # (target-blocks.lua), so Pandoc wrote no title into the file's

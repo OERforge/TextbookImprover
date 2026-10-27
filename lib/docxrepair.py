@@ -526,6 +526,22 @@ ITEM_QUOTE_MARK = "tiqItemQuote"
 ITEM_QUOTE = re.compile(r"^_?" + ITEM_QUOTE_MARK + r"(\d+)x\d+$")
 
 
+def _marked(paragraph, name, depth, count, base=2000000):
+    """paragraph with a mark at its start, a bookmark naming a depth and a
+    count, the bookmark's id base and the count. A zero-width run on each
+    side, as move_bookmarks_into_paragraphs puts them: the reader joins a
+    bookmark to the one before it with no text between, across paragraphs
+    too, and the mark would be lost into the last paragraph's, or take the
+    name of the next one here."""
+    ident = base + count
+    mark = ('<w:bookmarkStart w:id="%d" w:name="%s%dx%d"/><w:bookmarkEnd w:id="%d"/>'
+            % (ident, name, depth, count, ident))
+    end = paragraph.index("</w:pPr>") + len("</w:pPr>") if "</w:pPr>" in paragraph \
+        else re.match(r"<w:p\b[^>]*>", paragraph).end()
+    after = ZWSP_RUN if paragraph[end:].lstrip().startswith("<w:bookmarkStart") else ""
+    return paragraph[:end] + ZWSP_RUN + mark + after + paragraph[end:]
+
+
 def mark_quoted_lists(xml, levels, blanks=None):
     """Each numbered paragraph indented at least half a quote step beyond
     its level's own indent marked with its quote depth; and each paragraph
@@ -550,16 +566,7 @@ def mark_quoted_lists(xml, levels, blanks=None):
     def marked(paragraph, name, depth):
         nonlocal count
         count += 1
-        ident = 2000000 + count
-        mark = ('<w:bookmarkStart w:id="%d" w:name="%s%dx%d"/><w:bookmarkEnd w:id="%d"/>'
-                % (ident, name, depth, count, ident))
-        end = paragraph.index("</w:pPr>") + len("</w:pPr>")
-        # A zero-width run on each side, as move_bookmarks_into_paragraphs
-        # puts them: the reader joins a bookmark to the one before it with
-        # no text between, across paragraphs too, and the mark would be lost
-        # into the last paragraph's, or take the name of the next one here.
-        after = ZWSP_RUN if paragraph[end:].lstrip().startswith("<w:bookmarkStart") else ""
-        return paragraph[:end] + ZWSP_RUN + mark + after + paragraph[end:]
+        return _marked(paragraph, name, depth, count)
 
     out = []
     for token in re.split(r"(<w:tbl>|</w:tbl>|<w:p\b[^>]*>.*?</w:p>)", xml, flags=re.S):
@@ -585,11 +592,311 @@ def mark_quoted_lists(xml, levels, blanks=None):
     return "".join(out), count
 
 
+# A list item's later paragraphs as Pandoc's writer sets them from 3.13
+# on, unnumbered and lined up with the item's text, which its reader keeps
+# in the item (docxtarget.CONTINUATION_PANDOC). The reader has open lists,
+# innermost first (bodyPartToBlocks, Readers/Docx.hs, 3.13): an item opens
+# one, its text indent the item's own w:ind's, or else its numbering
+# level's, or else its style's, and ends those inside it; an unnumbered
+# paragraph indented like the text of one, by its own w:ind or else its
+# style's, is that item's, and ends the lists inside it; anything else, a
+# paragraph indented otherwise, a table, a rule, a heading, a caption and
+# what it captions (docxtarget.captioned_parts), ends them all, and so does
+# a note, whose paragraphs the reader reads where its reference is, keeping
+# no list open across them (notePartsToBlocks). A table's cells are read
+# the same way, from no list open, one cell after another. In a Word
+# target's file that says so (docxtarget.CONTINUATIONS_VAR), what of its
+# own the reader can't keep: a quote's or code's paragraph inside an item,
+# indented beyond the item's text by the quote's depth
+# (docxtarget.indent_quotes), and an item's paragraphs after a table, a
+# rule, a figure, or a note it holds (docxtarget.item_tables), where the
+# reader ends its list (mark_continuations).
+# A body's tables and paragraphs, an empty one (<w:p />, as the writer
+# writes an empty cell's) a token of its own.
+BLOCKS = re.compile(r"<w:tbl>|</w:tbl>|<w:p\b[^>]*/>|<w:p\b[^>]*>.*?</w:p>", re.S)
+CONTINUATION_BASE = 2100000            # the ids of mark_continuations' marks
+
+
+def _numbering_lefts(numbering):
+    """{(numId, ilvl): the level's left indent, or None} for every level a
+    w:num defines, through its abstract numbering."""
+    abstracts = {m.group(1): m.group(0) for m in re.finditer(
+        r'<w:abstractNum\b[^>]*w:abstractNumId="(\d+)".*?</w:abstractNum>', numbering, re.S)}
+    found = {}
+    for m in re.finditer(r'<w:num w:numId="(\d+)"[^>]*>.*?</w:num>', numbering, re.S):
+        ref = re.search(r'w:abstractNumId w:val="(\d+)"', m.group(0))
+        if not ref or ref.group(1) not in abstracts:
+            continue
+        for lvl in re.finditer(r'<w:lvl w:ilvl="(\d+)".*?</w:lvl>', abstracts[ref.group(1)], re.S):
+            ind = re.search(r'<w:ind\b([^>]*)/>', lvl.group(0))
+            left = ind and re.search(r'w:(?:left|start)="(-?\d+)"', ind.group(1))
+            found[(m.group(1), lvl.group(1))] = int(left.group(1)) if left else None
+    return found
+
+
+def _style_lefts(styles):
+    """{paragraph style id: its left indent, or None}, from the first style
+    up the ones it's based on that has a w:ind, as the reader takes a
+    style's (getParStyleField)."""
+    own = {}
+    for m in re.finditer(r'<w:style\b[^>]*w:type="paragraph"[^>]*>.*?</w:style>', styles, re.S):
+        ident = re.search(r'w:styleId="([^"]*)"', m.group(0))
+        if not ident:
+            continue
+        based = re.search(r'<w:basedOn w:val="([^"]*)"', m.group(0))
+        ind = re.search(r'<w:pPr>(?:(?!</w:pPr>).)*?<w:ind\b([^>]*)/>', m.group(0), re.S)
+        left = ind and re.search(r'w:(?:left|start)="(-?\d+)"', ind.group(1))
+        own[ident.group(1)] = (ind is not None, int(left.group(1)) if left else None,
+                               based.group(1) if based else None)
+    lefts = {}
+    for ident in own:
+        seen, at = set(), ident
+        while at in own and at not in seen:
+            seen.add(at)
+            has, left, based = own[at]
+            if has:
+                lefts[ident] = left
+                break
+            at = based
+        else:
+            lefts[ident] = None
+    return lefts
+
+
+def _left(paragraph):
+    """A paragraph's own left indent (w:left, or w:start), or None."""
+    import docxtarget
+    ind = docxtarget.own_indent(paragraph)
+    left = ind.get("left", ind.get("start"))
+    return int(left) if left is not None and re.fullmatch(r"-?\d+", left) else None
+
+
+def item_paragraphs(xml, numbering, styles="", quoted=False, held=()):
+    """Each paragraph of xml that continues a list item, as Pandoc's reader
+    takes one from 3.13 on (above), and, in a Word target's file that says
+    so, its own: [(start, end, (numId, ilvl) of the item, the item's text
+    indent, how many quote steps the paragraph stands beyond it, whether
+    it's to be a list paragraph)]. One is to be a list paragraph where the
+    reader has ended its item's list, at a table, a rule, a figure, or a
+    note the item holds, and so keeps it in the item only as one; or where
+    it's in the writer's form for an item's paragraph
+    (docxtarget.continuation_left) but lined up with no list open, its numId
+    then the innermost open list's, or None, and its ilvl the one its indent
+    names, the paragraphs lined up with it after it its item's. quoted: a
+    quote's or code's paragraph may stand beyond the item's text by
+    QUOTE_STEP a depth, the innermost item it can be taken first; not in a
+    table's cells, which indent_quotes leaves alone. held: {("t", n), ("r",
+    n), ("f", n)}, the tables, rules, and figures, counted from 0 as
+    docxtarget.item_tables counts them, that stand in an item; a figure's
+    picture and caption, and a table's caption, are none of the item's
+    paragraphs."""
+    import docxtarget
+    levels = _numbering_lefts(numbering)
+    style_lefts = _style_lefts(styles)
+    tokens = list(BLOCKS.finditer(xml))
+    pairs = {}                         # a token's index: its pair's kind, ordinal
+    for caption, captioned, kind, ordinal in docxtarget.captioned_parts(tokens):
+        pairs[caption] = pairs[captioned] = (kind, ordinal)
+    found = []
+    # The lists open, innermost first: (text indent, ilvl, numId, whether
+    # the reader keeps it open too, which of found are the reader's own
+    # continuations of its item since), the fourth false once the reader
+    # has ended it at something the item holds.
+    open_lists = []
+    outer = []                         # the lists open outside each table we're in
+    tables = rules = depth = 0
+
+    def closed(lists):
+        # Ended to the reader, which keeps nothing of them open after, so
+        # none of their continuations before is any later note's concern.
+        return [o[:3] + (False, []) for o in lists]
+    for i, m in enumerate(tokens):
+        token = m.group(0)
+        if token == "<w:tbl>":
+            body = depth == 0
+            outer.append(closed(open_lists) if body and ("t", tables) in held else [])
+            tables += body
+            depth += 1
+            open_lists = []
+            continue
+        if token == "</w:tbl>":
+            depth -= 1
+            open_lists = outer.pop() if outer else []
+            continue
+        if depth == 0 and i in pairs:
+            # A caption, or what it captions: one part to the reader, which
+            # ends every list at it, an item's too where the item holds it.
+            open_lists = closed(open_lists) if pairs[i] in held else []
+            continue
+        if 'o:hr="t"' in token:
+            open_lists = closed(open_lists) if depth == 0 and ("r", rules) in held else []
+            rules += depth == 0
+            continue
+        style = re.search(r'<w:pStyle w:val="([^"]*)"', token)
+        style = style.group(1) if style else None
+        if style and re.match(r"(?i)heading\s*\d", style):
+            open_lists = []
+            continue
+        numbered = docxtarget._numbering(token)
+        own = _left(token)
+        if numbered in levels:
+            numid, ilvl = numbered
+            text = own if own is not None else levels[numbered] \
+                if levels[numbered] is not None else style_lefts.get(style)
+            # The items outside this one hold a list now, after which a
+            # list paragraph of theirs would go into this item, the one just
+            # before it (handleListParagraphs): their continuations from
+            # here on are none a note makes list paragraphs of.
+            open_lists = [o[:4] + (None,) for o in open_lists if o[1] < int(ilvl)]
+            if text is not None:
+                open_lists.insert(0, (text, int(ilvl), numid, True, []))
+        else:
+            left = own if own is not None else style_lefts.get(style)
+            match = next(((n, 0) for n, o in enumerate(open_lists) if left == o[0]), None)
+            if match is None and quoted and depth == 0 and left is not None:
+                match = next(((n, (left - o[0]) // docxtarget.QUOTE_STEP)
+                              for n, o in enumerate(open_lists)
+                              if left > o[0] and (left - o[0]) % docxtarget.QUOTE_STEP == 0), None)
+            implied = left // docxtarget.LIST_STEP - 1 \
+                if left and left % docxtarget.LIST_STEP == 0 else None
+            if match is not None:
+                open_lists = open_lists[match[0]:]
+                text, ilvl, numid, kept, natives = open_lists[0]
+                # One the reader keeps is its own continuation; one it
+                # doesn't, a list paragraph, ends what it has open, which
+                # is what's open inside it, gone already (only lists inside
+                # one the reader ended can still be open to it).
+                found.append((m.start(), m.end(), (numid, str(ilvl)), text, match[1], not kept))
+                if kept and natives is not None:
+                    natives.append(len(found) - 1)
+            elif depth == 0 and i + 1 < len(tokens) and tokens[i + 1].group(0) == "<w:tbl>" \
+                    and ("t", tables) in held and own is None:
+                # The caption the writer wrote before a table an item holds
+                # in the item's style, Compact, with no indent of its own,
+                # which the reader doesn't pair with it
+                # (docxtarget.table_captions styles one it can): the
+                # table's, and it ends the reader's lists as the table does.
+                open_lists = closed(open_lists)
+            elif implied is not None and docxtarget.continuation_left(token) is not None \
+                    and style != "BlockText":
+                # An item's paragraph in the writer's form that no open list
+                # takes, which the reader would take for a quotation: a list
+                # paragraph at the level its indent names, as the writer
+                # before 3.13 numbered it (an item it numbered nowhere, one
+                # opening with an anchor before a list; what follows a
+                # heading in an item), and the item's paragraphs after it
+                # its.
+                numid = open_lists[0][2] if open_lists else None
+                found.append((m.start(), m.end(), (numid, str(implied)), left, 0, True))
+                open_lists = [(left, implied, numid, False, [])] + closed(
+                    [o for o in open_lists if o[1] < implied])
+            else:
+                open_lists = []
+        if open_lists and re.search(r"<w:(?:footnote|endnote)Reference\b", token):
+            # A note's paragraphs, which the reader reads here, end every
+            # list it has open, and the item's paragraphs after it are list
+            # paragraphs. The reader folds a list paragraph only into the
+            # item's paragraph just before it (handleListParagraphs,
+            # Lists.hs), and with nothing between to end the list, a
+            # continuation of its own there keeps it out: so the item's
+            # paragraphs before the note, the one holding it too, are list
+            # paragraphs as well, with no indent for the reader to take any
+            # for a continuation by (their text indent None).
+            for n in open_lists[0][4] or ():
+                found[n] = found[n][:3] + (None, found[n][4], True)
+            open_lists = closed(open_lists)
+    return found
+
+
+def held_captions(xml, held):
+    """[(start, end)] of the paragraphs of each figure a list item holds
+    ("f" in held, counted as docxtarget.item_tables counts it), its
+    picture's and its caption's, and of the caption the reader pairs with a
+    table an item holds ("t"), a figure's that the writer writes as a
+    table: in the writer's form from 3.13 on, each has the item's indent,
+    and the reader, having ended the list at the pair, would take the
+    caption's words for a quotation inside the caption (bodyPartToBlocks'
+    for Captioned, Readers/Docx.hs)."""
+    import docxtarget
+    tokens = list(BLOCKS.finditer(xml))
+    found = []
+    for caption, captioned, kind, ordinal in docxtarget.captioned_parts(tokens):
+        if (kind, ordinal) in held:
+            for k in (caption, captioned) if kind == "f" else (caption,):
+                found.append((tokens[k].start(), tokens[k].end()))
+    return sorted(found)
+
+
+def mark_continuations(xml, numbering, styles="", quoted=False, held=(), marks=True,
+                       every=False):
+    """In a Word target's file whose lists' later paragraphs are indented
+    (docxtarget.CONTINUATIONS_VAR), each item's paragraph item_paragraphs
+    finds indented beyond the item's text lined up with it, for the reader
+    to keep it in the item, a quote's marked with its depth
+    (ITEM_QUOTE_MARK), which nest_item_quotes gives it, the reader quoting
+    it once by its style (a code's depth is quoted_code's), unless marks is
+    false, as in the notes, whose marks nothing reads; and each the reader
+    would keep in no list, after a table, a rule, a figure, or a note its
+    item holds, numbered with an id that has no definition, which the
+    reader reads as a list paragraph and folds into the item before it,
+    for apply_list_tables to put back in the item with what it holds.
+    every: each item's paragraph numbered so, for a reader before 3.13,
+    which takes an unnumbered paragraph indented like an item's text for a
+    quote, the list ended, and folds a list paragraph into the item before
+    it, in a table's cells too. A figure an item holds, and the caption of
+    a table one holds, have their paragraphs' indent taken off
+    (held_captions), and so does an item's paragraph item_paragraphs gives
+    no text indent, a list paragraph before a note. Returns (xml, count)."""
+    edits = [(start, end, None) for start, end in held_captions(xml, held)]
+    for start, end, (_, ilvl), text, inside, after in item_paragraphs(
+            xml, numbering, styles, quoted, held):
+        if inside or after or every:
+            edits.append((start, end, (ilvl, text, inside, after)))
+    out, at, count = [], 0, 0
+    for start, end, item in sorted(edits, key=lambda e: e[:2]):
+        paragraph = xml[start:end]
+        if item is None:
+            paragraph = re.sub(r"<w:ind\b[^>]*/>", "", paragraph, count=1)
+            paragraph = re.sub(r"<w:pPr>\s*</w:pPr>", "", paragraph, count=1)
+            out.append(xml[at:start] + paragraph)
+            at = end
+            continue
+        ilvl, text, inside, after = item
+        if after or every:
+            # A list paragraph, which the reader folds into the item's
+            # paragraph just before it (handleListParagraphs): no indent,
+            # which it could take for a continuation of a list a note it
+            # read here left open, its own number then the list's end.
+            paragraph = re.sub(r"<w:ind\b[^>]*/>", "", paragraph, count=1)
+        elif inside:
+            paragraph = re.sub(r'(<w:ind\b[^>]*\sw:(?:left|start)=")-?\d+(")',
+                               r"\g<1>%d\g<2>" % text, paragraph, count=1)
+        if inside:
+            if marks and 'w:pStyle w:val="BlockText"' in paragraph:
+                paragraph = _marked(paragraph, ITEM_QUOTE_MARK, inside, count + 1,
+                                    CONTINUATION_BASE)
+        if after or every:
+            numbering_ = ('<w:numPr><w:ilvl w:val="%s"/><w:numId w:val="%s"/></w:numPr>'
+                          % (ilvl, NO_DEFINITION))
+            props = re.match(r"(<w:p\b[^>]*>\s*<w:pPr>)(\s*<w:pStyle\b[^>]*/>)?", paragraph)
+            if props:
+                paragraph = paragraph[:props.end()] + numbering_ + paragraph[props.end():]
+            else:
+                opening = re.match(r"<w:p\b[^>]*>", paragraph).end()
+                paragraph = (paragraph[:opening] + "<w:pPr>" + numbering_ + "</w:pPr>"
+                             + paragraph[opening:])
+        count += 1
+        out.append(xml[at:start] + paragraph)
+        at = end
+    return "".join(out) + xml[at:], count
+
+
 def nest_item_quotes(doc):
     """Each paragraph marked by mark_quoted_lists as in a list item's
     quote, quoted to its depth: the reader quotes it once, by its style,
     and join_nested_quotes then joins it to the quote's other paragraphs.
-    The marks are removed. Returns how many were nested deeper."""
+    The marks are removed. Returns how many were found, so that the page
+    is saved without them though none was nested deeper."""
     nested = 0
 
     def mark_depth(block):
@@ -609,12 +916,12 @@ def nest_item_quotes(doc):
         for i, block in enumerate(blocks):
             if block.get("t") == "BlockQuote" and len(block["c"]) == 1:
                 depth = mark_depth(block["c"][0])
+                nested += depth > 0
                 if depth > 1:
                     inner = block["c"][0]
                     for _ in range(depth):
                         inner = {"t": "BlockQuote", "c": [inner]}
                     blocks[i] = inner
-                    nested += 1
                     continue
             elif block.get("t") in ("Para", "Plain"):
                 depth = mark_depth(block)
@@ -807,13 +1114,19 @@ def list_tables(docx_path):
     (docxtarget.ITEM_TABLE_MARK), from
     the same part as the id map, or [] for any other file."""
     with zipfile.ZipFile(docx_path) as z:
-        for name in z.namelist():
-            if name.startswith("customXml/") and name.endswith(".xml"):
-                data = z.read(name).decode("utf-8", "replace")
-                if "OERforge/TextbookImprover/ids" in data:
-                    return [(k, int(n), int(f), c) for k, n, f, c in re.findall(
-                        r'<listBlock kind="([trq])" n="(\d+)" follow="(\d+)" continues="(\d+)"\s*/>',
-                        data)]
+        return _list_blocks({name: z.read(name) for name in z.namelist()
+                             if name.startswith("customXml/") and name.endswith(".xml")})
+
+
+def _list_blocks(parts):
+    """list_tables' entries from a package's parts, {name: bytes}."""
+    for name, data in parts.items():
+        if name.startswith("customXml/") and name.endswith(".xml"):
+            data = data.decode("utf-8", "replace")
+            if "OERforge/TextbookImprover/ids" in data:
+                return [(k, int(n), int(f), c) for k, n, f, c in re.findall(
+                    r'<listBlock kind="([trqf])" n="(\d+)" follow="(\d+)" continues="(\d+)"\s*/>',
+                    data)]
     return []
 
 
@@ -822,7 +1135,9 @@ def apply_list_tables(docx_path, json_path):
     blocks after it, put back in the item, and the list the reader began
     again after them joined to the first. Pandoc's reader ends a list at a
     table (it folds only paragraphs into an item), so these come back as a
-    list, a table, paragraphs, and a second list. Returns how many."""
+    list, a table, paragraphs, and a second list. So do a rule and, in a
+    file whose items' later paragraphs are indented, a figure. Returns how
+    many."""
     import json
     marks = list_tables(docx_path)
     if not marks:
@@ -830,47 +1145,57 @@ def apply_list_tables(docx_path, json_path):
     with open(json_path, encoding="utf-8") as fh:
         doc = json.load(fh)
     def find():
-        """{kind: [(blocks, index, position)]} of every table and rule, in
-        document order, wherever they stand now."""
-        places = {"t": [], "r": []}
+        """{kind: [(blocks, index, position, how many list items hold
+        it)]} of every table, rule, and figure, in document order, wherever
+        they stand now."""
+        places = {"t": [], "r": [], "f": []}
+        held = {"Table": "t", "HorizontalRule": "r", "Figure": "f"}
 
-        def walk(blocks):
+        def walk(blocks, depth):
             for i, block in enumerate(blocks):
                 if not isinstance(block, dict):
                     continue
                 kind = block.get("t")
-                if kind == "Table":
-                    places["t"].append((blocks, i, len(places["t"]) + len(places["r"])))
-                elif kind == "HorizontalRule":
-                    places["r"].append((blocks, i, len(places["t"]) + len(places["r"])))
+                if kind in held:
+                    places[held[kind]].append(
+                        (blocks, i, len(places["t"]) + len(places["r"]) + len(places["f"]), depth))
                 elif kind in ("Div", "BlockQuote"):
-                    walk(block["c"][1] if kind == "Div" else block["c"])
+                    walk(block["c"][1] if kind == "Div" else block["c"], depth)
                 elif kind == "OrderedList":
                     for item in block["c"][1]:
-                        walk(item)
+                        walk(item, depth + 1)
                 elif kind == "BulletList":
                     for item in block["c"]:
-                        walk(item)
-        walk(doc["blocks"])
+                        walk(item, depth + 1)
+        walk(doc["blocks"], 0)
         places["q"] = places["t"]    # a quotation's table is counted with the tables
         return places
     lists = ("OrderedList", "BulletList")
 
     def items(block):
         return block["c"][1] if block["t"] == "OrderedList" else block["c"]
+
+    def same_list(one, other):
+        """Whether one is of other's kind, and an ordered list numbered as
+        it is, its start aside."""
+        return isinstance(one, dict) and one.get("t") == other.get("t") and (
+            one["t"] != "OrderedList" or one["c"][0][1:] == other["c"][0][1:])
     moved = 0
-    # In document order, each found again where it stands: a list rejoined
+    # In document order, each found again where it stands. An outer item's
+    # table comes first and takes back its blocks after it as the reader
+    # gave them back (docxtarget._read_back), the parts of a list the item
+    # holds among them, so that an inner item's, after it, is then found in
+    # that item after the part of the list it goes back in. A list rejoined
     # after one table or rule is the list the next one, further on, needs
     # to find before it. A move keeps every table and rule in document
     # order, so the ordinals hold.
-    first = find()
-    order = sorted(marks, key=lambda m: first[m[0]][m[1]][2]
-                   if m[1] < len(first[m[0]]) else -1)
+    start = find()
+    order = sorted(marks, key=lambda m: start[m[0]][m[1]][2] if m[1] < len(start[m[0]]) else -1)
     for kind, ordinal, follow, continues in order:
         places = find()
         if ordinal >= len(places[kind]):
             continue
-        blocks, i, _ = places[kind][ordinal]
+        blocks, i, _, depth = places[kind][ordinal]
         if kind == "q":
             # Back into the quotation before it, and the quotation the
             # reader began again after it joined to that one.
@@ -884,31 +1209,84 @@ def apply_list_tables(docx_path, json_path):
                 quote["c"].extend(blocks.pop(i)["c"])
             moved += 1
             continue
-        if i == 0 or not isinstance(blocks[i - 1], dict) \
-                or blocks[i - 1].get("t") not in lists:
+        if depth >= len(continues):
+            # Back in its item already, taken there among an outer item's
+            # blocks after what that item holds before it.
             continue
-        # The lists from the outermost to the item's own, each the last
-        # block of the last item of the one before.
-        chain = [blocks[i - 1]]
-        for _ in continues[1:]:
+        # A table's caption the writer wrote in a list item's style
+        # (Compact), which the reader doesn't pair with it, as the target
+        # styles it now that it can (docxtarget.table_captions): a
+        # paragraph between the list and the table, which goes back with
+        # it, or, where its words are the caption the reader gave the table
+        # from w:tblCaption, becomes that caption, its words with their
+        # marks.
+        first = i
+        if kind == "t" and i >= 2 and isinstance(blocks[i - 1], dict) \
+                and blocks[i - 1].get("t") in ("Para", "Plain") \
+                and isinstance(blocks[i - 2], dict) and blocks[i - 2].get("t") in lists:
+            first = i - 1
+            words = lambda inlines: _words(_stringify(inlines).replace("\u200b", ""))
+            caption = blocks[i]["c"][1][1] if blocks[i].get("t") == "Table" else []
+            if words(blocks[i - 1]["c"]) and words(blocks[i - 1]["c"]) == " ".join(
+                    words(b["c"]) for b in caption if b.get("t") in ("Para", "Plain")):
+                blocks[i]["c"][1][1] = [{"t": "Plain", "c": blocks[i - 1]["c"]}]
+                del blocks[i - 1]
+                i = first = i - 1
+        if first == 0 or not isinstance(blocks[first - 1], dict) \
+                or blocks[first - 1].get("t") not in lists:
+            continue
+        # The lists from the one before it, at the depth it stands at, to
+        # the item's own, each the last block of the last item of the one
+        # before; or, where something an outer item holds before this list
+        # has ended the lists outside it and nothing has put this list back
+        # in that item (its mark found nothing), from the outermost left
+        # here: the innermost of continues's levels.
+        chain = [blocks[first - 1]]
+        for _ in continues[depth + 1:]:
             last = items(chain[-1])[-1] if items(chain[-1]) else []
             if not last or not isinstance(last[-1], dict) \
                     or last[-1].get("t") not in lists:
                 break
             chain.append(last[-1])
-        if len(chain) != len(continues):
-            continue
-        taken = blocks[i:i + 1 + follow]
-        del blocks[i:i + 1 + follow]
+        continues = continues[len(continues) - len(chain):]
+        taken = blocks[first:i + 1 + follow]
+        del blocks[first:i + 1 + follow]
         items(chain[-1])[-1].extend(taken)
+        # Blocks the reader made more of than the item had, a definition the
+        # writer styled as the item's text, a caption's second paragraph:
+        # what's left before the list begun again is the item's whose list
+        # goes on, the deepest, and goes back in it.
+        going_on = [level for level in range(len(chain)) if continues[level] == "1"]
+        if going_on:
+            level = going_on[-1]
+            end = first
+            while end < len(blocks) and isinstance(blocks[end], dict) \
+                    and blocks[end].get("t") not in lists:
+                end += 1
+            if end > first and end < len(blocks) and (
+                    same_list(blocks[end], chain[level])
+                    or (blocks[end].get("t") in lists and end + 1 < len(blocks)
+                        and same_list(blocks[end + 1], chain[level]))):
+                items(chain[level])[-1].extend(blocks[first:end])
+                del blocks[first:end]
         # The reader begins each list that went on again after the table
-        # or rule, the innermost first; each joins its own.
+        # or rule, the innermost first; each joins its own. A list of
+        # another kind or numbering before it is the next item's own list,
+        # that item having no numbered paragraph (it opens with a div, an
+        # anchor say, before the list), so Word numbers it nowhere: it
+        # stays in the item, as the reader before 3.13 left it.
         for level in range(len(chain) - 1, -1, -1):
-            if continues[level] == "1" and i < len(blocks) \
-                    and isinstance(blocks[i], dict) \
-                    and blocks[i].get("t") == chain[level]["t"]:
-                items(chain[level]).extend(items(blocks[i]))
-                del blocks[i]
+            if continues[level] != "1" or first >= len(blocks) \
+                    or not isinstance(blocks[first], dict):
+                continue
+            if blocks[first].get("t") in lists \
+                    and not same_list(blocks[first], chain[level]) \
+                    and first + 1 < len(blocks) and isinstance(blocks[first + 1], dict) \
+                    and same_list(blocks[first + 1], chain[level]):
+                items(chain[level])[-1].append(blocks.pop(first))
+            if same_list(blocks[first], chain[level]):
+                items(chain[level]).extend(items(blocks[first]))
+                del blocks[first]
         moved += 1
     if moved:
         with open(json_path, "w", encoding="utf-8") as fh:
@@ -1012,8 +1390,19 @@ def quoted_code(docx_path):
             return []
         xml = z.read("word/document.xml").decode("utf-8")
         numbering = z.read("word/numbering.xml").decode("utf-8", "replace")
+        styles = z.read("word/styles.xml").decode("utf-8", "replace") \
+            if "word/styles.xml" in names else ""
+        held = {(kind, n) for kind, n, _, _ in _list_blocks(
+            {name: z.read(name) for name in names if name.startswith("customXml/")})
+            if kind in "trf"}
     levels = docxtarget.level_indents(numbering)
     blanks = docxtarget.level_indents(numbering, blank=True)
+    # An item's later paragraph, as Pandoc's writer sets one from 3.13 on,
+    # in a file that says so: its quotes beyond the item's own text, after
+    # a table the item holds too.
+    later = {start: inside for start, _, _, _, inside, _ in item_paragraphs(
+        xml, numbering, styles, quoted=True, held=held)} \
+        if docxtarget.CONTINUATIONS_VAR in settings else {}
 
     def indent(para):
         found = re.search(r'<w:pPr>.*?<w:ind\b[^>]*w:(?:left|start)="(-?\d+)"', para, re.S)
@@ -1021,7 +1410,8 @@ def quoted_code(docx_path):
 
     found = []
     tables, list_depth = 0, 0
-    for para in re.findall(r"<w:tbl>|</w:tbl>|<w:p>(?:(?!</w:p>).)*</w:p>", xml, re.S):
+    for m in re.finditer(r"<w:tbl>|</w:tbl>|<w:p>(?:(?!</w:p>).)*</w:p>", xml, re.S):
+        para = m.group(0)
         # Not in a table, which indent_quotes leaves alone.
         if para in ("<w:tbl>", "</w:tbl>"):
             tables += 1 if para == "<w:tbl>" else -1
@@ -1030,6 +1420,10 @@ def quoted_code(docx_path):
             continue
         numbered = docxtarget._numbering(para)
         left = indent(para)
+        if m.start() in later:
+            if later[m.start()] >= 1 and 'w:val="SourceCode"' in para:
+                found.append((_code_text(para), later[m.start()]))
+            continue
         if not numbered:
             list_depth = 0
             # Code in a quote in a quote, outside any list: the reader
@@ -1209,15 +1603,30 @@ def repaired_copy(source, destination, headings="keep", deletions="accept", note
         blank = blank_marker_levels(
             parts["word/numbering.xml"].decode("utf-8", "replace")
             if "word/numbering.xml" in names else "")
+        import docxtarget
+        settings = parts.get("word/settings.xml", b"").decode("utf-8", "replace")
+        numbering = parts["word/numbering.xml"].decode("utf-8", "replace") \
+            if "word/numbering.xml" in names else ""
+        styles = parts["word/styles.xml"].decode("utf-8", "replace") \
+            if "word/styles.xml" in names else ""
+        # A Word target's file whose lists' later paragraphs are indented,
+        # as Pandoc's writer sets them from 3.13 on: what the reader can't
+        # keep in an item put so it does (mark_continuations).
+        indented = bool(numbering) and docxtarget.CONTINUATIONS_VAR in settings
+        # A reader before 3.13 keeps none of them in its item unless each
+        # is a list paragraph, as the writer's numbered ones were.
+        every = indented and docxtarget.pandoc_version() < docxtarget.CONTINUATION_PANDOC
+        quoted = docxtarget.QUOTED_LISTS_VAR in settings
+        held = {(kind, n) for kind, n, _, _ in _list_blocks(parts) if kind in "trf"}
         for info in infos:
             data = parts[info.filename]
             if info.filename == "word/document.xml":
                 text, moved = move_bookmarks_into_paragraphs(
                     drop_jaws_titles(data.decode("utf-8")))
-                if "word/numbering.xml" in names and "TextbookImproverQuotedLists" in \
-                        parts.get("word/settings.xml", b"").decode("utf-8", "replace"):
-                    import docxtarget
-                    numbering = parts["word/numbering.xml"].decode("utf-8", "replace")
+                if indented:
+                    text, _ = mark_continuations(text, numbering, styles, quoted, held,
+                                                 every=every)
+                if numbering and quoted:
                     text, _ = mark_quoted_lists(text, docxtarget.level_indents(numbering),
                                                 docxtarget.level_indents(numbering, blank=True))
                 text, _ = keep_unlinked_bookmarks(text)
@@ -1226,6 +1635,9 @@ def repaired_copy(source, destination, headings="keep", deletions="accept", note
                 data = text.encode("utf-8")
             elif info.filename == "word/footnotes.xml":
                 text = data.decode("utf-8")
+                if indented:
+                    text, _ = mark_continuations(text, numbering, styles, quoted, marks=False,
+                                                 every=every)
                 if blank:
                     text, _ = join_continuations(text, blank)
                 text, _ = bar_accents(text)

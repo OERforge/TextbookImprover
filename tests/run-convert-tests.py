@@ -6432,11 +6432,168 @@ x = 1
 """
 
 
+# Figures in a list's items, the second its item's last block.
+# What else a list item holds that Pandoc 3.13's reader ends a list at: a
+# note, a table with its caption, and a rule; and in a page of HTML, a
+# figure of two pictures, which the writer writes as a table, and a list
+# in a table's cell.
+ITEMS_HOLDING = """# Items holding more
+
+1. An item with a note.
+
+   Its second paragraph, with a note.[^1]
+
+   Its third paragraph.
+
+2. An item with a captioned table.
+
+   | a | b |
+   |---|---|
+   | 1 | 2 |
+
+   : A caption.
+
+   After the table.
+
+3. An item with a rule.
+
+   ---
+
+   > A quote after the rule.
+
+   After the quote.
+
+4. The last item.
+
+[^1]: The note's text.
+"""
+ITEMS_HOLDING_HTML = (
+    '<!DOCTYPE html>\n<html lang="en"><head><title>Pictures</title></head><body>\n'
+    "<h1>Pictures</h1>\n<ol>\n<li><p>An item with two pictures.</p>"
+    '<figure><img src="square.png" alt="Left"> <img src="square.png" alt="Right">'
+    "<figcaption>Two pictures in one figure.</figcaption></figure>"
+    "<p>After the two pictures.</p></li>\n<li><p>The last item.</p></li>\n</ol>\n"
+    "<table><tr><th>Steps</th></tr><tr><td><ol><li><p>Open the file.</p>"
+    "<p>It is in your folder.</p></li><li><p>Save it.</p></li></ol></td></tr></table>\n"
+    # Parts that each open with an anchor before a list, as OpenStax's
+    # solutions are written; and a figure outside any list whose picture has
+    # an id nothing links to, between two lists each holding a figure.
+    '<ol type="a"><li><div id="part-a"></div><ul><li>k = 70</li><li>n = 29</li></ul>'
+    "<p>Text for part a.</p></li>"
+    '<li><div id="part-b"></div><ul><li>k = 83</li><li>n = 30</li></ul>'
+    "<p>Text for part b.</p></li></ol>\n"
+    '<ol><li><p>Item A.</p><figure><img src="square.png" alt="One">'
+    "<figcaption>Held figure one.</figcaption></figure><p>After held figure one.</p></li></ol>\n"
+    '<figure><img id="unlinked" src="square.png" alt="Two"><figcaption>An outside figure.'
+    "</figcaption></figure>\n"
+    '<ul><li><p>Item B.</p><figure><img src="square.png" alt="Three"><figcaption>Held figure two.'
+    "</figcaption></figure><p>After held figure two.</p></li><li><p>Item C.</p></li></ul>\n"
+    "</body></html>\n")
+# Lists in lists: an item holding a table before its list, whose item holds
+# one too; an item's paragraph with a note after its list; and a definition
+# list after a table an item holds.
+NESTED_HOLDING = """# Nested items holding more
+
+1. Step one.
+
+   | a | b |
+   |---|---|
+   | 1 | 2 |
+
+   After the first table.
+
+   - Sub-step.
+
+     | c | d |
+     |---|---|
+     | 3 | 4 |
+
+     After the sub-step's table.
+
+   - Second sub-step.
+
+   Back in step one.
+
+2. Step two.
+
+   - Nested one.
+   - Nested two.
+
+   Step two's paragraph after its list, with a note.[^1]
+
+3. Step three.
+
+   | e | f |
+   |---|---|
+   | 5 | 6 |
+
+   Term
+   :   Definition after the table.
+
+   Back in step three.
+
+4. Step four.
+
+Between the lists.
+
+1. Part one.
+
+   | g | h |
+   |---|---|
+   | 7 | 8 |
+
+   - Sub-part.
+
+     - Sub-sub-part.
+
+     | i | j |
+     |---|---|
+     | 9 | 0 |
+
+     After the sub-part's table.
+
+   - Second sub-part.
+
+   | k | l |
+   |---|---|
+   | 1 | 2 |
+
+   After part one's last table.
+
+2. Part two.
+
+3. | m | n |
+   |---|---|
+   | 5 | 6 |
+
+   Part three's words after the table it opens with.
+
+4. Part four.
+
+[^1]: The note.
+"""
+FIGURES_IN_ITEMS = """# Figures in items
+
+1. First item's text.
+
+   ![A square in an item](square.png)
+
+   After the figure.
+
+2. Second item.
+
+   ![Another square](square.png)
+
+3. Third item.
+"""
+
+
 def case_quoted_lists(work):
     """Lists in quotations through the Word target and back: a quote that
     opens with a list, one that ends with one before another quote, a list
     in a quote in a quote, and a nested list. And an author's Word file,
-    without the target's document variable, read as Pandoc reads it."""
+    without the target's document variable, read as Pandoc reads it. And
+    figures in a list's items."""
     import zipfile as zf
 
     def book(path, files, targets):
@@ -6464,16 +6621,97 @@ def case_quoted_lists(work):
     # Two quotes kept apart only by the Divs they're in, which Word doesn't
     # keep: they come back two quotes, not one.
     divs = "Before.\n\n::: one\n> Quote A.\n:::\n\n::: two\n> Quote B.\n:::\n\nAfter.\n"
-    book(source, {"page.md": QUOTED_LISTS, "divs.md": divs},
+    book(source, {"page.md": QUOTED_LISTS, "divs.md": divs, "figures.md": FIGURES_IN_ITEMS,
+                  "items.md": ITEMS_HOLDING, "pictures.html": ITEMS_HOLDING_HTML,
+                  "nested.md": NESTED_HOLDING,
+                  "square.png": ONE_PIXEL},
          "  word:\n    format: docx\n  html:\n    format: html\n")
     written = os.path.join(source, "word", "page.docx")
     data = open(written, "rb").read() if os.path.exists(written) else b""
-    written_divs = os.path.join(source, "word", "divs.docx")
+
+    def written_word(stem):
+        path = os.path.join(source, "word", stem + ".docx")
+        return open(path, "rb").read() if os.path.exists(path) else b""
     back = os.path.join(work, "back")
-    book(back, {"page.docx": data,
-                "divs.docx": open(written_divs, "rb").read() if os.path.exists(written_divs) else b""},
+    book(back, {"page.docx": data, "divs.docx": written_word("divs"),
+                "figures.docx": written_word("figures"), "items.docx": written_word("items"),
+                "pictures.docx": written_word("pictures"), "nested.docx": written_word("nested")},
          "  html:\n    format: html\n")
-    divs_back = read(back, "html", "divs.html") if exists(back, "html", "divs.html") else ""
+    back_html = lambda stem: read(back, "html", stem + ".html") \
+        if exists(back, "html", stem + ".html") else ""
+    divs_back, figures_back = back_html("divs"), back_html("figures")
+    items_back, pictures_back = back_html("items"), back_html("pictures")
+    nested_back = back_html("nested")
+
+    def lists_of(html):
+        """The lists of a page outside its tables and notes, as
+        [(tag, [(the item's own words, [its lists])])]."""
+        from html.parser import HTMLParser
+
+        class Lists(HTMLParser):
+            def __init__(self):
+                super().__init__()
+                self.top, self.open, self.skip = [], [], 0
+
+            def handle_starttag(self, tag, attrs):
+                if tag in ("table", "section"):
+                    self.skip += 1
+                if self.skip:
+                    return
+                if tag in ("ol", "ul"):
+                    lst = (tag, [])
+                    (self.open[-1][1] if self.open and self.open[-1][0] == "li"
+                     else self.top).append(lst)
+                    self.open.append(("list", lst))
+                elif tag == "li" and self.open and self.open[-1][0] == "list":
+                    item = ([""], [])
+                    self.open[-1][1][1].append(item)
+                    self.open.append(("li", item[1], item[0]))
+
+            def handle_endtag(self, tag):
+                if tag in ("table", "section"):
+                    self.skip -= 1
+                if self.skip:
+                    return
+                if tag in ("ol", "ul", "li") and self.open:
+                    self.open.pop()
+
+            def handle_data(self, data):
+                if not self.skip and self.open and self.open[-1][0] == "li":
+                    self.open[-1][2][0] += data
+        parser = Lists()
+        parser.feed(html)
+        return [(tag, [(" ".join(words[0].split()), inner) for words, inner in items])
+                for tag, items in parser.top]
+    version = subprocess.run(["pandoc", "--version"], capture_output=True,
+                             text=True).stdout.split()[1]
+    indented = tuple(int(p) for p in re.findall(r"\d+", version)[:2]) >= (3, 13)
+
+    def figure_items(html=None):
+        """The items of a page's one list at the top (figures.html's), or []
+        if the list came back as more than one; a list after it in a table
+        no part of it."""
+        body = re.sub(r"<section\b[^>]*footnotes.*?</section>", "",
+                      figures_back if html is None else html, flags=re.S)
+        body = re.sub(r"</ol>\s*<div class=\"table-wrapper\".*", "</ol>", body, flags=re.S)
+        lists = re.findall(r"<ol\b[^>]*>(.*)</ol>", body, re.S)
+        return re.split(r"</li>\s*<li\b[^>]*>", lists[0]) \
+            if len(lists) == 1 and "</ol>" not in lists[0] else []
+    words = lambda html: re.sub(r"<[^>]+>", "", html)
+    cell = re.search(r"<td\b[^>]*>(.*?)</td>", pictures_back, re.S)
+
+    def caption_style():
+        """The style of the paragraph holding the table's caption in the
+        Word file written from items.md."""
+        data = written_word("items")
+        if not data:
+            return None
+        import io
+        with zf.ZipFile(io.BytesIO(data)) as z:
+            xml = z.read("word/document.xml").decode("utf-8")
+        found = re.search(r'<w:p>(?:(?!</w:p>).)*?<w:pStyle w:val="([^"]+)"(?:(?!</w:p>).)*?'
+                          r"A caption\.", xml, re.S)
+        return found.group(1) if found else None
     # The same file as an author's, without the variable.
     plain = b""
     if data:
@@ -6500,6 +6738,85 @@ def case_quoted_lists(work):
         ("an author's file, without the variable, is read as Pandoc reads it: the lists outside",
          lambda: plain and markdown(author, "page") != markdown(source, "page")
          and "> - opens with a list" not in markdown(author, "page")),
+        # Pandoc 3.13's writer gives an item's later paragraphs no number, so
+        # its reader pairs a figure's picture with its caption as a figure,
+        # which ends the list; the target's file says where each stood. The
+        # writer before numbered the picture, which the reader then kept in
+        # the item, a picture and its caption a paragraph.
+        ("a figure in a list item comes back in it, the list whole and the item's paragraph "
+         "after it in the item: a figure with Pandoc 3.13, and before, a picture and its "
+         "caption",
+         lambda: [len(figure_items())] == [3]
+         and "After the figure." in figure_items()[0] and "Third item." in figure_items()[2]
+         and "<blockquote" not in figures_back
+         and all(("<figure" in item) == indented and "<img" in item
+                 and ("square in an item" in item or "Another square" in item)
+                 for item in figure_items()[:2])),
+        # A note's paragraphs, read where its reference is, end the 3.13
+        # reader's lists; a table's caption the writer gives the item's
+        # style, which the reader read as a paragraph besides the table's.
+        ("a list item holding a note, a captioned table, or a rule comes back whole, the "
+         "paragraphs after each in the item, the table's caption once and its own, written in "
+         "Table Caption, and the quote after the rule one quote",
+         lambda: caption_style() == "TableCaption" and len(figure_items(items_back)) == 4
+         and "Its third paragraph." in figure_items(items_back)[0]
+         and "After the table." in figure_items(items_back)[1]
+         and words(items_back).count("A caption.") == 1
+         and "<caption" in figure_items(items_back)[1]
+         and "A quote after the rule." in figure_items(items_back)[2]
+         and "After the quote." in figure_items(items_back)[2]
+         and items_back.count("<blockquote") == 1 and "tiqItemQuote" not in items_back),
+        # The writer writes a figure of more than a picture as a table, its
+        # caption after it; with 3.13, the list ends at it.
+        ("a figure of two pictures in a list item comes back in it with its caption, with "
+         "Pandoc 3.13; and a list in a table's cell, its item's second paragraph in the item",
+         lambda: (not indented or (len(figure_items(pictures_back)) == 2
+                                   and "<figcaption" in figure_items(pictures_back)[0]
+                                   and "After the two pictures." in figure_items(pictures_back)[0]
+                                   and "<blockquote" not in pictures_back))
+         and cell is not None and cell.group(1).count("<ol") == 1
+         and re.search(r"<li\b[^>]*>(?:(?!</li>).)*It is in your folder\.", cell.group(1), re.S)
+         is not None and "<blockquote" not in cell.group(1)),
+        # The writer numbers no paragraph of a part that opens with an anchor
+        # before its list; a figure's picture with an id nothing links to has
+        # its bookmark taken out, after which the reader pairs it.
+        ("parts that open with an anchor before a list come back as the list's items, each "
+         "with its list; and a figure outside any list, its picture's id linked to by nothing, "
+         "stays out of the lists around it, each holding its own figure",
+         lambda: [(tag, len(items)) for tag, items in lists_of(pictures_back)][-3:]
+         == [("ol", 2), ("ol", 1), ("ul", 2)]
+         and [[tag for tag, _ in inner] for _, inner in lists_of(pictures_back)[-3][1]]
+         == [["ul"], ["ul"]]
+         and "Text for part a." in str(lists_of(pictures_back)[-3][1][0])
+         and "Held figure two" in re.search(r"<ul>.*?</ul>", pictures_back.split(
+             "An outside figure")[-1], re.S).group(0)
+         and "An outside figure" not in str(lists_of(pictures_back))),
+        # What an item holds before its own list, that list's item holding a
+        # table too; an item's paragraph with a note after its list; and a
+        # definition list after a table, which the reader gives back more
+        # blocks of than the item had.
+        ("a list whose item holds a table before its own list, whose item holds one too, comes "
+         "back whole, the next item at its level; and so does an item's paragraph with a note "
+         "after its list, in that item, and a definition list after a table in an item; and an "
+         "inner item's table after the inner item's own list, and the outer item's after its "
+         "list, each in its item, and an item that opens with a table",
+         lambda: [(tag, len(items)) for tag, items in lists_of(nested_back)] == [("ol", 4), ("ol", 4)]
+         and "words after the table it opens with" in lists_of(nested_back)[1][1][2][0]
+         and [(tag, len(items)) for tag, items in lists_of(nested_back)[1][1][0][1]] == [("ul", 2)]
+         and "last table." in lists_of(nested_back)[1][1][0][0]
+         and "After the sub-part" in str(lists_of(nested_back)[1][1][0][1][0][1][0][0])
+         and [(tag, len(items)) for tag, items in lists_of(nested_back)[1][1][0][1][0][1][0][1]]
+         == [("ul", 1)]
+         and "After" not in str(lists_of(nested_back)[1][1][0][1][0][1][0][1])
+         and "After" not in str(lists_of(nested_back)[1][1][0][1][0][1][1][0])
+         # Before 3.13, where the reader takes it for a list paragraph,
+         # in the item's list's last item (docs/formats.md, Word output).
+         and "paragraph after its list, with a note" in (
+             lists_of(nested_back)[0][1][1][0] if indented
+             else str(lists_of(nested_back)[0][1][1]))
+         and "Back in step three." in lists_of(nested_back)[0][1][2][0]
+         and "Back in step one." in str(lists_of(nested_back)[0][1][0])
+         and "Step two." in lists_of(nested_back)[0][1][1][0]),
     ]
 
 

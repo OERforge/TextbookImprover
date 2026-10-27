@@ -602,6 +602,713 @@ def check_docx_repair():
     ]
 
 
+# A list's numbering as Pandoc's writer writes it: 1000 the list of no
+# marker (baseListId), its marker a blank, and 1001 a bulleted list, each
+# level's text a step of 720 further in.
+LIST_NUMBERING = (
+    '<w:numbering xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+    + "".join('<w:abstractNum w:abstractNumId="%d">%s</w:abstractNum>' % (n, "".join(
+        '<w:lvl w:ilvl="%d"><w:numFmt w:val="bullet"/><w:lvlText w:val="%s"/>'
+        '<w:pPr><w:ind w:left="%d" w:hanging="360"/></w:pPr></w:lvl>'
+        % (level, marker, 720 * (level + 1)) for level in range(3)))
+        for n, marker in ((990, " "), (991, "•")))
+    + '<w:num w:numId="1000"><w:abstractNumId w:val="990"/></w:num>'
+    '<w:num w:numId="1001"><w:abstractNumId w:val="991"/></w:num></w:numbering>')
+LIST_STYLES = ('<w:styles><w:style w:type="paragraph" w:styleId="BodyText"><w:name w:val="Body Text"/>'
+               '</w:style><w:style w:type="paragraph" w:styleId="ListContinue">'
+               '<w:basedOn w:val="ListContinueBase"/></w:style>'
+               '<w:style w:type="paragraph" w:styleId="ListContinueBase"><w:pPr>'
+               '<w:ind w:left="720"/></w:pPr></w:style></w:styles>')
+
+
+def list_paragraph(text, style="BodyText", number=None, indent=None):
+    """A paragraph as Pandoc's writer writes one: its style, its numbering
+    (numId, ilvl), and its own w:ind's attributes."""
+    props = '<w:pStyle w:val="%s"/>' % style
+    if number:
+        props += '<w:numPr><w:ilvl w:val="%s"/><w:numId w:val="%s"/></w:numPr>' % (number[1],
+                                                                                  number[0])
+    if indent:
+        props += "<w:ind %s/>" % indent
+    return '<w:p><w:pPr>%s</w:pPr><w:r><w:t>%s</w:t></w:r></w:p>' % (props, text)
+
+
+def quote_list_item(text, left):
+    """A list's item in a quote as the Word target writes it, moved a
+    quote step in."""
+    return list_paragraph(text, "BodyText", ("1001", "0"), 'w:left="%d" w:hanging="360"' % left)
+
+
+def check_list_continuations():
+    """A list item's later paragraphs as Pandoc's writer sets them from
+    3.13 on, unnumbered and lined up with the item's text, and its reader
+    reads them: what the Word target does with its own in that form, and
+    what reading a file it wrote does before the reader gets it."""
+    import zipfile
+    import docxrepair
+    import docxtarget
+    item = lambda text, level=0, indent=None: list_paragraph(
+        text, "FirstParagraph", ("1001", str(level)), indent)
+    later = lambda text, left, style="BodyText", extra="": list_paragraph(
+        text, style, None, 'w:left="%d"%s w:firstLine="0"' % (left, extra))
+    table = ('<w:tbl><w:tr><w:tc><w:p/></w:tc><w:tc>%s</w:tc></w:tr></w:tbl>'
+             % list_paragraph("cell", "Compact"))
+    rule = ('<w:p><w:r><w:pict><v:rect style="width:0;height:1.5pt" o:hralign="center" '
+            'o:hrstd="t" o:hr="t" /></w:pict></w:r></w:p>')
+    body = (item("A") + later("A1", 720) + item("B", 1) + later("B1", 1440) + later("A2", 720)
+            + later("Q", 1200, "BlockText", ' w:right="480"') + table + later("A3", 720)
+            + item("C") + later("C1", 720) + rule + later("X", 720)
+            + item("D") + list_paragraph("D1", "ListContinue")
+            + list_paragraph("D2", "Heading2", None, 'w:left="720" w:firstLine="0"')
+            + later("Y", 720) + item("E") + list_paragraph("", "BodyText") + later("Z", 720)
+            + item("F") + '<w:p/>' + later("W", 720))
+
+    def found(xml, quoted, held=()):
+        return [("".join(re.findall(r"<w:t>([^<]*)</w:t>", xml[s:e])), level, text, inside, after)
+                for s, e, level, text, inside, after in docxrepair.item_paragraphs(
+                    xml, LIST_NUMBERING, LIST_STYLES, quoted, held)]
+    marked, marks = docxrepair.mark_continuations(body, LIST_NUMBERING, LIST_STYLES, True,
+                                                  {("t", 0)})
+    unmarked, _ = docxrepair.mark_continuations(body, LIST_NUMBERING, LIST_STYLES, True,
+                                                {("t", 0)}, marks=False)
+    everyone, _ = docxrepair.mark_continuations(body, LIST_NUMBERING, LIST_STYLES, True,
+                                                {("t", 0)}, every=True)
+    paragraph_of = lambda xml, text: next(p for p in re.findall(r"<w:p>.*?</w:p>", xml)
+                                          if "<w:t>%s</w:t>" % text in p)
+    # The Word target: a formula in an item, and quotes and lists in each
+    # other, as the writer sets an item's later paragraphs from 3.13 on.
+    formula = ('<w:bookmarkStart w:id="5" w:name="tiqMath1d1"/><w:p><w:pPr>'
+               '<w:pStyle w:val="FirstParagraph"/></w:pPr><m:oMathPara/></w:p>'
+               '<w:bookmarkEnd w:id="5"/>')
+    quote = lambda inner, n: ('<w:bookmarkStart w:id="%d" w:name="tiqQuote%d"/>%s'
+                              '<w:bookmarkEnd w:id="%d"/>' % (900 + n, n, inner, 900 + n))
+    levels = docxtarget.level_indents(LIST_NUMBERING)
+    blanks = docxtarget.level_indents(LIST_NUMBERING, blank=True)
+    in_item, _, in_item_items = docxtarget.indent_quotes(
+        item("item") + quote(later("in its quote", 720, "BlockText"), 1), levels, blanks)
+    # The writer styles every paragraph in a quote Block Text, a list's
+    # items too.
+    quoted_item = lambda text: list_paragraph(text, "BlockText", ("1001", "0"))
+    quoted_list, _, _ = docxtarget.indent_quotes(quote(
+        quoted_item("quoted item") + later("its next paragraph", 720, "BlockText")
+        + later("its code", 720, "SourceCode"), 2), levels, blanks)
+    # A quoted list, then one outside every quote whose item holds a quote:
+    # the second list's isn't the first's depth.
+    after_quoted, _, _ = docxtarget.indent_quotes(
+        quote(quoted_item("quoted item"), 3) + item("plain item")
+        + quote(later("plain item's quote", 720, "BlockText"), 4), levels, blanks)
+    settings = ('<w:settings><w:compat><w:compatSetting w:name="compatibilityMode"/></w:compat>'
+                "</w:settings>")
+    both = docxtarget.continuations_var(docxtarget.quoted_lists_var(settings))
+    # What quoted_code finds in a file the target wrote, the code's quote
+    # depth beyond its item's text.
+    work = tempfile.mkdtemp()
+    code_body = (item("one") + later("Load it:", 1200, "BlockText", ' w:right="480"')
+                 + later("include csv", 1200, "SourceCode")
+                 + quote_list_item("quoted", 1200) + later("acct1", 1200, "SourceCode"))
+
+    def code_file(name, settings_xml):
+        path = os.path.join(work, name)
+        with zipfile.ZipFile(path, "w") as z:
+            z.writestr("word/document.xml", '<w:document><w:body>%s</w:body></w:document>'
+                       % code_body)
+            z.writestr("word/numbering.xml", LIST_NUMBERING)
+            z.writestr("word/styles.xml", LIST_STYLES)
+            z.writestr("word/settings.xml", settings_xml)
+        return path
+    indented_code = docxrepair.quoted_code(code_file("indented.docx", both))
+    numbered_code = docxrepair.quoted_code(code_file(
+        "numbered.docx", docxtarget.quoted_lists_var(settings)))
+    # Code in a quote in a quote after a table its item holds.
+    code_body = (item("one") + table + later("Outer:", 1200, "BlockText", ' w:right="480"')
+                 + later("Inner:", 1680, "BlockText", ' w:right="480"')
+                 + later("two deep", 1680, "SourceCode"))
+    held_code_path = code_file("held.docx", both)
+    with zipfile.ZipFile(held_code_path, "a") as z:
+        z.writestr("customXml/item1.xml", '<ids xmlns="https://github.com/OERforge/TextbookImprover/'
+                   'ids"><listBlock kind="t" n="0" follow="3" continues="0"/></ids>')
+    held_code = docxrepair.quoted_code(held_code_path)
+    # A file the target wrote, as reading it gets it ready for the reader.
+    repaired = os.path.join(work, "repaired.docx")
+    source = os.path.join(work, "source.docx")
+    with zipfile.ZipFile(source, "w") as z:
+        z.writestr("word/document.xml", '<w:document><w:body>%s</w:body></w:document>' % body)
+        z.writestr("word/numbering.xml", LIST_NUMBERING)
+        z.writestr("word/styles.xml", LIST_STYLES)
+        z.writestr("word/settings.xml", both)
+        z.writestr("customXml/item1.xml", '<ids xmlns="https://github.com/OERforge/TextbookImprover/'
+                   'ids"><listBlock kind="t" n="0" follow="1" continues="1"/></ids>')
+        # A note holding a list, its item's later paragraph in the
+        # writer's form.
+        z.writestr("word/footnotes.xml", '<w:footnotes><w:footnote w:id="2">%s</w:footnote>'
+                   '</w:footnotes>' % (item("note's item") + later("note's later", 720)))
+
+    def repaired_for(version, part="word/document.xml"):
+        """The copy reading makes of source for a reader of the Pandoc
+        version given: the part named."""
+        saved = docxtarget.pandoc_version
+        docxtarget.pandoc_version = lambda: version
+        try:
+            docxrepair.repaired_copy(source, repaired)
+        finally:
+            docxtarget.pandoc_version = saved
+        with zipfile.ZipFile(repaired) as z:
+            return z.read(part).decode("utf-8")
+    repaired_xml = repaired_for((3, 13))
+    repaired_old = repaired_for((3, 12, 1))
+    notes_xml = repaired_for((3, 13), "word/footnotes.xml")
+    notes_old = repaired_for((3, 12, 1), "word/footnotes.xml")
+    # Figures, a picture's paragraph (Captioned Figure, unnumbered, so the
+    # reader pairs it with its caption) and its caption, as the writer sets
+    # one in an item from 3.13 on: one before the list, one an item holds
+    # (the body's second), one in a table's cell, one an item opens
+    # (numbered), and one no item holds, which ends the list.
+    picture = lambda left, extra="": (
+        '<w:p><w:pPr><w:pStyle w:val="CaptionedFigure"/>%s%s</w:pPr><w:r><w:drawing>'
+        '<wp:inline/></w:drawing></w:r></w:p>'
+        % (extra, '<w:ind w:left="%d" w:firstLine="0"/>' % left if left else ""))
+    figure_caption = lambda text, left: list_paragraph(
+        text, "ImageCaption", None, 'w:left="%d" w:firstLine="0"' % left if left else None)
+    figures_body = (picture(0) + figure_caption("before", 0)
+                    + item("G") + picture(720) + figure_caption("in G", 720) + later("G1", 720)
+                    + item("H") + later("H1", 720)
+                    + '<w:tbl><w:tr><w:tc>%s</w:tc></w:tr></w:tbl>' % (picture(0) + figure_caption(
+                        "in a cell", 0))
+                    + item("J") + picture(0, '<w:numPr><w:ilvl w:val="0"/><w:numId w:val="1001"/>'
+                                             '</w:numPr>') + figure_caption("J's", 720)
+                    + later("J1", 720)
+                    + item("K") + picture(720) + figure_caption("in K", 720) + later("K1", 720))
+    figures_held = {("f", 1)}
+    figures_marked, _ = docxrepair.mark_continuations(figures_body, LIST_NUMBERING, LIST_STYLES,
+                                                      False, figures_held)
+    # The target's count, by the mark before a figure an item holds, after
+    # a figure no list holds, one in a table's cell, and one a numbered
+    # picture opens, which the reader doesn't pair with its caption.
+    figures_target, figures_listed = docxtarget.item_tables(
+        picture(0) + figure_caption("before", 0)
+        + '<w:tbl><w:tr><w:tc>%s</w:tc></w:tr></w:tbl>' % (picture(0) + figure_caption(
+            "in a cell", 0))
+        + item("J") + picture(0, '<w:numPr><w:ilvl w:val="0"/><w:numId w:val="1001"/>'
+                                 '</w:numPr>') + figure_caption("J's", 720)
+        + item("G") + '<w:bookmarkStart w:id="7" w:name="%s1kff1c1"/>' % docxtarget.ITEM_TABLE_MARK
+        + picture(720) + '<w:bookmarkEnd w:id="7"/>' + figure_caption("in G", 720))
+    # And the figure put back in its item after the reader, which ends the
+    # list at it: a list, the figure, the item's paragraph after it, and the
+    # list begun again.
+    para = lambda text: {"t": "Para", "c": [{"t": "Str", "c": text}]}
+    read_back = {"pandoc-api-version": [1, 23, 1], "meta": {}, "blocks": [
+        {"t": "Figure", "c": [["", [], []], [None, [para("before")]], [para("picture")]]},
+        {"t": "OrderedList", "c": [[1, {"t": "Decimal"}, {"t": "Period"}], [[para("G")]]]},
+        {"t": "Figure", "c": [["", [], []], [None, [para("in G")]], [para("picture")]]},
+        para("G1"),
+        {"t": "OrderedList", "c": [[2, {"t": "Decimal"}, {"t": "Period"}], [[para("H")]]]}]}
+    figure_docx = os.path.join(work, "figure.docx")
+    figure_json = os.path.join(work, "figure.json")
+    with zipfile.ZipFile(figure_docx, "w") as z:
+        z.writestr("customXml/item1.xml", '<ids xmlns="https://github.com/OERforge/TextbookImprover/'
+                   'ids"><listBlock kind="f" n="1" follow="1" continues="1"/></ids>')
+    with open(figure_json, "w", encoding="utf-8") as fh:
+        json.dump(read_back, fh)
+    figures_moved = docxrepair.apply_list_tables(figure_docx, figure_json)
+    with open(figure_json, encoding="utf-8") as fh:
+        figures_put_back = json.load(fh)["blocks"]
+    # An item the writer numbers nowhere, one that opens with an anchor
+    # before a list, its words after the list lined up with its text, no
+    # level of the reader's theirs; and a table's caption in a tight list's item style,
+    # before a table the item holds.
+    orphan_body = (item("a") + table + item("i", 1) + item("ii", 1) + later("b's words", 720)
+                   + item("c"))
+    caption_body = (item("x") + list_paragraph("Table 1", "Compact") + table
+                    + later("x after", 720) + item("y"))
+    caption_quote = (item("x") + list_paragraph("Table 1", "Compact") + table
+                     + later("quote after", 1200, "BlockText", ' w:right="480"'))
+
+    def put_back(blocks, marks):
+        """blocks after the reader, given the target's listBlock marks, as
+        apply_list_tables leaves them."""
+        with zipfile.ZipFile(figure_docx, "w") as z:
+            z.writestr("customXml/item1.xml", '<ids xmlns="https://github.com/OERforge/'
+                       'TextbookImprover/ids">%s</ids>' % "".join(
+                           '<listBlock kind="%s" n="%d" follow="%d" continues="%s"/>' % m
+                           for m in marks))
+        with open(figure_json, "w", encoding="utf-8") as fh:
+            json.dump(dict(read_back, blocks=blocks), fh)
+        docxrepair.apply_list_tables(figure_docx, figure_json)
+        with open(figure_json, encoding="utf-8") as fh:
+            return json.load(fh)["blocks"]
+    alpha = lambda start, entries: {"t": "OrderedList", "c": [
+        [start, {"t": "LowerAlpha"}, {"t": "Period"}], entries]}
+    table_block = {"t": "Table", "c": [["", [], []], [None, []], [], ["", [], []], [],
+                                       ["", [], []]]}
+    caption_put_back = put_back([alpha(1, [[para("x")]]), para("Table 1"), table_block,
+                                 para("x after"), alpha(2, [[para("y")]])], [("t", 0, 1, "1")])
+    figure = {"t": "Figure", "c": [["", [], []], [None, []], [para("picture")]]}
+    roman = {"t": "OrderedList", "c": [[1, {"t": "LowerRoman"}, {"t": "Period"}],
+                                       [[para("i")], [para("ii")]]]}
+    nested_put_back = put_back([alpha(1, [[para("a")]]), figure, roman, alpha(3, [[para("c")]])],
+                               [("f", 0, 0, "1")])
+    # A table's caption the reader gave it from w:tblCaption, its words the
+    # paragraph's before it: the paragraph becomes the caption.
+    captioned_table = json.loads(json.dumps(table_block))
+    captioned_table["c"][1] = [None, [{"t": "Plain", "c": [{"t": "Str", "c": "Table"},
+                                                           {"t": "Space"},
+                                                           {"t": "Str", "c": "1"}]}]]
+    caption_words = {"t": "Para", "c": [{"t": "Emph", "c": [{"t": "Str", "c": "Table"}]},
+                                         {"t": "Space"}, {"t": "Str", "c": "1"}]}
+    caption_merged = put_back([alpha(1, [[para("x")]]), caption_words, captioned_table,
+                               para("x after"), alpha(2, [[para("y")]])], [("t", 0, 1, "1")])
+    # What the reader does that ends a list, mirrored: a rule an item
+    # holds; a note, whose paragraphs end every list where its reference
+    # is, the item's paragraphs before it then list paragraphs too, with
+    # no indent; a deeper item's list ended by an item outside it; a
+    # quote off the quote step; a picture with a bookmark or a caption that
+    # keeps with the next, which the reader doesn't pair; a caption after
+    # a table, which it does; a quote or a paragraph with an indent of its
+    # own before a table an item holds, which is no caption; the reader's
+    # lists ended by a table an item holds, an inner item opening again
+    # after it; and a list in a table's cell.
+    note = lambda paragraph: paragraph.replace(
+        "</w:p>", '<w:r><w:footnoteReference w:id="2"/></w:r></w:p>')
+    rule_body = item("r") + rule + later("after the rule", 720)
+    note_body = (note(item("n")) + later("n1", 720) + item("m") + later("m1", 720)
+                 + note(later("m2", 720)) + later("m3", 720) + item("o"))
+    note_marked, _ = docxrepair.mark_continuations(note_body, LIST_NUMBERING, LIST_STYLES)
+    deeper_body = item("a") + item("b", 1) + item("c") + later("c deep", 1440)
+    off_step = item("s") + later("off the step", 960, "BlockText")
+    bookmarked = lambda left: picture(left).replace(
+        "<w:r><w:drawing>", '<w:bookmarkStart w:id="9" w:name="fig"/><w:r><w:drawing>')
+    kept_caption = lambda text: list_paragraph(text, "ImageCaption", None,
+                                               'w:left="720" w:firstLine="0"').replace(
+        "</w:pPr>", "<w:keepNext/></w:pPr>")
+    unpaired_body = (item("p") + bookmarked(720) + figure_caption("its caption", 720)
+                     + later("p1", 720) + item("k") + picture(720) + kept_caption("kept")
+                     + later("k1", 720))
+    after_table = item("v") + table + figure_caption("the table's", 720) + later("v1", 720)
+    after_marked, _ = docxrepair.mark_continuations(after_table, LIST_NUMBERING, LIST_STYLES,
+                                                    False, {("t", 0)})
+    no_caption = (item("t") + later("quote before", 1200, "BlockText") + table
+                  + later("t1", 720) + item("u") + list_paragraph("own", "Compact", None,
+                                                                  'w:left="360"')
+                  + table + later("u1", 720))
+    reopened = item("A") + item("B", 1) + table + item("C", 1) + later("A after", 720)
+    orphan_after = (item("a") + table + item("i", 1) + later("b1", 720) + later("b2", 720)
+                    + later("b's quote", 1200, "BlockText"))
+    cell_list = ("<w:tbl><w:tr><w:tc>%s</w:tc></w:tr></w:tbl>"
+                 % (item("in a cell") + later("the cell's later", 720)))
+    cell_every, _ = docxrepair.mark_continuations(cell_list, LIST_NUMBERING, LIST_STYLES,
+                                                  every=True)
+    cell_kept, _ = docxrepair.mark_continuations(cell_list, LIST_NUMBERING, LIST_STYLES)
+    # The target: which figures it holds, a mark around a figure the reader
+    # makes none of left out, and a table's caption in its own style.
+    image = lambda: {"t": "Image", "c": [["", [], []], [], ["a.png", ""]]}
+    lone = lambda caption: {"t": "Figure", "c": [["", [], []], [None, caption],
+                                                [{"t": "Plain", "c": [image()]}]]}
+    two = {"t": "Figure", "c": [["", [], []], [None, [para("two")]],
+                                [{"t": "Plain", "c": [image(), {"t": "Space"}, image()]}]]}
+    uncaptioned = ('<w:p><w:pPr><w:pStyle w:val="Figure"/><w:ind w:left="720" w:firstLine="0"/>'
+                   '</w:pPr><w:r><w:drawing><wp:inline/></w:drawing></w:r></w:p>')
+    _, stray_listed = docxtarget.item_tables(
+        item("G") + '<w:bookmarkStart w:id="7" w:name="%s1kff1c1"/>' % docxtarget.ITEM_TABLE_MARK
+        + uncaptioned + '<w:bookmarkEnd w:id="7"/>' + later("G1", 720) + picture(0)
+        + figure_caption("a figure outside the list", 0))
+    compact_caption = lambda text: list_paragraph(text, "Compact")
+    plain_table = "<w:tbl><w:tr><w:tc><w:p/></w:tc></w:tr></w:tbl>"
+    marked_table = lambda n, inner: ('<w:bookmarkStart w:id="%d" w:name="%s%d"/>%s'
+                                     '<w:bookmarkEnd w:id="%d"/>'
+                                     % (300 + n, docxtarget.TABLE_MARK, n, inner, 300 + n))
+    restyled, restyled_count = docxtarget.table_captions(
+        marked_table(1, compact_caption("Prices &amp; costs")
+                     + '<w:p><w:pPr><w:pStyle w:val="Compact"/></w:pPr><m:oMath/></w:p>'
+                     + plain_table)
+        + compact_caption("Something else") + plain_table
+        + marked_table(2, compact_caption("A mark with no table"))
+        + compact_caption("A tight list's item") + plain_table)
+    quoted_doc = {"blocks": [{"t": "BlockQuote", "c": [{"t": "Para", "c": [
+        {"t": "Span", "c": [["tiqItemQuote1x1", [], []], []]}, {"t": "Str", "c": "Q"}]}]}]}
+    quote_marks = docxrepair.nest_item_quotes(quoted_doc)
+    # An outer item's paragraph holding a note after its list: a
+    # continuation the reader keeps, which a list paragraph would not be.
+    note_after = (item("A") + item("B", 1) + note(later("A2", 720)) + later("A3", 720))
+    # What the reader gives back after a held block: a paragraph after a
+    # list folds into the list's last item, up to a block that isn't one.
+    plain = lambda text: {"t": "Plain", "c": [{"t": "Str", "c": text}]}
+    bullets = {"t": "BulletList", "c": [[plain("x")]]}
+    heading = {"t": "Header", "c": [3, ["", [], []], [{"t": "Str", "c": "h"}]]}
+    # A list whose item holds a table is the parts the reader splits it
+    # into, and a paragraph after a table, at any depth, folds into
+    # nothing; one after a list begun again after it folds into that.
+    ends_held = {"t": "BulletList", "c": [[plain("x"), table_block, para("after")]]}
+    deep_held = {"t": "BulletList", "c": [[plain("x"), {"t": "BulletList", "c": [
+        [plain("y"), table_block]]}]]}
+    held_then_list = {"t": "BulletList", "c": [[plain("x"), table_block, bullets]]}
+    two_items = {"t": "BulletList", "c": [[plain("x"), table_block], [plain("x2")]]}
+    in_divs = {"t": "Div", "c": [["", ["box"], []], [para("one"), para("two")]]}
+    # An item that opens with a table, which the target gives a paragraph
+    # for its number first (_number_anchored): an item, then the table.
+    table_first = {"t": "BulletList", "c": [[table_block, para("p")], [plain("q")]]}
+    other_list = {"t": "BulletList", "c": [[plain("z")]]}
+    read_back_counts = [docxtarget._read_back(blocks, True) for blocks in (
+        [para("p"), bullets, para("q"), para("r")],
+        [bullets, para("q"), table_block, para("s")],
+        [bullets, heading, para("t")],
+        [ends_held, para("u")], [deep_held, para("v")], [held_then_list, para("w")],
+        [two_items, para("y")], [in_divs], [{"t": "Div", "c": [["a0", [], []], []]}, para("a")],
+        [table_first, para("r")], [bullets, other_list])] + [
+        docxtarget._read_back([bullets, json.loads(json.dumps(two)), para("s")], False)]
+    # An item that opens with anchors before a list gets a paragraph for its
+    # number; one with words after its anchors doesn't need one.
+    anchor_div = lambda name: {"t": "Div", "c": [[name, [], []], []]}
+    anchored = [anchor_div("a1"), anchor_div("a2"), bullets]
+    worded = [anchor_div("a3"), para("words"), bullets]
+    anchored_counts = (docxtarget._number_anchored(anchored), docxtarget._number_anchored(worded))
+    # And one that opens with a table, alone in a div too, gets an empty
+    # paragraph first, as the writer gives one that opens with a list.
+    tabled = [{"t": "Div", "c": [["", ["table-wrapper"], []], [table_block]]}, para("after")]
+    tabled_count = docxtarget._number_anchored(tabled)
+    ruled = [{"t": "HorizontalRule"}, para("after")]
+    ruled_count = docxtarget._number_anchored(ruled)
+    pictured = [json.loads(json.dumps(two)), para("after")]
+    pictured_count = docxtarget._number_anchored(pictured)
+    # A formula alone in a Plain, or in a span, is a display paragraph too.
+    display = {"t": "Math", "c": [{"t": "DisplayMath"}, "x"]}
+    plain_math = {"t": "Plain", "c": [display]}
+    span_math = {"t": "Para", "c": [{"t": "Span", "c": [["eq", [], []], [display]]}]}
+    split_plain = docxtarget._split_display({"t": "Plain", "c": [{"t": "Str", "c": "so"}, {"t": "Space"},
+                                                                 display]})
+    # The target's count of figures as reading will have the file: a
+    # bookmark in a picture's paragraph moved into its caption, as reading
+    # moves one, so the reader pairs it.
+    bookmarked_count = docxtarget.item_tables(
+        "<w:body>" + bookmarked(0) + figure_caption("bookmarked", 0) + item("G")
+        + '<w:bookmarkStart w:id="7" w:name="%s1kff0c0"/>' % docxtarget.ITEM_TABLE_MARK
+        + picture(720) + '<w:bookmarkEnd w:id="7"/>' + figure_caption("in G", 720) + "</w:body>")[1]
+    # After the reader: an outer item's table takes back its blocks after
+    # it as the reader gave them back, the parts of the list it holds among
+    # them, and then an inner item's goes back in the part before it; and
+    # blocks the reader made more of than the count, before the list begun
+    # again, the item's.
+    nested_blocks = [alpha(1, [[para("one")]]), table_block, para("after one's table"),
+                     {"t": "BulletList", "c": [[para("sub")]]}, table_block, para("after sub's"),
+                     {"t": "BulletList", "c": [[para("sub two")]]}, alpha(2, [[para("two")]])]
+    nested_back = put_back(nested_blocks, [("t", 0, 5, "1"), ("t", 1, 1, "11")])
+    leftover_back = put_back([alpha(1, [[para("x")]]), table_block, para("y"), para("extra"),
+                              alpha(2, [[para("z")]])], [("t", 0, 1, "1")])
+    # A table the outer item holds after its list, which the outer item's
+    # table took back with its blocks, stays where it is; the outer item's
+    # blocks are back in it where its list doesn't go on, which no block
+    # left over would mend; and an inner item's table after a list that
+    # item holds goes back in that item, not in the list's.
+    placed_back = put_back([alpha(1, [[para("one")]]), table_block,
+                            {"t": "BulletList", "c": [[para("sub")]]}, table_block,
+                            {"t": "BulletList", "c": [[para("sub two")]]}, table_block,
+                            para("after the third"), alpha(2, [[para("two")]])],
+                           [("t", 0, 5, "1"), ("t", 1, 0, "11"), ("t", 2, 1, "1")])
+    last_back = put_back([alpha(1, [[para("one")]]), table_block,
+                          {"t": "BulletList", "c": [[para("sub")]]}, table_block,
+                          para("after sub's"), para("one's after its list")],
+                         [("t", 0, 4, "0"), ("t", 1, 1, "00")])
+    walk_back = put_back([alpha(1, [[para("one")]]), table_block,
+                          {"t": "BulletList", "c": [[para("sub"), {"t": "BulletList", "c": [
+                              [para("sub-sub")]]}]]}, table_block, para("after sub's"),
+                          alpha(2, [[para("two")]])],
+                         [("t", 0, 3, "1"), ("t", 1, 1, "10")])
+    shutil.rmtree(work, ignore_errors=True)
+    return [
+        ("an item's later paragraph lined up with its text continues it, the lists inside it "
+         "ended, as Pandoc's reader from 3.13 has it; one beyond the text, a quote's, only in a "
+         "file the target wrote, by a quote step; a table the item holds keeps the list, its "
+         "paragraphs after it flagged, to the item's end",
+         lambda: found(body, True, {("t", 0)})[:6] == [
+             ("A1", ("1001", "0"), 720, 0, False), ("B1", ("1001", "1"), 1440, 0, False),
+             ("A2", ("1001", "0"), 720, 0, False), ("Q", ("1001", "0"), 720, 1, False),
+             ("A3", ("1001", "0"), 720, 0, True), ("C1", ("1001", "0"), 720, 0, False)]),
+        ("a rule, a heading, an empty paragraph, and a table no item holds end the lists, and an "
+         "item's paragraph after one, in the writer's form, which the reader would take for a "
+         "quotation, is a list paragraph at the level its indent names, as the writer before "
+         "3.13 numbered it; a style's indent counts as the paragraph's own",
+         lambda: [(f[0], f[1], f[4]) for f in found(body, True, {("t", 0)})] == [
+             ("A1", ("1001", "0"), False), ("B1", ("1001", "1"), False),
+             ("A2", ("1001", "0"), False), ("Q", ("1001", "0"), False),
+             ("A3", ("1001", "0"), True), ("C1", ("1001", "0"), False), ("X", (None, "0"), True),
+             ("D1", ("1001", "0"), False), ("Y", (None, "0"), True), ("Z", (None, "0"), True),
+             ("W", (None, "0"), True)]
+         and [(f[0], f[1]) for f in found(body, True)][4] == ("A3", (None, "0"))),
+        ("in a file without quoted lists, a quote's paragraph beyond the item's text ends the "
+         "list, as the reader takes it, and isn't the item's",
+         lambda: [f[0] for f in found(body, False, {("t", 0)})] == [
+             "A1", "B1", "A2", "A3", "C1", "X", "D1", "Y", "Z", "W"]),
+        ("reading a file the target wrote, a quote's paragraph in an item is lined up with the "
+         "item's text, marked with its depth for nest_item_quotes, and the item's paragraph after "
+         "its table numbered as a list paragraph; the rest as they were",
+         lambda: marks == 6
+         and re.search(r'<w:ind w:left="720" w:right="480" w:firstLine="0"/></w:pPr>'
+                       r'<w:r><w:t>&#8203;</w:t></w:r><w:bookmarkStart w:id="\d+" '
+                       r'w:name="tiqItemQuote1x1"/>', paragraph_of(marked, "Q"))
+         and all('<w:numPr><w:ilvl w:val="0"/><w:numId w:val="4000000"/></w:numPr>'
+                 in paragraph_of(marked, t) for t in ("A3", "X", "Y", "Z", "W"))
+         and all(paragraph_of(marked, t) == paragraph_of(body, t) for t in ("A1", "B1", "C1", "D1"))),
+        ("for a reader before 3.13, which would read each as a quote, every item's later "
+         "paragraph is a list paragraph, the paragraphs that aren't one as they were",
+         lambda: all('<w:numPr><w:ilvl w:val="%s"/><w:numId w:val="4000000"/></w:numPr>'
+                     % level in paragraph_of(everyone, t)
+                     for t, level in (("A1", 0), ("B1", 1), ("A2", 0), ("Q", 0), ("A3", 0),
+                                      ("C1", 0), ("D1", 0)))
+         and "tiqItemQuote1x" in paragraph_of(everyone, "Q")
+         and all(paragraph_of(everyone, t) == paragraph_of(body, t) for t in ("C", "D2", "cell"))),
+        ("in the notes, the quote is lined up but not marked",
+         lambda: "tiqItemQuote" not in unmarked
+         and '<w:ind w:left="720" w:right="480" w:firstLine="0"/>' in paragraph_of(unmarked, "Q")),
+        ("the writer's later paragraph is unnumbered and indented with a first line of 0; "
+         "nothing else is one",
+         lambda: docxtarget.continuation_left(later("x", 1440)) == 1440
+         and docxtarget.continuation_left(item("x")) is None
+         and docxtarget.continuation_left(list_paragraph("x", "BodyText", None,
+                                                         'w:left="720" w:hanging="360"')) is None
+         and docxtarget.continuation_left(list_paragraph("x", "BodyText", None,
+                                                         'w:left="720"')) is None),
+        ("a formula in an item's later paragraph is lined up with the item's text, unnumbered, "
+         "where the writer indents an item's later paragraphs, and numbered with no marker where "
+         "it numbers them",
+         lambda: docxtarget.list_math(formula, True) == (
+             '<w:p><w:pPr><w:pStyle w:val="FirstParagraph"/><w:ind w:left="1440" '
+             'w:firstLine="0" /></w:pPr><m:oMathPara/></w:p>', 1)
+         and docxtarget.list_math(formula, False) == (
+             '<w:p><w:pPr><w:pStyle w:val="FirstParagraph"/><w:numPr><w:ilvl w:val="1" />'
+             '<w:numId w:val="1000" /></w:numPr></w:pPr><m:oMathPara/></w:p>', 1)),
+        ("a quote in an item stands a quote step beyond the item's text, counted for the "
+         "file's variable",
+         lambda: '<w:ind w:left="1200" w:right="480" w:firstLine="0" />' in in_item
+         and in_item_items == 1),
+        ("a list in a quote: the item a quote step in, its later paragraph lined up with it in "
+         "Body Text, its code too",
+         lambda: '<w:pStyle w:val="BodyText"/><w:numPr><w:ilvl w:val="0"/><w:numId w:val="1001"/>'
+         '</w:numPr><w:ind w:left="1200" w:hanging="360" />' in quoted_list
+         and '<w:pStyle w:val="BodyText"/><w:ind w:left="1200" w:firstLine="0" /></w:pPr><w:r>'
+         '<w:t>its next paragraph' in quoted_list
+         and '<w:pStyle w:val="SourceCode"/><w:ind w:left="1200" w:firstLine="0" /></w:pPr><w:r>'
+         '<w:t>its code' in quoted_list),
+        ("a list outside every quote isn't the quoted list's before it",
+         lambda: '<w:pStyle w:val="BlockText"/><w:ind w:left="1200" w:right="480" '
+         'w:firstLine="0" /></w:pPr><w:r><w:t>plain item' in after_quoted),
+        ("a file says its lists' later paragraphs are indented beside its quoted lists, once",
+         lambda: both.count("<w:docVars>") == 1
+         and '<w:docVar w:name="TextbookImproverContinuations" w:val="indent"/>' in both
+         and '<w:docVar w:name="TextbookImproverQuotedLists" w:val="480"/>' in both
+         and docxtarget.continuations_var(both) == both),
+        ("code in an item's quote is found with the quote's depth; a quoted list's own code "
+         "isn't quoted again; and in a file that doesn't say its items' later paragraphs are "
+         "indented, the rules for numbered ones hold, code beyond two quote steps outside "
+         "any list one quote deeper than the reader quotes it",
+         lambda: indented_code == [("include csv", 1)]
+         and numbered_code == [("include csv", 1), ("acct1", 1)]),
+        ("reading a file the target wrote, the quote is lined up and marked, and the paragraph "
+         "after the item's table a list paragraph; for a reader before 3.13, every item's "
+         "later paragraph a list paragraph",
+         lambda: "tiqItemQuote1x1" in repaired_xml
+         and '<w:numId w:val="4000000"/>' in paragraph_of(repaired_xml, "A3")
+         and '<w:numId w:val="4000000"/>' not in paragraph_of(repaired_xml, "A1")
+         and all('<w:numPr><w:ilvl w:val="%s"/><w:numId w:val="4000000"/></w:numPr>' % level
+                 in paragraph_of(repaired_old, t)
+                 for t, level in (("A1", 0), ("B1", 1), ("A2", 0), ("Q", 0), ("A3", 0)))
+         and re.search(r"tiqItemQuote1x\d+", paragraph_of(repaired_old, "Q"))),
+        ("a figure an item holds keeps its list, the paragraphs after it list paragraphs to the "
+         "item's end; its picture and caption are none of the item's; one no item holds ends "
+         "the list, the item's paragraphs after it list paragraphs of no list open, one in a "
+         "cell is passed over, and a caption beside a numbered picture, which the reader "
+         "doesn't pair with it, continues the item",
+         lambda: [(f[0], f[1][0], f[4]) for f in found(figures_body, False, figures_held)]
+         == [("G1", "1001", True), ("H1", "1001", False), ("J's", "1001", False),
+             ("J1", "1001", False), ("K1", None, True)]
+         and [(f[0], f[1][0]) for f in found(figures_body, False)][0] == ("G1", None)),
+        ("the held figure's picture and caption lose their indent, so the reader doesn't take "
+         "the caption's words for a quotation; the others keep theirs",
+         lambda: "<w:ind" not in paragraph_of(figures_marked, "in G")
+         and "<w:ind" not in re.findall(r"<w:p>.*?</w:p>", figures_marked)[3]
+         and "<w:drawing>" in re.findall(r"<w:p>.*?</w:p>", figures_marked)[3]
+         and '<w:numId w:val="4000000"/>' in paragraph_of(figures_marked, "G1")
+         and "<w:ind" in paragraph_of(figures_marked, "in K")
+         and paragraph_of(figures_marked, "before") == paragraph_of(figures_body, "before")),
+        ("the target counts a figure the reader pairs with its caption, outside tables and "
+         "unnumbered, as the reading does",
+         lambda: figures_listed == [("f", 1, 1, "1")]
+         and docxtarget.ITEM_TABLE_MARK not in figures_target),
+        ("the words of an item the writer numbers nowhere, after its list, are a list paragraph "
+         "at the item's level, where no level the reader keeps open is theirs; not a quote's "
+         "paragraph so lined up, nor one in the writer's form only by its style's indent",
+         lambda: [(f[0], f[1], f[3], f[4]) for f in found(orphan_body, False)]
+         == [("b's words", ("1001", "0"), 0, True)]
+         and found(item("q") + rule + later("deep quote", 2160, "BlockText", ' w:right="480"'),
+                   False) == []
+         and found(item("r") + list_paragraph("Head", "Heading2")
+                   + list_paragraph("styled", "ListContinue"), False) == []),
+        ("a table's caption in the item's style, before a table the item holds, keeps the list, "
+         "and the item's paragraph after the table is a list paragraph of the item's list; "
+         "where the item doesn't hold the table, the caption ends the list, and the paragraph "
+         "is a list paragraph of none",
+         lambda: [(f[0], f[1], f[4]) for f in found(caption_body, False, {("t", 0)})]
+         == [("x after", ("1001", "0"), True)]
+         and [(f[0], f[1], f[4]) for f in found(caption_body, False)]
+         == [("x after", (None, "0"), True)]
+         and [(f[0], f[3], f[4]) for f in found(caption_quote, True, {("t", 0)})]
+         == [("quote after", 1, True)]),
+        ("after the reader, a table's caption paragraph goes back in the item with the table; "
+         "and a list of another numbering after a figure, the next item's own, stays in the "
+         "item, the list of the item's own numbering joining it",
+         lambda: [b["t"] for b in caption_put_back] == ["OrderedList"]
+         and [[b["t"] for b in item] for item in caption_put_back[0]["c"][1]]
+         == [["Para", "Para", "Table", "Para"], ["Para"]]
+         and [b["t"] for b in nested_put_back] == ["OrderedList"]
+         and [[b["t"] for b in item] for item in nested_put_back[0]["c"][1]]
+         == [["Para", "Figure", "OrderedList"], ["Para"]]),
+        ("after the reader, the figure an item holds and the paragraph after it go back in the "
+         "item, and the list begun again after them joins it",
+         lambda: figures_moved == 1 and [b["t"] for b in figures_put_back] == ["Figure",
+                                                                              "OrderedList"]
+         and [[b["t"] for b in item] for item in figures_put_back[1]["c"][1]]
+         == [["Para", "Figure", "Para"], ["Para"]]),
+        ("after the reader, a caption paragraph whose words are the table's caption becomes "
+         "that caption, its emphasis kept, and isn't the item's paragraph",
+         lambda: [[b["t"] for b in item] for item in caption_merged[0]["c"][1]]
+         == [["Para", "Table", "Para"], ["Para"]]
+         and caption_merged[0]["c"][1][0][1]["c"][1][1][0]["c"][0]["t"] == "Emph"),
+        ("a rule an item holds keeps the list, the paragraph after it a list paragraph of the "
+         "item's list; one no item holds ends it",
+         lambda: [(f[0], f[1], f[4]) for f in found(rule_body, False, {("r", 0)})]
+         == [("after the rule", ("1001", "0"), True)]
+         and [(f[0], f[1], f[4]) for f in found(rule_body, False)]
+         == [("after the rule", (None, "0"), True)]),
+        ("a note ends the reader's lists where its reference is: the item's paragraphs after "
+         "it are list paragraphs, and so are those before it since the item's own; every list "
+         "paragraph with no indent, which the reader could take for a continuation",
+         lambda: [(f[0], f[2], f[4]) for f in found(note_body, False)]
+         == [("n1", 720, True), ("m1", None, True), ("m2", None, True), ("m3", 720, True)]
+         and all('<w:numId w:val="4000000"/>' in paragraph_of(note_marked, t)
+                 and "<w:ind" not in paragraph_of(note_marked, t)
+                 for t in ("n1", "m1", "m2", "m3"))),
+        ("an item ends the reader's lists inside the one before it: a paragraph lined up with "
+         "a deeper item's text after it is no continuation of that item",
+         lambda: [(f[0], f[1], f[4]) for f in found(deeper_body, False)]
+         == [("c deep", ("1001", "1"), True)]),
+        ("a quote's paragraph beyond an item's text by other than quote steps isn't the item's",
+         lambda: found(off_step, True) == []),
+        ("a picture with a bookmark beside it, and a caption that keeps with the next paragraph "
+         "after a picture, are no pair to the reader: an item's paragraphs like any other",
+         lambda: [f[0] for f in found(unpaired_body, False)]
+         == ["", "its caption", "p1", "", "kept", "k1"]),
+        ("a caption after a table is the table's to the reader, ending the list, and with the "
+         "table an item holds no paragraph of the item, its indent taken off",
+         lambda: [(f[0], f[1], f[4]) for f in found(after_table, False)]
+         == [("v1", (None, "0"), True)]
+         and [(f[0], f[1], f[4]) for f in found(after_table, False, {("t", 0)})]
+         == [("v1", ("1001", "0"), True)]
+         and "<w:ind" not in paragraph_of(after_marked, "the table's")
+         and '<w:numId w:val="4000000"/>' in paragraph_of(after_marked, "v1")),
+        ("a quote, or a paragraph indented its own way, before a table an item holds is no "
+         "caption of it, and ends the list",
+         lambda: [(f[0], f[1]) for f in found(no_caption, False, {("t", 0), ("t", 1)})]
+         == [("t1", (None, "0")), ("u1", (None, "0"))]),
+        ("after a table an item holds, an inner item opening again leaves the outer item's "
+         "list ended to the reader, its paragraph after a list paragraph",
+         lambda: [(f[0], f[1], f[4]) for f in found(reopened, False, {("t", 0)})]
+         == [("A after", ("1001", "0"), True)]),
+        ("after an item's paragraph no open list takes, the paragraphs lined up with it, and a "
+         "quote a step beyond it, are that item's list paragraphs too",
+         lambda: [(f[0], f[1], f[3], f[4]) for f in found(orphan_after, True)]
+         == [("b1", ("1001", "0"), 0, True), ("b2", ("1001", "0"), 0, True),
+             ("b's quote", ("1001", "0"), 1, True)]),
+        ("code in a quote in a quote after a table its item holds is found at its quote's depth "
+         "beyond the item's text, not counted from the margin",
+         lambda: held_code == [("two deep", 2)]),
+        ("a list in a table's cell: its item's later paragraph is the item's, a list paragraph "
+         "for a reader before 3.13 only",
+         lambda: [(f[0], f[4]) for f in found(cell_list, False)] == [("the cell's later", False)]
+         and '<w:numId w:val="4000000"/>' in paragraph_of(cell_every, "the cell's later")
+         and paragraph_of(cell_kept, "the cell's later")
+         == paragraph_of(cell_list, "the cell's later")),
+        ("in a note, an item's later paragraph is a list paragraph for a reader before 3.13, "
+         "and left for one from 3.13",
+         lambda: '<w:numId w:val="4000000"/>' in paragraph_of(notes_old, "note's later")
+         and '<w:numId w:val="4000000"/>' not in paragraph_of(notes_xml, "note's later")),
+        ("the target holds a figure of a picture and a caption as one, one of two pictures, "
+         "written as a table, as a table, and one with no caption not at all, where the writer "
+         "indents an item's later paragraphs; and none where it numbers them",
+         lambda: docxtarget._held(lone([para("cap")]), True) == "f"
+         and docxtarget._held(two, True) == "t" and docxtarget._held(lone([]), True) is None
+         and docxtarget._held(lone([para("cap")])) is None and docxtarget._held(two) is None),
+        ("a mark around a figure the reader makes no figure of is left out, not taken for the "
+         "next figure the reader makes",
+         lambda: stray_listed == []),
+        ("a table's caption the writer wrote in Compact, each paragraph its mark holds before the "
+         "table, a formula's too, is styled Table Caption; a paragraph before a table outside "
+         "any table's mark isn't, nor one past a mark whose range holds no table",
+         lambda: restyled_count == 2
+         and paragraph_of(restyled, "Prices &amp; costs").count('w:val="TableCaption"') == 1
+         and '<w:pStyle w:val="TableCaption"/></w:pPr><m:oMath/>' in restyled
+         and 'w:val="Compact"' in paragraph_of(restyled, "Something else")
+         and 'w:val="Compact"' in paragraph_of(restyled, "A tight list's item")),
+        ("after a list in an item, a paragraph holding a note is a continuation the reader "
+         "keeps, not made a list paragraph, which it would fold into the inner list's item",
+         lambda: [(f[0], f[4]) for f in found(note_after, False)]
+         == [("A2", False), ("A3", True)]),
+        ("the blocks the reader gives back after a held block: a paragraph after a list "
+         "folds into its last item, up to a table, a heading, or another list; a list whose "
+         "item holds a table, at any depth, is its parts, the paragraphs after the table "
+         "blocks of their own, an item that opens with one among them, and a figure the writer "
+         "writes as one a table to any reader; a list after another begins another; a div is "
+         "what it holds, an anchor nothing",
+         lambda: read_back_counts == [2, 3, 3, 4, 3, 3, 3, 2, 1, 4, 2, 3]),
+        ("an item that opens with anchors before a list gets a paragraph of them, which the "
+         "writer numbers, and one that opens with a table, a figure the writer writes as one, or "
+         "a rule an empty paragraph first; one whose "
+         "anchors come before words keeps them",
+         lambda: anchored_counts == (1, 0) and anchored[0]["t"] == "Plain"
+         and [x["c"][0][0] for x in anchored[0]["c"]] == ["a1", "a2"] and len(anchored) == 2
+         and worded[0]["t"] == "Div"
+         and tabled_count == 1 and [b["t"] for b in tabled] == ["Plain", "Div", "Para"]
+         and tabled[0]["c"] == [{"t": "Str", "c": ""}]
+         and ruled_count == 1 and [b["t"] for b in ruled] == ["Plain", "HorizontalRule", "Para"]
+         and pictured_count == 1 and [b["t"] for b in pictured] == ["Plain", "Figure", "Para"]),
+        ("a formula alone in a Plain or in a span is a display paragraph, and a Plain with "
+         "words and a formula is cut into Plains",
+         lambda: docxtarget._display_math_para(plain_math)
+         and docxtarget._display_math_para(span_math)
+         and [b["t"] for b in split_plain] == ["Plain", "Plain"]),
+        ("the target counts a captioned picture with a bookmark in its paragraph as a figure, "
+         "the bookmark moved into its caption as reading moves it",
+         lambda: bookmarked_count == [("f", 1, 0, "0")]),
+        ("after the reader, an outer item's table takes back its blocks, the parts of the inner "
+         "list among them, and the inner item's goes back in its item; and a block the reader "
+         "made beyond the count goes back in the item whose list goes on",
+         lambda: [b["t"] for b in nested_back] == ["OrderedList"]
+         and [[b["t"] for b in item] for item in nested_back[0]["c"][1]]
+         == [["Para", "Table", "Para", "BulletList"], ["Para"]]
+         and [[b["t"] for b in item] for item in nested_back[0]["c"][1][0][3]["c"]]
+         == [["Para", "Table", "Para"], ["Para"]]
+         and [[b["t"] for b in item] for item in leftover_back[0]["c"][1]]
+         == [["Para", "Table", "Para", "Para"], ["Para"]]),
+        ("a table the outer item's table took back with its blocks stays in that item; the "
+         "outer item's blocks go back in it where its list doesn't go on; and an inner item's "
+         "table after a list that item holds goes back in the item, not the list",
+         lambda: [b["t"] for b in placed_back] == ["OrderedList"]
+         and [[b["t"] for b in item] for item in placed_back[0]["c"][1]]
+         == [["Para", "Table", "BulletList", "Table", "Para"], ["Para"]]
+         and [[b["t"] for b in item] for item in placed_back[0]["c"][1][0][2]["c"]]
+         == [["Para", "Table"], ["Para"]]
+         and [b["t"] for b in last_back] == ["OrderedList"]
+         and [[b["t"] for b in item] for item in last_back[0]["c"][1]]
+         == [["Para", "Table", "BulletList", "Para"]]
+         and [[b["t"] for b in item] for item in last_back[0]["c"][1][0][2]["c"]]
+         == [["Para", "Table", "Para"]]
+         and [[b["t"] for b in item] for item in walk_back[0]["c"][1]]
+         == [["Para", "Table", "BulletList"], ["Para"]]
+         and [[b["t"] for b in item] for item in walk_back[0]["c"][1][0][2]["c"]]
+         == [["Para", "BulletList", "Table", "Para"]]),
+        ("a quote mark at depth one is taken off and counted, so the page is saved without it",
+         lambda: quote_marks == 1 and quoted_doc["blocks"][0]["c"][0]["c"]
+         == [{"t": "Str", "c": "Q"}]),
+    ]
+
+
 def check_word_equation_text():
     """Normal text in Word's equation, \\text{} in TeX, gets only the
     characters that are characters for others, as math-repair.lua gives
@@ -4516,6 +5223,8 @@ GROUPS = [
     ("caption contrast", check_contrast),
     ("manifest names", check_manifest_names),
     ("repairing a .docx on the way in", check_docx_repair),
+    ("a list item's later paragraphs, indented as Pandoc 3.13 writes them",
+     check_list_continuations),
     ("normal text in a Word equation", check_word_equation_text),
     ("a bar in a Word equation and in a deck's", check_equation_bars),
     ("Pandoc's bar accent, written and read", check_bar_accents),

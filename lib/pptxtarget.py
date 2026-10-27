@@ -94,9 +94,9 @@ writer's output:
 - a link's title is its ScreenTip, on each run of the link, where the
   writer writes none (link_titles, from deck-pptx.lua's marks);
 - each notes slide has a color map override, the master's mapping, as
-  PowerPoint writes one, which the writer leaves out: the schema has it
-  optional, but Keynote is reported to refuse a deck without it (Pandoc's
-  issue 11935, which its writer puts right after 3.12.1; notes_colors);
+  PowerPoint writes one, which the writer leaves out before 3.13: the
+  schema has it optional, but Keynote is reported to refuse a deck without
+  it (Pandoc's issue 11935, which 3.13's writer puts right; notes_colors);
 - each run's properties are in the order the schema gives them, where the
   writer puts a link's a:hlinkClick before a color's a:solidFill and a
   code font's a:latin (ordered_properties);
@@ -1896,7 +1896,7 @@ def notes_colors(xml, counts):
     the writer writes none: the schema has it optional, but Keynote is
     reported to refuse a deck whose notes slide has none, and to open it
     with one (Pandoc's issue 11935, against 3.12; not tried here). The
-    writer writes one from the release after 3.12.1 on (commit 25bef2d),
+    writer writes one from 3.13 on (commit 25bef2d, #11960),
     and a notes slide that has one is left as it is.
     counts["notes_colors"] counts the notes slides given one."""
     if "<p:clrMapOvr" in xml or "</p:cSld>" not in xml:

@@ -3213,12 +3213,23 @@ def unrecorded_link():
     return xml, rels, counts["notes_links"]
 
 
-# A notes slide as Pandoc's writer writes one from the release after
-# 3.12.1 on, its color map after its common data.
+# A notes slide as Pandoc's writer writes one from 3.13 on (#11935), its
+# color map after its common data.
 MAPPED_NOTES = ('<p:notes xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" '
                 'xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">'
                 '<p:cSld><p:spTree/></p:cSld><p:clrMapOvr><a:masterClrMapping/>'
                 '</p:clrMapOvr></p:notes>')
+# A notes slide's color map, as pptxtarget writes it, or as the writer
+# does, with a space before the empty element's end; and the release
+# whose writer writes it.
+NOTES_COLOR_MAP = r"<p:clrMapOvr>\s*<a:masterClrMapping\s*/>\s*</p:clrMapOvr>"
+WRITER_NOTES_COLORS = (3, 13)
+
+
+def pandoc_version():
+    """The version of the Pandoc on the path, as a tuple of numbers."""
+    words = subprocess.run(["pandoc", "--version"], capture_output=True, text=True).stdout.split()
+    return tuple(int(p) for p in re.findall(r"\d+", words[1] if len(words) > 1 else "")[:3])
 
 
 def mapped_notes():
@@ -3533,17 +3544,20 @@ def case_pptx(work):
          and "Could not convert TeX math \\frac{a}{b}" not in out),
         ("a run's properties are in the schema's order, a code font before its link, where "
          "the writer puts the link first; and each notes slide has the color map PowerPoint "
-         "gives one, after its common data, which the writer leaves out, and one that has it "
-         "is left as it is",
+         "gives one, once, after its common data, which the writer leaves out before 3.13, "
+         "and one that has it is left as it is",
          lambda: code_link is not None and re.search(
              r'<a:rPr\b[^>]*><a:latin typeface="[^"]*"\s*/><a:hlinkClick r:id="rId\d+"\s*/>'
              r"</a:rPr><a:t>the code</a:t>", hp[code_link.part])
          and all(properties_in_order(x) for x in every_slides + every_notes)
-         and every_notes and all("</p:cSld><p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr>"
-                                 in x for x in every_notes)
+         and every_notes and all(len(re.findall(NOTES_COLOR_MAP, x)) == 1
+                                 and re.search("</p:cSld>" + NOTES_COLOR_MAP, x)
+                                 for x in every_notes)
          and "1 run(s)' properties put in the schema's order" in out
-         and "%d notes slide(s) given the color map PowerPoint gives one" % len(every_notes)
-         in out and mapped_notes() == (MAPPED_NOTES, 0)),
+         and (("given the color map" not in out) if pandoc_version() >= WRITER_NOTES_COLORS
+              else "%d notes slide(s) given the color map PowerPoint gives one"
+              % len(every_notes) in out)
+         and mapped_notes() == (MAPPED_NOTES, 0)),
         ("a link to a figure goes to the slide the figure is on",
          lambda: opening is not None and first is not None and re.search(
              r'Target="%s"' % re.escape(first.part.rsplit("/", 1)[1]),

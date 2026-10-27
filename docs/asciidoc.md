@@ -1,6 +1,6 @@
 # AsciiDoc sources
 
-An `.adoc` file beside the sources is a page of the book, read with Pandoc's AsciiDoc reader into the same intermediate a `.docx` gets. Three things are done on reading that Asciidoctor would have done and the reader (Pandoc's, from 3.11 to 3.12.1, which is the `asciidoc` library's) doesn't:
+An `.adoc` file beside the sources is a page of the book, read with Pandoc's AsciiDoc reader into the same intermediate a `.docx` gets. Three things are done on reading that Asciidoctor would have done and the reader (Pandoc's, from 3.11 to 3.13, which is the `asciidoc` library's) doesn't:
 
 - **`imagesdir` is applied.** `image::hats.png[]` under `:imagesdir: images` names `images/hats.png`. A chapter that sets none takes its master file's.
 - **A chapter's `=` line is its title** and its `==` sections become `h2`, so a page has one `h1`. Asciidoctor's own settings (`:toc:`, `:icons:`, `:stylesheet:`, `:sectnums:`) are dropped from the metadata, where Pandoc's template would read `toc` as a switch.

@@ -6,9 +6,10 @@
 # A field the copy leaves out keeps its value here.
 
 # OpenStax's paper and margins, which its books' tables were made for,
-# with type larger than OpenStax's 9 points: a full line holds about 88
-# characters. Any size works; the book class's own are 10pt, 11pt, and
-# 12pt, and another, such as 13.5pt, is set with KOMA-Script's scrextend.
+# with type larger than OpenStax's 9 points: a full line holds about 81
+# characters in IBM Plex Serif. Any size works; the book class's own are
+# 10pt, 11pt, and 12pt, and another, such as 13.5pt, is set with
+# KOMA-Script's scrextend.
 fontsize: 12pt
 papersize: letter
 geometry:
@@ -28,6 +29,13 @@ linestretch: 1.25
 # with it, breaking no word at a line's end. TextbookImprover's own
 # setting, not Pandoc's: false justifies them, as LaTeX does by itself.
 ragged-right: true
+
+# The faces: the text in IBM Plex Serif, sans-serif and monospaced type
+# in IBM Plex Sans and Mono, and formulas in IBM Plex Math, where TeX has
+# them (TeX Live's plex package), and in Latin Modern, with a warning,
+# where it hasn't. A face named here sets its family instead: mainfont,
+# sansfont, monofont, or mathfont; mainfont with no mathfont sets
+# formulas in Latin Modern Math (docs/configuration.md, "The faces").
 
 # WCAG 1.4.8 (AAA) asks for lines of no more than 80 characters, and for
 # lines and paragraphs further apart than this page sets them, footnotes

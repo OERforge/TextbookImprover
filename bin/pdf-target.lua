@@ -1052,15 +1052,15 @@ end
 --
 -- MATH_ROOM is the part of its count a formula is given, in a column of
 -- math or among the words: a tenth more. Pandoc's template scales Latin
--- Modern Math, a formula's face where a book names none, to the height
--- of the text's small letters, and Noto Sans's, the face of OpenStax's
--- math books, are 24 percent taller than Latin Modern's, so a formula
--- is set wider than the count, which is Latin Modern's: in College
--- Algebra 2e's first chapter, in Noto Sans, without it 10 of its 51
--- tables of steps would have had a formula wider than its column, 9 set
--- smaller to fit it (FIT_MACROS); with it, 4 had, 3 set smaller, which
--- were wider than the line even in columns as wide as LaTeX measures
--- their widest formula or word.
+-- Modern Math, a formula's face where a book names a face for its text
+-- and none for formulas, to the height of the text's small letters, and
+-- Noto Sans's, the face of OpenStax's math books, are 24 percent taller
+-- than Latin Modern's, so a formula is set wider than the count, which
+-- is Latin Modern's: in College Algebra 2e's first chapter, in Noto Sans,
+-- without it 10 of its 51 tables of steps would have had a formula wider
+-- than its column, 9 set smaller to fit it (FIT_MACROS); with it, 4 had,
+-- 3 set smaller, which were wider than the line even in columns as wide
+-- as LaTeX measures their widest formula or word.
 local MATH_ROOM = 1.1
 
 -- The least part of its size FIT_MACROS sets a table in to fit its line

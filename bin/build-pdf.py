@@ -174,18 +174,20 @@ OWN_SPACING = re.compile(r"\\(?:usepackage|RequirePackage)\s*(?:\[[^\]]*\])?\s*"
                          r"\{[^}]*\bsetspace\b|\\(?:linespread|setstretch|onehalfspacing"
                          r"|doublespacing|singlespacing)(?![A-Za-z@])")
 
-# Latin Modern, the template's fonts when none is chosen, has no Greek and
-# few mathematical symbols, and a character its font lacks is drawn blank
-# (.notdef): gone from the page and from the text a screen reader gets. A
-# book that uses them as text (a statistics book's mu, sigma, and
-# less-than-or-equal) loses them. Latin Modern Math has them, so it fills
-# in for each of the three families, and for a face the metadata file
-# names for one, unless the file gives the face fallbacks of its own
-# (Pandoc's mainfontfallback, say): Noto Sans, an OpenStax book's face,
-# has no less-than-or-equal either. What it can't supply is reported
-# after the build, because veraPDF catches only some of it: a character
-# an equation falls back to one of LaTeX's older math fonts for is
-# dropped with no trace at all.
+# A character its font lacks is drawn blank (.notdef): gone from the page
+# and from the text a screen reader gets. Latin Modern, the template's
+# fonts when none is chosen, and the default's where IBM Plex isn't
+# installed (FAMILIES), has no small Greek letters and few mathematical
+# symbols, so a book that uses them as text (a statistics book's mu,
+# sigma, and less-than-or-equal) lost them; IBM Plex Serif has those, but
+# not, say, the circled digits below. Latin Modern Math has Greek and the
+# symbols, so it fills in for each of the three families, and for a face
+# the metadata file names for one, unless the file gives the face
+# fallbacks of its own (Pandoc's mainfontfallback, say): Noto Sans, an
+# OpenStax book's face, has no less-than-or-equal either. What it can't
+# supply is reported after the build, because veraPDF catches only some
+# of it: a character an equation falls back to one of LaTeX's older math
+# fonts for is dropped with no trace at all.
 # DejaVu Sans comes after it when it's installed, as it is with most Linux
 # desktops: it has what Latin Modern Math doesn't, such as the circled
 # digits an AsciiDoc book's code callouts are (58 of them in the security
@@ -202,9 +204,136 @@ FALLBACK = ("\\def\\OERFallbackFonts{\"Latin Modern Math:mode=harf;\"}\n"
             "\"NewCMMath-Book.otf:mode=harf;\"}}{}\n"
             "\\directlua{luaotfload.add_fallback(\"oerfallback\", "
             "{\\OERFallbackFonts})}\n")
-FAMILIES = (("mainfont", "\\setmainfont", "Latin Modern Roman"),
-            ("sansfont", "\\setsansfont", "Latin Modern Sans"),
-            ("monofont", "\\setmonofont", "Latin Modern Mono"))
+# The default's faces: IBM Plex, its Serif for the text, its Sans and Mono
+# for the sans-serif and monospaced families, and IBM Plex Math for
+# formulas, whose letters are Plex Serif's (Rob, 2026-10-27: "Let's go with
+# your suggestion of Plex with Plex Math as the new default"). Of the serif
+# faces with a math font made for them, its small letters are the largest at
+# a given size, the measure research on reading uses (2.18 mm at 12 points,
+# where Latin Modern's are 1.82), its thinnest strokes are two and a half
+# times as thick as Latin Modern's, and it draws Greek and Cyrillic itself
+# (docs/configuration.md, "The faces"). Each is named by its files, as the
+# CNX unpacker names an OpenStax design's (cnx.project), since a face named
+# by its family can be matched by another of its weights without a word. A
+# family the metadata file doesn't name is set in Plex, and formulas in Plex
+# Math where it names neither them nor the text's face, since Plex Math's
+# letters are Plex Serif's, wherever TeX has every file they take. Where it
+# lacks any, they're all set in Latin Modern, as they were before, and
+# LaTeX writes a line for each file it lacks (FACE_MISSING), which the run
+# gives as one warning (face_warning): "Have it fall back to Latin Modern
+# with a warning, if it's not available." TeX Live's plex has every file.
+# Beside Plex Serif, Plex Mono is set at 0.858 of the text's size
+# (PLEX_MONO_SCALE), where a character is as wide as Latin Modern Mono's
+# at the text's size (0.515 of it, to Plex Mono's 0.6), its small letters
+# a little larger still (0.443 to 0.431): nothing fits or wraps a line of
+# code too long for its line, and at the text's size, Pandoc's template's
+# own (Scale=MatchLowercase), 65 characters filled the text's 6.5 inches,
+# where 76 had, and a line of 76 ran off the paper, where it took 88 (a
+# separate review's measure, at 12 points). Beside a face a file names,
+# Plex Mono is scaled to that face's small letters, as Latin Modern Mono
+# was.
+FAMILIES = (("mainfont", "\\setmainfont", "IBMPlexSerif", "Latin Modern Roman"),
+            ("sansfont", "\\setsansfont", "IBMPlexSans", "Latin Modern Sans"),
+            ("monofont", "\\setmonofont", "IBMPlexMono", "Latin Modern Mono"))
+PLEX_MATH = "IBMPlexMath-Regular.otf"
+PLEX_MONO_SCALE = 0.858
+PLEX_SHAPES = (("UprightFont", "Regular"), ("BoldFont", "Bold"), ("ItalicFont", "Italic"),
+               ("BoldItalicFont", "BoldItalic"))
+FACE_MISSING = re.compile(r"^TextbookImprover face: no (\S+)$", re.M)
+
+
+def named(meta, field):
+    """Whether the metadata (meta) names a face for the field: one empty,
+    as `mainfont:` with nothing after it is, names none, as the template
+    takes it ($if(mainfont)$), where it had kept the default's faces out
+    and set none in their place."""
+    return bool(meta_plain(meta.get(field)))
+
+
+def defaults_of(meta):
+    """(FAMILIES' entries for the families the metadata (meta) doesn't
+    name, whether the formulas are the default's too: where it names
+    neither them nor the text's face)."""
+    return ([f for f in FAMILIES if not named(meta, f[0])],
+            not named(meta, "mainfont") and not named(meta, "mathfont"))
+
+
+def latin_modern_said(families, math):
+    """(the default's faces, what's set in Latin Modern where TeX lacks
+    them), for the warnings: the book, where every family and the
+    formulas are the default's, and otherwise each the metadata doesn't
+    name, the text, its sans-serif or monospaced type, or its formulas."""
+    faces = "IBM Plex and IBM Plex Math" if math else "IBM Plex"
+    fields = [field for field, _command, _stem, _latin in families]
+    if len(fields) == len(FAMILIES) and math:
+        return faces, "the book is set in Latin Modern"
+    kinds = [kind for field, kind in (("mainfont", "text"), ("sansfont", "sans-serif type"),
+                                      ("monofont", "monospaced type")) if field in fields]
+    kinds += ["formulas"] if math else []
+    said = kinds[0] if len(kinds) == 1 else " and ".join(kinds) if len(kinds) == 2 \
+        else ", ".join(kinds[:-1]) + ", and " + kinds[-1]
+    plural = len(kinds) > 1 or kinds == ["formulas"]
+    return faces, f"its {said} {'are' if plural else 'is'} set in Latin Modern"
+
+
+def default_faces(meta):
+    """The LaTeX that sets each family the metadata (meta) doesn't name,
+    and the formulas where it names neither them nor the text's face, in
+    the default's faces (FAMILIES): IBM Plex where TeX has every file they
+    take, and Latin Modern where it lacks any, a line in LaTeX's log for
+    each file it lacks (FACE_MISSING) and a warning for one who builds the
+    LaTeX by hand. '' where the metadata names them all."""
+    families, math = defaults_of(meta)
+    if not families:
+        return ""
+    files = [f"{stem}-{shape}.otf" for _field, _command, stem, _latin in families
+             for _key, shape in PLEX_SHAPES] + ([PLEX_MATH] if math else [])
+    options = ",".join(["Extension=.otf"] + [f"{key}=*-{shape}" for key, shape in PLEX_SHAPES]
+                       + ["RawFeature={fallback=oerfallback}"])
+    faces, said = latin_modern_said(families, math)
+    serif = not named(meta, "mainfont")
+    return ("\\newif\\ifOERPlex\\OERPlextrue\n"
+            + "".join(f"\\IfFontExistsTF{{{name}}}{{}}"
+                      f"{{\\OERPlexfalse\\typeout{{TextbookImprover face: no {name}}}}}\n"
+                      for name in files)
+            + "\\ifOERPlex\n"
+            + "".join(f"  {command}{{{stem}}}[{options}"
+                      + (f",Scale={PLEX_MONO_SCALE}" if field == "monofont" and serif else "")
+                      + "]\n"
+                      for field, command, stem, _latin in families)
+            + (f"  \\setmathfont{{{PLEX_MATH}}}\n" if math else "")
+            + "\\else\n"
+            + "".join(f"  {command}{{{latin}}}[RawFeature={{fallback=oerfallback}}]\n"
+                      for _field, command, _stem, latin in families)
+            + f"  \\PackageWarningNoLine{{TextbookImprover}}{{TeX lacks the default's faces, "
+              f"{faces},\\MessageBreak so {said}}}\n"
+            + "\\fi\n")
+
+
+def face_warning(lacking, meta):
+    """The run's warning that the default's faces gave way to Latin
+    Modern (default_faces): the first of the files LaTeX lacked
+    (FACE_MISSING), how many more, and what to do."""
+    faces, said = latin_modern_said(*defaults_of(meta))
+    more = len(lacking) - 1
+    return (f"WARNING: TeX lacks the PDF's default faces, {faces}, so {said}: LaTeX found "
+            f"no {lacking[0]}" + (f", nor {more} more of their files" if more else "")
+            + ". TeX Live's plex package has them: for TinyTeX or TeX Live from tug.org, "
+            + latexbuild.tlmgr_command("install plex")
+            + ", and for Debian's or Ubuntu's texlive packages, sudo apt install "
+            "texlive-fonts-extra. To keep Latin Modern without this warning, name Latin "
+            "Modern's faces in the pdf.metadata file (docs/configuration.md, \"The faces\").")
+
+
+def rescaled(options):
+    """A face's options (a list of strings) for setting it again after the
+    default's text face, with a scale last: the last one they give, or the
+    template's own, MatchLowercase. fontspec keeps a face it has loaded
+    with the same options at the size it worked out then, so a face set
+    again as the template had set it kept Latin Modern's measure."""
+    scales = [o for o in options if o.replace(" ", "").startswith("Scale=")]
+    return options + (scales[-1:] or ["Scale=MatchLowercase"])
+
 
 # Where figures are printed (pdf.figures): each placed H, where the text
 # has it (in_place); floating, but not past the next section's heading
@@ -683,24 +812,46 @@ def book_metadata(project, resolved, base, numbered):
         ours += ("\\RequirePackage{xcolor}\n\\makeatletter\n"
                  + "\n".join(guarded_color(c) for c in colors)
                  + "\n\\makeatother\n")
-    faces = []
-    for field, command, default in FAMILIES:
-        if field not in meta:
-            faces.append(f"{command}{{{default}}}[RawFeature={{fallback=oerfallback}}]\n")
-        elif field + "fallback" not in meta and meta_plain(meta[field]):
+    faces = [default_faces(meta)]
+
+    def given(field):
+        """The options the metadata gives the field's face, as the template
+        writes them."""
+        value = meta.get(field + "options")
+        value = value["c"] if value and value.get("t") == "MetaList" \
+            else [value] if value else []
+        return [meta_plain(o) for o in value if meta_plain(o)]
+    for field, command, _plex, _latin in FAMILIES:
+        if not named(meta, field):
+            continue
+        name = meta_plain(meta[field])
+        if field + "fallback" not in meta:
             # Set again, as the template set it, with the fallbacks: for
             # the text's face, babel's too, which the template gives the
             # language the book is in, and which is the one the text gets.
-            given = meta.get(field + "options")
-            given = given["c"] if given and given.get("t") == "MetaList" \
-                else [given] if given else []
-            options = ",".join([meta_plain(o) for o in given if meta_plain(o)]
-                               + ["RawFeature={fallback=oerfallback}"])
-            name = meta_plain(meta[field])
+            options = ",".join(given(field) + ["RawFeature={fallback=oerfallback}"])
             faces.append(f"{command}{{{name}}}[{options}]\n")
             if field == "mainfont":
                 faces.append(f"\\ifdefined\\babelfont\\babelfont{{rm}}[{options}]{{{name}}}\\fi\n")
-    if faces:
+        elif not named(meta, "mainfont"):
+            # Set again with its own fallbacks after the default's text
+            # face, with its scale (rescaled), as the formulas' face is
+            # below: set again as the template had set it, it kept Latin
+            # Modern's measure (the PDF suite's preamble book).
+            options = ",".join(rescaled(given(field))
+                               + [f"RawFeature={{fallback={field}fallback}}"])
+            faces.append(f"{command}{{{name}}}[{options}]\n")
+    if named(meta, "mathfont") and not named(meta, "mainfont"):
+        # The template sets a face the file names before the default's
+        # text face, which default_faces sets, and Pandoc's template scales
+        # each to the text's small letters as they are then, lmodern's
+        # Latin Modern: IBM Plex Math named alone was set a sixth smaller
+        # than Plex Serif (9.99 points to 11.96, a separate review's
+        # measure). Set again after it, with its scale (rescaled), it's
+        # scaled to the text's.
+        faces.append(f"\\setmathfont[{','.join(rescaled(given('mathfont')))}]"
+                     f"{{{meta_plain(meta['mathfont'])}}}\n")
+    if any(faces):
         ours += FALLBACK + "".join(faces)
     if document_class(meta) in FRONTMATTER_CLASSES:
         meta["has-frontmatter"] = meta_bool(False)
@@ -1116,8 +1267,13 @@ def build(base, name, resolved, keep, intermediates=None, latex_only=False,
         # are relative to it.
         result = subprocess.run(command, cwd=base, capture_output=True,
                                 text=True, env=environment)
+        said, source = latex_said(log_path)
+        # The default's faces given way to Latin Modern (default_faces),
+        # whether LaTeX went on to finish or not.
+        lacking = list(dict.fromkeys(FACE_MISSING.findall(said)))
+        if lacking:
+            print(face_warning(lacking, meta), file=sys.stderr)
         if result.returncode == 0:
-            said, source = latex_said(log_path)
             owners = {page_id(stem): stem for stem, _t, _d in assembly.pages}
             # What was fitted to its line, and what's still wider than it.
             for line in latexbuild.fit_report(said, source, owners):

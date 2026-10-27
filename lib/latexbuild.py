@@ -273,8 +273,8 @@ def embed_figure_fonts(root, out_root, names, done=None, workers=4):
 # books), leaves them drawn from TeX's own symbol fonts, whose glyphs map
 # to control characters: GIAM's \square read as U+0003, \blacksquare U+0004,
 # \lozenge U+0006, which a screen reader can't say and veraPDF passes.
-# Each is made the character it is, from Latin Modern Math, or, for one
-# that font lacks, from the text's fonts and their fallback, set as a box
+# Each is made the character it is, from the math font, or, for one Latin
+# Modern Math lacks, from the text's fonts and their fallback, set as a box
 # (\mbox); only a name that is still amssymb's (a math character, or one
 # built from its \dabar@), or the kernel's placeholder for latexsym's, so
 # a book's own definition is kept. Inside \ExplSyntaxOn, for unicode-math
@@ -613,18 +613,19 @@ FIT_MACROS = r"""% Something too wide for its line, which TeX can't break:
 % within a quarter inch of the paper's edge even at three quarters of its
 % size is set smaller still, as far as it takes, to half its size at
 % least. Type set smaller isn't always as much narrower: Latin Modern
-% Roman, the default face, has designs for sizes from 5 to 17 points, each
-% wider for its size than the next larger (the 9-point 2.8 percent wider
-% than the 10-point, the 8-point 3.3 percent wider than the 9-point), and
-% in 12-point type unicode-math sets math of 10 points or less in the
-% font's forms for subscripts (ssty), 13 percent wider. So whatever is too
-% wide is fitted on the first run, a formula's spaces narrowed and its
-% type set smaller at once, as its width before narrowing asks; and on the
-% second each fit is measured again, and fitted again where it's off its
-% line by more than 4 percent of it, too wide or too narrow, more than a
-% design's step, less of which centering takes up, and a formula in text
-% or a numbered display, which nothing centers, or a worked example's
-% steps, each of whose columns LaTeX measured, wherever it's too wide.
+% Roman, the default's face where IBM Plex isn't installed, has designs
+% for sizes from 5 to 17 points, each wider for its size than the next
+% larger (the 9-point 2.8 percent wider than the 10-point, the 8-point 3.3
+% percent wider than the 9-point), and in 12-point type unicode-math sets
+% math of 10 points or less in the font's forms for subscripts (ssty), 13
+% percent wider in Latin Modern Math. So whatever is too wide is fitted on
+% the first run, a formula's spaces narrowed and its type set smaller at
+% once, as its width before narrowing asks; and on the second each fit is
+% measured again, and fitted again where it's off its line by more than 4
+% percent of it, too wide or too narrow, more than a design's step, less
+% of which centering takes up, and a formula in text or a numbered
+% display, which nothing centers, or a worked example's steps, each of
+% whose columns LaTeX measured, wherever it's too wide.
 % longtable sets a table's columns by the widths it recorded the run
 % before, and the first run's can be wrong: where a table's head is one
 % row, a cell across columns, it gives the last of those columns the
@@ -2355,7 +2356,8 @@ def failure_advice(log):
         said.append(f"LaTeX can't find the font {name}. Install it, or name one that's "
                     "installed where it's chosen: for a PDF from the pages, the pdf.metadata "
                     "file (mainfont, sansfont, monofont, or mathfont), where taking its lines "
-                    "out gives the default, Latin Modern. TeX Live has an OpenStax book's: "
+                    "out gives the default, IBM Plex, or Latin Modern, with a warning, where "
+                    "TeX lacks Plex. TeX Live has an OpenStax book's: "
                     "IBM Plex in its plex package, and Noto Sans in its noto package, or on "
                     "Debian and Ubuntu in fonts-noto-core.")
     # A tagged book can outgrow TeX's tables: tagging keeps every structure

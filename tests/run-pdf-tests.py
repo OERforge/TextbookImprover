@@ -81,13 +81,25 @@ sys.path.insert(0, HERE)
 import parallel  # noqa: E402
 import pdftext  # noqa: E402
 
+# Latin Modern's faces, named, as a metadata file keeps them where the
+# default's are IBM Plex's (build-pdf.py's FAMILIES): the faces the checks
+# of the book, the notes book, the fit book, and the two-column book were
+# measured in, where a line's words, a table's widths, and a formula's are
+# Latin Modern's, and the untagged book's, whose checks read its text as
+# pypdf 4.0.2 gives it (build_untagged). The default book, the footer,
+# sized, fancy, preamble, AAA, bars, and languages books are in the
+# default's faces.
+LATIN_MODERN = ("mainfont: Latin Modern Roman\nsansfont: Latin Modern Sans\n"
+                "monofont: Latin Modern Mono\nmathfont: Latin Modern Math\n")
+
 # The book class's own page, where the PDF target's default would have
 # its own (bin/pdf-layout.yaml): 10pt type, justified, in the class's
 # margins, which the checks of the book and the notes book measure lines
-# 345 points long in. The footer book and the default book, the book
-# again, have the default page, and the sized book the default as a
-# metadata file changes it.
-CLASS_PAGE = "fontsize: 10pt\ngeometry: []\nlinestretch: 1\nragged-right: false\n"
+# 345 points long in, in Latin Modern, Pandoc's own face. The footer book
+# and the default book, the book again, have the default page, and the
+# sized book the default as a metadata file changes it.
+CLASS_PAGE = ("fontsize: 10pt\ngeometry: []\nlinestretch: 1\nragged-right: false\n"
+              + LATIN_MODERN)
 
 FRONT = r"""---
 title: The Test Book
@@ -781,8 +793,10 @@ def build_ua1(work):
 
 
 def build_untagged(work):
-    """A book built to no PDF/UA standard, UNTAGGED_PAGE: (the PDF's path,
-    what the run said)."""
+    """A book built to no PDF/UA standard, UNTAGGED_PAGE, in Latin Modern
+    (LATIN_MODERN), since pypdf 4.0.2, Ubuntu 24.04's, runs the words of
+    its text together in IBM Plex, as it does the notes book's untagged
+    copy's (build_notes): (the PDF's path, what the run said)."""
     os.makedirs(os.path.join(work, "assets"))
     png(os.path.join(work, "assets", "red.png"), (200, 0, 0))
     noise_png(os.path.join(work, "assets", "wide.png"), 400, 200)
@@ -791,10 +805,13 @@ def build_untagged(work):
     with open(os.path.join(work, "project.yaml"), "w", encoding="utf-8") as fh:
         fh.write("project:\n  title: No Standard\n  identifier: org.example.untagged\n"
                  "  language: en-US\n")
+    with open(os.path.join(work, "meta.yaml"), "w", encoding="utf-8") as fh:
+        fh.write(LATIN_MODERN)
     with open(os.path.join(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
         fh.write("defaults:\n  captions:\n    figure_prefixes: [Figure, Exhibit]\n"
                  "  images:\n    downsample: 2\n"
-                 "targets:\n  pdf:\n    format: pdf\n    pdf:\n      standard: []\n")
+                 "targets:\n  pdf:\n    format: pdf\n    pdf:\n      standard: []\n"
+                 "      metadata: meta.yaml\n")
     converted = subprocess.run(["python3", os.path.join(BIN, "convert.py")], cwd=work,
                                capture_output=True, text=True, stdin=subprocess.DEVNULL)
     return (os.path.join(work, "pdf", "org.example.untagged.pdf"),
@@ -899,13 +916,18 @@ def pikepdf_open(path):
 
 def build_notes(work):
     """NOTES_CAPTIONS, NOTES_CELLS, and NOTES_HEADINGS, built tagged, to
-    PDF/UA-2, with a list of figures, and untagged: (the tagged PDF's path,
-    the untagged one's, what the run said, the tagged one's LaTeX)."""
+    PDF/UA-2, with a list of figures, and untagged, on the default page,
+    each in Latin Modern (LATIN_MODERN): (the tagged PDF's path, the
+    untagged one's, what the run said, the tagged one's LaTeX). pypdf's
+    text of an untagged PDF in IBM Plex runs its words together, which
+    pdftotext's and MuPDF's don't: such a PDF draws no spaces, and pypdf
+    finds them by the gaps."""
     os.makedirs(os.path.join(work, "assets"))
     png(os.path.join(work, "assets", "red.png"), (200, 0, 0))
     for name, text in (("captions.md", NOTES_CAPTIONS), ("cells.md", NOTES_CELLS),
                        ("headings.md", NOTES_HEADINGS),
-                       ("meta.md", "---\nlof: true\n" + CLASS_PAGE + "---\n")):
+                       ("meta.md", "---\nlof: true\n" + CLASS_PAGE + "---\n"),
+                       ("plain.md", "---\n" + LATIN_MODERN + "---\n")):
         with open(os.path.join(work, name), "w", encoding="utf-8") as fh:
             fh.write(text)
     with open(os.path.join(work, "project.yaml"), "w", encoding="utf-8") as fh:
@@ -913,7 +935,8 @@ def build_notes(work):
                  "  language: en-US\n  contents:\n    - captions\n    - cells\n    - headings\n")
     with open(os.path.join(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
         fh.write("targets:\n  pdf:\n    format: pdf\n    pdf:\n      metadata: meta.md\n"
-                 "  plain:\n    format: pdf\n    pdf:\n      standard: []\n")
+                 "  plain:\n    format: pdf\n    pdf:\n      standard: []\n"
+                 "      metadata: plain.md\n")
     converted = subprocess.run(["python3", os.path.join(BIN, "convert.py")], cwd=work,
                                capture_output=True, text=True, stdin=subprocess.DEVNULL)
     run(["python3", os.path.join(BIN, "build-pdf.py"), "--latex-only", "--target", "pdf"],
@@ -1084,11 +1107,20 @@ def build_fancy(work):
 # package geometry"), and undone a spacing the file set. And no contents
 # page, as such a book may have none: Pandoc's template sets LaTeX's
 # tocdepth, which the bookmarks follow, only where it writes the contents,
-# so a page's subsections had bookmarks too.
-PREAMBLE_META = ("---\ntoc: false\nheader-includes:\n  - |\n    ```{=latex}\n"
+# so a page's subsections had bookmarks too. And a math font of its own, a
+# monospaced face with fallbacks of its own, and no face for the text: the
+# template sets each before the default's text face, scaled to Latin
+# Modern's small letters, and build-pdf.py sets each again after it, with a
+# scale, without which fontspec kept the size it had worked out (formulas
+# a sixth smaller than the text).
+PREAMBLE_META = ("---\ntoc: false\nmathfont: IBMPlexMath-Regular.otf\n"
+                 "monofont: Latin Modern Mono\nmonofontfallback:\n"
+                 "  - \"IBMPlexMono-Regular.otf:mode=harf;\"\nheader-includes:\n"
+                 "  - |\n    ```{=latex}\n"
                  "    \\usepackage[margin=1.5in]{geometry}\n"
                  "    \\usepackage[doublespacing]{setspace}\n    ```\n---\n")
-PREAMBLE_TWO = ("# Two\n\nThe second chapter.\n\n## Its section\n\nThe section.\n\n"
+PREAMBLE_TWO = ("# Two\n\nThe second chapter.\n\n## Its section\n\nThe section, and its "
+                "formula, $x + y = z$, and its code, `x = y`.\n\n"
                 "### Its subsection\n\nThe subsection.\n")
 
 
@@ -1562,7 +1594,8 @@ FIT_ONE = (
 
 
 def build_fit(work):
-    """FIT_ONE on the default page: (the PDF's path, what the run said,
+    """FIT_ONE on the default page, in Latin Modern (LATIN_MODERN): (the
+    PDF's path, what the run said,
     its LaTeX, and LuaLaTeX's log of its LaTeX run as a third run would
     be, the aux saying two had gone before and fitted nothing)."""
     os.makedirs(work)
@@ -1571,8 +1604,10 @@ def build_fit(work):
     with open(os.path.join(work, "project.yaml"), "w", encoding="utf-8") as fh:
         fh.write("project:\n  title: Fit\n  identifier: org.example.fit\n"
                  "  language: en-US\n  contents:\n    - one\n")
+    with open(os.path.join(work, "meta.yaml"), "w", encoding="utf-8") as fh:
+        fh.write(LATIN_MODERN)
     with open(os.path.join(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
-        fh.write("targets:\n  pdf:\n    format: pdf\n")
+        fh.write("targets:\n  pdf:\n    format: pdf\n    pdf:\n      metadata: meta.yaml\n")
     converted = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick"],
                                cwd=work, capture_output=True, text=True,
                                stdin=subprocess.DEVNULL)
@@ -1612,8 +1647,8 @@ FIT_TWO = (
 
 
 def build_fit_columns(work):
-    """FIT_TWO on the default page in two columns, under fleqn: (the PDF's
-    path, what the run said)."""
+    """FIT_TWO on the default page in two columns, under fleqn, in Latin
+    Modern (LATIN_MODERN): (the PDF's path, what the run said)."""
     os.makedirs(work)
     with open(os.path.join(work, "one.md"), "w", encoding="utf-8") as fh:
         fh.write(FIT_TWO)
@@ -1621,7 +1656,7 @@ def build_fit_columns(work):
         fh.write("project:\n  title: Columns\n  identifier: org.example.columns\n"
                  "  language: en-US\n  contents:\n    - one\n")
     with open(os.path.join(work, "meta.yaml"), "w", encoding="utf-8") as fh:
-        fh.write("classoption: [twocolumn, fleqn]\n")
+        fh.write("classoption: [twocolumn, fleqn]\n" + LATIN_MODERN)
     with open(os.path.join(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
         fh.write("targets:\n  pdf:\n    format: pdf\n    pdf:\n      metadata: meta.yaml\n")
     converted = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick"],
@@ -1672,17 +1707,39 @@ def build_blank_lines(work):
     return os.path.join(work, "pdf", "org.example.bars.pdf"), source
 
 
+# build-pdf.py as a module, its name for IBM Plex Math's file one no TeX
+# has, run on a copy of the default book: the book as LaTeX sets it where
+# TeX lacks a file of Plex's (build-pdf.py's default_faces).
+LACKING_PLEX = ("import importlib.util, sys\n"
+                "spec = importlib.util.spec_from_file_location('build_pdf', sys.argv[1])\n"
+                "build_pdf = importlib.util.module_from_spec(spec)\n"
+                "spec.loader.exec_module(build_pdf)\n"
+                "build_pdf.PLEX_MATH = 'NoSuchMath-Regular.otf'\n"
+                "sys.argv = sys.argv[1:]\n"
+                "sys.exit(build_pdf.main())\n")
+
+
 def build_default(work):
-    """The book (write_book) on the PDF target's default page, which its
-    checks measure on the class's (CLASS_PAGE): every kind of thing it
-    holds, ragged right, in 12pt type on the default's margins. The PDF's
-    path."""
+    """The book (write_book) on the PDF target's default page, in its
+    faces, where its checks measure it on the class's (CLASS_PAGE), in
+    Latin Modern: every kind of thing it holds, ragged right, in 12pt type
+    on the default's margins, in IBM Plex. And a copy of it, its PDF built
+    again where TeX lacks a file of Plex's (LACKING_PLEX), in the folder
+    beside it ending -lacking. (The PDF's path, what the run said, the
+    copy's PDF's path, and what its build said.)"""
     write_book(work)
     with open(os.path.join(work, "front.md"), "w", encoding="utf-8") as fh:
         fh.write(FRONT.replace(CLASS_PAGE, ""))
-    subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick"], cwd=work,
-                   capture_output=True, text=True, stdin=subprocess.DEVNULL)
-    return os.path.join(work, "pdf", "org.example.pdf.pdf")
+    converted = run(["python3", os.path.join(BIN, "convert.py"), "--quick"], work)
+    lacking = work + "-lacking"
+    shutil.copytree(work, lacking)
+    lacking_path = os.path.join(lacking, "pdf", "org.example.pdf.pdf")
+    if os.path.exists(lacking_path):
+        os.remove(lacking_path)
+    rebuilt = run(["python3", "-c", LACKING_PLEX, os.path.join(BIN, "build-pdf.py"), "-d",
+                   lacking, "--target", "pdf", "--intermediates", lacking], lacking)
+    return (os.path.join(work, "pdf", "org.example.pdf.pdf"),
+            converted.stdout + converted.stderr, lacking_path, rebuilt.stdout + rebuilt.stderr)
 
 
 def bar_limits(path):
@@ -1727,6 +1784,31 @@ def sizes_by_page(reader, words):
         page.extract_text(visitor_text=visit)
         found.append(sizes)
     return found
+
+
+def font_sizes(reader, page, face):
+    """The sizes a page draws text in a font whose name holds face at, as
+    sizes_by_page reads them."""
+    import math
+    found = set()
+
+    def visit(text, cm, tm, font, size):
+        if font is not None and face in str(font.get("/BaseFont", "")) and text.strip():
+            found.add(round(size * math.hypot(tm[0], tm[1]) * math.hypot(cm[0], cm[1]), 2))
+    reader.pages[page].extract_text(visitor_text=visit)
+    return found
+
+
+def code_advance(path, words):
+    """How wide each glyph of the line holding words is, on average: the
+    line's width over its glyphs, None for no such line."""
+    lines = {}
+    for page, baseline, left, right, char in pdftext.glyph_boxes(path):
+        lines.setdefault((page, baseline), []).append((left, right, char))
+    for glyphs in lines.values():
+        if words in "".join(g[2] for g in glyphs):
+            return (glyphs[-1][1] - glyphs[0][0]) / len(glyphs)
+    return None
 
 
 def head_of(source, words):
@@ -2631,11 +2713,99 @@ def sized_checks(sized_path, sized_said):
     ]
 
 
-def default_checks(default_path):
+def default_checks(default_path, default_said, lacking_path, lacking_said):
     """The default book's checks (build_default): the book on the page a
-    book gets when nothing changes it."""
+    book gets when nothing changes it, in the faces it gets, and as it's
+    set where TeX lacks them."""
+    fonts = font_names(pypdf.PdfReader(default_path)) if os.path.exists(default_path) \
+        else set()
+    lacking = font_names(pypdf.PdfReader(lacking_path)) if os.path.exists(lacking_path) \
+        else set()
+    spec = importlib.util.spec_from_file_location("build_pdf", os.path.join(BIN, "build-pdf.py"))
+    build_pdf = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(build_pdf)
+
+    def named(fields, value="A Face"):
+        """Metadata naming a face for each field, as Pandoc gives it."""
+        return {field: {"t": "MetaString", "c": value} for field in fields}
+
+    def files(meta, value="A Face"):
+        """The files of the default's faces LaTeX looks for, given the
+        metadata's fields, and whether it sets the formulas' face."""
+        latex = build_pdf.default_faces(named(meta, value))
+        return (re.findall(r"\\IfFontExistsTF\{([^}]*)\}", latex),
+                "\\setmathfont{IBMPlexMath-Regular.otf}" in latex)
+    shapes = ("Regular", "Bold", "Italic", "BoldItalic")
+    # The book's one character no font has, Latin Modern's fallbacks
+    # filling in for the rest as they do for Plex.
+    unfilled = ("WARNING: 3 character(s) the fonts don't have are missing from the PDF: "
+                "\u6f22 (U+6F22) x3.")
+    plex = ["IBMPlex%s-%s.otf" % (face, shape) for face in ("Serif", "Sans", "Mono")
+            for shape in shapes]
     items = [("the book on the PDF target's default page builds, LaTeX stopping on "
-              "nothing in it", lambda: os.path.exists(default_path))]
+              "nothing in it", lambda: os.path.exists(default_path)),
+             ("and it's in the default's faces, IBM Plex: its text in Plex Serif, its code "
+              "in Plex Mono, and its formulas in IBM Plex Math, whose letters are Plex "
+              "Serif's, with the fallback fonts for a character they lack, the run saying "
+              "nothing of the faces",
+              lambda: all(any(face in name for name in fonts) for face in
+                          ("IBMPlexSerif-Regular", "IBMPlexMono", "IBMPlexMath-Regular"))
+              and not any("LMRoman" in name or "LatinModern" in name for name in fonts)
+              and "default faces" not in default_said and unfilled in default_said),
+             ("where TeX lacks a file of Plex's, its math font's here, the book is set in "
+              "Latin Modern, as it was before Plex was the default, with the fallback "
+              "fonts, and the run warns, naming the file, the package that has them, and "
+              "how to keep Latin Modern without the warning",
+              lambda: any("LMRoman" in name for name in lacking)
+              and any("LatinModernMath" in name for name in lacking)
+              and not any("IBMPlex" in name for name in lacking)
+              and unfilled in lacking_said
+              and re.search(r"WARNING: TeX lacks the PDF's default faces, IBM Plex and IBM Plex "
+                            r"Math, so the book is set in Latin Modern: LaTeX found no "
+                            r"NoSuchMath-Regular\.otf\. TeX Live's plex package has them: for "
+                            r"TinyTeX or TeX Live from tug\.org, (?:sudo (?:\S*/)?)?tlmgr "
+                            r"install plex, and for Debian's or Ubuntu's texlive packages, sudo "
+                            r"apt install texlive-fonts-extra\. To keep Latin Modern without "
+                            r"this warning, name Latin Modern's faces in the pdf\.metadata file "
+                            r"\(docs/configuration\.md, \"The faces\"\)\.", lacking_said)),
+             ("LaTeX looks for every file of the default's faces it would set, those of "
+              "each family the metadata file doesn't name, and IBM Plex Math's where it "
+              "names neither a face for the text nor one for formulas, which only then "
+              "are in Plex Math",
+              lambda: files([]) == (plex + ["IBMPlexMath-Regular.otf"], True)
+              and files(["mainfont"]) == (plex[4:], False)
+              and files(["mathfont"]) == (plex, False)
+              and files(["mainfont", "monofont"]) == (plex[4:8], False)
+              and files(["mainfont"], "") == (plex + ["IBMPlexMath-Regular.otf"], True)
+              and build_pdf.default_faces(named(["mainfont", "sansfont", "monofont"])) == ""),
+             ("and the warning says what's set in Latin Modern: the book, where every family "
+              "and the formulas are the default's, and otherwise each the file doesn't name",
+              lambda: "so its sans-serif type and monospaced type are set in Latin Modern: "
+              "LaTeX found no IBMPlexSans-Regular.otf, nor 7 more of their files." in
+              build_pdf.face_warning(plex[4:], named(["mainfont"]))
+              and "TeX lacks the PDF's default faces, IBM Plex, so its monospaced type is set "
+              "in Latin Modern: LaTeX found no IBMPlexMono-Regular.otf." in
+              build_pdf.face_warning(plex[8:9], named(["mainfont", "sansfont", "mathfont"]))
+              and "IBM Plex, so its text, sans-serif type, and monospaced type are set in "
+              "Latin Modern" in build_pdf.face_warning(plex, named(["mathfont"]))
+              and "IBM Plex and IBM Plex Math, so the book is set in Latin Modern" in
+              build_pdf.face_warning(plex, {})),
+             ("a face the file names, set again after the default's text face, is given a "
+              "scale, so that fontspec works its size out again: the last its options "
+              "give, or the template's own",
+              lambda: build_pdf.rescaled([]) == ["Scale=MatchLowercase"]
+              and build_pdf.rescaled(["Scale = 0.9", "Ligatures=TeX"])
+              == ["Scale = 0.9", "Ligatures=TeX", "Scale = 0.9"]),
+             ("code is set in Plex Mono at 0.858 of the text's size, each character as wide "
+              "as Latin Modern Mono's at the text's size, so a line of code holds as many as "
+              "it did, and formulas at the text's size",
+              lambda: (lambda advance, page: advance is not None
+                       and abs(advance - 0.515 * 11.955) < 0.05 and page is not None
+                       and max(font_sizes(pypdf.PdfReader(default_path), page, "IBMPlexMath")
+                               or {0}) == 11.96)(
+                  code_advance(default_path, "def demand(p):"),
+                  page_holding(default_path, "Inline math"))),
+             ]
     if shutil.which("verapdf") or os.environ.get("VERAPDF"):
         items.append(("and veraPDF finds only the character no font has, as on the class's "
                       "page",
@@ -2670,6 +2840,15 @@ def preamble_checks(preamble_path, preamble_source, preamble_said):
          "the metadata file",
          lambda: "\\usepackage[margin=1.5in]{geometry}" in preamble_source
          and "Could not find" not in preamble_said and "does not exist" not in preamble_said),
+        ("a math font, and a monospaced face with fallbacks of its own, that the file "
+         "names, and no face for the text, are scaled to the default's text face: "
+         "formulas at the text's size, not a sixth smaller, and Latin Modern Mono, its "
+         "small letters a sixth smaller than IBM Plex Serif's, a fifth larger than the text",
+         lambda: (lambda page: page is not None
+                  and max(font_sizes(reader, page, "IBMPlexMath") or {0}) == 11.96
+                  and abs(max(font_sizes(reader, page, "LMMono") or {0}) - 14.31) < 0.05
+                  and sizes_by_page(reader, "The section")[page][:1] == [11.96])(
+             page_holding(preamble_path, "The section"))),
     ]
 
 def gap_after(path, words):
@@ -3671,10 +3850,14 @@ def aaa_checks(aaa_path):
     leading = commonest_leading(body) or 0
     # The space between paragraphs on every page of text, the least of
     # them as the page sets it: a full page's, two-sided, is stretched to
-    # fill it (\flushbottom), a chapter's last page's not.
+    # fill it (\flushbottom), a chapter's last page's not. The text's lines
+    # alone: in IBM Plex, the default's face, a footnote's first line is as
+    # far under the text's last as a paragraph's is under the one before.
     breaks = []
     for page in range(opening, len(reader.pages)) if opening is not None else []:
         found = text_lines(lines, page)
+        found = found[:next((i for i, line in enumerate(found)
+                             if squeezed("The note.") in squeezed(line[3])), len(found))]
         breaks += [a[0] - b[0] for a, b in zip(found, found[1:])
                    if 1.5 * leading < a[0] - b[0] < 2 * leading]
 
@@ -3749,13 +3932,15 @@ def fancy_checks(fancy_path, fancy_said):
 # The folders the books are built in, each the main book's (work) with its
 # suffix: the PDF/UA-1, untagged, notes, footer, sized, fancy, default,
 # preamble, AAA, fit, two-column, evaluation bar's, and languages books are
-# built beside it (build_ua1 to build_languages). The cleanup removes them
+# built beside it (build_ua1 to build_languages), and the default book's
+# copy, built again where TeX lacks a file of IBM Plex's (build_default). The cleanup removes them
 # and --keep names them, from this one list, and a check sees that no build
 # leaves another: the languages book's folder was left in the temporary
 # directory by every run, when the cleanup and the message each had a list
 # of their own.
 BOOK_FOLDERS = ("", "-ua1", "-untagged", "-notes", "-footer", "-sized", "-fancy",
-                "-default", "-preamble", "-aaa", "-fit", "-columns", "-bars", "-languages")
+                "-default", "-default-lacking", "-preamble", "-aaa", "-fit", "-columns",
+                "-bars", "-languages")
 
 
 def checks(work, jobs=1):
@@ -3784,7 +3969,7 @@ def checks(work, jobs=1):
             footer_path = footed.result()
             sized_path, sized_said = sized.result()
             fancy_path, fancy_said = fancied.result()
-            default_path = defaulted.result()
+            default_path, default_said, lacking_path, lacking_said = defaulted.result()
             preamble_path, preamble_source, preamble_said = prefaced.result()
             aaa_path = aaa.result()
             fit_path, fit_said, fit_source, fit_third = fitted.result()
@@ -3799,7 +3984,8 @@ def checks(work, jobs=1):
         footer_path = build_footer(work + "-footer")
         sized_path, sized_said = build_sized(work + "-sized")
         fancy_path, fancy_said = build_fancy(work + "-fancy")
-        default_path = build_default(work + "-default")
+        default_path, default_said, lacking_path, lacking_said = build_default(
+            work + "-default")
         preamble_path, preamble_source, preamble_said = build_preamble(work + "-preamble")
         aaa_path = build_aaa(work + "-aaa")
         fit_path, fit_said, fit_source, fit_third = build_fit(work + "-fit")
@@ -4564,7 +4750,7 @@ def checks(work, jobs=1):
     items += footer_checks(footer_path)
     items += sized_checks(sized_path, sized_said)
     items += fancy_checks(fancy_path, fancy_said)
-    items += default_checks(default_path)
+    items += default_checks(default_path, default_said, lacking_path, lacking_said)
     items += preamble_checks(preamble_path, preamble_source, preamble_said)
     items += aaa_checks(aaa_path)
     items += fit_checks(fit_path, fit_said, fit_source, fit_third)

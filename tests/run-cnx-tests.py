@@ -559,11 +559,14 @@ def case_trade(work):
          and "# copied here to be changed for this book" in read(out, "pdf-layout.yaml")),
         ("its text is in OpenStax's face for its design, cosmos's IBM Plex Serif, named by "
          "its files, and its formulas in IBM Plex Math, whose letters are Plex Serif's, "
-         "the file says",
+         "the file says, and that it's the default's face, which, named, stops the build "
+         "where it isn't installed",
          lambda: "# The text in IBM Plex Serif, as OpenStax sets this book in its cosmos\n"
          in read(out, "pdf-layout.yaml")
-         and "# by its files, so the build stops if one isn't installed. Formulas in IBM\n"
-         "# Plex Math, whose letters are Plex Serif's.\nmainfont: IBMPlexSerif\n"
+         and "# of their own. It's the default's face too, named here by its files, so\n"
+         "# the build stops if one isn't installed, where the default gives way to\n"
+         "# Latin Modern with a warning. Formulas in IBM Plex Math, whose letters\n"
+         "# are Plex Serif's.\nmainfont: IBMPlexSerif\n"
          "mainfontoptions:\n  - Extension=.otf\n  - UprightFont=*-Regular\n"
          in read(out, "pdf-layout.yaml")),
         ("its notes are numbered through each chapter, as OpenStax numbers "
@@ -1002,9 +1005,9 @@ effect="italics">myśli</emphasis></para></meaning></definition>
                  for s in ("psychology", "biology", "organic-chemistry"))
          and all(faces[s]["mainfontoptions"] == ["Extension=.ttf"]
                  + PLEX_SERIF["mainfontoptions"][1:] for s in ("marketing", "statistics"))
-         and noto.endswith("from version 3.000\n# (github.com/notofonts/math), and "
-                           "Debian's and Ubuntu's fonts-noto-core\n# have 2.001. With "
-                           "3.000 or later installed, take the # off the line\n# below.\n"
+         and noto.endswith("by from version 3.000 (github.com/notofonts/math), and "
+                           "Debian's and\n# Ubuntu's fonts-noto-core have 2.001. With "
+                           "3.000 or later installed, take\n# the # off the line below.\n"
                            "mainfont: NotoSans\nmainfontoptions:\n  - Extension=.ttf\n"
                            "  - UprightFont=*-Regular\n  - BoldFont=*-Bold\n"
                            "  - ItalicFont=*-Italic\n  - BoldItalicFont=*-BoldItalic\n"

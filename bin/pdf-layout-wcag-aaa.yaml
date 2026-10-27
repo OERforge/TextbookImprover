@@ -8,7 +8,8 @@
 # docs/configuration.md, "The PDF's page", says what each setting gives.
 
 # Lines of no more than 80 characters, on average: 13.5-point type in
-# OpenStax's margins holds about 78 to a full line.
+# OpenStax's margins holds about 72 to a full line in IBM Plex Serif,
+# the default's face, and 78 in Latin Modern.
 fontsize: 13.5pt
 papersize: letter
 geometry:

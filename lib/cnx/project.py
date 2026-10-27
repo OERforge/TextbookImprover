@@ -209,11 +209,14 @@ def face_lines(style):
         return []
     design, face = found
     said, settings = FACES[face]
+    named = ("It's the default's face too, named here by its files, so the build stops "
+             "if one isn't installed, where the default gives way to Latin Modern with a "
+             "warning." if face == "IBM Plex Serif" else
+             "It's named by its files, so the build stops if one isn't installed, where "
+             "the default's face, IBM Plex Serif, gives way to Latin Modern with a warning.")
     words = (f"The text in {face}, as OpenStax sets this book in its {design} design, "
              "and the headings in its bold, where OpenStax sets them in a face of their "
-             "own. Its small letters are larger at a given size than Latin Modern's, the "
-             "default's face, and its thin strokes sturdier. It's named by its files, so "
-             "the build stops if one isn't installed. " + said)
+             f"own. {named} " + said)
     return ["# " + line for line in textwrap.wrap(words, 72)] + settings
 
 

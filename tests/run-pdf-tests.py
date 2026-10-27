@@ -1365,6 +1365,19 @@ FIT_ONE = (
     "its full length, which a count of its characters fits:\n\n<table><thead><tr>"
     "<th>Label</th><th>Blank</th></tr></thead><tbody><tr><td>Rowblank</td><td>"
     + "_" * 52 + "</td></tr></tbody></table>\n\n"
+    "A table whose columns have no widths, words in one and a long fill-in blank in the other, "
+    "which fit the line together with the blank at its least:\n\n<table><thead><tr>"
+    "<th>Item</th><th>Answer</th></tr></thead><tbody><tr><td>Wordcol lorem ipsum dolor sit "
+    "amet consectetur</td><td>Signature: " + "_" * 66 + "</td></tr></tbody></table>\n\n"
+    "A table whose columns have no widths, two of words and one a long fill-in blank:\n\n"
+    "<table><thead><tr><th>Name</th><th>Role</th><th>Notes</th></tr></thead><tbody><tr>"
+    "<td>Threecol Alexandra Hamilton</td><td>Project coordinator</td><td>" + "_" * 58
+    + "</td></tr></tbody></table>\n\n"
+    "A table whose columns have no widths, words that fit the line beside a blank of three "
+    "underscores after its label, but not beside one of two thirds of a column three times "
+    "as wide as the label:\n\n<table><thead><tr><th>Item</th><th>Answer</th></tr></thead>"
+    "<tbody><tr><td>Labelcol lorem ipsum dolor sit amet consectetur adipiscing elit sed</td>"
+    "<td>Labelsig: " + "_" * 66 + "</td></tr></tbody></table>\n\n"
     "A table whose columns have no widths, a label and its formula in the first column, "
     "pairs of numbers with fractions in the others, as Precalculus 2e's Table 2 of section "
     "4.4 has them, which the counts give more of the line than the label:\n\n<table><tbody><tr>"
@@ -2729,6 +2742,74 @@ print(c.tight * new.factor / s.factor * s.columns * (line - pad) / (new.columns 
     return tuple(float(x) for x in done.stdout.split()) if done.returncode == 0 else ()
 
 
+def paragraph_measures(texts):
+    """FIT_MACROS' measure of each text as a paragraph (oerfit.paragraph),
+    its Lua run by texlua on nodes a character wide: (its least, its width
+    as one line). A letter is a glyph, a space glue, an underscore a fill-in
+    blank's, ~ a no-break space (a penalty of 10000 and glue), and $ opens
+    and closes a formula. [] without texlua or where it fails."""
+    import latexbuild
+    texlua = shutil.which("texlua")
+    if texlua is None:
+        return []
+    macros = latexbuild.FIT_MACROS
+    opening = macros.index("\\directlua{") + len("\\directlua{")
+    depth, end = 1, opening
+    while depth:
+        depth += {"{": 1, "}": -1}.get(macros[end], 0)
+        end += 1
+    stubs = """
+ids = { hlist = 1, vlist = 2, glue = 3, penalty = 4, math = 5, dir = 6, glyph = 7, kern = 8 }
+luatexbase = { attributes = { OERFitAttribute = 1, OERFitStepsAttribute = 2, OERBlankAttribute = 99 },
+               add_to_callback = function() end }
+node = { id = function(name) return ids[name] or 0 end,
+         traverse = function(head) local i = 0 return function() i = i + 1 return head[i] end end,
+         dimensions = function(n) return n.width or 0 end,
+         has_attribute = function(n, a, v)
+           local x = n.attr and n.attr[a]
+           if v then return (x == v) and x or nil end
+           return x
+         end }
+tex = { getattribute = function() return 0 end, sprint = function() end, hsize = 1000000 }
+texio = { write_nl = function() end }
+"""
+    run = """
+local function build(s)
+  local list, inmath = {}, false
+  for c in s:gmatch(".") do
+    if c == "$" then
+      inmath = not inmath
+      list[#list + 1] = { id = ids.math, subtype = inmath and 0 or 1, width = 0 }
+    elseif c == " " then
+      list[#list + 1] = { id = ids.glue, width = 1 }
+    elseif c == "~" then
+      list[#list + 1] = { id = ids.penalty, penalty = 10000, width = 0 }
+      list[#list + 1] = { id = ids.glue, width = 1 }
+    elseif c == "_" then
+      list[#list + 1] = { id = ids.glyph, char = 95, width = 1, attr = { [99] = 1 } }
+    else
+      list[#list + 1] = { id = ids.glyph, char = c:byte(), width = 1 }
+    end
+  end
+  return list
+end
+for _, s in ipairs({%s}) do
+  local line, low = oerfit.paragraph(build(s))
+  print(low, line)
+end
+""" % ", ".join("[==[%s]==]" % text for text in texts)
+    with tempfile.TemporaryDirectory() as work:
+        script = os.path.join(work, "paragraph.lua")
+        with open(script, "w", encoding="utf-8") as fh:
+            fh.write(stubs + macros[opening:end - 1] + run)
+        done = subprocess.run([texlua, script], cwd=work, capture_output=True, text=True)
+    if done.returncode != 0:
+        print(done.stderr[-500:])
+        return []
+    numbers = [int(float(x)) for x in done.stdout.split()]
+    return list(zip(numbers[0::2], numbers[1::2]))
+
+
 def formula_widths(texs, count="formula_width(tex)"):
     """pdf-target.lua's formula_width of each TeX in texs, or another of its
     counts of it (a Lua expression of tex), its Lua run by `pandoc lua`, the
@@ -3096,6 +3177,42 @@ def fit_checks(fit_path, fit_said, fit_source, fit_third):
         ("a table whose columns have no widths, a blank too long for its line, keeps its "
          "type, its columns wrapping, the blank drawn shorter to end within its column",
          lambda: at("Rowblank", 1) and within("Rowblank") and at_edge(52)),
+        # Counted whole, as by the counts and by LaTeX's measure, a long
+        # blank took the line from the words beside it, which wrapped where
+        # they had room: Wordcol's seven words on two lines, and Threecol's
+        # name and role each on two.
+        ("a table whose columns have no widths, words beside a long blank, gives the words "
+         "their line and the blank what's left of it, the blank drawn shorter to end within "
+         "its column",
+         lambda: at("Wordcol", 1) and "Wordcolloremipsumdolorsitametconsectetur"
+         in squeezed(line_of("Wordcol")) and at_edge(66, "Wordcol") and within("Wordcol")),
+        ("and two columns of words beside a blank, each on one line",
+         lambda: at("Threecol", 1)
+         and "ThreecolAlexandraHamiltonProjectcoordinator" in squeezed(line_of("Threecol"))
+         and at_edge(58, "Threecol") and within("Threecol")),
+        # Given the rest of the line beside the words on one line, Labelsig
+        # had less than three times its width, and its blank, drawn at two
+        # thirds of the column while TeX broke the cell into lines, went to
+        # the line after it.
+        ("but a blank after a label keeps its label's line, its least two thirds of its "
+         "column, the words wrapping where they don't fit beside that",
+         lambda: at("Labelsig", 1) and blank_at(fit_path, "Labelsig") is not None
+         and at_edge(66, "Labelsig") and within("Labelsig")
+         and "Labelcol" in line_of("Labelcol") and "sed" not in line_of("Labelcol")),
+        # FIT_MACROS' measure of a paragraph's least, run by texlua on nodes
+        # a character wide: a blank three underscores, or three times the
+        # words that share its line, before it and joined to it as far as a
+        # space TeX may break at, a formula and a no-break space among
+        # them; the line whole where that's less, the words after the last
+        # blank whole, and a paragraph with no blank as wide as its line.
+        ("LaTeX's measure of a paragraph's least: a blank three underscores, or two thirds of "
+         "its line beside the words that share it, joined to it as far as a space TeX may "
+         "break at, a formula's and a no-break space's not among them",
+         lambda: paragraph_measures(
+             ["Signature: " + "_" * 66, "____%", "Name ____ Date: " + "_" * 32,
+              "Label: " + "_" * 30 + "~cm and more", "Label: " + "_" * 30 + "$x = y$",
+              "Wordcol lorem ipsum", "a. ____", "____/____"])
+         == [(33, 77), (4, 5), (18, 48), (30, 49), (36, 42), (19, 19), (7, 7), (8, 9)]),
         # The counts gave the pairs' columns, their fractions counted a part
         # after the other, more of the line than the label's, whose formula
         # broke after its relation, the label and the formula on three lines.

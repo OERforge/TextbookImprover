@@ -588,11 +588,22 @@ FIT_MACROS = r"""% Something too wide for its line, which TeX can't break:
 % pdf-target.lua's counts, which give each column of words its part of
 % the line on a first run: each column of formulas, a step's math, as wide
 % as its widest, and each column of words, which wraps, as wide as its
-% widest paragraph set as one line, where the table so fits its line, and
-% otherwise no narrower than its longest piece TeX can't break, a formula
-% whole and a blank's three underscores at most, the rest of the line
-% shared among them in proportion to how much wider each would be as one
-% line; where even that's wider than the line, the table's spaces are
+% widest paragraph set as one line, where the table so fits its line;
+% where it fits with each fill-in blank at its least, each column as
+% wide as its widest paragraph so, the columns of blanks sharing the rest
+% of the line by how much longer their blanks are whole, as a blank is
+% drawn as long as its column leaves room for (counted whole, a long blank
+% took the line from the words beside it, which wrapped where they had
+% room). A blank's least is three underscores, and where words share its
+% line, before it or joined to it up to a space TeX may break at, a
+% no-break space not one, two thirds of the line, as the blank macros
+% below draw it while TeX breaks the paragraph: a column less than three
+% times as wide as those words put the blank on the line after them
+% (oerfit.paragraph measures a paragraph so). Otherwise, no narrower than
+% its longest piece TeX can't break, a formula whole and a blank's three
+% underscores at most, the rest of the line shared among them in
+% proportion to how much wider each would be as one line; where even
+% that's wider than the line, the table's spaces are
 % narrowed; then, in a table's words, a formula's longest part between two
 % of its breaks, as TeX breaks a formula in text, a step's formula having
 % none; and then its type is set smaller, as another table's is, its
@@ -659,7 +670,8 @@ FIT_MACROS = r"""% Something too wide for its line, which TeX can't break:
     oerfit = { state = {}, kind = {}, line = {}, room = {}, size = {}, columns = {},
                width = {}, tight = {}, sep = {}, sep0 = {}, where = {}, twocol = {}, run = 0,
                sources = { status.filename }, seen = { [status.filename] = true }, stored = {},
-               steps = {}, entries = {}, natural = {}, longest = {}, pieces = {}, applied = {} }
+               steps = {}, entries = {}, natural = {}, longest = {}, pieces = {}, applied = {},
+               low = {} }
     if string.sub(status.filename, 1, 2) == "./" then oerfit.seen[string.sub(status.filename, 3)] = true end
     local function current()
       local id = tex.getattribute(attribute)
@@ -743,42 +755,73 @@ FIT_MACROS = r"""% Something too wide for its line, which TeX can't break:
       end
       return true
     end, "oer.fit.cells")
+    function oerfit.paragraph(head)
+      local line, piece, longest, bit, most, inmath, blanks = 0, 0, 0, 0, 0, false, 0
+      local low, before, whole, three, joined, state, tied = 0, 0, 0, 0, 0, 0, false
+      local function close()
+        local least = math.max(before + three + joined, 3 * (before + joined))
+        low = math.max(low, math.min(before + whole + joined, least))
+        before, whole, three, joined, state = 0, 0, 0, 0, 0
+      end
+      for n in node.traverse(head) do
+        if n.id == MATH then inmath = n.subtype == 0 end
+        if n.id == KERN and blank and node.has_attribute(n, blank, 2) then
+          line = line + 0
+        elseif n.id == GLUE then
+          line = line + n.width
+          if inmath then
+            piece, bit = piece + n.width, bit + n.width
+          else
+            if piece > longest then longest = piece end
+            if bit > most then most = bit end
+            piece, bit, blanks = 0, 0, 0
+          end
+          if inmath or tied then
+            if state > 0 then state, joined = 2, joined + n.width else before = before + n.width end
+          elseif state > 0 then
+            close()
+          else
+            before = before + n.width
+          end
+        elseif n.id == PENALTY and inmath and n.penalty < 10000 then
+          if bit > most then most = bit end
+          bit = 0
+        elseif not (n.id == VLIST and math.abs(n.width - tex.hsize) <= 1) then
+          local w = node.dimensions(n, n.next)
+          line = line + w
+          if n.id == GLYPH and n.char == 95 and blank and node.has_attribute(n, blank) then
+            blanks = blanks + 1
+            if blanks <= 3 then piece, bit = piece + w, bit + w end
+            if state == 0 then
+              state, whole, three = 1, w, w
+            elseif state == 1 then
+              whole = whole + w
+              if blanks <= 3 then three = three + w end
+            elseif blanks <= 3 then
+              joined = joined + w
+            end
+          else
+            blanks = 0
+            piece, bit = piece + w, bit + w
+            if state == 0 then before = before + w else state, joined = 2, joined + w end
+          end
+        end
+        tied = n.id == PENALTY and n.penalty >= 10000
+      end
+      if state > 0 then close() else low = math.max(low, before) end
+      if piece > longest then longest = piece end
+      if bit > most then most = bit end
+      return line, low, longest, most
+    end
     luatexbase.add_to_callback("pre_linebreak_filter", function(head)
       local id, j = current(), tex.getattribute(column)
       if id and oerfit.kind[id] == "s" and j and j > 0 then
-        local line, piece, longest, bit, most, inmath, blanks = 0, 0, 0, 0, 0, false, 0
-        for n in node.traverse(head) do
-          if n.id == MATH then inmath = n.subtype == 0 end
-          if n.id == KERN and blank and node.has_attribute(n, blank, 2) then
-            line = line + 0
-          elseif n.id == GLUE then
-            line = line + n.width
-            if inmath then
-              piece, bit = piece + n.width, bit + n.width
-            else
-              if piece > longest then longest = piece end
-              if bit > most then most = bit end
-              piece, bit, blanks = 0, 0, 0
-            end
-          elseif n.id == PENALTY and inmath and n.penalty < 10000 then
-            if bit > most then most = bit end
-            bit = 0
-          elseif not (n.id == VLIST and math.abs(n.width - tex.hsize) <= 1) then
-            local w = node.dimensions(n, n.next)
-            line = line + w
-            if n.id == GLYPH and n.char == 95 and blank and node.has_attribute(n, blank) then
-              blanks = blanks + 1
-              if blanks <= 3 then piece, bit = piece + w, bit + w end
-            else
-              blanks = 0
-              piece, bit = piece + w, bit + w
-            end
-          end
-        end
-        if piece > longest then longest = piece end
-        if bit > most then most = bit end
+        local line, low, longest, most = oerfit.paragraph(head)
         local nat, long, bits = oerfit.natural[id] or {}, oerfit.longest[id] or {}, oerfit.pieces[id] or {}
         oerfit.natural[id], oerfit.longest[id], oerfit.pieces[id] = nat, long, bits
+        local lows = oerfit.low[id] or {}
+        oerfit.low[id] = lows
+        if low > (lows[j] or 0) then lows[j] = low end
         if line > (nat[j] or 0) then nat[j] = line end
         if longest > (long[j] or 0) then long[j] = longest end
         if most > (bits[j] or 0) then bits[j] = most end
@@ -887,13 +930,15 @@ FIT_MACROS = r"""% Something too wide for its line, which TeX can't break:
       local sep, sep0, size = oerfit.sep[id], oerfit.sep0[id], oerfit.size[id]
       local line, room = oerfit.line[id], oerfit.room[id]
       local nat, long, bits = oerfit.natural[id] or {}, oerfit.longest[id] or {}, oerfit.pieces[id] or {}
-      local all, applied, natural, longest, pieces = 0, 0, 0, 0, 0
+      local lows = oerfit.low[id] or {}
+      local all, applied, natural, longest, pieces, low = 0, 0, 0, 0, 0, 0
       for j = 1, k do all = all + e[j] end
       for _, j in ipairs(info.words) do
         applied = applied + (oerfit.applied[id][j] or 0)
         natural = natural + (nat[j] or 0) / f0
         longest = longest + (long[j] or 0) / f0
         pieces = pieces + (bits[j] or 0) / f0
+        low = low + (lows[j] or 0) / f0
       end
       local maths = (all - applied - 2 * (k - 1) * sep) / f0
       local spaced, narrow = 2 * (k - 1) * sep0, 2 * (k - 1) * 0.25 * size
@@ -918,6 +963,9 @@ FIT_MACROS = r"""% Something too wide for its line, which TeX can't break:
         local out = {}
         for _, j in ipairs(info.words) do out[j] = math.ceil((nat[j] or 0) / f0) end
         return { narrow = 0, factor = 1, columns = 1, center = 0, widths = out }
+      end
+      if low < natural and maths + low + spaced <= line then
+        return { narrow = 0, factor = 1, columns = 1, center = 0, widths = shared(line - maths - spaced, 1, lows) }
       end
       if maths + longest + spaced <= line then
         return { narrow = 0, factor = 1, columns = 1, center = 0, widths = shared(line - maths - spaced, 1, long) }

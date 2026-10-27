@@ -2166,6 +2166,38 @@ local function term_notes(list)
   end
 end
 
+-- A term with an = in its words, which LaTeX's tagging (latex-lab's block
+-- module) reads in \item's optional argument as keys, and stops on as keys
+-- it doesn't know ("Some keys specified on the \item command are
+-- unknown"). Pandoc's writer braces such a term from 3.13 on, one with a
+-- Str holding an = among its own inlines (#11954, needsBraces in
+-- Writers/LaTeX.hs), and before only one holding a link within the
+-- document; for an older Pandoc it's braced here the same way, last.
+local BRACED_TERMS = PANDOC_VERSION >= { 3, 13 }
+local function term_braces(list)
+  if BRACED_TERMS then return nil end
+  local items, changed = pandoc.List({}), false
+  for _, item in ipairs(list.content) do
+    local term = pandoc.Inlines(item[1])
+    local equals = false
+    for _, inline in ipairs(term) do
+      if inline.t == 'Str' and inline.text:find('=', 1, true) then equals = true end
+    end
+    if equals then
+      changed = true
+      local braced = pandoc.Inlines({ pandoc.RawInline('latex', '{') })
+      braced:extend(term)
+      braced:insert(pandoc.RawInline('latex', '}'))
+      term = braced
+    end
+    items:insert({ term, item[2] })
+  end
+  if changed then
+    list.content = items
+    return list
+  end
+end
+
 -- A box, a div of class box (a LibreTexts page's Example, Exercise, or
 -- Note; a LaTeX book's passage in a frame), which the pages and the EPUB
 -- draw with a border: set off by a rule above and one below, artifacts
@@ -2279,4 +2311,5 @@ return {
       return doc
     end },
   { Pandoc = fit_formulas },
+  { DefinitionList = term_braces },
 }

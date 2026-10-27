@@ -209,6 +209,9 @@ Table: Cost by year {.unnumbered}
 Elasticity[^term]
 :   How much quantity responds to price.
 
+Markup = price less cost
+:   An equals sign in a term, which LaTeX's tagging read as keys.
+
 [^term]: A term's footnote, which LaTeX's tagging stopped on.
 
 Highlighted code, whose spaces were lost beside a colored word:
@@ -3821,6 +3824,14 @@ def checks(work, jobs=1):
         ("a footnote in a definition list's term is set, at the head of its definition",
          lambda: re.search(r"Elasticity\s*\d+How much", text) is not None
          and "A term" in text),
+        # Pandoc's writer before 3.13 leaves a term with an = in it bare in
+        # \item's optional argument, where LaTeX's tagging reads it as keys
+        # and stops; pdf-target.lua braces it, as 3.13's writer does. Any
+        # run of spaces between words, as pypdf 4.0.2 reads a justified
+        # line's wider ones.
+        ("a definition list's term with an equals sign is set",
+         lambda: re.search(r"Markup\s*=\s*price\s+less\s+cost\s*An\s+equals\s+sign\s+in\s+a\s+term",
+                           text) is not None),
         # PDF/UA-1 is PDF 1.7: no MathML structure elements, a TeX alt text
         # on each formula, Office's MathML attribute unless pdf.ua1_math is
         # alt, and a /Contents on every link, LaTeX's own included.

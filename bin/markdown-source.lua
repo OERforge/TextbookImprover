@@ -361,6 +361,45 @@ local function has_body_heads(tbl)
   return false
 end
 
+-- A table Pandoc's writer before 3.13 writes as the text [TABLE], dropping
+-- it without a warning: one no pipe table can hold, a cell having more
+-- than a paragraph or a line break in it, and too wide for a grid table,
+-- which it writes only where the line holds 8 characters a column (72 by
+-- default, so 10 columns or more), with raw HTML off, as the target has
+-- it (Writers/Markdown.hs, 3.9 to 3.12.1). From 3.13 it writes a grid
+-- table at any width (#11945). Cells with spans, and a foot, which the
+-- writer gives a grid table at any width, are left to their own rules.
+local GRID_AT_ANY_WIDTH = PANDOC_VERSION >= { 3, 13 }
+local function dropped_by_writer(tbl)
+  if GRID_AT_ANY_WIDTH or #tbl.foot.rows > 0
+      or PANDOC_WRITER_OPTIONS.columns >= 8 * #tbl.colspecs then
+    return false
+  end
+  local function simple(cell)
+    local blocks = cell.contents
+    if #blocks == 0 then return true end
+    if #blocks > 1 or (blocks[1].t ~= 'Plain' and blocks[1].t ~= 'Para') then
+      return false
+    end
+    local broken = false
+    pandoc.Blocks(blocks):walk({ LineBreak = function() broken = true end })
+    return not broken
+  end
+  local function check(rows)
+    for _, row in ipairs(rows) do
+      for _, cell in ipairs(row.cells) do
+        if not simple(cell) then return true end
+      end
+    end
+    return false
+  end
+  if check(tbl.head.rows) then return true end
+  for _, body in ipairs(tbl.bodies) do
+    if check(body.head) or check(body.body) then return true end
+  end
+  return false
+end
+
 function Table(tbl)
   tbl = clean_table(tbl)
   if ADOC then return cell_math(tbl) end
@@ -371,8 +410,10 @@ function Table(tbl)
   -- rows of one body: the groups went, and which rows headed them, as
   -- AsciiDoc's writer flattens them (adoc_html_table). And so is a table
   -- with a role: a layout table is role="presentation", which a pipe
-  -- table has nowhere to keep, and would come back a data table.
-  if has_spans(tbl) or has_body_heads(tbl) or tbl.attr.attributes.role ~= nil then
+  -- table has nowhere to keep, and would come back a data table. And so
+  -- is a table an older writer would drop (dropped_by_writer).
+  if has_spans(tbl) or has_body_heads(tbl) or tbl.attr.attributes.role ~= nil
+      or dropped_by_writer(tbl) then
     return pandoc.RawBlock('html',
       pandoc.write(pandoc.Pandoc({ tbl }), 'html',
                    { html_math_method = 'mathml' }))

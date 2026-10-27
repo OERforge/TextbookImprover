@@ -7835,6 +7835,70 @@ def case_mark_breaks(work):
     ]
 
 
+def wide_table(caption, columns, first):
+    """A table of the columns given, a header row and a row whose first
+    cell is the HTML given."""
+    head = "".join("<th>H%d</th>" % i for i in range(columns))
+    cells = "".join("<td>c%d</td>" % i for i in range(1, columns))
+    return ("<table><caption>%s</caption><tr>%s</tr><tr><td>%s</td>%s</tr></table>\n"
+            % (caption, head, first, cells))
+
+
+WIDE_TABLES = ("<!DOCTYPE html>\n<html lang=\"en\"><head><title>Wide</title></head><body>\n"
+               "<h1>Wide</h1>\n"
+               + wide_table("Broken", 10, "one<br>two")
+               + wide_table("Paragraphs", 11, "<p>three</p><p>four</p>")
+               + wide_table("Nine", 9, "five<br>six")
+               + wide_table("Plain", 10, "seven")
+               + "</body></html>\n")
+
+
+def case_wide_tables(work):
+    """A table of ten columns or more with a line break or a second
+    paragraph in a cell, through a Markdown target and back: Pandoc's
+    writer before 3.13 writes it as the text [TABLE], so the target
+    writes it as HTML there."""
+    first = os.path.join(work, "first")
+    os.makedirs(first)
+    with open(os.path.join(first, "wide.html"), "w", encoding="utf-8") as fh:
+        fh.write(WIDE_TABLES)
+    result = convert(first, "targets:\n  html:\n    format: html\n"
+                            "  src:\n    format: markdown\n", fixtures=())
+    md = read(first, "src", "wide.md") if exists(first, "src", "wide.md") else ""
+    second = os.path.join(work, "second")
+    os.makedirs(second)
+    if md:
+        shutil.copy(os.path.join(first, "src", "wide.md"), second)
+    shutil.copy(os.path.join(first, "project.yaml"), second)
+    with open(os.path.join(second, "conversion.yaml"), "w", encoding="utf-8") as fh:
+        fh.write("targets:\n  html:\n    format: html\n")
+    again = run_in(second)
+    compare = subprocess.run(
+        ["python3", os.path.join(ROOT, "util", "compare-output.py"),
+         os.path.join(first, "html"), os.path.join(second, "html")],
+        capture_output=True, text=True)
+    version = subprocess.run(["pandoc", "--version"], capture_output=True,
+                             text=True).stdout.split()[1]
+    grid_at_any_width = tuple(int(p) for p in re.findall(r"\d+", version)[:2]) >= (3, 13)
+    grids = re.findall(r"^\+=+\+", md, re.M)
+    return [
+        ("a table of ten columns or more with a line break or a second paragraph in a cell "
+         "is written whole, where Pandoc's writer before 3.13 writes it as [TABLE]: a grid "
+         "table with 3.13 on, and HTML before",
+         lambda: result.returncode == 0 and "[TABLE]" not in md
+         and all(s in md for s in ("one", "two", "three", "four"))
+         and md.count("```{=html}") == (0 if grid_at_any_width else 2)
+         and len(grids) == (3 if grid_at_any_width else 1)),
+        ("a table of nine columns is a grid table, and a plain one of ten a pipe table, "
+         "with either",
+         lambda: re.search(r"^\| five\\ +\|", md, re.M)
+         and re.search(r"^\| seven +\| c1 +\|", md, re.M)
+         and re.search(r"^\|-+\|", md, re.M)),
+        ("read back as a book, the Markdown gives the same HTML",
+         lambda: again.returncode == 0 and "Runs agree" in compare.stdout),
+    ]
+
+
 MERGE_BOOK = {
     "ch1.md": ("# Chapter One\n\nIntro.\n\n## First\n\nA. See "
                "[Second](ch1--second.html) and [Two](ch2.html).\n\n"
@@ -8110,6 +8174,7 @@ CASES = [
      case_display_style),
     ("a nested list that starts past one, through Markdown", case_list_starts),
     ("a mark that ends in a line break, through Markdown and AsciiDoc", case_mark_breaks),
+    ("a table of ten columns with a line break in a cell, through Markdown", case_wide_tables),
     ("two editions from one directory", case_editions),
     ("roles, numbering, and a contents page", case_structure),
     ("footnote numbering and placement", case_notes),

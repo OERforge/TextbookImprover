@@ -158,7 +158,9 @@ def unpack(repo_dir, out, slug=None, source_name=None, bank=None, boxes=True):
             fh.write(openstax_conversion(
                 source,
                 *(baked.t(key) if baked.has_string(key) else default
-                  for key, default in (("figure", "Figure"), ("table", "Table")))))
+                  for key, default in (("figure", "Figure"), ("table", "Table"),
+                                       ("folio.access_for_free",
+                                        "Access for free at openstax.org")))))
         # The PDF's page, which that conversion.yaml names.
         if not os.path.exists(os.path.join(out, PDF_LAYOUT)):
             with open(os.path.join(out, PDF_LAYOUT), "w", encoding="utf-8") as fh:

@@ -246,7 +246,8 @@ def openstax_pdf_layout(source, style):
     return "\n".join(head) + "\n\n" + settings
 
 
-def openstax_conversion(source, figure_word="Figure", table_word="Table"):
+def openstax_conversion(source, figure_word="Figure", table_word="Table",
+                        footer="Access for free at openstax.org"):
     """conversion.yaml for an OpenStax book: the footer OpenStax asks
     for, footnotes numbered through each chapter as OpenStax numbers
     them, the PDF's page (PDF_LAYOUT), and the words the book's captions
@@ -256,13 +257,16 @@ def openstax_conversion(source, figure_word="Figure", table_word="Table"):
     The footer is the attribution the book's copyright page asks a copy
     to carry on every page, digital or printed, in its words, and as
     OpenStax's PDFs print it: not a link, since an address as a link's
-    text, on every page, is what some checkers report as a bare URL."""
+    text, on every page, is what some checkers report as a bare URL. Its
+    words are the book's language's, as cookbook prints them on a page of
+    OpenStax's PDF (folio.access_for_free), with the period the license
+    page's English has after them."""
     lines = [f"# Written by {source}; yours to edit.",
              "# OpenStax asks that every page of a book made from theirs say where it",
              "# can be read for free; this footer does that on every page of every",
              "# target, in OpenStax's words.",
              "defaults:",
-             '  footer: "Access for free at openstax.org."',
+             f"  footer: {yaml_string(footer.rstrip('.') + '.')}",
              "  # Footnotes numbered through each chapter, as OpenStax numbers them;",
              "  # each unit is a part in project.yaml, so its chapters number apart.",
              "  notes:",

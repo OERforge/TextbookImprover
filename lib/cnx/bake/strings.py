@@ -2,10 +2,10 @@
 cnx.bake.strings -- the words baking writes into a book: "Figure",
 "Answer Key", a note's title, an end-of-chapter page's title.
 
-These are openstax/cookbook's English and Polish locale strings
-(lib/locales/en.yml and pl.yml, and each recipe's locales/en.yml or
-pl.yml), the ones the ported recipes use, kept as they are there so a
-book reads as OpenStax's does. Copyright (c) 2020 Rice University, under
+These are openstax/cookbook's English, Polish, and Spanish locale
+strings (lib/locales/en.yml, pl.yml, and es.yml, and each recipe's
+locales/en.yml, pl.yml, or es.yml), the ones the ported recipes use,
+kept as they are there so a book reads as OpenStax's does. Copyright (c) 2020 Rice University, under
 the MIT License, whose text is in lib/cnx/LICENSE-cookbook.txt.
 
 Copyright 2026 Robert Szarka
@@ -68,6 +68,11 @@ COMMON = {
     },
     "index": {
         "main": "Index",
+    },
+    # The attribution OpenStax asks every page of a copy to carry, its
+    # license page's words, which cnx.project makes the footer.
+    "folio": {
+        "access_for_free": "Access for free at openstax.org",
     },
 }
 
@@ -1024,6 +1029,9 @@ COMMON_PL = {
         "term": "Skorowidz rzeczowy",
         "foreign": "Skorowidz terminów obcojęzycznych",
     },
+    "folio": {
+        "access_for_free": "Podręcznik dostępny za darmo na openstax.org",
+    },
     "appendix": {
         "nominative": "Dodatek",
         "genitive": "Dodatku",
@@ -1133,6 +1141,270 @@ BY_STYLE_PL = {
 }
 
 
+# lib/locales/es.yml, for a book in Spanish: the strings the ported
+# directions look up, as cookbook's Spanish locale gives them. It has no
+# "problem", which the statistics recipe heads each example's problem
+# with, 389 times in OpenStax's two Spanish statistics books, so that
+# OpenStax's own *Introducción a la estadística* shows "Translation
+# missing: es.problem" there (openstax.org, read 2026-10-27): "Problema"
+# here is TextbookImprover's, not cookbook's. Of the strings it lacks,
+# that's the only one OpenStax's Spanish books reach (each of the five
+# repositories' eleven baked); "section", "preface", and "lo_label_text"
+# stay English.
+COMMON_ES = {
+    "figure": "Figura",
+    "table": "Tabla",
+    "appendix": "Apéndice",
+    "solution": "Solución",
+    "problem": "Problema",
+    "chapter_outline": "Esquema del capítulo",
+    "example": "Ejemplo",
+    "exercise": "Ejercicio",
+    "equation": "Ecuación",
+    "chapter": "Capítulo",
+    "unit": "Unidad",
+    "learning_objectives": "Objetivos de aprendizaje",
+    "stepwise_step_label": "Paso",
+    "references": "Referencias",
+    "answer_key_title": "Clave de respuestas",
+    "eoc_exercises_title": "Ejercicios",
+    "eoc_composite_metadata_title": "Revisión del capítulo",
+    "eoc_solutions_title": "Soluciones",
+    "eoc_suggested_reading": "Sugerencias para estudios adicionales",
+    "eob_index_symbols_group": "Símbolos",
+    "section_exercises": "Sección %{number} ejercicios",
+    "handbook_outline_title": "Esquema",
+    "context_lead_text": "Referirse a ",
+    "eoc": {
+        "glossary": "Términos clave",
+        "key-equations": "Ecuaciones clave",
+        "summary": "Resumen",
+        "further-research": "Investigación adicional",
+        "key-concepts": "Conceptos clave",
+        "references": "Referencias",
+        "solutions": "Soluciones",
+        "section-exercises": "Sección %{number} ejercicios",
+    },
+    "eob": {
+        "references": "Referencias",
+        "reference": "Referencias",
+    },
+    "index": {
+        "main": "Índice",
+    },
+    "folio": {
+        "access_for_free": "Acceso gratis en openstax.org",
+    },
+}
+
+# Each recipe's locales/es.yml, the strings its English has: history's
+# is finance's, but for two strings.
+BY_STYLE_ES = {
+    "anatomy": {
+        "notes": {
+            "interactive": "Enlace Interactivo",
+            "everyday": "Conexión Diaria",
+            "homeostatic": "Desequilibrios Homeostáticos",
+            "disorders": "Trastornos del ...",
+            "career": "Conexión Profesional",
+            "chapter-objectives": "Objetivos del Capítulo",
+            "aging": "El Envejecimiento y el ...",
+        },
+        "eoc": {
+            "interactive-exercise": "Preguntas Sobre Enlaces Interactivos",
+            "multiple-choice": "Preguntas de Revisión",
+            "free-response": "Preguntas de Pensamiento Crítico",
+            "summary": "Revisión del Capítulo",
+            "disorders": "Trastornos del ...",
+            "career": "Conexión Profesional",
+        },
+    },
+    "calculus": {
+        "eoc": {
+            "review-exercises": "Ejercicios de repaso",
+            "chapter-review": "Revisión del capítulo",
+        },
+        "media-2": "Medios",
+        "notes": {
+            "media-2": "Medios",
+            "problem-solving": "Estrategia de resolución de problemas",
+            "project": "Proyecto de estudiante",
+            "theorem": "Teorema",
+            "checkpoint": "Punto de control",
+        },
+    },
+    "chemistry": {
+        "eoc": {
+            "exercises": "Ejercicios",
+        },
+        "notes": {
+            "link-to-learning": "Enlace al aprendizaje",
+            "everyday-life": "La química en la vida cotidiana",
+            "chemist-portrait": "Retrato de un químico",
+            "sciences-interconnect": "Cómo se interconectan las ciencias",
+        },
+    },
+    "computer-science": {
+        "unit": "Parte",
+        "notes": {
+            "think-through": "Piénsalo",
+            "tech-everyday": "Tecnología en la Vida Cotidiana",
+            "concepts-practice": "Conceptos en Práctica",
+            "global-tech": "Problemas Globales de Tecnología",
+            "link-to-learning": "Enlace al Aprendizaje",
+            "industry-spotlight": "Destacado en la Industria",
+        },
+        "eoc": {
+            "review-questions": "Preguntas de Revisión",
+            "conceptual-questions": "Preguntas Conceptuales",
+            "practice-exercises": "Ejercicios de Práctica",
+            "problem-set-a": "Serie de Problemas A",
+            "problem-set-b": "Serie de Problemas B",
+            "thought-provokers": "Provocadores del Pensamiento",
+            "labs-assessments": "Laboratorios",
+            "section-summary": "Resumen",
+        },
+        "exercises": {
+            "your-turn": "Tu Turno",
+            "solution": "Solución",
+            "exercise": "Ejercicio",
+        },
+    },
+    "finance": {
+        "notes": {
+            "think-through": "Piénsalo",
+            "link-to-learning": "Enlace al Aprendizaje",
+            "concepts-practice": "Conceptos en la Práctica",
+        },
+        "eoc": {
+            "cfa-institute": "Instituto CFA",
+            "multiple-choice": "Opción Múltiple",
+            "review-questions": "Preguntas de Revisión",
+            "problem-set": "Problemas",
+            "section-summary": "Resumen",
+            "sources-notes": "Fuentes y Notas",
+            "video-activity": "Video Actividad",
+        },
+    },
+    "history": {
+        "eoc": {
+            "review-questions": "Preguntas de Revisión",
+            "section-summary": "Resumen",
+        },
+    },
+    "microbiology": {
+        "notes": {
+            "clinical-focus": "Enfoque Clínico",
+            "check-your-understanding": "Verifica Tu Comprensión ",
+            "micro-connection": "Micro Conexiones",
+            "link-to-learning": "Enlace Al Aprendizaje",
+            "eye-on-ethics": "Ojo En La Etica",
+            "case-in-point": "Caso En Punto",
+            "disease-profile": "Perfil De Enfermedad",
+        },
+        "eoc": {
+            "multiple-choice": "Selección Multiple",
+            "fill-in-the-blank": "Complete El Espacio En Blanco",
+            "short-answer": "Respuesta Corta",
+            "critical-thinking": "Pensamiento Crítico",
+            "review-questions": "Preguntas De Revisión",
+            "true-false": "Verdadero/Falso",
+            "matching": "Combinación",
+        },
+        "eoc_key_concepts": "Resumen",
+        "eoc_exercises_title": "Revisión Del Capítulo",
+        "eoc_composite_metadata_title": "Preguntas De Revisión",
+    },
+    "political-science": {
+        "eoc": {
+            "review-questions": "Preguntas de Revisión",
+            "suggested-readings": "Lecturas sugeridas",
+        },
+        "notes": {
+            "show-data": "Muéstrame los Datos",
+            "connecting-courses": "Cursos de Conexión",
+            "meet-professional": "Conoce a un Profesional",
+            "changing-political": "El Cambiante Paisaje Político",
+            "what-do": "¿Qué puedo hacer?",
+            "where-engage": "¿Dónde puedo participar?",
+            "media-video": "Video",
+            "media-podcast": "Podcast",
+        },
+    },
+    "precalculus": {
+        "section_exercises": "%{number} Ejercicios de sección",
+        "eoc": {
+            "practice-test": "Examen de práctica",
+            "review-exercises": "Ejercicios de repaso",
+            "section-exercises": "%{number} Ejercicios de sección",
+            "exercises": "Ejercicios",
+            "chapter-review": "Revisión del capítulo",
+        },
+        "notes": {
+            "try": "Inténtelo ",
+            "how-to-notitle": "Cómo",
+            "qa": "Preguntas y respuestas",
+            "media-notitle": "Media",
+        },
+    },
+    "precalculus-coreq": {
+        "section_exercises": "%{number} Ejercicios de sección",
+        "coreq-skills": "Habilidades de correquisito",
+        "eoc": {
+            "practice-test": "Examen de práctica",
+            "review-exercises": "Ejercicios de repaso",
+            "section-exercises": "%{number} ejercicios de sección",
+            "exercises": "Ejercicios",
+            "chapter-review": "Revisión del capítulo",
+        },
+        "notes": {
+            "try": "Inténtelo ",
+            "how-to-notitle": "Cómo",
+            "qa": "Q&A",
+            "media-notitle": "Media",
+        },
+    },
+    "statistics": {
+        "eoc_free_response": "Tarea para la casa",
+        "eoc": {
+            "summary": "Repaso del capítulo",
+            "formula-review": "Repaso de fórmulas",
+            "practice": "Práctica",
+            "bring-together-homework": "Resúmalo todo: tarea para la casa",
+            "bring-together-exercises": "Uniéndolo todo: Práctica",
+            "free-response": "Tarea para la casa",
+            "solutions": "Soluciones",
+            "stats-labs": "Laboratorios de estadística",
+            "excel-labs": "Laboratorios de Excel",
+        },
+        "notes": {
+            "try": "Inténtelo ",
+            "lab": "Laboratorio de estadística ",
+            "collab": "Ejercicio colaborativo",
+            "calculator": "Uso de las calculadoras TI-83, 83+, 84, 84+",
+            "chapter-objectives": "Objetivos del capítulo",
+        },
+    },
+    "u-physics": {
+        "notes": {
+            "check-understanding": "Compruebe Lo Aprendido ",
+            "media-2": "Interactivo",
+            "problem-solving": "Estrategia de Resolución De Problemas",
+        },
+        "eoc": {
+            "review-conceptual-questions": "Preguntas Conceptuales",
+            "review-problems": "Problemas",
+            "review-additional-problems": "Problemas Adicionales",
+            "review-challenge": "Problemas De Desafío",
+            "chapter-review": "Revisión Del Capítulo",
+            "key-concepts": "Resumen",
+            "solutions": "Soluciones",
+        },
+        "eoc_key_concepts": "Resumen",
+    },
+}
+
+
 def merged(base, extra):
     out = copy.deepcopy(base)
     for key, value in extra.items():
@@ -1149,12 +1421,16 @@ ALIASES = {"ap-physics-2e": "ap-physics", "otto-book": "chemistry"}
 
 def for_style(style, language="en"):
     """The strings for a book of the style: English, or for a book in
-    Polish, Polish where cookbook's Polish locale has a string and
-    English where it hasn't (cookbook would write "translation
-    missing")."""
+    Polish or Spanish, the language's where cookbook's locale for it has
+    a string, the recipe's before the common ones, as cookbook looks
+    them up, and English where it hasn't (cookbook would write
+    "translation missing")."""
     style = ALIASES.get(style, style)
     strings = merged(COMMON, BY_STYLE.get(style, {}))
     if language == "pl":
         strings = merged(strings, merged(COMMON_PL, BY_STYLE_PL.get(style,
+                                                                   {})))
+    elif language == "es":
+        strings = merged(strings, merged(COMMON_ES, BY_STYLE_ES.get(style,
                                                                    {})))
     return strings

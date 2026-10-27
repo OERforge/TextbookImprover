@@ -1972,6 +1972,9 @@ EXPANSIONS = {"\u2026": "...", "\u2033": "\u2032\u2032", "\u2122": "TM"}
 POLISH_LETTERS = {"ą": ("a", 1), "ć": ("c", 1), "ę": ("e", 1),
                   "ł": ("l", 1), "ń": ("n", 1), "ó": ("o", 1),
                   "ś": ("s", 1), "ź": ("z", 1), "ż": ("z", 2)}
+# And CLDR's Spanish: ñ a letter of its own after n (&N<ñ), as
+# twitter_cldr's tailoring for es gives it.
+OWN_LETTERS = {"pl": POLISH_LETTERS, "es": {"ñ": ("n", 1)}}
 
 
 def collation_key(text, language="en"):
@@ -1980,15 +1983,16 @@ def collation_key(text, language="en"):
     punctuation, and symbols before digits, in CLDR's order, digits
     before letters; then accents, then lowercase before uppercase. It
     orders the 12,934 terms of eight of OpenStax's repositories as
-    twitter_cldr does. For a book in Polish, CLDR's Polish collation,
-    which twitter_cldr gives cookbook for one: ą after a, ł after l, and
-    the like, ż after ź."""
+    twitter_cldr does. For a book in Polish or Spanish, CLDR's collation
+    for the language, which twitter_cldr gives cookbook for one: in
+    Polish, ą after a, ł after l, and the like, ż after ź; in Spanish, ñ
+    after n."""
     primary, secondary, tertiary = [], [], []
-    # A Polish letter written as a letter and an accent is one letter.
-    source = unicodedata.normalize("NFC", text) if language == "pl" \
-        else text
+    letters_own = OWN_LETTERS.get(language, {})
+    # A letter of its own written as a letter and an accent is one letter.
+    source = unicodedata.normalize("NFC", text) if letters_own else text
     for ch in "".join(EXPANSIONS.get(c, c) for c in source):
-        own = POLISH_LETTERS.get(ch.lower()) if language == "pl" else None
+        own = letters_own.get(ch.lower())
         if own is not None:
             primary.append((2,) + own)
             secondary.append("")

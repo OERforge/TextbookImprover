@@ -1033,6 +1033,211 @@ effect="italics">myśli</emphasis></para></meaning></definition>
          lambda: re.search(r"<h2>L</h2>.*lęk.*<h2>Ł</h2>.*łuk odruchowy.*"
                            r"<h2>P</h2>.*psychologia ewolucyjna",
                            index("skorowidz-rzeczowy"), re.S)),
+        ("its footer is OpenStax's in Polish, cookbook's words on a page of its PDF",
+         lambda: '  footer: "Podręcznik dostępny za darmo na openstax.org."\n'
+         in read(out, "conversion.yaml")),
+    ]
+
+
+# A book in Spanish --------------------------------------------------------
+
+def case_spanish(work):
+    """A book in Spanish baked as statistics, the style of OpenStax's
+    two Spanish statistics books, with cookbook's Spanish words: the
+    common ones, statistics', and the one cookbook lacks, "problem"."""
+    repo = os.path.join(work, "osbooks-introduccion-estadistica")
+    write(os.path.join(repo, "META-INF", "books.xml"), """<container
+ xmlns="https://openstax.org/namespaces/book-container" version="1">
+<book slug="introduccion-estadistica" style="statistics"
+ href="../collections/introduccion-estadistica.collection.xml"/></container>""")
+    write(os.path.join(repo, "collections", "introduccion-estadistica.collection.xml"),
+          COLLECTION.format(title="Introducción a la estadística",
+                            slug="introduccion-estadistica",
+                            uuid="55555555-3333-4333-8444-555555555555",
+                            content="""
+<col:subcollection><md:title>Muestreo y datos</md:title>
+<col:content><col:module document="m60001"/><col:module document="m60002"/>
+</col:content></col:subcollection>""").replace(
+              "<md:language>en</md:language>", "<md:language>es</md:language>"))
+    module(repo, "m60001", "Introducción", """
+<para id="p1">Empezamos.</para>""", cls="introduction")
+    module(repo, "m60002", "Definiciones", """
+<figure id="f1"><media alt="Un dado"><image mime-type="image/png"
+src="../../media/one.png"/></media><caption>Un dado.</caption></figure>
+<table id="t1" summary="Dos números"><title>Datos</title><tgroup cols="2"><tbody>
+<row><entry>1</entry><entry>2</entry></row></tbody></tgroup></table>
+<para id="p1">La <link target-id="f1"/> y la <link target-id="t1"/>.</para>
+<example id="e1"><exercise id="ex1"><problem id="pr1"><para id="pp1">¿Cuál es la
+media?</para></problem><solution id="so1"><para id="sp1">Es 1,5.</para></solution>
+</exercise></example>
+<note id="n1" class="statistics try"><exercise id="ex2"><problem id="pr2"><para
+id="pp2">Calcule la mediana.</para></problem><solution id="so2"><para id="sp2">Es
+1,5.</para></solution></exercise></note>
+<note id="n2" class="statistics collab"><label/><para id="cp1">Intente este
+ejercicio en clase.</para></note>
+<section id="s1" class="summary"><title>Definiciones</title><para id="sm1">Un
+resumen.</para></section>
+<section id="s2" class="practice"><exercise id="ex3"><problem id="pr3"><para
+id="pp3">¿Qué es una muestra?</para></problem><solution id="so3"><para id="sp3">Un
+subconjunto.</para></solution></exercise></section>
+""", glossary="""<glossary><definition id="d1"><term>ordinal</term><meaning
+id="dm1">Un nivel.</meaning></definition><definition id="d2"><term>ñandú</term><meaning
+id="dm2">Un ave.</meaning></definition><definition id="d3"><term>nube</term><meaning
+id="dm3">Un cúmulo.</meaning></definition><definition id="d4"><term>nominal</term><meaning
+id="dm4">Otro nivel.</meaning></definition><definition id="d5"><term>año</term><meaning
+id="dm5">Doce meses.</meaning></definition><definition id="d6"><term>anzuelo</term><meaning
+id="dm6">Un gancho.</meaning></definition></glossary>""")
+    os.makedirs(os.path.join(repo, "media"), exist_ok=True)
+    with open(os.path.join(repo, "media", "one.png"), "wb") as fh:
+        fh.write(ONE_PIXEL)
+    out = os.path.join(work, "estadistica")
+    result = unpack(repo, out)
+    section = read(out, "1-1-definiciones.html")
+
+    def title_of(name):
+        match = re.search(r"<h1>(.*?)</h1>", read(out, name))
+        return match.group(1) if match else None
+    return [
+        ("a book in Spanish unpacks, its figure a Figura and its table a Tabla, as "
+         "links to them name them",
+         lambda: result.returncode == 0
+         and '<span class="os-label">Figura 1.1</span>' in section
+         and '<span class="os-label">Tabla 1.1</span>' in section
+         and 'La <a href="#f1">Figura 1.1</a> y la <a href="#t1">Tabla 1.1</a>.' in section),
+        ("and its captions' own labels are read by the Spanish words, its footer "
+         "OpenStax's in Spanish, cookbook's words on a page of its PDF",
+         lambda: '  captions:\n    figure_prefixes: ["Figura"]\n'
+         '    table_prefixes: ["Tabla"]\n' in read(out, "conversion.yaml")
+         and '  footer: "Acceso gratis en openstax.org."\n' in read(out, "conversion.yaml")),
+        ("an example is an Ejemplo, its problem headed Problema, which cookbook has no "
+         "Spanish for, and its solution Solución",
+         lambda: "<h2>Ejemplo 1.1 </h2>" in section
+         and '<div class="os-problem" id="pr1"><h3>Problema</h3>' in section
+         and '<div class="os-solution" id="so1"><h3>Solución</h3>' in section),
+        ("statistics' notes are in its Spanish, Inténtelo and Ejercicio colaborativo",
+         lambda: "<h2>Inténtelo 1.1</h2>" in section
+         and "<h2>Ejercicio colaborativo</h2>" in section),
+        ("the chapter's pages are titled and named in Spanish",
+         lambda: [title_of(name) for name in (
+             "1-terminos-clave.html", "1-repaso-del-capitulo.html", "1-practica.html",
+             "1-soluciones.html")]
+         == ["Términos clave", "Repaso del capítulo", "Práctica", "Soluciones"]
+         and '- title: "Capítulo 1 Muestreo y datos"' in read(out, "project.yaml")),
+        ("the glossary is in Spanish order, ñ after n, in a word as at its start",
+         lambda: re.findall(r"</span>([^<]+)</dt>", read(out, "1-terminos-clave.html"))
+         == ["anzuelo", "año", "nominal", "nube", "ñandú", "ordinal"]),
+    ]
+
+
+# Cookbook's Spanish words as the port has them -----------------------------
+
+def case_spanish_strings(work):
+    """Cookbook's Spanish words, as case_cookbook_words checks them."""
+    return case_cookbook_words("es", "Spanish")
+
+
+def case_polish_strings(work):
+    """Cookbook's Polish words, as case_cookbook_words checks them."""
+    return case_cookbook_words("pl", "Polish")
+
+
+# The port's words for a key cookbook has none for, in a language: the
+# heading the statistics recipe gives an example's problem, which shows
+# "Translation missing: es.problem" in OpenStax's Introducción a la
+# estadística.
+NOT_COOKBOOKS = {"es": {("problem",)}, "pl": set()}
+
+
+def case_cookbook_words(language, name):
+    """The port's words in the language against cookbook's. A Spanish word
+    is for a key the port's English has, which a recipe looks up; Polish
+    has keys of its own, a word's grammatical cases and its recipes' (a
+    pl- style), which only cookbook can check. With CNX_COOKBOOK naming a
+    clone of openstax/cookbook, each is cookbook's (lib/locales/LANGUAGE.yml
+    and each recipe's locales/LANGUAGE.yml), its &amp; read as &, but those
+    of NOT_COOKBOOKS, which cookbook lacks; and each of cookbook's that the
+    port's English has is ported, and each of a recipe's in the language
+    alone."""
+    import html
+    from cnx.bake import strings as S
+    common, by_style = {"es": (S.COMMON_ES, S.BY_STYLE_ES),
+                        "pl": (S.COMMON_PL, S.BY_STYLE_PL)}[language]
+
+    def paths(d, prefix=()):
+        for key, value in d.items():
+            if isinstance(value, dict):
+                yield from paths(value, prefix + (key,))
+            else:
+                yield prefix + (key,), value
+
+    def has(d, path):
+        for part in path:
+            if not isinstance(d, dict) or part not in d:
+                return False
+            d = d[part]
+        return not isinstance(d, dict)
+    english_any = [S.COMMON] + list(S.BY_STYLE.values())
+    checks = []
+    if language == "es":
+        orphans = [".".join(p) for p, _ in paths(common)
+                   if not any(has(d, p) for d in english_any)]
+        for style, extra in by_style.items():
+            english = S.merged(S.COMMON, S.BY_STYLE.get(style, {}))
+            orphans += [f"{style}: " + ".".join(p) for p, _ in paths(extra)
+                        if not has(english, p)]
+        checks.append((f"every {name} word is for a key the English has",
+                       lambda: orphans == []))
+    cookbook = os.environ.get("CNX_COOKBOOK")
+    if not cookbook:
+        print(f"  skip  set CNX_COOKBOOK to a clone of openstax/cookbook to compare the "
+              f"{name} words with its own")
+        return checks
+    import yaml
+    differ, missing = [], []
+
+    def compare(path, ours, used):
+        """Cookbook's file at path against ours, used saying whether the
+        port looks a key up."""
+        with open(path, encoding="utf-8") as fh:
+            theirs = yaml.safe_load(fh)[language]
+        for key, value in paths(theirs):
+            value = html.unescape(str(value))
+            if has(ours, key):
+                got = ours
+                for part in key:
+                    got = got[part]
+                if got != value:
+                    differ.append((path, ".".join(key), got, value))
+            elif used(key):
+                missing.append((path, ".".join(key)))
+        for key, _ in paths(ours):
+            if not has(theirs, key) and key not in NOT_COOKBOOKS[language]:
+                differ.append((path, ".".join(key), "not cookbook's"))
+    compare(os.path.join(cookbook, "lib", "locales", language + ".yml"), common,
+            lambda key: any(has(d, key) for d in english_any))
+    recipes = os.path.join(cookbook, "lib", "recipes")
+    own = sorted(r for r in os.listdir(recipes)
+                 if os.path.exists(os.path.join(recipes, r, "locales", language + ".yml")))
+    for recipe in own:
+        english = S.merged(S.COMMON, S.BY_STYLE.get(recipe, {}))
+        # A recipe in the language alone (pl-economics) looks up its own.
+        alone = recipe not in S.BY_STYLE
+        compare(os.path.join(recipes, recipe, "locales", language + ".yml"),
+                by_style.get(recipe, {}),
+                lambda key, english=english, alone=alone: alone or has(english, key))
+
+    def none(found):
+        if found:
+            print("  " + repr(found[:5]))
+        return not found
+    but = ", but " + ", ".join(".".join(k) + "'s" for k in sorted(NOT_COOKBOOKS[language])) \
+        if NOT_COOKBOOKS[language] else ""
+    return checks + [
+        (f"each recipe of cookbook's with {name} words has them here",
+         lambda: own and sorted(by_style) == own),
+        (f"each {name} word is cookbook's{but}", lambda: none(differ)),
+        ("and each of cookbook's that the port looks up is here",
+         lambda: none(missing)),
     ]
 
 
@@ -2399,6 +2604,7 @@ def case_collation(work):
              "a_b", "a b", "a,b", "(a)", "2nd", "éclair", "eclair",
              "Ecole", "“quoted”", "a/b", "a&b"]
     ordered = sorted(words, key=collation_key)
+    spanish = ["oso", "Ñandú", "ñandú", "nube", "año", "anzuelo"]
     return [
         ("space and punctuation sort before digits, digits before letters, "
          "in CLDR's order",
@@ -2421,6 +2627,15 @@ def case_collation(work):
          lambda: [_group_of(w) for w in ("α-helix", "éclair", "Æther", "2nd",
                                          "zebra", "łódź")]
          == [None, "E", "Ae", None, "Z", "L"]),
+        ("a book in Spanish sorts ñ after n, a letter of its own, written as n and a "
+         "tilde or as one character, Ñ after ñ, where other books sort it as n",
+         lambda: sorted(spanish, key=lambda w: collation_key(w, "es"))
+         == ["anzuelo", "año", "nube", "ñandú", "Ñandú", "oso"]
+         and collation_key("an\u0303o", "es") == collation_key("año", "es")
+         and sorted(spanish, key=collation_key)
+         == ["año", "anzuelo", "ñandú", "Ñandú", "nube", "oso"]),
+        ("and lists a term that starts with ñ under N, as cookbook groups it",
+         lambda: _group_of("ñandú", "es") == "N"),
     ]
 
 
@@ -2816,6 +3031,9 @@ CASES = [
     ("exercises from OpenStax's exercise bank", case_bank),
     ("Organic Chemistry's problems and pages", case_organic),
     ("a book in Polish", case_polish),
+    ("a book in Spanish", case_spanish),
+    ("cookbook's Spanish words", case_spanish_strings),
+    ("cookbook's Polish words", case_polish_strings),
     ("a chapter's review, a group of its own", case_review),
     ("a nursing book's references, gathered by chapter", case_references),
     ("a math book, baked as College Algebra is", case_precalculus),

@@ -34,6 +34,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
 import re
+import xml.etree.ElementTree as ElementTree
 from html.parser import HTMLParser
 
 # What MathML draws larger in display style: an integral, a sum, a product,
@@ -169,6 +170,53 @@ class _Formulas(HTMLParser):
             self.opened = None
 
 
+class _Tree(HTMLParser):
+    """A formula's markup, its math element and what that holds, as a tree
+    of the standard library's elements, read as _Formulas reads the page:
+    each tag's and attribute's name in lower case, as an HTML parser gives
+    it, a character's reference or entity decoded, and an element left
+    open closed by its parent's end tag. So marking a page needs no HTML
+    parser installed, html5lib or lxml, without which a page whose formula
+    set display style had stopped the run ("Reading saved web pages needs
+    an HTML parser"), the setting on or off."""
+
+    def __init__(self, markup):
+        super().__init__(convert_charrefs=True)
+        self.root, self.open = None, []
+        self.feed(markup)
+        self.close()
+
+    def handle_starttag(self, tag, attrs):
+        element = ElementTree.Element(tag, {key: value or "" for key, value in attrs})
+        if self.open:
+            self.open[-1].append(element)
+        elif self.root is None:
+            self.root = element
+        else:
+            return
+        self.open.append(element)
+
+    def handle_startendtag(self, tag, attrs):
+        depth = len(self.open)
+        self.handle_starttag(tag, attrs)
+        del self.open[depth:]
+
+    def handle_endtag(self, tag):
+        for at in range(len(self.open) - 1, -1, -1):
+            if self.open[at].tag == tag:
+                del self.open[at:]
+                return
+
+    def handle_data(self, data):
+        if not self.open:
+            return
+        element = self.open[-1]
+        if len(element):
+            element[-1].tail = (element[-1].tail or "") + data
+        else:
+            element.text = (element.text or "") + data
+
+
 def marked_in_text(markup):
     """(markup, how many): a page's markup with each formula in running
     text that sets in display style something display style changes
@@ -177,18 +225,16 @@ def marked_in_text(markup):
     style where math.display_style_in_text says to. A display formula
     (display="block") is in display style anyway. The markup is edited as
     text, a formula at a time, each found as an HTML parser finds it
-    (_Formulas), and the rest left as it was."""
+    (_Formulas) and read so (_Tree), and the rest left as it was."""
     if "displaystyle" not in markup:
         return markup, 0
-    import htmlparse as hp
     out, last, count = [], 0, 0
     for start, end in _Formulas(markup).spans:
         whole = markup[start:end]
         if BLOCK.search(whole[:whole.index(">") + 1]) or "displaystyle" not in whole \
                 or MARKED.search(markup[max(0, start - 80):start]):
             continue
-        math = next((e for e in hp.parse("<body>" + whole + "</body>").iter()
-                     if name(e) == "math"), None)
+        math = _Tree(whole).root
         if math is None or not in_display(math):
             continue
         out.append(markup[last:start])

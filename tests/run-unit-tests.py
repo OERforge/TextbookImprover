@@ -2739,7 +2739,8 @@ def check_display_style_in_text():
     """lib/mathstyle.py: a formula in running text an HTML page sets in
     display style, where display style changes it, put in a span of class
     displaystyle-text for math-repair.lua; the rest of the page as it was,
-    a comment, an attribute, and a script whatever they hold."""
+    a comment, an attribute, and a script whatever they hold; and no HTML
+    parser needed to read the formula."""
     import mathstyle
     m = '<math xmlns="http://www.w3.org/1998/Math/MathML">%s</math>'
     on = '<mstyle displaystyle="true">%s</mstyle>'
@@ -2760,6 +2761,19 @@ def check_display_style_in_text():
 
     def wrapped(formula):
         return '<span class="displaystyle-text">%s</span>' % formula
+
+    def without_parser():
+        """The page marked the same with no HTML parser installed, where
+        reading each formula with one (htmlparse) had stopped the run."""
+        import htmlparse
+        kept = htmlparse.BACKEND
+        htmlparse.BACKEND = None
+        try:
+            return mathstyle.marked_in_text(page) == (out, count)
+        except SystemExit:
+            return False
+        finally:
+            htmlparse.BACKEND = kept
     return [
         ("a fraction, a sum's limits, and a formula whose math element says so are marked",
          lambda: count == 3 and all(wrapped(f) in out for f in (fraction, sum_, own))),
@@ -2786,6 +2800,8 @@ def check_display_style_in_text():
                                     '<p><script type="math/mml">%s</script> then ' % fraction))),
         ("and the page as it marks it is marked no more",
          lambda: mathstyle.marked_in_text(out) == (out, 0)),
+        ("and it's marked the same with no HTML parser installed, html5lib or lxml",
+         without_parser),
     ]
 
 

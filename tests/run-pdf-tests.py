@@ -386,6 +386,12 @@ address, <https://example.org/fill____in>, and a picture's description:
 # And boxes that open a list's item, a quotation, and a definition, whose
 # label LaTeX sets untagged from \everypar, which a box's rule had taken
 # over.
+# A drawing in LaTeX's picture mode, a circle asked for at 80 points,
+# which LaTeX's lcircle10 font draws at 40, its largest, and pict2e at 80
+# with a path: in the preamble book, drawn with pict2e (picture_paths, on
+# by default), and in the untagged book, whose target turns it off.
+PICTURE = ("```{=latex}\n\\setlength{\\unitlength}{1pt}\\begin{picture}(90,90)"
+           "\\put(45,45){\\circle{80}}\\end{picture}\n```\n")
 UNTAGGED_PAGE = r"""# Figures
 
 Three figures whose captions carry their own labels, the second too
@@ -439,7 +445,10 @@ A term
 [^u1]: The first note, in the text.
 [^u2]: The second note, in a labeled caption.
 [^u3]: The third note, in a caption.
-"""
+
+A circle in picture mode:
+
+""" + PICTURE
 
 # Footnotes where LaTeX numbered them wrong, in a book built tagged and
 # untagged, its notes numbered through its two chapters: in a figure's
@@ -810,8 +819,8 @@ def build_untagged(work):
     with open(os.path.join(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
         fh.write("defaults:\n  captions:\n    figure_prefixes: [Figure, Exhibit]\n"
                  "  images:\n    downsample: 2\n"
-                 "targets:\n  pdf:\n    format: pdf\n    pdf:\n      standard: []\n"
-                 "      metadata: meta.yaml\n")
+                 "targets:\n  pdf:\n    format: pdf\n    picture_paths: \"off\"\n"
+                 "    pdf:\n      standard: []\n      metadata: meta.yaml\n")
     converted = subprocess.run(["python3", os.path.join(BIN, "convert.py")], cwd=work,
                                capture_output=True, text=True, stdin=subprocess.DEVNULL)
     return (os.path.join(work, "pdf", "org.example.untagged.pdf"),
@@ -1120,7 +1129,7 @@ PREAMBLE_META = ("---\ntoc: false\nmathfont: IBMPlexMath-Regular.otf\n"
                  "    \\usepackage[margin=1.5in]{geometry}\n"
                  "    \\usepackage[doublespacing]{setspace}\n    ```\n---\n")
 PREAMBLE_TWO = ("# Two\n\nThe second chapter.\n\n## Its section\n\nThe section, and its "
-                "formula, $x + y = z$, and its code, `x = y`.\n\n"
+                "formula, $x + y = z$, and its code, `x = y`.\n\n" + PICTURE + "\n"
                 "### Its subsection\n\nThe subsection.\n")
 
 
@@ -2840,6 +2849,12 @@ def preamble_checks(preamble_path, preamble_source, preamble_said):
          "the metadata file",
          lambda: "\\usepackage[margin=1.5in]{geometry}" in preamble_source
          and "Could not find" not in preamble_said and "does not exist" not in preamble_said),
+        ("a picture in a page's LaTeX, a circle asked for at 80 points, is drawn with a "
+         "path by pict2e, four curves, no glyph of LaTeX's lcircle10 font, which maps to no "
+         "character",
+         lambda: reader is not None and "LCIRCLE10" not in pdftext.base_fonts(preamble_path)
+         and not {"LINE10", "LINEW10"} & pdftext.base_fonts(preamble_path)
+         and sorted(pdftext.curves(preamble_path).values()) == [4]),
         ("a math font, and a monospaced face with fallbacks of its own, that the file "
          "names, and no face for the text, are scaled to the default's text face: "
          "formulas at the text's size, not a sixth smaller, and Latin Modern Mono, its "
@@ -4232,6 +4247,10 @@ def checks(work, jobs=1):
          and says(untagged_text, "Boxed words at a definition")),
         # Pandoc reads the PDF's images through its resource path, where
         # the run puts its scaled copies first.
+        ("with picture_paths off, a picture in a page's LaTeX is drawn with LaTeX's own "
+         "lcircle10 glyphs, as before pict2e drew picture mode in every PDF",
+         lambda: os.path.exists(untagged_path)
+         and "LCIRCLE10" in pdftext.base_fonts(untagged_path)),
         ("images.downsample: the PDF carries an image scaled down to twice the width it's "
          "shown at, and the run says so",
          lambda: (200, 100) in image_pixels(untagged_path)
@@ -4563,7 +4582,7 @@ def checks(work, jobs=1):
                      for command in ("ul", "st", "hl"))),
         # The cancel package draws its strokes with picture mode's \line,
         # glyphs of LaTeX's line10 font, which have no map to Unicode;
-        # with pict2e (latexbuild's CANCEL_STROKES) they're paths.
+        # with pict2e (latexbuild's PICTURE_PATHS) they're paths.
         ("a formula's term struck out is drawn as a line, one for each stroke, and none "
          "of LaTeX's line10 font's glyphs, which have no map to Unicode, is in the PDF, "
          "tagged or not",
@@ -4572,7 +4591,7 @@ def checks(work, jobs=1):
          and not {"LINE10", "LINEW10"} & (pdftext.base_fonts(notes_path)
                                           | pdftext.base_fonts(notes_plain))),
         # pict2e defines an \arc of its own, which a \newcommand of the
-        # book's in its text stopped on ("already defined"); CANCEL_STROKES
+        # book's in its text stopped on ("already defined"); PICTURE_PATHS
         # takes it away again at \begin{document}.
         ("pict2e, loaded for a term struck out, leaves the book its own command of a "
          "name pict2e has, \\arc, defined in its text, tagged or not",

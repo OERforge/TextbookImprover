@@ -489,6 +489,21 @@ def diagonal_strokes(path):
     return found
 
 
+def curves(path):
+    """{page index: how many curved segments its own content draws}, each
+    of a path's Bezier curves (c, v, y): pict2e draws a circle as four, a
+    quarter each, and an oval's corners so, where LaTeX's own picture mode
+    draws them as glyphs of its lcircle10 font."""
+    found = {}
+    with pikepdf.open(path) as pdf:
+        for n, page in enumerate(pdf.pages):
+            count = sum(1 for _operands, op in pikepdf.parse_content_stream(page)
+                        if str(op) in ("c", "v", "y"))
+            if count:
+                found[n] = count
+    return found
+
+
 def base_fonts(path):
     """The base font names a PDF's pages and their form XObjects draw with,
     a subset's tag taken off (ABCDEF+LINE10 is LINE10)."""

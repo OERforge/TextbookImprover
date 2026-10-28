@@ -1462,7 +1462,7 @@ def case_book_pdf(work):
         """A term the book strikes out with cancel, in its PDF from its own
         LaTeX and from its pages: two strokes drawn as paths, no glyph of
         the line10 font, and the book's own \\arc, a name pict2e has.
-        texremediate adds latexbuild.CANCEL_STROKES to the copy."""
+        texremediate adds latexbuild.PICTURE_PATHS to the copy."""
         try:
             import pikepdf  # noqa: F401
         except ImportError:
@@ -1502,8 +1502,9 @@ def case_book_pdf(work):
 def case_struck_out(work):
     """A term struck out with cancel, in the pieces no other book here
     reaches: a tagged copy's report, a copy made from a copy, a book that
-    loads pict2e itself, a command of a pict2e name made at \\begin{document},
-    and a document with no cancel."""
+    loads pict2e itself, a command of a pict2e name made at \\begin{document};
+    and a picture with no cancel, drawn with paths unless picture_paths is
+    off (latexbuild.PICTURE_PATHS)."""
     sys.path.insert(0, os.path.join(ROOT, "lib"))
     import latexbuild
     import texremediate
@@ -1518,6 +1519,21 @@ def case_struck_out(work):
     result = convert(work)
     said = result.stdout + result.stderr
     copy = os.path.join(work, "tagged", "notes.tex")
+    # A book with a picture and no cancel, copied with picture_paths as it
+    # is by default and off: pict2e in the first copy, the run saying so,
+    # and none in the second.
+    pictures = os.path.join(work, "pictures")
+    os.makedirs(pictures)
+    with open(os.path.join(pictures, "drawn.tex"), "w", encoding="utf-8") as fh:
+        fh.write("\\documentclass{article}\n\\begin{document}\nA circle, "
+                 "\\begin{picture}(9,9)\\put(4,4){\\circle{8}}\\end{picture}.\n"
+                 "\\end{document}\n")
+    with open(os.path.join(pictures, "conversion.yaml"), "w") as fh:
+        fh.write("targets:\n  paths:\n    format: source\n    tagging: \"on\"\n"
+                 "  fonts:\n    format: source\n    tagging: \"on\"\n"
+                 "    picture_paths: \"off\"\n")
+    drawn = convert(pictures)
+    drawn_said = drawn.stdout + drawn.stderr
 
     def build(name, text):
         """(LaTeX's exit status, the PDF's path, its text) for text, built
@@ -1545,7 +1561,7 @@ def case_struck_out(work):
 
     def copy_of_copy():
         """The tagged copy made again from itself, as a copy laid over the
-        book's folder is: CANCEL_STROKES once, and it builds, its term
+        book's folder is: PICTURE_PATHS once, and it builds, its term
         struck out a path and the book's own \\cbezier its own."""
         missing = tools()
         if missing:
@@ -1569,21 +1585,86 @@ def case_struck_out(work):
         import pdftext
         status, pdf, _ = build("own", (
             "\\documentclass{article}\n\\usepackage{cancel}\n\\usepackage{pict2e}\n"
-            + latexbuild.CANCEL_STROKES + "\\begin{document}\n$\\cancel{3}$\n"
+            + latexbuild.PICTURE_PATHS + "\\begin{document}\n$\\cancel{3}$\n"
             "\\begin{picture}(40,20)\\cbezier(0,0)(10,20)(30,20)(40,0)\\end{picture}\n"
             "\\end{document}\n"))
         return status == 0 and len(pdftext.diagonal_strokes(pdf)) == 1
 
-    def without_cancel():
-        """A document with no cancel loads no pict2e: \\maxovalrad, which
-        pict2e defines and leaves, isn't defined."""
+    def own_names():
+        """A document's own \\buttcap and \\maxovalrad, which pict2e makes
+        too, kept beside it: its \\circle, \\oval, and \\circle* drawn
+        with pict2e's \\buttcap all the same, as paths, four curves each,
+        the \\oval reading the document's \\maxovalrad. A \\buttcap of
+        the document's own had been replaced by pict2e's, and a
+        \\maxovalrad had stopped LaTeX ("already defined")."""
         missing = tools()
         if missing:
             return skip(missing)
-        status, _, found = build("none", (
-            "\\documentclass{article}\n" + latexbuild.CANCEL_STROKES + "\\begin{document}\n"
-            "\\ifdefined\\maxovalrad pict2e loaded\\else no pict2e\\fi\n\\end{document}\n"))
-        return status == 0 and "no pict2e" in found
+        import pdftext
+        status, pdf, found = build("own-names", (
+            "\\documentclass{article}\n\\newcommand{\\buttcap}{BUTT}\n"
+            "\\newcommand{\\maxovalrad}{5pt}\n" + latexbuild.PICTURE_PATHS
+            + "\\begin{document}\nOwn: \\buttcap, \\maxovalrad.\n\n"
+            "\\setlength{\\unitlength}{1pt}\\begin{picture}(100,60)\\put(30,30){\\circle{40}}"
+            "\\put(70,30){\\oval(30,20)}\\put(90,30){\\circle*{6}}\\end{picture}\n"
+            "\\end{document}\n"))
+        return status == 0 and "Own: BUTT, 5pt." in found and pdftext.curves(pdf) == {0: 12}
+
+    # A circle asked for at 80 points, which LaTeX's lcircle10 draws at
+    # 40, its largest, and pict2e at 80, as a path; \\maxovalrad, which
+    # pict2e defines and leaves, says whether it's loaded.
+    picture = ("\\begin{document}\n\\ifdefined\\maxovalrad pict2e loaded\\else no pict2e"
+               "\\fi\n\n\\setlength{\\unitlength}{1pt}\\begin{picture}(90,90)"
+               "\\put(45,45){\\circle{80}}\\end{picture}\n\\end{document}\n")
+
+    def without_cancel(paths):
+        """A document with no cancel loads pict2e, which draws its circle
+        with a path, and none with PICTURE_FONTS before it (picture_paths
+        off), LaTeX drawing the circle with lcircle10's glyphs."""
+        missing = tools()
+        if missing:
+            return skip(missing)
+        import pdftext
+        status, pdf, found = build("paths" if paths else "fonts", (
+            "\\documentclass{article}\n" + ("" if paths else latexbuild.PICTURE_FONTS)
+            + latexbuild.PICTURE_PATHS + picture))
+        fonts = pdftext.base_fonts(pdf) if status == 0 else set()
+        return status == 0 and (("pict2e loaded" in found and "LCIRCLE10" not in fonts)
+                                if paths else
+                                ("no pict2e" in found and "LCIRCLE10" in fonts))
+
+    def fonts_with_cancel():
+        """With PICTURE_FONTS and cancel, pict2e is loaded for the struck-out
+        term, as before, and draws the picture too."""
+        missing = tools()
+        if missing:
+            return skip(missing)
+        import pdftext
+        status, pdf, found = build("fonts-cancel", (
+            "\\documentclass{article}\n\\usepackage{cancel}\n" + latexbuild.PICTURE_FONTS
+            + latexbuild.PICTURE_PATHS + picture.replace(
+                "\\end{document}", "$\\cancel{3}$\n\\end{document}")))
+        return status == 0 and "pict2e loaded" in found \
+            and len(pdftext.diagonal_strokes(pdf)) == 1 and "LCIRCLE10" not in pdftext.base_fonts(pdf)
+
+    def tagged_copies():
+        """What a tagged copy of a book gets (texremediate.tag): pict2e for
+        a picture, counted to say so, with picture_paths, and for cancel
+        alone without it, LaTeX's own picture mode named first (PICTURE_FONTS);
+        nothing for a picture without it."""
+        def tagged(text, paths):
+            texts = {"b.tex": "\\documentclass{article}\n" + text
+                     + "\\begin{document}\n\\begin{picture}(9,9)\\end{picture}\n\\end{document}\n"}
+            counts = texremediate.tag(texts, "b.tex", "en", False, ("ua-2",), None, paths)
+            return texts["b.tex"], counts
+        on, on_counts = tagged("", True)
+        off, off_counts = tagged("", False)
+        cancel, cancel_counts = tagged("\\usepackage{cancel}\n", False)
+        return latexbuild.PICTURE_PATHS in on and latexbuild.PICTURE_FONTS not in on \
+            and on_counts.get("picture") == 1 and not on_counts.get("cancel") \
+            and latexbuild.PICTURE_PATHS not in off and not off_counts.get("picture") \
+            and latexbuild.PICTURE_FONTS + latexbuild.PICTURE_PATHS in cancel \
+            and cancel_counts.get("cancel") == 1 and not cancel_counts.get("picture")
     return [
         ("a tagged copy of a book that strikes a term out with cancel has pict2e drawing it, "
          "and the run says so",
@@ -1595,7 +1676,23 @@ def case_struck_out(work):
          copy_of_copy),
         ("a book that loads pict2e itself keeps pict2e's \\cbezier, which pict2e makes at "
          "\\begin{document}", own_pict2e),
-        ("a document with no cancel loads no pict2e", without_cancel),
+        ("a book's own \\buttcap and \\maxovalrad are kept, its circles, oval, and dot drawn "
+         "by pict2e all the same, the oval reading its \\maxovalrad", own_names),
+        ("a document with no cancel loads pict2e, its circle asked for at 80 points a "
+         "path, no glyph of lcircle10", lambda: without_cancel(True)),
+        ("and with picture_paths off it loads none, LaTeX drawing the circle with "
+         "lcircle10's glyphs", lambda: without_cancel(False)),
+        ("and with picture_paths off and cancel, pict2e is loaded for the struck-out term, "
+         "as before, and draws the picture too", fonts_with_cancel),
+        ("a tagged copy of a book gets pict2e for its picture, counted to say so, and with "
+         "picture_paths off, only for cancel, LaTeX's own picture mode named first",
+         tagged_copies),
+        ("and so does a book's tagged copy as the run makes it, which says so, and with the "
+         "target's picture_paths off it gets none",
+         lambda: drawn.returncode == 0
+         and "c__oer_pictiie_names_clist" in read(pictures, "paths", "drawn.tex")
+         and "its drawings in picture mode drawn with paths by pict2e" in drawn_said
+         and "c__oer_pictiie_names_clist" not in read(pictures, "fonts", "drawn.tex")),
     ]
 
 

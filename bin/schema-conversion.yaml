@@ -157,6 +157,28 @@ keys:
       fonts, and its formulas get no MathML. A book that sets its fonts
       with a package of its own (mathptmx, fontspec) keeps them either way.
 
+  picture_paths:
+    type: enum
+    values: ["on", "off"]
+    default: "on"
+    stage: render
+    description: >
+      For a target that writes a PDF or LaTeX (pdf, a deck's PDF, latex,
+      and a source target's tagged copy of a LaTeX book): whether LaTeX's
+      picture mode, a picture environment's lines, arrows, circles, and
+      ovals, is drawn with paths, by the pict2e package. LaTeX draws them
+      with glyphs of its line and circle fonts, whose map to Unicode has
+      only a space, where PDF/UA asks every glyph for a character, and
+      which come in a few slopes and sizes: a circle asked for at 80
+      points is drawn at 40, the largest,
+      and a line of a slope they lack stops LaTeX. pict2e draws what's
+      written. Off keeps LaTeX's own drawing, for a book whose pictures
+      were laid out around what LaTeX drew, unless the cancel package is
+      loaded, as Pandoc's template loads it for a formula that strikes a
+      term out, and a LaTeX book may itself: pict2e is loaded for cancel's
+      strokes either way, as before, and then draws the book's pictures
+      too. Needs pict2e installed.
+
   title_page:
     type: enum
     values: ["auto", "on", "off"]

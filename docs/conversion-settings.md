@@ -40,6 +40,10 @@ For a target with format source on a LaTeX book: whether the copy is made to bui
 
 For a target with format source and tagging on, on a LaTeX book: whether the copy loads unicode-math, so each formula carries its MathML, which LaTeX makes only from an OpenType math font. Its Latin Modern fonts are TeX's own design, but their metrics differ a little, so pages can break differently: the calculus notes take 84 pages instead of 85, while GIAM keeps its 434. Off keeps the book's fonts, and its formulas get no MathML. A book that sets its fonts with a package of its own (mathptmx, fontspec) keeps them either way.
 
+**`picture_paths`**—one of `on`, `off`; default `on`
+
+For a target that writes a PDF or LaTeX (pdf, a deck's PDF, latex, and a source target's tagged copy of a LaTeX book): whether LaTeX's picture mode, a picture environment's lines, arrows, circles, and ovals, is drawn with paths, by the pict2e package. LaTeX draws them with glyphs of its line and circle fonts, whose map to Unicode has only a space, where PDF/UA asks every glyph for a character, and which come in a few slopes and sizes: a circle asked for at 80 points is drawn at 40, the largest, and a line of a slope they lack stops LaTeX. pict2e draws what's written. Off keeps LaTeX's own drawing, for a book whose pictures were laid out around what LaTeX drew, unless the cancel package is loaded, as Pandoc's template loads it for a formula that strikes a term out, and a LaTeX book may itself: pict2e is loaded for cancel's strokes either way, as before, and then draws the book's pictures too. Needs pict2e installed.
+
 **`title_page`**—one of `auto`, `on`, `off`; default `auto`
 
 For a target with format epub3 or pdf: whether the book opens with a title page, its title and authors. auto goes by the book's structure, not its number of files: a title page when the book has more than one top-level entry (chapters, parts), or is one page with more than one top-level heading, or has something before its title heading (a byline, a subtitle); none for a document whose one top-level heading is its title, which then appears once, as that heading, and in the file's metadata.

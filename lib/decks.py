@@ -902,23 +902,25 @@ def tidy(path):
 def build_pdf(intermediate, base, out_pdf, *, template, filters, language,
               standards=("ua-2",), ua1_math="office", ratio="auto", title=None,
               repair_captions=True, remove_empty_paragraphs=True, env=None,
-              keep=None, trace=None):
+              keep=None, trace=None, picture_paths=True):
     """One deck's tagged PDF, through ltx-talk: the deck's filtered
-    intermediate, its headings renumbered (renumber), written by Pandoc's
-    beamer writer with template and filters, talkified, and built by
-    LuaLaTeX in a folder of its own, at least twice (ltx-talk's first run
-    leaves a placeholder page) and again while the log asks for it or the
-    .aux file changed, up to LATEX_RUNS times (unsettled: still asking, or
-    changed, after the last), each run stopped after
-    LATEX_TIMEOUT seconds; then the
-    tables' captions retagged and the empty paragraph elements taken out,
-    as for a book's PDF. title names the PDF when the deck has none. keep:
-    a folder the LaTeX is copied to. An SVG that can't be made a PDF stops
-    it before LaTeX, which can't show one. Returns a dict: ok, pages, log
-    (the last run's), timeout (LaTeX stopped), unsettled, ratio and why, level, frame
-    tag, whether each slide's title was tagged at its own level, talkify's
-    counts, the SVGs that couldn't be converted and why, the beamer
-    commands header-includes gives, and the repairs' counts."""
+    intermediate, its headings renumbered (renumber), written by
+    Pandoc's beamer writer with template and filters, talkified, and
+    built by LuaLaTeX in a folder of its own, at least twice (ltx-talk's
+    first run leaves a placeholder page) and again while the log asks
+    for it or the .aux file changed, up to LATEX_RUNS times (unsettled:
+    still asking, or changed, after the last), each run stopped after
+    LATEX_TIMEOUT seconds; then the tables' captions retagged and the
+    empty paragraph elements taken out, as for a book's PDF. title names
+    the PDF when the deck has none. keep: a folder the LaTeX is copied
+    to. picture_paths: whether picture mode is drawn with pict2e
+    (latexbuild.PICTURE_PATHS). An SVG that can't be made a PDF stops it
+    before LaTeX, which can't show one. Returns a dict: ok, pages, log
+    (the last run's), timeout (LaTeX stopped), unsettled, ratio and why,
+    level, frame tag, whether each slide's title was tagged at its own
+    level, talkify's counts, the SVGs that couldn't be converted and
+    why, the beamer commands header-includes gives, and the repairs'
+    counts."""
     with open(intermediate, encoding="utf-8") as fh:
         doc = json.load(fh)
     meta = doc.get("meta") or {}
@@ -949,6 +951,9 @@ def build_pdf(intermediate, base, out_pdf, *, template, filters, language,
         tex = os.path.join(work, "deck.tex")
         standards = [str(s).strip() for s in standards if str(s).strip()] or ["ua-2"]
         macros = latexbuild.PDF_MACROS
+        # Picture mode in LaTeX's own fonts, where picture_paths is off.
+        if not picture_paths:
+            macros += latexbuild.PICTURE_FONTS
         ua1 = latexbuild.is_ua1(standards)
         if ua1:
             macros += latexbuild.UA1_LINKS

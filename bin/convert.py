@@ -3573,6 +3573,7 @@ def remediate_sources(target, base, docs, paths, env, html_stems=(), language=No
         master = latex_parts[0][0]
         tagging = str(target["tagging"]) == "on"
         mathml = str(target["latex_mathml"]) == "on"
+        pictures = str(target["picture_paths"]) == "on"
         definitions = None
         macros_path = os.path.join(base, LATEX_MACROS) if LATEX_MACROS else ""
         if str(target["latex_definitions"]) == "on" and os.path.isfile(macros_path):
@@ -3598,7 +3599,7 @@ def remediate_sources(target, base, docs, paths, env, html_stems=(), language=No
                 base, target.output_dir, one, one_files, page_alts, tagging=tagging,
                 language=language, headers=decisions, definitions=definitions,
                 definitions_name=LATEX_MACROS, seen=seen, mathml=mathml,
-                written=written_files))
+                written=written_files, picture_paths=pictures))
             written_files.update(one_files)
             files += [f for f in one_files if f not in files]
         counts["unplaced"] = len(counts.get("unplaced_keys", []))
@@ -3621,7 +3622,8 @@ def remediate_sources(target, base, docs, paths, env, html_stems=(), language=No
                 other_counts = texremediate.remediate(
                     base, target.output_dir, other, other_files, page_alts, tagging=tagging,
                     language=language, definitions=definitions,
-                    definitions_name=LATEX_MACROS, mathml=mathml, written=written_files)
+                    definitions_name=LATEX_MACROS, mathml=mathml, written=written_files,
+                    picture_paths=pictures)
                 others.append((other, len([f for f in other_files
                                            if f not in written_files and f != other]),
                                other_counts))
@@ -3695,6 +3697,8 @@ def remediate_sources(target, base, docs, paths, env, html_stems=(), language=No
                   if counts.get("tag_math_setup") else "")
                + ("cancel set to draw with pict2e, so a term the book strikes out is "
                   "drawn with paths, not a font's glyphs, " if counts.get("tag_cancel") else "")
+               + ("its drawings in picture mode drawn with paths by pict2e, not a font's "
+                  "glyphs (picture_paths), " if counts.get("tag_picture") else "")
                + (f"{counts['tag_floats']} figure(s) and table(s) tagged where the text has "
                   "them, not gathered at the end of the document, "
                   if counts.get("tag_floats") else "")
@@ -4012,7 +4016,8 @@ def latex_book_pdf(target, base, latex_parts, paths, work, language, project, ta
         merge_counts(counts, texremediate.remediate(
             base, build, master, files, alts, tagging=True, language=language,
             headers=headers, definitions=definitions, definitions_name=LATEX_MACROS,
-            seen=seen, standard=standards, written=written_files))
+            seen=seen, standard=standards, written=written_files,
+            picture_paths=str(target["picture_paths"]) == "on"))
         written_files.update(files)
     counts["unplaced"] = len(counts.get("unplaced_keys", []))
     warn_stand_ins(target.name, [counts], "the copy LaTeX builds")
@@ -4106,6 +4111,8 @@ def latex_book_pdf(target, base, latex_parts, paths, work, language, project, ta
                counts.get("tag_math_setup") else "")
             + ("cancel set to draw with pict2e, so a term struck out is drawn with "
                "paths, not a font's glyphs, " if counts.get("tag_cancel") else "")
+            + ("its drawings in picture mode drawn with paths by pict2e, not a font's "
+               "glyphs (picture_paths), " if counts.get("tag_picture") else "")
             + ("its figures and tables tagged where the text has them, "
                if counts.get("tag_floats") else "")
             + (f"{counts['tag_boxes']} table(s) of one column of prose tagged as a "
@@ -4182,7 +4189,7 @@ def deck_pdfs(target, stems, names, base, language):
             repair_captions=bool(target["pdf.repair_captions"]),
             remove_empty_paragraphs=bool(target["pdf.remove_empty_paragraphs"]), env=env,
             trace=(lambda c: say("+ " + " ".join(shell_quote(p) for p in c[:12]) + " ..."))
-            if TRACE else None)
+            if TRACE else None, picture_paths=str(target["picture_paths"]) == "on")
 
     workers = max(1, min(len(stems), os.cpu_count() or 1, 4))
     with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:

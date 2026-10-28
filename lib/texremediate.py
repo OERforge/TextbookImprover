@@ -387,7 +387,7 @@ KEYS_SKIPPED = r"""% Written for LaTeX's tagging, which reads the alt and artifa
 
 def remediate(base, out_dir, master, files, alts, tagging=False, language=None,
               headers=None, definitions=None, definitions_name="", seen=None,
-              mathml=True, standard=("ua-2",), written=()):
+              mathml=True, standard=("ua-2",), written=(), picture_paths=True):
     """Write a remediated copy of each file in files (relative to base) to
     out_dir at the same relative path. alts: {key: alt, or None for
     decorative} (htmlremediate.alt_rows); tagging: made to build with
@@ -398,7 +398,8 @@ def remediate(base, out_dir, master, files, alts, tagging=False, language=None,
     the images and drawings on the conversion's pages, against which a
     decision the copy couldn't write is counted; mathml: whether a tagged
     copy loads unicode-math for its formulas' MathML; standard: the PDF
-    standards a tagged copy's \\DocumentMetadata claims; written: files
+    standards a tagged copy's \\DocumentMetadata claims; picture_paths:
+    whether a tagged copy draws picture mode with pict2e (tag); written: files
     another master's copy has written already, read here and not written
     again, as when a book's masters share chapters. Returns a dict of
     counts, and in unplaced_keys the keys of those decisions."""
@@ -477,7 +478,8 @@ def remediate(base, out_dir, master, files, alts, tagging=False, language=None,
         if not language:
             language = latexsource.preamble_language(
                 latexsource.split_master(originals[master])[0])
-        for key, n in tag(texts, master, language, mathml, standard, base).items():
+        for key, n in tag(texts, master, language, mathml, standard, base,
+                          picture_paths).items():
             totals["tag_" + key] = n
     for name in files:
         if name in written:
@@ -1385,7 +1387,13 @@ def _opening_formulas(text):
     return text, len(at)
 
 
-def tag(texts, master, language, mathml=True, standard=("ua-2",), base=None):
+# A drawing in LaTeX's picture mode, which a tagged copy has pict2e draw
+# (tag), counted to say so.
+PICTURE = re.compile(r"\\begin\s*\{picture\}")
+
+
+def tag(texts, master, language, mathml=True, standard=("ua-2",), base=None,
+        picture_paths=True):
     """texts: {name: text}, changed in place to build with LaTeX's tagging
     on LuaLaTeX, each change measured on GIAM, where it was needed:
     \\DocumentMetadata before \\documentclass (the standards given, ua-2 by
@@ -1397,8 +1405,9 @@ def tag(texts, master, language, mathml=True, standard=("ua-2",), base=None):
     center environment, which leaves one open in LaTeX 2026-06-01, each
     float's tags where the text has it (FLOATS_HERE), the packages
     tagging can't build or tag with replaced by definitions that keep the
-    text (SHIMS), pict2e for the terms cancel strikes out
-    (latexbuild.CANCEL_STROKES), and, unless mathml is false, unicode-math
+    text (SHIMS), pict2e for picture mode, unless picture_paths is false,
+    and for the terms cancel strikes out (latexbuild.PICTURE_PATHS), and,
+    unless mathml is false, unicode-math
     for the formulas' MathML (math_block). Returns counts."""
     counts = {"metadata": 0, "pdftex_options": 0, "pdftex_settings": 0,
               "theorems": 0, "centerline": 0, "formulas": 0, "floats": 0}
@@ -1417,14 +1426,17 @@ def tag(texts, master, language, mathml=True, standard=("ua-2",), base=None):
     if "enumitem" in packages:
         block += ENUMITEM_KEYS
         counts["enumitem"] = enumitem_settings(texts)
-    # A term the book strikes out, drawn with paths by pict2e, not with
-    # glyphs of the line10 font, which have no map to Unicode; not again
-    # in a copy made from a copy, where its constant would stop LaTeX
-    # ("already defined").
-    if "cancel" in packages and not any("c__oer_pictiie_names_clist" in piece
-                                         for piece in pieces):
-        block += latexbuild.CANCEL_STROKES
-        counts["cancel"] = 1
+    # Picture mode drawn with paths by pict2e, unless picture_paths is
+    # false, and a term the book strikes out with cancel either way, not
+    # with glyphs of the line10 and lcircle10 fonts, which have no map to
+    # Unicode; not again in a copy made from a copy, where its constant
+    # would stop LaTeX ("already defined").
+    if (picture_paths or "cancel" in packages) and not any(
+            "c__oer_pictiie_names_clist" in piece for piece in pieces):
+        block += ("" if picture_paths else latexbuild.PICTURE_FONTS) + latexbuild.PICTURE_PATHS
+        counts["cancel"] = int("cancel" in packages)
+        counts["picture"] = int(picture_paths and any(
+            latexsource.code_matches(PICTURE, t) for t in texts.values()))
     shimmed = shimmed_packages(packages, base)
     # A package math_block stands in for, so unicode-math loads.
     stand_ins = [n for n in (counts.get("math_stand_in") or "").split(", ") if n]

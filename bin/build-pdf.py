@@ -770,6 +770,10 @@ def book_metadata(project, resolved, base, numbered):
         else ([meta_plain(claimed)] if claimed else [])
     ours = ("\\ifdefined\\tagpdfsetup\n  \\tagpdfsetup{math/setup={%s}}\n\\fi\n"
             % math_setup(claimed, str(resolved["pdf.ua1_math"]))) + HEADER
+    # Picture mode in LaTeX's own fonts, where picture_paths is off: pict2e
+    # only for a struck-out term (latexbuild.PICTURE_PATHS).
+    if str(resolved["picture_paths"]) != "on":
+        ours += latexbuild.PICTURE_FONTS
     if is_ua1(claimed):
         # LaTeX's own links, a footnote's mark among them, get no /Contents,
         # which PDF/UA-1 requires of every link (7.18.5); a footnote mark

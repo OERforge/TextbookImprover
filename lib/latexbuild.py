@@ -464,29 +464,45 @@ FLOATS_HERE = ("\\ExplSyntaxOn\\keys_if_exist:nnT {__tag/setup} {float/here}\n"
                "  {\\tagpdfsetup{float/here}}\\ExplSyntaxOff\n")
 
 
-# A formula's term struck out, in a book's PDF and a deck's (PDF_MACROS),
-# and in a LaTeX book's that loads cancel (texremediate.tag).
-CANCEL_STROKES = r"""% A formula's term struck out with the cancel package (\cancel,
-% \bcancel, and \xcancel, which texmath writes for MathML's diagonal
-% strikes, and \cancelto): cancel draws each stroke with picture mode's
-% \line, and \cancelto's arrow with \vector, which set glyphs of LaTeX's
-% line10 font, whose map to Unicode has only a space, and veraPDF failed
-% College Algebra 2e's first chapter on two of them (PDF/UA-2's 8.4.5.8).
-% pict2e draws picture mode's lines and arrows as paths, with no font.
-% cancel, given pict2e, asks for LaTeX's own commands
-% (\OriginalPictureCmds), its comment saying pict2e's have no bounding
-% box, which pict2e's \line has now; told to use pict2e's, it draws each
-% stroke where it did (measured: \cancel, \bcancel, \xcancel, and
-% \cancelto, in text, in a script, and displayed). pict2e is loaded at the
-% end of the preamble, after any pict2e the document loads with options
-% of its own, and only where cancel is, since it has drawing commands of
-% its own, \arc, \Line, \polygon, \moveto, and the rest, which, loaded so
+# Picture mode drawn with paths, in a book's PDF and a deck's (PDF_MACROS),
+# and in a LaTeX book's tagged copy (texremediate.tag); with picture_paths
+# off (PICTURE_FONTS), only a formula's struck-out term.
+PICTURE_PATHS = r"""% LaTeX's picture mode drawn with paths, by pict2e: a picture
+% environment's lines, arrows, circles, and ovals, and the strokes the
+% cancel package draws through a formula's term (\cancel, \bcancel, and
+% \xcancel, which texmath writes for MathML's diagonal strikes, and
+% \cancelto) with picture mode's \line and \vector. LaTeX draws them with
+% glyphs of its line10 and lcircle10 fonts, whose map to Unicode has only
+% a space, and veraPDF failed College Algebra 2e's first chapter on two of
+% cancel's (PDF/UA-2's 8.4.5.8); and the fonts have only some slopes and
+% sizes, so a circle asked for at 80 points was drawn at 40, the largest,
+% LaTeX saying so only in its log ("size unavailable"), and a line of a
+% slope they lack, \line(7,3), stopped LaTeX ("Bad \line or \vector
+% argument"). pict2e draws what's written. A picture laid out around what
+% LaTeX drew, an 80-point circle seen at 40, gets the 80 now;
+% picture_paths off (\OERPictureFonts) keeps LaTeX's own, unless cancel is
+% loaded: pict2e is loaded for its strokes either way, as before, and then
+% draws the document's pictures too. cancel, given pict2e, asks for
+% LaTeX's own commands (\OriginalPictureCmds), its comment saying pict2e's
+% have no bounding box, which pict2e's \line has now; told to use
+% pict2e's, it draws each stroke where it did (measured: \cancel,
+% \bcancel, \xcancel, and \cancelto, in text, in a script, and displayed).
+% pict2e is loaded at the end of the preamble, after any pict2e the
+% document loads with options of its own. It has drawing commands of its
+% own, \arc, \Line, \polygon, \moveto, and the rest, which, loaded so
 % late, replaced a document's own \arc, on which LaTeX then stopped
 % ("Missing number"), and stopped LaTeX on a \newcommand of one in the
 % text ("already defined"). So those names are set aside before it loads
 % and, at \begin{document}, given back as the document had them or taken
-% away. Not \maxovalrad, which pict2e's \oval reads, nor the trig
-% package's names (\UseSin and the rest), which pict2e loads.
+% away; \buttcap among them, which pict2e's \circle, \dot, and \oval
+% call, and are given pict2e's own in the group each draws in (taken
+% away, and not given it, a circle stopped LaTeX: "Undefined control
+% sequence"). \maxovalrad, which \oval reads, is set aside too, since a
+% document's own stopped pict2e from loading ("already defined"), and is
+% given back where the document had one, and kept where it hadn't. The
+% trig package's names, \UseSin and the rest, which pict2e loads and
+% uses, stay trig's: a document's own command of one of them is replaced,
+% or, made in the text, stops LaTeX.
 \ExplSyntaxOn
 \clist_const:Nn \c__oer_pictiie_names_clist
   {
@@ -495,33 +511,63 @@ CANCEL_STROKES = r"""% A formula's term struck out with the cancel package (\can
     roundcap, squarecap, miterjoin, roundjoin, beveljoin, ltxarrows,
     pstarrows, cbezier
   }
-\AddToHook { begindocument / before }
+\cs_new_protected:Npn \__oer_pictiie_load:
   {
-    \IfPackageLoadedT { cancel }
+    \IfPackageLoadedF { pict2e }
       {
-        \IfPackageLoadedF { pict2e }
+        \clist_map_inline:Nn \c__oer_pictiie_names_clist
+          {
+            \cs_set_eq:cc { __oer_pictiie_ ##1 : } {##1}
+            \cs_undefine:c {##1}
+          }
+        \cs_set_eq:NN \__oer_pictiie_maxovalrad: \maxovalrad
+        \cs_undefine:N \maxovalrad
+        \RequirePackage { pict2e }
+        \cs_set_eq:NN \__oer_pictiie_own_buttcap: \buttcap
+        \cs_if_exist:cT { pIIe@circ }
+          {
+            \cs_set_eq:Nc \__oer_pictiie_circ:n { pIIe@circ }
+            \cs_set_protected:cpn { pIIe@circ } ##1
+              {
+                \cs_set_eq:NN \buttcap \__oer_pictiie_own_buttcap:
+                \__oer_pictiie_circ:n {##1}
+              }
+          }
+        \cs_if_exist:cT { pIIe@buttcap }
+          {
+            \cs_set_eq:Nc \__oer_pictiie_buttcap_ok: { pIIe@buttcap }
+            \cs_set_protected:cpn { pIIe@buttcap }
+              {
+                \cs_set_eq:NN \buttcap \__oer_pictiie_own_buttcap:
+                \__oer_pictiie_buttcap_ok:
+              }
+          }
+        \AddToHook { begindocument / end }
           {
             \clist_map_inline:Nn \c__oer_pictiie_names_clist
               {
-                \cs_set_eq:cc { __oer_pictiie_ #1 : } {#1}
-                \cs_undefine:c {#1}
+                \cs_if_exist:cTF { __oer_pictiie_ ##1 : }
+                  { \cs_set_eq:cc {##1} { __oer_pictiie_ ##1 : } }
+                  { \cs_undefine:c {##1} }
               }
-            \RequirePackage { pict2e }
-            \AddToHook { begindocument / end }
-              {
-                \clist_map_inline:Nn \c__oer_pictiie_names_clist
-                  {
-                    \cs_if_exist:cTF { __oer_pictiie_ #1 : }
-                      { \cs_set_eq:cc {#1} { __oer_pictiie_ #1 : } }
-                      { \cs_undefine:c {#1} }
-                  }
-              }
+            \cs_if_exist:NT \__oer_pictiie_maxovalrad:
+              { \cs_set_eq:NN \maxovalrad \__oer_pictiie_maxovalrad: }
           }
-        \cs_set_eq:NN \OriginalPictureCmds \scan_stop:
       }
+  }
+\AddToHook { begindocument / before }
+  {
+    \cs_if_exist:NTF \OERPictureFonts
+      { \IfPackageLoadedT { cancel } { \__oer_pictiie_load: } }
+      { \__oer_pictiie_load: }
+    \IfPackageLoadedT { cancel }
+      { \cs_set_eq:NN \OriginalPictureCmds \scan_stop: }
   }
 \ExplSyntaxOff
 """
+# picture_paths off: LaTeX's own picture mode, before PICTURE_PATHS is read
+# at \begin{document}.
+PICTURE_FONTS = "\\def\\OERPictureFonts{}\n"
 
 
 # How small fitting sets something's type (FIT_MACROS): to fit its line,
@@ -1723,7 +1769,7 @@ PDF_MACROS = r"""\ExplSyntaxOn
       { #1 }
   }
 \ExplSyntaxOff
-""" + CANCEL_STROKES + r"""% A fill-in blank, a run of four or more underscores pdf-target.lua marks
+""" + PICTURE_PATHS + r"""% A fill-in blank, a run of four or more underscores pdf-target.lua marks
 % (\OERBlank), that runs past the end of its line into the margin: TeX
 % can't break a run of underscores, and Sociology's chapter 19 quiz had a
 % question whose blank ran 24 points past its line. Once a paragraph's
@@ -2300,25 +2346,28 @@ def fit_report(output, source, pages):
 
 def failure_advice(log):
     """What to do about a failed build, from its log: a file LaTeX can't
-    find, the two packages a struck-out term needs among them, a language
+    find, the two packages picture mode and a struck-out term need among
+    them, a language
     babel hasn't, a font that isn't installed, or one of TeX's tables
     outgrown."""
     said = []
     missing = list(dict.fromkeys(MISSING_FILE.findall(log)))
-    # A formula's term struck out: Pandoc's template loads cancel for it in
-    # the preamble, and CANCEL_STROKES loads pict2e at \begin{document},
-    # neither of which TinyTeX or TeX Live's medium scheme has, so a build
-    # stops on cancel.sty and, once that's installed, on pict2e.sty, which
-    # the book never names. Both are named at once; a book that loads
-    # pict2e for drawings of its own is told the same, cancel included.
+    # PICTURE_PATHS loads pict2e at \begin{document} for every PDF, unless
+    # picture_paths is off, and for a formula's term struck out, which
+    # Pandoc's template loads cancel for in the preamble; neither is in
+    # TinyTeX or TeX Live's medium scheme, so a build stops on pict2e.sty,
+    # which the book never names, and on cancel.sty where a term is struck
+    # out. Both are named at once; a book that loads pict2e for drawings of
+    # its own is told the same, cancel included.
     if {"cancel.sty", "pict2e.sty"} & set(missing):
-        said.append("LaTeX can't find cancel.sty or pict2e.sty. A formula's struck-out term "
-                    "(\\cancel, \\bcancel, or \\xcancel) needs TeX's cancel package and "
-                    "pict2e, which the run loads with cancel to draw the strokes as paths, "
-                    "and a book can load pict2e for drawings of its own. For TinyTeX or TeX "
-                    f"Live from tug.org, `{tlmgr_command('install cancel pict2e')}` installs "
-                    "both; for Debian's or Ubuntu's texlive packages, `sudo apt install "
-                    "texlive-latex-extra texlive-pictures`.")
+        said.append("LaTeX can't find cancel.sty or pict2e.sty. The run loads pict2e to draw "
+                    "picture mode's lines, arrows, and circles as paths, a formula's "
+                    "struck-out term's strokes among them, and a struck-out term "
+                    "(\\cancel, \\bcancel, or \\xcancel) needs TeX's cancel package too. "
+                    "For TinyTeX or TeX Live from tug.org, "
+                    f"`{tlmgr_command('install cancel pict2e')}` installs both; for Debian's "
+                    "or Ubuntu's texlive packages, `sudo apt install texlive-latex-extra "
+                    "texlive-pictures`.")
     # tlmgr only manages a TeX Live installed from tug.org or as TinyTeX;
     # Debian's and Ubuntu's texlive packages come with a tlmgr that runs in
     # an uninitialized user mode and installs nothing, so both routes are

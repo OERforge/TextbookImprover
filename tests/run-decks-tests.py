@@ -2340,6 +2340,20 @@ title: Captioned
 [^h]: The head's note.
 """
 
+# A circle in LaTeX's picture mode, asked for at 80 points, which LaTeX's
+# lcircle10 font draws at 40, its largest, and pict2e at 80 with a path:
+# built with picture_paths off, in LaTeX's own glyphs.
+PICTURED = """---
+title: Pictured
+---
+
+# A Circle
+
+```{=latex}
+\\setlength{\\unitlength}{1pt}\\begin{picture}(90,90)\\put(45,45){\\circle{80}}\\end{picture}
+```
+"""
+
 # Captions that carry their own labels, one by a word the settings name, a
 # figure marked unnumbered, and a figure and a table whose captions don't,
 # which keep ltx-talk's label, "Figure:" or "Table:".
@@ -2401,10 +2415,12 @@ def case_pdf_settings(work):
     if problem:
         print(f"  skip  {problem}; a deck's PDF settings aren't checked")
         return []
-    plain = folder(os.path.join(work, "plain"), "targets:\n  pdf:\n    format: pdf\n    pdf:\n"
-                   "      repair_captions: false\n", decks_given={"captioned.md": CAPTIONED})
+    plain = folder(os.path.join(work, "plain"), "targets:\n  pdf:\n    format: pdf\n"
+                   "    picture_paths: \"off\"\n    pdf:\n      repair_captions: false\n",
+                   decks_given={"captioned.md": CAPTIONED, "pictured.md": PICTURED})
     unrepaired = convert(plain)
     captioned = os.path.join(plain, "pdf", "captioned.pdf")
+    pictured = os.path.join(plain, "pdf", "pictured.pdf")
     plain_check = rows_of(os.path.join(plain, "output-check.csv"))
     work = folder(os.path.join(work, "ua1"), "defaults:\n  captions:\n"
                   "    figure_prefixes: [Figure, Exhibit]\n"
@@ -2443,6 +2459,9 @@ def case_pdf_settings(work):
          and footnote_ties(captioned)[1:] == (0, 0, 0, 0)),
         ("decks with no slide shown in steps have no note of links taken out",
          lambda: "on the earlier steps" not in result.stderr + unrepaired.stderr),
+        ("with picture_paths off, a deck's picture in its LaTeX is drawn with LaTeX's own "
+         "lcircle10 glyphs, as before pict2e drew picture mode in every PDF",
+         lambda: os.path.exists(pictured) and "LCIRCLE10" in pdftext.base_fonts(pictured)),
         # pdf-target.lua sets them with \OERNoCaptionLabel: a figure's
         # caption through LaTeX's caption sockets, a long table's through
         # an empty \LTcaptype, ltx-talk loading no caption package.

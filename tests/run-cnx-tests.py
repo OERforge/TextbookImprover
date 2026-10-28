@@ -1577,16 +1577,31 @@ def tables_of(html):
         r'<table id="([^"]+)"[^>]*>', html)}
 
 
-def stepped(tables, name):
+def stepped(tables, name, kind="steps"):
     """Whether the table of an id in tables (tables_of) is of the class
-    steps."""
+    steps, or of another kind."""
     found = re.search(r'\bclass="([^"]*)"', tables.get(name, ""))
-    return bool(found) and "steps" in found.group(1).split()
+    return bool(found) and kind in found.group(1).split()
+
+
+def ruled(tables, name):
+    """Whether the table of an id in tables (tables_of) is of the class
+    row-rules, a rule under each row of its body."""
+    return stepped(tables, name, "row-rules")
+
+
+def key_equations_table(cls):
+    """A table of a class in a Key Equations section, as the unpacker reads
+    one (cnx.steptables.in_key_equations)."""
+    from lxml import etree
+    section = etree.fromstring('<section class="key-equations"><table class="%s"/></section>'
+                               % cls)
+    return section[0]
 
 
 def case_step_tables(work):
     from lxml import etree
-    from cnx import mathtex, steptables
+    from cnx import mathtex, project, steptables
     repo = os.path.join(work, "osbooks-steps")
     build_steps(repo)
     out = os.path.join(work, "steps")
@@ -1651,6 +1666,32 @@ def case_step_tables(work):
          and not any(stepped(tables, n) for n in ("data1", "days", "kinds", "pictures",
                                                     "spaced"))
          and other_tables and not any(stepped(other_tables, n) for n in other_tables)),
+        ("a table OpenStax's math books draw with a light rule under each row is of the "
+         "class row-rules, which every format but Word draws so: in a dev-math book, its "
+         "steps, classed unstyled or of no class, and its tables of data classed unstyled, "
+         "not one of no class; in a precalculus book, its tables classed unstyled, not steps "
+         "of no class, a table of data there",
+         lambda: all(ruled(tables, n) for n in ("steps1", "steps2", "steps3", "steps4",
+                                                 "kinds", "pictures", "spaced"))
+         and not any(ruled(tables, n) for n in ("data1", "days"))
+         and all(ruled(other_tables, n) for n in ("steps1", "steps2", "steps3", "kinds",
+                                                   "pictures", "spaced"))
+         and not any(ruled(other_tables, n) for n in ("data1", "steps4", "days"))),
+        ("a Key Equations table is ruled so where it's classed unstyled, as any table is, "
+         "in the lighter gray a calculus or algebra-1 book draws it in (row-rules-faint), "
+         "and of another class not even there; a book of another design rules none; and the "
+         "styles that rule tables are the corn design's (cnx.project.DESIGNS)",
+         lambda: steptables.row_rules(key_equations_table("unstyled"), "calculus", False)
+         == ["row-rules", "row-rules-faint"]
+         and steptables.row_rules(key_equations_table("unnumbered unstyled"), "algebra-1",
+                                  False) == ["row-rules", "row-rules-faint"]
+         and steptables.row_rules(key_equations_table("unnumbered"), "calculus", False) == []
+         and steptables.row_rules(key_equations_table(""), "algebra-1", False) == []
+         and steptables.row_rules(key_equations_table("unstyled"), "precalculus", False)
+         == ["row-rules"]
+         and steptables.row_rules(key_equations_table("unstyled"), "hs-physics", False) == []
+         and steptables.row_rules(key_equations_table("unstyled"), "sociology", True) == []
+         and steptables.RULED_STYLES == set(project.DESIGNS["corn"][1])),
         ("the header guess reads a table as Pandoc gives it to the guess: "
          "a ratio set as a fraction is a formula, not the number 21100 "
          "under a row of words, and a short row is padded, not a band "
@@ -1736,6 +1777,10 @@ def case_step_tables(work):
          lambda: all(stepped(tables_of(converted), n)
                      for n in ("steps1", "steps2", "steps3", "steps4"))
          and not stepped(tables_of(converted), "data1")),
+        ("and a table ruled row by row keeps its class there too, which page.css rules",
+         lambda: all(ruled(tables_of(converted), n)
+                     for n in ("steps1", "steps2", "steps3", "steps4", "kinds"))
+         and not ruled(tables_of(converted), "data1")),
     ])
 
 
@@ -2321,6 +2366,20 @@ def case_layout_kinds(work):
              ("tiny-coreq", "rules"), ("tiny-coreq", "hours"), ("tiny-physics", "terms"),
              ("tiny-physics", "equations"), ("tiny-physics", "alone"),
              ("tiny-history", "byline")))),
+        ("a table classed unstyled in a book of the corn design is ruled row by row (class "
+         "row-rules), a layout table's or a table of data's: in College Algebra with "
+         "Corequisite Support, its worked steps, a table of data, and its Key Equations; in "
+         "a precalculus book, a byline, a worksheet, matching exercises, a list, and a Key "
+         "Equations table, not one of another class there, or a table of no class; and in "
+         "Physics, of another design, nothing is",
+         lambda: all(ruled(found["tiny-coreq"], n) for n in ("worked", "hours", "rules"))
+         and all(ruled(found["tiny-history"], n)
+                 for n in ("byline", "claims", "match1", "match2", "listed", "growth"))
+         and not any(ruled(found["tiny-history"], n)
+                     for n in ("sizes", "tolls", "crops", "time", "tally", "signed", "maps",
+                               "ports", "halving"))
+         and known("tiny-physics", "terms", "equations", "alone")
+         and not any(ruled(found["tiny-physics"], n) for n in found["tiny-physics"])),
         ("and the run counts them",
          lambda: "3 table(s) that only lay things out" in said["tiny-physics"]
          and "2 table(s) that only lay things out" in said["tiny-coreq"]

@@ -1716,6 +1716,190 @@ def build_blank_lines(work):
     return os.path.join(work, "pdf", "org.example.bars.pdf"), source
 
 
+# Tables ruled row by row (class row-rules), as the CNX unpacker classes
+# those OpenStax's math books draw with a light rule under each row: on a
+# page, a worked example's steps, a layout table, its last step opening
+# with "(", which booktabs takes a rule's columns to trim it to from; a
+# table of data with a caption and a head; and one with a cell spanning
+# rows. On another, a table in a ruled table's last cell, after which the
+# row's rule is drawn, a table not ruled, and a table ruled in the lighter
+# gray of a calculus book's Key Equations (row-rules-faint).
+# And on a third, a table of 205 rows, longer than one of the chunks
+# longtable sets a table in (\LTchunksize, 200 rows).
+def ruled_page(title, body):
+    return ('<!DOCTYPE html>\n<html lang="en"><head><meta charset="utf-8"><title>' + title
+            + '</title></head><body>\n<h1>' + title + '</h1>\n' + body + '</body></html>\n')
+
+
+RULED_TABLES = ruled_page("Ruled", (
+    '<p>Stepsbefore, a worked example\'s steps:</p>\n'
+    '<table class="steps row-rules" role="presentation"><tbody>\n'
+    '<tr><td>Stepone Write the equation.</td><td><math><mi>x</mi><mo>+</mo><mn>3</mn>'
+    '<mo>=</mo><mn>7</mn></math></td></tr>\n'
+    '<tr><td>Steptwo Take 3 from each side.</td><td><math><mi>x</mi><mo>=</mo><mn>7</mn>'
+    '<mo>&#x2212;</mo><mn>3</mn></math></td></tr>\n'
+    '<tr><td>(a) Stepthree Simplify.</td><td><math><mi>x</mi><mo>=</mo><mn>4</mn></math>'
+    '</td></tr>\n</tbody></table>\n'
+    '<p>Databefore, a table of data:</p>\n'
+    '<table class="row-rules"><caption>Keyequations</caption>\n'
+    '<thead><tr><th>Nameword</th><th>Equation</th></tr></thead><tbody>\n'
+    '<tr><td>Slopeword</td><td>rise over run</td></tr>\n'
+    '<tr><td>Pointword</td><td>a point and a slope</td></tr>\n'
+    '<tr><td>Interceptword</td><td>where it meets an axis</td></tr>\n</tbody></table>\n'
+    '<p>Spanbefore, a cell spanning rows:</p>\n'
+    '<table class="row-rules"><tbody>\n'
+    '<tr><td rowspan="2">Spanstwo</td><td>Spanfirst</td></tr>\n'
+    '<tr><td>Spansecond</td></tr>\n'
+    '<tr><td>Spanalone</td><td>Spanthird</td></tr>\n</tbody></table>\n'
+    '<p>Spanafter, the end.</p>\n'))
+RULED_INNER = ruled_page("Inner", (
+    '<p>Innerbefore, a table in a cell:</p>\n'
+    '<table class="row-rules"><tbody>\n'
+    '<tr><td>Besideit</td><td><table><thead><tr><th>Innerhead</th><th>B</th></tr></thead>'
+    '<tbody>\n<tr><td>Innerone</td><td>2</td></tr><tr><td>Innertwo</td><td>4</td></tr>'
+    '</tbody></table></td></tr>\n'
+    '<tr><td>Underit</td><td>Lastone</td></tr>\n</tbody></table>\n'
+    '<p>Plainbefore, a table not ruled:</p>\n'
+    '<table><thead><tr><th>Plainhead</th><th>Value</th></tr></thead><tbody>\n'
+    '<tr><td>Plainone</td><td>1</td></tr><tr><td>Plaintwo</td><td>2</td></tr>\n'
+    '</tbody></table>\n<p>Plainafter, the end.</p>\n'
+    '<table class="row-rules row-rules-faint"><tbody>\n'
+    '<tr><td>Faintone</td><td>1</td></tr><tr><td>Fainttwo</td><td>2</td></tr>\n'
+    '</tbody></table>\n<p>Faintafter, the end.</p>\n'))
+RULED_LONG = ruled_page("Long", (
+    '<p>Longbefore, a long table:</p>\n'
+    '<table class="row-rules"><thead><tr><th>Longhead</th><th>Square</th></tr></thead><tbody>\n'
+    + "".join(f'<tr><td>Longrow{n}</td><td>{n * n}</td></tr>\n' for n in range(1, 206))
+    + '</tbody></table>\n<p>Longafter, the end.</p>\n'))
+GRAY = (0.459, 0.455, 0.455)   # OpenStax's Grey3, #757474, as the PDF gives it
+FAINT = (0.945, 0.945, 0.945)  # and its Grey1, #F1F1F1
+
+
+def build_rules(work):
+    """RULED_TABLES, RULED_INNER, and RULED_LONG as a book's three pages, on
+    the default page: the PDF's path."""
+    os.makedirs(work)
+    for name, page in (("ruled", RULED_TABLES), ("inner", RULED_INNER),
+                       ("long", RULED_LONG)):
+        with open(os.path.join(work, name + ".html"), "w", encoding="utf-8") as fh:
+            fh.write(page)
+    with open(os.path.join(work, "project.yaml"), "w", encoding="utf-8") as fh:
+        fh.write("project:\n  title: Rules\n  identifier: org.example.rules\n"
+                 "  language: en-US\n  contents:\n    - ruled\n    - inner\n    - long\n")
+    with open(os.path.join(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
+        fh.write("targets:\n  pdf:\n    format: pdf\n")
+    run(["python3", os.path.join(BIN, "convert.py"), "--quick"], work)
+    return os.path.join(work, "pdf", "org.example.rules.pdf")
+
+
+def rules_between(lines, rules, above, below, color=GRAY):
+    """How many level rules of a color (any, for None) a page draws between
+    the line holding above and the first line under it holding below, on
+    the first page holding both (glyph_lines, pdftext.level_rules); None
+    where no page does."""
+    for page, rows in sorted(lines.items()):
+        tops = [row[0] for row in rows if above in row[3]]
+        bottoms = [row[0] for row in rows if below in row[3] and tops and row[0] < tops[0]]
+        if tops and bottoms:
+            return sum(1 for at, height, _left, _right, drawn, _artifact in rules
+                       if at == page and max(bottoms) < height < tops[0]
+                       and (color is None or drawn == color))
+    return None
+
+
+def rules_checks(rules_path):
+    """The rules book's checks (build_rules)."""
+    built = os.path.exists(rules_path)
+    lines = glyph_lines(rules_path) if built else {}
+    rules = pdftext.level_rules(rules_path) if built else []
+
+    def between(above, below, color=GRAY):
+        return rules_between(lines, rules, above, below, color)
+
+    def page_of(word):
+        return next((page for page, rows in sorted(lines.items())
+                     if any(word in row[3] for row in rows)), None)
+
+    def steps_rules():
+        page = page_of("Stepone")
+        top, bottom = (next(row[0] for row in lines.get(page, []) if word in row[3])
+                       for word in ("Stepone", "Databefore"))
+        return [r for r in rules if r[0] == page and bottom < r[1] < top]
+
+    def line_edges():
+        """Where the line starts and ends: the widest gray rule on the page
+        with the table in a cell, as wide as the line, its column of words
+        wrapping."""
+        return max(((r[2], r[3]) for r in rules if r[0] == page_of("Underit") and r[4] == GRAY),
+                   key=lambda edges: edges[1] - edges[0])
+    long_pages = [page for page, rows in lines.items()
+                  if any("Longhead" in row[3] for row in rows)]
+    items = [
+        ("a table ruled row by row (class row-rules) has a rule under each row of its body, "
+         "in OpenStax's gray, a worked example's steps, a layout table, and a table of data, "
+         "and none under its head, as OpenStax draws none there, nor any of the rules the "
+         "writer draws above it, under its head, or below it",
+         lambda: built and [(between(*pair), between(*pair, None)) for pair in (
+             ("Stepone", "Steptwo"), ("Steptwo", "Stepthree"), ("Stepthree", "Databefore"),
+             ("Slopeword", "Pointword"), ("Pointword", "Interceptword"),
+             ("Interceptword", "Spanbefore"))] == [(1, 1)] * 6
+         and [between(above, below, None) for above, below in (
+             ("Stepsbefore", "Stepone"), ("Keyequations", "Nameword"),
+             ("Nameword", "Slopeword"))] == [0, 0, 0]),
+        ("and a table of a calculus book's Key Equations (row-rules-faint) in OpenStax's "
+         "lighter gray",
+         lambda: built and [between("Faintone", "Fainttwo", FAINT),
+                            between("Fainttwo", "Faintafter", FAINT),
+                            between("Faintone", "Faintafter")] == [1, 1, 0]),
+        ("each an artifact, across the table's columns as booktabs draws a rule in a long "
+         "table, not the line: the steps' start right of where a table as wide as the line "
+         "starts its rules and end left of where it ends them",
+         lambda: built and rules and all(r[5] for r in rules if r[4] in (GRAY, FAINT))
+         and len(steps_rules()) == 3
+         and len({(r[2], r[3]) for r in steps_rules()}) == 1
+         and steps_rules()[0][2] > line_edges()[0] + 20
+         and steps_rules()[0][3] < line_edges()[1] - 20),
+        ("a step opening with \"(\" keeps it: the rule before it is no rule's columns to trim "
+         "to (booktabs' \\midrule(lr) in a long table)",
+         lambda: built and any("(a)Stepthree" in row[3].replace(" ", "")
+                               for rows in lines.values() for row in rows)),
+        ("a row a cell spanning rows reaches below isn't ruled; the row it ends with is",
+         lambda: built and [between("Spanfirst", "Spansecond", None),
+                            between("Spansecond", "Spanalone"),
+                            between("Spanalone", "Spanafter")] == [0, 1, 1]),
+        ("a table in a ruled table's last cell is drawn as before, its head's black rule and "
+         "no other, and the rule under the row it's in is under it",
+         lambda: built and [between("Innerhead", "Innerone", (0.0, 0.0, 0.0)),
+                            between("Innerhead", "Innerone", None),
+                            between("Innerone", "Innertwo", None),
+                            between("Innertwo", "Underit"),
+                            between("Underit", "Plainbefore")] == [1, 1, 0, 1, 1]),
+        ("a table not ruled keeps the writer's black rules, above it, under its head, and "
+         "below it, and no gray one",
+         lambda: built and [between(above, below, (0.0, 0.0, 0.0)) for above, below in (
+             ("Plainbefore", "Plainhead"), ("Plainhead", "Plainone"),
+             ("Plaintwo", "Plainafter"))] == [1, 1, 1]
+         and between("Plainbefore", "Plainafter") == 0),
+        ("a table longer than one of longtable's chunks (200 rows) is ruled across the end "
+         "of the first, where a rule had stopped LaTeX's tagging: a rule under each of its "
+         "205 rows, and none under its head on any page it's on",
+         lambda: built and long_pages and sum(
+             1 for r in rules if r[0] in long_pages and r[4] == GRAY) == 205
+         and between("Longrow200", "Longrow201") in (1, None)
+         and between("Longhead", "Longrow1", None) == 0),
+        ("and a rule is no row of its table's: each table's rows are its own, the long "
+         "table's its head's and its 205",
+         lambda: built and [len(spanning_table(rules_path, n)) for n in range(7)]
+         == [4, 3, 2, 3, 3, 2, 206]
+         and spanning_table(rules_path, 1) == [[2, 1], [1], [1, 1]]),
+    ]
+    if shutil.which("verapdf") or os.environ.get("VERAPDF"):
+        items.append(("veraPDF finds nothing in the rules book's PDF",
+                      lambda: built and not pdfcheck.run_verapdf(
+                          outputcheck.find_validator("verapdf"), rules_path)))
+    return items
+
+
 # build-pdf.py as a module, its name for IBM Plex Math's file one no TeX
 # has, run on a copy of the default book: the book as LaTeX sets it where
 # TeX lacks a file of Plex's (build-pdf.py's default_faces).
@@ -3955,7 +4139,7 @@ def fancy_checks(fancy_path, fancy_said):
 # of their own.
 BOOK_FOLDERS = ("", "-ua1", "-untagged", "-notes", "-footer", "-sized", "-fancy",
                 "-default", "-default-lacking", "-preamble", "-aaa", "-fit", "-columns",
-                "-bars", "-languages")
+                "-bars", "-languages", "-rules")
 
 
 def checks(work, jobs=1):
@@ -3977,6 +4161,7 @@ def checks(work, jobs=1):
             columned = pool.submit(build_fit_columns, work + "-columns")
             barred = pool.submit(build_blank_lines, work + "-bars")
             spoken = pool.submit(build_languages, work + "-languages")
+            ruled = pool.submit(build_rules, work + "-rules")
             reader, source, rows, log, placements = book.result()
             ua1_path, ua1_said, ua1_rows = ua1.result()
             untagged_path, untagged_said = plain.result()
@@ -3991,6 +4176,7 @@ def checks(work, jobs=1):
             columns_path, columns_said = columned.result()
             bars_path, bars_source = barred.result()
             languages_path = spoken.result()
+            rules_path = ruled.result()
     else:
         reader, source, rows, log, placements = build(work)
         ua1_path, ua1_said, ua1_rows = build_ua1(work + "-ua1")
@@ -4007,6 +4193,7 @@ def checks(work, jobs=1):
         columns_path, columns_said = build_fit_columns(work + "-columns")
         bars_path, bars_source = build_blank_lines(work + "-bars")
         languages_path = build_languages(work + "-languages")
+        rules_path = build_rules(work + "-rules")
 
     def page_text(path):
         return "".join(page.extract_text() or "" for page in pypdf.PdfReader(path).pages) \
@@ -4791,6 +4978,7 @@ def checks(work, jobs=1):
          and [abs(up - down) < 3 for up, down in bar_limits(bars_path)] == [True, True]),
     ]
     items += language_checks(languages_path)
+    items += rules_checks(rules_path)
     items.append(("every folder a book is built in is one the suite removes once it's done, "
                   "or names when told to keep them (BOOK_FOLDERS)",
                   lambda: {os.path.basename(path) for path in glob.glob(glob.escape(work) + "*")}

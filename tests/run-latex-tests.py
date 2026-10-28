@@ -2879,6 +2879,12 @@ def case_pieces(work):
                "\\newcommand{\\remark}[1]{\\noindent\\begingroup #1\\endgroup}\n"
                "Text $\\hl{x}$ and \\remark{y}.\n")
     math_kept = latexsource.repair_text(in_math, {}, latexsource.math_macros([in_math]))
+    # A table ruled row by row as the PDF target writes it, in a latex
+    # target's LaTeX read back.
+    ruled_back = latexsource.repair_text(
+        "{\\OERFitTable{1}{2}{0}\\OERRowRules[F1F1F1]\n\n\\begin{longtable}[]{@{}ll@{}}\n"
+        "\\toprule\\noalign{}\n\\endhead\na & b\\OERRowRule \\\\\nc & d\\OERRowRule \\\\\n"
+        "\\end{longtable}\n\n\\OERFitTableEnd{1}}\n", {})
     no_macros = latexsource.math_macros(["A formula: $x + 1$, and no macro.\n"])
     line_break = "A\\\\[6mm] B \\[ y \\] C"
     starred = "A\\titleformat*{\\section}{\\bfseries}B\\titlespacing*{\\section}{0pt}{1em}{1em}C"
@@ -3555,6 +3561,10 @@ def case_pieces(work):
                                       "\\newcommand{\\remark}[1]{\\noindent\\/{ #1}}")),
         ("titlesec's starred forms are left out with their own arguments",
          lambda: starred == "ABC"),
+        ("a table ruled row by row, as the PDF target writes it, is read back without its "
+         "rules' commands, which the reader would expand as the preamble defines them",
+         lambda: "OERRowRule" not in ruled_back
+         and "a & b \\\\\nc & d \\\\\n\\end{longtable}" in ruled_back),
         ("a call's arguments are found past a comment between them, as TeX finds them",
          lambda: [a[0] for a in commented[0][3]] == ["a", "b"] if commented else False),
         ("a color in each of xcolor's models is CSS",

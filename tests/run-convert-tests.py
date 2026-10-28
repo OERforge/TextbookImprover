@@ -5145,8 +5145,11 @@ def case_side_by_side(work):
 # (lib/cnx/steptables.py's formula_steps): its math cell for cell, the
 # second step's left side empty, and each step's reason in words, then a
 # fraction marked to be set in display style and the same fraction not; a
-# table of data after them; and a worked example's steps a book sets out in
-# a table of its own (class steps), and another layout table.
+# table of data after them; a worked example's steps a book sets out in a
+# table of its own (class steps), and another layout table; and steps and a
+# table of data with a head ruled row by row (class row-rules), as the CNX
+# unpacker classes the tables OpenStax's math books rule so, and one ruled
+# in the lighter gray of a calculus book's Key Equations (row-rules-faint).
 HALF = ('<math xmlns="http://www.w3.org/1998/Math/MathML"><mfrac><mn>7</mn><mn>2</mn>'
         "</mfrac></math>")
 STEPS_PAGE = (
@@ -5172,7 +5175,11 @@ STEPS_PAGE = (
                "<td>%s</td></tr><tr><td>Simplify.</td><td>"
                '<math xmlns="http://www.w3.org/1998/Math/MathML"><mn>3.5</mn></math></td></tr>'
                "</tbody></table>") % (name, HALF)
-              for name in ("unnumbered unstyled steps", "unnumbered unstyled"))
+              for name in ("unnumbered unstyled steps", "unnumbered unstyled",
+                           "unnumbered unstyled steps row-rules"))
+    + "".join('<table class="%s"><thead><tr><th>Term</th><th>Value</th></tr></thead><tbody>'
+              "<tr><td>x</td><td>2</td></tr><tr><td>y</td><td>3</td></tr></tbody></table>"
+              % name for name in ("row-rules", "row-rules row-rules-faint"))
     + "</body></html>")
 
 
@@ -5182,7 +5189,8 @@ def case_formula_steps_reflow(work):
     relations one over another, and no rule above or below them, where a
     table of data has its rules, and none above or below the steps a book
     sets out in a table of its own (class steps) either, where another
-    layout table has them; a formula marked to be set in display style drawn
+    layout table has them, and a table ruled row by row (class row-rules) a
+    rule under each row of its body; a formula marked to be set in display style drawn
     so; in a phone's, each step's math on a line, and its words wrapping
     within the window, where a layout table's cells stack, each on a line of
     its own. Needs Playwright and its Chromium, and skips without them."""
@@ -5195,7 +5203,7 @@ def case_formula_steps_reflow(work):
     with open(os.path.join(work, "steps.html"), "w", encoding="utf-8") as fh:
         fh.write(STEPS_PAGE)
     result = convert(work, "targets:\n  html:\n    format: html\n", fixtures=())
-    boxes, rules, halves = {}, {}, []
+    boxes, rules, ruled, halves = {}, {}, {}, []
     page = os.path.join(work, "html", "steps.html")
     if result.returncode == 0 and os.path.exists(page):
         play = None
@@ -5224,6 +5232,15 @@ def case_formula_steps_reflow(work):
                         "'table')].map(t => [t.className || 'data', ["
                         "getComputedStyle(t.tBodies[0]).borderTopWidth, "
                         "getComputedStyle(t.tBodies[0]).borderBottomWidth]]))"))
+                    # A table ruled row by row: each row's rule, its width
+                    # and color, and its header cells' rules above them.
+                    ruled.update(view.evaluate(
+                        "() => Object.fromEntries([...document.querySelectorAll("
+                        "'table.row-rules')].map(t => [t.className, ["
+                        "[...t.rows].map(r => getComputedStyle(r).borderBottomWidth + ' ' "
+                        "+ getComputedStyle(r).borderBottomColor), "
+                        "[...t.querySelectorAll('th')].map(h => "
+                        "getComputedStyle(h).borderTopWidth)]]))"))
                     # The fraction marked to be set in display style, and the
                     # one not.
                     halves = [rows.nth(r).locator("td").nth(0).locator("math")
@@ -5251,6 +5268,20 @@ def case_formula_steps_reflow(work):
          "steps), where another layout table has its rules",
          lambda: rules.get("unnumbered unstyled steps") == ["0px", "0px"]
          and rules.get("unnumbered unstyled") == ["1px", "1px"]),
+        ("a table ruled row by row (class row-rules), steps or a table of data, has a rule "
+         "under each row of its body in OpenStax's gray, none under its head, as OpenStax "
+         "draws none there, and none above or below its body or above its header cells, "
+         "where a table of data has them; and one of a calculus book's Key Equations "
+         "(row-rules-faint) has them in OpenStax's lighter gray",
+         lambda: rules.get("unnumbered unstyled steps row-rules") == ["0px", "0px"]
+         and rules.get("row-rules") == ["0px", "0px"]
+         and ruled.get("unnumbered unstyled steps row-rules")
+         == [["1px rgb(117, 116, 116)"] * 2, []]
+         and [r.split()[0] for r in ruled.get("row-rules", [[]])[0]] == ["0px", "1px", "1px"]
+         and ruled.get("row-rules", [[]])[0][1:] == ["1px rgb(117, 116, 116)"] * 2
+         and ruled.get("row-rules", [[], []])[1] == ["0px", "0px"]
+         and ruled.get("row-rules row-rules-faint", [[]])[0][1:]
+         == ["1px rgb(241, 241, 241)"] * 2),
         ("a formula marked to be set in display style is drawn larger than the same formula "
          "in text style, a fraction's parts at full size",
          lambda: len(halves) == 2 and all(halves)

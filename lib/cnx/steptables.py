@@ -136,6 +136,24 @@ ANY_CLASS_STYLES = {"dev-math"}
 STEPS_STYLES = {"dev-math", "precalculus-coreq"}
 # The class steps_table gives them.
 STEPS_CLASS = "steps"
+# OpenStax's corn design, its math books' (cnx.project.DESIGNS, which the
+# CNX suite holds these to), draws a light gray rule under every row of the
+# body of a table it classes unstyled (ce-styles' design-settings/corn/
+# parts/_table-settings.scss, UnnumberedUnstyledTable: each data cell's
+# bottom border, 0.09rem of Grey3, #757474; a header cell has none), and the
+# calculus and algebra-1 styles draw it in Grey1, #F1F1F1, a gray so light
+# it's hardly seen, in Key Equations (their book.scss, KeyEquations, whose
+# rule reaches only a table classed unstyled). Such a table gets the class
+# row-rules, which every format but Word draws so, a Key Equations table
+# in those styles row-rules-faint too, for the lighter gray; and so does a
+# dev-math book's table of steps of another class, which OpenStax draws in
+# a grid, a rule under each row among its lines (Rob, 2026-10-27, of a
+# light rule under each step: "Everywhere OpenStax rules").
+RULED_STYLES = {"additive-manufacturing", "algebra-1", "calculus", "contemporary-math",
+                "dev-math", "precalculus", "precalculus-coreq", "statistics"}
+FAINT_KEY_EQUATIONS = {"algebra-1", "calculus"}
+ROW_RULES_CLASS = "row-rules"
+FAINT_CLASS = "row-rules-faint"
 
 
 def cell_text(cell, alt=True):
@@ -343,6 +361,20 @@ def in_key_equations(source):
     return any("key-equations" in classes(a) for a in source.iterancestors())
 
 
+def row_rules(source, style, steps):
+    """The classes that draw a table with a light rule under each row of
+    its body, as OpenStax draws it: ROW_RULES_CLASS for one it classes
+    unstyled in a book of its corn design (RULED_STYLES), or a table of
+    steps (steps) in such a book, and FAINT_CLASS beside it for one so
+    classed in Key Equations in a book of FAINT_KEY_EQUATIONS; [] for any
+    other."""
+    unstyled = "unstyled" in classes(source)
+    if style not in RULED_STYLES or not (unstyled or steps):
+        return []
+    faint = unstyled and style in FAINT_KEY_EQUATIONS and in_key_equations(source)
+    return [ROW_RULES_CLASS] + ([FAINT_CLASS] if faint else [])
+
+
 def steps_table(source, style):
     """Whether a table laid out for where it stands (layout_reason's
     "place") is given the class steps (STEPS_CLASS): in a book of
@@ -351,7 +383,8 @@ def steps_table(source, style):
     properties, a comparison, or a problem laid out as it stands. Every
     format draws them without the rules a table of data has, as it draws
     the steps the unpacker lays out itself (formula_steps), while they're
-    a layout table."""
+    a layout table, and every format but Word with a light rule under each
+    row, as OpenStax does (row_rules)."""
     return style in STEPS_STYLES and not in_key_equations(source)
 
 

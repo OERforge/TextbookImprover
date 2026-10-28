@@ -2289,6 +2289,12 @@ def repair_text(text, counter, math_macros=(), counters=()):
                       counter, "multicolumn_edge")
     text = language_marks(text, counter)
     text = drop(text, "OERLinkContents", counter, "link_contents")
+    # The PDF target's rule under each row of a table ruled row by row
+    # (pdf-target.lua's ROW_RULES): the reader would expand them as the
+    # preamble defines them, \OERRowRules an empty paragraph before the
+    # table.
+    text = drop_command(text, "OERRowRules", "o", counter, "row_rules")
+    text = drop_command(text, "OERRowRule", "", counter, "row_rules")
     text = stacked_lines(text, counter)
     text = minipage_breaks(text, counter)
     text = drop(text, "OERLinkContentsReset", counter, "link_contents_reset")

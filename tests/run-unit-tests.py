@@ -206,20 +206,35 @@ def check_page_css():
     3.12 stylesheet follows. page.css is an EPUB's too, whose stylesheet
     leaves the light background to the reading system, white as a rule,
     and gives dark mode #232629. Every color page.css gives text has to
-    clear WCAG AA against the background it lands on, in each."""
+    clear WCAG AA against the background it lands on, in each, and a
+    table's row rule 3:1, WCAG's for a line that tells something, but the
+    one OpenStax draws hardly seen."""
     import re as _re
     with open(os.path.join(ROOT, "bin", "page.css"), encoding="utf-8") as fh:
         css = _re.sub(r"/\*.*?\*/", "", fh.read(), flags=_re.S)
     screen = css.split("@media print")[0]
-    pairs = _re.findall(r"light-dark\((#[0-9a-fA-F]{3,6}),\s*(#[0-9a-fA-F]{3,6})\)", screen)
+    pairs = _re.findall(r"(?<![-\w])color:\s*light-dark\((#[0-9a-fA-F]{3,6}),\s*"
+                        r"(#[0-9a-fA-F]{3,6})\)", screen)
     fixed = _re.findall(r"(?<![-\w])color:\s*(#[0-9a-fA-F]{3,6})\s*;", screen)
     outlines = _re.findall(r"outline:[^;]*?(#[0-9a-fA-F]{3,6})", screen)
+    # A rule's colors, a table's row rules': OpenStax's gray, and the gray
+    # it draws a calculus book's Key Equations in, Grey1, hardly seen.
+    rules = _re.findall(r"border[-\w]*:[^;]*?light-dark\((#[0-9a-fA-F]{3,6}),\s*"
+                        r"(#[0-9a-fA-F]{3,6})\)", screen)
+    backgrounds = (("#fdfdfd", "#1a1a1a"), ("#ffffff", "#232629"))
     return [
-        ("each light-dark() color clears 4.5:1 in light and dark mode, a page's and an EPUB's",
+        ("each light-dark() color text is given clears 4.5:1 in light and dark mode, a "
+         "page's and an EPUB's",
          lambda: pairs and all(contrast(expand(l), light) >= 4.5
                                and contrast(expand(d), dark) >= 4.5
-                               for l, d in pairs
-                               for light, dark in (("#fdfdfd", "#1a1a1a"), ("#ffffff", "#232629")))),
+                               for l, d in pairs for light, dark in backgrounds)),
+        ("a table's row rule clears 3:1, as a line that tells something does, in both modes, "
+         "but the rule OpenStax draws Key Equations with in a calculus book, its Grey1, "
+         "hardly seen in either",
+         lambda: rules == [("#757474", "#9a9a9a"), ("#f1f1f1", "#2e2e2e")]
+         and all(contrast("#757474", light) >= 3 and contrast("#9a9a9a", dark) >= 3
+                 and contrast("#f1f1f1", light) < 1.5 and contrast("#2e2e2e", dark) < 1.5
+                 for light, dark in backgrounds)),
         ("a fixed text color has a light-dark() form beside it",
          lambda: all(any(expand(c) == expand(l) for l, _ in pairs) for c in fixed)),
         ("no outline is a fixed color that dark mode's background matches",

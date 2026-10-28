@@ -146,6 +146,32 @@ table.steps[role="presentation"] > tbody {
   }
 }
 
+/* A table OpenStax's math books draw with a light rule under each row of
+   its body (class row-rules, which the CNX unpacker gives the tables
+   OpenStax's corn design rules so: those it classes unstyled, and a
+   worked example's steps): none of the rules above and below its head and
+   body and over its header cells that Pandoc's stylesheets draw, none
+   under its head, as OpenStax draws none there, and a rule under each row
+   of its body, in OpenStax's gray, lighter in dark mode. A layout table's
+   cells stacked on a narrow screen keep it, under each row's. A Key
+   Equations table in the calculus books (row-rules-faint) has OpenStax's
+   lighter gray, which is hardly seen, as on OpenStax's own pages. */
+table.row-rules > thead,
+table.row-rules > tbody,
+table.row-rules > tfoot,
+table.row-rules > * > tr > th {
+  border-top: 0;
+  border-bottom: 0;
+}
+table.row-rules > tbody > tr {
+  border-bottom: 1px solid #757474;
+  border-bottom: 1px solid light-dark(#757474, #9a9a9a);
+}
+table.row-rules.row-rules-faint > tbody > tr {
+  border-bottom: 1px solid #f1f1f1;
+  border-bottom: 1px solid light-dark(#f1f1f1, #2e2e2e);
+}
+
 /* Word puts the "Table 2.1" label below the table; keep it there. */
 table caption {
   caption-side: bottom;

@@ -54,7 +54,7 @@ from .bake.core import (class_test, classes, detach, has_class, prepend,
 from .cnxml import E, append_text
 from .mathml import MATHML
 from .steptables import (HEADED, STEPS_CLASS, formula_steps, head_rows, header_guess,
-                         layout_reason, organizer_page, steps_table, symbol_key)
+                         layout_reason, organizer_page, row_rules, steps_table, symbol_key)
 
 VOID = {"area", "base", "br", "col", "embed", "hr", "img", "input", "link",
         "meta", "source", "track", "wbr"}
@@ -1005,7 +1005,9 @@ class Emitter:
         table, or a grid of key terms, unless the header guess reads a
         header row in it, which leaves it a data table, reported. Steps
         are given the class steps too (steps_table), which every format
-        draws without a table of data's rules.
+        draws without a table of data's rules, and a table OpenStax rules
+        row by row the class row-rules (row_rules), which every format but
+        Word draws with a light rule under each row of its body instead.
         OpenStax's HTML marks a table so only when it has no label of
         OpenStax's (aria-label), with which a browser would ignore the
         role. The labels, written in 2023 from the tables' summaries,
@@ -1038,6 +1040,11 @@ class Emitter:
         if label:
             self.report(page.name, "table-label-left-out",
                         f"{name}" + (", a layout table" if layout else "") + f": {label}")
+        # A rule under each row where OpenStax draws one (row_rules), a
+        # layout table's or a table of data's.
+        ruled = row_rules(source, self.book.style, STEPS_CLASS in (out.get("class") or "").split())
+        if ruled:
+            out.set("class", " ".join((out.get("class") or "").split() + ruled))
         return layout
 
     # glossaries, indexes, summaries -----------------------------------

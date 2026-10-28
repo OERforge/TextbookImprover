@@ -1437,16 +1437,58 @@ local sized_table
 -- its own, each step's words beside its result, which the CNX unpacker
 -- gives the class steps (the dev-math books' and the corequisite book's),
 -- are drawn without them too (UNRULED), their formulas breaking as other
--- tables' do. Steps are drawn so only while they're a layout table: steps
--- that table-headers.csv makes a table of data keep a table of data's
--- rules, as they do on a page (page.css).
+-- tables' do, unless they're ruled row by row (ROW_RULES, below), as the
+-- unpacker classes them now. Steps are drawn so only while they're a
+-- layout table: steps that table-headers.csv makes a table of data keep a
+-- table of data's rules, as they do on a page (page.css).
 local UNRULED = '\\def\\toprule{}\\def\\bottomrule{}'
 local UNBROKEN = '\\binoppenalty=10000 \\relpenalty=10000 '
+
+-- A table ruled row by row (class row-rules, which the CNX unpacker gives
+-- a table OpenStax's math books draw with a light rule under each row of
+-- its body: one they class unstyled, and a worked example's steps), a
+-- layout table's or a table of data's, as a page draws it (page.css): none
+-- of the writer's rules above it, under its head, or below it, and a rule
+-- under each row of its body, OpenStax's gray, across the table's columns
+-- (PDF_MACROS' \OERRowRules), or its lighter gray for a calculus book's
+-- Key Equations (class row-rules-faint). A row ruled ends with
+-- \OERRowRule, after everything else its cells hold, a table in a cell
+-- among them, whose rows aren't ruled; the rule is drawn at the row's end.
+-- A head's rows aren't ruled, nor a foot's, as OpenStax rules only its
+-- body's rows of data cells. A row a cell spanning rows reaches below
+-- isn't ruled: a rule across the table would cross the cell, where
+-- OpenStax rules the row's other cells, and a cell spanning rows is rare in
+-- such a table (in 6 of the 3,337 tables OpenStax's books of that design
+-- class unstyled, the Spanish books' among them, counted book by book).
+local ROW_RULES = '\\OERRowRules '
+local FAINT_RULES = '\\OERRowRules[F1F1F1] '
+
+local function rule_rows(tbl)
+  for _, body in ipairs(tbl.bodies) do
+    local reach = 0
+    for at, row in ipairs(body.body) do
+      for _, cell in ipairs(row.cells) do
+        reach = math.max(reach, at + (cell.row_span or 1) - 1)
+      end
+      local cell = row.cells[#row.cells]
+      if cell and reach <= at then
+        local raw = pandoc.RawInline('latex', '\\OERRowRule')
+        local last = cell.contents[#cell.contents]
+        if last and (last.t == 'Plain' or last.t == 'Para') then
+          last.content:insert(raw)
+        else
+          cell.contents:insert(pandoc.Plain({ raw }))
+        end
+      end
+    end
+  end
+end
 
 function Table(tbl)
   local nested = tbl.attributes[IN_CELL] ~= nil
   local steps = tbl.classes:includes('formula-steps')
   local unruled = is_layout(tbl) and (steps or tbl.classes:includes('steps'))
+  local ruled = tbl.classes:includes('row-rules')
   local result, wraps, columns, lead, measured = sized_table(tbl)
   if nested then return result end
   local id = next_fit()
@@ -1458,7 +1500,9 @@ function Table(tbl)
     local out = pandoc.Blocks{}
     for i = 1, lead or 0 do out:insert(blocks[i]) end
     out:insert(pandoc.RawBlock('latex', open .. (steps and UNBROKEN or '')
-                                        .. (unruled and UNRULED or '')))
+                                        .. (ruled and (tbl.classes:includes('row-rules-faint')
+                                                       and FAINT_RULES or ROW_RULES)
+                                            or unruled and UNRULED or '')))
     for i = (lead or 0) + 1, #blocks do out:insert(blocks[i]) end
     out:insert(pandoc.RawBlock('latex', '\\OERFitTableEnd{' .. id .. '}}'))
     return out
@@ -1489,6 +1533,9 @@ sized_table = function(tbl)
   fit_to_line(tbl)
   local measured = not cell and (steps_spec(tbl) or table_spec(tbl, given)) or nil
   local wraps, count = wrapping(tbl), #tbl.colspecs
+  -- Its rows' marks once it's measured, which they'd count among its cells'
+  -- contents (simple_cell, steps_columns).
+  if not cell and tbl.classes:includes('row-rules') then rule_rows(tbl) end
   local columns = 0
   for _, body in ipairs(tbl.bodies) do
     if body.row_head_columns > columns then

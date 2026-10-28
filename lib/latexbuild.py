@@ -1482,6 +1482,47 @@ PDF_MACROS = r"""\ExplSyntaxOn
     \prop_if_exist:NT \g__tbl_untagged_cells_prop
       { \prop_gclear:N \g__tbl_untagged_cells_prop }
   }
+% A table ruled row by row (pdf-target.lua's ROW_RULES), in a group with
+% \OERRowRules: none of the rules the writer draws above it, under its
+% head, and below it (\toprule, \midrule, and \bottomrule, each followed
+% by \noalign{}, which is left alone), and booktabs' rules in OpenStax's
+% gray (\CT@arc@, booktabs' hook for colortbl's color), or the color its
+% optional argument gives, as #rrggbb's digits (a calculus book's Key
+% Equations, F1F1F1). A row ruled ends
+% with \OERRowRule, and the rule is put after the \noalign longtable
+% opens the next row with (the tbl/row/init hook, \group_insert_after:N),
+% where a rule between rows goes: booktabs' \specialrule, a \midrule's
+% width and space, which in a long table is a row of its own across the
+% table's columns, not the line's, an artifact where LaTeX tags
+% (latex-lab's firstaid module), and kept on the page of the row above
+% it. After the last row of one of the chunks longtable sets a table in
+% (\LTchunksize rows, 200), that \noalign is the next chunk's, and the
+% rule goes there: put at the row's end (tbl/row/end), in the chunk the
+% row ended, it stopped LaTeX's tagging ("\ERRORtbl/row"), since
+% latex-lab counts a rule's row off for longtable to count on again
+% after it, which longtable doesn't at a chunk's end. The \noalign{}
+% after the rule, as after the writer's own, keeps it from taking a row
+% that opens with "(" for the columns to trim it to.
+\bool_new:N \g__oer_row_rule_bool
+\NewDocumentCommand \OERRowRule { } { \bool_gset_true:N \g__oer_row_rule_bool }
+\NewDocumentCommand \OERRowRules { O { 757474 } }
+  {
+    \bool_gset_false:N \g__oer_row_rule_bool
+    \cs_set_eq:NN \toprule \prg_do_nothing:
+    \cs_set_eq:NN \midrule \prg_do_nothing:
+    \cs_set_eq:NN \bottomrule \prg_do_nothing:
+    \cs_set:cpn { CT@arc@ } { \color [HTML] {#1} }
+  }
+\cs_new:Npn \__oer_row_rule:
+  { \specialrule { \lightrulewidth } { \aboverulesep } { \belowrulesep } \noalign { } }
+\AddToHook { tbl / row / init }
+  {
+    \bool_if:NT \g__oer_row_rule_bool
+      {
+        \bool_gset_false:N \g__oer_row_rule_bool
+        \group_insert_after:N \__oer_row_rule:
+      }
+  }
 % A link's description, which \pdfstringdef sets globally, and so it's
 % cleared globally too: cleared in a group (a footnote, a cell, a
 % caption), it came back at the group's end, and in a PDF/UA-1 book a

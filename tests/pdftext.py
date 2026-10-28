@@ -504,6 +504,67 @@ def curves(path):
     return found
 
 
+def level_rules(path):
+    """[(page index, height, left, right, color, artifact)] for each level
+    rule a page's own content draws, in points from the page's foot and
+    left edge, as drawn: a line stroked from one point to another at the
+    same height, as LuaTeX draws a thin rule, or a filled rectangle wider
+    than it's tall, at its middle; its color the stroke's or the fill's,
+    (r, g, b) to three places, a gray as its three; and whether it's drawn
+    in an artifact's marked content."""
+    found = []
+
+    def at(ctm, x, y):
+        return (ctm[0] * x + ctm[2] * y + ctm[4], ctm[1] * x + ctm[3] * y + ctm[5])
+
+    def rule(n, ctm, a, b, color, marked):
+        (x0, y0), (x1, y1) = at(ctm, *a), at(ctm, *b)
+        found.append((n, round((y0 + y1) / 2, 2), round(min(x0, x1), 2),
+                      round(max(x0, x1), 2), color, "/Artifact" in marked))
+
+    with pikepdf.open(path) as pdf:
+        for n, page in enumerate(pdf.pages):
+            ctm, stroke, fill, saved, marked, points, box = (
+                [1, 0, 0, 1, 0, 0], (0.0, 0.0, 0.0), (0.0, 0.0, 0.0), [], [], [], None)
+            for operands, op in pikepdf.parse_content_stream(page):
+                op = str(op)
+                if op == "q":
+                    saved.append((list(ctm), stroke, fill))
+                elif op == "Q" and saved:
+                    ctm, stroke, fill = saved.pop()
+                elif op == "cm" and len(operands) == 6:
+                    ctm = _times([float(x) for x in operands], ctm)
+                elif op in ("RG", "rg") and len(operands) == 3:
+                    color = tuple(round(float(x), 3) for x in operands)
+                    stroke, fill = (color, fill) if op == "RG" else (stroke, color)
+                elif op in ("G", "g") and len(operands) == 1:
+                    color = (round(float(operands[0]), 3),) * 3
+                    stroke, fill = (color, fill) if op == "G" else (stroke, color)
+                elif op in ("BMC", "BDC") and operands:
+                    marked.append(str(operands[0]))
+                elif op == "EMC" and marked:
+                    marked.pop()
+                elif op == "m" and len(operands) == 2:
+                    points, box = [[float(v) for v in operands]], None
+                elif op == "l" and points and len(operands) == 2:
+                    points.append([float(v) for v in operands])
+                elif op == "re" and len(operands) == 4:
+                    points, box = [], [float(v) for v in operands]
+                elif op in ("S", "s"):
+                    if len(points) == 2 and abs(points[0][1] - points[1][1]) < 0.01 \
+                            and abs(points[0][0] - points[1][0]) > 0.01:
+                        rule(n, ctm, points[0], points[1], stroke, marked)
+                    points, box = [], None
+                elif op in ("f", "F", "f*"):
+                    if box and abs(box[2]) > abs(box[3]):
+                        middle = box[1] + box[3] / 2
+                        rule(n, ctm, (box[0], middle), (box[0] + box[2], middle), fill, marked)
+                    points, box = [], None
+                elif op in ("n", "B", "B*", "b", "b*"):
+                    points, box = [], None
+    return found
+
+
 def base_fonts(path):
     """The base font names a PDF's pages and their form XObjects draw with,
     a subset's tag taken off (ABCDEF+LINE10 is LINE10)."""

@@ -2256,6 +2256,8 @@ def read_html_to_json(base, docs, env, work):
                     "tex": "read from the TeX the rendering carried",
                     "rebuilt": "rebuilt as MathML from MathJax's rendering",
                     "tex-follows": "dropped beside their TeX, which is read",
+                    "mml-follows": "dropped beside the MathML MathJax kept as their "
+                                   "source, which is read in their place",
                     "lost": "lost, marked [formula]: nothing in the "
                             "rendering can be read back"}
             say(f"{name}: " + "; ".join(f"{n} formula(s) {said[k]}"

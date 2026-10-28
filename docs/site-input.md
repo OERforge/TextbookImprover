@@ -43,7 +43,7 @@ What surrounds the content depends on what built the site, and a profile says wh
 
 A profile may also say what its generator lays out as a table that isn't one. Scribble does that four ways, and of DCIC's 335 tables 210 were these: a REPL interaction (prompt, code, result) becomes its contents; a section's own table of contents, nothing but `toclink` links, goes, like just-the-docs' per-page contents; a verbatim block with a line per row becomes one `<pre>`; and a Python/Pyret comparison, the one kind that is data, keeps its table and gets its row of language names as header cells. Three more have only their shape to go by: code a line a row, each line in Scribble's typewriter span, becomes one `<pre>`; the book's contents, a link a row, becomes a list; and a derivation laid out to line up its equals signs (`T(k) | = | T(k-1) + c`, a relation alone in every row's middle column) is marked a layout table, which the header guess leaves alone. The report counts each kind. With these and the reading fixes in [HTML sources](html.md) (bold written as a style, empty spacer columns), none of DCIC's tables is left without headers where it needs them.
 
-A book's pages keep no `<script>` except math (`type="math/tex"`, which Pandoc reads), no stylesheets, and no `<style>`. An `<a name>` with no link becomes an empty `<span>` holding the id, since Pandoc's reader drops the name.
+A book's pages keep no `<script>` except math (`type="math/tex"`, which Pandoc reads, and MathJax 2's `math/mml`, whose MathML the conversion reads in its place), no stylesheets, and no `<style>`. An `<a name>` with no link becomes an empty `<span>` holding the id, since Pandoc's reader drops the name.
 
 ## The order, from the pages' own menus
 

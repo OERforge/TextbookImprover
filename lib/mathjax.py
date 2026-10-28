@@ -8,7 +8,11 @@ save keeps no scripts, so the TeX is gone. Each rendering is replaced
 before Pandoc reads the page, by the first of these that it has:
 
 1. Nothing, when MathJax's <script type="math/tex"> follows it: Pandoc
-   reads the TeX, so the formula isn't there twice.
+   reads the TeX, so the formula isn't there twice. Where the script that
+   follows is MathJax 2's <script type="math/mml">, a formula written in
+   MathML, which Pandoc doesn't read, its MathML takes the script's place.
+   A script of another kind, AsciiMath's, Pandoc doesn't read either: the
+   rendering is read as below.
 2. The MathML MathJax hides in it for screen readers (MathJax 2's
    MJX_Assistive_MathML, 3's and 4's mjx-assistive-mml), or MathJax 2's
    data-mathml attribute: exact.
@@ -467,10 +471,11 @@ def _replace(parent, old, new):
 
 def rebuilt(markup):
     """(markup, counts): the page with every MathJax rendering replaced,
-    and how many went each way -- tex-follows, hidden-mathml, tex,
-    rebuilt, lost. A page that mentions no MathJax is returned untouched."""
-    counts = {"tex-follows": 0, "hidden-mathml": 0, "tex": 0, "rebuilt": 0,
-              "lost": 0}
+    and how many went each way -- tex-follows, mml-follows, hidden-mathml,
+    tex, rebuilt, lost. A page that mentions no MathJax is returned
+    untouched."""
+    counts = {"tex-follows": 0, "mml-follows": 0, "hidden-mathml": 0, "tex": 0,
+              "rebuilt": 0, "lost": 0}
     if "MathJax" not in markup and "mjx-" not in markup:
         return markup, counts
     root = hp.parse(markup)
@@ -495,10 +500,26 @@ def rebuilt(markup):
         siblings = [s for s in parent if isinstance(s.tag, str)]
         at = siblings.index(rendering)
         following = siblings[at + 1] if at + 1 < len(siblings) else None
-        if following is not None and hp.local(following.tag) == "script" \
-                and (following.get("type") or "").startswith("math/"):
+        script = (following.get("type") or "") \
+            if following is not None and hp.local(following.tag) == "script" else ""
+        # A script Pandoc reads, as its reader takes one: a type that
+        # begins math/tex (pScriptMath, Readers/HTML.hs).
+        if script.startswith("math/tex"):
             hp.drop(rendering, parent_of)
             counts["tex-follows"] += 1
+            continue
+        # MathJax 2 keeps a formula written in MathML as its source, in a
+        # <script type="math/mml">, which Pandoc doesn't read, so the
+        # MathML takes the script's place.
+        mml = script.split(";")[0].strip().lower() == "math/mml"
+        source = _find(hp.parse("<body>" + (following.text or "") + "</body>"),
+                       lambda e: hp.local(e.tag) == "math") if mml else None
+        if source is not None:
+            if display and not source.get("display"):
+                source.set("display", "block")
+            _replace(parent, following, source)
+            hp.drop(rendering, parent_of)
+            counts["mml-follows"] += 1
             continue
         holder, hidden = _hidden_mathml(rendering)
         if hidden is None:

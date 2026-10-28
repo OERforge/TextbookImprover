@@ -82,13 +82,25 @@ def variants(samples):
     out["mj2-svg-bare"] = ("lost", [
         '<span class="MathJax_SVG">%s</span>'
         % re.sub(r"<title[^>]*>.*?</title>", "", h, flags=re.S) for h in svg])
+    # A formula written in MathML, as MathJax 2 leaves it: its rendering,
+    # then the source in a <script type="math/mml">, which Pandoc doesn't
+    # read; the formula had been dropped with the rendering.
+    out["mj2-chtml-script"] = ("mml-follows", [
+        '%s<script type="math/mml" id="MathJax-Element-%d">%s</script>' % (h, i, m)
+        for i, (h, m) in enumerate(zip(chtml, mml), start=1)])
+    # A script of a kind Pandoc doesn't read either, AsciiMath's, after a
+    # rendering: the rendering is read, where it had been dropped for it.
+    out["mj2-chtml-asciimath"] = ("rebuilt", [
+        '%s<script type="math/asciimath" id="MathJax-Element-%d">x</script>' % (h, i)
+        for i, h in enumerate(chtml, start=1)])
     return out
 
 
 LABELS = {"mj2": "MathJax 2", "mj3": "MathJax 3", "mj4": "MathJax 4",
           "chtml": "CommonHTML", "svg": "SVG", "mml": "with its hidden MathML",
           "bare": "without hidden MathML", "nolatex": "without data-latex",
-          "title": "with a TeX title"}
+          "title": "with a TeX title", "script": "with its math/mml script",
+          "asciimath": "with an AsciiMath script"}
 
 
 def rendering_checks(mathjax, samples):
@@ -118,7 +130,9 @@ def rendering_checks(mathjax, samples):
 
 def pipeline_checks(samples):
     """A saved page with one formula that can be read back and one that
-    can't, converted: MathML in the page, and the lost one reported."""
+    can't, converted: MathML in the page, and the lost one reported. And
+    a page of formulas MathJax 2 drew from MathML, each with its source
+    after it, read from the source."""
     work = tempfile.mkdtemp()
     try:
         svg = re.sub(r"<title[^>]*>.*?</title>", "", samples["mj2-svg"][0],
@@ -128,6 +142,18 @@ def pipeline_checks(samples):
                      '</head><body><h1>Saved</h1><p>First %s, then '
                      '<span class="MathJax_SVG">%s</span>.</p></body></html>'
                      % (samples["mj3-chtml-bare"][0], svg))
+        # MathJax 2's renderings of formulas written in MathML, each with
+        # its source after it: one in the text, one displayed, whose source
+        # doesn't say so, as where MathJax was told which were displays.
+        mml = [re.sub(r"\s*\n\s*", "", m) for m in samples["mj2-mml"]]
+        with open(os.path.join(work, "source.html"), "w", encoding="utf-8") as fh:
+            fh.write('<!DOCTYPE html><html lang="en"><head><title>Source</title>'
+                     '</head><body><h1>Source</h1><p>First %s<script type="math/mml" '
+                     'id="MathJax-Element-1">%s</script>, then:</p><div '
+                     'class="MathJax_Display">%s</div><script type="math/mml" '
+                     'id="MathJax-Element-2">%s</script></body></html>'
+                     % (samples["mj2-chtml"][0], mml[0], samples["mj2-chtml"][1],
+                        re.sub(r'\s*display="block"', "", mml[1])))
         with open(os.path.join(work, "conversion.yaml"), "w") as fh:
             fh.write("targets:\n  html:\n    format: html\n")
         run = subprocess.run([sys.executable, os.path.join(ROOT, "bin",
@@ -150,6 +176,18 @@ def pipeline_checks(samples):
         yield ("and one that can't is marked, said on the way, and reported",
                "[formula]" in page and "lost, marked [formula]" in run.stderr
                and "formula-lost" in report, run.stderr[-300:])
+        source = ""
+        path = os.path.join(work, "html", "source.html")
+        if os.path.exists(path):
+            with open(path, encoding="utf-8") as fh:
+                source = fh.read()
+        yield ("a formula MathJax 2 kept as MathML in a math/mml script is read from it, "
+               "once, in the text and displayed, a display's MathML marked as one, and said",
+               source.count("<math") == 2 and "<msubsup>" in source and "<msqrt>" in source
+               and len(re.findall(r'<math[^>]*display="block"', source)) == 1
+               and "mjx-" not in source
+               and "2 formula(s) dropped beside the MathML MathJax kept as their source"
+               in run.stderr, run.stderr[-300:])
     finally:
         shutil.rmtree(work, ignore_errors=True)
 

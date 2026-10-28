@@ -441,22 +441,25 @@ A face the file names sets its family in place of the default's, and one for san
 
 #### WCAG 1.4.8 (AAA)
 
-[Visual Presentation](https://www.w3.org/WAI/WCAG22/Understanding/visual-presentation.html) asks for five things a reader can have of a block of text, and lets the means be the reader's own PDF viewer ("the mechanism can be provided by the browser or other user agent"). Two are a viewer's whatever the page: colors the reader chooses, and text enlarged to twice its size without scrolling sideways, as a viewer's reflow of a tagged PDF gives it. The default page gives a third, text that isn't justified, and lines space-and-a-half apart, and misses the rest: its lines average about 81 characters in IBM Plex Serif, spaces counted, where the criterion asks for no more than 80 (Latin Modern's average 88), and its paragraphs are closer together than it asks, its footnotes' and captions' lines too. `bin/pdf-layout-wcag-aaa.yaml` is a page that gives them, for a book that's to meet the criterion, and a book on it is longer: *Introduction to Sociology 3e* runs to 1,279 pages on it in Plex, where the default gives it 1,032. It's the default page with three changes, below. Copy it into a book's folder and name the copy in `conversion.yaml`, as with a copy of the default, or copy it over `bin/pdf-layout.yaml` to make it every book's page:
+[Visual Presentation](https://www.w3.org/WAI/WCAG22/Understanding/visual-presentation.html) asks for five things a reader can have of a block of text, and lets the means be the reader's own PDF viewer ("the mechanism can be provided by the browser or other user agent"). Two are a viewer's whatever the page: colors the reader chooses, and text enlarged to twice its size without scrolling sideways, as a viewer's reflow of a tagged PDF gives it. The default page gives a third, text that isn't justified, and lines space-and-a-half apart, and misses the rest: its lines average about 81 characters in IBM Plex Serif, spaces counted, where the criterion asks for no more than 80 (Latin Modern's average 88), and its paragraphs are closer together than it asks, its footnotes' and captions' lines too. `bin/pdf-layout-wcag-aaa.yaml` is a page that gives them, for a book that's to meet the criterion, and a book on it is longer: *Introduction to Sociology 3e* runs to 1,139 pages on it in Plex, where the default gives it 1,032. It's the default page with three changes, below. Copy it into a book's folder and name the copy in `conversion.yaml`, as with a copy of the default, or copy it over `bin/pdf-layout.yaml` to make it every book's page:
 
 ```yaml
 # A page for a book whose PDF is to meet WCAG 1.4.8, Visual Presentation
 # (AAA): the PDF target's default page (bin/pdf-layout.yaml) with larger
 # type, paragraphs further apart, and footnotes and captions spaced as
-# the text is, which makes a book about 24 percent longer. To use it for
+# the text is, which makes a book about 10 percent longer. To use it for
 # a book, copy it into the book's folder and name the copy in
 # conversion.yaml (defaults: pdf: metadata: pdf-layout-wcag-aaa.yaml); to
 # make it every book's page, copy it over bin/pdf-layout.yaml.
 # docs/configuration.md, "The PDF's page", says what each setting gives.
 
-# Lines of no more than 80 characters, on average: 13.5-point type in
-# OpenStax's margins holds about 72 to a full line in IBM Plex Serif,
-# the default's face, and 78 in Latin Modern.
-fontsize: 13.5pt
+# Lines of no more than 80 characters, on average: 12.5-point type in
+# OpenStax's margins holds about 77 to a full line in IBM Plex Serif,
+# the default's face. Latin Modern holds more to a line at a size: a book
+# set in it, as the default is where TeX lacks Plex, or as a book's own
+# file can name it, needs 13.5-point type (fontsize: 13.5pt), about 78
+# to a full line.
+fontsize: 12.5pt
 papersize: letter
 geometry:
   - left=1in
@@ -485,7 +488,7 @@ header-includes:
   - '\SetSinglespace{1.25}'
 ```
 
-- **Lines of no more than 80 characters**, which W3C's technique for it reads as an average ([C20](https://www.w3.org/WAI/WCAG22/Techniques/css/C20)): 13.5-point type, whose full lines average about 72 in IBM Plex Serif (67 to 75, at the 10th and 90th percentiles), where the default's average 81 (77 to 85), spaces counted, in *Introduction to Sociology 3e*'s section 1.3 and *College Algebra 2e*'s. Larger type serves a reader with low vision too, but gives a wide table fewer characters' room: in Latin Modern, the default's face when this page was made, whose full lines average 78 at 13.5 points and 88 at 12, *Introductory Business Statistics 2e* had 81 lines that ran into the margin at 13.5 points, where the default gave it 54. Plex's wider letters would meet the criterion with less: 12.5-point type, about 77 a line (73 to 81), or side margins of 1.1 inches with 12-point type, about 78 (73 to 82), the text then 0.2 inch narrower than the 6.5 inches OpenStax's tables were made for (`geometry: [left=1.1in, right=1.1in, top=0.8in, bottom=0.8in, footskip=0.3in]`). The two sections, 33 pages on the default page, are 40 on this one, 36 on it in 12.5-point type, and 34 on the default page with the wider margins.
+- **Lines of no more than 80 characters**, which W3C's technique for it reads as an average ([C20](https://www.w3.org/WAI/WCAG22/Techniques/css/C20)): 12.5-point type, whose full lines average about 77 in IBM Plex Serif (73 to 81, at the 10th and 90th percentiles), where the default's average 81 (77 to 85), spaces counted, in *Introduction to Sociology 3e*'s section 1.3 and *College Algebra 2e*'s. Latin Modern's letters are narrower, and a full line of it averages 78 at 13.5 points and 88 at 12: a book set in it, as the default is where TeX lacks Plex, needs `fontsize: 13.5pt`, as the page's comment says. Larger type serves a reader with low vision too, but gives a wide table fewer characters' room: in Latin Modern, the default's face when this page was made, *Introductory Business Statistics 2e* had 81 lines that ran into the margin at 13.5 points, where the default gave it 54. Side margins of 1.1 inches with 12-point type would meet the criterion too, about 78 a line (73 to 82), the text then 0.2 inch narrower than the 6.5 inches OpenStax's tables were made for (`geometry: [left=1.1in, right=1.1in, top=0.8in, bottom=0.8in, footskip=0.3in]`). The two sections, 33 pages on the default page, are 36 on this one, 40 on it in 13.5-point type, and 34 on the default page with the wider margins.
 - **Lines space-and-a-half apart**, which W3C's technique for line spacing ([C21](https://www.w3.org/WAI/WCAG22/Techniques/css/C21)) measures from the type's size: the default's lines, 1.5 times the type's size apart, are space-and-a-half already, and the page keeps them.
 - **Paragraphs further apart than lines**: "paragraph spacing is at least 1.5 times larger than the line spacing", which W3C's explanation of the criterion measures from the top of one paragraph's last line to the top of the next one's first, 250% of single spacing. Measured from the type's size instead, as C21 measures lines, that's 2.5 times the type's size, a space of 1em between paragraphs at this line spacing. The default's paragraphs are 2.1 times the type's size apart, half the class's line apart as parskip sets them (OpenStax's are 2.2).
 - **Footnotes and captions spaced as the text is.** setspace sets a footnote single-spaced, 1.2 times its type's size, whatever `linestretch` says, and the caption package does the same to a caption in a book with a table, which every OpenStax book has. setspace's `\SetSinglespace{1.25}` gives them the text's spacing, 1.5 times their type's size.

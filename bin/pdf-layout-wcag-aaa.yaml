@@ -1,16 +1,19 @@
 # A page for a book whose PDF is to meet WCAG 1.4.8, Visual Presentation
 # (AAA): the PDF target's default page (bin/pdf-layout.yaml) with larger
 # type, paragraphs further apart, and footnotes and captions spaced as
-# the text is, which makes a book about 24 percent longer. To use it for
+# the text is, which makes a book about 10 percent longer. To use it for
 # a book, copy it into the book's folder and name the copy in
 # conversion.yaml (defaults: pdf: metadata: pdf-layout-wcag-aaa.yaml); to
 # make it every book's page, copy it over bin/pdf-layout.yaml.
 # docs/configuration.md, "The PDF's page", says what each setting gives.
 
-# Lines of no more than 80 characters, on average: 13.5-point type in
-# OpenStax's margins holds about 72 to a full line in IBM Plex Serif,
-# the default's face, and 78 in Latin Modern.
-fontsize: 13.5pt
+# Lines of no more than 80 characters, on average: 12.5-point type in
+# OpenStax's margins holds about 77 to a full line in IBM Plex Serif,
+# the default's face. Latin Modern holds more to a line at a size: a book
+# set in it, as the default is where TeX lacks Plex, or as a book's own
+# file can name it, needs 13.5-point type (fontsize: 13.5pt), about 78
+# to a full line.
+fontsize: 12.5pt
 papersize: letter
 geometry:
   - left=1in

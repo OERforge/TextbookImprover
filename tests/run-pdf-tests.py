@@ -4387,8 +4387,8 @@ def columns_checks(columns_path, columns_said):
 
 def aaa_checks(aaa_path):
     """The AAA book's checks (build_aaa): the page for WCAG 1.4.8 (AAA),
-    bin/pdf-layout-wcag-aaa.yaml. 13.5pt is 13.45 of the PDF's points,
-    and a footnote's type, 11.25pt, is 11.21."""
+    bin/pdf-layout-wcag-aaa.yaml. 12.5pt is 12.45 of the PDF's points,
+    and a footnote's type, 10.42pt, is 10.38."""
     reader = pypdf.PdfReader(aaa_path) if os.path.exists(aaa_path) else None
     lines = glyph_lines(aaa_path) if reader else {}
     opening = page_holding(aaa_path, "The first chapter opens")
@@ -4425,20 +4425,20 @@ def aaa_checks(aaa_path):
     caption = lines_from(figure, "Each sentence of this caption", "Henceforth") \
         if figure is not None else []
     return [
-        ("on the page for WCAG 1.4.8 (AAA), the text is 13.5pt type on lines "
+        ("on the page for WCAG 1.4.8 (AAA), the text is 12.5pt type on lines "
          "space-and-a-half apart, 1.5 times the type's size, as W3C's technique C21 "
          "measures it",
-         lambda: len(body) > 10 and set(sizes) == {13.45}
-         and abs(leading - 1.5 * 13.45) < 0.15),
+         lambda: len(body) > 10 and set(sizes) == {12.45}
+         and abs(leading - 1.5 * 12.45) < 0.15),
         ("its paragraphs 2.5 times the type's size apart, from the top of one's last "
          "line to the top of the next one's first",
-         lambda: len(breaks) >= 2 and abs(min(breaks) - 2.5 * 13.45) < 0.5),
+         lambda: len(breaks) >= 2 and abs(min(breaks) - 2.5 * 12.45) < 0.5),
         ("and a footnote's lines and a caption's, in a book with a table, which loads "
          "the caption package, are as far apart for their type as the text's, where the "
          "default page sets them single-spaced",
          lambda: len(note) > 2 and len(caption) > 2
-         and abs(commonest_leading(note) - 1.5 * 11.21) < 0.15
-         and abs(commonest_leading(caption) - 1.5 * 13.45) < 0.15),
+         and abs(commonest_leading(note) - 1.5 * 10.38) < 0.15
+         and abs(commonest_leading(caption) - 1.5 * 12.45) < 0.15),
     ]
 
 

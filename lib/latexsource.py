@@ -686,6 +686,8 @@ BOOLEAN_SET = re.compile(r"\\setboolean\s*\{\s*([A-Za-z@]+)\s*\}\s*"
 ANY_IFTHENELSE = re.compile(r"\\ifthenelse\b")
 PARTIAL_RULE = re.compile(r"\\(cline|cmidrule)\s*(?:\([^)]*\))?\s*\{[^}]*\}")
 GRAPHICS = re.compile(r"\\includegraphics\s*(\*)?\s*(\[([^]]*)\])?\s*\{")
+# Where one begins, its options read by graphics_calls.
+GRAPHICS_START = re.compile(r"\\includegraphics(?![A-Za-z@])\s*\*?\s*")
 
 
 def substitute(pattern, text, replace, counter, key):
@@ -2857,62 +2859,148 @@ def resolve_graphic(base, name, dirs, counter=None):
     return None
 
 
-def convert_graphic(base, work, path, record, say):
+def program_said(program, done):
+    """What a program that failed said, for a warning: its first line
+    naming an error, else its last line, at most 200 characters, or that
+    it said nothing. epstopdf follows its error with PATH's folders, one
+    a line, which the end of what it said would have given instead."""
+    lines = [" ".join(line.split()) for line in
+             (done.stderr or "").splitlines() + (done.stdout or "").splitlines()]
+    lines = [line for line in lines if line]
+    if not lines:
+        return f"{program} stopped with {done.returncode}, saying nothing"
+    line = next((line for line in lines if "error" in line.lower()), lines[-1])
+    return f"{program} said: {line[:200]}"
+
+
+def convert_graphic(base, work, path, record):
     """An SVG of a PDF's first page, or an EPS's, at base/rendered/<path>.svg,
-    made again only when the file has changed. Returns its name, or None."""
+    made again only when the file has changed. Returns (its name, None), or
+    (None, why) where it can't be made: the programs it needs that aren't
+    installed, a list, or what the one that failed said. An EPS image is
+    made a PDF first, by epstopdf, which runs Ghostscript."""
     name = f"{RENDERED}/{os.path.splitext(path)[0]}.svg".replace(os.sep, "/")
     with open(os.path.join(base, path), "rb") as fh:
         digest = hashlib.sha256(fh.read()).hexdigest()
     out = os.path.join(base, name)
     if record.get(name) == digest and os.path.isfile(out):
-        return name
-    if not shutil.which("pdftocairo"):
-        return None
+        return name, None
+    eps = path.lower().endswith((".eps", ".ps"))
+    missing = [program for program in (("epstopdf", "gs", "pdftocairo") if eps
+                                       else ("pdftocairo",))
+               if not shutil.which(program)]
+    if missing:
+        return None, missing
     source = os.path.join(base, path)
-    if path.lower().endswith((".eps", ".ps")):
-        if not shutil.which("epstopdf"):
-            return None
+    if eps:
         pdf = os.path.join(work, "render", os.path.basename(path) + ".pdf")
         os.makedirs(os.path.dirname(pdf), exist_ok=True)
-        if subprocess.run(["epstopdf", source, "--outfile=" + pdf],
-                          capture_output=True).returncode != 0:
-            return None
+        done = subprocess.run(["epstopdf", source, "--outfile=" + pdf],
+                              capture_output=True, text=True, errors="replace")
+        if done.returncode != 0:
+            return None, program_said("epstopdf", done)
         source = pdf
     os.makedirs(os.path.dirname(out), exist_ok=True)
-    if subprocess.run(["pdftocairo", "-svg", "-f", "1", "-l", "1", source,
-                       out], capture_output=True).returncode != 0:
-        return None
+    done = subprocess.run(["pdftocairo", "-svg", "-f", "1", "-l", "1", source, out],
+                          capture_output=True, text=True, errors="replace")
+    if done.returncode != 0:
+        return None, program_said("pdftocairo", done)
     record[name] = digest
-    return name
+    return name, None
 
 
-def repair_graphics(base, work, text, dirs, record, counter, say):
+def graphics_calls(text):
+    """Each \\includegraphics in text, as (where it starts, the index of
+    its file's opening brace). Its options are read to their closing
+    bracket with braces kept whole, so a ] in braces doesn't end them
+    (alt={A [bracketed] plot}), where GRAPHICS stops at it and finds no
+    call."""
+    for m in GRAPHICS_START.finditer(text):
+        i = m.end()
+        if text.startswith("[", i):
+            close = closing_bracket(text, i)
+            if close < 0:
+                continue
+            i = close + 1
+            while i < len(text) and text[i].isspace():
+                i += 1
+        if text.startswith("{", i):
+            yield m.start(), i
+
+
+def repair_graphics(base, work, text, dirs, record, counter, left_out):
     """Each \\includegraphics in code pointed at a file a browser shows:
     the extension graphicx would add written in, and a PDF or EPS made
-    an SVG."""
+    an SVG. One that can't be made an SVG is left out, as no page can
+    show it (a page would embed the PDF, and a Word file hold an image
+    Word can't show), and left_out[its file] says why; a file already
+    there is left out again without another try."""
     spans = skip_spans(text)
     out, last = [], 0
-    for m in GRAPHICS.finditer(text):
-        if in_spans(m.start(), spans):
+    for start, brace in graphics_calls(text):
+        if in_spans(start, spans):
             continue
-        close = matching_brace(text, m.end() - 1)
+        close = matching_brace(text, brace)
         if close < 0:
             continue
-        name = text[m.end():close - 1]
+        name = text[brace + 1:close - 1]
         path = resolve_graphic(base, name, dirs, counter)
         if path is None:
             continue
         if path.lower().endswith(CONVERT):
-            made = convert_graphic(base, work, path, record, say)
+            key = path.replace(os.sep, "/")
+            made, why = (None, left_out[key]) if key in left_out \
+                else convert_graphic(base, work, path, record)
             counter["graphics_converted" if made else "graphics_failed"] = \
                 counter.get("graphics_converted" if made
                             else "graphics_failed", 0) + 1
-            path = made or path
+            if not made:
+                left_out[key] = why
+                out.append(text[last:start])
+                last = close
+                continue
+            path = made
         if path != name:
-            out.append(text[last:m.end()] + path.replace(os.sep, "/"))
+            out.append(text[last:brace + 1] + path.replace(os.sep, "/"))
             last = close - 1
     out.append(text[last:])
     return "".join(out)
+
+
+# What installs each program a PDF or EPS image is made an SVG with.
+GRAPHICS_PROGRAMS = {"epstopdf": "epstopdf (TeX Live's epstopdf package)",
+                     "gs": "Ghostscript (ghostscript)",
+                     "pdftocairo": "pdftocairo (poppler-utils)"}
+
+
+def and_list(words):
+    """words joined as a list in a sentence: a, a and b, a, b, and c."""
+    if len(words) < 3:
+        return " and ".join(words)
+    return ", ".join(words[:-1]) + ", and " + words[-1]
+
+
+def say_left_out(left_out, say):
+    """What repair_graphics left out, said: the images whose programs
+    aren't installed, with what installs them, and the ones a program
+    failed on, with what it said of the last. left_out maps each image's
+    file to why, so an image the book includes more than once is one."""
+    missing = [(path, why) for path, why in left_out.items() if isinstance(why, list)]
+    failed = [(path, why) for path, why in left_out.items() if not isinstance(why, list)]
+
+    def named(items):
+        return ", ".join(path for path, _ in items[:5]) + (", ..." if len(items) > 5 else "")
+    if missing:
+        programs = [p for p in GRAPHICS_PROGRAMS if any(p in why for _, why in missing)]
+        say(f"WARNING: {len(missing)} PDF or EPS image(s) need "
+            + and_list([GRAPHICS_PROGRAMS[p] for p in programs])
+            + " to become SVG images a page can show, and "
+            + ("it isn't" if len(programs) == 1 else "they aren't")
+            + " installed; they're left out of the pages: " + named(missing) + ".")
+    if failed:
+        say(f"WARNING: {len(failed)} PDF or EPS image(s) couldn't be made SVG images a "
+            "page can show, so they're left out of the pages: " + named(failed)
+            + f". Of {failed[-1][0]}, {failed[-1][1]}")
 
 
 # --------------------------------------------------------------------------
@@ -6193,9 +6281,14 @@ def prepare(base, work, master, say, macros=""):
     dirs = graphics_paths(preamble)
     if folder:
         dirs = [folder] + [os.path.join(folder, d) for d in dirs] + dirs
+    left_out = {}
     for name in files:
         texts[name] = repair_graphics(base, work, texts[name], dirs, record,
-                                      counts, say)
+                                      counts, left_out)
+    say_left_out(left_out, say)
+    # The master's preamble as the images left it, for the copy: an image
+    # in \title or in a macro without arguments is there.
+    images_preamble = split_master(texts[master])[0]
     if record:
         write_text(record_path, json.dumps(record, indent=1, sort_keys=True))
     for index, name in enumerate(files):
@@ -6228,7 +6321,7 @@ def prepare(base, work, master, say, macros=""):
     preamble_copy = re.sub(
         r"(\\begin\s*\{document\})$",
         lambda m: "\\renewcommand{\\centerline}[1]{\\begin{center}#1"
-                  "\\end{center}}\n" + extra + m.group(1), preamble)
+                  "\\end{center}}\n" + extra + m.group(1), images_preamble)
     texts[master] = preamble_copy + "".join(pieces) + rest
     for name, text in texts.items():
         write_text(os.path.join(copy, name), text)

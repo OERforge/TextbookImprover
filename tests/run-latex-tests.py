@@ -49,6 +49,7 @@ import io
 import json
 import os
 import re
+import shlex
 import shutil
 import struct
 import subprocess
@@ -857,6 +858,157 @@ def case_unbuilt(work):
          lambda: result.returncode != 0 and "figures/venn.tex" in said
          and "figures/Makefile" in said and "Nothing was converted" in said
          and not os.path.exists(os.path.join(work, "html"))),
+    ]
+
+
+
+def tools_alone(work, *programs):
+    """An environment whose PATH holds Pandoc, file, Python, and programs
+    alone, in a folder beside work, so a case runs alike wherever it runs.
+    Python is a script that runs this one (sys.executable): a venv's
+    python run through a link starts without the venv's packages, and a
+    pyenv shim is a script that needs the PATH it's taken from."""
+    tools = work + "-bin"
+    os.makedirs(tools, exist_ok=True)
+    for program in ("pandoc", "file") + programs:
+        found = shutil.which(program)
+        if found:
+            os.symlink(found, os.path.join(tools, program))
+    with open(os.path.join(tools, "python3"), "w") as fh:
+        fh.write("#!/bin/sh\nexec %s \"$@\"\n" % shlex.quote(sys.executable))
+    os.chmod(os.path.join(tools, "python3"), 0o755)
+    return tools, dict(os.environ, PATH=tools)
+
+
+def case_unmade_images(work):
+    """A book's PDF and EPS images where they can't be made SVG: left out
+    of the pages, and the run says so, once for each image. Kept, the page
+    embedded the PDF and the Word file held an image Word can't show,
+    which stopped the Word file read back as a source, and nothing was
+    said. One is in the master's preamble, in \\title and in a macro, which
+    the copy had kept as the book wrote it; one has a ] in its alt text,
+    which the copy had passed over. The runs' PATH holds Pandoc, Python,
+    and file alone (tools_alone), then a pdftocairo that fails as well, so
+    the case runs alike wherever it runs, and then, where poppler-utils is
+    installed, its pdftocairo."""
+    os.makedirs(os.path.join(work, "img"))
+    pdf(os.path.join(work, "img", "diagram.pdf"))
+    pdf(os.path.join(work, "img", "logo.pdf"))
+    with open(os.path.join(work, "img", "shape.eps"), "w") as fh:
+        fh.write("%!PS-Adobe-3.0 EPSF-3.0\n%%BoundingBox: 0 0 10 10\n"
+                 "newpath 0 0 moveto 10 10 lineto stroke\nshowpage\n")
+    png(os.path.join(work, "img", "square.png"), (90, 90, 90))
+    with open(os.path.join(work, "notes.tex"), "w", encoding="utf-8") as fh:
+        fh.write("\\documentclass{article}\n\\usepackage{graphicx}\n"
+                 "\\newcommand{\\logo}{\\includegraphics[height=1em,alt={A logo.}]{img/logo.pdf}}\n"
+                 "\\title{Notes \\includegraphics[height=1cm,alt={A crest.}]{img/logo}}\n"
+                 "\\begin{document}\n\\maketitle\n"
+                 "\\section{Shapes}\nA plot: \\includegraphics[alt={A diagram.}]{img/diagram}, "
+                 "and again: \\includegraphics[width=1cm]{img/diagram.pdf}, and once more: "
+                 "\\includegraphics[alt={A [bracketed] plot.}]{img/diagram.pdf}. Ours: \\logo.\n\n"
+                 "\\begin{figure}\\centering\n\\includegraphics[width=2cm]{img/shape.eps}\n"
+                 "\\caption{A shape}\\label{fig:shape}\n\\end{figure}\n\n"
+                 "A square: \\includegraphics[alt={A square.}]{img/square}.\n"
+                 "\\end{document}\n")
+    with open(os.path.join(work, "conversion.yaml"), "w") as fh:
+        fh.write("targets:\n  html:\n    format: html\n  word:\n    format: docx\n")
+    tools, lacking = tools_alone(work)
+    result = convert(work, env=lacking)
+    said = result.stdout + result.stderr
+
+    def page_of(folder):
+        path = os.path.join(folder, "html", "notes.html")
+        return read(folder, "html", "notes.html") if os.path.exists(path) else ""
+    page = page_of(work)
+
+    def word_reads_back():
+        """The Word file holds the square alone, and read back as a source,
+        it gives the page its square and the figure's caption."""
+        import zipfile
+        docx = os.path.join(work, "word", "notes.docx")
+        if not os.path.exists(docx):
+            return False
+        with zipfile.ZipFile(docx) as z:
+            media = [n for n in z.namelist() if n.startswith("word/media/")]
+        back = os.path.join(work, "back")
+        os.makedirs(back)
+        shutil.copy(docx, back)
+        with open(os.path.join(back, "conversion.yaml"), "w") as fh:
+            fh.write("targets:\n  html:\n    format: html\n")
+        convert(back, env=lacking)
+        again = page_of(back)
+        return len(media) == 1 and media[0].endswith(".png") \
+            and 'alt="A square."' in again and "A shape" in again
+
+    # A pdftocairo that fails on every file, as on a PDF it can't read,
+    # saying so after a warning and before another error, as pdftocairo
+    # does; each run noted.
+    runs = work + "-runs.txt"
+    with open(os.path.join(tools, "pdftocairo"), "w") as fh:
+        fh.write("#!/bin/sh\necho \"$@\" >> %s\n"
+                 "echo 'Syntax Warning: May not be a PDF file (continuing anyway)' >&2\n"
+                 "echo 'Syntax Error: Couldn'\"'\"'t find trailer dictionary' >&2\n"
+                 "echo 'Syntax Error: Couldn'\"'\"'t read xref table' >&2\n"
+                 "exit 1\n" % shlex.quote(runs))
+    os.chmod(os.path.join(tools, "pdftocairo"), 0o755)
+    again = work + "-failing"
+    shutil.copytree(work, again, ignore=shutil.ignore_patterns("html", "word", "back"))
+    failing = convert(again, env=lacking)
+    failed_said = failing.stdout + failing.stderr
+    failed_page = page_of(again)
+    tried = open(runs).read().splitlines() if os.path.exists(runs) else []
+
+    # poppler-utils' own pdftocairo, where it's installed.
+    real = shutil.which("pdftocairo")
+    made = work + "-made"
+    made_page = []
+
+    def made_svg():
+        if not real:
+            return skip("no pdftocairo to make a PDF image an SVG (sudo apt install "
+                        "poppler-utils)")
+        if not made_page:
+            shutil.copytree(work, made, ignore=shutil.ignore_patterns("html", "word", "back"))
+            os.remove(os.path.join(tools, "pdftocairo"))
+            os.symlink(real, os.path.join(tools, "pdftocairo"))
+            convert(made, env=lacking)
+            made_page.append(page_of(made))
+        sources = dict((alt, src) for src, alt in re.findall(
+            r'<img\b[^>]*?src="([^"]*)"[^>]*?alt="([^"]*)"', made_page[0]))
+        return "<embed" not in made_page[0] \
+            and sources.get("A logo.", "").endswith("rendered/img/logo.svg") \
+            and sources.get("A crest.", "").endswith("rendered/img/logo.svg") \
+            and sources.get("A diagram.", "").endswith("rendered/img/diagram.svg") \
+            and sources.get("A [bracketed] plot.", "").endswith("rendered/img/diagram.svg")
+    return [
+        ("without pdftocairo, a PDF or EPS image is left out of the pages, a figure's caption "
+         "kept, and the run says so, naming each once and what installs what it needs",
+         lambda: "WARNING: 3 PDF or EPS image(s) need epstopdf (TeX Live's epstopdf package), "
+         "Ghostscript (ghostscript), and pdftocairo (poppler-utils) to become SVG images a "
+         "page can show, and they aren't installed; they're left out of the pages: "
+         "img/logo.pdf, img/diagram.pdf, img/shape.eps." in said
+         and "<embed" not in page and "<img" in page
+         and not any(word in page for word in ("diagram", "bracketed", "logo", "crest",
+                                               "shape.eps"))
+         and "A shape" in page and 'alt="A square."' in page),
+        ("and the Word file holds no image Word can't show, so read back it gives the page "
+         "again", word_reads_back),
+        ("one pdftocairo fails on is left out too, and the run says what pdftocairo said, "
+         "one whose programs are missing named apart",
+         lambda: re.search(
+             r"^WARNING: 2 PDF or EPS image\(s\) couldn't be made SVG images a page can show, "
+             r"so they're left out of the pages: img/logo\.pdf, img/diagram\.pdf\. Of "
+             r"img/diagram\.pdf, pdftocairo said: Syntax Error: Couldn't find trailer "
+             r"dictionary$", failed_said, re.M) is not None
+         and "WARNING: 1 PDF or EPS image(s) need epstopdf (TeX Live's epstopdf package) and "
+         "Ghostscript (ghostscript) to become SVG images a page can show, and they aren't "
+         "installed; they're left out of the pages: img/shape.eps." in failed_said
+         and "<embed" not in failed_page and "diagram" not in failed_page
+         and "logo" not in failed_page and 'alt="A square."' in failed_page),
+        ("pdftocairo is tried once for each image, not at each place the book includes it",
+         lambda: len(tried) == 2),
+        ("with pdftocairo, each is made an SVG, in the preamble's \\title and macro too",
+         made_svg),
     ]
 
 
@@ -5484,6 +5636,7 @@ def case_no_contents(work):
 CASES = [("a LaTeX book", case_book), ("two masters", case_masters),
          ("a LaTeX book's language", case_language),
          ("one file", case_single), ("an unbuilt book", case_unbuilt),
+         ("PDF and EPS images that can't be made SVG", case_unmade_images),
          ("a table tagged as a division of paragraphs", case_layout_tables),
          ("the source target", case_source), ("a book with fonts of its own", case_own_fonts),
          ("a LaTeX book's PDF, from its own LaTeX", case_book_pdf),

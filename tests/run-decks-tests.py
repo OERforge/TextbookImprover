@@ -1,12 +1,16 @@
 #!/usr/bin/env python3
 """
 run-decks-tests.py -- check decks written in Markdown: a folder of them
-as slides, each deck's page, its Markdown and source copies, and its PDF
-through ltx-talk.
+as slides, each deck's page, its Markdown and source copies, its PDF
+through ltx-talk, its PowerPoint file, and its reveal.js presentation.
 
     python3 tests/run-decks-tests.py
 
-Needs Pandoc 3.9 or later. The PDF's cases need LuaLaTeX with LaTeX
+Needs Pandoc 3.9 or later. A deck's PowerPoint file needs 3.10.1, and its
+presentation 3.12, as convert.py's pptx and revealjs targets do
+(PPTX_PANDOC, REVEALJS_PANDOC): with an older Pandoc, the checks of them
+skip, naming the Pandoc found and the one they need, and the rest of
+each case runs. The PDF's cases need LuaLaTeX with LaTeX
 2026-06-01 or later and the ltx-talk, lua-unicode-math, and
 newcomputermodern packages, the packages the decks load (SUITE_TEX), and
 pikepdf and pypdf to read what was built, and skip, saying why, without
@@ -1086,8 +1090,13 @@ def case_shared_alt(work):
                   "# Part B\n\n## Second\n\n![A rising line](img/b.png)\n",
         "two.md": "---\ntitle: Two\n---\n\n# First\n\n![Two dots](img/c.png)\n",
         "three.md": "---\ntitle: Three\n---\n\n# First\n\n![Two dots](img/d.png)\n"}
+    unready = too_old("REVEALJS_PANDOC", "a deck's reveal.js presentation")
+    if unready:
+        print(f"  skip  {unready}; the pictures sharing alt text in a presentation aren't "
+              "looked for")
     work = folder(work, "targets:\n  pages:\n    format: html\n    pages:\n      split_level: 1\n"
-                        "  show:\n    format: revealjs\n", decks_given=decks_given)
+                        + ("" if unready else "  show:\n    format: revealjs\n"),
+                  decks_given=decks_given)
     for name, color in (("a", 10), ("b", 20), ("c", 30), ("d", 40)):
         png(os.path.join(work, "img", name + ".png"), color, color, color)
     result = convert(work, "--quick")
@@ -1099,30 +1108,34 @@ def case_shared_alt(work):
          lambda: result.returncode == 0 and rows == [
              ("img/a.png", "one", "shared with 1 other image"),
              ("img/b.png", "one", "shared with 1 other image")]),
-        ("the output check names them on the deck's pieces and in its presentation, and "
-         "not the other decks'",
+        ("the output check names them on the deck's pieces" + ("" if unready else
+                                                               " and in its presentation")
+         + ", and not the other decks'",
          lambda: found == [("pages/one--part-a.html", "img/a.png"),
-                           ("pages/one--part-b.html", "img/b.png"),
-                           ("show/one.html", "img/a.png"), ("show/one.html", "img/b.png")]),
+                           ("pages/one--part-b.html", "img/b.png")]
+         + ([] if unready else [("show/one.html", "img/a.png"), ("show/one.html", "img/b.png")])),
     ]
 
 
 def case_lowercase_names(work):
     """media.lowercase in a deck's presentation and its page alike: the
     picture copied under its name in lowercase, and named so."""
-    problem = revealjs_ready()
+    unready = too_old("REVEALJS_PANDOC", "a deck's reveal.js presentation")
+    if unready:
+        print(f"  skip  {unready}; a presentation's lowercased names aren't checked")
+    problem = None if unready else revealjs_ready()
     if problem:
         return [("a copy of reveal.js to build the presentations with: " + problem,
                  lambda: False)]
     work = folder(work, "defaults:\n  media:\n    lowercase: true\ntargets:\n  pages:\n"
-                        "    format: html\n  show:\n    format: revealjs\n",
+                        "    format: html\n" + ("" if unready else "  show:\n    format: revealjs\n"),
                   decks_given={"one.md": "---\ntitle: One\n---\n\n# First\n\n"
                                          "![A rising line](Img/Rising.PNG)\n"})
     png(os.path.join(work, "Img", "Rising.PNG"), 10, 20, 30)
     result = convert(work, "--quick")
     shown = {name: read(os.path.join(work, name, "one.html"))
              if os.path.exists(os.path.join(work, name, "one.html")) else ""
-             for name in ("pages", "show")}
+             for name in ("pages",) + (() if unready else ("show",))}
     return [
         ("each copies the picture under its name in lowercase, and names it so",
          lambda: result.returncode == 0
@@ -1136,22 +1149,26 @@ def case_display_style(work):
     a deck's presentation, as on its page and in its PDF: its MathML in an
     mstyle that says so, laid out as a display is, a sum's limits under and
     over it (target-blocks.lua), where another formula's are scripts."""
-    problem = revealjs_ready()
+    unready = too_old("REVEALJS_PANDOC", "a deck's reveal.js presentation")
+    if unready:
+        print(f"  skip  {unready}; a presentation's formula in display style isn't checked")
+    problem = None if unready else revealjs_ready()
     if problem:
         return [("a copy of reveal.js to build the presentations with: " + problem,
                  lambda: False)]
-    work = folder(work, "targets:\n  pages:\n    format: html\n  show:\n    format: revealjs\n",
+    work = folder(work, "targets:\n  pages:\n    format: html\n"
+                  + ("" if unready else "  show:\n    format: revealjs\n"),
                   decks_given={"one.md": "---\ntitle: One\n---\n\n# First\n\nA sum, "
                                          "$\\displaystyle \\sum_{i=1}^{n} i$, and one in "
                                          "a line, $\\sum_{j=1}^{n} j$.\n"})
     result = convert(work, "--quick")
     shown = {name: read(os.path.join(work, name, "one.html"))
              if os.path.exists(os.path.join(work, name, "one.html")) else ""
-             for name in ("pages", "show")}
+             for name in ("pages",) + (() if unready else ("show",))}
     return [
-        ("in the presentation, as on the deck's page, the formula opening with "
-         "\\displaystyle is in an mstyle that says so, its sum's limits under and over it, "
-         "and the other's beside it",
+        (("on the deck's page" if unready else "in the presentation, as on the deck's page")
+         + ", the formula opening with \\displaystyle is in an mstyle that says so, its "
+         "sum's limits under and over it, and the other's beside it",
          lambda: result.returncode == 0 and all(
              page.count('<semantics><mstyle displaystyle="true"><mrow><munderover>') == 1
              and len(re.findall(r"<msubsup><mo>(?:&#x2211;|∑)</mo>", page)) == 1
@@ -1163,13 +1180,21 @@ def case_downsample(work):
     """images.downsample in a deck's presentation, its PowerPoint file,
     and its PDF: each carries the picture scaled down to twice the width
     it's shown at, and the deck's own file stays as it is."""
-    problem = revealjs_ready()
+    old_reveal = too_old("REVEALJS_PANDOC", "a deck's reveal.js presentation")
+    if old_reveal:
+        print(f"  skip  {old_reveal}; a presentation's scaled picture isn't checked")
+    old_pptx = too_old("PPTX_PANDOC", "a deck's PowerPoint file")
+    if old_pptx:
+        print(f"  skip  {old_pptx}; a PowerPoint file's scaled picture isn't checked")
+    problem = None if old_reveal else revealjs_ready()
     if problem:
         return [("a copy of reveal.js to build the presentations with: " + problem,
                  lambda: False)]
     unready = pdf_ready()
     if unready:
         print(f"  skip  {unready}; a deck's PDF with a scaled picture isn't checked")
+    if old_reveal and old_pptx and unready:
+        return []
     try:
         from PIL import Image  # noqa: F401
     except ImportError:
@@ -1178,7 +1203,8 @@ def case_downsample(work):
     import random
     import zipfile
     work = folder(work, "defaults:\n  images:\n    downsample: 2\ntargets:\n"
-                        "  show:\n    format: revealjs\n  slides:\n    format: pptx\n"
+                        + ("" if old_reveal else "  show:\n    format: revealjs\n")
+                        + ("" if old_pptx else "  slides:\n    format: pptx\n")
                         + ("" if unready else "  print:\n    format: pdf\n"),
                   decks_given={"one.md": "---\ntitle: One\n---\n\n# First\n\n"
                                          "![A wide band of noise](img/wide.png){width=100px}\n"})
@@ -1227,15 +1253,20 @@ def case_downsample(work):
                     found.append((int(image["/Width"]), int(image["/Height"])))
         return found
     checks = [
-        ("a deck's presentation and its PowerPoint file carry the picture scaled down to twice "
-         "the width it's shown at, and the deck's own stays as it is",
+        ("the deck converts, and its own picture stays as it is",
          lambda: result.returncode == 0
-         and file_size("show", "img", "wide.png") == (200, 100)
-         and pptx_sizes() == [(200, 100)]
          and open(os.path.join(work, "img", "wide.png"), "rb").read() == original),
     ]
+    if not old_reveal:
+        checks.append(("its presentation carries the picture scaled down to twice the width "
+                       "it's shown at",
+                       lambda: file_size("show", "img", "wide.png") == (200, 100)))
+    if not old_pptx:
+        checks.append(("its PowerPoint file carries it scaled down likewise",
+                       lambda: pptx_sizes() == [(200, 100)]))
     if not unready:
-        checks.append(("and so does its PDF", lambda: pdf_sizes() == [(200, 100)]))
+        checks.append(("its PDF carries it scaled down likewise",
+                       lambda: pdf_sizes() == [(200, 100)]))
     return checks
 
 
@@ -2005,8 +2036,16 @@ def case_languages(work):
     own, each deck's language decided once for every target, a deck with
     none in the project's."""
     ready = pdf_ready()
-    work = folder(work, "targets:\n  pages:\n    format: html\n  show:\n    format: revealjs\n"
-                  "  slides:\n    format: pptx\n" + ("" if ready else "  pdf:\n    format: pdf\n"),
+    old_reveal = too_old("REVEALJS_PANDOC", "a deck's reveal.js presentation")
+    if old_reveal:
+        print(f"  skip  {old_reveal}; a presentation's language isn't checked")
+    old_pptx = too_old("PPTX_PANDOC", "a deck's PowerPoint file")
+    if old_pptx:
+        print(f"  skip  {old_pptx}; a PowerPoint file's language isn't checked")
+    work = folder(work, "targets:\n  pages:\n    format: html\n"
+                  + ("" if old_reveal else "  show:\n    format: revealjs\n")
+                  + ("" if old_pptx else "  slides:\n    format: pptx\n")
+                  + ("" if ready else "  pdf:\n    format: pdf\n"),
                   decks_given={"allemand.md": GERMAN_DECK, "english.md": ENGLISH_DECK})
     result = convert(work, "--quick")
 
@@ -2031,14 +2070,18 @@ def case_languages(work):
             return None
         with pikepdf.open(path) as pdf:
             return str(pdf.Root.get("/Lang", ""))
+    shown = ("pages",) + (() if old_reveal else ("show",))
     checks = [
         ("each deck converts", lambda: result.returncode == 0),
-        ("a deck's page and presentation are in its language, one with none in the project's",
-         lambda: (root("pages", "allemand.html"), root("pages", "english.html"),
-                  root("show", "allemand.html"), root("show", "english.html"))
-         == ("de", "en-US", "de", "en-US")),
-        ("and its PowerPoint file's text",
-         lambda: runs("allemand") == {"de"} and runs("english") == {"en-US"}),
+        ("a deck's page " + ("is" if old_reveal else "and presentation are") + " in its "
+         "language, one with none in the project's",
+         lambda: [(root(name, "allemand.html"), root(name, "english.html")) for name in shown]
+         == [("de", "en-US")] * len(shown)),
+    ]
+    if not old_pptx:
+        checks.append(("and its PowerPoint file's text",
+                       lambda: runs("allemand") == {"de"} and runs("english") == {"en-US"}))
+    checks += [
         ("the run names the deck in another language and drafts its row",
          lambda: "1 page(s) are in another language than the book's, en-US: allemand de "
          "(its file)" in result.stderr
@@ -3314,6 +3357,34 @@ def pandoc_version():
     return tuple(int(p) for p in re.findall(r"\d+", words[1] if len(words) > 1 else "")[:3])
 
 
+# The Pandoc a deck's PowerPoint file and its presentation need, by the
+# name convert.py gives it (PPTX_PANDOC, REVEALJS_PANDOC), read from it
+# once, so the two can't drift apart.
+NEEDED = {}
+
+
+def too_old(name, what):
+    """Why the Pandoc on the path can't write what, a deck's PowerPoint
+    file or its presentation, or None. convert.py stops a pptx target on a
+    Pandoc older than PPTX_PANDOC, and a revealjs target on one older than
+    REVEALJS_PANDOC; the suite's floor is 3.9. A machine to set up, not the
+    code failing, so the checks of what those targets write skip, saying
+    so, where they'd fail; the rest of a case runs."""
+    if not NEEDED:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("convert_needs",
+                                                      os.path.join(BIN, "convert.py"))
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        NEEDED.update(PPTX_PANDOC=module.PPTX_PANDOC, REVEALJS_PANDOC=module.REVEALJS_PANDOC)
+    if pandoc_version() >= NEEDED[name]:
+        return None
+    found = subprocess.run(["pandoc", "--version"], capture_output=True,
+                           text=True).stdout.split()[1]
+    return (f"Pandoc {found} is too old for {what}, which needs "
+            + ".".join(map(str, NEEDED[name])) + " or later")
+
+
 def mapped_notes():
     """pptxtarget's notes slide that has a color map already, and the
     notes slides it counts as given one."""
@@ -3472,6 +3543,10 @@ TALL_DISPLAY = ('<a:pPr/><a14:m><m:oMathPara><m:oMath><m:f><m:num><m:r><m:t>1</m
 
 
 def case_pptx(work):
+    unready = too_old("PPTX_PANDOC", "a deck's PowerPoint file")
+    if unready:
+        print(f"  skip  {unready}; a deck's PowerPoint file isn't checked")
+        return []
     work = folder(work, PPTX, decks_given={"Flat Deck.md": FLAT, "sectioned.md": SECTIONED,
                                            "untitled.md": UNTITLED, "shapes.md": SHAPES})
     write(os.path.join(work, "image-alt.csv"), "Image,Alt\nimg/chart,A line rising to the right\n")
@@ -3902,6 +3977,7 @@ def case_pptx_settings(work):
     slides.size on-screen-show, a book's pptx target, and a Pandoc too
     old."""
     import pptxtarget
+    unready = too_old("PPTX_PANDOC", "a deck's PowerPoint file")
     config = PPTX + "    slides:\n      notes: omitted\n      reference_doc: look.pptx\n" \
         "      aspect_ratio: \"16:9\"\n      size: on-screen-show\n"
     decks_dir = folder(os.path.join(work, "decks"), config,
@@ -3941,7 +4017,7 @@ def case_pptx_settings(work):
     os.chmod(os.path.join(tools, "pandoc"), 0o755)
     old = convert(old_dir, "--quick", env=dict(os.environ, PATH=tools + os.pathsep
                                                + os.environ["PATH"]))
-    return [
+    built = [
         ("slides.notes omitted leaves the speaker notes out, and the run says so",
          lambda: result.returncode == 0 and parts
          and not any(n.startswith("ppt/notesSlides/") for n in parts)
@@ -3978,6 +4054,9 @@ def case_pptx_settings(work):
         ("a reference document that isn't there stops the run, saying where it looked",
          lambda: nowhere.returncode != 0 and "slides.reference_doc is" in nowhere.stderr
          and "nowhere.pptx" in nowhere.stderr and "doesn't exist" in nowhere.stderr),
+    ]
+    # Said before a deck's target is built, whatever the Pandoc.
+    before = [
         ("a book's pptx target writes nothing, and the run says why",
          lambda: as_book.returncode == 0
          and "target slides is format pptx, which is written for decks written in Markdown"
@@ -3986,6 +4065,10 @@ def case_pptx_settings(work):
          lambda: old.returncode != 0 and "Pandoc 3.10.0 is too old for target slides's "
          "PowerPoint files" in old.stderr),
     ]
+    if unready:
+        print(f"  skip  {len(built)} checks of the PowerPoint files' settings: {unready}")
+        return before
+    return built + before
 
 
 # A column with two pictures, which the writer puts in one place; a third
@@ -4103,6 +4186,10 @@ Press \\textsc{small} and \\LaTeX{} now.
 def case_pptx_edges(work):
     """What the writer can't be brought to do, named; and an SVG, with
     rsvg-convert and without."""
+    unready = too_old("PPTX_PANDOC", "a deck's PowerPoint file")
+    if unready:
+        print(f"  skip  {unready}; what the PowerPoint writer can't do isn't checked")
+        return []
     decks_dir = folder(os.path.join(work, "decks"), PPTX, decks_given={"edges.md": EDGES})
     write(os.path.join(decks_dir, "img", "bar.svg"), "<svg xmlns='http://www.w3.org/2000/svg' "
           "width='40' height='20'><rect width='40' height='20' fill='#333'/></svg>")
@@ -4538,6 +4625,10 @@ def note_steps(page):
 
 
 def case_revealjs(work):
+    unready = too_old("REVEALJS_PANDOC", "a deck's reveal.js presentation")
+    if unready:
+        print(f"  skip  {unready}; a deck's presentation isn't checked")
+        return []
     problem = revealjs_ready()
     if problem:
         return [("a copy of reveal.js to build the presentations with: " + problem,
@@ -4705,6 +4796,7 @@ def case_revealjs_settings(work):
     repository's copy of reveal.js and REVEALJS_DIR's in its place, a
     later release, reveal.js 5, and an empty folder, a Pandoc too old, and
     highlighted code."""
+    unready = too_old("REVEALJS_PANDOC", "a deck's reveal.js presentation")
     problem = revealjs_ready()
     if problem:
         return [("a copy of reveal.js to build the presentations with: " + problem,
@@ -4763,7 +4855,7 @@ def case_revealjs_settings(work):
     os.chmod(os.path.join(tools, "pandoc"), 0o755)
     old = convert(plain, "--quick", env=dict(os.environ, PATH=tools + os.pathsep
                                              + os.environ["PATH"]))
-    return [
+    built = [
         ("slides.notes visible shows the notes under each slide, slides.aspect_ratio sets "
          "the shape, and the presentation is the whole deck, whatever cuts its pages",
          lambda: sorted(os.listdir(os.path.join(visible_dir, "present")))[-1] == "reveal.js"
@@ -4783,10 +4875,6 @@ def case_revealjs_settings(work):
          lambda: "A closing line of the deck itself." in left
          and left.index("Reveal.initialize(") < left.index("A closing line of the deck itself.")
          < left.index("function pageView")),
-        ("a book's revealjs target is refused, the rest written",
-         lambda: as_book.returncode == 0 and "target present is format revealjs, which is "
-         "written for decks written in Markdown" in as_book.stderr
-         and not os.path.exists(os.path.join(book, "present"))),
         ("without REVEALJS_DIR the repository's copy of reveal.js goes beside the "
          "presentations, its license and its theme's font's with it, and nothing is noted",
          lambda: unset.returncode == 0 and "through Pandoc's reveal.js writer and reveal.js "
@@ -4796,15 +4884,6 @@ def case_revealjs_settings(work):
              os.path.relpath(os.path.join(root, name), revealtarget.VENDORED)
              for root, _, names in os.walk(revealtarget.VENDORED) for name in names
              if name not in ("README.md", "package.json"))),
-        ("the repository's copy is reveal.js as its README names it, and one missing a file "
-         "stops the run, saying a checkout has it and REVEALJS_DIR can name another",
-         lambda: vendored_version() == ("6.0.2", "6.0.2")
-         and vendored_problem("dist/plugin/zoom.js") == (
-             "The repository's copy of reveal.js, vendor/reveal.js, is missing "
-             "dist/plugin/zoom.js: a checkout of TextbookImprover has reveal.js 6 there, and "
-             "REVEALJS_DIR can name the folder of another copy (see docs/installation.md).")
-         and vendored_problem("package.json").startswith(
-             "The repository's copy of reveal.js, vendor/reveal.js, is missing package.json:")),
         ("REVEALJS_DIR's copy takes its place, and a release other than the repository's is "
          "noted, with the one the presentations' script was written against",
          lambda: newer.returncode == 0 and "and reveal.js 6.9.0, copied beside them" in newer.stderr
@@ -4819,12 +4898,33 @@ def case_revealjs_settings(work):
          lambda: older.returncode != 0 and "REVEALJS_DIR's reveal.js is 5.2.1, and the "
          "presentations are written for reveal.js 6" in older.stderr
          and "unset, the repository's own copy of reveal.js 6.0.2 is used" in older.stderr),
-        ("a Pandoc older than 3.12 is refused, its version named",
-         lambda: old.returncode != 0 and "Pandoc 3.11.0 is too old for target present's "
-         "presentations; 3.12 or later" in old.stderr),
         ("a slide's highlighted code is in the theme's colors (lib/highlighting.py)",
          lambda: "code span.dv { color: %s; }" % highlight_color("DecVal") in code_page),
     ]
+    # Said before a deck's presentation is built, whatever the Pandoc, or
+    # of the repository's copy of reveal.js itself.
+    before = [
+        ("a book's revealjs target is refused, the rest written",
+         lambda: as_book.returncode == 0 and "target present is format revealjs, which is "
+         "written for decks written in Markdown" in as_book.stderr
+         and not os.path.exists(os.path.join(book, "present"))),
+        ("the repository's copy is reveal.js as its README names it, and one missing a file "
+         "stops the run, saying a checkout has it and REVEALJS_DIR can name another",
+         lambda: vendored_version() == ("6.0.2", "6.0.2")
+         and vendored_problem("dist/plugin/zoom.js") == (
+             "The repository's copy of reveal.js, vendor/reveal.js, is missing "
+             "dist/plugin/zoom.js: a checkout of TextbookImprover has reveal.js 6 there, and "
+             "REVEALJS_DIR can name the folder of another copy (see docs/installation.md).")
+         and vendored_problem("package.json").startswith(
+             "The repository's copy of reveal.js, vendor/reveal.js, is missing package.json:")),
+        ("a Pandoc older than 3.12 is refused, its version named",
+         lambda: old.returncode != 0 and "Pandoc 3.11.0 is too old for target present's "
+         "presentations; 3.12 or later" in old.stderr),
+    ]
+    if unready:
+        print(f"  skip  {len(built)} checks of the presentations' settings: {unready}")
+        return before
+    return built + before
 
 
 CASES = [("the pieces", case_pieces),

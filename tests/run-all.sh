@@ -60,10 +60,12 @@
 #                          its copies, its PDF through ltx-talk, which
 #                          needs LuaLaTeX, ltx-talk, and what the decks
 #                          load (skipped without),
-#                          its PowerPoint file, and its reveal.js
-#                          presentation, twelve of whose checks open it
-#                          in a browser with the optional Playwright and
-#                          its Chromium (skipped without).
+#                          its PowerPoint file, which needs Pandoc
+#                          3.10.1, and its reveal.js presentation, which
+#                          needs 3.12 (each skipped with an older one),
+#                          twelve of whose checks open it in a browser
+#                          with the optional Playwright and its Chromium
+#                          (skipped without).
 #
 # Copyright 2026 Robert Szarka
 #

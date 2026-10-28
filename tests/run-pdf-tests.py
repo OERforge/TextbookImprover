@@ -2027,9 +2027,11 @@ FIT_CODE = (
 # code in no language that runs across a page's break, its lines short, at
 # the text's size, not set smaller by the footer's lines, which the output
 # routine sets while the block's group is open and which are wider than the
-# item's line; and a quotation's lines too long for the paper even at half
+# item's line; a quotation's lines too long for the paper even at half
 # their size, highlighted and in no language, wrapped at the quotation's
-# line's end, tagged and untagged.
+# line's end, tagged and untagged; and a list whose first item opens with
+# highlighted code, whose number LaTeX's tagging had set over the next
+# item's.
 CODE_MARGINS = ("geometry:\n  - left=0.75in\n  - right=1.5in\n  - top=0.8in\n"
                 "  - bottom=0.8in\n  - footskip=0.3in\nclassoption: [oneside]\n")
 FIT_CODE_MARGINS = (
@@ -2043,7 +2045,8 @@ FIT_CODE_MARGINS = (
     + "".join("    Footline_%02d = %d\n" % (i, i) for i in range(1, 81)) + "    ```\n\n"
     "> A quotation's lines too long for the paper even at half their size:\n>\n> ```python\n"
     "> Quotewrap = \"" + PAPER_WORDS + "\"\n> ```\n>\n> ```\n> Quoteplain = " + PAPER_WORDS
-    + "\n> ```\n")
+    + "\n> ```\n\nA list whose first item opens with highlighted code:\n\n"
+    "1. ```python\n   Itemopens = 1\n   ```\n\n2. The item after the code.\n")
 # A page 4 inches tall (CODE_TALL_PAGE, build_code), the default's
 # otherwise: a highlighted line too long for a page even wrapped, said to
 # run off its foot, wider at the text's size than TeX's largest dimension,
@@ -2131,6 +2134,22 @@ def code_line(path, word):
         if "".join(g[2] for g in glyphs).startswith(word):
             return (glyphs[0][0], glyphs[-1][1], (glyphs[-1][1] - glyphs[0][0]) / len(glyphs))
     return None
+
+
+def opened(path):
+    """Whether the margins book's list whose first item opens with
+    highlighted code has that item's number on the code's first line, its
+    left edge where the next item's number begins, and the next item its
+    own number alone (glyph_lines)."""
+    if not os.path.exists(path):
+        return False
+    lines = [line for rows in glyph_lines(path).values() for line in rows]
+    code = [line for line in lines if "Itemopens" in squeezed(line[3])]
+    after = [line for line in lines if "Theitemafterthecode." in squeezed(line[3])]
+    return (len(code) == 1 and len(after) == 1
+            and squeezed(code[0][3]) == "1.Itemopens=1"
+            and squeezed(after[0][3]) == "2.Theitemafterthecode."
+            and abs(code[0][1] - after[0][1]) < 0.5)
 
 
 def code_checks(code_path, latin_path, said, margins_path, margins_said, tall_path, tall_said):
@@ -2565,6 +2584,13 @@ def code_checks(code_path, latin_path, said, margins_path, margins_said, tall_pa
                      for i in (1, 80))
          and page_of(margins_path, "Footline_01") is not None
          and (page_of(margins_path, "Footline_80") or 0) > page_of(margins_path, "Footline_01")),
+        # Under LaTeX's tagging, the label had waited for the next item's
+        # first paragraph, and was set there, over that item's ("1.2.").
+        ("a list's item that opens with highlighted code has its number beside the code's "
+         "first line, in a tagged PDF and in an untagged one, and the next item its own",
+         lambda: all(opened(path) for path in (margins_path, os.path.join(
+             os.path.dirname(os.path.dirname(margins_path)), "untagged",
+             os.path.basename(margins_path))))),
     ]
     if shutil.which("verapdf") or os.environ.get("VERAPDF"):
         items.append(("veraPDF finds nothing in the code book's PDF, nor its margins book's",

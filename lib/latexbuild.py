@@ -2208,6 +2208,39 @@ PDF_MACROS = r"""\ExplSyntaxOn
         \legacy_if:nF { @inlabel } { \everypar { } }
       }
   }
+% A list's item that opens with fancyvrb's code, as Pandoc sets
+% highlighted code (Highlighting), has its label beside the code's first
+% line. LaTeX's tagging code for lists (latex-lab-testphase-block.sty)
+% keeps an item's label in \g__block_labels_box, not \@labels, and sets it
+% when the item's first paragraph begins (the para/begin hook). fancyvrb's
+% lines aren't paragraphs: its list sets \@inlabel false (\FV@ListVSpace)
+% and puts \@labels beside its first line, which the tagging code leaves
+% empty, so the label waited for the next item's paragraph and was set
+% there, over that item's ("2." over "3."); the PDF's structure had it in
+% its own item all the same. Before fancyvrb clears \@inlabel, a label
+% waiting there is moved to \@labels, where fancyvrb sets one, as it did
+% before the tagging code. Only a label that's waiting: a fix of LaTeX's
+% own, which would leave none, isn't undone, and without the tagging code,
+% or with its box named otherwise, nothing is done. LaTeX's own verbatim,
+% as Pandoc sets code in no language, sets each line as a paragraph,
+% which sets the label.
+\cs_if_exist:NT \g__block_labels_box
+  {
+    \AddToHook { package / fancyvrb / after }
+      {
+        \AddToHook { cmd / FV@ListVSpace / before }
+          {
+            \legacy_if:nT { @inlabel }
+              {
+                \box_if_empty:NF \g__block_labels_box
+                  {
+                    \box_gset_eq:cN { @labels } \g__block_labels_box
+                    \box_gclear:N \g__block_labels_box
+                  }
+              }
+          }
+      }
+  }
 % A line too wide in the contents, or in a list of figures or tables, is
 % reported by TeX at a line of the list's own file (book.toc), which the
 % build had looked up in the book's LaTeX: Sociology's front matter's page

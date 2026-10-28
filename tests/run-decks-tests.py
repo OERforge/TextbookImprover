@@ -644,6 +644,21 @@ Where it falls.[^f]
     ```
 """
 
+# A list whose first item opens with highlighted code, whose number
+# LaTeX's tagging had set over the next item's (latexbuild.PDF_MACROS).
+ITEM_CODE = r"""---
+title: Item Code
+---
+
+# A List
+
+1. ```python
+   Deckopens = 1
+   ```
+
+2. The item after the code.
+"""
+
 # What beamer and LaTeX's other classes read and ltx-talk didn't: a
 # footnote in a caption, a table, and a slide's title, struck text, a
 # passage in another language, code that shows a frame, a frame option
@@ -2095,6 +2110,23 @@ def case_languages(work):
     return checks
 
 
+def item_rows(path):
+    """The lines of ITEM_CODE's PDF holding its list's items, from the top,
+    each its glyphs' characters without spaces in the order drawn, and
+    where each begins (pdftext.glyph_boxes): ([text], [left])."""
+    if not os.path.exists(path):
+        return [], []
+    rows = {}
+    for page, baseline, left, _right, char in pdftext.glyph_boxes(path):
+        rows.setdefault((page, -baseline), []).append((left, char))
+    found = [(re.sub(r"\s+", "", "".join(c for _l, c in glyphs)),
+              round(min((l for l, c in glyphs if c.strip()),
+                        default=min(l for l, _c in glyphs)), 1))
+             for _key, glyphs in sorted(rows.items())]
+    found = [f for f in found if "Deckopens" in f[0] or "Theitemafter" in f[0]]
+    return [f[0] for f in found], [f[1] for f in found]
+
+
 def case_pdf(work):
     problem = pdf_ready()
     if problem:
@@ -2105,7 +2137,7 @@ def case_pdf(work):
         "Flat Deck.md": FLAT, "untitled.md": UNTITLED, "agenda.md": AGENDA, "odd.md": ODD,
         "nested.md": NESTED, "more.md": MORE, "subsections.md": SUBSECTIONS,
         "headings.md": HEADINGS, "langs.md": LANGS, "code-notes.md": CODE_NOTES,
-        "shaded-notes.md": SHADED_NOTES,
+        "shaded-notes.md": SHADED_NOTES, "item-code.md": ITEM_CODE,
         "sectioned.md": SECTIONED.replace("Right.", "![A dark bar](<img/a bar.svg>)" if svg
                                           else "Right.")})
     write(os.path.join(work, "img", "a bar.svg"), SVG)
@@ -2124,6 +2156,7 @@ def case_pdf(work):
     langs = os.path.join(work, "pdf", "langs.pdf")
     code_notes = os.path.join(work, "pdf", "code-notes.pdf")
     shaded_notes = os.path.join(work, "pdf", "shaded-notes.pdf")
+    item_code = os.path.join(work, "pdf", "item-code.pdf")
     built = lambda: [os.path.join(work, "pdf", name)  # noqa: E731
                      for name in sorted(os.listdir(os.path.join(work, "pdf")))]
     check = rows_of(os.path.join(work, "output-check.csv"))
@@ -2141,10 +2174,10 @@ def case_pdf(work):
     checks = [
         ("a PDF of each deck, the whole deck however its pages are cut",
          lambda: result.returncode == 0 and sorted(os.listdir(os.path.join(work, "pdf"))) == [
-             "Flat-Deck.pdf", "agenda.pdf", "code-notes.pdf", "headings.pdf", "langs.pdf",
-             "more.pdf", "nested.pdf", "odd.pdf", "sectioned.pdf", "shaded-notes.pdf",
-             "subsections.pdf", "untitled.pdf"]
-         and "Wrote 12 PDF(s)" in out and "still changing" not in out),
+             "Flat-Deck.pdf", "agenda.pdf", "code-notes.pdf", "headings.pdf", "item-code.pdf",
+             "langs.pdf", "more.pdf", "nested.pdf", "odd.pdf", "sectioned.pdf",
+             "shaded-notes.pdf", "subsections.pdf", "untitled.pdf"]
+         and "Wrote 13 PDF(s)" in out and "still changing" not in out),
         ("a slide's title is an H1, or an H2 in a section, and a section's an H1",
          lambda: levels(flat) == [1, 1, 1, 1] and levels(sectioned) == [1, 2, 2, 1, 2]),
         ("a slide before the first section is an H1, as a section is, and bookmarked"
@@ -2350,6 +2383,12 @@ def case_pdf(work):
          and footnote_ties(shaded_notes) == (2, 0, 0, 0, 0)
          and document_info(code_notes, "/Subject") == "Code in notes"
          and document_info(shaded_notes, "/Keywords") == "notes, code"),
+        # Under LaTeX's tagging, the label had waited for the next item's
+        # first paragraph, and was set there, over that item's ("1.2.").
+        ("a list's item that opens with highlighted code has its number beside the code's "
+         "first line, and the next item its own",
+         lambda: item_rows(item_code)[0] == ["1.Deckopens=1", "2.Theitemafterthecode."]
+         and len(set(item_rows(item_code)[1])) == 1),
         # In the theme every writer is given (lib/highlighting.py): in the
         # writer's macros for a slide's code, and in those deck-pdf.lua
         # writes for inline code in a section's footnote, the deck's only.

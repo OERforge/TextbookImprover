@@ -7,6 +7,13 @@ run-latex-tests.py -- check LaTeX as a source, end to end through convert.py.
 
 Needs Pandoc 3.9 or later. The drawing and the PDF image need a LaTeX
 engine and pdftocairo; without them those checks are skipped and say so.
+So are the checks that build with TeX where its LaTeX is too old for the
+PDF target or it lacks a package the books or their PDFs load
+(tex_unready), and those of an SVG picture made a PDF without
+rsvg-convert (why_no_svg), each said first with what installs it: a
+machine to set up, not the code failing. The cases of images that can't
+be made SVG or PDF run with Pandoc, Python, and file alone on their PATH
+(tools_alone), so they check the same everywhere.
 
 WHAT IS LOAD-BEARING HERE
 
@@ -505,11 +512,6 @@ def word_math_in_list(work):
         and "tiqMath" not in xml
 
 
-def can_draw():
-    return bool((shutil.which("pdflatex") or shutil.which("lualatex"))
-                and shutil.which("pdftocairo"))
-
-
 # What the suite's books need from TeX beyond what LaTeX's tagging and
 # Pandoc's template do (docs/installation.md): each TeX Live package, by a
 # file it holds. Found on TinyTeX's smaller bundle (TinyTeX-1), from every
@@ -520,8 +522,7 @@ def can_draw():
 # schemes may not, which the books load too (amsfonts to tools), named
 # after a TeX Live install lacked some; and cancel and pict2e, for the
 # terms the book and the struck-out case strike out, which neither TinyTeX
-# nor TeX Live's medium scheme has. And the one other tool the LaTeX
-# target's SVG needs.
+# nor TeX Live's medium scheme has.
 SUITE_TEX = [("amsfonts", "amssymb.sty"), ("amsmath", "amsmath.sty"),
              ("babel-english", "english.ldf"), ("caption", "caption.sty"),
              ("framed", "framed.sty"), ("geometry", "geometry.sty"), ("tools", "enumerate.sty"),
@@ -532,38 +533,80 @@ SUITE_TEX = [("amsfonts", "amssymb.sty"), ("amsmath", "amsmath.sty"),
              ("titlesec", "titlesec.sty"), ("ulem", "ulem.sty"),
              ("wasysym", "wasysym.sty"), ("wrapfig", "wrapfig.sty"),
              ("cancel", "cancel.sty"), ("pict2e", "pict2e.sty")]
+# What every tagged PDF loads, the suite's from the book's own LaTeX and
+# from its pages, which TinyTeX lacks (docs/installation.md's first tlmgr
+# line), by a file each holds: LaTeX's tagging code, latex-lab's, which
+# \DocumentMetadata reads, and tagpdf; luamml, for the formulas' MathML;
+# and selnolig, which Pandoc's template loads under LuaLaTeX for a book
+# with a language, and luatexbase, which selnolig loads.
+PDF_TEX = [("latex-lab", "documentmetadata-support.ltx"), ("tagpdf", "tagpdf.sty"),
+           ("luamml", "luamml.sty"), ("luatexbase", "luatexbase.sty"),
+           ("selnolig", "selnolig.sty")]
+TEX_UNREADY = []
 
 
-def tex_ready():
-    """Where there's a TeX, what it lacks that the suite's books need, as
-    the checks that name it and say what installs it: a LaTeX too old for
-    the PDF target to build with (latexbuild.MINIMUM_LATEX), whose checks
-    fail on its refusal, and the packages and tools the books load. An
-    empty list where it has them all or there's no TeX, whose checks
-    skip."""
-    if not (shutil.which("lualatex") or shutil.which("pdflatex")) \
-            or not shutil.which("kpsewhich"):
-        return []
-    sys.path.insert(0, os.path.join(ROOT, "lib"))
-    import latexbuild
-    lacking = []
-    if shutil.which(latexbuild.ENGINE):
-        problem = latexbuild.latex_problem(lambda message: None)
-        if problem:
-            lacking.append("TeX's LaTeX can build a tagged PDF, or the checks of the PDF "
-                           "target fail on the run's refusal: " + problem)
-    missing = [package for package, name in SUITE_TEX
-               if not subprocess.run(["kpsewhich", name], capture_output=True,
-                                     text=True, stdin=subprocess.DEVNULL).stdout.strip()]
-    tools = [] if shutil.which("rsvg-convert") else ["rsvg-convert"]
-    if missing or tools:
-        lacking.append(
-            "TeX has what the suite's books load, or the checks that build them "
-            "fail: missing " + ", ".join(missing + tools) + " ("
-            + "; ".join(([latexbuild.tlmgr_command("install " + " ".join(missing))]
-                         if missing else [])
-                        + (["sudo apt install librsvg2-bin"] if tools else [])) + ")")
-    return lacking
+def tex_unready():
+    """Why the checks that build with TeX skip on this one, or None: its
+    LaTeX too old for the PDF target to build with
+    (latexbuild.MINIMUM_LATEX), which the run refuses, or a package the
+    suite's books or their PDFs load (SUITE_TEX, PDF_TEX) missing, on which
+    LaTeX stops. That's a
+    machine to set up, not the code failing, as a machine without TeX is,
+    whose checks skip for the program each runs. None where there's no
+    TeX, or no kpsewhich to ask. Asked once a run: the cases run side by
+    side are told in LATEX_TESTS_TEX (main)."""
+    if TEX_UNREADY:
+        return TEX_UNREADY[0]
+    if "LATEX_TESTS_TEX" in os.environ:
+        TEX_UNREADY.append(json.loads(os.environ["LATEX_TESTS_TEX"]))
+        return TEX_UNREADY[0]
+    why = None
+    if (shutil.which("lualatex") or shutil.which("pdflatex")) and shutil.which("kpsewhich"):
+        sys.path.insert(0, os.path.join(ROOT, "lib"))
+        import latexbuild
+        if shutil.which(latexbuild.ENGINE):
+            why = latexbuild.latex_problem(lambda message: None)
+        missing = [package for package, name in SUITE_TEX + PDF_TEX
+                   if not subprocess.run(["kpsewhich", name], capture_output=True, text=True,
+                                         stdin=subprocess.DEVNULL).stdout.strip()]
+        if missing and not why:
+            why = ("TeX lacks " + ", ".join(missing) + ", which the suite's books and their "
+                   "PDFs load (" + latexbuild.tlmgr_command("install " + " ".join(missing))
+                   + ")")
+    TEX_UNREADY.append(why)
+    return why
+
+
+def why_no_tex(missing, *programs):
+    """Why a check that runs programs, TeX's, skips here, or None: missing,
+    where one of them isn't installed, or TeX not ready (tex_unready)."""
+    if not all(shutil.which(program) for program in programs):
+        return missing
+    return tex_unready()
+
+
+def why_no_drawings():
+    """Why the book's drawings aren't made here, or None: they need pdfLaTeX
+    or LuaLaTeX, pdftocairo, and TeX ready (tex_unready)."""
+    if not ((shutil.which("pdflatex") or shutil.which("lualatex"))
+            and shutil.which("pdftocairo")):
+        return "no LaTeX or pdftocairo: drawings not rendered"
+    return tex_unready()
+
+
+def why_no_status():
+    """Why the run can't check a book's packages against LaTeX's tagging
+    status list here, or None: the case writes the list beside its book,
+    and the run finds it with TeX's kpsewhich."""
+    return None if shutil.which("kpsewhich") \
+        else "no kpsewhich, which TeX has, to find the tagging status list with"
+
+
+def why_no_svg():
+    """Why an SVG picture isn't made a PDF here, or None: the latex target
+    and a PDF make it one with rsvg-convert."""
+    return None if shutil.which("rsvg-convert") \
+        else "no rsvg-convert to make an SVG picture a PDF (sudo apt install librsvg2-bin)"
 
 
 def built_or_why(ok, said):
@@ -652,14 +695,15 @@ def case_book(work):
         ("a drawing LaTeX can't make costs only itself",
          lambda: "1 of the book's 2 drawing(s)" in log
          and os.path.exists(os.path.join(work, "rendered", "ch1", "one-1.svg"))
-         if can_draw() else skip("no LaTeX or pdftocairo: drawings not rendered")),
+         if not why_no_drawings() else skip(why_no_drawings())),
         ("a drawing is rendered whole and keeps its figure's caption",
          lambda: re.search(r'<figure[^>]*>\s*(<div class="center">\s*)?'
                            r'<img\s+src="rendered/ch1/one-1\.svg"', one) and "A line" in one
-         if can_draw() else skip("no LaTeX or pdftocairo: drawings not rendered")),
+         if not why_no_drawings() else skip(why_no_drawings())),
         ("a PDF image is made an SVG",
          lambda: 'src="rendered/img/diagram.svg"' in one
-         if can_draw() else skip("no LaTeX or pdftocairo: drawings not rendered")),
+         if shutil.which("pdftocairo") else skip("no pdftocairo to make a PDF image an SVG "
+                                                 "(sudo apt install poppler-utils)")),
         ("\\mbox{\\tiny ...} and \\mbox{\\textsf R} reach MathML",
          lambda: all("rotatebox" in line for line in log.splitlines()
                      if "Could not convert TeX math" in line)
@@ -861,7 +905,6 @@ def case_unbuilt(work):
     ]
 
 
-
 def tools_alone(work, *programs):
     """An environment whose PATH holds Pandoc, file, Python, and programs
     alone, in a folder beside work, so a case runs alike wherever it runs.
@@ -1012,6 +1055,40 @@ def case_unmade_images(work):
     ]
 
 
+def case_unmade_svg(work):
+    """The latex target without rsvg-convert, on a PATH holding Pandoc,
+    Python, and file alone (tools_alone): its SVG picture left as LaTeX's
+    \\includesvg, which needs Inkscape and takes no alt text, and the run
+    says so, the one way the suite's other cases can't take where it
+    runs."""
+    os.makedirs(os.path.join(work, "img"))
+    with open(os.path.join(work, "img", "circle.svg"), "w") as fh:
+        fh.write('<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40">'
+                 '<circle cx="20" cy="20" r="15" fill="black"/></svg>\n')
+    with open(os.path.join(work, "one.md"), "w", encoding="utf-8") as fh:
+        fh.write("# Circles\n\nA circle:\n\n![A black circle.](img/circle.svg)\n")
+    with open(os.path.join(work, "project.yaml"), "w") as fh:
+        fh.write("project:\n  identifier: circles\n  title: Circles\n  language: en\n"
+                 "  contents:\n  - one\n")
+    with open(os.path.join(work, "conversion.yaml"), "w") as fh:
+        fh.write("targets:\n  latex:\n    format: latex\n")
+    _, lacking = tools_alone(work)
+    result = convert(work, env=lacking)
+    said = result.stdout + result.stderr
+    one = read(work, "latex", "one.tex") \
+        if os.path.exists(os.path.join(work, "latex", "one.tex")) else ""
+    return [
+        ("without rsvg-convert, the latex target leaves its SVG picture to LaTeX's "
+         "\\includesvg, beside it, and the run says so",
+         lambda: result.returncode == 0 and re.search(r"\\includesvg(\[[^]]*\])?\{img/circle",
+                                                      one) is not None
+         and os.path.exists(os.path.join(work, "latex", "img", "circle.svg"))
+         and not os.path.exists(os.path.join(work, "latex", "img", "circle.pdf"))
+         and "WARNING: 1 SVG image(s) weren't made PDF (img/circle.svg first): rsvg-convert "
+         "is needed (sudo apt install librsvg2-bin)" in said),
+    ]
+
+
 # An author's macros for an image: one the copy can give a key at each
 # call, one whose own alt text would win over a key set before it, one
 # that calls the first, which the copy doesn't follow, and one whose alt
@@ -1133,14 +1210,18 @@ def case_source(work):
         return done.returncode, done.stdout
 
     def builds_tagged():
-        if not shutil.which("lualatex"):
-            return skip("no lualatex to build the tagged copy")
+        why = why_no_tex("no lualatex to build the tagged copy", "lualatex")
+        if why:
+            return skip(why)
         status, log = build(os.path.join(work, "tagged"), "lualatex", passes=2)
         return status == 0 and "para hooks differ" not in log \
             and "Parent-Child" not in log and "already defined" not in log
 
     def alt_in_tagged_pdf():
         """The tagged build's figures carry the macro's image's alt text."""
+        why = why_no_tex("no lualatex to build the tagged copy", "lualatex")
+        if why:
+            return skip(why)
         try:
             import pikepdf
         except ImportError:
@@ -1167,6 +1248,9 @@ def case_source(work):
     def mathml_in_tagged_pdf():
         """The tagged build's formula carries its MathML, from unicode-math:
         the set-builder bar the definitions file makes \\mid is U+2223."""
+        why = why_no_tex("no lualatex to build the tagged copy", "lualatex")
+        if why:
+            return skip(why)
         try:
             import pikepdf
         except ImportError:
@@ -1194,6 +1278,9 @@ def case_source(work):
     def figure_in_place():
         """The tagged build's figure is tagged where the text has it, not in
         the container tagging gathers floats into at the document's end."""
+        why = why_no_tex("no lualatex to build the tagged copy", "lualatex")
+        if why:
+            return skip(why)
         try:
             import pikepdf
         except ImportError:
@@ -1215,16 +1302,18 @@ def case_source(work):
         return "/Figure" in names and "/figures" not in names
 
     def builds_untagged():
-        if not shutil.which("pdflatex"):
-            return skip("no pdflatex to build the tagged copy untagged")
+        why = why_no_tex("no pdflatex to build the tagged copy untagged", "pdflatex")
+        if why:
+            return skip(why)
         status, _ = build(os.path.join(work, "tagged"), "pdflatex",
                           re.sub(r"\\DocumentMetadata\{[^}]*\}\n", "", tagged))
         return status == 0
 
     def builds():
         engine = shutil.which("pdflatex")
-        if not engine:
-            return skip("no pdflatex to build the remediated copy")
+        why = why_no_tex("no pdflatex to build the remediated copy", "pdflatex")
+        if why:
+            return skip(why)
         build = os.path.join(work, "build")
         shutil.copytree(work, build, ignore=shutil.ignore_patterns(
             "fixed", "html", "build", "rendered"))
@@ -1242,8 +1331,9 @@ def case_source(work):
         stops without it, whatever the TeX: an up-to-date TeX Live 2026
         needs the block for none of them, so the book's copy can't show it."""
         engine = shutil.which("pdflatex")
-        if not engine:
-            return skip("no pdflatex to build the block against older definitions")
+        why = why_no_tex("no pdflatex to build the block against older definitions", "pdflatex")
+        if why:
+            return skip(why)
         sys.path.insert(0, os.path.join(ROOT, "lib"))
         import texremediate
         here = os.path.join(work, "keys-older")
@@ -1357,7 +1447,8 @@ def case_source(work):
         ("without the tagging status data, the run says how to install it",
          lambda: "tlmgr install latex-tagging-status" in first_said),
         ("with it, the book's packages are named by status, and the list's age",
-         lambda: "currently incompatible: amsthm" in said and "unchecked: babel" in said
+         lambda: skip(why_no_status()) if why_no_status()
+         else "currently incompatible: amsthm" in said and "unchecked: babel" in said
          and "not in the list: graphicx" in said and "older than the LaTeX it checks" in said),
         ("tagging off leaves the book's build alone",
          lambda: "\\DocumentMetadata" not in notes and "pdftex" in notes),
@@ -1427,8 +1518,9 @@ def case_own_fonts(work):
     bold_copy = os.path.join(bold, "tagged", "notes.tex")
 
     def bold_builds():
-        if not shutil.which("lualatex"):
-            return skip("no lualatex to build the copy")
+        why = why_no_tex("no lualatex to build the copy", "lualatex")
+        if why:
+            return skip(why)
         tree = os.path.join(bold, "build")
         os.makedirs(tree)
         shutil.copy(bold_copy, os.path.join(tree, "notes.tex"))
@@ -1480,9 +1572,10 @@ def case_book_pdf(work):
     sidecar, its formulas' MathML, and its figure tagged in place; built
     from the pages instead with pdf.from: pages; and a book that won't
     build with tagging stops the run with LaTeX's error and the way out."""
-    if not shutil.which("lualatex") or not shutil.which("latexmk"):
+    why = why_no_tex("no lualatex or latexmk for the PDF target", "lualatex", "latexmk")
+    if why:
         return [("a LaTeX book's PDF is built from its own LaTeX",
-                 lambda: skip("no lualatex or latexmk for the PDF target"))]
+                 lambda: skip(why))]
     books = {}
     for name, extra, targets in (
             ("book", "", "  pdf:\n    format: pdf\n"),
@@ -1563,7 +1656,12 @@ def case_book_pdf(work):
 
     def placeholder_reported():
         """The drawing with no description has LaTeX's placeholder, which a
-        validator accepts and the output check reports."""
+        validator accepts and the output check reports, reading the PDF with
+        pypdf."""
+        try:
+            import pypdf  # noqa: F401
+        except ImportError:
+            return skip("no pypdf for the output check to read the PDF")
         report = os.path.join(books["book"][0], "output-check.csv")
         if not os.path.exists(report):
             return False
@@ -1581,7 +1679,17 @@ def case_book_pdf(work):
                               capture_output=True, text=True)
         return done.stdout.strip().startswith("PASS")
 
+    def pages_unbuilt():
+        """Why there's no PDF from the pages here, or None: the pages hold
+        the drawing as an SVG, which a PDF needs rsvg-convert to make a PDF
+        of, and the run stopped, saying so (why_no_svg)."""
+        if why_no_svg() and "needs rsvg-convert" in books["pages"][2]:
+            return why_no_svg()
+        return None
+
     def built_from_pages():
+        if pages_unbuilt():
+            return skip(pages_unbuilt())
         found = text("pages")
         if found is None:
             return skip("no pdftotext to read the PDF")
@@ -1594,6 +1702,8 @@ def case_book_pdf(work):
         words in 10pt type (9.96 of the PDF's points), not 12pt, as much
         as 3% either way where microtype's font expansion justifies a
         line. convert.py passes on the empty layout, as it does any."""
+        if pages_unbuilt():
+            return skip(pages_unbuilt())
         try:
             import pypdf
         except ImportError:
@@ -1615,6 +1725,8 @@ def case_book_pdf(work):
         LaTeX and from its pages: two strokes drawn as paths, no glyph of
         the line10 font, and the book's own \\arc, a name pict2e has.
         texremediate adds latexbuild.PICTURE_PATHS to the copy."""
+        if pages_unbuilt():
+            return skip(pages_unbuilt())
         try:
             import pikepdf  # noqa: F401
         except ImportError:
@@ -1703,8 +1815,10 @@ def case_struck_out(work):
         return done.returncode, pdf, found
 
     def tools():
-        if not shutil.which("lualatex") or not shutil.which("pdftotext"):
-            return "no lualatex or pdftotext to build and read the page"
+        why = why_no_tex("no lualatex or pdftotext to build and read the page", "lualatex",
+                         "pdftotext")
+        if why:
+            return why
         try:
             import pikepdf  # noqa: F401
         except ImportError:
@@ -1852,9 +1966,10 @@ def case_pdf_copy(work):
     """The PDF target's copy of the book's folder: a link the book makes
     to a folder beside it still finds it, the book's .latexmkrc is kept
     and doesn't move the PDF, and what LaTeX couldn't resolve is named."""
-    if not shutil.which("lualatex") or not shutil.which("latexmk"):
+    why = why_no_tex("no lualatex or latexmk for the PDF target", "lualatex", "latexmk")
+    if why:
         return [("the PDF build's copy of the book keeps its links and .latexmkrc",
-                 lambda: skip("no lualatex or latexmk for the PDF target"))]
+                 lambda: skip(why))]
     book = os.path.join(work, "book")
     os.makedirs(os.path.join(work, "shared", "figs"))
     os.makedirs(book)
@@ -1968,8 +2083,9 @@ def case_other_masters(work):
         return done.returncode, os.path.join(tree, "workbook.pdf")
 
     def builds_tagged():
-        if not shutil.which("lualatex"):
-            return skip("no lualatex to build the workbook")
+        why = why_no_tex("no lualatex to build the workbook", "lualatex")
+        if why:
+            return skip(why)
         status, pdf = build("lualatex")
         if status != 0 or not os.path.exists(pdf):
             return False
@@ -1996,8 +2112,9 @@ def case_other_masters(work):
             and author == "Someone"
 
     def builds_untagged():
-        if not shutil.which("pdflatex"):
-            return skip("no pdflatex to build the workbook untagged")
+        why = why_no_tex("no pdflatex to build the workbook untagged", "pdflatex")
+        if why:
+            return skip(why)
         status, pdf = build("pdflatex", metadata=False)
         return status == 0 and os.path.exists(pdf)
     return [
@@ -2103,7 +2220,7 @@ def case_review_macros(work):
         """(figures' alt texts in order, the text) of the copy built with
         LuaLaTeX, tagged; None without LuaLaTeX, "pikepdf" without pikepdf
         to read it."""
-        if not shutil.which("lualatex"):
+        if why_no_tex("no lualatex", "lualatex"):
             return None
         try:
             import pikepdf  # noqa: F401
@@ -2146,7 +2263,7 @@ def case_review_macros(work):
         def run():
             result = build()
             if result is None:
-                return skip("no lualatex to build the copy")
+                return skip(why_no_tex("no lualatex to build the copy", "lualatex"))
             if result == "pikepdf":
                 return skip("no pikepdf to read the tagged PDF's structure")
             return check(*result)
@@ -2192,13 +2309,16 @@ LONG_SUM = " + ".join("a_{%d}" % k for k in range(1, 41))
 
 def case_latex_target(work):
     """The latex target: a Markdown book written as LaTeX, a master and a
-    file per chapter, read back as a LaTeX source to the same pages."""
+    file per chapter, read back as a LaTeX source to the same pages. Its
+    SVG picture only where rsvg-convert makes it a PDF (why_no_svg): the
+    target writes \\includesvg without, which no build here takes."""
     os.makedirs(os.path.join(work, "img"))
     png(os.path.join(work, "img", "square.png"), (90, 90, 90))
     png(os.path.join(work, "img", "a+b.png"), (30, 30, 30))
     with open(os.path.join(work, "img", "circle.svg"), "w") as fh:
         fh.write('<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40">'
                  '<circle cx="20" cy="20" r="15" fill="black"/></svg>\n')
+    circle = "" if why_no_svg() else "![A black circle.](img/circle.svg)\n\n"
     with open(os.path.join(work, "one.md"), "w", encoding="utf-8") as fh:
         fh.write("# Shapes\n\nA square:\n\n![A gray square.](img/square.png)\n\n"
                  "The area is $s^2$,[^area] and the next chapter has [circles](two.md#circles).\n\n"
@@ -2211,7 +2331,7 @@ def case_latex_target(work):
                  "[^area]: Computed so:\n\n    ```python\n    area = s * s  # 100%\n    ```\n\n"
                  "[^side]: ```python\n    side = s  # one side\n    ```\n")
     with open(os.path.join(work, "two.md"), "w", encoding="utf-8") as fh:
-        fh.write("# Circles {#circles}\n\n![A black circle.](img/circle.svg)\n\n"
+        fh.write("# Circles {#circles}\n\n" + circle +
                  "Its area is $\\pi r^2$.\n\n1. Draw it.\n2. Measure it.\n\n"
                  "So $$A = \\pi r^2.$$\\\nQ.E.D.\n\n"
                  + "A long sum: $$S = " + LONG_SUM + "$$\n\n"
@@ -2302,6 +2422,11 @@ def case_latex_target(work):
                 for c in re.findall(r"<code\b[^>]*>(.*?)</code>", text, re.S)]
 
     def round_trip():
+        if circle and not shutil.which("pdftocairo"):
+            # The target makes the SVG picture a PDF, and read back as a
+            # LaTeX source, a PDF image is made an SVG with pdftocairo.
+            return skip("no pdftocairo to make the latex target's PDF picture an SVG, read "
+                        "back (sudo apt install poppler-utils)")
         reading()
         compare = os.path.join(HERE, "..", "util", "compare-output.py")
         same = []
@@ -2320,8 +2445,10 @@ def case_latex_target(work):
 
     def builds():
         engine = shutil.which("latexmk")
-        if not engine or not shutil.which("lualatex"):
-            return skip("no latexmk and lualatex to build the latex target")
+        why = why_no_tex("no latexmk and lualatex to build the latex target",
+                         "latexmk", "lualatex")
+        if why:
+            return skip(why)
         done = subprocess.run([engine, "-lualatex", "-interaction=nonstopmode",
                                "shapes.tex"], cwd=out, capture_output=True,
                               text=True, timeout=600)
@@ -2331,8 +2458,10 @@ def case_latex_target(work):
         """The master's build, by latexmk (builds), kept the long sum's fit
         in its .aux, its run counted as the second, where counted as the run
         the file changed on every run."""
-        if not shutil.which("latexmk") or not shutil.which("lualatex"):
-            return skip("no latexmk and lualatex to build the latex target")
+        why = why_no_tex("no latexmk and lualatex to build the latex target",
+                         "latexmk", "lualatex")
+        if why:
+            return skip(why)
         aux = os.path.join(out, "shapes.aux")
         text = read(work, "latex", "shapes.aux") if os.path.exists(aux) else ""
         return "\\OERFitState{" in text and "\\OERFitRun{2}" in text
@@ -2346,8 +2475,10 @@ def case_latex_target(work):
         .aux's count of runs, kept from the build before, had said no more
         were to be fitted, and its fits, by their numbers, were the wrong
         formulas'."""
-        if not shutil.which("latexmk") or not shutil.which("lualatex"):
-            return skip("no latexmk and lualatex to build the latex target")
+        why = why_no_tex("no latexmk and lualatex to build the latex target",
+                         "latexmk", "lualatex")
+        if why:
+            return skip(why)
         again = work + "-edited"
         shutil.copytree(work, again)
         with open(os.path.join(again, "two.md"), encoding="utf-8") as fh:
@@ -2374,8 +2505,10 @@ def case_latex_target(work):
         code holding every character of ASCII. The .aux's count of runs had
         said no more were to be fitted, and nothing numbered had moved, so
         the long sum's fit went on to the short one."""
-        if not shutil.which("latexmk") or not shutil.which("lualatex"):
-            return skip("no latexmk and lualatex to build the latex target")
+        why = why_no_tex("no latexmk and lualatex to build the latex target",
+                         "latexmk", "lualatex")
+        if why:
+            return skip(why)
         again = work + "-in-place"
         shutil.copytree(out, again)
         with open(os.path.join(again, "two.tex"), encoding="utf-8") as fh:
@@ -2403,8 +2536,10 @@ def case_latex_target(work):
         a third argument, as a width with its column's number is, the line
         took the next one of the .aux for it, and LaTeX ended with Lua's
         error (unexpected symbol near '\\')."""
-        if not shutil.which("latexmk") or not shutil.which("lualatex"):
-            return skip("no latexmk and lualatex to build the latex target")
+        why = why_no_tex("no latexmk and lualatex to build the latex target",
+                         "latexmk", "lualatex")
+        if why:
+            return skip(why)
         again = work + "-old-aux"
         shutil.copytree(out, again)
         aux = os.path.join(again, "shapes.aux")
@@ -2430,8 +2565,9 @@ def case_latex_target(work):
         built three times: each file edited, its sum made longer, and the
         document built again beside its .aux, the fitting starts again. A
         hook on LaTeX's \\input{} saw neither."""
-        if not shutil.which("lualatex"):
-            return skip("no lualatex to build with")
+        why = why_no_tex("no lualatex to build with", "lualatex")
+        if why:
+            return skip(why)
         sys.path.insert(0, os.path.join(ROOT, "lib"))
         import latexbuild
         folder = work + "-files"
@@ -2474,10 +2610,12 @@ def case_latex_target(work):
         ("each chapter is a file of its own, the master's division commands not in it",
          lambda: "Shapes" in one and "Circles" in two and "\\mainmatter" not in one
          and "\\begin{document}" not in one + two),
-        ("the images are beside them, the SVG made PDF, each with its alt text",
+        ("the images are beside them, each with its alt text",
          lambda: os.path.exists(os.path.join(out, "img", "square.png"))
-         and os.path.exists(os.path.join(out, "img", "circle.pdf"))
-         and re.search(r"alt=\{A\s+gray\s+square\.\}", one)
+         and re.search(r"alt=\{A\s+gray\s+square\.\}", one)),
+        ("and the SVG made PDF, with its alt text",
+         lambda: skip(why_no_svg()) if why_no_svg()
+         else os.path.exists(os.path.join(out, "img", "circle.pdf"))
          and re.search(r"alt=\{A\s+black\s+circle\.\}", two)
          and "includesvg" not in two),
         ("the run says what it wrote", lambda: "shapes.tex and 3 file(s)" in said),
@@ -2725,7 +2863,8 @@ def case_documents(work):
         fh.write("targets:\n  html:\n    format: html\n")
     stopped = convert(work)
     told = stopped.stdout + stopped.stderr
-    pdf = bool(shutil.which("lualatex") and shutil.which("latexmk"))
+    pdf_why = why_no_tex("no lualatex or latexmk for the PDF target", "lualatex", "latexmk")
+    pdf = not pdf_why
     with open(os.path.join(work, "conversion.yaml"), "w") as fh:
         fh.write("defaults:\n  latex:\n    main:\n      - src/Topic B Two.tex\n"
                  "      - src/Topic A One.tex\n"
@@ -2803,7 +2942,7 @@ def case_documents(work):
 
     def pdfs_titled():
         if not pdf:
-            return skip("no lualatex or latexmk for the PDF target")
+            return skip(pdf_why)
         try:
             import pikepdf
         except ImportError:
@@ -2819,7 +2958,7 @@ def case_documents(work):
 
     def pdfs_pass():
         if not pdf:
-            return skip("no lualatex or latexmk for the PDF target")
+            return skip(pdf_why)
         verapdf = os.environ.get("VERAPDF") or shutil.which("verapdf")
         if not verapdf:
             return skip("no veraPDF to check the PDFs")
@@ -3146,8 +3285,9 @@ def case_pieces(work):
         """titlesec's stand-in beside fancyhdr's page styles builds tagged:
         titleps, loaded for titlesec's own styles, clashed with fancyhdr's
         \\headrule when it was loaded at once (OpenIntro Statistics)."""
-        if not shutil.which("lualatex"):
-            return skip("no lualatex for the copies' builds")
+        why = why_no_tex("no lualatex for the copies' builds", "lualatex")
+        if why:
+            return skip(why)
         folder = os.path.join(work, "fancy")
         os.makedirs(folder, exist_ok=True)
         texts = {"f.tex": "\\documentclass{book}\n\\usepackage{fancyhdr}\n"
@@ -3248,8 +3388,9 @@ def case_pieces(work):
         """titlesec's pagestyles option loads titleps at once, as titlesec
         does, so a command of titleps's the preamble uses before its first
         page style (\\settitlemarks) is defined in the copy too."""
-        if not shutil.which("lualatex"):
-            return skip("no lualatex for the copies' builds")
+        why = why_no_tex("no lualatex for the copies' builds", "lualatex")
+        if why:
+            return skip(why)
         folder = os.path.join(work, "pagestyles")
         os.makedirs(folder, exist_ok=True)
         texts = {"p.tex": "\\documentclass{book}\n\\usepackage[pagestyles]{titlesec}\n"
@@ -4122,7 +4263,8 @@ def case_customized(work):
         fh.write(adopted + "\n")
     with open(os.path.join(work, "image-alt.csv"), "w", encoding="utf-8") as fh:
         fh.write("Image,Alt\nch_one/figures/triangle/triangle.png,\"A triangle, from the sidecar\"\n")
-    pdf = bool(shutil.which("lualatex"))
+    pdf_why = why_no_tex("no lualatex for the PDF", "lualatex")
+    pdf = not pdf_why
     with open(os.path.join(work, "conversion.yaml"), "w") as fh:
         fh.write("targets:\n  html:\n    format: html\n"
                  "  tagged:\n    format: source\n    tagging: \"on\"\n"
@@ -4280,10 +4422,10 @@ def case_customized(work):
         ("the PDF built from the pages takes an alt text of two paragraphs, and a formula "
          "in a color the book defines",
          lambda: os.path.exists(os.path.join(work, "pdf", "org.example.custom.pdf"))
-         if pdf else skip("no lualatex for the PDF")),
+         if pdf else skip(pdf_why)),
         ("and the type size and margins the book's preamble gives, not Pandoc's 10pt in "
          "the book class's margins", lambda: page_layout_kept(work, said)
-         if pdf else skip("no lualatex for the PDF")),
+         if pdf else skip(pdf_why)),
         ("build-pdf.py run on its own, --latex-only, keeps the book's layout and colors, "
          "as convert.py's run gives them",
          lambda: "The LaTeX book's own layout, from its preamble: 11pt type; geometry's "
@@ -4291,7 +4433,7 @@ def case_customized(work):
          and re.search(r"\\documentclass\[[^]]*11pt[^]]*\]\{book\}", alone_tex)
          and "\\usepackage[margin=1in]{geometry}" in alone_tex
          and "\\definecolor{oiB}{rgb}{.337,.608,.741}" in alone_tex
-         if pdf else skip("no lualatex for the PDF")),
+         if pdf else skip(pdf_why)),
         ("the copy runs on the paragraphs of an alt-text argument, which "
          "\\includegraphics can't take", lambda: "\\Figure[A gray star in chapter two, drawn "
          "with five points of equal length.\nIts center filled," in read(
@@ -4371,7 +4513,7 @@ def case_customized(work):
              "project", {}).get("authors") == ["Ann Lee", "Bo Chen"]),
         ("and every link in it has its target: a label in a heading's braces is a label "
          "LaTeX finds", lambda: "Hyper reference" not in said
-         if pdf else skip("no lualatex for the PDF")),
+         if pdf else skip(pdf_why)),
         ("in the EPUB, a link to a figure in another chapter's file names the file, and "
          "a formula in a heading has the navigation document declare MathML", epub_links),
         ("and each chapter file's title is its heading's text, a formula's as text", epub_titles),
@@ -4413,7 +4555,7 @@ def case_customized(work):
          and "role: appendix" in re.sub(r"\s+", " ", contents_sample).split("tables")[-1][:40]
          if contents_sample else False),
         ("and the PDF from the pages numbers them as the pages do, its references to them "
-         "found", lambda: pdf_numbers(work, said) if pdf else skip("no lualatex for the PDF")),
+         "found", lambda: pdf_numbers(work, said) if pdf else skip(pdf_why)),
         ("and the Word file sets each as a display formula of its own, its number after it",
          lambda: word_formulas(os.path.join(work, "docx", "ch_two.docx"))),
         ("a chapter's title in a framed box is the page's H1 and title, out of the box, "
@@ -4533,9 +4675,10 @@ def case_unsupported(work):
     none of them and defines their commands, the run says what that
     changes, and the PDF from the book's own LaTeX builds tagged with every
     word, its figure's font embedded, and passes PDF/UA-2."""
-    if not shutil.which("lualatex") or not shutil.which("latexmk"):
+    why = why_no_tex("no lualatex or latexmk for the PDF target", "lualatex", "latexmk")
+    if why:
         return [("a book set with packages tagging can't take builds tagged",
-                 lambda: skip("no lualatex or latexmk for the PDF target"))]
+                 lambda: skip(why))]
     os.makedirs(work)
     with open(os.path.join(work, "book.tex"), "w", encoding="utf-8") as fh:
         fh.write(UNSUPPORTED_MASTER)
@@ -4588,9 +4731,19 @@ def case_unsupported(work):
         return not missing
 
     def passes_ua2():
+        """The PDF passes PDF/UA-2, its figures' fonts embedded, which the
+        run finds with pypdf and embeds with Ghostscript or pdftocairo:
+        without them it says it can't, and PDF/UA-2 fails."""
         verapdf = os.environ.get("VERAPDF") or shutil.which("verapdf")
         if not verapdf:
             return skip("no veraPDF to check the PDF")
+        if latexbuild.embedding_tool() is None:
+            return skip("no Ghostscript or pdftocairo to embed a figure's fonts "
+                        "(sudo apt install ghostscript)")
+        try:
+            import pypdf  # noqa: F401
+        except ImportError:
+            return skip("no pypdf for the run to find a figure's fonts to embed")
         done = subprocess.run([verapdf, "-f", "ua2", "--format", "text", built],
                               capture_output=True, text=True)
         return done.stdout.strip().startswith("PASS")
@@ -4606,6 +4759,9 @@ def case_unsupported(work):
             "(phv)" in said
 
     def figure_embedded():
+        if latexbuild.embedding_tool() is None:
+            return skip("no Ghostscript or pdftocairo to embed a figure's fonts "
+                        "(sudo apt install ghostscript)")
         try:
             import pypdf  # noqa: F401
         except ImportError:
@@ -5637,6 +5793,7 @@ CASES = [("a LaTeX book", case_book), ("two masters", case_masters),
          ("a LaTeX book's language", case_language),
          ("one file", case_single), ("an unbuilt book", case_unbuilt),
          ("PDF and EPS images that can't be made SVG", case_unmade_images),
+         ("an SVG picture the latex target can't make a PDF", case_unmade_svg),
          ("a table tagged as a division of paragraphs", case_layout_tables),
          ("the source target", case_source), ("a book with fonts of its own", case_own_fonts),
          ("a LaTeX book's PDF, from its own LaTeX", case_book_pdf),
@@ -5724,9 +5881,18 @@ def main():
     if unmatched:
         sys.exit("no case's label holds " + ", ".join(repr(c) for c in unmatched))
     failed = 0
-    for lacking in tex_ready():
-        print(f"  FAIL  {lacking}")
-        failed += 1
+    # What the machine lacks, said first, as the line a run's list of skips
+    # says what to install by: the checks that need it skip, as they do
+    # where there's no TeX. The cases side by side are told what TeX lacks.
+    # Asked here, whatever the environment says already: only this run's
+    # answer is handed on.
+    os.environ.pop("LATEX_TESTS_TEX", None)
+    unready = tex_unready()
+    os.environ["LATEX_TESTS_TEX"] = json.dumps(unready)
+    if unready:
+        print(f"  skip  the checks that build with TeX: {unready}")
+    if why_no_svg():
+        print(f"  skip  {why_no_svg()}")
     if arguments.jobs > 1 and len(cases) > 1:
         failed += parallel.run(os.path.abspath(__file__), CASES,
                                {label for label, _ in cases}, arguments.jobs,

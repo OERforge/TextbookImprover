@@ -2656,9 +2656,9 @@ def check_code_fit_report():
 def check_tex_packages():
     """The installation page's commands for TeX install every package the
     run and the suites check for, what a deck's PDF needs and what the
-    LaTeX, PDF, and decks suites' books and decks load, each line a command
-    of its own: copied, two names at a line break had once run together
-    ("soultabto-ltx")."""
+    LaTeX, PDF, decks, and slides suites' books and decks and their PDFs
+    load (SUITE_TEX and PDF_TEX), each line a command of its own: copied,
+    two names at a line break had once run together ("soultabto-ltx")."""
     page = open(os.path.join(ROOT, "docs", "installation.md"), encoding="utf-8").read()
     section = page.split("### Everything at once", 1)[-1].split("\n### ", 1)[0]
     block = re.search(r"```bash\n(.*?)```", section, re.S)
@@ -2666,15 +2666,16 @@ def check_tex_packages():
     named = {word for line in lines if line.startswith("tlmgr install ")
              for word in line.split()[2:]}
     books = []
-    for name in ("run-latex-tests.py", "run-pdf-tests.py", "run-decks-tests.py"):
+    for name in ("run-latex-tests.py", "run-pdf-tests.py", "run-decks-tests.py",
+                 "run-slides-tests.py"):
         suite = open(os.path.join(HERE, name), encoding="utf-8").read()
-        listed = re.search(r"^SUITE_TEX = \[(.*?)\]$", suite, re.S | re.M)
-        books.append(re.findall(r'\("([\w-]+)", "[^"]+"\)', listed.group(1)) if listed else [])
+        listed = re.findall(r"^(?:SUITE_TEX|PDF_TEX) = \[(.*?)\]$", suite, re.S | re.M)
+        books.append(re.findall(r'\("([\w-]+)", "[^"]+"\)', "".join(listed)))
     import decks
     talk = [package for _, package in decks.LTX_TALK_FILES]
     return [
         ("the installation page installs every TeX package a deck's PDF and the LaTeX, "
-         "PDF, and decks suites' books and decks need",
+         "PDF, decks, and slides suites' books and decks need",
          lambda: all(books) and set(sum(books, []) + talk) <= named),
         ("each line of it a command of its own",
          lambda: named and not any(line.rstrip().endswith("\\") for line in lines)),
@@ -4998,6 +4999,9 @@ def check_wcag_context():
     gives some runs no place; a blank drawn shorter to fit its line; and
     five links."""
     import pdfcheck
+    if pdfcheck.pypdf is None:
+        return [("what a PDF has where veraPDF's checks failed is read",
+                 lambda: print("  skip  no pypdf to read a PDF") or True)]
     import pypdf
     # Each run in a text object of its own, placed with Tm, and a blank in
     # marked content of its own, as LuaLaTeX writes a tagged page.

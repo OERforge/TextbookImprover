@@ -179,20 +179,25 @@ def case_front_door():
                   "--force", "--report-html", "--report-docx"], WORK)
     back = fl.read_csv(csv_path)
     standards = {r[6] for r in body if r[6]}
+    # The PDF, which pypdf writes (main): none without it.
+    pdf = os.path.exists(os.path.join(WORK, "blank.pdf"))
+    no_pdf = "no pypdf to write a PDF to audit (sudo apt install python3-pypdf)"
     return [
         ("the audit runs over a directory of mixed files",
          lambda: os.path.exists(csv_path)),
         ("the CSV keeps the three original columns first, then the rest",
          lambda: header == fl.COLUMNS),
-        ("a Word source, a Markdown source, a page, an EPUB, and a PDF are "
-         "each audited",
-         lambda: {"source-docx", "source-md", "html", "epub", "pdf"} <= kinds),
+        ("a Word source, a Markdown source, a page, and an EPUB are each audited",
+         lambda: {"source-docx", "source-md", "html", "epub"} <= kinds),
+        ("and a PDF",
+         lambda: "pdf" in kinds if pdf else print("  skip  " + no_pdf) or True),
         ("the report lists every input with its hash",
          lambda: "## Inputs" in report and sorted(re.findall(
              r"^- `[^`]*/([^/`]+)` \u2014 [\d,]+ bytes, SHA-256 `", report, re.M))
-         == ["blank.pdf", "book.epub", "media-a.docx", "page.html", "page.md"]),
+         == ["blank.pdf"] * pdf + ["book.epub", "media-a.docx", "page.html", "page.md"]),
         ("and the PDF's metadata and claims",
-         lambda: "metadata and claims" in report and "**Tagged:**" in report),
+         lambda: "metadata and claims" in report and "**Tagged:**" in report
+         if pdf else print("  skip  " + no_pdf) or True),
         ("with nothing changed, the report is left as it is and said to be "
          "current",
          lambda: "is current" in second.stderr and untouched),
@@ -225,8 +230,12 @@ def case_wcag():
     sys.path.insert(0, HERE)
     import fakeverapdf
     import pdfcheck
-    import pypdf
-    from pypdf.generic import BooleanObject, DictionaryObject, NameObject
+    try:
+        import pypdf
+        from pypdf.generic import BooleanObject, DictionaryObject, NameObject
+    except ImportError:
+        print("  skip  pypdf not installed; veraPDF's WCAG checks aren't asked of a PDF")
+        return []
     folder = os.path.join(WORK, "wcag")
     os.makedirs(folder)
     probe = os.path.join(WORK, "probe.pdf")

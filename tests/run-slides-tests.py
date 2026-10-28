@@ -11,9 +11,10 @@ shape a check or a decision is about is there on purpose, and reads back
 what the code wrote. A slides run of PowerPoint decks needs no Pandoc,
 and runs here without one on the PATH too; the case of a deck beside a
 book's pages, whose book needs Pandoc 3.9 or later, and the cases that
-convert a deck skip without it, a deck's PDF without LuaLaTeX and
-ltx-talk too. The rest needs nothing but the standard library, and
-PyYAML where it runs convert.py.
+convert a deck skip without it, a deck's PDF without LuaLaTeX,
+ltx-talk, or the packages the deck loads too, and the reading of its
+slides without pikepdf. The rest needs nothing but the standard
+library, and PyYAML where it runs convert.py.
 
 A deck converted is held to a round trip: to Markdown, back to
 PowerPoint through a Markdown deck's pptx target, and compared with
@@ -4511,15 +4512,45 @@ def case_math_pandoc_and_stop(work):
         out[-900:]
 
 
+# The TeX packages the deck's PDF loads beyond ltx-talk and what it loads
+# (decks.LTX_TALK_FILES), which a smaller TeX can lack, by a file each
+# holds: LaTeX's tagging code, which TinyTeX lacks (latex-lab's, which
+# \DocumentMetadata reads, and tagpdf), and luamml, for the formulas'
+# MathML; pict2e, which draws picture mode in every PDF, and which neither
+# TinyTeX nor TeX Live's medium scheme has; and luacolor and lua-ul, not
+# in TinyTeX, which the template loads for the deck's underlined and
+# struck-out words (docs/installation.md).
+SUITE_TEX = [("latex-lab", "documentmetadata-support.ltx"), ("tagpdf", "tagpdf.sty"),
+             ("luamml", "luamml.sty"), ("pict2e", "pict2e.sty"), ("luacolor", "luacolor.sty"),
+             ("lua-ul", "lua-ul.sty")]
+
+
+def tex_missing():
+    """Why TeX can't build the deck's PDF for a package of SUITE_TEX it
+    lacks, or None, as where there's no kpsewhich to ask."""
+    if not shutil.which("kpsewhich"):
+        return None
+    missing = [package for package, name in SUITE_TEX
+               if not subprocess.run(["kpsewhich", name], capture_output=True, text=True,
+                                     stdin=subprocess.DEVNULL).stdout.strip()]
+    if not missing:
+        return None
+    import latexbuild
+    return ("TeX lacks " + ", ".join(missing) + ", which a deck's PDF loads ("
+            + latexbuild.tlmgr_command("install " + " ".join(missing)) + ")")
+
+
 def case_converting_more(work):
     """A PowerPoint deck's PDF, through ltx-talk, and its reveal.js
-    presentation, as a deck written in Markdown has them."""
+    presentation, as a deck written in Markdown has them. What the PDF or
+    the reading of it needs, missing, is a machine to set up, so its
+    checks skip, saying why."""
     if not pandoc_ok():
         return
     import decks
-    problem = decks.ltx_talk_problem()
+    problem = decks.ltx_talk_problem() or tex_missing()
     if problem:
-        print("  skip  %s; a PowerPoint deck's PDF isn't checked" % problem)
+        print("  skip  %s; a PowerPoint deck's PDF isn't checked" % problem.rstrip("."))
     version = subprocess.run(["pandoc", "--version"], capture_output=True,
                              text=True).stdout.split()[1]
     present = tuple(int(n) for n in re.findall(r"\d+", version)[:3]) >= (3, 12)
@@ -4536,13 +4567,18 @@ def case_converting_more(work):
         sys.path.insert(0, HERE)
         import pdftext
         pdf = os.path.join(folder, "pdf", "Reader.pdf")
-        text = " ".join(pdftext.marked_text(pdf).values()) \
-            if os.path.isfile(pdf) and pdftext.pikepdf is not None else ""
-        yield "a pdf target writes each deck's PDF through ltx-talk, its slides the deck's: " \
-            "its title slide, a slide for each section, and the slides shown, no notes", \
-            "Wrote 1 PDF(s)" in out and "through ltx-talk: 13 page(s)" in out \
-            and "A Course of Talks" in text and "Ask who paid" not in text \
-            and "Not shown." not in text, out[-600:]
+        yield "a pdf target writes each deck's PDF through ltx-talk, a page for its title " \
+            "slide, each section, and each slide shown", \
+            "Wrote 1 PDF(s)" in out and "through ltx-talk: 13 page(s)" in out, out[-600:]
+        if pdftext.pikepdf is None:
+            print("  skip  pikepdf not found (sudo apt install python3-pikepdf); the PDF's "
+                  "slides aren't read")
+        else:
+            text = " ".join(pdftext.marked_text(pdf).values()) if os.path.isfile(pdf) else ""
+            yield "its slides the deck's: its title slide, a slide for each section, and the " \
+                "slides shown, no notes", \
+                "A Course of Talks" in text and "Ask who paid" not in text \
+                and "Not shown." not in text, text[-600:]
     if present:
         page = os.path.join(folder, "present", "Reader.html")
         shown = open(page, encoding="utf-8").read() if os.path.isfile(page) else ""

@@ -8,8 +8,9 @@ through ltx-talk.
 
 Needs Pandoc 3.9 or later. The PDF's cases need LuaLaTeX with LaTeX
 2026-06-01 or later and the ltx-talk, lua-unicode-math, and
-newcomputermodern packages, and pikepdf and pypdf to read what was built,
-and skip, saying why, without them; veraPDF, found as the output check
+newcomputermodern packages, the packages the decks load (SUITE_TEX), and
+pikepdf and pypdf to read what was built, and skip, saying why, without
+them; veraPDF, found as the output check
 finds it (VERAPDF, or on the path), judges each PDF's claim when it's
 there. The decks are written here, small and made up, each holding what
 the code has to handle: sections above the slides, an agenda before the
@@ -1484,21 +1485,32 @@ def verapdf():
 
 
 def pdf_ready():
-    """Why the PDF's cases can't run here, or None."""
+    """Why the PDF's cases can't run here, or None: ltx-talk or what it
+    needs missing (decks.ltx_talk_problem), a package the suite's decks
+    load (SUITE_TEX), or pikepdf and pypdf to read the PDFs. A machine to
+    set up, not the code failing, so the checks skip, saying why."""
     problem = decks.ltx_talk_problem()
     if problem:
-        return problem
+        # Said before what isn't checked, after a semicolon.
+        return problem.rstrip(".")
+    lacking = tex_missing()
+    if lacking:
+        return ("TeX lacks " + ", ".join(lacking) + ", which the suite's decks load ("
+                + decks.latexbuild.tlmgr_command("install " + " ".join(lacking)) + ")")
     if pikepdf is None or pypdf is None:
         return "pikepdf and pypdf are needed to read the PDFs built"
     return None
 
 
 # The TeX packages the suite's decks load beyond what ltx-talk needs, which
-# a smaller TeX can lack, by a file each holds: cancel and pict2e for the
-# odd deck's terms struck out of its formulas, which neither TinyTeX nor
-# TeX Live's medium scheme has, and luacolor and lua-ul, not in TinyTeX,
-# which the template loads for its struck text (docs/installation.md).
-SUITE_TEX = [("cancel", "cancel.sty"), ("pict2e", "pict2e.sty"),
+# a smaller TeX can lack, by a file each holds: LaTeX's tagging code, which
+# TinyTeX lacks (latex-lab's, which \DocumentMetadata reads, and tagpdf),
+# and luamml, for the formulas' MathML; cancel and pict2e for the odd
+# deck's terms struck out of its formulas, which neither TinyTeX nor TeX
+# Live's medium scheme has; and luacolor and lua-ul, not in TinyTeX, which
+# the template loads for its struck text (docs/installation.md).
+SUITE_TEX = [("latex-lab", "documentmetadata-support.ltx"), ("tagpdf", "tagpdf.sty"),
+             ("luamml", "luamml.sty"), ("cancel", "cancel.sty"), ("pict2e", "pict2e.sty"),
              ("luacolor", "luacolor.sty"), ("lua-ul", "lua-ul.sty")]
 
 
@@ -2314,12 +2326,6 @@ def case_pdf(work):
     if ran:
         checks.insert(1, ("veraPDF finds nothing to fail in any of them",
                           lambda: not [r for r in check if r[1].startswith("verapdf")]))
-    lacking = tex_missing()
-    if lacking:
-        checks.insert(0, ("TeX has the packages the suite's decks load, or the checks that "
-                          "build them fail: missing " + ", ".join(lacking) + " ("
-                          + decks.latexbuild.tlmgr_command("install " + " ".join(lacking)) + ")",
-                          lambda: False))
     return checks
 
 
@@ -2574,14 +2580,18 @@ def case_no_latex(work):
 
 def tools_without(work, keep=("pandoc", "file")):
     """A folder of the programs keep names and Python, for PATH: what a
-    run needs before LaTeX, and nothing else."""
+    run needs before LaTeX, and nothing else. Python is a script that runs
+    this one: a venv's python run through a link starts without the venv's
+    packages."""
     tools = os.path.join(work, "bin")
     os.makedirs(tools)
     for program in keep:
         found = shutil.which(program)
         if found:
             os.symlink(found, os.path.join(tools, program))
-    os.symlink(sys.executable, os.path.join(tools, "python3"))
+    with open(os.path.join(tools, "python3"), "w") as fh:
+        fh.write("#!/bin/sh\nexec %s \"$@\"\n" % shlex.quote(sys.executable))
+    os.chmod(os.path.join(tools, "python3"), 0o755)
     return tools
 
 
@@ -4525,6 +4535,11 @@ def case_revealjs(work):
     page = read(path) if os.path.exists(path) else ""
     check = [r for r in rows_of(os.path.join(decks_dir, "output-check.csv"))
              if r[0].endswith(".html")]
+    import outputcheck
+    nu = outputcheck.find_validator("vnu")
+    if not nu:
+        print("  skip  the Nu HTML checker not installed (VNU_JAR); its warning of a slide "
+              "with no title isn't checked")
     browser = browser_problem() if page else None
     tried = page and not browser
     browsed = in_browser(path, presentation_steps) if tried else {}
@@ -4581,7 +4596,9 @@ def case_revealjs(work):
         ("the output check finds nothing in the presentations but the slide with no title, a "
          "section with no heading, which the Nu checker warns of",
          lambda: page and [(os.path.basename(r[0]), r[1]) for r in check]
-         == [("no-title.html", "vnu:warning")] and "Section lacks heading" in check[0][2]),
+         == [("no-title.html", "vnu:warning")] and "Section lacks heading" in check[0][2])
+        if nu else ("the output check finds nothing in the presentations",
+                    lambda: page and check == []),
     ]
     in_browser_checks = [
         ("in a browser, reveal.js's role and its live region go, its progress bar, which a "

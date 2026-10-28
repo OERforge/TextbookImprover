@@ -37,7 +37,7 @@
 #                          which needs no Pandoc but to convert (a deck
 #                          converted, or in a book's folder, skipped
 #                          without Pandoc 3.9; a deck's PDF without
-#                          LuaLaTeX and ltx-talk).
+#                          LuaLaTeX, ltx-talk, or what the deck loads).
 #   run-site-tests.py      unpack-site.py on saves, WARCs, and captures.
 #   run-cnx-tests.py       unpack-cnx.py on books written in CNXML, baked
 #                          as OpenStax bakes them, and one converted, which
@@ -48,14 +48,18 @@
 #   run-filter-tests.py    the Lua filters on six .docx fixtures.
 #   run-convert-tests.py   convert.py, every source and target.
 #   run-epub-tests.py      build-epub.py: the book's shape and claims.
-#   run-pdf-tests.py       the pdf target, tagged; needs LuaLaTeX.
+#   run-pdf-tests.py       the pdf target, tagged; needs LuaLaTeX and the
+#                          packages its books load (skipped without).
 #   run-split-tests.py     split-pages.py, and what reads its pieces.
 #   run-audit-tests.py     the audit, and convert.py --check-only.
 #   run-latex-tests.py     LaTeX as a source, and the copies and PDFs
-#                          made from it; its drawings need a TeX.
+#                          made from it; its drawings and builds need a
+#                          TeX with the packages its books load (skipped
+#                          without).
 #   run-decks-tests.py     decks written in Markdown: each deck's page,
 #                          its copies, its PDF through ltx-talk, which
-#                          needs LuaLaTeX and ltx-talk (skipped without),
+#                          needs LuaLaTeX, ltx-talk, and what the decks
+#                          load (skipped without),
 #                          its PowerPoint file, and its reveal.js
 #                          presentation, twelve of whose checks open it
 #                          in a browser with the optional Playwright and

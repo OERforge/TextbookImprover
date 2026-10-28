@@ -732,7 +732,7 @@ def wcag_cases(work):
         import pikepdf
     except ImportError:
         pikepdf = None
-    if pikepdf is not None:
+    if pikepdf is not None and pdfcheck.pypdf is not None:
         tidy, tidy_report = os.path.join(work, "tidy.pdf"), os.path.join(work, "tidy.csv")
         with pikepdf.open(io.BytesIO(pdfcheck.wcag_probe())) as made:
             made.docinfo["/Title"] = "A Book"
@@ -752,8 +752,10 @@ def wcag_cases(work):
                       and [r["Check"] for r in tidy_rows] == ["verapdf-wcag:1.3.1-1",
                                                                "verapdf-wcag:2.4.9-1"]
                       or fail("got: " + alone)))
-    else:
+    elif pikepdf is None:
         print("  skip  no pikepdf to make a PDF the output check finds nothing in")
+    else:
+        print("  skip  no pypdf for the output check to read a PDF it finds nothing in")
     real = outputcheck.find_validator("verapdf")
     if not real:
         print("  skip  veraPDF not installed (VERAPDF); its WCAG profile isn't run itself")

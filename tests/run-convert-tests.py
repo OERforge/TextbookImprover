@@ -35,6 +35,7 @@ import glob
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -2848,6 +2849,7 @@ def case_zip(work):
     the folder around it dropped, nothing let outside the book, the
     directory's own settings kept, and nothing done with a zip holding no
     sources or with a slide deck, which is a zip too."""
+    import importlib.util
     import zipfile
     os.makedirs(work)
     book = os.path.join(work, "book")
@@ -2936,7 +2938,9 @@ def case_zip(work):
          "from their addresses, not the browser's file names",
          lambda: "saved from a browser" in saved_run.stderr
          and len(saved_pages) == 1 and "_" not in saved_pages[0]
-         and exists(saved, "project.yaml")),
+         and exists(saved, "project.yaml"))
+        if importlib.util.find_spec("html5lib") or importlib.util.find_spec("lxml")
+        else ("skip: a browser's save in a zip needs html5lib or lxml", lambda: True),
         ("Word files two folders deep, as OpenStax zips them, are sources "
          "and convert", lambda: exists(openstax, "tables.docx")
          and exists(openstax, "html", "tables.html")
@@ -3381,13 +3385,18 @@ def case_pdf_without_latex(work):
     with open(os.path.join(work, "conversion.yaml"), "w") as fh:
         fh.write("targets:\n  web:\n    format: html\n  print:\n    format: pdf\n")
     # A path holding Pandoc and Python and nothing else, so LuaLaTeX
-    # can't be found wherever it's installed.
+    # can't be found wherever it's installed. Python is a script that runs
+    # this one: a venv's python run through a link starts without the
+    # venv's packages.
     tools = work + "-bin"
     os.makedirs(tools)
-    for program in ("pandoc", "python3", "file"):
+    for program in ("pandoc", "file"):
         found = shutil.which(program)
         if found:
             os.symlink(found, os.path.join(tools, program))
+    with open(os.path.join(tools, "python3"), "w") as fh:
+        fh.write("#!/bin/sh\nexec %s \"$@\"\n" % shlex.quote(sys.executable))
+    os.chmod(os.path.join(tools, "python3"), 0o755)
     result = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
                             cwd=work, capture_output=True, text=True,
                             stdin=subprocess.DEVNULL,

@@ -6,9 +6,10 @@ run-pdf-tests.py -- check the pdf target against a small Markdown book.
     python3 tests/run-pdf-tests.py --keep    # leave the output in place
 
 Needs Pandoc 3.9 or later, LuaLaTeX with LaTeX's tagging code (TeX Live
-2026 or later; see docs/installation.md), and pypdf and pikepdf to read
-the result. Without LuaLaTeX, pypdf, or pikepdf it says so and skips;
-veraPDF, when found through VERAPDF or on the path, is run by the
+2026 or later; see docs/installation.md) and the packages the PDFs load
+(PDF_TEX, SUITE_TEX), and pypdf and pikepdf to read the result. Without any of
+them, or with a LaTeX too old, it says which and skips, as a machine to
+set up; veraPDF, when found through VERAPDF or on the path, is run by the
 output check and its findings are checked too.
 
 WHAT IS LOAD-BEARING HERE
@@ -2867,14 +2868,22 @@ SUITE_TEX = [("geometry", "geometry.sty"), ("setspace", "setspace.sty"),
              ("plex", "IBMPlexSerif-Regular.otf"), ("cancel", "cancel.sty"),
              ("pict2e", "pict2e.sty"), ("luacolor", "luacolor.sty"),
              ("lua-ul", "lua-ul.sty")]
+# And what any tagged PDF loads, which TinyTeX lacks too (docs/
+# installation.md's first tlmgr line): LaTeX's tagging code, latex-lab's,
+# which \DocumentMetadata reads, and tagpdf; luamml, for the formulas'
+# MathML; and selnolig, which Pandoc's template loads under LuaLaTeX for a
+# book with a language, and luatexbase, which selnolig loads.
+PDF_TEX = [("latex-lab", "documentmetadata-support.ltx"), ("tagpdf", "tagpdf.sty"),
+           ("luamml", "luamml.sty"), ("luatexbase", "luatexbase.sty"),
+           ("selnolig", "selnolig.sty")]
 
 
 def tex_missing():
-    """The packages of SUITE_TEX TeX can't find, none where there's no
-    kpsewhich to ask."""
+    """The packages of SUITE_TEX and PDF_TEX TeX can't find, none where
+    there's no kpsewhich to ask."""
     if not shutil.which("kpsewhich"):
         return []
-    return [package for package, name in SUITE_TEX
+    return [package for package, name in PDF_TEX + SUITE_TEX
             if not subprocess.run(["kpsewhich", name], capture_output=True, text=True,
                                   stdin=subprocess.DEVNULL).stdout.strip()]
 
@@ -5408,12 +5417,19 @@ def main():
 
     # A LaTeX too old to tag is a machine to set up, not a failure of the
     # target: build-pdf.py refuses it (run-convert-tests.py checks that),
-    # and this suite says why it can't run.
+    # and this suite says why it can't run. So is a TeX without a package
+    # the books load, on which LaTeX stops.
     spec = importlib.util.spec_from_file_location(
         "build_pdf", os.path.join(BIN, "build-pdf.py"))
     build_pdf = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(build_pdf)
     problem = build_pdf.latex_problem()
+    missing = tex_missing()
+    if missing and not problem:
+        import latexbuild
+        problem = ("TeX lacks " + ", ".join(missing) + ", which the suite's PDFs load ("
+                   + latexbuild.tlmgr_command("install " + " ".join(missing))
+                   + "); the pdf target is not checked")
     if problem:
         print(f"  skip  {problem}")
         print("\nall PDF checks skipped")
@@ -5421,13 +5437,6 @@ def main():
 
     work = tempfile.mkdtemp(prefix="pdf-tests-")
     failed = 0
-    missing = tex_missing()
-    if missing:
-        import latexbuild
-        print("  FAIL  TeX has the packages the suite's books load, or the checks that build "
-              "them fail: missing " + ", ".join(missing) + " ("
-              + latexbuild.tlmgr_command("install " + " ".join(missing)) + ")")
-        failed += 1
     try:
         try:
             items = checks(work, arguments.jobs)

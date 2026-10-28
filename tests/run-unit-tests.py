@@ -2591,6 +2591,68 @@ def check_fitted_blanks():
     ]
 
 
+def check_code_fit_report():
+    """The build's reports of what FIT_MACROS fitted and what's still too
+    wide, read from what LaTeX said, with blocks of code among them, each
+    between the lines \\OERFitCode and \\OERFitCodeEnd print: a line of
+    LaTeX's verbatim still too wide, which LaTeX reports as a line of text,
+    isn't counted among the lines too wide, nor a footnote's, which LaTeX
+    reports at a line of the file it's read from, here the book's fourth, a
+    line of text; a footnote's own paragraph, which LaTeX reports at the
+    line its text ends on, the footnote's last block's \\OERFitCodeEnd, is,
+    and so is a line of text after it; and the fit report names a block as
+    code running into the margin, and warns of a block too wide for the
+    paper with the tables and formulas."""
+    import latexbuild
+    source = "\n".join(["\\label{page-code}", "Words one.", "", "Words two.", "",
+                        "\\OERFitCode{1}", "", "\\begin{verbatim}", "Marginline",
+                        "\\end{verbatim}", "", "\\OERFitCodeEnd{1}", "",
+                        "Words.\\footnote{Its words.", "", "\\OERFitCode{2}",
+                        "\\OERCodeFile{oer-code-1.tex}", "\\OERFitCodeEnd{2}}"])
+    said = ("TextbookImprover code\n"
+            "Overfull \\hbox (43.1pt too wide) in paragraph at lines 9--9\n"
+            "TextbookImprover code end\n"
+            "Overfull \\hbox (202.0pt too wide) in paragraph at lines 18--18\n"
+            "TextbookImprover code\n"
+            "(./oer-code-1.tex\n"
+            "Overfull \\hbox (44.0pt too wide) in paragraph at lines 4--4\n"
+            ")\n"
+            "TextbookImprover code end\n"
+            "Overfull \\hbox (5.0pt too wide) in paragraph at lines 14--18\n"
+            "TextbookImprover fit: run 2, 0 narrowed, 2 smaller, smallest 0.5\n"
+            "TextbookImprover fit wide: c 43.1 6 0.75 0 1 0\n"
+            "TextbookImprover fit wide: c 301.0 6 0.5 0 0 0\n")
+    owners = {"page-code": "code"}
+    found = latexbuild.overfull_lines(said, source, owners)
+    report = latexbuild.fit_report(said, source, owners)
+    return [
+        ("a line of a block of code LaTeX reports as too wide isn't counted among the lines "
+         "too wide, nor a footnote's, reported at a line of its own file, and a footnote's "
+         "words, reported at the line of its last block's mark, are, and a line of text "
+         "after them",
+         lambda: found == [(202.0, "text", "code"), (5.0, "text", "code")]),
+        ("the fit report counts the blocks of code it fitted, names one still wider than the "
+         "text, running into the margin, and warns of one too wide for the paper",
+         lambda: report == [
+             "Fitted 2 table(s), formula(s), and block(s) of code too wide for their lines to "
+             "them: 2 in smaller type, the smallest at 50% of its size.",
+             "1 block(s) of code, still wider than the text in smaller type, the smallest at "
+             "75% of its size, runs into the margin on its right, the widest 43 points wider: "
+             "on code.",
+             "WARNING: 1 table(s), formula(s), or block(s) of code are too wide for the paper "
+             "even in smaller type, the smallest at 50% of its size, and run to within a "
+             "quarter inch of its edge or past it, the widest 301 points wider than the text: "
+             "on code."]),
+        ("a block of code wider than its line, a quotation's, but not past the text's edge, "
+         "isn't named as running into the margin",
+         lambda: latexbuild.fit_report(
+             "TextbookImprover fit: run 2, 0 narrowed, 1 smaller, smallest 0.75\n"
+             "TextbookImprover fit wide: c 0.0 6 0.75 0 1 0\n", source, owners)
+         == ["Fitted 1 table(s), formula(s), and block(s) of code too wide for their lines "
+             "to them: 1 in smaller type, the smallest at 75% of its size."]),
+    ]
+
+
 def check_tex_packages():
     """The installation page's commands for TeX install every package the
     run and the suites check for, what a deck's PDF needs and what the
@@ -5649,6 +5711,7 @@ GROUPS = [
     ("the WCAG modules' folder, and the summary their notes go in", check_wcag_setup),
     ("tlmgr, with sudo where it needs it", check_tlmgr_command),
     ("a PDF's lines too wide, and its fitted blanks", check_fitted_blanks),
+    ("a PDF's blocks of code fitted, and still too wide", check_code_fit_report),
     ("the installation page's TeX packages", check_tex_packages),
     ("drawings without the preview package", check_drawings_without_preview),
     ("layout tables", check_layout_tables),

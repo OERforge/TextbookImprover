@@ -2055,7 +2055,9 @@ def case_latex_target(work):
                  "area = s * s  # in square units\nif area > 10 and s[0] != '{':\n"
                  "    print(\"big\\n\")\n```\n\n"
                  "Called as `area(s[0])`{.python}, after [the code](#area-code).\n\n"
-                 "[^area]: Computed so:\n\n    ```python\n    area = s * s  # 100%\n    ```\n")
+                 "Its side is $s$.[^side]\n\n"
+                 "[^area]: Computed so:\n\n    ```python\n    area = s * s  # 100%\n    ```\n\n"
+                 "[^side]: ```python\n    side = s  # one side\n    ```\n")
     with open(os.path.join(work, "two.md"), "w", encoding="utf-8") as fh:
         fh.write("# Circles {#circles}\n\n![A black circle.](img/circle.svg)\n\n"
                  "Its area is $\\pi r^2$.\n\n1. Draw it.\n2. Measure it.\n\n"
@@ -2098,6 +2100,7 @@ def case_latex_target(work):
                  "<img src=\"img/square.png\" alt=\"A left square.\"></figure><figure>"
                  "<img src=\"img/square.png\" alt=\"A right square.\"></figure></div>"
                  "<figcaption>Two squares side by side</figcaption></figure>\n\n"
+                 "Termthree\n\n:   ```python\n    defined = 3\n    ```\n\n"
                  "```python\nsides = 3  # a triangle\n```\n\n"
                  "Its [lorry]{lang=en-GB} is grey.\n\n"
                  "::: {lang=en-GB}\nA paragraph spelt so.\n\n## Holiday\n\nIts fortnight.\n:::\n")
@@ -2186,9 +2189,11 @@ def case_latex_target(work):
         """The book edited after its build (builds), a sum too wide put
         before the long one, converted again and built again in the same
         folder, with the last build's .aux: the last run says it set both
-        smaller, each by its own measure. The .aux's count of runs, kept
-        from the build before, had said no more were to be fitted, and its
-        fits, by their numbers, were the wrong formulas'."""
+        smaller, each by its own measure, and the block of code holding
+        every character of ASCII, too long for its line, as before. The
+        .aux's count of runs, kept from the build before, had said no more
+        were to be fitted, and its fits, by their numbers, were the wrong
+        formulas'."""
         if not shutil.which("latexmk") or not shutil.which("lualatex"):
             return skip("no latexmk and lualatex to build the latex target")
         again = work + "-edited"
@@ -2208,14 +2213,15 @@ def case_latex_target(work):
         with open(log, encoding="utf-8", errors="replace") as fh:
             runs = re.findall(r"^TextbookImprover fit: run \d+, (\d+) narrowed, (\d+) smaller",
                               fh.read(), re.M)
-        return bool(runs) and runs[-1] == ("0", "2")
+        return bool(runs) and runs[-1] == ("0", "3")
 
     def in_place():
         """The target's LaTeX built (builds) and then edited in place, the
         long sum made a short one on the line it was on, and built again
-        beside the build's .aux: the last run fits nothing. The .aux's count
-        of runs had said no more were to be fitted, and nothing numbered
-        had moved, so the long sum's fit went on to the short one."""
+        beside the build's .aux: the last run fits nothing but the block of
+        code holding every character of ASCII. The .aux's count of runs had
+        said no more were to be fitted, and nothing numbered had moved, so
+        the long sum's fit went on to the short one."""
         if not shutil.which("latexmk") or not shutil.which("lualatex"):
             return skip("no latexmk and lualatex to build the latex target")
         again = work + "-in-place"
@@ -2235,7 +2241,7 @@ def case_latex_target(work):
         with open(log, encoding="utf-8", errors="replace") as fh:
             runs = re.findall(r"^TextbookImprover fit: run \d+, (\d+) narrowed, (\d+) smaller",
                               fh.read(), re.M)
-        return bool(runs) and runs[-1] == ("0", "0")
+        return bool(runs) and runs[-1] == ("0", "1")
 
     def old_aux():
         """The target's LaTeX built (builds) and built again, forced, beside
@@ -2380,6 +2386,28 @@ def case_latex_target(work):
         ("and a code block in a footnote, read from a file the master's preamble writes",
          lambda: "\\OERCodeFile{oer-code-1.tex}" in one
          and "\\begin{filecontents*}[overwrite]{oer-code-1.tex}" in master),
+        ("a block of code is marked to be fitted, as in the PDF, a footnote's too",
+         lambda: re.search(r"\\OERFitCode\{(\d+)\}\s*\\OERCodeFile\{oer-code-1\.tex\}\s*"
+                           r"\\OERFitCodeEnd\{\1\}", one)
+         and re.search(r"\\OERFitCode\{(\d+)\}\s*(?:%[^\n]*\n\s*)?(?:\\protect[^\n]*\n\s*)?"
+                       r"\\begin\{Shaded\}.*?\\end\{Shaded\}\s*\\OERFitCodeEnd\{\1\}", three,
+                       re.S)),
+        # The writer sets a footnote's first block after \footnote{, so a
+        # footnote that opens with code opens with its mark there, which a
+        # pattern for a mark on a line of its own left, and Pandoc's reader
+        # stopped on it ("unexpected ()"). And a definition that opens with
+        # code opens with a no-break space before its mark, as the writer
+        # opens one with code, which reads back as the writer's own does.
+        ("a footnote that opens with code has its mark after \\footnote{, and reads back, "
+         "its code a footnote's; and a definition that opens with code opens with a no-break "
+         "space, and reads back, the term and its code",
+         lambda: re.search(r"\\footnote\{\\OERFitCode\{\d+\}", one)
+         and re.search(r"\\item\[Termthree\]\s*~\s*\\OERFitCode\{\d+\}", three)
+         and reading()
+         and re.search(r'<li id="fn2">\s*<div class="sourceCode"', page(back, "one"))
+         and "side = s  # one side" in code_texts(page(back, "one"))
+         and re.search(r"<dt>Termthree</dt>", page(back, "three"))
+         and "defined = 3" in code_texts(page(back, "three"))),
         ("highlighted code's macros are in the theme's colors (lib/highlighting.py)",
          lambda: "\\newcommand{\\CommentTok}[1]{\\textcolor[rgb]{%s}" % comment_rgb in master
          and "\\begin{Highlighting}" in three),
@@ -2407,7 +2435,7 @@ def case_latex_target(work):
          "is fitted by its own measure",
          edited),
         ("and its LaTeX edited in place, the long sum made short, built again beside them, "
-         "nothing is fitted",
+         "nothing is fitted but a block of code too long for its line",
          in_place),
         ("and built again beside an .aux file written before a table could have more than "
          "one column of words, a step's width with no column's number, it builds",

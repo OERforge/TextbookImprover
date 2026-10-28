@@ -1392,8 +1392,11 @@ end
 -- group, for FIT_MACROS (latexbuild.py) to measure as LaTeX sets it and
 -- fit to its line on a later run: its spaces narrowed, then its type set
 -- smaller. The numbers are this run's, in the order the filter meets them,
--- the same on every run of LaTeX, which reads them from the same LaTeX.
-local fitted = 0
+-- the same on every run of LaTeX, which reads them from the same LaTeX;
+-- from OER_FIT_FIRST on where it's set, as deck-pdf.lua sets it for a
+-- section's footnotes, which it runs this filter on apart from the deck,
+-- so that theirs aren't the deck's numbers too.
+local fitted = math.tointeger(tonumber(OER_FIT_FIRST) or 0) or 0
 local function next_fit()
   fitted = fitted + 1
   return tostring(fitted)
@@ -2335,6 +2338,54 @@ local function fit_formulas(doc)
   return doc
 end
 
+-- A block of code FIT_MACROS fits (19): its lines are set as they're
+-- written, which TeX doesn't break, so one too long for its line ran on
+-- past it, into the margin or off the paper, with no word from LaTeX
+-- where it's fancyvrb's (Pandoc's highlighted code), which sets each line
+-- in a box with room to spare. Each is numbered and set between
+-- \OERFitCode and \OERFitCodeEnd, a group, which the latex target's
+-- LaTeX keeps for LaTeX to fit and latexsource.py takes out when it's
+-- read back: so is a footnote's, which footnote-code.lua has put in a file
+-- of its own that \OERCodeFile reads, a footnote's in a table's cell too,
+-- whose text the writer sets after the table. Not code in a table's cell,
+-- whose table is fitted, measured by its lines. A definition that opens
+-- with code opens with a no-break space, as the writer opens one whose
+-- first block is code (\item[term] ~, Writers/LaTeX.hs, #4662), so that
+-- the term has its line: \OERFitCode first, the writer's ~ was gone, and
+-- LaTeX set the term in the code's first line, or in the next list's.
+local CODE_FILE = '^\\OERCodeFile{'
+
+local function is_code(block)
+  return block.t == 'CodeBlock'
+    or block.t == 'RawBlock' and block.format == 'latex' and block.text:find(CODE_FILE) ~= nil
+end
+
+local function fit_code(doc)
+  local function fit(block)
+    local id = next_fit()
+    return { pandoc.RawBlock('latex', '\\OERFitCode{' .. id .. '}'), block,
+             pandoc.RawBlock('latex', '\\OERFitCodeEnd{' .. id .. '}') }
+  end
+  local blocks = {
+    traverse = 'topdown',
+    CodeBlock = fit,
+    RawBlock = function(raw) if is_code(raw) then return fit(raw) end end,
+    DefinitionList = function(list)
+      for _, item in ipairs(list.content) do
+        local first = item[2][1]
+        if first and first[1] and is_code(first[1]) then
+          first:insert(1, pandoc.RawBlock('latex', '~'))
+        end
+      end
+      return list
+    end }
+  blocks.Table = function(tbl)
+    return tbl:walk{ Note = function(note) return note:walk(blocks) end }, false
+  end
+  doc.blocks = doc.blocks:walk(blocks)
+  return doc
+end
+
 return {
   { BulletList = headings_inside, OrderedList = headings_inside,
     DefinitionList = headings_inside, BlockQuote = headings_inside,
@@ -2358,5 +2409,6 @@ return {
       return doc
     end },
   { Pandoc = fit_formulas },
+  { Pandoc = fit_code },
   { DefinitionList = term_braces },
 }

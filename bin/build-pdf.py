@@ -222,21 +222,20 @@ FALLBACK = ("\\def\\OERFallbackFonts{\"Latin Modern Math:mode=harf;\"}\n"
 # LaTeX writes a line for each file it lacks (FACE_MISSING), which the run
 # gives as one warning (face_warning): "Have it fall back to Latin Modern
 # with a warning, if it's not available." TeX Live's plex has every file.
-# Beside Plex Serif, Plex Mono is set at 0.858 of the text's size
-# (PLEX_MONO_SCALE), where a character is as wide as Latin Modern Mono's
-# at the text's size (0.515 of it, to Plex Mono's 0.6), its small letters
-# a little larger still (0.443 to 0.431): nothing fits or wraps a line of
-# code too long for its line, and at the text's size, Pandoc's template's
-# own (Scale=MatchLowercase), 65 characters filled the text's 6.5 inches,
-# where 76 had, and a line of 76 ran off the paper, where it took 88 (a
-# separate review's measure, at 12 points). Beside a face a file names,
-# Plex Mono is scaled to that face's small letters, as Latin Modern Mono
-# was.
+# Plex Mono is scaled to the text face's small letters, as Pandoc's
+# template scales every face but the text's (Scale=MatchLowercase), which
+# beside Plex Serif, whose small letters are as tall, is the text's size,
+# as Rob chose (2026-10-27: "I think it's worth also setting the code at
+# the text's size and fitting lines the way tables are"): 65 characters
+# fill the default page's 6.5 inches at 12 points, and a block of code
+# with a longer line is set smaller to fit it, as a table too wide is
+# (latexbuild.FIT_MACROS). It had been set at 0.858 of the text's size,
+# each character as wide as Latin Modern Mono's, so that a line held as
+# many, since nothing fitted a line of code.
 FAMILIES = (("mainfont", "\\setmainfont", "IBMPlexSerif", "Latin Modern Roman"),
             ("sansfont", "\\setsansfont", "IBMPlexSans", "Latin Modern Sans"),
             ("monofont", "\\setmonofont", "IBMPlexMono", "Latin Modern Mono"))
 PLEX_MATH = "IBMPlexMath-Regular.otf"
-PLEX_MONO_SCALE = 0.858
 PLEX_SHAPES = (("UprightFont", "Regular"), ("BoldFont", "Bold"), ("ItalicFont", "Italic"),
                ("BoldItalicFont", "BoldItalic"))
 FACE_MISSING = re.compile(r"^TextbookImprover face: no (\S+)$", re.M)
@@ -291,16 +290,13 @@ def default_faces(meta):
     options = ",".join(["Extension=.otf"] + [f"{key}=*-{shape}" for key, shape in PLEX_SHAPES]
                        + ["RawFeature={fallback=oerfallback}"])
     faces, said = latin_modern_said(families, math)
-    serif = not named(meta, "mainfont")
     return ("\\newif\\ifOERPlex\\OERPlextrue\n"
             + "".join(f"\\IfFontExistsTF{{{name}}}{{}}"
                       f"{{\\OERPlexfalse\\typeout{{TextbookImprover face: no {name}}}}}\n"
                       for name in files)
             + "\\ifOERPlex\n"
-            + "".join(f"  {command}{{{stem}}}[{options}"
-                      + (f",Scale={PLEX_MONO_SCALE}" if field == "monofont" and serif else "")
-                      + "]\n"
-                      for field, command, stem, _latin in families)
+            + "".join(f"  {command}{{{stem}}}[{options}]\n"
+                      for _field, command, stem, _latin in families)
             + (f"  \\setmathfont{{{PLEX_MATH}}}\n" if math else "")
             + "\\else\n"
             + "".join(f"  {command}{{{latin}}}[RawFeature={{fallback=oerfallback}}]\n"

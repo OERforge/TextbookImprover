@@ -2054,14 +2054,23 @@ def language_marks(text, counter):
 # column's part of the line.
 FIT_MARK = re.compile(r"\{\\OERFit(Table|StepsTable|Formula)\{(\d+)\}\{[^{}]*\}"
                       r"(?:\{[01]\}|\{[lcr]+\}\{[m\d.,]+\})?")
+# Its marks around a block of code, outside the code: a group they open
+# and close, not braces, since LaTeX's verbatim holds braces that don't
+# pair. Each is on a line of its own, which goes with it, but a footnote's
+# first, which the writer sets after \footnote{, and a footnote's last,
+# before the brace that closes it.
+FIT_CODE_MARK = re.compile(r"^[ \t]*\\OERFitCode(?:End)?\{\d+\}[ \t]*\n"
+                           r"|\\OERFitCode(?:End)?\{\d+\}", re.M)
 
 
 def fit_marks(text, counter):
-    """The PDF target's groups around a table or a formula to fit taken
-    out, in code, with \\OERFitTable, \\OERFitStepsTable, or \\OERFitFormula
-    opening each and a table's \\OERFitTableEnd closing it; what each holds
-    is left. Pandoc's reader would expand them as the preamble defines them,
-    in expl3 around Lua, and stop reading the book ("unexpected ()")."""
+    """The PDF target's groups around a table, a formula, or a block of
+    code to fit taken out, in code, with \\OERFitTable, \\OERFitStepsTable,
+    or \\OERFitFormula opening each and a table's \\OERFitTableEnd closing
+    it, and a block of code between \\OERFitCode and \\OERFitCodeEnd; what
+    each holds is left. Pandoc's reader would expand them as the preamble
+    defines them, in expl3 around Lua, and stop reading the book
+    ("unexpected ()")."""
     spans = skip_spans(text)
     found = [m for m in FIT_MARK.finditer(text) if not in_spans(m.start(), spans)]
     for m in reversed(found):
@@ -2072,6 +2081,11 @@ def fit_marks(text, counter):
         if m.group(1) != "Formula":
             inner = re.sub(r"\\OERFitTableEnd\{%s\}\s*$" % m.group(2), "", inner)
         text = text[:m.start()] + inner + text[close:]
+        counter["fit_marks"] = counter.get("fit_marks", 0) + 1
+    spans = skip_spans(text)
+    found = [m for m in FIT_CODE_MARK.finditer(text) if not in_spans(m.start(), spans)]
+    for m in reversed(found):
+        text = text[:m.start()] + text[m.end():]
         counter["fit_marks"] = counter.get("fit_marks", 0) + 1
     return text
 

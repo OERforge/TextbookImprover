@@ -366,12 +366,21 @@ local highlighted = false
 -- heading (the template's \oersectionnotes), as LaTeX, in the language of
 -- a div holding the section (lang), passages in other languages tagged,
 -- and through pdf-target.lua first: the texts are in the section's title,
--- so a paragraph's end in one is \endgraf, which a title can hold.
+-- so a paragraph's end in one is \endgraf, which a title can hold. The
+-- filter runs afresh on each section's, so each numbers what it fits from
+-- a number of its own, 100,000 apart (OER_FIT_FIRST), not from 1, as it
+-- numbers the deck's: a section's code got the fit of the deck's first
+-- block of code too wide, set at its size though it fit its line.
+local notes_run = 0
 local function section_notes(texts, lang)
   if lang then texts = pandoc.Blocks({ pandoc.Div(texts, pandoc.Attr('', {}, { lang = lang })) }) end
   local doc = pandoc.Pandoc(texts):walk({ Span = inline_language, Link = inline_language,
                                          Div = div_language })
-  doc = pandoc.utils.run_lua_filter(doc, PDF_TARGET)
+  notes_run = notes_run + 1
+  local env = {}
+  for name, value in pairs(_G) do env[name] = value end
+  env.OER_FIT_FIRST = 100000 * notes_run
+  doc = pandoc.utils.run_lua_filter(doc, PDF_TARGET, env)
   local latex = pandoc.write(doc, 'latex')
   highlighted = highlighted or latex:find('\\VERB', 1, true) ~= nil
   latex = latex:gsub('%s+$', ''):gsub('\n%s*\n+', '\\endgraf\n')

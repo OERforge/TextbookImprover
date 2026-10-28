@@ -2688,22 +2688,38 @@ WIDE_SLIDES = ("---\ntitle: Wide\n---\n\n# A table\n\n"
                + "|" + "---|" * 12 + "\n"
                + ("| " + " | ".join("%d.%02d" % (c * 37, c) for c in range(12)) + " |\n") * 3
                + "\n# A formula\n\n$$x = "
-               + " + ".join("a_{%d} b_{%d} c_{%d}" % (k, k, k) for k in range(16)) + "$$\n")
+               + " + ".join("a_{%d} b_{%d} c_{%d}" % (k, k, k) for k in range(16)) + "$$\n"
+               + "\n# Code\n\n```python\nCodeslide = \"" + "x" * 100 + "\"\n```\n"
+               + "\n# Short code\n\n```python\nShortslide = 1\n```\n")
+
+# A section's footnote with code that fits, and a slide with code too wide
+# for it, which deck-pdf.lua and pdf-target.lua number apart; and the deck
+# again with the slide's code short, where nothing is fitted.
+SECTION_CODE = ("---\ntitle: Sections\n---\n\n# A Section[^s]\n\n## Code\n\n```python\n"
+                "Slidecode = \"%s\"\n```\n\n[^s]: Its code:\n\n    ```python\n"
+                "    Sectionnote = 1\n    ```\n")
 
 
 def case_wide_slide(work):
-    """A table and a formula too wide for their slides, fitted to them,
-    and LaTeX's runs settling with them fitted, through a LuaLaTeX that
-    notes the folder each run is in: the .aux keeps the fit, which had
-    changed it on every run, and a deck with nothing to fit, which keeps
-    no count of runs, settles in two runs, as it did before fitting."""
+    """A table, a formula, and a block of code too wide for their slides,
+    fitted to them, and LaTeX's runs settling with them fitted, through a
+    LuaLaTeX that notes the folder each run is in: the .aux keeps the fit,
+    which had changed it on every run, and a deck with nothing to fit,
+    which keeps no count of runs, settles in two runs, as it did before
+    fitting. The block of code is too wide for its slide at the text's
+    size (a line of 74 characters had fit it, fitted or not), and a slide
+    of code that fits it is beside it. And a section's footnote's code
+    that fits keeps its size beside a slide's set smaller (SECTION_CODE):
+    its fit numbered from 1, as the deck's are, it had the slide's."""
     real = shutil.which("lualatex")
     if not real or pdf_ready():
         print(f"  skip  {pdf_ready() or 'lualatex not found'}; a slide too wide isn't checked")
         return []
     decks_dir = folder(os.path.join(work, "decks"), "targets:\n  pdf:\n    format: pdf\n",
                        decks_given={"wide.md": WIDE_SLIDES,
-                                    "plain.md": "---\ntitle: Plain\n---\n\n# Slide\n\nText.\n"})
+                                    "plain.md": "---\ntitle: Plain\n---\n\n# Slide\n\nText.\n",
+                                    "sections.md": SECTION_CODE % ("x" * 100),
+                                    "sectionsshort.md": SECTION_CODE % "x"})
     tools, runs = os.path.join(work, "tools"), os.path.join(work, "runs.log")
     write(os.path.join(tools, "lualatex"),
           f"#!/bin/sh\npwd >> {shlex.quote(runs)}\nexec {shlex.quote(real)} \"$@\"\n")
@@ -2730,14 +2746,35 @@ def case_wide_slide(work):
         boxes = [b for b in pdftext.glyph_boxes(path) if b[0] == slide]
         return len(boxes) >= least and all(18 <= left and right <= width - 18
                                            for _, _, left, right, _ in boxes)
+
+    def advance(deck, word):
+        """How wide a glyph of the line of code that opens with word is, on
+        average, in the deck's PDF; 0 where there's none."""
+        pdf = os.path.join(decks_dir, "pdf", deck + ".pdf")
+        if not os.path.exists(pdf):
+            return 0
+        lines = {}
+        for page, baseline, left, right, char in pdftext.glyph_boxes(pdf):
+            lines.setdefault((page, baseline), []).append((left, right, char))
+        for glyphs in lines.values():
+            if "".join(g[2] for g in glyphs).startswith(word):
+                return (glyphs[-1][1] - glyphs[0][0]) / len(glyphs)
+        return 0
     return [
-        ("a slide's table and a slide's formula too wide for it are set smaller to fit "
-         "it, a quarter inch inside its edges, as a book's are",
-         lambda: inside(1, 200) and inside(2, 100)),
+        ("a slide's table, formula, and block of code too wide for it are set smaller to "
+         "fit it, a quarter inch inside its edges, as a book's are, the code smaller than a "
+         "slide's code that fits",
+         lambda: inside(1, 200) and inside(2, 100) and inside(3, 100)
+         and 0 < advance("wide", "Codeslide") < 0.9 * advance("wide", "Shortslide")),
+        ("a section's footnote's code that fits is set at its size beside a slide's code set "
+         "smaller, as wide a character as where the slide's code fits too",
+         lambda: 0 < advance("sections", "Slidecode") < 0.9 * advance("sectionsshort", "Slidecode")
+         and abs(advance("sections", "Sectionnote") - advance("sectionsshort", "Sectionnote"))
+         < 0.05),
         ("and LaTeX's runs settle with them fitted, and in two runs for a deck with "
          "nothing to fit",
          lambda: result.returncode == 0 and "still changing" not in result.stderr
-         and len(counts()) == 2 and counts()[0] == 2),
+         and len(counts()) == 4 and counts()[0] == 2),
     ]
 
 

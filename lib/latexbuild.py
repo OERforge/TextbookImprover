@@ -581,13 +581,19 @@ FIT_LEAST = 0.5
 FIT_MACROS = r"""% Something too wide for its line, which TeX can't break:
 % a table's columns side by side, or a formula, displayed or in text, as a
 % worked example's steps are, an array, in College Algebra 2e (224 points
-% too wide, in its first chapter). pdf-target.lua numbers each table not
-% in a table's cell, each display formula, and each formula in text that
-% is an environment (\OERFitTable, \OERFitFormula), and LaTeX measures
-% each as it sets it: a table by the widths longtable records for its
-% columns and, where its columns wrap (p columns), by any line of a cell
-% longer than its column, its longest piece TeX can't break, a word or a
-% formula's part between two of its breaks (post_linebreak_filter), a
+% too wide, in its first chapter); or a line of code, set as it's written
+% (in Principles of Data Science, 74 of 243 blocks of code have a line of
+% more than 65 characters, which fill the default page's line in IBM Plex
+% Mono at 12 points). pdf-target.lua numbers each table not in a table's
+% cell, each display formula, each formula in text that is an
+% environment, and each block of code not in a table's cell, a footnote's
+% in one among them (\OERFitTable, \OERFitFormula, \OERFitCode), and
+% LaTeX measures each as it sets it: a table by the widths longtable
+% records for its columns and, where its columns wrap (p columns), by any
+% line of a cell longer than its column, its longest piece TeX can't
+% break, a word, words a no-break space joins, a line of code, or a
+% formula's part between two of its breaks (post_linebreak_filter, and
+% a line of highlighted code through \FancyVerbFormatLine, below), a
 % fill-in blank no more than three underscores, which PDF_MACROS draws a
 % blank too long for its line shorter to, at the least, without the kerns
 % it draws a long blank's underscores closer with (taken whole, as it
@@ -602,7 +608,8 @@ FIT_MACROS = r"""% Something too wide for its line, which TeX can't break:
 % the next line opens in one (the middle line of a formula over three,
 % or a formula that opens a line and breaks after an operator); a
 % formula by the list TeX makes of it
-% (post_mlist_to_hlist_filter). One wider than its line is fitted on the
+% (post_mlist_to_hlist_filter); and a block of code by its longest line
+% (\OERFitCode, below). One wider than its line is fitted on the
 % next run, from what this one measured, as Pandoc runs LaTeX again while
 % its log asks, four times at most: first its spaces narrowed (a table's
 % columns half an em apart, where they were 12 points; a formula's \qquad
@@ -712,13 +719,17 @@ FIT_MACROS = r"""% Something too wide for its line, which TeX can't break:
     local column = luatexbase.attributes.OERFitStepsAttribute
     local HLIST, VLIST, GLUE, PENALTY, MATH, DIR = node.id("hlist"), node.id("vlist"), node.id("glue"), node.id("penalty"), node.id("math"), node.id("dir")
     local GLYPH, KERN = node.id("glyph"), node.id("kern")
+    local EDGES = {}
+    for subtype, name in pairs(node.subtypes("glue")) do
+      if name == "leftskip" or name == "rightskip" or name == "parfillskip" then EDGES[subtype] = true end
+    end
     local blank = luatexbase.attributes.OERBlankAttribute
     local FLOOR, LEAST, AIM, JUMP, TOLERANCE = """ + str(FIT_FLOOR) + ", " + str(FIT_LEAST) + r""", 0.98, 0.04, 32768
     oerfit = { state = {}, kind = {}, line = {}, room = {}, size = {}, columns = {},
                width = {}, tight = {}, sep = {}, sep0 = {}, where = {}, twocol = {}, run = 0,
                sources = { status.filename }, seen = { [status.filename] = true }, stored = {},
                steps = {}, entries = {}, natural = {}, longest = {}, pieces = {}, applied = {},
-               low = {} }
+               low = {}, edge = {} }
     if string.sub(status.filename, 1, 2) == "./" then oerfit.seen[string.sub(status.filename, 3)] = true end
     local function current()
       local id = tex.getattribute(attribute)
@@ -737,9 +748,13 @@ FIT_MACROS = r"""% Something too wide for its line, which TeX can't break:
       if FLOOR * whole > room then return math.max(LEAST, down(AIM * room / whole, 1000)) end
       return FLOOR
     end
+    local function measured(id)
+      return id and not status.output_active
+    end
     luatexbase.add_to_callback("post_mlist_to_hlist_filter", function(head)
       local id = current()
-      if id and not (oerfit.kind[id] == "t" or oerfit.kind[id] == "p" or oerfit.kind[id] == "s") then
+      local kind = id and oerfit.kind[id]
+      if measured(id) and not (kind == "t" or kind == "p" or kind == "s" or kind == "c") then
         local w = node.dimensions(head)
         if w > (oerfit.width[id] or 0) then oerfit.width[id] = w end
       end
@@ -753,7 +768,9 @@ FIT_MACROS = r"""% Something too wide for its line, which TeX can't break:
         end
         if n.id == KERN and blank and node.has_attribute(n, blank, 2) then
           piece = piece + 0
-        elseif (n.id == GLUE and not inmath) or (n.id == PENALTY and inmath and n.penalty < 10000) then
+        elseif (n.id == GLUE and not inmath
+                and not (n.prev and n.prev.id == PENALTY and n.prev.penalty >= 10000))
+            or (n.id == PENALTY and inmath and n.penalty < 10000) then
           if piece > most then most = piece end
           piece, blanks = 0, 0
         elseif n.id == GLYPH and n.char == 95 and blank and node.has_attribute(n, blank) then
@@ -773,7 +790,8 @@ FIT_MACROS = r"""% Something too wide for its line, which TeX can't break:
     end
     luatexbase.add_to_callback("post_linebreak_filter", function(head)
       local id = current()
-      if id and oerfit.kind[id] == "p" then
+      if not measured(id) then
+      elseif oerfit.kind[id] == "p" then
         local lines, count, opens = {}, 0, false
         for line in node.traverse_id(HLIST, head) do
           if line.subtype == 1 then
@@ -797,6 +815,16 @@ FIT_MACROS = r"""% Something too wide for its line, which TeX can't break:
           if line.width > 0 then
             local t = longest(line, opens) / line.width
             if t > (oerfit.tight[id] or 0) then oerfit.tight[id] = t end
+          end
+        end
+      elseif oerfit.kind[id] == "c" then
+        for line in node.traverse_id(HLIST, head) do
+          if line.subtype == 1 then
+            local w = 0
+            for n in node.traverse(line.head) do
+              if not (n.id == GLUE and EDGES[n.subtype]) then w = w + node.dimensions(n, n.next) end
+            end
+            oerfit.code(id, w)
           end
         end
       end
@@ -887,6 +915,19 @@ FIT_MACROS = r"""% Something too wide for its line, which TeX can't break:
     end
     function oerfit.table(id, width, sep)
       oerfit.width[id], oerfit.sep[id] = width, sep
+    end
+    function oerfit.code(id, width, line)
+      if oerfit.kind[id] == "p" then
+        if line and line > 0 and width / line > (oerfit.tight[id] or 0) then
+          oerfit.tight[id] = width / line
+        end
+      elseif oerfit.kind[id] == "c" and width > (oerfit.width[id] or 0) then
+        oerfit.width[id] = width
+      end
+    end
+    function oerfit.code_line(width, line)
+      local id = current()
+      if measured(id) then oerfit.code(id, width, line) end
     end
     function oerfit.entry(id, width)
       local e = oerfit.entries[id]
@@ -1032,14 +1073,15 @@ FIT_MACROS = r"""% Something too wide for its line, which TeX can't break:
     end
     function oerfit.next(kind, id, s, w, line, room, tight)
       local size = oerfit.size[id]
-      local center = 0
+      local center, narrow = 0, 1
       if kind == "d" then center = 1 end
+      if kind == "c" then narrow = 0 end
       if not (kind == "t" or kind == "p") then
         local f = math.min(1, s.factor * line / w * AIM)
-        if f >= FLOOR then return { narrow = 1, factor = down(f, 1000), columns = 1, center = center } end
+        if f >= FLOOR then return { narrow = narrow, factor = down(f, 1000), columns = 1, center = center } end
         local least = FLOOR
         if w * FLOOR / s.factor > room then least = math.max(LEAST, down(s.factor * room / w * AIM, 1000)) end
-        return { narrow = 1, factor = least, columns = 1, center = center }
+        return { narrow = narrow, factor = least, columns = 1, center = center }
       end
       local k = oerfit.columns[id]
       local sep = oerfit.sep[id] or 0
@@ -1139,7 +1181,8 @@ FIT_MACROS = r"""% Something too wide for its line, which TeX can't break:
         if over or cells then
           local onpaper = 1
           if w and w > room then onpaper = 0 end
-          wide[id] = kind .. " " .. points(math.max(0, (w or 0) - line)) .. " " .. oerfit.where[id]
+          wide[id] = kind .. " " .. points(math.max(0, (w or 0) - (oerfit.edge[id] or line)))
+            .. " " .. oerfit.where[id]
             .. " " .. s.factor .. " " .. s.center .. " " .. onpaper .. " " .. (oerfit.twocol[id] or 0)
         end
         local far = w and (w > (1 + JUMP) * line or w < (1 - JUMP) * line) or tight > 1 + JUMP
@@ -1159,7 +1202,7 @@ FIT_MACROS = r"""% Something too wide for its line, which TeX can't break:
           new = nil
         elseif w and run == 1 and (over or cells) then
           new = oerfit.next(kind, id, s, w, line, room, math.max(tight, 0.05))
-        elseif w and run == 2 and (oerfit.state[id] and (far or (kind == "i" or kind == "e") and over)
+        elseif w and run == 2 and (oerfit.state[id] and (far or (kind == "i" or kind == "e" or kind == "c") and over)
                                    or not oerfit.state[id] and (over or cells)) then
           new, refit = oerfit.next(kind, id, s, w, line, room, math.max(tight, 0.05)), true
         end
@@ -1235,10 +1278,10 @@ FIT_MACROS = r"""% Something too wide for its line, which TeX can't break:
   \AddToHook { begindocument } { \directlua { oerfit.check() } }
   \AddToHook { enddocument / afterlastpage }
     { \legacy_if:nT { @filesw } { \directlua { oerfit.decide() } } }
-  % The margin a centered table or display, or a formula in text, may run
-  % into: the narrower of the page's margins, on either side of a
-  % two-sided page, less a quarter inch at the paper's edge; none on a page
-  % of two columns, where it would be the other column.
+  % The margin a centered table or display may run into: the narrower of
+  % the page's margins, on either side of a two-sided page, less a quarter
+  % inch at the paper's edge; none on a page of two columns, where it would
+  % be the other column.
   \cs_new_protected:Npn \__oer_fit_margin:
     {
       \dim_set:Nn \l__oer_fit_margin_dim
@@ -1251,6 +1294,26 @@ FIT_MACROS = r"""% Something too wide for its line, which TeX can't break:
               \dim_min:nn { \paperwidth - 1in - \hoffset - \oddsidemargin - \textwidth }
                 { \paperwidth - 1in - \hoffset - \evensidemargin - \textwidth }
             }
+          - 0.25in
+        }
+      \dim_compare:nNnT \l__oer_fit_margin_dim < { 0pt } { \dim_zero:N \l__oer_fit_margin_dim }
+      \legacy_if:nT { @twocolumn } { \dim_zero:N \l__oer_fit_margin_dim }
+    }
+  % And the margin a formula in text, a numbered display, or a block of
+  % code may run into, none of which is centered: the right one, the
+  % narrower of the two on a two-sided page, less a quarter inch at the
+  % paper's edge, where the narrower of all four had been, so that code ran
+  % into a wider right margin only as far as a narrower left one allowed.
+  \cs_new_protected:Npn \__oer_fit_right_margin:
+    {
+      \dim_set:Nn \l__oer_fit_margin_dim
+        {
+          \legacy_if:nTF { @twoside }
+            {
+              \dim_min:nn { \paperwidth - 1in - \hoffset - \oddsidemargin - \textwidth }
+                { \paperwidth - 1in - \hoffset - \evensidemargin - \textwidth }
+            }
+            { \paperwidth - 1in - \hoffset - \oddsidemargin - \textwidth }
           - 0.25in
         }
       \dim_compare:nNnT \l__oer_fit_margin_dim < { 0pt } { \dim_zero:N \l__oer_fit_margin_dim }
@@ -1292,10 +1355,10 @@ FIT_MACROS = r"""% Something too wide for its line, which TeX can't break:
           \tex_advance:D \tex_displaywidth:D 2 \l__oer_fit_margin_dim
         }
     }
-  % What the run before decided for a table or formula: #1 its kind, t a
-  % table whose columns don't wrap, p one whose do, s a worked example's
-  % steps, d a display formula, e a numbered one, i a formula in text; #2
-  % its spaces narrowed or not; #3 its type's size, a part of its own; #4 a
+  % What the run before decided for a table, a formula, or a block of
+  % code: #1 its kind, t a table whose columns don't wrap, p one whose do,
+  % s a worked example's steps, d a display formula, e a numbered one, i a
+  % formula in text, c a block of code; #2 its spaces narrowed or not; #3 its type's size, a part of its own; #4 a
   % wrapping table's columns' width, a part of the widths its LaTeX gives
   % them; #5 centered or not; and #6 a table's number of columns.
   \cs_new_protected:Npn \OERFitApply #1#2#3#4#5#6
@@ -1340,11 +1403,14 @@ FIT_MACROS = r"""% Something too wide for its line, which TeX can't break:
   % A table, in a group pdf-target.lua opens: #1 its number, #2 its
   % columns, #3 1 where they wrap, 2 for a table LaTeX lays out
   % (\OERFitStepsTable). The widths longtable records are forgotten, so
-  % that a table no longtable sets has none.
+  % that a table no longtable sets has none. A line of highlighted code in
+  % a cell of one whose columns wrap is measured against its column, as a
+  % line of a cell's paragraph is (\__oer_fit_code_lines:).
   \NewDocumentCommand \OERFitTable { m m m }
     {
       \setattribute \OERFitAttribute {#1}
       \cs_gset_eq:cN { LT@save@row } \scan_stop:
+      \int_compare:nNnT {#3} = { 1 } { \__oer_fit_code_lines: }
       \__oer_fit_margin:
       \directlua
         {
@@ -1417,9 +1483,9 @@ FIT_MACROS = r"""% Something too wide for its line, which TeX can't break:
   % A formula, in a group pdf-target.lua opens: #1 its number, #2 d for a
   % display, e for a numbered one, which isn't centered, its number at the
   % line's end, and i for a formula in text, the last two running on into
-  % the margin to the right of their line. A display isn't fitted under
-  % the fleqn class option, which sets it a margin from the line's left
-  % end, in a box as wide as the line.
+  % the margin to the right of their line (\__oer_fit_right_margin:). A
+  % display isn't fitted under the fleqn class option, which sets it a
+  % margin from the line's left end, in a box as wide as the line.
   \bool_new:N \l__oer_fit_skip_bool
   \NewDocumentCommand \OERFitFormula { m m }
     {
@@ -1432,7 +1498,7 @@ FIT_MACROS = r"""% Something too wide for its line, which TeX can't break:
       \bool_if:NF \l__oer_fit_skip_bool
         {
           \setattribute \OERFitAttribute {#1}
-          \__oer_fit_margin:
+          \str_if_eq:nnTF {#2} { d } { \__oer_fit_margin: } { \__oer_fit_right_margin: }
           \directlua
             {
               oerfit.open(#1, "#2", \dim_to_decimal_in_sp:n { \linewidth },
@@ -1446,12 +1512,95 @@ FIT_MACROS = r"""% Something too wide for its line, which TeX can't break:
             }
         }
     }
+  % A line of highlighted code, as fancyvrb sets one, measured as LaTeX
+  % sets it, in a group of a block of code or of a table whose columns
+  % wrap: by the box its characters are set in, through
+  % \FancyVerbFormatLine, fancyvrb's own command for a line, which the
+  % group wraps and puts back, against the line it's in, for what the
+  % attribute names, the innermost (oerfit.code_line): a footnote's code in
+  % a table's cell is the code's. Wrapped once, in the outermost group.
+  \box_new:N \l__oer_fit_code_box
+  \bool_new:N \l__oer_fit_code_lines_bool
+  \cs_new_protected:Npn \__oer_fit_code_lines:
+    {
+      \bool_if:NF \l__oer_fit_code_lines_bool
+        {
+          \cs_if_exist:NT \FancyVerbFormatLine
+            {
+              \bool_set_true:N \l__oer_fit_code_lines_bool
+              \cs_set_eq:NN \__oer_fit_code_line:n \FancyVerbFormatLine
+              \cs_set:Npn \FancyVerbFormatLine ##1
+                {
+                  \hbox_set:Nn \l__oer_fit_code_box { \__oer_fit_code_line:n {##1} }
+                  \directlua
+                    {
+                      oerfit.code_line(\dim_to_decimal_in_sp:n { \box_wd:N \l__oer_fit_code_box },
+                        \dim_to_decimal_in_sp:n { \linewidth })
+                    }
+                  \hbox_unpack_drop:N \l__oer_fit_code_box
+                }
+            }
+        }
+    }
+  % A block of code, between \OERFitCode and \OERFitCodeEnd, which
+  % pdf-target.lua writes around it, a group: #1 its number. Its lines are
+  % measured as LaTeX sets them, each by what it holds: fancyvrb's, as
+  % Pandoc's writer sets highlighted code (Highlighting) and code in a
+  % footnote (Verbatim), as above; and LaTeX's verbatim's, code in no
+  % language, whose lines are each a paragraph of one line, by that line,
+  % less the glue at its edges, the left one the margin of the list it's
+  % in (oer.fit.cells); not a paragraph the output routine sets, a page's
+  % footer, while the group is open across a page's break. It's fitted as
+  % a formula in text is: not centered, running on into the margin to the
+  % right of its line, its spaces left as they are, since they're
+  % characters, and its type set smaller, as much as it takes, but to
+  % three quarters of its size at least, and smaller still, to half at
+  % least, where it would come within a quarter inch of the paper's edge on
+  % its right; its lines closer with its type, as a table's are. One still
+  % wider than its line is said to be by how far it runs past the text's
+  % edge, none in a quotation's right margin. The log says where each
+  % begins and ends, so that a line LaTeX reports as too wide between them,
+  % one of verbatim's, is known as code's (latexbuild.overfull_lines):
+  % TeX names a line by the line of the file it's reading, the book's or,
+  % in a footnote, the file footnote-code.lua wrote the code to, and a
+  % footnote's own paragraphs by the line its text ends on.
+  \NewDocumentCommand \OERFitCode { m }
+    {
+      \group_begin:
+      \typeout { TextbookImprover~code }
+      \setattribute \OERFitAttribute {#1}
+      \__oer_fit_right_margin:
+      \directlua
+        {
+          oerfit.open(#1, "c", \dim_to_decimal_in_sp:n { \linewidth },
+            \dim_to_decimal_in_sp:n
+              { \hsize - \use:c { @totalleftmargin } + \l__oer_fit_margin_dim },
+            \dim_to_decimal_in_sp:n { \use:c { f@size } pt }, 0, \int_use:N \tex_inputlineno:D,
+            0, \legacy_if:nTF { @twocolumn } { 1 } { 0 })
+          oerfit.edge[#1] = \dim_to_decimal_in_sp:n { \hsize - \use:c { @totalleftmargin } }
+        }
+      \__oer_fit_code_lines:
+    }
+  \NewDocumentCommand \OERFitCodeEnd { m }
+    {
+      \typeout { TextbookImprover~code~end }
+      \group_end:
+    }
+  % A line of code in no language is never broken: LaTeX's own verbatim
+  % sets its right skip with no stretch, which a break at a hyphen would
+  % leave short, and latex-lab's sets it as the paragraph's, which
+  % build-pdf.py's ragged right gives a stretch, so that TeX broke a line
+  % too long for its line after a hyphen, as LuaTeX may break after one,
+  % where it now runs on whole, to be fitted.
+  \AddToHook { env / verbatim / begin } { \int_set:Nn \tex_exhyphenpenalty:D { 10000 } }
   \ExplSyntaxOff
 \else
   \NewDocumentCommand\OERFitTable{mmm}{}
   \NewDocumentCommand\OERFitStepsTable{mmmm}{}
   \NewDocumentCommand\OERFitTableEnd{m}{}
   \NewDocumentCommand\OERFitFormula{mm}{}
+  \NewDocumentCommand\OERFitCode{m}{}
+  \NewDocumentCommand\OERFitCodeEnd{m}{}
   \def\OERFitState#1#2#3#4#5{}
   \def\OERFitStepsWidth#1#2#3{}
   \def\OERFitStepsState#1#2{}
@@ -2193,6 +2342,10 @@ SHORTENED = re.compile(r"^TextbookImprover blank: (\d+(?:\.\d+)?)pt over at line
 # and where it's done: a line too wide there is the list's, reported at a
 # line of the list's own file.
 LISTS = re.compile(r"^TextbookImprover list(?:: (\S+)| end)$", re.M)
+# Where LaTeX sets a block of code, as FIT_MACROS' \OERFitCode and
+# \OERFitCodeEnd mark it: a line too wide there is the code's, which
+# fit_report names.
+CODE_MARKS = re.compile(r"^TextbookImprover code( end)?$", re.M)
 # How much wider than its text a line has to be to be named: a point or
 # two sits in the margin unseen, but more shows.
 OVERFULL_LEAST = 3.0
@@ -2220,7 +2373,8 @@ def overfull_lines(output, source, pages):
     page_id gives it) whose label is at or before it. A line whose blank
     was drawn shorter to fit it (SHORTENED) is as wide as it is now. A line
     of the contents is kind contents, and one of another list (LISTS) kind
-    list, on no page."""
+    list, on no page. A line of a block of code isn't one, wherever TeX
+    says it is (CODE_MARKS): fit_report names a block still too wide."""
     lists, opened = [], None
     for m in LISTS.finditer(output):
         if m.group(1):
@@ -2242,6 +2396,20 @@ def overfull_lines(output, source, pages):
         table.append(inside)
         if "\\end{longtable}" in text:
             inside = False
+    # A block of code's lines, which fit_report names, fitted or still too
+    # wide: what LaTeX said while it set one, not the lines of the LaTeX
+    # between pdf-target.lua's \OERFitCode and \OERFitCodeEnd, since TeX
+    # names a footnote's code's line by the line of the file it's read from
+    # and the footnote's own paragraphs by the line its text ends on.
+    code, opened = [], None
+    for m in CODE_MARKS.finditer(output):
+        if not m.group(1):
+            opened = m.end()
+        elif opened is not None:
+            code.append((opened, m.start()))
+            opened = None
+    if opened is not None:
+        code.append((opened, len(output)))
     found = []
     for m in OVERFULL.finditer(output):
         points = float(m.group(1))
@@ -2255,6 +2423,8 @@ def overfull_lines(output, source, pages):
         listed = next((name for start, end, name in lists if start <= m.start() < end), None)
         if listed:
             found.append((points, "contents" if listed == "toc" else "list", None))
+            continue
+        if any(start <= m.start() < end for start, end in code):
             continue
         line = int(m.group(2) or m.group(4) or m.group(5)) - 1
         if not 0 <= line < len(lines):
@@ -2301,20 +2471,20 @@ def overfull_warning(found, where="PDF"):
             + ".")
 
 
-# What FIT_MACROS says it fitted on a run: how many of the tables and
-# formulas it numbered it has narrowed alone, and how many it set smaller,
-# and the smallest part of its type's size any is in; and each that was still
-# wider than its line on the run: its kind (t a table whose columns don't
-# wrap, p one whose do, s one LaTeX lays out, a worked example's steps
-# among them, d a display formula, e
-# a numbered one, i a formula in text), how many points wider, the line of
+# What FIT_MACROS says it fitted on a run: how many of the tables,
+# formulas, and blocks of code it numbered it has narrowed alone, and how
+# many it set smaller, and the smallest part of its type's size any is in;
+# and each that was still wider than its line on the run: its kind (t a
+# table whose columns don't wrap, p one whose do, s one LaTeX lays out, a
+# worked example's steps among them, d a display formula, e a numbered
+# one, i a formula in text, c a block of code), how many points wider, the line of
 # LaTeX its group opened on, the part of its type's size it was in,
 # whether it was centered, whether it was on the paper, a quarter inch
 # inside its edge, and whether its page has two columns, where it has no
 # more room than its column.
 FITTED = re.compile(r"^TextbookImprover fit: run (\d+), (\d+) narrowed, (\d+) smaller, "
                     r"smallest ([\d.]+)$", re.M)
-FIT_WIDE = re.compile(r"^TextbookImprover fit wide: ([tpsdei]) ([\d.]+) (\d+) ([\d.]+) ([01]) ([01]) "
+FIT_WIDE = re.compile(r"^TextbookImprover fit wide: ([tpsdeic]) ([\d.]+) (\d+) ([\d.]+) ([01]) ([01]) "
                       r"([01])$", re.M)
 
 
@@ -2322,7 +2492,8 @@ def fit_report(output, source, pages):
     """[lines to print] for what FIT_MACROS fitted, from what LaTeX's last
     run said (output) about its input (source), pages as overfull_lines
     takes them: what it fitted; what's still wider than the text, centered
-    on the page, which LaTeX doesn't report as an overfull box; and, as
+    on the page, which LaTeX doesn't report as an overfull box, and a block
+    of code still wider than the text, running into the margin; and, as
     warnings, what isn't a quarter inch inside the paper's edge even at the
     least it sets type in, and what's wider than its column, on a page of
     two. A formula still wider than its line, but a display centered
@@ -2344,16 +2515,33 @@ def fit_report(output, source, pages):
             for kind, points, line, factor, center, paper, columns in FIT_WIDE.findall(output)]
     said = []
     if narrowed or smaller:
-        said.append(f"Fitted {narrowed + smaller} table(s) and formula(s) too wide for "
-                    f"their lines to them: "
+        said.append(f"Fitted {narrowed + smaller} table(s), formula(s), and block(s) of code "
+                    f"too wide for their lines to them: "
                     + "; ".join(([f"{narrowed} by narrowing their spaces"] if narrowed else [])
-                                + ([f"{smaller} in smaller type as well, the smallest at "
+                                + ([f"{smaller} in smaller type, the smallest at "
                                     f"{round(float(smallest) * 100)}% of its size"]
                                    if smaller else []))
                     + ".")
     # A table whose word runs a point into the space beside its column,
     # though the table fits its line, is no wider than the text.
     middle = sorted((w for w in wide if w[4] and w[5] and w[0] > 0), key=lambda w: -w[0])
+    # A block of code isn't centered: one still wider than the text, by
+    # how far it runs past the text's edge, runs into the margin on its
+    # right (in a quotation, past the quotation's line but not the text's,
+    # it's in the quotation's own margin, and not named), and
+    # overfull_lines leaves its lines to this, LaTeX's verbatim's among
+    # them, which LaTeX reports as lines of text, and fancyvrb's, which it
+    # doesn't report at all.
+    code = sorted((w for w in wide if w[1] == "c" and w[5] and not w[6] and w[0] > 0),
+                  key=lambda w: -w[0])
+    if code:
+        said.append(f"{len(code)} block(s) of code, still wider than the text in smaller "
+                    f"type, the smallest at {round(min(w[3] for w in code) * 100)}% of its "
+                    f"size, {'runs' if len(code) == 1 else 'run'} into the margin on its "
+                    f"right, the widest {code[0][0]:,.0f} points wider"
+                    + (": on " + page_list(list(dict.fromkeys(w[2] for w in code if w[2])))
+                       if any(w[2] for w in code) else "")
+                    + ".")
     if middle:
         tables = sum(1 for w in middle if w[1] in "tps")
         said.append(f"{len(middle)} of them, still wider than the text, "
@@ -2365,8 +2553,8 @@ def fit_report(output, source, pages):
                     + ".")
     off = sorted((w for w in wide if not w[5] and not w[6]), key=lambda w: -w[0])
     if off:
-        said.append(f"WARNING: {len(off)} table(s) or formula(s) are too wide for the paper "
-                    f"even in smaller type, the smallest at "
+        said.append(f"WARNING: {len(off)} table(s), formula(s), or block(s) of code are too "
+                    f"wide for the paper even in smaller type, the smallest at "
                     f"{round(min(w[3] for w in off) * 100)}% of its size, and run to within a "
                     "quarter inch of its edge or past it, the widest "
                     f"{off[0][0]:,.0f} points wider than the text"
@@ -2375,8 +2563,9 @@ def fit_report(output, source, pages):
                     + ".")
     beside = sorted((w for w in wide if not w[5] and w[6]), key=lambda w: -w[0])
     if beside:
-        said.append(f"WARNING: {len(beside)} table(s) or formula(s) on pages of two columns "
-                    f"are too wide for their column even in smaller type, the smallest at "
+        said.append(f"WARNING: {len(beside)} table(s), formula(s), or block(s) of code on "
+                    f"pages of two columns are too wide for their column even in smaller type, "
+                    f"the smallest at "
                     f"{round(min(w[3] for w in beside) * 100)}% of its size, and run past it, "
                     f"the widest {beside[0][0]:,.0f} points wider than the column"
                     + (": on " + page_list(list(dict.fromkeys(w[2] for w in beside if w[2])))
